@@ -32,6 +32,9 @@ pub struct ParamSpec {
     pub default: f32,
     /// Display unit, for example "Hz", "s", or "".
     pub unit: &'static str,
+    /// True for whole-number parameters, such as a MIDI channel or a seed.
+    /// Values are rounded, and editors step by 1.
+    pub integer: bool,
 }
 
 impl ParamSpec {
@@ -43,13 +46,23 @@ impl ParamSpec {
             max,
             default,
             unit,
+            integer: false,
         }
     }
 
-    /// Clamps a value into range. NaN becomes the default.
+    /// Marks the parameter as a whole number.
+    pub const fn integer(mut self) -> Self {
+        self.integer = true;
+        self
+    }
+
+    /// Clamps a value into range, rounding whole-number parameters.
+    /// NaN becomes the default.
     pub fn clamp(&self, value: f32) -> f32 {
         if value.is_nan() {
             self.default
+        } else if self.integer {
+            value.round().clamp(self.min, self.max)
         } else {
             value.clamp(self.min, self.max)
         }

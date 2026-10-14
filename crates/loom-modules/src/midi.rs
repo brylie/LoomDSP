@@ -20,8 +20,8 @@ pub static NOTE_IN: ModuleDescriptor = ModuleDescriptor {
     ],
     params: &[
         // 0 = omni (all channels), 1 to 16 = one channel.
-        ParamSpec::new("channel", 0.0, 16.0, 0.0, ""),
-        ParamSpec::new("bend-range", 0.0, 48.0, 2.0, "st"),
+        ParamSpec::new("channel", 0.0, 16.0, 0.0, "").integer(),
+        ParamSpec::new("bend-range", 0.0, 48.0, 2.0, "st").integer(),
     ],
     role: ModuleRole::Dsp(|_| Box::new(NoteIn::default())),
 };

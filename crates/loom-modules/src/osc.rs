@@ -96,7 +96,7 @@ pub static NOISE: ModuleDescriptor = ModuleDescriptor {
     description: "White noise. The seed makes renders repeatable (NFR-SND-04).",
     inputs: &[],
     outputs: &[PortSpec::new("out", SignalType::Audio)],
-    params: &[ParamSpec::new("seed", 1.0, 65_535.0, 1.0, "")],
+    params: &[ParamSpec::new("seed", 1.0, 65_535.0, 1.0, "").integer()],
     role: ModuleRole::Dsp(|config: &ModuleConfig| {
         let _ = config;
         Box::new(Noise { state: 1, seed: 1 })

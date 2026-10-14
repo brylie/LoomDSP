@@ -356,7 +356,7 @@ fn start_live(path: &Path, args: &AudioArgs, hold_note: Option<u8>) -> Result<Li
         println!("midi:   off");
         None
     } else {
-        match loom_host_desktop::connect_midi(args.midi.as_deref(), sender)? {
+        match loom_host_desktop::connect_midi(args.midi.as_deref(), loom_host_desktop::share_midi(sender))? {
             Some(connection) => {
                 println!("midi:   {}", connection.port_name());
                 Some(connection)

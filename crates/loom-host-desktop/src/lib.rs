@@ -9,7 +9,7 @@
 //! - Output only (no audio input yet).
 //! - 32-bit float devices only. This covers CoreAudio, WASAPI shared mode,
 //!   and PipeWire/PulseAudio defaults.
-//! - One MIDI input port, chosen at start. Hot-plugging comes in P1
+//! - MIDI ports are chosen at start. Hot-plugging comes in P1
 //!   (FR-MIDI-08).
 
 #![warn(missing_docs)]
@@ -17,8 +17,8 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use loom_core::{Engine, MidiEvent, MidiSender};
 use loom_rt::ScopedFlushDenormals;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 /// Errors from the desktop host.
@@ -327,9 +327,28 @@ impl CallbackStats {
     }
 }
 
+/// The engine's MIDI input, shared by every MIDI port and by the UI (for
+/// example an on-screen "hold note" button).
+///
+/// The engine's MIDI queue has a single producer, so senders take turns
+/// through a mutex. Only MIDI and UI threads lock it; the audio thread reads
+/// the queue without locks, so real-time rules are kept (NFR-RT-01).
+pub type SharedMidi = Arc<Mutex<MidiSender>>;
+
+/// Wraps a [`MidiSender`] so several threads can send through it.
+pub fn share_midi(sender: MidiSender) -> SharedMidi {
+    Arc::new(Mutex::new(sender))
+}
+
+/// Sends one event through a shared sender. Returns false if the queue was
+/// full or another thread panicked while sending.
+pub fn send_midi(midi: &SharedMidi, event: MidiEvent) -> bool {
+    midi.lock().map(|mut sender| sender.send(event)).unwrap_or(false)
+}
+
 /// An open MIDI input. MIDI stops when this is dropped.
 pub struct MidiConnection {
-    _connection: midir::MidiInputConnection<MidiSender>,
+    _connection: midir::MidiInputConnection<SharedMidi>,
     port_name: String,
 }
 
@@ -340,15 +359,46 @@ impl MidiConnection {
     }
 }
 
-/// Connects one MIDI input port to the engine.
-///
-/// `port` is a case-insensitive part of the port name. `None` picks the first
-/// port. Returns `Ok(None)` if `port` is `None` and no ports exist.
-pub fn connect_midi(port: Option<&str>, sender: MidiSender) -> Result<Option<MidiConnection>, HostError> {
+fn midi_input() -> Result<midir::MidiInput, HostError> {
     let mut input = midir::MidiInput::new("LoomDSP").map_err(|e| HostError::Midi(e.to_string()))?;
     // System messages such as clock are passed through; the engine ignores
     // what it does not use. Only SysEx is filtered out.
     input.ignore(midir::Ignore::Sysex);
+    Ok(input)
+}
+
+fn open_port(
+    input: midir::MidiInput,
+    port: &midir::MidiInputPort,
+    midi: SharedMidi,
+) -> Result<MidiConnection, HostError> {
+    let port_name = input.port_name(port).unwrap_or_else(|_| "<unnamed port>".into());
+    let connection = input
+        .connect(
+            port,
+            "loomdsp-in",
+            |_timestamp, bytes, midi: &mut SharedMidi| {
+                if bytes.first().is_some_and(|&status| status != 0xF0) && bytes.len() <= 3 {
+                    // Frame 0: applied at the start of the next audio buffer
+                    // (NFR-PERF-07). Sub-buffer timestamps come later.
+                    send_midi(midi, MidiEvent::from_bytes(0, bytes));
+                }
+            },
+            midi,
+        )
+        .map_err(|e| HostError::Midi(format!("{port_name}: {e}")))?;
+    Ok(MidiConnection {
+        _connection: connection,
+        port_name,
+    })
+}
+
+/// Connects one MIDI input port to the engine.
+///
+/// `port` is a case-insensitive part of the port name. `None` picks the first
+/// port. Returns `Ok(None)` if `port` is `None` and no ports exist.
+pub fn connect_midi(port: Option<&str>, midi: SharedMidi) -> Result<Option<MidiConnection>, HostError> {
+    let input = midi_input()?;
     let ports = input.ports();
     let chosen = match port {
         None => ports.first().cloned(),
@@ -371,23 +421,22 @@ pub fn connect_midi(port: Option<&str>, sender: MidiSender) -> Result<Option<Mid
             Some(p) => Err(HostError::NoMidiPort(Some(p.to_string()))),
         };
     };
-    let port_name = input.port_name(&chosen).unwrap_or_else(|_| "<unnamed port>".into());
-    let connection = input
-        .connect(
-            &chosen,
-            "loomdsp-in",
-            |_timestamp, bytes, sender: &mut MidiSender| {
-                if bytes.first().is_some_and(|&status| status != 0xF0) && bytes.len() <= 3 {
-                    // Frame 0: applied at the start of the next audio buffer
-                    // (NFR-PERF-07). Sub-buffer timestamps come in P1.
-                    sender.send(MidiEvent::from_bytes(0, bytes));
-                }
-            },
-            sender,
-        )
-        .map_err(|e| HostError::Midi(e.to_string()))?;
-    Ok(Some(MidiConnection {
-        _connection: connection,
-        port_name,
-    }))
+    open_port(input, &chosen, midi).map(Some)
+}
+
+/// Connects every MIDI input port to the engine, so any keyboard or
+/// controller plays without choosing it first. Ports that fail to open are
+/// returned as errors next to the ones that worked.
+pub fn connect_all_midi(midi: &SharedMidi) -> Result<(Vec<MidiConnection>, Vec<HostError>), HostError> {
+    let ports = midi_input()?.ports();
+    let mut connections = Vec::new();
+    let mut errors = Vec::new();
+    for port in &ports {
+        // midir consumes the `MidiInput` on connect, so each port needs its own.
+        match midi_input().and_then(|input| open_port(input, port, midi.clone())) {
+            Ok(connection) => connections.push(connection),
+            Err(error) => errors.push(error),
+        }
+    }
+    Ok((connections, errors))
 }
