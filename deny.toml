@@ -6,6 +6,15 @@ all-features = false
 [advisories]
 version = 2
 yanked = "deny"
+# "Unmaintained" notices for crates deep inside the UI stack, which we cannot
+# replace ourselves. Neither is a security vulnerability. Review when Iced or
+# wgpu is upgraded (OQ-14); remove an entry once upstream drops the crate.
+ignore = [
+    # paste: proc macro used by metal (wgpu's macOS backend).
+    { id = "RUSTSEC-2024-0436", reason = "via wgpu-hal/metal; unmaintained, not vulnerable" },
+    # ttf-parser: font parsing used by cosmic-text (Iced's text system).
+    { id = "RUSTSEC-2026-0192", reason = "via iced_wgpu/cosmic-text; unmaintained, not vulnerable" },
+]
 
 [licenses]
 version = 2

@@ -66,6 +66,13 @@ Scope:
 - Audio and MIDI device setup, hot-plugging, audio input (FR-APP-01, 03, 04, FR-MIDI-08).
 - MIDI learn, panic, CPU meter (FR-MIDI-02, FR-PERF-04, 05).
 
+Progress:
+- [x] Canvas prototype: `loom-canvas` and `loom-app`, with tiles, typed ports, cables, level of detail, inspector, live audio, and a stats bar ([p1-canvas.md](../benchmarks/p1-canvas.md)). Waiting for the reference-laptop measurement.
+- [ ] Engine-to-UI telemetry, first module views (scope, level meter).
+- [ ] Module browser, undo/redo, copy and paste, save and open.
+- [ ] Modulation on parameters, MIDI learn, panic, device hot-plugging.
+- [ ] Phase 1 module library and the tutorial.
+
 Exit criteria:
 - [ ] Tutorial: build a subtractive synth from primitives in under 20 minutes (tested with 3 people who did not write the tutorial).
 - [ ] Play that synth with a MIDI keyboard and map 4 knobs with MIDI learn.

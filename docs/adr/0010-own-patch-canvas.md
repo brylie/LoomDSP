@@ -63,6 +63,8 @@ Measured on the reference laptop (NFR-PERF-04), at full window size on the built
 
 If the first prototype misses these by a wide margin, revisit this ADR before building on it.
 
+**Prototype status:** the first prototype is in `crates/loom-canvas` and `crates/loom-app`. How to measure it, and the results so far, are in [p1-canvas.md](../benchmarks/p1-canvas.md). Accept this ADR once the reference laptop passes the first and third gates.
+
 ## Consequences
 
 - We own a substantial component: hit-testing, selection, pan and zoom, keyboard navigation, undo integration, and rendering. Estimate two to four weeks for a solid core.

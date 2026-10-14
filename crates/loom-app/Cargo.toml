@@ -1,0 +1,28 @@
+[package]
+name = "loom-app"
+description = "The LoomDSP desktop app: patch canvas, inspector, and live audio."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+readme.workspace = true
+keywords = ["audio", "synthesizer", "modular", "live", "dsp"]
+categories = ["multimedia::audio", "gui"]
+
+[[bin]]
+name = "loom-app"
+path = "src/main.rs"
+
+[dependencies]
+loom-core.workspace = true
+loom-modules.workspace = true
+loom-patch.workspace = true
+loom-host-desktop.workspace = true
+loom-canvas.workspace = true
+iced = { workspace = true, features = ["smol"] }
+clap.workspace = true
+
+[lints]
+workspace = true

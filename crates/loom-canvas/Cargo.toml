@@ -1,0 +1,24 @@
+[package]
+name = "loom-canvas"
+description = "The LoomDSP patch canvas: a GPU-drawn Iced widget for modules, ports, and cables."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+readme.workspace = true
+keywords = ["audio", "modular", "node-editor", "iced", "wgpu"]
+categories = ["gui", "multimedia::audio"]
+
+[dependencies]
+iced = { workspace = true }
+iced_wgpu.workspace = true
+bytemuck.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+# Same version as wgpu's own shader translator, to validate canvas.wgsl in tests.
+naga = { version = "27", features = ["wgsl-in", "msl-out"] }

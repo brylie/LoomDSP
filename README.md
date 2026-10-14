@@ -6,13 +6,19 @@ An open-source modular audio environment written in Rust, for musical experiment
 
 Build living musical systems by connecting small modules: oscillators and filters, but also modulators, sequencers, loopers, and logic that arranges the music as it plays. Hide the wiring behind a front panel, play it live with MIDI controllers, and share your patches with others.
 
-**Status: Phase 0 (engine foundations).** There is no graphical editor yet. The engine, the module library, the patch format, and a command-line player work today. See the [roadmap](docs/product/roadmap.md).
+**Status: Phase 1 (desktop patcher), early.** The engine, the module library, the patch format, and a command-line player work. A first desktop app with our own patch canvas is in progress. See the [roadmap](docs/product/roadmap.md).
 
 ## Try it
 
 You need [Rust](https://rustup.rs) 1.88 or newer.
 
 ```sh
+# Open a patch in the desktop app (canvas, inspector, live audio)
+cargo run --release -p loom-app -- examples/patches/fm-feedback.ron
+
+# A 300-module test patch, measuring frame rate while the camera moves
+cargo run --release -p loom-app -- --generate 300 --bench
+
 # List the available modules
 cargo run --release -p loom-cli -- modules
 
@@ -34,13 +40,14 @@ cargo run --release -p loom-cli -- stress examples/patches/subtractive.ron --sec
 
 Linux needs the ALSA development package (`libasound2-dev` on Debian and Ubuntu).
 
-## What works in Phase 0
+## What works so far
 
 - A runtime-editable DSP graph. Add, remove, and reconnect modules while audio plays, with no dropouts.
 - Sample-accurate feedback loops. The engine finds cycles and runs them one sample at a time. If a loop has no explicit 1-sample delay, the engine inserts one and tells you where ([ADR-0002](docs/adr/0002-graph-execution-and-feedback.md)).
 - A lock-free boundary between the control thread and the audio thread. The audio path never allocates, locks, or waits, and a test enforces this ([ADR-0001](docs/adr/0001-lock-free-control-audio-boundary.md)).
 - Deterministic output. The same patch and input give bit-identical audio at any host buffer size.
 - Patch files in RON ([ADR-0008](docs/adr/0008-patch-format-ron.md)), with polymorphic signals ([ADR-0007](docs/adr/0007-polymorphic-signal-model.md)).
+- A first desktop app (Phase 1 prototype): our own GPU-drawn patch canvas, an inspector, and live audio and MIDI while you patch ([ADR-0010](docs/adr/0010-own-patch-canvas.md)).
 - 12 modules: phase generator, sine, saw (band-limited), noise, state variable filter, ADSR, add, multiply, constant, 1-sample delay, MIDI note input, audio output.
 
 ## Repository layout
@@ -53,6 +60,8 @@ Linux needs the ALSA development package (`libasound2-dev` on Debian and Ubuntu)
 | `crates/loom-rt` | Small real-time helpers (denormal flushing, smoothing). Reusable outside LoomDSP. |
 | `crates/loom-host-desktop` | Audio (cpal) and MIDI (midir) host for desktop. |
 | `crates/loom-cli` | The `loom` command-line tool. |
+| `crates/loom-canvas` | The patch canvas: a GPU-drawn Iced widget ([ADR-0010](docs/adr/0010-own-patch-canvas.md)). |
+| `crates/loom-app` | The desktop app: canvas, inspector, live audio and MIDI. |
 | `examples/patches` | Example patches. |
 | `docs` | Requirements, roadmap, ADRs, and benchmark results. |
 
