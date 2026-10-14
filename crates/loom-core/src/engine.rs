@@ -214,7 +214,11 @@ impl Engine {
             // `max_block` floats long, and `frames <= max_block`. No module
             // is running, so nothing writes to them now.
             let samples = unsafe { std::slice::from_raw_parts(probe.buffer, frames) };
-            if probe.kind.meter() {
+            // Skip the work for a queue that is already full. The push below
+            // still counts a drop if the queue fills in between.
+            if probe.kind.meter() && self.telemetry.meters.is_full() {
+                self.stats.dropped_meters.fetch_add(1, Ordering::Relaxed);
+            } else if probe.kind.meter() {
                 let (peak, rms) = measure(samples);
                 let reading = MeterReading {
                     probe: probe.id,
@@ -229,6 +233,10 @@ impl Engine {
             }
             if probe.kind.scope() {
                 for (i, part) in samples.chunks(SCOPE_CHUNK).enumerate() {
+                    if self.telemetry.scope.is_full() {
+                        self.stats.dropped_scope.fetch_add(1, Ordering::Relaxed);
+                        continue;
+                    }
                     let mut chunk = ScopeChunk {
                         probe: probe.id,
                         frame: self.frame + (i * SCOPE_CHUNK) as u64,
