@@ -341,9 +341,14 @@ pub fn share_midi(sender: MidiSender) -> SharedMidi {
 }
 
 /// Sends one event through a shared sender. Returns false if the queue was
-/// full or another thread panicked while sending.
+/// full.
 pub fn send_midi(midi: &SharedMidi, event: MidiEvent) -> bool {
-    midi.lock().map(|mut sender| sender.send(event)).unwrap_or(false)
+    // A panic on another sending thread poisons the lock. The sender is only
+    // a queue producer with no state that a panic could leave half-changed,
+    // so keep using it instead of silently dropping all later MIDI.
+    midi.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .send(event)
 }
 
 /// An open MIDI input. MIDI stops when this is dropped.

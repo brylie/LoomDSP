@@ -143,8 +143,10 @@ struct State {
 
 impl State {
     fn hit_radius(&self) -> f32 {
-        // At least 7 screen pixels, so ports stay easy to grab when zoomed out.
-        PORT_HIT_RADIUS.max(7.0 / self.camera.zoom)
+        // At least 7 screen pixels, so ports stay easy to grab when zoomed
+        // out. At most a quarter of a tile's width, so the middle of a tile
+        // always grabs the tile, not a port.
+        PORT_HIT_RADIUS.max(7.0 / self.camera.zoom).min(TILE_WIDTH * 0.25)
     }
 }
 
@@ -737,6 +739,17 @@ mod tests {
         let middle = BTreeSet::from([2]);
         let canvas = PatchCanvas::new(&scene, &middle, |e| e);
         assert_eq!(canvas.overlay(&state).cables.len(), 2);
+    }
+
+    #[test]
+    fn tiles_stay_draggable_when_zoomed_out() {
+        // At the smallest zoom, the port hit radius must not cover the whole
+        // tile, or pressing anywhere on it would start a cable.
+        let scene = chain();
+        let mut state = State::default();
+        state.camera.zoom = crate::camera::MIN_ZOOM;
+        let centre = scene.module(2).unwrap().bounds().center();
+        assert_eq!(scene.hit(centre, state.hit_radius()), Hit::Module(2));
     }
 
     #[test]
