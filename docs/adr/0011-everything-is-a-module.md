@@ -21,7 +21,7 @@ Every feature of LoomDSP is a module in the graph. There are no separate subsyst
 - **Device-style processors** (EQ, dynamics, reverb, delay, sampler, granular) are modules.
 - **Loopers** (circular audio and MIDI) are modules, like clips in Bitwig's clip launcher.
 - **Arrangement is modules too.** There is no arranger timeline. Sections change through:
-  - **groups and next actions:** a group of loopers plays round robin, at random, or in sequence, and reports when a loop or a round finishes;
+  - **groups and next actions:** a group of loopers plays round robin, at random, or in sequence, and reports when a loop or a round finishes. ADR-0012 builds groups from phase-driven primitives (cycles, Clock Divide, Counter, Step Select) and ships them as open abstractions;
   - **counters and logic:** count loops or rounds, compare, and trigger other groups or scenes;
   - **scenes:** recall a stored state of chosen modules, with optional morphing;
   - **modulation curves** that run over bars or sections;
@@ -29,6 +29,8 @@ Every feature of LoomDSP is a module in the graph. There are no separate subsyst
 - **Larger editors** (sequencer grids, curve editors, looper waveforms, front panels) are views of a module's state, opened from the canvas.
 
 ### Example: arrangement by logic
+
+ADR-0012 decides how arrangement modules work. The modules and a fuller example are in the [arrangement specification](../design/arrangement.md).
 
 Four loopers form group A, playing round robin. Group A outputs a trigger each time it completes a round. A counter counts those triggers. When the count reaches 4, the counter fires a trigger into group B's "start" input and group A's "stop" input, and resets.
 

@@ -47,6 +47,14 @@ Before finishing a change, run `prek run --all-files` (fmt, clippy, typos, file 
 6. **Engine core stays portable.** `loom-core`, `loom-modules`, `loom-patch`, and `loom-rt` must build for `wasm32-unknown-unknown`: no threads, files, or audio APIs there.
 7. **`unsafe` needs a `// SAFETY:` comment** that explains why it is sound.
 
+## Where documentation goes
+
+- A **decision** (with its options and reasons) goes in an ADR. Keep it to the decision. Once accepted, do not rewrite it; write a new ADR that supersedes it.
+- **How a feature works** (modules, ports, rules, examples) goes in a specification in `docs/design/`, linked from the ADR. Update it in the same change as the code.
+- **Who needs it and why** goes in use cases and requirements in `docs/product/`. **Tasks** go in GitHub issues.
+
+Why: decisions stay trustworthy only if they do not move, while details must be free to change. See [docs/README.md](docs/README.md).
+
 ## Writing style
 
 Docs and comments use short, direct sentences and plain words, because many readers use English as a second language. Explain the reason behind a rule. Do not use em dashes. Avoid filler words such as "delve", "journey", "landscape", "realm", and "embark".
@@ -54,6 +62,7 @@ Docs and comments use short, direct sentences and plain words, because many read
 ## Where things are
 
 - Requirements with IDs: `docs/product/requirements.md`, `docs/product/non-functional-requirements.md`
-- Decisions: `docs/adr/`
+- Decisions: `docs/adr/` (one decision per ADR; frozen once accepted)
+- Specifications: `docs/design/` (living; update with the code they describe)
 - Benchmarks: `docs/benchmarks/`
 - Example patches: `examples/patches/`

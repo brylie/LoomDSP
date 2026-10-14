@@ -6,6 +6,8 @@ LoomDSP is an open-source modular audio environment written in Rust. It is a des
 
 LoomDSP is not a DAW. It is a grid for building **living musical systems**: patches that play, evolve, and arrange themselves through modulation, randomness, texture, sequencing, looping, and logic. Everything is a module, connected the same way: synths and effects, modulators, note effects, sequencers, loopers, and even arrangement (ADR-0011).
 
+A flagship example: a patch that plays group A's loops round robin, each twice, then hands over to group B after two rounds, then returns to A. A clip launcher cannot express this; in LoomDSP it is ordinary patching with counters and selectors, and the same building blocks scale from loops to parts to whole songs ([use case UC8](personas-and-use-cases.md), [arrangement specification](../design/arrangement.md)).
+
 People share their patches and modules, as with VCV Rack, so an ecosystem of creators grows around the core. Exporting patches as plugins (CLAP, VST3) or standalone apps may come later, but is deliberately out of scope for now.
 
 ## The problem

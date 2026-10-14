@@ -4,6 +4,21 @@ An ADR records one important technical decision: the context, the choice, and it
 
 Why we use them: contributors (human and AI) need to know *why* the code looks the way it does, not just *what* it does. Without a record, old debates restart and good reasons get lost.
 
+## What belongs in an ADR
+
+An ADR holds **one decision**: the problem, the options considered, what we chose, and what follows from it. A page or two is enough.
+
+It does not hold specifications (module ports, parameters, data formats in detail), worked examples, use cases, or task lists. Those change as the work goes on, so they live in [design specifications](../design/README.md), [use cases](../product/personas-and-use-cases.md), [requirements](../product/requirements.md), and issues. The ADR links to them.
+
+A useful test: if a detail could change without changing the decision, it belongs in a specification.
+
+## Editing rules
+
+- **Proposed:** edit freely while it is discussed.
+- **Accepted:** frozen. Only fix typos and broken links, or update the status line. To change the decision, write a new ADR and mark the old one "Superseded by ADR-NNNN".
+
+Why: an ADR is a record of why things are the way they are. If it is rewritten after the fact, it can no longer explain the history it was written to explain.
+
 ## Status values
 
 - **Proposed**: under discussion.
@@ -28,3 +43,4 @@ Why we use them: contributors (human and AI) need to know *why* the code looks t
 | [0009](0009-ui-stack-iced.md) | UI stack: Iced (canvas decided in ADR-0010) | Accepted in part |
 | [0010](0010-own-patch-canvas.md) | Our own patch canvas, built as an Iced widget | Proposed |
 | [0011](0011-everything-is-a-module.md) | Everything is a module | Proposed |
+| [0012](0012-arrangement-from-phase-driven-primitives.md) | Arrangement from phase-driven primitives | Proposed |

@@ -122,11 +122,14 @@ Requirements: FR-FILE-*, FR-ENCAP-04, FR-VIS-*.
 
 ### UC8. Build a self-arranging system (Ilmari). Grid-centred arrangement
 
-1. Add four audio loopers and put them in group A, set to round robin.
-2. Record a short phrase into each looper.
-3. Add a counter. Connect group A's "round finished" output to the counter.
-4. Set the counter to 4. Connect its output to group B's "start" input and group A's "stop" input.
-5. Add a polymetric step sequencer with lanes of 5, 7, and 16 steps, driving a synth voice and a filter.
-6. Press play. Group A cycles through its loopers. After four rounds, group B takes over. The sequencer's lanes drift against each other throughout.
+Goal: play group A round robin, each loop twice. After two rounds, play group B the same way. Then return to A. A clip launcher cannot do this.
 
-Requirements: FR-LIB-14, FR-LIB-20 to FR-LIB-23, ADR-0011.
+1. Add a Looper Group for part A with four audio cycles, and record or load a short phrase into each.
+2. Set it to play each loop twice, and to report "done" after two rounds.
+3. Add a second Looper Group for part B, set up the same way.
+4. Add a Song Sequencer (a counter and a step select) with two steps, A and B. Connect each group's "done" output to the song sequencer, and its outputs to the groups' "enable" inputs.
+5. Add a polymetric step sequencer with lanes of 5, 7, and 16 steps, driving a synth voice and a filter.
+6. Press play. Part A rotates through its loops, part B takes over after two rounds, and the song returns to A. The sequencer's lanes drift against each other throughout.
+7. Open the Looper Group to see how it works: cycles, a clock divider, a counter, and a step select. Change its rule, for example to pick the next loop at random, and save it as your own abstraction.
+
+Requirements: FR-LIB-14, FR-LIB-20 to FR-LIB-24. Decisions: ADR-0011, ADR-0012. Specification: [arrangement](../design/arrangement.md).

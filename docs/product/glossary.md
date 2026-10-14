@@ -9,6 +9,8 @@
 | **Copyleft** | A licence (such as GPL or AGPL) that requires derived works to use the same licence. Not allowed in LoomDSP dependencies. |
 | **Control thread** | Any non-audio thread, usually the UI thread. Allowed to allocate and block. |
 | **COOP / COEP** | HTTP headers that make a page "cross-origin isolated". Required for SharedArrayBuffer in browsers. |
+| **Counter** | A module that counts triggers and outputs the count as a phase, so a step sequencer or Step Select can follow it ([arrangement specification](../design/arrangement.md)). |
+| **Cycle** | A module that plays a stored note pattern or audio loop, read from the clock's bar phase. Outputs an end trigger when its loop ends. LoomDSP's looper and clip ([arrangement specification](../design/arrangement.md)). |
 | **Encapsulation** | Collapsing part of a patch into a sub-patch with its own ports and panel. |
 | **Engine** | The Rust code that runs a patch and produces audio. The same engine runs in every target. |
 | **Front panel** | The user-facing control surface of a patch or sub-patch. Separate from the cable view. |
@@ -43,9 +45,11 @@
 | **SharedArrayBuffer (SAB)** | Browser memory that the main thread and the audio thread can both read and write. |
 | **SIMD** | Single Instruction, Multiple Data. One CPU instruction processes several values at once. |
 | **SPSC queue** | Single-producer, single-consumer queue. One thread writes, one thread reads, no locks. |
+| **Step Select** | A module with N gate outputs, one high at a time, chosen by a phase input. A step sequencer whose steps are "which module plays" ([arrangement specification](../design/arrangement.md)). |
 | **Strongly connected component (SCC)** | A part of a graph where every node can reach every other node. In audio terms: a feedback loop. |
 | **Sub-patch** | A patch nested inside another patch. Also called a macro or abstraction in other tools. |
 | **Tile** | A module as drawn on the canvas: a compact box with inputs on the left edge and outputs on the right. |
+| **Trigger** | A short event on a gate cable, such as "loop ended". Inputs count rising edges. How long a trigger output stays high is open (OQ-19). |
 | **Voice** | One copy of a polyphonic sub-patch, playing one note. |
 | **VST3** | Steinberg's plugin format. Widest DAW support. The SDK is MIT-licensed since version 3.8. |
 | **WAM2** | Web Audio Modules 2.0. A plugin standard for browser-based audio hosts. |

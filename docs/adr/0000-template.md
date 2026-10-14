@@ -3,6 +3,10 @@
 - **Status:** Proposed
 - **Date:** YYYY-MM-DD
 - **Related requirements:** FR-..., NFR-...
+- **Specification:** link to `docs/design/...` if the decision has detail that will change
+
+<!-- One decision only. Ports, parameters, formats, examples, and task lists
+     go in a design specification, use case, or issue, linked from here. -->
 
 ## Context
 
