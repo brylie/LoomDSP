@@ -25,12 +25,10 @@ const TITLE_SIZE: f32 = 11.0;
 /// Port label size in world units.
 const LABEL_SIZE: f32 = 9.0;
 
-/// Cable opacity when no module is selected or hovered.
-const CABLE_OPACITY: f32 = 0.8;
-/// Opacity of other cables while the cursor is over a module.
-const CABLE_OPACITY_HOVER: f32 = 0.55;
-/// Opacity of other cables while modules are selected.
-const CABLE_OPACITY_SELECTED: f32 = 0.3;
+/// Opacity of cables that are not in focus. It never changes with hover or
+/// selection, so moving the pointer only changes the cables it points at,
+/// never the whole patch.
+const CABLE_OPACITY: f32 = 0.4;
 
 /// A gesture on the canvas. The application applies it to its model.
 #[derive(Debug, Clone, PartialEq)]
@@ -406,7 +404,7 @@ where
                 geometry,
                 overlay: self.overlay(state),
                 camera: state.camera,
-                cable_dim: self.cable_dim(state),
+                cable_dim: CABLE_OPACITY,
             },
         );
         self.draw_text(state, renderer, bounds);
@@ -460,7 +458,7 @@ impl<Message> PatchCanvas<'_, Message> {
                     };
                 }
             }
-            Hit::Nothing => {
+            Hit::Cable(_) | Hit::Nothing => {
                 let base = if shift { self.selection.clone() } else { BTreeSet::new() };
                 state.interaction = Interaction::Selecting {
                     start: world,
@@ -476,17 +474,15 @@ impl<Message> PatchCanvas<'_, Message> {
         match state.hover? {
             Hit::Module(id) => Some(id),
             Hit::Port(port) => Some(port.module),
-            Hit::Nothing => None,
+            Hit::Cable(_) | Hit::Nothing => None,
         }
     }
 
-    fn cable_dim(&self, state: &State) -> f32 {
-        if !self.selection.is_empty() {
-            CABLE_OPACITY_SELECTED
-        } else if Self::hovered_module(state).is_some() {
-            CABLE_OPACITY_HOVER
-        } else {
-            CABLE_OPACITY
+    /// The cable under the cursor, if any.
+    fn hovered_cable(state: &State) -> Option<usize> {
+        match state.hover? {
+            Hit::Cable(index) => Some(index),
+            _ => None,
         }
     }
 
@@ -494,13 +490,14 @@ impl<Message> PatchCanvas<'_, Message> {
         let mut overlay = Overlay::default();
         let p = &self.palette;
 
-        // Cables of selected and hovered modules come to the front at full
-        // opacity, so it is easy to see what a module is connected to.
+        // The hovered cable, and the cables of selected and hovered modules,
+        // come to the front at full opacity. Everything else stays as it is.
         let hovered = Self::hovered_module(state);
+        let hovered_cable = Self::hovered_cable(state);
         let in_focus = |id: u32| self.selection.contains(&id) || hovered == Some(id);
-        if !self.selection.is_empty() || hovered.is_some() {
-            for cable in self.scene.cables() {
-                if !(in_focus(cable.from.0) || in_focus(cable.to.0)) {
+        if !self.selection.is_empty() || hovered.is_some() || hovered_cable.is_some() {
+            for (index, cable) in self.scene.cables().iter().enumerate() {
+                if !(hovered_cable == Some(index) || in_focus(cable.from.0) || in_focus(cable.to.0)) {
                     continue;
                 }
                 let from = PortRef {
@@ -729,12 +726,10 @@ mod tests {
         let none = BTreeSet::new();
         let canvas = PatchCanvas::new(&scene, &none, |e| e);
         assert!(canvas.overlay(&state).cables.is_empty());
-        assert_eq!(canvas.cable_dim(&state), CABLE_OPACITY);
 
         let first = BTreeSet::from([1]);
         let canvas = PatchCanvas::new(&scene, &first, |e| e);
         assert_eq!(canvas.overlay(&state).cables.len(), 1);
-        assert_eq!(canvas.cable_dim(&state), CABLE_OPACITY_SELECTED);
 
         let middle = BTreeSet::from([2]);
         let canvas = PatchCanvas::new(&scene, &middle, |e| e);
@@ -762,6 +757,17 @@ mod tests {
             ..State::default()
         };
         assert_eq!(canvas.overlay(&state).cables.len(), 1);
-        assert_eq!(canvas.cable_dim(&state), CABLE_OPACITY_HOVER);
+    }
+
+    #[test]
+    fn hovering_a_cable_brings_only_that_cable_forward() {
+        let scene = chain();
+        let none = BTreeSet::new();
+        let canvas = PatchCanvas::new(&scene, &none, |e| e);
+        let state = State {
+            hover: Some(Hit::Cable(1)),
+            ..State::default()
+        };
+        assert_eq!(canvas.overlay(&state).cables.len(), 1);
     }
 }

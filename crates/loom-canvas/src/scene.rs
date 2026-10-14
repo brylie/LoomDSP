@@ -266,7 +266,53 @@ impl Scene {
                 return Hit::Module(module.id);
             }
         }
+        // Cables last, with a tighter tolerance than ports: they are thin,
+        // and empty canvas near a cable should still start a selection box.
+        if let Some(index) = self.cable_at(point, port_radius * 0.5) {
+            return Hit::Cable(index);
+        }
         Hit::Nothing
+    }
+
+    /// The topmost cable within `tolerance` of a world point.
+    fn cable_at(&self, point: Point, tolerance: f32) -> Option<usize> {
+        let t2 = tolerance * tolerance;
+        self.cables.iter().enumerate().rev().find_map(|(index, cable)| {
+            let from = self.port_position(PortRef {
+                module: cable.from.0,
+                output: true,
+                index: cable.from.1,
+            })?;
+            let to = self.port_position(PortRef {
+                module: cable.to.0,
+                output: false,
+                index: cable.to.1,
+            })?;
+            let curve = cable_curve(from, to);
+            // Quick reject: a cubic Bezier lies inside its control points' box.
+            let (min_x, max_x) = curve
+                .iter()
+                .fold((f32::MAX, f32::MIN), |(a, b), p| (a.min(p.x), b.max(p.x)));
+            let (min_y, max_y) = curve
+                .iter()
+                .fold((f32::MAX, f32::MIN), |(a, b), p| (a.min(p.y), b.max(p.y)));
+            if point.x < min_x - tolerance
+                || point.x > max_x + tolerance
+                || point.y < min_y - tolerance
+                || point.y > max_y + tolerance
+            {
+                return None;
+            }
+            let mut previous = from;
+            for i in 1..=CABLE_SEGMENTS {
+                let next = bezier(&curve, i as f32 / CABLE_SEGMENTS as f32);
+                if distance_squared_to_segment(point, previous, next) <= t2 {
+                    return Some(index);
+                }
+                previous = next;
+            }
+            None
+        })
     }
 
     /// IDs of modules whose tiles intersect a world rectangle.
@@ -286,8 +332,56 @@ pub enum Hit {
     Port(PortRef),
     /// A module tile (not on a port).
     Module(u32),
+    /// A cable, by index in [`Scene::cables`].
+    Cable(usize),
     /// Empty canvas.
     Nothing,
+}
+
+/// Segments per cable. Must match `SEGMENTS` in `canvas.wgsl`.
+pub(crate) const CABLE_SEGMENTS: u32 = 32;
+
+/// Control points of a cable's cubic Bezier curve.
+///
+/// Must match `vs_cable` in `canvas.wgsl`, so a cable is hit where it is
+/// drawn. Horizontal tangents at both ends; cables that run backwards (right
+/// to left, usually feedback) loop out and sag below the modules.
+pub(crate) fn cable_curve(from: Point, to: Point) -> [Point; 4] {
+    let span = (to.x - from.x).abs();
+    let (reach, sag) = if to.x < from.x {
+        (40.0 + span * 0.15, 30.0 + (span * 0.2).min(120.0))
+    } else {
+        ((span * 0.5).max(30.0), 0.0)
+    };
+    [
+        from,
+        Point::new(from.x + reach, from.y + sag),
+        Point::new(to.x - reach, to.y + sag),
+        to,
+    ]
+}
+
+fn bezier(c: &[Point; 4], t: f32) -> Point {
+    let u = 1.0 - t;
+    let (a, b, cc, d) = (u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t);
+    Point::new(
+        a * c[0].x + b * c[1].x + cc * c[2].x + d * c[3].x,
+        a * c[0].y + b * c[1].y + cc * c[2].y + d * c[3].y,
+    )
+}
+
+fn distance_squared_to_segment(p: Point, a: Point, b: Point) -> f32 {
+    let ab = b - a;
+    let ap = p - a;
+    let length2 = ab.x * ab.x + ab.y * ab.y;
+    let t = if length2 > 0.0 {
+        ((ap.x * ab.x + ap.y * ab.y) / length2).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let closest = Point::new(a.x + ab.x * t, a.y + ab.y * t);
+    let d = p - closest;
+    d.x * d.x + d.y * d.y
 }
 
 /// Rounds a world point to the snap grid.
@@ -364,6 +458,27 @@ mod tests {
         scene.move_modules(&[1], Vector::new(GRID, 0.0));
         assert_ne!(scene.generation(), before);
         assert_eq!(scene.module(1).unwrap().position, Point::new(GRID, 0.0));
+    }
+
+    #[test]
+    fn hits_cables_where_they_are_drawn() {
+        let cable = CableView {
+            from: (1, 0),
+            to: (2, 0),
+            colour_from: Color::WHITE,
+            colour_to: Color::WHITE,
+            delayed: false,
+        };
+        let scene = Scene::new(vec![module(1, 0.0, 0.0), module(2, 400.0, 200.0)], vec![cable]);
+        let from = scene.module(1).unwrap().output_position(0);
+        let to = scene.module(2).unwrap().input_position(0);
+        // The middle of a forward curve is the midpoint of its ends.
+        let middle = Point::new((from.x + to.x) / 2.0, (from.y + to.y) / 2.0);
+        assert_eq!(scene.hit(middle, PORT_HIT_RADIUS), Hit::Cable(0));
+        assert_eq!(
+            scene.hit(middle + Vector::new(0.0, 40.0), PORT_HIT_RADIUS),
+            Hit::Nothing
+        );
     }
 
     #[test]

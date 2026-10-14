@@ -374,7 +374,7 @@ impl Pipeline for CanvasPipeline {
 }
 
 /// Vertices per cable strip. Must match `SEGMENTS` in the shader.
-const CABLE_VERTICES: u32 = (32 + 1) * 2;
+const CABLE_VERTICES: u32 = (crate::scene::CABLE_SEGMENTS + 1) * 2;
 
 impl Primitive for CanvasPrimitive {
     type Pipeline = CanvasPipeline;

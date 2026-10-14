@@ -113,6 +113,8 @@ fn fs_shape(v: ShapeOut) -> @location(0) vec4<f32> {
 // ---------------------------------------------------------------------------
 // Cables: cubic Bezier curves, built in the vertex shader.
 
+// Must match `CABLE_SEGMENTS` and `cable_curve` in `scene.rs`, which
+// hit-tests cables along the same curve.
 const SEGMENTS: u32 = 32u;
 
 struct CableIn {
