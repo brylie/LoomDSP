@@ -13,9 +13,11 @@
 | **Engine** | The Rust code that runs a patch and produces audio. The same engine runs in every target. |
 | **Front panel** | The user-facing control surface of a patch or sub-patch. Separate from the cable view. |
 | **Grid** | LoomDSP's patch canvas, where every feature is a module. Named after the idea in Bitwig Studio's Grid. |
+| **Hold note** | A toolbar button that plays one note, for testing a patch without a MIDI keyboard. |
 | **Gate** | A signal used as on/off. Values above 0.5 are high. |
 | **Group** | A set of loopers or other playable modules that take turns according to their next action. |
 | **Inspector** | The side panel that shows every parameter of the selected module. Tiles on the canvas show only key controls. |
+| **Level of detail** | Drawing less when zoomed out: tiles drop their text and live views, so large patches stay readable and fast. |
 | **Living musical system** | A patch that plays, evolves, and arranges itself through modulation, randomness, sequencing, looping, and logic. What LoomDSP is for. |
 | **Looper** | A module that records and plays a loop of audio or MIDI, synced to the clock. |
 | **Lock-free** | Code that lets threads communicate without one thread waiting for another to release a lock. |
@@ -36,13 +38,14 @@
 | **Round robin** | Playing the members of a group one after another, then starting again. |
 | **Real-time safe** | Code that always finishes in a bounded time. No allocation, locks, or system calls. |
 | **RON** | Rusty Object Notation. A text format that maps directly to Rust data types through Serde. Used for patch files. |
-| **Scene** | A stored state of chosen modules, recalled by a trigger, optionally with a morph. |
+| **Scene** | A stored state of chosen modules, recalled by a trigger, optionally with a morph. Not the same as `loom_canvas::Scene` in the code, which is what the canvas draws. |
 | **Schedule** | The ordered list of module calls the engine runs each block. Built on a control thread. |
 | **SharedArrayBuffer (SAB)** | Browser memory that the main thread and the audio thread can both read and write. |
 | **SIMD** | Single Instruction, Multiple Data. One CPU instruction processes several values at once. |
 | **SPSC queue** | Single-producer, single-consumer queue. One thread writes, one thread reads, no locks. |
 | **Strongly connected component (SCC)** | A part of a graph where every node can reach every other node. In audio terms: a feedback loop. |
 | **Sub-patch** | A patch nested inside another patch. Also called a macro or abstraction in other tools. |
+| **Tile** | A module as drawn on the canvas: a compact box with inputs on the left edge and outputs on the right. |
 | **Voice** | One copy of a polyphonic sub-patch, playing one note. |
 | **VST3** | Steinberg's plugin format. Widest DAW support. The SDK is MIT-licensed since version 3.8. |
 | **WAM2** | Web Audio Modules 2.0. A plugin standard for browser-based audio hosts. |

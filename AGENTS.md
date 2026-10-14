@@ -24,6 +24,8 @@ cargo run --release -p loom-app -- --generate 300 --bench            # canvas fr
 
 ## Architecture in one page
 
+The longer version, with diagrams, is [docs/dev/architecture.md](docs/dev/architecture.md).
+
 - **Two threads, two halves** (ADR-0001). `Controller` runs on a control thread, owns the editable `Graph`, compiles it, and sends commands. `Engine` runs on the audio thread and only executes. They talk through bounded SPSC queues (`rtrb`). Memory is allocated on the control thread, moved to the audio thread, and moved back for freeing.
 - **Compilation** (ADR-0002, `crates/loom-core/src/compile.rs`). The graph is turned into a `Schedule`: every output port gets a buffer, Tarjan's algorithm finds feedback loops (SCCs), acyclic parts run a block at a time, and loops run one sample at a time. `loom.time.delay1` modules break loops. If a cycle has none, the compiler inserts one and reports it.
 - **Schedule swap.** A new schedule replaces the old one at a buffer boundary. Module instances live in engine slots and keep their state across swaps. Unit delay state is carried over by key.

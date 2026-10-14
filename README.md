@@ -6,11 +6,13 @@ An open-source modular audio environment written in Rust, for musical experiment
 
 Build living musical systems by connecting small modules: oscillators and filters, but also modulators, sequencers, loopers, and logic that arranges the music as it plays. Hide the wiring behind a front panel, play it live with MIDI controllers, and share your patches with others.
 
-**Status: Phase 1 (desktop patcher), early.** The engine, the module library, the patch format, and a command-line player work. A first desktop app with our own patch canvas is in progress. See the [roadmap](docs/product/roadmap.md).
+**Status: Phase 1 (desktop patcher), early.** The engine, the module library, the patch format, and a command-line player work. The first desktop app lets you patch and play live, with our own GPU-drawn canvas. See the [roadmap](docs/product/roadmap.md) and the [Phase 1 issues](https://github.com/brylie/LoomDSP/milestone/1).
+
+![The LoomDSP desktop app](docs/benchmarks/images/p1-canvas-fm-feedback.png)
 
 ## Try it
 
-You need [Rust](https://rustup.rs) 1.88 or newer.
+You need [Rust](https://rustup.rs) 1.88 or newer. New to the app? Read [Getting started](docs/guide/getting-started.md).
 
 ```sh
 # Open a patch in the desktop app (canvas, inspector, live audio)
@@ -22,7 +24,7 @@ cargo run --release -p loom-app -- --generate 300 --bench
 # List the available modules
 cargo run --release -p loom-cli -- modules
 
-# Play a patch with your MIDI keyboard (first MIDI input found)
+# Play a patch from the command line with your MIDI keyboard (first MIDI input found)
 cargo run --release -p loom-cli -- play examples/patches/subtractive.ron
 
 # No MIDI keyboard? Hold a note instead
@@ -47,7 +49,7 @@ Linux needs the ALSA development package (`libasound2-dev` on Debian and Ubuntu)
 - A lock-free boundary between the control thread and the audio thread. The audio path never allocates, locks, or waits, and a test enforces this ([ADR-0001](docs/adr/0001-lock-free-control-audio-boundary.md)).
 - Deterministic output. The same patch and input give bit-identical audio at any host buffer size.
 - Patch files in RON ([ADR-0008](docs/adr/0008-patch-format-ron.md)), with polymorphic signals ([ADR-0007](docs/adr/0007-polymorphic-signal-model.md)).
-- A first desktop app (Phase 1 prototype): our own GPU-drawn patch canvas, an inspector, and live audio and MIDI while you patch ([ADR-0010](docs/adr/0010-own-patch-canvas.md)).
+- A desktop app with our own GPU-drawn patch canvas: patch, move, and delete modules while audio plays, edit parameters in an inspector, and play from any connected MIDI keyboard. It holds 120 fps with 300 modules on an M1 laptop's Retina display ([ADR-0010](docs/adr/0010-own-patch-canvas.md), [benchmark](docs/benchmarks/p1-canvas.md)).
 - 12 modules: phase generator, sine, saw (band-limited), noise, state variable filter, ADSR, add, multiply, constant, 1-sample delay, MIDI note input, audio output.
 
 ## Repository layout
@@ -67,13 +69,16 @@ Linux needs the ALSA development package (`libasound2-dev` on Debian and Ubuntu)
 
 ## Documentation
 
+- [Getting started](docs/guide/getting-started.md): run the app and patch your first sound
+- [Architecture](docs/dev/architecture.md): how the code fits together, for developers
 - [Vision](docs/product/vision.md), [requirements](docs/product/requirements.md), and [roadmap](docs/product/roadmap.md)
 - [Architecture decisions](docs/adr/README.md)
-- [Phase 0 benchmark results](docs/benchmarks/p0-engine.md)
+- Benchmarks: [Phase 0 engine](docs/benchmarks/p0-engine.md), [Phase 1 canvas](docs/benchmarks/p1-canvas.md)
+- [Everything else](docs/README.md)
 
 ## Contributing
 
-Contributions are welcome, including AI-assisted ones. Read [CONTRIBUTING.md](CONTRIBUTING.md) and the [AI contribution policy](AI_POLICY.md). Issues labelled `good first issue` are a good place to start.
+Contributions are welcome, including AI-assisted ones. Read [CONTRIBUTING.md](CONTRIBUTING.md) and the [AI contribution policy](AI_POLICY.md). Issues labelled [`good first issue`](https://github.com/brylie/LoomDSP/labels/good%20first%20issue) are a good place to start, and most are new modules. During October, issues labelled [`hacktoberfest`](https://github.com/brylie/LoomDSP/labels/hacktoberfest) count for Hacktoberfest.
 
 ## Licence
 

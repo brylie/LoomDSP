@@ -9,7 +9,20 @@ Thank you for helping. This guide explains how to build, test, and send changes.
 - Big design changes need an [ADR](docs/adr/README.md) first.
 - AI-assisted contributions are welcome. Read the [AI contribution policy](AI_POLICY.md).
 
-Good starting points: issues labelled `good first issue` or `help wanted`. New modules are often a good first contribution: they are small, self-contained, and easy to test.
+Good starting points: issues labelled [`good first issue`](https://github.com/brylie/LoomDSP/labels/good%20first%20issue) or [`help wanted`](https://github.com/brylie/LoomDSP/labels/help%20wanted). New modules are often a good first contribution: they are small, self-contained, and easy to test. The current phase's work is in the [P1 milestone](https://github.com/brylie/LoomDSP/milestone/1), roughly in priority order.
+
+To understand the code first, read [docs/dev/architecture.md](docs/dev/architecture.md).
+
+### Labels
+
+| Kind | Labels |
+|---|---|
+| Type | `feature`, `bug`, `docs`, `research`, `adr`, `chore` |
+| Area | `area:engine`, `area:modules`, `area:ui`, `area:midi`, `area:crates`, `area:infra`, `area:export` |
+| Priority | `must`, `should`, `could` (same as the requirement priority) |
+| Newcomers | `good first issue`, `help wanted`, `hacktoberfest` |
+
+Comment on an issue before you start, so two people do not do the same work.
 
 ## Build and test
 
@@ -21,6 +34,13 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all --check
 cargo bench -p loom-modules          # optional, takes a few minutes
+```
+
+Run the desktop app and the command-line tool:
+
+```sh
+cargo run --release -p loom-app -- examples/patches/fm-feedback.ron
+cargo run --release -p loom-cli -- play examples/patches/subtractive.ron
 ```
 
 ### Git hooks (recommended)
@@ -76,8 +96,19 @@ Modules must also give the same output whether they process 1 frame or 128 frame
 1. Add a `static` `ModuleDescriptor` and a struct implementing `Module` in `crates/loom-modules/src/`.
 2. Add it to `ALL` in `crates/loom-modules/src/lib.rs`.
 3. Give it a stable, namespaced ID (`loom.<category>.<name>`) and version 1. Never rename a released ID, port, or parameter. Add a new version instead.
-4. Write a unit test with `loom_core::testing::run`.
-5. Run the full test suite.
+4. Mark whole-number parameters (channels, counts, seeds) with `.integer()` on their `ParamSpec`, so they round and the inspector snaps to whole values.
+5. Write a unit test with `loom_core::testing::run`.
+6. Run the full test suite, then try the module in the app: `cargo run --release -p loom-app`, pick it in the toolbar, and click **Add**.
+
+## Working on the canvas and app
+
+The canvas (`crates/loom-canvas`) must stay fast on high-resolution displays. Its cost should follow the number of things drawn, not the number of pixels. So:
+
+- Do not rebuild GPU data every frame. It is rebuilt only when the scene's generation changes; pan and zoom change one uniform.
+- Do not add shaders that run over the whole window for each shape.
+- In `canvas.wgsl`, avoid names that are reserved in Metal or HLSL (`half`, `in`, `out`, `sample`, and others). The `shader_names` test checks the list.
+
+To check performance, run `cargo run --release -p loom-app -- --generate 300 --bench` and read the bottom bar. Results and the method are in [docs/benchmarks/p1-canvas.md](docs/benchmarks/p1-canvas.md). For UI changes, add a screenshot to the pull request.
 
 ## Dependencies
 

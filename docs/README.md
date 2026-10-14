@@ -1,8 +1,16 @@
 # LoomDSP Documentation
 
-This folder holds the product requirements and architecture decisions for LoomDSP.
+This folder holds the guides, product requirements, and architecture decisions for LoomDSP.
 
-Status: **Draft v0.1** (2026-10-13). Everything here is open for discussion.
+Status: **Phase 1, early** (2026-10-14). Requirements are a draft and open for discussion.
+
+## Guides
+
+| Document | For | Purpose |
+|---|---|---|
+| [Getting started](guide/getting-started.md) | Musicians and testers | Run the desktop app, play a patch, and patch while it plays |
+| [Architecture](dev/architecture.md) | Developers | How the crates, threads, compiler, and canvas fit together, and where to start |
+| [Contributing](../CONTRIBUTING.md) | Developers | Build, test, hooks, CI, and pull requests |
 
 ## Product
 
@@ -28,6 +36,7 @@ Status: **Draft v0.1** (2026-10-13). Everything here is open for discussion.
 |---|---|
 | [Phase 0 engine](benchmarks/p0-engine.md) | Feedback loop cost, example patch cost, live and offline stress results |
 | [Phase 0 UI spikes](benchmarks/p0-ui-spikes.md) | Iced + iced_nodegraph and egui-snarl, measured on the reference laptop |
+| [Phase 1 canvas](benchmarks/p1-canvas.md) | Our own canvas: how to measure it, and the results |
 
 ## How to read requirement IDs
 
