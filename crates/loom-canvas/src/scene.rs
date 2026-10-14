@@ -315,6 +315,23 @@ impl Scene {
         })
     }
 
+    /// The output port a click on `hit` should probe: the port itself for an
+    /// output, the source of the cable for a connected input or a cable.
+    /// `None` for anything else.
+    pub fn probe_target(&self, hit: Hit) -> Option<PortRef> {
+        let from = match hit {
+            Hit::Port(port) if port.output => return Some(port),
+            Hit::Port(port) => self.cables.iter().find(|c| c.to == (port.module, port.index))?.from,
+            Hit::Cable(index) => self.cables.get(index)?.from,
+            Hit::Module(_) | Hit::Nothing => return None,
+        };
+        Some(PortRef {
+            module: from.0,
+            output: true,
+            index: from.1,
+        })
+    }
+
     /// IDs of modules whose tiles intersect a world rectangle.
     pub fn modules_in(&self, area: Rectangle) -> Vec<u32> {
         self.modules
@@ -322,6 +339,44 @@ impl Scene {
             .filter(|m| m.bounds().intersects(&area))
             .map(|m| m.id)
             .collect()
+    }
+}
+
+/// Live signal levels of output ports, from 0.0 (silent) to 1.0 (full).
+///
+/// The application fills this from engine meters once per frame. The canvas
+/// draws a glow on each cable and port from its source output's level. It is
+/// kept apart from [`Scene`] on purpose: levels change every frame, and a new
+/// scene generation would rebuild all GPU data (ADR-0010).
+#[derive(Debug, Clone, Default)]
+pub struct PortLevels {
+    levels: HashMap<(u32, usize), f32>,
+}
+
+impl PortLevels {
+    /// Sets the level of an output port. Values are clamped to 0.0..=1.0.
+    pub fn set(&mut self, module: u32, output: usize, level: f32) {
+        self.levels.insert((module, output), level.clamp(0.0, 1.0));
+    }
+
+    /// The level of an output port, 0.0 if unknown.
+    pub fn get(&self, module: u32, output: usize) -> f32 {
+        self.levels.get(&(module, output)).copied().unwrap_or(0.0)
+    }
+
+    /// Forgets every level.
+    pub fn clear(&mut self) {
+        self.levels.clear();
+    }
+
+    /// True if any port is above silence.
+    pub fn any_active(&self) -> bool {
+        self.levels.values().any(|&l| l > 0.0)
+    }
+
+    /// Every port with a level above zero.
+    pub fn iter(&self) -> impl Iterator<Item = ((u32, usize), f32)> + '_ {
+        self.levels.iter().filter(|(_, l)| **l > 0.0).map(|(&k, &l)| (k, l))
     }
 }
 
@@ -479,6 +534,47 @@ mod tests {
             scene.hit(middle + Vector::new(0.0, 40.0), PORT_HIT_RADIUS),
             Hit::Nothing
         );
+    }
+
+    #[test]
+    fn probe_targets_are_outputs() {
+        let cable = CableView {
+            from: (1, 0),
+            to: (2, 1),
+            colour_from: Color::WHITE,
+            colour_to: Color::WHITE,
+            delayed: false,
+        };
+        let scene = Scene::new(vec![module(1, 0.0, 0.0), module(2, 300.0, 0.0)], vec![cable]);
+        let source = PortRef {
+            module: 1,
+            output: true,
+            index: 0,
+        };
+        assert_eq!(scene.probe_target(Hit::Port(source)), Some(source));
+        assert_eq!(scene.probe_target(Hit::Cable(0)), Some(source));
+        let connected = PortRef {
+            module: 2,
+            output: false,
+            index: 1,
+        };
+        assert_eq!(scene.probe_target(Hit::Port(connected)), Some(source));
+        let free = PortRef { index: 0, ..connected };
+        assert_eq!(scene.probe_target(Hit::Port(free)), None);
+        assert_eq!(scene.probe_target(Hit::Cable(7)), None);
+        assert_eq!(scene.probe_target(Hit::Module(1)), None);
+    }
+
+    #[test]
+    fn port_levels_clamp() {
+        let mut levels = PortLevels::default();
+        assert!(!levels.any_active());
+        levels.set(1, 0, 3.0);
+        levels.set(2, 0, 0.0);
+        assert_eq!(levels.get(1, 0), 1.0);
+        assert_eq!(levels.get(9, 9), 0.0);
+        assert_eq!(levels.iter().count(), 1);
+        assert!(levels.any_active());
     }
 
     #[test]

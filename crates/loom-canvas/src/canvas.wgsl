@@ -125,6 +125,9 @@ struct CableIn {
     // width (world), dashed (0 or 1), minimum width (physical px),
     // focused (1: full opacity, 0: dimmed by `cable_dim`).
     @location(3) params: vec4<f32>,
+    // Live signal level, 0 to 1, from its own small buffer that is uploaded
+    // every frame. The cable instances above change only with the scene.
+    @location(4) level: f32,
 };
 
 struct CableOut {
@@ -138,6 +141,9 @@ struct CableOut {
     @location(3) along: f32,
     @location(4) dashed: f32,
     @location(5) opacity: f32,
+    // Width of the glow outside the cable, physical px, and its strength.
+    @location(6) glow: f32,
+    @location(7) level: f32,
 };
 
 @vertex
@@ -170,30 +176,42 @@ fn vs_cable(@builtin(vertex_index) vi: u32, cable: CableIn) -> CableOut {
     let normal = normalize(vec2<f32>(-tangent.y, tangent.x));
 
     let px = px_per_world();
-    let half_width = max(cable.params.x * 0.5 * px, cable.params.z * 0.5);
-    let offset = side * (half_width + 1.0);
+    let level = clamp(cable.level, 0.0, 1.0);
+    // A cable carrying signal gets a little wider and grows a soft glow.
+    let half_width = max(cable.params.x * 0.5 * px, cable.params.z * 0.5) * (1.0 + 0.5 * level);
+    let glow = level * 4.0 * g.scale;
+    let offset = side * (half_width + 1.0 + glow);
 
     // Rough length of the curve: average of the chord and the control polygon.
     let length_estimate = 0.5 * (distance(p0, p3) + distance(p0, p1) + distance(p1, p2) + distance(p2, p3));
 
     var result: CableOut;
     result.position = to_clip(pos + normal * offset / px);
-    result.colour = mix(cable.colour_from, cable.colour_to, t);
+    let colour = mix(cable.colour_from, cable.colour_to, t);
+    result.colour = vec4<f32>(mix(colour.rgb, vec3<f32>(1.0), 0.3 * level), colour.a);
     result.across = offset;
     result.half_width = half_width;
     result.along = t * length_estimate;
     result.dashed = cable.params.y;
-    result.opacity = select(g.cable_dim, 1.0, cable.params.w > 0.5);
+    result.opacity = select(mix(g.cable_dim, 1.0, level), 1.0, cable.params.w > 0.5);
+    result.glow = glow;
+    result.level = level;
     return result;
 }
 
 @fragment
 fn fs_cable(v: CableOut) -> @location(0) vec4<f32> {
-    var coverage = clamp(v.half_width + 0.5 - abs(v.across), 0.0, 1.0) * v.opacity;
+    let edge = abs(v.across) - v.half_width;
+    var coverage = clamp(0.5 - edge, 0.0, 1.0);
     if (v.dashed > 0.5 && fract(v.along / 10.0) > 0.55) {
         // Gaps stay faintly visible, so the cable never seems to vanish.
         coverage = coverage * 0.2;
     }
+    if (v.glow > 0.0) {
+        let fade = clamp(1.0 - edge / v.glow, 0.0, 1.0);
+        coverage = max(coverage, fade * fade * 0.45 * v.level);
+    }
+    coverage = coverage * v.opacity;
     if (coverage <= 0.0) {
         discard;
     }
