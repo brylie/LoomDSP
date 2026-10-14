@@ -26,6 +26,7 @@ mod midi;
 mod module;
 mod registry;
 pub mod signal;
+mod telemetry;
 
 pub use compile::{CompileReport, FeedbackLoop};
 pub use controller::{Controller, EngineParts, MidiSender, create_engine};
@@ -37,3 +38,4 @@ pub use midi::{MidiEvent, MidiMessage};
 pub use module::{Module, PortIo, ProcessContext, testing};
 pub use registry::{ModuleKind, Registry};
 pub use signal::SignalType;
+pub use telemetry::{MeterReading, ProbeId, ProbeKind, SCOPE_CHUNK, ScopeChunk, Telemetry};

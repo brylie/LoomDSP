@@ -15,8 +15,12 @@ pub fn patch_path(name: &str) -> PathBuf {
 }
 
 pub fn load(name: &str) -> EngineParts {
+    load_with(name, EngineConfig::with_sample_rate(SAMPLE_RATE))
+}
+
+pub fn load_with(name: &str, config: EngineConfig) -> EngineParts {
     let patch = Patch::load(patch_path(name)).expect("example patch loads");
-    let mut parts = create_engine(loom_modules::registry(), EngineConfig::with_sample_rate(SAMPLE_RATE));
+    let mut parts = create_engine(loom_modules::registry(), config);
     patch.load_into(&mut parts.controller).expect("example patch is valid");
     parts
 }

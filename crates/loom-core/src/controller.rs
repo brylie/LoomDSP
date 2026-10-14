@@ -7,10 +7,12 @@ use crate::error::LoomError;
 use crate::graph::{Graph, InputRef, ModuleId, Node, OutputRef};
 use crate::midi::MidiEvent;
 use crate::registry::Registry;
+use crate::telemetry::{ProbeId, ProbeKind, Telemetry, TelemetrySender};
 use rtrb::{Consumer, Producer, RingBuffer};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
-/// The three handles returned by [`create_engine`].
+/// The handles returned by [`create_engine`].
 pub struct EngineParts {
     /// Edits the graph. Keep it on a control thread.
     pub controller: Controller,
@@ -18,9 +20,11 @@ pub struct EngineParts {
     pub engine: Engine,
     /// Sends MIDI to the engine. Move it to the MIDI input thread.
     pub midi: MidiSender,
+    /// Meter and scope data from the engine. Read it on a control thread.
+    pub telemetry: Telemetry,
 }
 
-/// Creates a connected controller, engine, and MIDI sender.
+/// Creates a connected controller, engine, MIDI sender, and telemetry reader.
 pub fn create_engine(registry: Arc<Registry>, config: EngineConfig) -> EngineParts {
     let (command_tx, command_rx) = RingBuffer::new(config.command_capacity);
     // Every command can produce at most one piece of garbage, so a garbage
@@ -28,8 +32,20 @@ pub fn create_engine(registry: Arc<Registry>, config: EngineConfig) -> EnginePar
     // controller drains it before sending more commands.
     let (garbage_tx, garbage_rx) = RingBuffer::new(config.command_capacity);
     let (midi_tx, midi_rx) = RingBuffer::new(config.midi_capacity);
+    let (meter_tx, meter_rx) = RingBuffer::new(config.meter_capacity);
+    let (scope_tx, scope_rx) = RingBuffer::new(config.scope_capacity);
     let stats = Arc::new(EngineStats::default());
-    let engine = Engine::new(config, command_rx, garbage_tx, midi_rx, stats.clone());
+    let engine = Engine::new(
+        config,
+        command_rx,
+        garbage_tx,
+        midi_rx,
+        TelemetrySender {
+            meters: meter_tx,
+            scope: scope_tx,
+        },
+        stats.clone(),
+    );
     let controller = Controller {
         registry,
         graph: Graph::default(),
@@ -37,6 +53,8 @@ pub fn create_engine(registry: Arc<Registry>, config: EngineConfig) -> EnginePar
         garbage: garbage_rx,
         free_slots: (0..config.max_modules).rev().collect(),
         pending_removals: Vec::new(),
+        probes: BTreeMap::new(),
+        next_probe: 1,
         next_id: 1,
         dirty: false,
         last_report: CompileReport::default(),
@@ -47,6 +65,7 @@ pub fn create_engine(registry: Arc<Registry>, config: EngineConfig) -> EnginePar
         controller,
         engine,
         midi: MidiSender { tx: midi_tx },
+        telemetry: Telemetry::new(meter_rx, scope_rx),
     }
 }
 
@@ -74,6 +93,8 @@ pub struct Controller {
     garbage: Consumer<Garbage>,
     free_slots: Vec<usize>,
     pending_removals: Vec<usize>,
+    probes: BTreeMap<ProbeId, (OutputRef, ProbeKind)>,
+    next_probe: u32,
     next_id: u32,
     dirty: bool,
     last_report: CompileReport,
@@ -107,7 +128,7 @@ impl Controller {
         &self.last_report
     }
 
-    /// True if there are structural edits not yet committed.
+    /// True if there are structural or probe edits not yet committed.
     pub fn has_uncommitted_changes(&self) -> bool {
         self.dirty
     }
@@ -167,12 +188,13 @@ impl Controller {
         Ok(())
     }
 
-    /// Removes a module and every cable touching it.
+    /// Removes a module, every cable touching it, and every probe on it.
     pub fn remove_module(&mut self, id: ModuleId) -> Result<(), LoomError> {
         let node = self.graph.nodes.remove(&id).ok_or(LoomError::UnknownModule(id))?;
         self.graph
             .cables
             .retain(|to, from| to.module != id && from.module != id);
+        self.probes.retain(|_, (from, _)| from.module != id);
         if let Some(slot) = node.slot {
             // The running schedule still uses this slot. The instance is
             // removed after the next schedule swap (see `commit`).
@@ -288,6 +310,38 @@ impl Controller {
         Ok(())
     }
 
+    /// Starts watching an output port. The engine sends its telemetry from
+    /// the next [`Controller::commit`] on (FR-VIS-04).
+    ///
+    /// Probes are view state: they are not part of the graph and are not
+    /// saved in patches. Removing the module removes its probes.
+    pub fn add_probe(&mut self, output: OutputRef, kind: ProbeKind) -> Result<ProbeId, LoomError> {
+        self.check_output(output)?;
+        let id = ProbeId(self.next_probe);
+        self.next_probe += 1;
+        self.probes.insert(id, (output, kind));
+        self.dirty = true;
+        Ok(id)
+    }
+
+    /// Stops watching a port, from the next [`Controller::commit`] on.
+    /// Telemetry already in the queues may still arrive.
+    pub fn remove_probe(&mut self, id: ProbeId) -> Result<(), LoomError> {
+        self.probes.remove(&id).ok_or(LoomError::UnknownProbe(id))?;
+        self.dirty = true;
+        Ok(())
+    }
+
+    /// The port and kind of a probe.
+    pub fn probe(&self, id: ProbeId) -> Option<(OutputRef, ProbeKind)> {
+        self.probes.get(&id).copied()
+    }
+
+    /// Every probe, sorted by ID.
+    pub fn probes(&self) -> impl Iterator<Item = (ProbeId, OutputRef, ProbeKind)> + '_ {
+        self.probes.iter().map(|(&id, &(from, kind))| (id, from, kind))
+    }
+
     /// Compiles the graph and sends it to the engine. The engine switches to
     /// it at the start of its next buffer, with no dropout (FR-GRAPH-02).
     pub fn commit(&mut self) -> Result<&CompileReport, LoomError> {
@@ -300,7 +354,7 @@ impl Controller {
         if self.commands.slots() < 1 + self.pending_removals.len() {
             return Err(LoomError::QueueFull);
         }
-        let (schedule, report) = compile(&self.graph, self.config.max_block);
+        let (schedule, report) = compile(&self.graph, &self.probes, self.config.max_block);
         // Order matters: swap first (the new schedule no longer uses the
         // removed slots), then remove the instances.
         let pushed = self.commands.push(Command::SwapSchedule(Box::new(schedule))).is_ok()

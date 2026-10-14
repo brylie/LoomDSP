@@ -100,6 +100,7 @@ impl App {
             mut controller,
             engine,
             midi: sender,
+            ..
         } = create_engine(loom_modules::registry(), EngineConfig::with_sample_rate(sample_rate));
 
         let mut status = String::new();

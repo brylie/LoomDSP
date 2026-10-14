@@ -3,7 +3,8 @@
 mod common;
 
 use common::*;
-use loom_core::ModuleId;
+use loom_core::{EngineConfig, EngineParts, LoomError, ModuleId, OutputRef, ProbeKind};
+use std::sync::atomic::Ordering;
 
 #[test]
 fn sine_patch_plays_a_note_and_is_silent_without_one() {
@@ -155,4 +156,136 @@ fn removed_modules_are_returned_for_freeing() {
     parts.controller.collect_garbage();
     let stats = parts.controller.stats();
     assert_eq!(stats.leaked.load(std::sync::atomic::Ordering::Relaxed), 0);
+}
+
+#[test]
+fn scope_probe_reproduces_the_signal_and_meters_match_it() {
+    // FR-VIS-04: the scope sees exactly what the port carries, and each meter
+    // reading describes one block of it.
+    let mut parts = load("sine.ron");
+    let gain = parts.controller.output_ref(ModuleId(5), "out").unwrap();
+    let probe = parts.controller.add_probe(gain, ProbeKind::MeterAndScope).unwrap();
+    parts.controller.commit().unwrap();
+
+    let mut scope = Vec::new();
+    let mut meters = Vec::new();
+    let mut drain = |parts: &mut EngineParts| {
+        for chunk in parts.telemetry.scope() {
+            assert_eq!(chunk.probe, probe);
+            assert_eq!(chunk.frame, scope.len() as u64, "no gaps");
+            scope.extend_from_slice(chunk.samples());
+        }
+        meters.extend(parts.telemetry.meters());
+    };
+    // 77 frames per buffer: blocks and scope chunks do not line up.
+    let (left, _) = render_with(&mut parts, 24_000, 77, &one_note(), |_, parts| drain(parts));
+    drain(&mut parts);
+
+    assert_eq!(scope, left, "the probed port feeds the output directly");
+    let mut frame = 0;
+    for reading in &meters {
+        assert_eq!(reading.probe, probe);
+        assert_eq!(reading.frame, frame);
+        let block = &left[frame as usize..frame as usize + reading.frames as usize];
+        let peak = block.iter().fold(0.0f32, |p, x| p.max(x.abs()));
+        assert_eq!(reading.peak, peak);
+        assert!((reading.rms - rms(block)).abs() < 1e-6);
+        frame += u64::from(reading.frames);
+    }
+    assert_eq!(frame, 24_000);
+    assert!(meters.iter().any(|m| m.peak > 0.1), "the note is metered");
+    let stats = parts.controller.stats();
+    assert_eq!(stats.dropped_meters.load(Ordering::Relaxed), 0);
+    assert_eq!(stats.dropped_scope.load(Ordering::Relaxed), 0);
+}
+
+#[test]
+fn probes_inside_feedback_loops_see_every_sample() {
+    // Loop members run one sample at a time, into the same buffers.
+    let mut parts = load("fm-feedback.ron");
+    let probes: Vec<_> = [2, 3, 4, 5]
+        .into_iter()
+        .map(|m| {
+            // Each of these modules has one output.
+            let port = OutputRef {
+                module: ModuleId(m),
+                port: 0,
+            };
+            parts.controller.add_probe(port, ProbeKind::Scope).unwrap()
+        })
+        .collect();
+    parts.controller.commit().unwrap();
+    render(&mut parts, 4_096, 128, &one_note());
+    let mut signals = vec![Vec::new(); probes.len()];
+    for chunk in parts.telemetry.scope() {
+        let i = probes.iter().position(|p| *p == chunk.probe).unwrap();
+        signals[i].extend_from_slice(chunk.samples());
+    }
+    for signal in &signals {
+        assert_eq!(signal.len(), 4_096);
+        assert!(rms(signal) > 0.0);
+    }
+    assert_eq!(parts.telemetry.meters().count(), 0, "scope only");
+}
+
+#[test]
+fn full_telemetry_queues_drop_telemetry_not_audio() {
+    // NFR-RT-07: a UI that stops reading loses meters, never sound.
+    let reference = render(&mut load("sine.ron"), 9_600, 128, &one_note());
+
+    let config = EngineConfig {
+        meter_capacity: 4,
+        scope_capacity: 4,
+        ..EngineConfig::with_sample_rate(SAMPLE_RATE)
+    };
+    let mut parts = load_with("sine.ron", config);
+    for module in [3, 4, 5] {
+        let port = parts.controller.output_ref(ModuleId(module), "out").unwrap();
+        parts.controller.add_probe(port, ProbeKind::MeterAndScope).unwrap();
+    }
+    parts.controller.commit().unwrap();
+    let probed = render(&mut parts, 9_600, 128, &one_note());
+    assert_eq!(reference, probed, "probes never change the sound");
+
+    let stats = parts.controller.stats();
+    assert!(stats.dropped_meters.load(Ordering::Relaxed) > 0);
+    assert!(stats.dropped_scope.load(Ordering::Relaxed) > 0);
+    // The oldest messages are kept, the newest dropped.
+    let meters: Vec<_> = parts.telemetry.meters().collect();
+    assert_eq!(meters.len(), 4);
+    assert!(meters.iter().all(|m| m.frame < 256));
+    let chunks: Vec<_> = parts.telemetry.scope().collect();
+    assert_eq!(chunks.len(), 4);
+    assert!(chunks.iter().all(|c| c.frame < 128));
+}
+
+#[test]
+fn removing_a_probe_or_its_module_stops_telemetry() {
+    let mut parts = load("sine.ron");
+    let c = &mut parts.controller;
+    let sine = c.output_ref(ModuleId(3), "out").unwrap();
+    let env = c.output_ref(ModuleId(4), "out").unwrap();
+    let a = c.add_probe(sine, ProbeKind::Meter).unwrap();
+    let b = c.add_probe(env, ProbeKind::Meter).unwrap();
+    assert!(c.has_uncommitted_changes(), "probes take effect at commit");
+    c.commit().unwrap();
+    assert_eq!(c.probe(a), Some((sine, ProbeKind::Meter)));
+    render(&mut parts, 128, 128, &[]);
+    let probes: Vec<_> = parts.telemetry.meters().map(|m| m.probe).collect();
+    assert_eq!(probes, vec![a, b]);
+
+    let c = &mut parts.controller;
+    c.remove_probe(a).unwrap();
+    assert!(matches!(c.remove_probe(a), Err(LoomError::UnknownProbe(_))));
+    c.remove_module(ModuleId(4)).unwrap();
+    assert_eq!(c.probes().count(), 0, "removing a module removes its probes");
+    c.commit().unwrap();
+    render(&mut parts, 128, 128, &[]);
+    assert_eq!(parts.telemetry.meters().count(), 0);
+
+    let missing = OutputRef {
+        module: ModuleId(3),
+        port: 9,
+    };
+    assert!(parts.controller.add_probe(missing, ProbeKind::Meter).is_err());
 }

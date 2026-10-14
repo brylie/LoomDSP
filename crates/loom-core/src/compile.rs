@@ -15,6 +15,7 @@
 
 use crate::descriptor::ModuleRole;
 use crate::graph::{Graph, InputRef, ModuleId, OutputRef};
+use crate::telemetry::{ProbeId, ProbeKind};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Marks tap keys created by the compiler, so they never clash with user
@@ -66,6 +67,13 @@ pub(crate) struct OutputOp {
     pub right: *const f32,
 }
 
+/// A probed output buffer. Read after each block for telemetry.
+pub(crate) struct ProbeOp {
+    pub id: ProbeId,
+    pub buffer: *const f32,
+    pub kind: ProbeKind,
+}
+
 pub(crate) enum Step {
     /// Run a module over the whole block.
     Module(u32),
@@ -92,6 +100,7 @@ pub(crate) struct Schedule {
     pub loop_taps: Vec<u32>,
     pub steps: Vec<Step>,
     pub outputs: Vec<OutputOp>,
+    pub probes: Vec<ProbeOp>,
 }
 
 // SAFETY: the raw pointers only point into buffers owned by this schedule.
@@ -112,6 +121,7 @@ impl Schedule {
             loop_taps: Vec::new(),
             steps: Vec::new(),
             outputs: Vec::new(),
+            probes: Vec::new(),
         }
     }
 
@@ -142,8 +152,14 @@ enum StepSpec {
     Loop { modules: Vec<usize>, taps: Vec<usize> },
 }
 
-/// Compiles the graph. `max_block` is the buffer length.
-pub(crate) fn compile(graph: &Graph, max_block: usize) -> (Schedule, CompileReport) {
+/// Compiles the graph. `max_block` is the buffer length. `probes` are output
+/// ports to read for telemetry; probes on unknown modules or ports are
+/// skipped.
+pub(crate) fn compile(
+    graph: &Graph,
+    probes: &BTreeMap<ProbeId, (OutputRef, ProbeKind)>,
+    max_block: usize,
+) -> (Schedule, CompileReport) {
     let ids: Vec<ModuleId> = graph.nodes.keys().copied().collect();
     let index_of: BTreeMap<ModuleId, usize> = ids.iter().enumerate().map(|(i, id)| (*id, i)).collect();
     let nodes: Vec<&crate::graph::Node> = graph.nodes.values().collect();
@@ -431,6 +447,18 @@ pub(crate) fn compile(graph: &Graph, max_block: usize) -> (Schedule, CompileRepo
         })
         .collect();
 
+    let probes = probes
+        .iter()
+        .filter_map(|(&id, &(from, kind))| {
+            let buffer = *out_buf.get(*index_of.get(&from.module)?)?.get(from.port)?;
+            Some(ProbeOp {
+                id,
+                buffer: buf_ptrs[buffer] as *const f32,
+                kind,
+            })
+        })
+        .collect();
+
     let schedule = Schedule {
         _buffers: buffers,
         _zero: zero,
@@ -442,6 +470,7 @@ pub(crate) fn compile(graph: &Graph, max_block: usize) -> (Schedule, CompileRepo
         loop_taps,
         steps: final_steps,
         outputs,
+        probes,
     };
     (schedule, report)
 }

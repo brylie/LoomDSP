@@ -7,3 +7,4 @@ Specifications change as the work teaches us. Edit them in the same pull request
 | Specification | Decision | Status |
 |---|---|---|
 | [Arrangement](arrangement.md) | [ADR-0012](../adr/0012-arrangement-from-phase-driven-primitives.md) | Draft, P3 |
+| [Telemetry](telemetry.md) | [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md) | Implemented, P1 |

@@ -3,7 +3,9 @@
 //! This test binary installs an allocator that aborts if any allocation or
 //! deallocation happens inside `assert_no_alloc`. Every call to
 //! `Engine::process` runs inside it, while the control side edits the graph
-//! between buffers (where allocation is allowed).
+//! between buffers (where allocation is allowed). Every output is probed, so
+//! telemetry runs too, both while the UI drains it and while its queues are
+//! full (FR-VIS-04, NFR-RT-07).
 //!
 //! The check is active in debug builds, which is how `cargo test` runs.
 
@@ -11,7 +13,7 @@ mod common;
 
 use assert_no_alloc::{AllocDisabler, assert_no_alloc};
 use common::*;
-use loom_core::MidiEvent;
+use loom_core::{MidiEvent, OutputRef, ProbeKind};
 
 #[global_allocator]
 static ALLOCATOR: AllocDisabler = AllocDisabler;
@@ -25,6 +27,15 @@ fn audio_thread_never_allocates() {
         "fm-feedback-delay1.ron",
     ] {
         let mut parts = load(patch);
+        let outputs: Vec<OutputRef> = parts
+            .controller
+            .graph()
+            .nodes()
+            .flat_map(|(module, node)| (0..node.descriptor.outputs.len()).map(move |port| OutputRef { module, port }))
+            .collect();
+        for output in outputs {
+            parts.controller.add_probe(output, ProbeKind::MeterAndScope).unwrap();
+        }
         let mut left = vec![0.0; 1024];
         let mut right = vec![0.0; 1024];
         let mut extra = Vec::new();
@@ -33,6 +44,8 @@ fn audio_thread_never_allocates() {
             if i % 7 == 0 {
                 let id = parts.controller.add_module("loom.filter.svf").unwrap();
                 parts.controller.connect_named(id, "lowpass", id, "in").unwrap();
+                let lowpass = parts.controller.output_ref(id, "lowpass").unwrap();
+                parts.controller.add_probe(lowpass, ProbeKind::Scope).unwrap();
                 extra.push(id);
             }
             if i % 11 == 0
@@ -47,6 +60,11 @@ fn audio_thread_never_allocates() {
             if i % 50 == 25 {
                 parts.midi.send(MidiEvent::note_off(0, 0, 60 + ((i - 25) % 12) as u8));
             }
+            // Drain telemetry for a while, then let the queues fill up.
+            if i < 200 {
+                parts.telemetry.meters().for_each(drop);
+                parts.telemetry.scope().for_each(drop);
+            }
             let frames = [1, 32, 128, 129, 1024][i % 5];
 
             // Audio thread: no allocation allowed.
@@ -54,5 +72,7 @@ fn audio_thread_never_allocates() {
                 parts.engine.process(&mut left[..frames], &mut right[..frames]);
             });
         }
+        let stats = parts.controller.stats();
+        assert!(stats.dropped_scope.load(std::sync::atomic::Ordering::Relaxed) > 0);
     }
 }

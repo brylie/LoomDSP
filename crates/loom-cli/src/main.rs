@@ -336,6 +336,7 @@ fn start_live(path: &Path, args: &AudioArgs, hold_note: Option<u8>) -> Result<Li
         controller,
         engine,
         midi: mut sender,
+        ..
     } = parts;
     println!("patch:  {} ({})", patch.name, path.display());
     println!(

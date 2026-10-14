@@ -2,11 +2,13 @@
 //!
 //! Real-time rules (NFR-RT-01): nothing in this file allocates, frees, locks,
 //! or waits once the engine is running. Memory arrives pre-allocated through
-//! the command queue and leaves through the garbage queue.
+//! the command queue and leaves through the garbage queue. Telemetry leaves
+//! through its own queues and is dropped when they are full (NFR-RT-07).
 
 use crate::compile::{ModuleOp, Schedule, Step};
 use crate::midi::MidiEvent;
 use crate::module::{Module, PortIo, ProcessContext};
+use crate::telemetry::{MeterReading, SCOPE_CHUNK, ScopeChunk, TelemetrySender, measure};
 use rtrb::{Consumer, Producer};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -25,6 +27,12 @@ pub struct EngineConfig {
     pub command_capacity: usize,
     /// Capacity of the MIDI input queue and per-buffer MIDI event list.
     pub midi_capacity: usize,
+    /// Capacity of the meter queue, in readings. One reading per metered
+    /// probe per block.
+    pub meter_capacity: usize,
+    /// Capacity of the scope queue, in chunks of
+    /// [`SCOPE_CHUNK`](crate::SCOPE_CHUNK) samples.
+    pub scope_capacity: usize,
 }
 
 impl Default for EngineConfig {
@@ -35,6 +43,8 @@ impl Default for EngineConfig {
             max_modules: 1024,
             command_capacity: 1024,
             midi_capacity: 1024,
+            meter_capacity: 1024,
+            scope_capacity: 1024,
         }
     }
 }
@@ -61,6 +71,10 @@ pub struct EngineStats {
     /// Objects the engine could not return for freeing (garbage queue full).
     /// They are leaked rather than freed on the audio thread.
     pub leaked: AtomicU64,
+    /// Meter readings dropped because the meter queue was full.
+    pub dropped_meters: AtomicU64,
+    /// Scope chunks dropped because the scope queue was full.
+    pub dropped_scope: AtomicU64,
 }
 
 pub(crate) enum Command {
@@ -85,6 +99,9 @@ pub struct Engine {
     garbage: Producer<Garbage>,
     midi_in: Consumer<MidiEvent>,
     midi: Vec<MidiEvent>,
+    telemetry: TelemetrySender,
+    /// Frames rendered since the engine started. Stamps telemetry.
+    frame: u64,
     config: EngineConfig,
     stats: Arc<EngineStats>,
 }
@@ -95,6 +112,7 @@ impl Engine {
         commands: Consumer<Command>,
         garbage: Producer<Garbage>,
         midi_in: Consumer<MidiEvent>,
+        telemetry: TelemetrySender,
         stats: Arc<EngineStats>,
     ) -> Self {
         Self {
@@ -104,6 +122,8 @@ impl Engine {
             garbage,
             midi_in,
             midi: Vec::with_capacity(config.midi_capacity),
+            telemetry,
+            frame: 0,
             config,
             stats,
         }
@@ -135,6 +155,8 @@ impl Engine {
                 &mut left[position..position + n],
                 &mut right[position..position + n],
             );
+            self.send_telemetry(n);
+            self.frame += n as u64;
             position += n;
         }
         self.stats.buffers.fetch_add(1, Ordering::Relaxed);
@@ -181,6 +203,44 @@ impl Engine {
             // capacity as the command queue, so this should not happen.
             std::mem::forget(garbage);
             self.stats.leaked.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Reads the probed buffers after a block of `frames` frames and queues
+    /// meter readings and scope chunks. Drops what does not fit.
+    fn send_telemetry(&mut self, frames: usize) {
+        for probe in &self.schedule.probes {
+            // SAFETY: probe buffers are output buffers of the schedule,
+            // `max_block` floats long, and `frames <= max_block`. No module
+            // is running, so nothing writes to them now.
+            let samples = unsafe { std::slice::from_raw_parts(probe.buffer, frames) };
+            if probe.kind.meter() {
+                let (peak, rms) = measure(samples);
+                let reading = MeterReading {
+                    probe: probe.id,
+                    frame: self.frame,
+                    frames: frames as u32,
+                    peak,
+                    rms,
+                };
+                if self.telemetry.meters.push(reading).is_err() {
+                    self.stats.dropped_meters.fetch_add(1, Ordering::Relaxed);
+                }
+            }
+            if probe.kind.scope() {
+                for (i, part) in samples.chunks(SCOPE_CHUNK).enumerate() {
+                    let mut chunk = ScopeChunk {
+                        probe: probe.id,
+                        frame: self.frame + (i * SCOPE_CHUNK) as u64,
+                        len: part.len() as u32,
+                        samples: [0.0; SCOPE_CHUNK],
+                    };
+                    chunk.samples[..part.len()].copy_from_slice(part);
+                    if self.telemetry.scope.push(chunk).is_err() {
+                        self.stats.dropped_scope.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+            }
         }
     }
 

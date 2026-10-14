@@ -1,4 +1,5 @@
 use crate::graph::ModuleId;
+use crate::telemetry::ProbeId;
 
 /// Errors from the control side of the engine.
 #[derive(Debug, thiserror::Error)]
@@ -52,6 +53,9 @@ pub enum LoomError {
     /// The patch has more modules than the engine was configured for.
     #[error("too many modules (limit is {0})")]
     TooManyModules(usize),
+    /// No probe with this ID.
+    #[error("no {0}")]
+    UnknownProbe(ProbeId),
     /// The command queue to the audio thread is full. Try again after the
     /// engine has processed a block.
     #[error("the engine command queue is full; is the audio engine running?")]
