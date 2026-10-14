@@ -469,12 +469,19 @@ impl<Message> PatchCanvas<'_, Message> {
         }
     }
 
-    /// The module under the cursor, if any (on its tile or one of its ports).
+    /// The module tile under the cursor, if any (not counting its ports).
     fn hovered_module(state: &State) -> Option<u32> {
         match state.hover? {
             Hit::Module(id) => Some(id),
-            Hit::Port(port) => Some(port.module),
-            Hit::Cable(_) | Hit::Nothing => None,
+            _ => None,
+        }
+    }
+
+    /// The port under the cursor, if any.
+    fn hovered_port(state: &State) -> Option<PortRef> {
+        match state.hover? {
+            Hit::Port(port) => Some(port),
+            _ => None,
         }
     }
 
@@ -490,14 +497,30 @@ impl<Message> PatchCanvas<'_, Message> {
         let mut overlay = Overlay::default();
         let p = &self.palette;
 
-        // The hovered cable, and the cables of selected and hovered modules,
-        // come to the front at full opacity. Everything else stays as it is.
+        // Cables in focus come to the front at full opacity: the cable under
+        // the cursor, the cables on the port under the cursor, and the cables
+        // of the module under the cursor and of selected modules. Everything
+        // else stays at the same dim level, so the patch never flickers.
         let hovered = Self::hovered_module(state);
+        let hovered_port = Self::hovered_port(state);
         let hovered_cable = Self::hovered_cable(state);
-        let in_focus = |id: u32| self.selection.contains(&id) || hovered == Some(id);
-        if !self.selection.is_empty() || hovered.is_some() || hovered_cable.is_some() {
+        let module_in_focus = |id: u32| self.selection.contains(&id) || hovered == Some(id);
+        let on_port = |cable: &crate::scene::CableView| {
+            hovered_port.is_some_and(|p| {
+                if p.output {
+                    cable.from == (p.module, p.index)
+                } else {
+                    cable.to == (p.module, p.index)
+                }
+            })
+        };
+        if !self.selection.is_empty() || hovered.is_some() || hovered_port.is_some() || hovered_cable.is_some() {
             for (index, cable) in self.scene.cables().iter().enumerate() {
-                if !(hovered_cable == Some(index) || in_focus(cable.from.0) || in_focus(cable.to.0)) {
+                let focused = hovered_cable == Some(index)
+                    || on_port(cable)
+                    || module_in_focus(cable.from.0)
+                    || module_in_focus(cable.to.0);
+                if !focused {
                     continue;
                 }
                 let from = PortRef {
@@ -757,6 +780,33 @@ mod tests {
             ..State::default()
         };
         assert_eq!(canvas.overlay(&state).cables.len(), 1);
+    }
+
+    #[test]
+    fn hovering_a_port_brings_only_its_cables_forward() {
+        let scene = chain();
+        let none = BTreeSet::new();
+        let canvas = PatchCanvas::new(&scene, &none, |e| e);
+        // Module 2's input carries cable 1 -> 2; its output carries 2 -> 3.
+        let state = State {
+            hover: Some(Hit::Port(PortRef {
+                module: 2,
+                output: false,
+                index: 0,
+            })),
+            ..State::default()
+        };
+        assert_eq!(canvas.overlay(&state).cables.len(), 1);
+        // A port with no cable highlights nothing.
+        let state = State {
+            hover: Some(Hit::Port(PortRef {
+                module: 1,
+                output: false,
+                index: 0,
+            })),
+            ..State::default()
+        };
+        assert!(canvas.overlay(&state).cables.is_empty());
     }
 
     #[test]

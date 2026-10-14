@@ -71,7 +71,7 @@ Signals flow from left to right. Each port's colour shows its signal type, and i
 Types only guide you. Any output can connect to any input, as in Eurorack or Bitwig's Grid. The signal rules are in [ADR-0007](../adr/0007-polymorphic-signal-model.md).
 
 - **Filled ports** have a cable. **Rings** are free.
-- **Cables run behind the tiles, dimmed.** Point at a cable, or at a module, to bring those cables to the front at full brightness. Selected modules keep their cables bright. Nothing else changes as you move the pointer, so you can follow one connection across a busy patch.
+- **Cables run behind the tiles, dimmed.** Point at a cable, a port, or a module to bring its cables to the front at full brightness. Selected modules keep their cables bright. Nothing else changes as you move the pointer, so you can follow one connection across a busy patch.
 - **Dashed cables** are part of a feedback loop. The engine adds a one-sample delay there, because a loop needs one to run. You can place your own delay with the "1-Sample Delay" module.
 - **Zoomed out,** tiles hide their text so large patches stay readable and fast.
 

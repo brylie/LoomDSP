@@ -9,7 +9,7 @@ The first version of our own patch canvas ([ADR-0010](../adr/0010-own-patch-canv
 - Compact module tiles on a 12-unit snap grid. Signal flows left to right. Inputs on the left edge, outputs on the right.
 - Ports coloured by signal type, with shape as a second cue: pitch and gate are square, the others round. Connected ports are filled, free ports are rings.
 - Cables as curves, coloured from source to destination type. Cables where the engine inserted a 1-sample delay are dashed. Feedback cables (running right to left) loop below the modules.
-- Cables run behind the tiles at a fixed, dim opacity. The hovered cable, and the cables of selected or hovered modules, come to the front at full brightness. The background level never changes, so moving the pointer does not make the whole patch flicker.
+- Cables run behind the tiles at a fixed, dim opacity. The hovered cable, the cables on a hovered port, and the cables of selected or hovered modules come to the front at full brightness. The background level never changes, so moving the pointer does not make the whole patch flicker.
 - Level of detail: titles only when at least 6.5 px tall, port labels only when at least 7.5 px tall.
 - Inspector panel for the selected module, with logarithmic sliders for frequencies and times.
 - Live audio and MIDI while editing. Every edit goes through the engine's lock-free schedule swap.
@@ -24,7 +24,7 @@ One custom wgpu primitive draws the whole canvas, in this order:
 1. A dot grid: one quad with a few operations per pixel, faded out when zoomed far out.
 2. Cables: one instanced triangle strip per cable, dimmed. The vertex shader builds the curve from the two end points, so a cable is 64 bytes of GPU data.
 3. Tiles: instanced rounded rectangles. Each one shades only its own pixels.
-4. Focused cables: the hovered cable, those of selected and hovered modules, and the one being dragged, at full opacity. Rebuilt each frame; usually only a handful.
+4. Focused cables: the hovered cable, those on a hovered port, those of selected and hovered modules, and the one being dragged, at full opacity. Rebuilt each frame; usually only a handful.
 5. Ports, then outlines for selection and hover, and the selection box.
 6. Text, through Iced, on top.
 
