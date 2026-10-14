@@ -66,6 +66,6 @@ On software rendering every pixel costs CPU time, so this is a rough sign that t
 
 ### Reference laptop (M1 family, built-in Retina)
 
-**First result (2026-10-14):** a steady 120 fps with `--generate 300 --bench` at full window size, with the camera moving. 120 fps is the display's refresh rate (ProMotion), so each frame finishes early and waits for the screen. The P0 spike reached 22 to 24 fps in the same setup.
+**First result (2026-10-14):** a steady 120 fps with `examples/patches/fm-feedback.ron` (8 modules) while moving the canvas by hand. 120 fps is the display's refresh rate (ProMotion), so each frame finishes early and waits for the screen. The P0 spike reached 40 fps with the same 8-module patch.
 
-Still to record: the zoomed-in runs and idle CPU and GPU (table above).
+Still to record: the 300-module runs, the zoomed-in runs, and idle CPU and GPU (table above).
