@@ -21,7 +21,10 @@ struct Globals {
     zoom: f32,
     // Physical pixels per logical pixel (2.0 on Retina).
     scale: f32,
-    _pad: vec2<f32>,
+    // Opacity of cables that are not in focus (not on a selected or hovered
+    // module). Lower while something is selected, so its cables stand out.
+    cable_dim: f32,
+    _pad: f32,
 };
 
 @group(0) @binding(0) var<uniform> g: Globals;
@@ -117,7 +120,8 @@ struct CableIn {
     @location(0) ends: vec4<f32>,
     @location(1) colour_from: vec4<f32>,
     @location(2) colour_to: vec4<f32>,
-    // width (world), dashed (0 or 1), minimum width (physical px), unused.
+    // width (world), dashed (0 or 1), minimum width (physical px),
+    // focused (1: full opacity, 0: dimmed by `cable_dim`).
     @location(3) params: vec4<f32>,
 };
 
@@ -131,6 +135,7 @@ struct CableOut {
     // Distance along the cable in world units (for dashes).
     @location(3) along: f32,
     @location(4) dashed: f32,
+    @location(5) opacity: f32,
 };
 
 @vertex
@@ -176,12 +181,13 @@ fn vs_cable(@builtin(vertex_index) vi: u32, cable: CableIn) -> CableOut {
     result.half_width = half_width;
     result.along = t * length_estimate;
     result.dashed = cable.params.y;
+    result.opacity = select(g.cable_dim, 1.0, cable.params.w > 0.5);
     return result;
 }
 
 @fragment
 fn fs_cable(v: CableOut) -> @location(0) vec4<f32> {
-    var coverage = clamp(v.half_width + 0.5 - abs(v.across), 0.0, 1.0);
+    var coverage = clamp(v.half_width + 0.5 - abs(v.across), 0.0, 1.0) * v.opacity;
     if (v.dashed > 0.5 && fract(v.along / 10.0) > 0.55) {
         // Gaps stay faintly visible, so the cable never seems to vanish.
         coverage = coverage * 0.2;

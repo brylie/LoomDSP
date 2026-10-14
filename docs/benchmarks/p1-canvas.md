@@ -9,6 +9,7 @@ The first version of our own patch canvas ([ADR-0010](../adr/0010-own-patch-canv
 - Compact module tiles on a 12-unit snap grid. Signal flows left to right. Inputs on the left edge, outputs on the right.
 - Ports coloured by signal type, with shape as a second cue: pitch and gate are square, the others round. Connected ports are filled, free ports are rings.
 - Cables as curves, coloured from source to destination type. Cables where the engine inserted a 1-sample delay are dashed. Feedback cables (running right to left) loop below the modules.
+- Cables run behind the tiles, slightly transparent. The cables of selected or hovered modules come to the front at full brightness, and the rest dim further, so connections stay readable in dense patches.
 - Level of detail: titles only when at least 6.5 px tall, port labels only when at least 7.5 px tall.
 - Inspector panel for the selected module, with logarithmic sliders for frequencies and times.
 - Live audio and MIDI while editing. Every edit goes through the engine's lock-free schedule swap.
@@ -21,10 +22,11 @@ Gestures: drag from a port to patch a cable; drag a connected input to move or r
 One custom wgpu primitive draws the whole canvas, in this order:
 
 1. A dot grid: one quad with a few operations per pixel, faded out when zoomed far out.
-2. Tiles: instanced rounded rectangles. Each one shades only its own pixels.
-3. Cables: one instanced triangle strip per cable. The vertex shader builds the curve from the two end points, so a cable is 64 bytes of GPU data.
-4. Ports, then the overlay (selection, hover, the cable being dragged, the selection box).
-5. Text, through Iced, on top.
+2. Cables: one instanced triangle strip per cable, dimmed. The vertex shader builds the curve from the two end points, so a cable is 64 bytes of GPU data.
+3. Tiles: instanced rounded rectangles. Each one shades only its own pixels.
+4. Focused cables: those of selected and hovered modules, and the one being dragged, at full opacity. Rebuilt each frame; usually only a handful.
+5. Ports, then outlines for selection and hover, and the selection box.
+6. Text, through Iced, on top.
 
 Tile, port, and cable data is built on the CPU and uploaded only when the scene changes. Panning and zooming change one 32-byte uniform buffer. Without the **Measure** toggle, the window redraws only on input and a twice-a-second stats refresh.
 

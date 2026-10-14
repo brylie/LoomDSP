@@ -25,6 +25,13 @@ const TITLE_SIZE: f32 = 11.0;
 /// Port label size in world units.
 const LABEL_SIZE: f32 = 9.0;
 
+/// Cable opacity when no module is selected or hovered.
+const CABLE_OPACITY: f32 = 0.8;
+/// Opacity of other cables while the cursor is over a module.
+const CABLE_OPACITY_HOVER: f32 = 0.55;
+/// Opacity of other cables while modules are selected.
+const CABLE_OPACITY_SELECTED: f32 = 0.3;
+
 /// A gesture on the canvas. The application applies it to its model.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CanvasEvent {
@@ -397,6 +404,7 @@ where
                 geometry,
                 overlay: self.overlay(state),
                 camera: state.camera,
+                cable_dim: self.cable_dim(state),
             },
         );
         self.draw_text(state, renderer, bounds);
@@ -461,9 +469,56 @@ impl<Message> PatchCanvas<'_, Message> {
         }
     }
 
+    /// The module under the cursor, if any (on its tile or one of its ports).
+    fn hovered_module(state: &State) -> Option<u32> {
+        match state.hover? {
+            Hit::Module(id) => Some(id),
+            Hit::Port(port) => Some(port.module),
+            Hit::Nothing => None,
+        }
+    }
+
+    fn cable_dim(&self, state: &State) -> f32 {
+        if !self.selection.is_empty() {
+            CABLE_OPACITY_SELECTED
+        } else if Self::hovered_module(state).is_some() {
+            CABLE_OPACITY_HOVER
+        } else {
+            CABLE_OPACITY
+        }
+    }
+
     fn overlay(&self, state: &State) -> Overlay {
         let mut overlay = Overlay::default();
         let p = &self.palette;
+
+        // Cables of selected and hovered modules come to the front at full
+        // opacity, so it is easy to see what a module is connected to.
+        let hovered = Self::hovered_module(state);
+        let in_focus = |id: u32| self.selection.contains(&id) || hovered == Some(id);
+        if !self.selection.is_empty() || hovered.is_some() {
+            for cable in self.scene.cables() {
+                if !(in_focus(cable.from.0) || in_focus(cable.to.0)) {
+                    continue;
+                }
+                let from = PortRef {
+                    module: cable.from.0,
+                    output: true,
+                    index: cable.from.1,
+                };
+                let to = PortRef {
+                    module: cable.to.0,
+                    output: false,
+                    index: cable.to.1,
+                };
+                if let (Some(a), Some(b)) = (self.scene.port_position(from), self.scene.port_position(to)) {
+                    overlay
+                        .cables
+                        .push(Cable::new(a, b, cable.colour_from, cable.colour_to, cable.delayed).focused());
+                }
+            }
+        }
+
         for id in self.selection {
             if let Some(module) = self.scene.module(*id) {
                 let b = module.bounds().expand(3.0);
@@ -497,7 +552,8 @@ impl<Message> PatchCanvas<'_, Message> {
                         Cable::new(start, end, port.colour, port.colour, false)
                     } else {
                         Cable::new(end, start, port.colour, port.colour, false)
-                    };
+                    }
+                    .focused();
                     overlay.cables.push(cable);
                 }
             }
@@ -620,5 +676,79 @@ where
 {
     fn from(canvas: PatchCanvas<'a, Message>) -> Self {
         Element::new(canvas)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scene::{CableView, ModuleView, PortShape, PortView};
+
+    fn module(id: u32, x: f32) -> ModuleView {
+        let port = || PortView {
+            label: "p".into(),
+            colour: Color::WHITE,
+            shape: PortShape::Round,
+        };
+        ModuleView {
+            id,
+            title: String::new(),
+            accent: Color::BLACK,
+            position: Point::new(x, 0.0),
+            inputs: vec![port()],
+            outputs: vec![port()],
+        }
+    }
+
+    fn cable(from: u32, to: u32) -> CableView {
+        CableView {
+            from: (from, 0),
+            to: (to, 0),
+            colour_from: Color::WHITE,
+            colour_to: Color::WHITE,
+            delayed: false,
+        }
+    }
+
+    /// Modules 1 -> 2 -> 3, so selecting 1 focuses one cable and selecting
+    /// 2 focuses both.
+    fn chain() -> Scene {
+        Scene::new(
+            vec![module(1, 0.0), module(2, 200.0), module(3, 400.0)],
+            vec![cable(1, 2), cable(2, 3)],
+        )
+    }
+
+    #[test]
+    fn selected_modules_bring_their_cables_forward() {
+        let scene = chain();
+        let state = State::default();
+
+        let none = BTreeSet::new();
+        let canvas = PatchCanvas::new(&scene, &none, |e| e);
+        assert!(canvas.overlay(&state).cables.is_empty());
+        assert_eq!(canvas.cable_dim(&state), CABLE_OPACITY);
+
+        let first = BTreeSet::from([1]);
+        let canvas = PatchCanvas::new(&scene, &first, |e| e);
+        assert_eq!(canvas.overlay(&state).cables.len(), 1);
+        assert_eq!(canvas.cable_dim(&state), CABLE_OPACITY_SELECTED);
+
+        let middle = BTreeSet::from([2]);
+        let canvas = PatchCanvas::new(&scene, &middle, |e| e);
+        assert_eq!(canvas.overlay(&state).cables.len(), 2);
+    }
+
+    #[test]
+    fn hovering_a_module_brings_its_cables_forward() {
+        let scene = chain();
+        let none = BTreeSet::new();
+        let canvas = PatchCanvas::new(&scene, &none, |e| e);
+        let state = State {
+            hover: Some(Hit::Module(3)),
+            ..State::default()
+        };
+        assert_eq!(canvas.overlay(&state).cables.len(), 1);
+        assert_eq!(canvas.cable_dim(&state), CABLE_OPACITY_HOVER);
     }
 }

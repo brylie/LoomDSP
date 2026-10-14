@@ -73,6 +73,12 @@ impl Cable {
             params: [CABLE_WIDTH, if dashed { 1.0 } else { 0.0 }, CABLE_MIN_PX, 0.0],
         }
     }
+
+    /// Draws the cable at full opacity, in front of the tiles.
+    pub fn focused(mut self) -> Self {
+        self.params[3] = 1.0;
+        self
+    }
 }
 
 /// GPU instances for one scene. Built on the CPU when the scene changes,
@@ -81,7 +87,8 @@ impl Cable {
 pub struct Geometry {
     /// The scene generation this was built from.
     pub generation: u64,
-    /// Cables, drawn over the tiles and under the ports.
+    /// Cables, drawn behind the tiles and dimmed. Focused cables are drawn
+    /// again in front, from the overlay.
     pub cables: Vec<Cable>,
     /// Tiles, then ports. Tiles come first so cables can go between them.
     pub shapes: Vec<Shape>,
@@ -166,7 +173,8 @@ impl Geometry {
 /// the cable being dragged, the selection box.
 #[derive(Debug, Default, Clone)]
 pub struct Overlay {
-    /// Cables (the one being dragged).
+    /// Cables in front of the tiles: those of selected and hovered modules,
+    /// and the one being dragged.
     pub cables: Vec<Cable>,
     /// Shapes (outlines, highlights).
     pub shapes: Vec<Shape>,
@@ -178,6 +186,8 @@ pub struct CanvasPrimitive {
     pub(crate) geometry: Arc<Geometry>,
     pub(crate) overlay: Overlay,
     pub(crate) camera: Camera,
+    /// Opacity of cables that are not in focus.
+    pub(crate) cable_dim: f32,
 }
 
 #[repr(C)]
@@ -187,7 +197,8 @@ struct Globals {
     size: [f32; 2],
     zoom: f32,
     scale: f32,
-    pad: [f32; 2],
+    cable_dim: f32,
+    pad: f32,
 }
 
 /// A vertex buffer that grows as needed and is never shrunk.
@@ -381,7 +392,8 @@ impl Primitive for CanvasPrimitive {
             size: [bounds.width.max(1.0), bounds.height.max(1.0)],
             zoom: self.camera.zoom,
             scale: viewport.scale_factor(),
-            pad: [0.0; 2],
+            cable_dim: self.cable_dim,
+            pad: 0.0,
         };
         queue.write_buffer(&pipeline.globals, 0, bytemuck::bytes_of(&globals));
 
@@ -401,27 +413,29 @@ impl Primitive for CanvasPrimitive {
         pass.set_pipeline(&pipeline.grid);
         pass.draw(0..4, 0..1);
 
-        // Tiles, then cables over them, then ports over the cable ends.
+        // Cables behind the tiles, so modules read as solid objects. Then the
+        // focused cables in front, then ports over every cable end, then the
+        // selection and hover outlines.
         let tiles = pipeline.tiles.min(pipeline.scene_shapes.len);
         let layers = [
-            (&pipeline.shapes, &pipeline.scene_shapes, 4, 0..tiles),
             (
                 &pipeline.cables,
                 &pipeline.scene_cables,
                 CABLE_VERTICES,
                 0..pipeline.scene_cables.len,
             ),
-            (
-                &pipeline.shapes,
-                &pipeline.scene_shapes,
-                4,
-                tiles..pipeline.scene_shapes.len,
-            ),
+            (&pipeline.shapes, &pipeline.scene_shapes, 4, 0..tiles),
             (
                 &pipeline.cables,
                 &pipeline.overlay_cables,
                 CABLE_VERTICES,
                 0..pipeline.overlay_cables.len,
+            ),
+            (
+                &pipeline.shapes,
+                &pipeline.scene_shapes,
+                4,
+                tiles..pipeline.scene_shapes.len,
             ),
             (
                 &pipeline.shapes,

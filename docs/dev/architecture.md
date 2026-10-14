@@ -80,8 +80,8 @@ The same path carries every structural edit: add, remove, connect, disconnect. P
 | Scene | `scene.rs` | Modules, ports, and cables in world coordinates. Built by the app. Each change gets a new generation number. Also does hit-testing. |
 | Camera | `camera.rs` | Pan and zoom. Converts between world and screen positions. |
 | GPU data | `gpu.rs` | Turns a scene into instances: one rounded rectangle per tile, header, and port, and one entry per cable. Uploaded only when the generation changes. |
-| Shaders | `canvas.wgsl` | Rounded rectangles shade only their own pixels. Cables are curves built in the vertex shader. Pan and zoom change one small uniform buffer. |
-| Widget | `widget.rs` | Mouse and keyboard handling, selection and hover overlays, and text through Iced (skipped when too small to read). |
+| Shaders | `canvas.wgsl` | Rounded rectangles shade only their own pixels. Cables are curves built in the vertex shader. Pan and zoom change one small uniform buffer, which also holds how much to dim cables that are not in focus. |
+| Widget | `widget.rs` | Mouse and keyboard handling, and the per-frame overlay: selection and hover outlines, and the cables of selected and hovered modules drawn in front. Text goes through Iced and is skipped when too small to read. |
 
 Without the app's Measure toggle, the window redraws only when something changes.
 
