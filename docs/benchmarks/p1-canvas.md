@@ -40,7 +40,7 @@ Record from the stats bar after about 10 seconds:
 
 | Run | fps | frame avg | worst | Notes |
 |---|---|---|---|---|
-| `--generate 300 --bench`, whole patch in view (titles hidden) | | | | |
+| `--generate 300 --bench`, whole patch in view (titles hidden) | 120 (display maximum) | about 8.3 ms | | Reference laptop, 2026-10-14 |
 | Same, zoomed to about 100 tiles visible (titles shown) | | | | |
 | Same, zoomed in to about 20 tiles (port labels shown) | | | | |
 | `examples/patches/fm-feedback.ron`, **Measure** on, camera still | | | | |
@@ -68,4 +68,6 @@ On software rendering every pixel costs CPU time, so this is a rough sign that t
 
 **First result (2026-10-14):** a steady 120 fps with `examples/patches/fm-feedback.ron` (8 modules) while moving the canvas by hand. 120 fps is the display's refresh rate (ProMotion), so each frame finishes early and waits for the screen. The P0 spike reached 40 fps with the same 8-module patch.
 
-Still to record: the 300-module runs, the zoomed-in runs, and idle CPU and GPU (table above).
+**300 modules (2026-10-14):** an average of 120 fps with `--generate 300 --bench` and the camera moving, the display's maximum. The P0 spike reached 22 to 24 fps in the same test.
+
+Still to record: the zoomed-in runs (titles and port labels drawn) and idle CPU and GPU (table above).

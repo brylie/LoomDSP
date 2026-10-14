@@ -49,7 +49,7 @@ Linux needs the ALSA development package (`libasound2-dev` on Debian and Ubuntu)
 - A lock-free boundary between the control thread and the audio thread. The audio path never allocates, locks, or waits, and a test enforces this ([ADR-0001](docs/adr/0001-lock-free-control-audio-boundary.md)).
 - Deterministic output. The same patch and input give bit-identical audio at any host buffer size.
 - Patch files in RON ([ADR-0008](docs/adr/0008-patch-format-ron.md)), with polymorphic signals ([ADR-0007](docs/adr/0007-polymorphic-signal-model.md)).
-- A desktop app with our own GPU-drawn patch canvas: patch, move, and delete modules while audio plays, edit parameters in an inspector, and play from any connected MIDI keyboard. It runs at the full 120 fps of an M1 laptop's Retina display while you move around a patch ([ADR-0010](docs/adr/0010-own-patch-canvas.md), [benchmark](docs/benchmarks/p1-canvas.md)).
+- A desktop app with our own GPU-drawn patch canvas: patch, move, and delete modules while audio plays, edit parameters in an inspector, and play from any connected MIDI keyboard. It runs at the full 120 fps of an M1 laptop's Retina display, even with 300 modules and the view moving ([ADR-0010](docs/adr/0010-own-patch-canvas.md), [benchmark](docs/benchmarks/p1-canvas.md)).
 - 12 modules: phase generator, sine, saw (band-limited), noise, state variable filter, ADSR, add, multiply, constant, 1-sample delay, MIDI note input, audio output.
 
 ## Repository layout
