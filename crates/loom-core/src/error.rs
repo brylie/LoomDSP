@@ -1,6 +1,5 @@
 use crate::graph::ModuleId;
 use crate::telemetry::ProbeId;
-use crate::transport::TimeSignature;
 
 /// Errors from the control side of the engine.
 #[derive(Debug, thiserror::Error)]
@@ -57,9 +56,6 @@ pub enum LoomError {
     /// No probe with this ID.
     #[error("no {0}")]
     UnknownProbe(ProbeId),
-    /// A time signature is out of range. The transport did not change.
-    #[error("invalid time signature {0} (the top number must be 1 to 32, the bottom 1, 2, 4, 8, or 16)")]
-    InvalidTimeSignature(TimeSignature),
     /// The command queue to the audio thread is full. Try again after the
     /// engine has processed a block.
     #[error("the engine command queue is full; is the audio engine running?")]

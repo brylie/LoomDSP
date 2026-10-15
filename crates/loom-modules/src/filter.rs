@@ -2,8 +2,7 @@
 
 use loom_core::signal::pitch;
 use loom_core::{
-    Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamSpec, PortIo, PortSpec, ProcessContext, SignalType,
-    Widget,
+    Module, ModuleConfig, ModuleDescriptor, ModuleRole, ParamSpec, PortIo, PortSpec, ProcessContext, SignalType,
 };
 use loom_rt::Smoothed;
 use std::f32::consts::PI;
@@ -26,12 +25,10 @@ pub static SVF: ModuleDescriptor = ModuleDescriptor {
         PortSpec::new("highpass", SignalType::Audio),
     ],
     params: &[
-        ParamSpec::new("cutoff", 20.0, 20_000.0, 1_000.0, "Hz").logarithmic(),
+        ParamSpec::new("cutoff", 20.0, 20_000.0, 1_000.0, "Hz"),
         ParamSpec::new("resonance", 0.0, 1.0, 0.2, ""),
     ],
     role: ModuleRole::Dsp(|config| Box::new(Svf::new(config))),
-    panel: Panel::new(6, 3, &[Widget::knob(0, 0, "cutoff"), Widget::knob(3, 0, "resonance")]),
-    displays: &[],
 };
 
 struct Svf {

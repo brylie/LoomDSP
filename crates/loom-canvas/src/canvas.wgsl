@@ -201,64 +201,6 @@ fn fs_cable(v: CableOut) -> @location(0) vec4<f32> {
 }
 
 // ---------------------------------------------------------------------------
-// Rings for knobs: part of a circle, from a start angle through a sweep,
-// clockwise from the top. The quad covers only the ring.
-
-struct ArcIn {
-    // centre x, centre y, radius, thickness (world).
-    @location(0) circle: vec4<f32>,
-    // start angle, sweep (radians), unused, unused.
-    @location(1) angles: vec4<f32>,
-    @location(2) colour: vec4<f32>,
-    @location(3) unused: vec4<f32>,
-};
-
-struct ArcOut {
-    @builtin(position) position: vec4<f32>,
-    // Position relative to the centre, in physical pixels.
-    @location(0) local: vec2<f32>,
-    // Radius and half thickness in physical pixels.
-    @location(1) ring: vec2<f32>,
-    @location(2) angles: vec2<f32>,
-    @location(3) colour: vec4<f32>,
-};
-
-@vertex
-fn vs_arc(@builtin(vertex_index) vi: u32, arc: ArcIn) -> ArcOut {
-    let corner = vec2<f32>(f32(vi & 1u), f32(vi >> 1u)) * 2.0 - 1.0;
-    let px = px_per_world();
-    let half_thickness = max(arc.circle.w * 0.5 * px, 0.5);
-    let reach = arc.circle.z * px + half_thickness + 1.0;
-    let local = corner * reach;
-
-    var result: ArcOut;
-    result.position = to_clip(arc.circle.xy + local / px);
-    result.local = local;
-    result.ring = vec2<f32>(arc.circle.z * px, half_thickness);
-    result.angles = arc.angles.xy;
-    result.colour = arc.colour;
-    return result;
-}
-
-const TAU: f32 = 6.2831853;
-
-@fragment
-fn fs_arc(v: ArcOut) -> @location(0) vec4<f32> {
-    let d = length(v.local);
-    var coverage = clamp(v.ring.y + 0.5 - abs(d - v.ring.x), 0.0, 1.0);
-    // Angle clockwise from the top, with y pointing down on screen.
-    let angle = atan2(v.local.x, -v.local.y);
-    let relative = angle - v.angles.x - floor((angle - v.angles.x) / TAU) * TAU;
-    if (relative > v.angles.y) {
-        coverage = 0.0;
-    }
-    if (coverage <= 0.0) {
-        discard;
-    }
-    return premultiply(v.colour, coverage);
-}
-
-// ---------------------------------------------------------------------------
 // Background dot grid. One full-size quad with very cheap shading.
 
 struct GridOut {

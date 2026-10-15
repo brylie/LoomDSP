@@ -12,11 +12,8 @@
 //! 4. Inside a loop, user-placed unit delays break the cycle. If cycles
 //!    remain, the compiler inserts its own one-sample delays and reports
 //!    where, so the UI can show them.
-//! 5. Bind unconnected inputs to their default (ADR-0015): the zero buffer,
-//!    a constant buffer per distinct value, or one shared buffer per
-//!    transport signal that the engine fills at the start of each block.
 
-use crate::descriptor::{ModuleRole, PortDefault};
+use crate::descriptor::ModuleRole;
 use crate::graph::{Graph, InputRef, ModuleId, OutputRef};
 use crate::telemetry::{ProbeId, ProbeKind};
 use std::collections::{BTreeMap, BTreeSet};
@@ -77,39 +74,6 @@ pub(crate) struct ProbeOp {
     pub kind: ProbeKind,
 }
 
-/// Buffers for transport signals that at least one unconnected input reads.
-/// `None` when nothing reads that signal, so it costs nothing.
-#[derive(Default)]
-pub(crate) struct TransportBuffers {
-    pub bar_phase: Option<*mut f32>,
-    pub beat_phase: Option<*mut f32>,
-    pub playing: Option<*mut f32>,
-}
-
-/// Identifies one shared default buffer. Value defaults are keyed by their
-/// bits, so each distinct value gets one buffer.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum DefaultKey {
-    Value(u32),
-    BarPhase,
-    BeatPhase,
-    Playing,
-}
-
-impl DefaultKey {
-    /// `None` for defaults that read the shared zero buffer. The pattern
-    /// compares with `==`, so -0.0 reads it too.
-    fn of(default: PortDefault) -> Option<Self> {
-        match default {
-            PortDefault::Value(0.0) => None,
-            PortDefault::Value(value) => Some(Self::Value(value.to_bits())),
-            PortDefault::BarPhase => Some(Self::BarPhase),
-            PortDefault::BeatPhase => Some(Self::BeatPhase),
-            PortDefault::Playing => Some(Self::Playing),
-        }
-    }
-}
-
 pub(crate) enum Step {
     /// Run a module over the whole block.
     Module(u32),
@@ -137,7 +101,6 @@ pub(crate) struct Schedule {
     pub steps: Vec<Step>,
     pub outputs: Vec<OutputOp>,
     pub probes: Vec<ProbeOp>,
-    pub transport: TransportBuffers,
 }
 
 // SAFETY: the raw pointers only point into buffers owned by this schedule.
@@ -159,7 +122,6 @@ impl Schedule {
             steps: Vec::new(),
             outputs: Vec::new(),
             probes: Vec::new(),
-            transport: TransportBuffers::default(),
         }
     }
 
@@ -369,47 +331,13 @@ pub(crate) fn compile(
         });
     }
 
-    // 5. One buffer per distinct default that an unconnected input reads.
-    // Only DSP modules read their inputs through pointers.
-    let default_of = |input: InputRef| nodes[index_of[&input.module]].descriptor.inputs[input.port].default;
-    let mut default_buf: BTreeMap<DefaultKey, usize> = BTreeMap::new();
-    for (v, node) in nodes.iter().enumerate() {
-        if !matches!(node.descriptor.role, ModuleRole::Dsp(_)) {
-            continue;
-        }
-        for port in 0..node.descriptor.inputs.len() {
-            let input = InputRef { module: ids[v], port };
-            if graph.cables.contains_key(&input) {
-                continue;
-            }
-            if let Some(key) = DefaultKey::of(default_of(input)) {
-                default_buf.entry(key).or_insert_with(|| {
-                    buffer_count += 1;
-                    buffer_count - 1
-                });
-            }
-        }
-    }
-
     // Allocate buffers and resolve pointers.
     let mut buffers: Vec<Box<[f32]>> = (0..buffer_count)
         .map(|_| vec![0.0; max_block].into_boxed_slice())
         .collect();
-    for (key, &buf) in &default_buf {
-        if let DefaultKey::Value(bits) = *key {
-            // Filled once here. Inputs are read-only, so nothing changes it.
-            buffers[buf].fill(f32::from_bits(bits));
-        }
-    }
     let mut zero: Box<[f32]> = vec![0.0; max_block].into_boxed_slice();
     let zero_ptr: *const f32 = zero.as_mut_ptr();
     let buf_ptrs: Vec<*mut f32> = buffers.iter_mut().map(|b| b.as_mut_ptr()).collect();
-    let transport_buffer = |key: DefaultKey| default_buf.get(&key).map(|&buf| buf_ptrs[buf]);
-    let transport = TransportBuffers {
-        bar_phase: transport_buffer(DefaultKey::BarPhase),
-        beat_phase: transport_buffer(DefaultKey::BeatPhase),
-        playing: transport_buffer(DefaultKey::Playing),
-    };
 
     let resolve_input = |input: InputRef| -> (*const f32, bool) {
         let connected = graph.cables.contains_key(&input);
@@ -417,8 +345,6 @@ pub(crate) fn compile(
             (buf_ptrs[buf], connected)
         } else if let Some(from) = graph.cables.get(&input) {
             (buf_ptrs[source_buffer(*from)], connected)
-        } else if let Some(key) = DefaultKey::of(default_of(input)) {
-            (buf_ptrs[default_buf[&key]], false)
         } else {
             (zero_ptr, false)
         }
@@ -545,7 +471,6 @@ pub(crate) fn compile(
         steps: final_steps,
         outputs,
         probes,
-        transport,
     };
     (schedule, report)
 }
@@ -626,92 +551,5 @@ mod tests {
         let mut sccs = tarjan(&succ);
         sccs.reverse();
         assert_eq!(sccs, vec![vec![0], vec![1, 2], vec![3]]);
-    }
-
-    struct Silent;
-
-    impl crate::Module for Silent {
-        fn process(&mut self, _: &crate::ProcessContext<'_>, _: &mut crate::PortIo<'_>) {}
-    }
-
-    static FOLLOWER: crate::ModuleDescriptor = crate::ModuleDescriptor {
-        id: "test.follower",
-        version: 1,
-        name: "Follower",
-        category: "Test",
-        description: "Inputs with every kind of default.",
-        inputs: &[
-            crate::PortSpec::new("bar", crate::SignalType::Phase).with_default(PortDefault::BarPhase),
-            crate::PortSpec::new("bar2", crate::SignalType::Phase).with_default(PortDefault::BarPhase),
-            crate::PortSpec::new("half", crate::SignalType::Modulation).with_default(PortDefault::Value(0.5)),
-            crate::PortSpec::new("zero", crate::SignalType::Modulation),
-        ],
-        outputs: &[crate::PortSpec::new("out", crate::SignalType::Modulation)],
-        params: &[],
-        role: ModuleRole::Dsp(|_| Box::new(Silent)),
-        panel: crate::Panel::EMPTY,
-        displays: &[],
-    };
-
-    fn followers(count: u32) -> Graph {
-        let mut graph = Graph::default();
-        for i in 0..count {
-            graph.nodes.insert(
-                ModuleId(i + 1),
-                crate::Node {
-                    descriptor: &FOLLOWER,
-                    params: Vec::new(),
-                    slot: Some(i as usize),
-                },
-            );
-        }
-        graph
-    }
-
-    fn input_ptr(schedule: &Schedule, op: usize, port: usize) -> *const f32 {
-        schedule.input_ptrs[schedule.ops[op].inputs.0 as usize + port]
-    }
-
-    #[test]
-    fn inputs_that_follow_the_same_default_share_one_buffer() {
-        let schedule = compile(&followers(100), &BTreeMap::new(), 64).0;
-        // 100 outputs, one bar phase buffer, one buffer holding 0.5.
-        assert_eq!(schedule._buffers.len(), 102);
-        let bar = schedule.transport.bar_phase.expect("bar phase is used") as *const f32;
-        assert!(schedule.transport.beat_phase.is_none());
-        assert!(schedule.transport.playing.is_none());
-        let half = input_ptr(&schedule, 0, 2);
-        // SAFETY: `half` points at a schedule buffer of 64 floats.
-        assert_eq!(unsafe { std::slice::from_raw_parts(half, 64) }, &[0.5; 64]);
-        for op in 0..100 {
-            assert_eq!(input_ptr(&schedule, op, 0), bar);
-            assert_eq!(input_ptr(&schedule, op, 1), bar);
-            assert_eq!(input_ptr(&schedule, op, 2), half);
-            assert_eq!(input_ptr(&schedule, op, 3), schedule._zero.as_ptr());
-            assert_eq!(schedule.ops[op].connected, 0);
-        }
-    }
-
-    #[test]
-    fn a_cable_replaces_the_default() {
-        let mut graph = followers(2);
-        let from = OutputRef {
-            module: ModuleId(2),
-            port: 0,
-        };
-        let to = InputRef {
-            module: ModuleId(1),
-            port: 0,
-        };
-        graph.cables.insert(to, from);
-        let schedule = compile(&graph, &BTreeMap::new(), 64).0;
-        // Module 2 runs first; module 1 reads module 2's output.
-        let source = schedule.output_ptrs[schedule.ops[0].outputs.0 as usize] as *const f32;
-        assert_eq!(input_ptr(&schedule, 1, 0), source);
-        assert_eq!(schedule.ops[1].connected, 1);
-        // Its second bar input and module 2's still follow the transport.
-        let bar = schedule.transport.bar_phase.expect("still used") as *const f32;
-        assert_eq!(input_ptr(&schedule, 1, 1), bar);
-        assert_eq!(input_ptr(&schedule, 0, 0), bar);
     }
 }

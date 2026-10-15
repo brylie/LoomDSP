@@ -2,8 +2,7 @@
 
 use loom_core::signal::pitch;
 use loom_core::{
-    MidiMessage, Module, ModuleDescriptor, ModuleRole, Panel, ParamSpec, PortIo, PortSpec, ProcessContext, SignalType,
-    Widget,
+    MidiMessage, Module, ModuleDescriptor, ModuleRole, ParamSpec, PortIo, PortSpec, ProcessContext, SignalType,
 };
 
 /// `loom.midi.note`: monophonic MIDI note input with last-note priority.
@@ -25,8 +24,6 @@ pub static NOTE_IN: ModuleDescriptor = ModuleDescriptor {
         ParamSpec::new("bend-range", 0.0, 48.0, 2.0, "st").integer(),
     ],
     role: ModuleRole::Dsp(|_| Box::new(NoteIn::default())),
-    panel: Panel::new(3, 2, &[Widget::light(0, 0, "gate")]),
-    displays: &["gate"],
 };
 
 const MAX_HELD: usize = 16;
@@ -118,9 +115,5 @@ impl Module for NoteIn {
     fn reset(&mut self) {
         self.held_len = 0;
         self.bend = 0.0;
-    }
-
-    fn displays(&self, values: &mut [f32]) {
-        values[0] = if self.held_len > 0 { 1.0 } else { 0.0 };
     }
 }

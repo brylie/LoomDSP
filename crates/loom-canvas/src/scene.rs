@@ -10,12 +10,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Size of the snap grid, in world units.
 pub const GRID: f32 = 12.0;
-/// Width of a module tile with a small or empty panel: 11 grid units.
+/// Width of a module tile.
 pub const TILE_WIDTH: f32 = 132.0;
-/// Width of each port label column beside a panel, in grid units.
-pub const LABEL_COLUMNS: u8 = 4;
-/// Space between the header and the panel.
-const PANEL_TOP: f32 = 4.0;
 /// Height of the title row at the top of a tile.
 pub const HEADER: f32 = 22.0;
 /// Height of one port row.
@@ -48,83 +44,6 @@ pub struct PortView {
     pub shape: PortShape,
 }
 
-/// What a widget on a panel is. Mirrors `loom_core::WidgetKind`, so the
-/// canvas does not depend on the engine.
-#[derive(Debug, Clone, PartialEq)]
-pub enum WidgetViewKind {
-    /// A dial. `steps` is the number of steps across its range for a
-    /// whole-number parameter, or 0 for a continuous one.
-    Knob {
-        /// Steps across the range, or 0.
-        steps: u32,
-    },
-    /// Off or on.
-    Toggle,
-    /// One button per option, top option first.
-    Radio {
-        /// Option labels.
-        options: Vec<String>,
-    },
-    /// A brightness.
-    Light,
-}
-
-/// One widget on a panel, placed in grid units from the panel's corner.
-#[derive(Debug, Clone, PartialEq)]
-pub struct WidgetView {
-    /// What it is.
-    pub kind: WidgetViewKind,
-    /// Column of its top-left corner.
-    pub x: u8,
-    /// Row of its top-left corner.
-    pub y: u8,
-    /// Label drawn with it.
-    pub label: String,
-}
-
-impl WidgetView {
-    /// Width and height in grid units. Must match `Widget::size` in
-    /// `loom-core`.
-    pub fn size(&self) -> (u8, u8) {
-        match &self.kind {
-            WidgetViewKind::Knob { .. } => (3, 3),
-            WidgetViewKind::Toggle | WidgetViewKind::Light => (3, 2),
-            WidgetViewKind::Radio { options } => (3, options.len() as u8 + 1),
-        }
-    }
-
-    /// True for widgets the user operates (all but lights).
-    pub fn is_control(&self) -> bool {
-        !matches!(self.kind, WidgetViewKind::Light)
-    }
-}
-
-/// The controls and displays between a tile's port columns (ADR-0013).
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct PanelView {
-    /// Width in grid units.
-    pub width: u8,
-    /// Height in grid units.
-    pub height: u8,
-    /// Widgets, in keyboard focus order.
-    pub widgets: Vec<WidgetView>,
-}
-
-/// Size of a tile in world units, for layout code that places tiles before
-/// building a scene.
-pub fn tile_size(inputs: usize, outputs: usize, panel_width: u8, panel_height: u8) -> iced::Size {
-    let units = (2 * LABEL_COLUMNS + panel_width).max((TILE_WIDTH / GRID) as u8);
-    let rows = inputs.max(outputs).max(1) as f32;
-    let ports = rows * ROW + PADDING;
-    let panel = if panel_height > 0 {
-        PANEL_TOP + f32::from(panel_height) * GRID + PADDING
-    } else {
-        0.0
-    };
-    let height = ((HEADER + ports.max(panel)) / GRID).ceil() * GRID;
-    iced::Size::new(f32::from(units) * GRID, height)
-}
-
 /// One module tile.
 #[derive(Debug, Clone)]
 pub struct ModuleView {
@@ -140,70 +59,19 @@ pub struct ModuleView {
     pub inputs: Vec<PortView>,
     /// Outputs, drawn on the right edge from the top.
     pub outputs: Vec<PortView>,
-    /// Controls and displays between the port columns.
-    pub panel: PanelView,
 }
 
 impl ModuleView {
-    fn size(&self) -> iced::Size {
-        tile_size(
-            self.inputs.len(),
-            self.outputs.len(),
-            self.panel.width,
-            self.panel.height,
-        )
-    }
-
-    /// Tile width: the panel between two port label columns, and at least
-    /// [`TILE_WIDTH`].
-    pub fn width(&self) -> f32 {
-        self.size().width
-    }
-
-    /// Tile height: the header plus the taller of the port rows and the
-    /// panel, rounded up to the grid so tiles stack neatly.
+    /// Tile height for this many port rows, rounded up to the grid so tiles
+    /// stack neatly.
     pub fn height(&self) -> f32 {
-        self.size().height
+        let rows = self.inputs.len().max(self.outputs.len()).max(1) as f32;
+        ((HEADER + rows * ROW + PADDING) / GRID).ceil() * GRID
     }
 
     /// The tile rectangle in world coordinates.
     pub fn bounds(&self) -> Rectangle {
-        Rectangle::new(self.position, self.size())
-    }
-
-    /// Top-left corner of the panel. A narrow panel is centred between the
-    /// port columns.
-    pub fn panel_origin(&self) -> Point {
-        let room = self.width() - f32::from(2 * LABEL_COLUMNS) * GRID;
-        let spare = (room - f32::from(self.panel.width) * GRID).max(0.0);
-        Point::new(
-            self.position.x + f32::from(LABEL_COLUMNS) * GRID + spare * 0.5,
-            self.position.y + HEADER + PANEL_TOP,
-        )
-    }
-
-    /// A widget's rectangle in world coordinates.
-    pub fn widget_bounds(&self, index: usize) -> Option<Rectangle> {
-        let widget = self.panel.widgets.get(index)?;
-        let origin = self.panel_origin();
-        let (w, h) = widget.size();
-        Some(Rectangle::new(
-            Point::new(
-                origin.x + f32::from(widget.x) * GRID,
-                origin.y + f32::from(widget.y) * GRID,
-            ),
-            iced::Size::new(f32::from(w) * GRID, f32::from(h) * GRID),
-        ))
-    }
-
-    /// Width available for a port label, in world units: half the tile
-    /// without a panel, the label column with one.
-    pub fn label_width(&self) -> f32 {
-        if self.panel.widgets.is_empty() {
-            self.width() * 0.5 - 10.0
-        } else {
-            f32::from(LABEL_COLUMNS) * GRID - 11.0
-        }
+        Rectangle::new(self.position, iced::Size::new(TILE_WIDTH, self.height()))
     }
 
     /// Centre of an input port.
@@ -214,7 +82,7 @@ impl ModuleView {
     /// Centre of an output port.
     pub fn output_position(&self, index: usize) -> Point {
         Point::new(
-            self.position.x + self.width(),
+            self.position.x + TILE_WIDTH,
             self.position.y + HEADER + ROW * (index as f32 + 0.5),
         )
     }
@@ -395,18 +263,7 @@ impl Scene {
         }
         for module in self.modules.iter().rev() {
             if module.bounds().contains(point) {
-                // Controls take the press; lights and empty panel space
-                // belong to the tile, so dragging them moves it.
-                let control = (0..module.panel.widgets.len()).find(|&i| {
-                    module.panel.widgets[i].is_control() && module.widget_bounds(i).is_some_and(|b| b.contains(point))
-                });
-                return match control {
-                    Some(widget) => Hit::Widget {
-                        module: module.id,
-                        widget,
-                    },
-                    None => Hit::Module(module.id),
-                };
+                return Hit::Module(module.id);
             }
         }
         // Cables last, with a tighter tolerance than ports: they are thin,
@@ -473,15 +330,8 @@ impl Scene {
 pub enum Hit {
     /// A port.
     Port(PortRef),
-    /// A module tile (not on a port or control).
+    /// A module tile (not on a port).
     Module(u32),
-    /// A control on a module's panel.
-    Widget {
-        /// Module ID.
-        module: u32,
-        /// Index in the module's panel widgets.
-        widget: usize,
-    },
     /// A cable, by index in [`Scene::cables`].
     Cable(usize),
     /// Empty canvas.
@@ -534,18 +384,6 @@ fn distance_squared_to_segment(p: Point, a: Point, b: Point) -> f32 {
     d.x * d.x + d.y * d.y
 }
 
-/// A port label cut to fit `width` world units at `size`, with "…" when it
-/// is too long. Uses an average glyph width, so it is approximate.
-pub fn fit_label(label: &str, width: f32, size: f32) -> std::borrow::Cow<'_, str> {
-    let fits = (width / (size * 0.56)).floor().max(1.0) as usize;
-    if label.chars().count() <= fits {
-        std::borrow::Cow::Borrowed(label)
-    } else {
-        let kept: String = label.chars().take(fits.saturating_sub(1)).collect();
-        std::borrow::Cow::Owned(format!("{kept}…"))
-    }
-}
-
 /// Rounds a world point to the snap grid.
 pub fn snap(point: Point) -> Point {
     Point::new((point.x / GRID).round() * GRID, (point.y / GRID).round() * GRID)
@@ -571,85 +409,7 @@ mod tests {
             position: Point::new(x, y),
             inputs: vec![port("a"), port("b")],
             outputs: vec![port("out")],
-            panel: PanelView::default(),
         }
-    }
-
-    fn knob(x: u8, y: u8) -> WidgetView {
-        WidgetView {
-            kind: WidgetViewKind::Knob { steps: 0 },
-            x,
-            y,
-            label: "k".into(),
-        }
-    }
-
-    #[test]
-    fn panels_widen_and_heighten_tiles() {
-        let mut m = module(1, 0.0, 0.0);
-        assert_eq!(m.width(), TILE_WIDTH);
-        m.panel = PanelView {
-            width: 6,
-            height: 8,
-            widgets: vec![knob(0, 0), knob(3, 0)],
-        };
-        // 4 + 6 + 4 grid units.
-        assert_eq!(m.width(), 14.0 * GRID);
-        assert!(m.height() >= HEADER + 8.0 * GRID);
-        assert_eq!(m.height() % GRID, 0.0);
-        // Outputs move to the new right edge.
-        assert_eq!(m.output_position(0).x, 14.0 * GRID);
-        // The panel starts after the left label column.
-        let first = m.widget_bounds(0).unwrap();
-        assert_eq!(first.x, 4.0 * GRID);
-        assert_eq!(first.width, 3.0 * GRID);
-        assert_eq!(m.widget_bounds(1).unwrap().x, 7.0 * GRID);
-    }
-
-    #[test]
-    fn narrow_panels_are_centred() {
-        let mut m = module(1, 0.0, 0.0);
-        m.panel = PanelView {
-            width: 1,
-            height: 1,
-            widgets: Vec::new(),
-        };
-        // 11 units wide, 8 for labels, 1 for the panel, 1 spare on each side.
-        assert_eq!(m.panel_origin().x, 5.0 * GRID);
-    }
-
-    #[test]
-    fn controls_take_the_press_and_lights_do_not() {
-        let mut m = module(1, 0.0, 0.0);
-        m.panel = PanelView {
-            width: 6,
-            height: 3,
-            widgets: vec![
-                knob(0, 0),
-                WidgetView {
-                    kind: WidgetViewKind::Light,
-                    x: 3,
-                    y: 0,
-                    label: "l".into(),
-                },
-            ],
-        };
-        let knob_centre = m.widget_bounds(0).unwrap().center();
-        let light_centre = m.widget_bounds(1).unwrap().center();
-        let scene = Scene::new(vec![m], Vec::new());
-        assert_eq!(
-            scene.hit(knob_centre, PORT_HIT_RADIUS),
-            Hit::Widget { module: 1, widget: 0 }
-        );
-        assert_eq!(scene.hit(light_centre, PORT_HIT_RADIUS), Hit::Module(1));
-    }
-
-    #[test]
-    fn long_labels_are_cut() {
-        assert_eq!(fit_label("in", 37.0, 9.0), "in");
-        let cut = fit_label("a-very-long-label", 37.0, 9.0);
-        assert!(cut.ends_with('…'), "{cut}");
-        assert!(cut.chars().count() <= 8);
     }
 
     #[test]

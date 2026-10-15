@@ -206,6 +206,23 @@ fn relative(cursor: mouse::Cursor, bounds: Rectangle) -> Option<Point> {
     cursor.position().map(|p| Point::new(p.x - bounds.x, p.y - bounds.y))
 }
 
+fn nudge_delta(key: &keyboard::Key, shift: bool) -> Option<Vector> {
+    use keyboard::key::Named;
+    let step = GRID * if shift { 4.0 } else { 1.0 };
+    match key.as_ref() {
+        keyboard::Key::Named(Named::ArrowUp) => Some(Vector::new(0.0, -step)),
+        keyboard::Key::Named(Named::ArrowDown) => Some(Vector::new(0.0, step)),
+        keyboard::Key::Named(Named::ArrowLeft) => Some(Vector::new(-step, 0.0)),
+        keyboard::Key::Named(Named::ArrowRight) => Some(Vector::new(step, 0.0)),
+        _ => None,
+    }
+}
+
+fn reset_zoom(camera: &mut Camera, bounds: Rectangle) {
+    let centre = Point::new(bounds.width * 0.5, bounds.height * 0.5);
+    camera.zoom_at(centre, 1.0 / camera.zoom);
+}
+
 impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer> for PatchCanvas<'_, Message>
 where
     Renderer: iced_wgpu::primitive::Renderer + text::Renderer<Font = Font>,
@@ -270,11 +287,41 @@ where
             Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
                 state.modifiers = *modifiers;
             }
+            Event::Keyboard(keyboard::Event::KeyPressed { key, .. })
+                if matches!(key.as_ref(), keyboard::Key::Named(keyboard::key::Named::Escape))
+                    && matches!(state.interaction, Interaction::Wiring { .. }) =>
+            {
+                state.interaction = Interaction::Idle;
+                shell.capture_event();
+                shell.request_redraw();
+            }
             Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. })
                 if self.focus_keys(state, key, *modifiers, over, shell) => {}
             Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) if over => {
                 use keyboard::key::Named;
                 match key.as_ref() {
+                    keyboard::Key::Named(Named::Escape) => {
+                        if !self.selection.is_empty() {
+                            self.emit(shell, CanvasEvent::Select(Vec::new()));
+                            shell.capture_event();
+                        }
+                    }
+                    keyboard::Key::Named(Named::ArrowUp | Named::ArrowDown | Named::ArrowLeft | Named::ArrowRight)
+                        if !self.selection.is_empty() =>
+                    {
+                        if let Some(delta) = nudge_delta(key, modifiers.shift()) {
+                            self.emit(shell, CanvasEvent::Move {
+                                ids: self.selection.iter().copied().collect(),
+                                delta,
+                            });
+                            shell.capture_event();
+                        }
+                    }
+                    keyboard::Key::Character("0") if modifiers.command() => {
+                        reset_zoom(&mut state.camera, bounds);
+                        shell.request_redraw();
+                        shell.capture_event();
+                    }
                     keyboard::Key::Named(Named::Delete | Named::Backspace) if !self.selection.is_empty() => {
                         self.emit(shell, CanvasEvent::Delete(self.selection.iter().copied().collect()));
                         shell.capture_event();
@@ -711,7 +758,8 @@ impl<Message> PatchCanvas<'_, Message> {
                         index: c.from.1,
                     });
                 if let Some(source) = source {
-                    self.emit(shell, CanvasEvent::Disconnect(port));
+                    // Keep the existing cable until a valid drop emits Connect.
+                    // Canceling or dropping elsewhere must leave the patch unchanged.
                     state.interaction = Interaction::Wiring { from: source };
                 } else {
                     state.interaction = Interaction::Wiring { from: port };
@@ -1279,6 +1327,31 @@ mod tests {
         let middle = BTreeSet::from([2]);
         let canvas = PatchCanvas::new(&scene, &middle, |e| e);
         assert_eq!(canvas.overlay(&state).cables.len(), 2);
+    }
+
+    #[test]
+    fn arrow_nudges_use_one_or_four_grid_steps() {
+        let cases = [
+            (keyboard::Key::Named(keyboard::key::Named::ArrowUp), Vector::new(0.0, -GRID)),
+            (keyboard::Key::Named(keyboard::key::Named::ArrowDown), Vector::new(0.0, GRID)),
+            (keyboard::Key::Named(keyboard::key::Named::ArrowLeft), Vector::new(-GRID, 0.0)),
+            (keyboard::Key::Named(keyboard::key::Named::ArrowRight), Vector::new(GRID, 0.0)),
+        ];
+        for (key, expected) in cases {
+            assert_eq!(nudge_delta(&key, false), Some(expected));
+            assert_eq!(nudge_delta(&key, true), Some(expected * 4.0));
+        }
+        assert_eq!(nudge_delta(&keyboard::Key::Character("x".into()), false), None);
+    }
+
+    #[test]
+    fn zoom_reset_sets_one_to_one_and_keeps_viewport_centre() {
+        let bounds = Rectangle::new(Point::ORIGIN, Size::new(800.0, 600.0));
+        let mut camera = Camera { origin: Point::new(100.0, 200.0), zoom: 2.0 };
+        let centre_before = camera.to_world(Point::new(400.0, 300.0));
+        reset_zoom(&mut camera, bounds);
+        assert_eq!(camera.zoom, 1.0);
+        assert_eq!(camera.to_world(Point::new(400.0, 300.0)), centre_before);
     }
 
     #[test]

@@ -6,12 +6,9 @@
 //! through its own queues and is dropped when they are full (NFR-RT-07).
 
 use crate::compile::{ModuleOp, Schedule, Step};
-use crate::descriptor::MAX_DISPLAYS;
-use crate::display::DisplayTable;
 use crate::midi::MidiEvent;
 use crate::module::{Module, PortIo, ProcessContext};
 use crate::telemetry::{MeterReading, SCOPE_CHUNK, ScopeChunk, TelemetrySender, measure};
-use crate::transport::{TimeSignature, Transport};
 use rtrb::{Consumer, Producer};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -81,32 +78,11 @@ pub struct EngineStats {
 }
 
 pub(crate) enum Command {
-    InsertModule {
-        slot: usize,
-        module: Box<dyn Module>,
-        /// The module's ID, which owns its display values.
-        id: u32,
-        /// How many display values it publishes.
-        displays: u8,
-    },
-    RemoveModule {
-        slot: usize,
-    },
+    InsertModule { slot: usize, module: Box<dyn Module> },
+    RemoveModule { slot: usize },
     SwapSchedule(Box<Schedule>),
-    SetParam {
-        slot: usize,
-        index: usize,
-        value: f32,
-    },
-    ResetModule {
-        slot: usize,
-    },
-    /// Already clamped by the controller.
-    SetTempo(f64),
-    /// Already checked by the controller.
-    SetTimeSignature(TimeSignature),
-    SetRunning(bool),
-    ResetTransport,
+    SetParam { slot: usize, index: usize, value: f32 },
+    ResetModule { slot: usize },
 }
 
 pub(crate) enum Garbage {
@@ -118,20 +94,13 @@ pub(crate) enum Garbage {
 /// audio callback.
 pub struct Engine {
     slots: Box<[Option<Box<dyn Module>>]>,
-    /// Display values per slot (0 for most modules), and where they go.
-    display_counts: Box<[u8]>,
-    displays: Arc<DisplayTable>,
     schedule: Box<Schedule>,
     commands: Consumer<Command>,
     garbage: Producer<Garbage>,
     midi_in: Consumer<MidiEvent>,
     midi: Vec<MidiEvent>,
     telemetry: TelemetrySender,
-    /// The patch transport (ADR-0015). Not part of the schedule, so editing
-    /// the patch never moves it.
-    transport: Transport,
-    /// Frames rendered since the engine started. Stamps telemetry and
-    /// anchors the transport.
+    /// Frames rendered since the engine started. Stamps telemetry.
     frame: u64,
     config: EngineConfig,
     stats: Arc<EngineStats>,
@@ -144,20 +113,16 @@ impl Engine {
         garbage: Producer<Garbage>,
         midi_in: Consumer<MidiEvent>,
         telemetry: TelemetrySender,
-        displays: Arc<DisplayTable>,
         stats: Arc<EngineStats>,
     ) -> Self {
         Self {
             slots: (0..config.max_modules).map(|_| None).collect(),
-            display_counts: vec![0; config.max_modules].into_boxed_slice(),
-            displays,
             schedule: Box::new(Schedule::empty()),
             commands,
             garbage,
             midi_in,
             midi: Vec::with_capacity(config.midi_capacity),
             telemetry,
-            transport: Transport::new(config.sample_rate),
             frame: 0,
             config,
             stats,
@@ -191,49 +156,24 @@ impl Engine {
                 &mut right[position..position + n],
             );
             self.send_telemetry(n);
-            self.publish_displays();
             self.frame += n as u64;
             position += n;
         }
         self.stats.buffers.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// Asks every module that has display values for them, after a block.
-    fn publish_displays(&self) {
-        for (slot, &count) in self.display_counts.iter().enumerate() {
-            if count == 0 {
-                continue;
-            }
-            if let Some(module) = self.slots[slot].as_ref() {
-                let mut values = [0.0; MAX_DISPLAYS];
-                let values = &mut values[..usize::from(count)];
-                module.displays(values);
-                self.displays.write(slot, values);
-            }
-        }
-    }
-
     fn apply_commands(&mut self) {
         while let Ok(command) = self.commands.pop() {
             match command {
-                Command::InsertModule {
-                    slot,
-                    module,
-                    id,
-                    displays,
-                } => {
+                Command::InsertModule { slot, module } => {
                     if let Some(old) = self.slots[slot].replace(module) {
                         self.discard(Garbage::Module(old));
                     }
-                    self.display_counts[slot] = displays;
-                    self.displays.claim(slot, id);
                 }
                 Command::RemoveModule { slot } => {
                     if let Some(old) = self.slots[slot].take() {
                         self.discard(Garbage::Module(old));
                     }
-                    self.display_counts[slot] = 0;
-                    self.displays.release(slot);
                 }
                 Command::SwapSchedule(mut schedule) => {
                     schedule.take_tap_state_from(&self.schedule);
@@ -251,10 +191,6 @@ impl Engine {
                         module.reset();
                     }
                 }
-                Command::SetTempo(tempo) => self.transport.set_tempo(self.frame, tempo),
-                Command::SetTimeSignature(time_signature) => self.transport.set_time_signature(time_signature),
-                Command::SetRunning(running) => self.transport.set_running(self.frame, running),
-                Command::ResetTransport => self.transport.reset(self.frame),
             }
         }
     }
@@ -336,7 +272,6 @@ impl Engine {
         let sample_rate = self.config.sample_rate;
         let midi = &self.midi[..];
         let slots = &mut self.slots;
-        let transport = self.transport.info(self.frame);
         let Schedule {
             input_ptrs,
             output_ptrs,
@@ -346,34 +281,8 @@ impl Engine {
             loop_taps,
             steps,
             outputs,
-            transport: transport_buffers,
             ..
         } = &mut *self.schedule;
-
-        // Transport signals first, once per block, for every input that
-        // follows them. Each sample's value comes from the anchor, so it is
-        // the same for any block size (rule 5).
-        if let Some(buffer) = transport_buffers.bar_phase {
-            // SAFETY: transport buffers are schedule buffers of `max_block`
-            // floats, `frames <= max_block`, modules only read them, and no
-            // module is running yet.
-            let buffer = unsafe { std::slice::from_raw_parts_mut(buffer, frames) };
-            for (i, value) in buffer.iter_mut().enumerate() {
-                *value = transport.bar_phase_at(i);
-            }
-        }
-        if let Some(buffer) = transport_buffers.beat_phase {
-            // SAFETY: as for the bar phase buffer above.
-            let buffer = unsafe { std::slice::from_raw_parts_mut(buffer, frames) };
-            for (i, value) in buffer.iter_mut().enumerate() {
-                *value = transport.beat_phase_at(i);
-            }
-        }
-        if let Some(buffer) = transport_buffers.playing {
-            // SAFETY: as for the bar phase buffer above.
-            let buffer = unsafe { std::slice::from_raw_parts_mut(buffer, frames) };
-            buffer.fill(if transport.playing() { 1.0 } else { 0.0 });
-        }
 
         let mut run_op = |op: &ModuleOp, offset: usize, len: usize| {
             if let Some(module) = slots[op.slot as usize].as_mut() {
@@ -382,13 +291,12 @@ impl Engine {
                     midi,
                     midi_base: position + offset,
                     frames: len,
-                    transport: transport.later(offset),
                 };
                 // SAFETY: the compiler gives every output its own buffer of
                 // `max_block` floats. Inputs point at other modules' outputs,
-                // a unit delay buffer, the zero buffer, or a default buffer.
-                // Cycles always pass through a unit delay, so no module reads
-                // its own output. `offset + len <= frames <= max_block`.
+                // a unit delay buffer, or the zero buffer. Cycles always pass
+                // through a unit delay, so no module reads its own output.
+                // `offset + len <= frames <= max_block`.
                 let mut io = unsafe {
                     PortIo::new(
                         &input_ptrs[op.inputs.0 as usize..op.inputs.1 as usize],
@@ -461,7 +369,5 @@ impl Engine {
                 *out += value;
             }
         }
-
-        self.transport.end_block();
     }
 }

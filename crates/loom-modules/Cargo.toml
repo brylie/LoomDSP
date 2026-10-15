@@ -17,7 +17,6 @@ loom-rt.workspace = true
 
 [dev-dependencies]
 loom-patch.workspace = true
-loom-test.workspace = true
 assert_no_alloc.workspace = true
 criterion.workspace = true
 

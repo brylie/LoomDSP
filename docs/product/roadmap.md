@@ -61,8 +61,7 @@ Scope:
 - Desktop app with canvas, module browser, cables, undo/redo (FR-CANVAS-01 to 06).
 - Polymorphic signals and colours, inferred channel count (FR-SIG-01 to 07).
 - Feedback with automatic single-sample delay (FR-GRAPH-03, 04).
-- Built-in modulation on parameters, without cables: assignments, depth arcs, and the modulation matrix (ADR-0014, FR-MOD-01, 03 to 08).
-- Transport, default inputs that follow it, and the Clock, Clock Divide, and Phase Scale modules (ADR-0015, FR-LIB-25 to 27).
+- Built-in modulation on parameters (FR-MOD-01, 03, 04, 05).
 - Phase 1 module library (FR-LIB-01 to 07, 11).
 - Signal activity on ports, without animating cables (FR-VIS-01).
 - Audio and MIDI device setup, hot-plugging, audio input (FR-APP-01, 03, 04, FR-MIDI-08).
@@ -114,12 +113,12 @@ Exit criteria:
 Scope:
 - Arrangement from phase-driven primitives (ADR-0012, [specification](../design/arrangement.md)):
   - Note and audio cycles that read the clock's bar phase and output an end trigger (FR-LIB-20).
-  - Counter (with phase output) and Step Select (FR-LIB-22), with Clock Divide from P1 (FR-LIB-27). These small logic modules can be built as early as P1.
+  - Clock Divide, Counter (with phase output), and Step Select (FR-LIB-22). These small logic modules can be built as early as P1.
   - Built-in abstractions made from them: Looper Group, Part, Song Sequencer (FR-LIB-21, FR-LIB-24).
 - Scenes: snapshots of module states, switched by triggers, with morph time (FR-LIB-23).
 - Sequencers, including polymetric multi-output step sequencers (FR-LIB-14).
 - Note effects, on the model chosen in OQ-16 (FR-LIB-13).
-- Modulation curves over bars and sections (FR-LIB-16), on the P1 transport and clock modules.
+- Clock and transport modules, and modulation curves over bars (FR-LIB-16).
 - Record the live output to an audio file while performing (FR-SHARE-03).
 
 Exit criteria:

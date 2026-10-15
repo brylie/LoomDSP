@@ -13,7 +13,7 @@ mod common;
 
 use assert_no_alloc::{AllocDisabler, assert_no_alloc};
 use common::*;
-use loom_core::{MidiEvent, OutputRef, ProbeKind, TimeSignature};
+use loom_core::{MidiEvent, OutputRef, ProbeKind};
 
 #[global_allocator]
 static ALLOCATOR: AllocDisabler = AllocDisabler;
@@ -59,16 +59,6 @@ fn audio_thread_never_allocates() {
             }
             if i % 50 == 25 {
                 parts.midi.send(MidiEvent::note_off(0, 0, 60 + ((i - 25) % 12) as u8));
-            }
-            // Transport changes are applied on the audio thread too.
-            match i % 13 {
-                3 => {
-                    parts.controller.set_tempo(60.0 + i as f64).unwrap();
-                }
-                5 => parts.controller.set_running(i % 2 == 0).unwrap(),
-                8 => parts.controller.reset_transport().unwrap(),
-                11 => parts.controller.set_time_signature(TimeSignature::new(7, 8)).unwrap(),
-                _ => {}
             }
             // Drain telemetry for a while, then let the queues fill up.
             if i < 200 {

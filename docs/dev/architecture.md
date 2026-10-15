@@ -10,7 +10,6 @@ flowchart BT
     core[loom-core<br/>module API, graph,<br/>compiler, engine]
     modules[loom-modules<br/>built-in modules]
     patch[loom-patch<br/>RON patch files]
-    test[loom-test<br/>module test harness]
     host[loom-host-desktop<br/>audio and MIDI devices]
     canvas[loom-canvas<br/>patch canvas widget]
     cli[loom-cli<br/>the loom tool]
@@ -19,7 +18,6 @@ flowchart BT
     core --> rt
     modules --> core
     patch --> core
-    test --> core
     host --> core
     cli --> modules & patch & host
     app --> modules & patch & host & canvas
@@ -31,7 +29,6 @@ flowchart BT
 | `loom-core` | The `Module` trait, the editable `Graph`, the compiler, the `Engine` that runs on the audio thread, and the `Controller` that edits it. | Portable: builds for WebAssembly. No threads, files, or audio APIs. |
 | `loom-modules` | Every built-in module, plus integration tests and benchmarks. | Same as `loom-core`. |
 | `loom-patch` | Loads, saves, and migrates patch files. | Same as `loom-core`. |
-| `loom-test` | The module test harness: renders one module, checks block-size invariance, and compares with reference WAV files. | Desktop only, for tests. Only `dev-dependencies` use it. |
 | `loom-host-desktop` | Connects the engine to audio devices (cpal) and MIDI inputs (midir). | Desktop only. The only crate that knows about audio APIs. |
 | `loom-canvas` | The patch canvas: an Iced widget drawn by one custom GPU primitive. | Knows nothing about the engine. It draws a `Scene` and reports gestures. |
 | `loom-cli` | The `loom` command: list modules, check, render, play, stress-test. | |
@@ -62,8 +59,6 @@ flowchart LR
 Every arrow into or out of the audio thread is a bounded, lock-free queue (`rtrb`). The audio thread never allocates, frees, locks, or waits (ADR-0001, NFR-RT-01). Memory is allocated on the UI thread, moved to the audio thread inside a command, and moved back as garbage to be freed.
 
 Telemetry for live views also leaves the audio thread through bounded queues: one for meter readings and one for scope samples. The app asks to watch an output port with `Controller::add_probe`. When a telemetry queue is full, the engine drops the new message and counts it; it never waits (NFR-RT-07). Details are in the [telemetry specification](../design/telemetry.md).
-
-The patch transport (tempo, time signature, running, position) lives in the engine, not in the schedule, so editing the patch never moves it ([ADR-0015](../adr/0015-one-transport-per-patch.md)). The controller changes it with commands, applied at buffer starts. At the start of each block the engine fills one shared buffer per transport signal that some unconnected input follows, such as bar phase. Details are in the [clock and transport specification](../design/clock.md).
 
 MIDI inputs and the Hold note button share one queue through a mutex (`SharedMidi`). Only the sending threads take that lock. The audio thread reads the queue without one.
 
@@ -110,10 +105,8 @@ Shader names must not be reserved words in Metal or HLSL, because wgpu's transla
 
 | What | Where |
 |---|---|
-| Module behaviour | Unit tests next to each module, using `loom_core::testing::run` (or `run_with_transport`). |
-| Each module against a reference render, at block sizes 1, 77, and 512 | `crates/loom-modules/tests/reference.rs`, with `loom-test`. References are in `tests/reference/`. |
+| Module behaviour | Unit tests next to each module, using `loom_core::testing::run`. |
 | No allocation on the audio path, including telemetry | `crates/loom-modules/tests/no_alloc.rs` (debug builds). |
-| Transport and default inputs, including no allocation | `crates/loom-core/tests/transport.rs`, `transport_no_alloc.rs`. |
 | Same output at any buffer size, bit-identical runs | `crates/loom-modules/tests/`. |
 | Patch loading and round trips | `crates/loom-patch`. |
 | Canvas logic and shaders | `crates/loom-canvas` (hit-testing, camera, geometry, shader validation). |

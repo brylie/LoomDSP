@@ -19,7 +19,6 @@
 mod compile;
 mod controller;
 mod descriptor;
-mod display;
 mod engine;
 mod error;
 mod graph;
@@ -28,15 +27,10 @@ mod module;
 mod registry;
 pub mod signal;
 mod telemetry;
-pub mod transport;
 
 pub use compile::{CompileReport, FeedbackLoop};
 pub use controller::{Controller, EngineParts, MidiSender, create_engine};
-pub use descriptor::{
-    MAX_DISPLAYS, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamMapping, ParamSpec, PortDefault, PortSpec,
-    Widget, WidgetKind,
-};
-pub use display::{DisplayReader, DisplaySource};
+pub use descriptor::{ModuleConfig, ModuleDescriptor, ModuleRole, ParamSpec, PortSpec};
 pub use engine::{Engine, EngineConfig, EngineStats};
 pub use error::LoomError;
 pub use graph::{Graph, InputRef, ModuleId, Node, OutputRef};
@@ -45,4 +39,3 @@ pub use module::{Module, PortIo, ProcessContext, testing};
 pub use registry::{ModuleKind, Registry};
 pub use signal::SignalType;
 pub use telemetry::{MeterReading, ProbeId, ProbeKind, SCOPE_CHUNK, ScopeChunk, Telemetry};
-pub use transport::{TimeSignature, TransportInfo, TransportSettings};
