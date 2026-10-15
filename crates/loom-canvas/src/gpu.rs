@@ -1,7 +1,8 @@
 //! GPU data and the custom wgpu primitive that draws the canvas.
 
 use crate::camera::Camera;
-use crate::scene::{PORT_RADIUS, PortShape, Scene, TILE_WIDTH};
+use crate::controls::ControlGeometry;
+use crate::scene::{PORT_RADIUS, PortShape, Scene};
 use crate::theme::Palette;
 use bytemuck::{Pod, Zeroable};
 use iced::advanced::graphics::color::pack;
@@ -9,7 +10,6 @@ use iced::wgpu;
 use iced::widget::shader::{Pipeline, Primitive, Viewport};
 use iced::{Color, Point, Rectangle};
 use std::collections::HashSet;
-use std::sync::Arc;
 
 /// Corner radius of tiles, in world units.
 const TILE_RADIUS: f32 = 5.0;
@@ -50,6 +50,32 @@ impl Shape {
             PortShape::Square => radius * 0.3,
         };
         Self::new(rect, corner, fill, border, border_width)
+    }
+}
+
+/// Part of a ring, for knobs. Its quad covers only the ring, so the
+/// fragment shader never runs outside it (ADR-0010).
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+pub struct Arc {
+    /// Centre x, centre y, radius, thickness, in world units.
+    circle: [f32; 4],
+    /// Start angle and sweep in radians, clockwise from the top; unused.
+    angles: [f32; 4],
+    colour: [f32; 4],
+    unused: [f32; 4],
+}
+
+impl Arc {
+    /// A ring segment from `start` through `sweep` radians, clockwise from
+    /// the top.
+    pub fn new(centre: Point, radius: f32, thickness: f32, start: f32, sweep: f32, colour: Color) -> Self {
+        Self {
+            circle: [centre.x, centre.y, radius, thickness],
+            angles: [start, sweep, 0.0, 0.0],
+            colour: pack(colour).components(),
+            unused: [0.0; 4],
+        }
     }
 }
 
@@ -127,7 +153,7 @@ impl Geometry {
             shapes.push(Shape::new(bounds, TILE_RADIUS, palette.tile, palette.tile_border, 1.0));
             // Header: a rounded strip, then a square strip over its lower
             // half so only the top corners are round.
-            let header = Rectangle::new(module.position, iced::Size::new(TILE_WIDTH, crate::scene::HEADER));
+            let header = Rectangle::new(module.position, iced::Size::new(module.width(), crate::scene::HEADER));
             shapes.push(Shape::new(header, TILE_RADIUS, module.accent, Color::TRANSPARENT, 0.0));
             let lower = Rectangle::new(
                 Point::new(header.x, header.y + header.height * 0.5),
@@ -183,7 +209,9 @@ pub struct Overlay {
 /// What one frame of the canvas draws.
 #[derive(Debug)]
 pub struct CanvasPrimitive {
-    pub(crate) geometry: Arc<Geometry>,
+    pub(crate) geometry: std::sync::Arc<Geometry>,
+    /// Panel controls. `None` when zoomed out too far to draw them.
+    pub(crate) controls: Option<std::sync::Arc<ControlGeometry>>,
     pub(crate) overlay: Overlay,
     pub(crate) camera: Camera,
     /// Opacity of cables that are not in focus.
@@ -253,6 +281,7 @@ impl InstanceBuffer {
 pub struct CanvasPipeline {
     shapes: wgpu::RenderPipeline,
     cables: wgpu::RenderPipeline,
+    arcs: wgpu::RenderPipeline,
     grid: wgpu::RenderPipeline,
     globals: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
@@ -260,7 +289,10 @@ pub struct CanvasPipeline {
     scene_shapes: InstanceBuffer,
     overlay_cables: InstanceBuffer,
     overlay_shapes: InstanceBuffer,
+    control_arcs: InstanceBuffer,
+    control_shapes: InstanceBuffer,
     uploaded: u64,
+    controls_uploaded: (u64, u64),
     tiles: u32,
 }
 
@@ -360,6 +392,12 @@ impl Pipeline for CanvasPipeline {
                 "fs_cable",
                 &[instance_layout(std::mem::size_of::<Cable>())],
             ),
+            arcs: make(
+                "loom-canvas arcs",
+                "vs_arc",
+                "fs_arc",
+                &[instance_layout(std::mem::size_of::<Arc>())],
+            ),
             grid: make("loom-canvas grid", "vs_grid", "fs_grid", &[]),
             globals,
             bind_group,
@@ -367,7 +405,10 @@ impl Pipeline for CanvasPipeline {
             scene_shapes: InstanceBuffer::new(device, "loom-canvas scene shapes"),
             overlay_cables: InstanceBuffer::new(device, "loom-canvas overlay cables"),
             overlay_shapes: InstanceBuffer::new(device, "loom-canvas overlay shapes"),
+            control_arcs: InstanceBuffer::new(device, "loom-canvas control arcs"),
+            control_shapes: InstanceBuffer::new(device, "loom-canvas control shapes"),
             uploaded: 0,
+            controls_uploaded: (0, 0),
             tiles: 0,
         }
     }
@@ -403,6 +444,15 @@ impl Primitive for CanvasPrimitive {
             pipeline.uploaded = self.geometry.generation;
             pipeline.tiles = self.geometry.tiles;
         }
+        // Control values have their own buffers: a knob turn uploads only
+        // these, never the tiles, ports, or cables.
+        if let Some(controls) = &self.controls
+            && pipeline.controls_uploaded != controls.key
+        {
+            pipeline.control_arcs.upload(device, queue, &controls.arcs);
+            pipeline.control_shapes.upload(device, queue, &controls.shapes);
+            pipeline.controls_uploaded = controls.key;
+        }
         pipeline.overlay_cables.upload(device, queue, &self.overlay.cables);
         pipeline.overlay_shapes.upload(device, queue, &self.overlay.shapes);
     }
@@ -414,9 +464,14 @@ impl Primitive for CanvasPrimitive {
         pass.draw(0..4, 0..1);
 
         // Cables behind the tiles, so modules read as solid objects. Then the
-        // focused cables in front, then ports over every cable end, then the
-        // selection and hover outlines.
+        // focused cables in front, then ports over every cable end, then
+        // panel controls, then the selection, hover, and focus outlines.
         let tiles = pipeline.tiles.min(pipeline.scene_shapes.len);
+        let (arcs, controls) = if self.controls.is_some() {
+            (pipeline.control_arcs.len, pipeline.control_shapes.len)
+        } else {
+            (0, 0)
+        };
         let layers = [
             (
                 &pipeline.cables,
@@ -437,6 +492,8 @@ impl Primitive for CanvasPrimitive {
                 4,
                 tiles..pipeline.scene_shapes.len,
             ),
+            (&pipeline.arcs, &pipeline.control_arcs, 4, 0..arcs),
+            (&pipeline.shapes, &pipeline.control_shapes, 4, 0..controls),
             (
                 &pipeline.shapes,
                 &pipeline.overlay_shapes,
@@ -511,6 +568,7 @@ mod tests {
         // Four vec4 attributes each.
         assert_eq!(std::mem::size_of::<Shape>(), 64);
         assert_eq!(std::mem::size_of::<Cable>(), 64);
+        assert_eq!(std::mem::size_of::<Arc>(), 64);
         assert_eq!(std::mem::size_of::<Globals>(), 32);
     }
 
@@ -523,6 +581,7 @@ mod tests {
             position: Point::new(x, 0.0),
             inputs: vec![port(), port()],
             outputs: vec![port()],
+            panel: crate::scene::PanelView::default(),
         };
         let scene = Scene::new(
             vec![module(1, 0.0), module(2, 200.0)],

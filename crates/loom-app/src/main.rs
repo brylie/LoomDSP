@@ -5,6 +5,7 @@
 //! canvas against the performance gates in NFR-PERF-04.
 
 mod layout;
+mod lights;
 mod live;
 mod param;
 mod scene;
@@ -15,7 +16,7 @@ use iced::widget::{
 };
 use iced::{Color, Element, Length, Point, Subscription, Theme};
 use live::Live;
-use loom_canvas::{CanvasEvent, PatchCanvas, Scene};
+use loom_canvas::{CanvasEvent, PanelValues, PatchCanvas, Scene};
 use loom_core::{
     Controller, EngineConfig, EngineParts, InputRef, MidiEvent, ModuleId, OutputRef, Telemetry, create_engine,
 };
@@ -56,7 +57,11 @@ fn main() -> iced::Result {
 #[derive(Debug, Clone)]
 enum Message {
     Canvas(CanvasEvent),
-    Param { module: u32, index: usize, position: f32 },
+    Param {
+        module: u32,
+        index: usize,
+        position: f32,
+    },
     Pick(String),
     Add,
     HoldNote,
@@ -65,12 +70,21 @@ enum Message {
     Animate(bool),
     Frame(Instant),
     Tick,
+    /// New brightness for lights on screen.
+    Lights(Vec<(lights::Light, f32)>),
 }
 
 struct App {
     controller: Controller,
     positions: BTreeMap<u32, Point>,
     scene: Scene,
+    /// Live values of panel controls and lights, apart from the scene so a
+    /// knob turn does not rebuild tiles or cables.
+    values: PanelValues,
+    /// Last brightness of each light, by module and widget.
+    lights: BTreeMap<lights::Light, f32>,
+    /// Modules whose lights are on screen, as the canvas reports.
+    visible_lights: Vec<u32>,
     selection: BTreeSet<u32>,
     name: String,
     save_path: PathBuf,
@@ -171,10 +185,15 @@ impl App {
         };
 
         let scene = scene::build(&controller, &positions);
+        let mut values = PanelValues::new();
+        scene::update_panel_values(&mut values, &controller, &BTreeMap::new());
         let mut app = Self {
             controller,
             positions,
             scene,
+            values,
+            lights: BTreeMap::new(),
+            visible_lights: Vec::new(),
             selection: BTreeSet::new(),
             name,
             save_path,
@@ -220,20 +239,65 @@ impl App {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        if self.measuring {
+        let main = if self.measuring {
             // Redraw every frame, so the counter measures real render cost.
             iced::window::frames().map(Message::Frame)
         } else {
             // Otherwise the window redraws only when something changes. A
             // slow tick keeps the audio numbers fresh.
             iced::time::every(Duration::from_millis(500)).map(|_| Message::Tick)
+        };
+        Subscription::batch([main, self.light_watch()])
+    }
+
+    /// Watches the lights on screen, and sends a message only when one
+    /// visibly changes. No lights on screen: no watcher.
+    fn light_watch(&self) -> Subscription<Message> {
+        let graph = self.controller.graph();
+        let watched: Vec<_> = self
+            .visible_lights
+            .iter()
+            .filter_map(|&id| Some((id, graph.node(ModuleId(id))?.descriptor)))
+            .flat_map(|(id, d)| {
+                d.panel.widgets.iter().enumerate().filter_map(move |(index, w)| {
+                    let display = (!w.is_control()).then(|| d.display_index(w.bind))??;
+                    Some(((id, index), display))
+                })
+            })
+            .filter_map(|(light, display)| {
+                let source = self.controller.display_source(ModuleId(light.0), display)?;
+                Some((light, source))
+            })
+            .collect();
+        if watched.is_empty() {
+            return Subscription::none();
         }
+        let watch = lights::Watch {
+            reader: self.controller.display_reader(),
+            lights: watched,
+        };
+        Subscription::run_with(watch, lights::stream).map(Message::Lights)
     }
 
     /// Rebuilds the scene after the graph changed.
     fn refresh(&mut self) {
         layout::auto_layout(&self.controller, &mut self.positions);
         self.scene = scene::build(&self.controller, &self.positions);
+        self.refresh_values();
+    }
+
+    /// Rebuilds the control and light values. Only changed values change
+    /// what the canvas uploads.
+    fn refresh_values(&mut self) {
+        scene::update_panel_values(&mut self.values, &self.controller, &self.lights);
+    }
+
+    /// Sets a parameter from a control on a tile or in the inspector.
+    fn set_param(&mut self, module: u32, index: usize, value: f32) {
+        if let Err(e) = self.controller.set_param(ModuleId(module), index, value) {
+            self.status = format!("error: {e}");
+        }
+        self.refresh_values();
     }
 
     fn report(&mut self) {
@@ -274,9 +338,7 @@ impl App {
                     .and_then(|n| n.descriptor.params.get(index))
                 {
                     let value = spec.denormalize(position);
-                    if let Err(e) = self.controller.set_param(ModuleId(module), index, value) {
-                        self.status = format!("error: {e}");
-                    }
+                    self.set_param(module, index, value);
                 }
             }
             Message::Pick(kind) => self.picked = Some(kind),
@@ -337,6 +399,10 @@ impl App {
                 self.controller.collect_garbage();
                 self.live.drain(&mut self.telemetry, Instant::now());
             }
+            Message::Lights(readings) => {
+                self.lights.extend(readings);
+                self.refresh_values();
+            }
         }
     }
 
@@ -374,6 +440,22 @@ impl App {
                     self.commit();
                 }
             }
+            CanvasEvent::SetControl {
+                module,
+                widget,
+                position,
+            } => {
+                if let Some((index, kind, spec)) = scene::control_param(&self.controller, module, widget) {
+                    let value = scene::control_value(kind, &spec, position);
+                    self.set_param(module, index, value);
+                }
+            }
+            CanvasEvent::ResetControl { module, widget } => {
+                if let Some((index, _, spec)) = scene::control_param(&self.controller, module, widget) {
+                    self.set_param(module, index, spec.default);
+                }
+            }
+            CanvasEvent::VisibleLights(ids) => self.visible_lights = ids,
             CanvasEvent::Delete(ids) => {
                 for id in &ids {
                     if self.controller.remove_module(ModuleId(*id)).is_ok() {
@@ -388,6 +470,7 @@ impl App {
 
     fn view(&self) -> Element<'_, Message> {
         let canvas = PatchCanvas::new(&self.scene, &self.selection, Message::Canvas)
+            .values(&self.values)
             .frame_key(self.frame_key)
             .animate(self.animating);
 
@@ -565,6 +648,8 @@ const DIM: Color = Color::from_rgb(0.62, 0.65, 0.71);
 
 const HELP: &str = "Drag from a port to patch a cable. Drag a connected input to move or remove its cable.\n\
 Drag tiles to move them. Shift-click or drag a box to select several.\n\
+Drag a knob up or down; Shift for fine steps; double-click resets it.\n\
+With a module selected, Tab moves between its controls and the arrow keys change them.\n\
 Right-drag or two-finger scroll to pan. Wheel or Cmd/Ctrl-scroll to zoom.\n\
 F or Home frames the patch. Delete removes the selection.";
 

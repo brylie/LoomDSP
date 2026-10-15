@@ -2,7 +2,7 @@
 
 use crate::compile::{CompileReport, compile};
 use crate::descriptor::{ModuleConfig, ModuleDescriptor, ModuleRole};
-use crate::display::DisplayTable;
+use crate::display::{DisplayReader, DisplaySource, DisplayTable};
 use crate::engine::{Command, Engine, EngineConfig, EngineStats, Garbage};
 use crate::error::LoomError;
 use crate::graph::{Graph, InputRef, ModuleId, Node, OutputRef};
@@ -331,9 +331,22 @@ impl Controller {
     /// not exist or has no such value. A module the engine has not run yet
     /// reads 0.
     pub fn display(&self, module: ModuleId, index: usize) -> Option<f32> {
+        self.display_source(module, index)
+            .map(|source| self.display_reader().read(source))
+    }
+
+    /// Where display value `index` of a module lives, for reading it with a
+    /// [`DisplayReader`] on another thread. `None` if the module does not
+    /// exist or has no such value.
+    pub fn display_source(&self, module: ModuleId, index: usize) -> Option<DisplaySource> {
         let node = self.graph.nodes.get(&module)?;
         let slot = node.slot?;
-        (index < node.descriptor.displays.len()).then(|| self.displays.read(slot, module.0, index))
+        (index < node.descriptor.displays.len()).then(|| DisplaySource::new(slot, module.0, index))
+    }
+
+    /// A handle that reads display values from any thread.
+    pub fn display_reader(&self) -> DisplayReader {
+        DisplayReader::new(self.displays.clone())
     }
 
     /// The transport settings last sent to the engine (ADR-0015).

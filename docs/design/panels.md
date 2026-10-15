@@ -163,11 +163,16 @@ The first display module.
 
 ### Tile layout ([#68](https://github.com/brylie/LoomDSP/issues/68))
 
+**Status:** Implemented. Code: `ModuleView::width`, `widget_bounds`, and `tile_size` in `loom-canvas/src/scene.rs`.
+
 - **The panel sits between the port columns.** Each side has a port label column 4 grid units wide. A label longer than its column is cut with "…", and hovering the port shows the full name.
 - Tile width is 4 + panel width + 4 grid units, and at least 11 (today's width), so titles still fit. Tile height is the header plus the taller of the port rows and the panel.
+- A tile with an empty panel keeps the old label layout: each side gets half the tile. *Why:* nothing sits between the columns, so cutting labels would hide text for no reason.
 - *Why:* tiles stay compact, and ports and cables keep their place at the tile edges.
 
 ### Interaction ([#68](https://github.com/brylie/LoomDSP/issues/68))
+
+**Status:** Implemented. Code: `loom-canvas/src/widget.rs`, `controls.rs`.
 
 | Gesture | Knob | Toggle, radio | Light, empty panel area | Header |
 |---|---|---|---|---|
@@ -185,6 +190,8 @@ The first display module.
 
 ### Level of detail ([#68](https://github.com/brylie/LoomDSP/issues/68))
 
+**Status:** Implemented. Code: `detail` in `loom-canvas/src/widget.rs`.
+
 The canvas already hides port labels and titles below a size on screen. Panels use the same two thresholds:
 
 | Zoom | Controls and lights |
@@ -195,8 +202,11 @@ The canvas already hides port labels and titles below a size on screen. Panels u
 
 ### Redraw ([#68](https://github.com/brylie/LoomDSP/issues/68))
 
+**Status:** Implemented. Code: `ControlGeometry` in `loom-canvas/src/controls.rs`, `loom-app/src/lights.rs`.
+
 - **Control values have their own GPU buffer.** Changing a value rewrites only that buffer, never the tiles, ports, or cables. *Why:* ADR-0010's rule that GPU data for the patch is rebuilt only when the patch changes.
-- Lights read the display table on a timer of 30 Hz, but only while a module with display values is on screen at a zoom where lights are drawn. A frame is drawn only when a shown brightness changes by at least 1/256.
+- Lights read the display table on a timer of 30 Hz, but only while a module with lights is on screen at a zoom where lights are drawn. A frame is drawn only when a shown brightness changes by at least 1/256.
+- The timer runs on its own thread and sends the UI a message only when a light changes. *Why:* in Iced every message redraws the window, so a plain 30 Hz timer message would draw 30 frames a second even when nothing moves. The canvas reports which modules with lights are on screen, so the app watches only those.
 - Nothing visible changing means no frame.
 
 ### Acceptance criteria: module panels
@@ -217,13 +227,16 @@ The canvas already hides port labels and titles below a size on screen. Panels u
 
 - [ ] Dragging a knob on a tile changes the parameter. The inspector shows the same value, and saving the patch keeps it.
 - [ ] Dragging a control never moves the tile. Dragging the header always does.
-- [ ] Shift-drag is 10 times finer. Double-click resets to the default.
-- [ ] A logarithmic knob moves by equal ratios: halfway up a 20 Hz to 20 kHz cutoff knob is about 632 Hz.
-- [ ] Every control is reachable by keyboard: Tab, Shift-Tab, arrows, Space, Escape, with a visible focus ring.
-- [ ] Changing a control value does not rebuild the GPU data for tiles, ports, or cables.
+- [x] Shift-drag is 10 times finer. Double-click resets to the default.
+- [x] A logarithmic knob moves by equal ratios: halfway up a 20 Hz to 20 kHz cutoff knob is about 632 Hz.
+- [x] Every control is reachable by keyboard: Tab, Shift-Tab, arrows, Space, Escape, with a visible focus ring.
+- [x] Changing a control value does not rebuild the GPU data for tiles, ports, or cables.
 - [ ] The MIDI Note gate light is lit while a key is held. The ADSR light follows its level.
-- [ ] Zoomed far out, controls and lights are not drawn. At middle zoom, they have no text.
-- [ ] With no lights on screen and no input, the app does not redraw. Check: the frame counter stays still for 10 seconds.
+- [x] Zoomed far out, controls and lights are not drawn. At middle zoom, they have no text.
+- [x] Lights add no frames while their brightness stays the same: the light watcher sends nothing until a shown level changes, and runs only while lights are on screen.
+- [ ] Manual, on the reference laptop: knobs, the toggle, and lights look right at close and middle zoom, and a cut port label shows in full on hover.
+
+The whole app still redraws twice a second for the stats bar's audio numbers. "No redraw when idle" for the whole app stays a P1 criterion below.
 
 ## P1 slice
 

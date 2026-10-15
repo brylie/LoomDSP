@@ -2,7 +2,7 @@
 //! generator for large test patches.
 
 use iced::Point;
-use loom_canvas::{GRID, TILE_WIDTH};
+use loom_canvas::{GRID, TILE_WIDTH, tile_size};
 use loom_core::{Controller, LoomError};
 use std::collections::BTreeMap;
 
@@ -55,8 +55,8 @@ pub fn auto_layout(controller: &Controller, positions: &mut BTreeMap<u32, Point>
         let column = depth.get(&id.0).copied().unwrap_or(0);
         let y = next_y.entry(column).or_insert(top);
         positions.insert(id.0, Point::new(column as f32 * COLUMN, *y));
-        let rows = node.descriptor.inputs.len().max(node.descriptor.outputs.len()).max(1) as f32;
-        let height = ((22.0 + rows * 16.0 + 6.0) / GRID).ceil() * GRID;
+        let d = node.descriptor;
+        let height = tile_size(d.inputs.len(), d.outputs.len(), d.panel.width, d.panel.height).height;
         *y += height + GAP;
     }
 }

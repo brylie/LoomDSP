@@ -74,6 +74,46 @@ impl DisplayTable {
     }
 }
 
+/// Where one display value lives: a slot, the module that should own it,
+/// and an index. Get one from
+/// [`Controller::display_source`](crate::Controller::display_source).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct DisplaySource {
+    slot: usize,
+    owner: u32,
+    index: usize,
+}
+
+impl DisplaySource {
+    pub(crate) fn new(slot: usize, owner: u32, index: usize) -> Self {
+        Self { slot, owner, index }
+    }
+}
+
+/// Reads display values from any thread, for example a UI timer that only
+/// wakes the UI when a light changes. Cheap to clone.
+#[derive(Clone)]
+pub struct DisplayReader {
+    table: std::sync::Arc<DisplayTable>,
+}
+
+impl std::fmt::Debug for DisplayReader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("DisplayReader")
+    }
+}
+
+impl DisplayReader {
+    pub(crate) fn new(table: std::sync::Arc<DisplayTable>) -> Self {
+        Self { table }
+    }
+
+    /// The latest value, or 0 while the slot belongs to another module.
+    pub fn read(&self, source: DisplaySource) -> f32 {
+        self.table.read(source.slot, source.owner, source.index)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

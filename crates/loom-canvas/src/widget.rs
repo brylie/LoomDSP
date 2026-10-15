@@ -1,8 +1,13 @@
 //! The patch canvas widget: input handling and drawing.
 
 use crate::camera::Camera;
+use crate::controls::{
+    ControlGeometry, PanelValues, knob_centre, knob_drag, knob_step, light_centre, radio_centre, radio_option,
+};
 use crate::gpu::{Cable, CanvasPrimitive, Geometry, Overlay, Shape};
-use crate::scene::{GRID, HEADER, Hit, PORT_HIT_RADIUS, PORT_RADIUS, PortRef, ROW, Scene, TILE_WIDTH};
+use crate::scene::{
+    GRID, HEADER, Hit, PORT_HIT_RADIUS, PORT_RADIUS, PortRef, ROW, Scene, TILE_WIDTH, WidgetViewKind, fit_label,
+};
 use crate::theme::Palette;
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::renderer;
@@ -14,7 +19,10 @@ use iced::{alignment, keyboard, mouse, window};
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+/// Two presses on the same control within this time reset it.
+const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 
 /// Titles are drawn when they would be at least this tall on screen.
 const TITLE_MIN_PX: f32 = 6.5;
@@ -53,6 +61,27 @@ pub enum CanvasEvent {
     Disconnect(PortRef),
     /// Delete modules.
     Delete(Vec<u32>),
+    /// Set a control on a module's panel. `position` is the knob position
+    /// from 0 to 1, 0 or 1 for a toggle, or the option index for radio
+    /// buttons.
+    SetControl {
+        /// Module ID.
+        module: u32,
+        /// Index in the module's panel widgets.
+        widget: usize,
+        /// The new position.
+        position: f32,
+    },
+    /// Reset a control to its parameter's default (double-click).
+    ResetControl {
+        /// Module ID.
+        module: u32,
+        /// Index in the module's panel widgets.
+        widget: usize,
+    },
+    /// The modules whose lights are on screen, at a zoom where lights are
+    /// drawn, changed. Only these need their display values read.
+    VisibleLights(Vec<u32>),
 }
 
 /// The patch canvas. Draws a [`Scene`] and reports gestures as
@@ -60,6 +89,7 @@ pub enum CanvasEvent {
 pub struct PatchCanvas<'a, Message> {
     scene: &'a Scene,
     selection: &'a BTreeSet<u32>,
+    values: Option<&'a PanelValues>,
     palette: Palette,
     on_event: Box<dyn Fn(CanvasEvent) -> Message + 'a>,
     frame_key: u64,
@@ -72,11 +102,18 @@ impl<'a, Message> PatchCanvas<'a, Message> {
         Self {
             scene,
             selection,
+            values: None,
             palette: Palette::default(),
             on_event: Box::new(on_event),
             frame_key: 0,
             animate: false,
         }
+    }
+
+    /// Sets the live values of panel controls and lights.
+    pub fn values(mut self, values: &'a PanelValues) -> Self {
+        self.values = Some(values);
+        self
     }
 
     /// Sets the colours.
@@ -115,6 +152,16 @@ enum Interaction {
         ids: Vec<u32>,
         start: Point,
         applied: Vector,
+        /// A toggle or radio press: applied on release if the tile did not
+        /// move, so dragging these moves the tile.
+        click: Option<(u32, usize, f32)>,
+    },
+    Turning {
+        module: u32,
+        widget: usize,
+        /// Pointer height on screen at the last move.
+        last_y: f32,
+        position: f32,
     },
     Wiring {
         from: PortRef,
@@ -136,7 +183,14 @@ struct State {
     cursor: Option<Point>,
     modifiers: keyboard::Modifiers,
     geometry: RefCell<Option<Arc<Geometry>>>,
+    controls: RefCell<Option<Arc<ControlGeometry>>>,
     animation: Option<(Instant, Camera)>,
+    /// The control with keyboard focus: module ID and widget index.
+    focus: Option<(u32, usize)>,
+    /// The last press on a control, for double-click.
+    last_click: Option<(Instant, u32, usize)>,
+    /// Modules with lights on screen, as last reported.
+    reported_lights: Option<Vec<u32>>,
 }
 
 impl State {
@@ -207,10 +261,17 @@ where
                     state.camera = base;
                     shell.request_redraw();
                 }
+                let lights = visible_lights(self.scene, &state.camera, bounds.size());
+                if state.reported_lights.as_ref() != Some(&lights) {
+                    state.reported_lights = Some(lights.clone());
+                    self.emit(shell, CanvasEvent::VisibleLights(lights));
+                }
             }
             Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
                 state.modifiers = *modifiers;
             }
+            Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. })
+                if self.focus_keys(state, key, *modifiers, over, shell) => {}
             Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) if over => {
                 use keyboard::key::Named;
                 match key.as_ref() {
@@ -261,7 +322,7 @@ where
                         state.interaction = Interaction::Panning { last: screen };
                     }
                     mouse::Button::Left => {
-                        self.press(state, world, shell);
+                        self.press(state, world, screen, shell);
                     }
                     _ => return,
                 }
@@ -281,7 +342,9 @@ where
                         state.camera.pan(delta);
                         redraw = true;
                     }
-                    Interaction::Moving { ids, start, applied } => {
+                    Interaction::Moving {
+                        ids, start, applied, ..
+                    } => {
                         let total = world - *start;
                         let snapped = Vector::new((total.x / GRID).round() * GRID, (total.y / GRID).round() * GRID);
                         if snapped != *applied {
@@ -289,6 +352,24 @@ where
                             *applied = snapped;
                             let ids = ids.clone();
                             self.emit(shell, CanvasEvent::Move { ids, delta });
+                        }
+                    }
+                    Interaction::Turning {
+                        module,
+                        widget,
+                        last_y,
+                        position,
+                    } => {
+                        let next = knob_drag(*position, screen.y - *last_y, state.modifiers.shift());
+                        *last_y = screen.y;
+                        if next != *position {
+                            *position = next;
+                            let event = CanvasEvent::SetControl {
+                                module: *module,
+                                widget: *widget,
+                                position: next,
+                            };
+                            self.emit(shell, event);
                         }
                     }
                     Interaction::Wiring { .. } => redraw = true,
@@ -333,7 +414,24 @@ where
                         selection.extend(self.scene.modules_in(area));
                         self.emit(shell, CanvasEvent::Select(selection.into_iter().collect()));
                     }
-                    Interaction::Idle | Interaction::Panning { .. } | Interaction::Moving { .. } => {}
+                    Interaction::Moving {
+                        applied,
+                        click: Some((module, widget, position)),
+                        ..
+                    } if applied == Vector::ZERO => {
+                        self.emit(
+                            shell,
+                            CanvasEvent::SetControl {
+                                module,
+                                widget,
+                                position,
+                            },
+                        );
+                    }
+                    Interaction::Idle
+                    | Interaction::Panning { .. }
+                    | Interaction::Moving { .. }
+                    | Interaction::Turning { .. } => {}
                 }
                 shell.request_redraw();
             }
@@ -355,10 +453,15 @@ where
         let state = tree.state.downcast_ref::<State>();
         match state.interaction {
             Interaction::Panning { .. } | Interaction::Moving { .. } => mouse::Interaction::Grabbing,
+            Interaction::Turning { .. } => mouse::Interaction::ResizingVertically,
             Interaction::Wiring { .. } => mouse::Interaction::Crosshair,
             Interaction::Selecting { .. } => mouse::Interaction::Crosshair,
             Interaction::Idle if cursor.is_over(layout.bounds()) => match state.hover {
                 Some(Hit::Port(_)) => mouse::Interaction::Pointer,
+                Some(Hit::Widget { module, widget }) => match self.widget_kind(module, widget) {
+                    Some(WidgetViewKind::Knob { .. }) => mouse::Interaction::ResizingVertically,
+                    _ => mouse::Interaction::Pointer,
+                },
                 Some(Hit::Module(_)) => mouse::Interaction::Grab,
                 _ => mouse::Interaction::default(),
             },
@@ -391,6 +494,23 @@ where
             }
         };
 
+        // Controls follow the titles: drawn as shapes once titles show, and
+        // not at all when zoomed further out (panels.md, Level of detail).
+        let empty = PanelValues::default();
+        let values = self.values.unwrap_or(&empty);
+        let controls = (detail(state.camera.zoom) != Detail::Far).then(|| {
+            let key = (self.scene.generation(), values.generation());
+            let mut cache = state.controls.borrow_mut();
+            match cache.as_ref() {
+                Some(c) if c.key == key => c.clone(),
+                _ => {
+                    let built = Arc::new(ControlGeometry::build(self.scene, values, &self.palette));
+                    *cache = Some(built.clone());
+                    built
+                }
+            }
+        });
+
         renderer.fill_quad(
             renderer::Quad {
                 bounds,
@@ -402,19 +522,181 @@ where
             bounds,
             CanvasPrimitive {
                 geometry,
+                controls,
                 overlay: self.overlay(state),
                 camera: state.camera,
                 cable_dim: CABLE_OPACITY,
             },
         );
-        self.draw_text(state, renderer, bounds);
+        self.draw_text(state, values, renderer, bounds);
     }
 }
 
 impl<Message> PatchCanvas<'_, Message> {
-    fn press(&self, state: &mut State, world: Point, shell: &mut Shell<'_, Message>) {
+    fn widget_kind(&self, module: u32, widget: usize) -> Option<&WidgetViewKind> {
+        Some(&self.scene.module(module)?.panel.widgets.get(widget)?.kind)
+    }
+
+    fn position(&self, module: u32, widget: usize) -> f32 {
+        self.values.map_or(0.0, |v| v.position(module, widget))
+    }
+
+    /// Selects the module of a control being edited, so the inspector
+    /// follows.
+    fn select_for_edit(&self, module: u32, shell: &mut Shell<'_, Message>) {
+        if self.selection.len() != 1 || !self.selection.contains(&module) {
+            self.emit(shell, CanvasEvent::Select(vec![module]));
+        }
+    }
+
+    fn set_control(&self, shell: &mut Shell<'_, Message>, module: u32, widget: usize, position: f32) {
+        self.emit(
+            shell,
+            CanvasEvent::SetControl {
+                module,
+                widget,
+                position,
+            },
+        );
+    }
+
+    /// The keyboard path to panel controls (NFR-UX-01). Returns true if the
+    /// key was used.
+    fn focus_keys(
+        &self,
+        state: &mut State,
+        key: &keyboard::Key,
+        modifiers: keyboard::Modifiers,
+        over: bool,
+        shell: &mut Shell<'_, Message>,
+    ) -> bool {
+        use keyboard::key::Named;
+        // Focus is only valid on a control of the one selected module.
+        let selected = (self.selection.len() == 1).then(|| *self.selection.iter().next().unwrap_or(&0));
+        if state.focus.is_some_and(|(m, w)| {
+            Some(m) != selected || !self.widget_kind(m, w).is_some_and(|k| *k != WidgetViewKind::Light)
+        }) {
+            state.focus = None;
+        }
+        let used = match key.as_ref() {
+            keyboard::Key::Named(Named::Tab) if over || state.focus.is_some() => {
+                let Some(module) = selected.and_then(|id| self.scene.module(id)) else {
+                    return false;
+                };
+                let current = state.focus.map(|(_, w)| w);
+                match next_focus(&module.panel, current, modifiers.shift()) {
+                    Some(widget) => state.focus = Some((module.id, widget)),
+                    None => return false,
+                }
+                true
+            }
+            keyboard::Key::Named(Named::Escape) if state.focus.is_some() => {
+                state.focus = None;
+                true
+            }
+            keyboard::Key::Named(
+                named @ (Named::ArrowUp | Named::ArrowRight | Named::ArrowDown | Named::ArrowLeft),
+            ) => {
+                let Some((module, widget)) = state.focus else {
+                    return false;
+                };
+                let up = matches!(named, Named::ArrowUp | Named::ArrowRight);
+                let position = self.position(module, widget);
+                let next = match self.widget_kind(module, widget) {
+                    Some(WidgetViewKind::Knob { steps }) => knob_step(position, up, modifiers.shift(), *steps),
+                    Some(WidgetViewKind::Toggle) => {
+                        if up {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    }
+                    Some(WidgetViewKind::Radio { options }) => {
+                        let last = options.len().saturating_sub(1) as f32;
+                        (position.round() + if up { 1.0 } else { -1.0 }).clamp(0.0, last)
+                    }
+                    _ => return false,
+                };
+                if next != position {
+                    self.set_control(shell, module, widget, next);
+                }
+                true
+            }
+            keyboard::Key::Named(Named::Space | Named::Enter) => {
+                let Some((module, widget)) = state.focus else {
+                    return false;
+                };
+                let position = self.position(module, widget);
+                match self.widget_kind(module, widget) {
+                    Some(WidgetViewKind::Toggle) => {
+                        self.set_control(shell, module, widget, if position > 0.5 { 0.0 } else { 1.0 })
+                    }
+                    Some(WidgetViewKind::Radio { options }) => {
+                        let next = (position.round() as usize + 1) % options.len().max(1);
+                        self.set_control(shell, module, widget, next as f32);
+                    }
+                    _ => {}
+                }
+                true
+            }
+            _ => false,
+        };
+        if used {
+            shell.request_redraw();
+            shell.capture_event();
+        }
+        used
+    }
+
+    fn press(&self, state: &mut State, world: Point, screen: Point, shell: &mut Shell<'_, Message>) {
         let shift = state.modifiers.shift();
-        match self.scene.hit(world, state.hit_radius()) {
+        let hit = self.scene.hit(world, state.hit_radius());
+        if !matches!(hit, Hit::Widget { .. }) {
+            state.focus = None;
+        }
+        match hit {
+            Hit::Widget { module, widget } => {
+                self.select_for_edit(module, shell);
+                state.focus = Some((module, widget));
+                let now = Instant::now();
+                let double = state
+                    .last_click
+                    .is_some_and(|(at, m, w)| m == module && w == widget && now - at < DOUBLE_CLICK);
+                if double {
+                    state.last_click = None;
+                    self.emit(shell, CanvasEvent::ResetControl { module, widget });
+                    return;
+                }
+                state.last_click = Some((now, module, widget));
+                let position = self.position(module, widget);
+                let click = match self.widget_kind(module, widget) {
+                    Some(WidgetViewKind::Knob { .. }) => {
+                        state.interaction = Interaction::Turning {
+                            module,
+                            widget,
+                            last_y: screen.y,
+                            position,
+                        };
+                        return;
+                    }
+                    Some(WidgetViewKind::Toggle) => Some(if position > 0.5 { 0.0 } else { 1.0 }),
+                    Some(WidgetViewKind::Radio { options }) => self
+                        .scene
+                        .module(module)
+                        .and_then(|m| m.widget_bounds(widget))
+                        .and_then(|rect| radio_option(rect, options.len(), world))
+                        .map(|option| option as f32),
+                    _ => None,
+                };
+                // Toggles and radio buttons act on release, so a drag that
+                // starts on them still moves the tile.
+                state.interaction = Interaction::Moving {
+                    ids: vec![module],
+                    start: world,
+                    applied: Vector::ZERO,
+                    click: click.map(|position| (module, widget, position)),
+                };
+            }
             Hit::Port(port) if !port.output => {
                 // Grabbing a connected input picks up its cable, like pulling
                 // a patch cable out of a jack.
@@ -455,6 +737,7 @@ impl<Message> PatchCanvas<'_, Message> {
                         ids: selection.into_iter().collect(),
                         start: world,
                         applied: Vector::ZERO,
+                        click: None,
                     };
                 }
             }
@@ -558,6 +841,14 @@ impl<Message> PatchCanvas<'_, Message> {
                 .shapes
                 .push(Shape::new(rect, r, Color::TRANSPARENT, p.hover, 1.2));
         }
+        if let Some((module, widget)) = state.focus
+            && self.selection.contains(&module)
+            && let Some(rect) = self.scene.module(module).and_then(|m| m.widget_bounds(widget))
+        {
+            overlay
+                .shapes
+                .push(Shape::new(rect.expand(1.0), 4.0, Color::TRANSPARENT, p.focus, 1.5));
+        }
         match &state.interaction {
             Interaction::Wiring { from } => {
                 if let (Some(start), Some(port), Some(cursor)) =
@@ -593,7 +884,7 @@ impl<Message> PatchCanvas<'_, Message> {
         overlay
     }
 
-    fn draw_text<Renderer>(&self, state: &State, renderer: &mut Renderer, bounds: Rectangle)
+    fn draw_text<Renderer>(&self, state: &State, values: &PanelValues, renderer: &mut Renderer, bounds: Rectangle)
     where
         Renderer: text::Renderer<Font = Font>,
     {
@@ -624,6 +915,12 @@ impl<Message> PatchCanvas<'_, Message> {
             shaping: text::Shaping::Basic,
             wrapping: text::Wrapping::None,
         };
+        // The control whose value shows instead of its label.
+        let active = match state.interaction {
+            Interaction::Turning { module, widget, .. } => Some((module, widget)),
+            _ => state.focus,
+        };
+        let mut full_label = None;
 
         for module in self.scene.modules() {
             let tile = module.bounds();
@@ -640,7 +937,7 @@ impl<Message> PatchCanvas<'_, Message> {
                 text(
                     &module.title,
                     title_px,
-                    TILE_WIDTH * zoom - 2.0 * pad,
+                    module.width() * zoom - 2.0 * pad,
                     text::Alignment::Left,
                 ),
                 title_pos,
@@ -650,29 +947,176 @@ impl<Message> PatchCanvas<'_, Message> {
             if !show_labels {
                 continue;
             }
-            let half = (TILE_WIDTH * 0.5 - 10.0) * zoom;
-            for (i, port) in module.inputs.iter().enumerate() {
+            let label_width = module.label_width();
+            let ports = module
+                .inputs
+                .iter()
+                .enumerate()
+                .map(|(i, p)| (false, i, p))
+                .chain(module.outputs.iter().enumerate().map(|(i, p)| (true, i, p)));
+            for (output, i, port) in ports {
                 let y = tile.y + HEADER + ROW * (i as f32 + 0.5);
-                let at = to_screen(Point::new(tile.x + 9.0, y));
+                let (x, align) = if output {
+                    (tile.x + module.width() - 9.0, text::Alignment::Right)
+                } else {
+                    (tile.x + 9.0, text::Alignment::Left)
+                };
+                let label = fit_label(&port.label, label_width, LABEL_SIZE);
+                let hovered = state.hover
+                    == Some(Hit::Port(PortRef {
+                        module: module.id,
+                        output,
+                        index: i,
+                    }));
+                if hovered && label != port.label.as_str() {
+                    full_label = Some((port.label.clone(), to_screen(Point::new(x, y - ROW))));
+                }
                 renderer.fill_text(
-                    text(&port.label, label_px, half, text::Alignment::Left),
-                    at,
+                    text(&label, label_px, label_width * zoom, align),
+                    to_screen(Point::new(x, y)),
                     self.palette.text_dim,
                     clip,
                 );
             }
-            for (i, port) in module.outputs.iter().enumerate() {
-                let y = tile.y + HEADER + ROW * (i as f32 + 0.5);
-                let at = to_screen(Point::new(tile.x + TILE_WIDTH - 9.0, y));
-                renderer.fill_text(
-                    text(&port.label, label_px, half, text::Alignment::Right),
-                    at,
-                    self.palette.text_dim,
-                    clip,
-                );
+
+            // Panel labels and values (panels.md, Level of detail: text only
+            // close up).
+            for (index, widget) in module.panel.widgets.iter().enumerate() {
+                let Some(rect) = module.widget_bounds(index) else {
+                    continue;
+                };
+                let width = rect.width * zoom;
+                match &widget.kind {
+                    WidgetViewKind::Knob { .. } => {
+                        let showing_value = active == Some((module.id, index));
+                        let content = match values.get(module.id, index) {
+                            Some(value) if showing_value => value.text.as_str(),
+                            _ => widget.label.as_str(),
+                        };
+                        let at = Point::new(rect.x, knob_centre(rect).y + 1.5 * GRID);
+                        let colour = if showing_value {
+                            self.palette.text
+                        } else {
+                            self.palette.text_dim
+                        };
+                        renderer.fill_text(
+                            text(content, label_px, width, text::Alignment::Center),
+                            to_screen(at),
+                            colour,
+                            clip,
+                        );
+                    }
+                    WidgetViewKind::Toggle | WidgetViewKind::Light => {
+                        let at = Point::new(rect.x, light_centre(rect).y + GRID);
+                        renderer.fill_text(
+                            text(&widget.label, label_px, width, text::Alignment::Center),
+                            to_screen(at),
+                            self.palette.text_dim,
+                            clip,
+                        );
+                    }
+                    WidgetViewKind::Radio { options } => {
+                        let at = Point::new(rect.x, rect.y + GRID * 0.5);
+                        renderer.fill_text(
+                            text(&widget.label, label_px, width, text::Alignment::Center),
+                            to_screen(at),
+                            self.palette.text_dim,
+                            clip,
+                        );
+                        for (i, option) in options.iter().enumerate() {
+                            let centre = radio_centre(rect, i);
+                            let at = Point::new(centre.x + 6.0, centre.y);
+                            renderer.fill_text(
+                                text(option, label_px, (rect.width - 12.0) * zoom, text::Alignment::Left),
+                                to_screen(at),
+                                self.palette.text,
+                                clip,
+                            );
+                        }
+                    }
+                }
             }
         }
+
+        // A cut port label shows in full while its port is hovered, in a
+        // layer above the tiles.
+        if let Some((label, at)) = full_label {
+            let size = Size::new(label.chars().count() as f32 * label_px * 0.6 + 8.0, label_px * 1.6);
+            let rect = Rectangle::new(Point::new(at.x - size.width * 0.5, at.y - size.height * 0.5), size);
+            renderer.with_layer(bounds, |renderer| {
+                renderer.fill_quad(
+                    renderer::Quad {
+                        bounds: rect,
+                        border: iced::Border::default().rounded(3.0),
+                        ..renderer::Quad::default()
+                    },
+                    self.palette.tile_border,
+                );
+                renderer.fill_text(
+                    text(&label, label_px, size.width, text::Alignment::Center),
+                    Point::new(rect.x, rect.center_y()),
+                    self.palette.text,
+                    bounds,
+                );
+            });
+        }
     }
+}
+
+/// How much a zoom level shows (panels.md, Level of detail).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Detail {
+    /// Port labels and panel text.
+    Close,
+    /// Titles and control shapes, no other text.
+    Middle,
+    /// Plain tiles: no text, no controls.
+    Far,
+}
+
+fn detail(zoom: f32) -> Detail {
+    let quantise = |size: f32| (size * 2.0).round() / 2.0;
+    if quantise(LABEL_SIZE * zoom) >= LABEL_MIN_PX {
+        Detail::Close
+    } else if quantise(TITLE_SIZE * zoom) >= TITLE_MIN_PX {
+        Detail::Middle
+    } else {
+        Detail::Far
+    }
+}
+
+/// Modules with a light on screen, at a zoom where lights are drawn.
+fn visible_lights(scene: &Scene, camera: &Camera, size: Size) -> Vec<u32> {
+    if detail(camera.zoom) == Detail::Far {
+        return Vec::new();
+    }
+    let visible = camera.visible(size);
+    scene
+        .modules()
+        .iter()
+        .filter(|m| m.panel.widgets.iter().any(|w| !w.is_control()) && m.bounds().intersects(&visible))
+        .map(|m| m.id)
+        .collect()
+}
+
+/// The control after (or with `back`, before) `current` in focus order,
+/// wrapping around. Lights are skipped. `None` if the panel has no
+/// controls.
+fn next_focus(panel: &crate::scene::PanelView, current: Option<usize>, back: bool) -> Option<usize> {
+    let controls: Vec<usize> = (0..panel.widgets.len())
+        .filter(|&i| panel.widgets[i].is_control())
+        .collect();
+    if controls.is_empty() {
+        return None;
+    }
+    let at = current.and_then(|c| controls.iter().position(|&i| i == c));
+    let next = match (at, back) {
+        (None, false) => 0,
+        (None, true) => controls.len() - 1,
+        (Some(i), false) => (i + 1) % controls.len(),
+        (Some(i), true) => (i + controls.len() - 1) % controls.len(),
+    };
+    Some(controls[next])
 }
 
 /// A slow figure-eight pan with a zoom swing, around the starting view.
@@ -704,7 +1148,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scene::{CableView, ModuleView, PortShape, PortView};
+    use crate::scene::{CableView, ModuleView, PanelView, PortShape, PortView, WidgetView};
 
     fn module(id: u32, x: f32) -> ModuleView {
         let port = || PortView {
@@ -719,7 +1163,85 @@ mod tests {
             position: Point::new(x, 0.0),
             inputs: vec![port()],
             outputs: vec![port()],
+            panel: PanelView::default(),
         }
+    }
+
+    fn widget(kind: WidgetViewKind, x: u8) -> WidgetView {
+        WidgetView {
+            kind,
+            x,
+            y: 0,
+            label: String::new(),
+        }
+    }
+
+    /// A knob, a light, and a toggle.
+    fn panel() -> PanelView {
+        PanelView {
+            width: 9,
+            height: 3,
+            widgets: vec![
+                widget(WidgetViewKind::Knob { steps: 0 }, 0),
+                widget(WidgetViewKind::Light, 3),
+                widget(WidgetViewKind::Toggle, 6),
+            ],
+        }
+    }
+
+    #[test]
+    fn tab_moves_focus_over_controls_and_skips_lights() {
+        let panel = panel();
+        assert_eq!(next_focus(&panel, None, false), Some(0));
+        assert_eq!(next_focus(&panel, Some(0), false), Some(2));
+        assert_eq!(next_focus(&panel, Some(2), false), Some(0));
+        assert_eq!(next_focus(&panel, Some(0), true), Some(2));
+        assert_eq!(next_focus(&panel, None, true), Some(2));
+        assert_eq!(next_focus(&PanelView::default(), None, false), None);
+    }
+
+    #[test]
+    fn detail_follows_the_text_thresholds() {
+        assert_eq!(detail(1.0), Detail::Close);
+        // Port labels hidden, titles shown.
+        assert_eq!(detail(0.7), Detail::Middle);
+        assert_eq!(detail(0.3), Detail::Far);
+    }
+
+    #[test]
+    fn only_lights_on_screen_are_reported() {
+        let mut lit = module(1, 0.0);
+        lit.panel = panel();
+        let far_away = ModuleView {
+            panel: panel(),
+            ..module(2, 5_000.0)
+        };
+        let plain = module(3, 200.0);
+        let scene = Scene::new(vec![lit, far_away, plain], Vec::new());
+        let camera = Camera {
+            origin: Point::new(-50.0, -50.0),
+            zoom: 1.0,
+        };
+        let size = Size::new(800.0, 600.0);
+        assert_eq!(visible_lights(&scene, &camera, size), vec![1]);
+        // Zoomed far out, lights are not drawn, so none need reading.
+        let far = Camera { zoom: 0.3, ..camera };
+        assert!(visible_lights(&scene, &far, size).is_empty());
+    }
+
+    #[test]
+    fn the_focused_control_has_a_ring() {
+        let mut m = module(1, 0.0);
+        m.panel = panel();
+        let scene = Scene::new(vec![m], Vec::new());
+        let selected = BTreeSet::from([1]);
+        let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+        let unfocused = canvas.overlay(&State::default()).shapes.len();
+        let state = State {
+            focus: Some((1, 0)),
+            ..State::default()
+        };
+        assert_eq!(canvas.overlay(&state).shapes.len(), unfocused + 1);
     }
 
     fn cable(from: u32, to: u32) -> CableView {

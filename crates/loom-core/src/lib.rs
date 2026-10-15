@@ -36,6 +36,7 @@ pub use descriptor::{
     MAX_DISPLAYS, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamMapping, ParamSpec, PortDefault, PortSpec,
     Widget, WidgetKind,
 };
+pub use display::{DisplayReader, DisplaySource};
 pub use engine::{Engine, EngineConfig, EngineStats};
 pub use error::LoomError;
 pub use graph::{Graph, InputRef, ModuleId, Node, OutputRef};
