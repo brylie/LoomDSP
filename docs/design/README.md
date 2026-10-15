@@ -40,4 +40,4 @@ Copy [template.md](template.md). Keep it to one feature. Link the ADR, requireme
 | [Telemetry](telemetry.md) | [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md) | Implemented, P1 |
 | [Panels](panels.md) | [ADR-0013](../adr/0013-modules-carry-their-own-panel.md) | Draft, P1 and P2 |
 | [Modulation](modulation.md) | [ADR-0014](../adr/0014-modulation-without-cables.md) | Draft, P1 and P2 |
-| [Clock and transport](clock.md) | [ADR-0015](../adr/0015-one-transport-per-patch.md) | Draft, P1 and P2 |
+| [Clock and transport](clock.md) | [ADR-0015](../adr/0015-one-transport-per-patch.md) | Engine sections Agreed (P1); rest Draft, P1 and P2 |
