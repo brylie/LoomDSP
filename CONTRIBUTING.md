@@ -98,6 +98,7 @@ Modules must also give the same output whether they process 1 frame or 128 frame
 2. Add it to `ALL` in `crates/loom-modules/src/lib.rs`.
 3. Give it a stable, namespaced ID (`loom.<category>.<name>`) and version 1. Never rename a released ID, port, or parameter. Add a new version instead.
 4. Mark whole-number parameters (channels, counts, seeds) with `.integer()` on their `ParamSpec`, so they round and the inspector snaps to whole values.
+   Mark frequencies and times with `.logarithmic()`, so equal steps of the control give equal ratios. Controls and modulation both use this mapping ([parameter mapping](docs/design/modulation.md#parameter-mapping)).
 5. Add a reference test to `crates/loom-modules/tests/reference.rs` with the [module test harness](docs/design/module-test-harness.md) (`loom-test`). It checks that block size does not change the output and compares with a short reference render. Create the file with `LOOM_UPDATE_REFERENCES=1 cargo test -p loom-modules --test reference`, listen to it, and commit it. Reviewers can listen to it too. For smaller checks, write unit tests with `loom_core::testing::run`.
 6. Run the full test suite, then try the module in the app: `cargo run --release -p loom-app`, pick it in the toolbar, and click **Add**.
 

@@ -3,10 +3,10 @@
 How any output modulates any parameter without a cable, and how users make, see, and edit those assignments.
 
 - **Kind:** living specification.
-- **Status:** Draft. Review it before building. The P1 slice becomes Agreed first.
+- **Status:** Draft. Review it before building. The P1 slice becomes Agreed first. [Parameter mapping](#parameter-mapping) is Agreed.
 - **Decision behind it:** [ADR-0014](../adr/0014-modulation-without-cables.md) (modulation without cables). Builds on [ADR-0013](../adr/0013-modules-carry-their-own-panel.md) (panels) and [ADR-0007](../adr/0007-polymorphic-signal-model.md) (signals).
 - **Requirements:** FR-MOD-01 to FR-MOD-08, FR-LIB-12.
-- **Issues:** [#19](https://github.com/brylie/LoomDSP/issues/19) (built-in modulation), [#20](https://github.com/brylie/LoomDSP/issues/20) (modulation range on controls).
+- **Issues:** [#19](https://github.com/brylie/LoomDSP/issues/19) (built-in modulation), [#20](https://github.com/brylie/LoomDSP/issues/20) (modulation range on controls), [#66](https://github.com/brylie/LoomDSP/issues/66) (parameter mapping).
 
 ## Goal
 
@@ -77,6 +77,40 @@ A panel beside the inspector. Columns: on, source (module and output), target (m
     2. The module applies its input to that value in the input's own units (for the filter, pitch at 0.1 per octave), then clamps to the parameter range again.
 
     The module's help page states how its inputs apply. *Why:* both are common, and neither should silently replace the other. A fixed order means the same base, cable, and assignments give the same value in every module.
+
+## Parameter mapping
+
+**Status:** Agreed ([#66](https://github.com/brylie/LoomDSP/issues/66)).
+
+Every parameter maps between its value and its control's position, from 0 to 1. Rules 2 and 3 use this mapping.
+
+| Mapping | Position `t` to value | Use |
+|---|---|---|
+| Linear (the default) | `min + t × (max - min)` | Most parameters. Whole-number parameters are always linear. |
+| Logarithmic | `min × (max / min)^t` | Frequencies and times. Equal steps of the control give equal ratios, so a tenth of a 20 Hz to 20 kHz knob is about one octave anywhere on it. |
+
+- **The mapping is part of `ParamSpec`.** `ParamSpec::new` is linear; `.logarithmic()` makes a parameter logarithmic. Nothing is guessed from the unit. *Why:* the module author knows how the parameter should feel. A guess can be wrong, and then the arc lies.
+- **`loom-core` has the two functions:** `ParamSpec::normalize(value)` gives the position, and `ParamSpec::denormalize(position)` gives the value. The inspector, panel controls, and the engine's modulation use only these. *Why:* rule 3.
+- **Every result is valid.** `normalize` clamps the value into range and returns a position from 0 to 1. `denormalize` clamps the position to 0 to 1 and returns the value as `ParamSpec::clamp` gives it: in range, and rounded for whole numbers. NaN in either becomes the default value. *Why:* callers never need to clamp again.
+- **The registry refuses impossible mappings:** a logarithmic parameter that is a whole number, or whose minimum is 0 or less. *Why:* there is no logarithm of 0, and whole numbers must step evenly, one value per step.
+- **Built-in parameters in Hz or seconds are logarithmic:** the filter cutoff and the envelope's attack, decay, and release times. All others are linear.
+- **The mapping is not saved in patch files.** Patches store values, not positions. *Why:* changing a parameter's mapping later never changes how a saved patch sounds.
+
+### Acceptance criteria: parameter mapping
+
+- [x] `denormalize(normalize(v))` returns `v` (within 1e-4, relative) at the minimum, default, and maximum of linear and logarithmic parameters.
+- [x] For cutoff (20 Hz to 20 kHz), position 0.5 is about 632 Hz, and each step of 0.1 multiplies the value by about 2.
+- [x] Whole-number parameters round, and step one value at a time across the whole range.
+- [x] Out-of-range values, positions, and NaN give valid results.
+- [x] The registry refuses a logarithmic whole-number parameter and a logarithmic parameter with a minimum of 0 or less.
+- [x] Every built-in parameter in Hz or seconds is logarithmic.
+- [x] The inspector uses `normalize` and `denormalize`. The app no longer guesses a mapping.
+
+### Out of scope
+
+- Decibel and stepped mappings (FR-PANEL-04, P2).
+- Skewed or custom curves.
+- The engine's modulation itself ([#19](https://github.com/brylie/LoomDSP/issues/19)). It will use these functions.
 
 ## Engine and API
 

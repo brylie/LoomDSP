@@ -31,7 +31,7 @@ pub mod transport;
 
 pub use compile::{CompileReport, FeedbackLoop};
 pub use controller::{Controller, EngineParts, MidiSender, create_engine};
-pub use descriptor::{ModuleConfig, ModuleDescriptor, ModuleRole, ParamSpec, PortDefault, PortSpec};
+pub use descriptor::{ModuleConfig, ModuleDescriptor, ModuleRole, ParamMapping, ParamSpec, PortDefault, PortSpec};
 pub use engine::{Engine, EngineConfig, EngineStats};
 pub use error::LoomError;
 pub use graph::{Graph, InputRef, ModuleId, Node, OutputRef};

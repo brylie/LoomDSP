@@ -57,4 +57,19 @@ mod tests {
     fn all_modules_register() {
         assert_eq!(super::registry().len(), super::ALL.len());
     }
+
+    #[test]
+    fn parameters_in_hz_and_seconds_are_logarithmic() {
+        use loom_core::ParamMapping;
+        for descriptor in super::ALL {
+            for param in descriptor.params {
+                let expected = if matches!(param.unit, "Hz" | "s") {
+                    ParamMapping::Logarithmic
+                } else {
+                    ParamMapping::Linear
+                };
+                assert_eq!(param.mapping, expected, "{}.{}", descriptor.id, param.name);
+            }
+        }
+    }
 }

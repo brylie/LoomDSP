@@ -49,7 +49,7 @@ Every panel uses the same widget set.
 
 ## Bindings
 
-- **Control to parameter.** A control takes its range, unit, and mapping (linear, logarithmic, whole numbers) from the parameter's `ParamSpec`. *Why:* the slider mapping work in the inspector (logarithmic Hz, snapping integers) then applies everywhere for free.
+- **Control to parameter.** A control takes its range, unit, and mapping (linear, logarithmic, whole numbers) from the parameter's `ParamSpec`, through `ParamSpec::normalize` and `denormalize` ([parameter mapping](modulation.md#parameter-mapping), Agreed). *Why:* the slider mapping work in the inspector (logarithmic Hz, snapping integers) then applies everywhere for free.
 - **Display to port.** A scope or meter reads a port probe through the telemetry queues.
 - **Display to module value.** A light or step position reads a **display value**: a small, fixed set of numbers a module publishes once per block. *Why:* a step sequencer's position is internal state, not a port, and it should not need a cable to be seen.
 - **Editor to module data.** A step grid or graph that edits a pattern writes module data (OQ-17), with undo.

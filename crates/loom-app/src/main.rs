@@ -273,7 +273,7 @@ impl App {
                     .node(ModuleId(module))
                     .and_then(|n| n.descriptor.params.get(index))
                 {
-                    let value = param::from_slider(spec, position);
+                    let value = spec.denormalize(position);
                     if let Err(e) = self.controller.set_param(ModuleId(module), index, value) {
                         self.status = format!("error: {e}");
                     }
@@ -449,7 +449,7 @@ impl App {
                                     space::horizontal(),
                                     text(param::format(spec, *value)).size(12).color(DIM),
                                 ],
-                                slider(0.0..=1.0, param::to_slider(spec, *value), move |position| {
+                                slider(0.0..=1.0, spec.normalize(*value), move |position| {
                                     Message::Param {
                                         module: id,
                                         index,

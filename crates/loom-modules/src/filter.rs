@@ -25,7 +25,7 @@ pub static SVF: ModuleDescriptor = ModuleDescriptor {
         PortSpec::new("highpass", SignalType::Audio),
     ],
     params: &[
-        ParamSpec::new("cutoff", 20.0, 20_000.0, 1_000.0, "Hz"),
+        ParamSpec::new("cutoff", 20.0, 20_000.0, 1_000.0, "Hz").logarithmic(),
         ParamSpec::new("resonance", 0.0, 1.0, 0.2, ""),
     ],
     role: ModuleRole::Dsp(|config| Box::new(Svf::new(config))),

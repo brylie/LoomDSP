@@ -15,10 +15,10 @@ pub static ADSR: ModuleDescriptor = ModuleDescriptor {
     inputs: &[PortSpec::new("gate", SignalType::Gate)],
     outputs: &[PortSpec::new("out", SignalType::Modulation)],
     params: &[
-        ParamSpec::new("attack", 0.0005, 10.0, 0.01, "s"),
-        ParamSpec::new("decay", 0.0005, 10.0, 0.2, "s"),
+        ParamSpec::new("attack", 0.0005, 10.0, 0.01, "s").logarithmic(),
+        ParamSpec::new("decay", 0.0005, 10.0, 0.2, "s").logarithmic(),
         ParamSpec::new("sustain", 0.0, 1.0, 0.7, ""),
-        ParamSpec::new("release", 0.0005, 10.0, 0.3, "s"),
+        ParamSpec::new("release", 0.0005, 10.0, 0.3, "s").logarithmic(),
     ],
     role: ModuleRole::Dsp(|config| Box::new(Adsr::new(config))),
 };

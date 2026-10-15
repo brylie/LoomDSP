@@ -1,6 +1,6 @@
 //! The set of module types available to patches.
 
-use crate::descriptor::{ModuleDescriptor, ModuleRole, PortDefault};
+use crate::descriptor::{ModuleDescriptor, ModuleRole, ParamMapping, PortDefault};
 use crate::error::LoomError;
 use std::collections::BTreeMap;
 
@@ -63,6 +63,16 @@ impl Registry {
             .any(|port| matches!(port.default, PortDefault::Value(value) if !value.is_finite()))
         {
             return Err(invalid("an input default must be a finite number"));
+        }
+        for param in descriptor.params {
+            if param.mapping == ParamMapping::Logarithmic {
+                if param.integer {
+                    return Err(invalid("a whole-number parameter cannot be logarithmic"));
+                }
+                if param.min.is_nan() || param.min <= 0.0 {
+                    return Err(invalid("a logarithmic parameter needs a minimum above 0"));
+                }
+            }
         }
         match descriptor.role {
             ModuleRole::UnitDelay if descriptor.inputs.len() != 1 || descriptor.outputs.len() != 1 => {
@@ -154,5 +164,36 @@ mod tests {
         };
         let error = Registry::new().register(&NAN_DEFAULT).unwrap_err();
         assert!(error.to_string().contains("finite"), "{error}");
+    }
+
+    /// A DSP module with the given parameters, for registry checks.
+    macro_rules! with_params {
+        ($($param:expr),*) => {{
+            static DESCRIPTOR: ModuleDescriptor = ModuleDescriptor {
+                id: "test.params",
+                version: 1,
+                name: "Params",
+                category: "Test",
+                description: "",
+                inputs: &[],
+                outputs: &[],
+                params: &[$($param),*],
+                role: ModuleRole::Dsp(|_| unreachable!("never created")),
+            };
+            &DESCRIPTOR
+        }};
+    }
+
+    #[test]
+    fn refuses_impossible_logarithmic_parameters() {
+        use crate::ParamSpec;
+        let whole = with_params!(ParamSpec::new("count", 1.0, 100.0, 1.0, "").integer().logarithmic());
+        let error = Registry::new().register(whole).unwrap_err();
+        assert!(error.to_string().contains("whole-number"), "{error}");
+        let from_zero = with_params!(ParamSpec::new("time", 0.0, 10.0, 1.0, "s").logarithmic());
+        let error = Registry::new().register(from_zero).unwrap_err();
+        assert!(error.to_string().contains("minimum above 0"), "{error}");
+        let fine = with_params!(ParamSpec::new("time", 0.001, 10.0, 1.0, "s").logarithmic());
+        assert!(Registry::new().register(fine).is_ok());
     }
 }
