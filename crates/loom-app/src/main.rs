@@ -5,6 +5,7 @@
 //! canvas against the performance gates in NFR-PERF-04.
 
 mod layout;
+mod live;
 mod param;
 mod scene;
 
@@ -13,8 +14,11 @@ use iced::widget::{
     button, column, container, pick_list, row, rule, scrollable, slider, space, text, toggler, tooltip,
 };
 use iced::{Color, Element, Length, Point, Subscription, Theme};
+use live::Live;
 use loom_canvas::{CanvasEvent, PatchCanvas, Scene};
-use loom_core::{Controller, EngineConfig, EngineParts, InputRef, MidiEvent, ModuleId, OutputRef, create_engine};
+use loom_core::{
+    Controller, EngineConfig, EngineParts, InputRef, MidiEvent, ModuleId, OutputRef, Telemetry, create_engine,
+};
 use loom_host_desktop::{AudioOptions, AudioOutput, CallbackStats, MidiConnection, RunningAudio, SharedMidi};
 use loom_patch::Patch;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -72,6 +76,10 @@ struct App {
     save_path: PathBuf,
     theme: Theme,
     _audio: Option<RunningAudio>,
+    /// Meter and scope data from the engine. Drained on every tick, so the
+    /// queues never fill, even before anything draws it.
+    telemetry: Telemetry,
+    live: Live,
     /// Open MIDI inputs. Input stops when they are dropped.
     midi_ports: Vec<MidiConnection>,
     audio_stats: Option<Arc<CallbackStats>>,
@@ -100,7 +108,7 @@ impl App {
             mut controller,
             engine,
             midi: sender,
-            ..
+            telemetry,
         } = create_engine(loom_modules::registry(), EngineConfig::with_sample_rate(sample_rate));
 
         let mut status = String::new();
@@ -183,6 +191,8 @@ impl App {
             ),
             audio_stats: audio.as_ref().map(|a| a.stats().clone()),
             _audio: audio,
+            telemetry,
+            live: Live::new(),
             midi_ports,
             audio_name,
             midi,
@@ -240,6 +250,8 @@ impl App {
     }
 
     fn commit(&mut self) {
+        // Probes follow the graph: a removed module loses its probes.
+        self.live.sync(&mut self.controller);
         match self.controller.commit() {
             Ok(_) => self.report(),
             Err(e) => self.status = format!("error: {e}"),
@@ -319,8 +331,12 @@ impl App {
             Message::Frame(now) => {
                 self.meter.record(now);
                 self.controller.collect_garbage();
+                self.live.drain(&mut self.telemetry, now);
             }
-            Message::Tick => self.controller.collect_garbage(),
+            Message::Tick => {
+                self.controller.collect_garbage();
+                self.live.drain(&mut self.telemetry, Instant::now());
+            }
         }
     }
 
@@ -476,13 +492,20 @@ impl App {
         let audio = match &self.audio_stats {
             Some(stats) => {
                 let s = stats.snapshot();
-                format!(
+                let engine = self.controller.stats();
+                let dropped = engine.dropped_meters.load(std::sync::atomic::Ordering::Relaxed)
+                    + engine.dropped_scope.load(std::sync::atomic::Ordering::Relaxed);
+                let mut line = format!(
                     "{} | load {:.0}% (max {:.0}%) | overruns {}",
                     self.audio_name,
                     s.last_load * 100.0,
                     s.max_load * 100.0,
                     s.overruns
-                )
+                );
+                if dropped > 0 {
+                    line.push_str(&format!(" | telemetry dropped {dropped}"));
+                }
+                line
             }
             None => self.audio_name.clone(),
         };

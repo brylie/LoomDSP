@@ -6,7 +6,7 @@ How meter and scope data travels from the audio thread to the UI.
 - **Decision behind it:** [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md) (lock-free boundary between control and audio threads).
 - **Requirements:** FR-VIS-04, NFR-RT-01, NFR-RT-07. It serves FR-VIS-01 (live values on ports) and FR-VIS-02 (scope on any cable).
 - **Issue:** [#6](https://github.com/brylie/LoomDSP/issues/6).
-- **Code:** `crates/loom-core/src/telemetry.rs`, `Engine::send_telemetry` in `engine.rs`, probes in `compile.rs`.
+- **Code:** `crates/loom-core/src/telemetry.rs`, `Engine::send_telemetry` in `engine.rs`, probes in `compile.rs`. App side: `crates/loom-app/src/live.rs`.
 
 ## How it works
 
@@ -49,13 +49,28 @@ ADR-0001 suggests triple buffering for large telemetry. A triple buffer shows on
 
 Drain the queues once per UI frame. At 60 frames per second, one scope fills about 13 chunks per frame, so the defaults leave plenty of room for several probes.
 
+## In the desktop app
+
+The app keeps the `Telemetry` handle from `create_engine` and drains it on every tick, so the queues never fill. Nothing is drawn yet. `crates/loom-app/src/live.rs` holds the pieces that later displays will use:
+
+- **`Live::sync`** runs before every `Controller::commit`. It keeps meter probes in step with the graph: with signal activity on, every output that has a cable gets one `Meter` probe, and probes of removed modules are forgotten. Activity is off, so the app requests no probes today. *Why:* nothing shows the levels yet. Probes would cost engine work, and moving values would keep the app redrawing, so an idle patch would never be idle (ADR-0010).
+- **`Live::drain`** takes all waiting telemetry. For each meter it keeps the highest peak and maps it to a level from 0 to 1: -60 dB and below is 0, 0 dB (1.0, or 10 V) and above is 1. The level rises at once and falls by 1.0 per second, using the time since the last call, so the call rate does not change it.
+- **`ScopeTrace`** turns the chunks of one scope probe into a stable trace:
+  1. It keeps one second of samples. If the frame stamps show a gap, it clears the history first. *Why:* drawing across lost samples would show a step that is not in the signal.
+  2. It finds the latest rising edge that still has a full window after it. The trigger level is halfway between the lowest and highest sample in the history, so signals with an offset, such as envelopes and pitch, trigger too. An edge counts only if the signal was below the level by a tenth of its swing before it, so noise on a slow edge cannot trigger twice. A flat signal falls back to the latest samples ("free run").
+  3. It finds the crossing to a fraction of a sample (`offset`). *Why:* a period is rarely a whole number of samples. Drawing shifted by the fraction keeps the wave still instead of jittering by up to one sample per frame.
+  4. It picks a vertical range from 0.01, 0.02, 0.05, ... 10. The range grows at once and shrinks only when the trace uses less than 40% of it, so it does not flicker.
+
+The planned direction for displays: signal displays are modules in the grid, not views laid over the canvas (ADR-0011, everything is a module). A scope module saves with the patch, sits next to the signal it shows, travels inside sub-patches, and can go on a front panel. It animates only while its tile is visible and large enough to read.
+
 ## Tests
 
 - `crates/loom-modules/tests/engine.rs`: the scope reproduces the probed signal sample for sample, meters match each block, probes inside feedback loops see every sample, full queues drop telemetry but not audio, and removed probes stop sending.
 - `crates/loom-modules/tests/no_alloc.rs`: every output probed while the graph is edited, with queues both drained and full.
+- `crates/loom-app/src/live.rs`: no probes while activity is off; telemetry from a running engine reaches meter levels and a triggered trace; probes follow removed modules and the activity switch. Trigger: rising edges, the same phase across frames with a period that is not a whole number of samples, signals with an offset, noise on the edge, flat signals. Gaps clear the history. Range steps.
 
 ## Open points
 
-- The app does not draw meters or scopes yet. They will be displays on module panels: a scope module and port activity ([panels specification](panels.md)).
+- The app does not draw meters or scopes yet (FR-VIS-01, FR-VIS-02). Planned, in the [panels specification](panels.md): a scope module that reads its probe through these queues, drawn by the canvas inside its tile, and an activity display without constant motion (for example a "carrying signal" or "silent" port marker, or levels only on hover). Meters must not brighten cables: pulsing cables are tiring and hide the hover focus in large patches.
 - Module display values (a sequencer's current step, an envelope's stage) need a path of their own, beside port probes. See the panels specification.
 - Probes on one port are independent. Two views of the same port send the data twice.
