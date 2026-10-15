@@ -90,9 +90,6 @@ pub struct Geometry {
     /// Cables, drawn behind the tiles and dimmed. Focused cables are drawn
     /// again in front, from the overlay.
     pub cables: Vec<Cable>,
-    /// Source output (module, index) of each cable in `cables`, so live
-    /// levels can be looked up every frame without rebuilding the cables.
-    pub sources: Vec<(u32, usize)>,
     /// Tiles, then ports. Tiles come first so cables can go between them.
     pub shapes: Vec<Shape>,
     /// Number of tile shapes at the start of `shapes`.
@@ -104,7 +101,6 @@ impl Geometry {
     pub fn build(scene: &Scene, palette: &Palette) -> Self {
         let mut connected: HashSet<(u32, bool, usize)> = HashSet::new();
         let mut cables = Vec::with_capacity(scene.cables().len());
-        let mut sources = Vec::with_capacity(scene.cables().len());
         for cable in scene.cables() {
             let (Some(from), Some(to)) = (
                 scene.module(cable.from.0).filter(|m| cable.from.1 < m.outputs.len()),
@@ -114,7 +110,6 @@ impl Geometry {
             };
             connected.insert((cable.from.0, true, cable.from.1));
             connected.insert((cable.to.0, false, cable.to.1));
-            sources.push(cable.from);
             cables.push(Cable::new(
                 from.output_position(cable.from.1),
                 to.input_position(cable.to.1),
@@ -168,7 +163,6 @@ impl Geometry {
         Self {
             generation: scene.generation(),
             cables,
-            sources,
             shapes,
             tiles,
         }
@@ -176,14 +170,12 @@ impl Geometry {
 }
 
 /// Things drawn on top of the scene that change often: selection, hover,
-/// the cable being dragged, the selection box, port level halos.
+/// the cable being dragged, the selection box.
 #[derive(Debug, Default, Clone)]
 pub struct Overlay {
     /// Cables in front of the tiles: those of selected and hovered modules,
     /// and the one being dragged.
     pub cables: Vec<Cable>,
-    /// Live level of each cable in `cables`, 0.0 to 1.0.
-    pub levels: Vec<f32>,
     /// Shapes (outlines, highlights).
     pub shapes: Vec<Shape>,
 }
@@ -193,9 +185,6 @@ pub struct Overlay {
 pub struct CanvasPrimitive {
     pub(crate) geometry: Arc<Geometry>,
     pub(crate) overlay: Overlay,
-    /// Live level of each cable in `geometry.cables`, 0.0 to 1.0. Uploaded
-    /// every frame: one float per cable, while the cables stay as they are.
-    pub(crate) levels: Vec<f32>,
     pub(crate) camera: Camera,
     /// Opacity of cables that are not in focus.
     pub(crate) cable_dim: f32,
@@ -271,17 +260,12 @@ pub struct CanvasPipeline {
     scene_shapes: InstanceBuffer,
     overlay_cables: InstanceBuffer,
     overlay_shapes: InstanceBuffer,
-    scene_levels: InstanceBuffer,
-    overlay_levels: InstanceBuffer,
     uploaded: u64,
     tiles: u32,
 }
 
 const SHAPE_ATTRIBUTES: [wgpu::VertexAttribute; 4] =
     wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x4];
-
-/// The live level of a cable, from a second instance buffer.
-const LEVEL_ATTRIBUTES: [wgpu::VertexAttribute; 1] = wgpu::vertex_attr_array![4 => Float32];
 
 impl Pipeline for CanvasPipeline {
     fn new(device: &wgpu::Device, _queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self {
@@ -374,14 +358,7 @@ impl Pipeline for CanvasPipeline {
                 "loom-canvas cables",
                 "vs_cable",
                 "fs_cable",
-                &[
-                    instance_layout(std::mem::size_of::<Cable>()),
-                    wgpu::VertexBufferLayout {
-                        array_stride: std::mem::size_of::<f32>() as u64,
-                        step_mode: wgpu::VertexStepMode::Instance,
-                        attributes: &LEVEL_ATTRIBUTES,
-                    },
-                ],
+                &[instance_layout(std::mem::size_of::<Cable>())],
             ),
             grid: make("loom-canvas grid", "vs_grid", "fs_grid", &[]),
             globals,
@@ -390,8 +367,6 @@ impl Pipeline for CanvasPipeline {
             scene_shapes: InstanceBuffer::new(device, "loom-canvas scene shapes"),
             overlay_cables: InstanceBuffer::new(device, "loom-canvas overlay cables"),
             overlay_shapes: InstanceBuffer::new(device, "loom-canvas overlay shapes"),
-            scene_levels: InstanceBuffer::new(device, "loom-canvas scene cable levels"),
-            overlay_levels: InstanceBuffer::new(device, "loom-canvas overlay cable levels"),
             uploaded: 0,
             tiles: 0,
         }
@@ -430,10 +405,6 @@ impl Primitive for CanvasPrimitive {
         }
         pipeline.overlay_cables.upload(device, queue, &self.overlay.cables);
         pipeline.overlay_shapes.upload(device, queue, &self.overlay.shapes);
-        // Levels change every frame, but they are one float per cable. The
-        // cable instances above stay on the GPU until the scene changes.
-        pipeline.scene_levels.upload(device, queue, &self.levels);
-        pipeline.overlay_levels.upload(device, queue, &self.overlay.levels);
     }
 
     fn draw(&self, pipeline: &CanvasPipeline, pass: &mut wgpu::RenderPass<'_>) -> bool {
@@ -444,50 +415,39 @@ impl Primitive for CanvasPrimitive {
 
         // Cables behind the tiles, so modules read as solid objects. Then the
         // focused cables in front, then ports over every cable end, then the
-        // selection and hover outlines and level halos.
+        // selection and hover outlines.
         let tiles = pipeline.tiles.min(pipeline.scene_shapes.len);
-        // A cable layer draws only as many cables as it has levels for, so
-        // the level buffer is never read past its end.
-        let scene_cables = pipeline.scene_cables.len.min(pipeline.scene_levels.len);
-        let overlay_cables = pipeline.overlay_cables.len.min(pipeline.overlay_levels.len);
         let layers = [
             (
                 &pipeline.cables,
                 &pipeline.scene_cables,
-                Some(&pipeline.scene_levels),
                 CABLE_VERTICES,
-                0..scene_cables,
+                0..pipeline.scene_cables.len,
             ),
-            (&pipeline.shapes, &pipeline.scene_shapes, None, 4, 0..tiles),
+            (&pipeline.shapes, &pipeline.scene_shapes, 4, 0..tiles),
             (
                 &pipeline.cables,
                 &pipeline.overlay_cables,
-                Some(&pipeline.overlay_levels),
                 CABLE_VERTICES,
-                0..overlay_cables,
+                0..pipeline.overlay_cables.len,
             ),
             (
                 &pipeline.shapes,
                 &pipeline.scene_shapes,
-                None,
                 4,
                 tiles..pipeline.scene_shapes.len,
             ),
             (
                 &pipeline.shapes,
                 &pipeline.overlay_shapes,
-                None,
                 4,
                 0..pipeline.overlay_shapes.len,
             ),
         ];
-        for (render, buffer, levels, vertices, instances) in layers {
+        for (render, buffer, vertices, instances) in layers {
             if !instances.is_empty() {
                 pass.set_pipeline(render);
                 pass.set_vertex_buffer(0, buffer.slice());
-                if let Some(levels) = levels {
-                    pass.set_vertex_buffer(1, levels.slice());
-                }
                 pass.draw(0..vertices, instances);
             }
         }
@@ -586,7 +546,6 @@ mod tests {
         );
         let geometry = Geometry::build(&scene, &Palette::default());
         assert_eq!(geometry.cables.len(), 1);
-        assert_eq!(geometry.sources, vec![(1, 0)]);
         // Three shapes per tile plus one per port.
         assert_eq!(geometry.shapes.len(), 2 * 3 + 6);
         assert_eq!(geometry.tiles, 2 * 3);

@@ -1,80 +1,135 @@
-//! Live views fed by engine telemetry: signal activity on cables and ports
-//! (FR-VIS-01) and oscilloscopes on probed outputs (FR-VIS-02).
+//! Engine telemetry in the app (FR-VIS-04).
 //!
-//! The app keeps probes in step with the graph: a meter on every output that
-//! has a cable while activity is on, and a scope on each output the user
-//! clicked. Once per UI frame it drains the telemetry queues, turns meter
-//! readings into levels for the canvas, and finds a trigger point in each
-//! scope's recent samples. See `docs/design/telemetry.md`.
+//! [`Live`] keeps meter probes in step with the graph ([`Live::sync`], called
+//! before every commit) and drains the telemetry queues once per tick
+//! ([`Live::drain`]). [`ScopeTrace`] turns the samples of a scope probe into a
+//! stable, triggered trace with a fitting vertical range.
+//!
+//! Nothing here is drawn yet. Signal displays will be modules in the grid (a
+//! scope module, and a quiet activity display for FR-VIS-01), not views laid
+//! over the canvas. Until they exist the app requests no probes, so the
+//! engine does no extra work and an idle patch stays idle. The code and its
+//! tests stay here for those modules to build on. See
+//! `docs/design/telemetry.md`.
 
-use iced::Color;
-use loom_canvas::{PortLevels, PortRef};
-use loom_core::{Controller, LoomError, OutputRef, ProbeId, ProbeKind, Telemetry};
+// Dormant until the signal display modules use it: only tests call some of it.
+#![cfg_attr(not(test), allow(dead_code))]
+
+use loom_core::{Controller, OutputRef, ProbeId, ProbeKind, ScopeChunk, Telemetry};
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::time::Instant;
 
-/// At most this many scopes are open. Opening another closes the oldest.
-/// Four is the number the canvas must hold 60 fps with (ADR-0010).
-pub const MAX_SCOPES: usize = 4;
-
-/// Time windows a scope can show, in seconds.
-pub const WINDOWS: [f32; 4] = [0.005, 0.02, 0.1, 0.5];
-
-/// Window a new scope starts with: 20 ms shows a few cycles of a bass note.
-const DEFAULT_WINDOW: usize = 1;
-
-/// Levels from -60 dB to 0 dB (1.0, or 10 V) map to 0..1 on the canvas.
+/// Levels from -60 dB to 0 dB map to 0..1.
 const FLOOR_DB: f32 = -60.0;
 
-/// How fast a level falls, in canvas units per second. The meters rise at
-/// once and fall over about a second, so short notes stay visible.
+/// How fast a level falls, in level units per second. Levels rise at once
+/// and fall over about a second, so short notes stay visible.
 const RELEASE_PER_SECOND: f32 = 1.0;
-
-/// Smallest change in a level that is worth a redraw.
-const LEVEL_EPSILON: f32 = 0.002;
 
 /// Vertical ranges a scope picks from. Half-steps keep the trace large
 /// without the range jumping on every frame.
 const RANGES: [f32; 10] = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0];
 
-/// A meter on one output, for signal activity.
+/// A meter on one output.
 struct Meter {
     probe: ProbeId,
-    /// Highest peak since the last frame.
+    /// Highest peak since the last drain.
     peak: f32,
-    /// Displayed level, 0..1.
+    /// Smoothed level, 0..1.
     level: f32,
 }
 
-/// One open oscilloscope.
-pub struct ScopeView {
-    /// The output being watched.
-    pub output: OutputRef,
-    probe: ProbeId,
-    /// "Module #id: port".
-    pub title: String,
-    /// The port's signal colour.
-    pub colour: Color,
-    /// Index into [`WINDOWS`].
-    pub window: usize,
-    history: History,
-    /// Samples to draw: one window plus one sample.
-    pub trace: Vec<f32>,
-    /// How far the trigger lies past `trace[0]`, as a fraction of a sample.
-    pub offset: f32,
-    /// Samples across the full width.
-    pub span: f32,
-    /// Value at the top edge.
-    pub range: f32,
-    /// True if the last frame found a trigger. Otherwise the scope shows the
-    /// latest samples as they come ("free run").
-    pub triggered: bool,
+/// Meter probes and levels for the app.
+#[derive(Default)]
+pub struct Live {
+    activity: bool,
+    meters: BTreeMap<OutputRef, Meter>,
+    by_probe: HashMap<ProbeId, OutputRef>,
+    last: Option<Instant>,
 }
 
-impl ScopeView {
-    /// Label for the time window, such as "20 ms".
-    pub fn window_label(&self) -> String {
-        format!("{} ms", WINDOWS[self.window] * 1000.0)
+impl Live {
+    /// No probes until signal activity is turned on.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Turns metering of every connected output on or off. Call
+    /// [`Live::sync`] and commit after.
+    pub fn set_activity(&mut self, on: bool) {
+        self.activity = on;
+    }
+
+    /// Smoothed level of an output, 0..1. Zero if it is not metered.
+    pub fn level(&self, output: OutputRef) -> f32 {
+        self.meters.get(&output).map_or(0.0, |m| m.level)
+    }
+
+    /// True if any probe is active, so telemetry may arrive.
+    pub fn has_probes(&self) -> bool {
+        !self.by_probe.is_empty()
+    }
+
+    /// Brings the probes in line with the graph. Call it before
+    /// [`Controller::commit`], so the changes take effect together.
+    ///
+    /// Probes whose module was removed are forgotten. With activity on,
+    /// every output that has a cable gets a meter.
+    pub fn sync(&mut self, controller: &mut Controller) {
+        let wanted: BTreeSet<OutputRef> = if self.activity {
+            controller.graph().cables().map(|(from, _)| from).collect()
+        } else {
+            BTreeSet::new()
+        };
+        let stale: Vec<OutputRef> = self
+            .meters
+            .iter()
+            .filter(|(output, meter)| !wanted.contains(output) || controller.probe(meter.probe).is_none())
+            .map(|(&output, _)| output)
+            .collect();
+        for output in stale {
+            if let Some(meter) = self.meters.remove(&output) {
+                // Already gone if its module was removed.
+                let _ = controller.remove_probe(meter.probe);
+                self.by_probe.remove(&meter.probe);
+            }
+        }
+        for output in wanted {
+            if self.meters.contains_key(&output) {
+                continue;
+            }
+            if let Ok(probe) = controller.add_probe(output, ProbeKind::Meter) {
+                self.by_probe.insert(probe, output);
+                self.meters.insert(
+                    output,
+                    Meter {
+                        probe,
+                        peak: 0.0,
+                        level: 0.0,
+                    },
+                );
+            }
+        }
+    }
+
+    /// Takes all waiting telemetry and updates the levels. Levels fall with
+    /// the time since the last call, so the call rate does not change them.
+    pub fn drain(&mut self, telemetry: &mut Telemetry, now: Instant) {
+        for reading in telemetry.meters() {
+            if let Some(meter) = self.by_probe.get(&reading.probe).and_then(|o| self.meters.get_mut(o)) {
+                meter.peak = meter.peak.max(reading.peak);
+            }
+        }
+        // No scope probes yet. Empty the queue anyway, so a stray chunk can
+        // never fill it.
+        telemetry.scope().for_each(drop);
+
+        let dt = self.last.map_or(0.0, |last| (now - last).as_secs_f32()).min(0.25);
+        self.last = Some(now);
+        for meter in self.meters.values_mut() {
+            meter.level = decay(meter.level, normalise(meter.peak), dt);
+            meter.peak = 0.0;
+        }
     }
 }
 
@@ -109,226 +164,78 @@ impl History {
     }
 }
 
-/// Telemetry state for the app.
-pub struct Live {
-    sample_rate: f32,
-    activity: bool,
-    meters: BTreeMap<OutputRef, Meter>,
-    by_probe: HashMap<ProbeId, OutputRef>,
-    scopes: Vec<ScopeView>,
-    /// Ports with an open scope, for the canvas.
-    scope_ports: Vec<PortRef>,
-    levels: PortLevels,
-    /// True if the last frame changed something on screen.
-    changing: bool,
-    last: Option<Instant>,
+/// A triggered oscilloscope trace for one scope probe (FR-VIS-02).
+///
+/// Push every [`ScopeChunk`] of the probe, then call [`ScopeTrace::update`]
+/// once per frame with the window to show.
+pub struct ScopeTrace {
+    history: History,
+    /// Samples to draw: one window plus one sample.
+    pub trace: Vec<f32>,
+    /// How far the trigger lies past `trace[0]`, as a fraction of a sample.
+    /// Shift the drawing left by this much, so the wave stays still even when
+    /// its period is not a whole number of samples.
+    pub offset: f32,
+    /// Samples across the full width.
+    pub span: f32,
+    /// Value at the top edge. The bottom edge is `-range`.
+    pub range: f32,
+    /// True if the last update found a trigger. Otherwise the trace is the
+    /// latest window ("free run").
+    pub triggered: bool,
 }
 
-fn port_ref(output: OutputRef) -> PortRef {
-    PortRef {
-        module: output.module.0,
-        output: true,
-        index: output.port,
-    }
-}
-
-impl Live {
-    /// Live views for an engine at this sample rate. Activity starts on.
+impl ScopeTrace {
+    /// A trace that keeps one second of history at this sample rate: enough
+    /// for long windows and some room to look back for a trigger.
     pub fn new(sample_rate: f32) -> Self {
         Self {
-            sample_rate,
-            activity: true,
-            meters: BTreeMap::new(),
-            by_probe: HashMap::new(),
-            scopes: Vec::new(),
-            scope_ports: Vec::new(),
-            levels: PortLevels::default(),
-            changing: false,
-            last: None,
-        }
-    }
-
-    /// True if cables and ports show signal activity.
-    pub fn activity(&self) -> bool {
-        self.activity
-    }
-
-    /// Turns signal activity on or off. Call [`Live::sync`] and commit after.
-    pub fn set_activity(&mut self, on: bool) {
-        self.activity = on;
-    }
-
-    /// Levels for the canvas.
-    pub fn levels(&self) -> &PortLevels {
-        &self.levels
-    }
-
-    /// Open scopes, oldest first.
-    pub fn scopes(&self) -> &[ScopeView] {
-        &self.scopes
-    }
-
-    /// Output ports with an open scope.
-    pub fn scope_ports(&self) -> &[PortRef] {
-        &self.scope_ports
-    }
-
-    /// True if the views move: a scope is open or a level is changing. The
-    /// app then redraws every frame.
-    pub fn animating(&self) -> bool {
-        !self.scopes.is_empty() || self.changing
-    }
-
-    /// True if any probe is active, so telemetry may arrive.
-    pub fn has_probes(&self) -> bool {
-        !self.by_probe.is_empty()
-    }
-
-    /// Brings the probes in line with the graph and the open views. Call it
-    /// before [`Controller::commit`], so the changes take effect together.
-    ///
-    /// Probes whose module was removed are forgotten. With activity on,
-    /// every output that has a cable gets a meter.
-    pub fn sync(&mut self, controller: &mut Controller) {
-        let wanted: BTreeSet<OutputRef> = if self.activity {
-            controller.graph().cables().map(|(from, _)| from).collect()
-        } else {
-            BTreeSet::new()
-        };
-        let stale: Vec<OutputRef> = self
-            .meters
-            .iter()
-            .filter(|(output, meter)| !wanted.contains(output) || controller.probe(meter.probe).is_none())
-            .map(|(&output, _)| output)
-            .collect();
-        for output in stale {
-            if let Some(meter) = self.meters.remove(&output) {
-                // Already gone if its module was removed.
-                let _ = controller.remove_probe(meter.probe);
-                self.by_probe.remove(&meter.probe);
-                self.levels.set(output.module.0, output.port, 0.0);
-            }
-        }
-        for output in wanted {
-            if self.meters.contains_key(&output) {
-                continue;
-            }
-            if let Ok(probe) = controller.add_probe(output, ProbeKind::Meter) {
-                self.by_probe.insert(probe, output);
-                self.meters.insert(
-                    output,
-                    Meter {
-                        probe,
-                        peak: 0.0,
-                        level: 0.0,
-                    },
-                );
-            }
-        }
-
-        let mut i = 0;
-        while i < self.scopes.len() {
-            if controller.probe(self.scopes[i].probe).is_none() {
-                self.forget_scope(i);
-            } else {
-                i += 1;
-            }
-        }
-    }
-
-    /// Opens a scope on an output. Returns false if one is already open
-    /// there. Call [`Controller::commit`] after.
-    pub fn open_scope(
-        &mut self,
-        controller: &mut Controller,
-        output: OutputRef,
-        title: String,
-        colour: Color,
-    ) -> Result<bool, LoomError> {
-        if self.scopes.iter().any(|s| s.output == output) {
-            return Ok(false);
-        }
-        let probe = controller.add_probe(output, ProbeKind::Scope)?;
-        if self.scopes.len() >= MAX_SCOPES {
-            self.close_scope(controller, 0);
-        }
-        self.by_probe.insert(probe, output);
-        // One second of history: enough for the longest window and some
-        // room to look back for a trigger.
-        let capacity = (self.sample_rate as usize).max(8192);
-        self.scopes.push(ScopeView {
-            output,
-            probe,
-            title,
-            colour,
-            window: DEFAULT_WINDOW,
-            history: History::new(capacity),
+            history: History::new((sample_rate as usize).max(8192)),
             trace: Vec::new(),
             offset: 0.0,
             span: 1.0,
             range: 1.0,
             triggered: false,
-        });
-        self.scope_ports.push(port_ref(output));
-        Ok(true)
-    }
-
-    /// Closes a scope by position. Call [`Controller::commit`] after.
-    pub fn close_scope(&mut self, controller: &mut Controller, index: usize) {
-        if let Some(scope) = self.scopes.get(index) {
-            let _ = controller.remove_probe(scope.probe);
-            self.forget_scope(index);
         }
     }
 
-    fn forget_scope(&mut self, index: usize) {
-        let scope = self.scopes.remove(index);
-        self.by_probe.remove(&scope.probe);
-        self.scope_ports.retain(|&p| p != port_ref(scope.output));
+    /// Adds a chunk from the probe.
+    pub fn push(&mut self, chunk: &ScopeChunk) {
+        self.history.push(chunk.frame, chunk.samples());
     }
 
-    /// Steps a scope to its next time window.
-    pub fn next_window(&mut self, index: usize) {
-        if let Some(scope) = self.scopes.get_mut(index) {
-            scope.window = (scope.window + 1) % WINDOWS.len();
+    /// Fills the trace with `window` samples from the latest trigger.
+    pub fn update(&mut self, window: usize) {
+        let window = window.max(1);
+        let samples = self.history.samples.make_contiguous();
+        self.span = window as f32;
+        self.trace.clear();
+        if samples.is_empty() {
+            self.triggered = false;
+            return;
         }
-    }
-
-    /// Takes all waiting telemetry and updates the views. Call once per UI
-    /// frame.
-    pub fn drain(&mut self, telemetry: &mut Telemetry, now: Instant) {
-        for reading in telemetry.meters() {
-            if let Some(meter) = self.by_probe.get(&reading.probe).and_then(|o| self.meters.get_mut(o)) {
-                meter.peak = meter.peak.max(reading.peak);
+        match find_trigger(samples, window) {
+            Some(position) => {
+                let start = position.floor() as usize;
+                self.offset = position - start as f32;
+                self.trace
+                    .extend_from_slice(&samples[start..(start + window + 1).min(samples.len())]);
+                self.triggered = true;
+            }
+            None => {
+                // Free run: the latest window.
+                let start = samples.len().saturating_sub(window + 1);
+                self.offset = 0.0;
+                self.trace.extend_from_slice(&samples[start..]);
+                self.triggered = false;
             }
         }
-        for chunk in telemetry.scope() {
-            if let Some(scope) = self.scopes.iter_mut().find(|s| s.probe == chunk.probe) {
-                scope.history.push(chunk.frame, chunk.samples());
-            }
-        }
-
-        let dt = self.last.map_or(0.0, |last| (now - last).as_secs_f32()).min(0.25);
-        self.last = Some(now);
-        self.changing = false;
-        for (output, meter) in &mut self.meters {
-            let level = decay(meter.level, normalise(meter.peak), dt);
-            meter.peak = 0.0;
-            if (level - meter.level).abs() > LEVEL_EPSILON || (level == 0.0 && meter.level > 0.0) {
-                self.changing = true;
-            }
-            meter.level = level;
-            self.levels.set(output.module.0, output.port, level);
-        }
-
-        for scope in &mut self.scopes {
-            let window = (WINDOWS[scope.window] * self.sample_rate).round().max(2.0) as usize;
-            update_trace(scope, window);
-        }
+        let peak = self.trace.iter().fold(0.0f32, |m, x| m.max(x.abs()));
+        self.range = pick_range(self.range, peak);
     }
 }
 
-/// Peak to canvas level: -60 dB and below is 0, 0 dB (1.0) and above is 1.
+/// Peak to level: -60 dB and below is 0, 0 dB (1.0, or 10 V) and above is 1.
 fn normalise(peak: f32) -> f32 {
     if peak <= 0.0 {
         return 0.0;
@@ -343,36 +250,6 @@ fn decay(level: f32, target: f32, dt: f32) -> f32 {
     if next < 0.001 { 0.0 } else { next }
 }
 
-/// Fills the scope's trace from its history.
-fn update_trace(scope: &mut ScopeView, window: usize) {
-    let samples = scope.history.samples.make_contiguous();
-    scope.span = window as f32;
-    scope.trace.clear();
-    if samples.is_empty() {
-        scope.triggered = false;
-        return;
-    }
-    match find_trigger(samples, window) {
-        Some(position) => {
-            let start = position.floor() as usize;
-            scope.offset = position - start as f32;
-            scope
-                .trace
-                .extend_from_slice(&samples[start..(start + window + 1).min(samples.len())]);
-            scope.triggered = true;
-        }
-        None => {
-            // Free run: the latest window.
-            let start = samples.len().saturating_sub(window + 1);
-            scope.offset = 0.0;
-            scope.trace.extend_from_slice(&samples[start..]);
-            scope.triggered = false;
-        }
-    }
-    let peak = scope.trace.iter().fold(0.0f32, |m, x| m.max(x.abs()));
-    scope.range = pick_range(scope.range, peak);
-}
-
 /// The latest rising edge through the middle of the signal that still has a
 /// full window after it, as a sample position with a fraction.
 ///
@@ -381,7 +258,7 @@ fn update_trace(scope: &mut ScopeView, window: usize) {
 /// counts only if the signal was clearly below the level before it
 /// (hysteresis of a tenth of the swing), so noise on a slow edge cannot
 /// trigger twice. Returns `None` for a flat signal or when no edge is found.
-pub fn find_trigger(samples: &[f32], window: usize) -> Option<f32> {
+fn find_trigger(samples: &[f32], window: usize) -> Option<f32> {
     let n = samples.len();
     let last_start = n.checked_sub(window + 1)?;
     // Level from the whole history (about a second), so that a slow signal
@@ -450,50 +327,60 @@ mod tests {
         parts
     }
 
+    fn sine(frequency: f32, sample_rate: f32, len: usize, phase: f32) -> Vec<f32> {
+        (0..len)
+            .map(|i| (std::f32::consts::TAU * (frequency * i as f32 / sample_rate + phase)).sin())
+            .collect()
+    }
+
     #[test]
-    fn engine_telemetry_reaches_levels_and_scopes() {
+    fn no_probes_until_activity_is_on() {
         let mut parts = sine_patch();
-        let mut live = Live::new(48_000.0);
+        let mut live = Live::new();
+        live.sync(&mut parts.controller);
+        assert!(!live.has_probes());
+        assert_eq!(parts.controller.probes().count(), 0);
+    }
+
+    #[test]
+    fn engine_telemetry_reaches_levels_and_traces() {
+        let mut parts = sine_patch();
+        let mut live = Live::new();
+        live.set_activity(true);
         live.sync(&mut parts.controller);
         // One meter per output with a cable.
         assert_eq!(live.meters.len(), 6);
         let sine = parts.controller.output_ref(ModuleId(3), "out").unwrap();
-        assert!(
-            live.open_scope(&mut parts.controller, sine, "Sine".into(), Color::WHITE)
-                .unwrap()
-        );
-        assert!(
-            !live
-                .open_scope(&mut parts.controller, sine, "Sine".into(), Color::WHITE)
-                .unwrap()
-        );
-        assert_eq!(live.scope_ports().len(), 1);
+        let env = parts.controller.output_ref(ModuleId(4), "out").unwrap();
+        let probe = parts.controller.add_probe(sine, ProbeKind::Scope).unwrap();
         parts.controller.commit().unwrap();
 
+        let mut trace = ScopeTrace::new(48_000.0);
         let (mut left, mut right) = (vec![0.0; 512], vec![0.0; 512]);
         let start = Instant::now();
         for i in 0..20 {
             parts.engine.process(&mut left, &mut right);
-            live.drain(&mut parts.telemetry, start + Duration::from_millis(16 * i));
+            for chunk in parts.telemetry.scope() {
+                assert_eq!(chunk.probe, probe);
+                trace.push(&chunk);
+            }
+            live.drain(&mut parts.telemetry, start + Duration::from_millis(80 * i));
         }
-        assert!(live.levels().get(3, 0) > 0.9, "the sine is at full level");
-        assert_eq!(live.levels().get(4, 0), 0.0, "no note, so the envelope is silent");
-        let scope = &live.scopes()[0];
-        assert!(scope.triggered);
-        assert_eq!(scope.trace.len(), 961, "20 ms at 48 kHz, plus one sample");
-        assert_eq!(scope.range, 1.0);
+        assert!(live.level(sine) > 0.9, "the sine is at full level");
+        assert_eq!(live.level(env), 0.0, "no note, so the envelope is silent");
+
+        trace.update(960);
+        assert!(trace.triggered);
+        assert_eq!(trace.trace.len(), 961, "20 ms at 48 kHz, plus one sample");
+        assert_eq!(trace.range, 1.0);
         assert!(
-            scope.trace[0] <= 0.0 && scope.trace[1] >= 0.0,
-            "starts on a rising edge: {:?} offset {}",
-            &scope.trace[..3],
-            scope.offset
+            trace.trace[0] <= 0.0 && trace.trace[1] >= 0.0,
+            "starts on a rising edge"
         );
 
-        // Removing the module drops its scope and the meters on its cables.
+        // Removing a module drops the meters on its cables.
         parts.controller.remove_module(ModuleId(3)).unwrap();
         live.sync(&mut parts.controller);
-        assert!(live.scopes().is_empty());
-        assert!(live.scope_ports().is_empty());
         assert_eq!(live.meters.len(), 4);
         assert_eq!(parts.controller.probes().count(), 4);
 
@@ -504,29 +391,15 @@ mod tests {
     }
 
     #[test]
-    fn opening_too_many_scopes_closes_the_oldest() {
-        let mut parts = sine_patch();
-        let mut live = Live::new(48_000.0);
-        let outputs: Vec<OutputRef> = [(1, "pitch"), (1, "gate"), (2, "phase"), (3, "out"), (4, "out")]
-            .into_iter()
-            .map(|(id, port)| parts.controller.output_ref(ModuleId(id), port).unwrap())
-            .collect();
-        for &output in &outputs {
-            live.open_scope(&mut parts.controller, output, String::new(), Color::WHITE)
-                .unwrap();
-        }
-        assert_eq!(live.scopes().len(), MAX_SCOPES);
-        assert_eq!(live.scopes()[0].output, outputs[1]);
-        assert_eq!(parts.controller.probes().count(), MAX_SCOPES);
-        live.close_scope(&mut parts.controller, 0);
-        assert_eq!(parts.controller.probes().count(), MAX_SCOPES - 1);
-        assert_eq!(live.scope_ports().len(), MAX_SCOPES - 1);
-    }
-
-    fn sine(frequency: f32, sample_rate: f32, len: usize, phase: f32) -> Vec<f32> {
-        (0..len)
-            .map(|i| (std::f32::consts::TAU * (frequency * i as f32 / sample_rate + phase)).sin())
-            .collect()
+    fn flat_trace_runs_free() {
+        let mut trace = ScopeTrace::new(48_000.0);
+        trace.update(100);
+        assert!(trace.trace.is_empty() && !trace.triggered);
+        trace.history.push(0, &[0.25; 500]);
+        trace.update(100);
+        assert!(!trace.triggered);
+        assert_eq!(trace.trace.len(), 101);
+        assert_eq!(trace.range, 0.5);
     }
 
     #[test]

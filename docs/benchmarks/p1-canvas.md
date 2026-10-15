@@ -46,10 +46,9 @@ Record from the stats bar after about 10 seconds:
 | Same, zoomed to about 100 tiles visible (titles shown) | | | | |
 | Same, zoomed in to about 20 tiles (port labels shown) | | | | |
 | `examples/patches/fm-feedback.ron`, **Measure** on, camera still | | | | |
-| Idle: **Measure** off, **Activity** off, nothing moving. Activity Monitor CPU % and GPU % | | | | |
-| `--generate 300 --bench` with **Activity** on and four scopes open (click four cables) | | | | ADR-0010 gate 2 |
+| Idle: **Measure** off, nothing moving. Activity Monitor CPU % and GPU % | | | | |
 
-Pass criteria (NFR-PERF-04): 60 fps with 300 modules in the patch and 100 visible, while panning and zooming. An idle patch uses close to no CPU or GPU. Gate 2: the same with four live scopes on screen. With **Activity** on and audio running, the app checks for new signal every 100 ms, so measure idle with it off.
+Pass criteria (NFR-PERF-04): 60 fps with 300 modules in the patch and 100 visible, while panning and zooming. An idle patch uses close to no CPU or GPU. The 4 live scopes come with module views (next P1 step) and are measured then.
 
 ## First results
 

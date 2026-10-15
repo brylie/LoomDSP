@@ -2,7 +2,7 @@
 
 use crate::camera::Camera;
 use crate::gpu::{Cable, CanvasPrimitive, Geometry, Overlay, Shape};
-use crate::scene::{GRID, HEADER, Hit, PORT_HIT_RADIUS, PORT_RADIUS, PortLevels, PortRef, ROW, Scene, TILE_WIDTH};
+use crate::scene::{GRID, HEADER, Hit, PORT_HIT_RADIUS, PORT_RADIUS, PortRef, ROW, Scene, TILE_WIDTH};
 use crate::theme::Palette;
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::renderer;
@@ -30,10 +30,6 @@ const LABEL_SIZE: f32 = 9.0;
 /// never the whole patch.
 const CABLE_OPACITY: f32 = 0.4;
 
-/// A press and release closer than this many screen pixels is a click, not
-/// a drag.
-const CLICK_SLOP: f32 = 3.0;
-
 /// A gesture on the canvas. The application applies it to its model.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CanvasEvent {
@@ -57,10 +53,6 @@ pub enum CanvasEvent {
     Disconnect(PortRef),
     /// Delete modules.
     Delete(Vec<u32>),
-    /// The user clicked a cable or a port: show this output on a scope.
-    /// Always an output port. A click on an input or a cable reports the
-    /// output that feeds it.
-    Probe(PortRef),
 }
 
 /// The patch canvas. Draws a [`Scene`] and reports gestures as
@@ -72,8 +64,6 @@ pub struct PatchCanvas<'a, Message> {
     on_event: Box<dyn Fn(CanvasEvent) -> Message + 'a>,
     frame_key: u64,
     animate: bool,
-    levels: Option<&'a PortLevels>,
-    probes: &'a [PortRef],
 }
 
 impl<'a, Message> PatchCanvas<'a, Message> {
@@ -86,28 +76,7 @@ impl<'a, Message> PatchCanvas<'a, Message> {
             on_event: Box::new(on_event),
             frame_key: 0,
             animate: false,
-            levels: None,
-            probes: &[],
         }
-    }
-
-    /// Live levels of output ports. Cables glow with the level of their
-    /// source, and output ports get a halo (FR-VIS-01). Changing levels does
-    /// not rebuild GPU data, so they can change every frame.
-    pub fn levels(mut self, levels: &'a PortLevels) -> Self {
-        self.levels = Some(levels);
-        self
-    }
-
-    /// Output ports that have a scope open. They get a ring, so the user can
-    /// see what is being watched.
-    pub fn probes(mut self, probes: &'a [PortRef]) -> Self {
-        self.probes = probes;
-        self
-    }
-
-    fn level(&self, (module, output): (u32, usize)) -> f32 {
-        self.levels.map_or(0.0, |l| l.get(module, output))
     }
 
     /// Sets the colours.
@@ -149,22 +118,11 @@ enum Interaction {
     },
     Wiring {
         from: PortRef,
-        /// The port that was pressed, and where on screen. Releasing on it
-        /// without moving is a click, which probes the port.
-        origin: PortRef,
-        press: Point,
-        /// A connected input that was grabbed. Its cable comes out only
-        /// once the pointer moves, so a click does not unplug it.
-        detach: Option<PortRef>,
     },
     Selecting {
         start: Point,
         current: Point,
         base: BTreeSet<u32>,
-        /// Screen point of the press, and the cable under it, if any. A
-        /// click on a cable probes it instead of selecting.
-        press: Point,
-        cable: Option<usize>,
     },
 }
 
@@ -303,7 +261,7 @@ where
                         state.interaction = Interaction::Panning { last: screen };
                     }
                     mouse::Button::Left => {
-                        self.press(state, world, screen, shell);
+                        self.press(state, world, shell);
                     }
                     _ => return,
                 }
@@ -333,16 +291,7 @@ where
                             self.emit(shell, CanvasEvent::Move { ids, delta });
                         }
                     }
-                    Interaction::Wiring { press, detach, .. } => {
-                        // Moving away from a grabbed input pulls its cable out.
-                        if let Some(input) = *detach
-                            && screen.distance(*press) > CLICK_SLOP
-                        {
-                            *detach = None;
-                            self.emit(shell, CanvasEvent::Disconnect(input));
-                        }
-                        redraw = true;
-                    }
+                    Interaction::Wiring { .. } => redraw = true,
                     Interaction::Selecting { current, .. } => {
                         *current = world;
                         redraw = true;
@@ -360,28 +309,8 @@ where
             Event::Mouse(mouse::Event::ButtonReleased(_)) => {
                 let interaction = std::mem::take(&mut state.interaction);
                 let world = screen.map(|s| state.camera.to_world(s));
-                let clicked = |press: Point| screen.is_some_and(|s| s.distance(press) <= CLICK_SLOP);
                 match interaction {
-                    Interaction::Wiring { origin, press, .. } if clicked(press) => {
-                        if let Some(port) = self.scene.probe_target(Hit::Port(origin)) {
-                            self.emit(shell, CanvasEvent::Probe(port));
-                        }
-                    }
-                    Interaction::Selecting {
-                        press,
-                        cable: Some(index),
-                        ..
-                    } if clicked(press) => {
-                        if let Some(port) = self.scene.probe_target(Hit::Cable(index)) {
-                            self.emit(shell, CanvasEvent::Probe(port));
-                        }
-                    }
-                    Interaction::Wiring { from, detach, .. } => {
-                        if let Some(input) = detach {
-                            // Released elsewhere without a move event in
-                            // between: unplug now.
-                            self.emit(shell, CanvasEvent::Disconnect(input));
-                        }
+                    Interaction::Wiring { from } => {
                         if let Some(Hit::Port(to)) = world.map(|w| self.scene.hit(w, state.hit_radius())) {
                             let pair = if from.output { (from, to) } else { (to, from) };
                             if pair.0.output && !pair.1.output {
@@ -395,9 +324,7 @@ where
                             }
                         }
                     }
-                    Interaction::Selecting {
-                        start, current, base, ..
-                    } => {
+                    Interaction::Selecting { start, current, base } => {
                         let area = Rectangle::new(
                             Point::new(start.x.min(current.x), start.y.min(current.y)),
                             Size::new((start.x - current.x).abs(), (start.y - current.y).abs()),
@@ -471,14 +398,11 @@ where
             },
             self.palette.background,
         );
-        // One level per cable, in the order the cables are on the GPU.
-        let levels = geometry.sources.iter().map(|&source| self.level(source)).collect();
         renderer.draw_primitive(
             bounds,
             CanvasPrimitive {
                 geometry,
                 overlay: self.overlay(state),
-                levels,
                 camera: state.camera,
                 cable_dim: CABLE_OPACITY,
             },
@@ -488,29 +412,31 @@ where
 }
 
 impl<Message> PatchCanvas<'_, Message> {
-    fn press(&self, state: &mut State, world: Point, screen: Point, shell: &mut Shell<'_, Message>) {
+    fn press(&self, state: &mut State, world: Point, shell: &mut Shell<'_, Message>) {
         let shift = state.modifiers.shift();
-        let hit = self.scene.hit(world, state.hit_radius());
-        match hit {
+        match self.scene.hit(world, state.hit_radius()) {
             Hit::Port(port) if !port.output => {
                 // Grabbing a connected input picks up its cable, like pulling
-                // a patch cable out of a jack. The cable comes out when the
-                // pointer moves, so a plain click only probes it.
-                let source = self.scene.probe_target(hit);
-                state.interaction = Interaction::Wiring {
-                    from: source.unwrap_or(port),
-                    origin: port,
-                    press: screen,
-                    detach: source.map(|_| port),
-                };
+                // a patch cable out of a jack.
+                let source = self
+                    .scene
+                    .cables()
+                    .iter()
+                    .find(|c| c.to == (port.module, port.index))
+                    .map(|c| PortRef {
+                        module: c.from.0,
+                        output: true,
+                        index: c.from.1,
+                    });
+                if let Some(source) = source {
+                    self.emit(shell, CanvasEvent::Disconnect(port));
+                    state.interaction = Interaction::Wiring { from: source };
+                } else {
+                    state.interaction = Interaction::Wiring { from: port };
+                }
             }
             Hit::Port(port) => {
-                state.interaction = Interaction::Wiring {
-                    from: port,
-                    origin: port,
-                    press: screen,
-                    detach: None,
-                };
+                state.interaction = Interaction::Wiring { from: port };
             }
             Hit::Module(id) => {
                 let mut selection = self.selection.clone();
@@ -538,11 +464,6 @@ impl<Message> PatchCanvas<'_, Message> {
                     start: world,
                     current: world,
                     base,
-                    press: screen,
-                    cable: match hit {
-                        Hit::Cable(index) => Some(index),
-                        _ => None,
-                    },
                 };
             }
         }
@@ -616,41 +537,7 @@ impl<Message> PatchCanvas<'_, Message> {
                     overlay
                         .cables
                         .push(Cable::new(a, b, cable.colour_from, cable.colour_to, cable.delayed).focused());
-                    overlay.levels.push(self.level(cable.from));
                 }
-            }
-        }
-
-        // Live levels: a halo around each output port carrying signal, so
-        // activity shows on unconnected and hidden cables too.
-        if let Some(levels) = self.levels {
-            for ((module, index), level) in levels.iter() {
-                let port = PortRef {
-                    module,
-                    output: true,
-                    index,
-                };
-                if let (Some(centre), Some(view)) = (self.scene.port_position(port), self.scene.port(port)) {
-                    let r = PORT_RADIUS + 1.5 + 2.5 * level;
-                    let rect = Rectangle::new(Point::new(centre.x - r, centre.y - r), Size::new(2.0 * r, 2.0 * r));
-                    let glow = Color {
-                        a: 0.25 + 0.6 * level,
-                        ..view.colour
-                    };
-                    overlay
-                        .shapes
-                        .push(Shape::new(rect, r, Color::TRANSPARENT, glow, 1.0 + level));
-                }
-            }
-        }
-        // Ports with a scope open get a ring in the selection colour.
-        for &port in self.probes {
-            if let Some(centre) = self.scene.port_position(port) {
-                let r = PORT_RADIUS + 5.5;
-                let rect = Rectangle::new(Point::new(centre.x - r, centre.y - r), Size::new(2.0 * r, 2.0 * r));
-                overlay
-                    .shapes
-                    .push(Shape::new(rect, r, Color::TRANSPARENT, p.selection, 1.2));
             }
         }
 
@@ -672,7 +559,7 @@ impl<Message> PatchCanvas<'_, Message> {
                 .push(Shape::new(rect, r, Color::TRANSPARENT, p.hover, 1.2));
         }
         match &state.interaction {
-            Interaction::Wiring { from, .. } => {
+            Interaction::Wiring { from } => {
                 if let (Some(start), Some(port), Some(cursor)) =
                     (self.scene.port_position(*from), self.scene.port(*from), state.cursor)
                 {
@@ -690,7 +577,6 @@ impl<Message> PatchCanvas<'_, Message> {
                     }
                     .focused();
                     overlay.cables.push(cable);
-                    overlay.levels.push(0.0);
                 }
             }
             Interaction::Selecting { start, current, .. } => {
@@ -921,34 +807,6 @@ mod tests {
             ..State::default()
         };
         assert!(canvas.overlay(&state).cables.is_empty());
-    }
-
-    #[test]
-    fn levels_follow_cables_and_light_up_ports() {
-        let scene = chain();
-        let selection = BTreeSet::from([2]);
-        let mut levels = PortLevels::default();
-        levels.set(1, 0, 0.8);
-        let state = State::default();
-
-        let canvas = PatchCanvas::new(&scene, &selection, |e| e);
-        let plain = canvas.overlay(&state);
-        assert_eq!(plain.levels, vec![0.0, 0.0]);
-
-        let probes = [PortRef {
-            module: 2,
-            output: true,
-            index: 0,
-        }];
-        let canvas = PatchCanvas::new(&scene, &selection, |e| e)
-            .levels(&levels)
-            .probes(&probes);
-        let lit = canvas.overlay(&state);
-        // One level per focused cable, from its source output.
-        assert_eq!(lit.cables.len(), lit.levels.len());
-        assert_eq!(lit.levels, vec![0.8, 0.0]);
-        // One halo for the active port and one ring for the probe.
-        assert_eq!(lit.shapes.len(), plain.shapes.len() + 2);
     }
 
     #[test]

@@ -1,9 +1,8 @@
 //! `loom-app`: the LoomDSP desktop app.
 //!
 //! Phase 1 prototype: the patch canvas (ADR-0010), an inspector for the
-//! selected module, live audio and MIDI, live signal views (cable activity
-//! and scopes), and a stats bar for measuring the canvas against the
-//! performance gates in NFR-PERF-04.
+//! selected module, live audio and MIDI, and a stats bar for measuring the
+//! canvas against the performance gates in NFR-PERF-04.
 
 mod layout;
 mod live;
@@ -16,7 +15,7 @@ use iced::widget::{
 };
 use iced::{Color, Element, Length, Point, Subscription, Theme};
 use live::Live;
-use loom_canvas::{CanvasEvent, PatchCanvas, PortRef, Scene, Scope};
+use loom_canvas::{CanvasEvent, PatchCanvas, Scene};
 use loom_core::{
     Controller, EngineConfig, EngineParts, InputRef, MidiEvent, ModuleId, OutputRef, Telemetry, create_engine,
 };
@@ -64,9 +63,6 @@ enum Message {
     Save,
     Measure(bool),
     Animate(bool),
-    Activity(bool),
-    CloseScope(usize),
-    ScopeWindow(usize),
     Frame(Instant),
     Tick,
 }
@@ -79,9 +75,9 @@ struct App {
     name: String,
     save_path: PathBuf,
     theme: Theme,
-    /// Audio output. Sound stops when it is dropped.
-    audio: Option<RunningAudio>,
-    /// Meter and scope data from the engine, drained once per frame.
+    _audio: Option<RunningAudio>,
+    /// Meter and scope data from the engine. Drained on every tick, so the
+    /// queues never fill, even before anything draws it.
     telemetry: Telemetry,
     live: Live,
     /// Open MIDI inputs. Input stops when they are dropped.
@@ -108,21 +104,12 @@ impl App {
             AudioOutput::open(&AudioOptions::default()).map_err(|e| e.to_string())
         };
         let sample_rate = output.as_ref().map(|o| o.sample_rate() as f32).unwrap_or(48_000.0);
-        let config = EngineConfig {
-            // Signal activity meters every output that has a cable: one
-            // reading per output per 128-frame block. 16384 readings hold a
-            // frame's worth for several hundred outputs.
-            meter_capacity: 16_384,
-            // About 5 s of one scope, so a slow frame does not cut the trace.
-            scope_capacity: 4096,
-            ..EngineConfig::with_sample_rate(sample_rate)
-        };
         let EngineParts {
             mut controller,
             engine,
             midi: sender,
             telemetry,
-        } = create_engine(loom_modules::registry(), config);
+        } = create_engine(loom_modules::registry(), EngineConfig::with_sample_rate(sample_rate));
 
         let mut status = String::new();
         let mut positions = BTreeMap::new();
@@ -203,9 +190,9 @@ impl App {
                 },
             ),
             audio_stats: audio.as_ref().map(|a| a.stats().clone()),
-            audio,
+            _audio: audio,
             telemetry,
-            live: Live::new(sample_rate),
+            live: Live::new(),
             midi_ports,
             audio_name,
             midi,
@@ -218,14 +205,8 @@ impl App {
             measuring: args.bench,
             animating: args.bench,
         };
-        // Probes for signal activity on the loaded patch.
-        app.live.sync(&mut app.controller);
-        let committed = app.controller.commit();
         if app.status.is_empty() {
-            match committed {
-                Ok(_) => app.report(),
-                Err(e) => app.status = format!("error: {e}"),
-            }
+            app.report();
         }
         app
     }
@@ -239,15 +220,9 @@ impl App {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        let audio = self.audio.is_some();
-        if self.measuring || (audio && self.live.animating()) {
-            // Redraw every frame: to measure real render cost, or because a
-            // scope is open or a level is moving.
+        if self.measuring {
+            // Redraw every frame, so the counter measures real render cost.
             iced::window::frames().map(Message::Frame)
-        } else if audio && self.live.has_probes() {
-            // Probes but nothing moving: check often enough that activity
-            // shows within a tenth of a second of the first note.
-            iced::time::every(Duration::from_millis(100)).map(|_| Message::Tick)
         } else {
             // Otherwise the window redraws only when something changes. A
             // slow tick keeps the audio numbers fresh.
@@ -275,8 +250,7 @@ impl App {
     }
 
     fn commit(&mut self) {
-        // Probes change with the graph: a new cable gets a meter, a removed
-        // module loses its scope.
+        // Probes follow the graph: a removed module loses its probes.
         self.live.sync(&mut self.controller);
         match self.controller.commit() {
             Ok(_) => self.report(),
@@ -354,19 +328,8 @@ impl App {
                 }
                 self.meter = FrameMeter::default();
             }
-            Message::Activity(on) => {
-                self.live.set_activity(on);
-                self.commit();
-            }
-            Message::CloseScope(index) => {
-                self.live.close_scope(&mut self.controller, index);
-                self.commit();
-            }
-            Message::ScopeWindow(index) => self.live.next_window(index),
             Message::Frame(now) => {
-                if self.measuring {
-                    self.meter.record(now);
-                }
+                self.meter.record(now);
                 self.controller.collect_garbage();
                 self.live.drain(&mut self.telemetry, now);
             }
@@ -411,7 +374,6 @@ impl App {
                     self.commit();
                 }
             }
-            CanvasEvent::Probe(port) => self.open_scope(port),
             CanvasEvent::Delete(ids) => {
                 for id in &ids {
                     if self.controller.remove_module(ModuleId(*id)).is_ok() {
@@ -424,39 +386,16 @@ impl App {
         }
     }
 
-    /// Opens a scope on an output port the user clicked.
-    fn open_scope(&mut self, port: PortRef) {
-        let output = OutputRef {
-            module: ModuleId(port.module),
-            port: port.index,
-        };
-        let Some(node) = self.controller.graph().node(output.module) else {
-            return;
-        };
-        let Some(spec) = node.descriptor.outputs.get(output.port) else {
-            return;
-        };
-        let title = format!("{} #{}: {}", node.descriptor.name, port.module, spec.name);
-        let colour = scene::signal_colour(spec.signal);
-        match self.live.open_scope(&mut self.controller, output, title, colour) {
-            Ok(true) => self.commit(),
-            Ok(false) => {}
-            Err(e) => self.status = format!("error: {e}"),
-        }
-    }
-
     fn view(&self) -> Element<'_, Message> {
         let canvas = PatchCanvas::new(&self.scene, &self.selection, Message::Canvas)
             .frame_key(self.frame_key)
-            .animate(self.animating)
-            .levels(self.live.levels())
-            .probes(self.live.scope_ports());
+            .animate(self.animating);
 
-        let mut patch = column![container(canvas).width(Length::Fill).height(Length::Fill)];
-        if !self.live.scopes().is_empty() {
-            patch = patch.push(rule::horizontal(1)).push(self.scopes());
-        }
-        let body = row![patch, rule::vertical(1), self.inspector()];
+        let body = row![
+            container(canvas).width(Length::Fill).height(Length::Fill),
+            rule::vertical(1),
+            self.inspector(),
+        ];
 
         column![
             self.toolbar(),
@@ -543,39 +482,6 @@ impl App {
             .into()
     }
 
-    /// The open scopes, side by side under the canvas.
-    fn scopes(&self) -> Element<'_, Message> {
-        let cards = self.live.scopes().iter().enumerate().map(|(index, scope)| {
-            let mut info = format!("±{}", scope.range);
-            if !scope.triggered {
-                info.push_str(" free");
-            }
-            let small = |label: String, message| {
-                button(text(label).size(10))
-                    .padding([1, 6])
-                    .style(button::text)
-                    .on_press(message)
-            };
-            let header = row![
-                container(text(&scope.title).size(11).wrapping(text::Wrapping::None))
-                    .width(Length::Fill)
-                    .clip(true),
-                text(info).size(10).color(DIM).wrapping(text::Wrapping::None),
-                small(scope.window_label(), Message::ScopeWindow(index)),
-                small("x".to_string(), Message::CloseScope(index)),
-            ]
-            .spacing(4)
-            .align_y(iced::Alignment::Center);
-            let trace = Scope::new(&scope.trace, scope.span)
-                .offset(scope.offset)
-                .range(scope.range)
-                .colour(scope.colour)
-                .height(96);
-            Element::from(column![header, trace].spacing(4).width(Length::Fill).max_width(360))
-        });
-        container(row(cards).spacing(12)).padding([8, 10]).into()
-    }
-
     fn stats_bar(&self) -> Element<'_, Message> {
         let graph = self.controller.graph();
         let frames = if self.measuring {
@@ -625,11 +531,6 @@ impl App {
                 .on_toggle(Message::Animate)
                 .size(14)
                 .text_size(12),
-            toggler(self.live.activity())
-                .label("Activity")
-                .on_toggle(Message::Activity)
-                .size(14)
-                .text_size(12),
             bar_text(frames),
             bar_text(format!("{} modules, {} cables", graph.len(), graph.cables().count())),
             bar_text(audio).color(DIM),
@@ -665,7 +566,6 @@ const DIM: Color = Color::from_rgb(0.62, 0.65, 0.71);
 const HELP: &str = "Drag from a port to patch a cable. Drag a connected input to move or remove its cable.\n\
 Drag tiles to move them. Shift-click or drag a box to select several.\n\
 Right-drag or two-finger scroll to pan. Wheel or Cmd/Ctrl-scroll to zoom.\n\
-Click a cable or an output port to open a scope on it.\n\
 F or Home frames the patch. Delete removes the selection.";
 
 /// Frame timing over the last second.

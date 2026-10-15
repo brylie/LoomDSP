@@ -84,11 +84,9 @@ The same path carries every structural edit: add, remove, connect, disconnect. P
 | Camera | `camera.rs` | Pan and zoom. Converts between world and screen positions. |
 | GPU data | `gpu.rs` | Turns a scene into instances: one rounded rectangle per tile, header, and port, and one entry per cable. Uploaded only when the generation changes. |
 | Shaders | `canvas.wgsl` | Rounded rectangles shade only their own pixels. Cables are curves built in the vertex shader. Pan and zoom change one small uniform buffer, which also holds the opacity of cables that are not in focus. |
-| Widget | `widget.rs` | Mouse and keyboard handling, and the per-frame overlay: selection and hover outlines, level halos on ports, and the cables of selected and hovered modules drawn in front. Text goes through Iced and is skipped when too small to read. |
-| Live levels | `scene.rs` (`PortLevels`), `gpu.rs` | Signal levels of output ports, set by the app every frame. Kept out of the scene, and uploaded as one float per cable, so live levels never rebuild the cables. |
-| Scope | `scope.rs` | A small oscilloscope widget: one thin quad per pixel column. The app finds the trigger point ([telemetry specification](../design/telemetry.md)). |
+| Widget | `widget.rs` | Mouse and keyboard handling, and the per-frame overlay: selection and hover outlines, and the cables of selected and hovered modules drawn in front. Text goes through Iced and is skipped when too small to read. |
 
-Without the app's Measure toggle, the window redraws only when something changes: an edit, or a live view (an open scope or a moving level).
+Without the app's Measure toggle, the window redraws only when something changes.
 
 Shader names must not be reserved words in Metal or HLSL, because wgpu's translator does not always rename them (the `shader_names` test lists them).
 
@@ -112,7 +110,7 @@ Shader names must not be reserved words in Metal or HLSL, because wgpu's transla
 | Same output at any buffer size, bit-identical runs | `crates/loom-modules/tests/`. |
 | Patch loading and round trips | `crates/loom-patch`. |
 | Canvas logic and shaders | `crates/loom-canvas` (hit-testing, camera, geometry, shader validation). |
-| Layout, parameter mapping, and live views (meters, scope trigger) in the app | `crates/loom-app`. |
+| Layout and parameter mapping in the app | `crates/loom-app`. |
 | Engine speed | `cargo bench -p loom-modules`. |
 
 CI runs all of them on Linux, macOS, and Windows. The full list of CI jobs is in CONTRIBUTING.md.
