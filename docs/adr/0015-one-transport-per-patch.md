@@ -18,15 +18,17 @@ If every synced module needs a cable from a clock module, a large patch gains do
 
 1. **Clock as an ordinary module only.** Every synced module gets a cable from it. Explicit, but cluttered, and two clock modules could disagree.
 2. **A global transport only, read inside modules.** No cables, but users cannot bend time: no swing, no polyrhythm by patching a different phase.
-3. **One transport per patch, owned by the engine, with defaults and modules.** The engine keeps the one transport. Modules read it through default inputs when nothing is patched. Transport and Clock modules expose it as cables for anyone who wants to patch time.
+3. **A clock module as the source, as in VCV Rack.** A clock module on the canvas has run and reset on its panel and as inputs. Very direct, and it fits direct manipulation (ADR-0013). But on its own it still needs a cable to every synced module, and it has no rule for following a plugin host.
+4. **One transport per patch, owned by the engine, with defaults and a Transport module.** The engine keeps the one transport. Modules read it through default inputs when nothing is patched. The transport's controls live on one Transport module, as in option 3, and Transport and Clock modules expose it as cables for anyone who wants to patch time.
 
 ## Decision (proposed)
 
-Option 3.
+Option 4: the engine's single transport, controlled from a module as in VCV Rack.
 
 - **The engine owns one transport per patch:** tempo, time signature, play state, and position in beats. Its source is the app, the plugin host, or MIDI clock.
 - **Unconnected time inputs follow the transport.** A module declares a default for each phase or clock input, such as "bar phase" or "beat phase". When no cable is connected, the input reads that value from the transport.
 - **Patching overrides the default.** A cable into the same input replaces the transport for that module. This is how users bend time.
+- **Controls live on the Transport module.** Every patch has exactly one. Its panel has Run, Reset, and tempo, and its run and reset inputs let anything in the patch start and stop time. There are no transport controls in the toolbar.
 - **Transport and Clock modules** put the transport on cables: bar and beat phase, play gate, triggers, and phases at musical rates. Clock Divide and related modules work on those signals.
 
 ## Consequences
@@ -35,4 +37,5 @@ Option 3.
 - The `ProcessContext` gains the transport state for each block. Default inputs are filled by the engine, so a module reads the same slice whether a cable is connected or not.
 - Position is kept in double precision, so loops stay in step through hour-long sets.
 - Sub-patches see the same transport. A sub-patch can still be fed a different phase through an input.
-- Plugin export has a clear rule: the host's transport becomes the patch transport.
+- Plugin export has a clear rule: the host's transport becomes the patch transport, and the Transport module's panel shows that it is following the host.
+- Start and stop are patchable. A Button module, a MIDI note, or logic can run the clock, and the controls can go on a front panel.
