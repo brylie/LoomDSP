@@ -11,23 +11,25 @@
 | **COOP / COEP** | HTTP headers that make a page "cross-origin isolated". Required for SharedArrayBuffer in browsers. |
 | **Counter** | A module that counts triggers and outputs the count as a phase, so a step sequencer or Step Select can follow it ([arrangement specification](../design/arrangement.md)). |
 | **Cycle** | A module that plays a stored note pattern or audio loop, read from the clock's bar phase. Outputs an end trigger when its loop ends. LoomDSP's looper and clip ([arrangement specification](../design/arrangement.md)). |
+| **Direct manipulation** | Editing an object where you see it, through controls it shows itself, rather than in a separate panel. LoomDSP's tiles work this way (ADR-0013). |
+| **Display value** | A number a module publishes once per block for its panel to show, such as a sequencer's current step. Internal state, not a port. |
 | **Encapsulation** | Collapsing part of a patch into a sub-patch with its own ports and panel. |
 | **Engine** | The Rust code that runs a patch and produces audio. The same engine runs in every target. |
-| **Front panel** | The user-facing control surface of a patch or sub-patch. Separate from the cable view. |
+| **Front panel** | The panel of a patch or sub-patch: the controls and displays that hide its wiring. A sub-patch's front panel is also what its tile shows in the parent patch. |
 | **Grid** | LoomDSP's patch canvas, where every feature is a module. Named after the idea in Bitwig Studio's Grid. |
 | **Hold note** | A toolbar button that plays one note, for testing a patch without a MIDI keyboard. |
 | **Gate** | A signal used as on/off. Values above 0.5 are high. |
 | **Group** | A set of loopers or other playable modules that take turns according to their next action. |
-| **Inspector** | The side panel that shows every parameter of the selected module. Tiles on the canvas show only key controls. |
+| **Inspector** | The side panel that shows every parameter of the selected module, for exact values and settings that do not fit on the tile. |
 | **Level of detail** | Drawing less when zoomed out: tiles drop their text and live views, so large patches stay readable and fast. |
 | **Living musical system** | A patch that plays, evolves, and arranges itself through modulation, randomness, sequencing, looping, and logic. What LoomDSP is for. |
 | **Looper** | A module that records and plays a loop of audio or MIDI, synced to the clock. |
 | **Lock-free** | Code that lets threads communicate without one thread waiting for another to release a lock. |
-| **Module view** | A custom display drawn inside a module's tile on the canvas: scope, step grid, envelope shape, clip lane. |
 | **Modulation** | Changing a parameter over time with another signal (LFO, envelope, MIDI). |
 | **Module** | One DSP unit on the canvas, such as an oscillator or filter. Built-in or from the SDK. |
 | **Next action** | What a group does when a member finishes its loop: play the next member, a random one, or follow an input. Taken from Bitwig's clip launcher, but patchable. |
 | **Note effect** | A module that transforms notes rather than audio: arpeggiator, chord, transpose, quantise. |
+| **Panel** | The controls and displays of a module, sub-patch, or patch, built from one shared set of widgets ([panels specification](../design/panels.md)). A module's tile is its panel. |
 | **Panic (MIDI)** | An action that silences all voices and clears stuck notes. Not the same as a Rust `panic!`. |
 | **Patch** | A complete graph of modules, cables, sub-patches, panels, and settings. Saved as one file. |
 | **Performance mode** | A locked view that shows only the front panel, for live use. |

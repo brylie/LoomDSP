@@ -56,5 +56,6 @@ Drain the queues once per UI frame. At 60 frames per second, one scope fills abo
 
 ## Open points
 
-- The app does not draw meters or scopes yet (FR-VIS-01, FR-VIS-02).
+- The app does not draw meters or scopes yet. They will be displays on module panels: a scope module and port activity ([panels specification](panels.md)).
+- Module display values (a sequencer's current step, an envelope's stage) need a path of their own, beside port probes. See the panels specification.
 - Probes on one port are independent. Two views of the same port send the data twice.

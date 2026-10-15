@@ -44,3 +44,4 @@ Why: an ADR is a record of why things are the way they are. If it is rewritten a
 | [0010](0010-own-patch-canvas.md) | Our own patch canvas, built as an Iced widget | Proposed |
 | [0011](0011-everything-is-a-module.md) | Everything is a module | Proposed |
 | [0012](0012-arrangement-from-phase-driven-primitives.md) | Arrangement from phase-driven primitives | Proposed |
+| [0013](0013-modules-carry-their-own-panel.md) | Modules carry their own panel | Proposed |

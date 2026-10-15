@@ -14,6 +14,11 @@ body:
     attributes:
       label: Related requirement IDs
       description: For example FR-MIDI-02. See docs/product/requirements.md.
+  - type: input
+    id: spec
+    attributes:
+      label: Specification
+      description: Link to the spec in docs/design/ that covers this, if there is one. Features are built from an agreed spec (see docs/design/README.md).
   - type: textarea
     id: idea
     attributes:

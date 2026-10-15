@@ -91,7 +91,7 @@ LoomDSP is a grid for building living musical systems: patches that play, evolve
 | FR-LIB-15 | Device-style processors as modules: EQ, dynamics (compressor, limiter, gate, transient control), reverb, delays, modulation effects (chorus, flanger, phaser, tremolo), distortion, filters (comb, resonator bank), pitch and frequency shifting, spectral splitting, sampler, granular. | Should | P2 to P4 | Users expect finished-sounding tools, not only primitives. Some are built from primitives, others as optimised single modules. |
 | FR-LIB-16 | Clock and transport modules, and modulation curves that run over bars or sections, so patches can shape themselves over time. There is no arranger timeline. | Must | P3 | Arrangement happens inside the grid (ADR-0011). In plugins, the host transport drives the clock. |
 | FR-LIB-17 | Display modules: oscilloscope, spectrum, level meter, XY scope, value readout, drawn live inside the module on the canvas. | Should | P1 to P2 | Seeing signals is part of patching. Bitwig's Grid shows small live displays inside modules. |
-| FR-LIB-18 | A module can declare a custom view drawn inside its tile on the canvas (scope, step grid, Euclidean ring, envelope shape, looper waveform), fed by engine telemetry or module data. | Must | P1 | Rich module views are what make the grid feel like an instrument. Infrastructure first (P1), individual views follow their modules. |
+| FR-LIB-18 | A module declares its panel as data: controls bound to parameters, and displays (scope, light, step grid, Euclidean ring, envelope shape, looper waveform) fed by engine telemetry, display values, or module data. Uses the same widgets and format as front panels (ADR-0013). | Must | P1 | Rich module views are what make the grid feel like an instrument. Infrastructure first (P1), individual views follow their modules. |
 | FR-LIB-19 | Modules can store data beyond parameters (patterns, loops, wavetables, samples). It is saved in the patch, covered by undo, and handed to the engine without breaking real-time rules. | Must | P2 | Sequencers, loopers, and samplers cannot work without it (OQ-17). |
 | FR-LIB-20 | Note and audio cycles (loopers) as modules: they read the clock's bar phase, play a stored pattern or loop that is a set number of bars long, start from their beginning or join in sync when their play gate rises, and output an end trigger when their loop ends (while playing). Recording, overdub, and clear come with OQ-15. | Must | P3 | Phase-driven loops stay in sync and change tempo together, and their end triggers drive arrangement logic (ADR-0012). |
 | FR-LIB-21 | Groups and next actions as built-in abstractions made from primitives (ADR-0012): a Looper Group rotates through its cycles (round robin, random, or by input), with N loops each, and outputs a trigger when a round completes. Users can open and change it. | Must | P3 | Like the clip launcher's next actions, but patchable and open, so any rule can be built. |
@@ -124,7 +124,7 @@ LoomDSP is a grid for building living musical systems: patches that play, evolve
 | FR-CANVAS-07 | Comments and colour groups on the canvas. | Should | P2 | Documentation inside the patch. |
 | FR-CANVAS-08 | Insert a module onto an existing cable by dropping it there. | Could | P2 | Common workflow in Bitwig Grid. |
 | FR-CANVAS-09 | Our own canvas widget (ADR-0010): compact module tiles on a snap grid, ports on tile edges, signal flowing left to right. | Must | P1 | The canvas is the centre of the product. Its look and speed must be ours to control. |
-| FR-CANVAS-10 | An inspector panel shows every parameter of the selected module. Tiles show only their key controls and live view. | Must | P1 | Keeps the canvas readable and cheap to draw, as in Bitwig's Grid. |
+| FR-CANVAS-10 | Each tile shows its module's panel: controls and displays, edited directly on the canvas (ADR-0013). An inspector shows every parameter of the selected module, for exact values and settings that do not fit on the tile. | Must | P1 | Direct manipulation: users edit things where they see them, as in Bitwig's Grid and Eurorack. |
 | FR-CANVAS-11 | Level of detail: when zoomed out, modules draw as simple tiles without text or live views. | Should | P1 | Large patches stay fast and readable. |
 | FR-CANVAS-12 | Cable styles show meaning: colour by signal type, thicker for stereo and polyphonic signals, a visible mark where the engine inserted a 1-sample delay. | Should | P2 | Users should read signal flow from the cables alone. |
 
@@ -132,8 +132,8 @@ LoomDSP is a grid for building living musical systems: patches that play, evolve
 
 | ID | Requirement | Priority | Phase | Rationale |
 |---|---|---|---|---|
-| FR-VIS-01 | Live value display on ports and cables (for example activity glow or small meter). | Should | P1 | Shows where signal flows. |
-| FR-VIS-02 | Probe any cable with an oscilloscope view. | Must | P1 | Core debugging tool. |
+| FR-VIS-01 | Ports show whether they carry signal, as a steady state updated a few times a second. Cables do not pulse or change brightness with the signal. | Should | P1 | Shows where signal flows without constant motion, which tires the eyes and hides what matters. |
+| FR-VIS-02 | A scope module, plus a one-step "Add scope" on any cable or output that places one already connected. | Must | P1 | Core debugging tool. As a module it saves with the patch and can go on a front panel (ADR-0013). |
 | FR-VIS-03 | Spectrum analyser and level meter modules. | Should | P2 | Common sound design need. |
 | FR-VIS-04 | Visual data reaches the UI without blocking the audio thread and without allocation. | Must | P1 | See NFR-RT-01. |
 
@@ -141,14 +141,16 @@ LoomDSP is a grid for building living musical systems: patches that play, evolve
 
 | ID | Requirement | Priority | Phase | Rationale |
 |---|---|---|---|---|
-| FR-PANEL-01 | Each patch and sub-patch can have a front panel, separate from the cable view. | Must | P2 | Hides complexity. Core of performance mode. |
-| FR-PANEL-02 | Panel widgets: knob, horizontal/vertical slider, toggle, button, selector, XY pad, label, scope, meter. | Must | P2 | Covers common instrument controls. |
+| FR-PANEL-01 | Each patch and sub-patch can have a front panel, separate from the cable view, designed with the same editor. | Must | P2 | Hides complexity. Core of performance mode. |
+| FR-PANEL-02 | Panel widgets: knob, horizontal/vertical slider, toggle, radio buttons, button, selector, XY pad, label, light, meter, scope, step grid, graph. | Must | P2 | Covers common instrument controls. |
 | FR-PANEL-03 | Widgets bind to exposed parameters. One parameter can have several widgets. | Must | P2 | Flexible layout. |
 | FR-PANEL-04 | Widgets support value mappings: linear, logarithmic frequency, decibels, stepped/enumerated. | Must | P2 | Controls must feel right. A linear cutoff knob is unusable. |
 | FR-PANEL-05 | Panel editor with grid snapping, alignment, grouping, and resizing. | Must | P2 | Panels must look tidy without pixel-pushing. |
 | FR-PANEL-06 | Themes: colours, fonts, and widget styles. Light and dark defaults. | Should | P2 | Stage visibility and branding for exports. |
 | FR-PANEL-07 | Vector rendering that scales cleanly on high-DPI screens. Custom images (SVG, PNG) as backgrounds or widget skins. | Should | P2 | Professional look. |
 | FR-PANEL-08 | A sub-patch panel can be embedded in its parent panel. | Should | P2 | Panels compose the same way patches do. |
+| FR-PANEL-09 | One panel model: module tiles, sub-patch tiles, and patch front panels use the same widgets, the same layout format, and the same panel editor. | Must | P2 | Users learn one vocabulary. Abstraction feels the same at every level (ADR-0013). |
+| FR-PANEL-10 | A sub-patch's front panel is what its tile shows in the parent patch. | Must | P2 | A finished sub-patch looks and works like a built-in module. |
 
 ## 10. Live performance (`PERF`)
 

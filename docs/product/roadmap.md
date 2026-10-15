@@ -56,13 +56,14 @@ Exit criteria:
 
 Scope:
 - Our own patch canvas as an Iced widget (ADR-0010, FR-CANVAS-09 to 11): compact tiles on a snap grid, inspector panel, level of detail.
-- Module view infrastructure, with oscilloscope and level meter as the first views (FR-LIB-17, FR-LIB-18, FR-VIS-02).
+- Module panels on tiles (ADR-0013): built-in modules declare controls and displays, edited in place. First widgets: knob, toggle, radio buttons, light, scope (FR-CANVAS-10, FR-LIB-18).
+- Scope module and "Add scope" on a cable (FR-LIB-17, FR-VIS-02).
 - Desktop app with canvas, module browser, cables, undo/redo (FR-CANVAS-01 to 06).
 - Polymorphic signals and colours, inferred channel count (FR-SIG-01 to 07).
 - Feedback with automatic single-sample delay (FR-GRAPH-03, 04).
 - Built-in modulation on parameters (FR-MOD-01, 03, 04, 05).
 - Phase 1 module library (FR-LIB-01 to 07, 11).
-- Scope probe and cable activity (FR-VIS-01, 02).
+- Signal activity on ports, without animating cables (FR-VIS-01).
 - Audio and MIDI device setup, hot-plugging, audio input (FR-APP-01, 03, 04, FR-MIDI-08).
 - MIDI learn, panic, CPU meter (FR-MIDI-02, FR-PERF-04, 05).
 
@@ -70,7 +71,8 @@ Progress:
 Issues for this phase are in the [P1 milestone](https://github.com/brylie/LoomDSP/milestone/1).
 
 - [x] Canvas prototype: `loom-canvas` and `loom-app`, with tiles, typed ports, cables, level of detail, inspector, live audio, every MIDI input connected, and a stats bar. 120 fps (the display maximum) with 300 modules and the camera moving on the reference laptop ([p1-canvas.md](../benchmarks/p1-canvas.md)). The zoomed-in and idle measurements are still open ([#4](https://github.com/brylie/LoomDSP/issues/4)).
-- [ ] Engine-to-UI telemetry and the first module views: scope and level meter ([#6](https://github.com/brylie/LoomDSP/issues/6) to [#10](https://github.com/brylie/LoomDSP/issues/10)).
+- [x] Engine-to-UI telemetry ([#6](https://github.com/brylie/LoomDSP/issues/6)).
+- [ ] Module panels on tiles and the scope module (ADR-0013) ([#6](https://github.com/brylie/LoomDSP/issues/6) to [#10](https://github.com/brylie/LoomDSP/issues/10)).
 - [ ] Module browser, undo/redo, copy and paste, open and save ([#11](https://github.com/brylie/LoomDSP/issues/11) to [#15](https://github.com/brylie/LoomDSP/issues/15)).
 - [ ] Modulation on parameters, MIDI learn, panic, device selection and hot-plugging ([#19](https://github.com/brylie/LoomDSP/issues/19) to [#29](https://github.com/brylie/LoomDSP/issues/29)).
 - [ ] Phase 1 module library, test harness, help pages, and the tutorial ([#30](https://github.com/brylie/LoomDSP/issues/30) to [#45](https://github.com/brylie/LoomDSP/issues/45)).
@@ -89,7 +91,7 @@ Exit criteria:
 Scope:
 - Sub-patches, nesting, exposed parameters, user library (FR-ENCAP-*).
 - Polyphony and voice allocation (FR-SIG-08, FR-VOICE-*).
-- Front panel editor and widgets (FR-PANEL-*).
+- Panel editor, the same for patches and sub-patches, and the full widget set (FR-PANEL-*). A sub-patch's front panel is its tile.
 - Performance mode, presets, set lists, layers (FR-PERF-01, 02, 06, 07).
 - Per-device controller mappings, MIDI clock, MIDI out, MPE, pickup modes (FR-MIDI-03, 04, 06, 07, 09).
 - Effects and sequencing modules (FR-LIB-08, 09).

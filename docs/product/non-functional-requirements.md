@@ -27,7 +27,7 @@ The audio thread has a hard deadline. At 48 kHz with a 128-sample buffer, each b
 | NFR-PERF-01 | Reference patch (about 100 modules, 8 voices) at 48 kHz/128 samples uses under 25% of one core on the reference machine *(proposal)*. | Must | Leaves headroom for the host and other plugins. |
 | NFR-PERF-02 | Per-module overhead (scheduling, port handling) is under 1% of a simple module's own DSP cost at 128 samples *(proposal)*. | Should | Modular designs fail when overhead dominates small modules. |
 | NFR-PERF-03 | Polyphonic voices are processed with SIMD where possible (for example 4 voices per f32x4). | Should | Voices are naturally parallel. This gives large throughput gains on native and WASM SIMD. |
-| NFR-PERF-04 | The patch canvas holds 60 fps while panning and zooming, at full window size on the reference laptop, with 100 modules visible and 300 in the patch *(proposal)*. An idle patch with no live views does not redraw. | Must | Smooth canvas interaction is part of the product feel. The laptop's Retina display is the hardest target we have measured: rendering cost follows physical pixels (ADR-0009). |
+| NFR-PERF-04 | The patch canvas holds 60 fps while panning and zooming, at full window size on the reference laptop, with 100 modules visible and 300 in the patch *(proposal)*. The canvas redraws only when something visible changes: a patch with nothing changing on screen does not redraw, and a display redraws only while it is on screen. | Must | Smooth canvas interaction is part of the product feel. The laptop's Retina display is the hardest target we have measured: rendering cost follows physical pixels (ADR-0009). |
 | NFR-PERF-05 | Applying a graph edit (add module or cable) takes under 20 ms from user action to audible result *(proposal)*. | Must | Patching should feel immediate. |
 | NFR-PERF-06 | Benchmarks run in CI and report regressions. | Should | Performance is a feature and needs protection. |
 | NFR-PERF-07 | Incoming MIDI events are applied in the next audio buffer, with timestamps preserved inside the buffer where the driver provides them. | Must | Controller response must feel immediate and timing must stay tight. |
@@ -83,7 +83,7 @@ These apply only if the optional, deferred web target goes ahead.
 
 | ID | Requirement | Priority | Rationale |
 |---|---|---|---|
-| NFR-UX-01 | Every panel widget is operable by keyboard, with visible focus. | Should | Accessibility and fast workflows. |
+| NFR-UX-01 | Every panel widget, on tiles and on front panels, is operable by keyboard, with visible focus. | Should | Accessibility and fast workflows. |
 | NFR-UX-02 | Exported panels expose widget names and values to screen readers where the host platform allows. | Could | Blind musicians use DAWs with screen readers. Most plugin UIs ignore them. |
 | NFR-UX-03 | Colour is never the only way to show signal type. Ports also have shape or label differences. | Should | Colour vision deficiency is common. |
 | NFR-UX-04 | UI text is translatable. English is the source language. | Could | Wider community reach. |

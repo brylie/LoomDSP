@@ -6,6 +6,7 @@ Thank you for helping. This guide explains how to build, test, and send changes.
 
 - Look for an issue first. If none exists, open one and describe what you want to change.
 - Issues reference requirement IDs from [docs/product/requirements.md](docs/product/requirements.md), for example `FR-MIDI-02`. Mention the ID in your pull request too. This links code to the reason it exists.
+- New features start with a [specification](docs/design/README.md#spec-first): what the user sees, the rules, acceptance criteria, and what is out of scope. Agree on the spec, then build to it, and update it in the same pull request when the code teaches you something.
 - Big design changes need an [ADR](docs/adr/README.md) first. The ADR records the decision only. Details that will change (ports, parameters, examples) go in a [design specification](docs/design/README.md), which you update with the code. See [kinds of documents](docs/README.md#kinds-of-documents).
 - AI-assisted contributions are welcome. Read the [AI contribution policy](AI_POLICY.md).
 
@@ -118,6 +119,7 @@ Only permissively licensed dependencies are allowed (MIT, Apache-2.0, BSD, ISC, 
 
 - Keep them focused: one change per pull request.
 - Include tests.
+- For a feature, link its specification and say which acceptance criteria the change meets. If the change differs from the spec, update the spec in the same pull request.
 - Explain what changed and why, in plain language.
 - CI must pass.
 

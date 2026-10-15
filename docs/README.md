@@ -19,7 +19,7 @@ Each kind of document has one job, so readers know what to trust and writers kno
 | Kind | Where | Holds | Changes |
 |---|---|---|---|
 | **Decision (ADR)** | [`adr/`](adr/README.md) | One decision: context, options, the choice, consequences. | Frozen once accepted. A changed decision gets a new ADR that supersedes the old one. |
-| **Specification** | [`design/`](design/README.md) | How a feature works: modules, ports, rules, examples, open points. | Living. Updated with the code it describes. |
+| **Specification** | [`design/`](design/README.md) | How a feature works: behaviour, rules, acceptance criteria, out of scope, open points. | Written before the code ([spec first](design/README.md#spec-first)). Living: updated with the code it describes. |
 | **Product** | [`product/`](product/vision.md) | Vision, personas and use cases, requirements, roadmap, open questions. | Living. |
 | **Guide** | `guide/`, `dev/` | How to use LoomDSP, or how to work on it. | Living. |
 | **Benchmark** | [`benchmarks/`](benchmarks/) | Measurements on a stated machine and date. | Add new results; keep old ones for comparison. |

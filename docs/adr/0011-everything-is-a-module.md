@@ -26,7 +26,7 @@ Every feature of LoomDSP is a module in the graph. There are no separate subsyst
   - **scenes:** recall a stored state of chosen modules, with optional morphing;
   - **modulation curves** that run over bars or sections;
   - **clock and transport** modules.
-- **Larger editors** (sequencer grids, curve editors, looper waveforms, front panels) are views of a module's state, opened from the canvas.
+- **Panels and larger editors** (sequencer grids, curve editors, looper waveforms, front panels) are views of a module's state. Each module carries its own panel on its tile (ADR-0013); larger editors open from it.
 
 ### Example: arrangement by logic
 
