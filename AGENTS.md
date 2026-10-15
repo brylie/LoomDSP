@@ -16,6 +16,7 @@ cargo fmt --all
 cargo deny check                       # licences and advisories
 typos                                  # spelling
 cargo bench -p loom-modules
+LOOM_UPDATE_REFERENCES=1 cargo test -p loom-modules --test reference   # write module reference renders
 cargo run --release -p loom-cli -- check examples/patches/fm-feedback.ron
 cargo run --release -p loom-cli -- render examples/patches/subtractive.ron -o /tmp/out.wav --note 60
 cargo run --release -p loom-app -- examples/patches/fm-feedback.ron   # desktop app
@@ -30,7 +31,7 @@ The longer version, with diagrams, is [docs/dev/architecture.md](docs/dev/archit
 - **Compilation** (ADR-0002, `crates/loom-core/src/compile.rs`). The graph is turned into a `Schedule`: every output port gets a buffer, Tarjan's algorithm finds feedback loops (SCCs), acyclic parts run a block at a time, and loops run one sample at a time. `loom.time.delay1` modules break loops. If a cycle has none, the compiler inserts one and reports it.
 - **Schedule swap.** A new schedule replaces the old one at a buffer boundary. Module instances live in engine slots and keep their state across swaps. Unit delay state is carried over by key.
 - **Telemetry** (`crates/loom-core/src/telemetry.rs`). The UI probes an output port with `Controller::add_probe`; after each block the engine pushes meter readings and scope chunks into two bounded queues, read through `Telemetry`. When a queue is full, telemetry is dropped and counted, never waited for. Spec: [docs/design/telemetry.md](docs/design/telemetry.md).
-- **Modules** implement `Module::process` over a `PortIo`. Their ports and parameters are described by a static `ModuleDescriptor`. An unconnected input reads its `PortSpec` default: zeros, a fixed value, or a transport signal. Use `io.is_connected(i)` for fallbacks; it reports cables only.
+- **Modules** implement `Module::process` over a `PortIo`. Their ports and parameters are described by a static `ModuleDescriptor`. An unconnected input reads its `PortSpec` default: zeros, a fixed value, or a transport signal. Use `io.is_connected(i)` for fallbacks; it reports cables only. Test each module with the `loom-test` harness (`crates/loom-modules/tests/reference.rs`): it checks block sizes 1, 77, and 512 and compares with a reference WAV file. Spec: [docs/design/module-test-harness.md](docs/design/module-test-harness.md).
 - **Transport** (ADR-0015, `crates/loom-core/src/transport.rs`). The engine owns one transport per patch: tempo, time signature, running, and position in `f64` beats. The `Controller` changes it; modules read it through `ProcessContext::transport`. Position is computed from an anchor, never by adding a step per block, so it is the same at any block size. Use `TransportInfo::position_at(i)` inside a call. Spec: [docs/design/clock.md](docs/design/clock.md).
 - **Signals** (ADR-0007). Every cable is `f32` at the sample rate. Types are hints only. Pitch is 0.1 per octave, 0.0 = middle C. Gates are high above 0.5. "1.0 = 10 V" for Eurorack users.
 - **Patches** (ADR-0008) are RON files, loaded by `loom-patch`.

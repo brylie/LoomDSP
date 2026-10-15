@@ -182,7 +182,11 @@ impl TransportInfo {
 
     /// The transport for a call that starts `frames` frames later. Only a
     /// call that starts on the jump frame sees the jump.
-    pub(crate) fn later(self, frames: usize) -> Self {
+    ///
+    /// The engine uses this to split a block into calls. A test harness that
+    /// splits a render into blocks must use it too: positions then come from
+    /// the same anchor, bit for bit, at any block size.
+    pub fn later(self, frames: usize) -> Self {
         Self {
             offset: self.offset + frames as u64,
             jumped: self.jumped && frames == 0,

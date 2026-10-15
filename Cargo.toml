@@ -5,6 +5,7 @@ members = [
     "crates/loom-core",
     "crates/loom-modules",
     "crates/loom-patch",
+    "crates/loom-test",
     "crates/loom-host-desktop",
     "crates/loom-cli",
     "crates/loom-canvas",
@@ -25,6 +26,7 @@ loom-rt = { path = "crates/loom-rt", version = "0.1.0" }
 loom-core = { path = "crates/loom-core", version = "0.1.0" }
 loom-modules = { path = "crates/loom-modules", version = "0.1.0" }
 loom-patch = { path = "crates/loom-patch", version = "0.1.0" }
+loom-test = { path = "crates/loom-test", version = "0.1.0" }
 loom-host-desktop = { path = "crates/loom-host-desktop", version = "0.1.0" }
 loom-canvas = { path = "crates/loom-canvas", version = "0.1.0" }
 

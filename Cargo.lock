@@ -2020,6 +2020,7 @@ dependencies = [
  "loom-core",
  "loom-patch",
  "loom-rt",
+ "loom-test",
 ]
 
 [[package]]
@@ -2036,6 +2037,14 @@ dependencies = [
 [[package]]
 name = "loom-rt"
 version = "0.1.0"
+
+[[package]]
+name = "loom-test"
+version = "0.1.0"
+dependencies = [
+ "hound",
+ "loom-core",
+]
 
 [[package]]
 name = "lru"
