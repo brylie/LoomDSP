@@ -127,7 +127,7 @@ What a trigger output sends follows OQ-19 ([#47](https://github.com/brylie/LoomD
 
 ### Out of scope for P1
 
-- Host transport (with plugin export, later).
+- Host transport (with plugin export, later; FR-LIB-25 covers it once export exists).
 - MIDI clock in and out (FR-MIDI-07, P2).
 - Swing and shuffle.
 - Tempo changes over time, such as modulation curves over bars (FR-LIB-16, P3).

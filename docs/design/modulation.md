@@ -56,7 +56,15 @@ A panel beside the inspector. Columns: on, source (module and output), target (m
 1. **Any output can be a source.** LFOs, envelopes, macros, sequencers, MIDI values, and audio oscillators alike. *Why:* "patch anything to anything" (ADR-0007). Audio-rate modulation is a sound, not a mistake.
 2. **Modulation works in the control's range.** The engine maps the base value to the control's 0 to 1 range, adds `depth × source` for each assignment, clamps to 0 to 1, and maps back. *Why:* depth 0.1 means "a tenth of the knob" on every parameter. On a logarithmic parameter such as cutoff, that is a musical interval, not a few hertz. The arc on the knob shows exactly what the engine does.
 3. **One mapping, shared.** Whether a parameter is linear or logarithmic is part of its `ParamSpec`, not guessed by the app. The inspector, panel controls, and engine all use the same mapping functions in `loom-core`. *Why:* if they disagreed, the arc would lie.
-4. **Polarity comes from the source, unless the user overrides it.** Each output declares unipolar (0 to 1) or bipolar (-1 to 1). Defaults: envelopes, gates, and phases are unipolar; LFOs, audio, and pitch are bipolar. An assignment can force either. *Why:* an envelope should push a cutoff up from its base, an LFO should swing around it.
+4. **Polarity comes from the source, unless the user overrides it.** Each output declares unipolar (0 to 1) or bipolar (-1 to 1). Defaults: envelopes, gates, and phases are unipolar; LFOs, audio, and pitch are bipolar. An assignment can force either, and the engine then remaps the source sample `s` before applying depth:
+
+   | Source declares | Assignment uses | Value used |
+   |---|---|---|
+   | same as the assignment | (no override) | `s` |
+   | bipolar | unipolar | `(s + 1) / 2` |
+   | unipolar | bipolar | `2s - 1` |
+
+   The arc follows the value used: a unipolar assignment draws from the base to `base + depth`, a bipolar one from `base - depth` to `base + depth`. Sources are never clamped; only the final parameter value is (rule 5). *Why:* an envelope should push a cutoff up from its base, an LFO should swing around it. A fixed, simple remap keeps the arc honest.
 5. **Sum, then clamp.** Several assignments on one parameter add up before the clamp (FR-MOD-03). Whole-number parameters are rounded after the clamp. *Why:* predictable, and the clamp keeps filters stable.
 6. **Per sample, only where needed.** A parameter with assignments, or one that is being smoothed, gets a per-sample buffer. Others stay one value per block. *Why:* modulation must be smooth at audio rate (FR-MOD-03), but most parameters are still most of the time.
 7. **Smoothing applies to the base value only.** Changes from the UI and MIDI are smoothed (FR-MOD-05). The modulation itself is not. *Why:* a sharp envelope or audio-rate source must stay sharp. Smoothing it would change the sound.
@@ -64,7 +72,11 @@ A panel beside the inspector. Columns: on, source (module and output), target (m
 9. **Depth 0 sounds the same as no assignment.** Output is bit-identical. *Why:* users set depth to 0 to compare, and expect silence from it.
 10. **Assignments stay inside their patch level.** Source and target must be in the same patch or sub-patch. To reach inside a sub-patch, expose the parameter (FR-ENCAP-03). *Why:* a sub-patch must work the same wherever it is used.
 11. **Assignments are part of the patch.** They are saved, undone, copied with their modules (when both ends are copied), and exported. *Why:* they change the sound.
-12. **Inputs and assignments add up.** Some modules have an input for the same quantity as a parameter, such as the filter's cutoff input for keyboard tracking. The input and the assignments both apply. *Why:* both are common, and neither should silently replace the other.
+12. **Inputs and assignments add up, in a fixed order.** Some modules have an input for the same quantity as a parameter, such as the filter's cutoff input for keyboard tracking. The order is:
+    1. The engine computes the modulated value: base, plus assignments in the 0 to 1 range, clamped, mapped back, rounded for whole numbers (rules 2 and 5).
+    2. The module applies its input to that value in the input's own units (for the filter, pitch at 0.1 per octave), then clamps to the parameter range again.
+
+    The module's help page states how its inputs apply. *Why:* both are common, and neither should silently replace the other. A fixed order means the same base, cable, and assignments give the same value in every module.
 
 ## Engine and API
 

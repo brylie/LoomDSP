@@ -114,12 +114,12 @@ Exit criteria:
 Scope:
 - Arrangement from phase-driven primitives (ADR-0012, [specification](../design/arrangement.md)):
   - Note and audio cycles that read the clock's bar phase and output an end trigger (FR-LIB-20).
-  - Clock Divide, Counter (with phase output), and Step Select (FR-LIB-22). These small logic modules can be built as early as P1.
+  - Counter (with phase output) and Step Select (FR-LIB-22), with Clock Divide from P1 (FR-LIB-27). These small logic modules can be built as early as P1.
   - Built-in abstractions made from them: Looper Group, Part, Song Sequencer (FR-LIB-21, FR-LIB-24).
 - Scenes: snapshots of module states, switched by triggers, with morph time (FR-LIB-23).
 - Sequencers, including polymetric multi-output step sequencers (FR-LIB-14).
 - Note effects, on the model chosen in OQ-16 (FR-LIB-13).
-- Clock and transport modules, and modulation curves over bars (FR-LIB-16).
+- Modulation curves over bars and sections (FR-LIB-16), on the P1 transport and clock modules.
 - Record the live output to an audio file while performing (FR-SHARE-03).
 
 Exit criteria:

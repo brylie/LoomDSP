@@ -28,7 +28,7 @@
 | **Looper** | A module that records and plays a loop of audio or MIDI, synced to the clock. |
 | **Lock-free** | Code that lets threads communicate without one thread waiting for another to release a lock. |
 | **Modulation** | Changing a parameter over time with another signal (LFO, envelope, MIDI). |
-| **Modulation assignment** | A link from any output to a parameter, with a depth, made without a cable ([modulation specification](../design/modulation.md)). |
+| **Modulation assignment** | A link from any output to a parameter in the same patch level, with a depth, made without a cable ([modulation specification](../design/modulation.md)). |
 | **Modulation matrix** | A table of every modulation assignment in a patch or sub-patch. |
 | **Module** | One DSP unit on the canvas, such as an oscillator or filter. Built-in or from the SDK. |
 | **Next action** | What a group does when a member finishes its loop: play the next member, a random one, or follow an input. Taken from Bitwig's clip launcher, but patchable. |
