@@ -15,5 +15,8 @@ categories = ["multimedia::audio"]
 rtrb.workspace = true
 thiserror.workspace = true
 
+[dev-dependencies]
+assert_no_alloc.workspace = true
+
 [lints]
 workspace = true

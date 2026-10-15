@@ -60,6 +60,8 @@ Every arrow into or out of the audio thread is a bounded, lock-free queue (`rtrb
 
 Telemetry for live views also leaves the audio thread through bounded queues: one for meter readings and one for scope samples. The app asks to watch an output port with `Controller::add_probe`. When a telemetry queue is full, the engine drops the new message and counts it; it never waits (NFR-RT-07). Details are in the [telemetry specification](../design/telemetry.md).
 
+The patch transport (tempo, time signature, running, position) lives in the engine, not in the schedule, so editing the patch never moves it ([ADR-0015](../adr/0015-one-transport-per-patch.md)). The controller changes it with commands, applied at buffer starts. At the start of each block the engine fills one shared buffer per transport signal that some unconnected input follows, such as bar phase. Details are in the [clock and transport specification](../design/clock.md).
+
 MIDI inputs and the Hold note button share one queue through a mutex (`SharedMidi`). Only the sending threads take that lock. The audio thread reads the queue without one.
 
 ## Life of an edit
@@ -105,8 +107,9 @@ Shader names must not be reserved words in Metal or HLSL, because wgpu's transla
 
 | What | Where |
 |---|---|
-| Module behaviour | Unit tests next to each module, using `loom_core::testing::run`. |
+| Module behaviour | Unit tests next to each module, using `loom_core::testing::run` (or `run_with_transport`). |
 | No allocation on the audio path, including telemetry | `crates/loom-modules/tests/no_alloc.rs` (debug builds). |
+| Transport and default inputs, including no allocation | `crates/loom-core/tests/transport.rs`, `transport_no_alloc.rs`. |
 | Same output at any buffer size, bit-identical runs | `crates/loom-modules/tests/`. |
 | Patch loading and round trips | `crates/loom-patch`. |
 | Canvas logic and shaders | `crates/loom-canvas` (hit-testing, camera, geometry, shader validation). |

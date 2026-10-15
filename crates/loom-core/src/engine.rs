@@ -9,6 +9,7 @@ use crate::compile::{ModuleOp, Schedule, Step};
 use crate::midi::MidiEvent;
 use crate::module::{Module, PortIo, ProcessContext};
 use crate::telemetry::{MeterReading, SCOPE_CHUNK, ScopeChunk, TelemetrySender, measure};
+use crate::transport::{TimeSignature, Transport};
 use rtrb::{Consumer, Producer};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -78,11 +79,28 @@ pub struct EngineStats {
 }
 
 pub(crate) enum Command {
-    InsertModule { slot: usize, module: Box<dyn Module> },
-    RemoveModule { slot: usize },
+    InsertModule {
+        slot: usize,
+        module: Box<dyn Module>,
+    },
+    RemoveModule {
+        slot: usize,
+    },
     SwapSchedule(Box<Schedule>),
-    SetParam { slot: usize, index: usize, value: f32 },
-    ResetModule { slot: usize },
+    SetParam {
+        slot: usize,
+        index: usize,
+        value: f32,
+    },
+    ResetModule {
+        slot: usize,
+    },
+    /// Already clamped by the controller.
+    SetTempo(f64),
+    /// Already checked by the controller.
+    SetTimeSignature(TimeSignature),
+    SetRunning(bool),
+    ResetTransport,
 }
 
 pub(crate) enum Garbage {
@@ -100,7 +118,11 @@ pub struct Engine {
     midi_in: Consumer<MidiEvent>,
     midi: Vec<MidiEvent>,
     telemetry: TelemetrySender,
-    /// Frames rendered since the engine started. Stamps telemetry.
+    /// The patch transport (ADR-0015). Not part of the schedule, so editing
+    /// the patch never moves it.
+    transport: Transport,
+    /// Frames rendered since the engine started. Stamps telemetry and
+    /// anchors the transport.
     frame: u64,
     config: EngineConfig,
     stats: Arc<EngineStats>,
@@ -123,6 +145,7 @@ impl Engine {
             midi_in,
             midi: Vec::with_capacity(config.midi_capacity),
             telemetry,
+            transport: Transport::new(config.sample_rate),
             frame: 0,
             config,
             stats,
@@ -191,6 +214,10 @@ impl Engine {
                         module.reset();
                     }
                 }
+                Command::SetTempo(tempo) => self.transport.set_tempo(self.frame, tempo),
+                Command::SetTimeSignature(time_signature) => self.transport.set_time_signature(time_signature),
+                Command::SetRunning(running) => self.transport.set_running(self.frame, running),
+                Command::ResetTransport => self.transport.reset(self.frame),
             }
         }
     }
@@ -272,6 +299,7 @@ impl Engine {
         let sample_rate = self.config.sample_rate;
         let midi = &self.midi[..];
         let slots = &mut self.slots;
+        let transport = self.transport.info(self.frame);
         let Schedule {
             input_ptrs,
             output_ptrs,
@@ -281,8 +309,34 @@ impl Engine {
             loop_taps,
             steps,
             outputs,
+            transport: transport_buffers,
             ..
         } = &mut *self.schedule;
+
+        // Transport signals first, once per block, for every input that
+        // follows them. Each sample's value comes from the anchor, so it is
+        // the same for any block size (rule 5).
+        if let Some(buffer) = transport_buffers.bar_phase {
+            // SAFETY: transport buffers are schedule buffers of `max_block`
+            // floats, `frames <= max_block`, modules only read them, and no
+            // module is running yet.
+            let buffer = unsafe { std::slice::from_raw_parts_mut(buffer, frames) };
+            for (i, value) in buffer.iter_mut().enumerate() {
+                *value = transport.bar_phase_at(i);
+            }
+        }
+        if let Some(buffer) = transport_buffers.beat_phase {
+            // SAFETY: as for the bar phase buffer above.
+            let buffer = unsafe { std::slice::from_raw_parts_mut(buffer, frames) };
+            for (i, value) in buffer.iter_mut().enumerate() {
+                *value = transport.beat_phase_at(i);
+            }
+        }
+        if let Some(buffer) = transport_buffers.playing {
+            // SAFETY: as for the bar phase buffer above.
+            let buffer = unsafe { std::slice::from_raw_parts_mut(buffer, frames) };
+            buffer.fill(if transport.playing() { 1.0 } else { 0.0 });
+        }
 
         let mut run_op = |op: &ModuleOp, offset: usize, len: usize| {
             if let Some(module) = slots[op.slot as usize].as_mut() {
@@ -291,12 +345,13 @@ impl Engine {
                     midi,
                     midi_base: position + offset,
                     frames: len,
+                    transport: transport.later(offset),
                 };
                 // SAFETY: the compiler gives every output its own buffer of
                 // `max_block` floats. Inputs point at other modules' outputs,
-                // a unit delay buffer, or the zero buffer. Cycles always pass
-                // through a unit delay, so no module reads its own output.
-                // `offset + len <= frames <= max_block`.
+                // a unit delay buffer, the zero buffer, or a default buffer.
+                // Cycles always pass through a unit delay, so no module reads
+                // its own output. `offset + len <= frames <= max_block`.
                 let mut io = unsafe {
                     PortIo::new(
                         &input_ptrs[op.inputs.0 as usize..op.inputs.1 as usize],
@@ -369,5 +424,7 @@ impl Engine {
                 *out += value;
             }
         }
+
+        self.transport.end_block();
     }
 }

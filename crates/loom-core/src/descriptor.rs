@@ -10,13 +10,42 @@ pub struct PortSpec {
     pub name: &'static str,
     /// Signal type, for colour and defaults.
     pub signal: SignalType,
+    /// What an input reads while no cable is connected. Ignored on outputs.
+    pub default: PortDefault,
 }
 
 impl PortSpec {
-    /// Creates a port spec.
+    /// Creates a port spec. Unconnected, it reads 0.
     pub const fn new(name: &'static str, signal: SignalType) -> Self {
-        Self { name, signal }
+        Self {
+            name,
+            signal,
+            default: PortDefault::Value(0.0),
+        }
     }
+
+    /// Sets what the input reads while no cable is connected.
+    pub const fn with_default(mut self, default: PortDefault) -> Self {
+        self.default = default;
+        self
+    }
+}
+
+/// What an unconnected input reads (ADR-0015).
+///
+/// The default is static: it does not change with the module's parameters.
+/// The compiler binds inputs when the patch changes, not when a parameter
+/// moves, so binding stays off the audio thread.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PortDefault {
+    /// A fixed number. Must be finite.
+    Value(f32),
+    /// The transport's bar phase, from 0 up to 1.
+    BarPhase,
+    /// The transport's beat phase (quarter notes), from 0 up to 1.
+    BeatPhase,
+    /// The transport's play gate: 1.0 while playing, 0.0 while stopped.
+    Playing,
 }
 
 /// One parameter.

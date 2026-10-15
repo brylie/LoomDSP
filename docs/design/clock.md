@@ -3,7 +3,7 @@
 How musical time reaches every module: the patch transport, inputs that follow it without cables, and the modules that put time on cables and divide it.
 
 - **Kind:** living specification.
-- **Status:** Sections have their own status. **Agreed** for the engine slice ([#72](https://github.com/brylie/LoomDSP/issues/72)): the transport fields, signals derived from the transport, default inputs, rules 1 to 6, and engine and API. Everything else is Draft: review it before building.
+- **Status:** Sections have their own status. **Implemented** for the engine slice ([#72](https://github.com/brylie/LoomDSP/issues/72)): the transport fields, signals derived from the transport, default inputs, rules 1 to 6 (except saving run state, which needs the Transport module), and engine and API. Everything else is Draft: review it before building.
 - **Decision behind it:** [ADR-0015](../adr/0015-one-transport-per-patch.md) (one transport per patch). Builds on [ADR-0007](../adr/0007-polymorphic-signal-model.md) (phase and gate signals) and [ADR-0012](../adr/0012-arrangement-from-phase-driven-primitives.md) (arrangement from phase).
 - **Requirements:** FR-LIB-07, FR-LIB-16, FR-LIB-22, FR-LIB-25 to FR-LIB-27, FR-MIDI-07.
 - **Prior art:** VCV Rack clock modules (run and reset on the panel and as inputs), Bitwig's Button modulator.
@@ -15,7 +15,7 @@ How musical time reaches every module: the patch transport, inputs that follow i
 
 ## The transport
 
-**Status:** the fields table is Agreed. "Controls live on the Transport module" and "Starting and stopping" are Draft ([#73](https://github.com/brylie/LoomDSP/issues/73)).
+**Status:** the fields table is Implemented. "Controls live on the Transport module" and "Starting and stopping" are Draft ([#73](https://github.com/brylie/LoomDSP/issues/73)).
 
 The engine keeps one transport per patch.
 
@@ -52,7 +52,7 @@ A **Button** module (FR-LIB-12) gives a performance control for this. Its panel 
 
 ## Signals derived from the transport
 
-**Status:** Agreed. The rate phase row belongs to the Clock module ([#74](https://github.com/brylie/LoomDSP/issues/74)) and stays Draft.
+**Status:** Implemented. The rate phase row belongs to the Clock module ([#74](https://github.com/brylie/LoomDSP/issues/74)) and stays Draft.
 
 | Signal | Value |
 |---|---|
@@ -67,7 +67,7 @@ Phases are computed in `f64` and converted to `f32` last. A phase that rounds to
 
 ## Default inputs
 
-**Status:** Agreed, except the clock mark, which is UI work for later and stays Draft.
+**Status:** Implemented, except the clock mark, which is UI work for later and stays Draft.
 
 A module can declare a **default** for any input. The default is used while nothing is connected.
 
@@ -101,7 +101,7 @@ What a trigger output sends follows OQ-19 ([#47](https://github.com/brylie/LoomD
 
 ## Rules
 
-**Status:** rules 1 to 6 are Agreed. Rules 7 to 9 are Draft.
+**Status:** rules 1 to 6 are Implemented in the engine; saving run state in the patch waits for the Transport module ([#73](https://github.com/brylie/LoomDSP/issues/73)). Rules 7 to 9 are Draft.
 
 1. **One transport, owned by the engine.** Modules read it; only the transport source changes it. *Why:* every synced module must agree on where the bar starts.
 2. **Position is double precision.** Phases are converted to `f32` only at the end. *Why:* in `f32`, position loses sample accuracy after a few minutes. An hour-long set must stay in step.
@@ -115,7 +115,7 @@ What a trigger output sends follows OQ-19 ([#47](https://github.com/brylie/LoomD
 
 ## Engine and API
 
-**Status:** Agreed ([#72](https://github.com/brylie/LoomDSP/issues/72)), except the patch format, which belongs to [#73](https://github.com/brylie/LoomDSP/issues/73).
+**Status:** Implemented ([#72](https://github.com/brylie/LoomDSP/issues/72)), except the patch format, which belongs to [#73](https://github.com/brylie/LoomDSP/issues/73).
 
 ### Transport state
 
@@ -150,7 +150,8 @@ Every call to `Module::process` gets the transport:
 | jumped | `bool` | True when the position jumped at the first frame of this call. |
 
 - Inside a feedback loop, each call is one frame. Position and jumped then describe that frame. Only the call for the first frame of the block can see `jumped`. *Why:* a module then sees the same values for any grouping of frames (rule 5).
-- *Why beats per sample is 0 while stopped:* a module that computes `position + i × beats_per_sample` then holds still with no special case, as rule 6 asks.
+- For the position at frame `i` of a call, a module uses `TransportInfo::position_at(i)` (or `bar_phase_at`, `beat_phase_at`). These compute from the anchor, exactly as the engine's shared buffers do. *Why:* adding `i × beats_per_sample` to the position rounds differently at different block sizes, which would break rule 5 inside the module.
+- *Why beats per sample is 0 while stopped:* any position computed from it then holds still with no special case, as rule 6 asks.
 - `ProcessContext::new`, used to test modules alone, gives a stopped transport at position 0, 120 BPM, 4/4. Tests can set another transport.
 
 ### `PortSpec` default
@@ -174,16 +175,16 @@ The Transport module's parameters (tempo, time signature, run) are saved like an
 
 "Block size" below means both the buffer length passed to `Engine::process` and `max_block`.
 
-- [ ] After one hour at 120 BPM and 48 kHz, bar phase at the last sample matches the exact value within one sample. The exact value comes from integer arithmetic on the sample count.
-- [ ] Changing tempo while playing keeps the position continuous: no jump in any phase.
-- [ ] The bar phase, beat phase, and playing buffers are bit-identical at block sizes 1, 32, and 1024, over a run that includes a tempo change, a stop, a start, and a reset at the same samples.
-- [ ] An unconnected input with a bar phase default reads bar phase. A cable overrides it; removing the cable returns to the transport. `is_connected` is false while it follows the default.
-- [ ] An unconnected input with a value default reads that value.
-- [ ] Stopping holds the position and every phase. Starting continues from there.
-- [ ] Reset sets the position to 0, and `jumped` is true for exactly one call per module: the one that covers the first frame after the reset.
-- [ ] Out-of-range tempo is clamped. An out-of-range time signature is refused and changes nothing.
-- [ ] Many inputs that follow the same transport signal read one shared buffer.
-- [ ] The allocation test (`tests/no_alloc.rs`) covers a patch with transport defaults and transport changes.
+- [x] After one hour at 120 BPM and 48 kHz, bar phase at the last sample matches the exact value within one sample. The exact value comes from integer arithmetic on the sample count.
+- [x] Changing tempo while playing keeps the position continuous: no jump in any phase.
+- [x] The bar phase, beat phase, and playing buffers are bit-identical at block sizes 1, 32, and 1024, over a run that includes a tempo change, a stop, a start, and a reset at the same samples.
+- [x] An unconnected input with a bar phase default reads bar phase. A cable overrides it; removing the cable returns to the transport. `is_connected` is false while it follows the default.
+- [x] An unconnected input with a value default reads that value.
+- [x] Stopping holds the position and every phase. Starting continues from there.
+- [x] Reset sets the position to 0, and `jumped` is true for exactly one call per module: the one that covers the first frame after the reset.
+- [x] Out-of-range tempo is clamped. An out-of-range time signature is refused and changes nothing.
+- [x] Many inputs that follow the same transport signal read one shared buffer.
+- [x] The allocation tests (`loom-core/tests/transport_no_alloc.rs`, `loom-modules/tests/no_alloc.rs`) cover a patch with transport defaults and transport changes.
 
 ### Acceptance criteria: modules and UI (Draft)
 

@@ -8,6 +8,7 @@ use crate::graph::{Graph, InputRef, ModuleId, Node, OutputRef};
 use crate::midi::MidiEvent;
 use crate::registry::Registry;
 use crate::telemetry::{ProbeId, ProbeKind, Telemetry, TelemetrySender};
+use crate::transport::{TimeSignature, TransportSettings, clamp_tempo};
 use rtrb::{Consumer, Producer, RingBuffer};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -58,6 +59,7 @@ pub fn create_engine(registry: Arc<Registry>, config: EngineConfig) -> EnginePar
         next_id: 1,
         dirty: false,
         last_report: CompileReport::default(),
+        transport: TransportSettings::default(),
         config,
         stats,
     };
@@ -98,6 +100,8 @@ pub struct Controller {
     next_id: u32,
     dirty: bool,
     last_report: CompileReport,
+    /// What the engine's transport is set to, as of the last command sent.
+    transport: TransportSettings,
     config: EngineConfig,
     stats: Arc<EngineStats>,
 }
@@ -308,6 +312,51 @@ impl Controller {
                 .map_err(|_| LoomError::QueueFull)?;
         }
         Ok(())
+    }
+
+    /// The transport settings last sent to the engine (ADR-0015).
+    pub fn transport(&self) -> TransportSettings {
+        self.transport
+    }
+
+    /// Sets the tempo in beats per minute, clamped to 20 to 300. Returns the
+    /// tempo used. Takes effect at the next buffer, and the position does
+    /// not jump.
+    pub fn set_tempo(&mut self, bpm: f64) -> Result<f64, LoomError> {
+        let tempo = clamp_tempo(bpm);
+        self.send(Command::SetTempo(tempo))?;
+        self.transport.tempo = tempo;
+        Ok(tempo)
+    }
+
+    /// Sets the time signature. One out of range is refused with
+    /// [`LoomError::InvalidTimeSignature`], and the transport does not
+    /// change.
+    pub fn set_time_signature(&mut self, time_signature: TimeSignature) -> Result<(), LoomError> {
+        if !time_signature.is_valid() {
+            return Err(LoomError::InvalidTimeSignature(time_signature));
+        }
+        self.send(Command::SetTimeSignature(time_signature))?;
+        self.transport.time_signature = time_signature;
+        Ok(())
+    }
+
+    /// Starts or stops the transport at the next buffer. Stopping holds the
+    /// position; starting continues from there.
+    pub fn set_running(&mut self, running: bool) -> Result<(), LoomError> {
+        self.send(Command::SetRunning(running))?;
+        self.transport.running = running;
+        Ok(())
+    }
+
+    /// Returns the transport to bar 1 at the next buffer, running or stopped.
+    /// Modules see it as a jump ([`TransportInfo::jumped`](crate::TransportInfo::jumped)).
+    pub fn reset_transport(&mut self) -> Result<(), LoomError> {
+        self.send(Command::ResetTransport)
+    }
+
+    fn send(&mut self, command: Command) -> Result<(), LoomError> {
+        self.commands.push(command).map_err(|_| LoomError::QueueFull)
     }
 
     /// Starts watching an output port. The engine sends its telemetry from

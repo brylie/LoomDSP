@@ -5,6 +5,7 @@
 //! [`ModuleDescriptor`](crate::ModuleDescriptor).
 
 use crate::midi::MidiEvent;
+use crate::transport::TransportInfo;
 use std::marker::PhantomData;
 
 /// A DSP module instance.
@@ -37,17 +38,32 @@ pub struct ProcessContext<'a> {
     /// of the first frame in this call.
     pub(crate) midi_base: usize,
     pub(crate) frames: usize,
+    pub(crate) transport: TransportInfo,
 }
 
 impl<'a> ProcessContext<'a> {
     /// Creates a context. Mainly useful for testing modules in isolation.
+    /// The transport is stopped at position 0, at 120 BPM, in 4/4.
     pub fn new(sample_rate: f32, frames: usize, midi: &'a [MidiEvent]) -> Self {
         Self {
             sample_rate,
             midi,
             midi_base: 0,
             frames,
+            transport: TransportInfo::default(),
         }
+    }
+
+    /// Replaces the transport, for testing modules in isolation.
+    pub fn with_transport(mut self, transport: TransportInfo) -> Self {
+        self.transport = transport;
+        self
+    }
+
+    /// The patch transport for this call (ADR-0015). Inside a feedback loop
+    /// each call is one frame, and this describes that frame.
+    pub fn transport(&self) -> &TransportInfo {
+        &self.transport
     }
 
     /// MIDI events that fall inside this call, as `(frame, event)`, where
@@ -64,9 +80,10 @@ impl<'a> ProcessContext<'a> {
 
 /// Access to a module's input and output buffers for one call.
 ///
-/// Inputs are read-only. Unconnected inputs read zeros. Use
-/// [`PortIo::is_connected`] to choose a fallback (for example a parameter
-/// value) when an input has no cable.
+/// Inputs are read-only. An unconnected input reads its port's default
+/// ([`PortDefault`](crate::PortDefault)): zeros unless the descriptor says
+/// otherwise. Use [`PortIo::is_connected`] to choose a fallback (for example
+/// a parameter value) when an input has no cable.
 pub struct PortIo<'a> {
     inputs: &'a [*const f32],
     outputs: &'a [*mut f32],
@@ -165,12 +182,34 @@ impl<'a> PortIo<'a> {
 pub mod testing {
     use super::*;
 
-    /// Runs `module.process` once over the given buffers.
+    /// Runs `module.process` once over the given buffers, with the transport
+    /// stopped at position 0.
     ///
     /// Every input and output slice must have the same length.
     pub fn run(
         module: &mut dyn Module,
         sample_rate: f32,
+        inputs: &[&[f32]],
+        connected: &[bool],
+        outputs: &mut [&mut [f32]],
+        midi: &[MidiEvent],
+    ) {
+        run_with_transport(
+            module,
+            sample_rate,
+            TransportInfo::default(),
+            inputs,
+            connected,
+            outputs,
+            midi,
+        );
+    }
+
+    /// Like [`run`], with the given transport.
+    pub fn run_with_transport(
+        module: &mut dyn Module,
+        sample_rate: f32,
+        transport: TransportInfo,
         inputs: &[&[f32]],
         connected: &[bool],
         outputs: &mut [&mut [f32]],
@@ -189,7 +228,7 @@ pub mod testing {
             .iter()
             .enumerate()
             .fold(0u64, |mask, (i, &c)| if c { mask | (1 << i) } else { mask });
-        let ctx = ProcessContext::new(sample_rate, frames, midi);
+        let ctx = ProcessContext::new(sample_rate, frames, midi).with_transport(transport);
         // SAFETY: the pointers come from distinct slices of length `frames`
         // that outlive this call; `&mut [&mut [f32]]` guarantees outputs are
         // unique and cannot alias the shared input slices.

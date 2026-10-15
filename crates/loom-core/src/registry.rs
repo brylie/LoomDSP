@@ -1,6 +1,6 @@
 //! The set of module types available to patches.
 
-use crate::descriptor::{ModuleDescriptor, ModuleRole};
+use crate::descriptor::{ModuleDescriptor, ModuleRole, PortDefault};
 use crate::error::LoomError;
 use std::collections::BTreeMap;
 
@@ -56,6 +56,13 @@ impl Registry {
         };
         if descriptor.inputs.len() > 64 {
             return Err(invalid("more than 64 inputs"));
+        }
+        if descriptor
+            .inputs
+            .iter()
+            .any(|port| matches!(port.default, PortDefault::Value(value) if !value.is_finite()))
+        {
+            return Err(invalid("an input default must be a finite number"));
         }
         match descriptor.role {
             ModuleRole::UnitDelay if descriptor.inputs.len() != 1 || descriptor.outputs.len() != 1 => {
@@ -128,5 +135,24 @@ mod tests {
         assert_eq!(ModuleKind::parse("loom.osc.sine").unwrap().version, 1);
         assert!(ModuleKind::parse("@1").is_err());
         assert!(ModuleKind::parse("x@y").is_err());
+    }
+
+    #[test]
+    fn refuses_input_defaults_that_are_not_finite() {
+        static NAN_DEFAULT: ModuleDescriptor = ModuleDescriptor {
+            id: "test.nan",
+            version: 1,
+            name: "NaN",
+            category: "Test",
+            description: "",
+            inputs: &[
+                crate::PortSpec::new("in", crate::SignalType::Modulation).with_default(PortDefault::Value(f32::NAN))
+            ],
+            outputs: &[],
+            params: &[],
+            role: ModuleRole::UnitDelay,
+        };
+        let error = Registry::new().register(&NAN_DEFAULT).unwrap_err();
+        assert!(error.to_string().contains("finite"), "{error}");
     }
 }
