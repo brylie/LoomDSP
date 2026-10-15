@@ -40,6 +40,8 @@ static ECHO: ModuleDescriptor = ModuleDescriptor {
     ],
     params: &[ParamSpec::new("gain", 0.0, 2.0, 1.0, "")],
     role: ModuleRole::Dsp(|_| Box::new(Echo { gain: 0.0 })),
+    panel: loom_core::Panel::EMPTY,
+    displays: &[],
 };
 
 struct Echo {
@@ -78,6 +80,8 @@ static CALL_LENGTH: ModuleDescriptor = ModuleDescriptor {
     outputs: &[PortSpec::new("out", SignalType::Modulation)],
     params: &[],
     role: ModuleRole::Dsp(|_| Box::new(CallLength)),
+    panel: loom_core::Panel::EMPTY,
+    displays: &[],
 };
 
 struct CallLength;
@@ -100,6 +104,8 @@ static NAN_AT_TEN: ModuleDescriptor = ModuleDescriptor {
     outputs: &[PortSpec::new("out", SignalType::Audio)],
     params: &[],
     role: ModuleRole::Dsp(|_| Box::new(NanAtTen { frame: 0 })),
+    panel: loom_core::Panel::EMPTY,
+    displays: &[],
 };
 
 struct NanAtTen {
@@ -335,6 +341,8 @@ fn unit_delays_are_refused() {
         outputs: &[PortSpec::new("out", SignalType::Audio)],
         params: &[],
         role: ModuleRole::UnitDelay,
+        panel: loom_core::Panel::EMPTY,
+        displays: &[],
     };
     let _ = Harness::new(&DELAY);
 }

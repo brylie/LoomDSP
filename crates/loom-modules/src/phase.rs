@@ -6,7 +6,8 @@
 
 use loom_core::signal::{EdgeDetector, pitch};
 use loom_core::{
-    Module, ModuleConfig, ModuleDescriptor, ModuleRole, ParamSpec, PortIo, PortSpec, ProcessContext, SignalType,
+    Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamSpec, PortIo, PortSpec, ProcessContext, SignalType,
+    Widget,
 };
 
 /// `loom.phase.generator`: a ramp from 0 to 1 at the frequency set by pitch.
@@ -26,6 +27,8 @@ pub static PHASE: ModuleDescriptor = ModuleDescriptor {
         ParamSpec::new("octave", -10.0, 10.0, 0.0, "oct"),
     ],
     role: ModuleRole::Dsp(|config| Box::new(Phase::new(config))),
+    panel: Panel::new(6, 3, &[Widget::knob(0, 0, "tune"), Widget::knob(3, 0, "octave")]),
+    displays: &[],
 };
 
 struct Phase {

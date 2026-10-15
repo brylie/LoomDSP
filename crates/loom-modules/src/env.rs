@@ -2,7 +2,8 @@
 
 use loom_core::signal::gate_is_high;
 use loom_core::{
-    Module, ModuleConfig, ModuleDescriptor, ModuleRole, ParamSpec, PortIo, PortSpec, ProcessContext, SignalType,
+    Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamSpec, PortIo, PortSpec, ProcessContext, SignalType,
+    Widget,
 };
 
 /// `loom.env.adsr`: attack, decay, sustain, release envelope.
@@ -21,6 +22,18 @@ pub static ADSR: ModuleDescriptor = ModuleDescriptor {
         ParamSpec::new("release", 0.0005, 10.0, 0.3, "s").logarithmic(),
     ],
     role: ModuleRole::Dsp(|config| Box::new(Adsr::new(config))),
+    panel: Panel::new(
+        6,
+        8,
+        &[
+            Widget::knob(0, 0, "attack"),
+            Widget::knob(3, 0, "decay"),
+            Widget::knob(0, 3, "sustain"),
+            Widget::knob(3, 3, "release"),
+            Widget::light(0, 6, "level"),
+        ],
+    ),
+    displays: &["level"],
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -114,6 +127,10 @@ impl Module for Adsr {
         self.stage = Stage::Idle;
         self.level = 0.0;
         self.gate_was_high = false;
+    }
+
+    fn displays(&self, values: &mut [f32]) {
+        values[0] = self.level;
     }
 }
 

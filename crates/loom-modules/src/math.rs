@@ -4,7 +4,8 @@
 //! multiply), so a module is useful with only one cable.
 
 use loom_core::{
-    Module, ModuleConfig, ModuleDescriptor, ModuleRole, ParamSpec, PortIo, PortSpec, ProcessContext, SignalType,
+    Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamSpec, PortIo, PortSpec, ProcessContext, SignalType,
+    Widget,
 };
 use loom_rt::Smoothed;
 
@@ -26,6 +27,8 @@ pub static ADD: ModuleDescriptor = ModuleDescriptor {
             offset: Smoothed::new(0.0, config.sample_rate, 0.005),
         })
     }),
+    panel: Panel::new(3, 3, &[Widget::knob(0, 0, "offset")]),
+    displays: &[],
 };
 
 struct Add {
@@ -65,6 +68,8 @@ pub static MUL: ModuleDescriptor = ModuleDescriptor {
             gain: Smoothed::new(1.0, config.sample_rate, 0.005),
         })
     }),
+    panel: Panel::new(3, 3, &[Widget::knob(0, 0, "gain")]),
+    displays: &[],
 };
 
 struct Mul {
@@ -103,6 +108,8 @@ pub static CONSTANT: ModuleDescriptor = ModuleDescriptor {
             value: Smoothed::new(0.0, config.sample_rate, 0.005),
         })
     }),
+    panel: Panel::new(3, 3, &[Widget::knob(0, 0, "value")]),
+    displays: &[],
 };
 
 struct Constant {

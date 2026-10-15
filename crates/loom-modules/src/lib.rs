@@ -59,6 +59,40 @@ mod tests {
     }
 
     #[test]
+    fn panels_follow_the_spec() {
+        // docs/design/panels.md, Module panels on tiles: a knob for every
+        // parameter except these, and lights on MIDI Note and ADSR.
+        let inspector_only = [
+            ("loom.osc.noise", "seed"),
+            ("loom.midi.note", "channel"),
+            ("loom.midi.note", "bend-range"),
+        ];
+        for descriptor in super::ALL {
+            let panel = &descriptor.panel;
+            for param in descriptor.params {
+                let knob = panel
+                    .widgets
+                    .iter()
+                    .any(|w| w.kind == loom_core::WidgetKind::Knob && w.bind == param.name);
+                let expected = !inspector_only.contains(&(descriptor.id, param.name));
+                assert_eq!(knob, expected, "{}.{}", descriptor.id, param.name);
+            }
+            let lights: Vec<&str> = panel
+                .widgets
+                .iter()
+                .filter(|w| w.kind == loom_core::WidgetKind::Light)
+                .map(|w| w.bind)
+                .collect();
+            let expected: &[&str] = match descriptor.id {
+                "loom.midi.note" => &["gate"],
+                "loom.env.adsr" => &["level"],
+                _ => &[],
+            };
+            assert_eq!(lights, expected, "{}", descriptor.id);
+        }
+    }
+
+    #[test]
     fn parameters_in_hz_and_seconds_are_logarithmic() {
         use loom_core::ParamMapping;
         for descriptor in super::ALL {

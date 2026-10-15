@@ -50,6 +50,8 @@ pub static FOLLOWER: ModuleDescriptor = ModuleDescriptor {
     ],
     params: &[],
     role: ModuleRole::Dsp(|_| Box::new(Follower)),
+    panel: loom_core::Panel::EMPTY,
+    displays: &[],
 };
 
 struct Follower;
@@ -96,6 +98,8 @@ pub static BAR_COPY: ModuleDescriptor = ModuleDescriptor {
     outputs: &[PortSpec::new("bar", SignalType::Phase)],
     params: &[],
     role: ModuleRole::Dsp(|_| Box::new(Bar)),
+    panel: loom_core::Panel::EMPTY,
+    displays: &[],
 };
 
 struct Bar;

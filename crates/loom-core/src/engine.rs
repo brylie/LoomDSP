@@ -6,6 +6,8 @@
 //! through its own queues and is dropped when they are full (NFR-RT-07).
 
 use crate::compile::{ModuleOp, Schedule, Step};
+use crate::descriptor::MAX_DISPLAYS;
+use crate::display::DisplayTable;
 use crate::midi::MidiEvent;
 use crate::module::{Module, PortIo, ProcessContext};
 use crate::telemetry::{MeterReading, SCOPE_CHUNK, ScopeChunk, TelemetrySender, measure};
@@ -82,6 +84,10 @@ pub(crate) enum Command {
     InsertModule {
         slot: usize,
         module: Box<dyn Module>,
+        /// The module's ID, which owns its display values.
+        id: u32,
+        /// How many display values it publishes.
+        displays: u8,
     },
     RemoveModule {
         slot: usize,
@@ -112,6 +118,9 @@ pub(crate) enum Garbage {
 /// audio callback.
 pub struct Engine {
     slots: Box<[Option<Box<dyn Module>>]>,
+    /// Display values per slot (0 for most modules), and where they go.
+    display_counts: Box<[u8]>,
+    displays: Arc<DisplayTable>,
     schedule: Box<Schedule>,
     commands: Consumer<Command>,
     garbage: Producer<Garbage>,
@@ -135,10 +144,13 @@ impl Engine {
         garbage: Producer<Garbage>,
         midi_in: Consumer<MidiEvent>,
         telemetry: TelemetrySender,
+        displays: Arc<DisplayTable>,
         stats: Arc<EngineStats>,
     ) -> Self {
         Self {
             slots: (0..config.max_modules).map(|_| None).collect(),
+            display_counts: vec![0; config.max_modules].into_boxed_slice(),
+            displays,
             schedule: Box::new(Schedule::empty()),
             commands,
             garbage,
@@ -179,24 +191,49 @@ impl Engine {
                 &mut right[position..position + n],
             );
             self.send_telemetry(n);
+            self.publish_displays();
             self.frame += n as u64;
             position += n;
         }
         self.stats.buffers.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Asks every module that has display values for them, after a block.
+    fn publish_displays(&self) {
+        for (slot, &count) in self.display_counts.iter().enumerate() {
+            if count == 0 {
+                continue;
+            }
+            if let Some(module) = self.slots[slot].as_ref() {
+                let mut values = [0.0; MAX_DISPLAYS];
+                let values = &mut values[..usize::from(count)];
+                module.displays(values);
+                self.displays.write(slot, values);
+            }
+        }
+    }
+
     fn apply_commands(&mut self) {
         while let Ok(command) = self.commands.pop() {
             match command {
-                Command::InsertModule { slot, module } => {
+                Command::InsertModule {
+                    slot,
+                    module,
+                    id,
+                    displays,
+                } => {
                     if let Some(old) = self.slots[slot].replace(module) {
                         self.discard(Garbage::Module(old));
                     }
+                    self.display_counts[slot] = displays;
+                    self.displays.claim(slot, id);
                 }
                 Command::RemoveModule { slot } => {
                     if let Some(old) = self.slots[slot].take() {
                         self.discard(Garbage::Module(old));
                     }
+                    self.display_counts[slot] = 0;
+                    self.displays.release(slot);
                 }
                 Command::SwapSchedule(mut schedule) => {
                     schedule.take_tap_state_from(&self.schedule);

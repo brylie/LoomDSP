@@ -1,6 +1,6 @@
 //! Modules the engine runs itself: the unit delay and the audio output.
 
-use loom_core::{ModuleDescriptor, ModuleRole, PortSpec, SignalType};
+use loom_core::{ModuleDescriptor, ModuleRole, Panel, PortSpec, SignalType};
 
 /// `loom.time.delay1`: delays its input by exactly one sample.
 ///
@@ -16,6 +16,8 @@ pub static UNIT_DELAY: ModuleDescriptor = ModuleDescriptor {
     outputs: &[PortSpec::new("out", SignalType::Audio)],
     params: &[],
     role: ModuleRole::UnitDelay,
+    panel: Panel::EMPTY,
+    displays: &[],
 };
 
 /// `loom.io.audio-out`: sends audio to the speakers or host.
@@ -32,4 +34,6 @@ pub static AUDIO_OUT: ModuleDescriptor = ModuleDescriptor {
     outputs: &[],
     params: &[],
     role: ModuleRole::AudioOutput,
+    panel: Panel::EMPTY,
+    displays: &[],
 };

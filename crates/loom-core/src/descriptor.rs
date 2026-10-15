@@ -209,6 +209,126 @@ pub struct ModuleDescriptor {
     pub params: &'static [ParamSpec],
     /// How the engine runs it.
     pub role: ModuleRole,
+    /// What the module's tile shows between its port columns (ADR-0013).
+    pub panel: Panel,
+    /// Names of the values the module publishes for displays, at most
+    /// [`MAX_DISPLAYS`]. It writes them in
+    /// [`Module::displays`](crate::Module::displays).
+    pub displays: &'static [&'static str],
+}
+
+/// Most display values one module can publish.
+pub const MAX_DISPLAYS: usize = 4;
+
+/// A module's panel: the controls and displays on its tile, laid out on the
+/// canvas grid (ADR-0013). Spec: `docs/design/panels.md`, Module panels on
+/// tiles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Panel {
+    /// Width in grid units.
+    pub width: u8,
+    /// Height in grid units.
+    pub height: u8,
+    /// Widgets, in keyboard focus order.
+    pub widgets: &'static [Widget],
+}
+
+impl Panel {
+    /// A panel with nothing on it.
+    pub const EMPTY: Self = Self::new(0, 0, &[]);
+
+    /// A panel of `width` by `height` grid units.
+    pub const fn new(width: u8, height: u8, widgets: &'static [Widget]) -> Self {
+        Self { width, height, widgets }
+    }
+}
+
+/// One control or display on a panel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Widget {
+    /// What it is.
+    pub kind: WidgetKind,
+    /// Column of its top-left corner, in grid units from the panel's left.
+    pub x: u8,
+    /// Row of its top-left corner, in grid units from the panel's top.
+    pub y: u8,
+    /// What it shows: a parameter name for controls, a display value name
+    /// for lights.
+    pub bind: &'static str,
+}
+
+impl Widget {
+    /// A knob for parameter `param`.
+    pub const fn knob(x: u8, y: u8, param: &'static str) -> Self {
+        Self {
+            kind: WidgetKind::Knob,
+            x,
+            y,
+            bind: param,
+        }
+    }
+
+    /// A toggle for a whole-number parameter from 0 to 1.
+    pub const fn toggle(x: u8, y: u8, param: &'static str) -> Self {
+        Self {
+            kind: WidgetKind::Toggle,
+            x,
+            y,
+            bind: param,
+        }
+    }
+
+    /// Radio buttons for a whole-number parameter with one value per option.
+    /// The first option is the minimum value.
+    pub const fn radio(x: u8, y: u8, param: &'static str, options: &'static [&'static str]) -> Self {
+        Self {
+            kind: WidgetKind::Radio { options },
+            x,
+            y,
+            bind: param,
+        }
+    }
+
+    /// A light for display value `display`.
+    pub const fn light(x: u8, y: u8, display: &'static str) -> Self {
+        Self {
+            kind: WidgetKind::Light,
+            x,
+            y,
+            bind: display,
+        }
+    }
+
+    /// Width and height in grid units.
+    pub const fn size(&self) -> (u8, u8) {
+        match self.kind {
+            WidgetKind::Knob => (3, 3),
+            WidgetKind::Toggle | WidgetKind::Light => (3, 2),
+            WidgetKind::Radio { options } => (3, options.len() as u8 + 1),
+        }
+    }
+
+    /// True for widgets bound to a parameter.
+    pub const fn is_control(&self) -> bool {
+        !matches!(self.kind, WidgetKind::Light)
+    }
+}
+
+/// The kinds of widget a panel can hold. More come with later phases.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum WidgetKind {
+    /// A dial for any parameter.
+    Knob,
+    /// Off or on, for a whole-number parameter from 0 to 1.
+    Toggle,
+    /// One button per option, for a whole-number parameter.
+    Radio {
+        /// Option labels, from the minimum value up.
+        options: &'static [&'static str],
+    },
+    /// A display value as brightness, clamped to 0 to 1.
+    Light,
 }
 
 impl ModuleDescriptor {
@@ -225,6 +345,60 @@ impl ModuleDescriptor {
     /// Index of the parameter with this name.
     pub fn param_index(&self, name: &str) -> Option<usize> {
         self.params.iter().position(|p| p.name == name)
+    }
+
+    /// Index of a display value by name.
+    pub fn display_index(&self, name: &str) -> Option<usize> {
+        self.displays.iter().position(|&d| d == name)
+    }
+
+    /// Checks the display values and the panel: every widget binds to
+    /// something this module has, fits its binding, lies inside the panel,
+    /// and overlaps no other widget. The registry runs this check.
+    pub fn check_panel(&self) -> Result<(), String> {
+        if self.displays.len() > MAX_DISPLAYS {
+            return Err(format!("more than {MAX_DISPLAYS} display values"));
+        }
+        let panel = &self.panel;
+        for (i, widget) in panel.widgets.iter().enumerate() {
+            let name = |problem: &str| format!("panel widget `{}` ({:?}): {problem}", widget.bind, widget.kind);
+            if widget.is_control() {
+                let Some(index) = self.param_index(widget.bind) else {
+                    return Err(name("no such parameter"));
+                };
+                let param = &self.params[index];
+                let values = param.max - param.min + 1.0;
+                match widget.kind {
+                    WidgetKind::Toggle if !(param.integer && param.min == 0.0 && param.max == 1.0) => {
+                        return Err(name("a toggle needs a whole-number parameter from 0 to 1"));
+                    }
+                    WidgetKind::Radio { options } if !(param.integer && values == options.len() as f32) => {
+                        return Err(name(
+                            "radio buttons need a whole-number parameter with one value per option",
+                        ));
+                    }
+                    _ => {}
+                }
+            } else if self.display_index(widget.bind).is_none() {
+                return Err(name("no such display value"));
+            }
+            let (w, h) = widget.size();
+            if u16::from(widget.x) + u16::from(w) > u16::from(panel.width)
+                || u16::from(widget.y) + u16::from(h) > u16::from(panel.height)
+            {
+                return Err(name("outside the panel"));
+            }
+            for other in &panel.widgets[..i] {
+                let (ow, oh) = other.size();
+                let (x, y, w, h) = (u16::from(widget.x), u16::from(widget.y), u16::from(w), u16::from(h));
+                let (ox, oy, ow, oh) = (u16::from(other.x), u16::from(other.y), u16::from(ow), u16::from(oh));
+                let apart = x >= ox + ow || ox >= x + w || y >= oy + oh || oy >= y + h;
+                if !apart {
+                    return Err(name(&format!("overlaps `{}`", other.bind)));
+                }
+            }
+        }
+        Ok(())
     }
 
     /// The `"id@version"` string used in patch files.

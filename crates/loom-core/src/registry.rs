@@ -74,6 +74,7 @@ impl Registry {
                 }
             }
         }
+        descriptor.check_panel().map_err(|reason| invalid(&reason))?;
         match descriptor.role {
             ModuleRole::UnitDelay if descriptor.inputs.len() != 1 || descriptor.outputs.len() != 1 => {
                 return Err(invalid("a unit delay needs exactly one input and one output"));
@@ -161,6 +162,8 @@ mod tests {
             outputs: &[],
             params: &[],
             role: ModuleRole::UnitDelay,
+            panel: crate::Panel::EMPTY,
+            displays: &[],
         };
         let error = Registry::new().register(&NAN_DEFAULT).unwrap_err();
         assert!(error.to_string().contains("finite"), "{error}");
@@ -179,6 +182,8 @@ mod tests {
                 outputs: &[],
                 params: &[$($param),*],
                 role: ModuleRole::Dsp(|_| unreachable!("never created")),
+                panel: crate::Panel::EMPTY,
+                displays: &[],
             };
             &DESCRIPTOR
         }};
@@ -195,5 +200,92 @@ mod tests {
         assert!(error.to_string().contains("minimum above 0"), "{error}");
         let fine = with_params!(ParamSpec::new("time", 0.001, 10.0, 1.0, "s").logarithmic());
         assert!(Registry::new().register(fine).is_ok());
+    }
+
+    /// A DSP module with two parameters, one display value, and a panel.
+    macro_rules! with_panel {
+        ($width:expr, $height:expr, [$($widget:expr),*]) => {{
+            use crate::{ParamSpec, Widget};
+            static DESCRIPTOR: ModuleDescriptor = ModuleDescriptor {
+                id: "test.panel",
+                version: 1,
+                name: "Panel",
+                category: "Test",
+                description: "",
+                inputs: &[],
+                outputs: &[],
+                params: &[
+                    ParamSpec::new("level", 0.0, 1.0, 0.5, ""),
+                    ParamSpec::new("on", 0.0, 1.0, 0.0, "").integer(),
+                    ParamSpec::new("slope", 0.0, 3.0, 0.0, "").integer(),
+                ],
+                role: ModuleRole::Dsp(|_| unreachable!("never created")),
+                panel: crate::Panel::new($width, $height, &[$($widget),*]),
+                displays: &["busy"],
+            };
+            Registry::new().register(&DESCRIPTOR).map_err(|error| error.to_string())
+        }};
+    }
+
+    #[test]
+    fn accepts_a_panel_that_fits() {
+        let result = with_panel!(
+            9,
+            5,
+            [
+                Widget::knob(0, 0, "level"),
+                Widget::toggle(3, 0, "on"),
+                Widget::radio(6, 0, "slope", &["6", "12", "18", "24"]),
+                Widget::light(0, 3, "busy")
+            ]
+        );
+        assert_eq!(result, Ok(()));
+    }
+
+    #[test]
+    fn refuses_panels_that_do_not_fit() {
+        let refused = [
+            (
+                with_panel!(3, 3, [Widget::knob(0, 0, "volume")]),
+                "`volume` (Knob): no such parameter",
+            ),
+            (with_panel!(3, 2, [Widget::toggle(0, 0, "level")]), "a toggle needs"),
+            (
+                with_panel!(3, 4, [Widget::radio(0, 0, "slope", &["6", "12", "24"])]),
+                "radio buttons need",
+            ),
+            (
+                with_panel!(3, 2, [Widget::light(0, 0, "idle")]),
+                "no such display value",
+            ),
+            (with_panel!(3, 2, [Widget::knob(0, 0, "level")]), "outside the panel"),
+            (
+                with_panel!(6, 3, [Widget::knob(0, 0, "level"), Widget::toggle(2, 1, "on")]),
+                "`on` (Toggle): overlaps `level`",
+            ),
+        ];
+        for (result, expected) in refused {
+            let error = result.unwrap_err();
+            assert!(error.contains(expected), "{error}");
+        }
+    }
+
+    #[test]
+    fn refuses_too_many_display_values() {
+        static DESCRIPTOR: ModuleDescriptor = ModuleDescriptor {
+            id: "test.displays",
+            version: 1,
+            name: "Displays",
+            category: "Test",
+            description: "",
+            inputs: &[],
+            outputs: &[],
+            params: &[],
+            role: ModuleRole::Dsp(|_| unreachable!("never created")),
+            panel: crate::Panel::EMPTY,
+            displays: &["a", "b", "c", "d", "e"],
+        };
+        let error = Registry::new().register(&DESCRIPTOR).unwrap_err();
+        assert!(error.to_string().contains("more than 4 display values"), "{error}");
     }
 }

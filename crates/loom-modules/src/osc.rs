@@ -4,7 +4,7 @@
 //! to drive them, or any other signal to bend the wave shape.
 
 use loom_core::{
-    Module, ModuleConfig, ModuleDescriptor, ModuleRole, ParamSpec, PortIo, PortSpec, ProcessContext, SignalType,
+    Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamSpec, PortIo, PortSpec, ProcessContext, SignalType,
 };
 use std::f32::consts::TAU;
 
@@ -19,6 +19,8 @@ pub static SINE: ModuleDescriptor = ModuleDescriptor {
     outputs: &[PortSpec::new("out", SignalType::Audio)],
     params: &[],
     role: ModuleRole::Dsp(|_| Box::new(Sine)),
+    panel: Panel::EMPTY,
+    displays: &[],
 };
 
 struct Sine;
@@ -43,6 +45,8 @@ pub static SAW: ModuleDescriptor = ModuleDescriptor {
     outputs: &[PortSpec::new("out", SignalType::Audio)],
     params: &[],
     role: ModuleRole::Dsp(|_| Box::new(Saw { previous: 0.0 })),
+    panel: Panel::EMPTY,
+    displays: &[],
 };
 
 struct Saw {
@@ -101,6 +105,8 @@ pub static NOISE: ModuleDescriptor = ModuleDescriptor {
         let _ = config;
         Box::new(Noise { state: 1, seed: 1 })
     }),
+    panel: Panel::EMPTY,
+    displays: &[],
 };
 
 struct Noise {

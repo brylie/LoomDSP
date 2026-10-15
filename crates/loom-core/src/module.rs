@@ -27,6 +27,14 @@ pub trait Module: Send {
 
     /// Clears internal state (envelopes, filter memory, oscillator phase).
     fn reset(&mut self) {}
+
+    /// Writes the module's display values, one per name in its
+    /// descriptor's `displays`, for lights on its panel (ADR-0013). The
+    /// engine calls it once after each block, on the audio thread, so the
+    /// rules for `process` apply. Display values never change the audio.
+    fn displays(&self, values: &mut [f32]) {
+        let _ = values;
+    }
 }
 
 /// Information about the current call to [`Module::process`].

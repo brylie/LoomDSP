@@ -19,6 +19,7 @@
 mod compile;
 mod controller;
 mod descriptor;
+mod display;
 mod engine;
 mod error;
 mod graph;
@@ -31,7 +32,10 @@ pub mod transport;
 
 pub use compile::{CompileReport, FeedbackLoop};
 pub use controller::{Controller, EngineParts, MidiSender, create_engine};
-pub use descriptor::{ModuleConfig, ModuleDescriptor, ModuleRole, ParamMapping, ParamSpec, PortDefault, PortSpec};
+pub use descriptor::{
+    MAX_DISPLAYS, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamMapping, ParamSpec, PortDefault, PortSpec,
+    Widget, WidgetKind,
+};
 pub use engine::{Engine, EngineConfig, EngineStats};
 pub use error::LoomError;
 pub use graph::{Graph, InputRef, ModuleId, Node, OutputRef};

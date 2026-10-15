@@ -649,6 +649,8 @@ mod tests {
         outputs: &[crate::PortSpec::new("out", crate::SignalType::Modulation)],
         params: &[],
         role: ModuleRole::Dsp(|_| Box::new(Silent)),
+        panel: crate::Panel::EMPTY,
+        displays: &[],
     };
 
     fn followers(count: u32) -> Graph {

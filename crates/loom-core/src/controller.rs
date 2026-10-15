@@ -2,6 +2,7 @@
 
 use crate::compile::{CompileReport, compile};
 use crate::descriptor::{ModuleConfig, ModuleDescriptor, ModuleRole};
+use crate::display::DisplayTable;
 use crate::engine::{Command, Engine, EngineConfig, EngineStats, Garbage};
 use crate::error::LoomError;
 use crate::graph::{Graph, InputRef, ModuleId, Node, OutputRef};
@@ -36,6 +37,7 @@ pub fn create_engine(registry: Arc<Registry>, config: EngineConfig) -> EnginePar
     let (meter_tx, meter_rx) = RingBuffer::new(config.meter_capacity);
     let (scope_tx, scope_rx) = RingBuffer::new(config.scope_capacity);
     let stats = Arc::new(EngineStats::default());
+    let displays = Arc::new(DisplayTable::new(config.max_modules));
     let engine = Engine::new(
         config,
         command_rx,
@@ -45,6 +47,7 @@ pub fn create_engine(registry: Arc<Registry>, config: EngineConfig) -> EnginePar
             meters: meter_tx,
             scope: scope_tx,
         },
+        displays.clone(),
         stats.clone(),
     );
     let controller = Controller {
@@ -60,6 +63,7 @@ pub fn create_engine(registry: Arc<Registry>, config: EngineConfig) -> EnginePar
         dirty: false,
         last_report: CompileReport::default(),
         transport: TransportSettings::default(),
+        displays,
         config,
         stats,
     };
@@ -102,6 +106,8 @@ pub struct Controller {
     last_report: CompileReport,
     /// What the engine's transport is set to, as of the last command sent.
     transport: TransportSettings,
+    /// Display values from the engine (ADR-0013).
+    displays: Arc<DisplayTable>,
     config: EngineConfig,
     stats: Arc<EngineStats>,
 }
@@ -171,7 +177,13 @@ impl Controller {
                 }
                 // The new slot is not in the running schedule yet, so
                 // inserting it now is harmless and spreads the work out.
-                if let Err(rtrb::PushError::Full(_)) = self.commands.push(Command::InsertModule { slot, module }) {
+                let insert = Command::InsertModule {
+                    slot,
+                    module,
+                    id: id.0,
+                    displays: descriptor.displays.len() as u8,
+                };
+                if let Err(rtrb::PushError::Full(_)) = self.commands.push(insert) {
                     self.free_slots.push(slot);
                     return Err(LoomError::QueueFull);
                 }
@@ -312,6 +324,16 @@ impl Controller {
                 .map_err(|_| LoomError::QueueFull)?;
         }
         Ok(())
+    }
+
+    /// Display value `index` of a module, as of the last block the engine
+    /// ran, for a light on its panel (ADR-0013). `None` if the module does
+    /// not exist or has no such value. A module the engine has not run yet
+    /// reads 0.
+    pub fn display(&self, module: ModuleId, index: usize) -> Option<f32> {
+        let node = self.graph.nodes.get(&module)?;
+        let slot = node.slot?;
+        (index < node.descriptor.displays.len()).then(|| self.displays.read(slot, module.0, index))
     }
 
     /// The transport settings last sent to the engine (ADR-0015).
