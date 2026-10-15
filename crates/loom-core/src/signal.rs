@@ -52,6 +52,53 @@ pub fn gate_is_high(value: f32) -> bool {
     value > GATE_THRESHOLD
 }
 
+/// The value of a trigger output for one frame: 1.0 on the frame the
+/// trigger fires, 0.0 on every other frame (ADR-0007).
+///
+/// Why one sample: a counter must never miss a trigger. A longer pulse would
+/// merge two triggers that come close together.
+#[inline]
+pub fn trigger(fired: bool) -> f32 {
+    if fired { 1.0 } else { 0.0 }
+}
+
+/// Finds triggers on an input: rising edges, where a high frame (above 0.5)
+/// follows a low one (ADR-0007). Any gate works as a trigger this way.
+///
+/// Keep one in the module and call [`EdgeDetector::rising`] once per frame,
+/// in order. The state carries over between calls to `process`, so the
+/// result does not depend on block size.
+///
+/// A new detector counts as low, so an input that is high from the first
+/// frame fires on that frame. There is no hysteresis.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct EdgeDetector {
+    was_high: bool,
+}
+
+impl EdgeDetector {
+    /// A detector whose previous frame counts as low.
+    pub const fn new() -> Self {
+        Self { was_high: false }
+    }
+
+    /// Takes the next frame's value. True when it is a rising edge.
+    #[inline]
+    pub fn rising(&mut self, value: f32) -> bool {
+        let high = gate_is_high(value);
+        let rising = high && !self.was_high;
+        self.was_high = high;
+        rising
+    }
+
+    /// Forgets the previous frame, as in a new detector. Call it from
+    /// `Module::reset`.
+    #[inline]
+    pub fn reset(&mut self) {
+        self.was_high = false;
+    }
+}
+
 /// Pitch conventions: 0.1 per octave, 0.0 = middle C.
 ///
 /// Why 0.1 per octave: it keeps 20 octaves inside the normalised -1.0 to 1.0
@@ -103,5 +150,70 @@ pub mod pitch {
             assert!((to_hz(from_midi_note(69.0)) - 440.0).abs() < 1e-2);
             assert!((to_midi_note(from_hz(440.0)) - 69.0).abs() < 1e-3);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn edges(detector: &mut EdgeDetector, input: &[f32]) -> Vec<bool> {
+        input.iter().map(|&value| detector.rising(value)).collect()
+    }
+
+    #[test]
+    fn rising_edges_fire_once() {
+        let input = [0.0, 1.0, 1.0, 0.0, 0.7, 0.5, 0.51];
+        let found = edges(&mut EdgeDetector::new(), &input);
+        assert_eq!(found, [false, true, false, false, true, false, true]);
+    }
+
+    #[test]
+    fn high_on_the_first_frame_fires() {
+        assert_eq!(edges(&mut EdgeDetector::new(), &[1.0, 1.0]), [true, false]);
+    }
+
+    #[test]
+    fn one_sample_triggers_need_a_low_frame_between_them() {
+        let separate = [trigger(true), trigger(false), trigger(true)];
+        assert_eq!(edges(&mut EdgeDetector::new(), &separate), [true, false, true]);
+        let merged = [trigger(true), trigger(true)];
+        assert_eq!(edges(&mut EdgeDetector::new(), &merged), [true, false]);
+    }
+
+    #[test]
+    fn edges_do_not_depend_on_how_frames_are_split() {
+        let input: Vec<f32> = (0..100).map(|i| if i % 7 < 3 { 1.0 } else { 0.0 }).collect();
+        let whole = edges(&mut EdgeDetector::new(), &input);
+        for block in [1, 2, 5, 64] {
+            let mut detector = EdgeDetector::new();
+            let split: Vec<bool> = input
+                .chunks(block)
+                .flat_map(|chunk| edges(&mut detector, chunk))
+                .collect();
+            assert_eq!(split, whole, "block size {block}");
+        }
+    }
+
+    #[test]
+    fn reset_counts_as_low_again() {
+        let mut detector = EdgeDetector::new();
+        assert!(detector.rising(1.0));
+        detector.reset();
+        assert!(detector.rising(1.0));
+    }
+
+    #[test]
+    fn nan_is_never_high() {
+        let mut detector = EdgeDetector::new();
+        assert!(!detector.rising(f32::NAN));
+        assert!(detector.rising(1.0));
+    }
+
+    #[test]
+    fn trigger_values() {
+        assert_eq!(trigger(true), 1.0);
+        assert_eq!(trigger(false), 0.0);
+        assert!(gate_is_high(trigger(true)));
     }
 }

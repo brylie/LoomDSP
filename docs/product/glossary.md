@@ -57,7 +57,7 @@
 | **Sub-patch** | A patch nested inside another patch. Also called a macro or abstraction in other tools. |
 | **Tile** | A module as drawn on the canvas: a compact box with inputs on the left edge and outputs on the right. |
 | **Transport** | The patch's one source of musical time: tempo, time signature, play state, and position. From the app, a plugin host, or MIDI clock. |
-| **Trigger** | A short event on a gate cable, such as "loop ended". Inputs count rising edges. How long a trigger output stays high is open (OQ-19). |
+| **Trigger** | An event on a gate cable, such as "loop ended". An output is high for one sample; inputs count rising edges (ADR-0007). |
 | **Voice** | One copy of a polyphonic sub-patch, playing one note. |
 | **VST3** | Steinberg's plugin format. Widest DAW support. The SDK is MIT-licensed since version 3.8. |
 | **WAM2** | Web Audio Modules 2.0. A plugin standard for browser-based audio hosts. |

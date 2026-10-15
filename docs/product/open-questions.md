@@ -17,6 +17,7 @@ Each open item lists the options and a current leaning. Close an item by writing
 | OQ-09 | Block vs. per-sample processing | Hybrid: blocks for acyclic parts, per sample inside feedback loops. Validate with benchmarks in P0. | ADR-0002, NFR-PERF-08 |
 | OQ-10 | Project name | "LoomDSP" appears to be free (informal search). Do a formal trademark check before a 1.0 release. | |
 | OQ-12 | Maturity of `iced_nodegraph` | Not used for the canvas. Findings reported upstream as a courtesy. | ADR-0010 |
+| OQ-19 | What is a trigger? | An output is high for exactly one sample. Inputs count rising edges above 0.5, with no hysteresis, and the first frame counts as following a low one. A fixed 1 ms pulse was rejected, because close triggers would merge. | FR-SIG-06, ADR-0007 |
 
 ## Open
 
@@ -76,17 +77,6 @@ VCV Rack's ecosystem works because people can install modules without building t
 | WebAssembly modules, run in a sandbox | Safe (sandboxed), one build for all platforms, any language that compiles to WASM. | Slower than native. Real-time safety of the WASM runtime (no allocation or JIT pauses on the audio thread) must be proven. |
 
 - **Leaning:** compile in for now. Spike WebAssembly modules in P4: measure the cost of a filter and an oscillator as WASM against native, and check the runtime's real-time behaviour. Decide before announcing a module SDK.
-
-### OQ-19. What is a trigger?
-
-ADR-0007 defines gates (high above 0.5) but not triggers. Arrangement logic (ADR-0012) is built from triggers: end of loop, every N, counter wrap. Counters count rising edges, so any gate already works as a trigger input. The question is what trigger *outputs* send.
-
-| Option | Pros | Cons |
-|---|---|---|
-| One sample high | Exact, cheapest, no overlap between fast triggers. | Invisible on scopes and cable activity; a module reading only block starts would miss it. |
-| Fixed short pulse (for example 1 ms) | Visible, and matches Eurorack practice. | Two triggers closer than the pulse merge into one. Length depends on sample rate. |
-
-- **Leaning:** one sample high on the cable, with the UI stretching it for display. Decide before the logic modules are built. Tracked in [#47](https://github.com/brylie/LoomDSP/issues/47).
 
 ## Risks
 

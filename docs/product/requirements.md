@@ -24,7 +24,7 @@ See ADR-0007 for the full signal model.
 | FR-SIG-03 | Signals are polymorphic: any output connects to any input with no conversion module. Ranges are chosen so that cross-type connections give musically useful results. | Must | P1 | "Patch anything to anything", as in Eurorack and Bitwig Grid. |
 | FR-SIG-04 | Phase signals wrap to the range 0.0 to 1.0. Oscillators and sequencers can be driven by an external phase input. | Must | P1 | Separating timing from wave shape enables phase distortion, sync, and step indexing with one concept. |
 | FR-SIG-05 | Pitch signals use LoomDSP's own documented scale (proposal: 0.1 per octave, 0.0 at a reference note). Helpers convert to and from Hz and MIDI note numbers. | Must | P1 | 0.1 per octave keeps 20 octaves inside the normalised -1 to 1 range, so pitch can modulate anything and anything can modulate pitch. |
-| FR-SIG-06 | Gate signals treat values above 0.5 as high. | Must | P1 | Simple, documented threshold. Any signal can act as a trigger. |
+| FR-SIG-06 | Gate signals treat values above 0.5 as high. A trigger output is high for one sample; trigger inputs count rising edges (ADR-0007). | Must | P1 | Simple, documented threshold. Any signal can act as a trigger. |
 | FR-SIG-07 | Channel count (mono or stereo) is inferred per cable when the graph is built. Stereo flows only where a stereo source exists. Mono inputs receiving stereo are handled per module (sum or process both channels). | Must | P1 | Stereo matters mainly for audio. Computing two channels on every modulation cable wastes CPU. |
 | FR-SIG-08 | Cables can carry a polyphonic bundle (one value per active voice). | Must | P2 | Polyphony is required for most instruments. |
 

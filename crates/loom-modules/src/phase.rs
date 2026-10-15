@@ -4,7 +4,7 @@
 //! ramp drive any shaper, and lets users bend time (sync, phase distortion,
 //! step indexing) before it becomes sound.
 
-use loom_core::signal::{gate_is_high, pitch};
+use loom_core::signal::{EdgeDetector, pitch};
 use loom_core::{
     Module, ModuleConfig, ModuleDescriptor, ModuleRole, ParamSpec, PortIo, PortSpec, ProcessContext, SignalType,
 };
@@ -33,7 +33,7 @@ struct Phase {
     sample_rate: f64,
     tune: f32,
     octave: f32,
-    reset_was_high: bool,
+    reset_in: EdgeDetector,
 }
 
 impl Phase {
@@ -43,7 +43,7 @@ impl Phase {
             sample_rate: f64::from(config.sample_rate),
             tune: 0.0,
             octave: 0.0,
-            reset_was_high: false,
+            reset_in: EdgeDetector::new(),
         }
     }
 }
@@ -53,11 +53,9 @@ impl Module for Phase {
         let ([pitch_in, reset], [out]) = io.split::<2, 1>();
         let offset = self.tune * pitch::PER_SEMITONE + self.octave * pitch::PER_OCTAVE;
         for ((out, &p), &r) in out.iter_mut().zip(pitch_in).zip(reset) {
-            let high = gate_is_high(r);
-            if high && !self.reset_was_high {
+            if self.reset_in.rising(r) {
                 self.phase = 0.0;
             }
-            self.reset_was_high = high;
 
             *out = self.phase as f32;
             let increment = f64::from(pitch::to_hz(p + offset)) / self.sample_rate;
@@ -76,5 +74,6 @@ impl Module for Phase {
 
     fn reset(&mut self) {
         self.phase = 0.0;
+        self.reset_in.reset();
     }
 }

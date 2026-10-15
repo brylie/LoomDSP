@@ -97,7 +97,7 @@ Examples: the LFO's phase input in sync mode defaults to bar phase, with a rate 
 
 *Why both Clock Divide and Phase Scale:* triggers are events, for counting and arrangement logic (ADR-0012). Phases are continuous, for anything that should move smoothly and in sync: LFOs, sequencers, cycles. Each domain needs its own divider. Phase Scale also gives polyrhythm: multiply 3, divide 2 plays three against two.
 
-What a trigger output sends follows OQ-19 ([#47](https://github.com/brylie/LoomDSP/issues/47)).
+Trigger outputs are high for one sample, and trigger inputs count rising edges ([ADR-0007](../adr/0007-polymorphic-signal-model.md#triggers)).
 
 ## Rules
 
