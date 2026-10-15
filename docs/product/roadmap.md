@@ -61,7 +61,8 @@ Scope:
 - Desktop app with canvas, module browser, cables, undo/redo (FR-CANVAS-01 to 06).
 - Polymorphic signals and colours, inferred channel count (FR-SIG-01 to 07).
 - Feedback with automatic single-sample delay (FR-GRAPH-03, 04).
-- Built-in modulation on parameters (FR-MOD-01, 03, 04, 05).
+- Built-in modulation on parameters, without cables: assignments, depth arcs, and the modulation matrix (ADR-0014, FR-MOD-01, 03 to 08).
+- Transport, default inputs that follow it, and the Clock, Clock Divide, and Phase Scale modules (ADR-0015, FR-LIB-25 to 27).
 - Phase 1 module library (FR-LIB-01 to 07, 11).
 - Signal activity on ports, without animating cables (FR-VIS-01).
 - Audio and MIDI device setup, hot-plugging, audio input (FR-APP-01, 03, 04, FR-MIDI-08).

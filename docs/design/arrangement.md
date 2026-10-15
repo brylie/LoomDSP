@@ -94,7 +94,7 @@ Rule options for Looper Group: round robin, random, or chosen by an input. Users
 | Module data (FR-LIB-19, OQ-17) | Cycles store patterns and audio. | [#50](https://github.com/brylie/LoomDSP/issues/50), P2 |
 | Sub-patches (FR-ENCAP-*) | Without them the example is about 30 tiles; with them each part is one tile. | [#51](https://github.com/brylie/LoomDSP/issues/51), P2 |
 | Trigger convention (OQ-19) | Counters and dividers count triggers. | [#47](https://github.com/brylie/LoomDSP/issues/47), P1 |
-| Clock and transport (FR-LIB-16) | Cycles read the bar phase. | [#41](https://github.com/brylie/LoomDSP/issues/41) |
+| Clock and transport (FR-LIB-16, [clock specification](clock.md)) | Cycles read the bar phase. Their bar phase input follows the transport by default. | [#41](https://github.com/brylie/LoomDSP/issues/41) |
 
 ## Performance note
 

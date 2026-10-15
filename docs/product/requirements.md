@@ -60,6 +60,9 @@ See ADR-0007 for the full signal model.
 | FR-MOD-03 | Modulation is evaluated per sample and the final value is clamped to the parameter range. | Must | P1 | Prevents unstable filters and keeps behaviour predictable. |
 | FR-MOD-04 | Parameter knobs show the live modulated value and the modulation range. | Must | P1 | Users must see what modulation does. |
 | FR-MOD-05 | Parameter changes from the UI and MIDI are smoothed to avoid zipper noise. | Must | P1 | Audible artefacts are unacceptable on stage. |
+| FR-MOD-06 | Any output can modulate any parameter through a modulation assignment, without a cable. Made by dragging an output onto a control; shown as a depth arc on the control and a badge on the source (ADR-0014). | Must | P1 | Keeps the cables for the signal path, so patches stay readable. |
+| FR-MOD-07 | A modulation matrix lists every assignment in a patch or sub-patch, editable by mouse and keyboard. | Must | P1 | One place to see and fix all routing, including routing without cables. |
+| FR-MOD-08 | Modulation depth is applied in the control's 0 to 1 range, using the parameter's own linear or logarithmic mapping. | Must | P1 | Depth means the same on every control, and the arc shows what the engine does. |
 
 ## 5. Module library (`LIB`)
 
@@ -73,7 +76,7 @@ The first library should be small and composable. Phase 1 needs enough to build 
 | FR-LIB-04 | Envelopes and LFOs: ADSR, AD, LFO (phase driven), sample and hold, slew. | Must | P1 | Basic modulation. |
 | FR-LIB-05 | Math and logic: add, multiply, mix, crossfade, clamp, scale/offset, compare, AND/OR/NOT, flip-flop, counter. | Must | P1 | Building blocks for anything else. |
 | FR-LIB-06 | Delay and time: one-sample delay, delay line with interpolation, allpass. | Must | P1 | Needed for feedback, effects, and physical models. |
-| FR-LIB-07 | I/O: audio in/out, MIDI note/CC/pitch bend, transport and clock (tempo, position). | Must | P1 | Connects the patch to the outside world. |
+| FR-LIB-07 | I/O: audio in/out, MIDI note/CC/pitch bend, transport and clock (tempo, position; see FR-LIB-25 to 27). | Must | P1 | Connects the patch to the outside world. |
 | FR-LIB-08 | Sequencing: step sequencer, clock divider, Euclidean generator. | Should | P2 | Common in performance patches. |
 | FR-LIB-09 | Effects: reverb, chorus, distortion/waveshaper, compressor. | Should | P2 | Users expect usable effects out of the box. |
 | FR-LIB-10 | Spectral: FFT-based modules. | Could | P4 | Higher complexity and latency. |
@@ -98,6 +101,9 @@ LoomDSP is a grid for building living musical systems: patches that play, evolve
 | FR-LIB-22 | Counters and arrangement logic as modules: Clock Divide (fire every N triggers), Counter (counts triggers and outputs a phase, so step sequencers can follow it), Step Select (one gate high per step, with an enable input), comparators, and probability gates. Example: play group A round robin, each loop twice; after two rounds, play group B the same way. | Must | P3 | This form of arrangement is not possible in a timeline or a fixed clip launcher. It is what makes LoomDSP grid-centred from the start (ADR-0012). The logic modules are small and can be built in P1. |
 | FR-LIB-23 | Scenes as modules: a scene stores the state of a chosen set of modules (parameters, active groups, sequencer patterns) and recalls it on a trigger, with an optional morph time. | Should | P3 | Scenes change sections of a piece in one move, and logic can trigger them. |
 | FR-LIB-24 | Built-in abstractions ship as open patches made from primitives (for example Looper Group, Part, Song Sequencer). They work as one module, can be opened to learn from or change, and use the same format as user abstractions. | Must | P3 | Keeps users close to their musical ideas without hiding how things work. Users' own saved abstractions grow the same library (ADR-0012). |
+| FR-LIB-25 | One transport per patch: tempo, time signature, play state, and position, from the app, a plugin host, or MIDI clock (ADR-0015). | Must | P1 | Every synced module must agree on where the bar starts. |
+| FR-LIB-26 | Inputs can default to transport signals (bar phase, beat phase, playing) while unconnected. A cable overrides the default. | Must | P1 | Synced modules work without clock cables, and time can still be bent by patching. |
+| FR-LIB-27 | Clock modules: Transport (bar and beat phase, play gate, triggers), Clock (phase and trigger at musical rates), Clock Divide (triggers), and Phase Scale (multiply and divide a phase, locked). | Must | P1 | Puts time on cables for patching, counting, and polyrhythm. |
 
 ## 6. Encapsulation (`ENCAP`)
 

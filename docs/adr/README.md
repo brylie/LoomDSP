@@ -45,3 +45,5 @@ Why: an ADR is a record of why things are the way they are. If it is rewritten a
 | [0011](0011-everything-is-a-module.md) | Everything is a module | Proposed |
 | [0012](0012-arrangement-from-phase-driven-primitives.md) | Arrangement from phase-driven primitives | Proposed |
 | [0013](0013-modules-carry-their-own-panel.md) | Modules carry their own panel | Proposed |
+| [0014](0014-modulation-without-cables.md) | Modulation without cables | Proposed |
+| [0015](0015-one-transport-per-patch.md) | One transport per patch, read by modules without cables | Proposed |

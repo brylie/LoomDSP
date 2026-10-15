@@ -6,11 +6,13 @@
 | **Block / buffer** | A group of samples processed together. Hosts choose the size (often 32 to 1024). |
 | **Cable** | A connection from an output port to an input port. |
 | **CLAP** | CLever Audio Plug-in. An open plugin format with a permissive licence. |
+| **Clock Divide** | A module that fires a trigger on every Nth incoming trigger ([clock specification](../design/clock.md)). |
 | **Copyleft** | A licence (such as GPL or AGPL) that requires derived works to use the same licence. Not allowed in LoomDSP dependencies. |
 | **Control thread** | Any non-audio thread, usually the UI thread. Allowed to allocate and block. |
 | **COOP / COEP** | HTTP headers that make a page "cross-origin isolated". Required for SharedArrayBuffer in browsers. |
 | **Counter** | A module that counts triggers and outputs the count as a phase, so a step sequencer or Step Select can follow it ([arrangement specification](../design/arrangement.md)). |
 | **Cycle** | A module that plays a stored note pattern or audio loop, read from the clock's bar phase. Outputs an end trigger when its loop ends. LoomDSP's looper and clip ([arrangement specification](../design/arrangement.md)). |
+| **Default input** | What an unconnected input reads: a fixed value, or a transport signal such as bar phase. A cable overrides it. |
 | **Direct manipulation** | Editing an object where you see it, through controls it shows itself, rather than in a separate panel. LoomDSP's tiles work this way (ADR-0013). |
 | **Display value** | A number a module publishes once per block for its panel to show, such as a sequencer's current step. Internal state, not a port. |
 | **Encapsulation** | Collapsing part of a patch into a sub-patch with its own ports and panel. |
@@ -26,6 +28,8 @@
 | **Looper** | A module that records and plays a loop of audio or MIDI, synced to the clock. |
 | **Lock-free** | Code that lets threads communicate without one thread waiting for another to release a lock. |
 | **Modulation** | Changing a parameter over time with another signal (LFO, envelope, MIDI). |
+| **Modulation assignment** | A link from any output to a parameter, with a depth, made without a cable ([modulation specification](../design/modulation.md)). |
+| **Modulation matrix** | A table of every modulation assignment in a patch or sub-patch. |
 | **Module** | One DSP unit on the canvas, such as an oscillator or filter. Built-in or from the SDK. |
 | **Next action** | What a group does when a member finishes its loop: play the next member, a random one, or follow an input. Taken from Bitwig's clip launcher, but patchable. |
 | **Note effect** | A module that transforms notes rather than audio: arpeggiator, chord, transpose, quantise. |
@@ -33,6 +37,7 @@
 | **Panic (MIDI)** | An action that silences all voices and clears stuck notes. Not the same as a Rust `panic!`. |
 | **Patch** | A complete graph of modules, cables, sub-patches, panels, and settings. Saved as one file. |
 | **Performance mode** | A locked view that shows only the front panel, for live use. |
+| **Phase Scale** | A module that multiplies or divides a phase while staying locked to it. Used for half-time, double-time, and polyrhythm. |
 | **Phase signal** | A ramp from 0.0 to 1.0 that wraps. It drives oscillators, LFOs, and sequencers. |
 | **Pitch signal** | A signal that represents musical pitch on a fixed scale (see OQ-04). |
 | **Polymorphic signal** | A signal that can connect to any input, whatever its type. Types only change colour and default ranges. |
@@ -51,6 +56,7 @@
 | **Strongly connected component (SCC)** | A part of a graph where every node can reach every other node. In audio terms: a feedback loop. |
 | **Sub-patch** | A patch nested inside another patch. Also called a macro or abstraction in other tools. |
 | **Tile** | A module as drawn on the canvas: a compact box with inputs on the left edge and outputs on the right. |
+| **Transport** | The patch's one source of musical time: tempo, time signature, play state, and position. From the app, a plugin host, or MIDI clock. |
 | **Trigger** | A short event on a gate cable, such as "loop ended". Inputs count rising edges. How long a trigger output stays high is open (OQ-19). |
 | **Voice** | One copy of a polyphonic sub-patch, playing one note. |
 | **VST3** | Steinberg's plugin format. Widest DAW support. The SDK is MIT-licensed since version 3.8. |
