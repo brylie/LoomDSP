@@ -194,6 +194,42 @@ mod tests {
     }
 
     #[test]
+    fn changing_n_keeps_the_count_since_reset() {
+        // Five triggers at N = 2, then three more at N = 3.
+        let mut module = Divide::new();
+        let first = pulses(5);
+        let mut out = vec![0.0; first.len()];
+        let silent = vec![0.0; first.len()];
+        run(
+            &mut module,
+            48_000.0,
+            &[&first, &silent],
+            &[true, true],
+            &mut [&mut out],
+            &[],
+        );
+        assert_eq!(out.iter().filter(|&&v| v == 1.0).count(), 2, "triggers 2 and 4");
+
+        module.set_param(0, 3.0);
+        let second = pulses(3);
+        let mut out = vec![0.0; second.len()];
+        let silent = vec![0.0; second.len()];
+        run(
+            &mut module,
+            48_000.0,
+            &[&second, &silent],
+            &[true, true],
+            &mut [&mut out],
+            &[],
+        );
+        // The count goes on from 5, so only trigger 6 fires, as if N had been
+        // 3 since the reset. A count kept modulo 2 would be at 1, and fire
+        // on trigger 7 instead.
+        let fired: Vec<usize> = (0..out.len()).filter(|&i| out[i] == 1.0).map(|i| i / 2 + 6).collect();
+        assert_eq!(fired, [6]);
+    }
+
+    #[test]
     fn same_output_for_any_block_size() {
         let input: Vec<f32> = (0..500).map(|i| if i % 7 < 2 { 1.0 } else { 0.0 }).collect();
         let reset: Vec<f32> = (0..500).map(|i| if i % 97 == 50 { 1.0 } else { 0.0 }).collect();
