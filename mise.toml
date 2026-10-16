@@ -6,3 +6,4 @@ prek = "latest"
 # Used by the prek hooks and by CI.
 "aqua:crate-ci/typos" = "latest"
 "aqua:EmbarkStudios/cargo-deny" = "latest"
+gh = "latest"
