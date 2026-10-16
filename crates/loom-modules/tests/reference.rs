@@ -6,7 +6,7 @@
 //! listen to them, and commit them.
 
 use loom_core::{MidiEvent, ModuleRole};
-use loom_modules::{ALL, env, filter, math, midi, osc, phase};
+use loom_modules::{ALL, display, env, filter, math, midi, osc, phase};
 use loom_test::{Harness, Signal, reference};
 
 #[test]
@@ -116,6 +116,22 @@ fn note_in() {
 }
 
 #[test]
+fn meter() {
+    // A pass-through: the reference is its input, a 220 Hz sine at half level.
+    let render = Harness::new(&display::METER)
+        .seconds(0.02)
+        .input(
+            "in",
+            Signal::from_fn(|frame| 0.5 * (frame as f32 * 220.0 / 48_000.0 * std::f32::consts::TAU).sin()),
+        )
+        .check(reference!("meter"));
+    let expected: Vec<f32> = (0..render.frames())
+        .map(|frame| 0.5 * (frame as f32 * 220.0 / 48_000.0 * std::f32::consts::TAU).sin())
+        .collect();
+    assert_eq!(render.output("out"), expected.as_slice());
+}
+
+#[test]
 fn every_dsp_module_has_a_reference_test() {
     // Add a test above when you add a module to `ALL`.
     let tested = [
@@ -129,6 +145,7 @@ fn every_dsp_module_has_a_reference_test() {
         &math::MUL,
         &math::CONSTANT,
         &midi::NOTE_IN,
+        &display::METER,
     ]
     .map(|descriptor| descriptor.id);
     for descriptor in ALL {

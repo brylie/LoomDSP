@@ -4,7 +4,9 @@ use iced::{Color, Point};
 use loom_canvas::{
     CableView, ModuleView, PanelValues, PanelView, PortShape, PortView, Scene, WidgetValue, WidgetView, WidgetViewKind,
 };
-use loom_core::{Controller, InputRef, ModuleDescriptor, ModuleId, ParamSpec, PortSpec, SignalType, WidgetKind};
+use loom_core::{
+    Controller, InputRef, ModuleDescriptor, ModuleId, OutputRef, ParamSpec, PortSpec, SignalType, WidgetKind,
+};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Port and cable colour for a signal type (ADR-0007).
@@ -32,6 +34,7 @@ pub fn category_colour(category: &str) -> Color {
         "MIDI" => Color::from_rgb8(0x86, 0x6A, 0x3A),
         "I/O" => Color::from_rgb8(0x6E, 0x6E, 0x78),
         "Time" => Color::from_rgb8(0x3E, 0x76, 0x78),
+        "Display" => Color::from_rgb8(0x4A, 0x6E, 0x5A),
         _ => Color::from_rgb8(0x50, 0x54, 0x60),
     }
 }
@@ -62,6 +65,7 @@ fn panel_view(d: &ModuleDescriptor) -> PanelView {
                     WidgetViewKind::Knob { steps }
                 }
                 WidgetKind::Toggle => WidgetViewKind::Toggle,
+                WidgetKind::Meter => WidgetViewKind::Meter,
                 WidgetKind::Radio { options } => WidgetViewKind::Radio {
                     options: options.iter().map(|o| o.to_string()).collect(),
                 },
@@ -101,9 +105,14 @@ pub fn control_value(kind: WidgetKind, spec: &ParamSpec, position: f32) -> f32 {
 }
 
 /// Updates the live value of every panel widget: parameter values for
-/// controls, and `lights` (by module and widget) for lights. Values that did
-/// not change keep the generation, so the canvas uploads nothing new.
-pub fn update_panel_values(values: &mut PanelValues, controller: &Controller, lights: &BTreeMap<(u32, usize), f32>) {
+/// controls, and `shown` (position and peak, by module and widget) for
+/// lights and meters. Values that did not change keep the generation, so the
+/// canvas uploads nothing new.
+pub fn update_panel_values(
+    values: &mut PanelValues,
+    controller: &Controller,
+    shown: &BTreeMap<(u32, usize), (f32, f32)>,
+) {
     for (id, node) in controller.graph().nodes() {
         let d = node.descriptor;
         for (index, w) in d.panel.widgets.iter().enumerate() {
@@ -113,17 +122,48 @@ pub fn update_panel_values(values: &mut PanelValues, controller: &Controller, li
                     let value = node.params[p];
                     WidgetValue {
                         position: control_position(w.kind, spec, value),
+                        peak: 0.0,
                         text: crate::param::format(spec, value),
                     }
                 }
-                _ => WidgetValue {
-                    position: lights.get(&(id.0, index)).copied().unwrap_or(0.0),
-                    text: String::new(),
-                },
+                _ => {
+                    let (position, peak) = shown.get(&(id.0, index)).copied().unwrap_or_default();
+                    WidgetValue {
+                        position,
+                        peak,
+                        text: String::new(),
+                    }
+                }
             };
             values.set(id.0, index, value);
         }
     }
+}
+
+/// The outputs that meters on these modules show, with the widget each
+/// one feeds.
+pub fn meter_outputs(controller: &Controller, modules: &[u32]) -> Vec<((u32, usize), OutputRef)> {
+    modules
+        .iter()
+        .filter_map(|&id| Some((id, controller.graph().node(ModuleId(id))?.descriptor)))
+        .flat_map(|(id, d)| {
+            d.panel
+                .widgets
+                .iter()
+                .enumerate()
+                .filter(|(_, w)| w.kind == WidgetKind::Meter)
+                .filter_map(move |(index, w)| {
+                    let port = d.outputs.iter().position(|p| p.name == w.bind)?;
+                    Some((
+                        (id, index),
+                        OutputRef {
+                            module: ModuleId(id),
+                            port,
+                        },
+                    ))
+                })
+        })
+        .collect()
 }
 
 /// The parameter a control is bound to, if the module and widget exist.

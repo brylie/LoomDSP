@@ -19,11 +19,13 @@ pub(crate) const KNOB_SWEEP: f32 = 1.5 * std::f32::consts::PI;
 const KNOB_RADIUS: f32 = 9.0;
 
 /// The live value of one widget.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct WidgetValue {
     /// Knob: position from 0 to 1. Toggle: 0 or 1. Radio: option index.
-    /// Light: brightness from 0 to 1.
+    /// Light: brightness from 0 to 1. Meter: RMS level from 0 to 1.
     pub position: f32,
+    /// Meter: peak level from 0 to 1. Unused by other widgets.
+    pub peak: f32,
     /// The value as text, with its unit, shown while a knob is dragged or
     /// focused.
     pub text: String,
@@ -64,6 +66,11 @@ impl PanelValues {
     /// The position of a widget's value, or 0.
     pub fn position(&self, module: u32, widget: usize) -> f32 {
         self.get(module, widget).map_or(0.0, |v| v.position)
+    }
+
+    /// The peak of a meter's value, or 0.
+    pub fn peak(&self, module: u32, widget: usize) -> f32 {
+        self.get(module, widget).map_or(0.0, |v| v.peak)
     }
 
     /// Changes whenever a value changes. Unique across all value sets.
@@ -155,6 +162,32 @@ impl ControlGeometry {
                         let fill = mix(palette.light_off, palette.light_on, b);
                         shapes.push(circle(light_centre(rect), 5.0, fill, palette.tile_border, 1.0));
                     }
+                    WidgetViewKind::Meter => {
+                        let track = meter_track(rect);
+                        shapes.push(Shape::new(track, 2.0, palette.light_off, palette.tile_border, 1.0));
+                        let rms = position.clamp(0.0, 1.0);
+                        if rms > 0.0 {
+                            let height = track.height * rms;
+                            let bar = Rectangle::new(
+                                Point::new(track.x, track.y + track.height - height),
+                                Size::new(track.width, height),
+                            );
+                            shapes.push(Shape::new(
+                                bar,
+                                2.0,
+                                meter_colour(rms, palette),
+                                Color::TRANSPARENT,
+                                0.0,
+                            ));
+                        }
+                        // The peak never shows below the RMS bar.
+                        let peak = values.peak(module.id, index).clamp(rms, 1.0);
+                        if peak > 0.0 {
+                            let y = track.y + track.height * (1.0 - peak);
+                            let line = Rectangle::new(Point::new(track.x, y - 0.75), Size::new(track.width, 1.5));
+                            shapes.push(Shape::new(line, 0.0, palette.text, Color::TRANSPARENT, 0.0));
+                        }
+                    }
                 }
             }
         }
@@ -174,6 +207,32 @@ pub(crate) fn knob_centre(rect: Rectangle) -> Point {
 /// Centre of a light: in the top row of its 3 × 2 cell.
 pub(crate) fn light_centre(rect: Rectangle) -> Point {
     Point::new(rect.x + rect.width * 0.5, rect.y + GRID * 0.5 + 1.0)
+}
+
+/// The bar of a meter: a narrow column in its 3 × 6 cell, above the label
+/// row.
+pub(crate) fn meter_track(rect: Rectangle) -> Rectangle {
+    Rectangle::new(
+        Point::new(rect.x + rect.width * 0.5 - 4.0, rect.y + 1.0),
+        Size::new(8.0, rect.height - GRID - 2.0),
+    )
+}
+
+/// Meter level, from 0 to 1, for a decibel value (-60 dB to 0 dB).
+fn level_of_db(db: f32) -> f32 {
+    (db + 60.0) / 60.0
+}
+
+/// Green below -12 dB, amber up to -3 dB, red above (panels.md, Meter
+/// widget).
+pub(crate) fn meter_colour(level: f32, palette: &Palette) -> Color {
+    if level < level_of_db(-12.0) {
+        palette.light_on
+    } else if level < level_of_db(-3.0) {
+        palette.control_value
+    } else {
+        palette.warning
+    }
 }
 
 /// Centre of radio option `i`: one row each, below the label row.
@@ -279,6 +338,7 @@ mod tests {
             WidgetValue {
                 position: 0.5,
                 text: "0.5".into(),
+                ..WidgetValue::default()
             },
         );
         let after = ControlGeometry::build(&scene, &values, &palette);
@@ -294,7 +354,7 @@ mod tests {
         let mut values = PanelValues::new();
         let value = WidgetValue {
             position: 0.25,
-            text: String::new(),
+            ..WidgetValue::default()
         };
         values.set(1, 0, value.clone());
         let generation = values.generation();
@@ -318,6 +378,59 @@ mod tests {
         // A whole-number parameter from 0 to 16 steps by 1/16.
         assert_eq!(knob_step(0.5, true, false, 16), 0.5625);
         assert_eq!(knob_step(1.0, true, false, 0), 1.0);
+    }
+
+    #[test]
+    fn meter_colours_follow_the_decibel_zones() {
+        let palette = Palette::default();
+        assert_eq!(meter_colour(level_of_db(-30.0), &palette), palette.light_on);
+        assert_eq!(meter_colour(level_of_db(-6.0), &palette), palette.control_value);
+        assert_eq!(meter_colour(level_of_db(-1.0), &palette), palette.warning);
+    }
+
+    #[test]
+    fn the_peak_line_is_never_below_the_bar() {
+        let meter = Scene::new(
+            vec![ModuleView {
+                id: 1,
+                title: String::new(),
+                accent: Color::BLACK,
+                position: Point::ORIGIN,
+                inputs: Vec::new(),
+                outputs: Vec::new(),
+                panel: PanelView {
+                    width: 3,
+                    height: 6,
+                    widgets: vec![WidgetView {
+                        kind: WidgetViewKind::Meter,
+                        x: 0,
+                        y: 0,
+                        label: String::new(),
+                    }],
+                },
+            }],
+            Vec::new(),
+        );
+        let mut values = PanelValues::new();
+        // A stale peak below the RMS level.
+        values.set(
+            1,
+            0,
+            WidgetValue {
+                position: 0.8,
+                peak: 0.2,
+                ..WidgetValue::default()
+            },
+        );
+        let geometry = ControlGeometry::build(&meter, &values, &Palette::default());
+        // Track, bar, peak line.
+        assert_eq!(geometry.shapes.len(), 3);
+        let bar = geometry.shapes[1].rect();
+        let line = geometry.shapes[2].rect();
+        assert!(
+            line[1] + line[3] * 0.5 <= bar[1] + 0.01,
+            "peak line {line:?} below bar {bar:?}"
+        );
     }
 
     #[test]

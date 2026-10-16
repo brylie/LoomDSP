@@ -213,7 +213,7 @@ mod tests {
                 category: "Test",
                 description: "",
                 inputs: &[],
-                outputs: &[],
+                outputs: &[crate::PortSpec::new("out", crate::SignalType::Audio)],
                 params: &[
                     ParamSpec::new("level", 0.0, 1.0, 0.5, ""),
                     ParamSpec::new("on", 0.0, 1.0, 0.0, "").integer(),
@@ -230,13 +230,14 @@ mod tests {
     #[test]
     fn accepts_a_panel_that_fits() {
         let result = with_panel!(
-            9,
-            5,
+            12,
+            6,
             [
                 Widget::knob(0, 0, "level"),
                 Widget::toggle(3, 0, "on"),
                 Widget::radio(6, 0, "slope", &["6", "12", "18", "24"]),
-                Widget::light(0, 3, "busy")
+                Widget::light(0, 3, "busy"),
+                Widget::meter(9, 0, "out")
             ]
         );
         assert_eq!(result, Ok(()));
@@ -257,6 +258,10 @@ mod tests {
             (
                 with_panel!(3, 2, [Widget::light(0, 0, "idle")]),
                 "no such display value",
+            ),
+            (
+                with_panel!(3, 6, [Widget::meter(0, 0, "wet")]),
+                "`wet` (Meter): no such output",
             ),
             (with_panel!(3, 2, [Widget::knob(0, 0, "level")]), "outside the panel"),
             (

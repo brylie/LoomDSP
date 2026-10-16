@@ -3,11 +3,11 @@
 How modules, sub-patches, and patches show controls and displays, and how users build them.
 
 - **Kind:** living specification. It changes as panels are built and used.
-- **Status:** Draft, except [Module panels on tiles](#module-panels-on-tiles-p1), which is Agreed.
+- **Status:** Draft, except [Module panels on tiles](#module-panels-on-tiles-p1) and [Level meters and audio load](#level-meters-and-audio-load-p1), which are Implemented.
 - **Decision behind it:** [ADR-0013](../adr/0013-modules-carry-their-own-panel.md) (modules carry their own panel).
 - **Requirements:** FR-PANEL-*, FR-CANVAS-10, FR-CANVAS-11, FR-LIB-18, FR-VIS-01 to 04, FR-ENCAP-03, NFR-PERF-04, NFR-UX-01.
 - **Builds on:** [Telemetry](telemetry.md) for live data, [ADR-0010](../adr/0010-own-patch-canvas.md) for the canvas, [parameter mapping](modulation.md#parameter-mapping) for control values.
-- **Issues:** [#7](https://github.com/brylie/LoomDSP/issues/7) (umbrella), [#67](https://github.com/brylie/LoomDSP/issues/67) (panel declarations), [#68](https://github.com/brylie/LoomDSP/issues/68) (controls on tiles), [#69](https://github.com/brylie/LoomDSP/issues/69) (display values).
+- **Issues:** [#7](https://github.com/brylie/LoomDSP/issues/7) (umbrella), [#67](https://github.com/brylie/LoomDSP/issues/67) (panel declarations), [#68](https://github.com/brylie/LoomDSP/issues/68) (controls on tiles), [#69](https://github.com/brylie/LoomDSP/issues/69) (display values), [#9](https://github.com/brylie/LoomDSP/issues/9) (level meter, audio load).
 
 ## One panel model, three places
 
@@ -237,6 +237,52 @@ The canvas already hides port labels and titles below a size on screen. Panels u
 - [ ] Manual, on the reference laptop: knobs, the toggle, and lights look right at close and middle zoom, and a cut port label shows in full on hover.
 
 The whole app still redraws twice a second for the stats bar's audio numbers. "No redraw when idle" for the whole app stays a P1 criterion below.
+
+## Level meters and audio load (P1)
+
+**Status:** Implemented ([#9](https://github.com/brylie/LoomDSP/issues/9)), except the manual check below. Code: `WidgetKind::Meter`, `loom-modules/src/display.rs`, `loom-app/src/monitor.rs`, `live.rs`, `alerts.rs`. Requirements: FR-LIB-17, FR-VIS-03 (the level meter module, brought forward from P2), FR-PERF-04.
+
+### Meter widget
+
+- A fifth P1 widget, 3 × 6 grid units. It binds to one of its module's **outputs** by name. The registry refuses a meter bound to an output the module does not have.
+- It shows the output's level from -60 dB (empty) to 0 dB (full), bottom to top: a bar for the RMS level and a thin line for the peak. Both rise at once and fall by the whole range in about a second. The bar is green below -12 dB, amber up to -3 dB, and red above. Its label is below it.
+- A meter is a display: pressing or dragging it selects or moves the tile, as with a light.
+- *Why levels fall over a second:* a short peak stays visible long enough to see, and the bar does not flicker.
+
+### Level meter module
+
+- **`loom.display.meter`**, category Display. One audio input `in` and one output `out` that passes `in` through, sample for sample. No parameters. Its panel is one meter bound to `out`.
+- Mono. For stereo, use two.
+- *Why a pass-through output:* probes read outputs, and the module can sit inline in a signal path or hang off an output, without changing the sound.
+
+### How levels reach a meter
+
+- While a meter is on screen at a zoom where it is drawn, the app keeps a `Meter` probe on its output ([telemetry](telemetry.md)). When the meter leaves the screen, the probe is removed at the next commit. *Why:* a probe costs engine work, and a meter nobody sees needs none.
+- Telemetry is drained on a background thread every 33 ms, not on the UI thread. The thread keeps each probe's peak and RMS levels and sends the UI a message only when a level changes by at least 1 of 256 steps. *Why:* as for lights, every message redraws the window, so a silent patch with meters on screen must send none.
+- Probes stay view state: not saved, and they never change the sound.
+
+### Audio load and dropouts in the stats bar
+
+- The stats bar always shows the audio load (the latest callback as a share of its time budget, and the highest so far) and the dropout count: callbacks that overran their buffer, plus errors reported by the audio device.
+- Load is shown normally below 70%, in amber from 70%, and in red from 90%.
+- The dropout count is red for 10 seconds after it grows.
+- *Why:* a performer needs a warning before a problem is audible (FR-PERF-04), and must notice when one just happened. A count that stayed red forever would soon be ignored.
+
+### Acceptance criteria: level meters and audio load
+
+- [x] The registry refuses a meter bound to an output the module does not have.
+- [x] The meter module passes its input through, bit for bit. It has a reference test and a block-size check.
+- [x] A meter on screen gets a probe on its output. When it leaves the screen, or the canvas zooms far out, the probe is removed.
+- [x] Levels map -60 dB and below to empty and 0 dB to full. They rise at once and fall by the full range in a second. The peak line is never below the RMS bar.
+- [x] The telemetry thread sends nothing while the shown levels stay the same.
+- [x] Load below 70% is normal, from 70% amber, from 90% red. The dropout count is red for 10 seconds after it grows.
+- [ ] Manual: a meter module after the filter in `subtractive.ron` rises when a note plays and falls after it stops.
+
+### Out of scope
+
+- Stereo meters, and a one-step "Add meter" gesture on a cable (it comes with "Add scope").
+- Peak hold numbers and clip indicators.
+- Spectrum and scope displays.
 
 ## P1 slice
 

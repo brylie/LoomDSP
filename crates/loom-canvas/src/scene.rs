@@ -67,6 +67,8 @@ pub enum WidgetViewKind {
     },
     /// A brightness.
     Light,
+    /// A level meter: an RMS bar and a peak line.
+    Meter,
 }
 
 /// One widget on a panel, placed in grid units from the panel's corner.
@@ -88,14 +90,15 @@ impl WidgetView {
     pub fn size(&self) -> (u8, u8) {
         match &self.kind {
             WidgetViewKind::Knob { .. } => (3, 3),
+            WidgetViewKind::Meter => (3, 6),
             WidgetViewKind::Toggle | WidgetViewKind::Light => (3, 2),
             WidgetViewKind::Radio { options } => (3, options.len() as u8 + 1),
         }
     }
 
-    /// True for widgets the user operates (all but lights).
+    /// True for widgets the user operates (all but lights and meters).
     pub fn is_control(&self) -> bool {
-        !matches!(self.kind, WidgetViewKind::Light)
+        !matches!(self.kind, WidgetViewKind::Light | WidgetViewKind::Meter)
     }
 }
 

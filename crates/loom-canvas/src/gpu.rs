@@ -39,6 +39,12 @@ impl Shape {
         }
     }
 
+    /// The rectangle: x, y, width, height in world units.
+    #[cfg(test)]
+    pub fn rect(&self) -> [f32; 4] {
+        self.rect
+    }
+
     /// A circle or square marker centred on a point.
     fn marker(centre: Point, radius: f32, shape: PortShape, fill: Color, border: Color, border_width: f32) -> Self {
         let rect = Rectangle::new(

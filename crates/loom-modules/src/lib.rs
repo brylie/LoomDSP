@@ -12,6 +12,7 @@
 use loom_core::{LoomError, ModuleDescriptor, Registry};
 use std::sync::Arc;
 
+pub mod display;
 pub mod env;
 pub mod filter;
 pub mod io;
@@ -34,6 +35,7 @@ pub static ALL: &[&ModuleDescriptor] = &[
     &io::UNIT_DELAY,
     &io::AUDIO_OUT,
     &midi::NOTE_IN,
+    &display::METER,
 ];
 
 /// Adds every built-in module to a registry.
@@ -89,6 +91,18 @@ mod tests {
                 _ => &[],
             };
             assert_eq!(lights, expected, "{}", descriptor.id);
+            let meters: Vec<&str> = panel
+                .widgets
+                .iter()
+                .filter(|w| w.kind == loom_core::WidgetKind::Meter)
+                .map(|w| w.bind)
+                .collect();
+            let expected: &[&str] = if descriptor.id == "loom.display.meter" {
+                &["out"]
+            } else {
+                &[]
+            };
+            assert_eq!(meters, expected, "{}", descriptor.id);
         }
     }
 

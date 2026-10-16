@@ -33,6 +33,8 @@ pub struct Palette {
     pub light_on: Color,
     /// Ring around the control that has keyboard focus.
     pub focus: Color,
+    /// A meter in its loudest zone.
+    pub warning: Color,
 }
 
 impl Default for Palette {
@@ -52,6 +54,7 @@ impl Default for Palette {
             light_off: Color::from_rgb8(0x35, 0x38, 0x40),
             light_on: Color::from_rgb8(0x7C, 0xE0, 0x8A),
             focus: Color::from_rgb8(0x6C, 0xB4, 0xF0),
+            warning: Color::from_rgb8(0xE0, 0x4F, 0x4F),
         }
     }
 }

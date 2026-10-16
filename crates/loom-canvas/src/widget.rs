@@ -79,9 +79,9 @@ pub enum CanvasEvent {
         /// Index in the module's panel widgets.
         widget: usize,
     },
-    /// The modules whose lights are on screen, at a zoom where lights are
-    /// drawn, changed. Only these need their display values read.
-    VisibleLights(Vec<u32>),
+    /// The modules whose lights or meters are on screen, at a zoom where
+    /// they are drawn, changed. Only these need their values read.
+    VisibleDisplays(Vec<u32>),
 }
 
 /// The patch canvas. Draws a [`Scene`] and reports gestures as
@@ -264,7 +264,7 @@ where
                 let lights = visible_lights(self.scene, &state.camera, bounds.size());
                 if state.reported_lights.as_ref() != Some(&lights) {
                     state.reported_lights = Some(lights.clone());
-                    self.emit(shell, CanvasEvent::VisibleLights(lights));
+                    self.emit(shell, CanvasEvent::VisibleDisplays(lights));
                 }
             }
             Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
@@ -574,7 +574,12 @@ impl<Message> PatchCanvas<'_, Message> {
         // Focus is only valid on a control of the one selected module.
         let selected = (self.selection.len() == 1).then(|| *self.selection.iter().next().unwrap_or(&0));
         if state.focus.is_some_and(|(m, w)| {
-            Some(m) != selected || !self.widget_kind(m, w).is_some_and(|k| *k != WidgetViewKind::Light)
+            Some(m) != selected
+                || !self
+                    .scene
+                    .module(m)
+                    .and_then(|module| module.panel.widgets.get(w))
+                    .is_some_and(|widget| widget.is_control())
         }) {
             state.focus = None;
         }
@@ -1006,6 +1011,15 @@ impl<Message> PatchCanvas<'_, Message> {
                             clip,
                         );
                     }
+                    WidgetViewKind::Meter => {
+                        let at = Point::new(rect.x, rect.y + rect.height - GRID * 0.5);
+                        renderer.fill_text(
+                            text(&widget.label, label_px, width, text::Alignment::Center),
+                            to_screen(at),
+                            self.palette.text_dim,
+                            clip,
+                        );
+                    }
                     WidgetViewKind::Toggle | WidgetViewKind::Light => {
                         let at = Point::new(rect.x, light_centre(rect).y + GRID);
                         renderer.fill_text(
@@ -1085,7 +1099,7 @@ fn detail(zoom: f32) -> Detail {
     }
 }
 
-/// Modules with a light on screen, at a zoom where lights are drawn.
+/// Modules with a light or meter on screen, at a zoom where they are drawn.
 fn visible_lights(scene: &Scene, camera: &Camera, size: Size) -> Vec<u32> {
     if detail(camera.zoom) == Detail::Far {
         return Vec::new();

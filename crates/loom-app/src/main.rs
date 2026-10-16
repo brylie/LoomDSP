@@ -4,9 +4,11 @@
 //! selected module, live audio and MIDI, and a stats bar for measuring the
 //! canvas against the performance gates in NFR-PERF-04.
 
+mod alerts;
 mod layout;
 mod lights;
 mod live;
+mod monitor;
 mod param;
 mod scene;
 
@@ -18,7 +20,7 @@ use iced::{Color, Element, Length, Point, Subscription, Theme};
 use live::Live;
 use loom_canvas::{CanvasEvent, PanelValues, PatchCanvas, Scene};
 use loom_core::{
-    Controller, EngineConfig, EngineParts, InputRef, MidiEvent, ModuleId, OutputRef, Telemetry, create_engine,
+    Controller, EngineConfig, EngineParts, InputRef, MidiEvent, ModuleId, OutputRef, ProbeId, create_engine,
 };
 use loom_host_desktop::{AudioOptions, AudioOutput, CallbackStats, MidiConnection, RunningAudio, SharedMidi};
 use loom_patch::Patch;
@@ -72,6 +74,8 @@ enum Message {
     Tick,
     /// New brightness for lights on screen.
     Lights(Vec<(lights::Light, f32)>),
+    /// New levels for meter probes.
+    Meters(Vec<(ProbeId, live::Level)>),
 }
 
 struct App {
@@ -83,17 +87,21 @@ struct App {
     values: PanelValues,
     /// Last brightness of each light, by module and widget.
     lights: BTreeMap<lights::Light, f32>,
-    /// Modules whose lights are on screen, as the canvas reports.
-    visible_lights: Vec<u32>,
+    /// Latest level of each meter probe.
+    meter_levels: std::collections::HashMap<ProbeId, live::Level>,
+    /// Modules whose lights or meters are on screen, as the canvas reports.
+    visible_displays: Vec<u32>,
     selection: BTreeSet<u32>,
     name: String,
     save_path: PathBuf,
     theme: Theme,
     _audio: Option<RunningAudio>,
-    /// Meter and scope data from the engine. Drained on every tick, so the
-    /// queues never fill, even before anything draws it.
-    telemetry: Telemetry,
+    /// Meter and scope data from the engine, drained on the telemetry
+    /// thread so the queues never fill.
+    monitor: monitor::Monitor,
     live: Live,
+    /// When the dropout count last grew, for the stats bar warning.
+    dropouts: alerts::Dropouts,
     /// Open MIDI inputs. Input stops when they are dropped.
     midi_ports: Vec<MidiConnection>,
     audio_stats: Option<Arc<CallbackStats>>,
@@ -193,7 +201,8 @@ impl App {
             scene,
             values,
             lights: BTreeMap::new(),
-            visible_lights: Vec::new(),
+            meter_levels: std::collections::HashMap::new(),
+            visible_displays: Vec::new(),
             selection: BTreeSet::new(),
             name,
             save_path,
@@ -210,8 +219,9 @@ impl App {
             ),
             audio_stats: audio.as_ref().map(|a| a.stats().clone()),
             _audio: audio,
-            telemetry,
+            monitor: monitor::Monitor::new(telemetry),
             live: Live::new(),
+            dropouts: alerts::Dropouts::default(),
             midi_ports,
             audio_name,
             midi,
@@ -247,7 +257,8 @@ impl App {
             // slow tick keeps the audio numbers fresh.
             iced::time::every(Duration::from_millis(500)).map(|_| Message::Tick)
         };
-        Subscription::batch([main, self.light_watch()])
+        let telemetry = Subscription::run_with(self.monitor.clone(), monitor::stream).map(Message::Meters);
+        Subscription::batch([main, self.light_watch(), telemetry])
     }
 
     /// Watches the lights on screen, and sends a message only when one
@@ -255,7 +266,7 @@ impl App {
     fn light_watch(&self) -> Subscription<Message> {
         let graph = self.controller.graph();
         let watched: Vec<_> = self
-            .visible_lights
+            .visible_displays
             .iter()
             .filter_map(|&id| Some((id, graph.node(ModuleId(id))?.descriptor)))
             .flat_map(|(id, d)| {
@@ -286,10 +297,43 @@ impl App {
         self.refresh_values();
     }
 
-    /// Rebuilds the control and light values. Only changed values change
-    /// what the canvas uploads.
+    /// Rebuilds the control, light, and meter values. Only changed values
+    /// change what the canvas uploads.
     fn refresh_values(&mut self) {
-        scene::update_panel_values(&mut self.values, &self.controller, &self.lights);
+        let mut shown: BTreeMap<lights::Light, (f32, f32)> = self
+            .lights
+            .iter()
+            .map(|(&light, &level)| (light, (level, 0.0)))
+            .collect();
+        let modules: Vec<u32> = self.controller.graph().nodes().map(|(id, _)| id.0).collect();
+        for (widget, output) in scene::meter_outputs(&self.controller, &modules) {
+            let level = self
+                .live
+                .probe(output)
+                .and_then(|probe| self.meter_levels.get(&probe))
+                .copied()
+                .unwrap_or_default();
+            shown.insert(widget, (level.rms, level.peak));
+        }
+        scene::update_panel_values(&mut self.values, &self.controller, &shown);
+    }
+
+    /// The outputs of the meters on screen: each needs a probe.
+    fn metered_outputs(&self) -> BTreeSet<OutputRef> {
+        scene::meter_outputs(&self.controller, &self.visible_displays)
+            .into_iter()
+            .map(|(_, output)| output)
+            .collect()
+    }
+
+    /// Adds probes for meters that came on screen and removes those that
+    /// left. Only probes change, so the scene is not rebuilt.
+    fn sync_probes(&mut self) {
+        let wanted = self.metered_outputs();
+        self.live.sync(&mut self.controller, &wanted);
+        if let Err(e) = self.controller.commit() {
+            self.status = format!("error: {e}");
+        }
     }
 
     /// Sets a parameter from a control on a tile or in the inspector.
@@ -315,7 +359,8 @@ impl App {
 
     fn commit(&mut self) {
         // Probes follow the graph: a removed module loses its probes.
-        self.live.sync(&mut self.controller);
+        let wanted = self.metered_outputs();
+        self.live.sync(&mut self.controller, &wanted);
         match self.controller.commit() {
             Ok(_) => self.report(),
             Err(e) => self.status = format!("error: {e}"),
@@ -393,11 +438,17 @@ impl App {
             Message::Frame(now) => {
                 self.meter.record(now);
                 self.controller.collect_garbage();
-                self.live.drain(&mut self.telemetry, now);
             }
             Message::Tick => {
                 self.controller.collect_garbage();
-                self.live.drain(&mut self.telemetry, Instant::now());
+                if let Some(stats) = &self.audio_stats {
+                    let s = stats.snapshot();
+                    self.dropouts.update(s.overruns + s.stream_errors, Instant::now());
+                }
+            }
+            Message::Meters(levels) => {
+                self.meter_levels.extend(levels);
+                self.refresh_values();
             }
             Message::Lights(readings) => {
                 self.lights.extend(readings);
@@ -455,7 +506,11 @@ impl App {
                     self.set_param(module, index, spec.default);
                 }
             }
-            CanvasEvent::VisibleLights(ids) => self.visible_lights = ids,
+            CanvasEvent::VisibleDisplays(ids) => {
+                self.visible_displays = ids;
+                self.sync_probes();
+                self.refresh_values();
+            }
             CanvasEvent::Delete(ids) => {
                 for id in &ids {
                     if self.controller.remove_module(ModuleId(*id)).is_ok() {
@@ -572,25 +627,29 @@ impl App {
         } else {
             "redraws on change".to_string()
         };
-        let audio = match &self.audio_stats {
+        // Load and dropouts are always shown, and turn amber or red before
+        // a problem is audible (FR-PERF-04).
+        let audio: Element<'_, Message> = match &self.audio_stats {
             Some(stats) => {
                 let s = stats.snapshot();
                 let engine = self.controller.stats();
                 let dropped = engine.dropped_meters.load(std::sync::atomic::Ordering::Relaxed)
                     + engine.dropped_scope.load(std::sync::atomic::Ordering::Relaxed);
-                let mut line = format!(
-                    "{} | load {:.0}% (max {:.0}%) | overruns {}",
-                    self.audio_name,
+                let load = bar_text(format!(
+                    "load {:.0}% (max {:.0}%)",
                     s.last_load * 100.0,
-                    s.max_load * 100.0,
-                    s.overruns
-                );
+                    s.max_load * 100.0
+                ))
+                .color(severity_colour(alerts::load_severity(s.last_load)));
+                let dropouts = bar_text(format!("dropouts {}", self.dropouts.count()))
+                    .color(severity_colour(self.dropouts.severity(Instant::now())));
+                let mut items = row![bar_text(&self.audio_name).color(DIM), load, dropouts].spacing(10);
                 if dropped > 0 {
-                    line.push_str(&format!(" | telemetry dropped {dropped}"));
+                    items = items.push(bar_text(format!("telemetry dropped {dropped}")).color(DIM));
                 }
-                line
+                items.into()
             }
-            None => self.audio_name.clone(),
+            None => bar_text(&self.audio_name).color(DIM).into(),
         };
         let midi = match self.midi_ports.as_slice() {
             [] => "MIDI: no inputs".to_string(),
@@ -616,7 +675,7 @@ impl App {
                 .text_size(12),
             bar_text(frames),
             bar_text(format!("{} modules, {} cables", graph.len(), graph.cables().count())),
-            bar_text(audio).color(DIM),
+            audio,
             bar_text(midi).color(DIM),
             // The status takes the remaining width and is cut off rather than
             // wrapped, so the bar stays one line high. Hover shows all of it.
@@ -645,6 +704,15 @@ fn bar_text<'a>(content: impl text::IntoFragment<'a>) -> iced::widget::Text<'a> 
 }
 
 const DIM: Color = Color::from_rgb(0.62, 0.65, 0.71);
+
+/// Stats bar colour for a warning level.
+fn severity_colour(severity: alerts::Severity) -> Color {
+    match severity {
+        alerts::Severity::Normal => DIM,
+        alerts::Severity::Warning => Color::from_rgb8(0xF5, 0xA6, 0x23),
+        alerts::Severity::Alarm => Color::from_rgb8(0xE0, 0x4F, 0x4F),
+    }
+}
 
 const HELP: &str = "Drag from a port to patch a cable. Drag a connected input to move or remove its cable.\n\
 Drag tiles to move them. Shift-click or drag a box to select several.\n\

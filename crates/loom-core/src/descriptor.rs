@@ -253,7 +253,7 @@ pub struct Widget {
     /// Row of its top-left corner, in grid units from the panel's top.
     pub y: u8,
     /// What it shows: a parameter name for controls, a display value name
-    /// for lights.
+    /// for lights, an output name for meters.
     pub bind: &'static str,
 }
 
@@ -299,10 +299,21 @@ impl Widget {
         }
     }
 
+    /// A level meter on output `output`, fed by a port probe.
+    pub const fn meter(x: u8, y: u8, output: &'static str) -> Self {
+        Self {
+            kind: WidgetKind::Meter,
+            x,
+            y,
+            bind: output,
+        }
+    }
+
     /// Width and height in grid units.
     pub const fn size(&self) -> (u8, u8) {
         match self.kind {
             WidgetKind::Knob => (3, 3),
+            WidgetKind::Meter => (3, 6),
             WidgetKind::Toggle | WidgetKind::Light => (3, 2),
             WidgetKind::Radio { options } => (3, options.len() as u8 + 1),
         }
@@ -310,7 +321,7 @@ impl Widget {
 
     /// True for widgets bound to a parameter.
     pub const fn is_control(&self) -> bool {
-        !matches!(self.kind, WidgetKind::Light)
+        !matches!(self.kind, WidgetKind::Light | WidgetKind::Meter)
     }
 }
 
@@ -329,6 +340,9 @@ pub enum WidgetKind {
     },
     /// A display value as brightness, clamped to 0 to 1.
     Light,
+    /// The level of one of the module's outputs, from a port probe: an RMS
+    /// bar and a peak line, -60 dB to 0 dB.
+    Meter,
 }
 
 impl ModuleDescriptor {
@@ -378,6 +392,10 @@ impl ModuleDescriptor {
                         ));
                     }
                     _ => {}
+                }
+            } else if widget.kind == WidgetKind::Meter {
+                if !self.outputs.iter().any(|port| port.name == widget.bind) {
+                    return Err(name("no such output"));
                 }
             } else if self.display_index(widget.bind).is_none() {
                 return Err(name("no such display value"));

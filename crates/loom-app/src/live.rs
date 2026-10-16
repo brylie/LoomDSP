@@ -1,21 +1,16 @@
 //! Engine telemetry in the app (FR-VIS-04).
 //!
-//! [`Live`] keeps meter probes in step with the graph ([`Live::sync`], called
-//! before every commit) and drains the telemetry queues once per tick
-//! ([`Live::drain`]). [`ScopeTrace`] turns the samples of a scope probe into a
-//! stable, triggered trace with a fitting vertical range.
-//!
-//! Nothing here is drawn yet. Signal displays will be modules in the grid (a
-//! scope module, and a quiet activity display for FR-VIS-01), not views laid
-//! over the canvas. Until they exist the app requests no probes, so the
-//! engine does no extra work and an idle patch stays idle. The code and its
-//! tests stay here for those modules to build on. See
-//! `docs/design/telemetry.md`.
+//! [`Live`] keeps meter probes in step with the graph and with the meters on
+//! screen ([`Live::sync`], called before every commit). [`Levels`] turns the
+//! meter readings into falling levels on the telemetry thread (see
+//! `monitor.rs`). [`ScopeTrace`] turns the samples of a scope probe into a
+//! stable, triggered trace with a fitting vertical range; no scope module
+//! draws it yet. See `docs/design/telemetry.md` and `docs/design/panels.md`.
 
-// Dormant until the signal display modules use it: only tests call some of it.
+// Parts wait for the scope module: only tests call them.
 #![cfg_attr(not(test), allow(dead_code))]
 
-use loom_core::{Controller, OutputRef, ProbeId, ProbeKind, ScopeChunk, Telemetry};
+use loom_core::{Controller, MeterReading, OutputRef, ProbeId, ProbeKind, ScopeChunk, Telemetry};
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::time::Instant;
 
@@ -30,26 +25,16 @@ const RELEASE_PER_SECOND: f32 = 1.0;
 /// without the range jumping on every frame.
 const RANGES: [f32; 10] = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0];
 
-/// A meter on one output.
-struct Meter {
-    probe: ProbeId,
-    /// Highest peak since the last drain.
-    peak: f32,
-    /// Smoothed level, 0..1.
-    level: f32,
-}
-
-/// Meter probes and levels for the app.
+/// Meter probes, kept in step with the graph and with the meters on screen.
+/// Lives on the UI thread, beside the `Controller`.
 #[derive(Default)]
 pub struct Live {
     activity: bool,
-    meters: BTreeMap<OutputRef, Meter>,
-    by_probe: HashMap<ProbeId, OutputRef>,
-    last: Option<Instant>,
+    meters: BTreeMap<OutputRef, ProbeId>,
 }
 
 impl Live {
-    /// No probes until signal activity is turned on.
+    /// No probes until something asks for them.
     pub fn new() -> Self {
         Self::default()
     }
@@ -60,76 +45,132 @@ impl Live {
         self.activity = on;
     }
 
-    /// Smoothed level of an output, 0..1. Zero if it is not metered.
-    pub fn level(&self, output: OutputRef) -> f32 {
-        self.meters.get(&output).map_or(0.0, |m| m.level)
+    /// The meter probe on an output, if it has one.
+    pub fn probe(&self, output: OutputRef) -> Option<ProbeId> {
+        self.meters.get(&output).copied()
     }
 
     /// True if any probe is active, so telemetry may arrive.
     pub fn has_probes(&self) -> bool {
-        !self.by_probe.is_empty()
+        !self.meters.is_empty()
     }
 
-    /// Brings the probes in line with the graph. Call it before
-    /// [`Controller::commit`], so the changes take effect together.
+    /// Brings the probes in line with the graph and with `wanted`, the
+    /// outputs of meters on screen. Call it before [`Controller::commit`],
+    /// so the changes take effect together.
     ///
     /// Probes whose module was removed are forgotten. With activity on,
-    /// every output that has a cable gets a meter.
-    pub fn sync(&mut self, controller: &mut Controller) {
-        let wanted: BTreeSet<OutputRef> = if self.activity {
-            controller.graph().cables().map(|(from, _)| from).collect()
-        } else {
-            BTreeSet::new()
-        };
+    /// every output that has a cable gets a meter too.
+    pub fn sync(&mut self, controller: &mut Controller, wanted: &BTreeSet<OutputRef>) {
+        let mut wanted = wanted.clone();
+        if self.activity {
+            wanted.extend(controller.graph().cables().map(|(from, _)| from));
+        }
         let stale: Vec<OutputRef> = self
             .meters
             .iter()
-            .filter(|(output, meter)| !wanted.contains(output) || controller.probe(meter.probe).is_none())
+            .filter(|(output, probe)| !wanted.contains(output) || controller.probe(**probe).is_none())
             .map(|(&output, _)| output)
             .collect();
         for output in stale {
-            if let Some(meter) = self.meters.remove(&output) {
+            if let Some(probe) = self.meters.remove(&output) {
                 // Already gone if its module was removed.
-                let _ = controller.remove_probe(meter.probe);
-                self.by_probe.remove(&meter.probe);
+                let _ = controller.remove_probe(probe);
             }
         }
         for output in wanted {
-            if self.meters.contains_key(&output) {
+            if self.meters.contains_key(&output) || controller.graph().node(output.module).is_none() {
                 continue;
             }
             if let Ok(probe) = controller.add_probe(output, ProbeKind::Meter) {
-                self.by_probe.insert(probe, output);
-                self.meters.insert(
-                    output,
-                    Meter {
-                        probe,
-                        peak: 0.0,
-                        level: 0.0,
-                    },
-                );
+                self.meters.insert(output, probe);
             }
         }
+    }
+}
+
+/// The level of one meter probe.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Level {
+    /// RMS level, 0..1.
+    pub rms: f32,
+    /// Peak level, 0..1. Never below `rms`.
+    pub peak: f32,
+}
+
+#[derive(Default)]
+struct Tracked {
+    /// Highest peak since the last drain.
+    peak: f32,
+    /// Sum of squares and frame count since the last drain. A block can be
+    /// shorter than one cycle of the signal, so the RMS is taken over every
+    /// frame since the last drain, not as the loudest block.
+    squares: f64,
+    frames: u64,
+    level: Level,
+    /// When the last reading arrived.
+    heard: Option<Instant>,
+}
+
+/// Meter levels from the telemetry queues. Lives on the telemetry thread.
+#[derive(Default)]
+pub struct Levels {
+    meters: HashMap<ProbeId, Tracked>,
+    last: Option<Instant>,
+}
+
+impl Levels {
+    /// The level of a probe, if any reading has arrived for it.
+    pub fn get(&self, probe: ProbeId) -> Option<Level> {
+        self.meters.get(&probe).map(|m| m.level)
+    }
+
+    /// Every probe's level.
+    pub fn all(&self) -> impl Iterator<Item = (ProbeId, Level)> + '_ {
+        self.meters.iter().map(|(&p, m)| (p, m.level))
     }
 
     /// Takes all waiting telemetry and updates the levels. Levels fall with
     /// the time since the last call, so the call rate does not change them.
+    /// A probe that has been silent at level 0 for two seconds is forgotten.
     pub fn drain(&mut self, telemetry: &mut Telemetry, now: Instant) {
-        for reading in telemetry.meters() {
-            if let Some(meter) = self.by_probe.get(&reading.probe).and_then(|o| self.meters.get_mut(o)) {
-                meter.peak = meter.peak.max(reading.peak);
-            }
-        }
-        // No scope probes yet. Empty the queue anyway, so a stray chunk can
-        // never fill it.
+        let readings: Vec<MeterReading> = telemetry.meters().collect();
+        // No scope displays yet. Empty the queue anyway, so a stray chunk
+        // can never fill it.
         telemetry.scope().for_each(drop);
+        self.update(&readings, now);
+    }
+
+    /// Takes meter readings and updates the levels, as [`Levels::drain`].
+    pub fn update(&mut self, readings: &[MeterReading], now: Instant) {
+        for reading in readings {
+            let meter = self.meters.entry(reading.probe).or_default();
+            meter.peak = meter.peak.max(reading.peak);
+            meter.squares += f64::from(reading.rms).powi(2) * f64::from(reading.frames);
+            meter.frames += u64::from(reading.frames);
+            meter.heard = Some(now);
+        }
 
         let dt = self.last.map_or(0.0, |last| (now - last).as_secs_f32()).min(0.25);
         self.last = Some(now);
         for meter in self.meters.values_mut() {
-            meter.level = decay(meter.level, normalise(meter.peak), dt);
+            let window_rms = if meter.frames > 0 {
+                (meter.squares / meter.frames as f64).sqrt() as f32
+            } else {
+                0.0
+            };
+            let rms = decay(meter.level.rms, normalise(window_rms), dt);
+            let peak = decay(meter.level.peak, normalise(meter.peak), dt).max(rms);
+            meter.level = Level { rms, peak };
             meter.peak = 0.0;
+            meter.squares = 0.0;
+            meter.frames = 0;
         }
+        self.meters.retain(|_, m| {
+            m.level.peak > 0.0
+                || m.heard
+                    .is_some_and(|heard| now - heard < std::time::Duration::from_secs(2))
+        });
     }
 }
 
@@ -334,11 +375,25 @@ mod tests {
     }
 
     #[test]
-    fn no_probes_until_activity_is_on() {
+    fn no_probes_until_something_asks() {
         let mut parts = sine_patch();
         let mut live = Live::new();
-        live.sync(&mut parts.controller);
+        live.sync(&mut parts.controller, &BTreeSet::new());
         assert!(!live.has_probes());
+        assert_eq!(parts.controller.probes().count(), 0);
+    }
+
+    #[test]
+    fn meters_on_screen_get_probes_and_lose_them_off_screen() {
+        let mut parts = sine_patch();
+        let mut live = Live::new();
+        let sine = parts.controller.output_ref(ModuleId(3), "out").unwrap();
+        live.sync(&mut parts.controller, &BTreeSet::from([sine]));
+        assert!(live.probe(sine).is_some());
+        assert_eq!(parts.controller.probes().count(), 1);
+        // Off screen: the probe goes.
+        live.sync(&mut parts.controller, &BTreeSet::new());
+        assert!(live.probe(sine).is_none());
         assert_eq!(parts.controller.probes().count(), 0);
     }
 
@@ -347,7 +402,7 @@ mod tests {
         let mut parts = sine_patch();
         let mut live = Live::new();
         live.set_activity(true);
-        live.sync(&mut parts.controller);
+        live.sync(&mut parts.controller, &BTreeSet::new());
         // One meter per output with a cable.
         assert_eq!(live.meters.len(), 6);
         let sine = parts.controller.output_ref(ModuleId(3), "out").unwrap();
@@ -356,6 +411,7 @@ mod tests {
         parts.controller.commit().unwrap();
 
         let mut trace = ScopeTrace::new(48_000.0);
+        let mut levels = Levels::default();
         let (mut left, mut right) = (vec![0.0; 512], vec![0.0; 512]);
         let start = Instant::now();
         for i in 0..20 {
@@ -364,10 +420,17 @@ mod tests {
                 assert_eq!(chunk.probe, probe);
                 trace.push(&chunk);
             }
-            live.drain(&mut parts.telemetry, start + Duration::from_millis(80 * i));
+            levels.drain(&mut parts.telemetry, start + Duration::from_millis(80 * i));
         }
-        assert!(live.level(sine) > 0.9, "the sine is at full level");
-        assert_eq!(live.level(env), 0.0, "no note, so the envelope is silent");
+        let level = |output| live.probe(output).and_then(|p| levels.get(p)).unwrap_or_default();
+        // With no note held, the sine runs at about 8 Hz, at full level.
+        assert!(level(sine).peak > 0.9, "the sine is at full level");
+        assert!(
+            level(sine).rms > 0.8 && level(sine).rms <= level(sine).peak,
+            "{:?}",
+            level(sine)
+        );
+        assert_eq!(level(env), Level::default(), "no note, so the envelope is silent");
 
         trace.update(960);
         assert!(trace.triggered);
@@ -380,12 +443,12 @@ mod tests {
 
         // Removing a module drops the meters on its cables.
         parts.controller.remove_module(ModuleId(3)).unwrap();
-        live.sync(&mut parts.controller);
+        live.sync(&mut parts.controller, &BTreeSet::new());
         assert_eq!(live.meters.len(), 4);
         assert_eq!(parts.controller.probes().count(), 4);
 
         live.set_activity(false);
-        live.sync(&mut parts.controller);
+        live.sync(&mut parts.controller, &BTreeSet::new());
         assert!(!live.has_probes());
         assert_eq!(parts.controller.probes().count(), 0);
     }
@@ -400,6 +463,42 @@ mod tests {
         assert!(!trace.triggered);
         assert_eq!(trace.trace.len(), 101);
         assert_eq!(trace.range, 0.5);
+    }
+
+    fn reading(probe: u32, frames: u32, peak: f32, rms: f32) -> MeterReading {
+        MeterReading {
+            probe: ProbeId(probe),
+            frame: 0,
+            frames,
+            peak,
+            rms,
+        }
+    }
+
+    #[test]
+    fn rms_is_taken_over_every_frame_since_the_last_update() {
+        let mut levels = Levels::default();
+        // One loud block and one silent block of the same length: the RMS
+        // of both together is 1 / sqrt(2), -3 dB, not the loudest block.
+        levels.update(&[reading(1, 128, 1.0, 1.0), reading(1, 128, 0.0, 0.0)], Instant::now());
+        let level = levels.get(ProbeId(1)).unwrap();
+        assert!((level.rms - 0.95).abs() < 1e-3, "{level:?}");
+        assert_eq!(level.peak, 1.0);
+    }
+
+    #[test]
+    fn silent_probes_are_forgotten() {
+        let start = Instant::now();
+        let mut levels = Levels::default();
+        levels.update(&[reading(1, 128, 0.5, 0.3)], start);
+        // It falls to 0 within a second, then is forgotten two seconds after
+        // its last reading.
+        for ms in (100..=1_500).step_by(100) {
+            levels.update(&[], start + Duration::from_millis(ms));
+        }
+        assert_eq!(levels.get(ProbeId(1)), Some(Level::default()));
+        levels.update(&[], start + Duration::from_millis(2_100));
+        assert_eq!(levels.get(ProbeId(1)), None);
     }
 
     #[test]
