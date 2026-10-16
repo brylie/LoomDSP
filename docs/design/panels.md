@@ -3,7 +3,7 @@
 How modules, sub-patches, and patches show controls and displays, and how users build them.
 
 - **Kind:** living specification. It changes as panels are built and used.
-- **Status:** Draft, except [Module panels on tiles](#module-panels-on-tiles-p1) and [Level meters and audio load](#level-meters-and-audio-load-p1), which are Implemented.
+- **Status:** Draft, except [Module panels on tiles](#module-panels-on-tiles-p1) and [Level meters and audio load](#level-meters-and-audio-load-p1), which are Implemented. [Labels and hover text](#labels-and-hover-text) is Draft.
 - **Decision behind it:** [ADR-0013](../adr/0013-modules-carry-their-own-panel.md) (modules carry their own panel).
 - **Requirements:** FR-PANEL-*, FR-CANVAS-10, FR-CANVAS-11, FR-LIB-18, FR-VIS-01 to 04, FR-ENCAP-03, NFR-PERF-04, NFR-UX-01.
 - **Builds on:** [Telemetry](telemetry.md) for live data, [ADR-0010](../adr/0010-own-patch-canvas.md) for the canvas, [parameter mapping](modulation.md#parameter-mapping) for control values.
@@ -283,6 +283,74 @@ The whole app still redraws twice a second for the stats bar's audio numbers. "N
 - Stereo meters, and a one-step "Add meter" gesture on a cable (it comes with "Add scope").
 - Peak hold numbers and clip indicators.
 - Spectrum and scope displays.
+
+## Labels and hover text
+
+**Status:** Draft. Builds on [port and parameter text](port-and-parameter-text.md) ([ADR-0016](../adr/0016-ports-and-parameters-carry-their-own-text.md)): every port and parameter has a `label` and a one-sentence `description`. Today the app shows only names. This section says where the label and description appear.
+
+### Goal
+
+A user zooms in on Clock Divide. The knob says "Division", not `n`. They rest the mouse on it and read "Fires on every Nth trigger." They never leave the canvas to learn what a control does (product principle 11).
+
+### Where each text shows
+
+| Place | Shows today | Shows after this change |
+|---|---|---|
+| Port label on a tile | name | label, cut with "…" to fit its column as now |
+| Caption of a knob, toggle, or radio group | parameter name | parameter label, cut with "…" to fit the widget |
+| Caption of a meter | output name | output label |
+| Caption of a light | display value name | display value name (display values have no label yet) |
+| Inspector parameter row | name | label |
+| Hover text on a port or control | full name, only when the label is cut | label and description, always |
+
+- **Names stay out of sight, except in hover text.** The hover text shows the stable name below the description, dimmed, when it differs from the label. *Why:* names are what patch files and `loom modules` use, so a user who edits a RON file can find the port. Everywhere else, the label is the better text.
+- **Captions are cut, never wrapped.** A label that does not fit is cut with "…", and the hover text shows it in full. *Why:* the grid layout of tiles does not change with text length.
+
+### Hover text
+
+- **When it shows.** After the pointer rests on a port or a control for 500 ms. It hides as soon as the pointer leaves, a drag starts, or the canvas pans or zooms. *Why the delay:* while wiring, the pointer passes over many ports. Text that flashed up under every one would get in the way.
+- **During a drag it does not show.** That covers dragging a cable, a knob, or a tile. *Why:* the knob label already shows the value while it is dragged, and a cable drag needs a clear view of the target ports.
+- **Keyboard focus shows it too.** When Tab moves focus to a control, its hover text shows after the same delay, and hides when focus moves on or Escape clears it. *Why:* keyboard users need the same help as mouse users (NFR-UX-01).
+- **What it shows.** The label on the first line, in normal text colour. The description below it, in dim text, wrapped. The name last, dimmed, if it differs from the label (see above).
+- **Size and place.** Fixed screen size, 12 px text, at most 260 px wide, whatever the zoom. It sits above the port or control, or below it when there is no room above, and always inside the canvas. *Why fixed size:* at middle zoom tile text is hidden because it is too small to read; the hover text is exactly what the user needs there, so it must stay readable.
+- **At every zoom where the port or control can be hovered.** At middle zoom, labels are hidden, but hovering a port still shows its hover text.
+- **Lights and empty panel areas have no hover text.** Display values have no description yet.
+- **It replaces the full-label overlay** from [Tile layout](#tile-layout-68), which then becomes the first line of the hover text.
+
+### Inspector
+
+- Each parameter row shows the label, and the value with its unit as now.
+- Hovering the row's label shows the description and the name, in an Iced tooltip with the same content as the canvas hover text.
+
+### Redraw and GPU data
+
+- Showing or hiding hover text redraws once. While it is shown and nothing else changes, nothing redraws. The 500 ms wait is a single timer, not a frame loop.
+- Labels are part of the scene. They change only when the patch changes, so they follow the existing rule: GPU data is rebuilt only when the scene's generation changes.
+- Hover text is drawn as Iced text and quads in the overlay layer, like the full-label overlay today. It adds nothing to the instanced GPU buffers.
+
+### Acceptance criteria: labels and hover text
+
+- [ ] Port labels, control captions, and meter captions show labels. A test builds the scene for Clock Divide and finds "Division", not `n`.
+- [ ] Inspector rows show labels.
+- [ ] Resting the pointer on a port or control for 500 ms shows its label, description, and (when it differs) name. Leaving hides it at once.
+- [ ] No hover text shows during a cable, knob, or tile drag.
+- [ ] A control focused with Tab shows its hover text after the delay.
+- [ ] Hover text stays inside the canvas for a port at each edge of the window.
+- [ ] With hover text shown and nothing changing, no frames are drawn. Check: the frame counter stays still for 10 seconds.
+- [ ] Manual, on the reference laptop: hover text is readable at close and middle zoom, and does not get in the way while wiring.
+
+### Out of scope
+
+- Translation (NFR-UX-04). Text is looked up by module ID and name when it comes.
+- Labels and descriptions for display values and panel widgets, so lights keep showing names.
+- Help pages (#43), and module descriptions in the module picker.
+- Touch: long-press for hover text.
+
+### Open points
+
+- **Delay.** Leaning: 500 ms, as most desktop apps use. Should it be shorter once one hover text has shown, so moving along a column of ports reads quickly?
+- **Showing the name.** Leaning: in the hover text only, when it differs from the label. Or never, and leave names to `loom modules` and help pages?
+- **Lights next to labelled knobs.** A tile will mix "Attack" captions with a `level` light. Leaning: accept it for now, and give display values labels in a later issue.
 
 ## P1 slice
 
