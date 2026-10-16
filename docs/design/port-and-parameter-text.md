@@ -62,6 +62,6 @@ params: &[
 
 ## Out of scope
 
-- Showing labels on tiles and in the inspector, and descriptions on hover: [Labels and hover text](panels.md#labels-and-hover-text) in panels.md (Draft).
+- Showing labels on tiles and in the inspector, and descriptions on hover: [Labels and hover text](panels.md#labels-and-hover-text) in panels.md (Agreed).
 - Generating help pages: #43.
 - Text for display values and panel widgets.
