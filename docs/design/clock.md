@@ -96,8 +96,11 @@ Examples: the LFO's phase input in sync mode defaults to bar phase, with a rate 
 | **Button** `loom.ui.button` | none | gate | mode (toggle, momentary) | A large button on its panel. Toggle flips the gate on each press; momentary is high while held. |
 | **Clock Divide** `loom.logic.divide` | trigger, reset | trigger | N (1 to 64), offset (0 to N-1) | Counts rising edges. Fires on the triggers numbered N, 2N, 3N after a reset; offset k moves each firing k triggers earlier. With offset N-1 it fires on the first trigger. |
 | **Phase Scale** `loom.phase.scale` | phase, reset | phase | multiply (1 to 16), divide (1 to 16) | Scales a phase by multiply ÷ divide, and stays locked to it. Divide counts the input's wraps, so a divide of 2 wraps once every two input cycles, starting on the same bar. |
+| **Phase Trigger** `loom.phase.trigger` | phase | trigger | none | Fires a trigger each time the input phase wraps from near 1 back to near 0. Turns any phase into triggers: a scaled phase, an LFO's phase, or the transport's bar phase. |
 
 *Why both Clock Divide and Phase Scale:* triggers are events, for counting and arrangement logic (ADR-0012). Phases are continuous, for anything that should move smoothly and in sync: LFOs, sequencers, cycles. Each domain needs its own divider. Phase Scale also gives polyrhythm: multiply 3, divide 2 plays three against two.
+
+*Why Phase Trigger:* it is how to multiply a clock. Phase Scale multiplies a phase, and Phase Trigger turns the result into triggers, for example to drive a Clock Divide or an envelope. A trigger-based multiplier, as in many VCV Rack modules, would have to measure the time between input triggers and guess when the next one comes. It would stumble on the first trigger and whenever the tempo changes. A multiplied phase is computed from the input, so it never guesses and stays locked. This follows Bitwig Grid, where timing is built from phase signals.
 
 Trigger outputs are high for one sample, and trigger inputs count rising edges ([ADR-0007](../adr/0007-polymorphic-signal-model.md#triggers)).
 
@@ -110,6 +113,14 @@ These details were settled while building the module.
 - **Reset and trigger on the same frame.** The reset comes first, so that trigger counts as the first one after the reset. *Why:* a loop's end trigger and a section reset often arrive together, and the new section must start counting at once.
 - **Changing N.** The module counts every trigger since the reset, not the count modulo N. So after changing N, it fires as if N had been set at the reset.
 - **No latency.** The output fires on the same frame as the input trigger.
+
+### Phase Trigger details (Draft)
+
+- **What counts as a wrap.** The phase falls by more than 0.5 from one frame to the next. *Why:* a phase moving forward at any rate below half the sample rate rises by less than 0.5 per frame, so only a wrap can fall that far. A small wobble or a slow backward drift does not fire.
+- **No latency.** The trigger fires on the frame where the phase has wrapped, the first frame of the new cycle.
+- **A reset to 0 is a wrap** when the phase was above 0.5, because it looks the same on the cable.
+- **Open:** does the first frame fire? Firing would mark bar 1 when the transport starts at position 0, but a module added halfway through a bar must not fire. One option: fire on the first frame only when the phase is exactly 0.
+- **Open:** a phase running backward wraps from near 0 up to near 1. Fire on that too, or only on forward wraps?
 
 ## Rules
 
@@ -203,6 +214,7 @@ The Transport module's parameters (tempo, time signature, run) are saved like an
 - [ ] Clock at 1/4 in 4/4 fires four triggers per bar, in line with the bar phase wrap, at block sizes 1, 32, and 1024.
 - [x] Clock Divide with N = 2, offset 0, fires on triggers 2, 4, 6. Offset 1 fires on 1, 3, 5. Reset starts the count again.
 - [ ] Phase Scale with divide 2 wraps once per two input wraps, aligned with the input's bar. Multiply 3, divide 2 wraps three times per two input wraps.
+- [ ] Phase Scale with multiply 4 into Phase Trigger fires four triggers per input cycle. The first is on the input's wrap. The output is the same at block sizes 1, 32, and 1024.
 - [ ] An LFO in sync mode with nothing connected follows bar phase. A cable overrides it; removing the cable returns to the transport.
 - [ ] Ports that follow the transport show the clock mark.
 - [ ] Every patch has one Transport module. It cannot be deleted, and a second one cannot be added.
@@ -223,6 +235,6 @@ The Transport module's parameters (tempo, time signature, run) are saved like an
 
 - How tempo goes on a cable, if at all (a scale for BPM in the signal range).
 - Swing: a Clock parameter, a separate module that bends a phase, or both.
-- Should Clock have a phase input of its own, so it can follow a bent phase instead of the transport?
+- Should Clock have a phase input of its own, so it can follow a bent phase instead of the transport? Proposed answer: no. Clock stays on the transport, and a bent phase goes into Phase Trigger. Agree this with the Phase Trigger details.
 - The Transport module's run and reset inputs ([#73](https://github.com/brylie/LoomDSP/issues/73)) are signals, but the transport updates at block starts (rule 4). If the engine reads them only at block starts, the response to a gate edge depends on block size, which breaks rule 5. Options: split the block at the edge so the change is sample accurate, or read the inputs on a fixed grid of frames that does not depend on block size. Decide before building #73.
 - What happens when the time signature changes while playing ([#73](https://github.com/brylie/LoomDSP/issues/73) exposes it as a parameter). Today the engine applies it at the next buffer. Bar phase is position divided by beats per bar, counted from bar 1, so the whole bar grid moves and bar phase jumps (in the first bar, 4/4 to 3/4 at beat 3 moves it from 0.5 to 0.67). `jumped` stays false. A module that watches for the bar phase wrap may then fire an extra bar trigger or miss one. Rule 3 covers tempo only. Options: apply it at once and count it as a jump; apply it at the next bar line, as most DAWs do; or keep the silent jump. Decide before building #73.
