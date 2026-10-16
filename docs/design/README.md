@@ -30,7 +30,7 @@ A spec can give sections their own status when parts move at different speeds.
 
 ## Writing one
 
-Copy [template.md](template.md). Keep it to one feature. Link the ADR, requirements, use case, and issues. Give every rule its reason, so later readers can judge when it should change.
+Copy [template.md](template.md). Keep it to one feature. Link the ADR, requirements, use case, and issues. Give every rule its reason, so later readers can judge when it should change. When a rule rests on theory a newcomer would not know, explain the theory in an [explainer](../learn/README.md) and link it from the spec's header.
 
 ## Index
 

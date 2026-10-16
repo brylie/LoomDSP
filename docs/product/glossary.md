@@ -16,6 +16,7 @@
 | **Direct manipulation** | Editing an object where you see it, through controls it shows itself, rather than in a separate panel. LoomDSP's tiles work this way (ADR-0013). |
 | **Display value** | A number a module publishes once per block for its panel to show, such as a sequencer's current step. Internal state, not a port. |
 | **Encapsulation** | Collapsing part of a patch into a sub-patch with its own ports and panel. |
+| **End of cycle (EOC)** | A trigger that marks the end of a cycle. It fires on the first sample of the next cycle, which is the same moment. The name comes from Eurorack. See [Phase and cycles](../learn/phase-and-cycles.md#when-it-fires). |
 | **Engine** | The Rust code that runs a patch and produces audio. The same engine runs in every target. |
 | **Front panel** | The panel of a patch or sub-patch: the controls and displays that hide its wiring. A sub-patch's front panel is also what its tile shows in the parent patch. |
 | **Grid** | LoomDSP's patch canvas, where every feature is a module. Named after the idea in Bitwig Studio's Grid. |
@@ -38,7 +39,7 @@
 | **Patch** | A complete graph of modules, cables, sub-patches, panels, and settings. Saved as one file. |
 | **Performance mode** | A locked view that shows only the front panel, for live use. |
 | **Phase Scale** | A module that multiplies or divides a phase while staying locked to it. Used for half-time, double-time, and polyrhythm. |
-| **Phase signal** | A ramp from 0.0 to 1.0 that wraps. It drives oscillators, LFOs, and sequencers. |
+| **Phase signal** | A ramp from 0.0 to 1.0 that wraps. It drives oscillators, LFOs, and sequencers. See [Phase and cycles](../learn/phase-and-cycles.md). |
 | **Pitch signal** | A signal that represents musical pitch on a fixed scale (see OQ-04). |
 | **Polymorphic signal** | A signal that can connect to any input, whatever its type. Types only change colour and default ranges. |
 | **Polyphony** | Playing several notes at once. Each note uses its own voice. |
@@ -62,3 +63,4 @@
 | **VST3** | Steinberg's plugin format. Widest DAW support. The SDK is MIT-licensed since version 3.8. |
 | **WAM2** | Web Audio Modules 2.0. A plugin standard for browser-based audio hosts. |
 | **WASM** | WebAssembly. A portable binary format that runs at near-native speed in browsers. |
+| **Wrap** | The moment a phase passes the point where 1 meets 0 and starts a new cycle. Detected as a jump of more than 0.5 between two samples, in either direction ([Phase and cycles](../learn/phase-and-cycles.md#finding-the-end-of-a-cycle)). |

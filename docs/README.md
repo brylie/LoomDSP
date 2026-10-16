@@ -11,6 +11,7 @@ Status: **Phase 1, early** (2026-10-14). Requirements are a draft and open for d
 | [Getting started](guide/getting-started.md) | Musicians and testers | Run the desktop app, play a patch, and patch while it plays |
 | [Architecture](dev/architecture.md) | Developers | How the crates, threads, compiler, and canvas fit together, and where to start |
 | [Contributing](../CONTRIBUTING.md) | Developers | Build, test, hooks, CI, and pull requests |
+| [Learn](learn/README.md) | Everyone | The theory behind LoomDSP: phase, cycles, triggers, and why things work the way they do |
 
 ## Kinds of documents
 
@@ -22,6 +23,7 @@ Each kind of document has one job, so readers know what to trust and writers kno
 | **Specification** | [`design/`](design/README.md) | How a feature works: behaviour, rules, acceptance criteria, out of scope, open points. | Written before the code ([spec first](design/README.md#spec-first)). Living: updated with the code it describes. |
 | **Product** | [`product/`](product/vision.md) | Vision, personas and use cases, requirements, roadmap, open questions. | Living. |
 | **Guide** | `guide/`, `dev/` | How to use LoomDSP, or how to work on it. | Living. |
+| **Explainer** | [`learn/`](learn/README.md) | The theory behind a feature: what the signal is, why the obvious approach fails, how other modular systems do it. | Living: updated with the behaviour it explains. |
 | **Benchmark** | [`benchmarks/`](benchmarks/) | Measurements on a stated machine and date. | Add new results; keep old ones for comparison. |
 
 Why decisions are kept apart from specifications: a decision record explains *why* the code is the way it is, and stays useful only if it does not move. Details such as ports, parameters, and examples change as features are built. Keeping them in an ADR would mean either editing a "frozen" record or writing a new ADR for every small change.

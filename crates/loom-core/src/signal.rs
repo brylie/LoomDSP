@@ -115,6 +115,9 @@ impl EdgeDetector {
 /// A new detector has no previous frame. Its first frame counts as a wrap
 /// only when the phase is exactly 0, so a phase that starts on a bar line
 /// fires, and one joined halfway through a cycle does not.
+///
+/// `docs/learn/phase-and-cycles.md` explains the rule with examples, and why
+/// simpler rules ("the phase equals 0", "the phase went down") fail.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct WrapDetector {
     previous: Option<f32>,

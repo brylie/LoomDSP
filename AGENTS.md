@@ -68,8 +68,9 @@ Why: a gap in the spec gets filled with a guess, and a well-built guess is costl
 - A **decision** (with its options and reasons) goes in an ADR. Keep it to the decision. Once accepted, do not rewrite it; write a new ADR that supersedes it.
 - **How a feature works** (modules, ports, rules, examples) goes in a specification in `docs/design/`, linked from the ADR. Update it in the same change as the code.
 - **Who needs it and why** goes in use cases and requirements in `docs/product/`. **Tasks** go in GitHub issues.
+- **The theory behind it** (what the signal is, why the obvious approach fails, how Eurorack, VCV Rack, or Bitwig Grid do it) goes in an explainer in `docs/learn/`. Write or update one whenever a feature rests on an idea a newcomer would not know, or an edge case took real thought to settle. Link it from the spec and from the code. See [docs/learn/README.md](docs/learn/README.md).
 
-Why: decisions stay trustworthy only if they do not move, while details must be free to change. See [docs/README.md](docs/README.md).
+Why: decisions stay trustworthy only if they do not move, while details must be free to change. Explainers exist because LoomDSP is also a way to learn modular sound design (product principle 11): the reasons behind our choices are part of what we ship. See [docs/README.md](docs/README.md).
 
 ## Writing style
 

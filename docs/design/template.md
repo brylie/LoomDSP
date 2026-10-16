@@ -6,6 +6,7 @@ One sentence: what this feature does, for whom.
 - **Status:** Draft
 - **Decision behind it:** ADR-NNNN, if there is one.
 - **Use case and requirements:** UCn, FR-..., NFR-...
+- **Background:** explainers in `docs/learn/` that teach the ideas behind this feature, if any.
 - **Issues:** #...
 - **Code:** where it lives, once it exists.
 
