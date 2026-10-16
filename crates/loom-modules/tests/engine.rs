@@ -44,6 +44,41 @@ fn output_does_not_depend_on_host_buffer_size() {
 }
 
 #[test]
+fn feedback_fm_recovers_after_extreme_settings() {
+    // #121: Multiply gain 10 and Add offset 10 push the loop's pitch past
+    // the range of f32 Hz. The sound must come back when the knobs do, and
+    // no NaN may reach the host on the way.
+    let mut parts = load("fm-feedback.ron");
+    let note = [Note {
+        note: 57,
+        on: 0,
+        off: usize::MAX,
+    }];
+    // Gain first, so the sine swings hard when the offset arrives. Both at
+    // once can lock the loop at phase 0, where the sine is 0, and miss the bug.
+    let (left, _) = render_with(&mut parts, 84_000, 512, &note, |position, parts| {
+        let (gain, offset) = match position {
+            24_000..36_000 => (10.0, 0.0),
+            36_000..48_000 => (10.0, 10.0),
+            _ => (0.08, 0.0),
+        };
+        parts.controller.set_param(ModuleId(5), 0, gain).unwrap();
+        parts.controller.set_param(ModuleId(2), 0, offset).unwrap();
+    });
+    assert!(
+        left.iter().all(|x| x.is_finite()),
+        "no NaN or infinity reaches the host"
+    );
+    assert!(rms(&left[72_000..]) > 0.05, "the tone comes back");
+
+    // After the extremes, the tone is the same periodic wave as before:
+    // the loop has no stuck state, only a different phase.
+    let before = &left[12_000..24_000];
+    let after = &left[72_000..84_000];
+    assert!((rms(before) - rms(after)).abs() < 0.01);
+}
+
+#[test]
 fn compiler_reports_feedback_loops() {
     let parts = load("subtractive.ron");
     assert!(parts.controller.last_report().loops.is_empty());

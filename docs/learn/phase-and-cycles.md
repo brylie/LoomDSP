@@ -47,6 +47,8 @@ In the table above, sample 3 to sample 4 is a jump of 0.991. That can only be a 
 
 A phase moving normally changes by a small amount per sample. It only moves 0.5 or more per sample if it runs faster than half the sample rate (24 kHz at 48 kHz). At that speed the samples cannot show its direction anyway (this is the Nyquist limit). So any phase we can follow moves less than 0.5 per sample, and a bigger jump must be a wrap.
 
+The Phase generator keeps to this limit itself. A pitch above Nyquist runs it at Nyquist, at most 0.5 per sample. This also protects a patch from very high pitch. Pitch is exponential, so a pitch of 20 (200 octaves) is more hertz than a 32-bit float can hold. Without the limit the phase would become "not a number" (NaN) and stay that way, and the patch would be silent until reloaded ([#121](https://github.com/brylie/LoomDSP/issues/121)).
+
 ### Why not "the phase equals 0"?
 
 Because, as the table shows, it almost never does. A rule of "fire when the phase is 0" would miss nearly every cycle. A phase that *stays* at 0 is also common (a stopped transport, an unconnected input), and that rule would then fire on every sample.
