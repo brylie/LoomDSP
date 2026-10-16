@@ -4,7 +4,7 @@
 //! ramp drive any shaper, and lets users bend time (sync, phase distortion,
 //! step indexing) before it becomes sound.
 
-use loom_core::signal::{EdgeDetector, pitch};
+use loom_core::signal::{EdgeDetector, WrapDetector, pitch, trigger};
 use loom_core::{
     Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamSpec, PortIo, PortSpec, ProcessContext, SignalType,
     Widget,
@@ -78,5 +78,76 @@ impl Module for Phase {
     fn reset(&mut self) {
         self.phase = 0.0;
         self.reset_in.reset();
+    }
+}
+
+/// `loom.phase.trigger`: fires a trigger each time its input phase wraps.
+///
+/// It turns any phase into triggers. With Phase Scale in front, it is a
+/// clock multiplier that stays locked to its input. The wrap rule is
+/// [`WrapDetector`]'s, shared with every end-of-cycle trigger.
+pub static PHASE_TRIGGER: ModuleDescriptor = ModuleDescriptor {
+    id: "loom.phase.trigger",
+    version: 1,
+    name: "Phase Trigger",
+    category: "Phase",
+    description: "Fires a trigger each time the phase wraps, forward or backward.",
+    inputs: &[PortSpec::new("phase", SignalType::Phase)],
+    outputs: &[PortSpec::new("trigger", SignalType::Gate)],
+    params: &[],
+    role: ModuleRole::Dsp(|_| {
+        Box::new(PhaseTrigger {
+            wrap: WrapDetector::new(),
+        })
+    }),
+    panel: Panel::EMPTY,
+    displays: &[],
+};
+
+struct PhaseTrigger {
+    wrap: WrapDetector,
+}
+
+impl Module for PhaseTrigger {
+    fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        let ([phase], [out]) = io.split::<1, 1>();
+        for (out, &p) in out.iter_mut().zip(phase) {
+            *out = trigger(self.wrap.wrapped(p));
+        }
+    }
+
+    fn reset(&mut self) {
+        self.wrap.reset();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use loom_core::testing::run;
+
+    fn phase_trigger(input: &[f32]) -> Vec<f32> {
+        let mut module = PhaseTrigger {
+            wrap: WrapDetector::new(),
+        };
+        let mut out = vec![0.0; input.len()];
+        run(&mut module, 48_000.0, &[input], &[true], &mut [&mut out], &[]);
+        out
+    }
+
+    #[test]
+    fn fires_one_sample_on_each_wrap() {
+        // Four frames per cycle, starting on a bar line.
+        let input: Vec<f32> = (0..12).map(|i| (i % 4) as f32 / 4.0).collect();
+        let out = phase_trigger(&input);
+        let fired: Vec<usize> = (0..out.len()).filter(|&i| out[i] == 1.0).collect();
+        assert_eq!(fired, [0, 4, 8]);
+        assert!(out.iter().all(|&value| value == 0.0 || value == 1.0));
+    }
+
+    #[test]
+    fn unconnected_input_fires_once_then_stays_low() {
+        // An unconnected input reads zeros: a phase standing still at 0.
+        assert_eq!(phase_trigger(&[0.0; 4]), [1.0, 0.0, 0.0, 0.0]);
     }
 }

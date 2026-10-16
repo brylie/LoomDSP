@@ -99,6 +99,52 @@ impl EdgeDetector {
     }
 }
 
+/// Finds the frames where a phase wraps: where it jumps by more than half a
+/// cycle from one frame to the next, in either direction. This is the shared
+/// basis for every trigger that marks the end of a cycle, so all of them
+/// agree on where a cycle ends.
+///
+/// Why more than half a cycle: a phase running at any rate below half the
+/// sample rate moves less than 0.5 per frame, so only a wrap can jump that
+/// far. A phase running forward wraps from near 1 down to near 0; one
+/// running backward wraps from near 0 up to near 1. Both are a new cycle.
+///
+/// The wrap is reported on the first frame of the new cycle. That is also
+/// the end of the old cycle, so an "end of cycle" trigger fires there too.
+///
+/// A new detector has no previous frame. Its first frame counts as a wrap
+/// only when the phase is exactly 0, so a phase that starts on a bar line
+/// fires, and one joined halfway through a cycle does not.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct WrapDetector {
+    previous: Option<f32>,
+}
+
+impl WrapDetector {
+    /// A detector with no previous frame.
+    pub const fn new() -> Self {
+        Self { previous: None }
+    }
+
+    /// Takes the next frame's phase. True when the phase has wrapped.
+    #[inline]
+    pub fn wrapped(&mut self, phase: f32) -> bool {
+        let wrapped = match self.previous {
+            Some(previous) => (phase - previous).abs() > 0.5,
+            None => phase == 0.0,
+        };
+        self.previous = Some(phase);
+        wrapped
+    }
+
+    /// Forgets the previous frame, as in a new detector. Call it from
+    /// `Module::reset`.
+    #[inline]
+    pub fn reset(&mut self) {
+        self.previous = None;
+    }
+}
+
 /// Pitch conventions: 0.1 per octave, 0.0 = middle C.
 ///
 /// Why 0.1 per octave: it keeps 20 octaves inside the normalised -1.0 to 1.0
@@ -215,5 +261,69 @@ mod tests {
         assert_eq!(trigger(true), 1.0);
         assert_eq!(trigger(false), 0.0);
         assert!(gate_is_high(trigger(true)));
+    }
+
+    fn wraps(detector: &mut WrapDetector, input: &[f32]) -> Vec<bool> {
+        input.iter().map(|&phase| detector.wrapped(phase)).collect()
+    }
+
+    #[test]
+    fn forward_wraps_fire_on_the_first_frame_of_the_new_cycle() {
+        let input = [0.25, 0.5, 0.75, 0.0, 0.25, 0.5, 0.75, 0.0];
+        let found = wraps(&mut WrapDetector::new(), &input);
+        assert_eq!(found, [false, false, false, true, false, false, false, true]);
+    }
+
+    #[test]
+    fn backward_wraps_fire_too() {
+        let input = [0.5, 0.25, 0.0, 0.75, 0.5];
+        let found = wraps(&mut WrapDetector::new(), &input);
+        assert_eq!(found, [false, false, false, true, false]);
+    }
+
+    #[test]
+    fn first_frame_fires_only_on_exactly_zero() {
+        assert_eq!(wraps(&mut WrapDetector::new(), &[0.0, 0.1]), [true, false]);
+        assert_eq!(wraps(&mut WrapDetector::new(), &[0.37, 0.4]), [false, false]);
+        assert_eq!(wraps(&mut WrapDetector::new(), &[0.999, 0.0]), [false, true]);
+    }
+
+    #[test]
+    fn small_steps_and_wobble_do_not_fire() {
+        let input = [0.4, 0.6, 0.55, 0.9, 0.45];
+        let found = wraps(&mut WrapDetector::new(), &input);
+        assert_eq!(found, [false; 5]);
+    }
+
+    #[test]
+    fn wraps_do_not_depend_on_how_frames_are_split() {
+        let input: Vec<f32> = (0..200).map(|i| (i as f32 * 0.07).fract()).collect();
+        let whole = wraps(&mut WrapDetector::new(), &input);
+        for block in [1, 2, 5, 64] {
+            let mut detector = WrapDetector::new();
+            let split: Vec<bool> = input
+                .chunks(block)
+                .flat_map(|chunk| wraps(&mut detector, chunk))
+                .collect();
+            assert_eq!(split, whole, "block size {block}");
+        }
+    }
+
+    #[test]
+    fn wrap_reset_forgets_the_previous_frame() {
+        let mut detector = WrapDetector::new();
+        assert!(detector.wrapped(0.0));
+        assert!(!detector.wrapped(0.0));
+        detector.reset();
+        assert!(detector.wrapped(0.0));
+    }
+
+    #[test]
+    fn nan_never_wraps() {
+        let mut detector = WrapDetector::new();
+        assert!(!detector.wrapped(0.9));
+        assert!(!detector.wrapped(f32::NAN));
+        assert!(!detector.wrapped(0.1));
+        assert!(detector.wrapped(0.95));
     }
 }

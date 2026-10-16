@@ -87,7 +87,7 @@ Examples: the LFO's phase input in sync mode defaults to bar phase, with a rate 
 
 ## Modules
 
-**Status:** Clock Divide is Implemented ([#48](https://github.com/brylie/LoomDSP/issues/48)); see its details below the table. The other modules are Draft.
+**Status:** Clock Divide ([#48](https://github.com/brylie/LoomDSP/issues/48)) and Phase Trigger are Implemented; see their details below the table. The other modules are Draft.
 
 | Module | Inputs | Outputs | Parameters | Behaviour |
 |---|---|---|---|---|
@@ -114,13 +114,14 @@ These details were settled while building the module.
 - **Changing N.** The module counts every trigger since the reset, not the count modulo N. So after changing N, it fires as if N had been set at the reset.
 - **No latency.** The output fires on the same frame as the input trigger.
 
-### Phase Trigger details (Draft)
+### Phase Trigger details
 
-- **What counts as a wrap.** The phase falls by more than 0.5 from one frame to the next. *Why:* a phase moving forward at any rate below half the sample rate rises by less than 0.5 per frame, so only a wrap can fall that far. A small wobble or a slow backward drift does not fire.
-- **No latency.** The trigger fires on the frame where the phase has wrapped, the first frame of the new cycle.
-- **A reset to 0 is a wrap** when the phase was above 0.5, because it looks the same on the cable.
-- **Open:** does the first frame fire? Firing would mark bar 1 when the transport starts at position 0, but a module added halfway through a bar must not fire. One option: fire on the first frame only when the phase is exactly 0.
-- **Open:** a phase running backward wraps from near 0 up to near 1. Fire on that too, or only on forward wraps?
+- **What counts as a wrap.** The phase jumps by more than 0.5 from one frame to the next, in either direction. *Why:* a phase moving at any rate below half the sample rate changes by less than 0.5 per frame, so only a wrap can jump that far. A small wobble does not fire.
+- **Both directions.** A phase running forward wraps from near 1 to near 0. One running backward wraps from near 0 to near 1. Both start a new cycle, so both fire.
+- **No latency.** The trigger fires on the first frame of the new cycle. That frame is also the end of the old cycle, so this is the same frame an end-of-cycle trigger marks.
+- **The first frame** fires only when the phase is exactly 0. *Why:* a phase that starts on a bar line marks bar 1, but a module added halfway through a cycle must not fire.
+- **Jumps.** A reset to 0 from above 0.5, or any other jump of more than half a cycle, looks the same on the cable as a wrap, and fires once. A smaller jump does not fire.
+- **Shared rule.** The rule lives in `loom_core::signal::WrapDetector`. Every trigger that marks the end of a cycle should use it: Phase Trigger now, and later the Clock trigger, the Transport's bar and beat triggers, and the end trigger of cycles (FR-LIB-20). *Why:* they must all agree on where a cycle ends.
 
 ## Rules
 
@@ -214,7 +215,8 @@ The Transport module's parameters (tempo, time signature, run) are saved like an
 - [ ] Clock at 1/4 in 4/4 fires four triggers per bar, in line with the bar phase wrap, at block sizes 1, 32, and 1024.
 - [x] Clock Divide with N = 2, offset 0, fires on triggers 2, 4, 6. Offset 1 fires on 1, 3, 5. Reset starts the count again.
 - [ ] Phase Scale with divide 2 wraps once per two input wraps, aligned with the input's bar. Multiply 3, divide 2 wraps three times per two input wraps.
-- [ ] Phase Scale with multiply 4 into Phase Trigger fires four triggers per input cycle. The first is on the input's wrap. The output is the same at block sizes 1, 32, and 1024.
+- [x] Phase Trigger fires one sample on each wrap of its input phase, forward or backward, and on the first frame only when the phase is exactly 0. The output is the same for any block size.
+- [ ] Phase Scale ([#31](https://github.com/brylie/LoomDSP/issues/31)) with multiply 4 into Phase Trigger fires four triggers per input cycle. The first is on the input's wrap. The output is the same at block sizes 1, 32, and 1024.
 - [ ] An LFO in sync mode with nothing connected follows bar phase. A cable overrides it; removing the cable returns to the transport.
 - [ ] Ports that follow the transport show the clock mark.
 - [ ] Every patch has one Transport module. It cannot be deleted, and a second one cannot be added.
@@ -235,6 +237,6 @@ The Transport module's parameters (tempo, time signature, run) are saved like an
 
 - How tempo goes on a cable, if at all (a scale for BPM in the signal range).
 - Swing: a Clock parameter, a separate module that bends a phase, or both.
-- Should Clock have a phase input of its own, so it can follow a bent phase instead of the transport? Proposed answer: no. Clock stays on the transport, and a bent phase goes into Phase Trigger. Agree this with the Phase Trigger details.
+- Should Clock have a phase input of its own, so it can follow a bent phase instead of the transport? Proposed answer: no. Clock stays on the transport, and a bent phase goes into Phase Trigger, which now exists. Settle this when building Clock ([#74](https://github.com/brylie/LoomDSP/issues/74)).
 - The Transport module's run and reset inputs ([#73](https://github.com/brylie/LoomDSP/issues/73)) are signals, but the transport updates at block starts (rule 4). If the engine reads them only at block starts, the response to a gate edge depends on block size, which breaks rule 5. Options: split the block at the edge so the change is sample accurate, or read the inputs on a fixed grid of frames that does not depend on block size. Decide before building #73.
 - What happens when the time signature changes while playing ([#73](https://github.com/brylie/LoomDSP/issues/73) exposes it as a parameter). Today the engine applies it at the next buffer. Bar phase is position divided by beats per bar, counted from bar 1, so the whole bar grid moves and bar phase jumps (in the first bar, 4/4 to 3/4 at beat 3 moves it from 0.5 to 0.67). `jumped` stays false. A module that watches for the bar phase wrap may then fire an extra bar trigger or miss one. Rule 3 covers tempo only. Options: apply it at once and count it as a jump; apply it at the next bar line, as most DAWs do; or keep the silent jump. Decide before building #73.

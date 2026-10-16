@@ -25,6 +25,7 @@ pub mod phase;
 /// Every built-in module.
 pub static ALL: &[&ModuleDescriptor] = &[
     &phase::PHASE,
+    &phase::PHASE_TRIGGER,
     &osc::SINE,
     &osc::SAW,
     &osc::NOISE,

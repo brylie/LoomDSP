@@ -157,10 +157,29 @@ fn divide() {
 }
 
 #[test]
+fn phase_trigger() {
+    // A 40 Hz phase from a bar line, so it fires on frame 0 and then every
+    // 1200 frames.
+    let render = Harness::new(&phase::PHASE_TRIGGER)
+        .seconds(0.1)
+        .input("phase", Signal::phase(40.0))
+        .check(reference!("phase_trigger"));
+    let fired: Vec<usize> = render
+        .output("trigger")
+        .iter()
+        .enumerate()
+        .filter(|&(_, &value)| value == 1.0)
+        .map(|(frame, _)| frame)
+        .collect();
+    assert_eq!(fired, [0, 1_200, 2_400, 3_600]);
+}
+
+#[test]
 fn every_dsp_module_has_a_reference_test() {
     // Add a test above when you add a module to `ALL`.
     let tested = [
         &phase::PHASE,
+        &phase::PHASE_TRIGGER,
         &osc::SINE,
         &osc::SAW,
         &osc::NOISE,
