@@ -318,6 +318,15 @@ impl App {
         scene::update_panel_values(&mut self.values, &self.controller, &shown);
     }
 
+    /// Takes the latest dropout count for the stats bar warning. Runs on
+    /// every tick and, in Measure mode, on every frame.
+    fn update_dropouts(&mut self, now: Instant) {
+        if let Some(stats) = &self.audio_stats {
+            let s = stats.snapshot();
+            self.dropouts.update(s.overruns + s.stream_errors, now);
+        }
+    }
+
     /// The outputs of the meters on screen: each needs a probe.
     fn metered_outputs(&self) -> BTreeSet<OutputRef> {
         scene::meter_outputs(&self.controller, &self.visible_displays)
@@ -438,13 +447,11 @@ impl App {
             Message::Frame(now) => {
                 self.meter.record(now);
                 self.controller.collect_garbage();
+                self.update_dropouts(now);
             }
             Message::Tick => {
                 self.controller.collect_garbage();
-                if let Some(stats) = &self.audio_stats {
-                    let s = stats.snapshot();
-                    self.dropouts.update(s.overruns + s.stream_errors, Instant::now());
-                }
+                self.update_dropouts(Instant::now());
             }
             Message::Meters(levels) => {
                 self.meter_levels.extend(levels);
