@@ -3,7 +3,7 @@
 How musical time reaches every module: the patch transport, inputs that follow it without cables, and the modules that put time on cables and divide it.
 
 - **Kind:** living specification.
-- **Status:** Sections have their own status. **Implemented** for the engine slice ([#72](https://github.com/brylie/LoomDSP/issues/72)): the transport fields, signals derived from the transport, default inputs, rules 1 to 6 (except saving run state, which needs the Transport module), and engine and API. Everything else is Draft: review it before building.
+- **Status:** Sections have their own status. **Implemented** for the engine slice ([#72](https://github.com/brylie/LoomDSP/issues/72)): the transport fields, signals derived from the transport, default inputs, rules 1 to 6 (except saving run state, which needs the Transport module), and engine and API. Also **Implemented**: the Clock Divide ([#48](https://github.com/brylie/LoomDSP/issues/48)) and Phase Trigger modules. Everything else is Draft: review it before building.
 - **Decision behind it:** [ADR-0015](../adr/0015-one-transport-per-patch.md) (one transport per patch). Builds on [ADR-0007](../adr/0007-polymorphic-signal-model.md) (phase and gate signals) and [ADR-0012](../adr/0012-arrangement-from-phase-driven-primitives.md) (arrangement from phase).
 - **Requirements:** FR-LIB-07, FR-LIB-16, FR-LIB-22, FR-LIB-25 to FR-LIB-27, FR-MIDI-07.
 - **Background:** [Phase and cycles](../learn/phase-and-cycles.md) explains phase signals and how the end of a cycle is found.
