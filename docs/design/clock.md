@@ -87,6 +87,8 @@ Examples: the LFO's phase input in sync mode defaults to bar phase, with a rate 
 
 ## Modules
 
+**Status:** Clock Divide is Implemented ([#48](https://github.com/brylie/LoomDSP/issues/48)); see its details below the table. The other modules are Draft.
+
 | Module | Inputs | Outputs | Parameters | Behaviour |
 |---|---|---|---|---|
 | **Transport** `loom.clock.transport` | run (gate), reset (trigger) | bar phase, beat phase, playing (gate), bar (trigger), beat (trigger), jump (trigger) | tempo, time signature, run | Exactly one per patch, and cannot be deleted. Its panel controls the transport (see above). Jump fires when the position moves by anything other than normal playback (a reset, a host loop). |
@@ -98,6 +100,16 @@ Examples: the LFO's phase input in sync mode defaults to bar phase, with a rate 
 *Why both Clock Divide and Phase Scale:* triggers are events, for counting and arrangement logic (ADR-0012). Phases are continuous, for anything that should move smoothly and in sync: LFOs, sequencers, cycles. Each domain needs its own divider. Phase Scale also gives polyrhythm: multiply 3, divide 2 plays three against two.
 
 Trigger outputs are high for one sample, and trigger inputs count rising edges ([ADR-0007](../adr/0007-polymorphic-signal-model.md#triggers)).
+
+### Clock Divide details
+
+These details were settled while building the module.
+
+- **Parameter names** are `n` (default 2) and `offset` (default 0). Both are whole numbers.
+- **Offset above N-1.** The `offset` parameter ranges from 0 to 63, because a parameter's range is fixed in the descriptor. An offset of N or more counts as N-1. *Why:* offset N-1 means "fire on the first trigger", and lowering N keeps that meaning.
+- **Reset and trigger on the same frame.** The reset comes first, so that trigger counts as the first one after the reset. *Why:* a loop's end trigger and a section reset often arrive together, and the new section must start counting at once.
+- **Changing N.** The module counts every trigger since the reset, not the count modulo N. So after changing N, it fires as if N had been set at the reset.
+- **No latency.** The output fires on the same frame as the input trigger.
 
 ## Rules
 
@@ -189,7 +201,7 @@ The Transport module's parameters (tempo, time signature, run) are saved like an
 ### Acceptance criteria: modules and UI (Draft)
 
 - [ ] Clock at 1/4 in 4/4 fires four triggers per bar, in line with the bar phase wrap, at block sizes 1, 32, and 1024.
-- [ ] Clock Divide with N = 2, offset 0, fires on triggers 2, 4, 6. Offset 1 fires on 1, 3, 5. Reset starts the count again.
+- [x] Clock Divide with N = 2, offset 0, fires on triggers 2, 4, 6. Offset 1 fires on 1, 3, 5. Reset starts the count again.
 - [ ] Phase Scale with divide 2 wraps once per two input wraps, aligned with the input's bar. Multiply 3, divide 2 wraps three times per two input wraps.
 - [ ] An LFO in sync mode with nothing connected follows bar phase. A cable overrides it; removing the cable returns to the transport.
 - [ ] Ports that follow the transport show the clock mark.
