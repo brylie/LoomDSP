@@ -39,8 +39,8 @@
 | **Patch** | A complete graph of modules, cables, sub-patches, panels, and settings. Saved as one file. |
 | **Performance mode** | A locked view that shows only the front panel, for live use. |
 | **Phase Scale** | A module that multiplies or divides a phase while staying locked to it. Used for half-time, double-time, and polyrhythm. |
-| **Phase Trigger** | A module that fires a trigger each time its input phase wraps. With Phase Scale in front, it multiplies a clock ([clock specification](../design/clock.md)). |
 | **Phase signal** | A ramp from 0.0 to 1.0 that wraps. It drives oscillators, LFOs, and sequencers. See [Phase and cycles](../learn/phase-and-cycles.md). |
+| **Phase Trigger** | A module that fires a trigger each time its input phase wraps. With Phase Scale in front, it multiplies a clock ([clock specification](../design/clock.md)). |
 | **Pitch signal** | A signal that represents musical pitch on a fixed scale (see OQ-04). |
 | **Polymorphic signal** | A signal that can connect to any input, whatever its type. Types only change colour and default ranges. |
 | **Polyphony** | Playing several notes at once. Each note uses its own voice. |
