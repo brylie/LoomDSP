@@ -5,13 +5,15 @@ use crate::controls::{
     ControlGeometry, PanelValues, knob_centre, knob_drag, knob_step, light_centre, radio_centre, radio_option,
 };
 use crate::gpu::{Cable, CanvasPrimitive, Geometry, Overlay, Shape};
+use crate::hover::{HOVER_MAX_WIDTH, HOVER_PADDING, HOVER_TEXT_PX, HoverTarget, HoverTimer};
 use crate::scene::{
-    GRID, HEADER, Hit, PORT_HIT_RADIUS, PORT_RADIUS, PortRef, ROW, Scene, TILE_WIDTH, WidgetViewKind, fit_label,
+    GRID, HEADER, Hit, HoverText, PORT_HIT_RADIUS, PORT_RADIUS, PortRef, ROW, Scene, TILE_WIDTH, WidgetViewKind,
+    fit_label,
 };
 use crate::theme::Palette;
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::renderer;
-use iced::advanced::text::{self, Text};
+use iced::advanced::text::{self, Paragraph as _, Text};
 use iced::advanced::widget::tree::{self, Tree};
 use iced::advanced::{Clipboard, Shell, Widget};
 use iced::{Color, Element, Event, Font, Length, Pixels, Point, Rectangle, Size, Vector};
@@ -187,6 +189,11 @@ struct State {
     animation: Option<(Instant, Camera)>,
     /// The control with keyboard focus: module ID and widget index.
     focus: Option<(u32, usize)>,
+    /// True when the focus came from Tab, so its hover text shows. A click
+    /// also focuses a control, but the pointer is on it then.
+    tab_focus: bool,
+    /// When hover text shows (panels.md, Labels and hover text).
+    hover_text: HoverTimer,
     /// The last press on a control, for double-click.
     last_click: Option<(Instant, u32, usize)>,
     /// Modules with lights on screen, as last reported.
@@ -239,6 +246,111 @@ where
     ) {
         let state = tree.state.downcast_mut::<State>();
         let bounds = layout.bounds();
+        self.handle(state, event, bounds, cursor, shell);
+        self.sync_hover_text(state, event, shell);
+    }
+
+    fn mouse_interaction(
+        &self,
+        tree: &Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        _viewport: &Rectangle,
+        _renderer: &Renderer,
+    ) -> mouse::Interaction {
+        let state = tree.state.downcast_ref::<State>();
+        match state.interaction {
+            Interaction::Panning { .. } | Interaction::Moving { .. } => mouse::Interaction::Grabbing,
+            Interaction::Turning { .. } => mouse::Interaction::ResizingVertically,
+            Interaction::Wiring { .. } => mouse::Interaction::Crosshair,
+            Interaction::Selecting { .. } => mouse::Interaction::Crosshair,
+            Interaction::Idle if cursor.is_over(layout.bounds()) => match state.hover {
+                Some(Hit::Port(_)) => mouse::Interaction::Pointer,
+                Some(Hit::Widget { module, widget }) => match self.widget_kind(module, widget) {
+                    Some(WidgetViewKind::Knob { .. }) => mouse::Interaction::ResizingVertically,
+                    _ => mouse::Interaction::Pointer,
+                },
+                Some(Hit::Module(_)) => mouse::Interaction::Grab,
+                _ => mouse::Interaction::default(),
+            },
+            Interaction::Idle => mouse::Interaction::default(),
+        }
+    }
+
+    fn draw(
+        &self,
+        tree: &Tree,
+        renderer: &mut Renderer,
+        _theme: &Theme,
+        _style: &renderer::Style,
+        layout: Layout<'_>,
+        _cursor: mouse::Cursor,
+        _viewport: &Rectangle,
+    ) {
+        let state = tree.state.downcast_ref::<State>();
+        let bounds = layout.bounds();
+
+        let geometry = {
+            let mut cache = state.geometry.borrow_mut();
+            match cache.as_ref() {
+                Some(g) if g.generation == self.scene.generation() => g.clone(),
+                _ => {
+                    let built = Arc::new(Geometry::build(self.scene, &self.palette));
+                    *cache = Some(built.clone());
+                    built
+                }
+            }
+        };
+
+        // Controls follow the titles: drawn as shapes once titles show, and
+        // not at all when zoomed further out (panels.md, Level of detail).
+        let empty = PanelValues::default();
+        let values = self.values.unwrap_or(&empty);
+        let controls = (detail(state.camera.zoom) != Detail::Far).then(|| {
+            let key = (self.scene.generation(), values.generation());
+            let mut cache = state.controls.borrow_mut();
+            match cache.as_ref() {
+                Some(c) if c.key == key => c.clone(),
+                _ => {
+                    let built = Arc::new(ControlGeometry::build(self.scene, values, &self.palette));
+                    *cache = Some(built.clone());
+                    built
+                }
+            }
+        });
+
+        renderer.fill_quad(
+            renderer::Quad {
+                bounds,
+                ..renderer::Quad::default()
+            },
+            self.palette.background,
+        );
+        renderer.draw_primitive(
+            bounds,
+            CanvasPrimitive {
+                geometry,
+                controls,
+                overlay: self.overlay(state),
+                camera: state.camera,
+                cable_dim: CABLE_OPACITY,
+            },
+        );
+        self.draw_text(state, values, renderer, bounds);
+        self.draw_hover_text(state, renderer, bounds);
+    }
+}
+
+impl<Message> PatchCanvas<'_, Message> {
+    /// Handles one event: everything but hover text.
+    fn handle(
+        &self,
+        state: &mut State,
+        event: &Event,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+        shell: &mut Shell<'_, Message>,
+    ) {
         let over = cursor.is_over(bounds);
         let screen = relative(cursor, bounds);
 
@@ -311,6 +423,10 @@ where
                     }
                 }
                 state.cursor = Some(state.camera.to_world(screen));
+                // The view moved under the pointer: hover text hides, and
+                // shows again only after the pointer rests anew.
+                state.hover_text.restart(Instant::now());
+                state.hover = Some(self.scene.hit(state.camera.to_world(screen), state.hit_radius()));
                 shell.request_redraw();
                 shell.capture_event();
             }
@@ -442,97 +558,52 @@ where
         }
     }
 
-    fn mouse_interaction(
-        &self,
-        tree: &Tree,
-        layout: Layout<'_>,
-        cursor: mouse::Cursor,
-        _viewport: &Rectangle,
-        _renderer: &Renderer,
-    ) -> mouse::Interaction {
-        let state = tree.state.downcast_ref::<State>();
-        match state.interaction {
-            Interaction::Panning { .. } | Interaction::Moving { .. } => mouse::Interaction::Grabbing,
-            Interaction::Turning { .. } => mouse::Interaction::ResizingVertically,
-            Interaction::Wiring { .. } => mouse::Interaction::Crosshair,
-            Interaction::Selecting { .. } => mouse::Interaction::Crosshair,
-            Interaction::Idle if cursor.is_over(layout.bounds()) => match state.hover {
-                Some(Hit::Port(_)) => mouse::Interaction::Pointer,
-                Some(Hit::Widget { module, widget }) => match self.widget_kind(module, widget) {
-                    Some(WidgetViewKind::Knob { .. }) => mouse::Interaction::ResizingVertically,
-                    _ => mouse::Interaction::Pointer,
-                },
-                Some(Hit::Module(_)) => mouse::Interaction::Grab,
-                _ => mouse::Interaction::default(),
-            },
-            Interaction::Idle => mouse::Interaction::default(),
+    /// Updates hover text after an event (panels.md, Labels and hover
+    /// text). It asks for a frame only when the text appears or hides, and
+    /// for a single timed frame while it waits, so it never draws while
+    /// nothing changes.
+    fn sync_hover_text(&self, state: &mut State, event: &Event, shell: &mut Shell<'_, Message>) {
+        let (now, redrawing) = match event {
+            Event::Window(window::Event::RedrawRequested(now)) => (*now, true),
+            _ => (Instant::now(), false),
+        };
+        let target = self.hover_target(state);
+        let mut changed = state.hover_text.rest(target, now);
+        // This frame is being drawn already, so text due now needs no other.
+        changed |= state.hover_text.tick(now) && !redrawing;
+        if changed {
+            shell.request_redraw();
+        }
+        if let Some(due) = state.hover_text.due() {
+            shell.request_redraw_at(due);
         }
     }
 
-    fn draw(
-        &self,
-        tree: &Tree,
-        renderer: &mut Renderer,
-        _theme: &Theme,
-        _style: &renderer::Style,
-        layout: Layout<'_>,
-        _cursor: mouse::Cursor,
-        _viewport: &Rectangle,
-    ) {
-        let state = tree.state.downcast_ref::<State>();
-        let bounds = layout.bounds();
-
-        let geometry = {
-            let mut cache = state.geometry.borrow_mut();
-            match cache.as_ref() {
-                Some(g) if g.generation == self.scene.generation() => g.clone(),
-                _ => {
-                    let built = Arc::new(Geometry::build(self.scene, &self.palette));
-                    *cache = Some(built.clone());
-                    built
-                }
+    /// What hover text would be about now: the port or control under the
+    /// pointer, or else the control focused with Tab. Nothing during a drag.
+    fn hover_target(&self, state: &State) -> Option<HoverTarget> {
+        if !matches!(state.interaction, Interaction::Idle) {
+            return None;
+        }
+        match state.hover {
+            Some(Hit::Port(port)) => return Some(HoverTarget::Port(port)),
+            Some(Hit::Widget { module, widget }) if self.is_control(module, widget) => {
+                return Some(HoverTarget::Control(module, widget));
             }
-        };
-
-        // Controls follow the titles: drawn as shapes once titles show, and
-        // not at all when zoomed further out (panels.md, Level of detail).
-        let empty = PanelValues::default();
-        let values = self.values.unwrap_or(&empty);
-        let controls = (detail(state.camera.zoom) != Detail::Far).then(|| {
-            let key = (self.scene.generation(), values.generation());
-            let mut cache = state.controls.borrow_mut();
-            match cache.as_ref() {
-                Some(c) if c.key == key => c.clone(),
-                _ => {
-                    let built = Arc::new(ControlGeometry::build(self.scene, values, &self.palette));
-                    *cache = Some(built.clone());
-                    built
-                }
-            }
-        });
-
-        renderer.fill_quad(
-            renderer::Quad {
-                bounds,
-                ..renderer::Quad::default()
-            },
-            self.palette.background,
-        );
-        renderer.draw_primitive(
-            bounds,
-            CanvasPrimitive {
-                geometry,
-                controls,
-                overlay: self.overlay(state),
-                camera: state.camera,
-                cable_dim: CABLE_OPACITY,
-            },
-        );
-        self.draw_text(state, values, renderer, bounds);
+            _ => {}
+        }
+        let (module, widget) = state.focus.filter(|_| state.tab_focus)?;
+        let selected = self.selection.len() == 1 && self.selection.contains(&module);
+        (selected && self.is_control(module, widget)).then_some(HoverTarget::Control(module, widget))
     }
-}
 
-impl<Message> PatchCanvas<'_, Message> {
+    fn is_control(&self, module: u32, widget: usize) -> bool {
+        self.scene
+            .module(module)
+            .and_then(|m| m.panel.widgets.get(widget))
+            .is_some_and(|w| w.is_control())
+    }
+
     fn widget_kind(&self, module: u32, widget: usize) -> Option<&WidgetViewKind> {
         Some(&self.scene.module(module)?.panel.widgets.get(widget)?.kind)
     }
@@ -590,7 +661,10 @@ impl<Message> PatchCanvas<'_, Message> {
                 };
                 let current = state.focus.map(|(_, w)| w);
                 match next_focus(&module.panel, current, modifiers.shift()) {
-                    Some(widget) => state.focus = Some((module.id, widget)),
+                    Some(widget) => {
+                        state.focus = Some((module.id, widget));
+                        state.tab_focus = true;
+                    }
                     None => return false,
                 }
                 true
@@ -656,6 +730,7 @@ impl<Message> PatchCanvas<'_, Message> {
     fn press(&self, state: &mut State, world: Point, screen: Point, shell: &mut Shell<'_, Message>) {
         let shift = state.modifiers.shift();
         let hit = self.scene.hit(world, state.hit_radius());
+        state.tab_focus = false;
         if !matches!(hit, Hit::Widget { .. }) {
             state.focus = None;
         }
@@ -925,7 +1000,6 @@ impl<Message> PatchCanvas<'_, Message> {
             Interaction::Turning { module, widget, .. } => Some((module, widget)),
             _ => state.focus,
         };
-        let mut full_label = None;
 
         for module in self.scene.modules() {
             let tile = module.bounds();
@@ -967,15 +1041,6 @@ impl<Message> PatchCanvas<'_, Message> {
                     (tile.x + 9.0, text::Alignment::Left)
                 };
                 let label = fit_label(&port.label, label_width, LABEL_SIZE);
-                let hovered = state.hover
-                    == Some(Hit::Port(PortRef {
-                        module: module.id,
-                        output,
-                        index: i,
-                    }));
-                if hovered && label != port.label.as_str() {
-                    full_label = Some((port.label.clone(), to_screen(Point::new(x, y - ROW))));
-                }
                 renderer.fill_text(
                     text(&label, label_px, label_width * zoom, align),
                     to_screen(Point::new(x, y)),
@@ -994,9 +1059,10 @@ impl<Message> PatchCanvas<'_, Message> {
                 match &widget.kind {
                     WidgetViewKind::Knob { .. } => {
                         let showing_value = active == Some((module.id, index));
+                        let caption = fit_label(&widget.label, rect.width, LABEL_SIZE);
                         let content = match values.get(module.id, index) {
                             Some(value) if showing_value => value.text.as_str(),
-                            _ => widget.label.as_str(),
+                            _ => &caption,
                         };
                         let at = Point::new(rect.x, knob_centre(rect).y + 1.5 * GRID);
                         let colour = if showing_value {
@@ -1014,7 +1080,12 @@ impl<Message> PatchCanvas<'_, Message> {
                     WidgetViewKind::Meter => {
                         let at = Point::new(rect.x, rect.y + rect.height - GRID * 0.5);
                         renderer.fill_text(
-                            text(&widget.label, label_px, width, text::Alignment::Center),
+                            text(
+                                &fit_label(&widget.label, rect.width, LABEL_SIZE),
+                                label_px,
+                                width,
+                                text::Alignment::Center,
+                            ),
                             to_screen(at),
                             self.palette.text_dim,
                             clip,
@@ -1023,7 +1094,12 @@ impl<Message> PatchCanvas<'_, Message> {
                     WidgetViewKind::Toggle | WidgetViewKind::Light => {
                         let at = Point::new(rect.x, light_centre(rect).y + GRID);
                         renderer.fill_text(
-                            text(&widget.label, label_px, width, text::Alignment::Center),
+                            text(
+                                &fit_label(&widget.label, rect.width, LABEL_SIZE),
+                                label_px,
+                                width,
+                                text::Alignment::Center,
+                            ),
                             to_screen(at),
                             self.palette.text_dim,
                             clip,
@@ -1032,7 +1108,12 @@ impl<Message> PatchCanvas<'_, Message> {
                     WidgetViewKind::Radio { options } => {
                         let at = Point::new(rect.x, rect.y + GRID * 0.5);
                         renderer.fill_text(
-                            text(&widget.label, label_px, width, text::Alignment::Center),
+                            text(
+                                &fit_label(&widget.label, rect.width, LABEL_SIZE),
+                                label_px,
+                                width,
+                                text::Alignment::Center,
+                            ),
                             to_screen(at),
                             self.palette.text_dim,
                             clip,
@@ -1051,29 +1132,103 @@ impl<Message> PatchCanvas<'_, Message> {
                 }
             }
         }
+    }
 
-        // A cut port label shows in full while its port is hovered, in a
-        // layer above the tiles.
-        if let Some((label, at)) = full_label {
-            let size = Size::new(label.chars().count() as f32 * label_px * 0.6 + 8.0, label_px * 1.6);
-            let rect = Rectangle::new(Point::new(at.x - size.width * 0.5, at.y - size.height * 0.5), size);
-            renderer.with_layer(bounds, |renderer| {
-                renderer.fill_quad(
-                    renderer::Quad {
-                        bounds: rect,
-                        border: iced::Border::default().rounded(3.0),
-                        ..renderer::Quad::default()
-                    },
-                    self.palette.tile_border,
+    /// The label, hover text, and world bounds of what hover text is about.
+    fn hover_content(&self, target: HoverTarget) -> Option<(&str, &HoverText, Rectangle)> {
+        match target {
+            HoverTarget::Port(port) => {
+                let view = self.scene.port(port)?;
+                let at = self.scene.port_position(port)?;
+                let anchor = Rectangle::new(
+                    Point::new(at.x - PORT_RADIUS, at.y - PORT_RADIUS),
+                    Size::new(2.0 * PORT_RADIUS, 2.0 * PORT_RADIUS),
                 );
-                renderer.fill_text(
-                    text(&label, label_px, size.width, text::Alignment::Center),
-                    Point::new(rect.x, rect.center_y()),
-                    self.palette.text,
-                    bounds,
-                );
-            });
+                Some((&view.label, &view.hover, anchor))
+            }
+            HoverTarget::Control(module, widget) => {
+                let module = self.scene.module(module)?;
+                let view = module.panel.widgets.get(widget)?;
+                Some((&view.label, &view.hover, module.widget_bounds(widget)?))
+            }
         }
+    }
+
+    /// Hover text (panels.md, Labels and hover text): the label, the
+    /// description, and the name when it differs, at a fixed screen size in
+    /// a layer above the tiles. Drawn at any zoom, because hover text is
+    /// what the user needs where tile text is too small to read.
+    fn draw_hover_text<Renderer>(&self, state: &State, renderer: &mut Renderer, bounds: Rectangle)
+    where
+        Renderer: text::Renderer<Font = Font>,
+    {
+        let Some((label, hover, world)) = state.hover_text.shown().and_then(|t| self.hover_content(t)) else {
+            return;
+        };
+        let font = renderer.default_font();
+        let inner = HOVER_MAX_WIDTH - 2.0 * HOVER_PADDING;
+        // Each line is measured as a paragraph, then drawn as text in that
+        // size, wrapped at word boundaries.
+        let line = |content: &str, size: f32, colour: Color| {
+            let text = Text {
+                content: content.to_string(),
+                bounds: Size::new(inner, f32::INFINITY),
+                size: Pixels(size),
+                line_height: text::LineHeight::Relative(1.3),
+                font,
+                align_x: text::Alignment::Left,
+                align_y: alignment::Vertical::Top,
+                shaping: text::Shaping::Basic,
+                wrapping: text::Wrapping::Word,
+            };
+            let measured = Renderer::Paragraph::with_text(text.as_ref()).min_bounds();
+            (
+                Text {
+                    bounds: Size::new(measured.width.ceil() + 1.0, measured.height.ceil()),
+                    ..text
+                },
+                colour,
+            )
+        };
+        let mut lines = vec![line(label, HOVER_TEXT_PX, self.palette.text)];
+        if !hover.description.is_empty() {
+            lines.push(line(&hover.description, HOVER_TEXT_PX, self.palette.text_dim));
+        }
+        if let Some(name) = &hover.name {
+            lines.push(line(name, HOVER_TEXT_PX - 1.0, self.palette.text_dim));
+        }
+        const LINE_GAP: f32 = 3.0;
+        let width = lines.iter().map(|(t, _)| t.bounds.width).fold(0.0, f32::max);
+        let height = lines.iter().map(|(t, _)| t.bounds.height).sum::<f32>() + LINE_GAP * (lines.len() - 1) as f32;
+        let size = Size::new(width + 2.0 * HOVER_PADDING, height + 2.0 * HOVER_PADDING);
+
+        let zoom = state.camera.zoom;
+        let corner = state.camera.to_screen(world.position());
+        let anchor = Rectangle::new(
+            Point::new(bounds.x + corner.x, bounds.y + corner.y),
+            world.size() * zoom,
+        );
+        let at = crate::hover::place(size, anchor, bounds);
+        renderer.with_layer(bounds, |renderer| {
+            renderer.fill_quad(
+                renderer::Quad {
+                    bounds: Rectangle::new(at, size),
+                    border: iced::Border {
+                        color: self.palette.tile_border,
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..renderer::Quad::default()
+                },
+                self.palette.tile,
+            );
+            let mut y = at.y + HOVER_PADDING;
+            for (text, colour) in lines {
+                let height = text.bounds.height;
+                renderer.fill_text(text, Point::new(at.x + HOVER_PADDING, y), colour, bounds);
+                y += height + LINE_GAP;
+            }
+        });
     }
 }
 
@@ -1167,6 +1322,7 @@ mod tests {
     fn module(id: u32, x: f32) -> ModuleView {
         let port = || PortView {
             label: "p".into(),
+            hover: crate::scene::HoverText::default(),
             colour: Color::WHITE,
             shape: PortShape::Round,
         };
@@ -1187,6 +1343,7 @@ mod tests {
             x,
             y: 0,
             label: String::new(),
+            hover: crate::scene::HoverText::default(),
         }
     }
 
@@ -1256,6 +1413,87 @@ mod tests {
             ..State::default()
         };
         assert_eq!(canvas.overlay(&state).shapes.len(), unfocused + 1);
+    }
+
+    #[test]
+    fn hover_text_is_about_the_port_or_control_under_the_pointer() {
+        let mut m = module(1, 0.0);
+        m.panel = panel();
+        let scene = Scene::new(vec![m], Vec::new());
+        let none = BTreeSet::new();
+        let canvas = PatchCanvas::new(&scene, &none, |e| e);
+        let port = PortRef {
+            module: 1,
+            output: true,
+            index: 0,
+        };
+        let on = |hover| State {
+            hover: Some(hover),
+            ..State::default()
+        };
+        assert_eq!(canvas.hover_target(&on(Hit::Port(port))), Some(HoverTarget::Port(port)));
+        let knob = Hit::Widget { module: 1, widget: 0 };
+        assert_eq!(canvas.hover_target(&on(knob)), Some(HoverTarget::Control(1, 0)));
+        assert_eq!(canvas.hover_target(&on(Hit::Module(1))), None);
+        assert_eq!(canvas.hover_target(&on(Hit::Nothing)), None);
+    }
+
+    #[test]
+    fn no_hover_text_during_a_drag() {
+        let mut m = module(1, 0.0);
+        m.panel = panel();
+        let scene = Scene::new(vec![m], Vec::new());
+        let none = BTreeSet::new();
+        let canvas = PatchCanvas::new(&scene, &none, |e| e);
+        let port = PortRef {
+            module: 1,
+            output: true,
+            index: 0,
+        };
+        let drags = [
+            Interaction::Wiring { from: port },
+            Interaction::Turning {
+                module: 1,
+                widget: 0,
+                last_y: 0.0,
+                position: 0.5,
+            },
+            Interaction::Moving {
+                ids: vec![1],
+                start: Point::ORIGIN,
+                applied: Vector::ZERO,
+                click: None,
+            },
+            Interaction::Panning { last: Point::ORIGIN },
+        ];
+        for interaction in drags {
+            let state = State {
+                hover: Some(Hit::Port(port)),
+                interaction: interaction.clone(),
+                ..State::default()
+            };
+            assert_eq!(canvas.hover_target(&state), None, "{interaction:?}");
+        }
+    }
+
+    #[test]
+    fn tab_focus_shows_hover_text_but_a_click_does_not() {
+        let mut m = module(1, 0.0);
+        m.panel = panel();
+        let scene = Scene::new(vec![m], Vec::new());
+        let selected = BTreeSet::from([1]);
+        let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+        let focused = |tab_focus| State {
+            focus: Some((1, 2)),
+            tab_focus,
+            ..State::default()
+        };
+        assert_eq!(canvas.hover_target(&focused(true)), Some(HoverTarget::Control(1, 2)));
+        assert_eq!(canvas.hover_target(&focused(false)), None);
+        // Focus on a module that is no longer selected shows nothing.
+        let none = BTreeSet::new();
+        let canvas = PatchCanvas::new(&scene, &none, |e| e);
+        assert_eq!(canvas.hover_target(&focused(true)), None);
     }
 
     fn cable(from: u32, to: u32) -> CableView {

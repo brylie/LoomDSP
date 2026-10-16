@@ -3,7 +3,7 @@
 How modules, sub-patches, and patches show controls and displays, and how users build them.
 
 - **Kind:** living specification. It changes as panels are built and used.
-- **Status:** Draft, except [Module panels on tiles](#module-panels-on-tiles-p1) and [Level meters and audio load](#level-meters-and-audio-load-p1), which are Implemented. [Labels and hover text](#labels-and-hover-text) is Agreed.
+- **Status:** Draft, except [Module panels on tiles](#module-panels-on-tiles-p1) and [Level meters and audio load](#level-meters-and-audio-load-p1), which are Implemented. [Labels and hover text](#labels-and-hover-text) is Implemented.
 - **Decision behind it:** [ADR-0013](../adr/0013-modules-carry-their-own-panel.md) (modules carry their own panel).
 - **Requirements:** FR-PANEL-*, FR-CANVAS-10, FR-CANVAS-11, FR-LIB-18, FR-VIS-01 to 04, FR-ENCAP-03, NFR-PERF-04, NFR-UX-01.
 - **Builds on:** [Telemetry](telemetry.md) for live data, [ADR-0010](../adr/0010-own-patch-canvas.md) for the canvas, [parameter mapping](modulation.md#parameter-mapping) for control values.
@@ -165,7 +165,7 @@ The first display module.
 
 **Status:** Implemented. Code: `ModuleView::width`, `widget_bounds`, and `tile_size` in `loom-canvas/src/scene.rs`.
 
-- **The panel sits between the port columns.** Each side has a port label column 4 grid units wide. A label longer than its column is cut with "…", and hovering the port shows the full name.
+- **The panel sits between the port columns.** Each side has a port label column 4 grid units wide. A label longer than its column is cut with "…", and the port's [hover text](#labels-and-hover-text) shows it in full.
 - Tile width is 4 + panel width + 4 grid units, and at least 11 (today's width), so titles still fit. Tile height is the header plus the taller of the port rows and the panel.
 - A tile with an empty panel keeps the old label layout: each side gets half the tile. *Why:* nothing sits between the columns, so cutting labels would hide text for no reason.
 - *Why:* tiles stay compact, and ports and cables keep their place at the tile edges.
@@ -286,7 +286,7 @@ The whole app still redraws twice a second for the stats bar's audio numbers. "N
 
 ## Labels and hover text
 
-**Status:** Agreed. Builds on [port and parameter text](port-and-parameter-text.md) ([ADR-0016](../adr/0016-ports-and-parameters-carry-their-own-text.md)): every port and parameter has a `label` and a one-sentence `description`. Today the app shows only names. This section says where the label and description appear.
+**Status:** Implemented, except the manual check below. Code: `loom-app/src/scene.rs` (labels), `loom-canvas/src/hover.rs` (timing and placement), `draw_hover_text` in `loom-canvas/src/widget.rs`, and the inspector in `loom-app/src/main.rs`. Builds on [port and parameter text](port-and-parameter-text.md) ([ADR-0016](../adr/0016-ports-and-parameters-carry-their-own-text.md)): every port and parameter has a `label` and a one-sentence `description`. This section says where the label and description appear.
 
 ### Goal
 
@@ -294,7 +294,7 @@ A user zooms in on Clock Divide. The knob says "Division", not `n`. They rest th
 
 ### Where each text shows
 
-| Place | Shows today | Shows after this change |
+| Place | Showed before | Shows now |
 |---|---|---|
 | Port label on a tile | name | label, cut with "…" to fit its column as now |
 | Caption of a knob, toggle, or radio group | parameter name | parameter label, cut with "…" to fit the widget |
@@ -303,8 +303,8 @@ A user zooms in on Clock Divide. The knob says "Division", not `n`. They rest th
 | Inspector parameter row | name | label |
 | Hover text on a port or control | full name, only when the label is cut | label and description, always |
 
-- **Names stay out of sight, except in hover text.** The hover text shows the stable name below the description, dimmed, when it differs from the label. *Why:* names are what patch files and `loom modules` use, so a user who edits a RON file can find the port. Everywhere else, the label is the better text.
-- **Captions are cut, never wrapped.** A label that does not fit is cut with "…", and the hover text shows it in full. *Why:* the grid layout of tiles does not change with text length.
+- **Names stay out of sight, except in hover text.** The hover text shows the stable name below the description, dimmed, when it differs from the label other than in letter case. So `n` shows under "Division", but `cutoff` does not repeat under "Cutoff". *Why:* names are what patch files and `loom modules` use, so a user who edits a RON file can find the port. Everywhere else, the label is the better text.
+- **Captions are cut, never wrapped.** A label that does not fit is cut with "…", and the hover text shows it in full. Widths are estimated per character, with narrow letters counting less, so "Division" fits under a knob, while "Resonance" is cut. *Why:* the grid layout of tiles does not change with text length, and estimating keeps text layout out of every frame.
 
 ### Hover text
 
@@ -314,8 +314,8 @@ A user zooms in on Clock Divide. The knob says "Division", not `n`. They rest th
 - **What it shows.** The label on the first line, in normal text colour. The description below it, in dim text, wrapped. The name last, dimmed, if it differs from the label (see above).
 - **Size and place.** Fixed screen size, 12 px text, at most 260 px wide, whatever the zoom. It sits above the port or control, or below it when there is no room above, and always inside the canvas. *Why fixed size:* at middle zoom tile text is hidden because it is too small to read; the hover text is exactly what the user needs there, so it must stay readable.
 - **At every zoom where the port or control can be hovered.** At middle zoom, labels are hidden, but hovering a port still shows its hover text.
-- **Lights and empty panel areas have no hover text.** Display values have no description yet. A tile can therefore mix labelled captions, such as "Attack", with a light that shows its display value name, such as `level`. *Why accept it:* giving display values labels is a separate change, and the mix is small.
-- **It replaces the full-label overlay** from [Tile layout](#tile-layout-68), which then becomes the first line of the hover text.
+- **Lights, meters, and empty panel areas have no hover text.** Meters are displays, like lights. Display values have no description yet. A tile can therefore mix labelled captions, such as "Attack", with a light that shows its display value name, such as `level`. *Why accept it:* giving display values labels is a separate change, and the mix is small.
+- **It replaces the full-label overlay** from [Tile layout](#tile-layout-68): a cut label shows in full as the first line of the hover text.
 
 ### Inspector
 
@@ -330,13 +330,14 @@ A user zooms in on Clock Divide. The knob says "Division", not `n`. They rest th
 
 ### Acceptance criteria: labels and hover text
 
-- [ ] Port labels, control captions, and meter captions show labels. A test builds the scene for Clock Divide and finds "Division", not `n`.
-- [ ] Inspector rows show labels.
-- [ ] Resting the pointer on a port or control for 500 ms shows its label, description, and (when it differs) name. Leaving hides it at once.
-- [ ] No hover text shows during a cable, knob, or tile drag.
-- [ ] A control focused with Tab shows its hover text after the delay.
-- [ ] Hover text stays inside the canvas for a port at each edge of the window.
-- [ ] With hover text shown and nothing changing, no frames are drawn. Check: the frame counter stays still for 10 seconds.
+- [x] Port labels, control captions, and meter captions show labels. A test builds the scene for Clock Divide and finds "Division", not `n`.
+- [ ] Manual: inspector rows show labels, and hovering one shows its description, and its name when it differs.
+- [x] Resting the pointer on a port or control for 500 ms shows its label, description, and (when it differs) name. Leaving hides it at once.
+- [x] No hover text shows during a cable, knob, or tile drag.
+- [x] A control focused with Tab shows its hover text after the delay.
+- [x] Hover text stays inside the canvas for a port at each edge of the window.
+- [x] With hover text shown and nothing changing, hover text asks for no frames (`HoverTimer` tests).
+- [ ] Manual: with Measure on, the frame rate with hover text shown matches the rate without it. (The stats bar still redraws twice a second, see above.)
 - [ ] Manual, on the reference laptop: hover text is readable at close and middle zoom, and does not get in the way while wiring.
 
 ### Out of scope

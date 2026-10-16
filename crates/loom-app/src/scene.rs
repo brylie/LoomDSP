@@ -2,7 +2,8 @@
 
 use iced::{Color, Point};
 use loom_canvas::{
-    CableView, ModuleView, PanelValues, PanelView, PortShape, PortView, Scene, WidgetValue, WidgetView, WidgetViewKind,
+    CableView, HoverText, ModuleView, PanelValues, PanelView, PortShape, PortView, Scene, WidgetValue, WidgetView,
+    WidgetViewKind,
 };
 use loom_core::{
     Controller, InputRef, ModuleDescriptor, ModuleId, OutputRef, ParamSpec, PortSpec, SignalType, WidgetKind,
@@ -41,13 +42,17 @@ pub fn category_colour(category: &str) -> Color {
 
 fn port_view(spec: &PortSpec) -> PortView {
     PortView {
-        label: spec.name.to_string(),
+        label: spec.label.to_string(),
+        hover: HoverText::new(spec.label, spec.description, spec.name),
         colour: signal_colour(spec.signal),
         shape: signal_shape(spec.signal),
     }
 }
 
-/// The canvas view of a module's panel (ADR-0013).
+/// The canvas view of a module's panel (ADR-0013). Controls and meters
+/// show their parameter or output label; lights show their display value
+/// name, because display values have no label yet (panels.md, Labels and
+/// hover text).
 fn panel_view(d: &ModuleDescriptor) -> PanelView {
     let widgets = d
         .panel
@@ -72,11 +77,23 @@ fn panel_view(d: &ModuleDescriptor) -> PanelView {
                 // Light, and any kind this app does not draw yet.
                 _ => WidgetViewKind::Light,
             };
+            let (label, hover) = if w.is_control() {
+                let param = d.params.iter().find(|p| p.name == w.bind);
+                param.map_or((w.bind, HoverText::default()), |p| {
+                    (p.label, HoverText::new(p.label, p.description, p.name))
+                })
+            } else if w.kind == WidgetKind::Meter {
+                let output = d.outputs.iter().find(|p| p.name == w.bind);
+                (output.map_or(w.bind, |p| p.label), HoverText::default())
+            } else {
+                (w.bind, HoverText::default())
+            };
             WidgetView {
                 kind,
                 x: w.x,
                 y: w.y,
-                label: w.bind.to_string(),
+                label: label.to_string(),
+                hover,
             }
         })
         .collect();
@@ -254,6 +271,31 @@ mod tests {
         assert_eq!(control_value(radio, &slope, 2.0), 3.0);
         assert_eq!(control_position(radio, &slope, 3.0), 2.0);
         assert_eq!(control_value(radio, &slope, 9.0), 4.0);
+    }
+
+    #[test]
+    fn tiles_show_labels_not_names() {
+        // panels.md, Labels and hover text: Clock Divide's `n` knob says
+        // "Division", and its hover text keeps the name, which differs.
+        let divide = &loom_modules::logic::DIVIDE;
+        let knob = &panel_view(divide).widgets[0];
+        assert_eq!(knob.label, "Division");
+        assert_eq!(knob.hover.description, "Fires on every Nth trigger.");
+        assert_eq!(knob.hover.name.as_deref(), Some("n"));
+        let reset = port_view(&divide.inputs[1]);
+        assert_eq!(reset.label, "Reset");
+        assert_eq!(reset.hover.name, None, "`reset` reads the same as \"Reset\"");
+    }
+
+    #[test]
+    fn meters_show_output_labels_and_lights_show_names() {
+        let meter = &panel_view(&loom_modules::display::METER).widgets[0];
+        assert_eq!(meter.label, "Out");
+        assert_eq!(meter.hover, HoverText::default());
+        let light = &panel_view(&loom_modules::env::ADSR).widgets[4];
+        assert_eq!(light.kind, WidgetViewKind::Light);
+        assert_eq!(light.label, "level");
+        assert_eq!(light.hover, HoverText::default());
     }
 
     #[test]

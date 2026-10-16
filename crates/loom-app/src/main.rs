@@ -18,7 +18,7 @@ use iced::widget::{
 };
 use iced::{Color, Element, Length, Point, Subscription, Theme};
 use live::Live;
-use loom_canvas::{CanvasEvent, PanelValues, PatchCanvas, Scene};
+use loom_canvas::{CanvasEvent, HoverText, PanelValues, PatchCanvas, Scene};
 use loom_core::{
     Controller, EngineConfig, EngineParts, InputRef, MidiEvent, ModuleId, OutputRef, ProbeId, create_engine,
 };
@@ -587,10 +587,21 @@ impl App {
                         items = items.push(text("No parameters.").size(12).color(DIM));
                     }
                     for (index, (spec, value)) in d.params.iter().zip(&node.params).enumerate() {
+                        // Hovering the label shows what the canvas hover
+                        // text shows (panels.md, Labels and hover text).
+                        let hover = HoverText::new(spec.label, spec.description, spec.name);
+                        let mut tip = column![text(spec.description).size(12)].spacing(4);
+                        if let Some(name) = hover.name {
+                            tip = tip.push(text(name).size(11).color(DIM));
+                        }
                         items = items.push(
                             column![
                                 row![
-                                    text(spec.name).size(12),
+                                    tooltip(
+                                        text(spec.label).size(12),
+                                        container(tip).padding(6).max_width(260).style(container::rounded_box),
+                                        tooltip::Position::Top,
+                                    ),
                                     space::horizontal(),
                                     text(param::format(spec, *value)).size(12).color(DIM),
                                 ],
