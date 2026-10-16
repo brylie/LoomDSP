@@ -461,7 +461,34 @@ impl Engine {
                 *out += value;
             }
         }
+        clip_output(left);
+        clip_output(right);
 
         self.transport.end_block();
+    }
+}
+
+/// The final output, as ADR-0007 asks: audio is not clipped on cables, only
+/// here, to its nominal range of -1 to 1. NaN and infinity become silence,
+/// so a broken patch can never send them to the device (#121).
+fn clip_output(samples: &mut [f32]) {
+    for sample in samples {
+        *sample = if sample.is_finite() {
+            sample.clamp(-1.0, 1.0)
+        } else {
+            0.0
+        };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clip_output_limits_the_range_and_silences_non_finite_samples() {
+        let mut samples = [0.25, -0.5, 1.5, -7.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY];
+        clip_output(&mut samples);
+        assert_eq!(samples, [0.25, -0.5, 1.0, -1.0, 0.0, 0.0, 0.0]);
     }
 }

@@ -79,6 +79,45 @@ fn feedback_fm_recovers_after_extreme_settings() {
 }
 
 #[test]
+fn final_output_is_clipped_and_never_non_finite() {
+    // ADR-0007: audio is clipped only at the final output, to -1 to 1.
+    // NaN and infinity become silence there (#121).
+    let mut parts = load("sine.ron");
+    let c = &mut parts.controller;
+    let constant = c.add_module("loom.math.constant").unwrap();
+    let out = c.add_module("loom.io.audio-out").unwrap();
+    c.connect_named(constant, "out", out, "left").unwrap();
+    c.set_param_named(constant, "value", 5.0).unwrap();
+    c.commit().unwrap();
+    // Constant smooths its value, so look after the ramp.
+    let (left, right) = render(&mut parts, 2_048, 128, &[]);
+    assert!(
+        left[1_024..].iter().chain(&right[1_024..]).all(|&x| x == 1.0),
+        "5 clips to 1"
+    );
+
+    parts.controller.set_param_named(constant, "value", -5.0).unwrap();
+    let (left, _) = render(&mut parts, 2_048, 128, &[]);
+    assert!(left[1_024..].iter().all(|&x| x == -1.0), "-5 clips to -1");
+
+    // x = 10 * (x + 1) each sample: past f32's range in about 40 samples.
+    let c = &mut parts.controller;
+    c.remove_module(constant).unwrap();
+    let add = c.add_module("loom.math.add").unwrap();
+    let mul = c.add_module("loom.math.mul").unwrap();
+    c.set_param_named(add, "offset", 1.0).unwrap();
+    c.set_param_named(mul, "gain", 10.0).unwrap();
+    c.connect_named(add, "out", mul, "a").unwrap();
+    c.connect_named(mul, "out", add, "a").unwrap();
+    c.connect_named(mul, "out", out, "left").unwrap();
+    c.commit().unwrap();
+    let (left, _) = render(&mut parts, 256, 128, &[]);
+    assert!(left.iter().all(|x| x.is_finite()));
+    assert!(left.contains(&1.0), "the loop clips at 1 before it overflows");
+    assert!(left[100..].iter().all(|&x| x == 0.0), "infinity becomes silence");
+}
+
+#[test]
 fn compiler_reports_feedback_loops() {
     let parts = load("subtractive.ron");
     assert!(parts.controller.last_report().loops.is_empty());
