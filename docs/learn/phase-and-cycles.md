@@ -21,7 +21,7 @@ Many things in a modular patch are phases:
 | A looper or clip | Its read position: which part of the audio or MIDI to play now. |
 | An LFO | Where it is in one slow wave. |
 
-*Why separate timing from shape:* one phase can drive any shape, and you can bend time before it becomes sound. Speed a phase up, slow it down, reverse it, or curve it, and everything it drives follows. A Fugue Machine-style patch is one clip read by several phases at different speeds and directions.
+*Why separate timing from shape:* one phase can drive any shape, and you can bend time before it becomes sound. Speed a phase up, slow it down, reverse it, or curve it, and everything it drives follows. A [Fugue Machine](https://alexandernaut.com/fugue-machine-classic/)-style patch is one clip read by several phases at different speeds and directions.
 
 **In Eurorack** a phase is just a ramp or sawtooth voltage. **In Bitwig Grid**, phase is a signal type of its own, with a whole family of modules that change it (the Ø modules: shift, reverse, mirror, bend, and others). LoomDSP follows Grid here: everything is a number on a cable, and phase is one way to read that number.
 
