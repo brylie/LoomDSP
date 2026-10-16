@@ -91,6 +91,15 @@ impl HoverTimer {
     }
 }
 
+/// Widest a line of hover text may be, in screen pixels, on a canvas
+/// `canvas_width` wide. Usually [`HOVER_MAX_WIDTH`] less padding, but less
+/// on a narrow canvas, so the box always fits beside the inspector and text
+/// wraps instead of being clipped.
+pub fn text_width(canvas_width: f32) -> f32 {
+    let room = HOVER_MAX_WIDTH.min(canvas_width - 2.0 * HOVER_GAP);
+    (room - 2.0 * HOVER_PADDING).max(1.0)
+}
+
 /// Where a hover text box of `size` goes: centred above `anchor`, or below
 /// it when there is no room above, and always inside `bounds`. All in
 /// screen coordinates. Returns the box's top-left corner.
@@ -209,6 +218,20 @@ mod tests {
             let at = place(size, anchor, bounds);
             assert!(inside(at), "{anchor:?} -> {at:?}");
         }
+    }
+
+    #[test]
+    fn a_narrow_canvas_narrows_the_text_and_the_box_fits() {
+        assert_eq!(text_width(1_000.0), HOVER_MAX_WIDTH - 2.0 * HOVER_PADDING);
+        let bounds = Rectangle::new(Point::new(0.0, 0.0), Size::new(150.0, 400.0));
+        let width = text_width(bounds.width) + 2.0 * HOVER_PADDING;
+        assert!(width <= bounds.width - 2.0 * HOVER_GAP, "{width}");
+        let size = Size::new(width, 80.0);
+        let anchor = Rectangle::new(Point::new(140.0, 200.0), Size::new(8.0, 8.0));
+        let at = place(size, anchor, bounds);
+        assert!(at.x >= 0.0 && at.x + size.width <= bounds.width, "{at:?}");
+        // Even a canvas too small for padding leaves a positive width.
+        assert!(text_width(4.0) > 0.0);
     }
 
     #[test]

@@ -5,7 +5,7 @@ use crate::controls::{
     ControlGeometry, PanelValues, knob_centre, knob_drag, knob_step, light_centre, radio_centre, radio_option,
 };
 use crate::gpu::{Cable, CanvasPrimitive, Geometry, Overlay, Shape};
-use crate::hover::{HOVER_MAX_WIDTH, HOVER_PADDING, HOVER_TEXT_PX, HoverTarget, HoverTimer};
+use crate::hover::{HOVER_PADDING, HOVER_TEXT_PX, HoverTarget, HoverTimer};
 use crate::scene::{
     GRID, HEADER, Hit, HoverText, PORT_HIT_RADIUS, PORT_RADIUS, PortRef, ROW, Scene, TILE_WIDTH, WidgetViewKind,
     fit_label,
@@ -192,6 +192,9 @@ struct State {
     /// True when the focus came from Tab, so its hover text shows. A click
     /// also focuses a control, but the pointer is on it then.
     tab_focus: bool,
+    /// True from a Tab press until the pointer moves: the focused control's
+    /// hover text wins over the port or control under a resting pointer.
+    focus_first: bool,
     /// When hover text shows (panels.md, Labels and hover text).
     hover_text: HoverTimer,
     /// The last press on a control, for double-click.
@@ -446,6 +449,7 @@ impl<Message> PatchCanvas<'_, Message> {
                 shell.capture_event();
             }
             Event::Mouse(mouse::Event::CursorMoved { .. }) => {
+                state.focus_first = false;
                 let Some(screen) = screen else { return };
                 let world = state.camera.to_world(screen);
                 state.cursor = Some(world);
@@ -580,21 +584,27 @@ impl<Message> PatchCanvas<'_, Message> {
     }
 
     /// What hover text would be about now: the port or control under the
-    /// pointer, or else the control focused with Tab. Nothing during a drag.
+    /// pointer, or else the control focused with Tab. Right after a Tab
+    /// press, the focused control comes first, until the pointer moves.
+    /// Nothing during a drag.
     fn hover_target(&self, state: &State) -> Option<HoverTarget> {
         if !matches!(state.interaction, Interaction::Idle) {
             return None;
         }
-        match state.hover {
-            Some(Hit::Port(port)) => return Some(HoverTarget::Port(port)),
-            Some(Hit::Widget { module, widget }) if self.is_control(module, widget) => {
-                return Some(HoverTarget::Control(module, widget));
-            }
-            _ => {}
+        let focused = state.focus.filter(|_| state.tab_focus).and_then(|(module, widget)| {
+            let selected = self.selection.len() == 1 && self.selection.contains(&module);
+            (selected && self.is_control(module, widget)).then_some(HoverTarget::Control(module, widget))
+        });
+        if state.focus_first && focused.is_some() {
+            return focused;
         }
-        let (module, widget) = state.focus.filter(|_| state.tab_focus)?;
-        let selected = self.selection.len() == 1 && self.selection.contains(&module);
-        (selected && self.is_control(module, widget)).then_some(HoverTarget::Control(module, widget))
+        match state.hover {
+            Some(Hit::Port(port)) => Some(HoverTarget::Port(port)),
+            Some(Hit::Widget { module, widget }) if self.is_control(module, widget) => {
+                Some(HoverTarget::Control(module, widget))
+            }
+            _ => focused,
+        }
     }
 
     fn is_control(&self, module: u32, widget: usize) -> bool {
@@ -664,6 +674,7 @@ impl<Message> PatchCanvas<'_, Message> {
                     Some(widget) => {
                         state.focus = Some((module.id, widget));
                         state.tab_focus = true;
+                        state.focus_first = true;
                     }
                     None => return false,
                 }
@@ -731,6 +742,7 @@ impl<Message> PatchCanvas<'_, Message> {
         let shift = state.modifiers.shift();
         let hit = self.scene.hit(world, state.hit_radius());
         state.tab_focus = false;
+        state.focus_first = false;
         if !matches!(hit, Hit::Widget { .. }) {
             state.focus = None;
         }
@@ -1166,7 +1178,7 @@ impl<Message> PatchCanvas<'_, Message> {
             return;
         };
         let font = renderer.default_font();
-        let inner = HOVER_MAX_WIDTH - 2.0 * HOVER_PADDING;
+        let inner = crate::hover::text_width(bounds.width);
         // Each line is measured as a paragraph, then drawn as text in that
         // size, wrapped at word boundaries.
         let line = |content: &str, size: f32, colour: Color| {
@@ -1490,6 +1502,21 @@ mod tests {
         };
         assert_eq!(canvas.hover_target(&focused(true)), Some(HoverTarget::Control(1, 2)));
         assert_eq!(canvas.hover_target(&focused(false)), None);
+        // With the pointer resting on the knob, a Tab press to the toggle
+        // shows the toggle's text until the pointer moves.
+        let knob = Hit::Widget { module: 1, widget: 0 };
+        let tabbed = State {
+            hover: Some(knob),
+            focus_first: true,
+            ..focused(true)
+        };
+        assert_eq!(canvas.hover_target(&tabbed), Some(HoverTarget::Control(1, 2)));
+        let moved = State {
+            hover: Some(knob),
+            focus_first: false,
+            ..focused(true)
+        };
+        assert_eq!(canvas.hover_target(&moved), Some(HoverTarget::Control(1, 0)));
         // Focus on a module that is no longer selected shows nothing.
         let none = BTreeSet::new();
         let canvas = PatchCanvas::new(&scene, &none, |e| e);
