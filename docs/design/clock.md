@@ -97,7 +97,7 @@ Examples: the LFO's phase input in sync mode defaults to bar phase, with a rate 
 | **Button** `loom.ui.button` | none | gate | mode (toggle, momentary) | A large button on its panel. Toggle flips the gate on each press; momentary is high while held. |
 | **Clock Divide** `loom.logic.divide` | trigger, reset | trigger | N (1 to 64), offset (0 to N-1) | Counts rising edges. Fires on the triggers numbered N, 2N, 3N after a reset; offset k moves each firing k triggers earlier. With offset N-1 it fires on the first trigger. |
 | **Phase Scale** `loom.phase.scale` | phase, reset | phase | multiply (1 to 16), divide (1 to 16) | Scales a phase by multiply ÷ divide, and stays locked to it. Divide counts the input's wraps, so a divide of 2 wraps once every two input cycles, starting on the same bar. |
-| **Phase Trigger** `loom.phase.trigger` | phase | trigger | none | Fires a trigger each time the input phase wraps from near 1 back to near 0. Turns any phase into triggers: a scaled phase, an LFO's phase, or the transport's bar phase. |
+| **Phase Trigger** `loom.phase.trigger` | phase | trigger | none | Fires a trigger each time the input phase wraps: forward from near 1 to near 0, or backward from near 0 to near 1. Turns any phase into triggers: a scaled phase, an LFO's phase, or the transport's bar phase. |
 
 *Why both Clock Divide and Phase Scale:* triggers are events, for counting and arrangement logic (ADR-0012). Phases are continuous, for anything that should move smoothly and in sync: LFOs, sequencers, cycles. Each domain needs its own divider. Phase Scale also gives polyrhythm: multiply 3, divide 2 plays three against two.
 
