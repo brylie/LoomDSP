@@ -60,7 +60,7 @@ fn panel_view(d: &ModuleDescriptor) -> PanelView {
                         .params
                         .iter()
                         .find(|p| p.name == w.bind)
-                        .filter(|p| p.integer)
+                        .filter(|p| p.options.integer)
                         .map_or(0, |p| (p.max - p.min) as u32);
                     WidgetViewKind::Knob { steps }
                 }
@@ -218,7 +218,21 @@ pub fn build(controller: &Controller, positions: &BTreeMap<u32, Point>) -> Scene
 mod tests {
     use super::*;
 
-    const CUTOFF: ParamSpec = ParamSpec::new("cutoff", 20.0, 20_000.0, 1_000.0, "Hz").logarithmic();
+    /// A parameter for test descriptors.
+    const fn param(name: &'static str, min: f32, max: f32, default: f32, unit: &'static str) -> loom_core::ParamSpec {
+        loom_core::ParamSpec {
+            name,
+            label: name,
+            description: "A test parameter.",
+            min,
+            max,
+            default,
+            unit,
+            options: loom_core::ParamOptions::DEFAULT,
+        }
+    }
+
+    const CUTOFF: ParamSpec = param("cutoff", 20.0, 20_000.0, 1_000.0, "Hz").logarithmic();
 
     #[test]
     fn halfway_up_the_cutoff_knob_is_632_hz() {
@@ -230,10 +244,10 @@ mod tests {
 
     #[test]
     fn toggles_and_radio_buttons_use_whole_values() {
-        let on = ParamSpec::new("on", 0.0, 1.0, 0.0, "").integer();
+        let on = param("on", 0.0, 1.0, 0.0, "").integer();
         assert_eq!(control_value(WidgetKind::Toggle, &on, 1.0), 1.0);
         assert_eq!(control_position(WidgetKind::Toggle, &on, 1.0), 1.0);
-        let slope = ParamSpec::new("slope", 1.0, 4.0, 1.0, "").integer();
+        let slope = param("slope", 1.0, 4.0, 1.0, "").integer();
         let radio = WidgetKind::Radio {
             options: &["6", "12", "18", "24"],
         };

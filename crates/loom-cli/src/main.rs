@@ -245,6 +245,14 @@ fn check(path: &Path) -> Result<ExitCode> {
             );
         }
     }
+    // Notes do not fail the check: the patch still loads and plays.
+    let notes = c.registry().notes();
+    if !notes.is_empty() {
+        println!("  module notes:");
+        for note in notes {
+            println!("    {note}");
+        }
+    }
     Ok(ExitCode::SUCCESS)
 }
 

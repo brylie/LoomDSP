@@ -2,8 +2,8 @@
 
 use loom_core::signal::pitch;
 use loom_core::{
-    MidiMessage, Module, ModuleDescriptor, ModuleRole, Panel, ParamSpec, PortIo, PortSpec, ProcessContext, SignalType,
-    Widget,
+    MidiMessage, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, PortDefault, PortIo, PortSpec,
+    ProcessContext, SignalType, Widget,
 };
 
 /// `loom.midi.note`: monophonic MIDI note input with last-note priority.
@@ -15,14 +15,51 @@ pub static NOTE_IN: ModuleDescriptor = ModuleDescriptor {
     description: "Monophonic note input (last-note priority). Pitch includes pitch bend.",
     inputs: &[],
     outputs: &[
-        PortSpec::new("pitch", SignalType::Pitch),
-        PortSpec::new("gate", SignalType::Gate),
-        PortSpec::new("velocity", SignalType::Modulation),
+        PortSpec {
+            name: "pitch",
+            label: "Pitch",
+            signal: SignalType::Pitch,
+            description: "Pitch of the last note held, with pitch bend. 0 is middle C.",
+            default: PortDefault::Value(0.0),
+        },
+        PortSpec {
+            name: "gate",
+            label: "Gate",
+            signal: SignalType::Gate,
+            description: "High while any note is held.",
+            default: PortDefault::Value(0.0),
+        },
+        PortSpec {
+            name: "velocity",
+            label: "Velocity",
+            signal: SignalType::Modulation,
+            description: "How hard the last note was played, from 0 to 1.",
+            default: PortDefault::Value(0.0),
+        },
     ],
     params: &[
-        // 0 = omni (all channels), 1 to 16 = one channel.
-        ParamSpec::new("channel", 0.0, 16.0, 0.0, "").integer(),
-        ParamSpec::new("bend-range", 0.0, 48.0, 2.0, "st").integer(),
+        ParamSpec {
+            name: "channel",
+            label: "Channel",
+            description: "The MIDI channel to listen to, from 1 to 16. 0 listens to all.",
+            min: 0.0,
+            max: 16.0,
+            default: 0.0,
+            unit: "",
+            options: ParamOptions::DEFAULT,
+        }
+        .integer(),
+        ParamSpec {
+            name: "bend-range",
+            label: "Bend Range",
+            description: "How far a full pitch bend moves the pitch.",
+            min: 0.0,
+            max: 48.0,
+            default: 2.0,
+            unit: "st",
+            options: ParamOptions::DEFAULT,
+        }
+        .integer(),
     ],
     role: ModuleRole::Dsp(|_| Box::new(NoteIn::default())),
     panel: Panel::new(3, 2, &[Widget::light(0, 0, "gate")]),

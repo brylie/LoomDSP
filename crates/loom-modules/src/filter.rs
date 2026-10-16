@@ -2,8 +2,8 @@
 
 use loom_core::signal::pitch;
 use loom_core::{
-    Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamSpec, PortIo, PortSpec, ProcessContext, SignalType,
-    Widget,
+    Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, PortDefault, PortIo, PortSpec,
+    ProcessContext, SignalType, Widget,
 };
 use loom_rt::Smoothed;
 use std::f32::consts::PI;
@@ -17,17 +17,66 @@ pub static SVF: ModuleDescriptor = ModuleDescriptor {
     category: "Filter",
     description: "State variable filter (trapezoidal integration). The cutoff input adds pitch: +0.1 doubles the cutoff.",
     inputs: &[
-        PortSpec::new("in", SignalType::Audio),
-        PortSpec::new("cutoff", SignalType::Pitch),
+        PortSpec {
+            name: "in",
+            label: "In",
+            signal: SignalType::Audio,
+            description: "The audio to filter.",
+            default: PortDefault::Value(0.0),
+        },
+        PortSpec {
+            name: "cutoff",
+            label: "Cutoff",
+            signal: SignalType::Pitch,
+            description: "Moves the cutoff as pitch: +0.1 doubles it.",
+            default: PortDefault::Value(0.0),
+        },
     ],
     outputs: &[
-        PortSpec::new("lowpass", SignalType::Audio),
-        PortSpec::new("bandpass", SignalType::Audio),
-        PortSpec::new("highpass", SignalType::Audio),
+        PortSpec {
+            name: "lowpass",
+            label: "Lowpass",
+            signal: SignalType::Audio,
+            description: "Keeps the frequencies below the cutoff.",
+            default: PortDefault::Value(0.0),
+        },
+        PortSpec {
+            name: "bandpass",
+            label: "Bandpass",
+            signal: SignalType::Audio,
+            description: "Keeps the frequencies near the cutoff.",
+            default: PortDefault::Value(0.0),
+        },
+        PortSpec {
+            name: "highpass",
+            label: "Highpass",
+            signal: SignalType::Audio,
+            description: "Keeps the frequencies above the cutoff.",
+            default: PortDefault::Value(0.0),
+        },
     ],
     params: &[
-        ParamSpec::new("cutoff", 20.0, 20_000.0, 1_000.0, "Hz").logarithmic(),
-        ParamSpec::new("resonance", 0.0, 1.0, 0.2, ""),
+        ParamSpec {
+            name: "cutoff",
+            label: "Cutoff",
+            description: "The frequency where the filter starts to cut.",
+            min: 20.0,
+            max: 20_000.0,
+            default: 1_000.0,
+            unit: "Hz",
+            options: ParamOptions::DEFAULT,
+        }
+        .logarithmic(),
+        ParamSpec {
+            name: "resonance",
+            label: "Resonance",
+            description: "Boosts the frequencies near the cutoff. High values ring.",
+            min: 0.0,
+            max: 1.0,
+            default: 0.2,
+            unit: "",
+            options: ParamOptions::DEFAULT,
+        },
     ],
     role: ModuleRole::Dsp(|config| Box::new(Svf::new(config))),
     panel: Panel::new(6, 3, &[Widget::knob(0, 0, "cutoff"), Widget::knob(3, 0, "resonance")]),

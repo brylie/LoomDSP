@@ -4,8 +4,8 @@
 //! multiply), so a module is useful with only one cable.
 
 use loom_core::{
-    Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamSpec, PortIo, PortSpec, ProcessContext, SignalType,
-    Widget,
+    Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, PortDefault, PortIo, PortSpec,
+    ProcessContext, SignalType, Widget,
 };
 use loom_rt::Smoothed;
 
@@ -17,11 +17,38 @@ pub static ADD: ModuleDescriptor = ModuleDescriptor {
     category: "Math",
     description: "Adds two signals and an offset.",
     inputs: &[
-        PortSpec::new("a", SignalType::Modulation),
-        PortSpec::new("b", SignalType::Modulation),
+        PortSpec {
+            name: "a",
+            label: "A",
+            signal: SignalType::Modulation,
+            description: "The first signal to add.",
+            default: PortDefault::Value(0.0),
+        },
+        PortSpec {
+            name: "b",
+            label: "B",
+            signal: SignalType::Modulation,
+            description: "The second signal to add.",
+            default: PortDefault::Value(0.0),
+        },
     ],
-    outputs: &[PortSpec::new("out", SignalType::Modulation)],
-    params: &[ParamSpec::new("offset", -10.0, 10.0, 0.0, "")],
+    outputs: &[PortSpec {
+        name: "out",
+        label: "Out",
+        signal: SignalType::Modulation,
+        description: "A plus B plus the offset.",
+        default: PortDefault::Value(0.0),
+    }],
+    params: &[ParamSpec {
+        name: "offset",
+        label: "Offset",
+        description: "A fixed amount added to the sum.",
+        min: -10.0,
+        max: 10.0,
+        default: 0.0,
+        unit: "",
+        options: ParamOptions::DEFAULT,
+    }],
     role: ModuleRole::Dsp(|config| {
         Box::new(Add {
             offset: Smoothed::new(0.0, config.sample_rate, 0.005),
@@ -58,11 +85,38 @@ pub static MUL: ModuleDescriptor = ModuleDescriptor {
     category: "Math",
     description: "Multiplies two signals and a gain. Use it as a VCA or ring modulator.",
     inputs: &[
-        PortSpec::new("a", SignalType::Audio),
-        PortSpec::new("b", SignalType::Modulation),
+        PortSpec {
+            name: "a",
+            label: "A",
+            signal: SignalType::Audio,
+            description: "The signal to scale.",
+            default: PortDefault::Value(0.0),
+        },
+        PortSpec {
+            name: "b",
+            label: "B",
+            signal: SignalType::Modulation,
+            description: "Scales A. Reads 1 while no cable is connected.",
+            default: PortDefault::Value(0.0),
+        },
     ],
-    outputs: &[PortSpec::new("out", SignalType::Audio)],
-    params: &[ParamSpec::new("gain", -10.0, 10.0, 1.0, "")],
+    outputs: &[PortSpec {
+        name: "out",
+        label: "Out",
+        signal: SignalType::Audio,
+        description: "A times B times the gain.",
+        default: PortDefault::Value(0.0),
+    }],
+    params: &[ParamSpec {
+        name: "gain",
+        label: "Gain",
+        description: "A fixed amount the product is multiplied by.",
+        min: -10.0,
+        max: 10.0,
+        default: 1.0,
+        unit: "",
+        options: ParamOptions::DEFAULT,
+    }],
     role: ModuleRole::Dsp(|config| {
         Box::new(Mul {
             gain: Smoothed::new(1.0, config.sample_rate, 0.005),
@@ -101,8 +155,23 @@ pub static CONSTANT: ModuleDescriptor = ModuleDescriptor {
     category: "Math",
     description: "Outputs a constant value. Useful for pitch offsets, gates, and testing.",
     inputs: &[],
-    outputs: &[PortSpec::new("out", SignalType::Modulation)],
-    params: &[ParamSpec::new("value", -10.0, 10.0, 0.0, "")],
+    outputs: &[PortSpec {
+        name: "out",
+        label: "Out",
+        signal: SignalType::Modulation,
+        description: "The value set by the parameter.",
+        default: PortDefault::Value(0.0),
+    }],
+    params: &[ParamSpec {
+        name: "value",
+        label: "Value",
+        description: "The number the output holds.",
+        min: -10.0,
+        max: 10.0,
+        default: 0.0,
+        unit: "",
+        options: ParamOptions::DEFAULT,
+    }],
     role: ModuleRole::Dsp(|config: &ModuleConfig| {
         Box::new(Constant {
             value: Smoothed::new(0.0, config.sample_rate, 0.005),

@@ -42,3 +42,4 @@ Copy [template.md](template.md). Keep it to one feature. Link the ADR, requireme
 | [Modulation](modulation.md) | [ADR-0014](../adr/0014-modulation-without-cables.md) | Draft, P1 and P2 |
 | [Module test harness](module-test-harness.md) | [ADR-0002](../adr/0002-graph-execution-and-feedback.md) | Implemented, P1 |
 | [Clock and transport](clock.md) | [ADR-0015](../adr/0015-one-transport-per-patch.md) | Engine sections, Clock Divide, and Phase Trigger Implemented (P1); rest Draft, P1 and P2 |
+| [Port and parameter text](port-and-parameter-text.md) | [ADR-0016](../adr/0016-ports-and-parameters-carry-their-own-text.md) | Implemented, P1 |

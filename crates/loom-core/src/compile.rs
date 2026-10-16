@@ -619,6 +619,17 @@ fn tarjan(succ: &[Vec<usize>]) -> Vec<Vec<usize>> {
 mod tests {
     use super::*;
 
+    /// A port for test descriptors.
+    const fn port(name: &'static str, signal: crate::SignalType) -> crate::PortSpec {
+        crate::PortSpec {
+            name,
+            label: name,
+            signal,
+            description: "A test port.",
+            default: crate::PortDefault::Value(0.0),
+        }
+    }
+
     #[test]
     fn tarjan_finds_cycles_in_topological_order() {
         // 0 -> 1 -> 2 -> 1, 2 -> 3
@@ -641,12 +652,12 @@ mod tests {
         category: "Test",
         description: "Inputs with every kind of default.",
         inputs: &[
-            crate::PortSpec::new("bar", crate::SignalType::Phase).with_default(PortDefault::BarPhase),
-            crate::PortSpec::new("bar2", crate::SignalType::Phase).with_default(PortDefault::BarPhase),
-            crate::PortSpec::new("half", crate::SignalType::Modulation).with_default(PortDefault::Value(0.5)),
-            crate::PortSpec::new("zero", crate::SignalType::Modulation),
+            port("bar", crate::SignalType::Phase).with_default(PortDefault::BarPhase),
+            port("bar2", crate::SignalType::Phase).with_default(PortDefault::BarPhase),
+            port("half", crate::SignalType::Modulation).with_default(PortDefault::Value(0.5)),
+            port("zero", crate::SignalType::Modulation),
         ],
-        outputs: &[crate::PortSpec::new("out", crate::SignalType::Modulation)],
+        outputs: &[port("out", crate::SignalType::Modulation)],
         params: &[],
         role: ModuleRole::Dsp(|_| Box::new(Silent)),
         panel: crate::Panel::EMPTY,

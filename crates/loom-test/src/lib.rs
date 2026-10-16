@@ -75,6 +75,7 @@ pub struct Harness {
     midi: Vec<MidiEvent>,
     transport: TransportSettings,
     tolerance: f32,
+    allow_undocumented: bool,
 }
 
 impl Harness {
@@ -99,6 +100,7 @@ impl Harness {
                 ..TransportSettings::default()
             },
             tolerance: DEFAULT_TOLERANCE,
+            allow_undocumented: false,
         }
     }
 
@@ -174,6 +176,14 @@ impl Harness {
         self
     }
 
+    /// Allows ports and parameters with no label or description, for a
+    /// quick experiment. By default every render fails on one, because the
+    /// app and help pages show them to users.
+    pub fn allow_undocumented(mut self) -> Self {
+        self.allow_undocumented = true;
+        self
+    }
+
     /// Length of the render in frames.
     pub fn frame_count(&self) -> usize {
         match self.length {
@@ -196,6 +206,18 @@ impl Harness {
             "block size {block} is not between 1 and {MAX_BLOCK}"
         );
         let descriptor = self.descriptor;
+        if !self.allow_undocumented {
+            let missing = descriptor.undocumented();
+            if !missing.is_empty() {
+                let list: Vec<String> = missing.iter().map(ToString::to_string).collect();
+                panic!(
+                    "{}: {}. Give every port and parameter a short label and a one-sentence description, or call \
+                     `.allow_undocumented()` for a quick experiment.",
+                    descriptor.id,
+                    list.join("; ")
+                );
+            }
+        }
         let frames = self.frame_count();
         let ModuleRole::Dsp(create) = descriptor.role else {
             unreachable!("checked in Harness::new")

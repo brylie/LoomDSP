@@ -36,10 +36,27 @@ impl ModuleKind {
     }
 }
 
+/// Something to fix in a registered module that does not stop it from
+/// loading, such as a port with no description.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegistryNote {
+    /// Module ID.
+    pub module: &'static str,
+    /// What to fix.
+    pub message: String,
+}
+
+impl std::fmt::Display for RegistryNote {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.module, self.message)
+    }
+}
+
 /// Module types by stable ID.
 #[derive(Debug, Default)]
 pub struct Registry {
     modules: BTreeMap<&'static str, &'static ModuleDescriptor>,
+    notes: Vec<RegistryNote>,
 }
 
 impl Registry {
@@ -49,6 +66,10 @@ impl Registry {
     }
 
     /// Adds a module type. Fails on duplicate IDs or invalid descriptors.
+    ///
+    /// A port or parameter with no label or description does not stop the
+    /// module from loading: it adds a note to [`Registry::notes`]. *Why:*
+    /// missing help text is worth fixing, but not worth refusing a patch.
     pub fn register(&mut self, descriptor: &'static ModuleDescriptor) -> Result<(), LoomError> {
         let invalid = |reason: &str| LoomError::InvalidDescriptor {
             id: descriptor.id.to_string(),
@@ -65,8 +86,8 @@ impl Registry {
             return Err(invalid("an input default must be a finite number"));
         }
         for param in descriptor.params {
-            if param.mapping == ParamMapping::Logarithmic {
-                if param.integer {
+            if param.options.mapping == ParamMapping::Logarithmic {
+                if param.options.integer {
                     return Err(invalid("a whole-number parameter cannot be logarithmic"));
                 }
                 if param.min.is_nan() || param.min <= 0.0 {
@@ -87,7 +108,18 @@ impl Registry {
         if self.modules.insert(descriptor.id, descriptor).is_some() {
             return Err(invalid("duplicate module ID"));
         }
+        self.notes
+            .extend(descriptor.undocumented().into_iter().map(|missing| RegistryNote {
+                module: descriptor.id,
+                message: missing.to_string(),
+            }));
         Ok(())
+    }
+
+    /// Notes about registered modules, in the order they were registered.
+    /// `loom check` prints them.
+    pub fn notes(&self) -> &[RegistryNote] {
+        &self.notes
     }
 
     /// Looks up a module by ID.
@@ -134,6 +166,31 @@ impl Registry {
 mod tests {
     use super::*;
 
+    /// A port for test descriptors.
+    const fn port(name: &'static str, signal: crate::SignalType) -> crate::PortSpec {
+        crate::PortSpec {
+            name,
+            label: name,
+            signal,
+            description: "A test port.",
+            default: crate::PortDefault::Value(0.0),
+        }
+    }
+
+    /// A parameter for test descriptors.
+    const fn param(name: &'static str, min: f32, max: f32, default: f32, unit: &'static str) -> crate::ParamSpec {
+        crate::ParamSpec {
+            name,
+            label: name,
+            description: "A test parameter.",
+            min,
+            max,
+            default,
+            unit,
+            options: crate::ParamOptions::DEFAULT,
+        }
+    }
+
     #[test]
     fn parses_kinds() {
         assert_eq!(
@@ -156,9 +213,7 @@ mod tests {
             name: "NaN",
             category: "Test",
             description: "",
-            inputs: &[
-                crate::PortSpec::new("in", crate::SignalType::Modulation).with_default(PortDefault::Value(f32::NAN))
-            ],
+            inputs: &[port("in", crate::SignalType::Modulation).with_default(PortDefault::Value(f32::NAN))],
             outputs: &[],
             params: &[],
             role: ModuleRole::UnitDelay,
@@ -167,6 +222,34 @@ mod tests {
         };
         let error = Registry::new().register(&NAN_DEFAULT).unwrap_err();
         assert!(error.to_string().contains("finite"), "{error}");
+    }
+
+    #[test]
+    fn registers_undocumented_modules_with_notes() {
+        static QUIET: ModuleDescriptor = ModuleDescriptor {
+            id: "test.quiet",
+            version: 1,
+            name: "Quiet",
+            category: "Test",
+            description: "",
+            inputs: &[crate::PortSpec {
+                name: "in",
+                label: "In",
+                signal: crate::SignalType::Audio,
+                description: "",
+                default: PortDefault::Value(0.0),
+            }],
+            outputs: &[port("out", crate::SignalType::Audio)],
+            params: &[],
+            role: ModuleRole::UnitDelay,
+            panel: crate::Panel::EMPTY,
+            displays: &[],
+        };
+        let mut registry = Registry::new();
+        registry.register(&QUIET).unwrap();
+        assert!(registry.get("test.quiet").is_some());
+        let notes: Vec<String> = registry.notes().iter().map(ToString::to_string).collect();
+        assert_eq!(notes, ["test.quiet: input `in` has no description"]);
     }
 
     /// A DSP module with the given parameters, for registry checks.
@@ -191,21 +274,20 @@ mod tests {
 
     #[test]
     fn refuses_impossible_logarithmic_parameters() {
-        use crate::ParamSpec;
-        let whole = with_params!(ParamSpec::new("count", 1.0, 100.0, 1.0, "").integer().logarithmic());
+        let whole = with_params!(param("count", 1.0, 100.0, 1.0, "").integer().logarithmic());
         let error = Registry::new().register(whole).unwrap_err();
         assert!(error.to_string().contains("whole-number"), "{error}");
-        let from_zero = with_params!(ParamSpec::new("time", 0.0, 10.0, 1.0, "s").logarithmic());
+        let from_zero = with_params!(param("time", 0.0, 10.0, 1.0, "s").logarithmic());
         let error = Registry::new().register(from_zero).unwrap_err();
         assert!(error.to_string().contains("minimum above 0"), "{error}");
-        let fine = with_params!(ParamSpec::new("time", 0.001, 10.0, 1.0, "s").logarithmic());
+        let fine = with_params!(param("time", 0.001, 10.0, 1.0, "s").logarithmic());
         assert!(Registry::new().register(fine).is_ok());
     }
 
     /// A DSP module with two parameters, one display value, and a panel.
     macro_rules! with_panel {
         ($width:expr, $height:expr, [$($widget:expr),*]) => {{
-            use crate::{ParamSpec, Widget};
+            use crate::Widget;
             static DESCRIPTOR: ModuleDescriptor = ModuleDescriptor {
                 id: "test.panel",
                 version: 1,
@@ -213,11 +295,11 @@ mod tests {
                 category: "Test",
                 description: "",
                 inputs: &[],
-                outputs: &[crate::PortSpec::new("out", crate::SignalType::Audio)],
+                outputs: &[port("out", crate::SignalType::Audio)],
                 params: &[
-                    ParamSpec::new("level", 0.0, 1.0, 0.5, ""),
-                    ParamSpec::new("on", 0.0, 1.0, 0.0, "").integer(),
-                    ParamSpec::new("slope", 0.0, 3.0, 0.0, "").integer(),
+                    param("level", 0.0, 1.0, 0.5, ""),
+                    param("on", 0.0, 1.0, 0.0, "").integer(),
+                    param("slope", 0.0, 3.0, 0.0, "").integer(),
                 ],
                 role: ModuleRole::Dsp(|_| unreachable!("never created")),
                 panel: crate::Panel::new($width, $height, &[$($widget),*]),

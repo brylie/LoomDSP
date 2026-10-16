@@ -6,8 +6,8 @@
 
 use loom_core::signal::{EdgeDetector, WrapDetector, pitch, trigger};
 use loom_core::{
-    Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamSpec, PortIo, PortSpec, ProcessContext, SignalType,
-    Widget,
+    Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, PortDefault, PortIo, PortSpec,
+    ProcessContext, SignalType, Widget,
 };
 
 /// `loom.phase.generator`: a ramp from 0 to 1 at the frequency set by pitch.
@@ -18,13 +18,49 @@ pub static PHASE: ModuleDescriptor = ModuleDescriptor {
     category: "Phase",
     description: "Ramp from 0 to 1 at the pitch frequency. Drives oscillators and LFOs.",
     inputs: &[
-        PortSpec::new("pitch", SignalType::Pitch),
-        PortSpec::new("reset", SignalType::Gate),
+        PortSpec {
+            name: "pitch",
+            label: "Pitch",
+            signal: SignalType::Pitch,
+            description: "Sets the frequency. 0 is middle C, and +0.1 is one octave up.",
+            default: PortDefault::Value(0.0),
+        },
+        PortSpec {
+            name: "reset",
+            label: "Reset",
+            signal: SignalType::Gate,
+            description: "A rising edge sets the phase back to 0.",
+            default: PortDefault::Value(0.0),
+        },
     ],
-    outputs: &[PortSpec::new("phase", SignalType::Phase)],
+    outputs: &[PortSpec {
+        name: "phase",
+        label: "Phase",
+        signal: SignalType::Phase,
+        description: "A ramp from 0 up to 1, once per cycle.",
+        default: PortDefault::Value(0.0),
+    }],
     params: &[
-        ParamSpec::new("tune", -48.0, 48.0, 0.0, "st"),
-        ParamSpec::new("octave", -10.0, 10.0, 0.0, "oct"),
+        ParamSpec {
+            name: "tune",
+            label: "Tune",
+            description: "Shifts the pitch in semitones.",
+            min: -48.0,
+            max: 48.0,
+            default: 0.0,
+            unit: "st",
+            options: ParamOptions::DEFAULT,
+        },
+        ParamSpec {
+            name: "octave",
+            label: "Octave",
+            description: "Shifts the pitch in octaves.",
+            min: -10.0,
+            max: 10.0,
+            default: 0.0,
+            unit: "oct",
+            options: ParamOptions::DEFAULT,
+        },
     ],
     role: ModuleRole::Dsp(|config| Box::new(Phase::new(config))),
     panel: Panel::new(6, 3, &[Widget::knob(0, 0, "tune"), Widget::knob(3, 0, "octave")]),
@@ -92,8 +128,20 @@ pub static PHASE_TRIGGER: ModuleDescriptor = ModuleDescriptor {
     name: "Phase Trigger",
     category: "Phase",
     description: "Fires a trigger each time the phase wraps, forward or backward.",
-    inputs: &[PortSpec::new("phase", SignalType::Phase)],
-    outputs: &[PortSpec::new("trigger", SignalType::Gate)],
+    inputs: &[PortSpec {
+        name: "phase",
+        label: "Phase",
+        signal: SignalType::Phase,
+        description: "The phase to watch. Each wrap fires a trigger.",
+        default: PortDefault::Value(0.0),
+    }],
+    outputs: &[PortSpec {
+        name: "trigger",
+        label: "Trigger",
+        signal: SignalType::Gate,
+        description: "Fires once each time the phase wraps.",
+        default: PortDefault::Value(0.0),
+    }],
     params: &[],
     role: ModuleRole::Dsp(|_| {
         Box::new(PhaseTrigger {

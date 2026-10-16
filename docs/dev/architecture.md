@@ -95,6 +95,50 @@ Without the app's Measure toggle, the window redraws only when something changes
 
 Shader names must not be reserved words in Metal or HLSL, because wgpu's translator does not always rename them (the `shader_names` test lists them).
 
+## Describing a module
+
+A module is a `static` `ModuleDescriptor` plus a struct that implements `Module`. The descriptor is plain data, written with named fields:
+
+```rust
+pub static DIVIDE: ModuleDescriptor = ModuleDescriptor {
+    id: "loom.logic.divide",
+    version: 1,
+    name: "Clock Divide",
+    category: "Logic",
+    description: "Fires on every Nth trigger. Offset fires earlier in the count. Reset starts the count again.",
+    inputs: &[
+        PortSpec {
+            name: "trigger",
+            label: "Trigger",
+            signal: SignalType::Gate,
+            description: "The triggers to count.",
+            default: PortDefault::Value(0.0),
+        },
+        // ...
+    ],
+    outputs: &[/* ... */],
+    params: &[
+        ParamSpec {
+            name: "n",
+            label: "Division",
+            description: "Fires on every Nth trigger.",
+            min: 1.0,
+            max: 64.0,
+            default: 2.0,
+            unit: "",
+            options: ParamOptions::DEFAULT,
+        }
+        .integer(),
+        // ...
+    ],
+    role: ModuleRole::Dsp(|_| Box::new(Divide::new())),
+    panel: Panel::new(6, 3, &[Widget::knob(0, 0, "n"), Widget::knob(3, 0, "offset")]),
+    displays: &[],
+};
+```
+
+Names (`id`, port and parameter `name`) are stable IDs that patch files store. Labels and descriptions are text for people and can change at any time (ADR-0016). `loom-modules` checks at compile time that none is empty: `const _: () = loom_core::assert_documented(ALL);`. See [port and parameter text](../design/port-and-parameter-text.md).
+
 ## Where to start
 
 | You want to | Start here |
@@ -113,6 +157,7 @@ Shader names must not be reserved words in Metal or HLSL, because wgpu's transla
 | Module behaviour | Unit tests next to each module, using `loom_core::testing::run` (or `run_with_transport`). |
 | Each module against a reference render, at block sizes 1, 77, and 512 | `crates/loom-modules/tests/reference.rs`, with `loom-test`. References are in `tests/reference/`. |
 | No allocation on the audio path, including telemetry | `crates/loom-modules/tests/no_alloc.rs` (debug builds). |
+| Every port and parameter has a label and a description | Compile time, `assert_documented(ALL)` in `crates/loom-modules/src/lib.rs`. |
 | Transport and default inputs, including no allocation | `crates/loom-core/tests/transport.rs`, `transport_no_alloc.rs`. |
 | Same output at any buffer size, bit-identical runs | `crates/loom-modules/tests/`. |
 | Patch loading and round trips | `crates/loom-patch`. |

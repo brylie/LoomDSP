@@ -2,8 +2,8 @@
 
 use loom_core::signal::gate_is_high;
 use loom_core::{
-    Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamSpec, PortIo, PortSpec, ProcessContext, SignalType,
-    Widget,
+    Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, PortDefault, PortIo, PortSpec,
+    ProcessContext, SignalType, Widget,
 };
 
 /// `loom.env.adsr`: attack, decay, sustain, release envelope.
@@ -13,13 +13,64 @@ pub static ADSR: ModuleDescriptor = ModuleDescriptor {
     name: "ADSR",
     category: "Envelope",
     description: "Envelope from 0 to 1, triggered by a gate. Linear attack, exponential decay and release.",
-    inputs: &[PortSpec::new("gate", SignalType::Gate)],
-    outputs: &[PortSpec::new("out", SignalType::Modulation)],
+    inputs: &[PortSpec {
+        name: "gate",
+        label: "Gate",
+        signal: SignalType::Gate,
+        description: "Going high starts the envelope. Going low releases it.",
+        default: PortDefault::Value(0.0),
+    }],
+    outputs: &[PortSpec {
+        name: "out",
+        label: "Out",
+        signal: SignalType::Modulation,
+        description: "The envelope level, from 0 to 1.",
+        default: PortDefault::Value(0.0),
+    }],
     params: &[
-        ParamSpec::new("attack", 0.0005, 10.0, 0.01, "s").logarithmic(),
-        ParamSpec::new("decay", 0.0005, 10.0, 0.2, "s").logarithmic(),
-        ParamSpec::new("sustain", 0.0, 1.0, 0.7, ""),
-        ParamSpec::new("release", 0.0005, 10.0, 0.3, "s").logarithmic(),
+        ParamSpec {
+            name: "attack",
+            label: "Attack",
+            description: "Time to rise from 0 to 1 after the gate goes high.",
+            min: 0.0005,
+            max: 10.0,
+            default: 0.01,
+            unit: "s",
+            options: ParamOptions::DEFAULT,
+        }
+        .logarithmic(),
+        ParamSpec {
+            name: "decay",
+            label: "Decay",
+            description: "Time to fall from 1 to the sustain level.",
+            min: 0.0005,
+            max: 10.0,
+            default: 0.2,
+            unit: "s",
+            options: ParamOptions::DEFAULT,
+        }
+        .logarithmic(),
+        ParamSpec {
+            name: "sustain",
+            label: "Sustain",
+            description: "The level held while the gate stays high.",
+            min: 0.0,
+            max: 1.0,
+            default: 0.7,
+            unit: "",
+            options: ParamOptions::DEFAULT,
+        },
+        ParamSpec {
+            name: "release",
+            label: "Release",
+            description: "Time to fall to 0 after the gate goes low.",
+            min: 0.0005,
+            max: 10.0,
+            default: 0.3,
+            unit: "s",
+            options: ParamOptions::DEFAULT,
+        }
+        .logarithmic(),
     ],
     role: ModuleRole::Dsp(|config| Box::new(Adsr::new(config))),
     panel: Panel::new(

@@ -5,8 +5,8 @@
 
 use assert_no_alloc::{AllocDisabler, assert_no_alloc};
 use loom_core::{
-    EngineConfig, EngineParts, Module, ModuleDescriptor, ModuleRole, Panel, ParamSpec, PortIo, PortSpec,
-    ProcessContext, Registry, SignalType, Widget, create_engine,
+    EngineConfig, EngineParts, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, PortDefault,
+    PortIo, PortSpec, ProcessContext, Registry, SignalType, Widget, create_engine,
 };
 use std::sync::Arc;
 
@@ -21,8 +21,23 @@ static LAMP: ModuleDescriptor = ModuleDescriptor {
     category: "Test",
     description: "Publishes display values.",
     inputs: &[],
-    outputs: &[PortSpec::new("out", SignalType::Modulation)],
-    params: &[ParamSpec::new("level", 0.0, 1.0, 0.5, "")],
+    outputs: &[PortSpec {
+        name: "out",
+        label: "Out",
+        signal: SignalType::Modulation,
+        description: "The level.",
+        default: PortDefault::Value(0.0),
+    }],
+    params: &[ParamSpec {
+        name: "level",
+        label: "Level",
+        description: "The level to output and publish.",
+        min: 0.0,
+        max: 1.0,
+        default: 0.5,
+        unit: "",
+        options: ParamOptions::DEFAULT,
+    }],
     role: ModuleRole::Dsp(|_| Box::new(Lamp { level: 0.0, calls: 0 })),
     panel: Panel::new(3, 2, &[Widget::light(0, 0, "level")]),
     displays: &["level", "calls"],

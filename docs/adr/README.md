@@ -47,3 +47,4 @@ Why: an ADR is a record of why things are the way they are. If it is rewritten a
 | [0013](0013-modules-carry-their-own-panel.md) | Modules carry their own panel | Proposed |
 | [0014](0014-modulation-without-cables.md) | Modulation without cables | Proposed |
 | [0015](0015-one-transport-per-patch.md) | One transport per patch, read by modules without cables | Proposed |
+| [0016](0016-ports-and-parameters-carry-their-own-text.md) | Ports and parameters carry a label and a description | Proposed |

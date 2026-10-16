@@ -6,7 +6,8 @@
 
 use loom_core::signal::{EdgeDetector, trigger};
 use loom_core::{
-    Module, ModuleDescriptor, ModuleRole, Panel, ParamSpec, PortIo, PortSpec, ProcessContext, SignalType, Widget,
+    Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, PortDefault, PortIo, PortSpec,
+    ProcessContext, SignalType, Widget,
 };
 
 /// `loom.logic.divide`: fires on every Nth incoming trigger.
@@ -22,13 +23,51 @@ pub static DIVIDE: ModuleDescriptor = ModuleDescriptor {
     category: "Logic",
     description: "Fires on every Nth trigger. Offset fires earlier in the count. Reset starts the count again.",
     inputs: &[
-        PortSpec::new("trigger", SignalType::Gate),
-        PortSpec::new("reset", SignalType::Gate),
+        PortSpec {
+            name: "trigger",
+            label: "Trigger",
+            signal: SignalType::Gate,
+            description: "The triggers to count.",
+            default: PortDefault::Value(0.0),
+        },
+        PortSpec {
+            name: "reset",
+            label: "Reset",
+            signal: SignalType::Gate,
+            description: "Starts the count again.",
+            default: PortDefault::Value(0.0),
+        },
     ],
-    outputs: &[PortSpec::new("trigger", SignalType::Gate)],
+    outputs: &[PortSpec {
+        name: "trigger",
+        label: "Trigger",
+        signal: SignalType::Gate,
+        description: "Fires on every Nth trigger.",
+        default: PortDefault::Value(0.0),
+    }],
     params: &[
-        ParamSpec::new("n", 1.0, 64.0, 2.0, "").integer(),
-        ParamSpec::new("offset", 0.0, 63.0, 0.0, "").integer(),
+        ParamSpec {
+            name: "n",
+            label: "Division",
+            description: "Fires on every Nth trigger.",
+            min: 1.0,
+            max: 64.0,
+            default: 2.0,
+            unit: "",
+            options: ParamOptions::DEFAULT,
+        }
+        .integer(),
+        ParamSpec {
+            name: "offset",
+            label: "Offset",
+            description: "Fires this many triggers earlier in the count.",
+            min: 0.0,
+            max: 63.0,
+            default: 0.0,
+            unit: "",
+            options: ParamOptions::DEFAULT,
+        }
+        .integer(),
     ],
     role: ModuleRole::Dsp(|_| Box::new(Divide::new())),
     panel: Panel::new(6, 3, &[Widget::knob(0, 0, "n"), Widget::knob(3, 0, "offset")]),

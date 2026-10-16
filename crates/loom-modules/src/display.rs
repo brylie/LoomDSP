@@ -1,7 +1,9 @@
 //! Display modules: modules whose job is to show a signal on their panel
 //! (FR-LIB-17, ADR-0013).
 
-use loom_core::{Module, ModuleDescriptor, ModuleRole, Panel, PortIo, PortSpec, ProcessContext, SignalType, Widget};
+use loom_core::{
+    Module, ModuleDescriptor, ModuleRole, Panel, PortDefault, PortIo, PortSpec, ProcessContext, SignalType, Widget,
+};
 
 /// `loom.display.meter`: a mono level meter. Passes its input through, so it
 /// can sit inline or hang off an output, and shows the level of that output
@@ -12,8 +14,20 @@ pub static METER: ModuleDescriptor = ModuleDescriptor {
     name: "Level Meter",
     category: "Display",
     description: "Shows the peak and RMS level of its input. Passes the input through unchanged.",
-    inputs: &[PortSpec::new("in", SignalType::Audio)],
-    outputs: &[PortSpec::new("out", SignalType::Audio)],
+    inputs: &[PortSpec {
+        name: "in",
+        label: "In",
+        signal: SignalType::Audio,
+        description: "The signal to measure.",
+        default: PortDefault::Value(0.0),
+    }],
+    outputs: &[PortSpec {
+        name: "out",
+        label: "Out",
+        signal: SignalType::Audio,
+        description: "The input, unchanged.",
+        default: PortDefault::Value(0.0),
+    }],
     params: &[],
     role: ModuleRole::Dsp(|_| Box::new(Meter)),
     panel: Panel::new(3, 6, &[Widget::meter(0, 0, "out")]),
