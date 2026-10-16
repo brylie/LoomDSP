@@ -63,6 +63,7 @@ See ADR-0007 for the full signal model.
 | FR-MOD-06 | Any output can modulate any parameter in the same patch level through a modulation assignment, without a cable. To reach inside a sub-patch, expose the parameter (FR-ENCAP-03). Made by dragging an output onto a control; shown as a depth arc on the control and a badge on the source (ADR-0014). | Must | P1 | Keeps the cables for the signal path, so patches stay readable. |
 | FR-MOD-07 | A modulation matrix lists every assignment in a patch or sub-patch, editable by mouse and keyboard. | Must | P1 | One place to see and fix all routing, including routing without cables. |
 | FR-MOD-08 | Modulation depth is applied in the control's 0 to 1 range, using the parameter's own linear or logarithmic mapping. | Must | P1 | Depth means the same on every control, and the arc shows what the engine does. |
+| FR-MOD-09 | Wide linear parameters, such as Multiply's gain, offer a choice of ranges (for example -0.1 to 0.1 or 0 to 10). The player picks one per module in the inspector. Controls and modulation work inside it, and patches save it. | Should | P1 | One knob over -10 to 10 is too coarse for fine jobs such as FM depth. A smaller range makes the knob precise and safe ([control ranges](../design/control-ranges.md)). |
 
 ## 5. Module library (`LIB`)
 

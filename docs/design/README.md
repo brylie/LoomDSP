@@ -40,5 +40,6 @@ Copy [template.md](template.md). Keep it to one feature. Link the ADR, requireme
 | [Telemetry](telemetry.md) | [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md) | Implemented, P1 |
 | [Panels](panels.md) | [ADR-0013](../adr/0013-modules-carry-their-own-panel.md) | Module panels on tiles, level meters, and audio load Implemented (P1); rest Draft |
 | [Modulation](modulation.md) | [ADR-0014](../adr/0014-modulation-without-cables.md) | Draft, P1 and P2 |
+| [Control ranges](control-ranges.md) | None (extends parameter mapping) | Draft, P1 |
 | [Module test harness](module-test-harness.md) | [ADR-0002](../adr/0002-graph-execution-and-feedback.md) | Implemented, P1 |
 | [Clock and transport](clock.md) | [ADR-0015](../adr/0015-one-transport-per-patch.md) | Engine sections, Clock Divide, and Phase Trigger Implemented (P1); rest Draft, P1 and P2 |
