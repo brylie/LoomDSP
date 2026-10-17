@@ -624,3 +624,21 @@ fn depth_zero_added_during_a_glide_continues_the_glide() {
     let run = |assign| glide_with_depth_zero("loom.filter.svf", "cutoff", 200.0, 8_000.0, "lowpass", noise, assign);
     assert_close(&run(true), &run(false), 1e-4);
 }
+
+#[test]
+fn assignment_to_non_dsp_module_is_rejected() {
+    let mut parts = engine();
+    let source = parts.controller.add_module("loom.math.constant").unwrap();
+    let delay = parts.controller.add_module("loom.time.delay1").unwrap();
+    let audio = parts.controller.add_module("loom.io.audio-out").unwrap();
+    let source_out = parts.controller.output_ref(source, "out").unwrap();
+
+    assert!(matches!(
+        parts.controller.add_assignment(source_out, delay, 0, 0.5),
+        Err(loom_core::LoomError::NoSuchParam { .. })
+    ));
+    assert!(matches!(
+        parts.controller.add_assignment(source_out, audio, 0, 0.5),
+        Err(loom_core::LoomError::NoSuchParam { .. })
+    ));
+}

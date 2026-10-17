@@ -105,6 +105,9 @@ impl Registry {
             }
             _ => {}
         }
+        if !matches!(descriptor.role, ModuleRole::Dsp(_)) && !descriptor.params.is_empty() {
+            return Err(invalid("only DSP modules can have parameters"));
+        }
         if self.modules.insert(descriptor.id, descriptor).is_some() {
             return Err(invalid("duplicate module ID"));
         }
@@ -382,5 +385,49 @@ mod tests {
         };
         let error = Registry::new().register(&DESCRIPTOR).unwrap_err();
         assert!(error.to_string().contains("more than 4 display values"), "{error}");
+    }
+
+    #[test]
+    fn refuses_parameters_on_non_dsp_modules() {
+        static DELAY_WITH_PARAMS: ModuleDescriptor = ModuleDescriptor {
+            id: "test.delay_params",
+            version: 1,
+            name: "Delay With Params",
+            category: "Test",
+            description: "",
+            inputs: &[port("in", crate::SignalType::Audio)],
+            outputs: &[port("out", crate::SignalType::Audio)],
+            params: &[param("time", 0.0, 1.0, 0.5, "s")],
+            role: ModuleRole::UnitDelay,
+            panel: crate::Panel::EMPTY,
+            displays: &[],
+        };
+        let error = Registry::new().register(&DELAY_WITH_PARAMS).unwrap_err();
+        assert!(
+            error.to_string().contains("only DSP modules can have parameters"),
+            "{error}"
+        );
+
+        static OUTPUT_WITH_PARAMS: ModuleDescriptor = ModuleDescriptor {
+            id: "test.output_params",
+            version: 1,
+            name: "Output With Params",
+            category: "Test",
+            description: "",
+            inputs: &[
+                port("left", crate::SignalType::Audio),
+                port("right", crate::SignalType::Audio),
+            ],
+            outputs: &[],
+            params: &[param("level", 0.0, 1.0, 0.5, "")],
+            role: ModuleRole::AudioOutput,
+            panel: crate::Panel::EMPTY,
+            displays: &[],
+        };
+        let error = Registry::new().register(&OUTPUT_WITH_PARAMS).unwrap_err();
+        assert!(
+            error.to_string().contains("only DSP modules can have parameters"),
+            "{error}"
+        );
     }
 }
