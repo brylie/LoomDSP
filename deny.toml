@@ -14,13 +14,6 @@ ignore = [
     { id = "RUSTSEC-2024-0436", reason = "via wgpu-hal/metal; unmaintained, not vulnerable" },
     # ttf-parser: font parsing used by cosmic-text (Iced's text system).
     { id = "RUSTSEC-2026-0192", reason = "via iced_wgpu/cosmic-text; unmaintained, not vulnerable" },
-    # zvariant: D-Bus types used by zbus 5, which mundy (Iced's system theme
-    # reader) needs on Linux. Merged into zbus 6; mundy 0.2 still uses zbus 5.
-    { id = "RUSTSEC-2026-0370", reason = "via iced_winit/mundy/zbus; unmaintained, not vulnerable" },
-    # zbus_names: D-Bus names used by zbus 5. Merged into zbus 6.
-    { id = "RUSTSEC-2026-0371", reason = "via iced_winit/mundy/zbus; unmaintained, not vulnerable" },
-    # zvariant_derive: derive macros for zvariant. Merged into zbus 6.
-    { id = "RUSTSEC-2026-0372", reason = "via iced_winit/mundy/zbus; unmaintained, not vulnerable" },
 ]
 
 [licenses]
