@@ -212,7 +212,7 @@ See ADR-0008.
 | FR-FILE-01 | Patches save as RON (Rusty Object Notation), a human-readable text format. | Must | P0 | Keeps Rust enums and structs exact through Serde. Works with git. |
 | FR-FILE-02 | The format has a version number. Older patches load in newer versions through migrations. | Must | P0 | Users must not lose work after upgrades. Applies from the first release. During the early alpha the format stays at version 1 and old patches may stop loading. |
 | FR-FILE-03 | The format is documented. | Should | P2 | Enables third-party tools. |
-| FR-FILE-04 | Patches reference modules by stable ID and version, not by display name. | Must | P0 | Renaming a module must not break patches. |
+| FR-FILE-04 | Patches reference modules by stable ID and version, not by display name. | Must | P0 | Renaming a module must not break patches. A display name can change at any time. During the early alpha the ID itself may also change, and then old patches may stop loading. |
 | FR-FILE-05 | Loading a patch with an unknown module shows a placeholder and keeps the data. | Should | P1 | Graceful handling of missing modules from newer versions. |
 | FR-FILE-06 | A patch can embed assets (wavetables, samples, panel images) or reference them. | Should | P2 | Exported plugins and shared patches must be self-contained. |
 | FR-FILE-07 | A JSON export of the patch format, for tools outside the Rust world. | Could | P4 | Only if third-party tools ask for it. |
