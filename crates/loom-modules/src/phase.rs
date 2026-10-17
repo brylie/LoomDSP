@@ -87,15 +87,24 @@ impl Phase {
     }
 }
 
-/// Phase step per sample for a frequency, at most half a cycle (Nyquist).
+/// Largest phase step per sample: just under half a cycle (Nyquist).
+///
+/// Not exactly 0.5: then the phase would read 0, 0.5, 0, 0.5, and no step
+/// would be more than half a cycle, so `WrapDetector` would see no wraps
+/// and a Phase Trigger would stop firing. At 0.49 every wrap is a jump of
+/// 0.51, clear of `f32` rounding.
+const MAX_STEP: f64 = 0.49;
+
+/// Phase step per sample for a frequency, at most [`MAX_STEP`].
 ///
 /// A high pitch overflows `to_hz` to infinity, and `inf - floor(inf)` is
 /// NaN. Without this limit the phase would stay NaN for good, so a patch
-/// stays silent even after the pitch comes back (#121). Frequencies above
-/// Nyquist cannot be heard as themselves anyway. NaN pitch stops the phase.
+/// stays silent even after the pitch comes back (#121). Frequencies near
+/// Nyquist and above cannot be heard as themselves anyway. NaN pitch stops
+/// the phase.
 fn increment(hz: f32, sample_rate: f64) -> f64 {
     let step = f64::from(hz) / sample_rate;
-    if step.is_nan() { 0.0 } else { step.min(0.5) }
+    if step.is_nan() { 0.0 } else { step.min(MAX_STEP) }
 }
 
 impl Module for Phase {
@@ -226,6 +235,30 @@ mod tests {
         // Middle C after the extremes: the phase moves by 261.6 / 48000.
         let step = out[7] - out[6];
         assert!((step - pitch::to_hz(0.0) / 48_000.0).abs() < 1e-6, "{out:?}");
+    }
+
+    #[test]
+    fn phase_trigger_keeps_firing_at_the_highest_pitch() {
+        // Pitch 20 runs Phase at its largest step. Every cycle must still
+        // end in a jump that Phase Trigger sees.
+        let mut generator = Phase::new(&ModuleConfig {
+            sample_rate: 48_000.0,
+            max_block: 100,
+        });
+        let pitch = [20.0; 100];
+        let reset = [0.0; 100];
+        let mut phase = [0.0; 100];
+        run(
+            &mut generator,
+            48_000.0,
+            &[&pitch, &reset],
+            &[true, true],
+            &mut [&mut phase],
+            &[],
+        );
+        let fired = phase_trigger(&phase).iter().filter(|&&t| t == 1.0).count();
+        // 100 frames at 0.49 cycles per frame: frame 0, then 48 wraps.
+        assert_eq!(fired, 49, "{phase:?}");
     }
 
     #[test]
