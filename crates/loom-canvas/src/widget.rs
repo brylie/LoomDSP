@@ -1062,7 +1062,9 @@ impl<Message> PatchCanvas<'_, Message> {
             }
 
             // Panel labels and values (panels.md, Level of detail: text only
-            // close up).
+            // close up). Iced draws text relative to its alignment: centred
+            // text is centred on the x it is given, so captions take the
+            // widget's centre, not its left edge.
             for (index, widget) in module.panel.widgets.iter().enumerate() {
                 let Some(rect) = module.widget_bounds(index) else {
                     continue;
@@ -1076,7 +1078,7 @@ impl<Message> PatchCanvas<'_, Message> {
                             Some(value) if showing_value => value.text.as_str(),
                             _ => &caption,
                         };
-                        let at = Point::new(rect.x, knob_centre(rect).y + 1.5 * GRID);
+                        let at = Point::new(rect.center_x(), knob_centre(rect).y + 1.5 * GRID);
                         let colour = if showing_value {
                             self.palette.text
                         } else {
@@ -1090,7 +1092,7 @@ impl<Message> PatchCanvas<'_, Message> {
                         );
                     }
                     WidgetViewKind::Meter => {
-                        let at = Point::new(rect.x, rect.y + rect.height - GRID * 0.5);
+                        let at = Point::new(rect.center_x(), rect.y + rect.height - GRID * 0.5);
                         renderer.fill_text(
                             text(
                                 &fit_label(&widget.label, rect.width, LABEL_SIZE),
@@ -1104,7 +1106,7 @@ impl<Message> PatchCanvas<'_, Message> {
                         );
                     }
                     WidgetViewKind::Toggle | WidgetViewKind::Light => {
-                        let at = Point::new(rect.x, light_centre(rect).y + GRID);
+                        let at = Point::new(rect.center_x(), light_centre(rect).y + GRID);
                         renderer.fill_text(
                             text(
                                 &fit_label(&widget.label, rect.width, LABEL_SIZE),
@@ -1118,7 +1120,7 @@ impl<Message> PatchCanvas<'_, Message> {
                         );
                     }
                     WidgetViewKind::Radio { options } => {
-                        let at = Point::new(rect.x, rect.y + GRID * 0.5);
+                        let at = Point::new(rect.center_x(), rect.y + GRID * 0.5);
                         renderer.fill_text(
                             text(
                                 &fit_label(&widget.label, rect.width, LABEL_SIZE),
