@@ -145,7 +145,7 @@ Names (`id`, port and parameter `name`) are stable IDs that patch files store. L
 |---|---|
 | Add a module | `crates/loom-modules/src/` (copy a similar module), then `lib.rs`. See CONTRIBUTING.md. |
 | Change how the graph runs | `crates/loom-core/src/compile.rs` and `engine.rs`. Read ADR-0001 and ADR-0002 first. |
-| Change the patch format | `crates/loom-patch/src/lib.rs`. Add a migration; never break old files (ADR-0008). |
+| Change the patch format | `crates/loom-patch/src/lib.rs`. During the early alpha the format stays at version 1, and a change may stop old files from loading: update the example patches in the same change ([AGENTS.md](../../AGENTS.md#project-stage-early-alpha)). From the first release, add a migration and never break old files (ADR-0008). |
 | Change how the canvas looks or responds | `crates/loom-canvas/src/`. Keep per-frame work small. |
 | Add a panel, button, or setting to the app | `crates/loom-app/src/main.rs`. |
 | Support another audio or MIDI case | `crates/loom-host-desktop/src/lib.rs`. |

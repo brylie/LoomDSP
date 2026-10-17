@@ -6,7 +6,7 @@ An open-source modular audio environment written in Rust, for musical experiment
 
 Build living musical systems by connecting small modules: oscillators and filters, but also modulators, sequencers, loopers, and logic that arranges the music as it plays. Hide the wiring behind a front panel, play it live with MIDI controllers, and share your patches with others.
 
-**Status: Phase 1 (desktop patcher), early.** The engine, the module library, the patch format, and a command-line player work. The first desktop app lets you patch and play live, with our own GPU-drawn canvas. See the [roadmap](docs/product/roadmap.md) and the [Phase 1 issues](https://github.com/brylie/LoomDSP/milestone/1).
+**Status: early alpha, Phase 1 (desktop patcher).** Expect breaking changes, including to the patch format, until the architecture settles. The engine, the module library, the patch format, and a command-line player work. The first desktop app lets you patch and play live, with our own GPU-drawn canvas. See the [roadmap](docs/product/roadmap.md) and the [Phase 1 issues](https://github.com/brylie/LoomDSP/milestone/1).
 
 ![The LoomDSP desktop app](docs/benchmarks/images/p1-canvas-fm-feedback.png)
 

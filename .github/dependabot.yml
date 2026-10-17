@@ -19,3 +19,7 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+    ignore:
+      # dtolnay/rust-toolchain@<version> pins our minimum Rust version (MSRV).
+      # It is a toolchain number, not an action version, so bump it by hand.
+      - dependency-name: dtolnay/rust-toolchain
