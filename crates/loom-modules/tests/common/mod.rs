@@ -121,6 +121,7 @@ pub fn meter_readings(parts: &mut EngineParts, frames: usize, block: usize, note
 
 /// The last value read at or before `seconds`.
 pub fn at(trace: &Trace, seconds: f32) -> f32 {
+    assert!(!trace.is_empty(), "empty trace");
     let frame = (seconds * SAMPLE_RATE) as usize;
     let i = trace.partition_point(|&(f, _)| f <= frame);
     trace[i.saturating_sub(1)].1
