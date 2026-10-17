@@ -107,7 +107,7 @@ pub type RangeFn = fn(
 
 - **Inspector, inputs:** "Receives about 0 to 5." When that is wider than the expected range, also "Expects -0.5 to 0.5." Unknown inputs show "Receives an unknown range (feedback loop)."
 - **Inspector, outputs:** "Sends about -4 to 4."
-- **Scope:** a scope module starts with its vertical scale fitted to the range its input receives. An unknown range falls back to the samples on screen.
+- **Scope:** a scope module starts with its vertical scale fitted to the range its input receives. A point range, such as an unmodulated Constant at 5, has no span to fit, so the scope centres on the value with the span of its input's expected range (4 to 6 for an audio input). An unknown range falls back to the samples on screen.
 - **Warnings:** a short line under the input in the inspector. They never block a cable and never change the sound.
 
 | Input type | Warning when | Text (draft) |
@@ -177,6 +177,7 @@ The width matters for warnings. A warning that a gate *never* goes high is safe,
 - [ ] In `fm-feedback.ron`, the oscillator sends -1 to 1, and outputs with hooks inside the loop are unknown.
 - [ ] A gate input fed 0 to 0.3 shows the "never goes high" warning. A gate input fed by an unknown range shows none.
 - [ ] A pitch input fed 0 to 10 shows the span warning.
+- [ ] A scope fed by an unmodulated Constant at 5 starts at 4 to 6. A scope fed by an unknown range starts from its samples.
 - [ ] Rendered output is bit-identical with propagation on and off.
 - [ ] Propagation allocates nothing on the audio thread, because it never runs there (`no_alloc` test unchanged).
 
