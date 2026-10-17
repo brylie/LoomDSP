@@ -2,7 +2,7 @@
 
 #![allow(dead_code)]
 
-use loom_core::{EngineConfig, EngineParts, MidiEvent, create_engine};
+use loom_core::{EngineConfig, EngineParts, MeterReading, MidiEvent, ModuleId, ProbeId, create_engine};
 use loom_patch::Patch;
 use std::path::PathBuf;
 
@@ -73,6 +73,85 @@ pub fn render_with(
 
 pub fn render(parts: &mut EngineParts, frames: usize, block: usize, notes: &[Note]) -> (Vec<f32>, Vec<f32>) {
     render_with(parts, frames, block, notes, |_, _| {})
+}
+
+/// A display value read during a render: `(frame, value)` pairs in frame
+/// order, one for each buffer.
+pub type Trace = Vec<(usize, f32)>;
+
+/// The index of a module's display value, by name.
+pub fn display_index(parts: &EngineParts, module: ModuleId, name: &str) -> usize {
+    let node = parts.controller.graph().node(module).expect("module exists");
+    node.descriptor
+        .display_index(name)
+        .unwrap_or_else(|| panic!("{} has no display value {name}", node.descriptor.id))
+}
+
+/// Renders `frames` frames in host buffers of `block` frames, as
+/// [`render`], and reads display value `name` of `module` before each
+/// buffer, as the app's light watcher would.
+pub fn watch(
+    parts: &mut EngineParts,
+    frames: usize,
+    block: usize,
+    notes: &[Note],
+    module: ModuleId,
+    name: &str,
+) -> Trace {
+    let index = display_index(parts, module, name);
+    let mut trace = Trace::new();
+    render_with(parts, frames, block, notes, |position, parts| {
+        let value = parts.controller.display(module, index).expect("display value exists");
+        trace.push((position, value));
+    });
+    trace
+}
+
+/// Renders as [`render`] and collects every meter reading. The queue is
+/// drained before each buffer, as the app's telemetry thread would, so it
+/// never fills, even at a block size of 1.
+pub fn meter_readings(parts: &mut EngineParts, frames: usize, block: usize, notes: &[Note]) -> Vec<MeterReading> {
+    let mut readings = Vec::new();
+    render_with(parts, frames, block, notes, |_, parts| {
+        readings.extend(parts.telemetry.meters());
+    });
+    readings.extend(parts.telemetry.meters());
+    readings
+}
+
+/// The last value read at or before `seconds`.
+pub fn at(trace: &Trace, seconds: f32) -> f32 {
+    let frame = (seconds * SAMPLE_RATE) as usize;
+    let i = trace.partition_point(|&(f, _)| f <= frame);
+    trace[i.saturating_sub(1)].1
+}
+
+/// The largest value read between `from` and `to` seconds.
+pub fn max_between(trace: &Trace, from: f32, to: f32) -> f32 {
+    let (from, to) = ((from * SAMPLE_RATE) as usize, (to * SAMPLE_RATE) as usize);
+    trace
+        .iter()
+        .filter(|(f, _)| (from..to).contains(f))
+        .map(|&(_, v)| v)
+        .fold(0.0, f32::max)
+}
+
+/// Peak and RMS of a probe's meter readings for the blocks that lie wholly
+/// between `from` and `to` seconds.
+pub fn level_between(readings: &[MeterReading], probe: ProbeId, from: f32, to: f32) -> (f32, f32) {
+    let (from, to) = ((from * SAMPLE_RATE) as u64, (to * SAMPLE_RATE) as u64);
+    let mut peak = 0.0f32;
+    let (mut squares, mut frames) = (0.0f64, 0u64);
+    for r in readings
+        .iter()
+        .filter(|r| r.probe == probe && r.frame >= from && r.frame + u64::from(r.frames) <= to)
+    {
+        peak = peak.max(r.peak);
+        squares += f64::from(r.rms).powi(2) * f64::from(r.frames);
+        frames += u64::from(r.frames);
+    }
+    assert!(frames > 0, "no meter readings for {probe:?} in {from}..{to}");
+    (peak, (squares / frames as f64).sqrt() as f32)
 }
 
 pub fn rms(signal: &[f32]) -> f32 {

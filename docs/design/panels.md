@@ -225,13 +225,13 @@ The canvas already hides port labels and titles below a size on screen. Panels u
 
 #68, controls on tiles:
 
-- [ ] Dragging a knob on a tile changes the parameter. The inspector shows the same value, and saving the patch keeps it.
-- [ ] Dragging a control never moves the tile. Dragging the header always does.
+- [x] Dragging a knob on a tile changes the parameter. The inspector shows the same value, and saving the patch keeps it. (Checked by hand in [#92](https://github.com/brylie/LoomDSP/issues/92).)
+- [x] Dragging a control never moves the tile. Dragging the header always does. (Checked by hand in [#92](https://github.com/brylie/LoomDSP/issues/92).)
 - [x] Shift-drag is 10 times finer. Double-click resets to the default.
 - [x] A logarithmic knob moves by equal ratios: halfway up a 20 Hz to 20 kHz cutoff knob is about 632 Hz.
 - [x] Every control is reachable by keyboard: Tab, Shift-Tab, arrows, Space, Escape, with a visible focus ring.
 - [x] Changing a control value does not rebuild the GPU data for tiles, ports, or cables.
-- [ ] The MIDI Note gate light is lit while a key is held. The ADSR light follows its level.
+- [x] The MIDI Note gate light is lit while a key is held. The ADSR light follows its level. The tests in `loom-modules/tests/panels.rs` play a note through `subtractive.ron` and read the display values the lights draw, at block sizes 1, 77, and 512.
 - [x] Zoomed far out, controls and lights are not drawn. At middle zoom, they have no text.
 - [x] Lights add no frames while their brightness stays the same: the light watcher sends nothing until a shown level changes, and runs only while lights are on screen.
 - [ ] Manual, on the reference laptop: knobs, the toggle, and lights look right at close and middle zoom, and a cut port label shows in full on hover.
@@ -240,7 +240,7 @@ The whole app still redraws twice a second for the stats bar's audio numbers. "N
 
 ## Level meters and audio load (P1)
 
-**Status:** Implemented ([#9](https://github.com/brylie/LoomDSP/issues/9)), except the manual check below. Code: `WidgetKind::Meter`, `loom-modules/src/display.rs`, `loom-app/src/monitor.rs`, `live.rs`, `alerts.rs`. Requirements: FR-LIB-17, FR-VIS-03 (the level meter module, brought forward from P2), FR-PERF-04.
+**Status:** Implemented ([#9](https://github.com/brylie/LoomDSP/issues/9)). Code: `WidgetKind::Meter`, `loom-modules/src/display.rs`, `loom-app/src/monitor.rs`, `live.rs`, `alerts.rs`. Requirements: FR-LIB-17, FR-VIS-03 (the level meter module, brought forward from P2), FR-PERF-04.
 
 ### Meter widget
 
@@ -276,7 +276,7 @@ The whole app still redraws twice a second for the stats bar's audio numbers. "N
 - [x] Levels map -60 dB and below to empty and 0 dB to full. They rise at once and fall by the full range in a second. The peak line is never below the RMS bar.
 - [x] The telemetry thread sends nothing while the shown levels stay the same.
 - [x] Load below 70% is normal, from 70% amber, from 90% red. The dropout count is red for 10 seconds after it grows.
-- [ ] Manual: a meter module after the filter in `subtractive.ron` rises when a note plays and falls after it stops.
+- [x] A meter module after the VCA in `subtractive.ron` rises when a note plays and falls after it stops. A meter on the filter's output stays up with no note, because the saw runs all the time and only the VCA is gated. Tested twice: as meter readings in `loom-modules/tests/panels.rs`, and as drawn levels and colour bands in `loom-app/src/live.rs`. (This was a manual check that said "after the filter"; [#92](https://github.com/brylie/LoomDSP/issues/92) found that wording wrong.)
 
 ### Out of scope
 

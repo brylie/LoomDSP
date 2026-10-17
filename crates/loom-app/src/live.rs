@@ -475,6 +475,73 @@ mod tests {
         }
     }
 
+    /// Issue #92, as drawn: Level Meters on the subtractive example, one
+    /// after the VCA and one on the filter's output. The telemetry thread's
+    /// 33 ms clock is simulated, so the test takes no real time.
+    #[test]
+    fn meters_on_the_subtractive_patch_rise_fall_and_change_colour() {
+        let mut parts = create_engine(loom_modules::registry(), EngineConfig::with_sample_rate(48_000.0));
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/patches/subtractive.ron");
+        Patch::load(path).unwrap().load_into(&mut parts.controller).unwrap();
+        let mut level_meter = |module: u32, output: &str| {
+            let meter = parts.controller.add_module("loom.display.meter").unwrap();
+            parts
+                .controller
+                .connect_named(ModuleId(module), output, meter, "in")
+                .unwrap();
+            parts.controller.output_ref(meter, "out").unwrap()
+        };
+        let vca = level_meter(8, "out");
+        let filter = level_meter(4, "lowpass");
+        let mut live = Live::new();
+        live.sync(&mut parts.controller, &BTreeSet::from([vca, filter]));
+        parts.controller.commit().unwrap();
+
+        // 1600 frames is 33.3 ms at 48 kHz: one telemetry tick per buffer.
+        // A note is held from 0.5 s to 1.5 s.
+        const TICK: usize = 1600;
+        let (mut left, mut right) = (vec![0.0; TICK], vec![0.0; TICK]);
+        let start = Instant::now();
+        let mut levels = Levels::default();
+        let mut shown = Vec::new();
+        for tick in 0..90 {
+            let seconds = (tick * TICK) as f32 / 48_000.0;
+            if tick == 15 {
+                assert!(parts.midi.send(loom_core::MidiEvent::note_on(0, 0, 57, 100)));
+            }
+            if tick == 45 {
+                assert!(parts.midi.send(loom_core::MidiEvent::note_off(0, 0, 57)));
+            }
+            parts.engine.process(&mut left, &mut right);
+            levels.drain(&mut parts.telemetry, start + Duration::from_secs_f32(seconds));
+            let level = |output| live.probe(output).and_then(|p| levels.get(p)).unwrap_or_default();
+            shown.push((seconds, level(vca), level(filter)));
+        }
+        let at = |seconds: f32| *shown.iter().rfind(|(s, _, _)| *s <= seconds).unwrap();
+
+        // Colour bands from panels.md, Meter widget: green below -12 dB,
+        // amber up to -3 dB.
+        let db = |db: f32| normalise(10f32.powf(db / 20.0));
+        let green = |level: f32| level > 0.0 && level < db(-12.0);
+        let amber = |level: f32| (db(-12.0)..db(-3.0)).contains(&level);
+
+        // After the VCA: empty before the note, green while it is held,
+        // falling after it, and empty again within a second.
+        assert_eq!(at(0.45).1, Level::default(), "empty before the note");
+        let held = at(1.45).1;
+        assert!(green(held.rms), "green while held: {held:?}");
+        let falling = at(1.9).1;
+        assert!(0.0 < falling.rms && falling.rms < held.rms, "falling: {falling:?}");
+        assert_eq!(at(2.6).1, Level::default(), "empty a second after the note");
+
+        // On the filter's output the saw drones with no note, so the meter
+        // stays up the whole time, and louder: amber, not green.
+        for seconds in [0.45, 1.45, 2.6] {
+            let drone = at(seconds).2;
+            assert!(amber(drone.rms), "amber at {seconds} s: {drone:?}");
+        }
+    }
+
     #[test]
     fn rms_is_taken_over_every_frame_since_the_last_update() {
         let mut levels = Levels::default();
