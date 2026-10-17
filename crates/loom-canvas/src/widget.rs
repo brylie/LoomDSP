@@ -106,6 +106,10 @@ pub enum CanvasEvent {
     /// The modules whose lights or meters are on screen, at a zoom where
     /// they are drawn, changed. Only these need their values read.
     VisibleDisplays(Vec<u32>),
+    /// Space was pressed and no panel control is focused. The app toggles
+    /// transport Run. Enter does not send this, and neither does Space while
+    /// a control is focused.
+    ToggleRun,
 }
 
 /// The patch canvas. Draws a [`Scene`] and reports gestures as
@@ -949,27 +953,36 @@ impl<Message> PatchCanvas<'_, Message> {
                 true
             }
             keyboard::Key::Named(named @ (Named::Space | Named::Enter)) => {
-                let Some((module, widget)) = state.focus else {
-                    return false;
-                };
-                let position = self.position(module, widget);
-                match self.widget_kind(module, widget) {
-                    Some(WidgetViewKind::Toggle) => {
-                        self.set_control(shell, module, widget, if position > 0.5 { 0.0 } else { 1.0 })
+                if let Some((module, widget)) = state.focus {
+                    let position = self.position(module, widget);
+                    match self.widget_kind(module, widget) {
+                        Some(WidgetViewKind::Toggle) => {
+                            self.set_control(shell, module, widget, if position > 0.5 { 0.0 } else { 1.0 })
+                        }
+                        // A repeated key must not press again. The first press is
+                        // still held, so key up can release it.
+                        Some(WidgetViewKind::Button) if repeat => {}
+                        Some(WidgetViewKind::Button) => {
+                            self.press_button_key(state, named, module, widget, shell);
+                        }
+                        Some(WidgetViewKind::Radio { options }) => {
+                            let next = (position.round() as usize + 1) % options.len().max(1);
+                            self.set_control(shell, module, widget, next as f32);
+                        }
+                        _ => {}
                     }
-                    // A repeated key must not press again. The first press is
-                    // still held, so key up can release it.
-                    Some(WidgetViewKind::Button) if repeat => {}
-                    Some(WidgetViewKind::Button) => {
-                        self.press_button_key(state, named, module, widget, shell);
+                    true
+                } else if matches!(named, Named::Space) {
+                    // Space with nothing focused is the Run shortcut. A
+                    // repeat is swallowed so holding the key does not toggle
+                    // again. Enter is not that shortcut.
+                    if !repeat {
+                        self.emit(shell, CanvasEvent::ToggleRun);
                     }
-                    Some(WidgetViewKind::Radio { options }) => {
-                        let next = (position.round() as usize + 1) % options.len().max(1);
-                        self.set_control(shell, module, widget, next as f32);
-                    }
-                    _ => {}
+                    true
+                } else {
+                    false
                 }
-                true
             }
             _ => false,
         };
@@ -2095,5 +2108,33 @@ mod tests {
             centre,
         );
         assert_eq!(pointer_up, vec![CanvasEvent::ButtonReleased { module: 1, widget: 0 }]);
+    }
+
+    /// Space with no focused control asks the app to toggle Run. Enter does
+    /// not, a repeat does not, and a focused button still takes Space.
+    #[test]
+    fn space_with_no_focus_toggles_run() {
+        let scene = Scene::new(vec![button_module()], Vec::new());
+        let at = Point::new(10.0, 10.0);
+        let selected = BTreeSet::from([1]);
+        let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+        let mut state = State::default();
+
+        let space = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Space, true), at);
+        assert_eq!(space, vec![CanvasEvent::ToggleRun]);
+
+        let mut repeat = key_event(keyboard::key::Named::Space, true);
+        if let Event::Keyboard(keyboard::Event::KeyPressed { repeat, .. }) = &mut repeat {
+            *repeat = true;
+        }
+        let again = drive(&canvas, &mut state, &repeat, at);
+        assert!(again.is_empty());
+
+        let enter = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Enter, true), at);
+        assert!(enter.is_empty());
+
+        state.focus = Some((1, 0));
+        let focused = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Space, true), at);
+        assert_eq!(focused, vec![CanvasEvent::ButtonPressed { module: 1, widget: 0 }]);
     }
 }

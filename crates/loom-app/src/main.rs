@@ -558,6 +558,12 @@ impl App {
                 self.sync_probes();
                 self.refresh_values();
             }
+            CanvasEvent::ToggleRun => {
+                let running = !self.controller.transport().running;
+                if let Err(e) = self.controller.set_running(running) {
+                    self.status = format!("error: {e}");
+                }
+            }
             CanvasEvent::Delete(ids) => {
                 for id in &ids {
                     if self.controller.remove_module(ModuleId(*id)).is_ok() {
