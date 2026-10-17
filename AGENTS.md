@@ -69,7 +69,7 @@ Other tools (Bitwig Grid, VCV Rack, Eurorack modules, Reaktor) inspire LoomDSP, 
 
 - Design from our own use cases, requirements, and module catalogue, not from another product's module list.
 - Use our own words and names. Never copy text, module lists, parameter sets, or UI from another product or its documentation.
-- Name another tool only to explain an idea or a convention to users, for example "like a range switch on a Eurorack module" or "1 V per octave".
+- Name another tool only to explain an idea or a convention, for example "like a range switch on a Eurorack module" or "1 V per octave".
 
 Why: working through another product's catalogue makes it the outline of our design, and its selection, names, and wording slip in even by accident. LoomDSP should be original, both legally and in what it offers.
 
