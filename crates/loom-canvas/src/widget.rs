@@ -15,7 +15,7 @@ use iced::advanced::{Clipboard, Shell, Widget};
 use iced::{Color, Element, Event, Font, Length, Pixels, Point, Rectangle, Size, Vector};
 use iced::{alignment, keyboard, mouse, window};
 use std::cell::RefCell;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -106,10 +106,29 @@ pub enum CanvasEvent {
     /// The modules whose lights or meters are on screen, at a zoom where
     /// they are drawn, changed. Only these need their values read.
     VisibleDisplays(Vec<u32>),
+    /// In MIDI learn mode, a control was clicked: arm it, or disarm it if it
+    /// is armed. Its value does not change (`docs/design/midi-learn.md`).
+    Learn {
+        /// Module ID.
+        module: u32,
+        /// Index in the module's panel widgets.
+        widget: usize,
+    },
     /// Space was pressed and no panel control is focused. The app toggles
     /// transport Run. Enter does not send this, and neither does Space while
     /// a control is focused.
     ToggleRun,
+}
+
+/// What MIDI learn mode shows on the canvas. While the canvas has one, a
+/// click on a control arms it instead of changing it.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct LearnView {
+    /// The armed control: module ID and widget index.
+    pub armed: Option<(u32, usize)>,
+    /// Mapping labels, such as `CC 74`, by module ID and widget index. They
+    /// show in place of the control's caption.
+    pub labels: BTreeMap<(u32, usize), String>,
 }
 
 /// The patch canvas. Draws a [`Scene`] and reports gestures as
@@ -122,6 +141,7 @@ pub struct PatchCanvas<'a, Message> {
     on_event: Box<dyn Fn(CanvasEvent) -> Message + 'a>,
     frame_key: u64,
     animate: bool,
+    learn: Option<&'a LearnView>,
 }
 
 impl<'a, Message> PatchCanvas<'a, Message> {
@@ -135,7 +155,14 @@ impl<'a, Message> PatchCanvas<'a, Message> {
             on_event: Box::new(on_event),
             frame_key: 0,
             animate: false,
+            learn: None,
         }
+    }
+
+    /// Turns on MIDI learn mode, with what it shows.
+    pub fn learn(mut self, learn: Option<&'a LearnView>) -> Self {
+        self.learn = learn;
+        self
     }
 
     /// Sets the live values of panel controls and lights.
@@ -389,7 +416,7 @@ where
             CanvasPrimitive {
                 geometry,
                 controls,
-                overlay: self.overlay(state),
+                overlay: self.overlay_in(state, state.camera.visible(bounds.size())),
                 bars,
                 camera: state.camera,
                 cable_dim: CABLE_OPACITY,
@@ -911,7 +938,24 @@ impl<Message> PatchCanvas<'_, Message> {
             }
             keyboard::Key::Named(Named::Escape) if state.focus.is_some() => {
                 state.focus = None;
+                // In MIDI learn mode, Escape also ends the mode, so the app
+                // must see it too.
+                self.learn.is_none()
+            }
+            // In MIDI learn mode the keyboard arms the focused control, like
+            // a click, and never changes a value (midi-learn.md).
+            // With nothing focused, Space still toggles Run below: that is
+            // the transport, not a parameter.
+            keyboard::Key::Named(Named::Space | Named::Enter) if self.learn.is_some() && state.focus.is_some() => {
+                if !repeat && let Some((module, widget)) = state.focus {
+                    self.emit(shell, CanvasEvent::Learn { module, widget });
+                }
                 true
+            }
+            keyboard::Key::Named(Named::ArrowUp | Named::ArrowRight | Named::ArrowDown | Named::ArrowLeft)
+                if self.learn.is_some() =>
+            {
+                false
             }
             keyboard::Key::Named(
                 named @ (Named::ArrowUp | Named::ArrowRight | Named::ArrowDown | Named::ArrowLeft),
@@ -1002,6 +1046,13 @@ impl<Message> PatchCanvas<'_, Message> {
             state.focus = None;
         }
         match hit {
+            Hit::Widget { module, widget } if self.learn.is_some() && self.is_control(module, widget) => {
+                self.select_for_edit(module, shell);
+                // The clicked control takes the keyboard focus, so Space or
+                // Enter acts on it next, not on a control focused earlier.
+                state.focus = Some((module, widget));
+                self.emit(shell, CanvasEvent::Learn { module, widget });
+            }
             Hit::Widget { module, widget } => {
                 self.select_for_edit(module, shell);
                 state.focus = Some((module, widget));
@@ -1128,6 +1179,43 @@ impl<Message> PatchCanvas<'_, Message> {
             Hit::Cable(index) => Some(index),
             _ => None,
         }
+    }
+
+    /// The overlay for a view whose visible world area is `visible`. Learn
+    /// mode outlines only the controls there, so its cost follows what is on
+    /// screen, not the size of the patch.
+    fn overlay_in(&self, state: &State, visible: Rectangle) -> Overlay {
+        let mut overlay = self.overlay(state);
+        let p = &self.palette;
+        // MIDI learn mode outlines every control on screen, and the armed
+        // one more strongly, so the user sees what a click will do.
+        if let Some(learn) = self.learn {
+            let visible_modules = self
+                .scene
+                .modules()
+                .iter()
+                .filter(|module| module.bounds().intersects(&visible));
+            for module in visible_modules {
+                for (index, view) in module.panel.widgets.iter().enumerate() {
+                    if !view.is_control() {
+                        continue;
+                    }
+                    let Some(rect) = module.widget_bounds(index) else {
+                        continue;
+                    };
+                    let (ring, radius) = focus_ring(&view.kind, rect);
+                    let (colour, width) = if learn.armed == Some((module.id, index)) {
+                        (p.selection, 2.5)
+                    } else {
+                        (p.focus, 1.0)
+                    };
+                    overlay
+                        .shapes
+                        .push(Shape::new(ring, radius, Color::TRANSPARENT, colour, width));
+                }
+            }
+        }
+        overlay
     }
 
     fn overlay(&self, state: &State) -> Overlay {
@@ -1299,7 +1387,16 @@ impl<Message> PatchCanvas<'_, Message> {
                 };
                 // A focused or turning knob shows its value instead of its
                 // caption.
+                // In MIDI learn mode, a mapped control shows its mapping.
+                let learned = match item.kind {
+                    TextKind::Caption(widget) => self
+                        .learn
+                        .and_then(|learn| learn.labels.get(&(module.id, widget)))
+                        .map(String::as_str),
+                    _ => None,
+                };
                 let value = match item.kind {
+                    _ if learned.is_some() => learned,
                     TextKind::Caption(widget) if active == Some((module.id, widget)) => values
                         .get(module.id, widget)
                         .filter(|_| matches!(module.panel.widgets[widget].kind, WidgetViewKind::Knob { .. }))
@@ -2136,5 +2233,133 @@ mod tests {
         state.focus = Some((1, 0));
         let focused = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Space, true), at);
         assert_eq!(focused, vec![CanvasEvent::ButtonPressed { module: 1, widget: 0 }]);
+    }
+
+    fn learning<'a>(
+        scene: &'a Scene,
+        selected: &'a BTreeSet<u32>,
+        learn: &'a LearnView,
+    ) -> PatchCanvas<'a, CanvasEvent> {
+        PatchCanvas::new(scene, selected, |e| e).learn(Some(learn))
+    }
+
+    fn arrow_up() -> Event {
+        let key = keyboard::Key::Named(keyboard::key::Named::ArrowUp);
+        Event::Keyboard(keyboard::Event::KeyPressed {
+            modified_key: key.clone(),
+            key,
+            physical_key: keyboard::key::Physical::Code(keyboard::key::Code::ArrowUp),
+            location: keyboard::Location::Standard,
+            modifiers: keyboard::Modifiers::default(),
+            text: None,
+            repeat: false,
+        })
+    }
+
+    /// In MIDI learn mode a click arms a knob or a button and takes the
+    /// keyboard focus. It never turns the knob or presses the button.
+    #[test]
+    fn a_learn_click_arms_and_focuses_without_changing_a_value() {
+        let mut m = module(1, 0.0);
+        m.panel = panel();
+        let button = ModuleView {
+            id: 2,
+            position: Point::new(400.0, 0.0),
+            ..button_module()
+        };
+        let scene = Scene::new(vec![m, button], Vec::new());
+        let selected = BTreeSet::from([1]);
+        let learn = LearnView::default();
+        let canvas = learning(&scene, &selected, &learn);
+        let mut state = State {
+            focus: Some((1, 2)),
+            tab_focus: true,
+            ..State::default()
+        };
+        let knob = scene.module(1).unwrap().widget_bounds(0).unwrap().center();
+        let events = drive(&canvas, &mut state, &click(mouse::Button::Left), knob);
+        assert_eq!(events, vec![CanvasEvent::Learn { module: 1, widget: 0 }]);
+        assert!(matches!(state.interaction, Interaction::Idle));
+        assert_eq!(state.focus, Some((1, 0)));
+
+        let button = scene.module(2).unwrap().widget_bounds(0).unwrap().center();
+        let events = drive(&canvas, &mut state, &click(mouse::Button::Left), button);
+        assert!(
+            events.contains(&CanvasEvent::Learn { module: 2, widget: 0 }),
+            "{events:?}"
+        );
+        assert!(
+            events.iter().all(|e| !matches!(e, CanvasEvent::ButtonPressed { .. })),
+            "{events:?}"
+        );
+    }
+
+    /// In MIDI learn mode Space and Enter arm the focused control, arrows do
+    /// nothing, and Escape is left for the app, which ends the mode.
+    #[test]
+    fn learn_mode_keys_arm_and_never_change_a_value() {
+        let mut m = module(1, 0.0);
+        m.panel = panel();
+        let scene = Scene::new(vec![m], Vec::new());
+        let selected = BTreeSet::from([1]);
+        let learn = LearnView::default();
+        let canvas = learning(&scene, &selected, &learn);
+        let at = Point::new(10.0, 10.0);
+        let mut state = State {
+            focus: Some((1, 0)),
+            tab_focus: true,
+            ..State::default()
+        };
+        for key in [keyboard::key::Named::Space, keyboard::key::Named::Enter] {
+            let events = drive(&canvas, &mut state, &key_event(key, true), at);
+            assert_eq!(events, vec![CanvasEvent::Learn { module: 1, widget: 0 }]);
+        }
+        assert!(drive(&canvas, &mut state, &arrow_up(), at).is_empty());
+
+        let escape = {
+            let key = keyboard::Key::Named(keyboard::key::Named::Escape);
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                modified_key: key.clone(),
+                key: key.clone(),
+                physical_key: keyboard::key::Physical::Code(keyboard::key::Code::Escape),
+                location: keyboard::Location::Standard,
+                modifiers: keyboard::Modifiers::default(),
+                text: None,
+                repeat: false,
+            })
+        };
+        let mut messages = Vec::new();
+        let mut shell = Shell::new(&mut messages);
+        let bounds = Rectangle::new(Point::ORIGIN, Size::new(800.0, 600.0));
+        canvas.handle(&mut state, &escape, bounds, mouse::Cursor::Available(at), &mut shell);
+        assert_eq!(
+            shell.event_status(),
+            iced::event::Status::Ignored,
+            "the app must see Escape"
+        );
+        assert_eq!(state.focus, None);
+
+        // With nothing focused, Space is still the Run shortcut.
+        let events = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Space, true), at);
+        assert_eq!(events, vec![CanvasEvent::ToggleRun]);
+    }
+
+    /// Learn mode outlines controls on screen only.
+    #[test]
+    fn learn_outlines_cover_only_visible_tiles() {
+        let mut near = module(1, 0.0);
+        near.panel = panel();
+        let far = ModuleView {
+            panel: panel(),
+            ..module(2, 5_000.0)
+        };
+        let scene = Scene::new(vec![near, far], Vec::new());
+        let none = BTreeSet::new();
+        let learn = LearnView::default();
+        let canvas = learning(&scene, &none, &learn);
+        let plain = canvas.overlay(&State::default()).shapes.len();
+        let view = Rectangle::new(Point::new(-50.0, -50.0), Size::new(800.0, 600.0));
+        // Two controls (a knob and a toggle) on the one visible tile.
+        assert_eq!(canvas.overlay_in(&State::default(), view).shapes.len(), plain + 2);
     }
 }

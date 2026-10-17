@@ -9,7 +9,8 @@ use crate::compile::{AssignmentRuntime, ModuleOp, ParamFill, Schedule, Step};
 use crate::descriptor::{MAX_DISPLAYS, Polarity};
 use crate::display::DisplayTable;
 use crate::graph::AssignmentId;
-use crate::midi::MidiEvent;
+use crate::midi::{MidiEvent, MidiMessage};
+use crate::midi_map::{MidiControl, MidiFeedback, later};
 use crate::module::{Module, PortIo, ProcessContext};
 use crate::telemetry::{MeterReading, SCOPE_CHUNK, ScopeChunk, TelemetrySender, measure};
 use crate::transport::{TimeSignature, Transport};
@@ -98,6 +99,9 @@ pub(crate) enum Command {
         slot: usize,
         index: usize,
         value: f32,
+        /// For a mapped parameter: its control and the edit's token, so the
+        /// controller can order this edit against control changes.
+        edit: Option<(MidiControl, u32)>,
     },
     /// Depth, polarity, and enabled flag of one assignment. Ignored when the
     /// running schedule has no assignment with this id.
@@ -135,6 +139,14 @@ pub struct Engine {
     garbage: Producer<Garbage>,
     midi_in: Consumer<MidiEvent>,
     midi: Vec<MidiEvent>,
+    /// What MIDI mappings did, for the controller (MIDI learn).
+    midi_feedback: Arc<MidiFeedback>,
+    /// Control changes received, for [`MidiFeedback::record`]. Never 0
+    /// after the first one.
+    cc_serial: u32,
+    /// One sequence for mapped control changes and screen edits, so the
+    /// controller can tell which came last.
+    feedback_sequence: u32,
     telemetry: TelemetrySender,
     /// The patch transport (ADR-0015). Not part of the schedule, so editing
     /// the patch never moves it.
@@ -151,7 +163,7 @@ impl Engine {
         config: EngineConfig,
         commands: Consumer<Command>,
         garbage: Producer<Garbage>,
-        midi_in: Consumer<MidiEvent>,
+        (midi_in, midi_feedback): (Consumer<MidiEvent>, Arc<MidiFeedback>),
         telemetry: TelemetrySender,
         displays: Arc<DisplayTable>,
         stats: Arc<EngineStats>,
@@ -165,6 +177,9 @@ impl Engine {
             garbage,
             midi_in,
             midi: Vec::with_capacity(config.midi_capacity),
+            midi_feedback,
+            cc_serial: 0,
+            feedback_sequence: 0,
             telemetry,
             transport: Transport::new(config.sample_rate),
             frame: 0,
@@ -186,6 +201,7 @@ impl Engine {
         let frames = left.len().min(right.len());
         self.apply_commands();
         self.collect_midi(frames);
+        self.apply_midi_maps();
 
         left[..frames].fill(0.0);
         right[..frames].fill(0.0);
@@ -252,22 +268,19 @@ impl Engine {
                     });
                     let old = std::mem::replace(&mut self.schedule, schedule);
                     self.discard(Garbage::Schedule(old));
+                    self.reapply_midi_maps();
                     self.stats.schedule_swaps.fetch_add(1, Ordering::Relaxed);
                 }
-                Command::SetParam { slot, index, value } => {
-                    if let Some(module) = self.slots[slot].as_mut() {
-                        module.set_param(index, value);
-                    }
-                    let slot = slot as u32;
-                    let index = index as u16;
-                    for fill in &mut self.schedule.fills {
-                        if fill.slot == slot && fill.param == index {
-                            fill.base = value;
-                            if let Some(smooth) = fill.smooth.as_mut() {
-                                smooth.set_target(fill.spec.normalize(value));
-                            }
-                            break;
-                        }
+                Command::SetParam {
+                    slot,
+                    index,
+                    value,
+                    edit,
+                } => {
+                    set_base(&mut self.slots, &mut self.schedule.fills, slot, index, value);
+                    if let Some((control, token)) = edit {
+                        self.feedback_sequence = self.feedback_sequence.wrapping_add(1);
+                        self.midi_feedback.write_edit(control, token, self.feedback_sequence);
                     }
                 }
                 Command::UpdateAssignment {
@@ -370,6 +383,63 @@ impl Engine {
             // keeps the audio thread free of allocation.
             let at = self.midi.partition_point(|e| e.frame <= event.frame);
             self.midi.insert(at, event);
+        }
+    }
+
+    /// Sets the base value of every mapped parameter whose control change
+    /// arrived in this buffer, at its start (MIDI learn, rule 4). Every
+    /// control change is also recorded for learning, and the events stay in
+    /// the list, so modules still see them (rule 6).
+    fn apply_midi_maps(&mut self) {
+        for event in &self.midi {
+            let MidiMessage::ControlChange {
+                channel,
+                controller,
+                value,
+            } = event.message()
+            else {
+                continue;
+            };
+            let control = MidiControl { channel, controller };
+            self.cc_serial = self.cc_serial.wrapping_add(1).max(1);
+            self.midi_feedback.record(control, value, self.cc_serial);
+            let maps = &self.schedule.midi_maps;
+            let start = maps.partition_point(|map| map.control < control);
+            for map in maps[start..].iter().take_while(|map| map.control == control) {
+                let base = crate::midi_map::control_value(map.spec, value);
+                set_base(
+                    &mut self.slots,
+                    &mut self.schedule.fills,
+                    map.slot as usize,
+                    usize::from(map.param),
+                    base,
+                );
+                self.feedback_sequence = self.feedback_sequence.wrapping_add(1);
+                self.midi_feedback.write(control, map.id, self.feedback_sequence, value);
+            }
+        }
+    }
+
+    /// After a swap: a control change applied to the old schedule after the
+    /// new one was compiled is missing from the new one's base values.
+    /// Applies it again (MIDI learn, rule 2), unless a screen edit came
+    /// after it. Screen edits made after the compile are queued behind the
+    /// swap, so they still win.
+    fn reapply_midi_maps(&mut self) {
+        for map in &self.schedule.midi_maps {
+            let entry = self.midi_feedback.read(map.control);
+            let (token, edited) = self.midi_feedback.read_edit(map.control);
+            let newest = token == 0 || later(entry.sequence, edited);
+            if entry.id == map.id && Some(entry.sequence) != map.synced && newest {
+                let base = crate::midi_map::control_value(map.spec, entry.value);
+                set_base(
+                    &mut self.slots,
+                    &mut self.schedule.fills,
+                    map.slot as usize,
+                    usize::from(map.param),
+                    base,
+                );
+            }
         }
     }
 
@@ -514,6 +584,25 @@ impl Engine {
         clip_output(right);
 
         self.transport.end_block();
+    }
+}
+
+/// Sets a parameter's base value: on the module, and on its fill if it is
+/// modulated, where a smoothed base glides to it.
+fn set_base(slots: &mut [Option<Box<dyn Module>>], fills: &mut [ParamFill], slot: usize, index: usize, value: f32) {
+    if let Some(module) = slots[slot].as_mut() {
+        module.set_param(index, value);
+    }
+    let slot = slot as u32;
+    let index = index as u16;
+    for fill in fills {
+        if fill.slot == slot && fill.param == index {
+            fill.base = value;
+            if let Some(smooth) = fill.smooth.as_mut() {
+                smooth.set_target(fill.spec.normalize(value));
+            }
+            break;
+        }
     }
 }
 

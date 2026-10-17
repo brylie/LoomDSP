@@ -72,7 +72,7 @@ The editing and display work ships in three slices, so each one can be built and
 #### Editing and removing
 
 - Depth, polarity, and on/off are edited in the inspector row. They take effect at the next buffer and do not recompile (engine rule, see [Engine and API](#engine-and-api)).
-- The remove button removes that assignment.
+- The remove button removes that assignment. It is the inspector's small **×** button ([removing an item](panels.md#removing-an-item)).
 - Deleting a module removes the assignments it is part of. Its badge counts and arcs update.
 - Saving writes assignments into the patch, as the engine already does.
 
@@ -251,7 +251,7 @@ A **Macro** module (FR-LIB-12) has one knob on its panel and one output equal to
 - Per-voice modulation (with polyphony, P2).
 - Response curves on assignments (for example exponential depth).
 - Assignments across sub-patch boundaries. Not planned: expose the parameter instead.
-- MIDI learn. It maps a controller to a base value, a separate feature ([#24](https://github.com/brylie/LoomDSP/issues/24)).
+- MIDI learn. It maps a controller to a base value, a separate feature ([MIDI learn](midi-learn.md), [#24](https://github.com/brylie/LoomDSP/issues/24)).
 
 ## Open points
 

@@ -21,6 +21,7 @@
 
 use crate::descriptor::{ModuleRole, ParamSpec, Polarity, PortDefault};
 use crate::graph::{AssignmentId, Graph, InputRef, ModuleId, OutputRef};
+use crate::midi_map::{MidiMapOp, MidiMappingId};
 use crate::telemetry::{ProbeId, ProbeKind};
 use loom_rt::Smoothed;
 use std::collections::{BTreeMap, BTreeSet};
@@ -189,6 +190,8 @@ pub(crate) struct Schedule {
     pub fills: Vec<ParamFill>,
     pub assignments: Vec<AssignmentRuntime>,
     pub param_ptrs: Vec<(u16, *const f32)>,
+    /// MIDI mappings, sorted by control.
+    pub midi_maps: Vec<MidiMapOp>,
 }
 
 // SAFETY: the raw pointers only point into buffers owned by this schedule.
@@ -214,6 +217,7 @@ impl Schedule {
             fills: Vec::new(),
             assignments: Vec::new(),
             param_ptrs: Vec::new(),
+            midi_maps: Vec::new(),
         }
     }
 
@@ -309,6 +313,7 @@ struct FillSpec {
 pub(crate) fn compile(
     graph: &Graph,
     probes: &BTreeMap<ProbeId, (OutputRef, ProbeKind)>,
+    midi_synced: &BTreeMap<MidiMappingId, u32>,
     sample_rate: f32,
     max_block: usize,
 ) -> (Schedule, CompileReport) {
@@ -903,8 +908,31 @@ pub(crate) fn compile(
             })
             .collect(),
         param_ptrs,
+        midi_maps: compile_midi_maps(graph, midi_synced),
     };
     (schedule, report)
+}
+
+/// The graph's MIDI mappings, sorted by control so the engine can find a
+/// control change's mapping with a binary search.
+fn compile_midi_maps(graph: &Graph, synced: &BTreeMap<MidiMappingId, u32>) -> Vec<MidiMapOp> {
+    let mut maps: Vec<MidiMapOp> = graph
+        .midi_mappings
+        .iter()
+        .filter_map(|(&id, mapping)| {
+            let node = graph.nodes.get(&mapping.target)?;
+            Some(MidiMapOp {
+                control: mapping.control,
+                id,
+                synced: synced.get(&id).copied(),
+                slot: node.slot? as u32,
+                param: u16::try_from(mapping.param).ok()?,
+                spec: node.descriptor.params.get(mapping.param)?,
+            })
+        })
+        .collect();
+    maps.sort_by_key(|map| map.control);
+    maps
 }
 
 /// Tarjan's strongly connected components. Returns SCCs in reverse
@@ -1048,7 +1076,7 @@ mod tests {
 
     #[test]
     fn inputs_that_follow_the_same_default_share_one_buffer() {
-        let schedule = compile(&followers(100), &BTreeMap::new(), 48_000.0, 64).0;
+        let schedule = compile(&followers(100), &BTreeMap::new(), &BTreeMap::new(), 48_000.0, 64).0;
         // 100 outputs, one bar phase buffer, one buffer holding 0.5.
         assert_eq!(schedule._buffers.len(), 102);
         let bar = schedule.transport.bar_phase.expect("bar phase is used") as *const f32;
@@ -1078,7 +1106,7 @@ mod tests {
             port: 0,
         };
         graph.cables.insert(to, from);
-        let schedule = compile(&graph, &BTreeMap::new(), 48_000.0, 64).0;
+        let schedule = compile(&graph, &BTreeMap::new(), &BTreeMap::new(), 48_000.0, 64).0;
         // Module 2 runs first; module 1 reads module 2's output.
         let source = schedule.output_ptrs[schedule.ops[0].outputs.0 as usize] as *const f32;
         assert_eq!(input_ptr(&schedule, 1, 0), source);
