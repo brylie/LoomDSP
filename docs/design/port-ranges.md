@@ -125,7 +125,7 @@ The width matters for warnings. A warning that a gate *never* goes high is safe,
 
 ### Tier 3: suggestions, never automatic changes
 
-- **Match range.** A parameter that offers ranges ([control ranges](control-ranges.md)) can show a **Match** button next to its Range selector, for example "Match: -1 to 1". Clicking it selects the smallest listed range that holds the expected ranges of every input the module's output feeds. For Constant `value` and Add `offset`, that is the whole rule. For Multiply `gain`, see Open points.
+- **Match range.** A parameter that offers ranges ([control ranges](control-ranges.md)) can show a **Match** button next to its Range selector, for example "Match: -1 to 1". Clicking it selects the smallest listed range that holds the expected ranges of every input the module's output feeds. For Constant `value`, that is the whole rule. Add `offset` gets the same rule only while neither A nor B has a cable, because Add then sends just its offset, as a Constant does. With a cable on A or B, the offset that keeps the output in range depends on the inputs, so Add offers no Match (see Open points). For Multiply `gain`, see Open points too.
 - **No suggestion** when the module's output has no cable, when the match is the range already selected, or when only the widest range would hold it.
 - Clicking Match is the same as picking that range by hand. Control ranges rule 6 applies: a smaller range clamps the value, a wider one keeps it. It is one undo step.
 - **New module from a cable.** If the canvas gets a gesture that creates a module from a dragged cable (not specified yet), the new module's ranges are chosen once, by the same match rule, instead of the author's defaults. From then on they are ordinary saved choices, and nothing changes them except the player.
@@ -183,6 +183,7 @@ The width matters for warnings. A warning that a gate *never* goes high is safe,
 ### Tier 3
 
 - [ ] A Constant feeding a pitch input offers "Match: -1 to 1" (the smallest listed range that holds -0.5 to 0.5).
+- [ ] Add with no cables offers the same Match as a Constant. Add with a cable on A or B offers none.
 - [ ] Clicking Match selects that range, follows control ranges rule 6, and undoes in one step.
 - [ ] Moving or removing a cable never changes any module's selected range or value.
 - [ ] A patch loads with its saved ranges and values, whatever the graph's estimates.
@@ -203,7 +204,8 @@ The width matters for warnings. A warning that a gate *never* goes high is safe,
 - **How is overestimation shown?** Options: the word "about" (current draft), a "~" prefix, showing a range only when it differs from the convention, or a tooltip that explains why it may be wide. Try with users.
 - **Pitch convention.** -0.5 to 0.5 (ten octaves) is a proposal. A narrower span gives earlier warnings; a wider one fewer false ones.
 - **Warning thresholds.** "More than 4 times the expected span" is a guess. Also: should a warning add a static mark on the port on the canvas? FR-VIS-01 rules out motion, not marks, but marks add clutter.
-- **Match for Multiply `gain`.** The useful gain maps the received span of A onto the expected span downstream: expected span divided by received span. That is less obvious to the player than the Constant and Add rules. Leaning: leave Multiply out of the first cut.
+- **Match for Add `offset` with inputs connected.** The rule for a Constant would be wrong here. With A fixed at 5 and an offset of -5, Add sends 0 into a pitch input, which is fine. A Match of -1 to 1 would clamp the offset to -1, and Add would send 4. A correct rule picks the range that holds every offset putting the output inside the expected range: from the expected minimum minus the highest input sum, to the expected maximum minus the lowest input sum. Because estimates can be too wide, this needs care. Leaning: no Match for Add with cables in the first cut.
+- **Match for Multiply `gain`.** The useful gain maps the received span of A onto the expected span downstream: expected span divided by received span. That is less obvious to the player than the Constant rule. Leaning: leave Multiply out of the first cut.
 - **A `loom-core` API.** Leaning: `Controller::port_range(port)` and a list of warnings, so `loom check` can print the same warnings as the app.
 - **Which tier goes in which phase** ([roadmap](../product/roadmap.md)). Leaning:
   - Tier 1 in P1, with modulation, because modulation rule 4 needs polarity on every output anyway.
