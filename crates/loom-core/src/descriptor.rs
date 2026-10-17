@@ -4,26 +4,42 @@ use crate::module::Module;
 use crate::signal::SignalType;
 
 /// One input or output port.
+///
+/// Write it as a struct literal, so every field is named and a missing one
+/// is a compile error:
+///
+/// ```
+/// use loom_core::{PortDefault, PortSpec, SignalType};
+///
+/// const RESET: PortSpec = PortSpec {
+///     name: "reset",
+///     label: "Reset",
+///     signal: SignalType::Gate,
+///     description: "Starts the count again.",
+///     default: PortDefault::Value(0.0),
+/// };
+/// ```
+///
+/// The name is a stable ID: patch files store it, so never rename a
+/// released port. The label and description are text for people. They can
+/// be reworded at any time, because patch files never store them.
 #[derive(Debug, Clone, Copy)]
 pub struct PortSpec {
     /// Stable name used in patch files. Never rename a released port.
     pub name: &'static str,
+    /// Short display name, for example "Reset". Not stored in patches.
+    pub label: &'static str,
     /// Signal type, for colour and defaults.
     pub signal: SignalType,
-    /// What an input reads while no cable is connected. Ignored on outputs.
+    /// What the port does, in one short sentence that fits a tooltip.
+    /// Not stored in patches. Longer theory goes in `docs/learn/`.
+    pub description: &'static str,
+    /// What an input reads while no cable is connected. Ignored on outputs;
+    /// write `PortDefault::Value(0.0)` there.
     pub default: PortDefault,
 }
 
 impl PortSpec {
-    /// Creates a port spec. Unconnected, it reads 0.
-    pub const fn new(name: &'static str, signal: SignalType) -> Self {
-        Self {
-            name,
-            signal,
-            default: PortDefault::Value(0.0),
-        }
-    }
-
     /// Sets what the input reads while no cable is connected.
     pub const fn with_default(mut self, default: PortDefault) -> Self {
         self.default = default;
@@ -49,10 +65,39 @@ pub enum PortDefault {
 }
 
 /// One parameter.
+///
+/// Write it as a struct literal, so every field is named and a missing one
+/// is a compile error. Optional settings live in [`ParamOptions`]; start
+/// from [`ParamOptions::DEFAULT`] and use the builder methods:
+///
+/// ```
+/// use loom_core::{ParamOptions, ParamSpec};
+///
+/// const N: ParamSpec = ParamSpec {
+///     name: "n",
+///     label: "Division",
+///     description: "Fires on every Nth trigger.",
+///     min: 1.0,
+///     max: 64.0,
+///     default: 2.0,
+///     unit: "",
+///     options: ParamOptions::DEFAULT,
+/// }
+/// .integer();
+/// ```
+///
+/// The name is a stable ID: patch files store it, so never rename a
+/// released parameter. The label and description are text for people. They
+/// can be reworded at any time, because patch files never store them.
 #[derive(Debug, Clone, Copy)]
 pub struct ParamSpec {
-    /// Stable name used in patch files.
+    /// Stable name used in patch files. Never rename a released parameter.
     pub name: &'static str,
+    /// Short display name, for example "Cutoff". Not stored in patches.
+    pub label: &'static str,
+    /// What the parameter does, in one short sentence that fits a tooltip.
+    /// Not stored in patches. Longer theory goes in `docs/learn/`.
+    pub description: &'static str,
     /// Minimum value.
     pub min: f32,
     /// Maximum value.
@@ -61,11 +106,39 @@ pub struct ParamSpec {
     pub default: f32,
     /// Display unit, for example "Hz", "s", or "".
     pub unit: &'static str,
+    /// Optional settings. Write [`ParamOptions::DEFAULT`] and change them
+    /// with the builder methods, such as [`ParamSpec::integer`].
+    pub options: ParamOptions,
+}
+
+/// Optional settings of a [`ParamSpec`].
+///
+/// It is a separate struct with a [`ParamOptions::DEFAULT`] constant, so a
+/// new option later breaks no module. `ParamSpec` as a whole has no default,
+/// because its label and description must always be written. A constant,
+/// not `Default::default()`, because descriptors are `static`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ParamOptions {
     /// True for whole-number parameters, such as a MIDI channel or a seed.
     /// Values are rounded, and editors step by 1.
     pub integer: bool,
     /// How the value maps to its control's position.
     pub mapping: ParamMapping,
+}
+
+impl ParamOptions {
+    /// No options: a linear parameter with any value in range.
+    pub const DEFAULT: Self = Self {
+        integer: false,
+        mapping: ParamMapping::Linear,
+    };
+}
+
+impl Default for ParamOptions {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
 }
 
 /// How a parameter's value maps to its control's position, from 0 to 1.
@@ -87,28 +160,15 @@ pub enum ParamMapping {
 }
 
 impl ParamSpec {
-    /// Creates a parameter spec.
-    pub const fn new(name: &'static str, min: f32, max: f32, default: f32, unit: &'static str) -> Self {
-        Self {
-            name,
-            min,
-            max,
-            default,
-            unit,
-            integer: false,
-            mapping: ParamMapping::Linear,
-        }
-    }
-
     /// Marks the parameter as a whole number.
     pub const fn integer(mut self) -> Self {
-        self.integer = true;
+        self.options.integer = true;
         self
     }
 
     /// Maps the parameter logarithmically, for frequencies and times.
     pub const fn logarithmic(mut self) -> Self {
-        self.mapping = ParamMapping::Logarithmic;
+        self.options.mapping = ParamMapping::Logarithmic;
         self
     }
 
@@ -117,7 +177,7 @@ impl ParamSpec {
     pub fn clamp(&self, value: f32) -> f32 {
         if value.is_nan() {
             self.default
-        } else if self.integer {
+        } else if self.options.integer {
             value.round().clamp(self.min, self.max)
         } else {
             value.clamp(self.min, self.max)
@@ -131,7 +191,7 @@ impl ParamSpec {
         if self.max <= self.min {
             return 0.0;
         }
-        let position = match self.mapping {
+        let position = match self.options.mapping {
             ParamMapping::Linear => (value - self.min) / (self.max - self.min),
             ParamMapping::Logarithmic => (value / self.min).ln() / (self.max / self.min).ln(),
         };
@@ -146,7 +206,7 @@ impl ParamSpec {
             return self.default;
         }
         let t = position.clamp(0.0, 1.0);
-        let value = match self.mapping {
+        let value = match self.options.mapping {
             ParamMapping::Linear => self.min + t * (self.max - self.min),
             ParamMapping::Logarithmic => self.min * (self.max / self.min).powf(t),
         };
@@ -382,11 +442,12 @@ impl ModuleDescriptor {
                 };
                 let param = &self.params[index];
                 let values = param.max - param.min + 1.0;
+                let integer = param.options.integer;
                 match widget.kind {
-                    WidgetKind::Toggle if !(param.integer && param.min == 0.0 && param.max == 1.0) => {
+                    WidgetKind::Toggle if !(integer && param.min == 0.0 && param.max == 1.0) => {
                         return Err(name("a toggle needs a whole-number parameter from 0 to 1"));
                     }
-                    WidgetKind::Radio { options } if !(param.integer && values == options.len() as f32) => {
+                    WidgetKind::Radio { options } if !(integer && values == options.len() as f32) => {
                         return Err(name(
                             "radio buttons need a whole-number parameter with one value per option",
                         ));
@@ -419,6 +480,57 @@ impl ModuleDescriptor {
         Ok(())
     }
 
+    /// The first port or parameter with an empty (or blank) label or
+    /// description, in the order inputs, outputs, parameters.
+    pub const fn first_undocumented(&self) -> Option<Undocumented> {
+        let mut index = 0;
+        while let Some(text) = self.text(index) {
+            if is_blank(text.value) {
+                return Some(text.undocumented);
+            }
+            index += 1;
+        }
+        None
+    }
+
+    /// Every port and parameter with an empty (or blank) label or
+    /// description, in the order inputs, outputs, parameters.
+    pub fn undocumented(&self) -> Vec<Undocumented> {
+        (0..)
+            .map_while(|index| self.text(index))
+            .filter(|text| is_blank(text.value))
+            .map(|text| text.undocumented)
+            .collect()
+    }
+
+    /// Text field number `index`, counting the label and then the
+    /// description of each input, output, and parameter. One list for both
+    /// checks above, so they cannot disagree.
+    const fn text(&self, index: usize) -> Option<Text> {
+        let (port, field) = (index / 2, index % 2);
+        let (kind, name, label, description) = if port < self.inputs.len() {
+            let spec = &self.inputs[port];
+            (SpecKind::Input, spec.name, spec.label, spec.description)
+        } else if port < self.inputs.len() + self.outputs.len() {
+            let spec = &self.outputs[port - self.inputs.len()];
+            (SpecKind::Output, spec.name, spec.label, spec.description)
+        } else if port < self.inputs.len() + self.outputs.len() + self.params.len() {
+            let spec = &self.params[port - self.inputs.len() - self.outputs.len()];
+            (SpecKind::Parameter, spec.name, spec.label, spec.description)
+        } else {
+            return None;
+        };
+        let (missing, value) = if field == 0 {
+            (MissingText::Label, label)
+        } else {
+            (MissingText::Description, description)
+        };
+        Some(Text {
+            undocumented: Undocumented { kind, name, missing },
+            value,
+        })
+    }
+
     /// The `"id@version"` string used in patch files.
     pub fn kind(&self) -> String {
         format!("{}@{}", self.id, self.version)
@@ -430,13 +542,169 @@ impl ModuleDescriptor {
     }
 }
 
+/// A port or parameter with an empty label or description.
+///
+/// Every built-in module is checked at compile time with
+/// [`assert_documented`]. The `loom-test` harness fails on one, and the
+/// registry loads the module but keeps a note ([`Registry::notes`](crate::Registry::notes)).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Undocumented {
+    /// Whether it is an input, an output, or a parameter.
+    pub kind: SpecKind,
+    /// Its stable name.
+    pub name: &'static str,
+    /// Which text is empty.
+    pub missing: MissingText,
+}
+
+/// Whether a spec is an input, an output, or a parameter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpecKind {
+    /// An input port.
+    Input,
+    /// An output port.
+    Output,
+    /// A parameter.
+    Parameter,
+}
+
+impl SpecKind {
+    /// "input", "output", or "parameter".
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            SpecKind::Input => "input",
+            SpecKind::Output => "output",
+            SpecKind::Parameter => "parameter",
+        }
+    }
+}
+
+/// Which text of a port or parameter is empty.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MissingText {
+    /// The `label` field.
+    Label,
+    /// The `description` field.
+    Description,
+}
+
+impl MissingText {
+    /// "label" or "description".
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            MissingText::Label => "label",
+            MissingText::Description => "description",
+        }
+    }
+}
+
+impl std::fmt::Display for Undocumented {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} `{}` has no {}",
+            self.kind.as_str(),
+            self.name,
+            self.missing.as_str()
+        )
+    }
+}
+
+/// One text field of a port or parameter, for the checks.
+struct Text {
+    undocumented: Undocumented,
+    value: &'static str,
+}
+
+const fn is_blank(text: &str) -> bool {
+    text.trim_ascii().is_empty()
+}
+
+/// Panics if any port or parameter of `modules` has an empty label or
+/// description. Call it in a `const` item, so a missing text is a compile
+/// error:
+///
+/// ```
+/// # static ALL: &[&loom_core::ModuleDescriptor] = &[];
+/// const _: () = loom_core::assert_documented(ALL);
+/// ```
+pub const fn assert_documented(modules: &[&ModuleDescriptor]) {
+    let mut i = 0;
+    while i < modules.len() {
+        let module = modules[i];
+        if let Some(missing) = module.first_undocumented() {
+            // A `const` cannot format, so the message is copied into a
+            // fixed buffer by hand.
+            let message = ConstMessage::new()
+                .push(module.id)
+                .push(": ")
+                .push(missing.kind.as_str())
+                .push(" `")
+                .push(missing.name)
+                .push("` has no ")
+                .push(missing.missing.as_str())
+                .push(". Every port and parameter needs a short label and a one-sentence description.");
+            panic!("{}", message.as_str(module.id));
+        }
+        i += 1;
+    }
+}
+
+/// A message built in a `const fn`, cut at 256 bytes.
+struct ConstMessage {
+    bytes: [u8; 256],
+    len: usize,
+}
+
+impl ConstMessage {
+    const fn new() -> Self {
+        Self {
+            bytes: [0; 256],
+            len: 0,
+        }
+    }
+
+    const fn push(mut self, text: &str) -> Self {
+        let text = text.as_bytes();
+        let mut i = 0;
+        while i < text.len() && self.len < self.bytes.len() {
+            self.bytes[self.len] = text[i];
+            self.len += 1;
+            i += 1;
+        }
+        self
+    }
+
+    /// The message, or `fallback` if the cut split a character.
+    const fn as_str<'a>(&'a self, fallback: &'a str) -> &'a str {
+        match std::str::from_utf8(self.bytes.split_at(self.len).0) {
+            Ok(text) => text,
+            Err(_) => fallback,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const CUTOFF: ParamSpec = ParamSpec::new("cutoff", 20.0, 20_000.0, 1_000.0, "Hz").logarithmic();
-    const GAIN: ParamSpec = ParamSpec::new("gain", -10.0, 10.0, 1.0, "");
-    const SEED: ParamSpec = ParamSpec::new("seed", 1.0, 65_535.0, 1.0, "").integer();
+    /// A parameter for test descriptors.
+    const fn param(name: &'static str, min: f32, max: f32, default: f32, unit: &'static str) -> ParamSpec {
+        ParamSpec {
+            name,
+            label: name,
+            description: "A test parameter.",
+            min,
+            max,
+            default,
+            unit,
+            options: ParamOptions::DEFAULT,
+        }
+    }
+
+    const CUTOFF: ParamSpec = param("cutoff", 20.0, 20_000.0, 1_000.0, "Hz").logarithmic();
+    const GAIN: ParamSpec = param("gain", -10.0, 10.0, 1.0, "");
+    const SEED: ParamSpec = param("seed", 1.0, 65_535.0, 1.0, "").integer();
 
     #[test]
     fn mappings_round_trip() {
@@ -454,7 +722,7 @@ mod tests {
 
     #[test]
     fn linear_is_the_default() {
-        assert_eq!(GAIN.mapping, ParamMapping::Linear);
+        assert_eq!(GAIN.options.mapping, ParamMapping::Linear);
         assert_eq!(GAIN.denormalize(0.5), 0.0);
         assert_eq!(GAIN.normalize(5.0), 0.75);
     }
@@ -489,8 +757,87 @@ mod tests {
             assert_eq!(spec.denormalize(f32::NAN), spec.default);
             assert_eq!(spec.normalize(f32::NAN), spec.normalize(spec.default));
         }
-        let fixed = ParamSpec::new("fixed", 1.0, 1.0, 1.0, "");
+        let fixed = param("fixed", 1.0, 1.0, 1.0, "");
         assert_eq!(fixed.normalize(1.0), 0.0);
         assert_eq!(fixed.denormalize(0.5), 1.0);
+    }
+
+    static DOCUMENTED: ModuleDescriptor = ModuleDescriptor {
+        id: "test.documented",
+        version: 1,
+        name: "Documented",
+        category: "Test",
+        description: "",
+        inputs: &[],
+        outputs: &[],
+        params: &[GAIN],
+        role: ModuleRole::UnitDelay,
+        panel: Panel::EMPTY,
+        displays: &[],
+    };
+
+    static UNDOCUMENTED: ModuleDescriptor = ModuleDescriptor {
+        id: "test.undocumented",
+        version: 1,
+        name: "Undocumented",
+        category: "Test",
+        description: "",
+        inputs: &[PortSpec {
+            name: "in",
+            label: "In",
+            signal: SignalType::Audio,
+            description: "",
+            default: PortDefault::Value(0.0),
+        }],
+        outputs: &[PortSpec {
+            name: "out",
+            label: "\t",
+            signal: SignalType::Audio,
+            description: "The input.",
+            default: PortDefault::Value(0.0),
+        }],
+        params: &[ParamSpec {
+            label: "",
+            description: "",
+            ..GAIN
+        }],
+        role: ModuleRole::UnitDelay,
+        panel: Panel::EMPTY,
+        displays: &[],
+    };
+
+    #[test]
+    fn lists_empty_labels_and_descriptions_in_order() {
+        assert_eq!(DOCUMENTED.first_undocumented(), None);
+        assert!(DOCUMENTED.undocumented().is_empty());
+        let missing: Vec<String> = UNDOCUMENTED.undocumented().iter().map(ToString::to_string).collect();
+        assert_eq!(
+            missing,
+            [
+                "input `in` has no description",
+                "output `out` has no label",
+                "parameter `gain` has no label",
+                "parameter `gain` has no description",
+            ]
+        );
+        assert_eq!(
+            UNDOCUMENTED.first_undocumented(),
+            Some(Undocumented {
+                kind: SpecKind::Input,
+                name: "in",
+                missing: MissingText::Description,
+            })
+        );
+    }
+
+    #[test]
+    fn assert_documented_passes_documented_modules() {
+        assert_documented(&[&DOCUMENTED]);
+    }
+
+    #[test]
+    #[should_panic(expected = "test.undocumented: input `in` has no description. Every port and parameter needs")]
+    fn assert_documented_names_the_first_missing_text() {
+        assert_documented(&[&DOCUMENTED, &UNDOCUMENTED]);
     }
 }

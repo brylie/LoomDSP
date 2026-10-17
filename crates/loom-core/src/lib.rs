@@ -33,8 +33,8 @@ pub mod transport;
 pub use compile::{CompileReport, FeedbackLoop};
 pub use controller::{Controller, EngineParts, MidiSender, create_engine};
 pub use descriptor::{
-    MAX_DISPLAYS, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamMapping, ParamSpec, PortDefault, PortSpec,
-    Widget, WidgetKind,
+    MAX_DISPLAYS, MissingText, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamMapping, ParamOptions,
+    ParamSpec, PortDefault, PortSpec, SpecKind, Undocumented, Widget, WidgetKind, assert_documented,
 };
 pub use display::{DisplayReader, DisplaySource};
 pub use engine::{Engine, EngineConfig, EngineStats};
@@ -42,7 +42,7 @@ pub use error::LoomError;
 pub use graph::{Graph, InputRef, ModuleId, Node, OutputRef};
 pub use midi::{MidiEvent, MidiMessage};
 pub use module::{Module, PortIo, ProcessContext, testing};
-pub use registry::{ModuleKind, Registry};
+pub use registry::{ModuleKind, Registry, RegistryNote};
 pub use signal::SignalType;
 pub use telemetry::{MeterReading, ProbeId, ProbeKind, SCOPE_CHUNK, ScopeChunk, Telemetry};
 pub use transport::{TimeSignature, TransportInfo, TransportSettings};

@@ -37,11 +37,36 @@ pub enum PortShape {
     Square,
 }
 
+/// The extra text that shows when the pointer rests on a port or control
+/// (panels.md, Labels and hover text). Its first line is the label.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct HoverText {
+    /// What it does, in one sentence.
+    pub description: String,
+    /// The stable name used in patch files, or `None` when it reads the
+    /// same as the label.
+    pub name: Option<String>,
+}
+
+impl HoverText {
+    /// Hover text for a port or parameter. The name is kept only when it
+    /// differs from the label other than in letter case, so "cutoff" does
+    /// not repeat under "Cutoff".
+    pub fn new(label: &str, description: &str, name: &str) -> Self {
+        Self {
+            description: description.to_string(),
+            name: (!name.eq_ignore_ascii_case(label)).then(|| name.to_string()),
+        }
+    }
+}
+
 /// One input or output port.
 #[derive(Debug, Clone)]
 pub struct PortView {
     /// Label shown next to the port when zoomed in.
     pub label: String,
+    /// Shown below the label when the pointer rests on the port.
+    pub hover: HoverText,
     /// Port and cable colour.
     pub colour: Color,
     /// Marker shape.
@@ -82,6 +107,9 @@ pub struct WidgetView {
     pub y: u8,
     /// Label drawn with it.
     pub label: String,
+    /// Shown below the label when the pointer rests on a control. Empty
+    /// for lights and meters, which have no hover text.
+    pub hover: HoverText,
 }
 
 impl WidgetView {
@@ -537,15 +565,39 @@ fn distance_squared_to_segment(p: Point, a: Point, b: Point) -> f32 {
     d.x * d.x + d.y * d.y
 }
 
-/// A port label cut to fit `width` world units at `size`, with "…" when it
-/// is too long. Uses an average glyph width, so it is approximate.
+/// A label cut to fit `width` world units at `size`, with "…" when it is
+/// too long. Used for port labels and panel captions.
+///
+/// Widths are estimated per character, not measured, so drawing never waits
+/// on text layout. Narrow letters such as "i" count for less, so a short
+/// word such as "Division" is not cut where an average width would cut it.
 pub fn fit_label(label: &str, width: f32, size: f32) -> std::borrow::Cow<'_, str> {
-    let fits = (width / (size * 0.56)).floor().max(1.0) as usize;
-    if label.chars().count() <= fits {
-        std::borrow::Cow::Borrowed(label)
-    } else {
-        let kept: String = label.chars().take(fits.saturating_sub(1)).collect();
-        std::borrow::Cow::Owned(format!("{kept}…"))
+    if label.chars().map(glyph_width).sum::<f32>() * size <= width {
+        return std::borrow::Cow::Borrowed(label);
+    }
+    let room = width / size - glyph_width('…');
+    let mut used = 0.0;
+    let kept: String = label
+        .chars()
+        .take_while(|&c| {
+            used += glyph_width(c);
+            used <= room
+        })
+        .collect();
+    std::borrow::Cow::Owned(format!("{kept}…"))
+}
+
+/// Rough width of a character in a proportional sans font, as a share of
+/// the font size. A little generous, so a label that fits by this count
+/// fits on screen.
+fn glyph_width(c: char) -> f32 {
+    match c {
+        'i' | 'j' | 'l' | 't' | 'f' | 'r' | 'I' | '.' | ',' | ':' | ';' | '\'' | '!' | '|' | ' ' => 0.28,
+        '…' | 'M' | 'W' => 1.0,
+        'm' => 0.82,
+        'w' => 0.72,
+        c if c.is_uppercase() => 0.66,
+        _ => 0.53,
     }
 }
 
@@ -561,6 +613,7 @@ mod tests {
     fn port(label: &str) -> PortView {
         PortView {
             label: label.into(),
+            hover: HoverText::default(),
             colour: Color::WHITE,
             shape: PortShape::Round,
         }
@@ -584,6 +637,7 @@ mod tests {
             x,
             y,
             label: "k".into(),
+            hover: HoverText::default(),
         }
     }
 
@@ -634,6 +688,7 @@ mod tests {
                     x: 3,
                     y: 0,
                     label: "l".into(),
+                    hover: HoverText::default(),
                 },
             ],
         };
@@ -653,6 +708,20 @@ mod tests {
         let cut = fit_label("a-very-long-label", 37.0, 9.0);
         assert!(cut.ends_with('…'), "{cut}");
         assert!(cut.chars().count() <= 8);
+    }
+
+    #[test]
+    fn narrow_letters_leave_room() {
+        // A knob caption is 3 grid units wide (panels.md, Labels and hover
+        // text): "Division" fits, "Bandpass" and "Resonance" are cut.
+        let knob = 3.0 * GRID;
+        assert_eq!(fit_label("Division", knob, 9.0), "Division");
+        assert_eq!(fit_label("Bandpass", knob, 9.0), "Bandp…");
+        assert!(fit_label("Resonance", knob, 9.0).ends_with('…'));
+        assert_eq!(fit_label("", knob, 9.0), "");
+        // A port label column beside a panel is 37 world units.
+        assert_eq!(fit_label("Lowpass", 37.0, 9.0), "Lowpass");
+        assert_eq!(fit_label("Velocity", 37.0, 9.0), "Velocity");
     }
 
     #[test]

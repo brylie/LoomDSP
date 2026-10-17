@@ -7,7 +7,7 @@ use loom_core::ParamSpec;
 /// Slider step in slider positions (0 to 1). Whole-number parameters move
 /// one value per step, so the slider snaps to them.
 pub fn slider_step(spec: &ParamSpec) -> f32 {
-    if spec.integer && spec.max > spec.min {
+    if spec.options.integer && spec.max > spec.min {
         1.0 / (spec.max - spec.min)
     } else {
         0.001
@@ -17,7 +17,7 @@ pub fn slider_step(spec: &ParamSpec) -> f32 {
 /// Value with a sensible number of digits and its unit.
 pub fn format(spec: &ParamSpec, value: f32) -> String {
     let digits = match value.abs() {
-        _ if spec.integer => 0,
+        _ if spec.options.integer => 0,
         v if v >= 1000.0 => 0,
         v if v >= 100.0 => 1,
         v if v >= 1.0 => 2,
@@ -34,12 +34,26 @@ pub fn format(spec: &ParamSpec, value: f32) -> String {
 mod tests {
     use super::*;
 
-    const CUTOFF: ParamSpec = ParamSpec::new("cutoff", 20.0, 20_000.0, 1_000.0, "Hz").logarithmic();
-    const GAIN: ParamSpec = ParamSpec::new("gain", -10.0, 10.0, 1.0, "");
+    /// A parameter for test descriptors.
+    const fn param(name: &'static str, min: f32, max: f32, default: f32, unit: &'static str) -> loom_core::ParamSpec {
+        loom_core::ParamSpec {
+            name,
+            label: name,
+            description: "A test parameter.",
+            min,
+            max,
+            default,
+            unit,
+            options: loom_core::ParamOptions::DEFAULT,
+        }
+    }
+
+    const CUTOFF: ParamSpec = param("cutoff", 20.0, 20_000.0, 1_000.0, "Hz").logarithmic();
+    const GAIN: ParamSpec = param("gain", -10.0, 10.0, 1.0, "");
 
     #[test]
     fn whole_numbers_snap() {
-        let channel = ParamSpec::new("channel", 0.0, 16.0, 0.0, "").integer();
+        let channel = param("channel", 0.0, 16.0, 0.0, "").integer();
         assert_eq!(channel.denormalize(0.52), 8.0);
         assert_eq!(format(&channel, 3.0), "3");
         assert!((slider_step(&channel) - 1.0 / 16.0).abs() < 1e-6);
@@ -48,7 +62,7 @@ mod tests {
     #[test]
     fn whole_numbers_step_one_value_over_a_wide_range() {
         // The noise seed spans 1 to 65,535. One slider step is one seed.
-        let seed = ParamSpec::new("seed", 1.0, 65_535.0, 1.0, "").integer();
+        let seed = param("seed", 1.0, 65_535.0, 1.0, "").integer();
         assert!((slider_step(&seed) - 1.0 / 65_534.0).abs() < 1e-9);
     }
 

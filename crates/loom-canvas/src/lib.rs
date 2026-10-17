@@ -11,6 +11,7 @@
 mod camera;
 mod controls;
 mod gpu;
+mod hover;
 mod scene;
 mod theme;
 mod widget;
@@ -18,8 +19,8 @@ mod widget;
 pub use camera::{Camera, MAX_ZOOM, MIN_ZOOM};
 pub use controls::{PanelValues, WidgetValue};
 pub use scene::{
-    CableView, GRID, Hit, LABEL_COLUMNS, ModuleView, PanelView, PortRef, PortShape, PortView, Scene, TILE_WIDTH,
-    WidgetView, WidgetViewKind, fit_label, snap, tile_size,
+    CableView, GRID, Hit, HoverText, LABEL_COLUMNS, ModuleView, PanelView, PortRef, PortShape, PortView, Scene,
+    TILE_WIDTH, WidgetView, WidgetViewKind, fit_label, snap, tile_size,
 };
 pub use theme::Palette;
 pub use widget::{CanvasEvent, PatchCanvas};

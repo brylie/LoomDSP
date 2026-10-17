@@ -4,7 +4,8 @@
 //! to drive them, or any other signal to bend the wave shape.
 
 use loom_core::{
-    Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamSpec, PortIo, PortSpec, ProcessContext, SignalType,
+    Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, PortDefault, PortIo, PortSpec,
+    ProcessContext, SignalType,
 };
 use std::f32::consts::TAU;
 
@@ -15,8 +16,20 @@ pub static SINE: ModuleDescriptor = ModuleDescriptor {
     name: "Sine",
     category: "Oscillator",
     description: "Sine wave shaped from a phase input.",
-    inputs: &[PortSpec::new("phase", SignalType::Phase)],
-    outputs: &[PortSpec::new("out", SignalType::Audio)],
+    inputs: &[PortSpec {
+        name: "phase",
+        label: "Phase",
+        signal: SignalType::Phase,
+        description: "Position in the wave, from 0 to 1. One ramp is one cycle.",
+        default: PortDefault::Value(0.0),
+    }],
+    outputs: &[PortSpec {
+        name: "out",
+        label: "Out",
+        signal: SignalType::Audio,
+        description: "Sine wave from -1 to 1.",
+        default: PortDefault::Value(0.0),
+    }],
     params: &[],
     role: ModuleRole::Dsp(|_| Box::new(Sine)),
     panel: Panel::EMPTY,
@@ -41,8 +54,20 @@ pub static SAW: ModuleDescriptor = ModuleDescriptor {
     name: "Saw",
     category: "Oscillator",
     description: "Band-limited saw wave shaped from a phase input (polyBLEP).",
-    inputs: &[PortSpec::new("phase", SignalType::Phase)],
-    outputs: &[PortSpec::new("out", SignalType::Audio)],
+    inputs: &[PortSpec {
+        name: "phase",
+        label: "Phase",
+        signal: SignalType::Phase,
+        description: "Position in the wave, from 0 to 1. One ramp is one cycle.",
+        default: PortDefault::Value(0.0),
+    }],
+    outputs: &[PortSpec {
+        name: "out",
+        label: "Out",
+        signal: SignalType::Audio,
+        description: "Saw wave from -1 to 1.",
+        default: PortDefault::Value(0.0),
+    }],
     params: &[],
     role: ModuleRole::Dsp(|_| Box::new(Saw { previous: 0.0 })),
     panel: Panel::EMPTY,
@@ -99,8 +124,24 @@ pub static NOISE: ModuleDescriptor = ModuleDescriptor {
     category: "Oscillator",
     description: "White noise. The seed makes renders repeatable (NFR-SND-04).",
     inputs: &[],
-    outputs: &[PortSpec::new("out", SignalType::Audio)],
-    params: &[ParamSpec::new("seed", 1.0, 65_535.0, 1.0, "").integer()],
+    outputs: &[PortSpec {
+        name: "out",
+        label: "Out",
+        signal: SignalType::Audio,
+        description: "White noise from -1 to 1.",
+        default: PortDefault::Value(0.0),
+    }],
+    params: &[ParamSpec {
+        name: "seed",
+        label: "Seed",
+        description: "Picks the noise pattern. The same seed gives the same noise.",
+        min: 1.0,
+        max: 65_535.0,
+        default: 1.0,
+        unit: "",
+        options: ParamOptions::DEFAULT,
+    }
+    .integer()],
     role: ModuleRole::Dsp(|config: &ModuleConfig| {
         let _ = config;
         Box::new(Noise { state: 1, seed: 1 })

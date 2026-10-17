@@ -1,6 +1,31 @@
 use super::*;
-use loom_core::{Module, ParamSpec, PortIo, PortSpec, ProcessContext, SignalType};
+use loom_core::{Module, ParamOptions, ParamSpec, PortIo, PortSpec, ProcessContext, SignalType};
 use std::path::PathBuf;
+
+/// A port for test descriptors.
+const fn port(name: &'static str, signal: SignalType) -> PortSpec {
+    PortSpec {
+        name,
+        label: name,
+        signal,
+        description: "A test port.",
+        default: PortDefault::Value(0.0),
+    }
+}
+
+/// A parameter for test descriptors.
+const fn param(name: &'static str, min: f32, max: f32, default: f32, unit: &'static str) -> ParamSpec {
+    ParamSpec {
+        name,
+        label: name,
+        description: "A test parameter.",
+        min,
+        max,
+        default,
+        unit,
+        options: ParamOptions::DEFAULT,
+    }
+}
 
 /// Output indices of [`ECHO`].
 mod out {
@@ -22,23 +47,23 @@ static ECHO: ModuleDescriptor = ModuleDescriptor {
     category: "Test",
     description: "Copies inputs to outputs.",
     inputs: &[
-        PortSpec::new("a", SignalType::Modulation),
-        PortSpec::new("bar", SignalType::Phase).with_default(PortDefault::BarPhase),
-        PortSpec::new("beat", SignalType::Phase).with_default(PortDefault::BeatPhase),
-        PortSpec::new("play", SignalType::Gate).with_default(PortDefault::Playing),
-        PortSpec::new("value", SignalType::Modulation).with_default(PortDefault::Value(0.25)),
+        port("a", SignalType::Modulation),
+        port("bar", SignalType::Phase).with_default(PortDefault::BarPhase),
+        port("beat", SignalType::Phase).with_default(PortDefault::BeatPhase),
+        port("play", SignalType::Gate).with_default(PortDefault::Playing),
+        port("value", SignalType::Modulation).with_default(PortDefault::Value(0.25)),
     ],
     outputs: &[
-        PortSpec::new("a", SignalType::Modulation),
-        PortSpec::new("bar", SignalType::Phase),
-        PortSpec::new("beat", SignalType::Phase),
-        PortSpec::new("play", SignalType::Gate),
-        PortSpec::new("value", SignalType::Modulation),
-        PortSpec::new("connected", SignalType::Gate),
-        PortSpec::new("midi", SignalType::Gate),
-        PortSpec::new("gain", SignalType::Modulation),
+        port("a", SignalType::Modulation),
+        port("bar", SignalType::Phase),
+        port("beat", SignalType::Phase),
+        port("play", SignalType::Gate),
+        port("value", SignalType::Modulation),
+        port("connected", SignalType::Gate),
+        port("midi", SignalType::Gate),
+        port("gain", SignalType::Modulation),
     ],
-    params: &[ParamSpec::new("gain", 0.0, 2.0, 1.0, "")],
+    params: &[param("gain", 0.0, 2.0, 1.0, "")],
     role: ModuleRole::Dsp(|_| Box::new(Echo { gain: 0.0 })),
     panel: loom_core::Panel::EMPTY,
     displays: &[],
@@ -77,7 +102,7 @@ static CALL_LENGTH: ModuleDescriptor = ModuleDescriptor {
     category: "Test",
     description: "Depends on block size.",
     inputs: &[],
-    outputs: &[PortSpec::new("out", SignalType::Modulation)],
+    outputs: &[port("out", SignalType::Modulation)],
     params: &[],
     role: ModuleRole::Dsp(|_| Box::new(CallLength)),
     panel: loom_core::Panel::EMPTY,
@@ -101,7 +126,7 @@ static NAN_AT_TEN: ModuleDescriptor = ModuleDescriptor {
     category: "Test",
     description: "Not finite.",
     inputs: &[],
-    outputs: &[PortSpec::new("out", SignalType::Audio)],
+    outputs: &[port("out", SignalType::Audio)],
     params: &[],
     role: ModuleRole::Dsp(|_| Box::new(NanAtTen { frame: 0 })),
     panel: loom_core::Panel::EMPTY,
@@ -337,14 +362,59 @@ fn unit_delays_are_refused() {
         name: "Delay",
         category: "Test",
         description: "",
-        inputs: &[PortSpec::new("in", SignalType::Audio)],
-        outputs: &[PortSpec::new("out", SignalType::Audio)],
+        inputs: &[port("in", SignalType::Audio)],
+        outputs: &[port("out", SignalType::Audio)],
         params: &[],
         role: ModuleRole::UnitDelay,
         panel: loom_core::Panel::EMPTY,
         displays: &[],
     };
     let _ = Harness::new(&DELAY);
+}
+
+/// Has a port and a parameter with no description: missing on purpose.
+static UNDOCUMENTED: ModuleDescriptor = ModuleDescriptor {
+    id: "test.undocumented",
+    version: 1,
+    name: "Undocumented",
+    category: "Test",
+    description: "Leaves out port and parameter text.",
+    inputs: &[PortSpec {
+        name: "in",
+        label: "In",
+        signal: SignalType::Audio,
+        description: "",
+        default: PortDefault::Value(0.0),
+    }],
+    outputs: &[port("out", SignalType::Audio)],
+    params: &[ParamSpec {
+        name: "gain",
+        label: "",
+        description: " ",
+        min: 0.0,
+        max: 1.0,
+        default: 1.0,
+        unit: "",
+        options: ParamOptions::DEFAULT,
+    }],
+    role: ModuleRole::Dsp(|_| Box::new(CallLength)),
+    panel: loom_core::Panel::EMPTY,
+    displays: &[],
+};
+
+#[test]
+#[should_panic(
+    expected = "test.undocumented: input `in` has no description; parameter `gain` has no label; \
+                           parameter `gain` has no description. Give every port and parameter"
+)]
+fn undocumented_ports_and_parameters_fail() {
+    let _ = Harness::new(&UNDOCUMENTED).frames(4).render();
+}
+
+#[test]
+fn undocumented_ports_and_parameters_can_be_allowed() {
+    let render = Harness::new(&UNDOCUMENTED).frames(4).allow_undocumented().render();
+    assert_eq!(render.frames(), 4);
 }
 
 #[test]

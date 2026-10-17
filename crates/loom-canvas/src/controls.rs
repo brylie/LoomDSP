@@ -296,6 +296,7 @@ mod tests {
             x,
             y: 0,
             label: String::new(),
+            hover: crate::scene::HoverText::default(),
         };
         Scene::new(
             vec![ModuleView {
@@ -406,6 +407,7 @@ mod tests {
                         x: 0,
                         y: 0,
                         label: String::new(),
+                        hover: crate::scene::HoverText::default(),
                     }],
                 },
             }],

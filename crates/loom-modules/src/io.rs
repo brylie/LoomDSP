@@ -1,6 +1,6 @@
 //! Modules the engine runs itself: the unit delay and the audio output.
 
-use loom_core::{ModuleDescriptor, ModuleRole, Panel, PortSpec, SignalType};
+use loom_core::{ModuleDescriptor, ModuleRole, Panel, PortDefault, PortSpec, SignalType};
 
 /// `loom.time.delay1`: delays its input by exactly one sample.
 ///
@@ -12,8 +12,20 @@ pub static UNIT_DELAY: ModuleDescriptor = ModuleDescriptor {
     name: "1-Sample Delay",
     category: "Time",
     description: "Delays the input by one sample. Marks where a feedback loop is broken.",
-    inputs: &[PortSpec::new("in", SignalType::Audio)],
-    outputs: &[PortSpec::new("out", SignalType::Audio)],
+    inputs: &[PortSpec {
+        name: "in",
+        label: "In",
+        signal: SignalType::Audio,
+        description: "The signal to delay.",
+        default: PortDefault::Value(0.0),
+    }],
+    outputs: &[PortSpec {
+        name: "out",
+        label: "Out",
+        signal: SignalType::Audio,
+        description: "The input, one sample later.",
+        default: PortDefault::Value(0.0),
+    }],
     params: &[],
     role: ModuleRole::UnitDelay,
     panel: Panel::EMPTY,
@@ -28,8 +40,20 @@ pub static AUDIO_OUT: ModuleDescriptor = ModuleDescriptor {
     category: "I/O",
     description: "Sends audio out. A cable on only one side plays on both sides.",
     inputs: &[
-        PortSpec::new("left", SignalType::Audio),
-        PortSpec::new("right", SignalType::Audio),
+        PortSpec {
+            name: "left",
+            label: "Left",
+            signal: SignalType::Audio,
+            description: "The left channel. Plays on both sides if Right has no cable.",
+            default: PortDefault::Value(0.0),
+        },
+        PortSpec {
+            name: "right",
+            label: "Right",
+            signal: SignalType::Audio,
+            description: "The right channel. Plays on both sides if Left has no cable.",
+            default: PortDefault::Value(0.0),
+        },
     ],
     outputs: &[],
     params: &[],

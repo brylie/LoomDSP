@@ -11,6 +11,17 @@ use std::sync::Arc;
 
 pub const SAMPLE_RATE: f32 = 48_000.0;
 
+/// A port for test descriptors.
+const fn port(name: &'static str, signal: SignalType) -> PortSpec {
+    PortSpec {
+        name,
+        label: name,
+        signal,
+        description: "A test port.",
+        default: PortDefault::Value(0.0),
+    }
+}
+
 /// Output indices of [`FOLLOWER`].
 pub mod out {
     pub const BAR: usize = 0;
@@ -32,21 +43,21 @@ pub static FOLLOWER: ModuleDescriptor = ModuleDescriptor {
     category: "Test",
     description: "Copies transport defaults to outputs.",
     inputs: &[
-        PortSpec::new("bar", SignalType::Phase).with_default(PortDefault::BarPhase),
-        PortSpec::new("beat", SignalType::Phase).with_default(PortDefault::BeatPhase),
-        PortSpec::new("play", SignalType::Gate).with_default(PortDefault::Playing),
-        PortSpec::new("value", SignalType::Modulation).with_default(PortDefault::Value(0.25)),
-        PortSpec::new("feedback", SignalType::Modulation),
+        port("bar", SignalType::Phase).with_default(PortDefault::BarPhase),
+        port("beat", SignalType::Phase).with_default(PortDefault::BeatPhase),
+        port("play", SignalType::Gate).with_default(PortDefault::Playing),
+        port("value", SignalType::Modulation).with_default(PortDefault::Value(0.25)),
+        port("feedback", SignalType::Modulation),
     ],
     outputs: &[
-        PortSpec::new("bar", SignalType::Phase),
-        PortSpec::new("beat", SignalType::Phase),
-        PortSpec::new("play", SignalType::Gate),
-        PortSpec::new("value", SignalType::Modulation),
-        PortSpec::new("connected", SignalType::Gate),
-        PortSpec::new("jumped", SignalType::Gate),
-        PortSpec::new("ctx_bar", SignalType::Phase),
-        PortSpec::new("feedback", SignalType::Modulation),
+        port("bar", SignalType::Phase),
+        port("beat", SignalType::Phase),
+        port("play", SignalType::Gate),
+        port("value", SignalType::Modulation),
+        port("connected", SignalType::Gate),
+        port("jumped", SignalType::Gate),
+        port("ctx_bar", SignalType::Phase),
+        port("feedback", SignalType::Modulation),
     ],
     params: &[],
     role: ModuleRole::Dsp(|_| Box::new(Follower)),
@@ -94,8 +105,8 @@ pub static BAR_COPY: ModuleDescriptor = ModuleDescriptor {
     name: "Bar",
     category: "Test",
     description: "Copies the bar phase.",
-    inputs: &[PortSpec::new("bar", SignalType::Phase).with_default(PortDefault::BarPhase)],
-    outputs: &[PortSpec::new("bar", SignalType::Phase)],
+    inputs: &[port("bar", SignalType::Phase).with_default(PortDefault::BarPhase)],
+    outputs: &[port("bar", SignalType::Phase)],
     params: &[],
     role: ModuleRole::Dsp(|_| Box::new(Bar)),
     panel: loom_core::Panel::EMPTY,

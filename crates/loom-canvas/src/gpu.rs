@@ -526,6 +526,7 @@ mod tests {
     fn port() -> PortView {
         PortView {
             label: "p".into(),
+            hover: crate::scene::HoverText::default(),
             colour: Color::WHITE,
             shape: PortShape::Round,
         }

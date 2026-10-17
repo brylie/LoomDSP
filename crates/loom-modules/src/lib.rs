@@ -41,6 +41,10 @@ pub static ALL: &[&ModuleDescriptor] = &[
     &logic::DIVIDE,
 ];
 
+// Every built-in port and parameter has a label and a description, or this
+// crate does not compile.
+const _: () = loom_core::assert_documented(ALL);
+
 /// Adds every built-in module to a registry.
 pub fn register_all(registry: &mut Registry) -> Result<(), LoomError> {
     for descriptor in ALL {
@@ -119,7 +123,7 @@ mod tests {
                 } else {
                     ParamMapping::Linear
                 };
-                assert_eq!(param.mapping, expected, "{}.{}", descriptor.id, param.name);
+                assert_eq!(param.options.mapping, expected, "{}.{}", descriptor.id, param.name);
             }
         }
     }

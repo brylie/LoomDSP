@@ -43,8 +43,11 @@ The harness is its own crate, `loom-test`, used as a dev-dependency. *Why:* it r
 | `.midi(events)` | none | MIDI events. Each event's `frame` counts from the start of the render. |
 | `.transport(settings)` | stopped, 120 BPM, 4/4 | The transport the module sees, starting at position 0. |
 | `.tolerance(t)` | 1e-5 | Largest allowed difference from the reference, per sample. |
+| `.allow_undocumented()` | off | Lets a module with no label or description on a port or parameter render, for a quick experiment. |
 
 An unknown input or parameter name fails the test at once, with the names the descriptor has.
+
+Every render fails if a port or parameter has an empty label or description, and lists each one ([port and parameter text](port-and-parameter-text.md)). *Why:* module authors outside this repository get the same check that built-in modules get at compile time.
 
 ### Signals
 
