@@ -41,29 +41,31 @@ The editing and display work ships in three slices, so each one can be built and
 
 | Action | Result |
 |---|---|
-| Drag from an output port and drop on a control on a tile | Creates an assignment with depth 0.25, polarity following the source, and on. The new assignment is added after the others on that parameter. Dropping on an input port still makes a cable. Dropping anywhere else does nothing. |
+| Drag from an output port and drop on a control on a tile | Creates an assignment with the default depth (below), polarity following the source, and on. The new assignment is added after the others on that parameter. Dropping on an input port still makes a cable. Dropping anywhere else does nothing. |
 | While that drag is over a control | The control is highlighted the way an input port is highlighted for a cable, so the user can see where the drop will go. |
-| Inspector: **Add modulation** under a parameter, then pick a source | Creates the same assignment as a drop. The list shows every output in the patch as "module name #id: output label", in module id order, then port order. |
+| Inspector: **Add modulation** under a parameter, then pick a source | Creates the same assignment as a drop. The list shows every output at the current patch level as "module name #id: output label", in module id order, then port order. Outputs that already drive this parameter are greyed out and cannot be picked, by the same rule as a drop on a control. |
 
 - Any control bound to a parameter accepts a drop: knobs, toggles, and radio buttons. Whole-number parameters round after the clamp (rule 5). A control bound to a display value (a light or meter) does not.
 - The source can be on the same module as the target. That makes a self-loop, which is valid (rule 8).
 - A drop that matches an assignment that already exists (same output, same parameter) adds nothing. The status bar says the assignment exists. *Why:* a second link from the same output only adds its depth to the first, so it is never needed, and two rows that look the same are confusing. The engine and the patch format still accept duplicates, so files written by hand keep loading.
-- Default depth 0.25: a quarter of the knob. It is large enough to hear on any parameter and small enough not to slam to a limit. It is one constant in the app, so it is easy to change after trying it with users.
+- **Default depth:** 0.25, a quarter of the knob, or one step of a whole-number parameter if that is larger. One step is `1 / (max - min)` in the control's 0 to 1 range, so a toggle gets depth 1, a radio button with 3 options gets 0.5, and one with 8 options keeps 0.25. *Why:* 0.25 is large enough to hear on a continuous parameter and small enough not to slam to a limit. On a whole-number parameter it is not enough: the value rounds after the clamp (rule 5), so a toggle moved by 0.25 never changes, and the drop would seem to do nothing. One step lets a source at its peak move the value one step, with the change at half way. The 0.25 is one constant in the app, so it is easy to change after trying it with users.
+- A unipolar assignment with a positive depth, on a control already at its maximum, only pushes into the clamp, so nothing moves. This holds for a toggle that is on. Set a negative depth to move it down. A bipolar assignment swings both ways, so it still moves the control. The spec does not flip the sign for the user, because the same drop must give the same assignment whatever the knob position.
 
 #### Seeing assignments
 
-- **On a tile knob:** one extra arc, in the modulation colour, shows the range the assignments can reach from the base. The knob's value arc and pointer still show the base value. The range runs from `base + low` to `base + high`, clamped to 0 to 1, where each enabled assignment adds to `low` and `high`:
+- **On a tile knob:** one extra arc, in the modulation colour, shows the furthest the assignments can reach from the base. The knob's value arc and pointer still show the base value. The range runs from `base + low` to `base + high`, clamped to 0 to 1, where each enabled assignment adds to `low` and `high`:
 
   | Assignment uses | Adds to `low` | Adds to `high` |
   |---|---|---|
   | unipolar, depth `d` | `min(0, d)` | `max(0, d)` |
   | bipolar, depth `d` | `-abs(d)` | `abs(d)` |
 
-  This is the range the engine produces for sources inside their declared range (rules 2, 4, and 5). A source outside its range, such as a hot audio signal, can reach further before the clamp. The arc does not show that.
+  This is the most the assignments can reach, for sources inside their declared range (rules 2, 4, and 5). Two sources reach the ends together only when they peak at the same time. A source outside its range, such as a hot audio signal, can reach further before the clamp. The arc does not show that. It shows the modulated parameter before rounding and before any module input adds to it (rule 12).
 - *Why one arc and not one per assignment:* a tile knob is small, and several arcs on it cannot be told apart. The combined range answers the question on stage: where can this knob go? The inspector shows each assignment.
 - **On toggles and radio buttons:** no arc. A small dot in the modulation colour, next to the control, shows that it has at least one enabled assignment.
-- **On the source:** an output port that drives at least one assignment shows a small label with the number of assignments, next to the port. It does not cover the port or its cable.
-- **In the inspector:** under each parameter's slider, one row per assignment, in the order the engine applies them. Each row shows the source ("module name #id: output label"), a depth slider from -1 to 1 with 0 in the middle and the depth as a signed percentage, a polarity choice (follow source, which also names the source's polarity, unipolar, or bipolar), an on/off switch, and a remove button.
+- **When every assignment on a control is off:** a knob shows no range arc, and any control (knob, toggle, or radio button) shows the dot, dimmed. *Why:* turning assignments off is how users compare with and without modulation. The control must still say it has assignments, or they are easy to forget and hard to find again.
+- **On the source:** an output port that drives at least one assignment shows a small label with the number of assignments, next to the port, counting those that are off. It does not cover the port or its cable. *Why:* the badge says where routing starts, so it must not hide routing that is only switched off.
+- **In the inspector:** under each parameter's slider, one row per assignment, in the order the engine applies them. Each row shows the source ("module name #id: output label"), a depth slider from -1 to 1 with 0 in the middle and the depth as a signed percentage, a polarity choice with three options: **Follow source (bipolar)**, with the source's own polarity in brackets, **Unipolar**, and **Bipolar**, an on/off switch, and a remove button.
 
 #### Editing and removing
 
@@ -107,7 +109,7 @@ The matrix shows the assignments of the current patch level only. Assignments in
 ## Rules
 
 1. **Any output can be a source.** LFOs, envelopes, macros, sequencers, MIDI values, and audio oscillators alike. *Why:* "patch anything to anything" (ADR-0007). Audio-rate modulation is a sound, not a mistake.
-2. **Modulation works in the control's range.** The engine maps the base value to the control's 0 to 1 range, adds `depth × source` for each assignment, clamps to 0 to 1, and maps back. *Why:* depth 0.1 means "a tenth of the knob" on every parameter. On a logarithmic parameter such as cutoff, that is a musical interval, not a few hertz. The arc on the knob shows exactly what the engine does.
+2. **Modulation works in the control's range.** The engine maps the base value to the control's 0 to 1 range, adds `depth × source` for each assignment, clamps to 0 to 1, and maps back. *Why:* depth 0.1 means "a tenth of the knob" on every parameter. On a logarithmic parameter such as cutoff, that is a musical interval, not a few hertz. The arc on the knob shows the range the engine can reach.
 3. **One mapping, shared.** Whether a parameter is linear or logarithmic is part of its `ParamSpec`, not guessed by the app. The inspector, panel controls, and engine all use the same mapping functions in `loom-core`. *Why:* if they disagreed, the arc would lie.
 4. **Polarity comes from the source, unless the user overrides it.** Each output declares unipolar (0 to 1) or bipolar (-1 to 1). Defaults: envelopes, gates, and phases are unipolar; LFOs, audio, and pitch are bipolar. An assignment can force either, and the engine then remaps the source sample `s` before applying depth:
 
@@ -117,7 +119,7 @@ The matrix shows the assignments of the current patch level only. Assignments in
    | bipolar | unipolar | `(s + 1) / 2` |
    | unipolar | bipolar | `2s - 1` |
 
-   The arc follows the value used: a unipolar assignment draws from the base to `base + depth`, a bipolar one from `base - depth` to `base + depth`. Sources are never clamped; only the final parameter value is (rule 5). *Why:* an envelope should push a cutoff up from its base, an LFO should swing around it. A fixed, simple remap keeps the arc honest.
+   The range arc on the knob follows the value used: a unipolar assignment reaches from the base to `base + depth`, a bipolar one from `base - depth` to `base + depth`, and the arc combines them ([Seeing assignments](#seeing-assignments)). Sources are never clamped; only the final parameter value is (rule 5). *Why:* an envelope should push a cutoff up from its base, an LFO should swing around it. A fixed, simple remap keeps the arc honest.
 5. **Sum, then clamp.** Several assignments on one parameter add up before the clamp (FR-MOD-03). Whole-number parameters are rounded after the clamp. *Why:* predictable, and the clamp keeps filters stable.
 6. **Per sample, only where needed.** A parameter with at least one assignment gets a per-sample buffer. Others stay one value per block. *Why:* modulation must be smooth at audio rate (FR-MOD-03), but most parameters are still most of the time.
 7. **Smoothing applies to the base value only.** When a parameter has assignments and its `ParamSpec` sets a smooth time, the engine smooths the base in the control's 0 to 1 position, then adds the modulation unsmoothed (FR-MOD-05). The module reads that buffer and does not smooth it again. A parameter with no assignments keeps the smoothing it already had inside the module, so a knob that is not modulated sounds the same as before. The time lives on `ParamOptions`, set with `ParamSpec::smooth`. Built-in times: the filter cutoff and resonance are 10 ms; the add offset, multiply gain, and constant value are 5 ms. Every other parameter is unsmoothed. *Why:* a sharp envelope or audio-rate source must stay sharp. Smoothing it would change the sound. Keeping the old path for unmodulated knobs means existing patches do not change.
@@ -210,13 +212,15 @@ A **Macro** module (FR-LIB-12) has one knob on its panel and one output equal to
 
 **Status:** Agreed. [#70](https://github.com/brylie/LoomDSP/issues/70) and [#20](https://github.com/brylie/LoomDSP/issues/20) (range part).
 
-- [ ] Dragging an output onto a tile control creates an assignment with depth 0.25 that follows the source's polarity. Dropping on an input port still makes a cable.
+- [ ] Dragging an output onto a tile control creates an assignment that follows the source's polarity, with depth 0.25 on a continuous parameter. Dropping on an input port still makes a cable.
+- [ ] A drop on a toggle gives depth 1, and on a radio button with 3 options depth 0.5. With the toggle off, a unipolar source at 1 turns it on (test).
 - [ ] Dropping the same output on the same parameter again adds nothing, and the status bar says why.
-- [ ] **Add modulation** in the inspector creates the same assignment as a drop.
+- [ ] **Add modulation** in the inspector creates the same assignment as a drop. Its list holds only outputs at the current patch level, and outputs that already drive the parameter are greyed out.
 - [ ] The inspector lists each parameter's assignments in engine order. Depth, polarity, and on/off can be changed there, and the remove button removes the assignment.
 - [ ] A modulated tile knob shows one range arc. For a given base and set of assignments, the arc's ends match the table in [Seeing assignments](#seeing-assignments) (unit test on the arc geometry), including the clamp at 0 and 1 and leaving out disabled assignments.
 - [ ] A modulated toggle or radio button shows the modulation dot.
-- [ ] An output that drives assignments shows their number. The number updates when an assignment is added or removed, or a module is deleted.
+- [ ] With every assignment on a control turned off, the control shows the dimmed dot and no arc.
+- [ ] An output that drives assignments shows their number, counting those that are off. The number updates when an assignment is added or removed, or a module is deleted.
 - [ ] Changing depth, polarity, or on/off does not rebuild tiles, ports, or cables on the GPU (ADR-0010). Adding or removing an assignment may.
 - [ ] Save, then load: the same assignments appear in the inspector, in the same order.
 
