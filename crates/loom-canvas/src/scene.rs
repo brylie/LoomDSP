@@ -572,7 +572,7 @@ fn distance_squared_to_segment(p: Point, a: Point, b: Point) -> f32 {
 /// on text layout. Narrow letters such as "i" count for less, so a short
 /// word such as "Division" is not cut where an average width would cut it.
 pub fn fit_label(label: &str, width: f32, size: f32) -> std::borrow::Cow<'_, str> {
-    if label.chars().map(glyph_width).sum::<f32>() * size <= width {
+    if text_width(label, size) <= width {
         return std::borrow::Cow::Borrowed(label);
     }
     let room = width / size - glyph_width('…');
@@ -585,6 +585,12 @@ pub fn fit_label(label: &str, width: f32, size: f32) -> std::borrow::Cow<'_, str
         })
         .collect();
     std::borrow::Cow::Owned(format!("{kept}…"))
+}
+
+/// Estimated width of `text` at font size `size`, in the same units as
+/// `size`. See [`fit_label`].
+pub fn text_width(text: &str, size: f32) -> f32 {
+    text.chars().map(glyph_width).sum::<f32>() * size
 }
 
 /// Rough width of a character in a proportional sans font, as a share of

@@ -15,6 +15,10 @@ pub struct Palette {
     pub text: Color,
     /// Port labels.
     pub text_dim: Color,
+    /// Bars standing in for titles too small to draw.
+    pub title_bar: Color,
+    /// Bars standing in for port labels and captions too small to draw.
+    pub text_bar: Color,
     /// Outline of selected modules.
     pub selection: Color,
     /// Highlight of the port under the cursor.
@@ -45,6 +49,8 @@ impl Default for Palette {
             tile_border: Color::from_rgb8(0x3C, 0x40, 0x4A),
             text: Color::from_rgb8(0xEC, 0xEE, 0xF2),
             text_dim: Color::from_rgb8(0x9A, 0xA0, 0xAD),
+            title_bar: Color::from_rgba8(0xEC, 0xEE, 0xF2, 0.4),
+            text_bar: Color::from_rgba8(0x9A, 0xA0, 0xAD, 0.3),
             selection: Color::from_rgb8(0xF5, 0xA6, 0x23),
             hover: Color::WHITE,
             marquee: Color::from_rgba8(0xF5, 0xA6, 0x23, 0.12),

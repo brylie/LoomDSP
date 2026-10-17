@@ -184,21 +184,25 @@ The first display module.
 
 - Knob drags work in the control's 0 to 1 range, through the parameter's mapping, so a logarithmic cutoff moves by equal intervals.
 - Editing a control selects its module, so the inspector follows.
-- **Keyboard:** with a module selected, Tab moves focus to its next control and Shift-Tab to the previous one. Up and Right raise the value by 1% of the range, Down and Left lower it; with Shift, 0.1%. Whole-number parameters step by 1. Space or Enter toggles or picks the next option. Escape clears the focus. The focused control has a visible ring (NFR-UX-01).
+- **Keyboard:** with a module selected, Tab moves focus to its next control and Shift-Tab to the previous one. Up and Right raise the value by 1% of the range, Down and Left lower it; with Shift, 0.1%. Whole-number parameters step by 1. Space or Enter toggles or picks the next option. Escape clears the focus. A control focused with Tab has a visible ring (NFR-UX-01). The ring goes around the control itself, not its caption, so the value shown there stays clear. A click or drag also focuses the control, so the arrow keys work after it, but shows no ring, as `:focus-visible` works on the web. *Why:* after a mouse gesture the pointer already shows where the user is, and a ring around the whole cell cut through the value text ([#92](https://github.com/brylie/LoomDSP/issues/92)).
 - While a knob is dragged or focused, its label shows the value with its unit.
 - *Why the wheel always zooms:* scrolling over a tile to zoom must never change the sound by accident.
 
 ### Level of detail ([#68](https://github.com/brylie/LoomDSP/issues/68))
 
-**Status:** Implemented. Code: `detail` in `loom-canvas/src/widget.rs`.
+**Status:** Implemented. Code: `detail` in `loom-canvas/src/widget.rs`, `tile_text.rs`.
 
 The canvas already hides port labels and titles below a size on screen. Panels use the same two thresholds:
 
-| Zoom | Controls and lights |
-|---|---|
-| Port labels shown | Full widgets, with labels and values |
-| Titles shown, port labels hidden | Shapes only: knob and value arc, toggle and light states. No text. |
-| Titles hidden | Not drawn |
+| Zoom | Controls and lights | Text |
+|---|---|---|
+| Port labels shown | Full widgets, with labels and values | All text |
+| Titles shown, port labels hidden | Shapes only: knob and value arc, toggle and light states | Titles. Port labels and captions are bars. |
+| Titles hidden | Not drawn | Titles and port labels are bars |
+
+- **Text too small to read leaves a faint bar.** A rounded bar, as wide as the text and half as tall as its letters, sits where the text would be. *Why:* a tile that loses all its text looks empty from far out, but a real panel seen from across a room still shows where things are written ([#92](https://github.com/brylie/LoomDSP/issues/92)). Text that small cannot be read anyway, and drawing it would mean thousands of glyph layouts in a large patch.
+- Bars are shapes in the scene's instanced buffer. They are built when the scene changes, never per frame, so they cost almost nothing at any zoom.
+- Text, bars, and hover on port labels all take their places from one list (`tile_text.rs`), so a bar always sits exactly where its text would be.
 
 ### Redraw ([#68](https://github.com/brylie/LoomDSP/issues/68))
 
@@ -229,10 +233,12 @@ The canvas already hides port labels and titles below a size on screen. Panels u
 - [x] Dragging a control never moves the tile. Dragging the header always does. (Checked by hand in [#92](https://github.com/brylie/LoomDSP/issues/92).)
 - [x] Shift-drag is 10 times finer. Double-click resets to the default.
 - [x] A logarithmic knob moves by equal ratios: halfway up a 20 Hz to 20 kHz cutoff knob is about 632 Hz.
-- [x] Every control is reachable by keyboard: Tab, Shift-Tab, arrows, Space, Escape, with a visible focus ring.
+- [x] Every control is reachable by keyboard: Tab, Shift-Tab, arrows, Space, Escape, with a visible focus ring. The ring shows for Tab focus only, and stays clear of the caption.
 - [x] Changing a control value does not rebuild the GPU data for tiles, ports, or cables.
 - [x] The MIDI Note gate light is lit while a key is held. The ADSR light follows its level. The tests in `loom-modules/tests/panels.rs` play a note through `subtractive.ron` and read the display values the lights draw, at block sizes 1, 77, and 512.
 - [x] Zoomed far out, controls and lights are not drawn. At middle zoom, they have no text.
+- [x] Text hidden by zoom is replaced by a bar at the place and width of its text: port labels and captions at middle zoom, titles and port labels far out.
+- [ ] Manual, on the reference laptop: with `--generate 300 --bench`, the frame rate far out with bars matches the rate without them.
 - [x] Lights add no frames while their brightness stays the same: the light watcher sends nothing until a shown level changes, and runs only while lights are on screen.
 - [ ] Manual, on the reference laptop: knobs, the toggle, and lights look right at close and middle zoom, and a cut port label shows in full on hover.
 
@@ -313,6 +319,7 @@ A user zooms in on Clock Divide. The knob says "Division", not `n`. They rest th
 - **Keyboard focus shows it too.** When Tab moves focus to a control, its hover text shows after the same delay, and hides when focus moves on or Escape clears it. Right after a Tab press, the focused control's text wins over a port or control under a resting pointer, until the pointer moves. *Why:* the last thing the user did decides what they want to read. *Why:* keyboard users need the same help as mouse users (NFR-UX-01).
 - **What it shows.** The label on the first line, in normal text colour. The description below it, in dim text, wrapped. The name last, dimmed, if it differs from the label (see above).
 - **Size and place.** Fixed screen size, 12 px text, at most 260 px wide, whatever the zoom. On a canvas narrower than that, the box narrows to fit and the text wraps. It sits above the port or control, or below it when there is no room above, and always inside the canvas. *Why fixed size:* at middle zoom tile text is hidden because it is too small to read; the hover text is exactly what the user needs there, so it must stay readable.
+- **A port's label hovers like the port.** Resting the pointer on a port's label, or on the bar that stands for it, shows the port's hover text. Pressing a label still selects or drags the tile, as before. *Why:* a cut label is what makes the user want the full text, so the label is where they point ([#92](https://github.com/brylie/LoomDSP/issues/92)).
 - **At every zoom where the port or control can be hovered.** At middle zoom, labels are hidden, but hovering a port still shows its hover text.
 - **Lights, meters, and empty panel areas have no hover text.** Meters are displays, like lights. Display values have no description yet. A tile can therefore mix labelled captions, such as "Attack", with a light that shows its display value name, such as `level`. *Why accept it:* giving display values labels is a separate change, and the mix is small.
 - **It replaces the full-label overlay** from [Tile layout](#tile-layout-68): a cut label shows in full as the first line of the hover text.
@@ -333,6 +340,7 @@ A user zooms in on Clock Divide. The knob says "Division", not `n`. They rest th
 - [x] Port labels, control captions, and meter captions show labels. A test builds the scene for Clock Divide and finds "Division", not `n`.
 - [ ] Manual: inspector rows show labels, and hovering one shows its description, and its name when it differs.
 - [x] Resting the pointer on a port or control for 500 ms shows its label, description, and (when it differs) name. Leaving hides it at once.
+- [x] Resting on a port's label shows the port's hover text. Resting on empty tile space shows none.
 - [x] No hover text shows during a cable, knob, or tile drag.
 - [x] A control focused with Tab shows its hover text after the delay.
 - [x] Hover text stays inside the canvas for a port at each edge of the window.

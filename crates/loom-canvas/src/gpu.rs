@@ -4,6 +4,7 @@ use crate::camera::Camera;
 use crate::controls::ControlGeometry;
 use crate::scene::{PORT_RADIUS, PortShape, Scene};
 use crate::theme::Palette;
+use crate::tile_text::{self, TextKind};
 use bytemuck::{Pod, Zeroable};
 use iced::advanced::graphics::color::pack;
 use iced::wgpu;
@@ -122,10 +123,19 @@ pub struct Geometry {
     /// Cables, drawn behind the tiles and dimmed. Focused cables are drawn
     /// again in front, from the overlay.
     pub cables: Vec<Cable>,
-    /// Tiles, then ports. Tiles come first so cables can go between them.
+    /// Tiles, then text bars, then ports. Tiles come first so cables can go
+    /// between them.
     pub shapes: Vec<Shape>,
     /// Number of tile shapes at the start of `shapes`.
     pub tiles: u32,
+    /// Bars standing in for text too small to draw (panels.md, Level of
+    /// detail), after the tiles: caption bars, then port label bars, then
+    /// title bars. The order lets each zoom level draw one range.
+    pub caption_bars: u32,
+    /// Number of port label bars.
+    pub port_bars: u32,
+    /// Number of title bars.
+    pub title_bars: u32,
 }
 
 impl Geometry {
@@ -190,6 +200,26 @@ impl Geometry {
             }
         }
         let tiles = shapes.len() as u32;
+
+        let (mut captions, mut labels, mut titles) = (Vec::new(), Vec::new(), Vec::new());
+        for module in scene.modules() {
+            tile_text::for_each(module, |item| {
+                let bar = item.bar();
+                if bar.width <= 0.0 {
+                    return;
+                }
+                let (list, colour) = match item.kind {
+                    TextKind::Title => (&mut titles, palette.title_bar),
+                    TextKind::Port(_) => (&mut labels, palette.text_bar),
+                    TextKind::Caption(_) | TextKind::Option(..) => (&mut captions, palette.text_bar),
+                };
+                list.push(Shape::new(bar, bar.height * 0.5, colour, Color::TRANSPARENT, 0.0));
+            });
+        }
+        let (caption_bars, port_bars, title_bars) = (captions.len() as u32, labels.len() as u32, titles.len() as u32);
+        shapes.append(&mut captions);
+        shapes.append(&mut labels);
+        shapes.append(&mut titles);
         shapes.append(&mut markers);
 
         Self {
@@ -197,6 +227,29 @@ impl Geometry {
             cables,
             shapes,
             tiles,
+            caption_bars,
+            port_bars,
+            title_bars,
+        }
+    }
+
+    /// Index of the first port marker in `shapes`.
+    pub fn markers(&self) -> u32 {
+        self.tiles + self.caption_bars + self.port_bars + self.title_bars
+    }
+
+    /// The text bars to draw: none close up, port labels and captions at
+    /// middle zoom (`titles` false), and titles and port labels far out
+    /// (`titles` true), where controls and their captions are not drawn.
+    pub fn bars(&self, shown: bool, titles: bool) -> std::ops::Range<u32> {
+        let start = self.tiles;
+        match (shown, titles) {
+            (false, _) => start..start,
+            (true, false) => start..start + self.caption_bars + self.port_bars,
+            (true, true) => {
+                let ports = start + self.caption_bars;
+                ports..ports + self.port_bars + self.title_bars
+            }
         }
     }
 }
@@ -219,6 +272,8 @@ pub struct CanvasPrimitive {
     /// Panel controls. `None` when zoomed out too far to draw them.
     pub(crate) controls: Option<std::sync::Arc<ControlGeometry>>,
     pub(crate) overlay: Overlay,
+    /// The range of `geometry.shapes` that holds the text bars to draw.
+    pub(crate) bars: std::ops::Range<u32>,
     pub(crate) camera: Camera,
     /// Opacity of cables that are not in focus.
     pub(crate) cable_dim: f32,
@@ -300,6 +355,7 @@ pub struct CanvasPipeline {
     uploaded: u64,
     controls_uploaded: (u64, u64),
     tiles: u32,
+    markers: u32,
 }
 
 const SHAPE_ATTRIBUTES: [wgpu::VertexAttribute; 4] =
@@ -416,6 +472,7 @@ impl Pipeline for CanvasPipeline {
             uploaded: 0,
             controls_uploaded: (0, 0),
             tiles: 0,
+            markers: 0,
         }
     }
 }
@@ -449,6 +506,7 @@ impl Primitive for CanvasPrimitive {
             pipeline.scene_shapes.upload(device, queue, &self.geometry.shapes);
             pipeline.uploaded = self.geometry.generation;
             pipeline.tiles = self.geometry.tiles;
+            pipeline.markers = self.geometry.markers();
         }
         // Control values have their own buffers: a knob turn uploads only
         // these, never the tiles, ports, or cables.
@@ -469,10 +527,13 @@ impl Primitive for CanvasPrimitive {
         pass.set_pipeline(&pipeline.grid);
         pass.draw(0..4, 0..1);
 
-        // Cables behind the tiles, so modules read as solid objects. Then the
-        // focused cables in front, then ports over every cable end, then
-        // panel controls, then the selection, hover, and focus outlines.
+        // Cables behind the tiles, so modules read as solid objects. Then
+        // text bars on the tiles, then the focused cables in front, then
+        // ports over every cable end, then panel controls, then the
+        // selection, hover, and focus outlines.
         let tiles = pipeline.tiles.min(pipeline.scene_shapes.len);
+        let markers = pipeline.markers.min(pipeline.scene_shapes.len);
+        let bars = self.bars.start.min(markers)..self.bars.end.min(markers);
         let (arcs, controls) = if self.controls.is_some() {
             (pipeline.control_arcs.len, pipeline.control_shapes.len)
         } else {
@@ -486,6 +547,7 @@ impl Primitive for CanvasPrimitive {
                 0..pipeline.scene_cables.len,
             ),
             (&pipeline.shapes, &pipeline.scene_shapes, 4, 0..tiles),
+            (&pipeline.shapes, &pipeline.scene_shapes, 4, bars),
             (
                 &pipeline.cables,
                 &pipeline.overlay_cables,
@@ -496,7 +558,7 @@ impl Primitive for CanvasPrimitive {
                 &pipeline.shapes,
                 &pipeline.scene_shapes,
                 4,
-                tiles..pipeline.scene_shapes.len,
+                markers..pipeline.scene_shapes.len,
             ),
             (&pipeline.arcs, &pipeline.control_arcs, 4, 0..arcs),
             (&pipeline.shapes, &pipeline.control_shapes, 4, 0..controls),
@@ -612,9 +674,59 @@ mod tests {
         );
         let geometry = Geometry::build(&scene, &Palette::default());
         assert_eq!(geometry.cables.len(), 1);
-        // Three shapes per tile plus one per port.
-        assert_eq!(geometry.shapes.len(), 2 * 3 + 6);
+        // Three shapes per tile, one bar per port label (the titles are
+        // empty, so they have none), and one marker per port.
+        assert_eq!(geometry.shapes.len(), 2 * 3 + 6 + 6);
         assert_eq!(geometry.tiles, 2 * 3);
+        assert_eq!(
+            (geometry.caption_bars, geometry.port_bars, geometry.title_bars),
+            (0, 6, 0)
+        );
+        assert_eq!(geometry.markers(), 2 * 3 + 6);
         assert_eq!(geometry.generation, scene.generation());
+    }
+
+    #[test]
+    fn each_zoom_draws_the_bars_for_the_text_it_hides() {
+        let module = ModuleView {
+            id: 1,
+            title: "Saw".into(),
+            accent: Color::BLACK,
+            position: Point::ORIGIN,
+            inputs: vec![port()],
+            outputs: vec![port()],
+            panel: crate::scene::PanelView {
+                width: 3,
+                height: 3,
+                widgets: vec![crate::scene::WidgetView {
+                    kind: crate::scene::WidgetViewKind::Knob { steps: 0 },
+                    x: 0,
+                    y: 0,
+                    label: "Gain".into(),
+                    hover: crate::scene::HoverText::default(),
+                }],
+            },
+        };
+        let palette = Palette::default();
+        let geometry = Geometry::build(&Scene::new(vec![module], Vec::new()), &palette);
+        assert_eq!(
+            (geometry.caption_bars, geometry.port_bars, geometry.title_bars),
+            (1, 2, 1)
+        );
+        let colours = |range: std::ops::Range<u32>| -> Vec<[f32; 4]> {
+            geometry.shapes[range.start as usize..range.end as usize]
+                .iter()
+                .map(|s| s.fill)
+                .collect()
+        };
+        let label = pack(palette.text_bar).components();
+        let title = pack(palette.title_bar).components();
+        // Close up: all text is drawn, so no bars.
+        assert!(geometry.bars(false, false).is_empty());
+        // Middle: the caption and both port labels, not the title.
+        assert_eq!(colours(geometry.bars(true, false)), vec![label; 3]);
+        // Far: both port labels and the title. Controls are not drawn, so
+        // neither is the caption's bar.
+        assert_eq!(colours(geometry.bars(true, true)), vec![label, label, title]);
     }
 }

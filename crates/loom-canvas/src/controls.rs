@@ -129,7 +129,7 @@ impl ControlGeometry {
                     }
                     WidgetViewKind::Toggle => {
                         let on = position > 0.5;
-                        let track = Rectangle::new(Point::new(rect.x + 7.0, rect.y + 1.0), Size::new(22.0, 11.0));
+                        let track = toggle_track(rect);
                         let fill = if on {
                             palette.control_value
                         } else {
@@ -233,6 +233,39 @@ pub(crate) fn meter_colour(level: f32, palette: &Palette) -> Color {
     } else {
         palette.warning
     }
+}
+
+/// The keyboard focus ring of a control, and its corner radius: around the
+/// control itself, never its caption, so a value shown there stays clear
+/// (panels.md, Interaction).
+pub(crate) fn focus_ring(kind: &WidgetViewKind, rect: Rectangle) -> (Rectangle, f32) {
+    match kind {
+        WidgetViewKind::Knob { .. } => {
+            let r = KNOB_RADIUS + 3.5;
+            let c = knob_centre(rect);
+            (
+                Rectangle::new(Point::new(c.x - r, c.y - r), Size::new(2.0 * r, 2.0 * r)),
+                r,
+            )
+        }
+        WidgetViewKind::Toggle => (toggle_track(rect).expand(2.5), 8.0),
+        // The options, below the caption row.
+        WidgetViewKind::Radio { .. } => (
+            Rectangle::new(
+                Point::new(rect.x, rect.y + GRID),
+                Size::new(rect.width, rect.height - GRID),
+            )
+            .expand(1.0),
+            4.0,
+        ),
+        // Displays never take focus.
+        WidgetViewKind::Light | WidgetViewKind::Meter => (rect.expand(1.0), 4.0),
+    }
+}
+
+/// The track of a toggle switch: in the top row of its 3 × 2 cell.
+fn toggle_track(rect: Rectangle) -> Rectangle {
+    Rectangle::new(Point::new(rect.x + 7.0, rect.y + 1.0), Size::new(22.0, 11.0))
 }
 
 /// Centre of radio option `i`: one row each, below the label row.

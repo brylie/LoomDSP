@@ -1,16 +1,12 @@
 //! The patch canvas widget: input handling and drawing.
 
 use crate::camera::Camera;
-use crate::controls::{
-    ControlGeometry, PanelValues, knob_centre, knob_drag, knob_step, light_centre, radio_centre, radio_option,
-};
+use crate::controls::{ControlGeometry, PanelValues, focus_ring, knob_drag, knob_step, radio_option};
 use crate::gpu::{Cable, CanvasPrimitive, Geometry, Overlay, Shape};
 use crate::hover::{HOVER_PADDING, HOVER_TEXT_PX, HoverTarget, HoverTimer};
-use crate::scene::{
-    GRID, HEADER, Hit, HoverText, PORT_HIT_RADIUS, PORT_RADIUS, PortRef, ROW, Scene, TILE_WIDTH, WidgetViewKind,
-    fit_label,
-};
+use crate::scene::{GRID, Hit, HoverText, PORT_HIT_RADIUS, PORT_RADIUS, PortRef, Scene, TILE_WIDTH, WidgetViewKind};
 use crate::theme::Palette;
+use crate::tile_text::{self, Align, LABEL_SIZE, TITLE_SIZE, TextKind};
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::renderer;
 use iced::advanced::text::{self, Paragraph as _, Text};
@@ -30,10 +26,6 @@ const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 const TITLE_MIN_PX: f32 = 6.5;
 /// Port labels are drawn when they would be at least this tall on screen.
 const LABEL_MIN_PX: f32 = 7.5;
-/// Title size in world units.
-const TITLE_SIZE: f32 = 11.0;
-/// Port label size in world units.
-const LABEL_SIZE: f32 = 9.0;
 
 /// Opacity of cables that are not in focus. It never changes with hover or
 /// selection, so moving the pointer only changes the cables it points at,
@@ -322,6 +314,13 @@ where
             }
         });
 
+        // Text too small to draw leaves a bar in its place.
+        let bars = match detail(state.camera.zoom) {
+            Detail::Close => geometry.bars(false, false),
+            Detail::Middle => geometry.bars(true, false),
+            Detail::Far => geometry.bars(true, true),
+        };
+
         renderer.fill_quad(
             renderer::Quad {
                 bounds,
@@ -335,6 +334,7 @@ where
                 geometry,
                 controls,
                 overlay: self.overlay(state),
+                bars,
                 camera: state.camera,
                 cable_dim: CABLE_OPACITY,
             },
@@ -603,6 +603,13 @@ impl<Message> PatchCanvas<'_, Message> {
             Some(Hit::Widget { module, widget }) if self.is_control(module, widget) => {
                 Some(HoverTarget::Control(module, widget))
             }
+            // A port's label, or the bar standing in for it, hovers like
+            // the port (panels.md, Hover text).
+            Some(Hit::Module(_)) => state
+                .cursor
+                .and_then(|world| tile_text::port_label_at(self.scene, world))
+                .map(HoverTarget::Port)
+                .or(focused),
             _ => focused,
         }
     }
@@ -933,13 +940,19 @@ impl<Message> PatchCanvas<'_, Message> {
                 .shapes
                 .push(Shape::new(rect, r, Color::TRANSPARENT, p.hover, 1.2));
         }
+        // The focus ring shows for keyboard focus only. After a click or a
+        // drag the pointer already shows where the user is, and the ring
+        // would only crowd the value text (#92).
         if let Some((module, widget)) = state.focus
+            && state.tab_focus
             && self.selection.contains(&module)
-            && let Some(rect) = self.scene.module(module).and_then(|m| m.widget_bounds(widget))
+            && let Some(m) = self.scene.module(module)
+            && let (Some(rect), Some(view)) = (m.widget_bounds(widget), m.panel.widgets.get(widget))
         {
+            let (ring, radius) = focus_ring(&view.kind, rect);
             overlay
                 .shapes
-                .push(Shape::new(rect.expand(1.0), 4.0, Color::TRANSPARENT, p.focus, 1.5));
+                .push(Shape::new(ring, radius, Color::TRANSPARENT, p.focus, 1.5));
         }
         match &state.interaction {
             Interaction::Wiring { from } => {
@@ -1022,129 +1035,34 @@ impl<Message> PatchCanvas<'_, Message> {
             let Some(clip) = screen_tile.intersection(&bounds) else {
                 continue;
             };
-            let pad = 7.0 * zoom;
-            let title_pos = to_screen(Point::new(tile.x, tile.y + HEADER * 0.5)) + Vector::new(pad, 0.0);
-            renderer.fill_text(
-                text(
-                    &module.title,
-                    title_px,
-                    module.width() * zoom - 2.0 * pad,
-                    text::Alignment::Left,
-                ),
-                title_pos,
-                self.palette.text,
-                clip,
-            );
-            if !show_labels {
-                continue;
-            }
-            let label_width = module.label_width();
-            let ports = module
-                .inputs
-                .iter()
-                .enumerate()
-                .map(|(i, p)| (false, i, p))
-                .chain(module.outputs.iter().enumerate().map(|(i, p)| (true, i, p)));
-            for (output, i, port) in ports {
-                let y = tile.y + HEADER + ROW * (i as f32 + 0.5);
-                let (x, align) = if output {
-                    (tile.x + module.width() - 9.0, text::Alignment::Right)
-                } else {
-                    (tile.x + 9.0, text::Alignment::Left)
+            tile_text::for_each(module, |item| {
+                let (size, colour) = match item.kind {
+                    TextKind::Title => (title_px, self.palette.text),
+                    _ if !show_labels => return,
+                    TextKind::Option(..) => (label_px, self.palette.text),
+                    _ => (label_px, self.palette.text_dim),
                 };
-                let label = fit_label(&port.label, label_width, LABEL_SIZE);
+                // A focused or turning knob shows its value instead of its
+                // caption.
+                let value = match item.kind {
+                    TextKind::Caption(widget) if active == Some((module.id, widget)) => values
+                        .get(module.id, widget)
+                        .filter(|_| matches!(module.panel.widgets[widget].kind, WidgetViewKind::Knob { .. }))
+                        .map(|v| v.text.as_str()),
+                    _ => None,
+                };
+                let align = match item.align {
+                    Align::Left => text::Alignment::Left,
+                    Align::Center => text::Alignment::Center,
+                    Align::Right => text::Alignment::Right,
+                };
                 renderer.fill_text(
-                    text(&label, label_px, label_width * zoom, align),
-                    to_screen(Point::new(x, y)),
-                    self.palette.text_dim,
+                    text(value.unwrap_or(&item.content), size, item.width * zoom, align),
+                    to_screen(item.anchor),
+                    if value.is_some() { self.palette.text } else { colour },
                     clip,
                 );
-            }
-
-            // Panel labels and values (panels.md, Level of detail: text only
-            // close up). Iced draws text relative to its alignment: centred
-            // text is centred on the x it is given, so captions take the
-            // widget's centre, not its left edge.
-            for (index, widget) in module.panel.widgets.iter().enumerate() {
-                let Some(rect) = module.widget_bounds(index) else {
-                    continue;
-                };
-                let width = rect.width * zoom;
-                match &widget.kind {
-                    WidgetViewKind::Knob { .. } => {
-                        let showing_value = active == Some((module.id, index));
-                        let caption = fit_label(&widget.label, rect.width, LABEL_SIZE);
-                        let content = match values.get(module.id, index) {
-                            Some(value) if showing_value => value.text.as_str(),
-                            _ => &caption,
-                        };
-                        let at = Point::new(rect.center_x(), knob_centre(rect).y + 1.5 * GRID);
-                        let colour = if showing_value {
-                            self.palette.text
-                        } else {
-                            self.palette.text_dim
-                        };
-                        renderer.fill_text(
-                            text(content, label_px, width, text::Alignment::Center),
-                            to_screen(at),
-                            colour,
-                            clip,
-                        );
-                    }
-                    WidgetViewKind::Meter => {
-                        let at = Point::new(rect.center_x(), rect.y + rect.height - GRID * 0.5);
-                        renderer.fill_text(
-                            text(
-                                &fit_label(&widget.label, rect.width, LABEL_SIZE),
-                                label_px,
-                                width,
-                                text::Alignment::Center,
-                            ),
-                            to_screen(at),
-                            self.palette.text_dim,
-                            clip,
-                        );
-                    }
-                    WidgetViewKind::Toggle | WidgetViewKind::Light => {
-                        let at = Point::new(rect.center_x(), light_centre(rect).y + GRID);
-                        renderer.fill_text(
-                            text(
-                                &fit_label(&widget.label, rect.width, LABEL_SIZE),
-                                label_px,
-                                width,
-                                text::Alignment::Center,
-                            ),
-                            to_screen(at),
-                            self.palette.text_dim,
-                            clip,
-                        );
-                    }
-                    WidgetViewKind::Radio { options } => {
-                        let at = Point::new(rect.center_x(), rect.y + GRID * 0.5);
-                        renderer.fill_text(
-                            text(
-                                &fit_label(&widget.label, rect.width, LABEL_SIZE),
-                                label_px,
-                                width,
-                                text::Alignment::Center,
-                            ),
-                            to_screen(at),
-                            self.palette.text_dim,
-                            clip,
-                        );
-                        for (i, option) in options.iter().enumerate() {
-                            let centre = radio_centre(rect, i);
-                            let at = Point::new(centre.x + 6.0, centre.y);
-                            renderer.fill_text(
-                                text(option, label_px, (rect.width - 12.0) * zoom, text::Alignment::Left),
-                                to_screen(at),
-                                self.palette.text,
-                                clip,
-                            );
-                        }
-                    }
-                }
-            }
+            });
         }
     }
 
@@ -1415,18 +1333,40 @@ mod tests {
     }
 
     #[test]
-    fn the_focused_control_has_a_ring() {
+    fn a_control_focused_by_keyboard_has_a_ring_clear_of_its_caption() {
         let mut m = module(1, 0.0);
         m.panel = panel();
         let scene = Scene::new(vec![m], Vec::new());
         let selected = BTreeSet::from([1]);
         let canvas = PatchCanvas::new(&scene, &selected, |e| e);
         let unfocused = canvas.overlay(&State::default()).shapes.len();
-        let state = State {
+        let tabbed = State {
+            focus: Some((1, 0)),
+            tab_focus: true,
+            ..State::default()
+        };
+        let overlay = canvas.overlay(&tabbed);
+        assert_eq!(overlay.shapes.len(), unfocused + 1);
+        // The ring stays above the caption, where the value shows.
+        let ring = overlay.shapes.last().unwrap().rect();
+        let module = &scene.modules()[0];
+        let mut caption = None;
+        tile_text::for_each(module, |item| {
+            if item.kind == TextKind::Caption(0) {
+                caption = Some(item.bounds());
+            }
+        });
+        let caption = caption.unwrap();
+        assert!(
+            ring[1] + ring[3] <= caption.y,
+            "ring {ring:?} clear of caption {caption:?}"
+        );
+        // Focus from a click or a drag shows no ring (#92).
+        let clicked = State {
             focus: Some((1, 0)),
             ..State::default()
         };
-        assert_eq!(canvas.overlay(&state).shapes.len(), unfocused + 1);
+        assert_eq!(canvas.overlay(&clicked).shapes.len(), unfocused);
     }
 
     #[test]
@@ -1450,6 +1390,18 @@ mod tests {
         assert_eq!(canvas.hover_target(&on(knob)), Some(HoverTarget::Control(1, 0)));
         assert_eq!(canvas.hover_target(&on(Hit::Module(1))), None);
         assert_eq!(canvas.hover_target(&on(Hit::Nothing)), None);
+        // On a port's label: the port's hover text (#92).
+        let mut label = None;
+        tile_text::for_each(&scene.modules()[0], |item| {
+            if item.kind == TextKind::Port(port) {
+                label = Some(item.bounds().center());
+            }
+        });
+        let on_label = State {
+            cursor: label,
+            ..on(Hit::Module(1))
+        };
+        assert_eq!(canvas.hover_target(&on_label), Some(HoverTarget::Port(port)));
     }
 
     #[test]
