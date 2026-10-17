@@ -67,7 +67,7 @@ pub enum PortRange {
 
 #### Use in modulation
 
-**Decided:** modulation takes only the **polarity** from the source's range, and does not scale by it. Modulation rule 4 remaps a source by polarity: a bipolar source on a unipolar assignment uses `(s + 1) / 2`. For every built-in source today, the range is 0 to 1 or -1 to 1, so scaling would change nothing, and not scaling keeps declared output ranges out of the sound (rule 5).
+**Decided:** modulation takes only the **polarity** from the source's range, and does not scale by it. Modulation rule 4 remaps a source by polarity: a bipolar source on a unipolar assignment uses `(s + 1) / 2`. Every built-in source today declares 0 to 1 or -1 to 1, except Pitch, which declares -0.5 to 0.5. Ignoring the Pitch span is intentional: a pitch source on a unipolar assignment maps to 0.25 to 0.75, not 0 to 1. Not scaling keeps declared output ranges out of the sound (rule 5).
 
 *Considered, not adopted:* remap by the range itself, with `(s - min) / (max - min)` on a unipolar assignment, so a 0 to 5 envelope moves a knob by the same share as a 0 to 1 envelope. It can be added later if a source declares another span. That needs its own spec change first, and it must use the source's **declared** range only, never the propagated one.
 
@@ -206,7 +206,7 @@ The width matters for warnings. A warning that a gate *never* goes high is safe,
 Settled in [#144](https://github.com/brylie/LoomDSP/issues/144):
 
 - **The range replaces polarity.** One field, polarity derived from it. *Why:* two fields can disagree. `polarity` is a required `PortSpec` field (ADR-0016), so replacing it touches about 50 port literals, but the early-alpha rule (AGENTS.md, Project stage) says to prefer the clean design over a shim. [Modulation](modulation.md) rule 4 now says polarity comes from the source's range.
-- **Modulation takes polarity only, not scale.** *Why:* every built-in source is 0 to 1 or -1 to 1, and scaling would make declared output ranges part of the sound. Revisit when a source declares another span.
+- **Modulation takes polarity only, not scale.** *Why:* scaling would make declared output ranges part of the sound. Pitch (-0.5 to 0.5) is the one built-in span that scaling would change: it would map to 0 to 1 on a unipolar assignment instead of 0.25 to 0.75. Scaling needs its own spec change, and must use the source's declared range only.
 - **Pitch convention: -0.5 to 0.5** (ten octaves around middle C). *Why:* it covers the audible and musical pitch range with some margin. Tier 2 warnings may tune the thresholds, not this span.
 - **No ADR.** *Why:* ADR-0007 already says signal types carry default ranges, and ADR-0014 already gives assignments a polarity. This change only replaces where a port's polarity comes from.
 
