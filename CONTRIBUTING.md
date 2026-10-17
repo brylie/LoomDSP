@@ -94,6 +94,8 @@ Modules must also give the same output whether they process 1 frame or 128 frame
 
 ## Adding a module
 
+Start from the module's entry in the [module catalogue](docs/product/module-catalogue.md), and name its catalogue ID (such as `MT-FILTER-02`) in the issue and pull request. If the module has no entry, propose one first. Design the module in a clean room ([ADR-0018](docs/adr/0018-clean-room-module-development.md)): work from its purpose and from textbooks, papers, and standards, and cite them. Do not read other audio projects' source code, and do not copy their help text, control names, or panel layouts. Why: LoomDSP's modules must be its own, so every patch can be shared under a permissive licence without doubt.
+
 1. Add a `static` `ModuleDescriptor` and a struct implementing `Module` in `crates/loom-modules/src/`.
 2. Add it to `ALL` in `crates/loom-modules/src/lib.rs`.
 3. Give it a stable, namespaced ID (`loom.<category>.<name>`) and version 1. Never rename a released ID, port, or parameter. Add a new version instead.

@@ -2,10 +2,12 @@
 
 | Term | Meaning |
 |---|---|
+| **Abstraction** | An open patch made from primitives that works as one module. Built-in abstractions ship with LoomDSP; users save their own the same way. You can open any abstraction to learn from it or change it (FR-LIB-24, ADR-0017). |
 | **AudioWorklet** | The browser API that runs custom audio code on a dedicated audio thread. It always processes blocks of 128 frames. |
 | **Block / buffer** | A group of samples processed together. Hosts choose the size (often 32 to 1024). |
 | **Cable** | A connection from an output port to an input port. |
 | **CLAP** | CLever Audio Plug-in. An open plugin format with a permissive licence. |
+| **Clean room** | How LoomDSP modules are made: from first principles and published theory, without reading other projects' code or copying their text or designs ([ADR-0018](../adr/0018-clean-room-module-development.md)). |
 | **Clock Divide** | A module that fires a trigger on every Nth incoming trigger ([clock specification](../design/clock.md)). |
 | **Copyleft** | A licence (such as GPL or AGPL) that requires derived works to use the same licence. Not allowed in LoomDSP dependencies. |
 | **Control thread** | Any non-audio thread, usually the UI thread. Allowed to allocate and block. |
@@ -32,6 +34,8 @@
 | **Modulation assignment** | A link from any output to a parameter in the same patch level, with a depth, made without a cable ([modulation specification](../design/modulation.md)). |
 | **Modulation matrix** | A table of every modulation assignment in a patch or sub-patch. |
 | **Module** | One DSP unit on the canvas, such as an oscillator or filter. Built-in or from the SDK. |
+| **Module catalogue** | The plan for the module library: every module type, trait, and role, with stable IDs such as `MT-FILTER-02` ([module catalogue](module-catalogue.md)). |
+| **Module type** | What a module does, as listed in the module catalogue. One type can be built as more than one module ID. |
 | **Next action** | What a group does when a member finishes its loop: play the next member, a random one, or follow an input. Taken from Bitwig's clip launcher, but patchable. |
 | **Note effect** | A module that transforms notes rather than audio: arpeggiator, chord, transpose, quantise. |
 | **Panel** | The controls and displays of a module, sub-patch, or patch, built from one shared set of widgets ([panels specification](../design/panels.md)). A module's tile is its panel. |
@@ -46,6 +50,8 @@
 | **Polyphony** | Playing several notes at once. Each note uses its own voice. |
 | **Port** | An input or output point on a module. |
 | **Polymetric** | Patterns of different lengths playing together, so they shift against each other over time. |
+| **Primitive** | A module with one job, such as a buffer reader or a selector. Abstractions are made from primitives (ADR-0017). |
+| **Role** | A contract of port names and core parameter names, such as "filter" or "envelope". A module or sub-patch that fills a role can go in any slot for that role (ADR-0017). |
 | **Round robin** | Playing the members of a group one after another, then starting again. |
 | **Real-time safe** | Code that always finishes in a bounded time. No allocation, locks, or system calls. |
 | **RON** | Rusty Object Notation. A text format that maps directly to Rust data types through Serde. Used for patch files. |
@@ -54,11 +60,14 @@
 | **SharedArrayBuffer (SAB)** | Browser memory that the main thread and the audio thread can both read and write. |
 | **SIMD** | Single Instruction, Multiple Data. One CPU instruction processes several values at once. |
 | **SPSC queue** | Single-producer, single-consumer queue. One thread writes, one thread reads, no locks. |
+| **Slot** | A place inside an abstraction that holds any part filling a given role. Swapping the part keeps the cables and carries values across by name (FR-ENCAP-08). |
+| **Stack** | A sub-patch mode that runs N copies of its contents, each with its own spread values. How LoomDSP does unison for any module, not only oscillators (FR-ENCAP-10). |
 | **Step Select** | A module with N gate outputs, one high at a time, chosen by a phase input. A step sequencer whose steps are "which module plays" ([arrangement specification](../design/arrangement.md)). |
 | **Strongly connected component (SCC)** | A part of a graph where every node can reach every other node. In audio terms: a feedback loop. |
 | **Sub-patch** | A patch nested inside another patch. Also called a macro or abstraction in other tools. |
 | **Tile** | A module as drawn on the canvas: a compact box with inputs on the left edge and outputs on the right. |
 | **Transport** | The patch's one source of musical time: tempo, time signature, play state, and position. From the app, a plugin host, or MIDI clock. |
+| **Trait** | A shared option, such as timebase, seed, or spread, defined once in the module SDK and used by many modules, so it works the same everywhere (FR-SDK-07). |
 | **Trigger** | An event on a gate cable, such as "loop ended". An output is high for one sample; inputs count rising edges (ADR-0007). |
 | **Voice** | One copy of a polyphonic sub-patch, playing one note. |
 | **VST3** | Steinberg's plugin format. Widest DAW support. The SDK is MIT-licensed since version 3.8. |

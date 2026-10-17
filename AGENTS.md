@@ -50,6 +50,7 @@ Before finishing a change, run `prek run --all-files` (fmt, clippy, typos, file 
 5. **Stable IDs.** Never rename a released module ID, port name, or parameter name. Patch files depend on them.
 6. **Engine core stays portable.** `loom-core`, `loom-modules`, `loom-patch`, and `loom-rt` must build for `wasm32-unknown-unknown`: no threads, files, or audio APIs there.
 7. **`unsafe` needs a `// SAFETY:` comment** that explains why it is sound.
+8. **Clean room** (ADR-0018). Design modules from first principles and published theory (textbooks, papers, standards). Do not read the source code of other audio projects, whatever their licence, except dependencies accepted under ADR-0006. Do not copy or closely paraphrase other products' manuals, and do not copy their panel layouts, control names, parameter sets, or presets. If you are asked to make a module "like" another product's, build it from its purpose and the theory, and cite your references in the pull request.
 
 ## Spec first
 
@@ -68,6 +69,8 @@ Why: a gap in the spec gets filled with a guess, and a well-built guess is costl
 - A **decision** (with its options and reasons) goes in an ADR. Keep it to the decision. Once accepted, do not rewrite it; write a new ADR that supersedes it.
 - **How a feature works** (modules, ports, rules, examples) goes in a specification in `docs/design/`, linked from the ADR. Update it in the same change as the code.
 - **Who needs it and why** goes in use cases and requirements in `docs/product/`. **Tasks** go in GitHub issues.
+- **Which modules to build** goes in the [module catalogue](docs/product/module-catalogue.md): one entry per module type, with a stable `MT-` ID. A new module starts from its catalogue entry. If it has none, add the entry first.
+- **What we learned from other products** goes in a dated research snapshot in `docs/research/`. Only research snapshots, ADR "Prior art" sections, and explainers name other products' modules. Catalogue entries, specifications, descriptors, and help text use our own words (ADR-0018).
 - **The theory behind it** (what the signal is, why the obvious approach fails, how Eurorack, VCV Rack, or Bitwig Grid do it) goes in an explainer in `docs/learn/`. Write or update one whenever a feature rests on an idea a newcomer would not know, or an edge case took real thought to settle. Link it from the spec and from the code. See [docs/learn/README.md](docs/learn/README.md).
 
 Why: decisions stay trustworthy only if they do not move, while details must be free to change. Explainers exist because LoomDSP is also a way to learn modular sound design (product principle 11): the reasons behind our choices are part of what we ship. See [docs/README.md](docs/README.md).
@@ -79,6 +82,8 @@ Docs and comments use short, direct sentences and plain words, because many read
 ## Where things are
 
 - Requirements with IDs: `docs/product/requirements.md`, `docs/product/non-functional-requirements.md`
+- Planned module types, traits, and roles: `docs/product/module-catalogue.md`
+- Research snapshots (evidence, not decisions): `docs/research/`
 - Decisions: `docs/adr/` (one decision per ADR; frozen once accepted)
 - Specifications: `docs/design/` (living; update with the code they describe)
 - Benchmarks: `docs/benchmarks/`

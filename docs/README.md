@@ -25,6 +25,7 @@ Each kind of document has one job, so readers know what to trust and writers kno
 | **Guide** | `guide/`, `dev/` | How to use LoomDSP, or how to work on it. | Living. |
 | **Explainer** | [`learn/`](learn/README.md) | The theory behind a feature: what the signal is, why the obvious approach fails, how other modular systems do it. | Living: updated with the behaviour it explains. |
 | **Benchmark** | [`benchmarks/`](benchmarks/) | Measurements on a stated machine and date. | Add new results; keep old ones for comparison. |
+| **Research** | [`research/`](research/2026-10-prior-art-survey.md) | What we learned from other products and sources, on a stated date. Non-normative: evidence, not decisions. | Frozen. Write a new snapshot instead of updating an old one. |
 
 Why decisions are kept apart from specifications: a decision record explains *why* the code is the way it is, and stays useful only if it does not move. Details such as ports, parameters, and examples change as features are built. Keeping them in an ADR would mean either editing a "frozen" record or writing a new ADR for every small change.
 
@@ -38,6 +39,7 @@ Why decisions are kept apart from specifications: a decision record explains *wh
 | [Non-functional requirements](product/non-functional-requirements.md) | Performance, real-time safety, portability, quality |
 | [Roadmap](product/roadmap.md) | Phases, scope per phase, and exit criteria |
 | [Open questions](product/open-questions.md) | Unresolved decisions and known risks |
+| [Module catalogue](product/module-catalogue.md) | Every planned module type, trait, and role, with stable IDs, phases, and requirements |
 | [Glossary](product/glossary.md) | Shared vocabulary |
 
 ## Architecture
@@ -46,6 +48,12 @@ Why decisions are kept apart from specifications: a decision record explains *wh
 |---|---|
 | [ADR index](adr/README.md) | Architecture Decision Records and how to write them |
 | [Design specifications](design/README.md) | Living specifications of features, linked to their ADRs |
+
+## Research
+
+| Document | Purpose |
+|---|---|
+| [Prior-art survey, 2026-10](research/2026-10-prior-art-survey.md) | Modules in 15 modular environments, as evidence for the module catalogue |
 
 ## Benchmarks
 

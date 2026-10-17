@@ -57,7 +57,7 @@ Each principle includes its reason, so we can judge trade-offs later.
 - G4. Share living systems: self-contained patch files that others can open, play, and learn from, and a growing library of community patches and modules.
 - G5. Provide a documented module SDK so others can add DSP modules in Rust.
 - G6. Publish reusable primitives (for example real-time helpers and the canvas) as standalone crates.
-- G7. Grow the module library toward the breadth of Bitwig Studio's Grid modules, modulators, note effects, and devices, all as modules in one grid.
+- G7. Build the module library planned in the [module catalogue](module-catalogue.md): our own list of module types, from primitives to open abstractions, all as modules in one grid. Its breadth matches the best modular environments, but it is measured against our plan, not against another product.
 
 Later goals, not scheduled: export patches as CLAP and VST3 plugins and standalone apps (ADR-0004), and run in the browser with WAM2 export. The strongest case for the browser is education: a teacher shares a link, and students start patching with no install.
 

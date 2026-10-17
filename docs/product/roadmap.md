@@ -22,6 +22,8 @@ Why this order:
 5. **Scope is kept tight on purpose.** Generative live performance and plugin export pull in different directions: plugins bring host integration, parameter automation, many formats, and per-platform builds and signing. Doing both at once risks doing neither well. So plugin and standalone export, and the web target, are deferred ("Later"). We decide after P3 whether to take them on.
 6. The engine core stays portable and WASM-compatible (NFR-PORT-01, NFR-PORT-02), and ADR-0004 records how export would work, so the option stays open at low cost.
 
+**Module types per phase.** The [module catalogue](module-catalogue.md) gives every planned module type a stable ID (such as `MT-FILTER-02`) and a phase. Each phase below builds the catalogue entries marked with that phase. A type's phase follows the use case it unblocks: the subtractive tutorial in P1, panels and live play in P2, self-arranging sets in P3, and the rest in P4.
+
 ---
 
 ## P0. Engine foundations
@@ -100,6 +102,8 @@ Scope:
 - Module data beyond parameters, for patterns and samples (FR-LIB-19, OQ-17).
 - Cable styles for stereo, polyphony, and inserted delays (FR-CANVAS-12).
 - Design spike: how notes travel on cables (OQ-16), so P3 can build note effects on a settled model.
+- Roles, slots, and traits (ADR-0017): a specification first, then slots in abstractions, sub-patch modes, role-bound panel widgets, and traits in the SDK (FR-ENCAP-08 to 10, FR-PANEL-11, FR-SDK-07, 08). Patch-wide scale and tuning (FR-LIB-29).
+- The catalogue's P2 module types, including the first abstractions: a synth voice and an effect chain with swappable slots.
 
 Exit criteria:
 - [ ] An 8-voice polysynth built from primitives, with a 6-knob panel, runs within the CPU budget.
@@ -121,6 +125,7 @@ Scope:
 - Note effects, on the model chosen in OQ-16 (FR-LIB-13).
 - Modulation curves over bars and sections (FR-LIB-16), on the P1 transport and clock modules.
 - Record the live output to an audio file while performing (FR-SHARE-03).
+- Seeded melody and rhythm generators (FR-LIB-28), and the rest of the catalogue's P3 module types.
 
 Exit criteria:
 - [ ] A patch plays group A round robin, each loop twice; after two rounds it plays group B the same way, then returns to A, with no manual action (the [worked example](../design/arrangement.md#worked-example)).
@@ -140,7 +145,7 @@ Scope:
 - Publish stable crates to crates.io (FR-SDK-06).
 - Patch format documentation (FR-FILE-03).
 - Spectral modules, preset morphing, OSC (FR-LIB-10, FR-PERF-03, FR-MIDI-05).
-- Grid breadth: the rest of the modulators, note effects, sequencers, and device-style processors (FR-LIB-12 to 15).
+- Library breadth: the rest of the [module catalogue](module-catalogue.md), including the remaining modulators, note effects, sequencers, and device-style processors (FR-LIB-12 to 15).
 
 ---
 

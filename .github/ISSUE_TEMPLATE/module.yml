@@ -9,6 +9,13 @@ body:
       description: For example "Wavefolder", loom.shaper.fold
     validations:
       required: true
+  - type: input
+    id: catalogue
+    attributes:
+      label: Catalogue ID
+      description: The module type in docs/product/module-catalogue.md, for example MT-SHAPE-01. If there is none, propose a catalogue entry in this issue.
+    validations:
+      required: true
   - type: textarea
     id: purpose
     attributes:
@@ -23,5 +30,5 @@ body:
   - type: textarea
     id: references
     attributes:
-      label: References
-      description: Papers, articles, or permissively licensed code that describe the algorithm. No GPL code, please.
+      label: Design references
+      description: Textbooks, papers, standards, or your own derivation that describe the algorithm. Please do not read or link other audio projects' source code, and do not copy their manuals (clean room, ADR-0018).

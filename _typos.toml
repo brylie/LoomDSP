@@ -3,3 +3,7 @@
 # Generated files: hashes and crate names, not prose.
 # Third-party agent skills vendored into .agents/ are not ours to fix.
 extend-exclude = ["*.lock", "*.png", "target/", ".agents/"]
+
+[default.extend-words]
+# A resonance of the vocal tract; formant filters shape sounds toward vowels.
+formant = "formant"

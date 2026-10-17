@@ -48,3 +48,5 @@ Why: an ADR is a record of why things are the way they are. If it is rewritten a
 | [0014](0014-modulation-without-cables.md) | Modulation without cables | Proposed |
 | [0015](0015-one-transport-per-patch.md) | One transport per patch, read by modules without cables | Proposed |
 | [0016](0016-ports-and-parameters-carry-their-own-text.md) | Ports and parameters carry a label and a description | Proposed |
+| [0017](0017-primitives-traits-and-abstractions.md) | A module library of primitives, traits, and open abstractions | Proposed |
+| [0018](0018-clean-room-module-development.md) | Clean-room module development | Proposed |

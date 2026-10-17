@@ -78,6 +78,26 @@ VCV Rack's ecosystem works because people can install modules without building t
 
 - **Leaning:** compile in for now. Spike WebAssembly modules in P4: measure the cost of a filter and an oscillator as WASM against native, and check the runtime's real-time behaviour. Decide before announcing a module SDK.
 
+### OQ-20. How roles are named and versioned
+
+Roles let a slot accept any part with the right ports and parameters (ADR-0017, FR-SDK-08). A role is a contract that patches depend on, so it needs a stable name and a way to change.
+
+- **Questions:** the naming scheme; where a role's contract lives (in the SDK, as data like a module descriptor); what happens when a role gains a parameter; whether a part can fill several roles.
+- **Leaning:** namespaced IDs like module IDs (for example `loom.role.filter`), with a version. A new version may only add optional parameters, so every part that filled the old version still fits. Decide in the roles and slots specification before P2 work starts.
+
+### OQ-21. What carries across a slot swap
+
+Parameters carry across by role name (FR-ENCAP-08). Stored data is harder: a sequencer pattern, a wavetable, or a recorded buffer belongs to one part.
+
+- **Questions:** whether module data carries across when two parts use the same kind of data; how much stored data a slot keeps for parts that are not active; how undo treats a swap.
+- **Leaning:** keep each part's data in the patch, keyed by the part, and restore it when the user swaps back. Never convert data between parts. A swap is one undo step.
+
+### OQ-22. Is the scale a module or a patch setting?
+
+Pitch modules follow a patch-wide scale and tuning (FR-LIB-29). It could be a setting on the patch, like the transport (ADR-0015), or a module.
+
+- **Leaning:** a patch setting, read by modules without cables like the transport, plus a Scale and tuning module (MT-PITCH-03) that changes it from a trigger, so logic can change key between sections.
+
 ## Risks
 
 | ID | Risk | Likelihood | Impact | Mitigation |
@@ -91,7 +111,7 @@ VCV Rack's ecosystem works because people can install modules without building t
 | R-08 | Building our own primitives (VST3 adapter, GUI embedding) adds maintenance load. | High | Medium | Only build what has no acceptable alternative. Keep each crate small, documented, and tested so others can help maintain it. |
 | R-09 | Building our own canvas (ADR-0010) takes much longer than estimated. | Medium | High | Iced keeps text, windowing, and ordinary widgets. Build a measured prototype first, with performance gates on the reference laptop. Keep the scope of the first version small. |
 | R-10 | Strict dependency rules leave a gap with no acceptable crate. | Medium | Medium | Licence rules are strict (Must). AI-policy preference is soft (Should). We can use a permissive crate even if we cannot contribute to it. |
-| R-11 | "Everything is a module" makes the library very large, and the project spreads thin. | High | High | Grow by phase. Prioritise modules for live performance. Make the module SDK good enough that the community can add modules. |
+| R-11 | "Everything is a module" makes the library very large, and the project spreads thin. | High | High | Grow by phase, following the [module catalogue](module-catalogue.md). Prioritise modules for live performance. Build primitives, shared traits, and open abstractions instead of one fixed module per device (ADR-0017). Make the module SDK good enough that the community can add modules. |
 | R-12 | Note handling (OQ-16) is decided late and forces rework in modules already built. | Medium | High | Design spike before the first note effect. Keep MIDI note input behind one module until then. |
 | R-13 | No way to install third-party modules without rebuilding slows the community (OQ-18). | Medium | Medium | Ship a strong built-in library first. Decide OQ-18 early in P4. |
 
