@@ -161,18 +161,26 @@ pub fn for_each<'a>(module: &'a ModuleView, mut f: impl FnMut(TextItem<'a>)) {
     }
 }
 
-/// The port whose label is under a world point, on any tile.
+/// The port whose label is under a world point. Text is drawn above every
+/// tile, so a label can show over a tile that overlaps its own. Every tile
+/// under the point is searched, topmost first.
 pub fn port_label_at(scene: &crate::scene::Scene, point: Point) -> Option<PortRef> {
-    let module = scene.modules().iter().rev().find(|m| m.bounds().contains(point))?;
-    let mut found = None;
-    for_each(module, |item| {
-        if let TextKind::Port(port) = item.kind
-            && item.bounds().contains(point)
-        {
-            found = Some(port);
-        }
-    });
-    found
+    scene
+        .modules()
+        .iter()
+        .rev()
+        .filter(|module| module.bounds().contains(point))
+        .find_map(|module| {
+            let mut found = None;
+            for_each(module, |item| {
+                if let TextKind::Port(port) = item.kind
+                    && item.bounds().contains(point)
+                {
+                    found = Some(port);
+                }
+            });
+            found
+        })
 }
 
 #[cfg(test)]
@@ -339,5 +347,16 @@ mod tests {
             None
         );
         assert_eq!(port_label_at(&scene, Point::new(-500.0, -500.0)), None);
+
+        // A tile on top that covers the label but has no label there
+        // itself: the label still hovers, as it is drawn above both.
+        let mut cover = self::module();
+        cover.id = 2;
+        cover.inputs.clear();
+        cover.outputs.clear();
+        cover.position = Point::new(label.x - 60.0, label.y - 40.0);
+        let overlapped = Scene::new(vec![self::module(), cover], Vec::new());
+        assert!(overlapped.modules()[1].bounds().contains(label.center()));
+        assert_eq!(port_label_at(&overlapped, label.center()), Some(lowpass));
     }
 }
