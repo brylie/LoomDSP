@@ -3,10 +3,10 @@
 How any output modulates any parameter without a cable, and how users make, see, and edit those assignments.
 
 - **Kind:** living specification.
-- **Status:** Draft for making, seeing, and editing assignments ([#70](https://github.com/brylie/LoomDSP/issues/70), [#71](https://github.com/brylie/LoomDSP/issues/71)). The [engine rules](#rules), [engine and API](#engine-and-api), and [engine acceptance criteria](#acceptance-criteria-engine) are Agreed ([#19](https://github.com/brylie/LoomDSP/issues/19)). [Parameter mapping](#parameter-mapping) is Agreed.
+- **Status:** Editing and display [slice 1](#slice-1-make-see-and-edit) (make, see, and edit) and its [undo rules](#undo) are Agreed ([#70](https://github.com/brylie/LoomDSP/issues/70), [#20](https://github.com/brylie/LoomDSP/issues/20)). Slices 2 and 3 (live value, hover lines, matrix) are Draft ([#20](https://github.com/brylie/LoomDSP/issues/20), [#71](https://github.com/brylie/LoomDSP/issues/71)). The [engine rules](#rules), [engine and API](#engine-and-api), and [engine acceptance criteria](#acceptance-criteria-engine) are Agreed and built ([#19](https://github.com/brylie/LoomDSP/issues/19)). [Parameter mapping](#parameter-mapping) is Agreed.
 - **Decision behind it:** [ADR-0014](../adr/0014-modulation-without-cables.md) (modulation without cables). Builds on [ADR-0013](../adr/0013-modules-carry-their-own-panel.md) (panels) and [ADR-0007](../adr/0007-polymorphic-signal-model.md) (signals).
 - **Requirements:** FR-MOD-01 to FR-MOD-08, FR-LIB-12.
-- **Issues:** [#19](https://github.com/brylie/LoomDSP/issues/19) (built-in modulation), [#20](https://github.com/brylie/LoomDSP/issues/20) (modulation range on controls), [#66](https://github.com/brylie/LoomDSP/issues/66) (parameter mapping).
+- **Issues:** [#19](https://github.com/brylie/LoomDSP/issues/19) (built-in modulation), [#20](https://github.com/brylie/LoomDSP/issues/20) (modulation range on controls), [#66](https://github.com/brylie/LoomDSP/issues/66) (parameter mapping), [#70](https://github.com/brylie/LoomDSP/issues/70) (making and seeing assignments), [#71](https://github.com/brylie/LoomDSP/issues/71) (matrix), [#12](https://github.com/brylie/LoomDSP/issues/12) (undo).
 
 ## Goal
 
@@ -23,33 +23,86 @@ How any output modulates any parameter without a cable, and how users make, see,
 
 ## Behaviour
 
-### Making an assignment
+The editing and display work ships in three slices, so each one can be built and tried on its own. Slice 1 is Agreed. Slices 2 and 3 are Draft.
+
+| Slice | What it adds | Status | Issues |
+|---|---|---|---|
+| 1. Make, see, and edit | Drag an output onto a tile control, add from the inspector, edit in the inspector, a range arc on tile knobs, a badge on the source | **Agreed** | [#70](https://github.com/brylie/LoomDSP/issues/70), [#20](https://github.com/brylie/LoomDSP/issues/20) (range part) |
+| 2. Live value and lines | The live value dot, hover lines, dragging an arc to change depth | Draft | [#20](https://github.com/brylie/LoomDSP/issues/20) (live part), [#70](https://github.com/brylie/LoomDSP/issues/70) |
+| 3. Matrix | The modulation matrix, with the keyboard path | Draft | [#71](https://github.com/brylie/LoomDSP/issues/71) |
+
+*Why slices:* slice 1 needs no engine change and no new canvas drawing beyond arcs and labels the canvas already draws. The live dot needs the engine to publish modulated values, and the matrix is a new panel. Neither should hold back the first way to make a patch with modulation.
+
+### Slice 1: make, see, and edit
+
+**Status:** Agreed.
+
+#### Making an assignment
 
 | Action | Result |
 |---|---|
-| Drag from an output port and drop on a control (on a tile or in the inspector) | Creates an assignment with depth 0.25. Dropping on a port still makes a cable. |
-| Select a module, press **M** (modulate mode), then drag any control | Sets that module's first output as a source on the dragged control. The drag sets the depth. Press M or Escape to leave the mode. |
-| Matrix: **Add**, then pick a source and a target | Creates an assignment from the table, by mouse or keyboard. |
+| Drag from an output port and drop on a control on a tile | Creates an assignment with depth 0.25, polarity following the source, and on. The new assignment is added after the others on that parameter. Dropping on an input port still makes a cable. Dropping anywhere else does nothing. |
+| While that drag is over a control | The control is highlighted the way an input port is highlighted for a cable, so the user can see where the drop will go. |
+| Inspector: **Add modulation** under a parameter, then pick a source | Creates the same assignment as a drop. The list shows every output in the patch as "module name #id: output label", in module id order, then port order. |
 
-### Seeing assignments
+- Any control bound to a parameter accepts a drop: knobs, toggles, and radio buttons. Whole-number parameters round after the clamp (rule 5). A control bound to a display value (a light or meter) does not.
+- The source can be on the same module as the target. That makes a self-loop, which is valid (rule 8).
+- A drop that matches an assignment that already exists (same output, same parameter) adds nothing. The status bar says the assignment exists. *Why:* a second link from the same output only adds its depth to the first, so it is never needed, and two rows that look the same are confusing. The engine and the patch format still accept duplicates, so files written by hand keep loading.
+- Default depth 0.25: a quarter of the knob. It is large enough to hear on any parameter and small enough not to slam to a limit. It is one constant in the app, so it is easy to change after trying it with users.
 
-- **On the control:** the base value, an arc for each assignment's range, and a dot for the live value (FR-MOD-04). Unipolar assignments draw the arc on one side of the base. Bipolar assignments draw it on both sides.
-- **On the source:** a small badge on the output port shows how many assignments it drives.
+#### Seeing assignments
+
+- **On a tile knob:** one extra arc, in the modulation colour, shows the range the assignments can reach from the base. The knob's value arc and pointer still show the base value. The range runs from `base + low` to `base + high`, clamped to 0 to 1, where each enabled assignment adds to `low` and `high`:
+
+  | Assignment uses | Adds to `low` | Adds to `high` |
+  |---|---|---|
+  | unipolar, depth `d` | `min(0, d)` | `max(0, d)` |
+  | bipolar, depth `d` | `-abs(d)` | `abs(d)` |
+
+  This is the range the engine produces for sources inside their declared range (rules 2, 4, and 5). A source outside its range, such as a hot audio signal, can reach further before the clamp. The arc does not show that.
+- *Why one arc and not one per assignment:* a tile knob is small, and several arcs on it cannot be told apart. The combined range answers the question on stage: where can this knob go? The inspector shows each assignment.
+- **On toggles and radio buttons:** no arc. A small dot in the modulation colour, next to the control, shows that it has at least one enabled assignment.
+- **On the source:** an output port that drives at least one assignment shows a small label with the number of assignments, next to the port. It does not cover the port or its cable.
+- **In the inspector:** under each parameter's slider, one row per assignment, in the order the engine applies them. Each row shows the source ("module name #id: output label"), a depth slider from -1 to 1 with 0 in the middle and the depth as a signed percentage, a polarity choice (follow source, which also names the source's polarity, unipolar, or bipolar), an on/off switch, and a remove button.
+
+#### Editing and removing
+
+- Depth, polarity, and on/off are edited in the inspector row. They take effect at the next buffer and do not recompile (engine rule, see [Engine and API](#engine-and-api)).
+- The remove button removes that assignment.
+- Deleting a module removes the assignments it is part of. Its badge counts and arcs update.
+- Saving writes assignments into the patch, as the engine already does.
+
+#### Undo
+
+Slice 1 does not wait for undo ([#12](https://github.com/brylie/LoomDSP/issues/12)). Today no edit in the app can be undone, and assignments are no different. When undo is built, these rules apply:
+
+- Adding, removing, and changing depth, polarity, or on/off are each an undo step. One depth slider drag is one step, not one per value, like a knob drag.
+- Undoing the removal of an assignment, or of a module with assignments, brings each assignment back in its old place in the order. *Why:* several assignments on one parameter are added in id order, and float sums depend on that order (see [Engine and API](#engine-and-api)). Restoring at the end of the list could change the sound in the last bits. The controller needs a way to put an assignment back with its old id.
+
+*Why not wait:* undo covers every edit, and building it is its own piece of work. Waiting would hold back modulation without making it safer than cables, which also cannot be undone yet.
+
+### Slice 2: live value and lines
+
+**Status:** Draft.
+
+- **Live value:** a dot on the knob shows the modulated value (FR-MOD-04). The engine computes it per sample, so it must publish one value per block for the UI, much like display values. How, and how often, is not decided.
 - **On hover:** pointing at a modulated control, or at a source badge, draws thin dashed lines between the source port and its targets, and highlights the tiles. They disappear when the pointer leaves. Selecting a module shows its lines too, following the same focus rules as cables.
-- **In the inspector:** each parameter lists its assignments, with a depth slider and a remove button.
-- **In the matrix:** every assignment, one per row.
+- **Drag an arc** on the control to change its depth. Shift for fine steps. With one combined arc, which assignment a drag changes is not decided.
+- **Drop on an inspector control.** The inspector is not part of the canvas, so a drag that starts on the canvas and ends there needs its own design.
 
-### Editing and removing
+### Slice 3: the modulation matrix
 
-- Drag an assignment's arc on the control to change its depth. Shift for fine steps.
-- Right-click an arc, or press Delete in the matrix, to remove it.
-- Deleting a module removes the assignments it is part of. Undo brings them back.
+**Status:** Draft.
 
-### The modulation matrix
+A panel beside the inspector. Columns: on, source (module and output), target (module and parameter), depth, polarity. Sort and filter by module, or show only the selected module. Every cell can be edited by keyboard (NFR-UX-01). **Add**, then pick a source and a target, creates an assignment. Delete removes the selected row.
 
-A panel beside the inspector. Columns: on, source (module and output), target (module and parameter), depth, polarity. Sort and filter by module, or show only the selected module. Every cell can be edited by keyboard (NFR-UX-01).
+The matrix shows the assignments of the current patch level only. Assignments inside a sub-patch are not listed. *Why:* an assignment never crosses a patch level (rule 10), so the ones inside a sub-patch belong to it. Open the sub-patch to see them, as with its cables.
 
 *Why a matrix as well as arcs:* arcs are best for one control, the matrix for the whole patch. It is also the place to check for hidden routing, and the keyboard path for people who do not use a mouse.
+
+### Not planned for P1
+
+- **Modulate mode (select a module, press M, drag controls).** Drag and drop and the inspector already cover the mouse path, and the matrix covers the keyboard path. It can come back if trying slice 1 shows that making many assignments is slow.
 
 ## Rules
 
@@ -153,15 +206,35 @@ A **Macro** module (FR-LIB-12) has one knob on its panel and one output equal to
 - [x] Assignments survive save and load. A patch saved before modulation still loads.
 - [x] Deleting a source or target module removes its assignments.
 
-### Acceptance criteria: editing and display
+### Acceptance criteria: slice 1
 
-**Status:** Draft. UI issues [#70](https://github.com/brylie/LoomDSP/issues/70) and [#71](https://github.com/brylie/LoomDSP/issues/71).
+**Status:** Agreed. [#70](https://github.com/brylie/LoomDSP/issues/70) and [#20](https://github.com/brylie/LoomDSP/issues/20) (range part).
 
-- [ ] Dragging an output onto a control creates an assignment. Undo removes it.
-- [ ] Modulated controls show base, range arc, and live value.
-- [ ] Hovering a modulated control draws its source lines. The source port shows a badge.
-- [ ] The matrix lists every assignment, and depth can be edited by keyboard.
-- [ ] Undo restores assignments removed by deleting a module.
+- [ ] Dragging an output onto a tile control creates an assignment with depth 0.25 that follows the source's polarity. Dropping on an input port still makes a cable.
+- [ ] Dropping the same output on the same parameter again adds nothing, and the status bar says why.
+- [ ] **Add modulation** in the inspector creates the same assignment as a drop.
+- [ ] The inspector lists each parameter's assignments in engine order. Depth, polarity, and on/off can be changed there, and the remove button removes the assignment.
+- [ ] A modulated tile knob shows one range arc. For a given base and set of assignments, the arc's ends match the table in [Seeing assignments](#seeing-assignments) (unit test on the arc geometry), including the clamp at 0 and 1 and leaving out disabled assignments.
+- [ ] A modulated toggle or radio button shows the modulation dot.
+- [ ] An output that drives assignments shows their number. The number updates when an assignment is added or removed, or a module is deleted.
+- [ ] Changing depth, polarity, or on/off does not rebuild tiles, ports, or cables on the GPU (ADR-0010). Adding or removing an assignment may.
+- [ ] Save, then load: the same assignments appear in the inspector, in the same order.
+
+### Acceptance criteria: slices 2 and 3
+
+**Status:** Draft. [#20](https://github.com/brylie/LoomDSP/issues/20), [#70](https://github.com/brylie/LoomDSP/issues/70), [#71](https://github.com/brylie/LoomDSP/issues/71).
+
+- [ ] Modulated knobs show the live value.
+- [ ] Hovering a modulated control draws its source lines.
+- [ ] The matrix lists every assignment in the current patch level, and every cell can be edited by keyboard.
+
+### Acceptance criteria: undo
+
+**Status:** Agreed, to be checked when [#12](https://github.com/brylie/LoomDSP/issues/12) is built.
+
+- [ ] Undo removes an assignment that was just made. Redo brings it back.
+- [ ] One depth slider drag is one undo step.
+- [ ] Undo restores the assignments removed by deleting a module, in their old order, and the output is bit-identical to before the delete.
 
 ### Out of scope for P1
 
@@ -173,6 +246,6 @@ A **Macro** module (FR-LIB-12) has one knob on its panel and one output equal to
 
 ## Open points
 
-- The M key and the default depth of 0.25 are guesses. Try them with users.
-- Should an assignment be able to target another assignment's depth directly, or through a "depth" parameter on a VCA-style module? Decide with FR-MOD-02.
-- How the matrix shows assignments inside sub-patches: hidden, or listed read-only under the sub-patch.
+- Should an assignment be able to target another assignment's depth directly, or through a "depth" parameter on a gain module? Not needed for P1. Decide with FR-MOD-02 (P2).
+- Slice 2: how the engine publishes live modulated values, which assignment an arc drag changes, and how a drag reaches the inspector. See [Slice 2](#slice-2-live-value-and-lines).
+- Try the default depth of 0.25 with users once slice 1 is built.
