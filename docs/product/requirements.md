@@ -27,6 +27,7 @@ See ADR-0007 for the full signal model.
 | FR-SIG-06 | Gate signals treat values above 0.5 as high. A trigger output is high for one sample; trigger inputs count rising edges (ADR-0007). | Must | P1 | Simple, documented threshold. Any signal can act as a trigger. |
 | FR-SIG-07 | Channel count (mono or stereo) is inferred per cable when the graph is built. Stereo flows only where a stereo source exists. Mono inputs receiving stereo are handled per module (sum or process both channels). | Must | P1 | Stereo matters mainly for audio. Computing two channels on every modulation cable wastes CPU. |
 | FR-SIG-08 | Cables can carry a polyphonic bundle (one value per active voice). | Must | P2 | Polyphony is required for most instruments. |
+| FR-SIG-09 | Every port declares a nominal range (for example 0 to 1 or -1 to 1), by default its signal type's convention. The range is a hint: it is shown to the player, and never enforced or clipped. | Should | P1 | Players need to know what a cable usually carries. Modulation also needs each output's polarity ([port ranges](../design/port-ranges.md)). |
 
 ## 2. DSP graph and engine (`GRAPH`)
 
@@ -64,6 +65,7 @@ See ADR-0007 for the full signal model.
 | FR-MOD-07 | A modulation matrix lists every assignment in a patch or sub-patch, editable by mouse and keyboard. | Must | P1 | One place to see and fix all routing, including routing without cables. |
 | FR-MOD-08 | Modulation depth is applied in the control's 0 to 1 range, using the parameter's own linear or logarithmic mapping. | Must | P1 | Depth means the same on every control, and the arc shows what the engine does. |
 | FR-MOD-09 | Wide linear parameters, such as Multiply's gain, offer a choice of ranges (for example -0.1 to 0.1 or 0 to 10). The player picks one per module in the inspector. Controls and modulation work inside it, and patches save it. | Should | P1 | One knob over -10 to 10 is too coarse for fine jobs such as FM depth. A smaller range makes the knob precise and safe ([control ranges](../design/control-ranges.md)). |
+| FR-MOD-10 | A parameter that offers ranges can suggest the range that fits what its module's output feeds. The player applies it with one click. Ranges and values never change automatically when cables change. | Could | P2 | Helps the player pick a safe range, without making a patch's sound depend on what is connected ([port ranges](../design/port-ranges.md)). |
 
 ## 5. Module library (`LIB`)
 
@@ -148,6 +150,7 @@ LoomDSP is a grid for building living musical systems: patches that play, evolve
 | FR-VIS-02 | A scope module, plus a one-step "Add scope" on any cable or output that places one already connected. | Must | P1 | Core debugging tool. As a module it saves with the patch and can go on a front panel (ADR-0013). |
 | FR-VIS-03 | Spectrum analyser and level meter modules. | Should | P2 | Common sound design need. |
 | FR-VIS-04 | Visual data reaches the UI without blocking the audio thread and without allocation. | Must | P1 | See NFR-RT-01. |
+| FR-VIS-05 | The app estimates the range each port receives or sends, from cables, parameters, and nominal ranges, and shows it in the inspector. It warns about likely mistakes, such as a gate input that never goes above 0.5, without blocking anything. | Could | P2 | Shows what a cable carries without a scope, and teaches why a patch misbehaves ([port ranges](../design/port-ranges.md)). |
 
 ## 9. Front panels (`PANEL`)
 

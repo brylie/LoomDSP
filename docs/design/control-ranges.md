@@ -80,5 +80,6 @@ PatchModule(id: 5, kind: "loom.math.mul@1", params: {"gain": 0.08}, ranges: {"ga
 
 - **Default range.** Leaning: -1 to 1 for all three parameters. It is safe and fits pitch and audio. Multiply's default gain of 1 then sits at the top of the knob. The alternative, -10 to 10, keeps today's feel but is not safe by default.
 - **Rule 6 needs agreement.** It is the current leaning, with its reason, and should be confirmed before building.
+- **Ranges from what is connected.** Could a range follow the signals around the module? [Port ranges](port-ranges.md) (Draft) proposes that ports declare nominal ranges and that the inspector offers a one-click **Match** for the Range selector. It never changes a range or value on its own, because that would break rules 6 and 7 here. Nothing in this spec waits for it.
 - **Other parameters.** Phase `tune` and `octave` are already in musical units and probably need no ranges. Check each new module as it comes.
 - **Explainer.** "Why feedback FM turns to noise", in `docs/learn/`: exponential pitch, the one-sample loop, aliasing above Nyquist, and how phase feedback (as on the DX7) differs from pitch feedback.
