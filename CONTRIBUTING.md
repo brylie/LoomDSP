@@ -98,7 +98,7 @@ Start from the module's entry in the [module catalogue](docs/product/module-cata
 
 1. Add a `static` `ModuleDescriptor` and a struct implementing `Module` in `crates/loom-modules/src/`.
 2. Add it to `ALL` in `crates/loom-modules/src/lib.rs`.
-3. Give it a stable, namespaced ID (`loom.<category>.<name>`) and version 1. Never rename a released ID, port, or parameter. Add a new version instead.
+3. Give it a stable, namespaced ID (`loom.<category>.<name>`) and version 1. Never rename a released ID, port, or parameter. Add a new version instead. During the early alpha nothing is released, so renames are allowed when they improve the design ([AGENTS.md](AGENTS.md#project-stage-early-alpha)).
 4. Write each port and parameter as a struct literal, with a short `label` and a one-sentence `description`. These are text for people, not IDs, so you can reword them later. The crate does not compile if one is empty ([port and parameter text](docs/design/port-and-parameter-text.md)).
 
    ```rust

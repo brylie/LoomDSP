@@ -6,6 +6,16 @@ Context for AI coding agents (and new human contributors). Read this before chan
 
 LoomDSP is an open-source modular audio environment in Rust, built for live performance. Users connect DSP modules in a graph, play it with MIDI controllers, and later export it as a plugin. Read [docs/product/vision.md](docs/product/vision.md) for goals and [docs/product/roadmap.md](docs/product/roadmap.md) for the current phase.
 
+## Project stage: early alpha
+
+Nothing is released yet. Until the architecture settles, expect breaking changes: module IDs, port and parameter names, the Rust API, and the patch format can all change. Prefer the clean design over a compatibility shim, a deprecated alias, or a migration.
+
+- The patch format stays at version 1. A change may stop old patches from loading. Migrations (FR-FILE-02, ADR-0008) start with the first release.
+- When a change breaks something, update every example patch, test, and reference render in the same pull request, and list the break in its description.
+- The other hard rules still apply in full: real-time safety, block-size invariance, determinism, licences, portability, and clean room.
+
+Why: the design is still being found. Keeping early mistakes compatible would freeze them before anyone depends on them.
+
 ## Commands
 
 ```sh
@@ -47,7 +57,7 @@ Before finishing a change, run `prek run --all-files` (fmt, clippy, typos, file 
 2. **Block-size invariance.** A module must give identical output whether called with 1 frame or many. Feedback loops call modules one frame at a time.
 3. **Determinism.** Same patch and input give bit-identical output. Random sources must be seeded.
 4. **Licences.** Only permissive dependencies (ADR-0006). Never add GPL, LGPL, or AGPL code or crates. Check `deny.toml`.
-5. **Stable IDs.** Never rename a released module ID, port name, or parameter name. Patch files depend on them.
+5. **Stable IDs.** Never rename a released module ID, port name, or parameter name. Patch files depend on them. Nothing is released during the early alpha, so a rename that improves the design is allowed; update every patch and test that uses the name in the same change.
 6. **Engine core stays portable.** `loom-core`, `loom-modules`, `loom-patch`, and `loom-rt` must build for `wasm32-unknown-unknown`: no threads, files, or audio APIs there.
 7. **`unsafe` needs a `// SAFETY:` comment** that explains why it is sound.
 8. **Clean room** (ADR-0018). Design modules from first principles and published theory (textbooks, papers, standards). Do not read the source code of other audio projects, whatever their licence, except dependencies accepted under ADR-0006. Do not copy or closely paraphrase other products' manuals, and do not copy their panel layouts, control names, parameter sets, or presets. If you are asked to make a module "like" another product's, build it from its purpose and the theory, and cite your references in the pull request.
