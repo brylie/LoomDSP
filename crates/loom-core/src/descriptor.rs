@@ -287,10 +287,12 @@ pub enum ModuleRole {
     Dsp(fn(&ModuleConfig) -> Box<dyn Module>),
     /// A one-sample delay, handled by the engine itself. It can break
     /// feedback loops without adding extra delay (ADR-0002).
-    /// Must have exactly one input and one output, and no parameters.
+    /// Must have exactly one input and one output, and no parameters or
+    /// display values.
     UnitDelay,
     /// Sends its two inputs (left, right) to the engine output.
-    /// Must have exactly two inputs and no outputs, and no parameters.
+    /// Must have exactly two inputs and no outputs, and no parameters or
+    /// display values.
     AudioOutput,
 }
 

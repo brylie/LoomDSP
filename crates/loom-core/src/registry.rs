@@ -105,8 +105,12 @@ impl Registry {
             }
             _ => {}
         }
-        if !matches!(descriptor.role, ModuleRole::Dsp(_)) && !descriptor.params.is_empty() {
-            return Err(invalid("only DSP modules can have parameters"));
+        // Only DSP modules have a `Module` instance, so only they can read
+        // parameters or publish display values. On any other role they would
+        // be accepted and then silently do nothing.
+        let has_params_or_displays = !descriptor.params.is_empty() || !descriptor.displays.is_empty();
+        if !matches!(descriptor.role, ModuleRole::Dsp(_)) && has_params_or_displays {
+            return Err(invalid("only DSP modules can have parameters or display values"));
         }
         if self.modules.insert(descriptor.id, descriptor).is_some() {
             return Err(invalid("duplicate module ID"));
@@ -388,7 +392,7 @@ mod tests {
     }
 
     #[test]
-    fn refuses_parameters_on_non_dsp_modules() {
+    fn refuses_parameters_and_displays_on_non_dsp_modules() {
         static DELAY_WITH_PARAMS: ModuleDescriptor = ModuleDescriptor {
             id: "test.delay_params",
             version: 1,
@@ -404,7 +408,9 @@ mod tests {
         };
         let error = Registry::new().register(&DELAY_WITH_PARAMS).unwrap_err();
         assert!(
-            error.to_string().contains("only DSP modules can have parameters"),
+            error
+                .to_string()
+                .contains("only DSP modules can have parameters or display values"),
             "{error}"
         );
 
@@ -426,7 +432,30 @@ mod tests {
         };
         let error = Registry::new().register(&OUTPUT_WITH_PARAMS).unwrap_err();
         assert!(
-            error.to_string().contains("only DSP modules can have parameters"),
+            error
+                .to_string()
+                .contains("only DSP modules can have parameters or display values"),
+            "{error}"
+        );
+
+        static DELAY_WITH_DISPLAYS: ModuleDescriptor = ModuleDescriptor {
+            id: "test.delay_displays",
+            version: 1,
+            name: "Delay With Displays",
+            category: "Test",
+            description: "",
+            inputs: &[port("in", crate::SignalType::Audio)],
+            outputs: &[port("out", crate::SignalType::Audio)],
+            params: &[],
+            role: ModuleRole::UnitDelay,
+            panel: crate::Panel::EMPTY,
+            displays: &["level"],
+        };
+        let error = Registry::new().register(&DELAY_WITH_DISPLAYS).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("only DSP modules can have parameters or display values"),
             "{error}"
         );
     }

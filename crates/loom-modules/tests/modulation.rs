@@ -625,6 +625,11 @@ fn depth_zero_added_during_a_glide_continues_the_glide() {
     assert_close(&run(true), &run(false), 1e-4);
 }
 
+/// Guards the controller path: an assignment to a module that is not a DSP
+/// module must fail, not be stored and ignored. The built-in unit delay and
+/// audio output have no parameters, so this passes through `NoSuchParam`. The
+/// registry test `refuses_parameters_and_displays_on_non_dsp_modules` is the
+/// one that proves such modules can never declare parameters.
 #[test]
 fn assignment_to_non_dsp_module_is_rejected() {
     let mut parts = engine();
