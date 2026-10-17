@@ -613,7 +613,9 @@ impl<Message> PatchCanvas<'_, Message> {
                         );
                     }
                     Interaction::Holding { module, widget } => {
-                        self.emit(shell, CanvasEvent::ButtonReleased { module, widget });
+                        if !Self::key_holds_button(state, module, widget) {
+                            self.emit(shell, CanvasEvent::ButtonReleased { module, widget });
+                        }
                     }
                     Interaction::Idle
                     | Interaction::Panning { .. }
@@ -710,11 +712,34 @@ impl<Message> PatchCanvas<'_, Message> {
         self.values.map_or(0.0, |v| v.position(module, widget))
     }
 
-    /// Ends a pointer hold, if there is one, and reports the release.
+    /// True when Space or Enter is still holding this button.
+    fn key_holds_button(state: &State, module: u32, widget: usize) -> bool {
+        state
+            .key_holds
+            .iter()
+            .flatten()
+            .any(|hold| hold.module == module && hold.widget == widget)
+    }
+
+    /// True when the pointer is still down on this button.
+    fn pointer_holds_button(state: &State, module: u32, widget: usize) -> bool {
+        matches!(
+            state.interaction,
+            Interaction::Holding {
+                module: held,
+                widget: held_widget,
+            } if held == module && held_widget == widget
+        )
+    }
+
+    /// Ends a pointer hold, if there is one. The release is reported only
+    /// when no key is still holding that button.
     fn release_pointer_hold(&self, state: &mut State, shell: &mut Shell<'_, Message>) {
         if let Interaction::Holding { module, widget } = state.interaction {
             state.interaction = Interaction::Idle;
-            self.emit(shell, CanvasEvent::ButtonReleased { module, widget });
+            if !Self::key_holds_button(state, module, widget) {
+                self.emit(shell, CanvasEvent::ButtonReleased { module, widget });
+            }
         }
     }
 
@@ -764,11 +789,8 @@ impl<Message> PatchCanvas<'_, Message> {
         let Some(hold) = state.key_holds[index].take() else {
             return;
         };
-        let still_held = state
-            .key_holds
-            .iter()
-            .flatten()
-            .any(|other| other.module == hold.module && other.widget == hold.widget);
+        let still_held = Self::key_holds_button(state, hold.module, hold.widget)
+            || Self::pointer_holds_button(state, hold.module, hold.widget);
         if !still_held {
             self.emit(
                 shell,
@@ -789,7 +811,9 @@ impl<Message> PatchCanvas<'_, Message> {
         let mut reported = [(0_u32, 0_usize); 2];
         let mut count = 0;
         for hold in holds.into_iter().flatten() {
-            if reported[..count].contains(&(hold.module, hold.widget)) {
+            if reported[..count].contains(&(hold.module, hold.widget))
+                || Self::pointer_holds_button(state, hold.module, hold.widget)
+            {
                 continue;
             }
             reported[count] = (hold.module, hold.widget);
@@ -1916,13 +1940,7 @@ mod tests {
             ..State::default()
         };
         let events = drive(&canvas, &mut state, &Event::Window(window::Event::Unfocused), centre);
-        assert_eq!(
-            events,
-            vec![
-                CanvasEvent::ButtonReleased { module: 1, widget: 0 },
-                CanvasEvent::ButtonReleased { module: 1, widget: 0 },
-            ]
-        );
+        assert_eq!(events, vec![CanvasEvent::ButtonReleased { module: 1, widget: 0 }]);
         assert!(matches!(state.interaction, Interaction::Idle));
         assert!(state.key_holds.iter().all(Option::is_none));
     }
@@ -2027,5 +2045,55 @@ mod tests {
             state.interaction,
             Interaction::Holding { module: 1, widget: 0 }
         ));
+    }
+
+    /// The gate stays down only when neither the pointer nor a key is holding.
+    #[test]
+    fn a_key_hold_survives_pointer_up_and_the_pointer_survives_a_key_up() {
+        let scene = Scene::new(vec![button_module()], Vec::new());
+        let centre = scene.module(1).unwrap().widget_bounds(0).unwrap().center();
+        let selected = BTreeSet::from([1]);
+        let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+        let mut state = State {
+            focus: Some((1, 0)),
+            ..State::default()
+        };
+        drive(&canvas, &mut state, &click(mouse::Button::Left), centre);
+        drive(
+            &canvas,
+            &mut state,
+            &key_event(keyboard::key::Named::Space, true),
+            centre,
+        );
+
+        let pointer_up = drive(
+            &canvas,
+            &mut state,
+            &Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+            centre,
+        );
+        assert!(pointer_up.is_empty());
+        assert!(matches!(state.interaction, Interaction::Idle));
+
+        state.interaction = Interaction::Holding { module: 1, widget: 0 };
+        let key_up = drive(
+            &canvas,
+            &mut state,
+            &key_event(keyboard::key::Named::Space, false),
+            centre,
+        );
+        assert!(key_up.is_empty());
+        assert!(matches!(
+            state.interaction,
+            Interaction::Holding { module: 1, widget: 0 }
+        ));
+
+        let pointer_up = drive(
+            &canvas,
+            &mut state,
+            &Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+            centre,
+        );
+        assert_eq!(pointer_up, vec![CanvasEvent::ButtonReleased { module: 1, widget: 0 }]);
     }
 }
