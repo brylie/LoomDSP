@@ -41,7 +41,19 @@ clap = { version = "4.6", features = ["derive"] }
 assert_no_alloc = "1.1"
 # UI (desktop app only; the engine crates never depend on these).
 # Iced and iced_wgpu are upgraded together (OQ-14).
-iced = { version = "0.14", features = ["advanced"] }
+# Iced's defaults minus linux-theme-detection: the app uses its own fixed
+# theme, and that feature pulls in mundy and zbus 5 (unmaintained crates).
+# Recheck this list when Iced is upgraded.
+iced = { version = "0.14", default-features = false, features = [
+    "advanced",
+    "wgpu",
+    "tiny-skia",
+    "crisp",
+    "web-colors",
+    "thread-pool",
+    "x11",
+    "wayland",
+] }
 iced_wgpu = "0.14"
 bytemuck = { version = "1", features = ["derive"] }
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
