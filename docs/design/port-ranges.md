@@ -45,7 +45,7 @@ During the control ranges discussion ([#122](https://github.com/brylie/LoomDSP/i
 |---|---|---|
 | Audio | -1 to 1 | As in ADR-0007. |
 | Modulation | -1 to 1 | Unipolar sources (envelopes) declare 0 to 1. |
-| Pitch | -0.5 to 0.5 | Ten octaves around middle C, about 8 Hz to 8.4 kHz. A proposal; ADR-0007 gives only the scale. |
+| Pitch | -0.5 to 0.5 | Ten octaves around middle C, about 8 Hz to 8.4 kHz. ADR-0007 gives the scale; this span is agreed in [#144](https://github.com/brylie/LoomDSP/issues/144). |
 | Phase | 0 to 1 | Inputs wrap any value (FR-SIG-04). |
 | Gate | 0 to 1 | High above 0.5. |
 
@@ -54,7 +54,7 @@ During the control ranges discussion ([#122](https://github.com/brylie/LoomDSP/i
 - Port hover text and the inspector show the nominal range next to the description, for example "Usually 0 to 1."
 - **Polarity comes from the range.** A range with `min >= 0` is unipolar; any other range is bipolar. `PortSpec::polarity` is removed: the range replaces it, so a port cannot declare two things that disagree. [Modulation](modulation.md) rule 4 takes the source's polarity from this range. The assignment's own polarity override (ADR-0014) stays.
 
-A sketch of the type, with names to settle in review:
+A sketch of the type. The names `PortRange`, `Signal`, and `Span` may change when Tier 1 is built:
 
 ```rust
 pub enum PortRange {
@@ -67,9 +67,9 @@ pub enum PortRange {
 
 #### Use in modulation
 
-Modulation rule 4 remaps a source by polarity: a bipolar source on a unipolar assignment uses `(s + 1) / 2`. With nominal ranges, the remap can use the range itself. A unipolar assignment would use `(s - min) / (max - min)`, so a 0 to 5 envelope moves a knob by the same share at full swing as a 0 to 1 envelope does.
+**Decided:** modulation takes only the **polarity** from the source's range, and does not scale by it. Modulation rule 4 remaps a source by polarity: a bipolar source on a unipolar assignment uses `(s + 1) / 2`. For every built-in source today, the range is 0 to 1 or -1 to 1, so scaling would change nothing, and not scaling keeps declared output ranges out of the sound (rule 5).
 
-**Decided:** modulation takes only the **polarity** from the source's range, and does not scale by it. For every built-in source today, the range is 0 to 1 or -1 to 1, so scaling would change nothing, and not scaling keeps declared output ranges out of the sound (rule 5). Scaling can be added later if a source declares another span; that needs its own spec change first, and it must use the source's **declared** range only, never the propagated one.
+*Considered, not adopted:* remap by the range itself, with `(s - min) / (max - min)` on a unipolar assignment, so a 0 to 5 envelope moves a knob by the same share as a 0 to 1 envelope. It can be added later if a source declares another span. That needs its own spec change first, and it must use the source's **declared** range only, never the propagated one.
 
 ### Tier 2: the controller estimates ranges through the graph
 
@@ -140,7 +140,7 @@ The width matters for warnings. A warning that a gate *never* goes high is safe,
 2. **Every port has a range, and most use their signal type's convention.** `range` is a required field, like every `PortSpec` field (ADR-0016). *Why:* struct literals make a missing field a compile error, so no port is forgotten. `PortRange::Signal` keeps the common case short.
 3. **A span is finite, with min < max.** The registry refuses others. *Why:* an empty or infinite span says nothing, and it breaks propagation.
 4. **An input's range never changes what the module does.** *Why:* it is text for people and input to warnings. The module's behaviour lives in its code and its help page.
-5. **Ranges are not saved in patches, and the sound never depends on a propagated range.** Modulation takes only the polarity from a declared range, so changing a span such as 0 to 1 to 0 to 5 does not change the sound, unless it crosses zero and flips the polarity. A flip changes how a source remaps on assignments that follow it, so after the first release it needs a new module version, like renaming a released port. During the early alpha, such a change updates every example patch and reference render in the same pull request (AGENTS.md, Project stage). *Why:* the same patch must sound the same in every build (hard rule 3). A propagated range changes whenever a cable moves, and a declared range can be tuned between releases, unless the sound depends on it.
+5. **Ranges are not saved in patches, and the sound never depends on a propagated range.** Modulation takes only the polarity from a declared range, so changing a span such as 0 to 1 to 0 to 5 does not change the sound, unless it crosses zero and flips the polarity. A flip changes the remap on every assignment that forces a polarity on that source, so after the first release it needs a new module version, like renaming a released port. During the early alpha, such a change updates every example patch and reference render in the same pull request (AGENTS.md, Project stage). *Why:* the same patch must sound the same in every build (hard rule 3). A propagated range changes whenever a cable moves, and a declared range can be tuned between releases, unless the sound depends on it.
 
 ### Tier 2
 
@@ -165,9 +165,10 @@ The width matters for warnings. A warning that a gate *never* goes high is safe,
 
 ### Tier 1
 
-- [ ] Every built-in port declares a range. Envelope outputs declare 0 to 1; the rest use their signal type's convention unless their help page says otherwise.
+- [ ] Every built-in port declares a range. Its derived polarity equals the `polarity` it declares today. Envelope `out` and MIDI `velocity` declare `Span(0.0, 1.0)`, even though velocity is a Modulation signal, whose convention is -1 to 1. The rest use their signal type's convention unless their help page says otherwise.
 - [ ] The registry refuses a span that is not finite or has `min >= max`.
-- [ ] Polarity derived from the range gives unipolar for envelopes, gates, and phases, and bipolar for LFOs, audio, and pitch, matching modulation rule 4's defaults.
+- [ ] Polarity derived from the range gives unipolar for envelopes, gates, and phases, and bipolar for LFOs, audio, and pitch, as each does today.
+- [ ] `loom-modules/tests/modulation.rs` passes unchanged.
 - [ ] Port hover text shows the nominal range.
 - [ ] Output of every reference render is bit-identical before and after ranges are added.
 
@@ -204,10 +205,10 @@ The width matters for warnings. A warning that a gate *never* goes high is safe,
 
 Settled in [#144](https://github.com/brylie/LoomDSP/issues/144):
 
-- **The range replaces polarity.** One field, polarity derived from it. *Why:* two fields can disagree, and #133 has not yet spread `polarity` across many ports. [Modulation](modulation.md) rule 4 now says polarity comes from the source's range.
+- **The range replaces polarity.** One field, polarity derived from it. *Why:* two fields can disagree. `polarity` is a required `PortSpec` field (ADR-0016), so replacing it touches about 50 port literals, but the early-alpha rule (AGENTS.md, Project stage) says to prefer the clean design over a shim. [Modulation](modulation.md) rule 4 now says polarity comes from the source's range.
 - **Modulation takes polarity only, not scale.** *Why:* every built-in source is 0 to 1 or -1 to 1, and scaling would make declared output ranges part of the sound. Revisit when a source declares another span.
 - **Pitch convention: -0.5 to 0.5** (ten octaves around middle C). *Why:* it covers the audible and musical pitch range with some margin. Tier 2 warnings may tune the thresholds, not this span.
-- **No ADR.** *Why:* modulation is still Draft, and Tier 1 is a field on `PortSpec`, not a new architecture.
+- **No ADR.** *Why:* ADR-0007 already says signal types carry default ranges, and ADR-0014 already gives assignments a polarity. This change only replaces where a port's polarity comes from.
 
 ## Open points
 

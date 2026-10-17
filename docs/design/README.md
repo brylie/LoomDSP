@@ -41,7 +41,7 @@ Copy [template.md](template.md). Keep it to one feature. Link the ADR, requireme
 | [Panels](panels.md) | [ADR-0013](../adr/0013-modules-carry-their-own-panel.md) | Module panels on tiles, level meters, and audio load Implemented (P1); labels and hover text Implemented; rest Draft |
 | [Modulation](modulation.md) | [ADR-0014](../adr/0014-modulation-without-cables.md) | Engine and parameter mapping Agreed (P1); editing and display Draft |
 | [Control ranges](control-ranges.md) | None (extends parameter mapping) | Draft, P1 |
-| [Port ranges](port-ranges.md) | None yet (builds on [ADR-0007](../adr/0007-polymorphic-signal-model.md)) | Draft, P1 and P2 |
+| [Port ranges](port-ranges.md) | None yet (builds on [ADR-0007](../adr/0007-polymorphic-signal-model.md)) | Tier 1 Agreed, Tiers 2 and 3 Draft, P1 and P2 |
 | [Module test harness](module-test-harness.md) | [ADR-0002](../adr/0002-graph-execution-and-feedback.md) | Implemented, P1 |
 | [Clock and transport](clock.md) | [ADR-0015](../adr/0015-one-transport-per-patch.md) | Engine sections, Clock Divide, and Phase Trigger Implemented (P1); rest Draft, P1 and P2 |
 | [Port and parameter text](port-and-parameter-text.md) | [ADR-0016](../adr/0016-ports-and-parameters-carry-their-own-text.md) | Implemented, P1 |
