@@ -3,14 +3,14 @@
 Each port says what range of values it usually carries, so the app can tell the player what a cable holds, warn about likely mistakes, and suggest a fix, without ever changing a module on its own.
 
 - **Kind:** living specification.
-- **Status:** Draft. All three tiers are proposals. Do not build from it yet.
-- **Decision behind it:** none yet. It builds on [ADR-0007](../adr/0007-polymorphic-signal-model.md), which already says signal types are metadata for colour, default ranges, and module behaviour. Whether Tier 1 needs its own ADR is an open point.
+- **Status:** Tier 1 is Agreed ([#144](https://github.com/brylie/LoomDSP/issues/144)). Tiers 2 and 3 are Draft proposals. Do not build them yet.
+- **Decision behind it:** no ADR of its own. It builds on [ADR-0007](../adr/0007-polymorphic-signal-model.md), which already says signal types are metadata for colour, default ranges, and module behaviour. Tier 1 does not need a new ADR: it is a small change to `PortSpec`, and modulation is still Draft.
 - **Use case and requirements:** FR-SIG-09, FR-VIS-05, FR-MOD-10 (all proposed here). Related: FR-SIG-02, FR-SIG-03, FR-MOD-08, FR-MOD-09.
 - **Background:** none yet. An explainer on interval arithmetic, and why its results are too wide, would help (see Open points).
 - **Prior art:** Eurorack and VCV Rack publish typical voltage ranges as conventions, for example 0 to 10 V for envelopes and about ±5 V for audio. Module panels often print their output range. In both, a module does not change its settings when you patch it; the player adjusts by ear and by eye.
 - **Related specs:** [Control ranges](control-ranges.md) (Draft), [Modulation](modulation.md) rule 4 (Draft), [Port and parameter text](port-and-parameter-text.md) (Implemented), [Telemetry](telemetry.md) (Implemented).
-- **Issues:** [#122](https://github.com/brylie/LoomDSP/issues/122) (control ranges, where this idea came up).
-- **Code:** not built.
+- **Issues:** [#122](https://github.com/brylie/LoomDSP/issues/122) (control ranges, where this idea came up), [#144](https://github.com/brylie/LoomDSP/issues/144) (range replaces polarity).
+- **Code:** not built. Until Tier 1 is built, `PortSpec` has a separate `polarity` field (added by [#133](https://github.com/brylie/LoomDSP/pull/133)). Building Tier 1 replaces it with `range`.
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
      built. See README.md in this folder. -->
@@ -37,6 +37,8 @@ During the control ranges discussion ([#122](https://github.com/brylie/LoomDSP/i
 
 ### Tier 1: ports declare a nominal range
 
+**Agreed** ([#144](https://github.com/brylie/LoomDSP/issues/144)).
+
 - `PortSpec` gets a `range` field. Most ports write `PortRange::Signal`, which means the convention of the port's signal type:
 
 | Signal type | Convention | Notes |
@@ -50,7 +52,7 @@ During the control ranges discussion ([#122](https://github.com/brylie/LoomDSP/i
 - A port that differs writes `PortRange::Span(min, max)`. Examples: an envelope output, `Span(0.0, 1.0)`; a future module with a 0 to 5 output, `Span(0.0, 5.0)`.
 - On an output, the range says what the port usually sends. On an input, it says what the input is designed for (its expected range).
 - Port hover text and the inspector show the nominal range next to the description, for example "Usually 0 to 1."
-- **Polarity comes from the range.** A range with `min >= 0` is unipolar; any other range is bipolar. This replaces the separate unipolar or bipolar declaration that [Modulation](modulation.md) rule 4 plans for outputs. The assignment's own polarity override (ADR-0014) stays.
+- **Polarity comes from the range.** A range with `min >= 0` is unipolar; any other range is bipolar. `PortSpec::polarity` is removed: the range replaces it, so a port cannot declare two things that disagree. [Modulation](modulation.md) rule 4 takes the source's polarity from this range. The assignment's own polarity override (ADR-0014) stays.
 
 A sketch of the type, with names to settle in review:
 
@@ -67,7 +69,7 @@ pub enum PortRange {
 
 Modulation rule 4 remaps a source by polarity: a bipolar source on a unipolar assignment uses `(s + 1) / 2`. With nominal ranges, the remap can use the range itself. A unipolar assignment would use `(s - min) / (max - min)`, so a 0 to 5 envelope moves a knob by the same share at full swing as a 0 to 1 envelope does.
 
-For every built-in source today, the range is 0 to 1 or -1 to 1, so this is the same remap as rule 4. The difference only appears when a source declares another span. Whether to scale by the range at all is an open point. If it does, the remap uses the source's **declared** range only, never the propagated one (rule 5).
+**Decided:** modulation takes only the **polarity** from the source's range, and does not scale by it. For every built-in source today, the range is 0 to 1 or -1 to 1, so scaling would change nothing, and not scaling keeps declared output ranges out of the sound (rule 5). Scaling can be added later if a source declares another span; that needs its own spec change first, and it must use the source's **declared** range only, never the propagated one.
 
 ### Tier 2: the controller estimates ranges through the graph
 
@@ -138,7 +140,7 @@ The width matters for warnings. A warning that a gate *never* goes high is safe,
 2. **Every port has a range, and most use their signal type's convention.** `range` is a required field, like every `PortSpec` field (ADR-0016). *Why:* struct literals make a missing field a compile error, so no port is forgotten. `PortRange::Signal` keeps the common case short.
 3. **A span is finite, with min < max.** The registry refuses others. *Why:* an empty or infinite span says nothing, and it breaks propagation.
 4. **An input's range never changes what the module does.** *Why:* it is text for people and input to warnings. The module's behaviour lives in its code and its help page.
-5. **Ranges are not saved in patches, and the sound never depends on a propagated range.** If modulation scales by range (Open points), it uses the source's declared range only, and declared output ranges then become part of the module's sound: after the first release, changing one needs a new module version, like renaming a released port. During the early alpha, a change updates every example patch and reference render in the same pull request (AGENTS.md, Project stage). *Why:* the same patch must sound the same in every build (hard rule 3). A propagated range changes whenever a cable moves, and a declared range can be tuned between releases, unless the sound depends on it.
+5. **Ranges are not saved in patches, and the sound never depends on a propagated range.** Modulation takes only the polarity from a declared range, so changing a span such as 0 to 1 to 0 to 5 does not change the sound, unless it crosses zero and flips the polarity. A flip changes how a source remaps on assignments that follow it, so after the first release it needs a new module version, like renaming a released port. During the early alpha, such a change updates every example patch and reference render in the same pull request (AGENTS.md, Project stage). *Why:* the same patch must sound the same in every build (hard rule 3). A propagated range changes whenever a cable moves, and a declared range can be tuned between releases, unless the sound depends on it.
 
 ### Tier 2
 
@@ -198,12 +200,18 @@ The width matters for warnings. A warning that a gate *never* goes high is safe,
 - Ranges through sub-patch boundaries (FR-ENCAP, P2). Leaning: a sub-patch output takes the range its inner graph sends.
 - Per-voice ranges for polyphonic cables (FR-SIG-08, P2).
 
+## Decisions
+
+Settled in [#144](https://github.com/brylie/LoomDSP/issues/144):
+
+- **The range replaces polarity.** One field, polarity derived from it. *Why:* two fields can disagree, and #133 has not yet spread `polarity` across many ports. [Modulation](modulation.md) rule 4 now says polarity comes from the source's range.
+- **Modulation takes polarity only, not scale.** *Why:* every built-in source is 0 to 1 or -1 to 1, and scaling would make declared output ranges part of the sound. Revisit when a source declares another span.
+- **Pitch convention: -0.5 to 0.5** (ten octaves around middle C). *Why:* it covers the audible and musical pitch range with some margin. Tier 2 warnings may tune the thresholds, not this span.
+- **No ADR.** *Why:* modulation is still Draft, and Tier 1 is a field on `PortSpec`, not a new architecture.
+
 ## Open points
 
-- **Does the nominal range replace polarity?** Leaning: yes. One field, polarity derived from it (Tier 1). Modulation rule 4 would then say "polarity comes from the source's range". Since modulation is still Draft and nothing is built, no new ADR seems needed; update modulation.md when this is agreed.
-- **Should modulation scale by the range, or only take polarity from it?** Scaling makes a 0 to 5 source move a knob like a 0 to 1 source, and it costs rule 5: declared output ranges become part of the sound. Leaning: take polarity only for now, since every built-in source is 0 to 1 or -1 to 1. Decide before the first source declares another span.
 - **How is overestimation shown?** Options: the word "about" (current draft), a "~" prefix, showing a range only when it differs from the convention, or a tooltip that explains why it may be wide. Try with users.
-- **Pitch convention.** -0.5 to 0.5 (ten octaves) is a proposal. A narrower span gives earlier warnings; a wider one fewer false ones.
 - **Warning thresholds.** "More than 4 times the expected span" is a guess. Also: should a warning add a static mark on the port on the canvas? FR-VIS-01 rules out motion, not marks, but marks add clutter.
 - **Match for Add `offset` with inputs connected.** The rule for a Constant would be wrong here. With A fixed at 5 and an offset of -5, Add sends 0 into a pitch input, which is fine. A Match of -1 to 1 would clamp the offset to -1, and Add would send 4. A correct rule picks the range that holds every offset putting the output inside the expected range: from the expected minimum minus the highest input sum, to the expected maximum minus the lowest input sum. Because estimates can be too wide, this needs care. Leaning: no Match for Add with cables in the first cut.
 - **Match for Multiply `gain`.** The useful gain maps the received span of A onto the expected span downstream: expected span divided by received span. That is less obvious to the player than the Constant rule. Leaning: leave Multiply out of the first cut.
