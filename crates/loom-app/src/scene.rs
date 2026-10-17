@@ -138,17 +138,10 @@ pub fn update_panel_values(
                 Some(p) if w.is_control() => {
                     let spec = &d.params[p];
                     let value = node.params[p];
-                    let mode = match w.kind {
-                        WidgetKind::Button { mode } => {
-                            d.param_index(mode).map(|index| node.params[index]).unwrap_or(0.0)
-                        }
-                        _ => 0.0,
-                    };
                     WidgetValue {
                         position: control_position(w.kind, spec, value),
                         peak: 0.0,
                         text: crate::param::format(spec, value),
-                        mode,
                     }
                 }
                 _ => {
@@ -157,7 +150,6 @@ pub fn update_panel_values(
                         position,
                         peak,
                         text: String::new(),
-                        mode: 0.0,
                     }
                 }
             };
@@ -192,13 +184,24 @@ pub fn meter_outputs(controller: &Controller, modules: &[u32]) -> Vec<((u32, usi
         .collect()
 }
 
-/// True when an edit switches a Button from Toggle to Momentary.
+/// The parameter writes for one edit, including a button gate that a switch
+/// to momentary must clear.
 ///
-/// The editor then sets `on` to 0, so a latched gate does not stay high
-/// with nobody holding the button (clock.md, Button details). Setting
-/// Momentary again, while it is already Momentary, does not clear a hold.
-pub fn switches_button_to_momentary(module_id: &str, param: &str, previous: f32, next: f32) -> bool {
-    module_id == "loom.ui.button" && param == "mode" && previous != 1.0 && next == 1.0
+/// The clear rides in the same list as the edit, so [`loom_core::Controller::set_params`]
+/// can send them together or not at all (clock.md, Button details).
+pub fn param_edits(node: &loom_core::Node, index: usize, value: f32) -> Vec<(usize, f32)> {
+    let Some(spec) = node.descriptor.params.get(index) else {
+        return vec![(index, value)];
+    };
+    let next = spec.clamp(value);
+    let mut changes = vec![(index, next)];
+    let previous = node.params.get(index).copied().unwrap_or(next);
+    for gate in node.descriptor.button_gates_to_clear(spec.name, previous, next) {
+        if gate != index && changes.iter().all(|(existing, _)| *existing != gate) {
+            changes.push((gate, 0.0));
+        }
+    }
+    changes
 }
 
 /// The parameter a control is bound to, if the module and widget exist.
@@ -279,11 +282,37 @@ mod tests {
 
     #[test]
     fn switching_a_button_to_momentary_clears_its_gate() {
-        assert!(switches_button_to_momentary("loom.ui.button", "mode", 0.0, 1.0));
-        assert!(!switches_button_to_momentary("loom.ui.button", "mode", 1.0, 1.0));
-        assert!(!switches_button_to_momentary("loom.ui.button", "mode", 1.0, 0.0));
-        assert!(!switches_button_to_momentary("loom.ui.button", "on", 0.0, 1.0));
-        assert!(!switches_button_to_momentary("loom.math.constant", "mode", 0.0, 1.0));
+        use loom_core::{EngineConfig, Registry, create_engine};
+        use std::sync::Arc;
+
+        let mut registry = Registry::new();
+        loom_modules::register_all(&mut registry).unwrap();
+        let parts = create_engine(Arc::new(registry), EngineConfig::default());
+        let mut controller = parts.controller;
+        let id = controller.add_module("loom.ui.button").unwrap();
+        let mode = controller
+            .graph()
+            .node(id)
+            .unwrap()
+            .descriptor
+            .param_index("mode")
+            .unwrap();
+        let on = controller
+            .graph()
+            .node(id)
+            .unwrap()
+            .descriptor
+            .param_index("on")
+            .unwrap();
+        controller.set_param(id, on, 1.0).unwrap();
+
+        let node = controller.graph().node(id).unwrap();
+        assert_eq!(param_edits(node, mode, 1.0), vec![(mode, 1.0), (on, 0.0)]);
+
+        controller.set_param(id, mode, 1.0).unwrap();
+        let node = controller.graph().node(id).unwrap();
+        assert_eq!(param_edits(node, mode, 1.0), vec![(mode, 1.0)]);
+        assert_eq!(param_edits(node, on, 1.0), vec![(on, 1.0)]);
     }
 
     #[test]

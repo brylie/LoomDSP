@@ -371,7 +371,15 @@ mod tests {
             ),
             (
                 with_panel!(6, 3, [Widget::button(0, 0, "on", "level")]),
-                "mode must be a whole-number parameter",
+                "mode must be a whole-number parameter from 0 to 1",
+            ),
+            (
+                with_panel!(6, 3, [Widget::button(0, 0, "on", "slope")]),
+                "mode must be a whole-number parameter from 0 to 1",
+            ),
+            (
+                with_panel!(6, 3, [Widget::button(0, 0, "on", "on")]),
+                "mode must be a different parameter",
             ),
             (with_panel!(3, 2, [Widget::knob(0, 0, "level")]), "outside the panel"),
             (

@@ -26,11 +26,6 @@ pub struct WidgetValue {
     pub position: f32,
     /// Meter: peak level from 0 to 1. Unused by other widgets.
     pub peak: f32,
-    /// Button: 0 for toggle, 1 for momentary. The canvas uses it to choose
-    /// the gesture. Other widgets leave it at 0. It is the parameter value,
-    /// refreshed with the panel values, so a change does not wait for a
-    /// scene rebuild.
-    pub mode: f32,
     /// The value as text, with its unit, shown while a knob is dragged or
     /// focused.
     pub text: String,
@@ -76,11 +71,6 @@ impl PanelValues {
     /// The peak of a meter's value, or 0.
     pub fn peak(&self, module: u32, widget: usize) -> f32 {
         self.get(module, widget).map_or(0.0, |v| v.peak)
-    }
-
-    /// A button's mode: 0 for toggle, 1 for momentary. Other widgets are 0.
-    pub fn mode(&self, module: u32, widget: usize) -> f32 {
-        self.get(module, widget).map_or(0.0, |v| v.mode)
     }
 
     /// Changes whenever a value changes. Unique across all value sets.

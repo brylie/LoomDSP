@@ -346,22 +346,42 @@ impl App {
     }
 
     /// Sets a parameter from a control on a tile or in the inspector.
+    ///
+    /// A switch to momentary also clears that button's gate. Both writes go
+    /// in one step, so a full command queue leaves the mode and the gate as
+    /// they were.
     fn set_param(&mut self, module: u32, index: usize, value: f32) {
-        let clear_on = self.controller.graph().node(ModuleId(module)).and_then(|node| {
-            let spec = node.descriptor.params.get(index)?;
-            let next = spec.clamp(value);
-            scene::switches_button_to_momentary(node.descriptor.id, spec.name, node.params[index], next)
-                .then(|| node.descriptor.param_index("on"))
-                .flatten()
-        });
-        if let Err(e) = self.controller.set_param(ModuleId(module), index, value) {
-            self.status = format!("error: {e}");
-        } else if let Some(on) = clear_on
-            && let Err(e) = self.controller.set_param(ModuleId(module), on, 0.0)
-        {
+        let changes = self
+            .controller
+            .graph()
+            .node(ModuleId(module))
+            .map(|node| scene::param_edits(node, index, value))
+            .unwrap_or_else(|| vec![(index, value)]);
+        if let Err(e) = self.controller.set_params(ModuleId(module), &changes) {
             self.status = format!("error: {e}");
         }
         self.refresh_values();
+    }
+
+    /// Applies a button gesture. The canvas names the gesture. [`loom_core::ButtonMode`]
+    /// names the value, from the mode parameter stored on the module.
+    fn apply_button(&mut self, module: u32, widget: usize, change: impl Fn(loom_core::ButtonMode, f32) -> Option<f32>) {
+        let edit = self.controller.graph().node(ModuleId(module)).and_then(|node| {
+            let panel_widget = node.descriptor.panel.widgets.get(widget)?;
+            let loom_core::WidgetKind::Button { mode } = panel_widget.kind else {
+                return None;
+            };
+            let mode_index = node.descriptor.param_index(mode)?;
+            let on_index = node.descriptor.param_index(panel_widget.bind)?;
+            let next = change(
+                loom_core::ButtonMode::from_value(node.params[mode_index]),
+                node.params[on_index],
+            )?;
+            Some((on_index, next))
+        });
+        if let Some((index, value)) = edit {
+            self.set_param(module, index, value);
+        }
     }
 
     fn report(&mut self) {
@@ -518,6 +538,15 @@ impl App {
                     let value = scene::control_value(kind, &spec, position);
                     self.set_param(module, index, value);
                 }
+            }
+            CanvasEvent::ButtonPressed { module, widget } => {
+                self.apply_button(module, widget, loom_core::ButtonMode::press);
+            }
+            CanvasEvent::ButtonReleased { module, widget } => {
+                self.apply_button(module, widget, |mode, _current| mode.release());
+            }
+            CanvasEvent::ButtonArrow { module, widget, high } => {
+                self.apply_button(module, widget, |mode, current| mode.arrow(current, high));
             }
             CanvasEvent::ResetControl { module, widget } => {
                 if let Some((index, _, spec)) = scene::control_param(&self.controller, module, widget) {

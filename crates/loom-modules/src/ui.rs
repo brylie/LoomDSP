@@ -117,6 +117,14 @@ mod tests {
     }
 
     #[test]
+    fn switching_to_momentary_clears_on() {
+        let on = BUTTON.param_index("on").unwrap();
+        let cleared: Vec<usize> = BUTTON.button_gates_to_clear("mode", 0.0, 1.0).collect();
+        assert_eq!(cleared, vec![on]);
+        assert!(BUTTON.button_gates_to_clear("mode", 1.0, 1.0).next().is_none());
+    }
+
+    #[test]
     fn every_sample_is_off_or_on() {
         for &on in &[0.0, 1.0] {
             for sample in render(on) {

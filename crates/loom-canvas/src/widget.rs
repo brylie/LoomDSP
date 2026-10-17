@@ -56,8 +56,8 @@ pub enum CanvasEvent {
     /// Delete modules.
     Delete(Vec<u32>),
     /// Set a control on a module's panel. `position` is the knob position
-    /// from 0 to 1, 0 or 1 for a toggle or a button, or the option index
-    /// for radio buttons.
+    /// from 0 to 1, 0 or 1 for a toggle, or the option index for radio
+    /// buttons. A button reports [`CanvasEvent::ButtonPressed`] instead.
     SetControl {
         /// Module ID.
         module: u32,
@@ -65,6 +65,36 @@ pub enum CanvasEvent {
         widget: usize,
         /// The new position.
         position: f32,
+    },
+    /// A button was pressed, by the pointer or by Space or Enter.
+    ///
+    /// The app decides the parameter value from the button's mode. The
+    /// canvas does not.
+    ButtonPressed {
+        /// Module ID.
+        module: u32,
+        /// Index in the module's panel widgets.
+        widget: usize,
+    },
+    /// A button hold ended.
+    ///
+    /// Pointer up sends this, including after the pointer has left the
+    /// button. So does another mouse button, key up, and the window losing
+    /// focus. The app ignores it for a toggle and clears a momentary gate.
+    ButtonReleased {
+        /// Module ID.
+        module: u32,
+        /// Index in the module's panel widgets.
+        widget: usize,
+    },
+    /// An arrow key on a focused button. `high` is up or right.
+    ButtonArrow {
+        /// Module ID.
+        module: u32,
+        /// Index in the module's panel widgets.
+        widget: usize,
+        /// Up or right. Down or left is false.
+        high: bool,
     },
     /// Reset a control to its parameter's default (double-click).
     ResetControl {
@@ -157,8 +187,9 @@ enum Interaction {
         last_y: f32,
         position: f32,
     },
-    /// A momentary button is held. Pointer up sets it off, wherever the
-    /// pointer is. The tile does not move.
+    /// A button is held. Pointer up reports a release, wherever the pointer
+    /// is, so a release always follows the press. The tile does not move.
+    /// The app decides whether that release changes a parameter.
     Holding {
         module: u32,
         widget: usize,
@@ -197,8 +228,12 @@ struct State {
     hover_text: HoverTimer,
     /// The last press on a control, for double-click.
     last_click: Option<(Instant, u32, usize)>,
-    /// A momentary button held from the keyboard. Key up sets it off.
-    key_hold: Option<(u32, usize)>,
+    /// Buttons held from the keyboard, one slot for Space and one for Enter.
+    ///
+    /// Each key is its own hold. Releasing one leaves a button high while the
+    /// other key is still down on it. Replacing a key's hold releases the
+    /// button that key was holding, when nothing else is holding it.
+    key_holds: [Option<KeyHold>; 2],
     /// Modules with lights on screen, as last reported.
     reported_lights: Option<Vec<u32>>,
 }
@@ -210,6 +245,14 @@ impl State {
         // always grabs the tile, not a port.
         PORT_HIT_RADIUS.max(7.0 / self.camera.zoom).min(TILE_WIDTH * 0.25)
     }
+}
+
+/// One key holding one button down.
+#[derive(Clone, Copy)]
+struct KeyHold {
+    key: keyboard::key::Named,
+    module: u32,
+    widget: usize,
 }
 
 fn relative(cursor: mouse::Cursor, bounds: Rectangle) -> Option<Point> {
@@ -448,6 +491,9 @@ impl<Message> PatchCanvas<'_, Message> {
             }
             Event::Mouse(mouse::Event::ButtonPressed(button)) if over => {
                 let Some(screen) = screen else { return };
+                // A second button must end a hold. Replacing the interaction
+                // without a release would leave a momentary gate high.
+                self.release_pointer_hold(state, shell);
                 let world = state.camera.to_world(screen);
                 match button {
                     mouse::Button::Middle | mouse::Button::Right => {
@@ -456,7 +502,7 @@ impl<Message> PatchCanvas<'_, Message> {
                     mouse::Button::Left => {
                         self.press(state, world, screen, shell);
                     }
-                    _ => return,
+                    _ => {}
                 }
                 shell.request_redraw();
                 shell.capture_event();
@@ -520,7 +566,12 @@ impl<Message> PatchCanvas<'_, Message> {
                     shell.request_redraw();
                 }
             }
-            Event::Mouse(mouse::Event::ButtonReleased(_)) => {
+            Event::Mouse(mouse::Event::ButtonReleased(button)) => {
+                // The left button is what started the hold. Releasing another
+                // button, one that was already down, must not end it.
+                if *button != mouse::Button::Left && matches!(state.interaction, Interaction::Holding { .. }) {
+                    return;
+                }
                 let interaction = std::mem::take(&mut state.interaction);
                 let world = screen.map(|s| state.camera.to_world(s));
                 match interaction {
@@ -562,7 +613,7 @@ impl<Message> PatchCanvas<'_, Message> {
                         );
                     }
                     Interaction::Holding { module, widget } => {
-                        self.set_control(shell, module, widget, 0.0);
+                        self.emit(shell, CanvasEvent::ButtonReleased { module, widget });
                     }
                     Interaction::Idle
                     | Interaction::Panning { .. }
@@ -572,12 +623,17 @@ impl<Message> PatchCanvas<'_, Message> {
                 shell.request_redraw();
             }
             Event::Mouse(mouse::Event::CursorLeft) => {
-                if let Interaction::Holding { module, widget } = std::mem::take(&mut state.interaction) {
-                    self.set_control(shell, module, widget, 0.0);
-                }
+                self.release_pointer_hold(state, shell);
                 if state.hover.take().is_some() {
                     shell.request_redraw();
                 }
+            }
+            Event::Window(window::Event::Unfocused) => {
+                // A key release never arrives if the window loses focus
+                // while Space or Enter is held. End every hold here.
+                self.release_pointer_hold(state, shell);
+                self.release_every_key_hold(state, shell);
+                shell.request_redraw();
             }
             _ => {}
         }
@@ -654,19 +710,108 @@ impl<Message> PatchCanvas<'_, Message> {
         self.values.map_or(0.0, |v| v.position(module, widget))
     }
 
-    /// True when a button's mode parameter is Momentary (1).
-    fn is_momentary(&self, module: u32, widget: usize) -> bool {
-        self.values.is_some_and(|v| v.mode(module, widget) >= 1.0)
+    /// Ends a pointer hold, if there is one, and reports the release.
+    fn release_pointer_hold(&self, state: &mut State, shell: &mut Shell<'_, Message>) {
+        if let Interaction::Holding { module, widget } = state.interaction {
+            state.interaction = Interaction::Idle;
+            self.emit(shell, CanvasEvent::ButtonReleased { module, widget });
+        }
     }
 
-    /// Ends a momentary keyboard hold. A repeated key does not start one.
-    fn release_key(&self, state: &mut State, key: &keyboard::Key, shell: &mut Shell<'_, Message>) {
+    /// Space or Enter, the keys that hold a button.
+    fn button_key(key: &keyboard::Key) -> Option<keyboard::key::Named> {
         use keyboard::key::Named;
-        let space_or_enter = matches!(key.as_ref(), keyboard::Key::Named(Named::Space | Named::Enter));
-        if space_or_enter && let Some((module, widget)) = state.key_hold.take() {
-            self.set_control(shell, module, widget, 0.0);
+        match key.as_ref() {
+            keyboard::Key::Named(named @ (Named::Space | Named::Enter)) => Some(named),
+            _ => None,
+        }
+    }
+
+    /// Starts a hold for one key. If that key was holding another button, and
+    /// nothing else is, that button is released first.
+    fn press_button_key(
+        &self,
+        state: &mut State,
+        key: keyboard::key::Named,
+        module: u32,
+        widget: usize,
+        shell: &mut Shell<'_, Message>,
+    ) {
+        let same = state
+            .key_holds
+            .iter()
+            .flatten()
+            .any(|hold| hold.key == key && hold.module == module && hold.widget == widget);
+        if same {
+            return;
+        }
+        self.release_button_key(state, key, shell);
+        self.emit(shell, CanvasEvent::ButtonPressed { module, widget });
+        if let Some(slot) = state.key_holds.iter_mut().find(|slot| slot.is_none()) {
+            *slot = Some(KeyHold { key, module, widget });
+        }
+    }
+
+    /// Ends one key's hold. The button stays down while another key holds it.
+    fn release_button_key(&self, state: &mut State, key: keyboard::key::Named, shell: &mut Shell<'_, Message>) {
+        let Some(index) = state
+            .key_holds
+            .iter()
+            .position(|slot| slot.is_some_and(|hold| hold.key == key))
+        else {
+            return;
+        };
+        let Some(hold) = state.key_holds[index].take() else {
+            return;
+        };
+        let still_held = state
+            .key_holds
+            .iter()
+            .flatten()
+            .any(|other| other.module == hold.module && other.widget == hold.widget);
+        if !still_held {
+            self.emit(
+                shell,
+                CanvasEvent::ButtonReleased {
+                    module: hold.module,
+                    widget: hold.widget,
+                },
+            );
             shell.request_redraw();
             shell.capture_event();
+        }
+    }
+
+    /// Ends every keyboard hold. Used when the window loses focus, because
+    /// the key releases never arrive.
+    fn release_every_key_hold(&self, state: &mut State, shell: &mut Shell<'_, Message>) {
+        let holds = std::mem::take(&mut state.key_holds);
+        let mut reported = [(0_u32, 0_usize); 2];
+        let mut count = 0;
+        for hold in holds.into_iter().flatten() {
+            if reported[..count].contains(&(hold.module, hold.widget)) {
+                continue;
+            }
+            reported[count] = (hold.module, hold.widget);
+            count += 1;
+            self.emit(
+                shell,
+                CanvasEvent::ButtonReleased {
+                    module: hold.module,
+                    widget: hold.widget,
+                },
+            );
+        }
+        if count > 0 {
+            shell.request_redraw();
+            shell.capture_event();
+        }
+    }
+
+    /// Ends the hold for the key that came up.
+    fn release_key(&self, state: &mut State, key: &keyboard::Key, shell: &mut Shell<'_, Message>) {
+        if let Some(named) = Self::button_key(key) {
+            self.release_button_key(state, named, shell);
         }
     }
 
@@ -689,17 +834,11 @@ impl<Message> PatchCanvas<'_, Message> {
         );
     }
 
-    /// Pointer down on a button. Toggle flips. Momentary goes high until
-    /// the pointer comes up, and the tile stays put either way.
+    /// Pointer down on a button. The tile stays put. Pointer up reports a
+    /// release, whichever mode the app has stored.
     fn press_button(&self, state: &mut State, module: u32, widget: usize, shell: &mut Shell<'_, Message>) {
-        if self.is_momentary(module, widget) {
-            self.set_control(shell, module, widget, 1.0);
-            state.interaction = Interaction::Holding { module, widget };
-        } else {
-            let position = self.position(module, widget);
-            let next = if position > 0.5 { 0.0 } else { 1.0 };
-            self.set_control(shell, module, widget, next);
-        }
+        self.emit(shell, CanvasEvent::ButtonPressed { module, widget });
+        state.interaction = Interaction::Holding { module, widget };
     }
 
     /// The keyboard path to panel controls (NFR-UX-01). Returns true if the
@@ -753,37 +892,39 @@ impl<Message> PatchCanvas<'_, Message> {
                     return false;
                 };
                 let up = matches!(named, Named::ArrowUp | Named::ArrowRight);
-                let position = self.position(module, widget);
-                let next = match self.widget_kind(module, widget) {
-                    Some(WidgetViewKind::Knob { steps }) => knob_step(position, up, modifiers.shift(), *steps),
-                    Some(WidgetViewKind::Toggle) => {
-                        if up {
-                            1.0
-                        } else {
-                            0.0
+                if matches!(self.widget_kind(module, widget), Some(WidgetViewKind::Button)) {
+                    self.emit(
+                        shell,
+                        CanvasEvent::ButtonArrow {
+                            module,
+                            widget,
+                            high: up,
+                        },
+                    );
+                } else {
+                    let position = self.position(module, widget);
+                    let next = match self.widget_kind(module, widget) {
+                        Some(WidgetViewKind::Knob { steps }) => knob_step(position, up, modifiers.shift(), *steps),
+                        Some(WidgetViewKind::Toggle) => {
+                            if up {
+                                1.0
+                            } else {
+                                0.0
+                            }
                         }
-                    }
-                    // Momentary arrows do nothing. Toggle arrows set the gate.
-                    Some(WidgetViewKind::Button) if self.is_momentary(module, widget) => position,
-                    Some(WidgetViewKind::Button) => {
-                        if up {
-                            1.0
-                        } else {
-                            0.0
+                        Some(WidgetViewKind::Radio { options }) => {
+                            let last = options.len().saturating_sub(1) as f32;
+                            (position.round() + if up { 1.0 } else { -1.0 }).clamp(0.0, last)
                         }
+                        _ => return false,
+                    };
+                    if next != position {
+                        self.set_control(shell, module, widget, next);
                     }
-                    Some(WidgetViewKind::Radio { options }) => {
-                        let last = options.len().saturating_sub(1) as f32;
-                        (position.round() + if up { 1.0 } else { -1.0 }).clamp(0.0, last)
-                    }
-                    _ => return false,
-                };
-                if next != position {
-                    self.set_control(shell, module, widget, next);
                 }
                 true
             }
-            keyboard::Key::Named(Named::Space | Named::Enter) => {
+            keyboard::Key::Named(named @ (Named::Space | Named::Enter)) => {
                 let Some((module, widget)) = state.focus else {
                     return false;
                 };
@@ -792,13 +933,11 @@ impl<Message> PatchCanvas<'_, Message> {
                     Some(WidgetViewKind::Toggle) => {
                         self.set_control(shell, module, widget, if position > 0.5 { 0.0 } else { 1.0 })
                     }
+                    // A repeated key must not press again. The first press is
+                    // still held, so key up can release it.
                     Some(WidgetViewKind::Button) if repeat => {}
-                    Some(WidgetViewKind::Button) if self.is_momentary(module, widget) => {
-                        self.set_control(shell, module, widget, 1.0);
-                        state.key_hold = Some((module, widget));
-                    }
                     Some(WidgetViewKind::Button) => {
-                        self.set_control(shell, module, widget, if position > 0.5 { 0.0 } else { 1.0 });
+                        self.press_button_key(state, named, module, widget, shell);
                     }
                     Some(WidgetViewKind::Radio { options }) => {
                         let next = (position.round() as usize + 1) % options.len().max(1);
@@ -1328,7 +1467,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::controls::WidgetValue;
     use crate::scene::{CableView, ModuleView, PanelView, PortShape, PortView, WidgetView};
 
     fn module(id: u32, x: f32) -> ModuleView {
@@ -1666,20 +1804,6 @@ mod tests {
         module
     }
 
-    fn button_values(position: f32, mode: f32) -> PanelValues {
-        let mut values = PanelValues::new();
-        values.set(
-            1,
-            0,
-            WidgetValue {
-                position,
-                mode,
-                ..WidgetValue::default()
-            },
-        );
-        values
-    }
-
     fn drive(canvas: &PatchCanvas<'_, CanvasEvent>, state: &mut State, event: &Event, at: Point) -> Vec<CanvasEvent> {
         let bounds = Rectangle::new(Point::ORIGIN, Size::new(800.0, 600.0));
         let mut messages = Vec::new();
@@ -1692,37 +1816,29 @@ mod tests {
         Event::Mouse(mouse::Event::ButtonPressed(button))
     }
 
-    /// A toggle press flips the gate. A second press, once the value has
-    /// updated, flips it back. Neither press resets it.
+    /// Pointer down reports a press and does not reset on a second press.
+    /// The app turns the press into a flip or a hold.
     #[test]
-    fn a_toggle_button_flips_on_press() {
+    fn a_button_reports_press_and_a_second_press_is_not_a_reset() {
         let scene = Scene::new(vec![button_module()], Vec::new());
         let centre = scene.module(1).unwrap().widget_bounds(0).unwrap().center();
         let selected = BTreeSet::from([1]);
-        let values = button_values(0.0, 0.0);
-        let canvas = PatchCanvas::new(&scene, &selected, |e| e).values(&values);
+        let canvas = PatchCanvas::new(&scene, &selected, |e| e);
         let mut state = State::default();
         let first = drive(&canvas, &mut state, &click(mouse::Button::Left), centre);
-        assert_eq!(
-            first,
-            vec![CanvasEvent::SetControl {
-                module: 1,
-                widget: 0,
-                position: 1.0,
-            }]
-        );
-        assert!(matches!(state.interaction, Interaction::Idle));
+        assert_eq!(first, vec![CanvasEvent::ButtonPressed { module: 1, widget: 0 }]);
+        assert!(matches!(
+            state.interaction,
+            Interaction::Holding { module: 1, widget: 0 }
+        ));
 
-        let values = button_values(1.0, 0.0);
-        let canvas = PatchCanvas::new(&scene, &selected, |e| e).values(&values);
         let second = drive(&canvas, &mut state, &click(mouse::Button::Left), centre);
         assert_eq!(
             second,
-            vec![CanvasEvent::SetControl {
-                module: 1,
-                widget: 0,
-                position: 0.0,
-            }]
+            vec![
+                CanvasEvent::ButtonReleased { module: 1, widget: 0 },
+                CanvasEvent::ButtonPressed { module: 1, widget: 0 },
+            ]
         );
         assert!(
             second
@@ -1731,31 +1847,19 @@ mod tests {
         );
     }
 
-    /// Momentary goes high on press and low on release, even outside the
-    /// button. Dragging does not move the tile.
+    /// Release is reported even after the pointer has left the button.
+    /// Dragging does not move the tile.
     #[test]
-    fn a_momentary_button_is_high_only_while_held() {
+    fn a_button_reports_release_outside() {
         let scene = Scene::new(vec![button_module()], Vec::new());
         let centre = scene.module(1).unwrap().widget_bounds(0).unwrap().center();
         let outside = Point::new(centre.x + 400.0, centre.y);
         let selected = BTreeSet::from([1]);
-        let values = button_values(0.0, 1.0);
-        let canvas = PatchCanvas::new(&scene, &selected, |e| e).values(&values);
+        let canvas = PatchCanvas::new(&scene, &selected, |e| e);
         let mut state = State::default();
 
         let down = drive(&canvas, &mut state, &click(mouse::Button::Left), centre);
-        assert_eq!(
-            down,
-            vec![CanvasEvent::SetControl {
-                module: 1,
-                widget: 0,
-                position: 1.0,
-            }]
-        );
-        assert!(matches!(
-            state.interaction,
-            Interaction::Holding { module: 1, widget: 0 }
-        ));
+        assert_eq!(down, vec![CanvasEvent::ButtonPressed { module: 1, widget: 0 }]);
 
         let moved = drive(
             &canvas,
@@ -1771,14 +1875,157 @@ mod tests {
             &Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
             outside,
         );
+        assert_eq!(up, vec![CanvasEvent::ButtonReleased { module: 1, widget: 0 }]);
+        assert!(matches!(state.interaction, Interaction::Idle));
+    }
+
+    /// Another mouse button ends the hold. Leaving the interaction as a pan
+    /// without a release would stick a momentary gate high.
+    #[test]
+    fn another_mouse_button_releases_a_hold() {
+        let scene = Scene::new(vec![button_module()], Vec::new());
+        let centre = scene.module(1).unwrap().widget_bounds(0).unwrap().center();
+        let selected = BTreeSet::from([1]);
+        let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+        let mut state = State::default();
+        drive(&canvas, &mut state, &click(mouse::Button::Left), centre);
+
+        let right = drive(&canvas, &mut state, &click(mouse::Button::Right), centre);
+        assert_eq!(right, vec![CanvasEvent::ButtonReleased { module: 1, widget: 0 }]);
+        assert!(matches!(state.interaction, Interaction::Panning { .. }));
+    }
+
+    /// Losing the window while a key or the pointer is held reports a release.
+    /// The key-up event never arrives after the window is unfocused.
+    #[test]
+    fn losing_the_window_releases_a_hold() {
+        let scene = Scene::new(vec![button_module()], Vec::new());
+        let centre = scene.module(1).unwrap().widget_bounds(0).unwrap().center();
+        let selected = BTreeSet::from([1]);
+        let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+        let mut state = State {
+            interaction: Interaction::Holding { module: 1, widget: 0 },
+            key_holds: [
+                Some(KeyHold {
+                    key: keyboard::key::Named::Space,
+                    module: 1,
+                    widget: 0,
+                }),
+                None,
+            ],
+            ..State::default()
+        };
+        let events = drive(&canvas, &mut state, &Event::Window(window::Event::Unfocused), centre);
         assert_eq!(
-            up,
-            vec![CanvasEvent::SetControl {
-                module: 1,
-                widget: 0,
-                position: 0.0,
-            }]
+            events,
+            vec![
+                CanvasEvent::ButtonReleased { module: 1, widget: 0 },
+                CanvasEvent::ButtonReleased { module: 1, widget: 0 },
+            ]
         );
         assert!(matches!(state.interaction, Interaction::Idle));
+        assert!(state.key_holds.iter().all(Option::is_none));
+    }
+
+    fn key_event(named: keyboard::key::Named, pressed: bool) -> Event {
+        let key = keyboard::Key::Named(named);
+        let code = match named {
+            keyboard::key::Named::Enter => keyboard::key::Code::Enter,
+            _ => keyboard::key::Code::Space,
+        };
+        let physical_key = keyboard::key::Physical::Code(code);
+        if pressed {
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                modified_key: key.clone(),
+                key,
+                physical_key,
+                location: keyboard::Location::Standard,
+                modifiers: keyboard::Modifiers::default(),
+                text: None,
+                repeat: false,
+            })
+        } else {
+            Event::Keyboard(keyboard::Event::KeyReleased {
+                modified_key: key.clone(),
+                key,
+                physical_key,
+                location: keyboard::Location::Standard,
+                modifiers: keyboard::Modifiers::default(),
+            })
+        }
+    }
+
+    /// Space on one button and Enter on another. Releasing one key releases
+    /// only the button that key was holding.
+    #[test]
+    fn each_key_releases_only_its_own_hold() {
+        let mut module = button_module();
+        module.panel.width = 12;
+        module.panel.widgets.push(widget(WidgetViewKind::Button, 6));
+        let scene = Scene::new(vec![module], Vec::new());
+        let selected = BTreeSet::from([1]);
+        let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+        let mut state = State {
+            focus: Some((1, 0)),
+            ..State::default()
+        };
+        let at = Point::new(20.0, 20.0);
+
+        let space = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Space, true), at);
+        assert_eq!(space, vec![CanvasEvent::ButtonPressed { module: 1, widget: 0 }]);
+
+        state.focus = Some((1, 1));
+        let enter = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Enter, true), at);
+        assert_eq!(enter, vec![CanvasEvent::ButtonPressed { module: 1, widget: 1 }]);
+
+        let up_space = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Space, false), at);
+        assert_eq!(up_space, vec![CanvasEvent::ButtonReleased { module: 1, widget: 0 }]);
+
+        let up_enter = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Enter, false), at);
+        assert_eq!(up_enter, vec![CanvasEvent::ButtonReleased { module: 1, widget: 1 }]);
+    }
+
+    /// Both keys can hold one button. Releasing the first leaves it held.
+    #[test]
+    fn releasing_one_key_keeps_a_button_the_other_key_holds() {
+        let scene = Scene::new(vec![button_module()], Vec::new());
+        let selected = BTreeSet::from([1]);
+        let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+        let mut state = State {
+            focus: Some((1, 0)),
+            ..State::default()
+        };
+        let at = Point::new(20.0, 20.0);
+        drive(&canvas, &mut state, &key_event(keyboard::key::Named::Space, true), at);
+        drive(&canvas, &mut state, &key_event(keyboard::key::Named::Enter, true), at);
+
+        let up_space = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Space, false), at);
+        assert!(up_space.is_empty());
+
+        let up_enter = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Enter, false), at);
+        assert_eq!(up_enter, vec![CanvasEvent::ButtonReleased { module: 1, widget: 0 }]);
+    }
+
+    /// A right-button release does not end a hold the left button started.
+    #[test]
+    fn releasing_another_mouse_button_keeps_the_left_hold() {
+        let scene = Scene::new(vec![button_module()], Vec::new());
+        let centre = scene.module(1).unwrap().widget_bounds(0).unwrap().center();
+        let selected = BTreeSet::from([1]);
+        let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+        let mut state = State::default();
+        drive(&canvas, &mut state, &click(mouse::Button::Left), centre);
+
+        let right = drive(
+            &canvas,
+            &mut state,
+            &Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Right)),
+            centre,
+        );
+        assert!(right.is_empty());
+        assert!(matches!(
+            state.interaction,
+            Interaction::Holding { module: 1, widget: 0 }
+        ));
     }
 }

@@ -127,16 +127,17 @@ These details were settled while building the module.
 
 ### Button details
 
-**Status:** Agreed ([#75](https://github.com/brylie/LoomDSP/issues/75)). Code: `loom.ui.button` in `loom-modules/src/ui.rs`, and `WidgetKind::Button` in `loom-core`.
+**Status:** Agreed ([#75](https://github.com/brylie/LoomDSP/issues/75)). Code: `loom.ui.button` in `loom-modules/src/ui.rs`, and `WidgetKind::Button` and `ButtonMode` in `loom-core`.
 
-- **Parameters.** `mode` is a whole number: 0 is Toggle (the default), 1 is Momentary. `on` is a whole number, 0 or 1, default 0. Both are saved. The output `gate` equals `on`. `process` ignores `mode`. *Why:* the gesture is what differs. The cable always carries the same gate.
+- **Parameters.** `mode` is a whole number: 0 is Toggle (the default), 1 is Momentary. `on` is a whole number, 0 or 1, default 0. Both are saved. The output `gate` equals `on`. `process` ignores `mode`. *Why:* the gesture is what differs. The cable always carries the same gate. The registry requires `mode` to be a whole number from 0 to 1, and a different parameter from the one the button shows.
 - **No extra threshold.** A whole-number parameter is rounded after the clamp ([modulation](modulation.md), rule 5), so the module only sees 0 or 1. The gate is that value, with no smoothing.
 - **Panel.** One button, 6 by 3 grid units, bound to `on`. Its fill shows the gate. Its caption is "On". `mode` stays in the inspector. *Why:* mode is a setup choice. A control for it on the tile would be easy to hit by mistake on a front panel.
-- **Toggle.** Pointer down flips `on`. Space or Enter flips it. Arrow keys set 0 or 1, as for a toggle. A double-click is two flips, not a reset. *Why press, not release:* the gate should land on the beat. Waiting for release would add the length of the press as delay.
-- **Momentary.** Pointer down sets `on` to 1. Pointer up sets it to 0, including after the pointer has left the button. Space or Enter holds it high while the key is down. Arrow keys do nothing.
+- **The canvas reports the gesture.** A press, a release, or an arrow. It does not read `mode`. `ButtonMode` turns that report into a value. *Why:* the canvas reports input (ADR-0010). The same button widget can serve any module, including a later Transport reset.
+- **Toggle.** A press flips `on`. Space or Enter presses it. Arrow keys set 0 or 1, as for a toggle. A release changes nothing. A double-click is two presses, not a reset. *Why press, not release:* the gate should land on the beat. Waiting for release would add the length of the press as delay.
+- **Momentary.** A press sets `on` to 1. A release sets it to 0, including after the pointer has left the button, when another mouse button is pressed, or when the window loses focus. Releasing a mouse button other than the left one does not end a hold the left button is still keeping. Space and Enter are separate holds: each keeps the button high while that key is down, releasing one leaves it high while the other is still down, and pressing either on a different button releases the button that key was holding. Arrow keys do nothing. *Why the extra releases:* otherwise the gate stays high with nobody holding it.
 - **The button does not drag the tile.** In both modes, pointer down on the button leaves the tile where it is. Drag the tile from its header.
 - **Key repeat is ignored.** A held key does not flip the gate again.
-- **Switching to Momentary clears `on`.** The editor does this when `mode` changes to 1. Setting Momentary again, while it is already Momentary, does not clear a hold. *Why:* the light and the gate must agree. A latched gate with no finger on the button would lie.
+- **Switching to Momentary clears the gate.** When a button's `mode` parameter changes to 1, the editor sets the parameter that button shows to 0, in the same step. If the command queue cannot take both writes, it writes neither. Setting Momentary again, while it is already Momentary, does not clear a hold. The rule follows the widget, not one module id. *Why:* the light and the gate must agree. A latched gate with no finger on the button would lie.
 - **Space.** When a panel control has keyboard focus, Space and Enter act on that control and do not toggle Run. Space toggles Run only when no panel control is focused. *Why:* if both ran, a focused Button patched into run would be asked to change twice. The focused control is the one being played. Run's handler, when the Transport module is built ([#73](https://github.com/brylie/LoomDSP/issues/73)), must not also see a key the canvas used.
 - **A saved hold stays on.** If a patch is saved while a momentary button is held, it loads with `on` at 1. The next tap clears it. That takes Space held during a save, so P1 accepts it. A general way to leave a parameter out of the file, if one is ever needed, gets its own spec.
 
@@ -238,7 +239,7 @@ The Transport module's parameters (tempo, time signature, run) are saved like an
 - [ ] Ports that follow the transport show the clock mark.
 - [ ] Every patch has one Transport module. It cannot be deleted, and a second one cannot be added.
 - [ ] Run on the Transport panel toggles running. Space does the same when no panel control is focused. A focused control takes Space for itself. Stopping holds synced phases; running continues from there.
-- [x] The Button gate equals `on`, and every sample is 0 or 1. A toggle press flips `on`. A momentary press sets it to 1, and release sets it to 0, including when the pointer has left the button. Switching `mode` to Momentary clears `on`.
+- [x] The Button gate equals `on`, and every sample is 0 or 1. A toggle press flips `on`. A momentary press sets it to 1, and release sets it to 0, including when the pointer has left the button, when another mouse button is pressed, or when the window loses focus. Switching `mode` to Momentary clears `on`, and a full command queue leaves both values unchanged.
 - [ ] Reset returns to bar 1 and fires the jump trigger.
 - [ ] A toggle Button patched into run starts and stops the transport. While connected, the Run toggle follows the input.
 - [ ] Run state, tempo, and time signature survive save and load.
