@@ -31,7 +31,7 @@ The editing and display work ships in three slices, so each one can be built and
 | 2. Live value and lines | The live value dot, hover lines, dragging an arc to change depth | Draft | [#20](https://github.com/brylie/LoomDSP/issues/20) (live part), [#70](https://github.com/brylie/LoomDSP/issues/70) |
 | 3. Matrix | The modulation matrix, with the keyboard path | Draft | [#71](https://github.com/brylie/LoomDSP/issues/71) |
 
-*Why slices:* slice 1 needs no engine change and no new canvas drawing beyond arcs and labels the canvas already draws. The live dot needs the engine to publish modulated values, and the matrix is a new panel. Neither should hold back the first way to make a patch with modulation.
+*Why slices:* slice 1 needs no engine change and no new kind of canvas drawing. Its range arcs, modulation dots (on toggles, radio buttons, and knobs whose arc has zero length or whose assignments are all off), and count badges use the arcs, round markers, and labels the canvas already draws. The live dot needs the engine to publish modulated values, and the matrix is a new panel. Neither should hold back the first way to make a patch with modulation.
 
 ### Slice 1: make, see, and edit
 
