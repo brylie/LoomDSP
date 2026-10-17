@@ -13,5 +13,5 @@ Specification (for features): <!-- link to docs/design/..., and the acceptance c
 - [ ] `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo fmt --all --check` pass
 - [ ] Audio-thread code does not allocate, lock, or wait (see CONTRIBUTING.md)
 - [ ] New dependencies are permissively licensed (ADR-0006)
-- [ ] Clean room (ADR-0018): no other project's source code was read, and no manual text, panel layout, or presets were copied. New modules name their catalogue ID and cite their design references
+- [ ] Clean room (ADR-0018): no other audio project's source code was read, except to use a dependency accepted under ADR-0006, and no manual text, panel layout, or presets were copied. New modules name their catalogue ID and cite their design references
 - [ ] If AI tools helped, I have read, understood, and tested every line (see AI_POLICY.md)
