@@ -46,8 +46,9 @@ Timing is phase-driven: a ramp from 0 to 1 sets where in a cycle a module is ([P
 | MT-PHASE-02 | Phase scale | Runs a phase faster or slower by a whole-number ratio, and stays locked to it. | | P1 | FR-LIB-27 | Specified (`loom.phase.scale`) |
 | MT-PHASE-03 | Phase trigger | Fires a trigger each time a phase wraps. | | P1 | FR-LIB-27 | Built (`loom.phase.trigger`) |
 | MT-PHASE-04 | Phase reset | Restarts a phase at zero on a trigger. | | P1 | FR-LIB-01 | Planned |
-| MT-PHASE-05 | Phase warp | Changes how a phase moves within each cycle without changing its period: offset, bend, S-curve, skew, reverse, mirror, wrap or fold an out-of-range signal, and smoothing that keeps the wrap point. | | P2 | FR-LIB-01 | Planned |
+| MT-PHASE-05 | Phase warp | Changes how a phase moves within each cycle without changing its period: offset, bend, S-curve, skew, reverse, mirror, and smoothing that keeps the wrap point. | | P2 | FR-LIB-01 | Planned |
 | MT-PHASE-06 | Phase split | Divides one cycle into N parts and outputs a phase for each part. | | P3 | New | Planned |
+| MT-PHASE-08 | Phase wrap and fold | Brings any signal into the 0 to 1 phase range, by wrapping it around or by folding it back at the edges. | | P1 | FR-LIB-01 | Planned |
 | MT-PHASE-07 | Span phase | A phase that covers N bars and is anchored to bar 1, so it has the same value at the same musical time after any jump. | | P3 | New | Planned |
 
 ## Sound sources
@@ -200,7 +201,7 @@ All random modules take a seed, so a patch sounds the same each time it loads (N
 
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
-| MT-SEQ-01 | Multi-lane sequencer | Steps through stored values in one or more lanes. Each lane has a type (value, gate, pitch, or curve), a length, a direction, and a read mode: by clock, by phase, or by a control value that points at a step. Steps can carry accent, chance, and repeat. Lanes of different lengths give polymetric patterns. | Timebase, Retrigger, Seed, Scale awareness | P2 | FR-LIB-08, FR-LIB-14 | Planned |
+| MT-SEQ-01 | Multi-lane sequencer | Steps through stored values in one or more lanes. Each lane has a type (value, gate, pitch, or curve), a length, a direction, and a read mode: by clock, by phase, or by a control value that points at a step. Steps can carry accent, chance, and repeat. P2 builds lanes that share one length and rate (FR-LIB-08). Lanes with their own length, rate, and direction, which give polymetric patterns, come in P3 (FR-LIB-14). | Timebase, Retrigger, Seed, Scale awareness | P2 | FR-LIB-08, FR-LIB-14 | Planned |
 | MT-SEQ-02 | Parameter sequencer | Each step sets its own group of parameter values elsewhere in the patch. | Timebase | P3 | FR-LIB-12 | Planned |
 | MT-SEQ-03 | Piano roll | Notes of any length and pitch in a loop, drawn or recorded. | Timebase, Scale awareness | P3 | New | Planned |
 | MT-SEQ-04 | Generator | Makes melodies or rhythms from a chosen algorithm: random notes in a scale, a random walk, a looping pattern that slowly mutates, a Markov chain, or rule systems such as L-systems and cellular automata. | Seed, Scale awareness, Timebase | P3 | FR-LIB-28 | Planned |
@@ -350,10 +351,10 @@ A user's own sub-patch can declare a role and then fill any matching slot (FR-EN
 | Phase | Types | Of which new (no requirement yet) |
 |---|---|---|
 | P0 | 3 | 0 |
-| P1 | 33 | 0 |
+| P1 | 34 | 0 |
 | P2 | 55 | 16 |
 | P3 | 32 | 13 |
 | P4 | 46 | 30 |
-| **Total** | **169** | **59** |
+| **Total** | **170** | **59** |
 
 Plus 11 traits and 7 initial roles. The summary is counted from the tables above; update it when entries change.

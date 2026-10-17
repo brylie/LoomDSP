@@ -31,4 +31,4 @@ body:
     id: references
     attributes:
       label: Design references
-      description: Textbooks, papers, standards, or your own derivation that describe the algorithm. Please do not read or link other audio projects' source code, and do not copy their manuals (clean room, ADR-0018).
+      description: Textbooks, papers, standards, or your own derivation that describe the algorithm. Please do not read or link other audio projects' source code to design a LoomDSP module, except the source code of a dependency accepted under ADR-0006 when using that dependency. Do not copy their manuals (clean room, ADR-0018).
