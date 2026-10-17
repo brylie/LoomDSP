@@ -599,6 +599,10 @@ impl<Message> PatchCanvas<'_, Message> {
             return focused;
         }
         match state.hover {
+            // A port in hit range wins over a label under the pointer, even
+            // another port's label. That port has the hover ring, and a
+            // press starts a cable from it, so the hover text must name it
+            // too.
             Some(Hit::Port(port)) => Some(HoverTarget::Port(port)),
             Some(Hit::Widget { module, widget }) if self.is_control(module, widget) => {
                 Some(HoverTarget::Control(module, widget))
