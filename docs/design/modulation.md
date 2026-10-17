@@ -27,8 +27,8 @@ The editing and display work ships in three slices, so each one can be built and
 
 | Slice | What it adds | Status | Issues |
 |---|---|---|---|
-| 1. Make, see, and edit | Drag an output onto a tile control, add from the inspector, edit in the inspector, a range arc on tile knobs, a badge on the source | **Agreed** | [#70](https://github.com/brylie/LoomDSP/issues/70), [#20](https://github.com/brylie/LoomDSP/issues/20) (range part) |
-| 2. Live value and lines | The live value dot, hover lines, dragging an arc to change depth | Draft | [#20](https://github.com/brylie/LoomDSP/issues/20) (live part), [#70](https://github.com/brylie/LoomDSP/issues/70) |
+| 1. Make, see, and edit | Drag an output onto a tile control, add from the inspector, edit in the inspector, see what each output drives in the inspector, a range arc on tile knobs, a badge on the source | **Agreed** | [#70](https://github.com/brylie/LoomDSP/issues/70), [#20](https://github.com/brylie/LoomDSP/issues/20) (range part) |
+| 2. Live value and lines | The live value dot, lines on hover and pinned from the badge, dragging an arc to change depth | Draft | [#20](https://github.com/brylie/LoomDSP/issues/20) (live part), [#70](https://github.com/brylie/LoomDSP/issues/70) |
 | 3. Matrix | The modulation matrix, with the keyboard path | Draft | [#71](https://github.com/brylie/LoomDSP/issues/71) |
 
 *Why slices:* slice 1 needs no engine change and no new kind of canvas drawing. Its range arcs, modulation dots (on toggles, radio buttons, and knobs whose arc has zero length or whose assignments are all off), and count badges use the arcs, round markers, and labels the canvas already draws. The live dot needs the engine to publish modulated values, and the matrix is a new panel. Neither should hold back the first way to make a patch with modulation.
@@ -67,6 +67,7 @@ The editing and display work ships in three slices, so each one can be built and
 - **When every assignment on a control is off:** a knob shows no range arc, and any control (knob, toggle, or radio button) shows the dot, dimmed. *Why:* turning assignments off is how users compare with and without modulation. The control must still say it has assignments, or they are easy to forget and hard to find again.
 - **On the source:** an output port that drives at least one assignment shows a small label with the number of assignments, next to the port, counting those that are off. It does not cover the port or its cable. *Why:* the badge says where routing starts, so it must not hide routing that is only switched off.
 - **In the inspector:** under each parameter's slider, one row per assignment, in the order the engine applies them. Each row shows the source ("module name #id: output label"), a depth slider from -1 to 1 with 0 in the middle and the depth as a signed percentage, a polarity choice with three options: **Follow source (bipolar)**, with the source's own polarity in brackets, **Unipolar**, and **Bipolar**, an on/off switch, and a remove button.
+- **What an output drives:** when the source module is selected, the inspector shows **Drives** under its parameters, one group per output that drives at least one assignment. Each line names the target and its depth, as "module name #id: parameter label, +25%", in the order the assignments were added. A line for an assignment that is off is dimmed. Clicking a line selects the target module. Depth and the other settings are edited on the target's rows, not here. *Why:* the badge says how many targets an output has, but not which. Without this list, slice 1 has no way to find them from the source side. Editing stays in one place, so the two views cannot disagree.
 
 #### Editing and removing
 
@@ -89,7 +90,8 @@ Slice 1 does not wait for undo ([#12](https://github.com/brylie/LoomDSP/issues/1
 **Status:** Draft.
 
 - **Live value:** a dot on the knob shows the modulated value (FR-MOD-04). The engine computes it per sample, so it must publish one value per block for the UI, much like display values. How, and how often, is not decided.
-- **On hover:** pointing at a modulated control, or at a source badge, draws thin dashed lines between the source port and its targets, and highlights the tiles. They disappear when the pointer leaves. Selecting a module shows its lines too, following the same focus rules as cables.
+- **On hover:** pointing at an output port that drives assignments, at its badge, or at a modulated control draws thin dashed lines between the source port and its targets, and highlights the tiles. They disappear when the pointer leaves. Hovering a port still shows its hover text. Selecting a module shows its lines too, following the same focus rules as cables.
+- **Pinned lines:** clicking a badge keeps that output's lines visible after the pointer leaves. Clicking the badge again, or pressing Escape, hides them. The badge shows that it is pinned. *Why the badge and not the port:* pressing an output port starts dragging a cable or an assignment, so a click there must not also mean something else.
 - **Drag an arc** on the control to change its depth. Shift for fine steps. With one combined arc, which assignment a drag changes is not decided.
 - **Drop on an inspector control.** The inspector is not part of the canvas, so a drag that starts on the canvas and ends there needs its own design.
 
@@ -222,6 +224,7 @@ A **Macro** module (FR-LIB-12) has one knob on its panel and one output equal to
 - [ ] A modulated toggle or radio button shows the modulation dot.
 - [ ] A knob with enabled assignments whose arc has zero length (depth 0, a whole-number knob from 0 to 10 at base 5 with depth 0.04, or a unipolar assignment at the maximum) shows the dot, not dimmed, and no arc.
 - [ ] With every assignment on a control turned off, the control shows the dimmed dot and no arc.
+- [ ] Selecting a source module lists, under **Drives**, every assignment its outputs drive, with target and depth, dimming those that are off. Clicking a line selects the target module.
 - [ ] An output that drives assignments shows their number, counting those that are off. The number updates when an assignment is added or removed, or a module is deleted.
 - [ ] Changing depth, polarity, or on/off does not rebuild tiles, ports, or cables on the GPU (ADR-0010). Adding or removing an assignment may.
 - [ ] Save, then load: the same assignments appear in the inspector, in the same order.
@@ -231,7 +234,7 @@ A **Macro** module (FR-LIB-12) has one knob on its panel and one output equal to
 **Status:** Draft. [#20](https://github.com/brylie/LoomDSP/issues/20), [#70](https://github.com/brylie/LoomDSP/issues/70), [#71](https://github.com/brylie/LoomDSP/issues/71).
 
 - [ ] Modulated knobs show the live value.
-- [ ] Hovering a modulated control draws its source lines.
+- [ ] Hovering an output port, its badge, or a modulated control draws the lines. Clicking the badge pins them until it is clicked again or Escape is pressed.
 - [ ] The matrix lists every assignment in the current patch level, and every cell can be edited by keyboard.
 
 ### Acceptance criteria: undo
