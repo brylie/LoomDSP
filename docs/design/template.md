@@ -7,6 +7,7 @@ One sentence: what this feature does, for whom.
 - **Decision behind it:** ADR-NNNN, if there is one.
 - **Use case and requirements:** UCn, FR-..., NFR-...
 - **Background:** explainers in `docs/learn/` that teach the ideas behind this feature, if any.
+- **Prior art:** other tools, named only to explain an idea or a convention. Describe behaviour in our own words and names; never copy their text, module lists, parameter sets, or UI (see AGENTS.md, Prior art).
 - **Issues:** #...
 - **Code:** where it lives, once it exists.
 

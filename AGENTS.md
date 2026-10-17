@@ -63,6 +63,16 @@ Before writing code for a feature, read its specification in `docs/design/` (the
 
 Why: a gap in the spec gets filled with a guess, and a well-built guess is costly to undo. See [docs/design/README.md](docs/design/README.md#spec-first).
 
+## Prior art
+
+Other tools (Bitwig Grid, VCV Rack, Eurorack modules, Reaktor) inspire LoomDSP, but we do not copy them.
+
+- Design from our own use cases, requirements, and module catalogue, not from another product's module list.
+- Use our own words and names. Never copy text, module lists, parameter sets, or UI from another product or its documentation.
+- Name another tool only to explain an idea or a convention to users, for example "like a range switch on a Eurorack module" or "1 V per octave".
+
+Why: working through another product's catalogue makes it the outline of our design, and its selection, names, and wording slip in even by accident. LoomDSP should be original, both legally and in what it offers.
+
 ## Where documentation goes
 
 - A **decision** (with its options and reasons) goes in an ADR. Keep it to the decision. Once accepted, do not rewrite it; write a new ADR that supersedes it.
