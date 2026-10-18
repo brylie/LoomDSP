@@ -520,19 +520,23 @@ impl<Message> PatchCanvas<'_, Message> {
         let over = cursor.is_over(bounds);
         let screen = relative(cursor, bounds);
 
-        if !self.interactive && !matches!(event, Event::Window(_)) {
+        if !self.interactive {
             // Modifiers still count, so Shift held while the pop-up closes
             // is known on the next click.
             if let Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) = event {
                 state.modifiers = *modifiers;
             }
             // A pop-up has the keys. Nothing may stay held or half dragged
-            // behind it.
+            // behind it. This runs on any event, redraws too, because the
+            // pop-up takes the pointer and key events before the canvas
+            // sees them. Each step does nothing once nothing is held.
             self.release_pointer_hold(state, shell);
             self.release_every_key_hold(state, shell);
             self.end_gestures(state, shell);
             state.interaction = Interaction::Idle;
-            return;
+            if !matches!(event, Event::Window(_)) {
+                return;
+            }
         }
 
         match event {
@@ -2118,6 +2122,41 @@ mod tests {
 
     fn click(button: mouse::Button) -> Event {
         Event::Mouse(mouse::Event::ButtonPressed(button))
+    }
+
+    /// A drag in progress when a pop-up opens ends at the next redraw,
+    /// which reaches the canvas even when the pop-up takes every pointer
+    /// and key event. A button held by the pointer is released too.
+    #[test]
+    fn a_redraw_ends_gestures_and_holds_when_the_canvas_is_not_interactive() {
+        let redraw = Event::Window(window::Event::RedrawRequested(Instant::now()));
+
+        let scene = chain();
+        let selected = BTreeSet::from([1]);
+        let tile = scene.module(1).unwrap().bounds().center();
+        let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+        let mut state = State::default();
+        let pressed = drive(&canvas, &mut state, &click(mouse::Button::Left), tile);
+        assert_eq!(pressed, vec![CanvasEvent::GestureStart]);
+        let blocked = PatchCanvas::new(&scene, &selected, |e| e).interactive(false);
+        let events = drive(&blocked, &mut state, &redraw, tile);
+        assert!(events.contains(&CanvasEvent::GestureEnd), "{events:?}");
+        assert!(matches!(state.interaction, Interaction::Idle));
+        // Nothing is held now, so later redraws send nothing more.
+        let again = drive(&blocked, &mut state, &redraw, tile);
+        assert!(!again.contains(&CanvasEvent::GestureEnd), "{again:?}");
+
+        let scene = Scene::new(vec![button_module()], Vec::new());
+        let centre = scene.module(1).unwrap().widget_bounds(0).unwrap().center();
+        let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+        let mut state = State::default();
+        drive(&canvas, &mut state, &click(mouse::Button::Left), centre);
+        let blocked = PatchCanvas::new(&scene, &selected, |e| e).interactive(false);
+        let events = drive(&blocked, &mut state, &redraw, centre);
+        assert!(
+            events.contains(&CanvasEvent::ButtonReleased { module: 1, widget: 0 }),
+            "{events:?}"
+        );
     }
 
     /// Shift pressed while a pop-up has the keys still extends the
