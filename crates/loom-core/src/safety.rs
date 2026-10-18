@@ -171,7 +171,9 @@ impl DcBlocker {
     }
 
     fn tick(&mut self, input: f32) -> f32 {
-        let mut output = self.coefficient * (self.previous_out + input - self.previous_in);
+        // The difference first: added to a large held input, a small output
+        // would round away and stop decaying.
+        let mut output = self.coefficient * (self.previous_out + (input - self.previous_in));
         // A held offset decays toward 0 for ever. Stop it before it becomes
         // a denormal, which is slow on some CPUs.
         if output.abs() < 1e-20 {
@@ -393,6 +395,20 @@ mod tests {
         // Then it recovers slowly.
         let (next, _) = limiter.tick(0.5, 0.0, false);
         assert!(next < 0.25);
+    }
+
+    #[test]
+    fn a_large_held_offset_decays_to_zero() {
+        for sample_rate in [44_100.0, 48_000.0, 96_000.0, 192_000.0] {
+            let mut dc = DcBlocker::new(sample_rate);
+            let mut output = 0.0;
+            for _ in 0..sample_rate as usize {
+                output = dc.tick(INPUT_LIMIT);
+            }
+            // About e^-31 of the step after 1 s. Rounding once held it near
+            // 0.0015 at 48 kHz.
+            assert!(output.abs() < 1e-9, "{sample_rate} Hz: {output}");
+        }
     }
 
     #[test]

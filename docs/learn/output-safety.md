@@ -60,4 +60,6 @@ The stage first turns NaN and infinity into 0, then runs the DC blocker, the lim
 
 - **DC blocker before the limiter.** Otherwise a DC offset uses up the limiter's headroom, and the limiter turns the music down to make room for a sound nobody hears.
 - **Limiter before the clip.** A limiter that meets an already-clipped wave cannot undo the flat tops. Seeing the unclipped signal, it lowers the gain instead.
-- **Clip last.** If everything else works, the clip never acts. It stays as the last line of defence, and it is all that runs when the stage is off.
+- **Clip last.** If everything else works, the clip never acts. It stays as the last line of defence.
+
+With the stage off, the DC blocker and the limiter do not run. The rest still does: NaN and infinity still become 0, audio still fades in when it starts, and the clip still holds the output to -1 to 1. So Off gives the patch's own signal, clipped, once the fade-in is over.

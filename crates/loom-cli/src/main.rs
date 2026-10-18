@@ -155,7 +155,7 @@ fn main() -> ExitCode {
             offline,
         } => {
             if offline {
-                stress_offline(&patch, seconds, rate, note)
+                stress_offline(&patch, seconds, rate, note, audio.output_safety)
             } else {
                 stress_live(&patch, &audio, seconds, rate, note)
             }
@@ -534,10 +534,14 @@ fn stress_live(path: &Path, args: &AudioArgs, seconds: f32, rate: f32, note: u8)
     Ok(if passed { ExitCode::SUCCESS } else { ExitCode::FAILURE })
 }
 
-fn stress_offline(path: &Path, seconds: f32, rate: f32, note: u8) -> Result<ExitCode> {
+fn stress_offline(path: &Path, seconds: f32, rate: f32, note: u8, output_safety: OutputSafety) -> Result<ExitCode> {
     const SAMPLE_RATE: f32 = 48_000.0;
     const BLOCK: usize = 128;
-    let (_, mut parts) = load_engine(path, EngineConfig::with_sample_rate(SAMPLE_RATE))?;
+    let config = EngineConfig {
+        output_safety,
+        ..EngineConfig::with_sample_rate(SAMPLE_RATE)
+    };
+    let (_, mut parts) = load_engine(path, config)?;
     parts.midi.send(MidiEvent::note_on(0, 0, note, 100));
     let mut stressor = Stressor::new();
     let blocks = (seconds * SAMPLE_RATE / BLOCK as f32) as usize;
