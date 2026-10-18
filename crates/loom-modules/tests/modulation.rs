@@ -777,3 +777,35 @@ fn a_moved_cell_never_shows_another_parameters_value() {
     assert_eq!(parts.controller.modulated(a, 0), None);
     assert_eq!(parts.controller.modulated(b, 0), Some(0.5));
 }
+
+/// With the command queue full, changing depth, polarity, or on/off fails
+/// and leaves the graph as it was, so the graph never holds a setting the
+/// engine does not have.
+#[test]
+fn a_full_queue_leaves_the_assignment_unchanged() {
+    let mut registry = loom_core::Registry::new();
+    registry.register(&LINEAR).expect("linear");
+    let config = EngineConfig {
+        // Two inserts and one swap fill it.
+        command_capacity: 3,
+        ..EngineConfig::with_sample_rate(48_000.0)
+    };
+    let mut parts = create_engine(Arc::new(registry), config);
+    let source = parts.controller.add_module("test.linear").unwrap();
+    let sink = parts.controller.add_module("test.linear").unwrap();
+    let id = parts
+        .controller
+        .add_assignment_named(source, "out", sink, "level", 0.25)
+        .unwrap();
+    parts.controller.commit().unwrap();
+    let before = *parts.controller.graph().assignment(id).unwrap();
+    assert!(parts.controller.set_assignment_depth(id, 0.5).is_err());
+    assert!(
+        parts
+            .controller
+            .set_assignment_polarity(id, Some(Polarity::Unipolar))
+            .is_err()
+    );
+    assert!(parts.controller.set_assignment_enabled(id, false).is_err());
+    assert_eq!(*parts.controller.graph().assignment(id).unwrap(), before);
+}

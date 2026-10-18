@@ -338,6 +338,10 @@ enum Interaction {
     },
     Wiring {
         from: PortRef,
+        /// True when the drag began by pulling a cable off an input. Then a
+        /// drop on a control assigns nothing: the user is discarding the
+        /// cable (modulation.md, Making an assignment).
+        pulled: bool,
     },
     /// Dragging a knob's range arc: its depth, not its value.
     Depth {
@@ -800,24 +804,28 @@ impl<Message> PatchCanvas<'_, Message> {
                 );
                 let world = screen.map(|s| state.camera.to_world(s));
                 match interaction {
-                    Interaction::Wiring { from } => match world.map(|w| self.scene.hit(w, state.hit_radius())) {
-                        Some(Hit::Port(to)) => {
-                            let pair = if from.output { (from, to) } else { (to, from) };
-                            if pair.0.output && !pair.1.output {
-                                self.emit(
-                                    shell,
-                                    CanvasEvent::Connect {
-                                        from: pair.0,
-                                        to: pair.1,
-                                    },
-                                );
+                    Interaction::Wiring { from, pulled } => {
+                        match world.map(|w| self.scene.hit(w, state.hit_radius())) {
+                            Some(Hit::Port(to)) => {
+                                let pair = if from.output { (from, to) } else { (to, from) };
+                                if pair.0.output && !pair.1.output {
+                                    self.emit(
+                                        shell,
+                                        CanvasEvent::Connect {
+                                            from: pair.0,
+                                            to: pair.1,
+                                        },
+                                    );
+                                }
                             }
+                            Some(Hit::Widget { module, widget })
+                                if !pulled && self.takes_assignment(from, module, widget) =>
+                            {
+                                self.emit(shell, CanvasEvent::Assign { from, module, widget });
+                            }
+                            _ => {}
                         }
-                        Some(Hit::Widget { module, widget }) if self.takes_assignment(from, module, widget) => {
-                            self.emit(shell, CanvasEvent::Assign { from, module, widget });
-                        }
-                        _ => {}
-                    },
+                    }
                     Interaction::Selecting { start, current, base } => {
                         let area = Rectangle::new(
                             Point::new(start.x.min(current.x), start.y.min(current.y)),
@@ -1411,13 +1419,30 @@ impl<Message> PatchCanvas<'_, Message> {
                     // step, so the gesture starts before the disconnect.
                     self.emit(shell, CanvasEvent::GestureStart);
                     self.emit(shell, CanvasEvent::Disconnect(port));
-                    state.interaction = Interaction::Wiring { from: source };
+                    state.interaction = Interaction::Wiring {
+                        from: source,
+                        pulled: true,
+                    };
                 } else {
-                    self.begin(state, Interaction::Wiring { from: port }, shell);
+                    self.begin(
+                        state,
+                        Interaction::Wiring {
+                            from: port,
+                            pulled: false,
+                        },
+                        shell,
+                    );
                 }
             }
             Hit::Port(port) => {
-                self.begin(state, Interaction::Wiring { from: port }, shell);
+                self.begin(
+                    state,
+                    Interaction::Wiring {
+                        from: port,
+                        pulled: false,
+                    },
+                    shell,
+                );
             }
             Hit::Module(id) => {
                 let mut selection = self.selection.clone();
@@ -1617,10 +1642,11 @@ impl<Message> PatchCanvas<'_, Message> {
                 .push(Shape::new(ring, radius, Color::TRANSPARENT, p.focus, 1.5));
         }
         match &state.interaction {
-            Interaction::Wiring { from } => {
+            Interaction::Wiring { from, pulled } => {
                 // A control that would take this output as an assignment is
                 // highlighted, like an input port for a cable.
                 if let Some(Hit::Widget { module, widget }) = state.hover
+                    && !pulled
                     && self.takes_assignment(*from, module, widget)
                     && let Some(m) = self.scene.module(module)
                     && let (Some(rect), Some(view)) = (m.widget_bounds(widget), m.panel.widgets.get(widget))
@@ -1813,21 +1839,21 @@ impl<Message> PatchCanvas<'_, Message> {
                     clip,
                 );
             });
-            // Badge numbers sit outside the tile, so they clip to the
-            // canvas. Too small to read, the pill alone shows.
-            let badge_px = quantise(BADGE_TEXT_SIZE * zoom);
-            if badge_px < LABEL_MIN_PX * 0.8 {
-                continue;
-            }
+        }
+
+        // Badge numbers sit outside their tile, so they are checked against
+        // their own bounds, not the tile's, and clip to the canvas. Too small
+        // to read, the pill alone shows.
+        let badge_px = quantise(BADGE_TEXT_SIZE * zoom);
+        if badge_px < LABEL_MIN_PX * 0.8 {
+            return;
+        }
+        for module in self.scene.modules() {
             for (index, port) in module.outputs.iter().enumerate() {
-                if let Some(rect) = module.badge_bounds(index) {
+                if let Some(rect) = module.badge_bounds(index).filter(|r| r.intersects(&visible)) {
+                    let label = port.badge.to_string();
                     renderer.fill_text(
-                        text(
-                            &port.badge.to_string(),
-                            badge_px,
-                            rect.width * zoom,
-                            text::Alignment::Center,
-                        ),
+                        text(&label, badge_px, rect.width * zoom, text::Alignment::Center),
                         to_screen(rect.center()),
                         self.palette.background,
                         bounds,
@@ -2189,7 +2215,10 @@ mod tests {
             index: 0,
         };
         let drags = [
-            Interaction::Wiring { from: port },
+            Interaction::Wiring {
+                from: port,
+                pulled: false,
+            },
             Interaction::Turning {
                 module: 1,
                 widget: 0,
@@ -3156,6 +3185,39 @@ mod tests {
         let mut state = State::default();
         drive(&canvas, &mut state, &click(mouse::Button::Left), ring);
         assert!(matches!(state.interaction, Interaction::Turning { .. }));
+    }
+
+    /// A cable pulled off a connected input and dropped on a control is
+    /// discarded. It does not become an assignment.
+    #[test]
+    fn a_pulled_cable_dropped_on_a_control_does_not_assign() {
+        let cable = CableView {
+            from: (1, 0),
+            to: (2, 0),
+            colour_from: Color::WHITE,
+            colour_to: Color::WHITE,
+            delayed: false,
+        };
+        let target = ModuleView {
+            panel: panel(),
+            ..module(2, 300.0)
+        };
+        let scene = Scene::new(vec![module(1, 0.0), target], vec![cable]);
+        let none = BTreeSet::new();
+        let canvas = PatchCanvas::new(&scene, &none, |e| e);
+        let mut state = State::default();
+        let input = PortRef {
+            module: 2,
+            output: false,
+            index: 0,
+        };
+        let start = scene.port_position(input).unwrap();
+        let down = drive(&canvas, &mut state, &click(mouse::Button::Left), start);
+        assert!(down.contains(&CanvasEvent::Disconnect(input)), "{down:?}");
+        let knob = scene.module(2).unwrap().widget_bounds(0).unwrap().center();
+        drive(&canvas, &mut state, &moved(knob), knob);
+        let up = drive(&canvas, &mut state, &released(), knob);
+        assert_eq!(up, vec![CanvasEvent::GestureEnd]);
     }
 
     /// A drag that starts on an input never assigns.
