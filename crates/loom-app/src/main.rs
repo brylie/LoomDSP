@@ -1244,10 +1244,10 @@ fn severity_colour(severity: alerts::Severity) -> Color {
 }
 
 const HELP: &str = "Drag from a port to patch a cable. Drag a connected input to move or remove its cable.\n\
-Drag tiles to move them. Shift-click or drag a box to select several.\n\
+Drag tiles to move them. Shift-click or drag a box to select several. Cmd/Ctrl+A selects all modules. Escape cancels a cable drag.\n\
 Drag a knob up or down; Shift for fine steps; double-click resets it.\n\
 With a module selected, Tab moves between its controls and the arrow keys change them.\n\
-Right-drag or two-finger scroll to pan. Wheel or Cmd/Ctrl-scroll to zoom.\n\
+Right-drag or two-finger scroll to pan. Wheel or Cmd/Ctrl-scroll to zoom. Cmd/Ctrl+0 resets zoom to 100%.\n\
 F or Home frames the patch. Delete removes the selection.\n\
 MIDI learn: click a control, then move a knob on your controller. Escape ends it.";
 
