@@ -17,6 +17,12 @@ pub(crate) const KNOB_START: f32 = -0.75 * std::f32::consts::PI;
 pub(crate) const KNOB_SWEEP: f32 = 1.5 * std::f32::consts::PI;
 /// Radius of a knob's ring, in world units.
 const KNOB_RADIUS: f32 = 9.0;
+/// Radius of a knob's modulation range arc: just outside its ring.
+const RANGE_RADIUS: f32 = 11.75;
+/// Radius of the modulation dot.
+const DOT_RADIUS: f32 = 2.0;
+/// Opacity of the dot when every assignment is off.
+const DIMMED: f32 = 0.35;
 
 /// The live value of one widget.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -29,6 +35,34 @@ pub struct WidgetValue {
     /// The value as text, with its unit, shown while a knob is dragged or
     /// focused.
     pub text: String,
+    /// What the control shows of its modulation assignments.
+    pub modulation: ModulationMark,
+}
+
+/// What a control shows of the modulation assignments on its parameter.
+/// Spec: `docs/design/modulation.md`, Seeing assignments.
+///
+/// The application works out the mark, because it needs the parameter's
+/// mapping. The canvas only draws it.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum ModulationMark {
+    /// No assignments.
+    #[default]
+    None,
+    /// The furthest the enabled assignments can reach, as knob positions
+    /// from 0 to 1, with `low < high`. A knob draws it as an arc. Any other
+    /// control draws the dot.
+    Range {
+        /// The lower end.
+        low: f32,
+        /// The upper end.
+        high: f32,
+    },
+    /// At least one enabled assignment, but no range to draw: a toggle or
+    /// radio button, or a knob whose arc has zero length.
+    Dot,
+    /// Every assignment is off. The dot, dimmed.
+    DimmedDot,
 }
 
 /// Live values for every widget, by module ID and widget index.
@@ -100,6 +134,12 @@ impl ControlGeometry {
                     continue;
                 };
                 let position = values.position(module.id, index);
+                let modulation = values
+                    .get(module.id, index)
+                    .map_or(ModulationMark::None, |v| v.modulation);
+                if let Some(dot) = modulation_dot(&widget.kind, rect, modulation, palette) {
+                    shapes.push(dot);
+                }
                 match &widget.kind {
                     WidgetViewKind::Knob { .. } => {
                         let centre = knob_centre(rect);
@@ -120,6 +160,16 @@ impl ControlGeometry {
                                 KNOB_START,
                                 KNOB_SWEEP * t,
                                 palette.control_value,
+                            ));
+                        }
+                        if let ModulationMark::Range { low, high } = modulation {
+                            arcs.push(ArcShape::new(
+                                centre,
+                                RANGE_RADIUS,
+                                1.5,
+                                KNOB_START + KNOB_SWEEP * low,
+                                KNOB_SWEEP * (high - low),
+                                palette.modulation,
                             ));
                         }
                         shapes.push(circle(centre, 6.5, palette.control_body, palette.tile_border, 1.0));
@@ -205,6 +255,47 @@ impl ControlGeometry {
             arcs,
             shapes,
         }
+    }
+}
+
+/// The modulation dot of a control, if it shows one. A knob shows it only
+/// when it has no range arc to draw.
+fn modulation_dot(kind: &WidgetViewKind, rect: Rectangle, mark: ModulationMark, palette: &Palette) -> Option<Shape> {
+    let colour = match (kind, mark) {
+        (_, ModulationMark::None) | (WidgetViewKind::Knob { .. }, ModulationMark::Range { .. }) => return None,
+        // Displays have no parameter, so no assignments.
+        (WidgetViewKind::Light | WidgetViewKind::Meter, _) => return None,
+        (_, ModulationMark::DimmedDot) => Color {
+            a: palette.modulation.a * DIMMED,
+            ..palette.modulation
+        },
+        (_, ModulationMark::Range { .. } | ModulationMark::Dot) => palette.modulation,
+    };
+    Some(circle(
+        modulation_dot_centre(kind, rect),
+        DOT_RADIUS,
+        colour,
+        Color::TRANSPARENT,
+        0.0,
+    ))
+}
+
+/// Where a control's modulation dot goes: next to the control, clear of its
+/// value and caption.
+pub(crate) fn modulation_dot_centre(kind: &WidgetViewKind, rect: Rectangle) -> Point {
+    match kind {
+        // In the gap at the bottom of the ring.
+        WidgetViewKind::Knob { .. } => {
+            let c = knob_centre(rect);
+            Point::new(c.x, c.y + KNOB_RADIUS)
+        }
+        // Right of the track.
+        WidgetViewKind::Toggle => {
+            let track = toggle_track(rect);
+            Point::new(track.x + track.width + 3.5, track.y + track.height * 0.5)
+        }
+        // The top right corner of the cell, beside the caption or the face.
+        _ => Point::new(rect.x + rect.width - 2.5, rect.y + 2.5),
     }
 }
 
@@ -399,6 +490,97 @@ mod tests {
         assert_ne!(after.key, before.key);
         // A value arc appeared on the knob.
         assert_eq!(after.arcs.len(), before.arcs.len() + 1);
+    }
+
+    fn modulated(position: f32, modulation: ModulationMark) -> WidgetValue {
+        WidgetValue {
+            position,
+            modulation,
+            ..WidgetValue::default()
+        }
+    }
+
+    /// The modulation dot's fill on widget `index`, if it is drawn.
+    fn dot_fill(geometry: &ControlGeometry, scene: &Scene, index: usize) -> Option<[f32; 4]> {
+        let module = &scene.modules()[0];
+        let kind = &module.panel.widgets[index].kind;
+        let c = modulation_dot_centre(kind, module.widget_bounds(index).unwrap());
+        let want = [c.x - DOT_RADIUS, c.y - DOT_RADIUS, 2.0 * DOT_RADIUS, 2.0 * DOT_RADIUS];
+        geometry.shapes.iter().find(|s| s.rect() == want).map(Shape::fill)
+    }
+
+    #[test]
+    fn a_knob_range_draws_one_arc_and_no_dot() {
+        let scene = scene();
+        let palette = Palette::default();
+        let mut values = PanelValues::new();
+        values.set(1, 0, modulated(0.5, ModulationMark::None));
+        let plain = ControlGeometry::build(&scene, &values, &palette);
+        values.set(1, 0, modulated(0.5, ModulationMark::Range { low: 0.25, high: 0.75 }));
+        let ranged = ControlGeometry::build(&scene, &values, &palette);
+        assert_eq!(ranged.arcs.len(), plain.arcs.len() + 1);
+        let arc = ranged.arcs.last().unwrap();
+        let expected = ArcShape::new(
+            knob_centre(scene.modules()[0].widget_bounds(0).unwrap()),
+            RANGE_RADIUS,
+            1.5,
+            KNOB_START + KNOB_SWEEP * 0.25,
+            KNOB_SWEEP * 0.5,
+            palette.modulation,
+        );
+        assert_eq!(bytemuck::bytes_of(arc), bytemuck::bytes_of(&expected));
+        assert_eq!(dot_fill(&ranged, &scene, 0), None);
+    }
+
+    #[test]
+    fn dots_show_on_knobs_without_a_range_and_on_toggles_and_radios() {
+        let scene = scene();
+        let palette = Palette::default();
+        let mut values = PanelValues::new();
+        values.set(1, 0, modulated(0.5, ModulationMark::Dot));
+        values.set(1, 1, modulated(0.0, ModulationMark::Dot));
+        values.set(1, 2, modulated(1.0, ModulationMark::Dot));
+        let lit = ControlGeometry::build(&scene, &values, &palette);
+        for index in 0..3 {
+            assert!(dot_fill(&lit, &scene, index).is_some(), "widget {index}");
+        }
+        // No range arc on the knob: only its track and value arc.
+        assert_eq!(lit.arcs.len(), 2);
+
+        for index in 0..3 {
+            values.set(1, index, modulated(0.0, ModulationMark::DimmedDot));
+        }
+        let dimmed = ControlGeometry::build(&scene, &values, &palette);
+        for index in 0..3 {
+            let (bright, dim) = (
+                dot_fill(&lit, &scene, index).unwrap(),
+                dot_fill(&dimmed, &scene, index).unwrap(),
+            );
+            assert!(
+                dim[3] < bright[3],
+                "widget {index}: {dim:?} is not dimmer than {bright:?}"
+            );
+        }
+        // Nothing modulated, no dots.
+        let plain = ControlGeometry::build(&scene, &PanelValues::new(), &palette);
+        assert!((0..3).all(|index| dot_fill(&plain, &scene, index).is_none()));
+    }
+
+    #[test]
+    fn modulation_changes_only_the_control_geometry() {
+        // Depth, polarity, and on/off reach the canvas as a new mark. Like a
+        // value, it rebuilds only the controls (ADR-0010).
+        let scene = scene();
+        let palette = Palette::default();
+        let scene_generation = scene.generation();
+        let mut values = PanelValues::new();
+        values.set(1, 0, modulated(0.5, ModulationMark::Range { low: 0.5, high: 0.75 }));
+        let before = ControlGeometry::build(&scene, &values, &palette);
+        values.set(1, 0, modulated(0.5, ModulationMark::DimmedDot));
+        let after = ControlGeometry::build(&scene, &values, &palette);
+        assert_eq!(scene.generation(), scene_generation);
+        assert_eq!(after.key.0, before.key.0);
+        assert_ne!(after.key.1, before.key.1);
     }
 
     #[test]

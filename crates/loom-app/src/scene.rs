@@ -122,15 +122,16 @@ pub fn control_value(kind: WidgetKind, spec: &ParamSpec, position: f32) -> f32 {
     }
 }
 
-/// Updates the live value of every panel widget: parameter values for
-/// controls, and `shown` (position and peak, by module and widget) for
-/// lights and meters. Values that did not change keep the generation, so the
+/// Updates the live value of every panel widget: parameter values and
+/// modulation marks for controls, and `shown` (position and peak, by module
+/// and widget) for lights and meters. Values that did not change keep the generation, so the
 /// canvas uploads nothing new.
 pub fn update_panel_values(
     values: &mut PanelValues,
     controller: &Controller,
     shown: &BTreeMap<(u32, usize), (f32, f32)>,
 ) {
+    let reaches = crate::modulation::reaches(controller.graph());
     for (id, node) in controller.graph().nodes() {
         let d = node.descriptor;
         for (index, w) in d.panel.widgets.iter().enumerate() {
@@ -138,10 +139,12 @@ pub fn update_panel_values(
                 Some(p) if w.is_control() => {
                     let spec = &d.params[p];
                     let value = node.params[p];
+                    let assigned = reaches.get(&(id, p)).map_or(&[][..], Vec::as_slice);
                     WidgetValue {
                         position: control_position(w.kind, spec, value),
                         peak: 0.0,
                         text: crate::param::format(spec, value),
+                        modulation: crate::modulation::mark(w.kind, spec, value, assigned),
                     }
                 }
                 _ => {
@@ -149,7 +152,7 @@ pub fn update_panel_values(
                     WidgetValue {
                         position,
                         peak,
-                        text: String::new(),
+                        ..WidgetValue::default()
                     }
                 }
             };

@@ -19,7 +19,7 @@ mod tile_text;
 mod widget;
 
 pub use camera::{Camera, MAX_ZOOM, MIN_ZOOM};
-pub use controls::{PanelValues, WidgetValue};
+pub use controls::{ModulationMark, PanelValues, WidgetValue};
 pub use scene::{
     CableView, GRID, Hit, HoverText, LABEL_COLUMNS, ModuleView, PanelView, PortRef, PortShape, PortView, Scene,
     TILE_WIDTH, WidgetView, WidgetViewKind, fit_label, snap, tile_size,

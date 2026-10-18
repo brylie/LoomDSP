@@ -39,6 +39,9 @@ pub struct Palette {
     pub focus: Color,
     /// A meter in its loudest zone.
     pub warning: Color,
+    /// Modulation range arcs and dots. Distinct from the value colour and
+    /// from every signal colour, so it does not read as a cable or a value.
+    pub modulation: Color,
 }
 
 impl Default for Palette {
@@ -61,6 +64,7 @@ impl Default for Palette {
             light_on: Color::from_rgb8(0x7C, 0xE0, 0x8A),
             focus: Color::from_rgb8(0x6C, 0xB4, 0xF0),
             warning: Color::from_rgb8(0xE0, 0x4F, 0x4F),
+            modulation: Color::from_rgb8(0xE8, 0x6A, 0xC8),
         }
     }
 }
