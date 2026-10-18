@@ -192,6 +192,7 @@ struct App {
 }
 
 /// Where a patch comes from.
+#[derive(Clone, Copy)]
 enum Source<'a> {
     Empty,
     Generated(usize),
@@ -422,7 +423,7 @@ impl App {
     /// Save: to the current file, or Save As when there is none. Returns
     /// false if nothing was saved.
     fn save(&mut self) -> bool {
-        self.close_slider_gesture();
+        self.finish_edits();
         match self.file.clone() {
             Some(path) => self.write_to(path),
             None => self.save_as(),
@@ -430,17 +431,28 @@ impl App {
     }
 
     fn save_as(&mut self) -> bool {
-        self.close_slider_gesture();
+        self.finish_edits();
         match files::pick_save(self.file.as_deref()) {
             Some(path) => self.write_to(path),
             None => false,
         }
     }
 
+    /// Ends any edit in progress, so the history and the saved mark see it.
+    /// A canvas drag that goes on afterwards makes steps of its own.
+    fn finish_edits(&mut self) {
+        self.close_slider_gesture();
+        if self.gesture {
+            self.gesture = false;
+            self.record();
+            self.history_back_on();
+        }
+    }
+
     /// Asks what to do with unsaved changes. Returns true if the caller may
     /// go on and drop them.
     fn can_discard(&mut self) -> bool {
-        self.close_slider_gesture();
+        self.finish_edits();
         if !self.unsaved() {
             return true;
         }
@@ -469,18 +481,33 @@ impl App {
         self.midi = None;
         self.midi_ports.clear();
         let output = Self::open_output(self.no_audio);
+        let sample_rate = output
+            .as_ref()
+            .map(|o| o.sample_rate() as f32)
+            .unwrap_or(self.sample_rate);
+        // The engine must run at the rate of the device that plays it. The
+        // session above was only a check that the patch loads.
+        let session = if sample_rate == self.sample_rate {
+            session
+        } else {
+            Self::session(sample_rate, source).unwrap_or_else(|e| {
+                files::show_error(&format!("Could not open the patch: {e}."));
+                Self::session(sample_rate, Source::Empty).expect("an empty patch always loads")
+            })
+        };
         let args = Args {
             patch: None,
             generate: None,
             no_audio: self.no_audio,
             bench: self.measuring,
         };
-        let sample_rate = output
-            .as_ref()
-            .map(|o| o.sample_rate() as f32)
-            .unwrap_or(self.sample_rate);
         let mut fresh = Self::assemble(output, sample_rate, session, self.generation + 1, &args);
         fresh.animating = self.animating;
+        // The canvas keeps its state across the rebuild and compares these
+        // keys with the ones it saw: they must keep counting up. A new frame
+        // key also resets pan and zoom to show the whole patch.
+        fresh.browser_key = self.browser_key;
+        fresh.frame_key = self.frame_key + 1;
         *self = fresh;
         true
     }

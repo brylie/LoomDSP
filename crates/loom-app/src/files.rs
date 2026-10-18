@@ -63,11 +63,27 @@ pub fn pick_open(current: Option<&Path>) -> Option<PathBuf> {
 
 /// Asks where to save. The result always has an extension.
 pub fn pick_save(current: Option<&Path>) -> Option<PathBuf> {
-    dialog(current)
+    let picked = dialog(current)
         .set_title("Save patch")
         .set_file_name(display_name(current))
-        .save_file()
-        .map(with_extension)
+        .save_file()?;
+    let path = with_extension(picked.clone());
+    // The dialog checked the name it returned. If adding the extension made
+    // a different file, that one needs its own confirmation.
+    if path != picked && path.exists() && !confirm_replace(&path) {
+        return None;
+    }
+    Some(path)
+}
+
+fn confirm_replace(path: &Path) -> bool {
+    let result = MessageDialog::new()
+        .set_level(MessageLevel::Warning)
+        .set_title(format!("Replace \"{}\"?", display_name(Some(path))))
+        .set_description("A file with this name already exists. Saving replaces it.")
+        .set_buttons(MessageButtons::YesNo)
+        .show();
+    result == MessageDialogResult::Yes
 }
 
 /// Asks what to do with unsaved changes.

@@ -554,6 +554,9 @@ impl<Message> PatchCanvas<'_, Message> {
                         state.camera.frame(world, bounds.size());
                     }
                     state.framed_key = Some(self.frame_key);
+                    // A new frame key means a new patch: its lights have to
+                    // be reported again, even if the list looks the same.
+                    state.reported_lights = None;
                     state.animation = None;
                     shell.request_redraw();
                 }
