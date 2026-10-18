@@ -21,6 +21,9 @@ use std::time::{Duration, Instant};
 
 /// Two presses on the same control within this time reset it.
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
+/// How far in screen pixels the pointer may move between the two clicks of
+/// a double-click.
+const DOUBLE_CLICK_SLOP: f32 = 4.0;
 
 /// Titles are drawn when they would be at least this tall on screen.
 const TITLE_MIN_PX: f32 = 6.5;
@@ -103,6 +106,18 @@ pub enum CanvasEvent {
         /// Index in the module's panel widgets.
         widget: usize,
     },
+    /// Open the module browser (`docs/design/module-browser.md`): `A` was
+    /// pressed with the pointer over the canvas, empty canvas was
+    /// double-clicked, or the browser key changed.
+    OpenBrowser {
+        /// Where a new module goes, in world units, not yet snapped.
+        world: Point,
+        /// Where the browser opens, in window coordinates.
+        at: Point,
+        /// The canvas area, in window coordinates, so the browser can stay
+        /// inside it.
+        area: Rectangle,
+    },
     /// The modules whose lights or meters are on screen, at a zoom where
     /// they are drawn, changed. Only these need their values read.
     VisibleDisplays(Vec<u32>),
@@ -148,7 +163,9 @@ pub struct PatchCanvas<'a, Message> {
     palette: Palette,
     on_event: Box<dyn Fn(CanvasEvent) -> Message + 'a>,
     frame_key: u64,
+    browser_key: u64,
     animate: bool,
+    interactive: bool,
     learn: Option<&'a LearnView>,
 }
 
@@ -162,7 +179,9 @@ impl<'a, Message> PatchCanvas<'a, Message> {
             palette: Palette::default(),
             on_event: Box::new(on_event),
             frame_key: 0,
+            browser_key: 0,
             animate: false,
+            interactive: true,
             learn: None,
         }
     }
@@ -189,6 +208,23 @@ impl<'a, Message> PatchCanvas<'a, Message> {
     /// this key changes (for example after loading a patch).
     pub fn frame_key(mut self, key: u64) -> Self {
         self.frame_key = key;
+        self
+    }
+
+    /// The canvas sends [`CanvasEvent::OpenBrowser`] at the centre of the
+    /// view whenever this key changes, but not when it first appears. The
+    /// app uses it for a toolbar button, because only the canvas knows its
+    /// camera.
+    pub fn browser_key(mut self, key: u64) -> Self {
+        self.browser_key = key;
+        self
+    }
+
+    /// While false, the canvas ignores the keyboard and the pointer, and
+    /// lets go of any hold or drag. For a pop-up that takes the keys, such
+    /// as the module browser.
+    pub fn interactive(mut self, interactive: bool) -> Self {
+        self.interactive = interactive;
         self
     }
 
@@ -289,6 +325,11 @@ struct State {
     hover_text: HoverTimer,
     /// The last press on a control, for double-click.
     last_click: Option<(Instant, u32, usize)>,
+    /// The last press on empty canvas, in screen coordinates, for
+    /// double-click.
+    last_empty_click: Option<(Instant, Point)>,
+    /// The browser key last seen.
+    browser_key: Option<u64>,
     /// Buttons held from the keyboard, one slot for Space and one for Enter.
     ///
     /// Each key is its own hold. Releasing one leaves a button high while the
@@ -317,6 +358,12 @@ struct KeyHold {
     key: keyboard::key::Named,
     module: u32,
     widget: usize,
+}
+
+/// True when a press at `screen` is the second click of a double-click
+/// after the `last` press.
+fn double_click(last: Option<(Instant, Point)>, screen: Point) -> bool {
+    last.is_some_and(|(at, point)| at.elapsed() < DOUBLE_CLICK && point.distance(screen) < DOUBLE_CLICK_SLOP)
 }
 
 fn relative(cursor: mouse::Cursor, bounds: Rectangle) -> Option<Point> {
@@ -473,8 +520,26 @@ impl<Message> PatchCanvas<'_, Message> {
         let over = cursor.is_over(bounds);
         let screen = relative(cursor, bounds);
 
+        if !self.interactive && !matches!(event, Event::Window(_)) {
+            // A pop-up has the keys. Nothing may stay held or half dragged
+            // behind it.
+            self.release_pointer_hold(state, shell);
+            self.release_every_key_hold(state, shell);
+            self.end_gestures(state, shell);
+            state.interaction = Interaction::Idle;
+            return;
+        }
+
         match event {
             Event::Window(window::Event::RedrawRequested(now)) => {
+                if state
+                    .browser_key
+                    .replace(self.browser_key)
+                    .is_some_and(|key| key != self.browser_key)
+                {
+                    let centre = Point::new(bounds.width / 2.0, bounds.height / 2.0);
+                    self.open_browser(state.camera.to_world(centre), centre, bounds, shell);
+                }
                 if state.framed_key != Some(self.frame_key) && bounds.width > 0.0 {
                     if let Some(world) = self.scene.bounds() {
                         state.camera.frame(world, bounds.size());
@@ -526,6 +591,12 @@ impl<Message> PatchCanvas<'_, Message> {
                         self.emit(shell, CanvasEvent::Select(all));
                         shell.capture_event();
                     }
+                    keyboard::Key::Character("a") if !modifiers.command() && !modifiers.alt() => {
+                        if let Some(screen) = screen {
+                            self.open_browser(state.camera.to_world(screen), screen, bounds, shell);
+                        }
+                        shell.capture_event();
+                    }
                     _ => {}
                 }
             }
@@ -565,7 +636,7 @@ impl<Message> PatchCanvas<'_, Message> {
                         state.interaction = Interaction::Panning { last: screen };
                     }
                     mouse::Button::Left => {
-                        self.press(state, world, screen, shell);
+                        self.press(state, world, screen, bounds, shell);
                     }
                     _ => {}
                 }
@@ -1097,7 +1168,7 @@ impl<Message> PatchCanvas<'_, Message> {
         used
     }
 
-    fn press(&self, state: &mut State, world: Point, screen: Point, shell: &mut Shell<'_, Message>) {
+    fn press(&self, state: &mut State, world: Point, screen: Point, bounds: Rectangle, shell: &mut Shell<'_, Message>) {
         let shift = state.modifiers.shift();
         let hit = self.scene.hit(world, state.hit_radius());
         state.tab_focus = false;
@@ -1221,7 +1292,13 @@ impl<Message> PatchCanvas<'_, Message> {
                     );
                 }
             }
+            Hit::Nothing if double_click(state.last_empty_click.take(), screen) => {
+                self.open_browser(world, screen, bounds, shell);
+            }
             Hit::Cable(_) | Hit::Nothing => {
+                if matches!(hit, Hit::Nothing) {
+                    state.last_empty_click = Some((Instant::now(), screen));
+                }
                 let base = if shift { self.selection.clone() } else { BTreeSet::new() };
                 state.interaction = Interaction::Selecting {
                     start: world,
@@ -1230,6 +1307,19 @@ impl<Message> PatchCanvas<'_, Message> {
                 };
             }
         }
+    }
+
+    /// Sends [`CanvasEvent::OpenBrowser`] for a point given in world and
+    /// canvas-relative screen coordinates.
+    fn open_browser(&self, world: Point, screen: Point, bounds: Rectangle, shell: &mut Shell<'_, Message>) {
+        self.emit(
+            shell,
+            CanvasEvent::OpenBrowser {
+                world,
+                at: Point::new(bounds.x + screen.x, bounds.y + screen.y),
+                area: bounds,
+            },
+        );
     }
 
     /// The module tile under the cursor, if any (not counting its ports).

@@ -49,7 +49,7 @@ If you hear nothing, check the bottom bar. It shows the audio device and sample 
 | Move modules | Drag a tile. Tiles snap to the grid. |
 | Select several modules | Shift-click tiles, or drag a box on empty canvas. Cmd/Ctrl+A selects all. |
 | Delete modules | Select them and press Delete or Backspace. |
-| Add a module | Pick one in the toolbar list and click **Add**. |
+| Add a module | Press **A** with the pointer over the canvas, or double-click empty canvas. Type part of a name, ID, or category, pick with the arrow keys, and press Enter. The module appears where the pointer was. **Add module** in the toolbar does the same at the centre of the canvas. Escape closes the browser. |
 | Pan | Right-drag, or scroll with two fingers on a trackpad. |
 | Zoom | Mouse wheel, or Cmd/Ctrl and scroll on a trackpad. |
 | Show the whole patch | Press F or Home. |
@@ -89,7 +89,6 @@ Click a tile to select it. The inspector shows its parameters. Frequencies and t
 These are planned for Phase 1. Each has an issue on GitHub.
 
 - Open and Save As dialogs, undo, and copy and paste.
-- A searchable module browser.
 - Oscilloscopes and level meters inside modules.
 - Modulation on parameters, MIDI learn, and a panic button.
 - Choosing audio and MIDI devices, and plugging devices in while the app runs.

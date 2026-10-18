@@ -65,4 +65,4 @@ Copy [template.md](template.md). Keep it to one feature. Link the ADR, requireme
 | [Clock and transport](clock.md) | [ADR-0015](../adr/0015-one-transport-per-patch.md) | Engine sections, Clock Divide, and Phase Trigger Implemented (P1); rest Draft, P1 and P2 |
 | [Port and parameter text](port-and-parameter-text.md) | [ADR-0016](../adr/0016-ports-and-parameters-carry-their-own-text.md) | Implemented, P1 |
 | [MIDI learn](midi-learn.md) | None (builds on [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md) and [ADR-0013](../adr/0013-modules-carry-their-own-panel.md)) | Agreed, P1 |
-| [Module browser](module-browser.md) | None (builds on [ADR-0010](../adr/0010-own-patch-canvas.md)) | Agreed, P1 |
+| [Module browser](module-browser.md) | None (builds on [ADR-0010](../adr/0010-own-patch-canvas.md)) | Implemented, P1 |

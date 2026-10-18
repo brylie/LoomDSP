@@ -3,12 +3,12 @@
 A searchable list of module types that adds the chosen module to the canvas, where the user is looking. It is for everyone who builds a patch, and fastest for users who know what they want.
 
 - **Kind:** living specification.
-- **Status:** Agreed
+- **Status:** Implemented
 - **Decision behind it:** [ADR-0010](../adr/0010-own-patch-canvas.md) (fast insertion on our own canvas).
 - **Use case and requirements:** FR-CANVAS-03, FR-CANVAS-06, NFR-UX-01, NFR-UX-05.
 - **Prior art:** many node editors open a search box at the pointer when you press a key on the canvas, and add the chosen node there. We use the idea, not any product's layout or wording.
 - **Issues:** [#11](https://github.com/brylie/LoomDSP/issues/11)
-- **Code:** `crates/loom-app` (not built yet).
+- **Code:** `crates/loom-app/src/browser.rs` (search and panel), `crates/loom-canvas/src/widget.rs` (`CanvasEvent::OpenBrowser`).
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
      built. See README.md in this folder. -->
@@ -27,7 +27,9 @@ Today the toolbar has a drop-down of module IDs and an Add button. It lists ever
 |---|---|---|
 | `A` with the pointer over the canvas | At the pointer | At the pointer, snapped to the grid |
 | Double-click on empty canvas | At the pointer | At the click, snapped to the grid |
-| "Add module" button in the toolbar | Under the button | Centre of the visible canvas, snapped to the grid |
+| "Add module" button in the toolbar | At the centre of the canvas | Centre of the visible canvas, snapped to the grid |
+
+The panel's corner goes at that point, moved in as needed so the whole panel stays inside the canvas. *Why:* the toolbar button opens it at the canvas centre, not under the button, because only the canvas knows its camera, and so where the centre is in the patch.
 
 The browser is a small floating panel: a search field on top, a list of matches below, and the highlighted module's description at the bottom. The search field has keyboard focus as soon as the browser opens, so the user can type at once.
 
