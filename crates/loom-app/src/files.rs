@@ -72,8 +72,14 @@ pub fn pick_save(current: Option<&Path>) -> Option<PathBuf> {
     let path = with_extension(picked.clone());
     // The dialog checked the name it returned. If adding the extension made
     // a different file, that one needs its own confirmation.
-    if path != picked && path.exists() && !confirm_replace(&path) {
-        return None;
+    if path != picked && path.exists() {
+        // With no way to ask, keep the name the dialog confirmed.
+        if !dialogs_available() {
+            return Some(picked);
+        }
+        if !confirm_replace(&path) {
+            return None;
+        }
     }
     Some(path)
 }

@@ -439,13 +439,12 @@ impl App {
     }
 
     /// Ends any edit in progress, so the history and the saved mark see it.
-    /// A canvas drag that goes on afterwards makes steps of its own.
+    /// A canvas drag stays open: the rest of it becomes a step of its own
+    /// when it ends.
     fn finish_edits(&mut self) {
         self.close_slider_gesture();
         if self.gesture {
-            self.gesture = false;
             self.record();
-            self.history_back_on();
         }
     }
 
@@ -493,11 +492,14 @@ impl App {
             .unwrap_or(self.sample_rate);
         // The engine must run at the rate of the device that plays it. The
         // session above was only a check that the patch loads.
+        let mut failure = None;
         let session = if sample_rate == self.sample_rate {
             session
         } else {
             Self::session(sample_rate, source).unwrap_or_else(|e| {
-                files::show_error(&format!("Could not open the patch: {e}."));
+                failure = Some(format!(
+                    "Could not open the patch at the new audio rate: {e}. The old patch could not be kept."
+                ));
                 Self::session(sample_rate, Source::Empty).expect("an empty patch always loads")
             })
         };
@@ -514,8 +516,12 @@ impl App {
         // key also resets pan and zoom to show the whole patch.
         fresh.browser_key = self.browser_key;
         fresh.frame_key = self.frame_key + 1;
+        if let Some(message) = &failure {
+            files::show_error(message);
+            fresh.status = message.clone();
+        }
         *self = fresh;
-        true
+        failure.is_none()
     }
 
     fn new_patch(&mut self) {
