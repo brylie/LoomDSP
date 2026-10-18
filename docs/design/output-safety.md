@@ -80,7 +80,7 @@ Each is an engine test in `crates/loom-modules/tests/output_safety.rs` unless it
 
 ## Out of scope
 
-- A preferences store and a preferences window for the app. This spec only says the mode is a per-machine preference. Until that exists, the app takes a command-line flag.
+- A preferences store and a preferences window for the app. This spec only says the mode is a per-machine preference. Until that exists, the app takes a command-line flag. The store is specified in [App preferences](preferences.md) (Draft).
 - A user-facing master volume.
 - Showing limiter activity in the stats bar. That belongs to [#130](https://github.com/brylie/LoomDSP/issues/130), which can count limited samples the same way it counts silenced ones.
 - Per-channel modes, for DC-coupled multi-channel interfaces. This waits for outputs beyond stereo.
