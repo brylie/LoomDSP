@@ -474,6 +474,15 @@ impl App {
         // playing. The engine is built at the rate of the device that will
         // play it.
         let output = Self::open_output(self.no_audio);
+        // Playing now and no device to play on afterwards: keep what plays.
+        if let (Err(e), true) = (&output, self._audio.is_some()) {
+            let message = format!(
+                "Could not open the patch: the audio device is not available ({e}). The current patch is unchanged."
+            );
+            files::show_error(&message);
+            self.status = message;
+            return false;
+        }
         let sample_rate = output
             .as_ref()
             .map(|o| o.sample_rate() as f32)
