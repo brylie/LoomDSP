@@ -266,7 +266,7 @@ fn undo_with_no_room_for_the_modules_changes_nothing() {
     // Something else takes the freed place.
     let filler = c.add_module("loom.osc.noise").unwrap();
     c.commit().unwrap();
-    let error = check(&step, false, &mut c).unwrap_err();
+    let error = check(&step, false, &c).unwrap_err();
     assert!(error.contains("no room"), "{error}");
     assert!(c.graph().node(filler).is_some() && c.graph().node(b).is_some());
 }
@@ -320,4 +320,47 @@ fn undo_of_a_move_leaves_a_mapped_parameter_the_hardware_moved() {
     undo(&step, &mut c, &mut positions);
     assert_eq!(positions[&id.0], Point::new(0.0, 0.0));
     assert_eq!(c.graph().node(id).unwrap().params[cutoff], 1234.0);
+}
+
+#[test]
+fn a_momentary_button_hold_is_no_edit_and_a_toggle_press_is() {
+    let mut c = parts().controller;
+    let id = c.add_module("loom.ui.button").unwrap();
+    let mode = c.graph().node(id).unwrap().descriptor.param_index("mode").unwrap();
+    let press = CanvasEvent::ButtonPressed {
+        module: id.0,
+        widget: 0,
+    };
+    let release = CanvasEvent::ButtonReleased {
+        module: id.0,
+        widget: 0,
+    };
+    let arrow = CanvasEvent::ButtonArrow {
+        module: id.0,
+        widget: 0,
+        high: true,
+    };
+    c.set_param(id, mode, 0.0).unwrap();
+    assert!(is_edit(&c, &press), "a toggle press is a step");
+    assert!(is_edit(&c, &arrow), "a toggle arrow is a step");
+    c.set_param(id, mode, 1.0).unwrap();
+    assert!(!is_edit(&c, &press), "a momentary press is no step");
+    assert!(!is_edit(&c, &release), "a momentary release is no step");
+    assert!(!is_edit(&c, &arrow), "a momentary arrow is no step");
+}
+
+#[test]
+fn moving_a_mapping_to_another_parameter_is_named_a_move() {
+    let mut c = parts().controller;
+    let id = c.add_module("loom.filter.svf").unwrap();
+    let control = MidiControl {
+        channel: 0,
+        controller: 74,
+    };
+    c.map_midi(control, id, 0).unwrap();
+    let mut positions = BTreeMap::new();
+    let step = record(&mut c, &mut positions, |c| {
+        c.map_midi(control, id, 1).unwrap();
+    });
+    assert_eq!(step.name(), "move MIDI mapping");
 }

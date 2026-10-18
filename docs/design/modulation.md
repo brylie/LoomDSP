@@ -239,11 +239,11 @@ A **Macro** module (FR-LIB-12) has one knob on its panel and one output equal to
 
 ### Acceptance criteria: undo
 
-**Status:** Agreed, to be checked when [#12](https://github.com/brylie/LoomDSP/issues/12) is built.
+**Status:** Agreed. Checked when [#12](https://github.com/brylie/LoomDSP/issues/12) was built: the third is tested in `loom-app/src/undo/tests.rs`. The first two wait for a UI that makes assignments and changes their depth; undo covers them through the same snapshot difference.
 
 - [ ] Undo removes an assignment that was just made. Redo brings it back.
 - [ ] One depth slider drag is one undo step.
-- [ ] Undo restores the assignments removed by deleting a module, in their old order, and the output is bit-identical to before the delete.
+- [x] Undo restores the assignments removed by deleting a module, in their old order, and the output is bit-identical to before the delete.
 
 ### Out of scope for P1
 

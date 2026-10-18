@@ -12,9 +12,10 @@
 //! controller.
 
 use iced::Point;
+use loom_canvas::CanvasEvent;
 use loom_core::{
-    Assignment, AssignmentId, Controller, InputRef, LoomError, MidiControl, ModuleDescriptor, ModuleId, ModuleRole,
-    OutputRef,
+    Assignment, AssignmentId, ButtonMode, Controller, InputRef, LoomError, MidiControl, ModuleDescriptor, ModuleId,
+    ModuleRole, OutputRef, WidgetKind,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -98,6 +99,40 @@ impl Step {
     pub fn touched_modules(&self) -> impl Iterator<Item = u32> + '_ {
         self.modules.keys().copied()
     }
+}
+
+/// True if a canvas event is an edit, and so becomes a step. Views,
+/// selection, and the transport are not edits. A momentary button hold is
+/// a performance action, not an edit (undo.md, What is not undoable), so
+/// only a button in toggle mode makes a step.
+pub fn is_edit(controller: &Controller, event: &CanvasEvent) -> bool {
+    match *event {
+        CanvasEvent::Move { .. }
+        | CanvasEvent::Connect { .. }
+        | CanvasEvent::Disconnect(_)
+        | CanvasEvent::Delete(_)
+        | CanvasEvent::SetControl { .. }
+        | CanvasEvent::ResetControl { .. } => true,
+        CanvasEvent::ButtonPressed { module, widget }
+        | CanvasEvent::ButtonReleased { module, widget }
+        | CanvasEvent::ButtonArrow { module, widget, .. } => !is_momentary_button(controller, module, widget),
+        _ => false,
+    }
+}
+
+/// True if the button's stored mode is momentary.
+fn is_momentary_button(controller: &Controller, module: u32, widget: usize) -> bool {
+    controller.graph().node(ModuleId(module)).is_some_and(|node| {
+        let Some(panel_widget) = node.descriptor.panel.widgets.get(widget) else {
+            return false;
+        };
+        let WidgetKind::Button { mode } = panel_widget.kind else {
+            return false;
+        };
+        node.descriptor
+            .param_index(mode)
+            .is_some_and(|i| ButtonMode::from_value(node.params[i]) == ButtonMode::Momentary)
+    })
 }
 
 /// Compares the patch before and after an edit. `touched` lists the
@@ -191,6 +226,14 @@ fn name(step: &Step) -> String {
         );
     }
     if let Some(control) = step.midi.values().find_map(|(_, new)| *new) {
+        // The control left another parameter: the mapping moved.
+        if step
+            .midi
+            .values()
+            .any(|(old, new)| *old == Some(control) && new.is_none())
+        {
+            return "move MIDI mapping".to_string();
+        }
         return format!("learn {control}");
     }
     if !step.midi.is_empty() {
@@ -247,7 +290,7 @@ fn name(step: &Step) -> String {
 
 /// Checks that a step can be applied, before anything changes (undo.md,
 /// rule 10). A refusal leaves the patch and the history as they were.
-pub fn check(step: &Step, forward: bool, controller: &mut Controller) -> Result<(), String> {
+pub fn check(step: &Step, forward: bool, controller: &Controller) -> Result<(), String> {
     let mut needed = 0;
     for (old, new) in step.modules.values() {
         let (have, want) = if forward { (old, new) } else { (new, old) };

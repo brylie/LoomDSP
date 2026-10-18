@@ -323,9 +323,9 @@ impl Controller {
     }
 
     /// How many more modules that run DSP the engine can take now. Undo
-    /// checks this before it puts removed modules back.
-    pub fn free_module_slots(&mut self) -> usize {
-        self.collect_garbage();
+    /// checks this before it puts removed modules back. A removed module's
+    /// slot counts only after the commit that follows its removal.
+    pub fn free_module_slots(&self) -> usize {
         self.free_slots.len()
     }
 
