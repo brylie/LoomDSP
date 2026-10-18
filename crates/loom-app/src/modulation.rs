@@ -48,7 +48,7 @@ pub fn mark(kind: WidgetKind, spec: &ParamSpec, base: f32, reaches: &[Reach]) ->
         return ModulationMark::None;
     }
     if reaches.iter().all(|r| !r.enabled) {
-        return ModulationMark::DimmedDot;
+        return ModulationMark::Ring;
     }
     if kind != WidgetKind::Knob {
         return ModulationMark::Dot;
@@ -198,10 +198,10 @@ mod tests {
     }
 
     #[test]
-    fn every_assignment_off_dims_the_dot() {
+    fn every_assignment_off_shows_the_ring() {
         assert_eq!(
             range(&LINEAR, 0.5, &[off(0.25, Unipolar), off(0.5, Bipolar)]),
-            ModulationMark::DimmedDot
+            ModulationMark::Ring
         );
         assert_eq!(
             mark(
@@ -210,7 +210,7 @@ mod tests {
                 0.0,
                 &[off(1.0, Unipolar)]
             ),
-            ModulationMark::DimmedDot
+            ModulationMark::Ring
         );
     }
 
