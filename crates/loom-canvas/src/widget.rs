@@ -1897,6 +1897,12 @@ impl<Message> PatchCanvas<'_, Message> {
             return;
         }
         for module in self.scene.modules() {
+            // A badge reaches past its tile's right edge by at most this
+            // much: the gap after the port and a pill with several digits.
+            const BADGE_REACH: f32 = 40.0;
+            if !module.bounds().expand(BADGE_REACH).intersects(&visible) {
+                continue;
+            }
             for (index, port) in module.outputs.iter().enumerate() {
                 if let Some(rect) = module.badge_bounds(index).filter(|r| r.intersects(&visible)) {
                     let label = port.badge.to_string();
