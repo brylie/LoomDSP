@@ -67,3 +67,4 @@ Copy [template.md](template.md). Keep it to one feature. Link the ADR, requireme
 | [Open, Save, and Save As](files.md) | None (builds on [ADR-0008](../adr/0008-patch-format-ron.md)) | Implemented, P1 |
 | [MIDI learn](midi-learn.md) | None (builds on [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md) and [ADR-0013](../adr/0013-modules-carry-their-own-panel.md)) | Agreed, P1 |
 | [Module browser](module-browser.md) | None (builds on [ADR-0010](../adr/0010-own-patch-canvas.md)) | Implemented, P1 |
+| [Output safety](output-safety.md) | [ADR-0019](../adr/0019-output-safety-stage.md) | Draft, P1 |
