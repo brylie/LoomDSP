@@ -413,16 +413,26 @@ pub struct History {
     steps: Vec<Step>,
     /// Steps before this can be undone; steps from here can be redone.
     position: usize,
+    /// The position at the last save, if the history can still reach it.
+    saved: Option<usize>,
 }
 
 impl History {
     /// Adds a step after the current one. Steps that could be redone are
     /// dropped (rule 9), and the oldest goes when the history is full.
     pub fn push(&mut self, step: Step) {
+        // The saved state is lost if it was among the steps that could be
+        // redone: they are dropped now.
+        if self.saved.is_some_and(|saved| saved > self.position) {
+            self.saved = None;
+        }
         self.steps.truncate(self.position);
         self.steps.push(step);
         if self.steps.len() > LIMIT {
             self.steps.remove(0);
+            // Everything moved down one place. A saved state before the first
+            // kept step cannot be reached again.
+            self.saved = self.saved.and_then(|saved| saved.checked_sub(1));
         }
         self.position = self.steps.len();
     }
@@ -447,10 +457,23 @@ impl History {
         self.position = (self.position + 1).min(self.steps.len());
     }
 
-    /// Forgets everything.
+    /// Forgets everything. The saved state is forgotten too: with no steps
+    /// to compare, the patch counts as changed (`docs/design/files.md`).
     pub fn clear(&mut self) {
         self.steps.clear();
         self.position = 0;
+        self.saved = None;
+    }
+
+    /// Notes that the patch as it is now is on disk.
+    pub fn mark_saved(&mut self) {
+        self.saved = Some(self.position);
+    }
+
+    /// True when the patch is the one last saved: nothing was done since, or
+    /// everything done since was undone.
+    pub fn is_saved(&self) -> bool {
+        self.saved == Some(self.position)
     }
 
     /// How many steps are kept.

@@ -82,13 +82,13 @@ Click a tile to select it. The inspector shows its parameters. Frequencies and t
 
 ## Saving
 
-**Save** writes the patch next to the file you opened, as `<name>.saved.ron`, including module positions. Patch files are plain text in [RON](../adr/0008-patch-format-ron.md), so you can read them, edit them, and keep them in git.
+**New**, **Open**, **Save**, and **Save As** (Ctrl or Cmd with N, O, S, and Shift+S) work on `.ron` patch files, including module positions. The window title shows the file name, with a `*` in front when you have unsaved changes. The app asks before it throws changes away. Save writes to the file you opened, so use Save As to keep an example as it is. Patch files are plain text in [RON](../adr/0008-patch-format-ron.md), so you can read them, edit them, and keep them in git.
 
 ## What is not there yet
 
 These are planned for Phase 1. Each has an issue on GitHub.
 
-- Open and Save As dialogs, undo, and copy and paste.
+- Copy and paste.
 - A searchable module browser.
 - Oscilloscopes and level meters inside modules.
 - Modulation on parameters, MIDI learn, and a panic button.

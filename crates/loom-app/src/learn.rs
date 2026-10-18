@@ -28,13 +28,16 @@ pub struct Armed {
 #[derive(Clone)]
 pub struct Watch {
     pub reader: MidiReader,
+    /// Counts the engines the app has built (see `lights::Watch`).
+    pub generation: u64,
 }
 
 impl Hash for Watch {
-    // The reader is the same for the whole app, so the subscription never
-    // restarts while it is wanted.
+    // The reader is the same for one engine, so the subscription restarts
+    // only with a new engine.
     fn hash<H: Hasher>(&self, state: &mut H) {
         "midi-learn".hash(state);
+        self.generation.hash(state);
     }
 }
 

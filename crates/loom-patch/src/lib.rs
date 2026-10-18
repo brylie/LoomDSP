@@ -273,11 +273,24 @@ impl Patch {
     }
 
     /// Writes a patch file.
+    ///
+    /// The text goes to a temporary file in the same folder first, then
+    /// replaces the target by a rename. A full disk or a crash cannot leave
+    /// a half-written patch where a good one was.
     pub fn save(&self, path: impl AsRef<Path>) -> Result<(), PatchError> {
         let path = path.as_ref();
-        std::fs::write(path, self.to_ron()?).map_err(|source| PatchError::Io {
+        let text = self.to_ron()?;
+        let io = |source| PatchError::Io {
             path: path.display().to_string(),
             source,
+        };
+        let mut temp = path.as_os_str().to_owned();
+        temp.push(".tmp");
+        let temp = std::path::PathBuf::from(temp);
+        std::fs::write(&temp, text).map_err(io)?;
+        std::fs::rename(&temp, path).map_err(|source| {
+            let _ = std::fs::remove_file(&temp);
+            io(source)
         })
     }
 
@@ -559,6 +572,22 @@ Patch(
 
     /// The engine adds assignments on one parameter in id order. Float sums
     /// depend on order, so a reloaded patch must keep it (review on #133).
+    #[test]
+    fn save_replaces_the_file_and_leaves_no_temporary() {
+        let dir = std::env::temp_dir().join(format!("loom-patch-save-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("p.ron");
+        std::fs::write(&path, "old").unwrap();
+        let patch = Patch::new("Saved");
+        patch.save(&path).unwrap();
+        assert_eq!(Patch::load(&path).unwrap().name, "Saved");
+        assert!(!dir.join("p.ron.tmp").exists());
+        // A target that cannot be written reports the error and keeps the old file.
+        let missing = dir.join("no-such-folder").join("p.ron");
+        assert!(matches!(patch.save(&missing), Err(PatchError::Io { .. })));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[test]
     fn assignment_order_survives_save_and_load() {
         let mut parts = create_engine(loom_modules::registry(), EngineConfig::default());

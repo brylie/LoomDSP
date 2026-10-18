@@ -3,13 +3,13 @@
 How a user opens, saves, and closes patch files in the desktop app, and how the app tells them about unsaved work.
 
 - **Kind:** living specification.
-- **Status:** Agreed
+- **Status:** Implemented
 - **Decision behind it:** none of its own yet. Builds on [ADR-0008](../adr/0008-patch-format-ron.md) (the patch format) and [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md) (the engine and controller are created together).
 - **Use case and requirements:** FR-FILE-01, FR-APP-01.
 - **Background:** none.
 - **Prior art:** every desktop editor has these commands. We use only the common conventions: shortcuts, a dot or star for unsaved work, and a three-button question.
 - **Issues:** [#14](https://github.com/brylie/LoomDSP/issues/14). Follow-ups this spec absorbs: the lights watcher and telemetry monitor must follow a new engine; `*.saved.ron` files next to examples; Open clears the undo history ([undo](undo.md#commands)).
-- **Code:** not built yet. Today `App::new` in `crates/loom-app/src/main.rs` loads one patch from the command line and saves to `<name>.saved.ron`.
+- **Code:** `crates/loom-app/src/files.rs` (dialogs, title, extension), and `App::session`, `App::replace`, `App::save`, and `App::can_discard` in `main.rs`. `History::mark_saved` and `is_saved` in `undo.rs`. `Patch::save` in `loom-patch` writes through a temporary file. The lights, telemetry, and MIDI watchers take an engine generation in their subscription identity.
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
      built. See README.md in this folder. -->
@@ -37,7 +37,7 @@ How a user opens, saves, and closes patch files in the desktop app, and how the 
 | **Save** | Cmd/Ctrl+S | Writes to the current file. With no current file, it acts as Save As. |
 | **Save As...** | Cmd/Ctrl+Shift+S | A file dialog. Writes the patch there, and the new path becomes the current file. |
 
-The commands are buttons in the toolbar and shortcuts anywhere in the window. A command-line patch path opens like Open, with the file as the current file.
+The commands are buttons in the toolbar and shortcuts anywhere in the window. A command-line patch path opens like Open, with the file as the current file. If it fails to load, the status bar shows the reason (no modal, because there is no patch to protect yet) and the app starts empty.
 
 ### What counts as an unsaved change
 
@@ -63,7 +63,7 @@ New, Open, closing the window, and quitting from the OS menu all ask when there 
 - **Don't Save:** continues without saving.
 - **Cancel:** stops the command.
 
-Quit from the OS menu is the same as closing the window. A crash or a forced kill cannot ask; autosave and recovery are out of scope.
+Quit from the OS menu is the same as closing the window. The app handles the window's close request. A quit that does not reach the app as a close request (for example Cmd+Q on macOS, if the window system skips it) cannot ask: check this by hand. A crash or a forced kill cannot ask; autosave and recovery are out of scope.
 
 ### Open replaces the patch
 
@@ -100,7 +100,7 @@ A failed save keeps the unsaved mark. A save writes to a temporary file in the s
 
 ### Dialog crate
 
-[`rfd`](https://crates.io/crates/rfd) (MIT or Apache-2.0). It supports macOS, Windows, and Linux (portal or GTK). To check before building: `cargo deny check` on all three platforms, and that the Linux backend does not pull in a GPL or LGPL crate (GTK3 is a system library, loaded at run time, not linked source; confirm with deny). Dialogs run off the UI thread through `rfd`'s async API and the Iced task system.
+[`rfd`](https://crates.io/crates/rfd) (MIT or Apache-2.0). It supports macOS, Windows, and Linux (portal or GTK). To check before building: `cargo deny check` on all three platforms, and that the Linux backend does not pull in a GPL or LGPL crate (GTK3 is a system library, loaded at run time, not linked source; confirm with deny). Dialogs are the blocking `rfd` calls, run on the UI thread as the operating systems expect. Audio runs on its own thread and keeps playing while a dialog is open.
 
 ## Rules
 

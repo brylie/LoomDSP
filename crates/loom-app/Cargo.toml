@@ -23,6 +23,7 @@ loom-host-desktop.workspace = true
 loom-canvas.workspace = true
 iced = { workspace = true, features = ["smol"] }
 clap.workspace = true
+rfd.workspace = true
 
 [lints]
 workspace = true

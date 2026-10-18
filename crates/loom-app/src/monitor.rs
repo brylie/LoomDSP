@@ -21,20 +21,26 @@ pub const INTERVAL: Duration = Duration::from_millis(33);
 #[derive(Clone)]
 pub struct Monitor {
     telemetry: Arc<Mutex<Option<Telemetry>>>,
+    generation: u64,
 }
 
 impl Monitor {
-    pub fn new(telemetry: Telemetry) -> Self {
+    /// `generation` counts the engines the app has built. Opening a patch
+    /// builds a new one, and the subscription must restart to take its
+    /// `Telemetry`.
+    pub fn new(telemetry: Telemetry, generation: u64) -> Self {
         Self {
             telemetry: Arc::new(Mutex::new(Some(telemetry))),
+            generation,
         }
     }
 }
 
 impl Hash for Monitor {
-    // One monitor for the life of the app: the subscription never restarts.
+    // One monitor per engine: the subscription restarts with a new engine.
     fn hash<H: Hasher>(&self, state: &mut H) {
         "loom-app telemetry monitor".hash(state);
+        self.generation.hash(state);
     }
 }
 

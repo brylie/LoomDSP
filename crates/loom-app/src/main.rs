@@ -5,6 +5,7 @@
 //! canvas against the performance gates in NFR-PERF-04.
 
 mod alerts;
+mod files;
 mod layout;
 mod learn;
 mod lights;
@@ -18,7 +19,7 @@ use clap::Parser;
 use iced::widget::{
     button, column, container, pick_list, row, rule, scrollable, slider, space, text, toggler, tooltip,
 };
-use iced::{Color, Element, Length, Point, Subscription, Theme};
+use iced::{Color, Element, Length, Point, Subscription, Task, Theme};
 use live::Live;
 use loom_canvas::{CanvasEvent, HoverText, LearnView, PanelValues, PatchCanvas, Scene};
 use loom_core::{
@@ -27,7 +28,7 @@ use loom_core::{
 use loom_host_desktop::{AudioOptions, AudioOutput, CallbackStats, MidiConnection, RunningAudio, SharedMidi};
 use loom_patch::Patch;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -53,6 +54,7 @@ fn main() -> iced::Result {
         .title(App::title)
         .theme(App::theme)
         .subscription(App::subscription)
+        .exit_on_close_request(false)
         .window_size((1440.0, 900.0))
         .antialiasing(false)
         .run()
@@ -69,7 +71,13 @@ enum Message {
     Pick(String),
     Add,
     HoldNote,
+    /// File commands (`docs/design/files.md`).
+    New,
+    Open,
     Save,
+    SaveAs,
+    /// The window asked to close.
+    CloseRequested,
     Measure(bool),
     Animate(bool),
     Frame(Instant),
@@ -116,8 +124,16 @@ struct App {
     /// Modules whose lights or meters are on screen, as the canvas reports.
     visible_displays: Vec<u32>,
     selection: BTreeSet<u32>,
+    /// The name saved inside the patch.
     name: String,
-    save_path: PathBuf,
+    /// The file the patch was opened from or saved to (`docs/design/files.md`).
+    file: Option<PathBuf>,
+    /// Counts the engines built. Background watchers restart when it changes.
+    generation: u64,
+    sample_rate: f32,
+    no_audio: bool,
+    /// Set when the app should exit after this update.
+    quit: bool,
     theme: Theme,
     _audio: Option<RunningAudio>,
     /// Meter and scope data from the engine, drained on the telemetry
@@ -165,52 +181,111 @@ struct App {
     touched: BTreeSet<(u32, usize)>,
 }
 
+/// Where a patch comes from.
+enum Source<'a> {
+    Empty,
+    Generated(usize),
+    File(&'a Path),
+}
+
+/// An engine and the patch loaded into it, before audio is attached.
+struct Session {
+    controller: Controller,
+    engine: loom_core::Engine,
+    midi: loom_core::MidiSender,
+    telemetry: loom_core::Telemetry,
+    positions: BTreeMap<u32, Point>,
+    name: String,
+    file: Option<PathBuf>,
+}
+
 impl App {
     fn new(args: Args) -> Self {
-        let output = if args.no_audio {
+        let output = Self::open_output(args.no_audio);
+        let sample_rate = output.as_ref().map(|o| o.sample_rate() as f32).unwrap_or(48_000.0);
+        let source = match (&args.patch, args.generate) {
+            (_, Some(n)) => Source::Generated(n),
+            (Some(path), None) => Source::File(path),
+            (None, None) => Source::Empty,
+        };
+        let mut status = String::new();
+        let session = Self::session(sample_rate, source).unwrap_or_else(|e| {
+            status = e;
+            Self::session(sample_rate, Source::Empty).expect("an empty patch always loads")
+        });
+        let mut app = Self::assemble(output, sample_rate, session, 1, &args);
+        if !status.is_empty() {
+            app.status = status;
+        }
+        app
+    }
+
+    fn open_output(no_audio: bool) -> Result<AudioOutput, String> {
+        if no_audio {
             Err("audio off".to_string())
         } else {
             AudioOutput::open(&AudioOptions::default()).map_err(|e| e.to_string())
-        };
-        let sample_rate = output.as_ref().map(|o| o.sample_rate() as f32).unwrap_or(48_000.0);
+        }
+    }
+
+    /// Builds an engine and loads a patch into it. On failure nothing else
+    /// is touched, so a failed open leaves the running patch alone.
+    fn session(sample_rate: f32, source: Source) -> Result<Session, String> {
         let EngineParts {
             mut controller,
             engine,
-            midi: sender,
+            midi,
             telemetry,
         } = create_engine(loom_modules::registry(), EngineConfig::with_sample_rate(sample_rate));
-
-        let mut status = String::new();
         let mut positions = BTreeMap::new();
-        let (name, save_path) = match (&args.patch, args.generate) {
-            (_, Some(n)) => {
-                if let Err(e) = layout::generate(&mut controller, n) {
-                    status = format!("generate failed: {e}");
-                }
+        let (name, file) = match source {
+            Source::Generated(n) => {
+                layout::generate(&mut controller, n).map_err(|e| format!("generate failed: {e}"))?;
                 layout::generated_layout(&controller, &mut positions);
-                (
-                    format!("Generated ({n} modules)"),
-                    PathBuf::from(format!("generated-{n}.ron")),
-                )
+                (format!("Generated ({n} modules)"), None)
             }
-            (Some(path), None) => match Patch::load(path).and_then(|p| p.load_into(&mut controller).map(|()| p)) {
-                Ok(patch) => {
-                    for m in &patch.modules {
-                        if let Some((x, y)) = m.position {
-                            positions.insert(m.id, Point::new(x, y));
-                        }
+            Source::File(path) => {
+                let patch = Patch::load(path).map_err(|e| e.to_string())?;
+                patch.load_into(&mut controller).map_err(|e| e.to_string())?;
+                for m in &patch.modules {
+                    if let Some((x, y)) = m.position {
+                        positions.insert(m.id, Point::new(x, y));
                     }
-                    // Saves go next to the file, so examples keep their comments.
-                    (patch.name.clone(), path.with_extension("saved.ron"))
                 }
-                Err(e) => {
-                    status = format!("could not open {}: {e}", path.display());
-                    ("Untitled".to_string(), PathBuf::from("untitled.ron"))
-                }
-            },
-            (None, None) => ("Untitled".to_string(), PathBuf::from("untitled.ron")),
+                (patch.name.clone(), Some(path.to_path_buf()))
+            }
+            Source::Empty => ("Untitled".to_string(), None),
         };
         layout::auto_layout(&controller, &mut positions);
+        Ok(Session {
+            controller,
+            engine,
+            midi,
+            telemetry,
+            positions,
+            name,
+            file,
+        })
+    }
+
+    /// Attaches audio and MIDI to a session and builds the app around it.
+    fn assemble(
+        output: Result<AudioOutput, String>,
+        sample_rate: f32,
+        session: Session,
+        generation: u64,
+        args: &Args,
+    ) -> Self {
+        let Session {
+            controller,
+            engine,
+            midi: sender,
+            telemetry,
+            positions,
+            name,
+            file,
+        } = session;
+        let mut status = String::new();
 
         // Every MIDI input plays the patch, and the "Hold note" button works
         // alongside them, so a keyboard is never hidden behind another port.
@@ -252,7 +327,11 @@ impl App {
             visible_displays: Vec::new(),
             selection: BTreeSet::new(),
             name,
-            save_path,
+            file,
+            generation,
+            sample_rate,
+            no_audio: args.no_audio,
+            quit: false,
             theme: Theme::custom(
                 "Loom",
                 iced::theme::Palette {
@@ -266,7 +345,7 @@ impl App {
             ),
             audio_stats: audio.as_ref().map(|a| a.stats().clone()),
             _audio: audio,
-            monitor: monitor::Monitor::new(telemetry),
+            monitor: monitor::Monitor::new(telemetry, generation),
             live: Live::new(),
             dropouts: alerts::Dropouts::default(),
             midi_ports,
@@ -290,14 +369,131 @@ impl App {
             history_off: false,
             touched: BTreeSet::new(),
         };
+        // A patch just loaded is the one on disk.
+        app.history.mark_saved();
         if app.status.is_empty() {
             app.report();
         }
         app
     }
 
+    /// True when the patch differs from the file (`docs/design/files.md`).
+    fn unsaved(&self) -> bool {
+        !self.history.is_saved()
+    }
+
+    /// Writes the patch to `path`. On success the path becomes the current
+    /// file and the unsaved mark clears.
+    fn write_to(&mut self, path: PathBuf) -> bool {
+        let mut patch = Patch::from_graph(&self.name, self.controller.graph());
+        for m in &mut patch.modules {
+            m.position = self.positions.get(&m.id).map(|p| (p.x.round(), p.y.round()));
+        }
+        match patch.save(&path) {
+            Ok(()) => {
+                self.status = format!("saved {}", path.display());
+                self.file = Some(path);
+                self.history.mark_saved();
+                true
+            }
+            Err(e) => {
+                let message = format!(
+                    "Could not save \"{}\": {e}. Your changes are not saved.",
+                    files::display_name(Some(&path))
+                );
+                files::show_error(&message);
+                self.status = message;
+                false
+            }
+        }
+    }
+
+    /// Save: to the current file, or Save As when there is none. Returns
+    /// false if nothing was saved.
+    fn save(&mut self) -> bool {
+        self.close_slider_gesture();
+        match self.file.clone() {
+            Some(path) => self.write_to(path),
+            None => self.save_as(),
+        }
+    }
+
+    fn save_as(&mut self) -> bool {
+        self.close_slider_gesture();
+        match files::pick_save(self.file.as_deref()) {
+            Some(path) => self.write_to(path),
+            None => false,
+        }
+    }
+
+    /// Asks what to do with unsaved changes. Returns true if the caller may
+    /// go on and drop them.
+    fn can_discard(&mut self) -> bool {
+        self.close_slider_gesture();
+        if !self.unsaved() {
+            return true;
+        }
+        match files::confirm_discard(&files::display_name(self.file.as_deref())) {
+            files::Choice::Save => self.save(),
+            files::Choice::DontSave => true,
+            files::Choice::Cancel => false,
+        }
+    }
+
+    /// Replaces the patch (and its engine) with `source`. If the source does
+    /// not load, the running patch is unchanged.
+    fn replace(&mut self, source: Source) -> bool {
+        let session = match Self::session(self.sample_rate, source) {
+            Ok(session) => session,
+            Err(e) => {
+                let message = format!("Could not open the patch: {e}. The current patch is unchanged.");
+                files::show_error(&message);
+                self.status = message;
+                return false;
+            }
+        };
+        // Free the audio device and MIDI inputs before the new engine takes them.
+        self._audio = None;
+        self.audio_stats = None;
+        self.midi = None;
+        self.midi_ports.clear();
+        let output = Self::open_output(self.no_audio);
+        let args = Args {
+            patch: None,
+            generate: None,
+            no_audio: self.no_audio,
+            bench: self.measuring,
+        };
+        let sample_rate = output
+            .as_ref()
+            .map(|o| o.sample_rate() as f32)
+            .unwrap_or(self.sample_rate);
+        let mut fresh = Self::assemble(output, sample_rate, session, self.generation + 1, &args);
+        fresh.animating = self.animating;
+        *self = fresh;
+        true
+    }
+
+    fn new_patch(&mut self) {
+        if self.can_discard() && self.replace(Source::Empty) {
+            self.status = "new patch".to_string();
+        }
+    }
+
+    fn open(&mut self) {
+        if !self.can_discard() {
+            return;
+        }
+        let Some(path) = files::pick_open(self.file.as_deref()) else {
+            return;
+        };
+        if self.replace(Source::File(&path)) {
+            self.status = format!("opened {}", path.display());
+        }
+    }
+
     fn title(&self) -> String {
-        format!("{} - LoomDSP", self.name)
+        files::window_title(self.file.as_deref(), self.unsaved())
     }
 
     fn theme(&self) -> Theme {
@@ -314,7 +510,8 @@ impl App {
             iced::time::every(Duration::from_millis(500)).map(|_| Message::Tick)
         };
         let telemetry = Subscription::run_with(self.monitor.clone(), monitor::stream).map(Message::Meters);
-        Subscription::batch([main, self.light_watch(), telemetry, self.midi_watch()])
+        let close = iced::window::close_requests().map(|_| Message::CloseRequested);
+        Subscription::batch([main, self.light_watch(), telemetry, self.midi_watch(), close])
     }
 
     /// Wakes the UI when control changes arrive, while there is something to
@@ -325,6 +522,7 @@ impl App {
         let watch = (mapped || self.learning).then(|| {
             let watch = learn::Watch {
                 reader: self.controller.midi_reader(),
+                generation: self.generation,
             };
             Subscription::run_with(watch, learn::stream).map(|_| Message::Midi)
         });
@@ -357,6 +555,7 @@ impl App {
         let watch = lights::Watch {
             reader: self.controller.display_reader(),
             lights: watched,
+            generation: self.generation,
         };
         Subscription::run_with(watch, lights::stream).map(Message::Lights)
     }
@@ -701,7 +900,12 @@ impl App {
         sent
     }
 
-    fn update(&mut self, message: Message) {
+    fn update(&mut self, message: Message) -> Task<Message> {
+        self.handle(message);
+        if self.quit { iced::exit() } else { Task::none() }
+    }
+
+    fn handle(&mut self, message: Message) {
         match message {
             Message::Canvas(event) => self.canvas_event(event),
             Message::Param {
@@ -755,15 +959,18 @@ impl App {
                     );
                 }
             }
+            Message::New => self.new_patch(),
+            Message::Open => self.open(),
             Message::Save => {
-                let mut patch = Patch::from_graph(&self.name, self.controller.graph());
-                for m in &mut patch.modules {
-                    m.position = self.positions.get(&m.id).map(|p| (p.x.round(), p.y.round()));
+                self.save();
+            }
+            Message::SaveAs => {
+                self.save_as();
+            }
+            Message::CloseRequested => {
+                if self.can_discard() {
+                    self.quit = true;
                 }
-                self.status = match patch.save(&self.save_path) {
-                    Ok(()) => format!("saved {}", self.save_path.display()),
-                    Err(e) => format!("save failed: {e}"),
-                };
             }
             Message::Measure(on) => {
                 self.measuring = on;
@@ -838,6 +1045,14 @@ impl App {
                         self.redo()
                     }
                     iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("z") => self.undo(),
+                    iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("n") => self.new_patch(),
+                    iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("o") => self.open(),
+                    iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("s") && modifiers.shift() => {
+                        self.save_as();
+                    }
+                    iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("s") => {
+                        self.save();
+                    }
                     iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("y") && !cfg!(target_os = "macos") => {
                         self.redo()
                     }
@@ -983,7 +1198,16 @@ impl App {
         let hold = button(text(if self.holding { "Release note" } else { "Hold note" }).size(13))
             .on_press_maybe(self.midi.as_ref().map(|_| Message::HoldNote));
         row![
-            text(&self.name).size(15),
+            text(format!(
+                "{}{}",
+                if self.unsaved() { "* " } else { "" },
+                files::display_name(self.file.as_deref())
+            ))
+            .size(15),
+            button(text("New").size(13)).on_press(Message::New),
+            button(text("Open").size(13)).on_press(Message::Open),
+            button(text("Save").size(13)).on_press(Message::Save),
+            button(text("Save As").size(13)).on_press(Message::SaveAs),
             space::horizontal(),
             pick_list(self.kinds.as_slice(), self.picked.as_ref(), Message::Pick)
                 .placeholder("Module...")
@@ -999,7 +1223,6 @@ impl App {
                 } else {
                     button::secondary
                 }),
-            button(text("Save").size(13)).on_press(Message::Save),
         ]
         .spacing(8)
         .padding([6, 10])

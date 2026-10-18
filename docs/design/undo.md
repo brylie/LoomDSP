@@ -193,6 +193,6 @@ The edit log itself lives in `loom-app` and knows nothing about the audio thread
 
 ## Open points
 
-1. **Unsaved-changes marker.** Should undo back to the saved state clear the "unsaved" mark? *Leaning:* yes, by remembering the history position at save. Not needed for the first version, because the app has no marker yet.
+1. **Unsaved-changes marker.** Should undo back to the saved state clear the "unsaved" mark? Done: the history remembers its position at save ([files](files.md#what-counts-as-an-unsaved-change)).
 2. **History limit.** 200 is a guess. *Leaning:* keep it a constant and revisit with real use.
 3. **ADR.** The two small `Controller` methods do not need one. If the work grows into a general edit-command layer in `loom-core`, write an ADR first.

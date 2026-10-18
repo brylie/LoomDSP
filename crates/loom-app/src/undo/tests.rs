@@ -364,3 +364,53 @@ fn moving_a_mapping_to_another_parameter_is_named_a_move() {
     });
     assert_eq!(step.name(), "move MIDI mapping");
 }
+
+#[test]
+fn the_saved_mark_follows_the_history_position() {
+    let mut c = parts().controller;
+    let id = c.add_module("loom.math.mul").unwrap();
+    let mut positions = BTreeMap::new();
+    let mut step_for = |c: &mut Controller, value: f32| {
+        record(c, &mut positions, |c| {
+            c.set_param_named(id, "gain", value).unwrap();
+        })
+    };
+    let mut history = History::default();
+    history.mark_saved();
+    assert!(history.is_saved(), "a patch just loaded is saved");
+    history.push(step_for(&mut c, 0.3));
+    assert!(!history.is_saved(), "an edit marks it unsaved");
+    history.undone();
+    assert!(history.is_saved(), "undo back to the saved state clears the mark");
+    history.redone();
+    history.mark_saved();
+    history.undone();
+    assert!(!history.is_saved(), "undo past the saved state marks it again");
+    history.push(step_for(&mut c, 0.4));
+    history.mark_saved();
+    history.undone();
+    history.push(step_for(&mut c, 0.5));
+    history.undone();
+    assert!(!history.is_saved(), "a new step drops the saved state from redo");
+    history.clear();
+    assert!(!history.is_saved(), "a cleared history cannot vouch for the file");
+}
+
+#[test]
+fn a_trimmed_history_loses_the_saved_state() {
+    let mut c = parts().controller;
+    let id = c.add_module("loom.math.mul").unwrap();
+    let mut positions = BTreeMap::new();
+    let mut history = History::default();
+    history.mark_saved();
+    for n in 0..LIMIT + 1 {
+        let step = record(&mut c, &mut positions, |c| {
+            c.set_param_named(id, "gain", 0.1 + n as f32 * 0.001).unwrap();
+        });
+        history.push(step);
+    }
+    for _ in 0..LIMIT {
+        history.undone();
+    }
+    assert!(!history.is_saved(), "the saved state fell off the start");
+}

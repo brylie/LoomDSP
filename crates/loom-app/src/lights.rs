@@ -24,12 +24,16 @@ pub type Light = (u32, usize);
 pub struct Watch {
     pub reader: DisplayReader,
     pub lights: Vec<(Light, DisplaySource)>,
+    /// Counts the engines the app has built. A new engine numbers its modules
+    /// from 1 again, so the same lights can read a different table.
+    pub generation: u64,
 }
 
 impl Hash for Watch {
-    // The subscription restarts when the set of lights changes. The reader
-    // is the same for the whole app.
+    // The subscription restarts when the set of lights changes, or when the
+    // engine does.
     fn hash<H: Hasher>(&self, state: &mut H) {
+        self.generation.hash(state);
         self.lights.hash(state);
     }
 }
