@@ -192,7 +192,6 @@ struct App {
 }
 
 /// Where a patch comes from.
-#[derive(Clone, Copy)]
 enum Source<'a> {
     Empty,
     Generated(usize),
@@ -471,7 +470,15 @@ impl App {
     /// Replaces the patch (and its engine) with `source`. If the source does
     /// not load, the running patch is unchanged.
     fn replace(&mut self, source: Source) -> bool {
-        let session = match Self::session(self.sample_rate, source) {
+        // Choosing the device does not start a stream, so the old patch keeps
+        // playing. The engine is built at the rate of the device that will
+        // play it.
+        let output = Self::open_output(self.no_audio);
+        let sample_rate = output
+            .as_ref()
+            .map(|o| o.sample_rate() as f32)
+            .unwrap_or(self.sample_rate);
+        let session = match Self::session(sample_rate, source) {
             Ok(session) => session,
             Err(e) => {
                 let message = format!("Could not open the patch: {e}. The current patch is unchanged.");
@@ -480,29 +487,12 @@ impl App {
                 return false;
             }
         };
-        // Free the audio device and MIDI inputs before the new engine takes them.
+        // Nothing can fail from here: free the audio device and MIDI inputs
+        // before the new engine takes them.
         self._audio = None;
         self.audio_stats = None;
         self.midi = None;
         self.midi_ports.clear();
-        let output = Self::open_output(self.no_audio);
-        let sample_rate = output
-            .as_ref()
-            .map(|o| o.sample_rate() as f32)
-            .unwrap_or(self.sample_rate);
-        // The engine must run at the rate of the device that plays it. The
-        // session above was only a check that the patch loads.
-        let mut failure = None;
-        let session = if sample_rate == self.sample_rate {
-            session
-        } else {
-            Self::session(sample_rate, source).unwrap_or_else(|e| {
-                failure = Some(format!(
-                    "Could not open the patch at the new audio rate: {e}. The old patch could not be kept."
-                ));
-                Self::session(sample_rate, Source::Empty).expect("an empty patch always loads")
-            })
-        };
         let args = Args {
             patch: None,
             generate: None,
@@ -516,12 +506,8 @@ impl App {
         // key also resets pan and zoom to show the whole patch.
         fresh.browser_key = self.browser_key;
         fresh.frame_key = self.frame_key + 1;
-        if let Some(message) = &failure {
-            files::show_error(message);
-            fresh.status = message.clone();
-        }
         *self = fresh;
-        failure.is_none()
+        true
     }
 
     fn new_patch(&mut self) {

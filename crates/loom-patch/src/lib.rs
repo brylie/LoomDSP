@@ -285,19 +285,23 @@ impl Patch {
         use std::io::Write;
         let path = path.as_ref();
         let text = self.to_ron()?;
+        // Write through a symlink to its target, as a plain write would. A
+        // rename over the link would replace the link itself.
+        let resolved = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        let target = resolved.as_path();
         let io = |source| PatchError::Io {
             path: path.display().to_string(),
             source,
         };
-        let existing = std::fs::metadata(path).ok();
+        let existing = std::fs::metadata(target).ok();
         if existing.as_ref().is_some_and(|m| m.permissions().readonly()) {
             return Err(io(std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
                 "the file is read-only",
             )));
         }
-        let name = path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default();
-        let temp = path.with_file_name(format!(".{name}.{}.tmp", std::process::id()));
+        let name = target.file_name().map(|n| n.to_string_lossy()).unwrap_or_default();
+        let temp = target.with_file_name(format!(".{name}.{}.tmp", std::process::id()));
         let written = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -307,7 +311,7 @@ impl Patch {
                 Some(meta) => std::fs::set_permissions(&temp, meta.permissions()),
                 None => Ok(()),
             })
-            .and_then(|()| std::fs::rename(&temp, path));
+            .and_then(|()| std::fs::rename(&temp, target));
         written.map_err(|source| {
             let _ = std::fs::remove_file(&temp);
             io(source)
@@ -614,6 +618,21 @@ Patch(
         #[allow(clippy::permissions_set_readonly_false)]
         perms.set_readonly(false);
         std::fs::set_permissions(&path, perms).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn save_through_a_symlink_updates_the_target() {
+        let dir = std::env::temp_dir().join(format!("loom-patch-link-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let real = dir.join("real.ron");
+        let link = dir.join("link.ron");
+        Patch::new("First").save(&real).unwrap();
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        Patch::new("Second").save(&link).unwrap();
+        assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
+        assert_eq!(Patch::load(&real).unwrap().name, "Second");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
