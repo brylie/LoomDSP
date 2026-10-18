@@ -307,6 +307,16 @@ impl<'a, Message> PatchCanvas<'a, Message> {
     }
 }
 
+/// What the modulation lines depend on: the scene (assignments and module
+/// positions), the pin, what the pointer is on, and the selection.
+#[derive(Debug, Clone, PartialEq)]
+struct LinesKey {
+    scene: u64,
+    pinned: Option<PortRef>,
+    hover: Option<Hit>,
+    selection: Vec<u32>,
+}
+
 #[derive(Debug, Clone, Default)]
 enum Interaction {
     #[default]
@@ -380,6 +390,10 @@ struct State {
     /// The output whose modulation lines stay on screen: its badge was
     /// clicked (`docs/design/modulation.md`, Lines).
     pinned: Option<PortRef>,
+    /// The modulation lines and outlines last built, and what they were
+    /// built from. They are rebuilt only when that changes, not every
+    /// frame (ADR-0010).
+    lines: RefCell<Option<(LinesKey, Overlay)>>,
     /// When hover text shows (panels.md, Labels and hover text).
     hover_text: HoverTimer,
     /// The last press on a control, for double-click.
@@ -617,6 +631,9 @@ impl<Message> PatchCanvas<'_, Message> {
                     // be reported again, even if the list looks the same.
                     state.reported_lights = None;
                     state.animation = None;
+                    // Module IDs repeat between patches, so an old pin could
+                    // land on an unrelated output.
+                    state.pinned = None;
                     shell.request_redraw();
                 }
                 if self.animate {
@@ -1315,8 +1332,8 @@ impl<Message> PatchCanvas<'_, Message> {
             && matches!(hit, Hit::Widget { .. } | Hit::Module(_))
             && let Some((module, widget)) = self.range_ring_at(world)
         {
-            self.select_for_edit(module, shell);
-            state.focus = Some((module, widget));
+            // The selection stays as it is: a selected source module is one
+            // way the drag picks its assignment (modulation.md, Arc drag).
             self.begin(
                 state,
                 Interaction::Depth {
@@ -1695,6 +1712,25 @@ impl<Message> PatchCanvas<'_, Message> {
     /// modules in focus as for cables. The tiles that a pinned or pointed
     /// at source drives are outlined. A pinned badge gets a ring.
     fn modulation_lines(&self, state: &State, overlay: &mut Overlay) {
+        let key = LinesKey {
+            scene: self.scene.generation(),
+            pinned: state.pinned,
+            hover: state.hover,
+            selection: self.selection.iter().copied().collect(),
+        };
+        let mut cache = state.lines.borrow_mut();
+        if cache.as_ref().is_none_or(|(k, _)| *k != key) {
+            let mut lines = Overlay::default();
+            self.build_modulation_lines(state, &mut lines);
+            *cache = Some((key, lines));
+        }
+        if let Some((_, lines)) = cache.as_ref() {
+            overlay.cables.extend_from_slice(&lines.cables);
+            overlay.shapes.extend_from_slice(&lines.shapes);
+        }
+    }
+
+    fn build_modulation_lines(&self, state: &State, overlay: &mut Overlay) {
         let p = &self.palette;
         if let Some(port) = state.pinned
             && let Some(badge) = self.scene.module(port.module).and_then(|m| m.badge_bounds(port.index))
@@ -3114,6 +3150,8 @@ mod tests {
         };
         let down = drive(&canvas, &mut state, &click(mouse::Button::Left), ring);
         assert!(down.contains(&CanvasEvent::GestureStart), "{down:?}");
+        // The selection stays: a selected source picks the assignment.
+        assert!(!down.iter().any(|e| matches!(e, CanvasEvent::Select(_))), "{down:?}");
         let up = Point::new(ring.x, ring.y - 20.0);
         let moved_events = drive(&canvas, &mut state, &moved(up), up);
         let [
@@ -3142,6 +3180,38 @@ mod tests {
             matches!(turned.as_slice(), [CanvasEvent::SetControl { .. }]),
             "{turned:?}"
         );
+    }
+
+    /// A new patch (a new frame key) drops the pin: module IDs repeat
+    /// between patches, so it could land on an unrelated output.
+    #[test]
+    fn a_new_patch_clears_the_pin() {
+        let (scene, values) = modulated_scene();
+        let none = BTreeSet::new();
+        let canvas = PatchCanvas::new(&scene, &none, |e| e).values(&values).frame_key(2);
+        let mut state = State {
+            pinned: Some(OUT),
+            framed_key: Some(1),
+            ..State::default()
+        };
+        let redraw = Event::Window(window::Event::RedrawRequested(Instant::now()));
+        drive(&canvas, &mut state, &redraw, Point::ORIGIN);
+        assert_eq!(state.pinned, None);
+    }
+
+    /// The lines are built once for a given pin, pointer, and selection,
+    /// and reused while those stay the same.
+    #[test]
+    fn modulation_lines_are_reused_until_their_inputs_change() {
+        let (scene, values) = modulated_scene();
+        let selected = BTreeSet::from([1]);
+        let canvas = PatchCanvas::new(&scene, &selected, |e| e).values(&values);
+        let state = State::default();
+        let first = canvas.overlay(&state).cables.len();
+        let key = state.lines.borrow().as_ref().map(|(k, _)| k.clone());
+        assert_eq!(canvas.overlay(&state).cables.len(), first);
+        assert_eq!(state.lines.borrow().as_ref().map(|(k, _)| k.clone()), key);
+        assert_eq!(first, 1, "the selected source's line");
     }
 
     /// A knob whose arc has zero length shows the dot, and its ring still

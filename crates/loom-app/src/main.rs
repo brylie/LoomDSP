@@ -2348,6 +2348,34 @@ mod tests {
         assert_eq!(depth(&app), 0.25);
     }
 
+    /// A selected source picks the assignment even though the drag starts
+    /// on another module's knob: the press does not change the selection.
+    #[test]
+    fn a_selected_source_picks_the_arc_drag() {
+        let mut app = app();
+        let (env, sine, filter, _, widget) = two_sources(&mut app);
+        app.selection = BTreeSet::from([sine.0]);
+        let _ = app.update(Message::Canvas(CanvasEvent::GestureStart));
+        let _ = app.update(Message::Canvas(CanvasEvent::DragDepth {
+            module: filter.0,
+            widget,
+            pinned: None,
+            delta: 0.1,
+        }));
+        let _ = app.update(Message::Canvas(CanvasEvent::GestureEnd));
+        let depth = |source| {
+            app.controller
+                .graph()
+                .assignments()
+                .find(|(_, a)| a.source == out(source))
+                .unwrap()
+                .1
+                .depth
+        };
+        assert!((depth(sine) - 0.35).abs() < 1e-6);
+        assert_eq!(depth(env), 0.25);
+    }
+
     /// With several sources and none in focus, a drag changes nothing and
     /// the status bar says why.
     #[test]

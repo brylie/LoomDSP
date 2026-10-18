@@ -144,12 +144,12 @@ pub fn update_panel_values_dragging(
     shown: &BTreeMap<(u32, usize), (f32, f32)>,
     dragging: Option<loom_core::AssignmentId>,
 ) {
-    let mut reaches = crate::modulation::reaches(controller.graph());
-    if let Some(a) = dragging.and_then(|id| controller.graph().assignment(id))
-        && let Some(reach) = crate::modulation::reach(controller.graph(), a)
-    {
-        reaches.insert((a.target, a.param), vec![reach]);
-    }
+    let reaches = crate::modulation::reaches(controller.graph());
+    // The dragged knob's arc shows only the dragged assignment. Whether it
+    // shows the live dot still depends on all of them.
+    let dragged = dragging
+        .and_then(|id| controller.graph().assignment(id))
+        .and_then(|a| Some(((a.target, a.param), crate::modulation::reach(controller.graph(), a)?)));
     for (id, node) in controller.graph().nodes() {
         let d = node.descriptor;
         for (index, w) in d.panel.widgets.iter().enumerate() {
@@ -157,10 +157,14 @@ pub fn update_panel_values_dragging(
                 Some(p) if w.is_control() => {
                     let spec = &d.params[p];
                     let value = node.params[p];
-                    let assigned = reaches.get(&(id, p)).map_or(&[][..], Vec::as_slice);
+                    let all = reaches.get(&(id, p)).map_or(&[][..], Vec::as_slice);
+                    let assigned = match &dragged {
+                        Some((key, reach)) if *key == (id, p) => std::slice::from_ref(reach),
+                        _ => all,
+                    };
                     // Only knobs show the live value, and only while an
                     // assignment is on (modulation.md, Live value).
-                    let live = (w.kind == WidgetKind::Knob && assigned.iter().any(|r| r.enabled))
+                    let live = (w.kind == WidgetKind::Knob && all.iter().any(|r| r.enabled))
                         .then(|| controller.modulated(id, p))
                         .flatten();
                     WidgetValue {
@@ -356,6 +360,38 @@ mod tests {
         parts.controller.set_assignment_enabled(id, false).unwrap();
         update_panel_values(&mut values, &parts.controller, &BTreeMap::new());
         assert_eq!(values.get(filter.0, knob).unwrap().live, None);
+    }
+
+    /// Dragging an assignment that is off shows only its arc, but the knob
+    /// keeps its live dot while another assignment is on.
+    #[test]
+    fn dragging_an_off_assignment_keeps_the_live_dot() {
+        let mut parts = loom_core::create_engine(loom_modules::registry(), loom_core::EngineConfig::default());
+        let controller = &mut parts.controller;
+        let source = controller.add_module("loom.math.constant").unwrap();
+        let filter = controller.add_module("loom.filter.svf").unwrap();
+        controller
+            .add_assignment_named(source, "out", filter, "cutoff", 0.2)
+            .unwrap();
+        let off = controller
+            .add_assignment_named(filter, "lowpass", filter, "cutoff", 0.1)
+            .unwrap();
+        controller.set_assignment_enabled(off, false).unwrap();
+        let d = controller.graph().node(filter).unwrap().descriptor;
+        let knob = d.panel.widgets.iter().position(|w| w.bind == "cutoff").unwrap();
+        controller.commit().unwrap();
+        let (mut left, mut right) = ([0.0; 64], [0.0; 64]);
+        parts.engine.process(&mut left, &mut right);
+
+        let mut values = PanelValues::new();
+        update_panel_values_dragging(&mut values, &parts.controller, &BTreeMap::new(), Some(off));
+        let value = values.get(filter.0, knob).unwrap();
+        assert!(value.live.is_some());
+        assert_eq!(
+            value.modulation,
+            loom_canvas::ModulationMark::Ring,
+            "only the off one's arc"
+        );
     }
 
     #[test]
