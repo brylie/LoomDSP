@@ -89,6 +89,8 @@ enum Message {
     Animate(bool),
     Frame(Instant),
     Tick,
+    /// A frame while live modulated values are on screen.
+    LiveFrame,
     /// New brightness for lights on screen.
     Lights(Vec<(lights::Light, f32)>),
     /// New levels for meter probes.
@@ -590,9 +592,16 @@ impl App {
             // slow tick keeps the audio numbers fresh.
             iced::time::every(Duration::from_millis(500)).map(|_| Message::Tick)
         };
+        // Live modulated values move every block, so a patch with an
+        // assignment that is on follows them every frame.
+        let live = if !self.measuring && self.controller.graph().assignments().any(|(_, a)| a.enabled) {
+            iced::window::frames().map(|_| Message::LiveFrame)
+        } else {
+            Subscription::none()
+        };
         let telemetry = Subscription::run_with(self.monitor.clone(), monitor::stream).map(Message::Meters);
         let close = iced::window::close_requests().map(|_| Message::CloseRequested);
-        Subscription::batch([main, self.light_watch(), telemetry, self.midi_watch(), close])
+        Subscription::batch([main, live, self.light_watch(), telemetry, self.midi_watch(), close])
     }
 
     /// Wakes the UI when control changes arrive, while there is something to
@@ -858,6 +867,18 @@ impl App {
                 if inserted == 1 { "delay" } else { "delays" },
             ),
         };
+        // One warning per compile, not one per parameter.
+        if report.without_live_value > 0 {
+            self.status.push_str(&format!(
+                "; {} modulated {} show no live value (table full)",
+                report.without_live_value,
+                if report.without_live_value == 1 {
+                    "knob"
+                } else {
+                    "knobs"
+                }
+            ));
+        }
     }
 
     /// Starts recording an edit: keeps the patch as it is now. Does nothing
@@ -1198,9 +1219,13 @@ impl App {
             }
             Message::Frame(now) => {
                 self.meter.record(now);
+                if self.controller.graph().assignments().any(|(_, a)| a.enabled) {
+                    self.refresh_values();
+                }
                 self.controller.collect_garbage();
                 self.update_dropouts(now);
             }
+            Message::LiveFrame => self.refresh_values(),
             Message::Tick => {
                 self.controller.collect_garbage();
                 self.update_dropouts(Instant::now());

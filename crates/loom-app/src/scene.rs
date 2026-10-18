@@ -141,11 +141,17 @@ pub fn update_panel_values(
                     let spec = &d.params[p];
                     let value = node.params[p];
                     let assigned = reaches.get(&(id, p)).map_or(&[][..], Vec::as_slice);
+                    // Only knobs show the live value, and only while an
+                    // assignment is on (modulation.md, Live value).
+                    let live = (w.kind == WidgetKind::Knob && assigned.iter().any(|r| r.enabled))
+                        .then(|| controller.modulated(id, p))
+                        .flatten();
                     WidgetValue {
                         position: control_position(w.kind, spec, value),
                         peak: 0.0,
                         text: crate::param::format(spec, value),
                         modulation: crate::modulation::mark(w.kind, spec, value, assigned),
+                        live,
                     }
                 }
                 _ => {
@@ -289,6 +295,37 @@ mod tests {
     }
 
     const CUTOFF: ParamSpec = param("cutoff", 20.0, 20_000.0, 1_000.0, "Hz").logarithmic();
+
+    /// A modulated knob carries the engine's live value while an
+    /// assignment is on, and none when every assignment is off.
+    #[test]
+    fn modulated_knobs_carry_the_live_value() {
+        let mut parts = loom_core::create_engine(loom_modules::registry(), loom_core::EngineConfig::default());
+        let controller = &mut parts.controller;
+        let source = controller.add_module("loom.math.constant").unwrap();
+        controller.set_param_named(source, "value", 0.5).unwrap();
+        let filter = controller.add_module("loom.filter.svf").unwrap();
+        let id = controller
+            .add_assignment_named(source, "out", filter, "cutoff", 0.2)
+            .unwrap();
+        let cutoff = controller.graph().node(filter).unwrap().descriptor;
+        let knob = cutoff.panel.widgets.iter().position(|w| w.bind == "cutoff").unwrap();
+        controller.commit().unwrap();
+        let (mut left, mut right) = ([0.0; 64], [0.0; 64]);
+        parts.engine.process(&mut left, &mut right);
+
+        let mut values = PanelValues::new();
+        update_panel_values(&mut values, &parts.controller, &BTreeMap::new());
+        let live = values.get(filter.0, knob).unwrap().live.expect("a live value");
+        assert_eq!(Some(live), parts.controller.modulated(filter, 0));
+        // The resonance knob is not modulated.
+        let other = 1 - knob;
+        assert_eq!(values.get(filter.0, other).unwrap().live, None);
+
+        parts.controller.set_assignment_enabled(id, false).unwrap();
+        update_panel_values(&mut values, &parts.controller, &BTreeMap::new());
+        assert_eq!(values.get(filter.0, knob).unwrap().live, None);
+    }
 
     #[test]
     fn halfway_up_the_cutoff_knob_is_632_hz() {
