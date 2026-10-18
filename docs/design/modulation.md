@@ -3,7 +3,7 @@
 How any output modulates any parameter without a cable, and how users make, see, and edit those assignments.
 
 - **Kind:** living specification.
-- **Status:** Editing and display [slice 1](#slice-1-make-see-and-edit) (make, see, and edit) and its [undo rules](#undo) are Agreed ([#70](https://github.com/brylie/LoomDSP/issues/70), [#20](https://github.com/brylie/LoomDSP/issues/20)). Slices 2 and 3 (live value, hover lines, matrix) are Draft ([#172](https://github.com/brylie/LoomDSP/issues/172), [#71](https://github.com/brylie/LoomDSP/issues/71)). The [engine rules](#rules), [engine and API](#engine-and-api), and [engine acceptance criteria](#acceptance-criteria-engine) are Agreed and built ([#19](https://github.com/brylie/LoomDSP/issues/19)). [Parameter mapping](#parameter-mapping) is Agreed.
+- **Status:** Editing and display [slice 1](#slice-1-make-see-and-edit) (make, see, and edit) and its [undo rules](#undo) are Agreed ([#70](https://github.com/brylie/LoomDSP/issues/70), [#20](https://github.com/brylie/LoomDSP/issues/20)). [Slice 2](#slice-2-live-value-and-lines) (live value, lines, arc drag) is Agreed ([#151](https://github.com/brylie/LoomDSP/issues/151), built in [#172](https://github.com/brylie/LoomDSP/issues/172)). Slice 3 (the matrix) is Draft ([#71](https://github.com/brylie/LoomDSP/issues/71)). The [engine rules](#rules), [engine and API](#engine-and-api), and [engine acceptance criteria](#acceptance-criteria-engine) are Agreed and built ([#19](https://github.com/brylie/LoomDSP/issues/19)). [Parameter mapping](#parameter-mapping) is Agreed.
 - **Decision behind it:** [ADR-0014](../adr/0014-modulation-without-cables.md) (modulation without cables). Builds on [ADR-0013](../adr/0013-modules-carry-their-own-panel.md) (panels) and [ADR-0007](../adr/0007-polymorphic-signal-model.md) (signals).
 - **Requirements:** FR-MOD-01 to FR-MOD-08, FR-LIB-12.
 - **Issues:** [#19](https://github.com/brylie/LoomDSP/issues/19) (built-in modulation), [#20](https://github.com/brylie/LoomDSP/issues/20) (range arcs and dots), [#66](https://github.com/brylie/LoomDSP/issues/66) (parameter mapping), [#70](https://github.com/brylie/LoomDSP/issues/70) (making and editing assignments), [#71](https://github.com/brylie/LoomDSP/issues/71) (matrix), [#151](https://github.com/brylie/LoomDSP/issues/151) and [#172](https://github.com/brylie/LoomDSP/issues/172) (slice 2), [#12](https://github.com/brylie/LoomDSP/issues/12) (undo).
@@ -23,12 +23,12 @@ How any output modulates any parameter without a cable, and how users make, see,
 
 ## Behaviour
 
-The editing and display work ships in three slices, so each one can be built and tried on its own. Slice 1 is Agreed. Slices 2 and 3 are Draft.
+The editing and display work ships in three slices, so each one can be built and tried on its own. Slices 1 and 2 are Agreed. Slice 3 is Draft.
 
 | Slice | What it adds | Status | Issues |
 |---|---|---|---|
 | 1. Make, see, and edit | Drag an output onto a tile control, add from the inspector, edit in the inspector, see what each output drives in the inspector, a range arc on tile knobs, a badge on the source | **Agreed** | [#70](https://github.com/brylie/LoomDSP/issues/70) (making and editing), [#20](https://github.com/brylie/LoomDSP/issues/20) (arcs and dots) |
-| 2. Live value and lines | The live value dot, lines on hover and pinned from the badge, dragging an arc to change depth | Draft | [#172](https://github.com/brylie/LoomDSP/issues/172), decided in [#151](https://github.com/brylie/LoomDSP/issues/151) |
+| 2. Live value and lines | The live value dot, lines on hover and pinned from the badge, dragging an arc to change depth | **Agreed** | [#172](https://github.com/brylie/LoomDSP/issues/172), decided in [#151](https://github.com/brylie/LoomDSP/issues/151) |
 | 3. Matrix | The modulation matrix, with the keyboard path | Draft | [#71](https://github.com/brylie/LoomDSP/issues/71) |
 
 *Why slices:* slice 1 needs no engine change and no new kind of canvas drawing. Its range arcs, modulation dots (on toggles, radio buttons, and knobs whose arc has zero length or whose assignments are all off), and count badges use the arcs, round markers, and labels the canvas already draws. The live dot needs the engine to publish modulated values, and the matrix is a new panel. Neither should hold back the first way to make a patch with modulation.
@@ -87,84 +87,46 @@ Undo ([#12](https://github.com/brylie/LoomDSP/issues/12), [undo.md](undo.md)) is
 
 ### Slice 2: live value and lines
 
-**Status:** Draft. The [proposal](#slice-2-proposal) below answers the open questions from [#151](https://github.com/brylie/LoomDSP/issues/151). It is not Agreed yet.
+**Status:** Agreed ([#151](https://github.com/brylie/LoomDSP/issues/151)). Built in [#172](https://github.com/brylie/LoomDSP/issues/172).
 
-- **Live value:** a dot on the knob shows the modulated value (FR-MOD-04). The engine computes it per sample, so it must publish one value per block for the UI, much like display values. See [the proposal](#live-value).
-- **On hover:** pointing at an output port that drives assignments, at its badge, or at a modulated control draws thin dashed lines between the source port and its targets, and highlights the tiles. They disappear when the pointer leaves. Hovering a port still shows its hover text. Selecting a module shows its lines too, following the same focus rules as cables.
-- **Pinned lines:** clicking a badge keeps that output's lines visible after the pointer leaves. Clicking the badge again, or pressing Escape, hides them. The badge shows that it is pinned. *Why the badge and not the port:* pressing an output port starts dragging a cable or an assignment, so a click there must not also mean something else.
-- **Drag an arc** on the control to change its depth. Shift for fine steps. With one combined arc, a drag must pick one assignment. See [the proposal](#arc-drag).
-- **Drop on an inspector control.** The inspector is not part of the canvas, so a drag that starts on the canvas and ends there needs its own design. See [the proposal](#drop-on-the-inspector).
+#### Live value
 
-#### Slice 2 proposal
+A dot on a modulated knob shows the value the engine gives the parameter (FR-MOD-04).
 
-**Status:** Proposal for [#151](https://github.com/brylie/LoomDSP/issues/151). Each question lists the options and a recommendation. Once #151 accepts or changes them, this section replaces the open bullets above and slice 2 becomes Agreed.
-
-##### Live value
-
-The question: how does the engine publish one modulated value per parameter per block, without allocating or waiting on the audio thread?
-
-| Option | How it works | Cost |
-|---|---|---|
-| A. A latest-value table, like display values | A table of atomics, allocated once with the engine. After each block, the engine stores each modulated parameter's value in its cell. `Controller::modulated(module, param)` loads it when the UI draws. | Small. Same pattern as `DisplayTable` (ADR-0013). Only the latest value is kept, which is all a dot needs. |
-| B. A telemetry queue | Push `(module, param, value)` records into a bounded queue after each block, like meter readings. | More moving parts. Drops records when the UI is slow, and the UI has to keep its own latest-value map. A queue suits streams, such as scope chunks, not one latest number. |
-| C. Compute it in the app | The app probes the sources and applies rules 2, 4, 5, and 7 itself. | Duplicates engine maths. It is wrong inside feedback loops, during smoothing, and where the compiler delays an assignment. The dot would lie. |
-
-**Recommendation: A.**
-
-- **Size.** The table has a fixed number of cells, set in the engine config next to `max_modules` (proposed default: 256). The compiler gives each modulated parameter a cell when it builds the schedule. If the patch has more modulated parameters than cells, the extra ones still sound right but show no dot, and the compiler reports it once as a warning. *Why a fixed size:* the table is allocated once, so no schedule swap ever allocates for it. 256 is far more than a stage patch uses.
-- **Owner check.** Each cell stores the module ID and parameter index that own it, checked before and after reading, as display values do. *Why:* after a recompile, a cell may move to another parameter, and the old knob must not show the new value.
-- **Which frame.** The last frame of the block. *Why:* it is the value the parameter has when the block ends, so it matches what display values do. An average would hide fast sources, and a peak would show values the base never sits at. At audio rate the dot jumps from frame to frame. That is honest, and the range arc already shows the span.
+- **The engine publishes one value per modulated parameter per block** into a latest-value table, the same pattern as display values (ADR-0013). The table is a set of atomics, allocated once with the engine. After each block the engine stores each value in its cell. The UI loads it with `Controller::modulated(module, param)` when it draws. Nothing waits and nothing allocates on the audio thread. *Why not a telemetry queue:* a queue suits streams such as scope chunks. A dot needs only the latest number, and a queue would drop records when the UI is slow and make the UI keep its own map. *Why not compute it in the app:* the app would copy the engine's maths, and get it wrong inside feedback loops, during smoothing, and where the compiler delays an assignment.
+- **Fixed size.** The table has a fixed number of cells, set in the engine config next to `max_modules`. The default is 256. The compiler gives each modulated parameter a cell when it builds the schedule. If a patch has more modulated parameters than cells, the extra ones still sound right but show no dot, and the compiler reports it once as a warning. *Why:* the table is allocated once, so no schedule swap allocates for it. 256 is far more than a stage patch uses. This is why no ADR is needed: it stays a copy of the display table pattern.
+- **Owner check.** Each cell stores the module ID and parameter index that own it, checked before and after reading, as display values do. *Why:* after a recompile a cell may move to another parameter, and the old knob must not show the new value.
+- **Which frame.** The last frame of the block. *Why:* it is the value the parameter has when the block ends, which matches display values. An average would hide fast sources, and a peak would show values the parameter only touches. At audio rate the dot jumps from frame to frame. That is honest, and the range arc already shows the span.
 - **Which value.** The value after step 1 of rule 12, mapped to the control's 0 to 1 position with `ParamSpec::normalize`. So the dot is the engine's modulated value before any module input adds to it, the same thing the range arc shows.
-- **How often the UI reads.** Once per drawn frame, for the visible knobs with assignments. The dot positions go into the canvas's `PanelValues` buffer, so a moving dot never rebuilds tiles, ports, or cables (ADR-0010).
-- **No dot** when every assignment on the knob is off, or when the knob has no cell. Toggles and radio buttons show no live value in slice 2: their dot already says they are modulated, and a flickering state on a small control is hard to read.
-- **ADR.** None needed if this stays a copy of the display table pattern. If review wants the table inside the schedule instead (no fixed size), that changes `loom-core` beyond the display pattern and needs an ADR.
+- **Drawing.** The UI reads the values once per drawn frame, for visible knobs with enabled assignments. The dot positions go into the canvas's `PanelValues` buffer, so a moving dot never rebuilds tiles, ports, or cables (ADR-0010).
+- **No dot** when every assignment on the knob is off, or when the parameter has no cell. Toggles and radio buttons show no live value: their modulation dot already says they are modulated, and a flickering state on a small control is hard to read.
 
-##### Arc drag
+#### Lines
 
-The question: a knob shows one combined arc. With several assignments, which one does dragging the arc change?
+- **On hover:** pointing at an output port that drives assignments, at its badge, or at a modulated control draws thin dashed lines between the source port and its targets, and highlights the tiles. They disappear when the pointer leaves. Hovering a port still shows its hover text. Selecting a module shows its lines too, following the same focus rules as cables.
+- **Pinned lines:** clicking a badge keeps that output's lines visible after the pointer leaves. Clicking the badge again, or pressing Escape, hides them. The badge shows that it is pinned. Only one output is pinned at a time: clicking another badge moves the pin. Escape hides pinned lines first. Only when nothing is pinned does it do what it does today. *Why the badge and not the port:* pressing an output port starts dragging a cable or an assignment, so a click there must not also mean something else. *Why one pin:* the pinned source also picks which assignment an arc drag changes (below), so it must be unambiguous.
+- **Drawing.** The canvas draws the lines as cable-like strips. It rebuilds them only when the hovered or pinned source changes, not every frame (ADR-0010).
 
-| Option | Behaviour | Problem |
-|---|---|---|
-| A. Only with one assignment | With one enabled assignment, the drag changes it. With several, the drag does nothing, and the status bar says to use the inspector. | Clear, but useless on the knobs that need it most. |
-| B. The last added | The drag changes the newest assignment. | Invisible: nothing on the knob says which one is newest, so the user changes the wrong one. |
-| C. All, scaled together | The drag scales every depth by the same factor. | Mixed signs and polarities make the result hard to predict, and a depth at 0 never moves. |
-| D. The focused source | If one source has its lines pinned (badge click) or its module selected, and it drives this knob, the drag changes that assignment. | Needs a source in focus, so it must fall back to something. |
+#### Arc drag
 
-**Recommendation: D, falling back to A.**
+Dragging the range arc on a tile knob changes the depth of one assignment.
 
-- The drag changes the assignment from the **pinned** source. If no source is pinned, it uses the **selected** module's output, when exactly one of its outputs drives this knob. If neither gives one, and the knob has exactly one enabled assignment, the drag changes that one. Otherwise the drag does nothing, and the status bar says "Several sources: pin one with its badge, or use the inspector". *Why:* pinning already means "show me this source's targets", so it is the natural way to say which source the drag is about. The user can see the choice, because the pinned lines run to this knob.
-- **Where to grab.** The ring around the knob where the range arc is drawn, on any knob with at least one enabled assignment, including one whose arc has zero length (it shows a dot). Pressing the knob's body still sets the base value. *Why:* depth 0 is a common setting (rule 9), and the user must be able to drag back out of it.
-- **The gesture.** Vertical drag, like the knob itself: up raises the depth, down lowers it, through 0 to negative. Shift for fine steps, at the same ratio as the knob's fine drag. Depth is clamped to -1 to 1. The status bar shows the source and the depth as a signed percentage while dragging. While dragging, the arc shows only the assignment being changed, so the user sees what moves.
+- **Which assignment.** In this order:
+  1. The pinned source's assignment on this knob, if it has one.
+  2. Otherwise, if exactly one output of the selected module drives this knob, that assignment.
+  3. Otherwise, if the knob has exactly one enabled assignment, that one.
+  4. Otherwise the drag changes nothing, and the status bar says "Several sources: pin one with its badge, or use the inspector".
+
+  *Why:* pinning already means "show me this source's targets", so it is the natural way to say which source a drag is about, and the pinned lines run to this knob, so the user can see the choice. *Why not the last added:* nothing on the knob says which one that is. *Why not scale them all:* with mixed signs and polarities the result is hard to predict, and a depth at 0 never moves.
+- **Where to grab.** The ring around the knob where the range arc is drawn, on any knob with at least one enabled assignment. This includes a knob whose arc has zero length and shows a dot. Pressing the knob's body still sets the base value. *Why:* depth 0 is a common setting (rule 9), and the user must be able to drag back out of it.
+- **The gesture.** Vertical drag, like the knob: up raises the depth, down lowers it, through 0 to negative. Shift gives fine steps, at the same ratio as the knob's fine drag. Depth is clamped to -1 to 1. While dragging, the status bar shows the source and the depth as a signed percentage, and the arc shows only the assignment being changed, so the user sees what moves.
 - **Undo.** One drag is one undo step, like a depth slider drag in the inspector ([Undo](#undo)).
 - **Toggles and radio buttons** have no arc, so there is nothing to drag. Their depth is set in the inspector.
 
-##### Drop on the inspector
+#### Not in slice 2
 
-The question: can a drag that starts on an output port on the canvas end on an inspector parameter, and how is that shown?
-
-| Option | How it works | Cost |
-|---|---|---|
-| A. An app-level drag | The canvas reports the assignment drag to the app while it is in progress (a new `CanvasEvent` with the source and the pointer position). Each inspector parameter row is wrapped in a `mouse_area`, so the app knows which row the pointer is over. On release over a row, the app creates the assignment. The row is highlighted like a tile control. | Needs a spike: Iced must keep sending pointer events to the canvas after the pointer leaves it, and `mouse_area` must report enter and exit while a button is held. Not checked yet. |
-| B. Leave it out of P1 | The inspector already has **Add modulation** (slice 1), which reaches every parameter, including ones not on the tile. | No drag path to parameters that are not on the panel. |
-
-**Recommendation: B for slice 2, and a spike for A.** *Why:* slice 1 already gives a way to modulate any parameter from the inspector, and the drop is the riskiest part of slice 2 for the least gain. If the spike shows Iced supports A cleanly, a follow-up adds it with these rules: same default depth and duplicate rule as a drop on a tile control, rows highlight while the drag is over them, and dropping elsewhere in the inspector does nothing.
-
-##### Modulate mode
-
-The question: bring back a mode where the user picks a source, then drags knobs to set depth?
-
-| Option | Behaviour |
-|---|---|
-| A. No mode in P1 | Keep the plan. Depth is set by arc drag and the inspector. |
-| B. A full mode | A toolbar or keyboard mode: pick a source, then any knob drag sets depth from that source, creating the assignment if needed. Leave the mode to go back to normal drags. |
-| C. No mode, but pinning as focus | The arc drag recommendation above already uses the pinned source. A later step could let an arc drag on a knob that this source does not drive yet create the assignment. |
-
-**Recommendation: A for slice 2, and decide C after trying it.** *Why:* a mode changes what every knob drag means, which is risky on stage, where a wrong drag is heard at once. Pinning gives most of the benefit without a mode, because the pinned lines show what the drag will affect. Try slice 2 with users first. If they keep pinning a source and then reaching for the inspector to add assignments, C is the next step.
-
-##### Notes for building
-
-- The lines are drawn by the canvas as cable-like strips, rebuilt only when the hovered or pinned source changes, not every frame (ADR-0010).
-- Escape hides pinned lines first. Only when nothing is pinned does it do what it does today.
+- **Dropping an output on an inspector control.** The inspector already has **Add modulation** (slice 1), which reaches every parameter, including ones not on the tile. A drag from the canvas into the inspector would need an app-level drag in Iced: the canvas reports the drag while it is in progress, and each inspector row knows when the pointer is over it. Whether Iced supports that cleanly is not checked. A spike decides it. If it works, the drop follows the slice 1 rules for a drop on a tile control: the same default depth and duplicate rule, rows highlight while the drag is over them, and a drop elsewhere does nothing.
+- **Modulate mode.** See [Not planned for P1](#not-planned-for-p1).
 
 ### Slice 3: the modulation matrix
 
@@ -178,7 +140,7 @@ The matrix shows the assignments of the current patch level only. Assignments in
 
 ### Not planned for P1
 
-- **Modulate mode (select a module, press M, drag controls).** Drag and drop and the inspector already cover the mouse path, and the matrix covers the keyboard path. It can come back if trying slice 1 shows that making many assignments is slow.
+- **Modulate mode (select a module, press M, drag controls).** Drag and drop and the inspector already cover the mouse path, and the matrix covers the keyboard path. A mode also changes what every knob drag means, which is risky on stage, where a wrong drag is heard at once. Decided in [#151](https://github.com/brylie/LoomDSP/issues/151). Pinning a source gives most of the benefit without a mode. After trying slice 2, decide whether an arc drag on a knob that the pinned source does not drive yet should create that assignment.
 
 ## Rules
 
@@ -300,16 +262,23 @@ A **Macro** module (FR-LIB-12) has one knob on its panel and one output equal to
 - [ ] Changing depth, polarity, or on/off does not rebuild tiles, ports, or cables on the GPU (ADR-0010). Adding or removing an assignment may.
 - [ ] Save, then load: the same assignments appear in the inspector, in the same order.
 
-### Acceptance criteria: slices 2 and 3
+### Acceptance criteria: slice 2
 
-**Status:** Draft. [#172](https://github.com/brylie/LoomDSP/issues/172), [#71](https://github.com/brylie/LoomDSP/issues/71).
+**Status:** Agreed ([#151](https://github.com/brylie/LoomDSP/issues/151)). [#172](https://github.com/brylie/LoomDSP/issues/172).
 
-- [ ] Modulated knobs show the live value.
-- [ ] Hovering an output port, its badge, or a modulated control draws the lines. Clicking the badge pins them until it is clicked again or Escape is pressed.
-- [ ] Proposed: the live value is the last frame of the block, before module inputs, and reading it does not allocate or wait on the audio thread (`tests/no_alloc.rs`).
-- [ ] Proposed: a patch with more modulated parameters than table cells sounds the same, shows no dot on the extra knobs, and reports one warning.
-- [ ] Proposed: dragging the arc changes the pinned source's assignment, or the only enabled one. With several and none in focus, it changes nothing and the status bar says why.
-- [ ] Proposed: one arc drag is one undo step.
+- [ ] Modulated knobs show the live value: the last frame of the block, before module inputs.
+- [ ] Publishing and reading live values does not allocate or wait on the audio thread (`tests/no_alloc.rs`).
+- [ ] A patch with more modulated parameters than table cells sounds the same, shows no dot on the extra knobs, and reports one warning.
+- [ ] After a recompile moves a cell to another parameter, the old knob never shows the new parameter's value.
+- [ ] Hovering an output port, its badge, or a modulated control draws the lines. Clicking the badge pins them until it is clicked again, another badge is clicked, or Escape is pressed.
+- [ ] Dragging the arc changes the pinned source's assignment, then the selected module's, then the only enabled one. With several and none in focus, it changes nothing and the status bar says why.
+- [ ] An arc drag works on a knob whose arc has zero length.
+- [ ] One arc drag is one undo step.
+
+### Acceptance criteria: slice 3
+
+**Status:** Draft. [#71](https://github.com/brylie/LoomDSP/issues/71).
+
 - [ ] The matrix lists every assignment in the current patch level, and every cell can be edited by keyboard.
 
 ### Acceptance criteria: undo
@@ -331,5 +300,5 @@ A **Macro** module (FR-LIB-12) has one knob on its panel and one output equal to
 ## Open points
 
 - Should an assignment be able to target another assignment's depth directly, or through a "depth" parameter on a gain module? Not needed for P1. Decide with FR-MOD-02 (P2).
-- Slice 2: how the engine publishes live modulated values, which assignment an arc drag changes, how a drag reaches the inspector, and modulate mode. Proposed answers are in [Slice 2 proposal](#slice-2-proposal), waiting for [#151](https://github.com/brylie/LoomDSP/issues/151).
+- Can Iced carry a drag from the canvas onto an inspector row? A spike decides whether the inspector drop comes back ([Not in slice 2](#not-in-slice-2)).
 - Try the default depth of 0.25 with users once slice 1 is built.
