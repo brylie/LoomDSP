@@ -53,6 +53,10 @@ pub struct CompileReport {
     pub modules: usize,
     /// Feedback loops, each run one sample at a time.
     pub loops: Vec<FeedbackLoop>,
+    /// Modulated parameters with no live value, because the table set by
+    /// [`EngineConfig::max_live_values`](crate::EngineConfig::max_live_values)
+    /// is full. They sound right, but their knobs show no live dot.
+    pub without_live_value: usize,
 }
 
 impl CompileReport {
@@ -95,6 +99,9 @@ pub(crate) struct ParamFill {
     pub smooth: Option<Smoothed>,
     pub buffer: *mut f32,
     pub sources: Vec<ModSource>,
+    /// Cell in the live value table, or [`crate::live::NO_CELL`]. Set by
+    /// the controller after compiling.
+    pub live: u32,
 }
 
 /// Depth, polarity, and enabled flag. The audio thread updates these without
@@ -192,6 +199,9 @@ pub(crate) struct Schedule {
     pub param_ptrs: Vec<(u16, *const f32)>,
     /// MIDI mappings, sorted by control.
     pub midi_maps: Vec<MidiMapOp>,
+    /// Live value cells the previous schedule used and this one does not.
+    /// The engine releases them when it swaps this schedule in.
+    pub live_release: Vec<u32>,
 }
 
 // SAFETY: the raw pointers only point into buffers owned by this schedule.
@@ -218,6 +228,7 @@ impl Schedule {
             assignments: Vec::new(),
             param_ptrs: Vec::new(),
             midi_maps: Vec::new(),
+            live_release: Vec::new(),
         }
     }
 
@@ -400,6 +411,7 @@ pub(crate) fn compile(
     let mut report = CompileReport {
         modules: n,
         loops: Vec::new(),
+        without_live_value: 0,
     };
 
     let user_tap = |v: usize| TapSpec {
@@ -790,6 +802,7 @@ pub(crate) fn compile(
                 smooth,
                 buffer: buf_ptrs[spec.buffer],
                 sources,
+                live: crate::live::NO_CELL,
             });
         }
         ops.push(ModuleOp {
@@ -909,6 +922,7 @@ pub(crate) fn compile(
             .collect(),
         param_ptrs,
         midi_maps: compile_midi_maps(graph, midi_synced),
+        live_release: Vec::new(),
     };
     (schedule, report)
 }
