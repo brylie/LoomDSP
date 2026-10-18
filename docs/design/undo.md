@@ -3,13 +3,13 @@
 How a user takes back and replays edits on the canvas, the inspector, and the panels, so that experiments are cheap.
 
 - **Kind:** living specification.
-- **Status:** Agreed
+- **Status:** Implemented
 - **Decision behind it:** none of its own yet. Builds on [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md) (all edits go through `Controller`). A short ADR is needed only if the `loom-core` change under [Engine support](#engine-support) turns out larger than a few small methods (see [Open points](#open-points)).
 - **Use case and requirements:** FR-CANVAS-04. Related: FR-LIB-19 (module data is covered by undo, built later).
 - **Background:** none.
 - **Prior art:** every editor has undo. The only conventions we use are the common shortcuts and "one drag is one step".
 - **Issues:** [#12](https://github.com/brylie/LoomDSP/issues/12). Rules this spec collects from elsewhere: [modulation undo](modulation.md#undo), [MIDI learn](midi-learn.md) (out of scope list), [removing an item](panels.md#removing-an-item).
-- **Code:** not built. Expected: an edit log in `crates/loom-app`, a restore method on `Controller` in `loom-core`, and gesture events in `loom-canvas`.
+- **Code:** `crates/loom-app/src/undo.rs` (snapshots, steps, history; tests in `undo/tests.rs`) and the edit wiring in `main.rs`. `Controller::restore_assignment` and `Controller::free_module_slots` in `loom-core`. `CanvasEvent::GestureStart` and `GestureEnd` in `loom-canvas`.
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
      built. See README.md in this folder. -->
@@ -106,7 +106,9 @@ A parameter with a MIDI mapping can change both from the screen and from the har
 
 ### Gestures
 
-The canvas reports one `SetControl` per pointer move, and one `Move` per pointer move during a module drag, so the app cannot tell where a drag starts or ends. Two new canvas events mark it: a **gesture start** and a **gesture end**. They carry the target of the events they bracket: module and widget for a control, module and assignment for a depth slider, or the moved modules for a module drag. The inspector sends the same pair for its sliders.
+The canvas reports one `SetControl` per pointer move, and one `Move` per pointer move during a module drag, so the app cannot tell where a drag starts or ends. Two new canvas events mark it: a **gesture start** and a **gesture end**. They carry no target. The app compares the patch at the start and at the end, so the step holds whatever changed in between, and the name comes from that change. *Why:* one rule covers every gesture, including a cable pulled out of one input and dropped on another. Gestures start at pointer down on a knob, a tile, or a port, and end at pointer up.
+
+An inspector slider sends no start, and letting go of it sends a slider-release message. The slider's first change opens the gesture. Arrow keys on a hovered slider change it without any release, so the next edit, or an undo or redo, closes a gesture that began on a slider. *Why:* the slider widget gives no other signal, and a gesture left open would block undo.
 
 A control that changes without a drag (a click on a toggle, a radio choice, a key step on a focused control, a double-click reset) sends a start and an end around its single change. An arrow key held down repeats. It sends the start at key down and the end at key up, and every repeat falls inside, so the whole hold is one step. *Why:* holding a key for a second would otherwise make dozens of steps and push the user's real edits out of the history.
 
@@ -130,17 +132,23 @@ The history keeps the last **200 steps**. When a new step would make it longer, 
 10. **Undo never fails silently.** Before a step is applied, the app checks what it can: the module kinds are in the registry, and there are enough free module slots. A removed module's slot is free only after the next schedule swap, so the check counts the slots in use, not only the modules in the graph. If the check fails, nothing is applied, the step stays in the history, and the status bar says why. If a `Controller` call still fails while the step is applied (for example the command queue is full), the history is cleared and the status bar says why. *Why:* a half-applied step that stays in the history would make every later undo wrong.
 11. **Hardware controls are not history.** Parameter values set by MIDI mappings never become steps ([Mapped parameters](#mapped-parameters)). *Why:* the hardware control is its own undo, undo cannot move it back, and a performer must not lose their last real edit to a fader wiggle.
 
+## How it works
+
+The app keeps the patch (modules with parameters and positions, cables, assignments, MIDI mappings) as a snapshot when an edit or gesture starts, and again when it ends. The difference is the step: only what changed, as (before, after) pairs. Undo applies the before side, redo the after side, through the same `Controller` methods an edit uses, and commits once.
+
+*Why compare states and not log inverse commands:* one action can touch many things, and a difference holds all of them with nothing to keep in step with the controller. A change on a mapped parameter counts only if the app set it, which is how hardware moves stay out of steps.
+
 ## Engine support
 
 Almost everything is already possible with the current `Controller`: `add_module_with_id` puts a module back with its old id, `connect` and `disconnect` return the cable they replaced or removed, and `map_midi`, `learn_midi`, and `unmap_midi` return the mappings they replaced.
 
 `remove_module` returns nothing, and it drops the module's cables, assignments, and mappings with it. The app reads all of these from the graph before it removes the module, and stores them in the step together with the module's kind, parameter values, and position. No new method is needed for that.
 
-What is missing:
+What was missing, and is now built:
 
-- **Restore an assignment with its old id.** `Controller::add_assignment` always takes the next id. Undo needs a restore method that takes the id and the whole assignment, including polarity and on/off (rule 5). *Leaning:* one new method, no ADR.
-- **Free module slots.** The check in rule 10 needs to know how many module slots are free. *Leaning:* a read-only method on `Controller`.
-- **Set a value without changing a mapping's feedback state** if learning ends up needing it. To be checked when building.
+- **Restore an assignment with its old id.** `Controller::add_assignment` always takes the next id. `Controller::restore_assignment` takes the id and the whole assignment, including polarity and on/off (rule 5). Built.
+- **Free module slots.** The check in rule 10 uses `Controller::free_module_slots`. Built.
+- Learning needed no further change: undo sets the stored value with `set_params`.
 
 The edit log itself lives in `loom-app` and knows nothing about the audio thread.
 
@@ -187,4 +195,4 @@ The edit log itself lives in `loom-app` and knows nothing about the audio thread
 
 1. **Unsaved-changes marker.** Should undo back to the saved state clear the "unsaved" mark? *Leaning:* yes, by remembering the history position at save. Not needed for the first version, because the app has no marker yet.
 2. **History limit.** 200 is a guess. *Leaning:* keep it a constant and revisit with real use.
-3. **ADR.** Two small `Controller` methods do not need one. If the work grows into a general edit-command layer in `loom-core`, write an ADR first.
+3. **ADR.** The two small `Controller` methods do not need one. If the work grows into a general edit-command layer in `loom-core`, write an ADR first.

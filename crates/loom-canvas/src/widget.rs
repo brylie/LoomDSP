@@ -118,6 +118,14 @@ pub enum CanvasEvent {
     /// transport Run. Enter does not send this, and neither does Space while
     /// a control is focused.
     ToggleRun,
+    /// A drag began: turning a knob, moving tiles, or pulling a cable. Every
+    /// edit until [`CanvasEvent::GestureEnd`] is one undo step
+    /// (`docs/design/undo.md`, Gestures). A held arrow key on a focused
+    /// control is a gesture too.
+    GestureStart,
+    /// The gesture ended. It is always sent after a start, also when the
+    /// pointer is released outside the window or the window loses focus.
+    GestureEnd,
 }
 
 /// What MIDI learn mode shows on the canvas. While the canvas has one, a
@@ -194,6 +202,28 @@ impl<'a, Message> PatchCanvas<'a, Message> {
     fn emit(&self, shell: &mut Shell<'_, Message>, event: CanvasEvent) {
         shell.publish((self.on_event)(event));
     }
+
+    /// Starts a gesture and sets the interaction that lasts through it.
+    fn begin(&self, state: &mut State, interaction: Interaction, shell: &mut Shell<'_, Message>) {
+        self.emit(shell, CanvasEvent::GestureStart);
+        state.interaction = interaction;
+    }
+
+    /// Ends the gesture of the current interaction, if it has one, and the
+    /// gesture of a held arrow key. Used when the interaction is replaced or
+    /// cut off, so a start always has an end.
+    fn end_gestures(&self, state: &mut State, shell: &mut Shell<'_, Message>) {
+        if matches!(
+            state.interaction,
+            Interaction::Moving { .. } | Interaction::Turning { .. } | Interaction::Wiring { .. }
+        ) {
+            state.interaction = Interaction::Idle;
+            self.emit(shell, CanvasEvent::GestureEnd);
+        }
+        if std::mem::take(&mut state.arrow_gesture) {
+            self.emit(shell, CanvasEvent::GestureEnd);
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -267,6 +297,9 @@ struct State {
     key_holds: [Option<KeyHold>; 2],
     /// Modules with lights on screen, as last reported.
     reported_lights: Option<Vec<u32>>,
+    /// True while an arrow key is down on a control: one gesture from key
+    /// down to key up, however often it repeats.
+    arrow_gesture: bool,
 }
 
 impl State {
@@ -525,6 +558,7 @@ impl<Message> PatchCanvas<'_, Message> {
                 // A second button must end a hold. Replacing the interaction
                 // without a release would leave a momentary gate high.
                 self.release_pointer_hold(state, shell);
+                self.end_gestures(state, shell);
                 let world = state.camera.to_world(screen);
                 match button {
                     mouse::Button::Middle | mouse::Button::Right => {
@@ -604,6 +638,10 @@ impl<Message> PatchCanvas<'_, Message> {
                     return;
                 }
                 let interaction = std::mem::take(&mut state.interaction);
+                let gesture = matches!(
+                    interaction,
+                    Interaction::Moving { .. } | Interaction::Turning { .. } | Interaction::Wiring { .. }
+                );
                 let world = screen.map(|s| state.camera.to_world(s));
                 match interaction {
                     Interaction::Wiring { from } => {
@@ -653,6 +691,9 @@ impl<Message> PatchCanvas<'_, Message> {
                     | Interaction::Moving { .. }
                     | Interaction::Turning { .. } => {}
                 }
+                if gesture {
+                    self.emit(shell, CanvasEvent::GestureEnd);
+                }
                 shell.request_redraw();
             }
             Event::Mouse(mouse::Event::CursorLeft) => {
@@ -666,6 +707,7 @@ impl<Message> PatchCanvas<'_, Message> {
                 // while Space or Enter is held. End every hold here.
                 self.release_pointer_hold(state, shell);
                 self.release_every_key_hold(state, shell);
+                self.end_gestures(state, shell);
                 shell.request_redraw();
             }
             _ => {}
@@ -868,6 +910,20 @@ impl<Message> PatchCanvas<'_, Message> {
         if let Some(named) = Self::button_key(key) {
             self.release_button_key(state, named, shell);
         }
+        if state.arrow_gesture
+            && matches!(
+                key.as_ref(),
+                keyboard::Key::Named(
+                    keyboard::key::Named::ArrowUp
+                        | keyboard::key::Named::ArrowRight
+                        | keyboard::key::Named::ArrowDown
+                        | keyboard::key::Named::ArrowLeft
+                )
+            )
+        {
+            state.arrow_gesture = false;
+            self.emit(shell, CanvasEvent::GestureEnd);
+        }
     }
 
     /// Selects the module of a control being edited, so the inspector
@@ -990,6 +1046,10 @@ impl<Message> PatchCanvas<'_, Message> {
                         }
                         _ => return false,
                     };
+                    if !state.arrow_gesture {
+                        state.arrow_gesture = true;
+                        self.emit(shell, CanvasEvent::GestureStart);
+                    }
                     if next != position {
                         self.set_control(shell, module, widget, next);
                     }
@@ -1076,12 +1136,16 @@ impl<Message> PatchCanvas<'_, Message> {
                 let position = self.position(module, widget);
                 let click = match self.widget_kind(module, widget) {
                     Some(WidgetViewKind::Knob { .. }) => {
-                        state.interaction = Interaction::Turning {
-                            module,
-                            widget,
-                            last_y: screen.y,
-                            position,
-                        };
+                        self.begin(
+                            state,
+                            Interaction::Turning {
+                                module,
+                                widget,
+                                last_y: screen.y,
+                                position,
+                            },
+                            shell,
+                        );
                         return;
                     }
                     Some(WidgetViewKind::Toggle) => Some(if position > 0.5 { 0.0 } else { 1.0 }),
@@ -1095,12 +1159,16 @@ impl<Message> PatchCanvas<'_, Message> {
                 };
                 // Toggles and radio buttons act on release, so a drag that
                 // starts on them still moves the tile.
-                state.interaction = Interaction::Moving {
-                    ids: vec![module],
-                    start: world,
-                    applied: Vector::ZERO,
-                    click: click.map(|position| (module, widget, position)),
-                };
+                self.begin(
+                    state,
+                    Interaction::Moving {
+                        ids: vec![module],
+                        start: world,
+                        applied: Vector::ZERO,
+                        click: click.map(|position| (module, widget, position)),
+                    },
+                    shell,
+                );
             }
             Hit::Port(port) if !port.output => {
                 // Grabbing a connected input picks up its cable, like pulling
@@ -1116,14 +1184,17 @@ impl<Message> PatchCanvas<'_, Message> {
                         index: c.from.1,
                     });
                 if let Some(source) = source {
+                    // Pulling a cable out and dropping it elsewhere is one
+                    // step, so the gesture starts before the disconnect.
+                    self.emit(shell, CanvasEvent::GestureStart);
                     self.emit(shell, CanvasEvent::Disconnect(port));
                     state.interaction = Interaction::Wiring { from: source };
                 } else {
-                    state.interaction = Interaction::Wiring { from: port };
+                    self.begin(state, Interaction::Wiring { from: port }, shell);
                 }
             }
             Hit::Port(port) => {
-                state.interaction = Interaction::Wiring { from: port };
+                self.begin(state, Interaction::Wiring { from: port }, shell);
             }
             Hit::Module(id) => {
                 let mut selection = self.selection.clone();
@@ -1138,12 +1209,16 @@ impl<Message> PatchCanvas<'_, Message> {
                     self.emit(shell, CanvasEvent::Select(selection.iter().copied().collect()));
                 }
                 if selection.contains(&id) {
-                    state.interaction = Interaction::Moving {
-                        ids: selection.into_iter().collect(),
-                        start: world,
-                        applied: Vector::ZERO,
-                        click: None,
-                    };
+                    self.begin(
+                        state,
+                        Interaction::Moving {
+                            ids: selection.into_iter().collect(),
+                            start: world,
+                            applied: Vector::ZERO,
+                            click: None,
+                        },
+                        shell,
+                    );
                 }
             }
             Hit::Cable(_) | Hit::Nothing => {
@@ -2361,5 +2436,118 @@ mod tests {
         let view = Rectangle::new(Point::new(-50.0, -50.0), Size::new(800.0, 600.0));
         // Two controls (a knob and a toggle) on the one visible tile.
         assert_eq!(canvas.overlay_in(&State::default(), view).shapes.len(), plain + 2);
+    }
+
+    fn knob_scene() -> (Scene, Point) {
+        let mut m = module(1, 0.0);
+        m.panel = panel();
+        let scene = Scene::new(vec![m], Vec::new());
+        let knob = scene.module(1).unwrap().widget_bounds(0).unwrap().center();
+        (scene, knob)
+    }
+
+    fn moved(to: Point) -> Event {
+        Event::Mouse(mouse::Event::CursorMoved { position: to })
+    }
+
+    fn released() -> Event {
+        Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
+    }
+
+    /// A knob drag is one gesture: start at pointer down, end at pointer up
+    /// (undo.md, Gestures).
+    #[test]
+    fn a_knob_drag_is_bracketed_by_a_gesture_start_and_end() {
+        let (scene, knob) = knob_scene();
+        let selected = BTreeSet::from([1]);
+        let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+        let mut state = State::default();
+        let down = drive(&canvas, &mut state, &click(mouse::Button::Left), knob);
+        assert_eq!(down, vec![CanvasEvent::GestureStart]);
+        let up = Point::new(knob.x, knob.y - 20.0);
+        let during = drive(&canvas, &mut state, &moved(up), up);
+        assert!(
+            matches!(during.as_slice(), [CanvasEvent::SetControl { .. }]),
+            "{during:?}"
+        );
+        let end = drive(&canvas, &mut state, &released(), up);
+        assert_eq!(end, vec![CanvasEvent::GestureEnd]);
+    }
+
+    /// A drag cut off by the window losing focus still ends its gesture, once.
+    #[test]
+    fn losing_the_window_ends_a_drag_gesture() {
+        let (scene, knob) = knob_scene();
+        let selected = BTreeSet::from([1]);
+        let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+        let mut state = State::default();
+        drive(&canvas, &mut state, &click(mouse::Button::Left), knob);
+        let lost = drive(&canvas, &mut state, &Event::Window(window::Event::Unfocused), knob);
+        assert_eq!(lost, vec![CanvasEvent::GestureEnd]);
+        let later = drive(&canvas, &mut state, &released(), knob);
+        assert!(later.is_empty(), "{later:?}");
+    }
+
+    /// A second button pressed in a drag replaces the interaction, and must
+    /// end the gesture first.
+    #[test]
+    fn another_button_during_a_drag_ends_the_gesture() {
+        let (scene, knob) = knob_scene();
+        let selected = BTreeSet::from([1]);
+        let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+        let mut state = State::default();
+        drive(&canvas, &mut state, &click(mouse::Button::Left), knob);
+        let events = drive(&canvas, &mut state, &click(mouse::Button::Right), knob);
+        assert_eq!(events, vec![CanvasEvent::GestureEnd]);
+    }
+
+    /// A held arrow key repeats. The whole hold, key down to key up, is one
+    /// gesture.
+    #[test]
+    fn a_held_arrow_key_is_one_gesture() {
+        let (scene, knob) = knob_scene();
+        let selected = BTreeSet::from([1]);
+        let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+        let mut state = State {
+            focus: Some((1, 0)),
+            ..State::default()
+        };
+        let first = drive(&canvas, &mut state, &arrow_up(), knob);
+        assert_eq!(first.first(), Some(&CanvasEvent::GestureStart), "{first:?}");
+        let Event::Keyboard(keyboard::Event::KeyPressed {
+            key,
+            modified_key,
+            physical_key,
+            location,
+            modifiers,
+            text,
+            ..
+        }) = arrow_up()
+        else {
+            unreachable!()
+        };
+        let again = Event::Keyboard(keyboard::Event::KeyPressed {
+            key: key.clone(),
+            modified_key,
+            physical_key,
+            location,
+            modifiers,
+            text,
+            repeat: true,
+        });
+        let repeat = drive(&canvas, &mut state, &again, knob);
+        assert!(
+            repeat.iter().all(|e| !matches!(e, CanvasEvent::GestureStart)),
+            "{repeat:?}"
+        );
+        let up = Event::Keyboard(keyboard::Event::KeyReleased {
+            modified_key: key.clone(),
+            key,
+            physical_key,
+            location: keyboard::Location::Standard,
+            modifiers,
+        });
+        let end = drive(&canvas, &mut state, &up, knob);
+        assert_eq!(end, vec![CanvasEvent::GestureEnd]);
     }
 }

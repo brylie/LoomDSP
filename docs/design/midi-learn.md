@@ -117,7 +117,7 @@ midi: [
 - Pickup (soft takeover), relative encoders, value range, and inversion (FR-MIDI-09, P2).
 - Learning notes, pitch bend, aftertouch, program change, 14-bit control changes, and NRPN. Pitch bend and aftertouch reach a patch through the MIDI input module (#30).
 - Mapping on any channel ("omni").
-- Undo of mapping edits. They join undo when [#12](https://github.com/brylie/LoomDSP/issues/12) lands.
+- Hardware moves in undo. Mapping edits are undoable ([undo.md](undo.md)); moves of the mapped hardware control are not.
 - Mapping to modulation depth, transport controls, or app actions.
 - MIDI out and feedback to motorised faders or LED rings.
 

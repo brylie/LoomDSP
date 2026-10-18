@@ -47,6 +47,9 @@ pub enum LoomError {
     /// No modulation assignment with this id.
     #[error("no modulation assignment {0}")]
     UnknownAssignment(AssignmentId),
+    /// A modulation assignment id is already used.
+    #[error("modulation assignment {0} is already in use")]
+    DuplicateAssignmentId(AssignmentId),
     /// A parameter name or index does not exist.
     #[error("module {module} has no parameter `{param}`")]
     NoSuchParam {

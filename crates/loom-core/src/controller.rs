@@ -300,6 +300,35 @@ impl Controller {
         Ok(id)
     }
 
+    /// Puts an assignment back under its old id, for undo. The id must be
+    /// free. Assignments on one parameter are summed in id order, so a
+    /// restored assignment must keep its place in that order.
+    /// Takes effect on the next [`Controller::commit`].
+    pub fn restore_assignment(&mut self, id: AssignmentId, assignment: Assignment) -> Result<(), LoomError> {
+        if self.graph.assignments.contains_key(&id) {
+            return Err(LoomError::DuplicateAssignmentId(id));
+        }
+        self.check_output(assignment.source)?;
+        self.check_param(assignment.target, assignment.param)?;
+        self.next_assignment = self.next_assignment.max(id.0 + 1);
+        self.graph.assignments.insert(
+            id,
+            Assignment {
+                depth: clamp_depth(assignment.depth),
+                ..assignment
+            },
+        );
+        self.dirty = true;
+        Ok(())
+    }
+
+    /// How many more modules that run DSP the engine can take now. Undo
+    /// checks this before it puts removed modules back.
+    pub fn free_module_slots(&mut self) -> usize {
+        self.collect_garbage();
+        self.free_slots.len()
+    }
+
     /// Assigns an output to a parameter, both named.
     pub fn add_assignment_named(
         &mut self,
