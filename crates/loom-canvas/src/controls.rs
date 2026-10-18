@@ -19,6 +19,14 @@ pub(crate) const KNOB_SWEEP: f32 = 1.5 * std::f32::consts::PI;
 const KNOB_RADIUS: f32 = 9.0;
 /// Radius of a knob's modulation range arc: just outside its ring.
 const RANGE_RADIUS: f32 = 11.75;
+/// A knob's focus ring reaches this far left, right, and up from its centre:
+/// the ring's border lies just outside the range arc.
+const KNOB_FOCUS_HALF_WIDTH: f32 = 15.0;
+const KNOB_FOCUS_TOP: f32 = 15.0;
+/// How far down the focus ring reaches: above the caption.
+const KNOB_FOCUS_BOTTOM: f32 = 12.5;
+/// Corner radius of a knob's focus ring.
+const KNOB_FOCUS_CORNER: f32 = 10.0;
 /// Radius of the modulation dot, and of the ring shown when every
 /// assignment is off.
 const DOT_RADIUS: f32 = 2.5;
@@ -342,12 +350,18 @@ pub(crate) fn meter_colour(level: f32, palette: &Palette) -> Color {
 /// (panels.md, Interaction).
 pub(crate) fn focus_ring(kind: &WidgetViewKind, rect: Rectangle) -> (Rectangle, f32) {
     match kind {
+        // Outside the modulation range arc, so focus never hides it. A
+        // circle that wide would cut into the caption, so the ring is a
+        // rounded rectangle: as far out as the arc needs at the top and
+        // sides, and flatter at the bottom, where the arc has its gap.
         WidgetViewKind::Knob { .. } => {
-            let r = KNOB_RADIUS + 3.5;
             let c = knob_centre(rect);
             (
-                Rectangle::new(Point::new(c.x - r, c.y - r), Size::new(2.0 * r, 2.0 * r)),
-                r,
+                Rectangle::new(
+                    Point::new(c.x - KNOB_FOCUS_HALF_WIDTH, c.y - KNOB_FOCUS_TOP),
+                    Size::new(2.0 * KNOB_FOCUS_HALF_WIDTH, KNOB_FOCUS_TOP + KNOB_FOCUS_BOTTOM),
+                ),
+                KNOB_FOCUS_CORNER,
             )
         }
         WidgetViewKind::Toggle => (toggle_track(rect).expand(2.5), 8.0),
@@ -570,6 +584,32 @@ mod tests {
         // Nothing modulated, no dots.
         let plain = ControlGeometry::build(&scene, &PanelValues::new(), &palette);
         assert!((0..3).all(|index| dot(&plain, &scene, index).is_none()));
+    }
+
+    #[test]
+    fn a_knob_focus_ring_clears_the_range_arc_and_the_caption() {
+        let rect = Rectangle::new(Point::ORIGIN, Size::new(3.0 * GRID, 3.0 * GRID));
+        let c = knob_centre(rect);
+        let (ring, corner) = focus_ring(&WidgetViewKind::Knob { steps: 0 }, rect);
+        // Signed distance from a point to the ring's outline: negative inside.
+        let outline = |p: Point| {
+            let qx = (p.x - ring.center_x()).abs() - (ring.width * 0.5 - corner);
+            let qy = (p.y - ring.center_y()).abs() - (ring.height * 0.5 - corner);
+            qx.max(0.0).hypot(qy.max(0.0)) + qx.max(qy).min(0.0) - corner
+        };
+        // The keyboard focus border (1.5) and the MIDI learn border (2.5)
+        // are drawn inside the outline. Neither may reach the arc.
+        let arc_outer = RANGE_RADIUS + 0.75;
+        for step in 0..=270 {
+            let angle = KNOB_START + KNOB_SWEEP * step as f32 / 270.0;
+            let p = Point::new(c.x + arc_outer * angle.sin(), c.y - arc_outer * angle.cos());
+            let gap = -outline(p);
+            assert!(gap >= 2.5 - 1e-4, "learn border reaches the arc at {angle}: gap {gap}");
+        }
+        // `a_control_focused_by_keyboard_has_a_ring_clear_of_its_caption`
+        // checks the caption.
+        // Inside the cell's width.
+        assert!(ring.x >= rect.x && ring.x + ring.width <= rect.x + rect.width);
     }
 
     #[test]
