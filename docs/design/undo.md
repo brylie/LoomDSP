@@ -3,7 +3,7 @@
 How a user takes back and replays edits on the canvas, the inspector, and the panels, so that experiments are cheap.
 
 - **Kind:** living specification.
-- **Status:** Draft
+- **Status:** Agreed
 - **Decision behind it:** none of its own yet. Builds on [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md) (all edits go through `Controller`). A short ADR is needed only if the `loom-core` change under [Engine support](#engine-support) turns out larger than a few small methods (see [Open points](#open-points)).
 - **Use case and requirements:** FR-CANVAS-04. Related: FR-LIB-19 (module data is covered by undo, built later).
 - **Background:** none.
