@@ -3,7 +3,7 @@
 How any output modulates any parameter without a cable, and how users make, see, and edit those assignments.
 
 - **Kind:** living specification.
-- **Status:** Editing and display [slice 1](#slice-1-make-see-and-edit) (make, see, and edit) and its [undo rules](#undo) are Agreed ([#70](https://github.com/brylie/LoomDSP/issues/70), [#20](https://github.com/brylie/LoomDSP/issues/20)). [Slice 2](#slice-2-live-value-and-lines) (live value, lines, arc drag) is Agreed ([#151](https://github.com/brylie/LoomDSP/issues/151), built in [#172](https://github.com/brylie/LoomDSP/issues/172)). Slice 3 (the matrix) is Draft ([#71](https://github.com/brylie/LoomDSP/issues/71)). The [engine rules](#rules), [engine and API](#engine-and-api), and [engine acceptance criteria](#acceptance-criteria-engine) are Agreed and built ([#19](https://github.com/brylie/LoomDSP/issues/19)). [Parameter mapping](#parameter-mapping) is Agreed.
+- **Status:** Editing and display [slice 1](#slice-1-make-see-and-edit) (make, see, and edit) and its [undo rules](#undo) are Agreed ([#70](https://github.com/brylie/LoomDSP/issues/70), [#20](https://github.com/brylie/LoomDSP/issues/20)). [Slice 2](#slice-2-live-value-and-lines) (live value, lines, arc drag) is Agreed ([#151](https://github.com/brylie/LoomDSP/issues/151), not built yet, [#172](https://github.com/brylie/LoomDSP/issues/172)). Slice 3 (the matrix) is Draft ([#71](https://github.com/brylie/LoomDSP/issues/71)). The [engine rules](#rules), [engine and API](#engine-and-api), and [engine acceptance criteria](#acceptance-criteria-engine) are Agreed and built ([#19](https://github.com/brylie/LoomDSP/issues/19)). [Parameter mapping](#parameter-mapping) is Agreed.
 - **Decision behind it:** [ADR-0014](../adr/0014-modulation-without-cables.md) (modulation without cables). Builds on [ADR-0013](../adr/0013-modules-carry-their-own-panel.md) (panels) and [ADR-0007](../adr/0007-polymorphic-signal-model.md) (signals).
 - **Requirements:** FR-MOD-01 to FR-MOD-08, FR-LIB-12.
 - **Issues:** [#19](https://github.com/brylie/LoomDSP/issues/19) (built-in modulation), [#20](https://github.com/brylie/LoomDSP/issues/20) (range arcs and dots), [#66](https://github.com/brylie/LoomDSP/issues/66) (parameter mapping), [#70](https://github.com/brylie/LoomDSP/issues/70) (making and editing assignments), [#71](https://github.com/brylie/LoomDSP/issues/71) (matrix), [#151](https://github.com/brylie/LoomDSP/issues/151) and [#172](https://github.com/brylie/LoomDSP/issues/172) (slice 2), [#12](https://github.com/brylie/LoomDSP/issues/12) (undo).
@@ -87,7 +87,7 @@ Undo ([#12](https://github.com/brylie/LoomDSP/issues/12), [undo.md](undo.md)) is
 
 ### Slice 2: live value and lines
 
-**Status:** Agreed ([#151](https://github.com/brylie/LoomDSP/issues/151)). Built in [#172](https://github.com/brylie/LoomDSP/issues/172).
+**Status:** Agreed ([#151](https://github.com/brylie/LoomDSP/issues/151)). Not built yet: [#172](https://github.com/brylie/LoomDSP/issues/172) builds it.
 
 #### Live value
 
@@ -116,6 +116,8 @@ Dragging the range arc on a tile knob changes the depth of one assignment.
   2. Otherwise, if exactly one output of the selected module drives this knob, that assignment.
   3. Otherwise, if the knob has exactly one enabled assignment, that one.
   4. Otherwise the drag changes nothing, and the status bar says "Several sources: pin one with its badge, or use the inspector".
+
+  If step 1 or 2 finds the source but it has more than one assignment on this knob, the drag changes nothing, and the status bar says to use the inspector. This only happens in patch files written by hand, because a drop never makes a duplicate (slice 1).
 
   *Why:* pinning already means "show me this source's targets", so it is the natural way to say which source a drag is about, and the pinned lines run to this knob, so the user can see the choice. *Why not the last added:* nothing on the knob says which one that is. *Why not scale them all:* with mixed signs and polarities the result is hard to predict, and a depth at 0 never moves.
 - **Where to grab.** The ring around the knob where the range arc is drawn, on any knob with at least one enabled assignment. This includes a knob whose arc has zero length and shows a dot. Pressing the knob's body still sets the base value. *Why:* depth 0 is a common setting (rule 9), and the user must be able to drag back out of it.
@@ -263,6 +265,8 @@ A **Macro** module (FR-LIB-12) has one knob on its panel and one output equal to
 - [ ] Save, then load: the same assignments appear in the inspector, in the same order.
 
 ### Acceptance criteria: slice 2
+
+<a id="acceptance-criteria-slices-2-and-3"></a>
 
 **Status:** Agreed ([#151](https://github.com/brylie/LoomDSP/issues/151)). [#172](https://github.com/brylie/LoomDSP/issues/172).
 
