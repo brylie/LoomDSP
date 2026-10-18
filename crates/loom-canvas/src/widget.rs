@@ -783,7 +783,7 @@ impl<Message> PatchCanvas<'_, Message> {
                             let event = CanvasEvent::DragDepth {
                                 module: *module,
                                 widget: *widget,
-                                pinned: state.pinned,
+                                pinned: self.pin(state),
                                 delta,
                             };
                             self.emit(shell, event);
@@ -965,6 +965,18 @@ impl<Message> PatchCanvas<'_, Message> {
 
     fn widget_kind(&self, module: u32, widget: usize) -> Option<&WidgetViewKind> {
         Some(&self.scene.module(module)?.panel.widgets.get(widget)?.kind)
+    }
+
+    /// The pinned output, while its badge shows. A pin on an output that
+    /// lost its last assignment, or whose module is gone, counts as none:
+    /// it draws nothing, so it must not take Escape or pick an arc drag.
+    fn pin(&self, state: &State) -> Option<PortRef> {
+        state.pinned.filter(|p| {
+            self.scene
+                .module(p.module)
+                .and_then(|m| m.badge_bounds(p.index))
+                .is_some()
+        })
     }
 
     /// The modulated knob whose range ring is under `world`, if any.
@@ -1197,7 +1209,7 @@ impl<Message> PatchCanvas<'_, Message> {
         let used = match key.as_ref() {
             // Escape hides pinned lines before it does anything else
             // (modulation.md, Lines).
-            keyboard::Key::Named(Named::Escape) if state.pinned.is_some() => {
+            keyboard::Key::Named(Named::Escape) if self.pin(state).is_some() => {
                 state.pinned = None;
                 true
             }
@@ -1714,7 +1726,7 @@ impl<Message> PatchCanvas<'_, Message> {
     fn modulation_lines(&self, state: &State, overlay: &mut Overlay) {
         let key = LinesKey {
             scene: self.scene.generation(),
-            pinned: state.pinned,
+            pinned: self.pin(state),
             hover: state.hover,
             selection: self.selection.iter().copied().collect(),
         };
@@ -1732,7 +1744,7 @@ impl<Message> PatchCanvas<'_, Message> {
 
     fn build_modulation_lines(&self, state: &State, overlay: &mut Overlay) {
         let p = &self.palette;
-        if let Some(port) = state.pinned
+        if let Some(port) = self.pin(state)
             && let Some(badge) = self.scene.module(port.module).and_then(|m| m.badge_bounds(port.index))
         {
             let ring = badge.expand(1.5);
@@ -1744,7 +1756,7 @@ impl<Message> PatchCanvas<'_, Message> {
             Some(Hit::Port(port) | Hit::Badge(port)) if port.output => Some(port),
             _ => None,
         };
-        let sources: Vec<(u32, usize)> = [state.pinned, pointed]
+        let sources: Vec<(u32, usize)> = [self.pin(state), pointed]
             .into_iter()
             .flatten()
             .map(|port| (port.module, port.index))
@@ -3180,6 +3192,35 @@ mod tests {
             matches!(turned.as_slice(), [CanvasEvent::SetControl { .. }]),
             "{turned:?}"
         );
+    }
+
+    /// A pin whose badge is gone (its last assignment removed) counts as
+    /// none: Escape goes to the app, and an arc drag carries no pin.
+    #[test]
+    fn a_pin_without_its_badge_takes_no_escape() {
+        let (mut scene, values) = modulated_scene();
+        let modules = scene.modules().to_vec();
+        let mut source = modules[0].clone();
+        source.outputs[0].badge = 0;
+        scene = Scene::new(vec![source, modules[1].clone()], Vec::new());
+        let none = BTreeSet::new();
+        let canvas = PatchCanvas::new(&scene, &none, |e| e).values(&values);
+        let mut state = State {
+            pinned: Some(OUT),
+            ..State::default()
+        };
+        assert_eq!(canvas.pin(&state), None);
+        let mut messages = Vec::new();
+        let mut shell = Shell::new(&mut messages);
+        let bounds = Rectangle::new(Point::ORIGIN, Size::new(800.0, 600.0));
+        canvas.handle(
+            &mut state,
+            &escape(),
+            bounds,
+            mouse::Cursor::Available(Point::ORIGIN),
+            &mut shell,
+        );
+        assert_eq!(shell.event_status(), iced::event::Status::Ignored);
     }
 
     /// A new patch (a new frame key) drops the pin: module IDs repeat

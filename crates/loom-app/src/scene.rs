@@ -135,6 +135,33 @@ pub fn update_panel_values(
     update_panel_values_dragging(values, controller, shown, None);
 }
 
+/// Updates only the live dots, for the refresh on every frame: the knobs
+/// bound to a parameter with an enabled assignment. Values that did not
+/// change leave the panel generation alone, so the canvas rebuilds nothing.
+pub fn update_live_values(values: &mut PanelValues, controller: &Controller) {
+    let graph = controller.graph();
+    let mut done = BTreeSet::new();
+    for (_, a) in graph.assignments().filter(|(_, a)| a.enabled) {
+        if !done.insert((a.target, a.param)) {
+            continue;
+        }
+        let Some(d) = graph.node(a.target).map(|n| n.descriptor) else {
+            continue;
+        };
+        let name = d.params[a.param].name;
+        let live = controller.modulated(a.target, a.param);
+        for (index, w) in d.panel.widgets.iter().enumerate() {
+            if w.kind != WidgetKind::Knob || w.bind != name {
+                continue;
+            }
+            if let Some(value) = values.get(a.target.0, index).filter(|v| v.live != live) {
+                let value = WidgetValue { live, ..value.clone() };
+                values.set(a.target.0, index, value);
+            }
+        }
+    }
+}
+
 /// As [`update_panel_values`], while the arc of a knob is dragged: that
 /// knob's arc shows only `dragging`, the assignment being changed, so the
 /// user sees what moves (`docs/design/modulation.md`, Arc drag).
@@ -360,6 +387,36 @@ mod tests {
         parts.controller.set_assignment_enabled(id, false).unwrap();
         update_panel_values(&mut values, &parts.controller, &BTreeMap::new());
         assert_eq!(values.get(filter.0, knob).unwrap().live, None);
+    }
+
+    /// The frame refresh changes only the live dot, and only when it moved,
+    /// so a still value keeps the panel generation.
+    #[test]
+    fn the_frame_refresh_touches_only_live_dots() {
+        let mut parts = loom_core::create_engine(loom_modules::registry(), loom_core::EngineConfig::default());
+        let controller = &mut parts.controller;
+        let source = controller.add_module("loom.math.constant").unwrap();
+        let filter = controller.add_module("loom.filter.svf").unwrap();
+        controller
+            .add_assignment_named(source, "out", filter, "cutoff", 0.2)
+            .unwrap();
+        let d = controller.graph().node(filter).unwrap().descriptor;
+        let knob = d.panel.widgets.iter().position(|w| w.bind == "cutoff").unwrap();
+        controller.commit().unwrap();
+
+        let mut values = PanelValues::new();
+        update_panel_values(&mut values, &parts.controller, &BTreeMap::new());
+        assert_eq!(values.get(filter.0, knob).unwrap().live, None, "not swapped in yet");
+        let (mut left, mut right) = ([0.0; 64], [0.0; 64]);
+        parts.engine.process(&mut left, &mut right);
+        let before = values.get(filter.0, knob).unwrap().clone();
+        update_live_values(&mut values, &parts.controller);
+        let after = values.get(filter.0, knob).unwrap().clone();
+        assert!(after.live.is_some());
+        assert_eq!(WidgetValue { live: None, ..after }, before, "only the dot changed");
+        let generation = values.generation();
+        update_live_values(&mut values, &parts.controller);
+        assert_eq!(values.generation(), generation, "a still value changes nothing");
     }
 
     /// Dragging an assignment that is off shows only its arc, but the knob

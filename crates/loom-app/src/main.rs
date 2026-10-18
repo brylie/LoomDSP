@@ -598,7 +598,11 @@ impl App {
         };
         // Live modulated values move every block, so a patch with an
         // assignment that is on follows them every frame.
-        let live = if !self.measuring && self.controller.graph().assignments().any(|(_, a)| a.enabled) {
+        // Without audio the engine does not run, so nothing moves.
+        let live = if !self.measuring
+            && self._audio.is_some()
+            && self.controller.graph().assignments().any(|(_, a)| a.enabled)
+        {
             iced::window::frames().map(|_| Message::LiveFrame)
         } else {
             Subscription::none()
@@ -1264,13 +1268,11 @@ impl App {
             }
             Message::Frame(now) => {
                 self.meter.record(now);
-                if self.controller.graph().assignments().any(|(_, a)| a.enabled) {
-                    self.refresh_values();
-                }
+                scene::update_live_values(&mut self.values, &self.controller);
                 self.controller.collect_garbage();
                 self.update_dropouts(now);
             }
-            Message::LiveFrame => self.refresh_values(),
+            Message::LiveFrame => scene::update_live_values(&mut self.values, &self.controller),
             Message::Tick => {
                 self.controller.collect_garbage();
                 self.update_dropouts(Instant::now());
