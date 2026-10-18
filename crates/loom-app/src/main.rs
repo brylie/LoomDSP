@@ -5,6 +5,7 @@
 //! canvas against the performance gates in NFR-PERF-04.
 
 mod alerts;
+mod browser;
 mod files;
 mod layout;
 mod learn;
@@ -17,13 +18,14 @@ mod undo;
 
 use clap::Parser;
 use iced::widget::{
-    button, column, container, pick_list, row, rule, scrollable, slider, space, text, toggler, tooltip,
+    button, column, container, mouse_area, row, rule, scrollable, slider, space, stack, text, toggler, tooltip,
 };
 use iced::{Color, Element, Length, Point, Subscription, Task, Theme};
 use live::Live;
 use loom_canvas::{CanvasEvent, HoverText, LearnView, PanelValues, PatchCanvas, Scene};
 use loom_core::{
-    Controller, EngineConfig, EngineParts, InputRef, MidiEvent, ModuleId, OutputRef, ProbeId, create_engine,
+    Controller, EngineConfig, EngineParts, InputRef, MidiEvent, ModuleDescriptor, ModuleId, OutputRef, ProbeId,
+    create_engine,
 };
 use loom_host_desktop::{AudioOptions, AudioOutput, CallbackStats, MidiConnection, RunningAudio, SharedMidi};
 use loom_patch::Patch;
@@ -68,8 +70,10 @@ enum Message {
         index: usize,
         position: f32,
     },
-    Pick(String),
-    Add,
+    /// The toolbar asks for the module browser at the centre of the canvas.
+    OpenBrowser,
+    /// A message for the open module browser.
+    Browser(browser::Message),
     HoldNote,
     /// File commands (`docs/design/files.md`).
     New,
@@ -100,7 +104,8 @@ enum Message {
     },
     /// A MIDI control change arrived.
     Midi,
-    /// A key: the undo and redo shortcuts, and Escape in learn mode.
+    /// A key: the undo and redo shortcuts, and Escape in learn mode. Ignored
+    /// while the module browser is open.
     Key(iced::keyboard::Event),
     /// Take back the last step (`docs/design/undo.md`).
     Undo,
@@ -150,8 +155,13 @@ struct App {
     midi: Option<SharedMidi>,
     holding: bool,
     status: String,
-    kinds: Vec<String>,
-    picked: Option<String>,
+    /// Every registered module, for the browser.
+    modules: Vec<&'static ModuleDescriptor>,
+    /// The module browser, while it is open.
+    browser: Option<browser::Browser>,
+    /// Changed by the toolbar button; the canvas then opens the browser at
+    /// its centre.
+    browser_key: u64,
     frame_key: u64,
     meter: FrameMeter,
     measuring: bool,
@@ -353,8 +363,9 @@ impl App {
             midi,
             holding: false,
             status,
-            kinds: loom_modules::registry().iter().map(|d| d.id.to_string()).collect(),
-            picked: None,
+            modules: loom_modules::registry().iter().collect(),
+            browser: None,
+            browser_key: 0,
             frame_key: 0,
             meter: FrameMeter::default(),
             measuring: args.bench,
@@ -527,7 +538,10 @@ impl App {
             Subscription::run_with(watch, learn::stream).map(|_| Message::Midi)
         });
         let keys = Some(iced::keyboard::listen().map(Message::Key));
-        Subscription::batch(watch.into_iter().chain(keys))
+        // The search field takes Escape for itself, so the browser listens
+        // to keys whether or not a widget used them.
+        let browser = self.browser.is_some().then(|| iced::event::listen_with(browser_key));
+        Subscription::batch(watch.into_iter().chain(keys).chain(browser))
     }
 
     /// Watches the lights on screen, and sends a message only when one
@@ -901,12 +915,58 @@ impl App {
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
-        self.handle(message);
-        if self.quit { iced::exit() } else { Task::none() }
+        let was_open = self.browser.is_some();
+        let task = match message {
+            Message::Browser(message) => self.browser_message(message),
+            message => {
+                self.handle(message);
+                Task::none()
+            }
+        };
+        if self.quit {
+            Task::batch([task, iced::exit()])
+        } else if !was_open && self.browser.is_some() {
+            Task::batch([task, browser::Browser::focus()])
+        } else {
+            task
+        }
+    }
+
+    /// Handles a browser message: keep it open, close it, or add a module.
+    fn browser_message(&mut self, message: browser::Message) -> Task<Message> {
+        let Some(open) = self.browser.as_mut() else {
+            return Task::none();
+        };
+        let (outcome, task) = open.update(message);
+        match outcome {
+            browser::Outcome::Stay => {}
+            browser::Outcome::Close => self.browser = None,
+            browser::Outcome::Add(descriptor, world) => {
+                self.browser = None;
+                self.add_module(descriptor, world);
+            }
+        }
+        task.map(Message::Browser)
+    }
+
+    /// Adds a module with its top-left corner at a world point and selects
+    /// it, as one undo step.
+    fn add_module(&mut self, descriptor: &'static ModuleDescriptor, world: Point) {
+        self.close_slider_gesture();
+        self.edit(|app| match app.controller.add_module(descriptor.id) {
+            Ok(id) => {
+                app.positions.insert(id.0, world);
+                app.selection = BTreeSet::from([id.0]);
+                app.commit();
+            }
+            Err(e) => app.status = format!("Could not add {}: {e}", descriptor.name),
+        });
     }
 
     fn handle(&mut self, message: Message) {
         match message {
+            Message::Browser(_) => {}
+            Message::Key(_) if self.browser.is_some() => {}
             Message::Canvas(event) => self.canvas_event(event),
             Message::Param {
                 module,
@@ -933,19 +993,7 @@ impl App {
             Message::SliderReleased => self.close_slider_gesture(),
             Message::Undo => self.undo(),
             Message::Redo => self.redo(),
-            Message::Pick(kind) => self.picked = Some(kind),
-            Message::Add => {
-                self.close_slider_gesture();
-                if let Some(kind) = self.picked.clone() {
-                    self.edit(|app| match app.controller.add_module(&kind) {
-                        Ok(id) => {
-                            app.selection = BTreeSet::from([id.0]);
-                            app.commit();
-                        }
-                        Err(e) => app.status = format!("error: {e}"),
-                    });
-                }
-            }
+            Message::OpenBrowser => self.browser_key += 1,
             Message::HoldNote => {
                 if let Some(midi) = &self.midi {
                     self.holding = !self.holding;
@@ -1148,6 +1196,10 @@ impl App {
                     self.arm((module, index));
                 }
             }
+            CanvasEvent::OpenBrowser { world, at, area } => {
+                self.close_slider_gesture();
+                self.browser = Some(browser::Browser::open(self.modules.clone(), world, at, area));
+            }
             CanvasEvent::VisibleDisplays(ids) => {
                 self.visible_displays = ids;
                 self.sync_probes();
@@ -1175,6 +1227,8 @@ impl App {
         let canvas = PatchCanvas::new(&self.scene, &self.selection, Message::Canvas)
             .values(&self.values)
             .frame_key(self.frame_key)
+            .browser_key(self.browser_key)
+            .interactive(self.browser.is_none())
             .animate(self.animating)
             .learn(self.learning.then_some(&self.learn_view));
 
@@ -1184,14 +1238,22 @@ impl App {
             self.inspector(),
         ];
 
-        column![
+        let main = column![
             self.toolbar(),
             rule::horizontal(1),
             body,
             rule::horizontal(1),
             self.stats_bar()
-        ]
-        .into()
+        ];
+        // Always a stack, so opening the browser keeps the canvas's state
+        // (its camera) in the same place in the widget tree.
+        let mut layers = stack![main];
+        if let Some(open) = &self.browser {
+            let outside = mouse_area(space().width(Length::Fill).height(Length::Fill))
+                .on_press(Message::Browser(browser::Message::Close));
+            layers = layers.push(outside).push(open.view().map(Message::Browser));
+        }
+        layers.into()
     }
 
     fn toolbar(&self) -> Element<'_, Message> {
@@ -1209,10 +1271,13 @@ impl App {
             button(text("Save").size(13)).on_press(Message::Save),
             button(text("Save As").size(13)).on_press(Message::SaveAs),
             space::horizontal(),
-            pick_list(self.kinds.as_slice(), self.picked.as_ref(), Message::Pick)
-                .placeholder("Module...")
-                .text_size(13),
-            button(text("Add").size(13)).on_press_maybe(self.picked.as_ref().map(|_| Message::Add)),
+            tooltip(
+                button(text("Add module").size(13)).on_press(Message::OpenBrowser),
+                container(text("Or press A over the canvas, or double-click empty canvas").size(12))
+                    .padding(6)
+                    .style(container::rounded_box),
+                tooltip::Position::Bottom,
+            ),
             hold,
             self.history_button("Undo", "Undo", self.history.undo_step(), Message::Undo),
             self.history_button("Redo", "Redo", self.history.redo_step(), Message::Redo),
@@ -1466,7 +1531,8 @@ fn severity_colour(severity: alerts::Severity) -> Color {
     }
 }
 
-const HELP: &str = "Drag from a port to patch a cable. Drag a connected input to move or remove its cable.\n\
+const HELP: &str = "A or a double-click on empty canvas opens the module browser at the pointer; type, then Enter adds.\n\
+Drag from a port to patch a cable. Drag a connected input to move or remove its cable.\n\
 Drag tiles to move them. Shift-click or drag a box to select several.\n\
 Drag a knob up or down; Shift for fine steps; double-click resets it.\n\
 With a module selected, Tab moves between its controls and the arrow keys change them.\n\
@@ -1507,5 +1573,99 @@ impl FrameMeter {
             "{fps} fps | frame {average:.1} ms (worst {:.1} ms)",
             self.worst.as_secs_f64() * 1000.0
         )
+    }
+}
+
+/// The keys the open browser handles, whether or not a widget used them.
+fn browser_key(event: iced::Event, _status: iced::event::Status, _window: iced::window::Id) -> Option<Message> {
+    use iced::keyboard::{Event, Key, key::Named};
+    let iced::Event::Keyboard(Event::KeyPressed { key, .. }) = event else {
+        return None;
+    };
+    let nav = match key {
+        Key::Named(Named::ArrowUp) => browser::Nav::Up,
+        Key::Named(Named::ArrowDown) => browser::Nav::Down,
+        Key::Named(Named::PageUp) => browser::Nav::PageUp,
+        Key::Named(Named::PageDown) => browser::Nav::PageDown,
+        Key::Named(Named::Escape) => browser::Nav::Escape,
+        _ => return None,
+    };
+    Some(Message::Browser(browser::Message::Key(nav)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use iced::Rectangle;
+
+    fn app() -> App {
+        App::new(Args {
+            patch: None,
+            generate: None,
+            no_audio: true,
+            bench: false,
+        })
+    }
+
+    fn open_at(app: &mut App, world: Point) {
+        let _ = app.update(Message::Canvas(CanvasEvent::OpenBrowser {
+            world,
+            at: Point::ORIGIN,
+            area: Rectangle::new(Point::ORIGIN, iced::Size::new(1000.0, 800.0)),
+        }));
+    }
+
+    fn type_query(app: &mut App, query: &str) {
+        let _ = app.update(Message::Browser(browser::Message::Query(query.to_string())));
+    }
+
+    #[test]
+    fn adding_from_the_browser_is_one_undo_step_at_the_snapped_point() {
+        let mut app = app();
+        let before = app.controller.graph().nodes().count();
+        let undo = app.history.undo_step().map(|s| s.name().to_string());
+
+        // Opening, typing, and closing are not edits.
+        open_at(&mut app, Point::new(250.0, 130.0));
+        type_query(&mut app, "svf");
+        let _ = app.update(Message::Browser(browser::Message::Key(browser::Nav::Escape)));
+        assert!(app.browser.is_none());
+        assert_eq!(app.history.undo_step().map(|s| s.name().to_string()), undo);
+
+        open_at(&mut app, Point::new(250.0, 130.0));
+        type_query(&mut app, "svf");
+        let _ = app.update(Message::Browser(browser::Message::Submit));
+        assert!(app.browser.is_none());
+        assert_eq!(app.controller.graph().nodes().count(), before + 1);
+        let id = *app.selection.iter().next().expect("the new module is selected");
+        assert_eq!(app.selection.len(), 1);
+        assert_eq!(app.positions[&id], Point::new(252.0, 132.0));
+
+        app.undo();
+        assert_eq!(app.controller.graph().nodes().count(), before);
+        assert_eq!(app.history.undo_step().map(|s| s.name().to_string()), undo);
+    }
+
+    #[test]
+    fn keys_go_to_the_browser_not_the_shortcuts() {
+        let mut app = app();
+        let before = app.controller.graph().nodes().count();
+        open_at(&mut app, Point::ORIGIN);
+        type_query(&mut app, "saw");
+        let _ = app.update(Message::Browser(browser::Message::Submit));
+        assert_eq!(app.controller.graph().nodes().count(), before + 1);
+
+        // Cmd+Z or Ctrl+Z while the browser is open does not undo.
+        open_at(&mut app, Point::ORIGIN);
+        let _ = app.update(Message::Key(iced::keyboard::Event::KeyPressed {
+            key: iced::keyboard::Key::Character("z".into()),
+            modified_key: iced::keyboard::Key::Character("z".into()),
+            physical_key: iced::keyboard::key::Physical::Unidentified(iced::keyboard::key::NativeCode::Unidentified),
+            location: iced::keyboard::Location::Standard,
+            modifiers: iced::keyboard::Modifiers::COMMAND,
+            text: None,
+            repeat: false,
+        }));
+        assert_eq!(app.controller.graph().nodes().count(), before + 1);
     }
 }
