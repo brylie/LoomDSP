@@ -5,7 +5,7 @@
 //! stress-test live editing.
 
 use clap::{Parser, Subcommand};
-use loom_core::{Controller, EngineConfig, EngineParts, MidiEvent, ModuleId, create_engine};
+use loom_core::{Controller, EngineConfig, EngineParts, MidiEvent, ModuleId, OutputSafety, create_engine};
 use loom_host_desktop::{AudioOptions, AudioOutput, StatsSnapshot};
 use loom_patch::Patch;
 use std::io::BufRead;
@@ -61,6 +61,10 @@ enum Command {
         /// Length of each note in seconds.
         #[arg(long, default_value_t = 1.0)]
         note_length: f32,
+        /// Safety stage on the output: low-latency, clean, or off. Off by
+        /// default, so the file is what the patch really makes (ADR-0019).
+        #[arg(long, default_value_t = OutputSafety::Off)]
+        output_safety: OutputSafety,
     },
     /// Play a patch live with a MIDI controller.
     Play {
@@ -112,6 +116,9 @@ struct AudioArgs {
     /// Do not open any MIDI input.
     #[arg(long)]
     no_midi: bool,
+    /// Safety stage on the output: low-latency, clean, or off (ADR-0019).
+    #[arg(long, default_value_t = OutputSafety::LowLatency)]
+    output_safety: OutputSafety,
 }
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -130,7 +137,14 @@ fn main() -> ExitCode {
             block,
             notes,
             note_length,
-        } => render(&patch, &output, seconds, sample_rate, block, &notes, note_length),
+            output_safety,
+        } => {
+            let config = EngineConfig {
+                output_safety,
+                ..EngineConfig::with_sample_rate(sample_rate as f32)
+            };
+            render(&patch, &output, seconds, config, block, &notes, note_length)
+        }
         Command::Play { patch, audio, note } => play(&patch, &audio, note),
         Command::Stress {
             patch,
@@ -156,9 +170,9 @@ fn main() -> ExitCode {
     }
 }
 
-fn load_engine(path: &Path, sample_rate: f32) -> Result<(Patch, EngineParts)> {
+fn load_engine(path: &Path, config: EngineConfig) -> Result<(Patch, EngineParts)> {
     let patch = Patch::load(path)?;
-    let mut parts = create_engine(loom_modules::registry(), EngineConfig::with_sample_rate(sample_rate));
+    let mut parts = create_engine(loom_modules::registry(), config);
     patch.load_into(&mut parts.controller)?;
     Ok((patch, parts))
 }
@@ -210,7 +224,7 @@ fn describe(controller: &Controller, id: ModuleId) -> String {
 }
 
 fn check(path: &Path) -> Result<ExitCode> {
-    let (patch, parts) = load_engine(path, 48_000.0)?;
+    let (patch, parts) = load_engine(path, EngineConfig::default())?;
     let c = &parts.controller;
     let report = c.last_report();
     println!("{}: \"{}\"", path.display(), patch.name);
@@ -269,14 +283,15 @@ fn render(
     path: &Path,
     output: &Path,
     seconds: f32,
-    sample_rate: u32,
+    config: EngineConfig,
     block: usize,
     notes: &[u8],
     note_length: f32,
 ) -> Result<ExitCode> {
-    let (_, mut parts) = load_engine(path, sample_rate as f32)?;
-    let frames = (seconds * sample_rate as f32) as usize;
-    let note_frames = ((note_length * sample_rate as f32) as usize).max(2);
+    let (_, mut parts) = load_engine(path, config)?;
+    let sample_rate = config.sample_rate;
+    let frames = (seconds * sample_rate) as usize;
+    let note_frames = ((note_length * sample_rate) as usize).max(2);
     // Each note plays for 90% of its slot, so notes retrigger cleanly.
     let events: Vec<(usize, MidiEvent)> = notes
         .iter()
@@ -293,7 +308,7 @@ fn render(
 
     let spec = hound::WavSpec {
         channels: 2,
-        sample_rate,
+        sample_rate: sample_rate as u32,
         bits_per_sample: 32,
         sample_format: hound::SampleFormat::Float,
     };
@@ -348,7 +363,11 @@ fn start_live(path: &Path, args: &AudioArgs, hold_note: Option<u8>) -> Result<Li
         sample_rate: args.sample_rate,
         buffer_size: args.buffer,
     })?;
-    let (patch, parts) = load_engine(path, output.sample_rate() as f32)?;
+    let config = EngineConfig {
+        output_safety: args.output_safety,
+        ..EngineConfig::with_sample_rate(output.sample_rate() as f32)
+    };
+    let (patch, parts) = load_engine(path, config)?;
     let EngineParts {
         controller,
         engine,
@@ -518,7 +537,7 @@ fn stress_live(path: &Path, args: &AudioArgs, seconds: f32, rate: f32, note: u8)
 fn stress_offline(path: &Path, seconds: f32, rate: f32, note: u8) -> Result<ExitCode> {
     const SAMPLE_RATE: f32 = 48_000.0;
     const BLOCK: usize = 128;
-    let (_, mut parts) = load_engine(path, SAMPLE_RATE)?;
+    let (_, mut parts) = load_engine(path, EngineConfig::with_sample_rate(SAMPLE_RATE))?;
     parts.midi.send(MidiEvent::note_on(0, 0, note, 100));
     let mut stressor = Stressor::new();
     let blocks = (seconds * SAMPLE_RATE / BLOCK as f32) as usize;

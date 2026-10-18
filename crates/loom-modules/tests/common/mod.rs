@@ -2,7 +2,7 @@
 
 #![allow(dead_code)]
 
-use loom_core::{EngineConfig, EngineParts, MeterReading, MidiEvent, ModuleId, ProbeId, create_engine};
+use loom_core::{EngineConfig, EngineParts, MeterReading, MidiEvent, ModuleId, OutputSafety, ProbeId, create_engine};
 use loom_patch::Patch;
 use std::path::PathBuf;
 
@@ -16,6 +16,16 @@ pub fn patch_path(name: &str) -> PathBuf {
 
 pub fn load(name: &str) -> EngineParts {
     load_with(name, EngineConfig::with_sample_rate(SAMPLE_RATE))
+}
+
+/// As [`load`], with the output safety stage off, for tests that compare
+/// the output with exact values (ADR-0019).
+pub fn load_raw(name: &str) -> EngineParts {
+    let config = EngineConfig {
+        output_safety: OutputSafety::Off,
+        ..EngineConfig::with_sample_rate(SAMPLE_RATE)
+    };
+    load_with(name, config)
 }
 
 pub fn load_with(name: &str, config: EngineConfig) -> EngineParts {

@@ -1,6 +1,6 @@
 # ADR-0019: A safety stage on the final output
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-18
 - **Related requirements:** FR-PERF-08, FR-PERF-05, NFR-SND-02, NFR-SND-03, NFR-RT-01
 - **Specification:** [Output safety](../design/output-safety.md)

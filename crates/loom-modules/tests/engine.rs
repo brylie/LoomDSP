@@ -81,8 +81,9 @@ fn feedback_fm_recovers_after_extreme_settings() {
 #[test]
 fn final_output_is_clipped_and_never_non_finite() {
     // ADR-0007: audio is clipped only at the final output, to -1 to 1.
-    // NaN and infinity become silence there (#121).
-    let mut parts = load("sine.ron");
+    // NaN and infinity become silence there (#121). With the safety stage
+    // off, that is all that happens (ADR-0019).
+    let mut parts = load_raw("sine.ron");
     let c = &mut parts.controller;
     let constant = c.add_module("loom.math.constant").unwrap();
     let out = c.add_module("loom.io.audio-out").unwrap();
@@ -235,8 +236,10 @@ fn removed_modules_are_returned_for_freeing() {
 #[test]
 fn scope_probe_reproduces_the_signal_and_meters_match_it() {
     // FR-VIS-04: the scope sees exactly what the port carries, and each meter
-    // reading describes one block of it.
-    let mut parts = load("sine.ron");
+    // reading describes one block of it. The safety stage is off, so the
+    // output is the port's signal (after the fade-in, which starts before
+    // the note).
+    let mut parts = load_raw("sine.ron");
     let gain = parts.controller.output_ref(ModuleId(5), "out").unwrap();
     let probe = parts.controller.add_probe(gain, ProbeKind::MeterAndScope).unwrap();
     parts.controller.commit().unwrap();
@@ -252,7 +255,12 @@ fn scope_probe_reproduces_the_signal_and_meters_match_it() {
         meters.extend(parts.telemetry.meters());
     };
     // 77 frames per buffer: blocks and scope chunks do not line up.
-    let (left, _) = render_with(&mut parts, 24_000, 77, &one_note(), |_, parts| drain(parts));
+    let note = [Note {
+        note: 57,
+        on: 1_000,
+        off: 24_000,
+    }];
+    let (left, _) = render_with(&mut parts, 24_000, 77, &note, |_, parts| drain(parts));
     drain(&mut parts);
 
     assert_eq!(scope, left, "the probed port feeds the output directly");

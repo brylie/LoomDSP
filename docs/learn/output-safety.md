@@ -3,7 +3,7 @@
 Why a signal can be "legal" and still harm speakers or ears, and what a safety stage on the final output does about it.
 
 - **Used by:** [Output safety spec](../design/output-safety.md), [ADR-0019](../adr/0019-output-safety-stage.md).
-- **Code:** `clip_output` in `crates/loom-core/src/engine.rs`. The stage will sit next to it.
+- **Code:** `crates/loom-core/src/safety.rs`.
 
 ## What the clip already does
 

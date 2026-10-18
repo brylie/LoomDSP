@@ -13,7 +13,7 @@ mod common;
 
 use assert_no_alloc::{AllocDisabler, assert_no_alloc};
 use common::*;
-use loom_core::{MidiControl, MidiEvent, OutputRef, ProbeKind, TimeSignature};
+use loom_core::{MidiControl, MidiEvent, OutputRef, OutputSafety, ProbeKind, TimeSignature};
 
 #[global_allocator]
 static ALLOCATOR: AllocDisabler = AllocDisabler;
@@ -102,6 +102,11 @@ fn audio_thread_never_allocates() {
                 8 => parts.controller.reset_transport().unwrap(),
                 11 => parts.controller.set_time_signature(TimeSignature::new(7, 8)).unwrap(),
                 _ => {}
+            }
+            // So are safety mode changes (ADR-0019), whose fade spans buffers.
+            if i % 19 == 0 {
+                let mode = [OutputSafety::Clean, OutputSafety::Off, OutputSafety::LowLatency][i / 19 % 3];
+                parts.controller.set_output_safety(mode).unwrap();
             }
             // Drain telemetry for a while, then let the queues fill up.
             if i < 200 {
