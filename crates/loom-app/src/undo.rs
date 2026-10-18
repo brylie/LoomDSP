@@ -314,11 +314,19 @@ pub fn apply(
             controller.add_module_with_id(ModuleId(id), &state.descriptor.kind())?;
         }
         let current = controller.graph().node(ModuleId(id)).map(|node| node.params.clone());
+        // For a module that is already there, replay only what the step
+        // changed. A mapped parameter the hardware moved since is not the
+        // step's to set (undo.md, Mapped parameters). A module that comes
+        // back gets every value.
         let changes: Vec<(usize, f32)> = state
             .params
             .iter()
             .enumerate()
-            .filter(|&(index, &value)| current.as_ref().is_none_or(|c| c.get(index) != Some(&value)))
+            .filter(|&(index, &value)| {
+                have.as_ref()
+                    .is_none_or(|other| other.params.get(index) != Some(&value))
+                    && current.as_ref().is_none_or(|c| c.get(index) != Some(&value))
+            })
             .map(|(index, &value)| (index, value))
             .collect();
         if !changes.is_empty() {

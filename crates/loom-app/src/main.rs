@@ -801,24 +801,42 @@ impl App {
 
     fn canvas_event(&mut self, event: CanvasEvent) {
         // Edits are steps. Views, selection, and the transport are not.
-        let edits = matches!(
-            event,
+        // A momentary hold is a performance action, not an edit (undo.md,
+        // What is not undoable). Only a button in toggle mode is a step.
+        let button_edit = |app: &Self, module: u32, widget: usize| !app.is_momentary_button(module, widget);
+        let edits = match event {
             CanvasEvent::Move { .. }
-                | CanvasEvent::Connect { .. }
-                | CanvasEvent::Disconnect(_)
-                | CanvasEvent::Delete(_)
-                | CanvasEvent::SetControl { .. }
-                | CanvasEvent::ButtonPressed { .. }
-                | CanvasEvent::ButtonReleased { .. }
-                | CanvasEvent::ButtonArrow { .. }
-                | CanvasEvent::ResetControl { .. }
-        );
+            | CanvasEvent::Connect { .. }
+            | CanvasEvent::Disconnect(_)
+            | CanvasEvent::Delete(_)
+            | CanvasEvent::SetControl { .. }
+            | CanvasEvent::ResetControl { .. } => true,
+            CanvasEvent::ButtonPressed { module, widget }
+            | CanvasEvent::ButtonReleased { module, widget }
+            | CanvasEvent::ButtonArrow { module, widget, .. } => button_edit(self, module, widget),
+            _ => false,
+        };
         if edits {
             self.close_slider_gesture();
             self.edit(|app| app.apply_canvas_event(event));
         } else {
             self.apply_canvas_event(event);
         }
+    }
+
+    /// True if the button's stored mode is momentary.
+    fn is_momentary_button(&self, module: u32, widget: usize) -> bool {
+        self.controller.graph().node(ModuleId(module)).is_some_and(|node| {
+            let Some(panel_widget) = node.descriptor.panel.widgets.get(widget) else {
+                return false;
+            };
+            let loom_core::WidgetKind::Button { mode } = panel_widget.kind else {
+                return false;
+            };
+            node.descriptor
+                .param_index(mode)
+                .is_some_and(|i| loom_core::ButtonMode::from_value(node.params[i]) == loom_core::ButtonMode::Momentary)
+        })
     }
 
     fn apply_canvas_event(&mut self, event: CanvasEvent) {

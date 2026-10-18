@@ -154,25 +154,25 @@ The edit log itself lives in `loom-app` and knows nothing about the audio thread
 
 ## Acceptance criteria
 
-- [ ] Undo removes a module that was just added. Redo adds it back with the same id and position.
-- [ ] Undo of a delete brings back the modules, their parameter values, their positions, their cables, their assignments, and their MIDI mappings, in one step. The restored modules are selected.
-- [ ] After undoing the delete of a module with assignments, an offline render of the patch is bit-identical to a render before the delete, at block sizes 1, 77, and 512.
-- [ ] Undoing a delete right after it, with the patch at the module limit, either works or changes nothing and says why in the status bar.
-- [ ] Undo of a connect that replaced a cable brings the old cable back.
-- [ ] A knob drag of many values is one step; undo returns the value from before the drag, redo returns the value at the end.
+- [x] Undo removes a module that was just added. Redo adds it back with the same id and position.
+- [x] Undo of a delete brings back the modules, their parameter values, their positions, their cables, their assignments, and their MIDI mappings, in one step. The restored modules are selected.
+- [x] After undoing the delete of a module with assignments, an offline render of the patch is bit-identical to a render before the delete, at block sizes 1, 77, and 512.
+- [x] Undoing a delete right after it, with the patch at the module limit, either works or changes nothing and says why in the status bar.
+- [x] Undo of a connect that replaced a cable brings the old cable back.
+- [x] A knob drag of many values is one step; undo returns the value from before the drag, redo returns the value at the end.
 - [ ] A depth slider drag is one step.
-- [ ] A click that does not change a value adds no step.
+- [x] A click that does not change a value adds no step.
 - [ ] A double-click reset is one step.
-- [ ] Holding an arrow key on a focused control is one step.
+- [x] Holding an arrow key on a focused control is one step.
 - [ ] A drag that moves several selected modules is one step.
-- [ ] A drag cut off by focus loss still ends its gesture and makes one step.
-- [ ] One undo of a learned mapping restores both the mapping state and the parameter's old value.
-- [ ] Removing a MIDI mapping with × can be undone.
-- [ ] Moving a mapping to another parameter can be undone.
+- [x] A drag cut off by focus loss still ends its gesture and makes one step.
+- [x] One undo of a learned mapping restores both the mapping state and the parameter's old value.
+- [x] Removing a MIDI mapping with × can be undone.
+- [x] Moving a mapping to another parameter can be undone.
 - [ ] A hardware MIDI knob movement adds no step and does not drop the redo steps.
-- [ ] Undo of a screen edit on a mapped parameter sets the value from before the edit, even after the hardware moved it.
-- [ ] A new edit after an undo drops the redo steps.
-- [ ] The history keeps 200 steps; the 201st edit drops the oldest.
+- [x] Undo of a screen edit on a mapped parameter sets the value from before the edit, even after the hardware moved it.
+- [x] A new edit after an undo drops the redo steps.
+- [x] The history keeps 200 steps; the 201st edit drops the oldest.
 - [ ] Opening a patch clears the history, and the buttons are disabled.
 - [ ] Undo and redo work from the keyboard and from the toolbar; the toolbar hover text and the status bar name the step.
 - [ ] Undo and redo shortcuts do nothing while a text field is being edited.

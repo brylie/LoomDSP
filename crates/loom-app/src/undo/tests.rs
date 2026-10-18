@@ -295,3 +295,29 @@ fn a_new_step_drops_the_redo_steps_and_the_history_keeps_200() {
     }
     assert_eq!(history.len(), LIMIT);
 }
+
+#[test]
+fn undo_of_a_move_leaves_a_mapped_parameter_the_hardware_moved() {
+    let mut c = parts().controller;
+    let id = c.add_module("loom.filter.svf").unwrap();
+    let cutoff = c.graph().node(id).unwrap().descriptor.param_index("cutoff").unwrap();
+    c.map_midi(
+        MidiControl {
+            channel: 0,
+            controller: 74,
+        },
+        id,
+        cutoff,
+    )
+    .unwrap();
+    let mut positions = BTreeMap::from([(id.0, Point::new(0.0, 0.0))]);
+    let before = snap(&c, &positions);
+    positions.insert(id.0, Point::new(30.0, 0.0));
+    let step = diff(&before, &snap(&c, &positions), &BTreeSet::new()).unwrap();
+    assert_eq!(step.name(), "move SVF");
+    // The performer turns the knob after the move.
+    c.set_param(id, cutoff, 1234.0).unwrap();
+    undo(&step, &mut c, &mut positions);
+    assert_eq!(positions[&id.0], Point::new(0.0, 0.0));
+    assert_eq!(c.graph().node(id).unwrap().params[cutoff], 1234.0);
+}
