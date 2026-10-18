@@ -552,6 +552,10 @@ impl App {
     /// if one is already open, so a gesture's first call is the one that
     /// counts.
     fn begin_edit(&mut self) {
+        // Another path (probe sync) may have sent the graph since the failure.
+        if !self.gesture {
+            self.history_back_on();
+        }
         if self.pending.is_none() && !self.history_off {
             self.pending = Some(undo::Snapshot::take(&self.controller, &self.positions));
             self.touched.clear();
