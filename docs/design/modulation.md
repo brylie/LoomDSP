@@ -105,7 +105,7 @@ A dot on a modulated knob shows the value the engine gives the parameter (FR-MOD
 
 - **On hover:** pointing at an output port that drives assignments, at its badge, or at a modulated control draws thin dashed lines between the source port and its targets, and highlights the tiles. They disappear when the pointer leaves. Hovering a port still shows its hover text. Selecting a module shows its lines too, following the same focus rules as cables.
 - **Pinned lines:** clicking a badge keeps that output's lines visible after the pointer leaves. Clicking the badge again, or pressing Escape, hides them. The badge shows that it is pinned. Only one output is pinned at a time: clicking another badge moves the pin. Escape hides pinned lines first. Only when nothing is pinned does it do what it does today. *Why the badge and not the port:* pressing an output port starts dragging a cable or an assignment, so a click there must not also mean something else. *Why one pin:* the pinned source also picks which assignment an arc drag changes (below), so it must be unambiguous.
-- **Drawing.** The canvas draws the lines as cable-like strips. It rebuilds them only when the hovered or pinned source changes, not every frame (ADR-0010).
+- **Drawing.** The canvas draws the lines as cable-like strips. It rebuilds them when the hovered or pinned source, the selection, the assignments, or a module position changes, and never every frame. Pan and zoom only update the camera, like cables (ADR-0010).
 
 #### Arc drag
 
