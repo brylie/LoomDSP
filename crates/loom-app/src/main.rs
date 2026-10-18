@@ -613,7 +613,8 @@ impl App {
         }
         // An armed parameter is a mode, not an edit: undo disarms it first.
         self.armed = None;
-        match undo::apply(&step, forward, &mut self.controller, &mut self.positions) {
+        let applied = undo::apply(&step, forward, &mut self.controller, &mut self.positions);
+        match applied {
             Ok(()) => {
                 if forward {
                     self.history.redone();
@@ -630,8 +631,18 @@ impl App {
                 }
                 self.selection
                     .retain(|&id| self.controller.graph().node(ModuleId(id)).is_some());
-                self.commit();
-                self.status = format!("{verb}: {}", step.name());
+                if self.commit() {
+                    self.status = format!("{verb}: {}", step.name());
+                } else {
+                    // The graph has the change but the engine does not. The
+                    // controller stays dirty, so the next commit sends it.
+                    // The history no longer matches what plays, so clear it.
+                    self.history.clear();
+                    self.status = format!(
+                        "{verb} could not reach the engine ({}); undo history cleared",
+                        self.status
+                    );
+                }
             }
             Err(e) => {
                 self.history.clear();
@@ -641,15 +652,24 @@ impl App {
         }
     }
 
-    fn commit(&mut self) {
+    /// Sends the graph to the engine. Returns false if that failed; the
+    /// status bar then holds the error.
+    fn commit(&mut self) -> bool {
         // Probes follow the graph: a removed module loses its probes.
         let wanted = self.metered_outputs();
         self.live.sync(&mut self.controller, &wanted);
-        match self.controller.commit() {
-            Ok(_) => self.report(),
-            Err(e) => self.status = format!("error: {e}"),
-        }
+        let sent = match self.controller.commit() {
+            Ok(_) => {
+                self.report();
+                true
+            }
+            Err(e) => {
+                self.status = format!("error: {e}");
+                false
+            }
+        };
         self.refresh();
+        sent
     }
 
     fn update(&mut self, message: Message) {
@@ -839,7 +859,9 @@ impl App {
                     port: to.index,
                 };
                 match self.controller.connect(output, input) {
-                    Ok(_) => self.commit(),
+                    Ok(_) => {
+                        self.commit();
+                    }
                     Err(e) => self.status = format!("error: {e}"),
                 }
             }

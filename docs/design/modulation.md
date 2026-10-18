@@ -78,12 +78,12 @@ The editing and display work ships in three slices, so each one can be built and
 
 #### Undo
 
-Slice 1 does not wait for undo ([#12](https://github.com/brylie/LoomDSP/issues/12)). Today no edit in the app can be undone, and assignments are no different. When undo is built, these rules apply:
+Undo ([#12](https://github.com/brylie/LoomDSP/issues/12), [undo.md](undo.md)) is built. The app has no screen to make or change assignments yet, so today undo restores assignments with the module that held them, with their old ids. When that screen comes (slice 1), these rules apply:
 
 - Adding, removing, and changing depth, polarity, or on/off are each an undo step. One depth slider drag is one step, not one per value, like a knob drag.
 - Undoing the removal of an assignment, or of a module with assignments, brings each assignment back in its old place in the order. *Why:* several assignments on one parameter are added in id order, and float sums depend on that order (see [Engine and API](#engine-and-api)). Restoring at the end of the list could change the sound in the last bits. The controller needs a way to put an assignment back with its old id.
 
-*Why not wait:* undo covers every edit, and building it is its own piece of work. Waiting would hold back modulation without making it safer than cables, which also cannot be undone yet.
+*Why not wait:* undo covers every edit, and building it was its own piece of work. Modulation did not wait for it.
 
 ### Slice 2: live value and lines
 
