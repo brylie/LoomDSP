@@ -4,7 +4,7 @@
 //! `docs/learn/output-safety.md`.
 //!
 //! Every step advances one sample at a time, so the output is the same for
-//! any block size. All memory is allocated in [`SafetyStage::new`], so
+//! any block size. All memory is allocated when the stage is built, so
 //! nothing here allocates on the audio thread, not even a mode change.
 
 use std::collections::VecDeque;
