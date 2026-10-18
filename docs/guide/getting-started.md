@@ -2,7 +2,7 @@
 
 This guide shows how to run the LoomDSP desktop app, play a patch, and change it while it plays.
 
-LoomDSP is early (Phase 1). The app can open, edit, and play patches. Saving works, but there is no file dialog yet. See [What is not there yet](#what-is-not-there-yet).
+LoomDSP is early (Phase 1). The app can open, edit, save, and play patches. See [What is not there yet](#what-is-not-there-yet).
 
 ![The FM feedback patch in the LoomDSP app](../benchmarks/images/p1-canvas-fm-feedback.png)
 
@@ -37,7 +37,7 @@ If you hear nothing, check the bottom bar. It shows the audio device and sample 
 |---|---|
 | Canvas (centre) | Your patch: modules as tiles, connected by cables. |
 | Inspector (right) | Every parameter of the selected module, with sliders. |
-| Toolbar (top) | Add a module, hold a note, save. |
+| Toolbar (top) | File name, New, Open, Save, Save As, add a module, hold a note. |
 | Bottom bar | Frame rate, module and cable count, audio load, MIDI inputs, and messages. Hover a cut-off message to read all of it. |
 
 ## Patching
@@ -82,7 +82,7 @@ Click a tile to select it. The inspector shows its parameters. Frequencies and t
 
 ## Saving
 
-**New**, **Open**, **Save**, and **Save As** (Ctrl or Cmd with N, O, S, and Shift+S) work on `.ron` patch files, including module positions. The window title shows the file name, with a `*` in front when you have unsaved changes. The app asks before it throws changes away. Save writes to the file you opened, so use Save As to keep an example as it is. Patch files are plain text in [RON](../adr/0008-patch-format-ron.md), so you can read them, edit them, and keep them in git.
+**New**, **Open**, **Save**, and **Save As** (Ctrl or Cmd with N, O, S, and Shift+S) work on `.ron` patch files, including module positions. The window title shows the file name, with a `*` in front when you have unsaved changes. The app asks before it throws changes away. Save writes to the file you opened, so use Save As to keep an example as it is. On Linux the question and error boxes need `zenity` or `kdialog`; without one, the app tells you in the status bar to save first. Patch files are plain text in [RON](../adr/0008-patch-format-ron.md), so you can read them, edit them, and keep them in git.
 
 ## What is not there yet
 

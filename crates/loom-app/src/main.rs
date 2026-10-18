@@ -460,6 +460,12 @@ impl App {
             files::Choice::Save => self.save(),
             files::Choice::DontSave => true,
             files::Choice::Cancel => false,
+            files::Choice::Unavailable => {
+                self.status =
+                    "Unsaved changes. No dialog program (zenity or kdialog) is installed: save with Ctrl+S first."
+                        .to_string();
+                false
+            }
         }
     }
 

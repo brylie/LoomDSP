@@ -275,8 +275,9 @@ impl Patch {
     /// Writes a patch file.
     ///
     /// The text goes to a new temporary file in the same folder first, then
-    /// replaces the target by a rename. A full disk or a crash cannot leave
-    /// a half-written patch where a good one was. The temporary name is
+    /// replaces the target by a rename. A full disk or a failed write cannot
+    /// leave a half-written patch where a good one was. It does not promise
+    /// the data survives a power loss. The temporary name is
     /// unique to this process and is never an existing file, so another
     /// save or a backup is never overwritten. A read-only target is refused,
     /// and the target keeps its permissions.

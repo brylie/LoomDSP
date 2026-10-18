@@ -16,6 +16,8 @@ pub enum Choice {
     Save,
     DontSave,
     Cancel,
+    /// No dialog could be shown (Linux without `zenity` or `kdialog`).
+    Unavailable,
 }
 
 /// The name shown for a patch: its file name, or "Untitled" before it has one.
@@ -88,6 +90,9 @@ fn confirm_replace(path: &Path) -> bool {
 
 /// Asks what to do with unsaved changes.
 pub fn confirm_discard(name: &str) -> Choice {
+    if !dialogs_available() {
+        return Choice::Unavailable;
+    }
     let result = MessageDialog::new()
         .set_level(MessageLevel::Warning)
         .set_title(format!("Save changes to \"{name}\"?"))
@@ -105,6 +110,18 @@ pub fn confirm_discard(name: &str) -> Choice {
         MessageDialogResult::No => Choice::DontSave,
         _ => Choice::Cancel,
     }
+}
+
+/// False on Linux when no program that draws message boxes is installed.
+/// Then the dialog would return "cancel" without showing anything.
+fn dialogs_available() -> bool {
+    if !cfg!(target_os = "linux") {
+        return true;
+    }
+    let Some(path) = std::env::var_os("PATH") else {
+        return false;
+    };
+    std::env::split_paths(&path).any(|dir| ["zenity", "kdialog"].iter().any(|p| dir.join(p).is_file()))
 }
 
 /// Tells the user that something failed. One button, so it cannot be a
