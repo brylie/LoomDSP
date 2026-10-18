@@ -127,7 +127,7 @@ Dragging the range arc on a tile knob changes the depth of one assignment.
 
 #### Not in slice 2
 
-- **Dropping an output on an inspector control.** The inspector already has **Add modulation** (slice 1), which reaches every parameter, including ones not on the tile. A drag from the canvas into the inspector would need an app-level drag in Iced: the canvas reports the drag while it is in progress, and each inspector row knows when the pointer is over it. Whether Iced supports that cleanly is not checked. A spike decides it. If it works, the drop follows the slice 1 rules for a drop on a tile control: the same default depth and duplicate rule, rows highlight while the drag is over them, and a drop elsewhere does nothing.
+- **Dropping an output on an inspector control.** The inspector already has **Add modulation** (slice 1), which reaches every parameter, including ones not on the tile. A drag from the canvas into the inspector would need an app-level drag in Iced: the canvas reports the drag while it is in progress, and each inspector row knows when the pointer is over it. The [spike in #186](https://github.com/brylie/LoomDSP/issues/186#issuecomment-6252045730) showed that Iced supports this, with one limit: the canvas cannot draw outside its own bounds, so the drag line over the inspector needs a window layer. [#188](https://github.com/brylie/LoomDSP/issues/188) adds the drop after slice 2, as its own spec change. The drop follows the slice 1 rules for a drop on a tile control: the same default depth and duplicate rule, rows highlight while the drag is over them, and a drop elsewhere does nothing.
 - **Modulate mode.** See [Not planned for P1](#not-planned-for-p1).
 
 ### Slice 3: the modulation matrix
@@ -304,5 +304,5 @@ A **Macro** module (FR-LIB-12) has one knob on its panel and one output equal to
 ## Open points
 
 - Should an assignment be able to target another assignment's depth directly, or through a "depth" parameter on a gain module? Not needed for P1. Decide with FR-MOD-02 (P2).
-- Can Iced carry a drag from the canvas onto an inspector row? A spike decides whether the inspector drop comes back ([Not in slice 2](#not-in-slice-2)).
+- The inspector drop ([#188](https://github.com/brylie/LoomDSP/issues/188)): should Escape cancel an output drag, how is the drag line drawn outside the canvas, which rows accept a drop, and is the drop off during MIDI learn? See [Not in slice 2](#not-in-slice-2).
 - Try the default depth of 0.25 with users once slice 1 is built.
