@@ -635,9 +635,7 @@ impl App {
                     self.status = format!("{verb}: {}", step.name());
                 } else {
                     // The graph has the change but the engine does not. The
-                    // controller stays dirty, so the next commit sends it.
-                    // The history no longer matches what plays, so clear it.
-                    self.history.clear();
+                    // history is already cleared by `commit`.
                     self.status = format!(
                         "{verb} could not reach the engine ({}); undo history cleared",
                         self.status
@@ -665,6 +663,14 @@ impl App {
             }
             Err(e) => {
                 self.status = format!("error: {e}");
+                // The graph holds a change the engine does not. Recording it
+                // would put a step in the history for something that does not
+                // play. The controller stays dirty, so the next commit
+                // retries the change; until then the history cannot be
+                // trusted.
+                self.pending = None;
+                self.touched.clear();
+                self.history.clear();
                 false
             }
         };
