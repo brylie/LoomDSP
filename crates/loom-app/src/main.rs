@@ -156,6 +156,10 @@ struct App {
     /// sends no start, and arrow keys on it send no end, so the next edit
     /// or an undo closes it too.
     slider_gesture: bool,
+    /// True after a commit failed, until the graph is sent. The graph holds a
+    /// change the engine does not, so no step is recorded: undo would send
+    /// that change along with a later one.
+    history_off: bool,
     /// Parameters this app set during the edit in progress. A change on a
     /// mapped parameter is part of the step only if it is listed here.
     touched: BTreeSet<(u32, usize)>,
@@ -283,6 +287,7 @@ impl App {
             pending: None,
             gesture: false,
             slider_gesture: false,
+            history_off: false,
             touched: BTreeSet::new(),
         };
         if app.status.is_empty() {
@@ -547,7 +552,7 @@ impl App {
     /// if one is already open, so a gesture's first call is the one that
     /// counts.
     fn begin_edit(&mut self) {
-        if self.pending.is_none() {
+        if self.pending.is_none() && !self.history_off {
             self.pending = Some(undo::Snapshot::take(&self.controller, &self.positions));
             self.touched.clear();
         }
@@ -581,6 +586,14 @@ impl App {
             self.slider_gesture = false;
             self.gesture = false;
             self.record();
+            self.history_back_on();
+        }
+    }
+
+    /// Records steps again once the engine has the whole graph.
+    fn history_back_on(&mut self) {
+        if !self.controller.has_uncommitted_changes() {
+            self.history_off = false;
         }
     }
 
@@ -659,6 +672,11 @@ impl App {
         let sent = match self.controller.commit() {
             Ok(_) => {
                 self.report();
+                // Inside a gesture, wait for its end: the rest of it was not
+                // recorded, so it stays out of the history as a whole.
+                if !self.gesture {
+                    self.history_off = false;
+                }
                 true
             }
             Err(e) => {
@@ -671,6 +689,7 @@ impl App {
                 self.pending = None;
                 self.touched.clear();
                 self.history.clear();
+                self.history_off = true;
                 false
             }
         };
@@ -845,6 +864,7 @@ impl App {
             CanvasEvent::GestureEnd => {
                 self.gesture = false;
                 self.record();
+                self.history_back_on();
             }
             CanvasEvent::Select(ids) => self.selection = ids.into_iter().collect(),
             CanvasEvent::Move { ids, delta } => {
