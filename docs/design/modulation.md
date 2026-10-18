@@ -3,7 +3,7 @@
 How any output modulates any parameter without a cable, and how users make, see, and edit those assignments.
 
 - **Kind:** living specification.
-- **Status:** Editing and display [slice 1](#slice-1-make-see-and-edit) (make, see, and edit) and its [undo rules](#undo) are Agreed ([#70](https://github.com/brylie/LoomDSP/issues/70), [#20](https://github.com/brylie/LoomDSP/issues/20)). [Slice 2](#slice-2-live-value-and-lines) (live value, lines, arc drag) is Agreed ([#151](https://github.com/brylie/LoomDSP/issues/151), not built yet, [#172](https://github.com/brylie/LoomDSP/issues/172)). Slice 3 (the matrix) is Draft ([#71](https://github.com/brylie/LoomDSP/issues/71)). The [engine rules](#rules), [engine and API](#engine-and-api), and [engine acceptance criteria](#acceptance-criteria-engine) are Agreed and built ([#19](https://github.com/brylie/LoomDSP/issues/19)). [Parameter mapping](#parameter-mapping) is Agreed.
+- **Status:** Editing and display [slice 1](#slice-1-make-see-and-edit) (make, see, and edit) and its [undo rules](#undo) are Agreed ([#70](https://github.com/brylie/LoomDSP/issues/70), [#20](https://github.com/brylie/LoomDSP/issues/20)). [Slice 2](#slice-2-live-value-and-lines) (live value, lines, arc drag) is Agreed ([#151](https://github.com/brylie/LoomDSP/issues/151), not built yet, [#172](https://github.com/brylie/LoomDSP/issues/172)). The [inspector drop](#inspector-drop) is Agreed and not built yet ([#188](https://github.com/brylie/LoomDSP/issues/188)). Slice 3 (the matrix) is Draft ([#71](https://github.com/brylie/LoomDSP/issues/71)). The [engine rules](#rules), [engine and API](#engine-and-api), and [engine acceptance criteria](#acceptance-criteria-engine) are Agreed and built ([#19](https://github.com/brylie/LoomDSP/issues/19)). [Parameter mapping](#parameter-mapping) is Agreed.
 - **Decision behind it:** [ADR-0014](../adr/0014-modulation-without-cables.md) (modulation without cables). Builds on [ADR-0013](../adr/0013-modules-carry-their-own-panel.md) (panels) and [ADR-0007](../adr/0007-polymorphic-signal-model.md) (signals).
 - **Requirements:** FR-MOD-01 to FR-MOD-08, FR-LIB-12.
 - **Issues:** [#19](https://github.com/brylie/LoomDSP/issues/19) (built-in modulation), [#20](https://github.com/brylie/LoomDSP/issues/20) (range arcs and dots), [#66](https://github.com/brylie/LoomDSP/issues/66) (parameter mapping), [#70](https://github.com/brylie/LoomDSP/issues/70) (making and editing assignments), [#71](https://github.com/brylie/LoomDSP/issues/71) (matrix), [#151](https://github.com/brylie/LoomDSP/issues/151) and [#172](https://github.com/brylie/LoomDSP/issues/172) (slice 2), [#12](https://github.com/brylie/LoomDSP/issues/12) (undo).
@@ -47,6 +47,7 @@ The editing and display work ships in three slices, so each one can be built and
 
 - Any control bound to a parameter accepts a drop: knobs, toggles, and radio buttons. Whole-number parameters round after the clamp (rule 5). A control bound to a display value (a light or meter) does not.
 - The source can be on the same module as the target. That makes a self-loop, which is valid (rule 8).
+- In MIDI learn mode, a drop on a control makes no assignment ([Inspector drop](#inspector-drop)).
 - A drop that matches an assignment that already exists (same output, same parameter) adds nothing. The status bar says the assignment exists. *Why:* a second link from the same output only adds its depth to the first, so it is never needed, and two rows that look the same are confusing. The engine and the patch format still accept duplicates, so files written by hand keep loading.
 - **Default depth:** 0.25, a quarter of the knob, or one step of a whole-number parameter if that is larger. One step is `1 / (max - min)` in the control's 0 to 1 range, so a toggle gets depth 1, a radio button with 3 options gets 0.5, and one with 8 options keeps 0.25. *Why:* 0.25 is large enough to hear on a continuous parameter and small enough not to slam to a limit. On a whole-number parameter it is not enough: the value rounds after the clamp (rule 5), so a toggle moved by 0.25 never changes, and the drop would seem to do nothing. One step lets a source at its peak move the value one step, with the change at half way. The 0.25 is one constant in the app, so it is easy to change after trying it with users.
 - A unipolar assignment with a positive depth, on a control already at its maximum, only pushes into the clamp, so nothing moves. This holds for a toggle that is on. Set a negative depth to move it down. A bipolar assignment swings both ways, so it still moves the control. The spec does not flip the sign for the user, because the same drop must give the same assignment whatever the knob position.
@@ -104,7 +105,7 @@ A dot on a modulated knob shows the value the engine gives the parameter (FR-MOD
 #### Lines
 
 - **On hover:** pointing at an output port that drives assignments, at its badge, or at a modulated control draws thin dashed lines between the source port and its targets, and highlights the tiles. They disappear when the pointer leaves. Hovering a port still shows its hover text. Selecting a module shows its lines too, following the same focus rules as cables.
-- **Pinned lines:** clicking a badge keeps that output's lines visible after the pointer leaves. Clicking the badge again, or pressing Escape, hides them. The badge shows that it is pinned. Only one output is pinned at a time: clicking another badge moves the pin. Escape hides pinned lines first. Only when nothing is pinned does it do what it does today. *Why the badge and not the port:* pressing an output port starts dragging a cable or an assignment, so a click there must not also mean something else. *Why one pin:* the pinned source also picks which assignment an arc drag changes (below), so it must be unambiguous.
+- **Pinned lines:** clicking a badge keeps that output's lines visible after the pointer leaves. Clicking the badge again, or pressing Escape, hides them. The badge shows that it is pinned. Only one output is pinned at a time: clicking another badge moves the pin. Escape hides pinned lines before anything else, except a drag in progress ([Inspector drop](#inspector-drop)). Only when nothing is pinned does it do what it does today. *Why the badge and not the port:* pressing an output port starts dragging a cable or an assignment, so a click there must not also mean something else. *Why one pin:* the pinned source also picks which assignment an arc drag changes (below), so it must be unambiguous.
 - **Drawing.** The canvas draws the lines as cable-like strips. It rebuilds them when the hovered or pinned source, the selection, the assignments, or a module position changes, and never every frame. Pan and zoom only update the camera, like cables (ADR-0010).
 
 #### Arc drag
@@ -127,8 +128,22 @@ Dragging the range arc on a tile knob changes the depth of one assignment.
 
 #### Not in slice 2
 
-- **Dropping an output on an inspector control.** The inspector already has **Add modulation** (slice 1), which reaches every parameter, including ones not on the tile. A drag from the canvas into the inspector would need an app-level drag in Iced: the canvas reports the drag while it is in progress, and each inspector row knows when the pointer is over it. The [spike in #186](https://github.com/brylie/LoomDSP/issues/186#issuecomment-6252045730) showed that Iced supports this, with one limit: the canvas cannot draw outside its own bounds, so the drag line over the inspector needs a window layer. [#188](https://github.com/brylie/LoomDSP/issues/188) adds the drop after slice 2, as its own spec change. The drop follows the slice 1 rules for a drop on a tile control: the same default depth and duplicate rule, rows highlight while the drag is over them, and a drop elsewhere does nothing.
+- **Dropping an output on an inspector control.** Agreed, but built after slice 2, in [#188](https://github.com/brylie/LoomDSP/issues/188). See [Inspector drop](#inspector-drop).
 - **Modulate mode.** See [Not planned for P1](#not-planned-for-p1).
+
+### Inspector drop
+
+**Status:** Agreed. Not built yet: [#188](https://github.com/brylie/LoomDSP/issues/188) builds it, after slice 2. The [spike in #186](https://github.com/brylie/LoomDSP/issues/186#issuecomment-6252045730) showed that Iced can carry the drag.
+
+Dropping an output on a parameter row in the inspector makes an assignment, the same as a drop on a tile control. *Why:* the inspector shows every parameter, including ones that are not on the tile, and dragging is faster than picking from the **Add modulation** list.
+
+- **What a drop makes.** The same as a drop on a tile control ([Making an assignment](#making-an-assignment)): the default depth, polarity following the source, on, and added after the others on that parameter. A drop that matches an assignment that already exists adds nothing, and the status bar says so. The drop is one undo step.
+- **Which rows accept a drop.** The rows of parameters that a tile drop accepts: knobs, toggles, and radio buttons. Other rows do not highlight and ignore the drop. *Why:* the two drop targets must agree, or a parameter could be modulated from one place and not the other.
+- **While dragging.** The row under the pointer is highlighted, the way a tile control is highlighted. Only one row is highlighted at a time. A drop anywhere else in the inspector does nothing. A drop on an input port still makes a cable, and a drop on a tile control follows slice 1.
+- **The drag line.** The dragged cable is drawn across the whole window with the same shader as on the canvas, so it looks the same over the inspector. A window-wide layer on top of the app draws it with a second canvas primitive. It reports no mouse interaction, so the layers below keep their cursor and events. *Why a second primitive:* iced_wgpu clips a custom primitive to its widget, so the canvas cannot draw outside itself. *Why the same shader:* a line that changes look at the canvas edge reads as two different gestures. The layer's GPU data changes only while a drag is in progress, never every frame when nothing is dragged (ADR-0010).
+- **Escape cancels any drag from an output**, a cable or an assignment, and so does the window losing focus. Nothing is made. A drag in progress takes Escape before anything else, such as pinned lines. *Why:* today Escape does not cancel a cable drag, so the only way out is to drop somewhere harmless. A drag the user can always back out of is safer on stage.
+- **Release outside the window** makes nothing.
+- **In MIDI learn mode**, dropping an output on a tile control or an inspector row makes no assignment, and nothing highlights. A drag from an output can still make a cable. *Why:* in learn mode, touching a control or row arms it for mapping ([MIDI learn](midi-learn.md)). A drop that also makes an assignment would give one gesture two meanings.
 
 ### Slice 3: the modulation matrix
 
@@ -279,6 +294,21 @@ A **Macro** module (FR-LIB-12) has one knob on its panel and one output equal to
 - [ ] An arc drag works on a knob whose arc has zero length.
 - [ ] One arc drag is one undo step.
 
+### Acceptance criteria: inspector drop
+
+**Status:** Agreed. [#188](https://github.com/brylie/LoomDSP/issues/188).
+
+- [ ] Dropping an output on a continuous parameter row makes an assignment with depth 0.25 that follows the source's polarity (test).
+- [ ] Dropping on a toggle parameter row gives depth 1 (test).
+- [ ] Dropping the same output on the same row again adds nothing, and the status bar says why (test).
+- [ ] Rows of parameters that a tile drop refuses do not highlight and ignore a drop (test).
+- [ ] Only the row under the pointer is highlighted during the drag (manual check).
+- [ ] The dragged cable looks the same over the canvas and over the inspector, and nothing is rebuilt on the GPU every frame when nothing is dragged (manual check, frame meter).
+- [ ] Escape and window focus loss cancel a cable drag and an assignment drag, and make nothing (test).
+- [ ] A release over empty canvas or outside the window makes nothing (test; manual check outside the window on macOS, Windows, and Linux).
+- [ ] In MIDI learn mode, a drop on a tile control or a row makes no assignment (test).
+- [ ] The drop is one undo step (test).
+
 ### Acceptance criteria: slice 3
 
 **Status:** Draft. [#71](https://github.com/brylie/LoomDSP/issues/71).
@@ -304,5 +334,4 @@ A **Macro** module (FR-LIB-12) has one knob on its panel and one output equal to
 ## Open points
 
 - Should an assignment be able to target another assignment's depth directly, or through a "depth" parameter on a gain module? Not needed for P1. Decide with FR-MOD-02 (P2).
-- The inspector drop ([#188](https://github.com/brylie/LoomDSP/issues/188)): should Escape cancel an output drag, how is the drag line drawn outside the canvas, which rows accept a drop, and is the drop off during MIDI learn? See [Not in slice 2](#not-in-slice-2).
 - Try the default depth of 0.25 with users once slice 1 is built.
