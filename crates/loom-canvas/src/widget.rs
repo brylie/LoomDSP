@@ -521,6 +521,11 @@ impl<Message> PatchCanvas<'_, Message> {
         let screen = relative(cursor, bounds);
 
         if !self.interactive && !matches!(event, Event::Window(_)) {
+            // Modifiers still count, so Shift held while the pop-up closes
+            // is known on the next click.
+            if let Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) = event {
+                state.modifiers = *modifiers;
+            }
             // A pop-up has the keys. Nothing may stay held or half dragged
             // behind it.
             self.release_pointer_hold(state, shell);
@@ -2113,6 +2118,25 @@ mod tests {
 
     fn click(button: mouse::Button) -> Event {
         Event::Mouse(mouse::Event::ButtonPressed(button))
+    }
+
+    /// Shift pressed while a pop-up has the keys still extends the
+    /// selection on the first click after it closes.
+    #[test]
+    fn modifiers_stay_current_while_the_canvas_is_not_interactive() {
+        let scene = chain();
+        let selected = BTreeSet::from([1]);
+        let tile = scene.module(2).unwrap().bounds().center();
+        let shift = Event::Keyboard(keyboard::Event::ModifiersChanged(keyboard::Modifiers::SHIFT));
+        let mut state = State::default();
+
+        let blocked = PatchCanvas::new(&scene, &selected, |e| e).interactive(false);
+        assert!(drive(&blocked, &mut state, &shift, tile).is_empty());
+        assert!(state.modifiers.shift());
+
+        let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+        let events = drive(&canvas, &mut state, &click(mouse::Button::Left), tile);
+        assert!(events.contains(&CanvasEvent::Select(vec![1, 2])), "{events:?}");
     }
 
     /// Pointer down reports a press and does not reset on a second press.
