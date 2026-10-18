@@ -600,7 +600,7 @@ impl<Message> PatchCanvas<'_, Message> {
                         self.emit(shell, CanvasEvent::Select(all));
                         shell.capture_event();
                     }
-                    keyboard::Key::Character("a") if !modifiers.command() && !modifiers.alt() => {
+                    keyboard::Key::Character("a") if modifiers.is_empty() => {
                         if let Some(screen) = screen {
                             self.open_browser(state.camera.to_world(screen), screen, bounds, shell);
                         }
@@ -2157,6 +2157,47 @@ mod tests {
             events.contains(&CanvasEvent::ButtonReleased { module: 1, widget: 0 }),
             "{events:?}"
         );
+    }
+
+    fn key_a(modifiers: keyboard::Modifiers) -> Event {
+        let key = keyboard::Key::Character("a".into());
+        Event::Keyboard(keyboard::Event::KeyPressed {
+            modified_key: key.clone(),
+            key,
+            physical_key: keyboard::key::Physical::Code(keyboard::key::Code::KeyA),
+            location: keyboard::Location::Standard,
+            modifiers,
+            text: None,
+            repeat: false,
+        })
+    }
+
+    /// `A` alone opens the browser at the pointer. With any modifier it does
+    /// not (module-browser.md, Rules).
+    #[test]
+    fn only_a_with_no_modifier_opens_the_browser() {
+        let scene = chain();
+        let none = BTreeSet::new();
+        let canvas = PatchCanvas::new(&scene, &none, |e| e);
+        let at = Point::new(100.0, 300.0);
+        let mut state = State::default();
+        let events = drive(&canvas, &mut state, &key_a(keyboard::Modifiers::default()), at);
+        assert!(
+            matches!(events.as_slice(), [CanvasEvent::OpenBrowser { at: p, .. }] if *p == at),
+            "{events:?}"
+        );
+        for modifiers in [
+            keyboard::Modifiers::SHIFT,
+            keyboard::Modifiers::CTRL,
+            keyboard::Modifiers::ALT,
+            keyboard::Modifiers::LOGO,
+        ] {
+            let events = drive(&canvas, &mut state, &key_a(modifiers), at);
+            assert!(
+                !events.iter().any(|e| matches!(e, CanvasEvent::OpenBrowser { .. })),
+                "{modifiers:?}: {events:?}"
+            );
+        }
     }
 
     /// Shift pressed while a pop-up has the keys still extends the
