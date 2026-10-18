@@ -216,6 +216,19 @@ impl Geometry {
                 };
                 markers.push(Shape::marker(centre, PORT_RADIUS, port.shape, fill, port.colour, 1.6));
             }
+            // Assignment count badges sit with the markers, over the
+            // cables. Their numbers are text.
+            for index in 0..module.outputs.len() {
+                if let Some(rect) = module.badge_bounds(index) {
+                    markers.push(Shape::new(
+                        rect,
+                        rect.height * 0.5,
+                        palette.modulation,
+                        Color::TRANSPARENT,
+                        0.0,
+                    ));
+                }
+            }
         }
         let tiles = shapes.len() as u32;
 
@@ -609,6 +622,7 @@ mod tests {
             hover: crate::scene::HoverText::default(),
             colour: Color::WHITE,
             shape: PortShape::Round,
+            badge: 0,
         }
     }
 
@@ -702,6 +716,27 @@ mod tests {
         );
         assert_eq!(geometry.markers(), 2 * 3 + 6);
         assert_eq!(geometry.generation, scene.generation());
+    }
+
+    /// An output that drives assignments gets one badge pill, drawn with
+    /// the markers over the cables. Its count is text.
+    #[test]
+    fn a_badge_is_one_shape_with_the_markers() {
+        let plain = ModuleView {
+            id: 1,
+            title: String::new(),
+            accent: Color::BLACK,
+            position: Point::ORIGIN,
+            inputs: vec![],
+            outputs: vec![port(), port()],
+            panel: Default::default(),
+        };
+        let mut badged = plain.clone();
+        badged.outputs[1].badge = 3;
+        let shapes = |m: ModuleView| Geometry::build(&Scene::new(vec![m], vec![]), &Palette::default());
+        let (before, after) = (shapes(plain), shapes(badged));
+        assert_eq!(after.shapes.len(), before.shapes.len() + 1);
+        assert_eq!(after.markers(), before.markers());
     }
 
     #[test]

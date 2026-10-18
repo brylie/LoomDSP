@@ -647,3 +647,25 @@ fn assignment_to_non_dsp_module_is_rejected() {
         Err(loom_core::LoomError::NoSuchParam { .. })
     ));
 }
+
+/// A whole-number parameter from 0 to 1, off, with one assignment at the
+/// depth the app gives a toggle (one step, 1.0): a unipolar source at 1
+/// turns it on, and at 0 leaves it off (modulation.md, slice 1). The
+/// button's `on` is such a parameter, and its gate is a unipolar source.
+#[test]
+fn a_unipolar_source_at_one_turns_an_off_toggle_on() {
+    fn run(source_on: f32) -> f32 {
+        let mut parts = engine();
+        let source = module(&mut parts.controller, "loom.ui.button", "on", source_on);
+        let target = module(&mut parts.controller, "loom.ui.button", "on", 0.0);
+        parts
+            .controller
+            .add_assignment_named(source, "gate", target, "on", 1.0)
+            .unwrap();
+        listen(&mut parts.controller, target, "gate");
+        parts.controller.commit().unwrap();
+        render(&mut parts, 4, 4)[3]
+    }
+    assert_eq!(run(1.0), 1.0);
+    assert_eq!(run(0.0), 0.0);
+}

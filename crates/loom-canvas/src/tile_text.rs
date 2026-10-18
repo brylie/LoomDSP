@@ -196,6 +196,7 @@ mod tests {
             hover: HoverText::default(),
             colour: Color::WHITE,
             shape: PortShape::Round,
+            badge: 0,
         }
     }
 

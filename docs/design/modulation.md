@@ -35,7 +35,7 @@ The editing and display work ships in three slices, so each one can be built and
 
 ### Slice 1: make, see, and edit
 
-**Status:** Agreed.
+**Status:** Agreed and built ([#70](https://github.com/brylie/LoomDSP/issues/70), [#20](https://github.com/brylie/LoomDSP/issues/20)).
 
 #### Making an assignment
 
@@ -69,7 +69,7 @@ The editing and display work ships in three slices, so each one can be built and
 - **When every assignment on a control is off:** a knob shows no range arc, and any control (knob, toggle, or radio button) shows a hollow ring in place of the dot: the same size and the same modulation colour, but not filled. *Why:* turning assignments off is how users compare with and without modulation. The control must still say it has assignments, or they are easy to forget and hard to find again. *Why a ring and not a dimmed dot:* a dot faded far enough to look different falls below 3:1 contrast with the tile (WCAG 2.1, 1.4.11), so it is easy to miss. The ring keeps the full contrast and differs by shape, which also works for colour-blind users. Filled for on and hollow for off is a common convention.
 - **On the source:** an output port that drives at least one assignment shows a small label with the number of assignments, next to the port, counting those that are off. It does not cover the port or its cable. *Why:* the badge says where routing starts, so it must not hide routing that is only switched off.
 - **In the inspector:** under each parameter's slider, one row per assignment, in the order the engine applies them. Each row shows the source ("module name #id: output label"), a depth slider from -1 to 1 with 0 in the middle and the depth as a signed percentage, a polarity choice with three options: **Follow source (bipolar)**, with the source's own polarity in brackets, **Unipolar**, and **Bipolar**, an on/off switch, and a remove button.
-- **What an output drives:** when the source module is selected, the inspector shows **Drives** under its parameters, one group per output that drives at least one assignment. Each line names the target and its depth, as "module name #id: parameter label, +25%", in the order the assignments were added. A line for an assignment that is off is dimmed. Clicking a line selects the target module. Depth and the other settings are edited on the target's rows, not here. *Why:* the badge says how many targets an output has, but not which. Without this list, slice 1 has no way to find them from the source side. Editing stays in one place, so the two views cannot disagree.
+- **What an output drives:** when the source module is selected, the inspector shows **Drives** under its parameters, one group per output that drives at least one assignment. Each line names the target and its depth, as "module name #id: parameter label, +25%", in the order the assignments were added. A line for an assignment that is off is dimmed and ends with "(off)". *Why the word:* dimmed text alone can fall below the contrast small text needs (WCAG 1.4.3), and the state must not rest on colour alone. Clicking a line selects the target module. Depth and the other settings are edited on the target's rows, not here. *Why:* the badge says how many targets an output has, but not which. Without this list, slice 1 has no way to find them from the source side. Editing stays in one place, so the two views cannot disagree.
 
 #### Editing and removing
 
@@ -80,7 +80,7 @@ The editing and display work ships in three slices, so each one can be built and
 
 #### Undo
 
-Undo ([#12](https://github.com/brylie/LoomDSP/issues/12), [undo.md](undo.md)) is built. The app has no screen to make or change assignments yet, so today undo restores assignments with the module that held them, with their old ids. When that screen comes (slice 1), these rules apply:
+Undo ([#12](https://github.com/brylie/LoomDSP/issues/12), [undo.md](undo.md)) is built. Undo restores assignments with the module that held them, with their old ids. For the slice 1 edits, these rules apply:
 
 - Adding, removing, and changing depth, polarity, or on/off are each an undo step. One depth slider drag is one step, not one per value, like a knob drag.
 - Undoing the removal of an assignment, or of a module with assignments, brings each assignment back in its old place in the order. *Why:* several assignments on one parameter are added in id order, and float sums depend on that order (see [Engine and API](#engine-and-api)). Restoring at the end of the list could change the sound in the last bits. The controller needs a way to put an assignment back with its old id.
@@ -266,19 +266,19 @@ A **Macro** module (FR-LIB-12) has one knob on its panel and one output equal to
 
 **Status:** Agreed. [#70](https://github.com/brylie/LoomDSP/issues/70), and [#20](https://github.com/brylie/LoomDSP/issues/20) for the arc and dot criteria.
 
-- [ ] Dragging an output onto a tile control creates an assignment that follows the source's polarity, with depth 0.25 on a continuous parameter. Dropping on an input port still makes a cable.
-- [ ] A drop on a toggle gives depth 1, and on a radio button with 3 options depth 0.5. With the toggle off, a unipolar source at 1 turns it on (test).
-- [ ] Dropping the same output on the same parameter again adds nothing, and the status bar says why.
-- [ ] **Add modulation** in the inspector creates the same assignment as a drop. Its list holds only outputs at the current patch level, and outputs that already drive the parameter are greyed out.
-- [ ] The inspector lists each parameter's assignments in engine order. Depth, polarity, and on/off can be changed there, and the remove button removes the assignment.
+- [x] Dragging an output onto a tile control creates an assignment that follows the source's polarity, with depth 0.25 on a continuous parameter. Dropping on an input port still makes a cable.
+- [x] A drop on a toggle gives depth 1, and on a radio button with 3 options depth 0.5. With the toggle off, a unipolar source at 1 turns it on (test).
+- [x] Dropping the same output on the same parameter again adds nothing, and the status bar says why.
+- [x] **Add modulation** in the inspector creates the same assignment as a drop. Its list holds only outputs at the current patch level, and outputs that already drive the parameter are greyed out.
+- [x] The inspector lists each parameter's assignments in engine order. Depth, polarity, and on/off can be changed there, and the remove button removes the assignment.
 - [x] A modulated tile knob shows one range arc. For a given base and set of assignments, the arc's ends match the table in [Seeing assignments](#seeing-assignments) (unit test on the arc geometry), including the clamp at 0 and 1, leaving out disabled assignments, and rounding the ends of a whole-number parameter (0 to 10, base 5, unipolar depth 0.25 ends at position 0.8).
 - [x] A modulated toggle or radio button shows the modulation dot.
 - [x] A knob with enabled assignments whose arc has zero length (depth 0, a whole-number knob from 0 to 10 at base 5 with depth 0.04, or a unipolar assignment at the maximum) shows the filled dot, not the ring, and no arc.
 - [x] With every assignment on a control turned off, the control shows the hollow ring and no arc.
-- [ ] Selecting a source module lists, under **Drives**, every assignment its outputs drive, with target and depth, dimming those that are off. Clicking a line selects the target module.
-- [ ] An output that drives assignments shows their number, counting those that are off. The number updates when an assignment is added or removed, or a module is deleted.
-- [ ] Changing depth, polarity, or on/off does not rebuild tiles, ports, or cables on the GPU (ADR-0010). Adding or removing an assignment may.
-- [ ] Save, then load: the same assignments appear in the inspector, in the same order.
+- [x] Selecting a source module lists, under **Drives**, every assignment its outputs drive, with target and depth, dimming those that are off. Clicking a line selects the target module.
+- [x] An output that drives assignments shows their number, counting those that are off. The number updates when an assignment is added or removed, or a module is deleted.
+- [x] Changing depth, polarity, or on/off does not rebuild tiles, ports, or cables on the GPU (ADR-0010). Adding or removing an assignment may.
+- [x] Save, then load: the same assignments appear in the inspector, in the same order.
 
 ### Acceptance criteria: slice 2
 
@@ -318,10 +318,10 @@ A **Macro** module (FR-LIB-12) has one knob on its panel and one output equal to
 
 ### Acceptance criteria: undo
 
-**Status:** Agreed. Checked when [#12](https://github.com/brylie/LoomDSP/issues/12) was built: the third is tested in `loom-app/src/undo/tests.rs`. The first two wait for a UI that makes assignments and changes their depth; undo covers them through the same snapshot difference.
+**Status:** Agreed. The third was tested when [#12](https://github.com/brylie/LoomDSP/issues/12) was built, in `loom-app/src/undo/tests.rs`. The first two are tested in `loom-app/src/main.rs` since [#70](https://github.com/brylie/LoomDSP/issues/70).
 
-- [ ] Undo removes an assignment that was just made. Redo brings it back.
-- [ ] One depth slider drag is one undo step.
+- [x] Undo removes an assignment that was just made. Redo brings it back.
+- [x] One depth slider drag is one undo step.
 - [x] Undo restores the assignments removed by deleting a module, in their old order, and the output is bit-identical to before the delete.
 
 ### Out of scope for P1

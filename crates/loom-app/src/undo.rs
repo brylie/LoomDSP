@@ -110,6 +110,7 @@ pub fn is_edit(controller: &Controller, event: &CanvasEvent) -> bool {
         CanvasEvent::Move { .. }
         | CanvasEvent::Connect { .. }
         | CanvasEvent::Disconnect(_)
+        | CanvasEvent::Assign { .. }
         | CanvasEvent::Delete(_)
         | CanvasEvent::SetControl { .. }
         | CanvasEvent::ResetControl { .. } => true,

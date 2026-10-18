@@ -26,6 +26,10 @@ pub const PADDING: f32 = 6.0;
 pub const PORT_RADIUS: f32 = 4.5;
 /// How far from a port's centre a click still hits it.
 pub const PORT_HIT_RADIUS: f32 = 9.0;
+/// Height of an output's assignment count badge.
+pub const BADGE_HEIGHT: f32 = 9.0;
+/// Size of the number on a badge, in world units.
+pub const BADGE_TEXT_SIZE: f32 = 7.0;
 
 /// How a port marker is drawn. Shape is a second cue next to colour, so
 /// signal types do not rely on colour alone (NFR-UX-03).
@@ -71,6 +75,10 @@ pub struct PortView {
     pub colour: Color,
     /// Marker shape.
     pub shape: PortShape,
+    /// On an output: how many modulation assignments it drives, counting
+    /// those that are off. 0 shows no badge (`docs/design/modulation.md`,
+    /// Seeing assignments).
+    pub badge: u32,
 }
 
 /// What a widget on a panel is. Mirrors `loom_core::WidgetKind`, so the
@@ -130,6 +138,16 @@ impl WidgetView {
     /// True for widgets the user operates (all but lights and meters).
     pub fn is_control(&self) -> bool {
         !matches!(self.kind, WidgetViewKind::Light | WidgetViewKind::Meter)
+    }
+
+    /// True for controls that take a dropped output as a modulation
+    /// assignment: knobs, toggles, and radio buttons (`docs/design/modulation.md`,
+    /// Making an assignment).
+    pub fn accepts_modulation(&self) -> bool {
+        matches!(
+            self.kind,
+            WidgetViewKind::Knob { .. } | WidgetViewKind::Toggle | WidgetViewKind::Radio { .. }
+        )
     }
 }
 
@@ -251,6 +269,20 @@ impl ModuleView {
             self.position.x + self.width(),
             self.position.y + HEADER + ROW * (index as f32 + 0.5),
         )
+    }
+
+    /// The assignment count badge of an output, if it shows one: a small
+    /// pill above and to the right of the port. It covers neither the port
+    /// nor its cable, which leaves the port to the right.
+    pub fn badge_bounds(&self, index: usize) -> Option<Rectangle> {
+        let count = self.outputs.get(index).map(|p| p.badge).filter(|&n| n > 0)?;
+        let digits = count.to_string().len() as f32;
+        let width = (digits * BADGE_TEXT_SIZE * 0.6 + 5.0).max(BADGE_HEIGHT);
+        let port = self.output_position(index);
+        Some(Rectangle::new(
+            Point::new(port.x + PORT_RADIUS + 1.0, port.y - 5.0 - BADGE_HEIGHT),
+            iced::Size::new(width, BADGE_HEIGHT),
+        ))
     }
 }
 
@@ -625,6 +657,7 @@ mod tests {
             hover: HoverText::default(),
             colour: Color::WHITE,
             shape: PortShape::Round,
+            badge: 0,
         }
     }
 
@@ -812,5 +845,29 @@ mod tests {
     #[test]
     fn snapping() {
         assert_eq!(snap(Point::new(13.0, -7.0)), Point::new(12.0, -12.0));
+    }
+
+    /// A badge sits above and right of its port: clear of the marker and of
+    /// the cable, which leaves the port to the right at the port's height.
+    #[test]
+    fn a_badge_clears_its_port_and_cable() {
+        let mut m = ModuleView {
+            id: 1,
+            title: String::new(),
+            accent: Color::BLACK,
+            position: Point::ORIGIN,
+            inputs: vec![],
+            outputs: vec![port("a"), port("b")],
+            panel: PanelView::default(),
+        };
+        assert_eq!(m.badge_bounds(0), None);
+        m.outputs[1].badge = 12;
+        let badge = m.badge_bounds(1).unwrap();
+        let port = m.output_position(1);
+        assert!(badge.x > port.x + PORT_RADIUS);
+        assert!(badge.y + badge.height < port.y);
+        // Wider than tall for two digits, and clear of the port above.
+        assert!(badge.width > badge.height);
+        assert!(badge.y > m.output_position(0).y);
     }
 }

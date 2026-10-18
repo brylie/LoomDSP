@@ -46,6 +46,7 @@ fn port_view(spec: &PortSpec) -> PortView {
         hover: HoverText::new(spec.label, spec.description, spec.name),
         colour: signal_colour(spec.signal),
         shape: signal_shape(spec.signal),
+        badge: 0,
     }
 }
 
@@ -221,17 +222,31 @@ pub fn build(controller: &Controller, positions: &BTreeMap<u32, Point>) -> Scene
     let graph = controller.graph();
     let delayed: BTreeSet<InputRef> = controller.last_report().inserted_delays().map(|(_, to)| *to).collect();
 
+    // Assignments each output drives, counting those that are off.
+    let mut badges: BTreeMap<OutputRef, u32> = BTreeMap::new();
+    for (_, a) in graph.assignments() {
+        *badges.entry(a.source).or_default() += 1;
+    }
     let modules = graph
         .nodes()
         .map(|(id, node)| {
             let d = node.descriptor;
+            let outputs = d
+                .outputs
+                .iter()
+                .enumerate()
+                .map(|(port, spec)| PortView {
+                    badge: badges.get(&OutputRef { module: id, port }).copied().unwrap_or(0),
+                    ..port_view(spec)
+                })
+                .collect();
             ModuleView {
                 id: id.0,
                 title: d.name.to_string(),
                 accent: category_colour(d.category),
                 position: positions.get(&id.0).copied().unwrap_or(Point::ORIGIN),
                 inputs: d.inputs.iter().map(port_view).collect(),
-                outputs: d.outputs.iter().map(port_view).collect(),
+                outputs,
                 panel: panel_view(d),
             }
         })
