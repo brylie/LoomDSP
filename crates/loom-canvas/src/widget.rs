@@ -59,6 +59,21 @@ pub enum CanvasEvent {
     },
     /// Remove the cable into this input.
     Disconnect(PortRef),
+    /// The range arc of a knob was dragged: change the depth of one of its
+    /// assignments by `delta`, as a share of the knob from -1 to 1
+    /// (`docs/design/modulation.md`, Arc drag). The app picks the
+    /// assignment, from `pinned` first. Sent between a
+    /// [`CanvasEvent::GestureStart`] and [`CanvasEvent::GestureEnd`].
+    DragDepth {
+        /// Module ID of the knob.
+        module: u32,
+        /// Index in the module's panel widgets.
+        widget: usize,
+        /// The output whose lines are pinned, if any.
+        pinned: Option<PortRef>,
+        /// Change of depth since the last event.
+        delta: f32,
+    },
     /// An output was dropped on a control that takes modulation: assign the
     /// output to the control's parameter (`docs/design/modulation.md`,
     /// Making an assignment). Not sent in MIDI learn mode.
@@ -278,7 +293,10 @@ impl<'a, Message> PatchCanvas<'a, Message> {
     fn end_gestures(&self, state: &mut State, shell: &mut Shell<'_, Message>) {
         if matches!(
             state.interaction,
-            Interaction::Moving { .. } | Interaction::Turning { .. } | Interaction::Wiring { .. }
+            Interaction::Moving { .. }
+                | Interaction::Turning { .. }
+                | Interaction::Wiring { .. }
+                | Interaction::Depth { .. }
         ) {
             state.interaction = Interaction::Idle;
             self.emit(shell, CanvasEvent::GestureEnd);
@@ -321,6 +339,13 @@ enum Interaction {
     Wiring {
         from: PortRef,
     },
+    /// Dragging a knob's range arc: its depth, not its value.
+    Depth {
+        module: u32,
+        widget: usize,
+        /// Pointer height on screen at the last move.
+        last_y: f32,
+    },
     Selecting {
         start: Point,
         current: Point,
@@ -348,6 +373,9 @@ struct State {
     /// True from a Tab press until the pointer moves: the focused control's
     /// hover text wins over the port or control under a resting pointer.
     focus_first: bool,
+    /// The output whose modulation lines stay on screen: its badge was
+    /// clicked (`docs/design/modulation.md`, Lines).
+    pinned: Option<PortRef>,
     /// When hover text shows (panels.md, Labels and hover text).
     hover_text: HoverTimer,
     /// The last press on a control, for double-click.
@@ -445,12 +473,12 @@ where
         let state = tree.state.downcast_ref::<State>();
         match state.interaction {
             Interaction::Panning { .. } | Interaction::Moving { .. } => mouse::Interaction::Grabbing,
-            Interaction::Turning { .. } => mouse::Interaction::ResizingVertically,
+            Interaction::Turning { .. } | Interaction::Depth { .. } => mouse::Interaction::ResizingVertically,
             Interaction::Holding { .. } => mouse::Interaction::Pointer,
             Interaction::Wiring { .. } => mouse::Interaction::Crosshair,
             Interaction::Selecting { .. } => mouse::Interaction::Crosshair,
             Interaction::Idle if cursor.is_over(layout.bounds()) => match state.hover {
-                Some(Hit::Port(_)) => mouse::Interaction::Pointer,
+                Some(Hit::Port(_) | Hit::Badge(_)) => mouse::Interaction::Pointer,
                 Some(Hit::Widget { module, widget }) => match self.widget_kind(module, widget) {
                     Some(WidgetViewKind::Knob { .. }) => mouse::Interaction::ResizingVertically,
                     _ => mouse::Interaction::Pointer,
@@ -725,6 +753,21 @@ impl<Message> PatchCanvas<'_, Message> {
                             self.emit(shell, event);
                         }
                     }
+                    Interaction::Depth { module, widget, last_y } => {
+                        let dy = screen.y - *last_y;
+                        *last_y = screen.y;
+                        // The knob's own drag scale: up raises, down lowers.
+                        let delta = knob_drag(0.5, dy, state.modifiers.shift()) - 0.5;
+                        if delta != 0.0 {
+                            let event = CanvasEvent::DragDepth {
+                                module: *module,
+                                widget: *widget,
+                                pinned: state.pinned,
+                                delta,
+                            };
+                            self.emit(shell, event);
+                        }
+                    }
                     Interaction::Holding { .. } | Interaction::Idle => {}
                     Interaction::Wiring { .. } => redraw = true,
                     Interaction::Selecting { current, .. } => {
@@ -750,7 +793,10 @@ impl<Message> PatchCanvas<'_, Message> {
                 let interaction = std::mem::take(&mut state.interaction);
                 let gesture = matches!(
                     interaction,
-                    Interaction::Moving { .. } | Interaction::Turning { .. } | Interaction::Wiring { .. }
+                    Interaction::Moving { .. }
+                        | Interaction::Turning { .. }
+                        | Interaction::Wiring { .. }
+                        | Interaction::Depth { .. }
                 );
                 let world = screen.map(|s| state.camera.to_world(s));
                 match interaction {
@@ -803,7 +849,8 @@ impl<Message> PatchCanvas<'_, Message> {
                     Interaction::Idle
                     | Interaction::Panning { .. }
                     | Interaction::Moving { .. }
-                    | Interaction::Turning { .. } => {}
+                    | Interaction::Turning { .. }
+                    | Interaction::Depth { .. } => {}
                 }
                 if gesture {
                     self.emit(shell, CanvasEvent::GestureEnd);
@@ -893,6 +940,38 @@ impl<Message> PatchCanvas<'_, Message> {
 
     fn widget_kind(&self, module: u32, widget: usize) -> Option<&WidgetViewKind> {
         Some(&self.scene.module(module)?.panel.widgets.get(widget)?.kind)
+    }
+
+    /// The modulated knob whose range ring is under `world`, if any.
+    fn range_ring_at(&self, world: Point) -> Option<(u32, usize)> {
+        let module = self.scene.modules().iter().rev().find(|m| m.bounds().contains(world))?;
+        (0..module.panel.widgets.len())
+            .find(|&w| self.on_range_ring(module.id, w, world))
+            .map(|w| (module.id, w))
+    }
+
+    /// True if `world` is on the ring around a knob where its range arc is
+    /// drawn, and the knob has an enabled assignment: there a drag changes
+    /// depth, not the value. This holds when the arc has zero length and
+    /// the knob shows the dot, so depth 0 can be dragged back out of.
+    fn on_range_ring(&self, module: u32, widget: usize, world: Point) -> bool {
+        let Some(m) = self.scene.module(module) else {
+            return false;
+        };
+        let (Some(rect), Some(WidgetViewKind::Knob { .. })) =
+            (m.widget_bounds(widget), self.widget_kind(module, widget))
+        else {
+            return false;
+        };
+        let modulated = self.values.and_then(|v| v.get(module, widget)).is_some_and(|v| {
+            matches!(
+                v.modulation,
+                crate::controls::ModulationMark::Range { .. } | crate::controls::ModulationMark::Dot
+            )
+        });
+        let d = world - crate::controls::knob_centre(rect);
+        let distance = (d.x * d.x + d.y * d.y).sqrt();
+        modulated && (crate::controls::RANGE_RING_INNER..=crate::controls::RANGE_RING_OUTER).contains(&distance)
     }
 
     fn position(&self, module: u32, widget: usize) -> f32 {
@@ -1091,6 +1170,12 @@ impl<Message> PatchCanvas<'_, Message> {
             state.focus = None;
         }
         let used = match key.as_ref() {
+            // Escape hides pinned lines before it does anything else
+            // (modulation.md, Lines).
+            keyboard::Key::Named(Named::Escape) if state.pinned.is_some() => {
+                state.pinned = None;
+                true
+            }
             keyboard::Key::Named(Named::Tab) if over || state.focus.is_some() => {
                 let Some(module) = selected.and_then(|id| self.scene.module(id)) else {
                     return false;
@@ -1216,6 +1301,25 @@ impl<Message> PatchCanvas<'_, Message> {
         let hit = self.scene.hit(world, state.hit_radius());
         state.tab_focus = false;
         state.focus_first = false;
+        // The ring of a modulated knob reaches a little past the knob's
+        // cell, so it is found before the hit test's answer is used.
+        if self.learn.is_none()
+            && matches!(hit, Hit::Widget { .. } | Hit::Module(_))
+            && let Some((module, widget)) = self.range_ring_at(world)
+        {
+            self.select_for_edit(module, shell);
+            state.focus = Some((module, widget));
+            self.begin(
+                state,
+                Interaction::Depth {
+                    module,
+                    widget,
+                    last_y: screen.y,
+                },
+                shell,
+            );
+            return;
+        }
         if !matches!(hit, Hit::Widget { .. }) {
             state.focus = None;
         }
@@ -1226,6 +1330,11 @@ impl<Message> PatchCanvas<'_, Message> {
                 // Enter acts on it next, not on a control focused earlier.
                 state.focus = Some((module, widget));
                 self.emit(shell, CanvasEvent::Learn { module, widget });
+            }
+            Hit::Badge(port) => {
+                // A click pins this output's lines, or unpins them. Only one
+                // output is pinned at a time.
+                state.pinned = if state.pinned == Some(port) { None } else { Some(port) };
             }
             Hit::Widget { module, widget } => {
                 self.select_for_edit(module, shell);
@@ -1474,6 +1583,8 @@ impl<Message> PatchCanvas<'_, Message> {
             }
         }
 
+        self.modulation_lines(state, &mut overlay);
+
         for id in self.selection {
             if let Some(module) = self.scene.module(*id) {
                 let b = module.bounds().expand(3.0);
@@ -1550,6 +1661,73 @@ impl<Message> PatchCanvas<'_, Message> {
             _ => {}
         }
         overlay
+    }
+
+    /// Modulation lines in focus (modulation.md, Lines): thin dashed lines
+    /// from a source port to its targets, for the pinned output, the output
+    /// or badge under the pointer, the control under the pointer, and the
+    /// modules in focus as for cables. The tiles that a pinned or pointed
+    /// at source drives are outlined. A pinned badge gets a ring.
+    fn modulation_lines(&self, state: &State, overlay: &mut Overlay) {
+        let p = &self.palette;
+        if let Some(port) = state.pinned
+            && let Some(badge) = self.scene.module(port.module).and_then(|m| m.badge_bounds(port.index))
+        {
+            let ring = badge.expand(1.5);
+            overlay
+                .shapes
+                .push(Shape::new(ring, ring.height * 0.5, Color::TRANSPARENT, p.text, 1.0));
+        }
+        let pointed = match state.hover {
+            Some(Hit::Port(port) | Hit::Badge(port)) if port.output => Some(port),
+            _ => None,
+        };
+        let sources: Vec<(u32, usize)> = [state.pinned, pointed]
+            .into_iter()
+            .flatten()
+            .map(|port| (port.module, port.index))
+            .collect();
+        let control = match state.hover {
+            Some(Hit::Widget { module, widget }) => Some((module, widget)),
+            _ => None,
+        };
+        let hovered = Self::hovered_module(state);
+        let module_in_focus = |id: u32| self.selection.contains(&id) || hovered == Some(id);
+        let mut outlined: Vec<u32> = Vec::new();
+        for m in self.scene.modulations() {
+            let by_source = sources.contains(&m.from);
+            let by_control = control.is_some_and(|(module, widget)| m.to == module && m.widget == Some(widget));
+            if !(by_source || by_control || module_in_focus(m.from.0) || module_in_focus(m.to)) {
+                continue;
+            }
+            let from = PortRef {
+                module: m.from.0,
+                output: true,
+                index: m.from.1,
+            };
+            let (Some(start), Some(end)) = (self.scene.port_position(from), self.scene.modulation_end(m)) else {
+                continue;
+            };
+            overlay.cables.push(
+                Cable::new(start, end, p.modulation, p.modulation, true)
+                    .thin()
+                    .focused(),
+            );
+            if (by_source || by_control) && !outlined.contains(&m.to) {
+                outlined.push(m.to);
+            }
+        }
+        for id in outlined {
+            if let Some(module) = self.scene.module(id) {
+                overlay.shapes.push(Shape::new(
+                    module.bounds().expand(3.0),
+                    7.0,
+                    Color::TRANSPARENT,
+                    p.modulation,
+                    1.2,
+                ));
+            }
+        }
     }
 
     fn draw_text<Renderer>(&self, state: &State, values: &PanelValues, renderer: &mut Renderer, bounds: Rectangle)
@@ -2786,6 +2964,198 @@ mod tests {
         let canvas = learning(&scene, &none, &learn);
         let (events, _) = drop_on(&canvas, &scene, 0);
         assert_eq!(events, vec![CanvasEvent::GestureEnd]);
+    }
+
+    /// The assign scene with one assignment from the source output to the
+    /// knob on tile 2, and the knob showing its range.
+    fn modulated_scene() -> (Scene, PanelValues) {
+        let mut source = module(1, 0.0);
+        source.outputs[0].badge = 1;
+        let target = ModuleView {
+            panel: panel(),
+            ..module(2, 300.0)
+        };
+        let scene = Scene::new(vec![source, target], Vec::new()).with_modulations(vec![crate::scene::ModulationView {
+            from: (1, 0),
+            to: 2,
+            widget: Some(0),
+        }]);
+        let mut values = PanelValues::new();
+        values.set(
+            2,
+            0,
+            crate::controls::WidgetValue {
+                position: 0.5,
+                modulation: crate::controls::ModulationMark::Range { low: 0.5, high: 0.75 },
+                ..Default::default()
+            },
+        );
+        (scene, values)
+    }
+
+    fn escape() -> Event {
+        let key = keyboard::Key::Named(keyboard::key::Named::Escape);
+        Event::Keyboard(keyboard::Event::KeyPressed {
+            modified_key: key.clone(),
+            key,
+            physical_key: keyboard::key::Physical::Code(keyboard::key::Code::Escape),
+            location: keyboard::Location::Standard,
+            modifiers: keyboard::Modifiers::default(),
+            text: None,
+            repeat: false,
+        })
+    }
+
+    /// Lines show while the pointer is on the source output, its badge, or
+    /// the modulated control, and not elsewhere. A badge click pins them;
+    /// a second click or Escape unpins, and Escape is used up only then.
+    #[test]
+    fn modulation_lines_follow_hover_and_the_pinned_badge() {
+        let (scene, values) = modulated_scene();
+        let none = BTreeSet::new();
+        let canvas = PatchCanvas::new(&scene, &none, |e| e).values(&values);
+        let lines = |state: &State| canvas.overlay(state).cables.len();
+        let badge = scene.module(1).unwrap().badge_bounds(0).unwrap().center();
+        assert_eq!(scene.hit(badge, PORT_HIT_RADIUS), Hit::Badge(OUT));
+        let knob = scene.module(2).unwrap().widget_bounds(0).unwrap().center();
+        let port = scene.port_position(OUT).unwrap();
+        let empty = Point::new(200.0, 400.0);
+
+        let mut state = State::default();
+        for (at, shown) in [(port, 1), (badge, 1), (knob, 1), (empty, 0)] {
+            drive(&canvas, &mut state, &moved(at), at);
+            assert_eq!(lines(&state), shown, "pointer at {at:?}");
+        }
+
+        drive(&canvas, &mut state, &moved(badge), badge);
+        assert!(drive(&canvas, &mut state, &click(mouse::Button::Left), badge).is_empty());
+        drive(&canvas, &mut state, &released(), badge);
+        drive(&canvas, &mut state, &moved(empty), empty);
+        assert_eq!(state.pinned, Some(OUT));
+        assert_eq!(lines(&state), 1, "pinned lines stay");
+
+        let mut messages = Vec::new();
+        let mut shell = Shell::new(&mut messages);
+        let bounds = Rectangle::new(Point::ORIGIN, Size::new(800.0, 600.0));
+        canvas.handle(
+            &mut state,
+            &escape(),
+            bounds,
+            mouse::Cursor::Available(empty),
+            &mut shell,
+        );
+        assert_eq!(shell.event_status(), iced::event::Status::Captured);
+        assert_eq!(state.pinned, None);
+        assert_eq!(lines(&state), 0);
+        let mut shell = Shell::new(&mut messages);
+        canvas.handle(
+            &mut state,
+            &escape(),
+            bounds,
+            mouse::Cursor::Available(empty),
+            &mut shell,
+        );
+        assert_eq!(
+            shell.event_status(),
+            iced::event::Status::Ignored,
+            "with nothing pinned the app sees Escape"
+        );
+
+        // Two clicks on the badge pin and unpin.
+        drive(&canvas, &mut state, &click(mouse::Button::Left), badge);
+        drive(&canvas, &mut state, &click(mouse::Button::Left), badge);
+        assert_eq!(state.pinned, None);
+    }
+
+    /// A drag on the ring around a modulated knob changes depth, up to
+    /// raise it, as one gesture, and carries the pinned output. A drag on
+    /// the knob body still turns it.
+    #[test]
+    fn dragging_the_range_ring_changes_depth() {
+        let (scene, values) = modulated_scene();
+        let none = BTreeSet::new();
+        let canvas = PatchCanvas::new(&scene, &none, |e| e).values(&values);
+        let rect = scene.module(2).unwrap().widget_bounds(0).unwrap();
+        let centre = crate::controls::knob_centre(rect);
+        let ring = Point::new(centre.x, centre.y - 12.0);
+
+        let mut state = State {
+            pinned: Some(OUT),
+            ..State::default()
+        };
+        let down = drive(&canvas, &mut state, &click(mouse::Button::Left), ring);
+        assert!(down.contains(&CanvasEvent::GestureStart), "{down:?}");
+        let up = Point::new(ring.x, ring.y - 20.0);
+        let moved_events = drive(&canvas, &mut state, &moved(up), up);
+        let [
+            CanvasEvent::DragDepth {
+                module: 2,
+                widget: 0,
+                pinned: Some(pinned),
+                delta,
+            },
+        ] = moved_events.as_slice()
+        else {
+            panic!("{moved_events:?}");
+        };
+        assert_eq!(*pinned, OUT);
+        assert!((delta - 0.1).abs() < 1e-6, "{delta}");
+        assert_eq!(
+            drive(&canvas, &mut state, &released(), up),
+            vec![CanvasEvent::GestureEnd]
+        );
+
+        let mut state = State::default();
+        drive(&canvas, &mut state, &click(mouse::Button::Left), centre);
+        let up = Point::new(centre.x, centre.y - 20.0);
+        let turned = drive(&canvas, &mut state, &moved(up), up);
+        assert!(
+            matches!(turned.as_slice(), [CanvasEvent::SetControl { .. }]),
+            "{turned:?}"
+        );
+    }
+
+    /// A knob whose arc has zero length shows the dot, and its ring still
+    /// takes a depth drag, so depth 0 can be dragged back out of.
+    #[test]
+    fn a_zero_length_arc_still_takes_a_depth_drag() {
+        let (scene, _) = modulated_scene();
+        let mut values = PanelValues::new();
+        values.set(
+            2,
+            0,
+            crate::controls::WidgetValue {
+                modulation: crate::controls::ModulationMark::Dot,
+                ..Default::default()
+            },
+        );
+        let none = BTreeSet::new();
+        let canvas = PatchCanvas::new(&scene, &none, |e| e).values(&values);
+        let centre = crate::controls::knob_centre(scene.module(2).unwrap().widget_bounds(0).unwrap());
+        let mut state = State::default();
+        drive(
+            &canvas,
+            &mut state,
+            &click(mouse::Button::Left),
+            Point::new(centre.x + 12.0, centre.y),
+        );
+        assert!(matches!(state.interaction, Interaction::Depth { .. }));
+    }
+
+    /// A knob with no enabled assignment has no ring to grab: a press there
+    /// turns the knob.
+    #[test]
+    fn an_unmodulated_knob_has_no_range_ring() {
+        let (scene, _) = modulated_scene();
+        let values = PanelValues::new();
+        let none = BTreeSet::new();
+        let canvas = PatchCanvas::new(&scene, &none, |e| e).values(&values);
+        let centre = crate::controls::knob_centre(scene.module(2).unwrap().widget_bounds(0).unwrap());
+        // Beside the knob, inside its cell, where the ring would be.
+        let ring = Point::new(centre.x + 12.0, centre.y);
+        let mut state = State::default();
+        drive(&canvas, &mut state, &click(mouse::Button::Left), ring);
+        assert!(matches!(state.interaction, Interaction::Turning { .. }));
     }
 
     /// A drag that starts on an input never assigns.

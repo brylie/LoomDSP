@@ -3,7 +3,7 @@
 How any output modulates any parameter without a cable, and how users make, see, and edit those assignments.
 
 - **Kind:** living specification.
-- **Status:** Editing and display [slice 1](#slice-1-make-see-and-edit) (make, see, and edit) and its [undo rules](#undo) are Agreed ([#70](https://github.com/brylie/LoomDSP/issues/70), [#20](https://github.com/brylie/LoomDSP/issues/20)). [Slice 2](#slice-2-live-value-and-lines) (live value, lines, arc drag) is Agreed ([#151](https://github.com/brylie/LoomDSP/issues/151), not built yet, [#172](https://github.com/brylie/LoomDSP/issues/172)). The [inspector drop](#inspector-drop) is Agreed and not built yet ([#188](https://github.com/brylie/LoomDSP/issues/188)). Slice 3 (the matrix) is Draft ([#71](https://github.com/brylie/LoomDSP/issues/71)). The [engine rules](#rules), [engine and API](#engine-and-api), and [engine acceptance criteria](#acceptance-criteria-engine) are Agreed and built ([#19](https://github.com/brylie/LoomDSP/issues/19)). [Parameter mapping](#parameter-mapping) is Agreed.
+- **Status:** Editing and display [slice 1](#slice-1-make-see-and-edit) (make, see, and edit) and its [undo rules](#undo) are Agreed ([#70](https://github.com/brylie/LoomDSP/issues/70), [#20](https://github.com/brylie/LoomDSP/issues/20)). [Slice 2](#slice-2-live-value-and-lines) (live value, lines, arc drag) is Agreed and built ([#151](https://github.com/brylie/LoomDSP/issues/151), [#172](https://github.com/brylie/LoomDSP/issues/172)). The [inspector drop](#inspector-drop) is Agreed and not built yet ([#188](https://github.com/brylie/LoomDSP/issues/188)). Slice 3 (the matrix) is Draft ([#71](https://github.com/brylie/LoomDSP/issues/71)). The [engine rules](#rules), [engine and API](#engine-and-api), and [engine acceptance criteria](#acceptance-criteria-engine) are Agreed and built ([#19](https://github.com/brylie/LoomDSP/issues/19)). [Parameter mapping](#parameter-mapping) is Agreed.
 - **Decision behind it:** [ADR-0014](../adr/0014-modulation-without-cables.md) (modulation without cables). Builds on [ADR-0013](../adr/0013-modules-carry-their-own-panel.md) (panels) and [ADR-0007](../adr/0007-polymorphic-signal-model.md) (signals).
 - **Requirements:** FR-MOD-01 to FR-MOD-08, FR-LIB-12.
 - **Issues:** [#19](https://github.com/brylie/LoomDSP/issues/19) (built-in modulation), [#20](https://github.com/brylie/LoomDSP/issues/20) (range arcs and dots), [#66](https://github.com/brylie/LoomDSP/issues/66) (parameter mapping), [#70](https://github.com/brylie/LoomDSP/issues/70) (making and editing assignments), [#71](https://github.com/brylie/LoomDSP/issues/71) (matrix), [#151](https://github.com/brylie/LoomDSP/issues/151) and [#172](https://github.com/brylie/LoomDSP/issues/172) (slice 2), [#12](https://github.com/brylie/LoomDSP/issues/12) (undo).
@@ -89,7 +89,7 @@ Undo ([#12](https://github.com/brylie/LoomDSP/issues/12), [undo.md](undo.md)) is
 
 ### Slice 2: live value and lines
 
-**Status:** Agreed ([#151](https://github.com/brylie/LoomDSP/issues/151)). Not built yet: [#172](https://github.com/brylie/LoomDSP/issues/172) builds it.
+**Status:** Agreed ([#151](https://github.com/brylie/LoomDSP/issues/151)) and built ([#172](https://github.com/brylie/LoomDSP/issues/172)).
 
 #### Live value
 
@@ -100,7 +100,7 @@ A dot on a modulated knob shows the value the engine gives the parameter (FR-MOD
 - **Owner check.** Each cell stores the module ID and parameter index that own it, checked before and after reading, as display values do. *Why:* after a recompile a cell may move to another parameter, and the old knob must not show the new value.
 - **Which frame.** The last frame of the block. *Why:* it is the value the parameter has when the block ends, which matches display values. An average would hide fast sources, and a peak would show values the parameter only touches. At audio rate the dot jumps from frame to frame. That is honest, and the range arc already shows the span.
 - **Which value.** The value after step 1 of rule 12, mapped to the control's 0 to 1 position with `ParamSpec::normalize`. So the dot is the engine's modulated value before any module input adds to it, the same thing the range arc shows.
-- **Drawing.** The UI reads the values once per drawn frame, for visible knobs with enabled assignments. The dot positions go into the canvas's `PanelValues` buffer, so a moving dot never rebuilds tiles, ports, or cables (ADR-0010).
+- **Drawing.** The UI reads the values once per drawn frame, for knobs with enabled assignments, while the patch has one. The dot positions go into the canvas's `PanelValues` buffer, so a moving dot never rebuilds tiles, ports, or cables (ADR-0010).
 - **No dot** when every assignment on the knob is off, or when the parameter has no cell. Toggles and radio buttons show no live value: their modulation dot already says they are modulated, and a flickering state on a small control is hard to read.
 
 #### Lines
@@ -284,16 +284,16 @@ A **Macro** module (FR-LIB-12) has one knob on its panel and one output equal to
 
 <a id="acceptance-criteria-slices-2-and-3"></a>
 
-**Status:** Agreed ([#151](https://github.com/brylie/LoomDSP/issues/151)). [#172](https://github.com/brylie/LoomDSP/issues/172).
+**Status:** Agreed ([#151](https://github.com/brylie/LoomDSP/issues/151)). Checked in [#172](https://github.com/brylie/LoomDSP/issues/172): engine tests in `loom-modules/tests/modulation.rs`, canvas tests in `loom-canvas/src/widget.rs` and `controls.rs`, app tests in `loom-app/src/main.rs` and `scene.rs`.
 
-- [ ] Modulated knobs show the live value: the last frame of the block, before module inputs.
-- [ ] Publishing and reading live values does not allocate or wait on the audio thread (`tests/no_alloc.rs`).
-- [ ] A patch with more modulated parameters than table cells sounds the same, shows no dot on the extra knobs, and reports one warning.
-- [ ] After a recompile moves a cell to another parameter, the old knob never shows the new parameter's value.
-- [ ] Hovering an output port, its badge, or a modulated control draws the lines. Clicking the badge pins them until it is clicked again, another badge is clicked, or Escape is pressed.
-- [ ] Dragging the arc changes the pinned source's assignment, then the selected module's, then the only enabled one. With several and none in focus, it changes nothing and the status bar says why.
-- [ ] An arc drag works on a knob whose arc has zero length.
-- [ ] One arc drag is one undo step.
+- [x] Modulated knobs show the live value: the last frame of the block, before module inputs.
+- [x] Publishing and reading live values does not allocate or wait on the audio thread (`tests/no_alloc.rs`).
+- [x] A patch with more modulated parameters than table cells sounds the same, shows no dot on the extra knobs, and reports one warning.
+- [x] After a recompile moves a cell to another parameter, the old knob never shows the new parameter's value.
+- [x] Hovering an output port, its badge, or a modulated control draws the lines. Clicking the badge pins them until it is clicked again, another badge is clicked, or Escape is pressed.
+- [x] Dragging the arc changes the pinned source's assignment, then the selected module's, then the only enabled one. With several and none in focus, it changes nothing and the status bar says why.
+- [x] An arc drag works on a knob whose arc has zero length.
+- [x] One arc drag is one undo step.
 
 ### Acceptance criteria: inspector drop
 

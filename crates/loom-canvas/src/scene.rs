@@ -313,6 +313,19 @@ pub struct CableView {
     pub delayed: bool,
 }
 
+/// One modulation assignment, as the canvas draws its line
+/// (`docs/design/modulation.md`, Lines).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModulationView {
+    /// Source module and output index.
+    pub from: (u32, usize),
+    /// Target module.
+    pub to: u32,
+    /// The control on the target's panel bound to the parameter, if it has
+    /// one. Without one, the line ends at the target's title.
+    pub widget: Option<usize>,
+}
+
 /// Everything the canvas draws.
 ///
 /// Each change gives the scene a new generation number. The canvas rebuilds
@@ -323,6 +336,7 @@ pub struct Scene {
     modules: Vec<ModuleView>,
     index: HashMap<u32, usize>,
     cables: Vec<CableView>,
+    modulations: Vec<ModulationView>,
     generation: u64,
 }
 
@@ -347,6 +361,7 @@ impl Scene {
             modules,
             index,
             cables,
+            modulations: Vec::new(),
             generation: next_generation(),
         }
     }
@@ -364,6 +379,37 @@ impl Scene {
     /// All cables.
     pub fn cables(&self) -> &[CableView] {
         &self.cables
+    }
+
+    /// Sets the modulation assignments, for their lines.
+    pub fn with_modulations(mut self, modulations: Vec<ModulationView>) -> Self {
+        self.modulations = modulations;
+        self.generation = next_generation();
+        self
+    }
+
+    /// All modulation assignments.
+    pub fn modulations(&self) -> &[ModulationView] {
+        &self.modulations
+    }
+
+    /// Where a modulation line ends: on its control, or at the target's
+    /// title when the parameter has no control on the panel.
+    pub fn modulation_end(&self, modulation: &ModulationView) -> Option<Point> {
+        let module = self.module(modulation.to)?;
+        let control = modulation.widget.and_then(|w| {
+            let rect = module.widget_bounds(w)?;
+            Some(match module.panel.widgets[w].kind {
+                WidgetViewKind::Knob { .. } => crate::controls::knob_centre(rect),
+                _ => rect.center(),
+            })
+        });
+        Some(control.unwrap_or_else(|| {
+            Point::new(
+                module.position.x + module.width() * 0.5,
+                module.position.y + HEADER * 0.5,
+            )
+        }))
     }
 
     /// One module by ID.
@@ -409,6 +455,19 @@ impl Scene {
     /// What is under a world point. Ports win over tiles, because they sit
     /// on the tile edges. Tiles drawn later win over earlier ones.
     pub fn hit(&self, point: Point, port_radius: f32) -> Hit {
+        // Badges sit just outside their tile, beside a port. They win, so a
+        // click on one never starts a cable.
+        for module in self.modules.iter().rev() {
+            for index in 0..module.outputs.len() {
+                if module.badge_bounds(index).is_some_and(|b| b.contains(point)) {
+                    return Hit::Badge(PortRef {
+                        module: module.id,
+                        output: true,
+                        index,
+                    });
+                }
+            }
+        }
         let r2 = port_radius * port_radius;
         let near = |p: Point| {
             let d = point - p;
@@ -550,6 +609,8 @@ pub enum Hit {
     },
     /// A cable, by index in [`Scene::cables`].
     Cable(usize),
+    /// The assignment count badge of an output.
+    Badge(PortRef),
     /// Empty canvas.
     Nothing,
 }

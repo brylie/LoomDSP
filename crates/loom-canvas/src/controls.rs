@@ -27,6 +27,10 @@ const KNOB_FOCUS_TOP: f32 = 15.0;
 const KNOB_FOCUS_BOTTOM: f32 = 12.5;
 /// Corner radius of a knob's focus ring.
 const KNOB_FOCUS_CORNER: f32 = 10.0;
+/// Where a press grabs a knob's range arc instead of the knob: from just
+/// outside its ring to a little past the arc.
+pub(crate) const RANGE_RING_INNER: f32 = KNOB_RADIUS + 1.5;
+pub(crate) const RANGE_RING_OUTER: f32 = RANGE_RADIUS + 3.0;
 /// Radius of the live value dot on a knob's range arc.
 const LIVE_RADIUS: f32 = 2.25;
 /// Radius of the modulation dot, and of the ring shown when every

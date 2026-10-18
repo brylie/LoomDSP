@@ -226,6 +226,9 @@ struct App {
     touched: BTreeSet<(u32, usize)>,
     /// The parameter whose **Add modulation** list is open.
     adding: Option<(u32, usize)>,
+    /// During an arc drag: the assignment it changes, once picked, or
+    /// `Some(None)` when none fits and the drag does nothing.
+    depth_drag: Option<Option<AssignmentId>>,
 }
 
 /// Where a patch comes from.
@@ -417,6 +420,7 @@ impl App {
             history_off: false,
             touched: BTreeSet::new(),
             adding: None,
+            depth_drag: None,
         };
         // A patch just loaded is the one on disk.
         app.history.mark_saved();
@@ -757,7 +761,8 @@ impl App {
                 .unwrap_or_default();
             shown.insert(widget, (level.rms, level.peak));
         }
-        scene::update_panel_values(&mut self.values, &self.controller, &shown);
+        let dragging = self.depth_drag.flatten();
+        scene::update_panel_values_dragging(&mut self.values, &self.controller, &shown, dragging);
     }
 
     /// Takes the latest dropout count for the stats bar warning. Runs on
@@ -854,6 +859,46 @@ impl App {
             }
             Err(e) => self.status = format!("error: {e}"),
         }
+    }
+
+    /// One step of an arc drag. The first picks the assignment, by the
+    /// spec's order; the rest of the drag keeps it.
+    fn drag_depth(&mut self, module: u32, widget: usize, pinned: Option<loom_canvas::PortRef>, delta: f32) {
+        let Some((param, _, _)) = scene::control_param(&self.controller, module, widget) else {
+            return;
+        };
+        let graph = self.controller.graph();
+        let picked = *self.depth_drag.get_or_insert_with(|| {
+            let pinned = pinned.map(|p| OutputRef {
+                module: ModuleId(p.module),
+                port: p.index,
+            });
+            let selected = (self.selection.len() == 1)
+                .then(|| self.selection.iter().next().map(|&id| ModuleId(id)))
+                .flatten();
+            match modulation::drag_target(graph, ModuleId(module), param, pinned, selected) {
+                Ok(id) => Some(id),
+                Err(why) => {
+                    self.status = why.to_string();
+                    None
+                }
+            }
+        });
+        let Some(id) = picked else { return };
+        let Some(a) = self.controller.graph().assignment(id).copied() else {
+            return;
+        };
+        match self.controller.set_assignment_depth(id, a.depth + delta) {
+            Ok(depth) => {
+                self.status = format!(
+                    "{}: depth {}",
+                    modulation::source_name(self.controller.graph(), a.source),
+                    modulation::depth_text(depth)
+                );
+            }
+            Err(e) => self.status = format!("error: {e}"),
+        }
+        self.refresh_values();
     }
 
     fn report(&mut self) {
@@ -1316,6 +1361,9 @@ impl App {
                 self.begin_edit();
             }
             CanvasEvent::GestureEnd => {
+                if self.depth_drag.take().is_some() {
+                    self.refresh_values();
+                }
                 self.gesture = false;
                 self.record();
                 self.history_back_on();
@@ -1354,6 +1402,12 @@ impl App {
                     self.assign(source, ModuleId(module), index);
                 }
             }
+            CanvasEvent::DragDepth {
+                module,
+                widget,
+                pinned,
+                delta,
+            } => self.drag_depth(module, widget, pinned, delta),
             CanvasEvent::Disconnect(port) => {
                 let input = InputRef {
                     module: ModuleId(port.module),
@@ -2184,5 +2238,155 @@ mod tests {
             .load_into(&mut reloaded.controller)
             .unwrap();
         assert_eq!(rows(&reloaded.controller), before);
+    }
+
+    /// An envelope and a sine both on the filter cutoff.
+    fn two_sources(app: &mut App) -> (ModuleId, ModuleId, ModuleId, usize, usize) {
+        let (env, filter, cutoff, widget) = env_and_filter(app);
+        let sine = app.controller.add_module("loom.osc.sine").unwrap();
+        app.commit();
+        drop_env(app, env, filter, widget);
+        let _ = app.update(Message::Assign {
+            source: OutputRef { module: sine, port: 0 },
+            module: filter.0,
+            index: cutoff,
+        });
+        (env, sine, filter, cutoff, widget)
+    }
+
+    fn out(module: ModuleId) -> OutputRef {
+        OutputRef { module, port: 0 }
+    }
+
+    /// The arc drag picks the pinned source, then the selected module's
+    /// output, then the only enabled assignment, and otherwise nothing.
+    #[test]
+    fn the_arc_drag_picks_its_assignment_in_order() {
+        let mut app = app();
+        let (env, sine, filter, cutoff, _) = two_sources(&mut app);
+        let graph = app.controller.graph();
+        let id_of = |source: OutputRef| {
+            graph
+                .assignments()
+                .find(|(_, a)| a.source == source)
+                .map(|(id, _)| id)
+                .unwrap()
+        };
+        let pick = |pinned, selected| modulation::drag_target(graph, filter, cutoff, pinned, selected);
+        assert_eq!(pick(Some(out(sine)), Some(env)), Ok(id_of(out(sine))));
+        assert_eq!(pick(None, Some(env)), Ok(id_of(out(env))));
+        // A pinned output that does not drive this knob falls through.
+        assert_eq!(pick(Some(out(filter)), Some(sine)), Ok(id_of(out(sine))));
+        assert!(pick(None, Some(filter)).is_err(), "two enabled: none fits");
+        assert!(pick(None, None).unwrap_err().contains("pin one"));
+
+        // With one of them off, the other is the only enabled one.
+        let (sine_id, env_id) = (id_of(out(sine)), id_of(out(env)));
+        app.controller.set_assignment_enabled(sine_id, false).unwrap();
+        let graph = app.controller.graph();
+        assert_eq!(modulation::drag_target(graph, filter, cutoff, None, None), Ok(env_id));
+    }
+
+    /// Two assignments from the same output (only possible in a hand-written
+    /// patch) make the drag change nothing, even when that output is pinned.
+    #[test]
+    fn a_duplicate_source_is_not_a_drag_target() {
+        let mut app = app();
+        let (env, filter, cutoff, _) = env_and_filter(&mut app);
+        for depth in [0.1, 0.2] {
+            app.controller.add_assignment(out(env), filter, cutoff, depth).unwrap();
+        }
+        let graph = app.controller.graph();
+        for (pinned, selected) in [(Some(out(env)), None), (None, Some(env))] {
+            let why = modulation::drag_target(graph, filter, cutoff, pinned, selected).unwrap_err();
+            assert!(why.contains("inspector"), "{why}");
+        }
+    }
+
+    /// One arc drag changes one assignment's depth as one undo step. While
+    /// it lasts, the knob's arc shows only that assignment.
+    #[test]
+    fn an_arc_drag_is_one_step_and_shows_only_its_assignment() {
+        let mut app = app();
+        let (_, sine, filter, _, widget) = two_sources(&mut app);
+        let steps = app.history.len();
+        let pinned = Some(loom_canvas::PortRef {
+            module: sine.0,
+            output: true,
+            index: 0,
+        });
+        let drag = |delta| {
+            Message::Canvas(CanvasEvent::DragDepth {
+                module: filter.0,
+                widget,
+                pinned,
+                delta,
+            })
+        };
+        let mark = |app: &App| app.values.get(filter.0, widget).unwrap().modulation;
+        let both = mark(&app);
+        let _ = app.update(Message::Canvas(CanvasEvent::GestureStart));
+        let _ = app.update(drag(0.1));
+        let _ = app.update(drag(0.1));
+        let during = mark(&app);
+        assert_ne!(during, both, "the arc shows the dragged assignment alone");
+        let _ = app.update(Message::Canvas(CanvasEvent::GestureEnd));
+        assert_eq!(app.depth_drag, None);
+        let depth = |app: &App| {
+            app.controller
+                .graph()
+                .assignments()
+                .find(|(_, a)| a.source == out(sine))
+                .unwrap()
+                .1
+                .depth
+        };
+        assert!((depth(&app) - 0.45).abs() < 1e-6, "{}", depth(&app));
+        assert!(app.status.contains("+45%"), "{}", app.status);
+        assert_eq!(app.history.len(), steps + 1);
+        app.undo();
+        assert_eq!(depth(&app), 0.25);
+    }
+
+    /// With several sources and none in focus, a drag changes nothing and
+    /// the status bar says why.
+    #[test]
+    fn an_arc_drag_with_no_choice_changes_nothing() {
+        let mut app = app();
+        let (_, _, filter, _, widget) = two_sources(&mut app);
+        app.selection.clear();
+        let before = assignments(&app);
+        let steps = app.history.len();
+        let _ = app.update(Message::Canvas(CanvasEvent::GestureStart));
+        let _ = app.update(Message::Canvas(CanvasEvent::DragDepth {
+            module: filter.0,
+            widget,
+            pinned: None,
+            delta: 0.2,
+        }));
+        let _ = app.update(Message::Canvas(CanvasEvent::GestureEnd));
+        assert_eq!(assignments(&app), before);
+        assert_eq!(app.history.len(), steps);
+        assert!(app.status.contains("Several sources"), "{}", app.status);
+    }
+
+    /// The scene has one line per assignment, ending on its control.
+    #[test]
+    fn the_scene_has_a_line_per_assignment() {
+        let mut app = app();
+        let (env, sine, filter, _, widget) = two_sources(&mut app);
+        let lines: Vec<_> = app
+            .scene
+            .modulations()
+            .iter()
+            .map(|m| (m.from, m.to, m.widget))
+            .collect();
+        assert_eq!(
+            lines,
+            vec![
+                ((env.0, 0), filter.0, Some(widget)),
+                ((sine.0, 0), filter.0, Some(widget))
+            ]
+        );
     }
 }

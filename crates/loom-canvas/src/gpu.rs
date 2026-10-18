@@ -125,6 +125,12 @@ impl Cable {
         }
     }
 
+    /// Draws the cable at a third of the usual width: a modulation line.
+    pub fn thin(mut self) -> Self {
+        self.params[0] = CABLE_WIDTH / 3.0;
+        self
+    }
+
     /// Draws the cable at full opacity, in front of the tiles.
     pub fn focused(mut self) -> Self {
         self.params[3] = 1.0;

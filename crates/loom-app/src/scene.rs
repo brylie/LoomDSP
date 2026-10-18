@@ -2,8 +2,8 @@
 
 use iced::{Color, Point};
 use loom_canvas::{
-    CableView, HoverText, ModuleView, PanelValues, PanelView, PortShape, PortView, Scene, WidgetValue, WidgetView,
-    WidgetViewKind,
+    CableView, HoverText, ModulationView, ModuleView, PanelValues, PanelView, PortShape, PortView, Scene, WidgetValue,
+    WidgetView, WidgetViewKind,
 };
 use loom_core::{
     Controller, InputRef, ModuleDescriptor, ModuleId, OutputRef, ParamSpec, PortSpec, SignalType, WidgetKind,
@@ -132,7 +132,24 @@ pub fn update_panel_values(
     controller: &Controller,
     shown: &BTreeMap<(u32, usize), (f32, f32)>,
 ) {
-    let reaches = crate::modulation::reaches(controller.graph());
+    update_panel_values_dragging(values, controller, shown, None);
+}
+
+/// As [`update_panel_values`], while the arc of a knob is dragged: that
+/// knob's arc shows only `dragging`, the assignment being changed, so the
+/// user sees what moves (`docs/design/modulation.md`, Arc drag).
+pub fn update_panel_values_dragging(
+    values: &mut PanelValues,
+    controller: &Controller,
+    shown: &BTreeMap<(u32, usize), (f32, f32)>,
+    dragging: Option<loom_core::AssignmentId>,
+) {
+    let mut reaches = crate::modulation::reaches(controller.graph());
+    if let Some(a) = dragging.and_then(|id| controller.graph().assignment(id))
+        && let Some(reach) = crate::modulation::reach(controller.graph(), a)
+    {
+        reaches.insert((a.target, a.param), vec![reach]);
+    }
     for (id, node) in controller.graph().nodes() {
         let d = node.descriptor;
         for (index, w) in d.panel.widgets.iter().enumerate() {
@@ -273,7 +290,21 @@ pub fn build(controller: &Controller, positions: &BTreeMap<u32, Point>) -> Scene
         })
         .collect();
 
-    Scene::new(modules, cables)
+    // One line per assignment, to the control bound to its parameter.
+    let modulations = graph
+        .assignments()
+        .filter_map(|(_, a)| {
+            let d = graph.node(a.target)?.descriptor;
+            let name = d.params.get(a.param)?.name;
+            Some(ModulationView {
+                from: (a.source.module.0, a.source.port),
+                to: a.target.0,
+                widget: d.panel.widgets.iter().position(|w| w.is_control() && w.bind == name),
+            })
+        })
+        .collect();
+
+    Scene::new(modules, cables).with_modulations(modulations)
 }
 
 #[cfg(test)]
