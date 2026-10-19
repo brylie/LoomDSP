@@ -61,7 +61,7 @@ We will know the decision works when:
 - `loom-app --dump-ui` shows every modelled panel, so a person or an agent can check a patch without a window.
 - The widget code of a modelled panel makes no decisions. To review what a panel shows, you read its model builder.
 - Opening and closing the browser, or adding and removing a modulation assignment, never resets or moves widget state such as the canvas camera, a slider drag, or an open pick list.
-- `loom-app` holds no UI framework code of its own, only models and the functions that draw them.
+- We use Iced rather than build our own version of it: `loom-app` adds no generic UI layer over Iced (no second widget tree, no diffing, no identity system). Custom widgets and test harnesses are fine.
 - Model types use no Iced types (true today), so moving them to their own crate stays a simple move.
 
 ## Consequences
