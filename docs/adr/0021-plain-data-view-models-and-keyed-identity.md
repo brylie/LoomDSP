@@ -10,7 +10,7 @@
 
 ## Context
 
-The desktop app (`crates/loom-app`) uses Iced 0.14. App tests need to check what the user sees: the inspector rows, the tile values, the status bar. Before PR #219 (issue #206) they could only send events and look for text in the widget tree. PR #219 split the inspector into a plain-data model (`inspector.rs`) that is turned into widgets, and added `App::ui_snapshot()` and `loom-app --dump-ui`, which read the same model. The question followed: should the app adopt a separate widget tree of its own, as Flutter has, so every part of the UI has a testable description?
+The desktop app (`crates/loom-app`) uses Iced 0.14. App tests need to check what the user sees: the inspector rows, the tile values, the status bar. Before PR #219 (issue #206) they could only send events and look for text in the widget tree. PR #219 split the inspector into a plain-data model (`inspector.rs`) that is turned into widgets, and added `App::ui_snapshot()` and `loom-app --dump-ui`, which read the same model. The question followed: should the app build a separate widget tree of its own, so every part of the UI has a testable description?
 
 A second, related problem is **widget identity**. Iced rebuilds the `Element` tree on every update and keeps widget state (the canvas camera, a scroll offset, an open pick list) in a separate `widget::Tree`. When the structure of `view` changes, state can land on the wrong widget or be lost. The app has a few workarounds for this, written before we had looked closely at how Iced matches state.
 
@@ -21,7 +21,7 @@ What we confirmed in the Iced 0.14 source (details and line numbers in the resea
 - `keyed_column` stores keys and, when they change, finds the first changed index and inserts or removes one contiguous run of children there. It does not follow a moved item, and when the number of items is the same it diffs by index even if the keys differ. There is no keyed row.
 - `widget::Id` is never read by `Tree::diff`. It addresses a widget for an `Operation` (focus, scroll, or a custom operation) run as a `Task`.
 
-So Iced already has what a "Flutter-like widget tree" would give us: an immutable description rebuilt each update, and a retained tree of state matched against it. The canvas `Scene` is our retained render layer on top.
+So Iced already has what a separate widget tree would give us: an immutable description rebuilt each update, and a retained tree of state matched against it. The canvas `Scene` is our retained render layer on top.
 
 ## Options considered
 
@@ -49,9 +49,20 @@ C. **Our own identity layer**, such as keys checked by a wrapper widget. More co
 
 | Workaround in `crates/loom-app/src/main.rs` | What it does | Iced replacement | Verdict |
 |---|---|---|---|
-| `view` always wraps the window in `stack![main]`, even when the module browser is closed | Keeps the canvas at the same path in the state tree, so its camera survives opening the browser | None. Identity is position within the parent, and Iced has no way to move state to a new parent (nothing like Flutter's global keys). `keyed_column` only orders siblings in one column. | **Stays.** It is the correct idiom: keep the structure stable and vary the children. |
+| `view` always wraps the window in `stack![main]`, even when the module browser is closed | Keeps the canvas at the same path in the state tree, so its camera survives opening the browser | None. Identity is position within the parent, and Iced has no way to move state to a new parent. `keyed_column` only orders siblings in one column. | **Stays.** It is the correct idiom: keep the structure stable and vary the children. |
 | `frame_key`, a counter passed to `PatchCanvas::frame_key` | When it changes, the canvas frames the whole patch on its next redraw. It survives the app being rebuilt after loading a patch, so it must keep counting up. | A custom `Operation` addressed by a canvas `widget::Id`, run with `iced::advanced::widget::operate` (a re-export of `iced_runtime::task::widget`). The canvas can hand its state, or a view of it, to `Operation::custom`. | **Stays for now.** It is not an identity workaround but a one-shot command into widget state. The counter needs no task round trip, it waits until the canvas has a size, and it survives the app being rebuilt. Reconsider if the canvas gets a third command of this kind. |
 | `browser_key`, a counter passed to `PatchCanvas::browser_key` | When it changes, the canvas sends `CanvasEvent::OpenBrowser` at the centre of its view, because only the canvas knows its camera | The canvas `operate` already reports its bounds and camera to `Operation::custom`. The app could query them with an operation and open the browser itself. | **May move.** A real replacement exists. Change it when this code is next touched, not as a task of its own. |
+
+## Outcomes we want
+
+We will know the decision works when:
+
+- App tests for a modelled panel compare snapshot fields ("the cutoff row shows 1.2 kHz"), not text found in the widget tree.
+- `loom-app --dump-ui` shows every modelled panel, so a person or an agent can check a patch without a window.
+- The widget code of a modelled panel makes no decisions. To review what a panel shows, you read its model builder.
+- Opening and closing the browser, or adding and removing a modulation assignment, never resets or moves widget state such as the canvas camera, a slider drag, or an open pick list.
+- `loom-app` holds no UI framework code of its own, only models and the functions that draw them.
+- Model types use no Iced types (true today), so moving them to their own crate stays a simple move.
 
 ## Consequences
 
@@ -63,4 +74,4 @@ C. **Our own identity layer**, such as keys checked by a wrapper widget. More co
 
 ## Prior art
 
-Elm keeps all state in one model and keys list items in its virtual DOM. React and Flutter rebuild a cheap description and keep state in a second tree, matched by type and position, with keys for lists; Flutter also has global keys that move state between parents. SwiftUI names the same split structural and explicit identity, and advises keeping structure stable. Xilem rebuilds typed views over a retained widget tree and routes events by id path. The [research snapshot](../research/2026-10-ui-view-models-and-identity.md) has the details and sources. We take the ideas, not the designs ([ADR-0018](0018-clean-room-module-development.md)).
+Other declarative toolkits make the same split between a description rebuilt on each change and a retained tree of state, and also match state by type and position, with keys for lists. The [research snapshot](../research/2026-10-ui-view-models-and-identity.md) compares them, with sources.
