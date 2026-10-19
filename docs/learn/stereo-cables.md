@@ -56,9 +56,9 @@ The obvious answer is to add the two sides. It fails for the most common case, a
 | 0.5 | 0.0 | 0.5 | 0.25 | 0.5 |
 | 0.0 | 0.5 | 0.5 | 0.25 | 0.0 (lost) |
 
-Adding doubles the centred signal, which is a jump of 6 dB. Taking the left side silently loses anything panned right. The mean keeps a centred signal at its level and hears both sides, so LoomDSP folds stereo to mono with the mean.
+Adding doubles the centred signal, which is a jump of 6 dB. Taking the left side silently loses anything panned right. The mean keeps a centred signal at its level and hears both sides, so LoomDSP downmixes stereo to mono with the mean. (This is not wave folding, which bends a waveform to add harmonics. A downmix only mixes the two sides.)
 
-### Folding can cancel
+### A downmix can cancel
 
 If the two sides are opposite, the mean is zero:
 
@@ -66,7 +66,7 @@ If the two sides are opposite, the mean is zero:
 |---|---|---|
 | 0.5 | -0.5 | 0.0 |
 
-This is not a bug in the fold. It is what happens when any stereo signal with opposite sides is played on one speaker, and why some wide stereo effects vanish on a phone speaker. If a control input seems dead when fed from a wide stereo source, this is likely why. Patch from one side with a split, or from a mono point earlier in the chain.
+This is not a bug in the downmix. It is what happens when any stereo signal with opposite sides is played on one speaker, and why some wide stereo effects vanish on a phone speaker. If a control input seems dead when fed from a wide stereo source, this is likely why. Patch from one side with a split, or from a mono point earlier in the chain.
 
 ## Copies of random things
 

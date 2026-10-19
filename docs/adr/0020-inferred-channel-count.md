@@ -50,21 +50,21 @@ C. **A, plus native stereo ports for modules that need both channels at once.**
 Options 5 and C, with the mean.
 
 - **Widths are inferred at compile time,** on the control thread, and never stored in a patch. A cable is stereo only when a module that declares a stereo output feeds it, directly or through modules that pass stereo on.
-- **Each port declares its channel behaviour.** An input either makes the module run per channel when stereo arrives (`PerChannel`), or does not (`Fold`): it folds stereo to the mean of the two sides while the module runs as one, and gives each copy its own side when another input already makes the module run per channel, or takes both channels itself (`Stereo`). An output either has as many channels as its module runs (`PerChannel`) or is always stereo (`Stereo`). A module with a `Stereo` port is never copied.
+- **Each port declares its channel behaviour.** An input either makes the module run per channel when stereo arrives (`PerChannel`), or takes both channels itself (`Stereo`), or does neither (`Downmix`). A `Downmix` input reads the mean of the two sides while the module runs as one, and gives each copy its own side when another input already makes the module run per channel. An output either has as many channels as its module runs (`PerChannel`) or is always stereo (`Stereo`). A module with a `Stereo` port is never copied.
 - **A module that receives stereo on a `PerChannel` input runs as two copies,** one per channel, each with its own state. All its outputs become stereo. A mono cable feeds both copies the same signal.
-- **A fold is the mean of left and right.**
+- **A downmix is the mean of left and right.**
 
 The exact rules, the defaults by signal type, and the API are in the [specification](../design/stereo.md).
 
 ## Consequences
 
 - **A mono-only patch pays nothing on the audio thread.** Its schedule has the same steps, buffers, and module instances as today. The only new work is the inference pass when the graph compiles, which uses a work queue so that its cost is linear in the number of modules and cables. Modules gain one declaration per port, and their `process` code does not change.
-- **Stereo costs only where it flows.** A copied module costs about twice as much, a fold costs one add and one multiply per sample, and a mono cable into a stereo port costs nothing (both channels read the same buffer).
+- **Stereo costs only where it flows.** A copied module costs about twice as much, a downmix costs one add and one multiply per sample, and a mono cable into a stereo port costs nothing (both channels read the same buffer).
 - **Most module authors write mono code.** Only modules that mix channels (panners, stereo reverbs, linked limiters, stereo sources) handle two buffers themselves.
 - **The patch format does not change.** A cable's width follows from the graph, so loading an old patch infers the same widths.
 - **Changing one cable can change widths downstream,** so a recompile may create or retire module copies. Copies are created and freed on the control thread and handed over at a buffer boundary, as slots are today. A new right-hand copy starts from reset, so its first block can differ from the left.
 - **Seeded modules must tell their copies apart,** or a copied noise source would be the same on both sides. Modules can read which channel a copy runs.
 - **Feedback loops need a fixed point.** Widths inside a loop depend on each other. Width only grows from mono to stereo, so iteration stops, and a loop is stereo only if stereo enters it.
-- **Folding can cancel sound.** A signal whose sides are opposite in sign folds to silence. The explainer covers it, so players know why.
+- **A downmix can cancel sound.** A signal whose sides are opposite in sign downmixes to silence. The explainer covers it, so players know why.
 - **Audio Out and the mixer need stereo-aware ports,** and the UI needs each cable's width to draw stereo cables (FR-CANVAS-12). The spec lists these.
 - **Polyphony is a separate dimension** (FR-SIG-08). The same compile pass is the natural place to infer voice count later, but how voices run (copies or SIMD lanes, NFR-PERF-03) is a separate decision.
