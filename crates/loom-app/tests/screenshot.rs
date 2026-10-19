@@ -8,14 +8,24 @@ fn subtractive() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches/subtractive.ron")
 }
 
-/// The subtractive example with two modulation assignments, so it has
-/// badges, modulation lines, and range arcs. Written next to the images.
+/// The subtractive example with modulation, so it has badges, modulation
+/// lines, and range arcs. Cutoff has two sources, so an arc drag that
+/// picks one changes its arc. Module 10 is a button whose `on` is
+/// modulated, which has no range arc. Written next to the images.
 fn modulated() -> PathBuf {
     let source = std::fs::read_to_string(subtractive()).expect("example patch");
+    let last_module = "PatchModule(id: 9, kind: \"loom.io.audio-out@1\"),";
+    let source = source.replace(
+        last_module,
+        &format!("{last_module}\n        PatchModule(id: 10, kind: \"loom.ui.button@1\"),"),
+    );
     let end = source.rfind(')').expect("a patch ends with `)`");
     let patch = format!(
-        "{}    modulation: [\n        (source: (5, \"out\"), target: (4, \"cutoff\"), depth: 0.25),\n        \
-         (source: (7, \"out\"), target: (4, \"resonance\"), depth: 0.4),\n    ],\n)\n",
+        "{}    modulation: [\n        \
+         (source: (5, \"out\"), target: (4, \"cutoff\"), depth: 0.25),\n        \
+         (source: (7, \"out\"), target: (4, \"cutoff\"), depth: -0.5),\n        \
+         (source: (7, \"out\"), target: (4, \"resonance\"), depth: 0.4),\n        \
+         (source: (5, \"out\"), target: (10, \"on\"), depth: 1.0),\n    ],\n)\n",
         &source[..end]
     );
     let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("modulated.ron");
@@ -109,11 +119,18 @@ fn renders_pointer_pin_and_drags() {
         ("hover.png", &["--pointer", "4:cutoff", "--hover-text"][..]),
         ("pin.png", &["--pin", "5:out"]),
         ("wire.png", &["--pointer", "4:resonance", "--wire", "3:out"]),
-        ("depth.png", &["--pointer", "4:cutoff", "--depth", "4:cutoff"]),
+        // Pulls the cable from the saw off the filter input.
+        ("pulled.png", &["--pointer", "4:resonance", "--wire", "4:in"]),
     ] {
         let pixels = image(name, extra).expect("a GPU, as for the plain image");
         assert_ne!(pixels, plain, "{name} looks like the plain image");
     }
+
+    // With 7:out pinned, an arc drag on cutoff shows only 7's assignment,
+    // so the arc changes. Nothing else differs between the two images.
+    let pinned = image("pinned.png", &["--pin", "7:out"]).expect("a GPU");
+    let dragging = image("depth.png", &["--pin", "7:out", "--depth", "4:cutoff"]).expect("a GPU");
+    assert_ne!(dragging, pinned, "the arc drag did not change the arc");
 }
 
 fn fails(patch: &Path, args: &[&str]) -> String {
@@ -132,6 +149,12 @@ fn fails(patch: &Path, args: &[&str]) -> String {
 fn an_unknown_control_fails() {
     assert!(fails(&subtractive(), &["--focus", "4:nope"]).contains("no control for parameter `nope`"));
     assert!(fails(&subtractive(), &["--pointer", "4:nope"]).contains("no control or port `nope`"));
+}
+
+#[test]
+fn a_depth_drag_needs_a_knob() {
+    let error = fails(&modulated(), &["--depth", "10:on"]);
+    assert!(error.contains("is not a knob"), "{error}");
 }
 
 #[test]

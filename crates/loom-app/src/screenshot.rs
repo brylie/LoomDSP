@@ -64,7 +64,9 @@ pub struct Options {
     pub pin: Option<Named>,
     /// Show a cable being wired from this port, as MODULE:PORT (outputs
     /// first). Its loose end is at --pointer. Over a control that takes
-    /// modulation, the control shows the drop highlight.
+    /// modulation, the control shows the drop highlight. On a connected
+    /// input, its cable is picked up as in the app: it leaves the input
+    /// and hangs from its source output, and no control is highlighted.
     #[arg(long, value_name = "MODULE:PORT", requires = "pointer", conflicts_with = "depth")]
     pub wire: Option<Named>,
     /// Show the range arc of this knob being dragged, as MODULE:PARAM: only
@@ -207,11 +209,17 @@ pub fn run(args: &crate::Args, path: &Path) -> Result<(), String> {
         (None, None) => crate::Source::Empty,
     };
     let config = loom_core::EngineConfig::with_sample_rate(48_000.0);
-    let session = crate::App::session(config, source)?;
+    let mut session = crate::App::session(config, source)?;
+    let options = &args.view;
+    // A wire from a connected input picks up its cable, as in the app: the
+    // cable leaves the patch and its loose end hangs from the source.
+    let wire = match &options.wire {
+        Some(target) => Some(pick_up(&mut session.controller, target)?),
+        None => None,
+    };
     let controller = &session.controller;
     let scene = crate::scene::build(controller, &session.positions);
 
-    let options = &args.view;
     let logical = Size::new(options.size.width as f32, options.size.height as f32);
     let focus = options
         .focus
@@ -228,7 +236,6 @@ pub fn run(args: &crate::Args, path: &Path) -> Result<(), String> {
         .as_ref()
         .map(|t| find_pin(controller, &scene, t))
         .transpose()?;
-    let wire = options.wire.as_ref().map(|t| find_port(controller, t)).transpose()?;
     let depth = options
         .depth
         .as_ref()
@@ -253,7 +260,7 @@ pub fn run(args: &crate::Args, path: &Path) -> Result<(), String> {
         pointer,
         pinned,
         drag: match (wire, depth) {
-            (Some(port), _) => Some(StillDrag::Wire(port)),
+            (Some((from, pulled)), _) => Some(StillDrag::Wire { from, pulled }),
             (None, Some((module, widget))) => Some(StillDrag::Depth(module, widget)),
             (None, None) => None,
         },
@@ -348,6 +355,31 @@ fn find_port(controller: &Controller, target: &Named) -> Result<PortRef, String>
         })
 }
 
+/// The port a wire starts from, and whether it was pulled off an input.
+/// A connected input is disconnected, and the wire starts at the output
+/// that fed it.
+fn pick_up(controller: &mut Controller, target: &Named) -> Result<(PortRef, bool), String> {
+    let port = find_port(controller, target)?;
+    if port.output {
+        return Ok((port, false));
+    }
+    let input = loom_core::InputRef {
+        module: ModuleId(port.module),
+        port: port.index,
+    };
+    match controller.disconnect(input).map_err(|e| e.to_string())? {
+        Some(source) => Ok((
+            PortRef {
+                module: source.module.0,
+                output: true,
+                index: source.port,
+            },
+            true,
+        )),
+        None => Ok((port, false)),
+    }
+}
+
 /// The world point of a named control's centre, or else of a port.
 fn find_point(controller: &Controller, scene: &Scene, target: &Named) -> Result<Point, String> {
     let descriptor = descriptor(controller, target.module)?;
@@ -387,7 +419,16 @@ fn depth_assignment(
     focus: Option<(u32, usize)>,
 ) -> Result<loom_core::AssignmentId, String> {
     let (module, widget) = knob;
-    let (param, _, _) = crate::scene::control_param(controller, module, widget).ok_or("not a parameter control")?;
+    let (param, kind, spec) =
+        crate::scene::control_param(controller, module, widget).ok_or("not a parameter control")?;
+    // Only a knob has a range arc to drag. Toggles, radio buttons, and
+    // buttons set their depth in the inspector.
+    if kind != loom_core::WidgetKind::Knob {
+        return Err(format!(
+            "the control for {module}:{} is not a knob, so it has no range arc to drag",
+            spec.name
+        ));
+    }
     let pinned = pinned.map(|p| OutputRef {
         module: ModuleId(p.module),
         port: p.index,

@@ -234,9 +234,17 @@ pub struct Still {
 /// A drag that a still image shows in progress. See [`Still::drag`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum StillDrag {
-    /// A cable being pulled from this port. Its loose end is at the
-    /// pointer, or on the port under it.
-    Wire(PortRef),
+    /// A cable being dragged from a port. Its loose end is at the pointer,
+    /// or on the port under it.
+    Wire {
+        /// The port the cable starts at.
+        from: PortRef,
+        /// True when the cable was pulled off an input: `from` is the
+        /// output it came from, and the scene no longer has the cable. A
+        /// drop on a control then assigns nothing, so no control is
+        /// highlighted.
+        pulled: bool,
+    },
     /// The range arc of this knob being dragged: module ID and widget
     /// index. The canvas draws no mark for it. The app shows the arc of
     /// the assignment being changed through [`PanelValues`].
@@ -659,7 +667,7 @@ impl<Message> PatchCanvas<'_, Message> {
             state.hover = Some(self.scene.hit(world, state.hit_radius()));
         }
         state.interaction = match still.drag {
-            Some(StillDrag::Wire(from)) => Interaction::Wiring { from, pulled: false },
+            Some(StillDrag::Wire { from, pulled }) => Interaction::Wiring { from, pulled },
             Some(StillDrag::Depth(module, widget)) => Interaction::Depth {
                 module,
                 widget,
@@ -3265,7 +3273,10 @@ mod tests {
         // Wiring from the output to the knob: the loose cable and the drop
         // highlight, and no hover text during a drag.
         let wiring = Still {
-            drag: Some(StillDrag::Wire(OUT)),
+            drag: Some(StillDrag::Wire {
+                from: OUT,
+                pulled: false,
+            }),
             pinned: None,
             ..still
         };
@@ -3282,6 +3293,17 @@ mod tests {
         assert_eq!(overlay.cables.len(), 2, "the line and the loose cable");
         let resting = canvas.overlay(&canvas.still_state(Still { drag: None, ..wiring }));
         assert_eq!(overlay.shapes.len(), resting.shapes.len() + 1, "the drop highlight");
+
+        // A cable pulled off an input assigns nothing on a drop, so the
+        // control is not highlighted.
+        let pulled = canvas.overlay(&canvas.still_state(Still {
+            drag: Some(StillDrag::Wire {
+                from: OUT,
+                pulled: true,
+            }),
+            ..wiring
+        }));
+        assert_eq!(pulled.shapes.len(), resting.shapes.len());
     }
 
     /// Lines show while the pointer is on the source output, its badge, or
