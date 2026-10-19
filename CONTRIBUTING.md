@@ -109,6 +109,8 @@ Start from the module's entry in the [module catalogue](docs/product/module-cata
        signal: SignalType::Gate,
        description: "Starts the count again.",
        default: PortDefault::Value(0.0),
+       polarity: Polarity::Unipolar,
+       channels: Channels::Downmix,
    }],
    params: &[
        ParamSpec {
@@ -125,6 +127,7 @@ Start from the module's entry in the [module catalogue](docs/product/module-cata
    ],
    ```
 
+   Every port names its `polarity` ([port ranges](docs/design/port-ranges.md)) and what it does with stereo, its `channels` ([stereo cables](docs/design/stereo.md#declaring-stereo-behaviour)). Most modules write mono code and need no more than the usual choice: audio inputs are `Channels::PerChannel`, so the engine runs the module once per side when stereo arrives; other inputs are `Channels::Downmix`; outputs are `Channels::PerChannel`. Use `Channels::Stereo` only for a module that must see both sides at once, such as a panner.
    Mark whole-number parameters (channels, counts, seeds) with `.integer()` on their `ParamSpec`, so they round and the inspector snaps to whole values.
    Mark frequencies and times with `.logarithmic()`, so equal steps of the control give equal ratios. Controls and modulation both use this mapping ([parameter mapping](docs/design/modulation.md#parameter-mapping)).
 5. Give it a panel: a `Panel` in its descriptor with a knob for each parameter a performer would turn, and lights for display values. The registry refuses a panel that does not fit (see [module panels on tiles](docs/design/panels.md#module-panels-on-tiles-p1)).

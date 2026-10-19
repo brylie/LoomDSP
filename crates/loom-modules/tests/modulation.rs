@@ -1,9 +1,9 @@
 //! Engine acceptance tests for parameter modulation.
 
 use loom_core::{
-    AssignmentId, Controller, EngineConfig, EngineParts, MidiEvent, Module, ModuleConfig, ModuleDescriptor, ModuleId,
-    ModuleRole, OutputSafety, Panel, ParamOptions, ParamSpec, Polarity, PortDefault, PortIo, PortSpec, ProbeKind,
-    ProcessContext, SignalType, create_engine,
+    AssignmentId, Channels, Controller, EngineConfig, EngineParts, MidiEvent, Module, ModuleConfig, ModuleDescriptor,
+    ModuleId, ModuleRole, OutputSafety, Panel, ParamOptions, ParamSpec, Polarity, PortDefault, PortIo, PortSpec,
+    ProbeKind, ProcessContext, SignalType, create_engine,
 };
 use loom_modules::register_all;
 use std::sync::Arc;
@@ -59,6 +59,7 @@ macro_rules! mirror_module {
                 description: "The parameter, or its modulated value.",
                 default: PortDefault::Value(0.0),
                 polarity: Polarity::Bipolar,
+                channels: Channels::PerChannel,
             }],
             params: &[$param],
             role: ModuleRole::Dsp(mirror),

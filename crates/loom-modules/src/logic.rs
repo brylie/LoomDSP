@@ -6,8 +6,8 @@
 
 use loom_core::signal::{EdgeDetector, trigger};
 use loom_core::{
-    Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, Polarity, PortDefault, PortIo, PortSpec,
-    ProcessContext, SignalType, Widget,
+    Channels, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, Polarity, PortDefault, PortIo,
+    PortSpec, ProcessContext, SignalType, Widget,
 };
 
 /// `loom.logic.divide`: fires on every Nth incoming trigger.
@@ -30,6 +30,7 @@ pub static DIVIDE: ModuleDescriptor = ModuleDescriptor {
             description: "The triggers to count.",
             default: PortDefault::Value(0.0),
             polarity: Polarity::Unipolar,
+            channels: Channels::Downmix,
         },
         PortSpec {
             name: "reset",
@@ -38,6 +39,7 @@ pub static DIVIDE: ModuleDescriptor = ModuleDescriptor {
             description: "Starts the count again.",
             default: PortDefault::Value(0.0),
             polarity: Polarity::Unipolar,
+            channels: Channels::Downmix,
         },
     ],
     outputs: &[PortSpec {
@@ -47,6 +49,7 @@ pub static DIVIDE: ModuleDescriptor = ModuleDescriptor {
         description: "Fires on every Nth trigger.",
         default: PortDefault::Value(0.0),
         polarity: Polarity::Unipolar,
+        channels: Channels::PerChannel,
     }],
     params: &[
         ParamSpec {

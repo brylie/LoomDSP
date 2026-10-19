@@ -2,8 +2,8 @@
 
 use loom_core::signal::pitch;
 use loom_core::{
-    Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, Polarity, PortDefault, PortIo,
-    PortSpec, ProcessContext, SignalType, Widget,
+    Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, Polarity,
+    PortDefault, PortIo, PortSpec, ProcessContext, SignalType, Widget,
 };
 use loom_rt::Smoothed;
 use std::f32::consts::PI;
@@ -24,6 +24,7 @@ pub static SVF: ModuleDescriptor = ModuleDescriptor {
             description: "The audio to filter.",
             default: PortDefault::Value(0.0),
             polarity: Polarity::Bipolar,
+            channels: Channels::PerChannel,
         },
         PortSpec {
             name: "cutoff",
@@ -32,6 +33,7 @@ pub static SVF: ModuleDescriptor = ModuleDescriptor {
             description: "Moves the cutoff as pitch: +0.1 doubles it.",
             default: PortDefault::Value(0.0),
             polarity: Polarity::Bipolar,
+            channels: Channels::Downmix,
         },
     ],
     outputs: &[
@@ -42,6 +44,7 @@ pub static SVF: ModuleDescriptor = ModuleDescriptor {
             description: "Keeps the frequencies below the cutoff.",
             default: PortDefault::Value(0.0),
             polarity: Polarity::Bipolar,
+            channels: Channels::PerChannel,
         },
         PortSpec {
             name: "bandpass",
@@ -50,6 +53,7 @@ pub static SVF: ModuleDescriptor = ModuleDescriptor {
             description: "Keeps the frequencies near the cutoff.",
             default: PortDefault::Value(0.0),
             polarity: Polarity::Bipolar,
+            channels: Channels::PerChannel,
         },
         PortSpec {
             name: "highpass",
@@ -58,6 +62,7 @@ pub static SVF: ModuleDescriptor = ModuleDescriptor {
             description: "Keeps the frequencies above the cutoff.",
             default: PortDefault::Value(0.0),
             polarity: Polarity::Bipolar,
+            channels: Channels::PerChannel,
         },
     ],
     params: &[

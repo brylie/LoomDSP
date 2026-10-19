@@ -18,11 +18,15 @@
 //! 6. Bind unconnected inputs to their default (ADR-0015): the zero buffer,
 //!    a constant buffer per distinct value, or one shared buffer per
 //!    transport signal that the engine fills at the start of each block.
+//! 7. Work out which outputs carry stereo (ADR-0020, `width.rs`). The
+//!    report lists them. The schedule does not use them yet, so every
+//!    module still runs as one instance on one channel.
 
 use crate::descriptor::{ModuleRole, ParamSpec, Polarity, PortDefault};
 use crate::graph::{AssignmentId, Graph, InputRef, ModuleId, OutputRef};
 use crate::midi_map::{MidiMapOp, MidiMappingId};
 use crate::telemetry::{ProbeId, ProbeKind};
+use crate::width::{self, Width};
 use loom_rt::Smoothed;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -57,9 +61,28 @@ pub struct CompileReport {
     /// [`EngineConfig::max_live_values`](crate::EngineConfig::max_live_values)
     /// is full. They sound right, but their knobs show no live dot.
     pub without_live_value: usize,
+    /// Modules that run as two copies, one per channel (ADR-0020).
+    pub per_channel: BTreeSet<ModuleId>,
+    /// Outputs that carry stereo. Every other output is mono.
+    pub stereo_outputs: BTreeSet<OutputRef>,
 }
 
 impl CompileReport {
+    /// How many channels an output carries, for drawing its cables and for
+    /// hover text (stereo spec, rules 19 and 23).
+    pub fn width(&self, output: OutputRef) -> Width {
+        if self.stereo_outputs.contains(&output) {
+            Width::Stereo
+        } else {
+            Width::Mono
+        }
+    }
+
+    /// True when the engine runs `module` as two copies, one per channel.
+    pub fn runs_per_channel(&self, module: ModuleId) -> bool {
+        self.per_channel.contains(&module)
+    }
+
     /// All delays the compiler inserted, across all loops.
     pub fn inserted_delays(&self) -> impl Iterator<Item = &(OutputRef, InputRef)> {
         self.loops.iter().flat_map(|l| l.inserted_delays.iter())
@@ -408,10 +431,13 @@ pub(crate) fn compile(
     let mut delayed: BTreeMap<AssignmentId, usize> = BTreeMap::new();
     let mut steps: Vec<StepSpec> = Vec::new();
     let mut output_nodes: Vec<usize> = Vec::new();
+    let widths = width::infer(graph);
     let mut report = CompileReport {
         modules: n,
         loops: Vec::new(),
         without_live_value: 0,
+        per_channel: widths.per_channel,
+        stereo_outputs: widths.stereo_outputs,
     };
 
     let user_tap = |v: usize| TapSpec {
@@ -1032,6 +1058,7 @@ mod tests {
                     crate::Polarity::Bipolar
                 }
             },
+            channels: crate::Channels::PerChannel,
         }
     }
 

@@ -3,8 +3,8 @@
 #![allow(dead_code)]
 
 use loom_core::{
-    EngineConfig, EngineParts, Module, ModuleDescriptor, ModuleId, ModuleRole, Polarity, PortDefault, PortIo, PortSpec,
-    ProbeId, ProbeKind, ProcessContext, Registry, SignalType, create_engine,
+    Channels, EngineConfig, EngineParts, Module, ModuleDescriptor, ModuleId, ModuleRole, Polarity, PortDefault, PortIo,
+    PortSpec, ProbeId, ProbeKind, ProcessContext, Registry, SignalType, create_engine,
 };
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -23,6 +23,7 @@ const fn port(name: &'static str, signal: SignalType) -> PortSpec {
             SignalType::Gate | SignalType::Phase => Polarity::Unipolar,
             SignalType::Audio | SignalType::Pitch | SignalType::Modulation => Polarity::Bipolar,
         },
+        channels: Channels::PerChannel,
     }
 }
 

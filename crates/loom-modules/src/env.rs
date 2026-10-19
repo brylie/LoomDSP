@@ -2,8 +2,8 @@
 
 use loom_core::signal::gate_is_high;
 use loom_core::{
-    Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, Polarity, PortDefault, PortIo,
-    PortSpec, ProcessContext, SignalType, Widget,
+    Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, Polarity,
+    PortDefault, PortIo, PortSpec, ProcessContext, SignalType, Widget,
 };
 
 /// `loom.env.adsr`: attack, decay, sustain, release envelope.
@@ -20,6 +20,7 @@ pub static ADSR: ModuleDescriptor = ModuleDescriptor {
         description: "Going high starts the envelope. Going low releases it.",
         default: PortDefault::Value(0.0),
         polarity: Polarity::Unipolar,
+        channels: Channels::Downmix,
     }],
     outputs: &[PortSpec {
         name: "out",
@@ -28,6 +29,7 @@ pub static ADSR: ModuleDescriptor = ModuleDescriptor {
         description: "The envelope level, from 0 to 1.",
         default: PortDefault::Value(0.0),
         polarity: Polarity::Unipolar,
+        channels: Channels::PerChannel,
     }],
     params: &[
         ParamSpec {

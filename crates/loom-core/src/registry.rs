@@ -1,6 +1,6 @@
 //! The set of module types available to patches.
 
-use crate::descriptor::{ModuleDescriptor, ModuleRole, ParamMapping, PortDefault};
+use crate::descriptor::{Channels, ModuleDescriptor, ModuleRole, ParamMapping, PortDefault};
 use crate::error::LoomError;
 use std::collections::BTreeMap;
 
@@ -95,6 +95,25 @@ impl Registry {
                 }
             }
         }
+        // Stereo rules (ADR-0020, stereo spec rule 5). An output cannot
+        // downmix, and a module that handles stereo itself is never copied,
+        // so a `PerChannel` input on it would never be honoured.
+        if descriptor.outputs.iter().any(|port| port.channels == Channels::Downmix) {
+            return Err(invalid("an output cannot be Downmix"));
+        }
+        let has_stereo_port = descriptor
+            .inputs
+            .iter()
+            .chain(descriptor.outputs)
+            .any(|port| port.channels == Channels::Stereo);
+        if has_stereo_port
+            && descriptor
+                .inputs
+                .iter()
+                .any(|port| port.channels == Channels::PerChannel)
+        {
+            return Err(invalid("a module with a Stereo port needs Downmix or Stereo inputs"));
+        }
         descriptor.check_panel().map_err(|reason| invalid(&reason))?;
         match descriptor.role {
             ModuleRole::UnitDelay if descriptor.inputs.len() != 1 || descriptor.outputs.len() != 1 => {
@@ -187,6 +206,7 @@ mod tests {
                     crate::Polarity::Bipolar
                 }
             },
+            channels: crate::Channels::PerChannel,
         }
     }
 
@@ -237,6 +257,67 @@ mod tests {
         assert!(error.to_string().contains("finite"), "{error}");
     }
 
+    /// A DSP module with the given ports, for the stereo checks.
+    macro_rules! with_ports {
+        ($inputs:expr, $outputs:expr) => {{
+            static DESCRIPTOR: ModuleDescriptor = ModuleDescriptor {
+                id: "test.ports",
+                version: 1,
+                name: "Ports",
+                category: "Test",
+                description: "",
+                inputs: $inputs,
+                outputs: $outputs,
+                params: &[],
+                role: ModuleRole::Dsp(|_| unreachable!("never created")),
+                panel: crate::Panel::EMPTY,
+                displays: &[],
+            };
+            Registry::new().register(&DESCRIPTOR)
+        }};
+    }
+
+    #[test]
+    fn refuses_downmix_outputs() {
+        let error = with_ports!(
+            &[],
+            &[port("out", crate::SignalType::Audio).with_channels(Channels::Downmix)]
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("output cannot be Downmix"), "{error}");
+    }
+
+    #[test]
+    fn refuses_per_channel_inputs_on_stereo_modules() {
+        let error = with_ports!(
+            &[port("in", crate::SignalType::Audio)],
+            &[port("out", crate::SignalType::Audio).with_channels(Channels::Stereo)]
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("Stereo port"), "{error}");
+        let error = with_ports!(
+            &[
+                port("in", crate::SignalType::Audio).with_channels(Channels::Stereo),
+                port("gain", crate::SignalType::Modulation),
+            ],
+            &[]
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("Stereo port"), "{error}");
+    }
+
+    #[test]
+    fn accepts_stereo_modules_with_downmix_inputs() {
+        with_ports!(
+            &[
+                port("in", crate::SignalType::Audio).with_channels(Channels::Stereo),
+                port("gain", crate::SignalType::Modulation).with_channels(Channels::Downmix),
+            ],
+            &[port("out", crate::SignalType::Audio).with_channels(Channels::Stereo)]
+        )
+        .unwrap();
+    }
+
     #[test]
     fn registers_undocumented_modules_with_notes() {
         static QUIET: ModuleDescriptor = ModuleDescriptor {
@@ -253,6 +334,7 @@ mod tests {
                 default: PortDefault::Value(0.0),
 
                 polarity: crate::Polarity::Bipolar,
+                channels: crate::Channels::PerChannel,
             }],
             outputs: &[port("out", crate::SignalType::Audio)],
             params: &[],

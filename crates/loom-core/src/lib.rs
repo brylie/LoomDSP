@@ -32,11 +32,12 @@ pub mod safety;
 pub mod signal;
 mod telemetry;
 pub mod transport;
+mod width;
 
 pub use compile::{CompileReport, FeedbackLoop};
 pub use controller::{Controller, EngineParts, MidiSender, create_engine};
 pub use descriptor::{
-    ButtonMode, MAX_DISPLAYS, MissingText, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamMapping,
+    ButtonMode, Channels, MAX_DISPLAYS, MissingText, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamMapping,
     ParamOptions, ParamSpec, Polarity, PortDefault, PortSpec, SpecKind, Undocumented, Widget, WidgetKind,
     assert_documented,
 };
@@ -52,3 +53,4 @@ pub use safety::OutputSafety;
 pub use signal::SignalType;
 pub use telemetry::{MeterReading, ProbeId, ProbeKind, SCOPE_CHUNK, ScopeChunk, Telemetry};
 pub use transport::{TimeSignature, TransportInfo, TransportSettings};
+pub use width::Width;

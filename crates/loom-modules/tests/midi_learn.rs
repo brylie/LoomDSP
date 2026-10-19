@@ -1,7 +1,7 @@
 //! Engine acceptance tests for MIDI learn. Spec: `docs/design/midi-learn.md`.
 
 use loom_core::{
-    ControlChangeSeen, EngineConfig, EngineParts, MidiControl, MidiEvent, MidiMessage, Module, ModuleConfig,
+    Channels, ControlChangeSeen, EngineConfig, EngineParts, MidiControl, MidiEvent, MidiMessage, Module, ModuleConfig,
     ModuleDescriptor, ModuleId, ModuleRole, Panel, ParamOptions, ParamSpec, Polarity, PortDefault, PortIo, PortSpec,
     ProbeKind, ProcessContext, SignalType, control_value, create_engine,
 };
@@ -50,6 +50,7 @@ const fn output(name: &'static str) -> PortSpec {
         description: "A test output.",
         default: PortDefault::Value(0.0),
         polarity: Polarity::Unipolar,
+        channels: Channels::PerChannel,
     }
 }
 

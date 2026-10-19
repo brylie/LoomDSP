@@ -2,8 +2,8 @@
 
 use loom_core::signal::pitch;
 use loom_core::{
-    MidiMessage, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, Polarity, PortDefault, PortIo,
-    PortSpec, ProcessContext, SignalType, Widget,
+    Channels, MidiMessage, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, Polarity, PortDefault,
+    PortIo, PortSpec, ProcessContext, SignalType, Widget,
 };
 
 /// `loom.midi.note`: monophonic MIDI note input with last-note priority.
@@ -22,6 +22,7 @@ pub static NOTE_IN: ModuleDescriptor = ModuleDescriptor {
             description: "Pitch of the last note held, with pitch bend. 0 is middle C.",
             default: PortDefault::Value(0.0),
             polarity: Polarity::Bipolar,
+            channels: Channels::PerChannel,
         },
         PortSpec {
             name: "gate",
@@ -30,6 +31,7 @@ pub static NOTE_IN: ModuleDescriptor = ModuleDescriptor {
             description: "High while any note is held.",
             default: PortDefault::Value(0.0),
             polarity: Polarity::Unipolar,
+            channels: Channels::PerChannel,
         },
         PortSpec {
             name: "velocity",
@@ -38,6 +40,7 @@ pub static NOTE_IN: ModuleDescriptor = ModuleDescriptor {
             description: "How hard the last note was played, from 0 to 1.",
             default: PortDefault::Value(0.0),
             polarity: Polarity::Unipolar,
+            channels: Channels::PerChannel,
         },
     ],
     params: &[

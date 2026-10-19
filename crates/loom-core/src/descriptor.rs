@@ -40,7 +40,7 @@ impl Polarity {
 /// is a compile error:
 ///
 /// ```
-/// use loom_core::{Polarity, PortDefault, PortSpec, SignalType};
+/// use loom_core::{Channels, Polarity, PortDefault, PortSpec, SignalType};
 ///
 /// const RESET: PortSpec = PortSpec {
 ///     name: "reset",
@@ -49,6 +49,7 @@ impl Polarity {
 ///     description: "Starts the count again.",
 ///     default: PortDefault::Value(0.0),
 ///     polarity: Polarity::Unipolar,
+///     channels: Channels::Downmix,
 /// };
 /// ```
 ///
@@ -74,6 +75,31 @@ pub struct PortSpec {
     /// pitch, and LFOs are bipolar. Ignored on inputs; write the polarity of
     /// the signal the input expects there.
     pub polarity: Polarity,
+    /// What the port does with stereo (ADR-0020). Every port must name one.
+    /// The usual choice: audio inputs are `PerChannel`, other inputs are
+    /// `Downmix`, and outputs are `PerChannel`.
+    pub channels: Channels,
+}
+
+/// What a port does with stereo (ADR-0020).
+///
+/// The compiler works out each cable's width from these. A module never
+/// sees a width it did not ask for: a `PerChannel` or `Downmix` port always
+/// reads and writes one channel per call. Spec: `docs/design/stereo.md`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Channels {
+    /// On an input: stereo arriving here makes the engine run the module as
+    /// two copies, one per channel. On an output: as many channels as the
+    /// module runs, so mono unless the module is copied.
+    PerChannel,
+    /// Inputs only. Stereo arriving here does not make the module run per
+    /// channel. While the module runs as one, the input reads one channel
+    /// made from both sides, by a method its signal type picks.
+    Downmix,
+    /// The module reads or writes both channels itself. A module with any
+    /// `Stereo` port is never copied, and its other inputs must be
+    /// `Downmix`.
+    Stereo,
 }
 
 impl PortSpec {
@@ -86,6 +112,12 @@ impl PortSpec {
     /// Sets the polarity an output declares for modulation.
     pub const fn with_polarity(mut self, polarity: Polarity) -> Self {
         self.polarity = polarity;
+        self
+    }
+
+    /// Sets what the port does with stereo.
+    pub const fn with_channels(mut self, channels: Channels) -> Self {
+        self.channels = channels;
         self
     }
 }
@@ -998,6 +1030,7 @@ mod tests {
             description: "",
             default: PortDefault::Value(0.0),
             polarity: Polarity::Bipolar,
+            channels: Channels::PerChannel,
         }],
         outputs: &[PortSpec {
             name: "out",
@@ -1006,6 +1039,7 @@ mod tests {
             description: "The input.",
             default: PortDefault::Value(0.0),
             polarity: Polarity::Bipolar,
+            channels: Channels::PerChannel,
         }],
         params: &[ParamSpec {
             label: "",

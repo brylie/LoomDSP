@@ -4,8 +4,8 @@
 //! to drive them, or any other signal to bend the wave shape.
 
 use loom_core::{
-    Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, Polarity, PortDefault, PortIo,
-    PortSpec, ProcessContext, SignalType,
+    Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, Polarity,
+    PortDefault, PortIo, PortSpec, ProcessContext, SignalType,
 };
 use std::f32::consts::TAU;
 
@@ -23,6 +23,7 @@ pub static SINE: ModuleDescriptor = ModuleDescriptor {
         description: "Position in the wave, from 0 to 1. One ramp is one cycle.",
         default: PortDefault::Value(0.0),
         polarity: Polarity::Unipolar,
+        channels: Channels::Downmix,
     }],
     outputs: &[PortSpec {
         name: "out",
@@ -31,6 +32,7 @@ pub static SINE: ModuleDescriptor = ModuleDescriptor {
         description: "Sine wave from -1 to 1.",
         default: PortDefault::Value(0.0),
         polarity: Polarity::Bipolar,
+        channels: Channels::PerChannel,
     }],
     params: &[],
     role: ModuleRole::Dsp(|_| Box::new(Sine)),
@@ -63,6 +65,7 @@ pub static SAW: ModuleDescriptor = ModuleDescriptor {
         description: "Position in the wave, from 0 to 1. One ramp is one cycle.",
         default: PortDefault::Value(0.0),
         polarity: Polarity::Unipolar,
+        channels: Channels::Downmix,
     }],
     outputs: &[PortSpec {
         name: "out",
@@ -71,6 +74,7 @@ pub static SAW: ModuleDescriptor = ModuleDescriptor {
         description: "Saw wave from -1 to 1.",
         default: PortDefault::Value(0.0),
         polarity: Polarity::Bipolar,
+        channels: Channels::PerChannel,
     }],
     params: &[],
     role: ModuleRole::Dsp(|_| Box::new(Saw { previous: 0.0 })),
@@ -135,6 +139,7 @@ pub static NOISE: ModuleDescriptor = ModuleDescriptor {
         description: "White noise from -1 to 1.",
         default: PortDefault::Value(0.0),
         polarity: Polarity::Bipolar,
+        channels: Channels::PerChannel,
     }],
     params: &[ParamSpec {
         name: "seed",

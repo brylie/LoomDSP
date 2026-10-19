@@ -4,8 +4,8 @@
 //! multiply), so a module is useful with only one cable.
 
 use loom_core::{
-    Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, Polarity, PortDefault, PortIo,
-    PortSpec, ProcessContext, SignalType, Widget,
+    Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, Polarity,
+    PortDefault, PortIo, PortSpec, ProcessContext, SignalType, Widget,
 };
 use loom_rt::Smoothed;
 
@@ -24,6 +24,7 @@ pub static ADD: ModuleDescriptor = ModuleDescriptor {
             description: "The first signal to add.",
             default: PortDefault::Value(0.0),
             polarity: Polarity::Bipolar,
+            channels: Channels::Downmix,
         },
         PortSpec {
             name: "b",
@@ -32,6 +33,7 @@ pub static ADD: ModuleDescriptor = ModuleDescriptor {
             description: "The second signal to add.",
             default: PortDefault::Value(0.0),
             polarity: Polarity::Bipolar,
+            channels: Channels::Downmix,
         },
     ],
     outputs: &[PortSpec {
@@ -41,6 +43,7 @@ pub static ADD: ModuleDescriptor = ModuleDescriptor {
         description: "A plus B plus the offset.",
         default: PortDefault::Value(0.0),
         polarity: Polarity::Bipolar,
+        channels: Channels::PerChannel,
     }],
     params: &[ParamSpec {
         name: "offset",
@@ -107,6 +110,7 @@ pub static MUL: ModuleDescriptor = ModuleDescriptor {
             description: "The signal to scale.",
             default: PortDefault::Value(0.0),
             polarity: Polarity::Bipolar,
+            channels: Channels::PerChannel,
         },
         PortSpec {
             name: "b",
@@ -115,6 +119,7 @@ pub static MUL: ModuleDescriptor = ModuleDescriptor {
             description: "Scales A. Reads 1 while no cable is connected.",
             default: PortDefault::Value(0.0),
             polarity: Polarity::Bipolar,
+            channels: Channels::Downmix,
         },
     ],
     outputs: &[PortSpec {
@@ -124,6 +129,7 @@ pub static MUL: ModuleDescriptor = ModuleDescriptor {
         description: "A times B times the gain.",
         default: PortDefault::Value(0.0),
         polarity: Polarity::Bipolar,
+        channels: Channels::PerChannel,
     }],
     params: &[ParamSpec {
         name: "gain",
@@ -192,6 +198,7 @@ pub static CONSTANT: ModuleDescriptor = ModuleDescriptor {
         description: "The value set by the parameter.",
         default: PortDefault::Value(0.0),
         polarity: Polarity::Bipolar,
+        channels: Channels::PerChannel,
     }],
     params: &[ParamSpec {
         name: "value",

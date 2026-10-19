@@ -4,8 +4,8 @@
 //! its gate. Spec: `docs/design/clock.md`, Button details.
 
 use loom_core::{
-    Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, Polarity, PortDefault, PortIo, PortSpec,
-    ProcessContext, SignalType, Widget,
+    Channels, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, Polarity, PortDefault, PortIo,
+    PortSpec, ProcessContext, SignalType, Widget,
 };
 
 /// `loom.ui.button`: a gate from a large button.
@@ -27,6 +27,7 @@ pub static BUTTON: ModuleDescriptor = ModuleDescriptor {
         description: "High while the button is on.",
         default: PortDefault::Value(0.0),
         polarity: Polarity::Unipolar,
+        channels: Channels::PerChannel,
     }],
     params: &[
         ParamSpec {

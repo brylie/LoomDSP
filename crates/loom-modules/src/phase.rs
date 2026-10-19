@@ -6,8 +6,8 @@
 
 use loom_core::signal::{EdgeDetector, WrapDetector, pitch, trigger};
 use loom_core::{
-    Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, Polarity, PortDefault, PortIo,
-    PortSpec, ProcessContext, SignalType, Widget,
+    Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, Polarity,
+    PortDefault, PortIo, PortSpec, ProcessContext, SignalType, Widget,
 };
 
 /// `loom.phase.generator`: a ramp from 0 to 1 at the frequency set by pitch.
@@ -25,6 +25,7 @@ pub static PHASE: ModuleDescriptor = ModuleDescriptor {
             description: "Sets the frequency. 0 is middle C, and +0.1 is one octave up.",
             default: PortDefault::Value(0.0),
             polarity: Polarity::Bipolar,
+            channels: Channels::Downmix,
         },
         PortSpec {
             name: "reset",
@@ -33,6 +34,7 @@ pub static PHASE: ModuleDescriptor = ModuleDescriptor {
             description: "A rising edge sets the phase back to 0.",
             default: PortDefault::Value(0.0),
             polarity: Polarity::Unipolar,
+            channels: Channels::Downmix,
         },
     ],
     outputs: &[PortSpec {
@@ -42,6 +44,7 @@ pub static PHASE: ModuleDescriptor = ModuleDescriptor {
         description: "A ramp from 0 up to 1, once per cycle.",
         default: PortDefault::Value(0.0),
         polarity: Polarity::Unipolar,
+        channels: Channels::PerChannel,
     }],
     params: &[
         ParamSpec {
@@ -166,6 +169,7 @@ pub static PHASE_TRIGGER: ModuleDescriptor = ModuleDescriptor {
         description: "The phase to watch. Each wrap fires a trigger.",
         default: PortDefault::Value(0.0),
         polarity: Polarity::Unipolar,
+        channels: Channels::Downmix,
     }],
     outputs: &[PortSpec {
         name: "trigger",
@@ -174,6 +178,7 @@ pub static PHASE_TRIGGER: ModuleDescriptor = ModuleDescriptor {
         description: "Fires once each time the phase wraps.",
         default: PortDefault::Value(0.0),
         polarity: Polarity::Unipolar,
+        channels: Channels::PerChannel,
     }],
     params: &[],
     role: ModuleRole::Dsp(|_| {

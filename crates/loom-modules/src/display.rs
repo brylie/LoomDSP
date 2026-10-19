@@ -2,8 +2,8 @@
 //! (FR-LIB-17, ADR-0013).
 
 use loom_core::{
-    Module, ModuleDescriptor, ModuleRole, Panel, Polarity, PortDefault, PortIo, PortSpec, ProcessContext, SignalType,
-    Widget,
+    Channels, Module, ModuleDescriptor, ModuleRole, Panel, Polarity, PortDefault, PortIo, PortSpec, ProcessContext,
+    SignalType, Widget,
 };
 
 /// `loom.display.meter`: a mono level meter. Passes its input through, so it
@@ -22,6 +22,7 @@ pub static METER: ModuleDescriptor = ModuleDescriptor {
         description: "The signal to measure.",
         default: PortDefault::Value(0.0),
         polarity: Polarity::Bipolar,
+        channels: Channels::PerChannel,
     }],
     outputs: &[PortSpec {
         name: "out",
@@ -30,6 +31,7 @@ pub static METER: ModuleDescriptor = ModuleDescriptor {
         description: "The input, unchanged.",
         default: PortDefault::Value(0.0),
         polarity: Polarity::Bipolar,
+        channels: Channels::PerChannel,
     }],
     params: &[],
     role: ModuleRole::Dsp(|_| Box::new(Meter)),
