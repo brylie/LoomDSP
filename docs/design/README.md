@@ -57,7 +57,8 @@ Copy [template.md](template.md). Keep it to one feature. Link the ADR, requireme
 | [Arrangement](arrangement.md) | [ADR-0012](../adr/0012-arrangement-from-phase-driven-primitives.md) | Draft, P3 |
 | [Telemetry](telemetry.md) | [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md) | Implemented, P1 |
 | [Panels](panels.md) | [ADR-0013](../adr/0013-modules-carry-their-own-panel.md) | Module panels on tiles, level meters, and audio load Implemented (P1); labels and hover text Implemented; rest Draft |
-| [Stereo cables](stereo.md) | [ADR-0020](../adr/0020-inferred-channel-count.md) | Agreed, P1 |
+| [Stereo cables](stereo.md) | [ADR-0020](../adr/0020-inferred-channel-count.md), [ADR-0021](../adr/0021-copies-take-state-from-the-running-instance.md) | Agreed, P1; rules 25 to 27 Proposed |
+| [Changing a running patch](live-patching.md) | [ADR-0002](../adr/0002-graph-execution-and-feedback.md), [ADR-0021](../adr/0021-copies-take-state-from-the-running-instance.md) | Rules 1 to 4 Implemented; rules 5 and 6 Draft, P1 |
 | [Modulation](modulation.md) | [ADR-0014](../adr/0014-modulation-without-cables.md) | Engine and parameter mapping Agreed (P1); editing slice 1 Agreed; slices 2 and 3 Draft |
 | [Undo and redo](undo.md) | None (builds on [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md)) | Implemented, P1 |
 | [Control ranges](control-ranges.md) | None (extends parameter mapping) | Draft, P1 |

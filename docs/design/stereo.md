@@ -3,10 +3,10 @@
 How the engine decides which cables carry stereo, and what modules do with it, so a stereo chain is one row of modules instead of two.
 
 - **Kind:** living specification.
-- **Status:** Agreed, not built yet ([#23](https://github.com/brylie/LoomDSP/issues/23)). Rule 13's cold start of copy 1 is Agreed for now and may change with the research in [#203](https://github.com/brylie/LoomDSP/issues/203).
-- **Decision behind it:** [ADR-0020](../adr/0020-inferred-channel-count.md), refining [ADR-0007](../adr/0007-polymorphic-signal-model.md).
+- **Status:** Agreed, not built yet ([#23](https://github.com/brylie/LoomDSP/issues/23)). Rules 25 to 27 (copy 1 takes copy 0's state) are Proposed by the research in [#203](https://github.com/brylie/LoomDSP/issues/203), with [ADR-0021](../adr/0021-copies-take-state-from-the-running-instance.md). Until they are agreed, rule 13's cold start stands.
+- **Decision behind it:** [ADR-0020](../adr/0020-inferred-channel-count.md), refining [ADR-0007](../adr/0007-polymorphic-signal-model.md). [ADR-0021](../adr/0021-copies-take-state-from-the-running-instance.md) for the state of copy 1.
 - **Use case and requirements:** FR-SIG-07, FR-SIG-01, FR-SIG-03, FR-CANVAS-12, NFR-RT-01
-- **Background:** [Stereo cables](../learn/stereo-cables.md): why copies, how each signal type downmixes, why a downmix can cancel.
+- **Background:** [Stereo cables](../learn/stereo-cables.md): why copies, how each signal type downmixes, why a downmix can cancel. [Hot patching](../learn/hot-patching.md): why a cold copy 1 clicks.
 - **Prior art:** Eurorack patches stereo as two cables and dual modules. VCV Rack carries several channels on one cable and lets each module decide what to do with them. Bitwig Grid works in stereo by default. Named only to explain the trade-offs; the rules below are our own.
 - **Issues:** #23, #203 (new paths without a cold start)
 - **Code:** not built yet. It will touch `crates/loom-core/src/descriptor.rs`, `compile.rs`, `module.rs`, and `engine.rs`.
@@ -96,11 +96,11 @@ How the canvas shows a stereo cable is FR-CANVAS-12 (P2). See Open points.
 
 ### Copies
 
-13. **Copy 0 is the module's existing instance.** It keeps its engine slot and its state when the module becomes stereo or mono again. Copy 1 is created on the control thread from the registry, reset, and given the module's current parameter values before the new schedule is sent. When the module becomes mono, copy 1 is sent back to the control thread to be freed. *Why:* the audio thread must not allocate or free (hard rule 1). Keeping copy 0 means a chain that turns stereo keeps its left side's sound.
+13. **Copy 0 is the module's existing instance.** It keeps its engine slot and its state when the module becomes stereo or mono again. Copy 1 is created on the control thread from the registry, reset, and given the module's current parameter values before the new schedule is sent. At the swap it takes copy 0's state, if the module can copy it (rules 25 to 27). When the module becomes mono, copy 1 is sent back to the control thread to be freed. *Why:* the audio thread must not allocate or free (hard rule 1). Keeping copy 0 means a chain that turns stereo keeps its left side's sound.
 
 14. **Both copies get every `set_param` call.** Each copy keeps its own parameter smoothing. *Why:* a module has one set of controls, whatever its width.
 
-15. **A copy can ask which channel it is.** `ProcessContext::channel()` returns 0 for a module that runs as one, or for copy 0, and 1 for copy 1. A module with a seed (the Seed trait) must mix the channel into its seed. *Why:* without it, a copied noise source or random step generator gives the same values on both sides, which is mono in disguise.
+15. **A copy can ask which channel it is.** `ProcessContext::channel()` returns 0 for a module that runs as one, or for copy 0, and 1 for copy 1. A module with a seed (the Seed trait) must mix the channel into its seed, also when it takes copy 0's state (rule 27). *Why:* without it, a copied noise source or random step generator gives the same values on both sides, which is mono in disguise.
 
 16. **Displays and modulation live values come from copy 0.** *Why:* the module has one panel. Copy 0 always exists, so lights do not jump when the module changes width.
 
@@ -128,6 +128,14 @@ How the canvas shows a stereo cable is FR-CANVAS-12 (P2). See Open points.
 
 24. **A patch with no stereo source compiles to the same schedule as before this feature.** Same module operations, buffers, and instances, and no width checks inside `process`. The only extra work is the inference pass on the control thread. *Why:* FR-SIG-07's reason for existing. Most patches are mono, and most cables carry control signals.
 
+### State of copy 1 (Proposed, #203)
+
+25. **Copy 1 takes copy 0's state at the swap.** `Module` gets an optional method, `fn copy_state_from(&mut self, other: &dyn Module) -> bool`, whose default returns `false`. At the swap that first runs copy 1, after its parameters are set and before it first processes, the engine calls `copy1.copy_state_from(copy0)`. A module that implements it downcasts `other` to its own type (through `Module::as_any`, provided for every module by a blanket implementation), copies every field that changes while it runs, including parameter smoothing, and returns `true`. It returns `false` when `other` is another type. *Why:* measured with the SVF and the same signal on both sides, a cold copy 1 is off by -2 to -24 dB for 1 to 20 ms, and a crossfade only scales that down. Copied state makes the right side bit-identical to the left. See the [live patching spec](live-patching.md), rule 6, and ADR-0021.
+
+26. **`copy_state_from` follows the rules for `process`:** no allocation, no locks, no waiting. Buffers are copied into the ones copy 1 already has, which have the same size because both copies were built with the same `ModuleConfig`. Copy 1 starts from reset only when the method returns `false`. Every built-in module with state implements it. *Why:* it runs on the audio thread (hard rule 1). A module that skips it still works, with a cold right side.
+
+27. **A seeded module re-derives its random state when it copies.** It copies everything else, then sets its random generator from its seed mixed with its channel (rule 15), as `reset` would. *Why:* a copied generator would play the left side's numbers on the right, which is mono in disguise. The result is still deterministic, because the swap lands on a known frame.
+
 ## Acceptance criteria
 
 - [ ] Given a patch with no `Stereo` output anywhere, when it compiles, then its schedule has the same number of module operations, buffers, and instances as on the main branch before this change, and the engine benchmark shows no regression beyond noise.
@@ -149,6 +157,9 @@ How the canvas shows a stereo cable is FR-CANVAS-12 (P2). See Open points.
 - [ ] Given a probe on a stereo output, then the meter reports each channel, and the scope shows `(left + right) / 2`.
 - [ ] Given a stereo cable into a port, when the player hovers it, then the hover text says "Stereo". (Manual check.)
 - [ ] Given a descriptor with `Downmix` on an output, or a module with a `Stereo` port and a `PerChannel` input, then the registry rejects it.
+- [ ] (Rules 25 to 27.) Given a running SVF that turns stereo, with the same signal on both sides, then its right output is bit-identical to its left from the first frame after the swap, and the `no_alloc` tests pass.
+- [ ] (Rules 25 and 26.) Given each built-in module with state, when the harness runs it for N frames, copies its state into a new instance, and runs both on, then both outputs are bit-identical from frame N.
+- [ ] (Rule 27.) Given a seeded module that turns stereo, then its left and right outputs differ after the swap, and are the same on every run.
 
 ## Out of scope
 
@@ -161,4 +172,4 @@ How the canvas shows a stereo cable is FR-CANVAS-12 (P2). See Open points.
 
 ## Open points
 
-1. **Copy 1 starts from reset.** When a cable change makes a running chain stereo, the right side starts cold, so a filter or delay can click or sound different for a moment. Players who know hardware will hear that as a bug. Research in #203: copy state from copy 0, crossfade from the left side, or another approach. Until it lands, the cold start stands.
+1. **Copy 1 starts from reset.** When a cable change makes a running chain stereo, the right side starts cold, so a filter or delay can click or sound different for a moment. #203 measured it and proposes rules 25 to 27 (copy state from copy 0) with ADR-0021. A crossfade was measured and rejected: it does not help when copy 1 settles slower than the fade. Until rules 25 to 27 are agreed, the cold start stands.
