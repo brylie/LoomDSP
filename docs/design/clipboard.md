@@ -3,13 +3,13 @@
 How a user copies modules with their cables and modulation, pastes them into the same patch or another one, and duplicates them in place.
 
 - **Kind:** living specification.
-- **Status:** Agreed
+- **Status:** Implemented. The transport rule (rule 6) waits for the Transport module.
 - **Decision behind it:** none of its own. Builds on [ADR-0008](../adr/0008-patch-format-ron.md) (the clipboard holds patch text) and [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md) (all edits go through `Controller`).
 - **Use case and requirements:** FR-CANVAS-05. Related: FR-FILE-05 (unknown modules, [#18](https://github.com/brylie/LoomDSP/issues/18)), NFR-UX-01 (keyboard, [#101](https://github.com/brylie/LoomDSP/issues/101)).
 - **Background:** none.
 - **Prior art:** every editor has copy, paste, and duplicate. The only conventions we use are the common shortcuts, and "paste lands at the pointer".
 - **Issues:** [#13](https://github.com/brylie/LoomDSP/issues/13).
-- **Code:** not built yet.
+- **Code:** `crates/loom-app/src/clipboard.rs` (`Group`; tests in `clipboard/tests.rs`), the commands in `main.rs`, and `CanvasEvent::Paste` in `loom-canvas`.
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
      built. See README.md in this folder. -->
@@ -42,6 +42,7 @@ How a user copies modules with their cables and modulation, pastes them into the
 - With nothing selected, copy, cut, and duplicate do nothing. The clipboard keeps what it had.
 - The status bar says what happened: **Copied 3 modules**, **Pasted Filter**, **Duplicated 2 modules**, or why nothing happened.
 - Copy is not an edit. It adds no undo step and does not mark the patch as changed.
+- While a drag or a held arrow key is in progress, cut, paste, and duplicate do nothing, as undo does. *Why:* the edit would join the gesture's step and get its name.
 
 ### What goes with the modules
 
@@ -75,7 +76,7 @@ The modules keep their places relative to each other. *Why the centre:* the same
 
 **Duplicate** puts the copy 2 grid units (24 pixels) right of and below the original, at any zoom. *Why:* the copy is visibly separate but stays next to the original. Duplicate again, and the next copy is offset from the last one, because the new copy is selected.
 
-A pasted module with no position (text written by hand) is placed by the same auto-layout a patch file without positions gets, below the modules that have one.
+A pasted module with no position (text written by hand) goes in a row starting at the paste point, below the modules that have one. *Why not the patch auto-layout:* it places new modules below the whole patch, far from the pointer.
 
 ### After a paste or duplicate
 
@@ -135,22 +136,22 @@ Nothing is added, no undo step is made, and the status bar says why, in these ca
 
 ## Acceptance criteria
 
-- [ ] Copy writes patch text with `version`, the selected modules, their positions and parameters, the inside cables, and the inside assignments, and no MIDI mappings.
-- [ ] Copy with nothing selected leaves the clipboard unchanged.
-- [ ] Paste of copied text adds the modules with new ids, their parameter values, the inside cables, and the inside assignments in the same order.
-- [ ] Paste with the pointer over the canvas puts the group's top-left corner at the pointer, snapped to the grid. With the pointer elsewhere, at the centre of the visible canvas. (manual)
-- [ ] Duplicate puts the copy 2 grid units right and down, keeps incoming cables and incoming assignments, and drops outgoing ones.
-- [ ] Duplicate leaves the original's cables, assignments, and MIDI mappings unchanged.
-- [ ] An offline render of a patch after duplicating a module with inside assignments matches a render of the same patch built by hand, bit for bit, at block sizes 1, 77, and 512.
-- [ ] After a paste or duplicate, the new modules are selected and nothing else is.
-- [ ] Undo removes the whole paste, redo brings it back with the same ids. The same for duplicate and cut.
-- [ ] Cut copies, then deletes, as one undo step.
-- [ ] Paste of a whole patch file adds its modules and cables and ignores its MIDI mappings.
-- [ ] Paste of hand-edited text with a changed parameter value uses the new value.
-- [ ] Paste of text that is not a patch, of an unknown module type, of an unknown parameter, or of too many modules adds nothing, adds no undo step, and says why in the status bar.
+- [x] Copy writes patch text with `version`, the selected modules, their positions and parameters, the inside cables, and the inside assignments, and no MIDI mappings.
+- [x] Copy with nothing selected leaves the clipboard unchanged.
+- [x] Paste of copied text adds the modules with new ids, their parameter values, the inside cables, and the inside assignments in the same order.
+- [x] Paste with the pointer over the canvas puts the group's top-left corner at the pointer, snapped to the grid. With the pointer elsewhere, at the centre of the visible canvas.
+- [x] Duplicate puts the copy 2 grid units right and down, keeps incoming cables and incoming assignments, and drops outgoing ones.
+- [x] Duplicate leaves the original's cables, assignments, and MIDI mappings unchanged.
+- [x] An offline render of a patch after duplicating a module with inside assignments matches a render of the same patch built by hand, bit for bit, at block sizes 1, 77, and 512.
+- [x] After a paste or duplicate, the new modules are selected and nothing else is.
+- [x] Undo removes the whole paste, redo brings it back with the same ids. The same for duplicate and cut.
+- [x] Cut copies, then deletes, as one undo step.
+- [x] Paste of a whole patch file adds its modules and cables and ignores its MIDI mappings.
+- [x] Paste of hand-edited text with a changed parameter value uses the new value.
+- [x] Paste of text that is not a patch, of an unknown module type, of an unknown parameter, or of too many modules adds nothing, adds no undo step, and says why in the status bar.
 - [ ] Ctrl/Cmd+C, X, V, and D act on the text, not the patch, while the module browser's search field is open. (manual)
 - [ ] Copy, paste, and duplicate work while a panel control has focus. (manual)
-- [ ] Paste and duplicate do not allocate or lock on the audio thread (`tests/no_alloc.rs` still passes).
+- [x] Paste and duplicate do not allocate or lock on the audio thread (`tests/no_alloc.rs` still passes).
 
 ## Out of scope
 

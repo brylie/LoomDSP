@@ -6,6 +6,7 @@
 
 mod alerts;
 mod browser;
+mod clipboard;
 mod files;
 mod layout;
 mod learn;
@@ -148,6 +149,12 @@ enum Message {
     Unassign(AssignmentId),
     /// A line under **Drives** selects its target module.
     SelectModule(u32),
+    /// The clipboard was read for a paste at a world point, not yet snapped
+    /// (`docs/design/clipboard.md`).
+    Pasted {
+        world: Point,
+        text: Option<String>,
+    },
 }
 
 struct App {
@@ -229,6 +236,9 @@ struct App {
     /// During an arc drag: the assignment it changes, once picked, or
     /// `Some(None)` when none fits and the drag does nothing.
     depth_drag: Option<Option<AssignmentId>>,
+    /// The name for the step the edit in progress makes, when a command
+    /// names it (cut, paste, duplicate) rather than what changed.
+    step_name: Option<String>,
 }
 
 /// Where a patch comes from.
@@ -421,6 +431,7 @@ impl App {
             touched: BTreeSet::new(),
             adding: None,
             depth_drag: None,
+            step_name: None,
         };
         // A patch just loaded is the one on disk.
         app.history.mark_saved();
@@ -950,9 +961,13 @@ impl App {
             return;
         };
         let after = undo::Snapshot::take(&self.controller, &self.positions);
-        if let Some(step) = undo::diff(&before, &after, &self.touched) {
+        if let Some(mut step) = undo::diff(&before, &after, &self.touched) {
+            if let Some(name) = self.step_name.take() {
+                step.rename(name);
+            }
             self.history.push(step);
         }
+        self.step_name = None;
         self.touched.clear();
     }
 
@@ -1087,6 +1102,10 @@ impl App {
         let was_open = self.browser.is_some();
         let task = match message {
             Message::Browser(message) => self.browser_message(message),
+            Message::Canvas(CanvasEvent::Paste { world }) => {
+                iced::clipboard::read().map(move |text| Message::Pasted { world, text })
+            }
+            message if self.clipboard_key(&message).is_some() => self.clipboard_command(&message),
             message => {
                 self.handle(message);
                 Task::none()
@@ -1315,6 +1334,7 @@ impl App {
                 });
             }
             Message::Midi => self.midi_arrived(),
+            Message::Pasted { world, text } => self.paste(world, text),
             Message::Key(iced::keyboard::Event::KeyPressed {
                 key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
                 ..
@@ -1464,15 +1484,149 @@ impl App {
                 }
             }
             CanvasEvent::Delete(ids) => {
-                for id in &ids {
-                    if self.controller.remove_module(ModuleId(*id)).is_ok() {
-                        self.positions.remove(id);
-                        self.selection.remove(id);
-                    }
-                }
-                self.commit();
+                self.delete_modules(&ids);
+            }
+            // The app reads the clipboard first, in `update`.
+            CanvasEvent::Paste { .. } => {}
+        }
+    }
+
+    /// Removes modules and commits. Returns false if the commit failed; the
+    /// status bar then holds the error.
+    fn delete_modules(&mut self, ids: &[u32]) -> bool {
+        for id in ids {
+            if self.controller.remove_module(ModuleId(*id)).is_ok() {
+                self.positions.remove(id);
+                self.selection.remove(id);
             }
         }
+        self.commit()
+    }
+
+    /// The clipboard command a message asks for: `'c'`, `'x'`, or `'d'`
+    /// with Ctrl or Cmd. Paste comes from the canvas instead, which knows
+    /// where the pointer is. Keys go to the browser while it is open.
+    fn clipboard_key(&self, message: &Message) -> Option<char> {
+        let Message::Key(iced::keyboard::Event::KeyPressed {
+            key: iced::keyboard::Key::Character(c),
+            modifiers,
+            ..
+        }) = message
+        else {
+            return None;
+        };
+        if !modifiers.command() || self.browser.is_some() {
+            return None;
+        }
+        ['c', 'x', 'd']
+            .into_iter()
+            .find(|k| c.eq_ignore_ascii_case(&k.to_string()))
+    }
+
+    fn clipboard_command(&mut self, message: &Message) -> Task<Message> {
+        let text = match self.clipboard_key(message) {
+            Some('c') => self.copy(),
+            Some('x') => self.cut(),
+            Some('d') => {
+                self.duplicate();
+                None
+            }
+            _ => None,
+        };
+        text.map_or_else(Task::none, iced::clipboard::write)
+    }
+
+    /// The selected modules, or `None` and a status bar note when nothing
+    /// is selected.
+    fn selected_group(&mut self, verb: &str, incoming: bool) -> Option<clipboard::Group> {
+        let group =
+            clipboard::Group::from_selection(self.controller.graph(), &self.positions, &self.selection, incoming);
+        if group.is_empty() {
+            self.status = format!("Nothing selected to {verb}");
+            return None;
+        }
+        Some(group)
+    }
+
+    /// Copy: returns the patch text for the clipboard. Not an edit.
+    fn copy(&mut self) -> Option<String> {
+        let group = self.selected_group("copy", false)?;
+        self.status = format!("Copied {}", group.describe());
+        Some(group.to_text())
+    }
+
+    /// Cut: copy, then delete, as one step named "cut ...".
+    fn cut(&mut self) -> Option<String> {
+        // Like undo, these commands wait for a drag to finish.
+        self.close_slider_gesture();
+        if self.gesture {
+            return None;
+        }
+        let group = self.selected_group("cut", false)?;
+        let ids: Vec<u32> = self.selection.iter().copied().collect();
+        self.step_name = Some(format!("cut {}", group.describe()));
+        self.edit(|app| {
+            if app.delete_modules(&ids) {
+                app.status = format!("Cut {}", group.describe());
+            }
+        });
+        Some(group.to_text())
+    }
+
+    /// Pastes clipboard text with its top-left corner at a world point.
+    fn paste(&mut self, world: Point, text: Option<String>) {
+        self.close_slider_gesture();
+        if self.gesture {
+            return;
+        }
+        let Some(text) = text else {
+            self.status = clipboard::NOTHING_TO_PASTE.to_string();
+            return;
+        };
+        match clipboard::Group::from_text(&text, self.controller.registry()) {
+            Ok(group) => self.add_group(&group, browser::snap(world), "paste", "Pasted"),
+            Err(why) => self.status = why,
+        }
+    }
+
+    /// Duplicates the selection next to it, keeping incoming cables and
+    /// assignments.
+    fn duplicate(&mut self) {
+        self.close_slider_gesture();
+        if self.gesture {
+            return;
+        }
+        let Some(group) = self.selected_group("duplicate", true) else {
+            return;
+        };
+        let at = group.top_left().unwrap_or(Point::ORIGIN);
+        let offset = clipboard::DUPLICATE_OFFSET;
+        self.add_group(
+            &group,
+            Point::new(at.x + offset, at.y + offset),
+            "duplicate",
+            "Duplicated",
+        );
+    }
+
+    /// Adds a group as one step and selects it, or changes nothing and says
+    /// why.
+    fn add_group(&mut self, group: &clipboard::Group, origin: Point, verb: &str, done: &str) {
+        if let Err(why) = group.check(&self.controller) {
+            self.status = format!("Cannot {verb}: {why}");
+            return;
+        }
+        self.step_name = Some(format!("{verb} {}", group.describe()));
+        self.edit(|app| match group.add(&mut app.controller, &mut app.positions, origin) {
+            Ok(ids) => {
+                app.selection = ids.into_iter().collect();
+                if app.commit() {
+                    app.status = format!("{done} {}", group.describe());
+                }
+            }
+            Err(e) => app.status = format!("Cannot {verb}: {e}"),
+        });
+        self.step_name = None;
     }
 
     fn view(&self) -> Element<'_, Message> {
@@ -1901,6 +2055,7 @@ Drag a knob up or down; Shift for fine steps; double-click resets it.\n\
 With a module selected, Tab moves between its controls and the arrow keys change them.\n\
 Right-drag or two-finger scroll to pan. Wheel or Cmd/Ctrl-scroll to zoom.\n\
 F or Home frames the patch. Delete removes the selection.\n\
+Cmd/Ctrl+C copies, X cuts, V pastes at the pointer, and D duplicates the selection.\n\
 MIDI learn: click a control, then move a knob on your controller. Escape ends it.";
 
 /// Frame timing over the last second.
@@ -2418,5 +2573,136 @@ mod tests {
                 ((sine.0, 0), filter.0, Some(widget))
             ]
         );
+    }
+
+    /// Ctrl+`c` or Cmd+`c`.
+    fn command_key(c: &str) -> Message {
+        Message::Key(iced::keyboard::Event::KeyPressed {
+            key: iced::keyboard::Key::Character(c.into()),
+            modified_key: iced::keyboard::Key::Character(c.into()),
+            physical_key: iced::keyboard::key::Physical::Unidentified(iced::keyboard::key::NativeCode::Unidentified),
+            location: iced::keyboard::Location::Standard,
+            modifiers: iced::keyboard::Modifiers::COMMAND,
+            text: None,
+            repeat: false,
+        })
+    }
+
+    /// A sine into a multiply, both selected, at known places.
+    fn two_selected(app: &mut App) -> (ModuleId, ModuleId) {
+        let sine = app.controller.add_module("loom.osc.sine").unwrap();
+        let vca = app.controller.add_module("loom.math.mul").unwrap();
+        app.controller.connect_named(sine, "out", vca, "a").unwrap();
+        app.controller.set_param_named(vca, "gain", 0.4).unwrap();
+        app.positions.insert(sine.0, Point::new(0.0, 0.0));
+        app.positions.insert(vca.0, Point::new(240.0, 0.0));
+        app.commit();
+        app.history.clear();
+        app.selection = BTreeSet::from([sine.0, vca.0]);
+        (sine, vca)
+    }
+
+    fn step_name(app: &App) -> Option<String> {
+        app.history.undo_step().map(|s| s.name().to_string())
+    }
+
+    #[test]
+    fn copy_with_nothing_selected_writes_nothing() {
+        let mut app = app();
+        app.selection.clear();
+        assert!(app.copy().is_none());
+        assert_eq!(app.status, "Nothing selected to copy");
+        assert!(app.history.undo_step().is_none(), "copy is not an edit");
+    }
+
+    #[test]
+    fn a_paste_lands_at_the_snapped_point_is_selected_and_is_one_undo_step() {
+        let mut app = app();
+        let (sine, vca) = two_selected(&mut app);
+        let text = app.copy().unwrap();
+        assert_eq!(app.status, "Copied 2 modules");
+        assert!(app.history.undo_step().is_none(), "copy is not an edit");
+
+        let before = app.controller.graph().nodes().count();
+        app.paste(Point::new(605.0, 299.0), Some(text));
+        assert_eq!(app.controller.graph().nodes().count(), before + 2);
+        assert_eq!(app.status, "Pasted 2 modules");
+        assert_eq!(step_name(&app).as_deref(), Some("paste 2 modules"));
+        let new: Vec<u32> = app.selection.iter().copied().collect();
+        assert_eq!(new.len(), 2, "only the pasted modules are selected");
+        assert!(!new.contains(&sine.0) && !new.contains(&vca.0));
+        assert_eq!(app.positions[&new[0]], Point::new(600.0, 300.0));
+        assert_eq!(app.positions[&new[1]], Point::new(840.0, 300.0));
+
+        app.undo();
+        assert_eq!(app.controller.graph().nodes().count(), before);
+        app.redo();
+        let back: Vec<u32> = app
+            .controller
+            .graph()
+            .nodes()
+            .map(|(id, _)| id.0)
+            .filter(|id| new.contains(id))
+            .collect();
+        assert_eq!(back, new, "redo brings the paste back with the same ids");
+        assert_eq!(app.controller.graph().cables().count(), 2);
+    }
+
+    #[test]
+    fn duplicate_from_the_keyboard_is_one_step_offset_by_two_grid_units() {
+        let mut app = app();
+        let (sine, _) = two_selected(&mut app);
+        let before = app.controller.graph().nodes().count();
+        let _ = app.update(command_key("d"));
+        assert_eq!(app.controller.graph().nodes().count(), before + 2);
+        assert_eq!(step_name(&app).as_deref(), Some("duplicate 2 modules"));
+        let first = *app.selection.iter().next().unwrap();
+        assert_ne!(first, sine.0);
+        assert_eq!(app.positions[&first], Point::new(24.0, 24.0));
+        app.undo();
+        assert_eq!(app.controller.graph().nodes().count(), before);
+    }
+
+    #[test]
+    fn cut_copies_and_deletes_as_one_step() {
+        let mut app = app();
+        let (sine, vca) = two_selected(&mut app);
+        let before = app.controller.graph().nodes().count();
+        let text = app.cut().unwrap();
+        assert!(text.contains("loom.osc.sine"));
+        assert_eq!(app.controller.graph().nodes().count(), before - 2);
+        assert_eq!(step_name(&app).as_deref(), Some("cut 2 modules"));
+        assert_eq!(app.history.len(), 1);
+        app.undo();
+        assert!(app.controller.graph().node(sine).is_some() && app.controller.graph().node(vca).is_some());
+        assert_eq!(app.controller.graph().cables().count(), 1);
+    }
+
+    #[test]
+    fn a_refused_paste_adds_nothing_and_no_step() {
+        let mut app = app();
+        let before = app.controller.graph().nodes().count();
+        app.paste(Point::ORIGIN, None);
+        assert_eq!(app.status, clipboard::NOTHING_TO_PASTE);
+        app.paste(Point::ORIGIN, Some("not a patch".to_string()));
+        assert_eq!(app.status, clipboard::NOTHING_TO_PASTE);
+        app.paste(
+            Point::ORIGIN,
+            Some("Patch(version: 1, modules: [(id: 1, kind: \"loom.none.such\")])".to_string()),
+        );
+        assert_eq!(app.status, "Cannot paste: unknown module `loom.none.such`");
+        assert_eq!(app.controller.graph().nodes().count(), before);
+        assert!(app.history.undo_step().is_none());
+    }
+
+    #[test]
+    fn clipboard_keys_go_to_the_browser_while_it_is_open() {
+        let mut app = app();
+        two_selected(&mut app);
+        let before = app.controller.graph().nodes().count();
+        open_at(&mut app, Point::ORIGIN);
+        let _ = app.update(command_key("d"));
+        let _ = app.update(command_key("x"));
+        assert_eq!(app.controller.graph().nodes().count(), before);
     }
 }

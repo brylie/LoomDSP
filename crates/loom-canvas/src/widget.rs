@@ -147,6 +147,13 @@ pub enum CanvasEvent {
         /// inside it.
         area: Rectangle,
     },
+    /// Ctrl+V or Cmd+V: paste the clipboard (`docs/design/clipboard.md`).
+    /// `world` is the pointer when it is over the canvas, and the centre of
+    /// the view when it is not, in world units, not yet snapped.
+    Paste {
+        /// Where the top-left corner of the pasted modules goes.
+        world: Point,
+    },
     /// The modules whose lights or meters are on screen, at a zoom where
     /// they are drawn, changed. Only these need their values read.
     VisibleDisplays(Vec<u32>),
@@ -659,6 +666,25 @@ impl<Message> PatchCanvas<'_, Message> {
             }) if self.focus_keys(state, key, *modifiers, *repeat, over, shell) => {}
             Event::Keyboard(keyboard::Event::KeyReleased { key, .. }) => {
                 self.release_key(state, key, shell);
+            }
+            // Paste works with the pointer anywhere in the window. Only the
+            // canvas knows where the pointer is in the patch, and where the
+            // view's centre is.
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: keyboard::Key::Character(c),
+                modifiers,
+                ..
+            }) if modifiers.command() && c.eq_ignore_ascii_case("v") => {
+                let at = screen
+                    .filter(|_| over)
+                    .unwrap_or(Point::new(bounds.width / 2.0, bounds.height / 2.0));
+                self.emit(
+                    shell,
+                    CanvasEvent::Paste {
+                        world: state.camera.to_world(at),
+                    },
+                );
+                shell.capture_event();
             }
             Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) if over => {
                 use keyboard::key::Named;
@@ -2527,6 +2553,44 @@ mod tests {
                 "{modifiers:?}: {events:?}"
             );
         }
+    }
+
+    /// Ctrl+V or Cmd+V pastes at the pointer over the canvas, and at the
+    /// centre of the view with the pointer elsewhere (clipboard.md).
+    #[test]
+    fn paste_goes_to_the_pointer_or_the_centre_of_the_view() {
+        let scene = chain();
+        let none = BTreeSet::new();
+        let canvas = PatchCanvas::new(&scene, &none, |e| e);
+        let mut state = State::default();
+        let key = keyboard::Key::Character("v".into());
+        let paste = Event::Keyboard(keyboard::Event::KeyPressed {
+            modified_key: key.clone(),
+            key,
+            physical_key: keyboard::key::Physical::Code(keyboard::key::Code::KeyV),
+            location: keyboard::Location::Standard,
+            modifiers: keyboard::Modifiers::COMMAND,
+            text: None,
+            repeat: false,
+        });
+        let at = Point::new(100.0, 300.0);
+        let events = drive(&canvas, &mut state, &paste, at);
+        assert_eq!(
+            events,
+            vec![CanvasEvent::Paste {
+                world: state.camera.to_world(at)
+            }]
+        );
+        let events = drive(&canvas, &mut state, &paste, Point::new(900.0, 700.0));
+        assert_eq!(
+            events,
+            vec![CanvasEvent::Paste {
+                world: state.camera.to_world(Point::new(400.0, 300.0))
+            }]
+        );
+        // While a pop-up has the keys, paste is the pop-up's.
+        let blocked = PatchCanvas::new(&scene, &none, |e| e).interactive(false);
+        assert!(drive(&blocked, &mut state, &paste, at).is_empty());
     }
 
     /// Shift pressed while a pop-up has the keys still extends the

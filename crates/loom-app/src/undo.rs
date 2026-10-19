@@ -95,6 +95,12 @@ impl Step {
         &self.name
     }
 
+    /// Gives the step the name of the command that made it, such as
+    /// "paste Filter", in place of the name read from what changed.
+    pub fn rename(&mut self, name: String) {
+        self.name = name;
+    }
+
     /// The modules the step touched.
     pub fn touched_modules(&self) -> impl Iterator<Item = u32> + '_ {
         self.modules.keys().copied()
