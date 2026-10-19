@@ -33,11 +33,11 @@ pub struct Options {
     pub size: ImageSize,
     /// Physical pixels per logical pixel. 2 draws like a high-density
     /// screen, with sharper text.
-    #[arg(long, value_name = "FACTOR", default_value_t = 1.0, requires = "screenshot")]
+    #[arg(long, value_name = "FACTOR", default_value_t = 1.0, value_parser = positive, requires = "screenshot")]
     pub scale: f32,
     /// Zoom, in screen pixels per world unit. Without it, the whole patch
     /// fits in the image.
-    #[arg(long, value_name = "ZOOM", requires = "screenshot")]
+    #[arg(long, value_name = "ZOOM", value_parser = positive, requires = "screenshot")]
     pub zoom: Option<f32>,
     /// World point at the centre of the image, as X,Y. Without it, the
     /// centre of the focused module, or else of the patch.
@@ -66,6 +66,19 @@ impl Default for Options {
     }
 }
 
+/// Largest image side in pixels, logical or physical. Larger images are
+/// slow to draw and may not fit in GPU memory.
+const MAX_SIDE: u32 = 8192;
+
+/// Parses a finite number above 0. `f32` parsing alone accepts `NaN` and
+/// `inf`, which would make every screen position non-finite.
+fn positive(s: &str) -> Result<f32, String> {
+    match s.trim().parse::<f32>() {
+        Ok(v) if v.is_finite() && v > 0.0 => Ok(v),
+        _ => Err(format!("`{s}` is not a number above 0")),
+    }
+}
+
 /// An image size in logical pixels.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ImageSize {
@@ -79,8 +92,8 @@ impl FromStr for ImageSize {
     fn from_str(s: &str) -> Result<Self, String> {
         let (w, h) = s.split_once('x').ok_or("expected WIDTHxHEIGHT, for example 1280x800")?;
         let parse = |v: &str| match v.trim().parse::<u32>() {
-            Ok(n) if (1..=8192).contains(&n) => Ok(n),
-            _ => Err(format!("`{v}` is not a size from 1 to 8192")),
+            Ok(n) if (1..=MAX_SIDE).contains(&n) => Ok(n),
+            _ => Err(format!("`{v}` is not a size from 1 to {MAX_SIDE}")),
         };
         Ok(Self {
             width: parse(w)?,
@@ -98,7 +111,10 @@ impl FromStr for WorldPoint {
 
     fn from_str(s: &str) -> Result<Self, String> {
         let (x, y) = s.split_once(',').ok_or("expected X,Y, for example 400,300")?;
-        let parse = |v: &str| v.trim().parse::<f32>().map_err(|_| format!("`{v}` is not a number"));
+        let parse = |v: &str| match v.trim().parse::<f32>() {
+            Ok(n) if n.is_finite() => Ok(n),
+            _ => Err(format!("`{v}` is not a finite number")),
+        };
         Ok(Self(Point::new(parse(x)?, parse(y)?)))
     }
 }
@@ -154,18 +170,25 @@ pub fn run(args: &crate::Args, path: &Path) -> Result<(), String> {
         camera: camera(&scene, logical, options.zoom, centre),
         focus,
     };
-    if !(options.scale.is_finite() && options.scale > 0.0) {
-        return Err(format!("scale {} must be above 0", options.scale));
-    }
-    let physical = Size::new(
-        (logical.width * options.scale).round() as u32,
-        (logical.height * options.scale).round() as u32,
-    );
+    let physical = physical_size(logical, options.scale)?;
     // Tab moves focus within the selected module, so the focused module is
     // selected too. The focus ring draws only on a selected module.
     let selection = focus.map(|(module, _)| module).into_iter().collect();
     let pixels = render(&scene, &values, &selection, still, physical, options.scale)?;
     write_png(path, physical, &pixels)
+}
+
+/// The image size in physical pixels. The scale can push it to zero or past
+/// [`MAX_SIDE`] even when the logical size is fine, so it is checked again.
+fn physical_size(logical: Size, scale: f32) -> Result<Size<u32>, String> {
+    let side = |v: f32| {
+        let v = (v * scale).round();
+        (1.0..=MAX_SIDE as f32)
+            .contains(&v)
+            .then_some(v as u32)
+            .ok_or_else(|| format!("at scale {scale}, a side of {v} pixels is not from 1 to {MAX_SIDE}"))
+    };
+    Ok(Size::new(side(logical.width)?, side(logical.height)?))
 }
 
 /// The camera for an image of `size`: the whole scene framed, as when a
@@ -286,6 +309,20 @@ mod tests {
             })
         );
         assert!("cutoff".parse::<FocusTarget>().is_err());
+        assert!("NaN,0".parse::<WorldPoint>().is_err());
+        assert!("0,inf".parse::<WorldPoint>().is_err());
+        assert_eq!(positive("2"), Ok(2.0));
+        for bad in ["0", "-1", "NaN", "inf"] {
+            assert!(positive(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn scale_keeps_the_image_in_range() {
+        let size = Size::new(640.0, 400.0);
+        assert_eq!(physical_size(size, 2.0), Ok(Size::new(1280, 800)));
+        assert!(physical_size(Size::new(1.0, 1.0), 0.1).is_err());
+        assert!(physical_size(size, 100.0).is_err());
     }
 
     #[test]

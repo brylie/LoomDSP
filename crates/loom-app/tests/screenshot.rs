@@ -36,7 +36,7 @@ fn screenshot(name: &str, args: &[&str]) -> Option<(u32, u32, Vec<u8>)> {
 
 /// Number of distinct colours, to tell a drawn patch from a flat fill.
 fn colours(pixels: &[u8]) -> usize {
-    let mut seen: Vec<[u8; 4]> = pixels.chunks_exact(4).map(|p| [p[0], p[1], p[2], p[3]]).collect();
+    let mut seen: Vec<[u8; 4]> = pixels.as_chunks::<4>().0.to_vec();
     seen.sort_unstable();
     seen.dedup();
     seen.len()
@@ -55,16 +55,22 @@ fn renders_an_example_patch() {
 
 #[test]
 fn renders_at_a_scale_with_focus() {
-    let Some((width, height, pixels)) = screenshot(
-        "subtractive-focus.png",
-        &[
-            "--size", "160x100", "--scale", "2", "--zoom", "2", "--focus", "4:cutoff",
-        ],
-    ) else {
+    let focused = |name, focus| {
+        screenshot(
+            name,
+            &["--size", "160x100", "--scale", "2", "--zoom", "2", "--focus", focus],
+        )
+    };
+    let Some((width, height, cutoff)) = focused("focus-cutoff.png", "4:cutoff") else {
         return;
     };
     assert_eq!((width, height), (320, 200));
-    assert!(colours(&pixels) > 50, "only {} colours", colours(&pixels));
+    assert!(colours(&cutoff) > 50, "only {} colours", colours(&cutoff));
+    // Both views centre on the same module at the same zoom, so only the
+    // focus ring and the value text move. If focus were not drawn, the
+    // images would be the same.
+    let (_, _, resonance) = focused("focus-resonance.png", "4:resonance").expect("a GPU, as above");
+    assert_ne!(cutoff, resonance, "focus changed nothing in the image");
 }
 
 #[test]
