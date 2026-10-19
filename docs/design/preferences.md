@@ -85,7 +85,7 @@ When a field falls back to its default, it falls back to the safe choice. For ou
 - The app writes the file only when the player changes a preference. It never writes at start or at exit. *Why:* a player who never opens the window never gets a file, and a read-only home folder causes no errors.
 - It writes the whole file, with every field, including defaults. *Why:* a player who opens the file sees every setting there is.
 - It writes to a temporary file in the same folder and renames it, as Save does for patches ([files.md](files.md)). *Why:* a crash or a full disk cannot leave half a file.
-- If the file could not be parsed at start, the first write first renames the old file to `preferences.broken.ron` in the same folder (replacing an older one). *Why:* the player may have edited it by hand. Their edits should not vanish just because they changed a setting.
+- If the file could not be parsed at start, the first write first renames the old file to `<name>.broken.ron` in the same folder, where `<name>` is the file's name without `.ron`. So `preferences.ron` becomes `preferences.broken.ron`, and `--preferences stage.ron` gives `stage.broken.ron`. This replaces an older backup of the same file only. *Why:* the player may have edited it by hand. Their edits should not vanish just because they changed a setting, and one rig's backup must not overwrite another's.
 - If the write fails, the new value still applies for this run. Status bar: `Could not save preferences "<path>": <system reason>. The change applies until you quit.`
 
 ### The command-line flag
@@ -157,6 +157,7 @@ Tests point `--preferences` (or the loading function behind it) at a temporary f
 - [ ] Given a file with `output_safety: "clean"`, when the app starts, then the first `EngineConfig` has `OutputSafety::Clean`.
 - [ ] Given a file that does not parse, when the app starts, then the mode is Low latency, the status bar shows the error, and the file is unchanged.
 - [ ] Given that broken file, when the player picks Clean, then the old file is now `preferences.broken.ron` and `preferences.ron` holds `clean`.
+- [ ] Given broken files `studio.ron` and `stage.ron` in one folder, when the app runs once with each through `--preferences` and the player changes a setting each time, then the folder holds `studio.broken.ron` and `stage.broken.ron`, each with its own old contents.
 - [ ] Given `output_safety: "loud"` and a valid later field, when the app starts, then the mode is Low latency, the later field is used, and the status bar names the bad value.
 - [ ] Given a saved `clean` and `--output-safety off`, when the app starts, then the engine runs Off, the window shows Off with the flag note, and after quitting the file still holds `clean`.
 - [ ] Given a running engine, when the player picks Off, then the app sends one `SetOutputSafety(Off)` command, writes the file, and the next patch it opens builds its engine with Off.
