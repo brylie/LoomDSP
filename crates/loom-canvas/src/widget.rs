@@ -227,7 +227,7 @@ pub struct Still {
     /// A drag in progress.
     pub drag: Option<StillDrag>,
     /// Show hover text at once, as if the pointer or the keyboard focus had
-    /// rested for [`crate::hover::HOVER_DELAY`]. A drag shows none.
+    /// rested for the hover delay. A drag shows none.
     pub hover_text: bool,
 }
 
