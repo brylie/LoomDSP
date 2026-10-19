@@ -973,17 +973,18 @@ impl App {
 
     /// Ends the recording and adds a step if the patch changed.
     fn record(&mut self) {
+        // A command's name is for this step only, also when no step is made.
+        let step_name = self.step_name.take();
         let Some(before) = self.pending.take() else {
             return;
         };
         let after = undo::Snapshot::take(&self.controller, &self.positions);
         if let Some(mut step) = undo::diff(&before, &after, &self.touched) {
-            if let Some(name) = self.step_name.take() {
+            if let Some(name) = step_name {
                 step.rename(name);
             }
             self.history.push(step);
         }
-        self.step_name = None;
         self.touched.clear();
     }
 
@@ -1640,8 +1641,14 @@ impl App {
                     app.status = format!("{done} {}", group.describe());
                 }
             }
-            Err(e) => app.status = format!("Cannot {verb}: {e}"),
+            Err(e) => {
+                // The rollback freed the new modules' slots. Only a commit
+                // hands them back, so the next paste has room.
+                app.commit();
+                app.status = format!("Cannot {verb}: {e}");
+            }
         });
+        // `record` clears it, but an edit inside a gesture does not record.
         self.step_name = None;
     }
 
@@ -2721,5 +2728,23 @@ mod tests {
         let _ = app.update(command_key("d"));
         let _ = app.update(command_key("x"));
         assert_eq!(app.controller.graph().nodes().count(), before);
+    }
+
+    /// A command's step name never labels a later edit, even when the
+    /// command made no step.
+    #[test]
+    fn a_step_name_does_not_outlive_its_edit() {
+        let mut app = app();
+        let (_, vca) = two_selected(&mut app);
+        app.history_off = true;
+        app.step_name = Some("cut 2 modules".to_string());
+        app.edit(|_| {});
+        assert!(app.step_name.is_none());
+        app.history_off = false;
+        app.edit(|app| {
+            app.controller.set_param_named(vca, "gain", 0.9).unwrap();
+            app.commit();
+        });
+        assert_eq!(step_name(&app).as_deref(), Some("change Multiply Gain"));
     }
 }

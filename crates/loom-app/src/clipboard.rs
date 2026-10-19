@@ -321,7 +321,9 @@ impl Group {
 
     /// Adds the group with new ids, its top-left corner at `origin`, and
     /// returns the new ids. The caller commits. On an error, everything
-    /// added is taken away again, so a paste is whole or nothing.
+    /// added is taken away again, so a paste is whole or nothing. The caller
+    /// commits then too: the slots of the removed modules come back only
+    /// with a commit.
     pub fn add(
         &self,
         controller: &mut Controller,

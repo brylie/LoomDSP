@@ -279,3 +279,51 @@ fn a_group_too_big_for_the_patch_is_refused_before_anything_is_added() {
     assert_eq!(why, "the patch has room for 1 more module");
     assert_eq!(c.graph().nodes().count(), 2);
 }
+
+#[test]
+fn a_paste_that_fills_the_command_queue_is_taken_back_and_frees_its_slots() {
+    let mut config = EngineConfig::with_sample_rate(48_000.0);
+    config.command_capacity = 4;
+    let mut parts = create_engine(loom_modules::registry(), config);
+    let mut positions = BTreeMap::new();
+    let mut voice_ids = Vec::new();
+    // Build the voice a little at a time, so the small queue never fills.
+    for kind in ["loom.phase.generator", "loom.osc.sine", "loom.math.mul"] {
+        voice_ids.push(parts.controller.add_module(kind).unwrap());
+        parts.controller.commit().unwrap();
+        parts.engine.process(&mut [0.0; 16], &mut [0.0; 16]);
+    }
+    let c = &mut parts.controller;
+    c.connect_named(voice_ids[0], "phase", voice_ids[1], "phase").unwrap();
+    c.connect_named(voice_ids[1], "out", voice_ids[2], "a").unwrap();
+    c.commit().unwrap();
+    parts.engine.process(&mut [0.0; 16], &mut [0.0; 16]);
+    parts.controller.commit().ok();
+    let c = &mut parts.controller;
+    let before: Vec<u32> = c.graph().nodes().map(|(id, _)| id.0).collect();
+    let free = c.free_module_slots();
+
+    // Two copies of three modules do not fit in a queue of four.
+    let group = Group::from_selection(c.graph(), &positions, &ids(&voice_ids), false);
+    group.add(c, &mut positions, Point::ORIGIN).unwrap();
+    group.check(c).unwrap();
+    assert!(matches!(
+        group.add(c, &mut positions, Point::ORIGIN),
+        Err(LoomError::QueueFull)
+    ));
+    assert_eq!(
+        c.graph().nodes().count(),
+        before.len() + 3,
+        "the failed paste left nothing"
+    );
+
+    for _ in 0..3 {
+        parts.engine.process(&mut [0.0; 16], &mut [0.0; 16]);
+        let _ = parts.controller.commit();
+    }
+    assert_eq!(
+        parts.controller.free_module_slots(),
+        free - 3,
+        "the commit hands the failed paste's slots back"
+    );
+}
