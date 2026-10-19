@@ -17,7 +17,7 @@
 | **Default input** | What an unconnected input reads: a fixed value, or a transport signal such as bar phase. A cable overrides it. |
 | **Direct manipulation** | Editing an object where you see it, through controls it shows itself, rather than in a separate panel. LoomDSP's tiles work this way (ADR-0013). |
 | **Display value** | A number a module publishes once per block for its panel to show, such as a sequencer's current step. Internal state, not a port. |
-| **Downmix** | Turning a stereo signal into mono by taking the mean of left and right. What a control input does when a stereo cable arrives, unless another input already makes its module run once per side. Then each side reads its own channel ([stereo specification](../design/stereo.md)). |
+| **Downmix** | Turning a stereo signal into mono. LoomDSP takes the mean of left and right for audio, modulation, and pitch, the higher side for gates, and the mean the shorter way round for phases. What a control input does when a stereo cable arrives, unless another input already makes its module run once per side. Then each side reads its own channel ([stereo specification](../design/stereo.md)). |
 | **Encapsulation** | Collapsing part of a patch into a sub-patch with its own ports and panel. |
 | **End of cycle (EOC)** | A trigger that marks the end of a cycle. It fires on the first sample of the next cycle, which is the same moment. The name comes from Eurorack. See [Phase and cycles](../learn/phase-and-cycles.md#when-it-fires). |
 | **Engine** | The Rust code that runs a patch and produces audio. The same engine runs in every target. |

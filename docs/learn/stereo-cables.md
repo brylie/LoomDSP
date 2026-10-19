@@ -56,7 +56,9 @@ The obvious answer is to add the two sides. It fails for the most common case, a
 | 0.5 | 0.0 | 0.5 | 0.25 | 0.5 |
 | 0.0 | 0.5 | 0.5 | 0.25 | 0.0 (lost) |
 
-Adding doubles the centred signal, which is a jump of 6 dB. Taking the left side silently loses anything panned right. The mean keeps a centred signal at its level and hears both sides, so LoomDSP downmixes stereo to mono with the mean. (This is not wave folding, which bends a waveform to add harmonics. A downmix only mixes the two sides.)
+Adding doubles the centred signal, which is a jump of 6 dB. Taking the left side silently loses anything panned right. The mean keeps a centred signal at its level and hears both sides, so LoomDSP downmixes audio to mono with the mean. (This is not wave folding, which bends a waveform to add harmonics. A downmix only mixes the two sides.)
+
+A fourth method is common in broadcast: equal power, `(left + right) / √2`. Two unrelated signals, such as the two sides of a wide reverb, add up in power rather than in level, so dividing by √2 keeps their loudness. But a centred mono signal comes back 3 dB louder. Patches feed control inputs with LFOs and envelopes far more often than with reverb tails, so LoomDSP keeps the mean.
 
 ### A downmix can cancel
 
@@ -67,6 +69,36 @@ If the two sides are opposite, the mean is zero:
 | 0.5 | -0.5 | 0.0 |
 
 This is not a bug in the downmix. It is what happens when any stereo signal with opposite sides is played on one speaker, and why some wide stereo effects vanish on a phone speaker. If a control input seems dead when fed from a wide stereo source, this is likely why. Patch from one side with a split, or from a mono point earlier in the chain.
+
+### Not every signal is a level
+
+The mean is right for a level: audio, an LFO, an envelope. Pitch works too, because the mean of two pitches is the pitch halfway between them. Two other signal types break it.
+
+**Gates.** A gate is high above 0.5. Take a gate that is open on the left side only:
+
+| Left | Right | Mean | Maximum |
+|---|---|---|---|
+| 1.0 | 0.0 | 0.5 (reads low) | 1.0 (high) |
+| 1.0 | 1.0 | 1.0 | 1.0 |
+| 0.0 | 0.0 | 0.0 | 0.0 |
+
+The mean lands exactly on the threshold, and 0.5 is not above 0.5, so the gate is lost. The maximum keeps the gate open when either side is open, which is what a player expects. So a gate input downmixes with the maximum. It works for triggers too: a trigger on either side comes through.
+
+**Phases.** A phase runs from 0 up to 1 and then wraps, so 0.9 and 0.1 are close together on the circle, 0.2 apart across the wrap:
+
+| Left | Right | Plain mean | Shorter-way mean |
+|---|---|---|---|
+| 0.2 | 0.4 | 0.3 | 0.3 |
+| 0.9 | 0.1 | 0.5 (the far side) | 0.0 |
+| 0.25 | 0.75 | 0.5 | 0.0 (a tie, decided by a fixed rule) |
+
+The plain mean of 0.9 and 0.1 is 0.5, half a cycle away from both. To get the right answer, find the difference the short way round (from 0.9 forward to 0.1 is +0.2), go half of it from the left side, and wrap: 0.9 + 0.1 = 1.0, which wraps to 0.0. When the sides are exactly half a cycle apart, both ways round are as short, so the rule always picks the same one. The output stays the same on every run.
+
+A module author never picks the method. They declare an input `Downmix`, and its signal type decides.
+
+### Why "downmix" and not "average"
+
+"Average" sounds exact, but it is not. The mean, the median, and the mean round a circle are all averages, and gates do not use an average at all. "Downmix" names what the input does, which is make one channel from two. The table in the spec says how.
 
 ## Copies of random things
 

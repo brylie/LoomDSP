@@ -6,7 +6,7 @@ How the engine decides which cables carry stereo, and what modules do with it, s
 - **Status:** Agreed, not built yet ([#23](https://github.com/brylie/LoomDSP/issues/23)). Rule 13's cold start of copy 1 is Agreed for now and may change with the research in [#203](https://github.com/brylie/LoomDSP/issues/203).
 - **Decision behind it:** [ADR-0020](../adr/0020-inferred-channel-count.md), refining [ADR-0007](../adr/0007-polymorphic-signal-model.md).
 - **Use case and requirements:** FR-SIG-07, FR-SIG-01, FR-SIG-03, FR-CANVAS-12, NFR-RT-01
-- **Background:** [Stereo cables](../learn/stereo-cables.md): why copies, why the mean, why a downmix can cancel.
+- **Background:** [Stereo cables](../learn/stereo-cables.md): why copies, how each signal type downmixes, why a downmix can cancel.
 - **Prior art:** Eurorack patches stereo as two cables and dual modules. VCV Rack carries several channels on one cable and lets each module decide what to do with them. Bitwig Grid works in stereo by default. Named only to explain the trade-offs; the rules below are our own.
 - **Issues:** #23, #203 (new paths without a cold start)
 - **Code:** not built yet. It will touch `crates/loom-core/src/descriptor.rs`, `compile.rs`, `module.rs`, and `engine.rs`.
@@ -73,14 +73,24 @@ How the canvas shows a stereo cable is FR-CANVAS-12 (P2). See Open points.
     | `PerChannel` or `Downmix` | none | its default | its default, both copies |
     | `PerChannel` or `Downmix` | mono | the cable | the cable, both copies |
     | `PerChannel` | stereo | (cannot happen, rule 6) | copy 0 left, copy 1 right |
-    | `Downmix` | stereo | the mean of left and right | copy 0 left, copy 1 right |
+    | `Downmix` | stereo | the downmix of rule 11 | copy 0 left, copy 1 right |
     | `Stereo` | none | its default on both channels | (never copied, rule 5) |
     | `Stereo` | mono | the cable on both channels | |
     | `Stereo` | stereo | left and right | |
 
     *Why:* once a module runs per channel, giving each copy its own side of every stereo input is free and keeps the image. A downmix is only for modules that stay mono.
 
-11. **A downmix is `(left + right) / 2`.** The compiler gives each downmixed input a buffer, written just before the module runs (one sample at a time inside a feedback loop). *Why:* a mono signal spread to both sides downmixes back to the same level. A sum would make it 6 dB louder, and taking the left side would drop the right without warning. The explainer shows the cases.
+11. **The downmix depends on the input's signal type.** The compiler gives each downmixed input a buffer, written just before the module runs (one sample at a time inside a feedback loop).
+
+    | Signal type of the input | Downmix |
+    |---|---|
+    | Audio, modulation, pitch | The mean, `(left + right) / 2`. |
+    | Gate | The maximum, `max(left, right)`. |
+    | Phase | The mean the shorter way round the circle: `d = right - left`, wrapped into the range from -0.5 (included) up to 0.5 (not included), then `left + d / 2`, wrapped into 0 up to 1. |
+
+    *Why:* for levels, a mono signal spread to both sides downmixes back to the same level. A sum would make it 6 dB louder, and taking the left side would drop the right without warning. For pitch, the mean is the pitch halfway between. For gates, the mean of a gate high on one side only is exactly 0.5, which reads as low, so the gate would be lost; the maximum is high when either side is high. For phase, the plain mean of 0.9 and 0.1 is 0.5, the far side of the circle; the shorter-way mean gives 0.0. When the sides are exactly half a cycle apart, the rule still gives one fixed answer, `left - 0.25` wrapped, so output stays deterministic. All three cost a few operations per sample, with no tables or branches that depend on history. The explainer shows the cases.
+
+    The author writes only `Downmix`. The input's signal type picks the method, so a port's type and its downmix never disagree.
 
 12. **A mono cable into a `Stereo` input costs nothing.** Both channels point at the same buffer. *Why:* no copy is needed, because inputs are read only.
 
@@ -96,7 +106,7 @@ How the canvas shows a stereo cable is FR-CANVAS-12 (P2). See Open points.
 
 ### Modulation
 
-17. **Modulation assignments never make a module run per channel.** A stereo source into a module that runs as one gives the mean. Into a module that runs as two copies, each copy gets its own side, and a mono source gives both copies the same. *Why:* modulating a parameter from a stereo source is rare, and doubling the target for it would surprise the player. The rule mirrors `Downmix` inputs.
+17. **Modulation assignments never make a module run per channel.** A stereo source into a module that runs as one gives the mean, because a parameter has no signal type. Into a module that runs as two copies, each copy gets its own side, and a mono source gives both copies the same. *Why:* modulating a parameter from a stereo source is rare, and doubling the target for it would surprise the player. The rule mirrors `Downmix` inputs.
 
 ### API
 
@@ -110,7 +120,7 @@ How the canvas shows a stereo cable is FR-CANVAS-12 (P2). See Open points.
 
 21. **Join and Split are the first stereo modules,** built in P1 from MT-MIX-03. Join takes two mono inputs (`Stereo` output). Split takes one `Stereo` input and has a mono output per side. *Why:* with one stereo input on Audio Out, a player with separate left and right signals needs Join. Join is also the smallest module that makes stereo, so the feature can be heard and tested. Split gives back the case that a downmix cannot: reading one side on purpose.
 
-22. **A meter on a stereo output shows both channels. A scope shows the mean of the two sides,** the same downmix as rule 11. *Why:* level is where the sides most often differ, and a player checks it per side. A scope trace is for shape, and one trace is easier to read. A scope of a signal whose sides are opposite shows a flat line, like any downmix (see the explainer). To see one side, probe a Split output.
+22. **A meter on a stereo output shows both channels. A scope shows the mean of the two sides,** the same downmix rule 11 gives audio, whatever the output's type. *Why:* level is where the sides most often differ, and a player checks it per side. A scope trace is for shape, and one trace is easier to read. A scope of a signal whose sides are opposite shows a flat line, like any downmix (see the explainer). To see one side, probe a Split output.
 
 23. **A port's hover text says "Stereo" when its cable is stereo,** until FR-CANVAS-12 (P2) draws stereo cables. *Why:* the player needs some way to see a width the engine chose for them.
 
@@ -122,11 +132,13 @@ How the canvas shows a stereo cable is FR-CANVAS-12 (P2). See Open points.
 
 - [ ] Given a patch with no `Stereo` output anywhere, when it compiles, then its schedule has the same number of module operations, buffers, and instances as on the main branch before this change, and the engine benchmark shows no regression beyond noise.
 - [ ] Given a stereo test source into a filter into Audio Out, when the patch runs, then the filter runs as two copies, and each side matches a mono filter fed that side alone.
-- [ ] Given a stereo cable into a `Downmix` input of a module that runs as one, then the input reads exactly `(left + right) / 2`.
+- [ ] Given a stereo cable into an audio, modulation, or pitch `Downmix` input of a module that runs as one, then the input reads exactly `(left + right) / 2`.
+- [ ] Given a stereo cable into a gate `Downmix` input, with left 1.0 and right 0.0, then the input reads 1.0 (high).
+- [ ] Given a stereo cable into a phase `Downmix` input, with left 0.9 and right 0.1, then the input reads 0.0. With left 0.25 and right 0.75, it reads 0.0, every run.
 - [ ] Given a mono cable into a `Stereo` input, then both channels read the same buffer, and no downmix or copy buffer is added.
 - [ ] Given a feedback loop that no stereo cable enters, then every cable in it stays mono.
 - [ ] Given a feedback loop whose modules pass audio on through `PerChannel` inputs, and one stereo cable into a `PerChannel` input in the loop, then every module in the loop runs as two copies, every cable in it is stereo, and it compiles.
-- [ ] Given the same mono loop, and a stereo cable only into a `Downmix` input in the loop (such as a filter cutoff), then the loop stays mono, and that input reads the mean.
+- [ ] Given the same mono loop, and a stereo cable only into a `Downmix` input in the loop (such as a filter cutoff), then the loop stays mono, and that input reads the downmix of rule 11.
 - [ ] Given a long chain built so that stereo reaches modules in the reverse of the order they are stored, then inference visits each module and cable at most once.
 - [ ] Given a stereo chain, when the stereo cable is removed and the patch recompiles, then copy 1 of each module is freed on the control thread, copy 0 keeps its state, and the `no_alloc` tests pass.
 - [ ] Given a copied module, when it is run through the module test harness, then its output is identical at block sizes 1, 77, and 512.

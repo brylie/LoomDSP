@@ -44,22 +44,24 @@ C. **A, plus native stereo ports for modules that need both channels at once.**
 - **Sum** (L + R). A centred mono signal spread to both sides comes back 6 dB louder.
 - **Left only.** Cheap, but silently drops the right side.
 - **Mean** ((L + R) / 2). A centred signal comes back at the level it had.
+- **Equal power** ((L + R) / √2). Keeps the loudness of unrelated left and right material, but a centred signal comes back 3 dB louder.
+- **A method per signal type.** The mean for levels, but the maximum for gates (the mean of a gate high on one side is 0.5, which reads as low) and a mean that respects the wrap for phases (the plain mean of 0.9 and 0.1 is 0.5, not 0.0).
 
 ## Decision
 
-Options 5 and C, with the mean.
+Options 5 and C, with a downmix method per signal type.
 
 - **Widths are inferred at compile time,** on the control thread, and never stored in a patch. A cable is stereo only when a module that declares a stereo output feeds it, directly or through modules that pass stereo on.
-- **Each port declares its channel behaviour.** An input either makes the module run per channel when stereo arrives (`PerChannel`), or takes both channels itself (`Stereo`), or does neither (`Downmix`). A `Downmix` input reads the mean of the two sides while the module runs as one, and gives each copy its own side when another input already makes the module run per channel. An output either has as many channels as its module runs (`PerChannel`) or is always stereo (`Stereo`). A module with a `Stereo` port is never copied.
+- **Each port declares its channel behaviour.** An input either makes the module run per channel when stereo arrives (`PerChannel`), or takes both channels itself (`Stereo`), or does neither (`Downmix`). A `Downmix` input reads one value made from the two sides while the module runs as one, and gives each copy its own side when another input already makes the module run per channel. An output either has as many channels as its module runs (`PerChannel`) or is always stereo (`Stereo`). A module with a `Stereo` port is never copied.
 - **A module that receives stereo on a `PerChannel` input runs as two copies,** one per channel, each with its own state. All its outputs become stereo. A mono cable feeds both copies the same signal.
-- **A downmix is the mean of left and right.**
+- **The input's signal type picks the downmix:** the mean for audio, modulation, and pitch, the maximum for gates, and the mean the shorter way round the circle for phases. The author writes only `Downmix`.
 
 The exact rules, the defaults by signal type, and the API are in the [specification](../design/stereo.md).
 
 ## Consequences
 
 - **A mono-only patch pays nothing on the audio thread.** Its schedule has the same steps, buffers, and module instances as today. The only new work is the inference pass when the graph compiles, which uses a work queue so that its cost is linear in the number of modules and cables. Modules gain one declaration per port, and their `process` code does not change.
-- **Stereo costs only where it flows.** A copied module costs about twice as much, a downmix costs one add and one multiply per sample, and a mono cable into a stereo port costs nothing (both channels read the same buffer).
+- **Stereo costs only where it flows.** A copied module costs about twice as much, a downmix costs a few operations per sample, and a mono cable into a stereo port costs nothing (both channels read the same buffer).
 - **Most module authors write mono code.** Only modules that mix channels (panners, stereo reverbs, linked limiters, stereo sources) handle two buffers themselves.
 - **The patch format does not change.** A cable's width follows from the graph, so loading an old patch infers the same widths.
 - **Changing one cable can change widths downstream,** so a recompile may create or retire module copies. Copies are created and freed on the control thread and handed over at a buffer boundary, as slots are today. A new right-hand copy starts from reset, so its first block can differ from the left.
