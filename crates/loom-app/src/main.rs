@@ -16,6 +16,7 @@ mod modulation;
 mod monitor;
 mod param;
 mod scene;
+mod screenshot;
 mod undo;
 
 use clap::Parser;
@@ -56,10 +57,20 @@ struct Args {
     /// A command-line flag until the app has preferences.
     #[arg(long, default_value_t = OutputSafety::LowLatency)]
     output_safety: OutputSafety,
+    /// Saving a still image of the canvas instead of opening a window.
+    #[command(flatten)]
+    view: screenshot::Options,
 }
 
 fn main() -> iced::Result {
     let args = Args::parse();
+    if let Some(path) = &args.view.screenshot {
+        if let Err(e) = screenshot::run(&args, path) {
+            eprintln!("loom-app: {e}");
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
     iced::application(move || App::new(args.clone()), App::update, App::view)
         .title(App::title)
         .theme(App::theme)
@@ -579,6 +590,7 @@ impl App {
             no_audio: self.no_audio,
             bench: self.measuring,
             output_safety: self.output_safety,
+            view: screenshot::Options::default(),
         };
         let mut fresh = Self::assemble(output, sample_rate, session, self.generation + 1, &args);
         fresh.animating = self.animating;
@@ -2163,6 +2175,7 @@ mod tests {
             no_audio: true,
             bench: false,
             output_safety: OutputSafety::LowLatency,
+            view: screenshot::Options::default(),
         })
     }
 

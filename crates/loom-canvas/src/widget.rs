@@ -203,6 +203,19 @@ pub struct PatchCanvas<'a, Message> {
     animate: bool,
     interactive: bool,
     learn: Option<&'a LearnView>,
+    still: Option<Still>,
+}
+
+/// How a still image of the canvas starts: its camera and the control with
+/// keyboard focus. See [`PatchCanvas::still`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Still {
+    /// The view. It replaces the framing the canvas does when it first
+    /// appears.
+    pub camera: Camera,
+    /// Module ID and widget index of the control with keyboard focus. It
+    /// draws as after a Tab press: with the focus ring and its value.
+    pub focus: Option<(u32, usize)>,
 }
 
 impl<'a, Message> PatchCanvas<'a, Message> {
@@ -219,7 +232,18 @@ impl<'a, Message> PatchCanvas<'a, Message> {
             animate: false,
             interactive: true,
             learn: None,
+            still: None,
         }
+    }
+
+    /// Starts the canvas with this camera and focus instead of framing the
+    /// scene, so one drawn frame shows a chosen state. For saving the
+    /// canvas as an image without a window (`loom-app --screenshot`).
+    /// Only the first appearance uses it: later frames keep the state as
+    /// usual.
+    pub fn still(mut self, still: Still) -> Self {
+        self.still = Some(still);
+        self
     }
 
     /// Turns on MIDI learn mode, with what it shows.
@@ -459,7 +483,18 @@ where
     }
 
     fn state(&self) -> tree::State {
-        tree::State::new(State::default())
+        let state = match self.still {
+            Some(still) => State {
+                camera: still.camera,
+                // Already framed, so the first redraw keeps this camera.
+                framed_key: Some(self.frame_key),
+                focus: still.focus,
+                tab_focus: still.focus.is_some(),
+                ..State::default()
+            },
+            None => State::default(),
+        };
+        tree::State::new(state)
     }
 
     fn size(&self) -> Size<Length> {

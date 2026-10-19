@@ -31,6 +31,8 @@ cargo run --release -p loom-cli -- check examples/patches/fm-feedback.ron
 cargo run --release -p loom-cli -- render examples/patches/subtractive.ron -o /tmp/out.wav --note 60
 cargo run --release -p loom-app -- examples/patches/fm-feedback.ron   # desktop app
 cargo run --release -p loom-app -- --generate 300 --bench            # canvas frame-rate test
+cargo run --release -p loom-app -- examples/patches/subtractive.ron --screenshot /tmp/canvas.png   # canvas to PNG, no window
+cargo run --release -p loom-app -- examples/patches/subtractive.ron --screenshot /tmp/knob.png --zoom 2 --scale 2 --focus 4:cutoff
 ```
 
 ## Architecture in one page
