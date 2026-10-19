@@ -19,17 +19,19 @@ mod undo;
 
 use clap::Parser;
 use iced::widget::{
-    button, column, container, mouse_area, row, rule, scrollable, slider, space, stack, text, toggler, tooltip,
+    button, column, container, mouse_area, pick_list, row, rule, scrollable, slider, space, stack, text, toggler,
+    tooltip,
 };
 use iced::{Color, Element, Length, Point, Subscription, Task, Theme};
 use live::Live;
 use loom_canvas::{CanvasEvent, HoverText, LearnView, PanelValues, PatchCanvas, Scene};
 use loom_core::{
-    Controller, EngineConfig, EngineParts, InputRef, MidiEvent, ModuleDescriptor, ModuleId, OutputRef, OutputSafety,
-    ProbeId, create_engine,
+    AssignmentId, Controller, EngineConfig, EngineParts, InputRef, MidiEvent, ModuleDescriptor, ModuleId, OutputRef,
+    OutputSafety, ProbeId, create_engine,
 };
 use loom_host_desktop::{AudioOptions, AudioOutput, CallbackStats, MidiConnection, RunningAudio, SharedMidi};
 use loom_patch::Patch;
+use modulation::PolarityChoice;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -91,6 +93,8 @@ enum Message {
     Animate(bool),
     Frame(Instant),
     Tick,
+    /// A frame while live modulated values are on screen.
+    LiveFrame,
     /// New brightness for lights on screen.
     Lights(Vec<(lights::Light, f32)>),
     /// New levels for meter probes.
@@ -118,6 +122,36 @@ enum Message {
     Redo,
     /// An inspector slider was let go.
     SliderReleased,
+    /// Open or close the **Add modulation** list under a parameter.
+    AddModulation {
+        module: u32,
+        index: usize,
+    },
+    /// Assign an output to a parameter, picked from **Add modulation**.
+    Assign {
+        source: OutputRef,
+        module: u32,
+        index: usize,
+    },
+    /// An assignment's depth slider moved.
+    Depth {
+        id: AssignmentId,
+        depth: f32,
+    },
+    /// An assignment's polarity was picked.
+    Polarity {
+        id: AssignmentId,
+        choice: PolarityChoice,
+    },
+    /// An assignment was turned on or off.
+    Enabled {
+        id: AssignmentId,
+        enabled: bool,
+    },
+    /// The remove button on an assignment row.
+    Unassign(AssignmentId),
+    /// A line under **Drives** selects its target module.
+    SelectModule(u32),
 }
 
 struct App {
@@ -196,6 +230,11 @@ struct App {
     /// Parameters this app set during the edit in progress. A change on a
     /// mapped parameter is part of the step only if it is listed here.
     touched: BTreeSet<(u32, usize)>,
+    /// The parameter whose **Add modulation** list is open.
+    adding: Option<(u32, usize)>,
+    /// During an arc drag: the assignment it changes, once picked, or
+    /// `Some(None)` when none fits and the drag does nothing.
+    depth_drag: Option<Option<AssignmentId>>,
 }
 
 /// Where a patch comes from.
@@ -391,6 +430,8 @@ impl App {
             slider_gesture: false,
             history_off: false,
             touched: BTreeSet::new(),
+            adding: None,
+            depth_drag: None,
         };
         // A patch just loaded is the one on disk.
         app.history.mark_saved();
@@ -571,9 +612,20 @@ impl App {
             // slow tick keeps the audio numbers fresh.
             iced::time::every(Duration::from_millis(500)).map(|_| Message::Tick)
         };
+        // Live modulated values move every block, so a patch with an
+        // assignment that is on follows them every frame.
+        // Without audio the engine does not run, so nothing moves.
+        let live = if !self.measuring
+            && self._audio.is_some()
+            && self.controller.graph().assignments().any(|(_, a)| a.enabled)
+        {
+            iced::window::frames().map(|_| Message::LiveFrame)
+        } else {
+            Subscription::none()
+        };
         let telemetry = Subscription::run_with(self.monitor.clone(), monitor::stream).map(Message::Meters);
         let close = iced::window::close_requests().map(|_| Message::CloseRequested);
-        Subscription::batch([main, self.light_watch(), telemetry, self.midi_watch(), close])
+        Subscription::batch([main, live, self.light_watch(), telemetry, self.midi_watch(), close])
     }
 
     /// Wakes the UI when control changes arrive, while there is something to
@@ -729,7 +781,8 @@ impl App {
                 .unwrap_or_default();
             shown.insert(widget, (level.rms, level.peak));
         }
-        scene::update_panel_values(&mut self.values, &self.controller, &shown);
+        let dragging = self.depth_drag.flatten();
+        scene::update_panel_values_dragging(&mut self.values, &self.controller, &shown, dragging);
     }
 
     /// Takes the latest dropout count for the stats bar warning. Runs on
@@ -799,6 +852,75 @@ impl App {
         }
     }
 
+    /// Assigns an output to a parameter with the default depth, after the
+    /// others on that parameter. A drop on a tile control and **Add
+    /// modulation** both come here. An output that already drives the
+    /// parameter adds nothing (`docs/design/modulation.md`, Making an
+    /// assignment).
+    fn assign(&mut self, source: OutputRef, target: ModuleId, index: usize) {
+        let graph = self.controller.graph();
+        let Some(spec) = graph.node(target).and_then(|n| n.descriptor.params.get(index)).copied() else {
+            return;
+        };
+        let (from, to) = (
+            modulation::source_name(graph, source),
+            modulation::target_name(graph, target, index),
+        );
+        if modulation::exists(graph, source, target, index) {
+            self.status = format!("{from} already modulates {to}");
+            return;
+        }
+        let depth = modulation::default_depth(&spec);
+        match self.controller.add_assignment(source, target, index, depth) {
+            Ok(_) => {
+                if self.commit() {
+                    self.status = format!("{from} modulates {to}, {}", modulation::depth_text(depth));
+                }
+            }
+            Err(e) => self.status = format!("error: {e}"),
+        }
+    }
+
+    /// One step of an arc drag. The first picks the assignment, by the
+    /// spec's order; the rest of the drag keeps it.
+    fn drag_depth(&mut self, module: u32, widget: usize, pinned: Option<loom_canvas::PortRef>, delta: f32) {
+        let Some((param, _, _)) = scene::control_param(&self.controller, module, widget) else {
+            return;
+        };
+        let graph = self.controller.graph();
+        let picked = *self.depth_drag.get_or_insert_with(|| {
+            let pinned = pinned.map(|p| OutputRef {
+                module: ModuleId(p.module),
+                port: p.index,
+            });
+            let selected = (self.selection.len() == 1)
+                .then(|| self.selection.iter().next().map(|&id| ModuleId(id)))
+                .flatten();
+            match modulation::drag_target(graph, ModuleId(module), param, pinned, selected) {
+                Ok(id) => Some(id),
+                Err(why) => {
+                    self.status = why.to_string();
+                    None
+                }
+            }
+        });
+        let Some(id) = picked else { return };
+        let Some(a) = self.controller.graph().assignment(id).copied() else {
+            return;
+        };
+        match self.controller.set_assignment_depth(id, a.depth + delta) {
+            Ok(depth) => {
+                self.status = format!(
+                    "{}: depth {}",
+                    modulation::source_name(self.controller.graph(), a.source),
+                    modulation::depth_text(depth)
+                );
+            }
+            Err(e) => self.status = format!("error: {e}"),
+        }
+        self.refresh_values();
+    }
+
     fn report(&mut self) {
         let report = self.controller.last_report();
         let inserted = report.inserted_delays().count();
@@ -810,6 +932,18 @@ impl App {
                 if inserted == 1 { "delay" } else { "delays" },
             ),
         };
+        // One warning per compile, not one per parameter.
+        if report.without_live_value > 0 {
+            self.status.push_str(&format!(
+                "; {} modulated {} show no live value (table full)",
+                report.without_live_value,
+                if report.without_live_value == 1 {
+                    "knob"
+                } else {
+                    "knobs"
+                }
+            ));
+        }
     }
 
     /// Starts recording an edit: keeps the patch as it is now. Does nothing
@@ -1042,6 +1176,69 @@ impl App {
                 }
             }
             Message::SliderReleased => self.close_slider_gesture(),
+            Message::AddModulation { module, index } => {
+                self.adding = if self.adding == Some((module, index)) {
+                    None
+                } else {
+                    Some((module, index))
+                };
+            }
+            Message::Assign { source, module, index } => {
+                self.adding = None;
+                self.close_slider_gesture();
+                self.edit(|app| app.assign(source, ModuleId(module), index));
+            }
+            Message::Depth { id, depth } => {
+                // Like a parameter slider: the first change opens the
+                // gesture, and letting go closes it, so one drag is one step.
+                if !self.gesture {
+                    self.gesture = true;
+                    self.slider_gesture = true;
+                }
+                self.begin_edit();
+                if let Err(e) = self.controller.set_assignment_depth(id, depth) {
+                    self.status = format!("error: {e}");
+                }
+                self.refresh_values();
+            }
+            Message::Polarity { id, choice } => {
+                self.close_slider_gesture();
+                self.edit(|app| {
+                    if let Err(e) = app.controller.set_assignment_polarity(id, choice.polarity()) {
+                        app.status = format!("error: {e}");
+                    }
+                    app.refresh_values();
+                });
+            }
+            Message::Enabled { id, enabled } => {
+                self.close_slider_gesture();
+                self.edit(|app| {
+                    if let Err(e) = app.controller.set_assignment_enabled(id, enabled) {
+                        app.status = format!("error: {e}");
+                    }
+                    app.refresh_values();
+                });
+            }
+            Message::Unassign(id) => {
+                self.close_slider_gesture();
+                self.edit(|app| match app.controller.remove_assignment(id) {
+                    Ok(removed) => {
+                        app.commit();
+                        let graph = app.controller.graph();
+                        app.status = format!(
+                            "Removed modulation from {} to {}",
+                            modulation::source_name(graph, removed.source),
+                            modulation::target_name(graph, removed.target, removed.param)
+                        );
+                    }
+                    Err(e) => app.status = format!("error: {e}"),
+                });
+            }
+            Message::SelectModule(id) => {
+                if self.controller.graph().node(ModuleId(id)).is_some() {
+                    self.selection = BTreeSet::from([id]);
+                }
+            }
             Message::Undo => self.undo(),
             Message::Redo => self.redo(),
             Message::OpenBrowser => self.browser_key += 1,
@@ -1087,9 +1284,11 @@ impl App {
             }
             Message::Frame(now) => {
                 self.meter.record(now);
+                scene::update_live_values(&mut self.values, &self.controller);
                 self.controller.collect_garbage();
                 self.update_dropouts(now);
             }
+            Message::LiveFrame => scene::update_live_values(&mut self.values, &self.controller),
             Message::Tick => {
                 self.controller.collect_garbage();
                 self.update_dropouts(Instant::now());
@@ -1180,6 +1379,9 @@ impl App {
                 self.begin_edit();
             }
             CanvasEvent::GestureEnd => {
+                if self.depth_drag.take().is_some() {
+                    self.refresh_values();
+                }
                 self.gesture = false;
                 self.record();
                 self.history_back_on();
@@ -1209,6 +1411,21 @@ impl App {
                     Err(e) => self.status = format!("error: {e}"),
                 }
             }
+            CanvasEvent::Assign { from, module, widget } => {
+                if let Some((index, _, _)) = scene::control_param(&self.controller, module, widget) {
+                    let source = OutputRef {
+                        module: ModuleId(from.module),
+                        port: from.index,
+                    };
+                    self.assign(source, ModuleId(module), index);
+                }
+            }
+            CanvasEvent::DragDepth {
+                module,
+                widget,
+                pinned,
+                delta,
+            } => self.drag_depth(module, widget, pinned, delta),
             CanvasEvent::Disconnect(port) => {
                 let input = InputRef {
                     module: ModuleId(port.module),
@@ -1450,7 +1667,11 @@ impl App {
                                 .align_y(iced::Alignment::Center),
                             );
                         }
+                        row_items = row_items.push(self.assignment_rows(id, index));
                         items = items.push(row_items);
+                    }
+                    if let Some(drives) = self.drives(id) {
+                        items = items.push(drives);
                     }
                     items.into()
                 }
@@ -1471,6 +1692,113 @@ impl App {
             .width(280)
             .height(Length::Fill)
             .into()
+    }
+
+    /// Under a parameter's slider: one row per assignment on it, in engine
+    /// order, then **Add modulation** (`docs/design/modulation.md`, Seeing
+    /// assignments).
+    fn assignment_rows(&self, module: u32, index: usize) -> Element<'_, Message> {
+        let graph = self.controller.graph();
+        let center = iced::Alignment::Center;
+        let mut rows = column![].spacing(6);
+        for (id, a) in modulation::on_param(graph, ModuleId(module), index) {
+            let own = modulation::source_polarity(graph, a.source);
+            let assignment = column![
+                row![
+                    text(modulation::source_name(graph, a.source)).size(11),
+                    space::horizontal(),
+                    remove_button("Remove modulation", Message::Unassign(id)),
+                ]
+                .align_y(center),
+                row![
+                    slider(-1.0..=1.0, a.depth, move |depth| Message::Depth { id, depth })
+                        .on_release(Message::SliderReleased)
+                        .step(0.01_f32),
+                    text(modulation::depth_text(a.depth)).size(11).width(36),
+                ]
+                .spacing(6)
+                .align_y(center),
+                row![
+                    pick_list(
+                        PolarityChoice::options(own),
+                        Some(PolarityChoice::of(a.polarity, own)),
+                        move |choice| Message::Polarity { id, choice },
+                    )
+                    .text_size(11),
+                    space::horizontal(),
+                    toggler(a.enabled)
+                        .label(if a.enabled { "On" } else { "Off" })
+                        .on_toggle(move |enabled| Message::Enabled { id, enabled })
+                        .size(14)
+                        .text_size(11),
+                ]
+                .spacing(6)
+                .align_y(center),
+            ]
+            .spacing(3);
+            rows = rows.push(container(assignment).padding([0, 8]));
+        }
+        let open = self.adding == Some((module, index));
+        rows = rows.push(
+            button(text(if open { "Cancel" } else { "Add modulation" }).size(11))
+                .padding([2, 6])
+                .style(button::text)
+                .on_press(Message::AddModulation { module, index }),
+        );
+        if open {
+            // Every output at this patch level. One that already drives the
+            // parameter is greyed out and cannot be picked.
+            let mut list = column![].spacing(1);
+            for source in modulation::sources(graph) {
+                let taken = modulation::exists(graph, source, ModuleId(module), index);
+                list = list.push(
+                    button(text(modulation::source_name(graph, source)).size(11))
+                        .width(Length::Fill)
+                        .padding([2, 6])
+                        .style(button::secondary)
+                        .on_press_maybe((!taken).then_some(Message::Assign { source, module, index })),
+                );
+            }
+            rows = rows.push(container(list).padding([0, 8]));
+        }
+        rows.into()
+    }
+
+    /// **Drives**: what each output of `module` drives, one group per output
+    /// that drives at least one assignment. A line selects its target. Lines
+    /// for assignments that are off say "off" and are dimmed, so the state
+    /// does not rest on colour alone.
+    fn drives(&self, module: u32) -> Option<Element<'_, Message>> {
+        let graph = self.controller.graph();
+        let drives = modulation::drives(graph, ModuleId(module));
+        if drives.is_empty() {
+            return None;
+        }
+        let node = graph.node(ModuleId(module))?;
+        let mut list = column![text("Drives").size(13)].spacing(4);
+        for (port, assignments) in drives {
+            let label = node.descriptor.outputs.get(port).map_or("?", |p| p.label);
+            list = list.push(text(label).size(11).color(DIM));
+            for (_, a) in assignments {
+                let mut line = format!(
+                    "{}, {}",
+                    modulation::target_name(graph, a.target, a.param),
+                    modulation::depth_text(a.depth)
+                );
+                if !a.enabled {
+                    line.push_str(" (off)");
+                }
+                let label = text(line).size(11);
+                list = list.push(
+                    button(if a.enabled { label } else { label.color(DIM) })
+                        .width(Length::Fill)
+                        .padding([2, 8])
+                        .style(button::text)
+                        .on_press(Message::SelectModule(a.target.0)),
+                );
+            }
+        }
+        Some(list.into())
     }
 
     fn stats_bar(&self) -> Element<'_, Message> {
@@ -1719,5 +2047,393 @@ mod tests {
             repeat: false,
         }));
         assert_eq!(app.controller.graph().nodes().count(), before + 1);
+    }
+
+    /// An envelope and a filter, with the filter's cutoff knob widget.
+    fn env_and_filter(app: &mut App) -> (ModuleId, ModuleId, usize, usize) {
+        let env = app.controller.add_module("loom.env.adsr").unwrap();
+        let filter = app.controller.add_module("loom.filter.svf").unwrap();
+        app.commit();
+        let d = app.controller.graph().node(filter).unwrap().descriptor;
+        let cutoff = d.param_index("cutoff").unwrap();
+        let widget = d.panel.widgets.iter().position(|w| w.bind == "cutoff").unwrap();
+        app.history.clear();
+        (env, filter, cutoff, widget)
+    }
+
+    fn drop_env(app: &mut App, env: ModuleId, filter: ModuleId, widget: usize) {
+        let from = loom_canvas::PortRef {
+            module: env.0,
+            output: true,
+            index: 0,
+        };
+        let _ = app.update(Message::Canvas(CanvasEvent::Assign {
+            from,
+            module: filter.0,
+            widget,
+        }));
+    }
+
+    fn assignments(app: &App) -> Vec<loom_core::Assignment> {
+        app.controller.graph().assignments().map(|(_, a)| *a).collect()
+    }
+
+    /// Dropping an output on a knob assigns it with depth 0.25, following
+    /// the source's polarity. A second drop of the same output adds nothing
+    /// and says why. Undo and redo take the assignment back and forth.
+    #[test]
+    fn a_drop_assigns_once_and_is_one_undo_step() {
+        let mut app = app();
+        let (env, filter, cutoff, widget) = env_and_filter(&mut app);
+        drop_env(&mut app, env, filter, widget);
+        let made = assignments(&app);
+        assert_eq!(made.len(), 1);
+        assert_eq!(made[0].source, OutputRef { module: env, port: 0 });
+        assert_eq!((made[0].target, made[0].param), (filter, cutoff));
+        assert_eq!(made[0].depth, 0.25);
+        assert_eq!(made[0].polarity, None);
+        assert!(made[0].enabled);
+        assert_eq!(app.history.undo_step().map(undo::Step::name), Some("add modulation"));
+
+        drop_env(&mut app, env, filter, widget);
+        assert_eq!(assignments(&app).len(), 1);
+        assert!(app.status.contains("already modulates"), "{}", app.status);
+
+        app.undo();
+        assert!(assignments(&app).is_empty());
+        app.redo();
+        assert_eq!(assignments(&app), made);
+    }
+
+    /// **Add modulation** makes the same assignment as a drop, from a list
+    /// of every output in module order, where outputs that already drive
+    /// the parameter cannot be picked.
+    #[test]
+    fn add_modulation_matches_a_drop() {
+        let mut app = app();
+        let (env, filter, cutoff, widget) = env_and_filter(&mut app);
+        let source = OutputRef { module: env, port: 0 };
+        let graph = app.controller.graph();
+        let sources = modulation::sources(graph);
+        assert_eq!(sources.first(), Some(&source));
+        let mut sorted = sources.clone();
+        sorted.sort();
+        assert_eq!(sources, sorted, "module order, then port order");
+
+        let _ = app.update(Message::AddModulation {
+            module: filter.0,
+            index: cutoff,
+        });
+        assert_eq!(app.adding, Some((filter.0, cutoff)));
+        let _ = app.update(Message::Assign {
+            source,
+            module: filter.0,
+            index: cutoff,
+        });
+        assert_eq!(app.adding, None);
+        let picked = assignments(&app);
+        assert!(modulation::exists(app.controller.graph(), source, filter, cutoff));
+
+        let mut dropped = self::app();
+        let (env, filter, _, widget2) = env_and_filter(&mut dropped);
+        assert_eq!(widget, widget2);
+        drop_env(&mut dropped, env, filter, widget);
+        assert_eq!(assignments(&dropped), picked);
+    }
+
+    /// The inspector row edits depth, polarity, and on/off, and removes. A
+    /// depth slider drag is one undo step. None of these but removal
+    /// rebuilds the scene, so the GPU keeps its tiles, ports, and cables.
+    #[test]
+    fn inspector_rows_edit_and_remove_assignments() {
+        let mut app = app();
+        let (env, filter, cutoff, widget) = env_and_filter(&mut app);
+        drop_env(&mut app, env, filter, widget);
+        let id = app.controller.graph().assignments().next().unwrap().0;
+        let generation = app.scene.generation();
+        let steps = app.history.len();
+
+        for depth in [0.3, 0.4, 0.5] {
+            let _ = app.update(Message::Depth { id, depth });
+        }
+        let _ = app.update(Message::SliderReleased);
+        assert_eq!(assignments(&app)[0].depth, 0.5);
+        assert_eq!(app.history.len(), steps + 1, "one drag, one step");
+
+        let _ = app.update(Message::Polarity {
+            id,
+            choice: PolarityChoice::Bipolar,
+        });
+        let _ = app.update(Message::Enabled { id, enabled: false });
+        let a = assignments(&app)[0];
+        assert_eq!(a.polarity, Some(loom_core::Polarity::Bipolar));
+        assert!(!a.enabled);
+        assert_eq!(app.scene.generation(), generation, "no scene rebuild for edits");
+
+        app.undo();
+        app.undo();
+        app.undo();
+        assert_eq!(assignments(&app)[0].depth, 0.25);
+
+        let _ = app.update(Message::Unassign(id));
+        assert!(assignments(&app).is_empty());
+        assert!(modulation::on_param(app.controller.graph(), filter, cutoff).is_empty());
+    }
+
+    /// The source's output shows how many assignments it drives, counting
+    /// those that are off, and follows adds, removals, and deletes.
+    #[test]
+    fn badges_count_every_assignment_on_an_output() {
+        let mut app = app();
+        let (env, filter, _, widget) = env_and_filter(&mut app);
+        let badge = |app: &App| app.scene.module(env.0).unwrap().outputs[0].badge;
+        assert_eq!(badge(&app), 0);
+        drop_env(&mut app, env, filter, widget);
+        let resonance = app
+            .controller
+            .graph()
+            .node(filter)
+            .unwrap()
+            .descriptor
+            .param_index("resonance")
+            .unwrap();
+        let _ = app.update(Message::Assign {
+            source: OutputRef { module: env, port: 0 },
+            module: filter.0,
+            index: resonance,
+        });
+        assert_eq!(badge(&app), 2);
+        let id = app.controller.graph().assignments().next().unwrap().0;
+        let _ = app.update(Message::Enabled { id, enabled: false });
+        assert_eq!(badge(&app), 2, "off still counts");
+        let _ = app.update(Message::Unassign(id));
+        assert_eq!(badge(&app), 1);
+        let _ = app.update(Message::Canvas(CanvasEvent::Delete(vec![filter.0])));
+        assert_eq!(badge(&app), 0);
+    }
+
+    /// **Drives** lists what each output drives, in the order added, and a
+    /// line selects its target.
+    #[test]
+    fn drives_lists_targets_and_selects_them() {
+        let mut app = app();
+        let (env, filter, cutoff, widget) = env_and_filter(&mut app);
+        drop_env(&mut app, env, filter, widget);
+        let drives = modulation::drives(app.controller.graph(), env);
+        let targets: Vec<_> = drives[&0].iter().map(|(_, a)| (a.target, a.param)).collect();
+        assert_eq!(targets, vec![(filter, cutoff)]);
+        assert!(modulation::drives(app.controller.graph(), filter).is_empty());
+        let _ = app.update(Message::SelectModule(filter.0));
+        assert_eq!(app.selection, BTreeSet::from([filter.0]));
+    }
+
+    /// Saved and loaded, the inspector lists the same assignments in the
+    /// same order.
+    #[test]
+    fn assignments_keep_their_order_through_a_save() {
+        let mut app = app();
+        let (env, filter, cutoff, widget) = env_and_filter(&mut app);
+        let other = app.controller.add_module("loom.osc.sine").unwrap();
+        app.commit();
+        let _ = app.update(Message::Assign {
+            source: OutputRef { module: other, port: 0 },
+            module: filter.0,
+            index: cutoff,
+        });
+        drop_env(&mut app, env, filter, widget);
+        let rows = |c: &Controller| -> Vec<(OutputRef, f32)> {
+            modulation::on_param(c.graph(), filter, cutoff)
+                .into_iter()
+                .map(|(_, a)| (a.source, a.depth))
+                .collect()
+        };
+        let before = rows(&app.controller);
+        assert_eq!(before[0].0.module, other, "the sine was added first");
+
+        let text = Patch::from_graph("Order", app.controller.graph()).to_ron().unwrap();
+        let mut reloaded = create_engine(loom_modules::registry(), EngineConfig::default());
+        Patch::from_ron(&text)
+            .unwrap()
+            .load_into(&mut reloaded.controller)
+            .unwrap();
+        assert_eq!(rows(&reloaded.controller), before);
+    }
+
+    /// An envelope and a sine both on the filter cutoff.
+    fn two_sources(app: &mut App) -> (ModuleId, ModuleId, ModuleId, usize, usize) {
+        let (env, filter, cutoff, widget) = env_and_filter(app);
+        let sine = app.controller.add_module("loom.osc.sine").unwrap();
+        app.commit();
+        drop_env(app, env, filter, widget);
+        let _ = app.update(Message::Assign {
+            source: OutputRef { module: sine, port: 0 },
+            module: filter.0,
+            index: cutoff,
+        });
+        (env, sine, filter, cutoff, widget)
+    }
+
+    fn out(module: ModuleId) -> OutputRef {
+        OutputRef { module, port: 0 }
+    }
+
+    /// The arc drag picks the pinned source, then the selected module's
+    /// output, then the only enabled assignment, and otherwise nothing.
+    #[test]
+    fn the_arc_drag_picks_its_assignment_in_order() {
+        let mut app = app();
+        let (env, sine, filter, cutoff, _) = two_sources(&mut app);
+        let graph = app.controller.graph();
+        let id_of = |source: OutputRef| {
+            graph
+                .assignments()
+                .find(|(_, a)| a.source == source)
+                .map(|(id, _)| id)
+                .unwrap()
+        };
+        let pick = |pinned, selected| modulation::drag_target(graph, filter, cutoff, pinned, selected);
+        assert_eq!(pick(Some(out(sine)), Some(env)), Ok(id_of(out(sine))));
+        assert_eq!(pick(None, Some(env)), Ok(id_of(out(env))));
+        // A pinned output that does not drive this knob falls through.
+        assert_eq!(pick(Some(out(filter)), Some(sine)), Ok(id_of(out(sine))));
+        assert!(pick(None, Some(filter)).is_err(), "two enabled: none fits");
+        assert!(pick(None, None).unwrap_err().contains("pin one"));
+
+        // With one of them off, the other is the only enabled one.
+        let (sine_id, env_id) = (id_of(out(sine)), id_of(out(env)));
+        app.controller.set_assignment_enabled(sine_id, false).unwrap();
+        let graph = app.controller.graph();
+        assert_eq!(modulation::drag_target(graph, filter, cutoff, None, None), Ok(env_id));
+    }
+
+    /// Two assignments from the same output (only possible in a hand-written
+    /// patch) make the drag change nothing, even when that output is pinned.
+    #[test]
+    fn a_duplicate_source_is_not_a_drag_target() {
+        let mut app = app();
+        let (env, filter, cutoff, _) = env_and_filter(&mut app);
+        for depth in [0.1, 0.2] {
+            app.controller.add_assignment(out(env), filter, cutoff, depth).unwrap();
+        }
+        let graph = app.controller.graph();
+        for (pinned, selected) in [(Some(out(env)), None), (None, Some(env))] {
+            let why = modulation::drag_target(graph, filter, cutoff, pinned, selected).unwrap_err();
+            assert!(why.contains("inspector"), "{why}");
+        }
+    }
+
+    /// One arc drag changes one assignment's depth as one undo step. While
+    /// it lasts, the knob's arc shows only that assignment.
+    #[test]
+    fn an_arc_drag_is_one_step_and_shows_only_its_assignment() {
+        let mut app = app();
+        let (_, sine, filter, _, widget) = two_sources(&mut app);
+        let steps = app.history.len();
+        let pinned = Some(loom_canvas::PortRef {
+            module: sine.0,
+            output: true,
+            index: 0,
+        });
+        let drag = |delta| {
+            Message::Canvas(CanvasEvent::DragDepth {
+                module: filter.0,
+                widget,
+                pinned,
+                delta,
+            })
+        };
+        let mark = |app: &App| app.values.get(filter.0, widget).unwrap().modulation;
+        let both = mark(&app);
+        let _ = app.update(Message::Canvas(CanvasEvent::GestureStart));
+        let _ = app.update(drag(0.1));
+        let _ = app.update(drag(0.1));
+        let during = mark(&app);
+        assert_ne!(during, both, "the arc shows the dragged assignment alone");
+        let _ = app.update(Message::Canvas(CanvasEvent::GestureEnd));
+        assert_eq!(app.depth_drag, None);
+        let depth = |app: &App| {
+            app.controller
+                .graph()
+                .assignments()
+                .find(|(_, a)| a.source == out(sine))
+                .unwrap()
+                .1
+                .depth
+        };
+        assert!((depth(&app) - 0.45).abs() < 1e-6, "{}", depth(&app));
+        assert!(app.status.contains("+45%"), "{}", app.status);
+        assert_eq!(app.history.len(), steps + 1);
+        app.undo();
+        assert_eq!(depth(&app), 0.25);
+    }
+
+    /// A selected source picks the assignment even though the drag starts
+    /// on another module's knob: the press does not change the selection.
+    #[test]
+    fn a_selected_source_picks_the_arc_drag() {
+        let mut app = app();
+        let (env, sine, filter, _, widget) = two_sources(&mut app);
+        app.selection = BTreeSet::from([sine.0]);
+        let _ = app.update(Message::Canvas(CanvasEvent::GestureStart));
+        let _ = app.update(Message::Canvas(CanvasEvent::DragDepth {
+            module: filter.0,
+            widget,
+            pinned: None,
+            delta: 0.1,
+        }));
+        let _ = app.update(Message::Canvas(CanvasEvent::GestureEnd));
+        let depth = |source| {
+            app.controller
+                .graph()
+                .assignments()
+                .find(|(_, a)| a.source == out(source))
+                .unwrap()
+                .1
+                .depth
+        };
+        assert!((depth(sine) - 0.35).abs() < 1e-6);
+        assert_eq!(depth(env), 0.25);
+    }
+
+    /// With several sources and none in focus, a drag changes nothing and
+    /// the status bar says why.
+    #[test]
+    fn an_arc_drag_with_no_choice_changes_nothing() {
+        let mut app = app();
+        let (_, _, filter, _, widget) = two_sources(&mut app);
+        app.selection.clear();
+        let before = assignments(&app);
+        let steps = app.history.len();
+        let _ = app.update(Message::Canvas(CanvasEvent::GestureStart));
+        let _ = app.update(Message::Canvas(CanvasEvent::DragDepth {
+            module: filter.0,
+            widget,
+            pinned: None,
+            delta: 0.2,
+        }));
+        let _ = app.update(Message::Canvas(CanvasEvent::GestureEnd));
+        assert_eq!(assignments(&app), before);
+        assert_eq!(app.history.len(), steps);
+        assert!(app.status.contains("Several sources"), "{}", app.status);
+    }
+
+    /// The scene has one line per assignment, ending on its control.
+    #[test]
+    fn the_scene_has_a_line_per_assignment() {
+        let mut app = app();
+        let (env, sine, filter, _, widget) = two_sources(&mut app);
+        let lines: Vec<_> = app
+            .scene
+            .modulations()
+            .iter()
+            .map(|m| (m.from, m.to, m.widget))
+            .collect();
+        assert_eq!(
+            lines,
+            vec![
+                ((env.0, 0), filter.0, Some(widget)),
+                ((sine.0, 0), filter.0, Some(widget))
+            ]
+        );
     }
 }

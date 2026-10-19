@@ -657,3 +657,171 @@ fn assignment_to_non_dsp_module_is_rejected() {
         Err(loom_core::LoomError::NoSuchParam { .. })
     ));
 }
+
+/// A whole-number parameter from 0 to 1, off, with one assignment at the
+/// depth the app gives a toggle (one step, 1.0): a unipolar source at 1
+/// turns it on, and at 0 leaves it off (modulation.md, slice 1). The
+/// button's `on` is such a parameter, and its gate is a unipolar source.
+#[test]
+fn a_unipolar_source_at_one_turns_an_off_toggle_on() {
+    fn run(source_on: f32) -> f32 {
+        let mut parts = engine();
+        let source = module(&mut parts.controller, "loom.ui.button", "on", source_on);
+        let target = module(&mut parts.controller, "loom.ui.button", "on", 0.0);
+        parts
+            .controller
+            .add_assignment_named(source, "gate", target, "on", 1.0)
+            .unwrap();
+        listen(&mut parts.controller, target, "gate");
+        parts.controller.commit().unwrap();
+        render(&mut parts, 4, 4)[3]
+    }
+    assert_eq!(run(1.0), 1.0);
+    assert_eq!(run(0.0), 0.0);
+}
+
+fn engine_with_live_cells(cells: usize) -> EngineParts {
+    let mut registry = loom_core::Registry::new();
+    register_all(&mut registry).expect("built-ins");
+    registry.register(&LINEAR).expect("linear");
+    // Exact values through Audio Out, as in `engine`: safety off, and
+    // past the fade-in (ADR-0019).
+    let config = EngineConfig {
+        max_live_values: cells,
+        output_safety: OutputSafety::Off,
+        ..EngineConfig::with_sample_rate(48_000.0)
+    };
+    let mut parts = create_engine(Arc::new(registry), config);
+    let mut silence = [0.0; 1024];
+    parts.engine.process(&mut silence.clone(), &mut silence);
+    parts
+}
+
+/// The live value is the parameter's modulated value at the last frame of
+/// the block, as a position from 0 to 1 (modulation.md, Live value). The
+/// sink writes its modulated parameter to its output, so the two match.
+#[test]
+fn the_live_value_is_the_last_frame_of_the_block() {
+    let mut parts = engine_with_live_cells(256);
+    let ramp = parts.controller.add_module("loom.phase.generator").unwrap();
+    let sink = parts.controller.add_module("test.linear").unwrap();
+    let id = parts
+        .controller
+        .add_assignment_named(ramp, "phase", sink, "level", 1.0)
+        .unwrap();
+    parts
+        .controller
+        .set_assignment_polarity(id, Some(Polarity::Unipolar))
+        .unwrap();
+    listen(&mut parts.controller, sink, "out");
+    parts.controller.commit().unwrap();
+    // Not swapped in yet: nothing to read.
+    assert_eq!(parts.controller.modulated(sink, 0), None);
+    for block in [1, 77, 128] {
+        let out = render(&mut parts, block, block);
+        let live = parts.controller.modulated(sink, 0).expect("a live value");
+        assert_eq!(live, out[block - 1], "block of {block}");
+    }
+    // A parameter with no assignment has no live value.
+    assert_eq!(parts.controller.modulated(ramp, 0), None);
+}
+
+/// With more modulated parameters than cells, the extra ones still sound
+/// the same but have no live value, and the compile report says so once.
+#[test]
+fn a_full_live_table_drops_the_dot_but_not_the_sound() {
+    fn run(cells: usize) -> (Vec<f32>, Option<f32>, Option<f32>, usize) {
+        let mut parts = engine_with_live_cells(cells);
+        let source = module(&mut parts.controller, "test.linear", "level", 1.0);
+        let a = parts.controller.add_module("test.linear").unwrap();
+        let b = parts.controller.add_module("test.linear").unwrap();
+        for (target, depth) in [(a, 0.25), (b, 0.5)] {
+            parts
+                .controller
+                .add_assignment_named(source, "out", target, "level", depth)
+                .unwrap();
+        }
+        let mix = parts.controller.add_module("loom.math.add").unwrap();
+        parts.controller.connect_named(a, "out", mix, "a").unwrap();
+        parts.controller.connect_named(b, "out", mix, "b").unwrap();
+        listen(&mut parts.controller, mix, "out");
+        let missing = parts.controller.commit().unwrap().without_live_value;
+        let out = render(&mut parts, 64, 64);
+        (
+            out,
+            parts.controller.modulated(a, 0),
+            parts.controller.modulated(b, 0),
+            missing,
+        )
+    }
+    let (full, a, b, missing) = run(256);
+    assert_eq!((a, b, missing), (Some(0.25), Some(0.5), 0));
+    let (one, a, b, missing) = run(1);
+    assert_eq!(missing, 1);
+    assert_eq!(a.is_some() as u8 + b.is_some() as u8, 1);
+    assert_eq!(one, full, "the sound does not change");
+}
+
+/// After a recompile gives a cell to another parameter, the old knob never
+/// reads the new parameter's value, and the new one reads nothing until
+/// the engine has the schedule that gives it the cell.
+#[test]
+fn a_moved_cell_never_shows_another_parameters_value() {
+    let mut parts = engine_with_live_cells(1);
+    let source = module(&mut parts.controller, "test.linear", "level", 1.0);
+    let a = parts.controller.add_module("test.linear").unwrap();
+    let b = parts.controller.add_module("test.linear").unwrap();
+    let first = parts
+        .controller
+        .add_assignment_named(source, "out", a, "level", 0.25)
+        .unwrap();
+    listen(&mut parts.controller, a, "out");
+    parts.controller.commit().unwrap();
+    render(&mut parts, 8, 8);
+    assert_eq!(parts.controller.modulated(a, 0), Some(0.25));
+
+    parts.controller.remove_assignment(first).unwrap();
+    parts
+        .controller
+        .add_assignment_named(source, "out", b, "level", 0.5)
+        .unwrap();
+    parts.controller.commit().unwrap();
+    // The controller has moved the cell to b, the engine not yet.
+    assert_eq!(parts.controller.modulated(a, 0), None);
+    assert_eq!(parts.controller.modulated(b, 0), None);
+    render(&mut parts, 8, 8);
+    assert_eq!(parts.controller.modulated(a, 0), None);
+    assert_eq!(parts.controller.modulated(b, 0), Some(0.5));
+}
+
+/// With the command queue full, changing depth, polarity, or on/off fails
+/// and leaves the graph as it was, so the graph never holds a setting the
+/// engine does not have.
+#[test]
+fn a_full_queue_leaves_the_assignment_unchanged() {
+    let mut registry = loom_core::Registry::new();
+    registry.register(&LINEAR).expect("linear");
+    let config = EngineConfig {
+        // Two inserts and one swap fill it.
+        command_capacity: 3,
+        ..EngineConfig::with_sample_rate(48_000.0)
+    };
+    let mut parts = create_engine(Arc::new(registry), config);
+    let source = parts.controller.add_module("test.linear").unwrap();
+    let sink = parts.controller.add_module("test.linear").unwrap();
+    let id = parts
+        .controller
+        .add_assignment_named(source, "out", sink, "level", 0.25)
+        .unwrap();
+    parts.controller.commit().unwrap();
+    let before = *parts.controller.graph().assignment(id).unwrap();
+    assert!(parts.controller.set_assignment_depth(id, 0.5).is_err());
+    assert!(
+        parts
+            .controller
+            .set_assignment_polarity(id, Some(Polarity::Unipolar))
+            .is_err()
+    );
+    assert!(parts.controller.set_assignment_enabled(id, false).is_err());
+    assert_eq!(*parts.controller.graph().assignment(id).unwrap(), before);
+}

@@ -6,6 +6,7 @@ use crate::display::{DisplayReader, DisplaySource, DisplayTable};
 use crate::engine::{Command, Engine, EngineConfig, EngineStats, Garbage};
 use crate::error::LoomError;
 use crate::graph::{Assignment, AssignmentId, Graph, InputRef, ModuleId, Node, OutputRef};
+use crate::live::{LiveCells, LiveTable, NO_CELL};
 use crate::midi::MidiEvent;
 use crate::midi_map::{
     ControlChangeSeen, MidiControl, MidiFeedback, MidiMapping, MidiMappingId, MidiReader, control_value, later,
@@ -42,6 +43,7 @@ pub fn create_engine(registry: Arc<Registry>, config: EngineConfig) -> EnginePar
     let (scope_tx, scope_rx) = RingBuffer::new(config.scope_capacity);
     let stats = Arc::new(EngineStats::default());
     let displays = Arc::new(DisplayTable::new(config.max_modules));
+    let live = Arc::new(LiveTable::new(config.max_live_values));
     let midi_feedback = Arc::new(MidiFeedback::new());
     let engine = Engine::new(
         config,
@@ -52,7 +54,7 @@ pub fn create_engine(registry: Arc<Registry>, config: EngineConfig) -> EnginePar
             meters: meter_tx,
             scope: scope_tx,
         },
-        displays.clone(),
+        (displays.clone(), live.clone()),
         stats.clone(),
     );
     let controller = Controller {
@@ -75,6 +77,8 @@ pub fn create_engine(registry: Arc<Registry>, config: EngineConfig) -> EnginePar
         last_report: CompileReport::default(),
         transport: TransportSettings::default(),
         displays,
+        live,
+        live_cells: LiveCells::new(config.max_live_values),
         config,
         stats,
     };
@@ -131,6 +135,10 @@ pub struct Controller {
     transport: TransportSettings,
     /// Display values from the engine (ADR-0013).
     displays: Arc<DisplayTable>,
+    /// Live modulated values from the engine, and which cell each modulated
+    /// parameter has (`docs/design/modulation.md`, Live value).
+    live: Arc<LiveTable>,
+    live_cells: LiveCells,
     config: EngineConfig,
     stats: Arc<EngineStats>,
 }
@@ -359,40 +367,40 @@ impl Controller {
     /// buffer, without recompiling.
     pub fn set_assignment_depth(&mut self, id: AssignmentId, depth: f32) -> Result<f32, LoomError> {
         let depth = clamp_depth(depth);
-        self.assignment_mut(id)?.depth = depth;
-        self.send_assignment(id)?;
+        self.update_assignment(id, |a| a.depth = depth)?;
         Ok(depth)
     }
 
     /// Forces an assignment's polarity, or `None` to follow the source output.
     /// Takes effect at the next buffer, without recompiling.
     pub fn set_assignment_polarity(&mut self, id: AssignmentId, polarity: Option<Polarity>) -> Result<(), LoomError> {
-        self.assignment_mut(id)?.polarity = polarity;
-        self.send_assignment(id)
+        self.update_assignment(id, |a| a.polarity = polarity)
     }
 
     /// Turns an assignment on or off. The scheduling edge stays, so this does
     /// not recompile. Takes effect at the next buffer.
     pub fn set_assignment_enabled(&mut self, id: AssignmentId, enabled: bool) -> Result<(), LoomError> {
-        self.assignment_mut(id)?.enabled = enabled;
-        self.send_assignment(id)
+        self.update_assignment(id, |a| a.enabled = enabled)
     }
 
-    fn assignment_mut(&mut self, id: AssignmentId) -> Result<&mut Assignment, LoomError> {
-        self.graph
+    /// Sends the changed assignment first, then writes the graph. A full
+    /// queue then changes nothing, so the graph and the engine never
+    /// disagree, as in [`Controller::set_params`].
+    fn update_assignment(&mut self, id: AssignmentId, change: impl FnOnce(&mut Assignment)) -> Result<(), LoomError> {
+        let mut assignment = *self
+            .graph
             .assignments
-            .get_mut(&id)
-            .ok_or(LoomError::UnknownAssignment(id))
-    }
-
-    fn send_assignment(&mut self, id: AssignmentId) -> Result<(), LoomError> {
-        let assignment = *self.assignment_mut(id)?;
+            .get(&id)
+            .ok_or(LoomError::UnknownAssignment(id))?;
+        change(&mut assignment);
         self.send(Command::UpdateAssignment {
             id,
             depth: assignment.depth,
             enabled: assignment.enabled,
             polarity: assignment.polarity,
-        })
+        })?;
+        self.graph.assignments.insert(id, assignment);
+        Ok(())
     }
 
     /// Maps a hardware control to a parameter. Takes effect on the next
@@ -701,6 +709,16 @@ impl Controller {
             .map(|source| self.display_reader().read(source))
     }
 
+    /// The live value of a modulated parameter: the last frame of the
+    /// latest block, as a position from 0 to 1, before any module input
+    /// adds to it. `None` when the parameter is not modulated, has no cell
+    /// (see [`CompileReport::without_live_value`]), or the engine has not
+    /// swapped in the schedule that gives it one yet. Never waits.
+    pub fn modulated(&self, module: ModuleId, param: usize) -> Option<f32> {
+        let key = (u64::from(module.0) << 32) | param as u64;
+        self.live.read(self.live_cells.cell(key)?, key)
+    }
+
     /// Where display value `index` of a module lives, for reading it with a
     /// [`DisplayReader`] on another thread. `None` if the module does not
     /// exist or has no such value.
@@ -828,13 +846,22 @@ impl Controller {
                 }
             })
             .collect();
-        let (schedule, report) = compile(
+        let (mut schedule, mut report) = compile(
             &self.graph,
             &self.probes,
             &synced,
             self.config.sample_rate,
             self.config.max_block,
         );
+        // Live value cells, kept from the last compile where the parameter
+        // is still modulated.
+        let keys: Vec<u64> = schedule.fills.iter().map(|fill| fill.key).collect();
+        let (released, missing) = self.live_cells.assign(&keys);
+        for fill in &mut schedule.fills {
+            fill.live = self.live_cells.cell(fill.key).unwrap_or(NO_CELL);
+        }
+        schedule.live_release = released;
+        report.without_live_value = missing;
         // Order matters: swap first (the new schedule no longer uses the
         // removed slots), then remove the instances.
         let pushed = self.commands.push(Command::SwapSchedule(Box::new(schedule))).is_ok()

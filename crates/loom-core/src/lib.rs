@@ -23,6 +23,7 @@ mod display;
 mod engine;
 mod error;
 mod graph;
+mod live;
 mod midi;
 mod midi_map;
 mod module;

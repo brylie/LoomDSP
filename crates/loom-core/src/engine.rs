@@ -9,6 +9,7 @@ use crate::compile::{AssignmentRuntime, ModuleOp, ParamFill, Schedule, Step};
 use crate::descriptor::{MAX_DISPLAYS, Polarity};
 use crate::display::DisplayTable;
 use crate::graph::AssignmentId;
+use crate::live::{LiveTable, NO_CELL};
 use crate::midi::{MidiEvent, MidiMessage};
 use crate::midi_map::{MidiControl, MidiFeedback, later};
 use crate::module::{Module, PortIo, ProcessContext};
@@ -29,6 +30,9 @@ pub struct EngineConfig {
     pub max_block: usize,
     /// Maximum number of DSP module instances.
     pub max_modules: usize,
+    /// Cells in the live value table: how many modulated parameters show
+    /// their live value on screen. More still sound right, without a dot.
+    pub max_live_values: usize,
     /// Capacity of the control-to-audio command queue.
     pub command_capacity: usize,
     /// Capacity of the MIDI input queue and per-buffer MIDI event list.
@@ -50,6 +54,7 @@ impl Default for EngineConfig {
             sample_rate: 48_000.0,
             max_block: 128,
             max_modules: 1024,
+            max_live_values: 256,
             command_capacity: 1024,
             midi_capacity: 1024,
             meter_capacity: 1024,
@@ -140,6 +145,7 @@ pub struct Engine {
     /// Display values per slot (0 for most modules), and where they go.
     display_counts: Box<[u8]>,
     displays: Arc<DisplayTable>,
+    live: Arc<LiveTable>,
     schedule: Box<Schedule>,
     commands: Consumer<Command>,
     garbage: Producer<Garbage>,
@@ -173,13 +179,14 @@ impl Engine {
         garbage: Producer<Garbage>,
         (midi_in, midi_feedback): (Consumer<MidiEvent>, Arc<MidiFeedback>),
         telemetry: TelemetrySender,
-        displays: Arc<DisplayTable>,
+        (displays, live): (Arc<DisplayTable>, Arc<LiveTable>),
         stats: Arc<EngineStats>,
     ) -> Self {
         Self {
             slots: (0..config.max_modules).map(|_| None).collect(),
             display_counts: vec![0; config.max_modules].into_boxed_slice(),
             displays,
+            live,
             schedule: Box::new(Schedule::empty()),
             commands,
             garbage,
@@ -226,6 +233,7 @@ impl Engine {
             );
             self.send_telemetry(n);
             self.publish_displays();
+            self.publish_live(n);
             self.frame += n as u64;
             position += n;
         }
@@ -244,6 +252,23 @@ impl Engine {
                 module.displays(values);
                 self.displays.write(slot, values);
             }
+        }
+    }
+
+    /// Stores the last frame of each modulated parameter with a live cell,
+    /// as a position from 0 to 1, after a block of `frames`.
+    fn publish_live(&self, frames: usize) {
+        if frames == 0 {
+            return;
+        }
+        for fill in &self.schedule.fills {
+            if fill.live == NO_CELL {
+                continue;
+            }
+            // SAFETY: the fill buffer holds `max_block` floats, and the
+            // block just filled its first `frames`.
+            let last = unsafe { *fill.buffer.add(frames - 1) };
+            self.live.write(fill.live, fill.spec.normalize(last));
         }
     }
 
@@ -275,6 +300,17 @@ impl Engine {
                     schedule.take_smooth_state_from(&self.schedule, |slot, param| {
                         slots[slot].as_ref().and_then(|module| module.param_glide(param))
                     });
+                    // Cells the old schedule used and this one does not go
+                    // first, so a cell that changes hands is never claimed
+                    // and then released.
+                    for &cell in &schedule.live_release {
+                        self.live.release(cell);
+                    }
+                    for fill in &schedule.fills {
+                        if fill.live != NO_CELL {
+                            self.live.claim(fill.live, fill.key);
+                        }
+                    }
                     let old = std::mem::replace(&mut self.schedule, schedule);
                     self.discard(Garbage::Schedule(old));
                     self.reapply_midi_maps();

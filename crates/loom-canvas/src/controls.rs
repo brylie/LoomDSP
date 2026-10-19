@@ -27,6 +27,12 @@ const KNOB_FOCUS_TOP: f32 = 15.0;
 const KNOB_FOCUS_BOTTOM: f32 = 12.5;
 /// Corner radius of a knob's focus ring.
 const KNOB_FOCUS_CORNER: f32 = 10.0;
+/// Where a press grabs a knob's range arc instead of the knob: from just
+/// outside its ring to a little past the arc.
+pub(crate) const RANGE_RING_INNER: f32 = KNOB_RADIUS + 1.5;
+pub(crate) const RANGE_RING_OUTER: f32 = RANGE_RADIUS + 3.0;
+/// Radius of the live value dot on a knob's range arc.
+const LIVE_RADIUS: f32 = 2.25;
 /// Radius of the modulation dot, and of the ring shown when every
 /// assignment is off.
 const DOT_RADIUS: f32 = 2.5;
@@ -46,6 +52,10 @@ pub struct WidgetValue {
     pub text: String,
     /// What the control shows of its modulation assignments.
     pub modulation: ModulationMark,
+    /// Knob: the live modulated value as a position from 0 to 1, drawn as
+    /// a dot on the range arc (`docs/design/modulation.md`, Live value).
+    /// `None` draws no dot.
+    pub live: Option<f32>,
 }
 
 /// What a control shows of the modulation assignments on its parameter.
@@ -183,6 +193,9 @@ impl ControlGeometry {
                                 palette.modulation,
                             ));
                         }
+                        if let Some(live) = values.get(module.id, index).and_then(|v| v.live) {
+                            shapes.push(live_dot(centre, live, palette));
+                        }
                         shapes.push(circle(centre, 6.5, palette.control_body, palette.tile_border, 1.0));
                         let angle = KNOB_START + KNOB_SWEEP * t;
                         let tip = Point::new(centre.x + 4.0 * angle.sin(), centre.y - 4.0 * angle.cos());
@@ -267,6 +280,27 @@ impl ControlGeometry {
             shapes,
         }
     }
+}
+
+/// The live value dot: on the range arc, at the knob angle of `position`.
+/// A light outline keeps it apart from the arc under it.
+fn live_dot(centre: Point, position: f32, palette: &Palette) -> Shape {
+    circle(
+        live_dot_centre(centre, position),
+        LIVE_RADIUS,
+        palette.modulation,
+        palette.text,
+        0.8,
+    )
+}
+
+/// Where the live value dot of a knob centred at `centre` goes.
+fn live_dot_centre(centre: Point, position: f32) -> Point {
+    let angle = KNOB_START + KNOB_SWEEP * position.clamp(0.0, 1.0);
+    Point::new(
+        centre.x + RANGE_RADIUS * angle.sin(),
+        centre.y - RANGE_RADIUS * angle.cos(),
+    )
 }
 
 /// The modulation dot of a control, if it shows one. A knob shows it only
@@ -627,6 +661,40 @@ mod tests {
         assert_eq!(scene.generation(), scene_generation);
         assert_eq!(after.key.0, before.key.0);
         assert_ne!(after.key.1, before.key.1);
+    }
+
+    /// A knob with a live value gets one dot on its range arc, at the knob
+    /// angle of that value. Only the controls rebuild when it moves.
+    #[test]
+    fn the_live_value_is_a_dot_on_the_range_arc() {
+        let scene = scene();
+        let palette = Palette::default();
+        let mut values = PanelValues::new();
+        let range = ModulationMark::Range { low: 0.25, high: 0.75 };
+        values.set(1, 0, modulated(0.5, range));
+        let without = ControlGeometry::build(&scene, &values, &palette);
+        values.set(
+            1,
+            0,
+            WidgetValue {
+                live: Some(1.0),
+                ..modulated(0.5, range)
+            },
+        );
+        let with = ControlGeometry::build(&scene, &values, &palette);
+        assert_eq!(with.shapes.len(), without.shapes.len() + 1);
+        assert_eq!(with.key.0, without.key.0, "the scene is not rebuilt");
+        // At 0 and 1 the dot sits at the ends of the sweep, down left and
+        // down right, on the range radius; at 0.5 straight up.
+        let c = Point::ORIGIN;
+        let (low, mid, high) = (
+            live_dot_centre(c, 0.0),
+            live_dot_centre(c, 0.5),
+            live_dot_centre(c, 1.0),
+        );
+        assert!(low.x < 0.0 && low.y > 0.0);
+        assert!(high.x > 0.0 && high.y > 0.0);
+        assert!(mid.x.abs() < 1e-4 && (mid.y + RANGE_RADIUS).abs() < 1e-4);
     }
 
     #[test]
