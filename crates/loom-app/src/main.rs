@@ -8,6 +8,7 @@ mod alerts;
 mod browser;
 mod clipboard;
 mod files;
+mod inspector;
 mod layout;
 mod learn;
 mod lights;
@@ -17,16 +18,14 @@ mod monitor;
 mod param;
 mod scene;
 mod screenshot;
+mod snapshot;
 mod undo;
 
 use clap::Parser;
-use iced::widget::{
-    button, column, container, mouse_area, pick_list, row, rule, scrollable, slider, space, stack, text, toggler,
-    tooltip,
-};
+use iced::widget::{button, column, container, mouse_area, row, rule, space, stack, text, toggler, tooltip};
 use iced::{Color, Element, Length, Point, Subscription, Task, Theme};
 use live::Live;
-use loom_canvas::{CanvasEvent, HoverText, LearnView, PanelValues, PatchCanvas, Scene};
+use loom_canvas::{CanvasEvent, LearnView, PanelValues, PatchCanvas, Scene};
 use loom_core::{
     AssignmentId, Controller, EngineConfig, EngineParts, InputRef, MidiEvent, ModuleDescriptor, ModuleId, OutputRef,
     OutputSafety, ProbeId, create_engine,
@@ -60,6 +59,25 @@ struct Args {
     /// Saving a still image of the canvas instead of opening a window.
     #[command(flatten)]
     view: screenshot::Options,
+    /// Print what the UI shows (tiles, inspector, status bar, undo steps,
+    /// window title) as JSON and exit, without a window, audio, or MIDI.
+    #[arg(long, conflicts_with = "screenshot")]
+    dump_ui: bool,
+    /// With --dump-ui: select this module, so the inspector shows it.
+    /// Repeat to select several.
+    #[arg(long, value_name = "MODULE", requires = "dump_ui")]
+    select: Vec<u32>,
+}
+
+impl Args {
+    /// Where the patch comes from.
+    fn source(&self) -> Source<'_> {
+        match (&self.patch, self.generate) {
+            (_, Some(n)) => Source::Generated(n),
+            (Some(path), None) => Source::File(path),
+            (None, None) => Source::Empty,
+        }
+    }
 }
 
 fn main() -> iced::Result {
@@ -68,6 +86,16 @@ fn main() -> iced::Result {
         if let Err(e) = screenshot::run(&args, path) {
             eprintln!("loom-app: {e}");
             std::process::exit(1);
+        }
+        return Ok(());
+    }
+    if args.dump_ui {
+        match snapshot::run(&args) {
+            Ok(json) => println!("{json}"),
+            Err(e) => {
+                eprintln!("loom-app: {e}");
+                std::process::exit(1);
+            }
         }
         return Ok(());
     }
@@ -203,6 +231,12 @@ struct App {
     quit: bool,
     theme: Theme,
     _audio: Option<RunningAudio>,
+    /// The engine, when no audio device plays it. Nothing in the app runs
+    /// it; tests run it by hand with `App::process`, so they can check what
+    /// depends on a running engine (live values, lights, meters). Keeping
+    /// it costs the real audio path nothing: there is none.
+    #[cfg_attr(not(test), allow(dead_code))]
+    idle_engine: Option<loom_core::Engine>,
     /// Meter and scope data from the engine, drained on the telemetry
     /// thread so the queues never fill.
     monitor: monitor::Monitor,
@@ -283,11 +317,7 @@ impl App {
     fn new(args: Args) -> Self {
         let output = Self::open_output(args.no_audio);
         let sample_rate = output.as_ref().map(|o| o.sample_rate() as f32).unwrap_or(48_000.0);
-        let source = match (&args.patch, args.generate) {
-            (_, Some(n)) => Source::Generated(n),
-            (Some(path), None) => Source::File(path),
-            (None, None) => Source::Empty,
-        };
+        let source = args.source();
         let mut status = String::new();
         let config = EngineConfig {
             output_safety: args.output_safety,
@@ -297,7 +327,7 @@ impl App {
             status = e;
             Self::session(config, Source::Empty).expect("an empty patch always loads")
         });
-        let mut app = Self::assemble(output, sample_rate, session, 1, &args);
+        let mut app = Self::assemble(output, sample_rate, session, 1, &args, true);
         if !status.is_empty() {
             app.status = status;
         }
@@ -353,12 +383,14 @@ impl App {
     }
 
     /// Attaches audio and MIDI to a session and builds the app around it.
+    /// Without `connect_midi`, no MIDI port is opened.
     fn assemble(
         output: Result<AudioOutput, String>,
         sample_rate: f32,
         session: Session,
         generation: u64,
         args: &Args,
+        connect_midi: bool,
     ) -> Self {
         let Session {
             controller,
@@ -374,7 +406,12 @@ impl App {
         // Every MIDI input plays the patch, and the "Hold note" button works
         // alongside them, so a keyboard is never hidden behind another port.
         let midi = loom_host_desktop::share_midi(sender);
-        let midi_ports = match loom_host_desktop::connect_all_midi(&midi) {
+        let connected = if connect_midi {
+            loom_host_desktop::connect_all_midi(&midi)
+        } else {
+            Ok((Vec::new(), Vec::new()))
+        };
+        let midi_ports = match connected {
             Ok((ports, errors)) => {
                 if let Some(error) = errors.first() {
                     status = format!("MIDI: {error}");
@@ -387,15 +424,15 @@ impl App {
             }
         };
 
-        let (audio, midi, audio_name) = match output {
+        let (audio, midi, audio_name, idle_engine) = match output {
             Ok(output) => {
                 let label = format!("{} at {} Hz", output.name(), output.sample_rate());
                 match output.start(engine) {
-                    Ok(audio) => (Some(audio), Some(midi), label),
-                    Err(e) => (None, None, format!("no audio ({e})")),
+                    Ok(audio) => (Some(audio), Some(midi), label, None),
+                    Err(e) => (None, None, format!("no audio ({e})"), None),
                 }
             }
-            Err(e) => (None, None, format!("no audio ({e})")),
+            Err(e) => (None, None, format!("no audio ({e})"), Some(engine)),
         };
 
         let scene = scene::build(&controller, &positions);
@@ -430,6 +467,7 @@ impl App {
             ),
             audio_stats: audio.as_ref().map(|a| a.stats().clone()),
             _audio: audio,
+            idle_engine,
             monitor: monitor::Monitor::new(telemetry, generation),
             live: Live::new(),
             dropouts: alerts::Dropouts::default(),
@@ -591,8 +629,10 @@ impl App {
             bench: self.measuring,
             output_safety: self.output_safety,
             view: screenshot::Options::default(),
+            dump_ui: false,
+            select: Vec::new(),
         };
-        let mut fresh = Self::assemble(output, sample_rate, session, self.generation + 1, &args);
+        let mut fresh = Self::assemble(output, sample_rate, session, self.generation + 1, &args, true);
         fresh.animating = self.animating;
         // The canvas keeps its state across the rebuild and compares these
         // keys with the ones it saw: they must keep counting up. A new frame
@@ -676,6 +716,15 @@ impl App {
     /// Watches the lights on screen, and sends a message only when one
     /// visibly changes. No lights on screen: no watcher.
     fn light_watch(&self) -> Subscription<Message> {
+        match self.watched_lights() {
+            Some(watch) => Subscription::run_with(watch, lights::stream).map(Message::Lights),
+            None => Subscription::none(),
+        }
+    }
+
+    /// The lights on screen and where their values live, or `None` when
+    /// there are none.
+    fn watched_lights(&self) -> Option<lights::Watch> {
         let graph = self.controller.graph();
         let watched: Vec<_> = self
             .visible_displays
@@ -692,15 +741,20 @@ impl App {
                 Some((light, source))
             })
             .collect();
-        if watched.is_empty() {
-            return Subscription::none();
-        }
-        let watch = lights::Watch {
+        (!watched.is_empty()).then(|| lights::Watch {
             reader: self.controller.display_reader(),
             lights: watched,
             generation: self.generation,
-        };
-        Subscription::run_with(watch, lights::stream).map(Message::Lights)
+        })
+    }
+
+    /// Runs the engine for `frames` frames on silent buffers, as an audio
+    /// device would. Tests only: the app never runs the idle engine.
+    #[cfg(test)]
+    fn process(&mut self, frames: usize) {
+        let engine = self.idle_engine.as_mut().expect("an audio device plays the engine");
+        let (mut left, mut right) = (vec![0.0; frames], vec![0.0; frames]);
+        engine.process(&mut left, &mut right);
     }
 
     /// Rebuilds the scene after the graph changed.
@@ -1775,220 +1829,7 @@ impl App {
     }
 
     fn inspector(&self) -> Element<'_, Message> {
-        let graph = self.controller.graph();
-        let content: Element<'_, Message> = match self.selection.iter().next() {
-            Some(&id) if self.selection.len() == 1 => match graph.node(ModuleId(id)) {
-                Some(node) => {
-                    let d = node.descriptor;
-                    let mut items = column![
-                        text(d.name).size(17),
-                        text(format!("{} #{id}", d.kind())).size(11).color(DIM),
-                        text(d.description).size(12),
-                    ]
-                    .spacing(6);
-                    if d.params.is_empty() {
-                        items = items.push(text("No parameters.").size(12).color(DIM));
-                    }
-                    for (index, (spec, value)) in d.params.iter().zip(&node.params).enumerate() {
-                        // Hovering the label shows what the canvas hover
-                        // text shows (panels.md, Labels and hover text).
-                        let hover = HoverText::new(spec.label, spec.description, spec.name);
-                        let mut tip = column![text(spec.description).size(12)].spacing(4);
-                        if let Some(name) = hover.name {
-                            tip = tip.push(text(name).size(11).color(DIM));
-                        }
-                        let mapping = graph.midi_mapping_of(ModuleId(id), index).map(|(_, m)| m.control);
-                        if self.learning {
-                            // In learn mode a row arms its parameter, and its
-                            // value does not change (midi-learn.md).
-                            let armed = self.armed.is_some_and(|a| a.param == (id, index));
-                            let detail = match (armed, mapping) {
-                                (true, _) => "Waiting for MIDI...".to_string(),
-                                (false, Some(control)) => control.to_string(),
-                                (false, None) => param::format(spec, *value),
-                            };
-                            let arm = button(row![
-                                text(spec.label).size(12),
-                                space::horizontal(),
-                                text(detail).size(12)
-                            ])
-                            .width(Length::Fill)
-                            .style(if armed { button::primary } else { button::secondary })
-                            .on_press(Message::LearnParam { module: id, index });
-                            // A mapping can be removed in learn mode too.
-                            let mut line = row![arm].spacing(4).align_y(iced::Alignment::Center);
-                            if mapping.is_some() {
-                                line = line.push(remove_button(
-                                    "Remove MIDI mapping",
-                                    Message::Unmap { module: id, index },
-                                ));
-                            }
-                            items = items.push(line);
-                            continue;
-                        }
-                        let mut row_items = column![
-                            row![
-                                tooltip(
-                                    text(spec.label).size(12),
-                                    container(tip).padding(6).max_width(260).style(container::rounded_box),
-                                    tooltip::Position::Top,
-                                ),
-                                space::horizontal(),
-                                text(param::format(spec, *value)).size(12).color(DIM),
-                            ],
-                            slider(0.0..=1.0, spec.normalize(*value), move |position| {
-                                Message::Param {
-                                    module: id,
-                                    index,
-                                    position,
-                                }
-                            })
-                            .on_release(Message::SliderReleased)
-                            .step(param::slider_step(spec)),
-                        ]
-                        .spacing(2);
-                        if let Some(control) = mapping {
-                            row_items = row_items.push(
-                                row![
-                                    text(control.to_string()).size(11).color(DIM),
-                                    space::horizontal(),
-                                    remove_button("Remove MIDI mapping", Message::Unmap { module: id, index }),
-                                ]
-                                .align_y(iced::Alignment::Center),
-                            );
-                        }
-                        row_items = row_items.push(self.assignment_rows(id, index));
-                        items = items.push(row_items);
-                    }
-                    if let Some(drives) = self.drives(id) {
-                        items = items.push(drives);
-                    }
-                    items.into()
-                }
-                None => text("").into(),
-            },
-            Some(_) => text(format!("{} modules selected", self.selection.len()))
-                .size(13)
-                .into(),
-            None => column![
-                text("Inspector").size(17),
-                text("Select a module to edit its parameters.").size(12).color(DIM),
-                text(HELP).size(11).color(DIM),
-            ]
-            .spacing(8)
-            .into(),
-        };
-        container(scrollable(container(content).padding(12)))
-            .width(280)
-            .height(Length::Fill)
-            .into()
-    }
-
-    /// Under a parameter's slider: one row per assignment on it, in engine
-    /// order, then **Add modulation** (`docs/design/modulation.md`, Seeing
-    /// assignments).
-    fn assignment_rows(&self, module: u32, index: usize) -> Element<'_, Message> {
-        let graph = self.controller.graph();
-        let center = iced::Alignment::Center;
-        let mut rows = column![].spacing(6);
-        for (id, a) in modulation::on_param(graph, ModuleId(module), index) {
-            let own = modulation::source_polarity(graph, a.source);
-            let assignment = column![
-                row![
-                    text(modulation::source_name(graph, a.source)).size(11),
-                    space::horizontal(),
-                    remove_button("Remove modulation", Message::Unassign(id)),
-                ]
-                .align_y(center),
-                row![
-                    slider(-1.0..=1.0, a.depth, move |depth| Message::Depth { id, depth })
-                        .on_release(Message::SliderReleased)
-                        .step(0.01_f32),
-                    text(modulation::depth_text(a.depth)).size(11).width(36),
-                ]
-                .spacing(6)
-                .align_y(center),
-                row![
-                    pick_list(
-                        PolarityChoice::options(own),
-                        Some(PolarityChoice::of(a.polarity, own)),
-                        move |choice| Message::Polarity { id, choice },
-                    )
-                    .text_size(11),
-                    space::horizontal(),
-                    toggler(a.enabled)
-                        .label(if a.enabled { "On" } else { "Off" })
-                        .on_toggle(move |enabled| Message::Enabled { id, enabled })
-                        .size(14)
-                        .text_size(11),
-                ]
-                .spacing(6)
-                .align_y(center),
-            ]
-            .spacing(3);
-            rows = rows.push(container(assignment).padding([0, 8]));
-        }
-        let open = self.adding == Some((module, index));
-        rows = rows.push(
-            button(text(if open { "Cancel" } else { "Add modulation" }).size(11))
-                .padding([2, 6])
-                .style(button::text)
-                .on_press(Message::AddModulation { module, index }),
-        );
-        if open {
-            // Every output at this patch level. One that already drives the
-            // parameter is greyed out and cannot be picked.
-            let mut list = column![].spacing(1);
-            for source in modulation::sources(graph) {
-                let taken = modulation::exists(graph, source, ModuleId(module), index);
-                list = list.push(
-                    button(text(modulation::source_name(graph, source)).size(11))
-                        .width(Length::Fill)
-                        .padding([2, 6])
-                        .style(button::secondary)
-                        .on_press_maybe((!taken).then_some(Message::Assign { source, module, index })),
-                );
-            }
-            rows = rows.push(container(list).padding([0, 8]));
-        }
-        rows.into()
-    }
-
-    /// **Drives**: what each output of `module` drives, one group per output
-    /// that drives at least one assignment. A line selects its target. Lines
-    /// for assignments that are off say "off" and are dimmed, so the state
-    /// does not rest on colour alone.
-    fn drives(&self, module: u32) -> Option<Element<'_, Message>> {
-        let graph = self.controller.graph();
-        let drives = modulation::drives(graph, ModuleId(module));
-        if drives.is_empty() {
-            return None;
-        }
-        let node = graph.node(ModuleId(module))?;
-        let mut list = column![text("Drives").size(13)].spacing(4);
-        for (port, assignments) in drives {
-            let label = node.descriptor.outputs.get(port).map_or("?", |p| p.label);
-            list = list.push(text(label).size(11).color(DIM));
-            for (_, a) in assignments {
-                let mut line = format!(
-                    "{}, {}",
-                    modulation::target_name(graph, a.target, a.param),
-                    modulation::depth_text(a.depth)
-                );
-                if !a.enabled {
-                    line.push_str(" (off)");
-                }
-                let label = text(line).size(11);
-                list = list.push(
-                    button(if a.enabled { label } else { label.color(DIM) })
-                        .width(Length::Fill)
-                        .padding([2, 8])
-                        .style(button::text)
-                        .on_press(Message::SelectModule(a.target.0)),
-                );
-            }
-        }
-        Some(list.into())
+        inspector::view(self.inspector_model())
     }
 
     fn stats_bar(&self) -> Element<'_, Message> {
@@ -2176,6 +2017,8 @@ mod tests {
             bench: false,
             output_safety: OutputSafety::LowLatency,
             view: screenshot::Options::default(),
+            dump_ui: false,
+            select: Vec::new(),
         })
     }
 
@@ -2797,5 +2640,128 @@ mod tests {
             generation: app.generation,
         });
         assert_eq!(app.controller.graph().nodes().count(), before + 2);
+    }
+    /// The widget on module `id`'s tile at `widget`, as the snapshot shows it.
+    fn tile_widget(app: &App, id: ModuleId, widget: usize) -> snapshot::Widget {
+        let snapshot = app.ui_snapshot();
+        let tile = snapshot.tiles.iter().find(|t| t.id == id.0).expect("a tile");
+        tile.widgets[widget].clone()
+    }
+
+    /// A modulated knob shows no live value until the engine runs, then
+    /// follows it through the app's own `LiveFrame` path.
+    #[test]
+    fn a_running_engine_moves_the_live_dot() {
+        let mut app = app();
+        let source = app.controller.add_module("loom.math.constant").unwrap();
+        app.controller.set_param_named(source, "value", 0.5).unwrap();
+        let (_, filter, cutoff, widget) = env_and_filter(&mut app);
+        let _ = app.update(Message::Assign {
+            source: out(source),
+            module: filter.0,
+            index: cutoff,
+        });
+        let _ = app.update(Message::LiveFrame);
+        assert_eq!(tile_widget(&app, filter, widget).live, None, "the engine has not run");
+
+        app.process(64);
+        let _ = app.update(Message::LiveFrame);
+        let knob = tile_widget(&app, filter, widget);
+        let live = knob.live.expect("a live value");
+        assert!(live > knob.position, "a positive source raises the cutoff: {knob:?}");
+        let snapshot::Mark::Range { low, high } = knob.modulation else {
+            panic!("an arc: {knob:?}");
+        };
+        assert!((low..=high).contains(&live), "the dot is on the arc: {knob:?}");
+    }
+
+    /// A light on screen follows the engine: the envelope's level light is
+    /// dark at rest and lights up while its gate is held.
+    #[test]
+    fn a_running_engine_lights_the_envelope() {
+        let mut app = app();
+        let gate = app.controller.add_module("loom.math.constant").unwrap();
+        app.controller.set_param_named(gate, "value", 1.0).unwrap();
+        let env = app.controller.add_module("loom.env.adsr").unwrap();
+        app.commit();
+        let d = app.controller.graph().node(env).unwrap().descriptor;
+        let light = d.panel.widgets.iter().position(|w| w.bind == "level").unwrap();
+        let _ = app.update(Message::Canvas(CanvasEvent::VisibleDisplays(vec![env.0])));
+        let watch = app.watched_lights().expect("the level light is on screen");
+
+        app.process(480);
+        let _ = app.update(Message::Lights(watch.read()));
+        assert_eq!(tile_widget(&app, env, light).position, 0.0, "no gate, no level");
+
+        app.controller.connect_named(gate, "out", env, "gate").unwrap();
+        app.commit();
+        app.process(4_800);
+        let _ = app.update(Message::Lights(watch.read()));
+        let level = tile_widget(&app, env, light).position;
+        assert!(level > 0.5, "the gate is held: {level}");
+    }
+
+    /// The inspector lists a parameter's assignments in order, with the one
+    /// that is off shown off. **Add modulation** greys out the outputs that
+    /// already drive it, and the source's **Drives** line says "(off)".
+    #[test]
+    fn the_snapshot_shows_the_inspector_rows() {
+        let mut app = app();
+        let (env, sine, filter, cutoff, _) = two_sources(&mut app);
+        let off = app
+            .controller
+            .graph()
+            .assignments()
+            .find(|(_, a)| a.source == out(sine))
+            .unwrap()
+            .0;
+        let _ = app.update(Message::Enabled {
+            id: off,
+            enabled: false,
+        });
+        let _ = app.update(Message::SelectModule(filter.0));
+        let _ = app.update(Message::AddModulation {
+            module: filter.0,
+            index: cutoff,
+        });
+
+        let snapshot = app.ui_snapshot();
+        assert_eq!(snapshot.undo.as_deref(), Some("change modulation"));
+        let inspector::Inspector::Module(rows) = snapshot.inspector else {
+            panic!("one module is selected: {:?}", snapshot.inspector);
+        };
+        assert_eq!(rows.name, "SVF");
+        let row = &rows.params[cutoff];
+        assert_eq!(row.label, "Cutoff");
+        let inspector::ParamMode::Edit {
+            assignments, adding, ..
+        } = &row.mode
+        else {
+            panic!("not in learn mode");
+        };
+        let (env_out, sine_out) = (format!("ADSR #{}: Out", env.0), format!("Sine #{}: Out", sine.0));
+        let shown: Vec<_> = assignments
+            .iter()
+            .map(|a| (a.source.as_str(), a.depth_text.as_str(), a.enabled))
+            .collect();
+        assert_eq!(shown, vec![(&*env_out, "+25%", true), (&*sine_out, "+25%", false)]);
+        let pickable: Vec<_> = adding
+            .as_ref()
+            .expect("Add modulation is open")
+            .iter()
+            .map(|s| (s.name.as_str(), s.enabled))
+            .collect();
+        assert!(pickable.contains(&(&*env_out, false)), "{pickable:?}");
+        assert!(pickable.contains(&(&*sine_out, false)), "{pickable:?}");
+        assert!(pickable.iter().any(|&(_, enabled)| enabled), "{pickable:?}");
+        assert!(rows.drives.is_empty(), "the filter drives nothing");
+
+        let _ = app.update(Message::SelectModule(sine.0));
+        let inspector::Inspector::Module(rows) = app.ui_snapshot().inspector else {
+            panic!("the sine is selected");
+        };
+        let line = &rows.drives[0].lines[0];
+        assert_eq!((line.target, line.enabled), (filter.0, false));
+        assert!(line.text.ends_with("(off)"), "{}", line.text);
     }
 }

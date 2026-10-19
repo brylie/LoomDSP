@@ -38,6 +38,16 @@ impl Hash for Watch {
     }
 }
 
+impl Watch {
+    /// Reads every light once.
+    pub fn read(&self) -> Vec<(Light, f32)> {
+        self.lights
+            .iter()
+            .map(|(light, s)| (*light, self.reader.read(*s)))
+            .collect()
+    }
+}
+
 /// Brightness as drawn: 256 levels.
 pub fn level(value: f32) -> u8 {
     (value.clamp(0.0, 1.0) * 255.0).round() as u8
@@ -58,9 +68,9 @@ pub fn stream(watch: &Watch) -> impl Stream<Item = Vec<(Light, f32)>> + use<> {
     std::thread::spawn(move || {
         let mut last = vec![None; watch.lights.len()];
         while !tx.is_closed() {
-            let readings: Vec<f32> = watch.lights.iter().map(|(_, s)| watch.reader.read(*s)).collect();
+            let snapshot = watch.read();
+            let readings: Vec<f32> = snapshot.iter().map(|&(_, r)| r).collect();
             if let Some(levels) = changed(&last, &readings) {
-                let snapshot = watch.lights.iter().map(|(light, _)| *light).zip(readings).collect();
                 match tx.try_send(snapshot) {
                     Ok(()) => last = levels,
                     // The UI has not taken the last one yet: try again next

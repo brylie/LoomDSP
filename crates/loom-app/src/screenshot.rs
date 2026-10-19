@@ -144,13 +144,8 @@ impl FromStr for FocusTarget {
 
 /// Loads the patch the way the app does, draws it, and writes the PNG.
 pub fn run(args: &crate::Args, path: &Path) -> Result<(), String> {
-    let source = match (&args.patch, args.generate) {
-        (_, Some(n)) => crate::Source::Generated(n),
-        (Some(patch), None) => crate::Source::File(patch),
-        (None, None) => crate::Source::Empty,
-    };
     let config = loom_core::EngineConfig::with_sample_rate(48_000.0);
-    let session = crate::App::session(config, source)?;
+    let session = crate::App::session(config, args.source())?;
     let scene = crate::scene::build(&session.controller, &session.positions);
     let mut values = PanelValues::new();
     crate::scene::update_panel_values(&mut values, &session.controller, &BTreeMap::new());

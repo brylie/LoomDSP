@@ -1938,6 +1938,8 @@ dependencies = [
  "loom-patch",
  "png",
  "rfd",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
