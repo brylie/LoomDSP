@@ -8,7 +8,7 @@ Each open item lists the options and a current leaning. Close an item by writing
 |---|---|---|---|
 | OQ-01 | Desktop first or browser first? | Desktop first. The browser is an optional target, deferred. | Vision, roadmap |
 | OQ-02 | UI framework and node editor | Iced for the application UI. Our own patch canvas as an Iced widget, after spikes with iced_nodegraph (GPU fill-rate bound on Retina) and egui-snarl (poor look). | ADR-0009, ADR-0010 |
-| OQ-03 | Stereo on every cable? | No. Channel count is inferred per cable. Stereo flows where audio needs it. | FR-SIG-07, ADR-0007 |
+| OQ-03 | Stereo on every cable? | No. Channel count is inferred per cable. Stereo flows where audio needs it. | FR-SIG-07, ADR-0007, ADR-0020 |
 | OQ-04 | Pitch and value conventions | Our own documented conventions, following the Eurorack and Bitwig Grid idea of "patch anything to anything". | FR-SIG-03, 05, ADR-0007 |
 | OQ-05 | Patch file format | RON, because it keeps Serde's full data model (enums, structs, tuples). | FR-FILE-01, ADR-0008 |
 | OQ-06 | VST3 licensing | Steinberg released VST 3 SDK 3.8.0 under the MIT licence (October 2025). The `vst3` crate is MIT/Apache-2.0 and now ships generated bindings. The older `vst3-sys` crate is GPLv3 and is excluded. | FR-NATIVE-02, ADR-0006 |

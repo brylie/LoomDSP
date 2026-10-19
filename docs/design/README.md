@@ -57,6 +57,7 @@ Copy [template.md](template.md). Keep it to one feature. Link the ADR, requireme
 | [Arrangement](arrangement.md) | [ADR-0012](../adr/0012-arrangement-from-phase-driven-primitives.md) | Draft, P3 |
 | [Telemetry](telemetry.md) | [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md) | Implemented, P1 |
 | [Panels](panels.md) | [ADR-0013](../adr/0013-modules-carry-their-own-panel.md) | Module panels on tiles, level meters, and audio load Implemented (P1); labels and hover text Implemented; rest Draft |
+| [Stereo cables](stereo.md) | [ADR-0020](../adr/0020-inferred-channel-count.md) | Draft, P1 |
 | [Modulation](modulation.md) | [ADR-0014](../adr/0014-modulation-without-cables.md) | Engine and parameter mapping Agreed (P1); editing slice 1 Agreed; slices 2 and 3 Draft |
 | [Undo and redo](undo.md) | None (builds on [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md)) | Implemented, P1 |
 | [Control ranges](control-ranges.md) | None (extends parameter mapping) | Draft, P1 |

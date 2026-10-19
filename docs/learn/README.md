@@ -9,6 +9,7 @@ LoomDSP is also a way to learn modular sound design, for musicians and for the p
 | Explainer | Teaches |
 |---|---|
 | [Phase and cycles](phase-and-cycles.md) | What a phase is, how to find the end of a cycle, crossings and turnarounds. |
+| [Stereo cables](stereo-cables.md) | Why stereo is inferred and not on every cable, why most modules run as copies, and why folding to mono uses the mean. |
 | [Output safety](output-safety.md) | Why DC harms speakers, why a hard clip is not enough, what a limiter's lookahead costs, and why audio fades in. |
 
 ## Writing one

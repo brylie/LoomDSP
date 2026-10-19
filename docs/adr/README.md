@@ -51,3 +51,4 @@ Why: an ADR is a record of why things are the way they are. If it is rewritten a
 | [0017](0017-primitives-traits-and-abstractions.md) | A module library of primitives, traits, and open abstractions | Proposed |
 | [0018](0018-clean-room-module-development.md) | Clean-room module development | Proposed |
 | [0019](0019-output-safety-stage.md) | A safety stage on the final output | Accepted |
+| [0020](0020-inferred-channel-count.md) | Channel count inferred per cable, with per-channel copies | Proposed |

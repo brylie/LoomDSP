@@ -55,10 +55,7 @@ Why one sample: arrangement logic (ADR-0012) counts triggers, so a lost trigger 
 
 ### Channel count inference
 
-- Each output declares its channel layout: `Mono`, `Stereo`, or `FollowsInput(port)`.
-- When the graph is built (on the control thread), layouts propagate along cables.
-- Each input declares how it handles stereo arriving at a mono input: `Sum` (mix to mono) or `PerChannel` (the engine runs the module once per channel, with separate state).
-- Most DSP modules (filters, distortion, delays) default to `PerChannel`. Most modulation inputs default to `Sum`.
+Channel count (mono or stereo) is inferred per cable when the graph is built, so stereo flows only where a stereo source exists. How it is inferred, how modules declare stereo behaviour, and what it costs are decided in [ADR-0020](0020-inferred-channel-count.md).
 
 ### Polyphony
 
