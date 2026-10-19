@@ -123,7 +123,7 @@ Modulation assignments already scale and offset any parameter (ADR-0014), so the
 | MT-LEVEL-05 | Clamp | Keeps a signal between a lower and an upper limit. | | P1 | FR-LIB-05 | Planned |
 | MT-MIX-01 | Mixer | Sums several inputs, with level, pan, and mute per channel. At unity gain it is a quick merge. P1 builds level and mute. Pan comes later, with stereo signals. | | P1 | FR-LIB-05 | Planned |
 | MT-MIX-02 | Crossfade | Blends two signals by a control, with an equal-power or linear law. | | P1 | FR-LIB-05 | Planned |
-| MT-MIX-03 | Stereo tool | Pans, sets width, converts between left/right and mid/side, and splits or joins channels. P1 builds join and split, the first stereo sources ([stereo spec](../design/stereo.md)). Pan, width, and mid/side come later. | | P1 | FR-SIG-07 | Planned |
+| MT-MIX-03 | Stereo tool | Pans, sets width, converts between left/right and mid/side, and splits or joins channels. P1 builds join and split. Pan, width, and mid/side come later. | | P1 | FR-SIG-07 | Planned |
 | MT-ROUTE-01 | Selector | Picks one of N inputs. It steps to the next on a trigger, jumps to the input a control value points at, or picks at random. | Seed, Smoothing | P2 | New | Planned |
 | MT-ROUTE-02 | Distributor | Sends one input to one of N outputs, with the same three ways to choose. | Seed | P2 | New | Planned |
 | MT-ROUTE-03 | Mute | Silences a signal on a button or gate, with a short fade so it never clicks. | | P2 | New | Planned |

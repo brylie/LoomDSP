@@ -22,7 +22,7 @@ In Eurorack, stereo is two cables: one per side, often into a "dual" module that
 
 Most cables in a modular patch are not audio. They carry LFOs, envelopes, pitch, gates, and phases. An LFO is the same on both sides, so a stereo LFO cable is two copies of the same numbers. Computing it twice wastes CPU and memory, and in a large patch the waste is most of the work.
 
-So LoomDSP lets stereo exist only where something makes it: a stereo sample, a panner, a stereo reverb. From there it spreads along the audio path and nowhere else.
+So LoomDSP lets stereo exist only where something makes it: a stereo sample, a panner, a stereo reverb. From there it spreads only through inputs that ask for it, which are usually audio inputs. A module that receives stereo there runs once per side, so all its outputs become stereo, even an envelope or a gate it makes from the audio. Control inputs and modulation never start this on their own: a stereo cable into a cutoff input is averaged to one value, and the LFO cables around it stay mono.
 
 ## Why it is worked out when the patch compiles
 
