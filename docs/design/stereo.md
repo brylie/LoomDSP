@@ -8,7 +8,7 @@ How the engine decides which cables carry stereo, and what modules do with it, s
 - **Use case and requirements:** FR-SIG-07, FR-SIG-01, FR-SIG-03, FR-CANVAS-12, NFR-RT-01
 - **Background:** [Stereo cables](../learn/stereo-cables.md): why copies, why the mean, why folding can cancel.
 - **Prior art:** Eurorack patches stereo as two cables and dual modules. VCV Rack carries several channels on one cable and lets each module decide what to do with them. Bitwig Grid works in stereo by default. Named only to explain the trade-offs; the rules below are our own.
-- **Issues:** #23
+- **Issues:** #23, #203 (new paths without a cold start)
 - **Code:** not built yet. It will touch `crates/loom-core/src/descriptor.rs`, `compile.rs`, `module.rs`, and `engine.rs`.
 
 ## Goal
@@ -50,7 +50,7 @@ How the canvas shows a stereo cable is FR-CANVAS-12 (P2). See Open points.
 
    *Why required:* like polarity, it is a choice the author should make on purpose. A default hidden in a builder would make every control input either too costly or wrong.
 
-4. **The usual choice by signal type:** audio inputs are `PerChannel`. Modulation, pitch, phase, and gate inputs are `Fold`. Outputs are `PerChannel`. An author may choose otherwise, for example a stereo-aware amplifier whose gain input should also run per channel. *Why:* audio is what players want in stereo. Control signals are almost always mono, and FR-SIG-07 says not to pay twice for them.
+4. **The usual choice by signal type:** audio inputs are `PerChannel`. Modulation, pitch, phase, and gate inputs are `Fold`. Outputs are `PerChannel`. An author may choose otherwise, for example a stereo-aware amplifier whose gain input should also run per channel. Generators such as oscillators and noise keep `PerChannel` outputs, so they stay mono. A generator declares a `Stereo` output only when its two sides differ by design, such as spread unison or noise that differs on each side. *Why:* audio is what players want in stereo. Control signals are almost always mono, and FR-SIG-07 says not to pay twice for them.
 
 5. **A module with any `Stereo` port is never copied.** Its other inputs must be `Fold`, and its other outputs are always mono. The registry rejects a descriptor that breaks this, and one with `Fold` on an output. *Why:* a module that reads both channels itself has already decided how to handle them. Copying it would run its stereo logic twice.
 
@@ -104,9 +104,19 @@ How the canvas shows a stereo cable is FR-CANVAS-12 (P2). See Open points.
 
 19. **The compile report lists the width of every output.** *Why:* the canvas needs it to draw stereo cables (FR-CANVAS-12), and the inspector to show it.
 
+### Audio Out, telemetry, and display
+
+20. **Audio Out has one `Stereo` input, `in`,** in place of `left` and `right`. A mono cable plays on both sides, through rule 12. *Why:* one stereo cable to the output is the natural end of a stereo chain. The mono case behaves as before, and costs nothing.
+
+21. **Join and Split are the first stereo modules,** built in P1 from MT-MIX-03. Join takes two mono inputs (`Stereo` output). Split takes one `Stereo` input and has a mono output per side. *Why:* with one stereo input on Audio Out, a player with separate left and right signals needs Join. Join is also the smallest module that makes stereo, so the feature can be heard and tested. Split gives back the case that a fold cannot: reading one side on purpose.
+
+22. **A meter on a stereo output shows both channels. A scope shows the mean of the two sides,** the same fold as rule 11. *Why:* level is where the sides most often differ, and a player checks it per side. A scope trace is for shape, and one trace is easier to read. A scope of a signal whose sides are opposite shows a flat line, like any fold (see the explainer). To see one side, probe a Split output.
+
+23. **A port's hover text says "Stereo" when its cable is stereo,** until FR-CANVAS-12 (P2) draws stereo cables. *Why:* the player needs some way to see a width the engine chose for them.
+
 ### Cost
 
-20. **A patch with no stereo source compiles to the same schedule as before this feature.** Same module operations, buffers, and instances, and no width checks inside `process`. The only extra work is the inference pass on the control thread. *Why:* FR-SIG-07's reason for existing. Most patches are mono, and most cables carry control signals.
+24. **A patch with no stereo source compiles to the same schedule as before this feature.** Same module operations, buffers, and instances, and no width checks inside `process`. The only extra work is the inference pass on the control thread. *Why:* FR-SIG-07's reason for existing. Most patches are mono, and most cables carry control signals.
 
 ## Acceptance criteria
 
@@ -118,7 +128,11 @@ How the canvas shows a stereo cable is FR-CANVAS-12 (P2). See Open points.
 - [ ] Given a stereo chain, when the stereo cable is removed and the patch recompiles, then copy 1 of each module is freed on the control thread, copy 0 keeps its state, and the `no_alloc` tests pass.
 - [ ] Given a copied module, when it is run through the module test harness, then its output is identical at block sizes 1, 77, and 512.
 - [ ] Given a copied seeded module, then its left and right outputs differ, and both are the same on every run.
-- [ ] Given each example patch from before this change, when it loads, then it gives bit-identical output.
+- [ ] Given each example patch, updated to Audio Out's `in` port, when it loads, then it gives bit-identical output to the patch before this change.
+- [ ] Given a mono cable into Audio Out, then both sides of the device output carry it.
+- [ ] Given two mono signals through Join and then Split, then each Split output is bit-identical to the signal that went in on that side.
+- [ ] Given a probe on a stereo output, then the meter reports each channel, and the scope shows `(left + right) / 2`.
+- [ ] Given a stereo cable into a port, when the player hovers it, then the hover text says "Stereo". (Manual check.)
 - [ ] Given a descriptor with `Fold` on an output, or a module with a `Stereo` port and a `PerChannel` input, then the registry rejects it.
 
 ## Out of scope
@@ -127,13 +141,9 @@ How the canvas shows a stereo cable is FR-CANVAS-12 (P2). See Open points.
 - **Polyphony** (FR-SIG-08, P2). Voice count is another dimension, decided with voice allocation.
 - **Choosing a width by hand,** such as forcing a cable mono. A player who wants that patches through a fold or a stereo tool.
 - **Mid/side cables.** Mid/side is a conversion a module does (MT-MIX-03), not a cable width.
-- **The stereo modules themselves:** pan, width, join, and split (MT-MIX-03), stereo reverb, a stereo mixer. Each follows the catalogue.
+- **Other stereo modules:** pan, width, and mid/side (MT-MIX-03 after P1), a stereo reverb, a stereo mixer. Each follows the catalogue. Join and Split are in scope (rule 21).
 - **Cable styles for stereo** (FR-CANVAS-12, P2).
 
 ## Open points
 
-1. **Audio Out's ports.** Today it has `left` and `right`, and a cable on one side plays on both. Leaning: replace them with one `Stereo` input, `in`. A mono cable still plays on both sides (rule 12), and every example patch is updated. Players with two separate mono signals use a join, which would pull a small join and split module forward from MT-MIX-03 into P1.
-2. **The first stereo source in P1.** Without one, nothing is ever stereo and the feature cannot be heard. Leaning: the join module from point 1, then device audio input when it exists.
-3. **Telemetry on stereo outputs.** Probes read one buffer. Leaning: a meter shows both channels, and a scope shows the left channel until the [telemetry spec](telemetry.md) adds two-channel scopes.
-4. **Where the player sees the width before P2.** Leaning: the port's hover text says "stereo" when its cable is stereo, until FR-CANVAS-12 draws stereo cables.
-5. **Copy 1 starts from reset.** When a cable change makes a running chain stereo, the right side starts cold, so a filter or delay can click or sound different for a moment. Leaning: accept it for now. A later optional `Module` method could copy state from copy 0.
+1. **Copy 1 starts from reset.** When a cable change makes a running chain stereo, the right side starts cold, so a filter or delay can click or sound different for a moment. Players who know hardware will hear that as a bug. Research in #203: copy state from copy 0, crossfade from the left side, or another approach. Until it lands, the cold start stands.
