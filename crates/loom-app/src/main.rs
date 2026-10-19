@@ -155,9 +155,12 @@ enum Message {
     SelectModule(u32),
     /// The clipboard was read for a paste at a world point, not yet snapped
     /// (`docs/design/clipboard.md`).
+    /// `generation` is the engine's when the read began: a result that
+    /// arrives after another patch opened is dropped.
     Pasted {
         world: Point,
         text: Option<String>,
+        generation: u64,
     },
 }
 
@@ -1120,7 +1123,12 @@ impl App {
         let task = match message {
             Message::Browser(message) => self.browser_message(message),
             Message::Canvas(CanvasEvent::Paste { world }) => {
-                iced::clipboard::read().map(move |text| Message::Pasted { world, text })
+                let generation = self.generation;
+                iced::clipboard::read().map(move |text| Message::Pasted {
+                    world,
+                    text,
+                    generation,
+                })
             }
             message if self.clipboard_key(&message).is_some() => self.clipboard_command(&message),
             message => {
@@ -1351,7 +1359,16 @@ impl App {
                 });
             }
             Message::Midi => self.midi_arrived(),
-            Message::Pasted { world, text } => self.paste(world, text),
+            Message::Pasted {
+                world,
+                text,
+                generation,
+            } => {
+                // The paste was for a patch that is no longer open.
+                if generation == self.generation {
+                    self.paste(world, text);
+                }
+            }
             Message::Key(iced::keyboard::Event::KeyPressed {
                 key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
                 ..
@@ -2746,5 +2763,26 @@ mod tests {
             app.commit();
         });
         assert_eq!(step_name(&app).as_deref(), Some("change Multiply Gain"));
+    }
+
+    /// A clipboard read that finishes after another patch opened is dropped.
+    #[test]
+    fn a_paste_for_a_closed_patch_is_dropped() {
+        let mut app = app();
+        two_selected(&mut app);
+        let text = app.copy().unwrap();
+        let before = app.controller.graph().nodes().count();
+        let _ = app.update(Message::Pasted {
+            world: Point::ORIGIN,
+            text: Some(text.clone()),
+            generation: app.generation + 1,
+        });
+        assert_eq!(app.controller.graph().nodes().count(), before);
+        let _ = app.update(Message::Pasted {
+            world: Point::ORIGIN,
+            text: Some(text),
+            generation: app.generation,
+        });
+        assert_eq!(app.controller.graph().nodes().count(), before + 2);
     }
 }
