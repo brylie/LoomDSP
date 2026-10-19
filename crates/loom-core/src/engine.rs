@@ -166,6 +166,9 @@ pub struct Engine {
     /// Frames rendered since the engine started. Stamps telemetry and
     /// anchors the transport.
     frame: u64,
+    /// Length of the last block the current schedule ran, so a swap can
+    /// read the last value of each of its outputs. 0 before it has run.
+    last_frames: usize,
     /// DC blocker, limiter, and fade on the summed output (ADR-0019).
     safety: SafetyStage,
     config: EngineConfig,
@@ -198,6 +201,7 @@ impl Engine {
             telemetry,
             transport: Transport::new(config.sample_rate),
             frame: 0,
+            last_frames: 0,
             safety: SafetyStage::new(config.output_safety, config.sample_rate),
             config,
             stats,
@@ -235,6 +239,7 @@ impl Engine {
             self.publish_displays();
             self.publish_live(n);
             self.frame += n as u64;
+            self.last_frames = n;
             position += n;
         }
         self.stats.buffers.fetch_add(1, Ordering::Relaxed);
@@ -295,7 +300,10 @@ impl Engine {
                     self.displays.release(slot);
                 }
                 Command::SwapSchedule(mut schedule) => {
-                    schedule.take_tap_state_from(&self.schedule);
+                    schedule.take_tap_state_from(&self.schedule, self.last_frames);
+                    // The new schedule has not run yet, so a second swap
+                    // before the next block has no last values to read.
+                    self.last_frames = 0;
                     let slots = &self.slots;
                     schedule.take_smooth_state_from(&self.schedule, |slot, param| {
                         slots[slot].as_ref().and_then(|module| module.param_glide(param))

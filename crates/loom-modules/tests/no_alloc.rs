@@ -43,10 +43,17 @@ fn audio_thread_never_allocates() {
             // Control thread: allocation allowed here.
             if i % 7 == 0 {
                 let id = parts.controller.add_module("loom.filter.svf").unwrap();
-                parts.controller.connect_named(id, "lowpass", id, "in").unwrap();
                 let lowpass = parts.controller.output_ref(id, "lowpass").unwrap();
                 parts.controller.add_probe(lowpass, ProbeKind::Scope).unwrap();
                 extra.push(id);
+            }
+            // Close the loop a buffer later, once the filter has run. The
+            // inserted delay is new, so the swap starts it from the old
+            // schedule's last lowpass value (live patching spec, rule 5).
+            if i % 7 == 1
+                && let Some(&id) = extra.last()
+            {
+                parts.controller.connect_named(id, "lowpass", id, "in").unwrap();
             }
             if i % 11 == 0
                 && let Some(id) = extra.pop()

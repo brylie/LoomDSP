@@ -34,6 +34,15 @@ use std::collections::{BTreeMap, BTreeSet};
 /// unit delay keys (which are module IDs).
 const AUTO_TAP: u64 = 1 << 63;
 
+/// [`Tap::source`] of a delay with nothing plugged into it.
+pub(crate) const NO_SOURCE: u64 = u64::MAX;
+
+/// A key for an output port, unique in a graph and sorted by module, then
+/// port.
+fn output_key(output: OutputRef) -> u64 {
+    (u64::from(output.module.0) << 16) | (output.port as u64 & 0xFFFF)
+}
+
 /// Marks a tap inserted on a modulation assignment. Bit 62 keeps these clear
 /// of cable taps, whose keys use the module id shifted by 16 under `AUTO_TAP`.
 const ASSIGN_TAP: u64 = AUTO_TAP | (1 << 62);
@@ -139,6 +148,10 @@ pub(crate) struct AssignmentRuntime {
 
 pub(crate) struct Tap {
     pub key: u64,
+    /// [`output_key`] of the output this delay reads, or [`NO_SOURCE`].
+    /// A new delay starts with that output's last value (live patching
+    /// spec, rule 5).
+    pub source: u64,
     pub input: *const f32,
     pub output: *mut f32,
     pub state: f32,
@@ -211,6 +224,9 @@ pub(crate) struct Schedule {
     pub ops: Vec<ModuleOp>,
     /// Sorted by key, so tap state can be carried across schedule swaps.
     pub taps: Vec<Tap>,
+    /// Every output port's buffer, sorted by [`output_key`]. The next
+    /// schedule reads it at the swap to start its new delays.
+    pub sources: Vec<(u64, *const f32)>,
     pub loop_ops: Vec<u32>,
     pub loop_taps: Vec<u32>,
     pub steps: Vec<Step>,
@@ -241,6 +257,7 @@ impl Schedule {
             output_ptrs: Vec::new(),
             ops: Vec::new(),
             taps: Vec::new(),
+            sources: Vec::new(),
             loop_ops: Vec::new(),
             loop_taps: Vec::new(),
             steps: Vec::new(),
@@ -256,8 +273,13 @@ impl Schedule {
     }
 
     /// Copies unit delay state from the previous schedule, matched by key.
-    /// Runs on the audio thread: no allocation, linear time.
-    pub fn take_tap_state_from(&mut self, old: &Schedule) {
+    /// A delay with no state to carry starts with the last value its source
+    /// output wrote in the old schedule's last block of `frames` frames, or
+    /// 0 if that output did not run (live patching spec, rule 5). Then the
+    /// delay holds what it would hold had it always been there.
+    /// Runs on the audio thread: no allocation, linear time plus a binary
+    /// search per new delay.
+    pub fn take_tap_state_from(&mut self, old: &Schedule, frames: usize) {
         let mut j = 0;
         for tap in &mut self.taps {
             while j < old.taps.len() && old.taps[j].key < tap.key {
@@ -265,6 +287,14 @@ impl Schedule {
             }
             if j < old.taps.len() && old.taps[j].key == tap.key {
                 tap.state = old.taps[j].state;
+            } else if let Some(last) = frames.checked_sub(1)
+                && tap.source != NO_SOURCE
+                && let Ok(i) = old.sources.binary_search_by_key(&tap.source, |&(key, _)| key)
+            {
+                // SAFETY: every buffer in `sources` is `max_block` floats
+                // long and owned by `old`, which is alive here. The last
+                // block filled its first `frames <= max_block` floats.
+                tap.state = unsafe { *old.sources[i].1.add(last) };
             }
         }
     }
@@ -300,6 +330,7 @@ impl Schedule {
 
 struct TapSpec {
     key: u64,
+    source: Option<OutputRef>,
     input: Option<usize>,
     output: usize,
 }
@@ -440,15 +471,17 @@ pub(crate) fn compile(
         stereo_outputs: widths.stereo_outputs,
     };
 
-    let user_tap = |v: usize| TapSpec {
-        key: u64::from(ids[v].0),
-        input: graph
-            .source_of(InputRef {
-                module: ids[v],
-                port: 0,
-            })
-            .map(source_buffer),
-        output: out_buf[v][0],
+    let user_tap = |v: usize| {
+        let source = graph.source_of(InputRef {
+            module: ids[v],
+            port: 0,
+        });
+        TapSpec {
+            key: u64::from(ids[v].0),
+            source,
+            input: source.map(source_buffer),
+            output: out_buf[v][0],
+        }
     };
 
     for scc in &sccs {
@@ -622,6 +655,7 @@ pub(crate) fn compile(
                     let output = buffer_count - 1;
                     taps.push(TapSpec {
                         key: ASSIGN_TAP | u64::from(id.0),
+                        source: Some(*from),
                         input: Some(source_buffer(*from)),
                         output,
                     });
@@ -666,6 +700,7 @@ pub(crate) fn compile(
                 let output = buffer_count - 1;
                 taps.push(TapSpec {
                     key: AUTO_TAP | (u64::from(input.module.0) << 16) | (input.port as u64 & 0xFFFF),
+                    source: Some(from),
                     input: Some(source_buffer(from)),
                     output,
                 });
@@ -854,6 +889,7 @@ pub(crate) fn compile(
         .iter()
         .map(|&i| Tap {
             key: taps[i].key,
+            source: taps[i].source.map_or(NO_SOURCE, output_key),
             input: taps[i].input.map_or(zero_ptr, |b| buf_ptrs[b] as *const f32),
             output: buf_ptrs[taps[i].output],
             state: 0.0,
@@ -922,6 +958,20 @@ pub(crate) fn compile(
         })
         .collect();
 
+    // `ids` is sorted and ports count up, so this is sorted by key.
+    let (ids, buf_ptrs) = (&ids, &buf_ptrs);
+    let sources: Vec<(u64, *const f32)> = out_buf
+        .iter()
+        .enumerate()
+        .flat_map(|(v, ports)| {
+            ports.iter().enumerate().map(move |(port, &buf)| {
+                let key = output_key(OutputRef { module: ids[v], port });
+                (key, buf_ptrs[buf] as *const f32)
+            })
+        })
+        .collect();
+    debug_assert!(sources.is_sorted_by_key(|&(key, _)| key));
+
     let schedule = Schedule {
         _buffers: buffers,
         _zero: zero,
@@ -929,6 +979,7 @@ pub(crate) fn compile(
         output_ptrs,
         ops,
         taps: final_taps,
+        sources,
         loop_ops,
         loop_taps,
         steps: final_steps,

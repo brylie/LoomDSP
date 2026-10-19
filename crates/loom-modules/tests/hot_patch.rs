@@ -7,9 +7,11 @@
 //! the ideal continuation: what the patch would play if the new path had
 //! been running all along. Its peak, in dBFS, is how loud the glitch is.
 //!
-//! Some tests pin today's clicks. When rules 5 and 6 of
-//! `docs/design/live-patching.md` are built, their assertions flip to
-//! bit-identical with the ideal. Background: `docs/learn/hot-patching.md`.
+//! The unit delay tests check rule 5 of `docs/design/live-patching.md`:
+//! a new delay starts with its source's last value, so the output is
+//! bit-identical to the ideal. The stereo copy tests measure a cold copy 1,
+//! which rule 6 replaces once copies are built (#23). Background:
+//! `docs/learn/hot-patching.md`.
 
 mod common;
 
@@ -173,21 +175,36 @@ fn input(parts: &loom_core::EngineParts, module: ModuleId, name: &str) -> InputR
     parts.controller.input_ref(module, name).unwrap()
 }
 
-/// Renders `frames` frames in blocks of 64, calling `change` and
-/// committing once, just before frame `at`.
+/// Host buffer sizes the delay tests run at. The edit lands on the same
+/// frame at each, so the output must be the same (hard rule 2).
+const BLOCKS: [usize; 4] = [1, 64, 77, 512];
+
+/// Renders `frames` frames in host buffers of up to `block` frames, calling
+/// `change` and committing once, just before frame `at`. The buffer before
+/// the edit is cut short so the edit lands exactly on `at`.
 fn render_changing(
     parts: &mut loom_core::EngineParts,
     frames: usize,
     at: usize,
-    mut change: impl FnMut(&mut loom_core::EngineParts),
+    block: usize,
+    change: impl FnOnce(&mut loom_core::EngineParts),
 ) -> Vec<f32> {
-    render_with(parts, frames, 64, &[], |position, parts| {
-        if position == at {
-            change(parts);
-            parts.controller.commit().unwrap();
+    let mut left = vec![0.0; frames];
+    let mut right = vec![0.0; frames];
+    let mut run = |parts: &mut loom_core::EngineParts, from: usize, to: usize| {
+        let mut position = from;
+        while position < to {
+            let n = block.min(to - position);
+            let range = position..position + n;
+            parts.engine.process(&mut left[range.clone()], &mut right[range]);
+            position += n;
         }
-    })
-    .0
+    };
+    run(parts, 0, at);
+    change(parts);
+    parts.controller.commit().unwrap();
+    run(parts, at, frames);
+    left
 }
 
 /// A sine at middle C, from a Phase module into a Sine module.
@@ -200,7 +217,7 @@ fn sine(parts: &mut loom_core::EngineParts) -> ModuleId {
 }
 
 #[test]
-fn a_new_loop_through_a_fallback_input_drops_out_for_one_sample() {
+fn a_new_loop_through_a_fallback_input_does_not_drop_out() {
     // Case 2. A Multiply scales a sine by its B input, which reads 1 while
     // nothing is plugged in. At the change, B is patched from a loop:
     // B = 1 + 0.3 * out, one sample late. The compiler inserts the delay.
@@ -209,6 +226,10 @@ fn a_new_loop_through_a_fallback_input_drops_out_for_one_sample() {
     // already running (its input plugged, its output not yet), so the
     // delay holds the value from the frame before. Only the last cable is
     // plugged at the change.
+    //
+    // A new delay that started at 0 made B read 0 for one sample, where it
+    // read 1 before and about 1 after: a one-sample dropout, -6 dB. Rule 5
+    // starts it with the source's last value instead.
     let frames = 9_600;
     let at = 4_800;
     let build = |explicit: bool| {
@@ -239,45 +260,35 @@ fn a_new_loop_through_a_fallback_input_drops_out_for_one_sample() {
         (parts, vca, bias, delay)
     };
 
-    let (mut parts, vca, bias, _) = build(false);
-    let b = input(&parts, vca, "b");
-    let cold = render_changing(&mut parts, frames, at, |parts| {
-        let from = parts.controller.output_ref(bias, "out").unwrap();
-        parts.controller.connect(from, b).unwrap();
-    });
-    let report = parts.controller.last_report();
-    assert_eq!(report.loops.len(), 1);
-    assert_eq!(report.loops[0].inserted_delays[0].1, b, "the delay is on B");
+    for block in BLOCKS {
+        let (mut parts, vca, bias, _) = build(false);
+        let b = input(&parts, vca, "b");
+        let inserted = render_changing(&mut parts, frames, at, block, |parts| {
+            let from = parts.controller.output_ref(bias, "out").unwrap();
+            parts.controller.connect(from, b).unwrap();
+        });
+        let report = parts.controller.last_report();
+        assert_eq!(report.loops.len(), 1);
+        assert_eq!(report.loops[0].inserted_delays[0].1, b, "the delay is on B");
 
-    let (mut parts, vca, _, delay) = build(true);
-    let b = input(&parts, vca, "b");
-    let ideal = render_changing(&mut parts, frames, at, |parts| {
-        let from = parts.controller.output_ref(delay.unwrap(), "out").unwrap();
-        parts.controller.connect(from, b).unwrap();
-    });
+        let (mut parts, vca, _, delay) = build(true);
+        let b = input(&parts, vca, "b");
+        let ideal = render_changing(&mut parts, frames, at, block, |parts| {
+            let from = parts.controller.output_ref(delay.unwrap(), "out").unwrap();
+            parts.controller.connect(from, b).unwrap();
+        });
 
-    assert_eq!(cold[..at], ideal[..at], "identical before the change");
-    let error: Vec<f32> = cold[at..].iter().zip(&ideal[at..]).map(|(c, i)| c - i).collect();
-    println!(
-        "new loop into a fallback input: error peak {:.1} dB, settles in {:.2} ms, first sample {:.3} instead of {:.3}",
-        db(peak(&error)),
-        settle_ms(&error),
-        cold[at],
-        ideal[at],
-    ); // The new delay starts at 0, so B reads 0 for one sample where it read
-    // 1 before and about 1 after: the sine drops out for one sample.
-    assert_eq!(cold[at], 0.0);
-    assert!(peak(&error) > CLICK);
-    assert!(settle_ms(&error) < 0.1, "only the first few samples differ");
+        assert!(peak(&ideal[at..]) > 0.1, "the patch makes sound");
+        assert_eq!(inserted, ideal, "block size {block}");
+    }
 }
 
 #[test]
-fn a_new_loop_through_an_input_that_reads_zero_is_only_one_sample_late() {
-    // Case 2, harmless form. Same loop, but closed through an Add's B
-    // input, which reads 0 while nothing is plugged in. A delay that starts
-    // at 0 then gives exactly what the input read before, so the cable acts
-    // as if it were plugged in one sample later. No click beyond the step
-    // that plugging the cable makes anyway.
+fn a_new_loop_through_an_input_that_reads_zero_matches_a_running_delay() {
+    // Case 2, mild form. Same loop, but closed through an Add's B input,
+    // which reads 0 while nothing is plugged in. A delay that started at 0
+    // acted as if the cable were plugged one sample later, with no extra
+    // step. With rule 5 it is exact, as with a delay already running.
     let frames = 9_600;
     let at = 4_800;
     let build = |explicit: bool| {
@@ -300,41 +311,36 @@ fn a_new_loop_through_an_input_that_reads_zero_is_only_one_sample_late() {
         (parts, mix, scale, delay)
     };
 
-    let (mut parts, mix, scale, _) = build(false);
-    let b = input(&parts, mix, "b");
-    let cold = render_changing(&mut parts, frames, at, |parts| {
-        let from = parts.controller.output_ref(scale, "out").unwrap();
-        parts.controller.connect(from, b).unwrap();
-    });
-    assert_eq!(parts.controller.last_report().loops[0].inserted_delays[0].1, b);
+    for block in BLOCKS {
+        let (mut parts, mix, scale, _) = build(false);
+        let b = input(&parts, mix, "b");
+        let inserted = render_changing(&mut parts, frames, at, block, |parts| {
+            let from = parts.controller.output_ref(scale, "out").unwrap();
+            parts.controller.connect(from, b).unwrap();
+        });
+        assert_eq!(parts.controller.last_report().loops[0].inserted_delays[0].1, b);
 
-    let (mut parts, mix, _, delay) = build(true);
-    let b = input(&parts, mix, "b");
-    let ideal = render_changing(&mut parts, frames, at, |parts| {
-        let from = parts.controller.output_ref(delay.unwrap(), "out").unwrap();
-        parts.controller.connect(from, b).unwrap();
-    });
+        let (mut parts, mix, _, delay) = build(true);
+        let b = input(&parts, mix, "b");
+        let ideal = render_changing(&mut parts, frames, at, block, |parts| {
+            let from = parts.controller.output_ref(delay.unwrap(), "out").unwrap();
+            parts.controller.connect(from, b).unwrap();
+        });
 
-    // Plugging the cable steps the output whichever way it is done, by up
-    // to half the signal here. The cold delay moves that step one sample
-    // later, and does not add a step of its own.
-    let window = at - 64..at + 64;
-    println!(
-        "new loop into a zero input: largest step {:.4} cold, {:.4} ideal",
-        largest_step(&cold[window.clone()]),
-        largest_step(&ideal[window.clone()]),
-    );
-    assert!(largest_step(&cold[window.clone()]) <= largest_step(&ideal[window]) + 1e-6);
+        assert_eq!(inserted, ideal, "block size {block}");
+    }
 }
 
 #[test]
-fn a_delay_that_moves_to_another_cable_clicks() {
+fn a_delay_that_moves_to_another_cable_does_not_click() {
     // Case 3. A running loop: Add B -> Multiply (0.5) -> back into Add B.
     // The compiler delays the Add's B input. Then a cable is added that
     // changes nothing you can hear (it goes through a Multiply set to 0),
     // but makes a second loop. The compiler now delays a different cable,
-    // the Multiply's input, and the old delay is gone. The new one starts
-    // at 0, so the feedback drops out for one sample.
+    // the Multiply's input, and the old delay is gone. A new delay that
+    // started at 0 dropped the feedback for one sample: -17 dB. Rule 5
+    // starts it with the Add's last output, which is exactly what it would
+    // hold had it always been there.
     //
     // The two placements give the same recurrence, out = in + 0.5 * out
     // one sample earlier, so the ideal output is the patch with no change.
@@ -362,36 +368,32 @@ fn a_delay_that_moves_to_another_cable_clicks() {
         (parts, mix, feedback, silent)
     };
 
-    let (mut parts, ..) = build();
-    let ideal = render(&mut parts, frames, 64, &[]).0;
+    for block in BLOCKS {
+        let (mut parts, ..) = build();
+        let ideal = render_changing(&mut parts, frames, at, block, |_| {});
 
-    let (mut parts, mix, feedback, silent) = build();
-    let before = parts.controller.last_report().loops[0].inserted_delays.clone();
-    assert_eq!(before[0].1, input(&parts, mix, "b"), "delayed at the Add first");
-    let changed = render_changing(&mut parts, frames, at, |parts| {
-        let from = parts.controller.output_ref(feedback, "out").unwrap();
-        let to = parts.controller.input_ref(silent, "a").unwrap();
-        parts.controller.connect(from, to).unwrap();
-    });
-    let after = parts.controller.last_report().loops[0].inserted_delays.clone();
-    assert_eq!(after.len(), 1);
-    assert_eq!(after[0].1, input(&parts, feedback, "a"), "the delay moved");
+        let (mut parts, mix, feedback, silent) = build();
+        let before = parts.controller.last_report().loops[0].inserted_delays.clone();
+        assert_eq!(before[0].1, input(&parts, mix, "b"), "delayed at the Add first");
+        let changed = render_changing(&mut parts, frames, at, block, |parts| {
+            let from = parts.controller.output_ref(feedback, "out").unwrap();
+            let to = parts.controller.input_ref(silent, "a").unwrap();
+            parts.controller.connect(from, to).unwrap();
+        });
+        let after = parts.controller.last_report().loops[0].inserted_delays.clone();
+        assert_eq!(after.len(), 1);
+        assert_eq!(after[0].1, input(&parts, feedback, "a"), "the delay moved");
 
-    let error: Vec<f32> = changed[at..].iter().zip(&ideal[at..]).map(|(c, i)| c - i).collect();
-    println!(
-        "delay moved inside a running loop: error peak {:.1} dB, settles in {:.2} ms",
-        db(peak(&error)),
-        settle_ms(&error),
-    );
-    assert_eq!(changed[..at], ideal[..at]);
-    assert!(peak(&error) > CLICK);
+        assert!(peak(&ideal[at..]) > 0.1, "the patch makes sound");
+        assert_eq!(changed, ideal, "block size {block}");
+    }
 }
 
 #[test]
-fn unplugging_and_replugging_inside_a_loop_keeps_the_delay_state() {
+fn an_unrelated_edit_keeps_a_running_loop_bit_identical() {
     // The other side of case 3: a delay that stays on the same input keeps
-    // its state across swaps, because its key is that input. Changing a
-    // knob or adding an unrelated module recompiles without a click.
+    // its state across swaps, because its key is that input. Adding an
+    // unrelated module recompiles without a click.
     let frames = 9_600;
     let at = 4_800;
     let build = || {
@@ -411,7 +413,7 @@ fn unplugging_and_replugging_inside_a_loop_keeps_the_delay_state() {
         parts
     };
     let ideal = render(&mut build(), frames, 64, &[]).0;
-    let changed = render_changing(&mut build(), frames, at, |parts| {
+    let changed = render_changing(&mut build(), frames, at, 64, |parts| {
         parts.controller.add_module("loom.osc.noise").unwrap();
     });
     assert_eq!(changed, ideal);

@@ -45,16 +45,16 @@ One exception: a module with a random generator must not copy the generator as i
 
 ## Inserted delays: a value that was never there
 
-A feedback loop needs a one-sample delay somewhere (ADR-0002). If the player does not place one, the compiler does. Its state is one number: the sample it is holding. A new delay starts at 0.
+A feedback loop needs a one-sample delay somewhere (ADR-0002). If the player does not place one, the compiler does. Its state is one number: the sample it is holding. Until #203, a new delay started at 0.
 
-Often that is fine. Say the loop closes into an Add's B input. Before the cable, B read 0, because an unplugged Add input reads 0. The new delay gives 0 for one sample, then the signal. That is exactly what plugging the cable one sample later would give. Nothing extra is heard.
+Often that is fine. Say the loop closes into an Add's B input. Before the cable, B read 0, because an unplugged Add input reads 0. A delay that starts at 0 gives 0 for one sample, then the signal. That is exactly what plugging the cable one sample later would give. Nothing extra is heard.
 
-It goes wrong when the input did not read 0 before:
+A delay that starts at 0 goes wrong when the input did not read 0 before:
 
 - **A Multiply's B input reads 1 when nothing is plugged in.** Close a loop into it, and for one sample it reads 0 instead of 1 or the new signal. The Multiply's output drops out for one sample: a click. Measured error: -6 dB.
-- **The compiler can move its delay.** Add a cable to a running loop, and the compiler may now break the loop on a different cable. The old delay is gone, and the new one starts at 0, in the middle of a loop that was already ringing. Both placements make the same loop, so nothing should change. Measured error: -17 dB, for one sample.
+- **The compiler can move its delay.** Add a cable to a running loop, and the compiler may now break the loop on a different cable. The old delay is gone, and the new one started at 0, in the middle of a loop that was already ringing. Both placements make the same loop, so nothing should change. Measured error: -17 dB, for one sample.
 
-The fix is to start a new delay with the value it would hold if it had always been there: the last sample its source wrote before the swap. That is what the cable would carry in hardware. Then both cases above are bit-identical to the ideal.
+The fix is to start a new delay with the value it would hold if it had always been there: the last sample its source wrote before the swap. That is what the cable would carry in hardware. The engine does this now (live patching spec, rule 5), and both cases above are bit-identical to the ideal.
 
 ## How the measurements work
 
