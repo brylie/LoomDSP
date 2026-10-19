@@ -50,7 +50,7 @@ C. **A, plus native stereo ports for modules that need both channels at once.**
 Options 5 and C, with the mean.
 
 - **Widths are inferred at compile time,** on the control thread, and never stored in a patch. A cable is stereo only when a module that declares a stereo output feeds it, directly or through modules that pass stereo on.
-- **Each port declares its channel behaviour.** An input either makes the module run per channel when stereo arrives (`PerChannel`), or folds stereo to mono (`Fold`), or takes both channels itself (`Stereo`). An output either has as many channels as its module runs (`PerChannel`) or is always stereo (`Stereo`). A module with a `Stereo` port is never copied.
+- **Each port declares its channel behaviour.** An input either makes the module run per channel when stereo arrives (`PerChannel`), or does not (`Fold`): it folds stereo to the mean of the two sides while the module runs as one, and gives each copy its own side when another input already makes the module run per channel, or takes both channels itself (`Stereo`). An output either has as many channels as its module runs (`PerChannel`) or is always stereo (`Stereo`). A module with a `Stereo` port is never copied.
 - **A module that receives stereo on a `PerChannel` input runs as two copies,** one per channel, each with its own state. All its outputs become stereo. A mono cable feeds both copies the same signal.
 - **A fold is the mean of left and right.**
 
@@ -58,7 +58,7 @@ The exact rules, the defaults by signal type, and the API are in the [specificat
 
 ## Consequences
 
-- **A mono-only patch pays nothing on the audio thread.** Its schedule has the same steps, buffers, and module instances as today. The only new work is the inference pass when the graph compiles, which is linear in the number of cables. Modules gain one declaration per port, and their `process` code does not change.
+- **A mono-only patch pays nothing on the audio thread.** Its schedule has the same steps, buffers, and module instances as today. The only new work is the inference pass when the graph compiles, which uses a work queue so that its cost is linear in the number of modules and cables. Modules gain one declaration per port, and their `process` code does not change.
 - **Stereo costs only where it flows.** A copied module costs about twice as much, a fold costs one add and one multiply per sample, and a mono cable into a stereo port costs nothing (both channels read the same buffer).
 - **Most module authors write mono code.** Only modules that mix channels (panners, stereo reverbs, linked limiters, stereo sources) handle two buffers themselves.
 - **The patch format does not change.** A cable's width follows from the graph, so loading an old patch infers the same widths.

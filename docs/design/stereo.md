@@ -60,7 +60,7 @@ How the canvas shows a stereo cable is FR-CANVAS-12 (P2). See Open points.
 
 7. **Output widths:** a `Stereo` output is always stereo. A `PerChannel` output is stereo when its module runs as two copies, and mono otherwise. So a module with no inputs, such as an oscillator, is mono unless it declares a `Stereo` output. *Why:* stereo then flows only from modules that make it, as FR-SIG-07 asks.
 
-8. **Widths are found by iteration to a fixed point.** Start with every output mono. Apply rules 6 and 7 until nothing changes. A width only ever changes from mono to stereo, so this ends after at most one pass per module, and in practice after one or two passes over the cables. *Why:* inside a feedback loop the widths depend on each other, so a single pass in order is not enough. Starting from mono means a loop is stereo only if stereo enters it, which is the smallest answer that is consistent.
+8. **Widths are found with a work queue, to a fixed point.** Start with every module and output mono, and queue every module with a `Stereo` output. Take a module from the queue and apply rule 7 to its outputs. For each module those outputs feed, apply rule 6. If it now runs as two copies, mark it and queue it. Stop when the queue is empty. A module changes from mono to stereo at most once, so each module is queued at most once and each cable is followed at most once. The work is linear in modules plus cables. *Why:* inside a feedback loop the widths depend on each other, so a single pass in order is not enough. Repeating full passes until nothing changes would also be correct, but in the worst case costs modules times cables. Starting from mono means a loop is stereo only if stereo enters it, which is the smallest answer that is consistent.
 
 9. **Unit delays follow the same rules.** `loom.time.delay1` has a `PerChannel` input and output. A delay the compiler inserts takes the width of the cable it breaks. Each channel has its own delay state, carried across schedule swaps by its key and channel. *Why:* a delay is an ordinary per-channel module; treating it any other way would mix the sides inside a loop.
 
@@ -124,7 +124,10 @@ How the canvas shows a stereo cable is FR-CANVAS-12 (P2). See Open points.
 - [ ] Given a stereo test source into a filter into Audio Out, when the patch runs, then the filter runs as two copies, and each side matches a mono filter fed that side alone.
 - [ ] Given a stereo cable into a `Fold` input of a module that runs as one, then the input reads exactly `(left + right) / 2`.
 - [ ] Given a mono cable into a `Stereo` input, then both channels read the same buffer, and no fold or copy buffer is added.
-- [ ] Given a feedback loop that no stereo cable enters, then every cable in it stays mono. Given one stereo cable entering it, then the whole loop is stereo and compiles.
+- [ ] Given a feedback loop that no stereo cable enters, then every cable in it stays mono.
+- [ ] Given a feedback loop whose modules pass audio on through `PerChannel` inputs, and one stereo cable into a `PerChannel` input in the loop, then every module in the loop runs as two copies, every cable in it is stereo, and it compiles.
+- [ ] Given the same mono loop, and a stereo cable only into a `Fold` input in the loop (such as a filter cutoff), then the loop stays mono, and that input reads the mean.
+- [ ] Given a long chain built so that stereo reaches modules in the reverse of the order they are stored, then inference visits each module and cable at most once.
 - [ ] Given a stereo chain, when the stereo cable is removed and the patch recompiles, then copy 1 of each module is freed on the control thread, copy 0 keeps its state, and the `no_alloc` tests pass.
 - [ ] Given a copied module, when it is run through the module test harness, then its output is identical at block sizes 1, 77, and 512.
 - [ ] Given a copied seeded module, then its left and right outputs differ, and both are the same on every run.
