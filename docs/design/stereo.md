@@ -3,7 +3,7 @@
 How the engine decides which cables carry stereo, and what modules do with it, so a stereo chain is one row of modules instead of two.
 
 - **Kind:** living specification.
-- **Status:** Draft
+- **Status:** Agreed, not built yet ([#23](https://github.com/brylie/LoomDSP/issues/23)). Rule 13's cold start of copy 1 is Agreed for now and may change with the research in [#203](https://github.com/brylie/LoomDSP/issues/203).
 - **Decision behind it:** [ADR-0020](../adr/0020-inferred-channel-count.md), refining [ADR-0007](../adr/0007-polymorphic-signal-model.md).
 - **Use case and requirements:** FR-SIG-07, FR-SIG-01, FR-SIG-03, FR-CANVAS-12, NFR-RT-01
 - **Background:** [Stereo cables](../learn/stereo-cables.md): why copies, why the mean, why folding can cancel.
