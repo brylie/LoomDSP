@@ -61,6 +61,7 @@ A step is named by a verb and what it acted on, in the same words the user sees 
 | Change a parameter | **change Filter Cutoff** |
 | Assignment add, remove, change | **add modulation**, **remove modulation**, **change modulation depth** |
 | MIDI mapping | **learn CC 74**, **remove MIDI mapping**, **move MIDI mapping** |
+| Cut, paste, duplicate | **cut Filter**, **paste 3 modules**, **duplicate Filter** ([copy, paste, and duplicate](clipboard.md)) |
 
 The exact wording can change while building. Each step must have a name.
 
@@ -82,6 +83,7 @@ The exact wording can change while building. Each step must have a name.
 | Move a mapping to another parameter | The move. |
 | Remove a MIDI mapping (the small × button) | The removal. |
 | "Add scope" on a cable | The new scope module and its cable together. |
+| Cut, paste, or duplicate | The whole group: its modules, cables, and assignments ([copy, paste, and duplicate](clipboard.md)). Copy is not a step. |
 | A button press whose saved value is toggle | The toggle. |
 
 ### What is not undoable
@@ -180,7 +182,6 @@ The edit log itself lives in `loom-app` and knows nothing about the audio thread
 
 ## Out of scope
 
-- **Copy, paste, and duplicate.** They are an edit that will join the history when they land ([#13](https://github.com/brylie/LoomDSP/issues/13)).
 - **Module data** (patterns, samples). It joins when it exists (FR-LIB-19, OQ-17). Large data may need steps that share storage.
 - **Undo of arrangement part swaps** (open question on swaps). A swap is one step when it exists.
 - **Reset of a whole module.** There is no such command yet. When it exists, it is one step with every parameter it changed.
