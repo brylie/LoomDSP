@@ -4,7 +4,7 @@ What carries over when the player edits a patch while it plays, so a new cable j
 
 - **Kind:** living specification.
 - **Status:** Rules 1 to 4 Implemented. Rules 5 and 6 Agreed, from the research in [#203](https://github.com/brylie/LoomDSP/issues/203), not built yet. Rule 6 is built with stereo copies (#23).
-- **Decision behind it:** [ADR-0002](../adr/0002-graph-execution-and-feedback.md) (schedules and inserted delays), [ADR-0021](../adr/0021-copies-take-state-from-the-running-instance.md) (state of channel copies).
+- **Decision behind it:** [ADR-0002](../adr/0002-graph-execution-and-feedback.md) (schedules and inserted delays), [ADR-0022](../adr/0022-copies-take-state-from-the-running-instance.md) (state of channel copies).
 - **Use case and requirements:** FR-GRAPH-01, FR-GRAPH-02, FR-GRAPH-03, FR-SIG-07, NFR-RT-01, NFR-RT-05, NFR-SND-02
 - **Background:** [Hot patching](../learn/hot-patching.md): why a new path clicks, and why a crossfade does not fix it.
 - **Prior art:** in Eurorack, every module runs all the time, and a cable only connects what is already running. VCV Rack behaves the same way. Named only to explain the expectation.
@@ -50,7 +50,7 @@ Every edit that changes the graph compiles a new schedule on the control thread.
 
    The value is what a delay that had always been on that cable would hold, so the new delay continues the signal instead of inventing a 0. *How:* the old schedule keeps a table of its output buffers, sorted by output. At the swap, each new delay looks up its source there and reads the last frame of the last block. A binary search per new delay, no allocation.
 
-6. **Copy 1 of a module that turns stereo takes copy 0's state.** The rules are in the [stereo spec](stereo.md), rules 13 and 25 to 27, and the decision in ADR-0021. *Why:* measured with the SVF and the same signal on both sides, a cold copy 1 is off by -2 to -24 dB and takes 1 to 20 ms to settle. A 5 ms crossfade scales that down but does not shorten it. Copied state is exact.
+6. **Copy 1 of a module that turns stereo takes copy 0's state.** The rules are in the [stereo spec](stereo.md), rules 13 and 25 to 27, and the decision in ADR-0022. *Why:* measured with the SVF and the same signal on both sides, a cold copy 1 is off by -2 to -24 dB and takes 1 to 20 ms to settle. A 5 ms crossfade scales that down but does not shorten it. Copied state is exact.
 
 ### Click threshold
 
@@ -68,7 +68,7 @@ The measurements compare what the engine plays with the ideal continuation: what
 ## Out of scope
 
 - **Fading cables in and out** (FR-GRAPH-05). A fade softens the step that plugging a cable makes in any system, hardware included. This spec is about state, so that the step is no bigger than plugging the cable should make.
-- **Keeping the state of a deleted module for undo.** Undo of a delete creates a new instance (rule 4). A later change could hand the old state over through the same method as ADR-0021.
+- **Keeping the state of a deleted module for undo.** Undo of a delete creates a new instance (rule 4). A later change could hand the old state over through the same method as ADR-0022.
 - **Replacing a module with a newer version** while it plays.
 
 ## Open points

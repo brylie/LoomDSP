@@ -1,4 +1,4 @@
-# ADR-0021: A new channel copy takes its state from the running instance
+# ADR-0022: A new channel copy takes its state from the running instance
 
 - **Status:** Accepted
 - **Date:** 2026-10-19

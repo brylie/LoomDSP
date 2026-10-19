@@ -3,7 +3,7 @@
 Why a new cable into a running patch can click, what state has to carry over for it not to, and why a crossfade does not hide a cold start.
 
 - **Specification:** [Changing a running patch](../design/live-patching.md), [Stereo cables](../design/stereo.md) rules 13 and 25 to 27
-- **Decision:** [ADR-0021](../adr/0021-copies-take-state-from-the-running-instance.md)
+- **Decision:** [ADR-0022](../adr/0022-copies-take-state-from-the-running-instance.md)
 - **Measurements:** `crates/loom-modules/tests/hot_patch.rs` (run with `--nocapture` to see the numbers)
 
 ## What a player expects
@@ -39,7 +39,7 @@ It helps only when the new copy settles faster than the fade. A crossfade multip
 
 ## The fix for copies: hand over the state
 
-The new copy should not start empty. At the swap it takes the running copy's state: the integrators, the smoothing, a delay line's buffer. Then it continues exactly where the left side was, and with the same signal on both sides the two are bit-identical. That needs one small method per module, which is why ADR-0021 makes it a decision.
+The new copy should not start empty. At the swap it takes the running copy's state: the integrators, the smoothing, a delay line's buffer. Then it continues exactly where the left side was, and with the same signal on both sides the two are bit-identical. That needs one small method per module, which is why ADR-0022 makes it a decision.
 
 One exception: a module with a random generator must not copy the generator as it is. Then the right side would play the same random numbers as the left, which is mono in disguise. It takes everything else and restarts its generator from its seed and its channel.
 

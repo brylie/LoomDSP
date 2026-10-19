@@ -23,6 +23,8 @@ loom-host-desktop.workspace = true
 loom-canvas.workspace = true
 iced_wgpu.workspace = true
 png.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 iced = { workspace = true, features = ["smol"] }
 clap.workspace = true
 rfd.workspace = true

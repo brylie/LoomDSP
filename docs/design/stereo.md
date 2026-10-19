@@ -3,8 +3,8 @@
 How the engine decides which cables carry stereo, and what modules do with it, so a stereo chain is one row of modules instead of two.
 
 - **Kind:** living specification.
-- **Status:** Agreed, not built yet ([#23](https://github.com/brylie/LoomDSP/issues/23)). Rules 25 to 27 (copy 1 takes copy 0's state) were added from the research in [#203](https://github.com/brylie/LoomDSP/issues/203), with [ADR-0021](../adr/0021-copies-take-state-from-the-running-instance.md).
-- **Decision behind it:** [ADR-0020](../adr/0020-inferred-channel-count.md), refining [ADR-0007](../adr/0007-polymorphic-signal-model.md). [ADR-0021](../adr/0021-copies-take-state-from-the-running-instance.md) for the state of copy 1.
+- **Status:** Agreed, not built yet ([#23](https://github.com/brylie/LoomDSP/issues/23)). Rules 25 to 27 (copy 1 takes copy 0's state) were added from the research in [#203](https://github.com/brylie/LoomDSP/issues/203), with [ADR-0022](../adr/0022-copies-take-state-from-the-running-instance.md).
+- **Decision behind it:** [ADR-0020](../adr/0020-inferred-channel-count.md), refining [ADR-0007](../adr/0007-polymorphic-signal-model.md). [ADR-0022](../adr/0022-copies-take-state-from-the-running-instance.md) for the state of copy 1.
 - **Use case and requirements:** FR-SIG-07, FR-SIG-01, FR-SIG-03, FR-CANVAS-12, NFR-RT-01
 - **Background:** [Stereo cables](../learn/stereo-cables.md): why copies, how each signal type downmixes, why a downmix can cancel. [Hot patching](../learn/hot-patching.md): why a cold copy 1 clicks.
 - **Prior art:** Eurorack patches stereo as two cables and dual modules. VCV Rack carries several channels on one cable and lets each module decide what to do with them. Bitwig Grid works in stereo by default. Named only to explain the trade-offs; the rules below are our own.
@@ -130,7 +130,7 @@ How the canvas shows a stereo cable is FR-CANVAS-12 (P2). See Open points.
 
 ### State of copy 1
 
-25. **Copy 1 takes copy 0's state at the swap.** `Module` gets an optional method, `fn copy_state_from(&mut self, other: &dyn Module) -> bool`, whose default returns `false`. At the swap that first runs copy 1, after its parameters are set and before it first processes, the engine calls `copy1.copy_state_from(copy0)`. A module that implements it downcasts `other` to its own type (through `Module::as_any`, provided for every module by a blanket implementation), copies every field that changes while it runs, including parameter smoothing, and returns `true`. It returns `false` when `other` is another type. *Why:* measured with the SVF and the same signal on both sides, a cold copy 1 is off by -2 to -24 dB for 1 to 20 ms, and a crossfade only scales that down. Copied state makes the right side bit-identical to the left. See the [live patching spec](live-patching.md), rule 6, and ADR-0021.
+25. **Copy 1 takes copy 0's state at the swap.** `Module` gets an optional method, `fn copy_state_from(&mut self, other: &dyn Module) -> bool`, whose default returns `false`. At the swap that first runs copy 1, after its parameters are set and before it first processes, the engine calls `copy1.copy_state_from(copy0)`. A module that implements it downcasts `other` to its own type (through `Module::as_any`, provided for every module by a blanket implementation), copies every field that changes while it runs, including parameter smoothing, and returns `true`. It returns `false` when `other` is another type. *Why:* measured with the SVF and the same signal on both sides, a cold copy 1 is off by -2 to -24 dB for 1 to 20 ms, and a crossfade only scales that down. Copied state makes the right side bit-identical to the left. See the [live patching spec](live-patching.md), rule 6, and ADR-0022.
 
 26. **`copy_state_from` follows the rules for `process`:** no allocation, no locks, no waiting. Buffers are copied into the ones copy 1 already has, which have the same size because both copies were built with the same `ModuleConfig`. Copy 1 starts from reset only when the method returns `false`. Every built-in module with state implements it. *Why:* it runs on the audio thread (hard rule 1). A module that skips it still works, with a cold right side.
 
@@ -158,7 +158,7 @@ How the canvas shows a stereo cable is FR-CANVAS-12 (P2). See Open points.
 - [ ] Given a stereo cable into a port, when the player hovers it, then the hover text says "Stereo". (Manual check.)
 - [ ] Given a descriptor with `Downmix` on an output, or a module with a `Stereo` port and a `PerChannel` input, then the registry rejects it.
 - [ ] (Rules 25 to 27.) Given a running SVF that turns stereo, with the same signal on both sides, then its right output is bit-identical to its left from the first frame after the swap, and the `no_alloc` tests pass.
-- [ ] (Rules 25 and 26.) Given each built-in module with state, when the harness runs it for N frames, copies its state into a new instance, and runs both on, then both outputs are bit-identical from frame N.
+- [ ] (Rules 25 and 26.) Given each built-in module with state, except seeded modules covered by rule 27, when the harness runs it for N frames, copies its state into a new instance, and runs both on, then both outputs are bit-identical from frame N.
 - [ ] (Rule 27.) Given a seeded module that turns stereo, then its left and right outputs differ after the swap, and are the same on every run.
 
 ## Out of scope
@@ -172,4 +172,4 @@ How the canvas shows a stereo cable is FR-CANVAS-12 (P2). See Open points.
 
 ## Open points
 
-1. **Copy 1 starts from reset** (closed). When a cable change makes a running chain stereo, the right side starts cold, so a filter or delay can click or sound different for a moment. Settled by #203: rules 25 to 27 (copy state from copy 0) and ADR-0021. A crossfade was measured and rejected: it does not help when copy 1 settles slower than the fade.
+1. **Copy 1 starts from reset** (closed). When a cable change makes a running chain stereo, the right side starts cold, so a filter or delay can click or sound different for a moment. Settled by #203: rules 25 to 27 (copy state from copy 0) and ADR-0022. A crossfade was measured and rejected: it does not help when copy 1 settles slower than the fade.

@@ -203,13 +203,8 @@ impl FromStr for Pointer {
 
 /// Loads the patch the way the app does, draws it, and writes the PNG.
 pub fn run(args: &crate::Args, path: &Path) -> Result<(), String> {
-    let source = match (&args.patch, args.generate) {
-        (_, Some(n)) => crate::Source::Generated(n),
-        (Some(patch), None) => crate::Source::File(patch),
-        (None, None) => crate::Source::Empty,
-    };
     let config = loom_core::EngineConfig::with_sample_rate(48_000.0);
-    let mut session = crate::App::session(config, source)?;
+    let mut session = crate::App::session(config, args.source())?;
     let options = &args.view;
     // A wire from a connected input picks up its cable, as in the app: the
     // cable leaves the patch and its loose end hangs from the source.
