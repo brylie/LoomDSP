@@ -90,7 +90,7 @@ When a field falls back to its default, it falls back to the safe choice. For ou
 
 ### The command-line flag
 
-`--output-safety low-latency|clean|off` stays. It sets the effective value for this run only and does not change the saved value.
+`--output-safety low-latency|clean|off` stays. It sets the effective value for this run only and does not change the saved value. The flag has no default value. When it is left out, the saved value applies. When it is given, even as `low-latency`, it wins. *Why:* today the flag defaults to `low-latency`, so the app could not tell "not given" from "given as low-latency", and the saved value would never apply.
 
 | Flag | Saved value | Effective value | File after the run |
 |---|---|---|---|
@@ -143,7 +143,7 @@ With `--no-audio`, there is no engine to tell. The choice is saved and used by t
 
 1. **Preferences belong to the machine, never the patch.** Opening, saving, or creating a patch never reads or writes preferences, and a patch cannot hold one. *Why:* ADR-0019, rule 2. A patch from someone else must not change the player's protection.
 2. **The preferences store lives in `loom-app`.** No engine crate reads or writes the file. *Why:* hard rule 6. The engine crates stay portable and file-free. The app reads the file and passes plain values into `EngineConfig` and the `Controller`.
-3. **A problem with the file never blocks start and never turns protection off.** Every field falls back to its default, and defaults are the safe choice. *Why:* see Reading the file.
+3. **A problem with the file never blocks start and never turns protection off.** A file that cannot be read or parsed gives the defaults for every field. A field with a value the app does not know falls back to its default alone, and the other fields keep their values. Defaults are the safe choice. *Why:* see Reading the file.
 4. **The app writes only on a change, atomically.** *Why:* see Writing the file.
 5. **A command-line flag sets the effective value for one run and is never saved.** *Why:* see The command-line flag.
 6. **A change at run time reaches the running engine through `Controller::set_output_safety`, and the app never rebuilds the engine for it.** *Why:* rebuilding would restart every module's state and cut the sound. The command was built so the change is click-free.
@@ -159,6 +159,7 @@ Tests point `--preferences` (or the loading function behind it) at a temporary f
 - [ ] Given that broken file, when the player picks Clean, then the old file is now `preferences.broken.ron` and `preferences.ron` holds `clean`.
 - [ ] Given broken files `studio.ron` and `stage.ron` in one folder, when the app runs once with each through `--preferences` and the player changes a setting each time, then the folder holds `studio.broken.ron` and `stage.broken.ron`, each with its own old contents.
 - [ ] Given `output_safety: "loud"` and a valid later field, when the app starts, then the mode is Low latency, the later field is used, and the status bar names the bad value.
+- [ ] Given a saved `clean` and `--output-safety low-latency`, when the app starts, then the engine runs Low latency. Given a saved `clean` and no flag, then it runs Clean.
 - [ ] Given a saved `clean` and `--output-safety off`, when the app starts, then the engine runs Off, the window shows Off with the flag note, and after quitting the file still holds `clean`.
 - [ ] Given a running engine, when the player picks Off, then the app sends one `SetOutputSafety(Off)` command, writes the file, and the next patch it opens builds its engine with Off.
 - [ ] Given the mode already in effect, when the player picks it again, then no command is sent and the file's modification time does not change.
