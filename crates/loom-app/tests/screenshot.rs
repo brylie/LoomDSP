@@ -11,8 +11,9 @@ fn subtractive() -> PathBuf {
 /// The subtractive example with modulation, so it has badges, modulation
 /// lines, and range arcs. Cutoff has two sources, so an arc drag that
 /// picks one changes its arc. Module 10 is a button whose `on` is
-/// modulated, which has no range arc. Written next to the images.
-fn modulated() -> PathBuf {
+/// modulated, which has no range arc. Written next to the images, as
+/// `name`: tests run in parallel, so each needs its own file.
+fn modulated(name: &str) -> PathBuf {
     let source = std::fs::read_to_string(subtractive()).expect("example patch");
     let last_module = "PatchModule(id: 9, kind: \"loom.io.audio-out@1\"),";
     let source = source.replace(
@@ -28,7 +29,7 @@ fn modulated() -> PathBuf {
          (source: (5, \"out\"), target: (10, \"on\"), depth: 1.0),\n    ],\n)\n",
         &source[..end]
     );
-    let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("modulated.ron");
+    let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(name);
     std::fs::write(&path, patch).expect("patch written");
     path
 }
@@ -109,7 +110,7 @@ fn renders_at_a_scale_with_focus() {
 /// The pointer, a pinned badge, hover text, and a drag change the image.
 #[test]
 fn renders_pointer_pin_and_drags() {
-    let patch = modulated();
+    let patch = modulated("modulated-drags.ron");
     let view = ["--size", "350x200", "--zoom", "2", "--center", "4:cutoff"];
     let image = |name: &str, extra: &[&str]| screenshot_of(&patch, name, &[&view[..], extra].concat()).map(|i| i.2);
     let Some(plain) = image("plain.png", &[]) else {
@@ -153,7 +154,7 @@ fn an_unknown_control_fails() {
 
 #[test]
 fn a_depth_drag_needs_a_knob() {
-    let error = fails(&modulated(), &["--depth", "10:on"]);
+    let error = fails(&modulated("modulated-knob.ron"), &["--depth", "10:on"]);
     assert!(error.contains("is not a knob"), "{error}");
 }
 
