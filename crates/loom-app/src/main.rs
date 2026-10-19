@@ -28,7 +28,7 @@ use live::Live;
 use loom_canvas::{CanvasEvent, HoverText, LearnView, PanelValues, PatchCanvas, Scene};
 use loom_core::{
     AssignmentId, Controller, EngineConfig, EngineParts, InputRef, MidiEvent, ModuleDescriptor, ModuleId, OutputRef,
-    ProbeId, create_engine,
+    OutputSafety, ProbeId, create_engine,
 };
 use loom_host_desktop::{AudioOptions, AudioOutput, CallbackStats, MidiConnection, RunningAudio, SharedMidi};
 use loom_patch::Patch;
@@ -52,6 +52,10 @@ struct Args {
     /// Start measuring frame rate with the camera moving (performance gate).
     #[arg(long)]
     bench: bool,
+    /// Safety stage on the output: low-latency, clean, or off (ADR-0019).
+    /// A command-line flag until the app has preferences.
+    #[arg(long, default_value_t = OutputSafety::LowLatency)]
+    output_safety: OutputSafety,
 }
 
 fn main() -> iced::Result {
@@ -179,6 +183,8 @@ struct App {
     generation: u64,
     sample_rate: f32,
     no_audio: bool,
+    /// The safety stage's mode, for every engine this app builds.
+    output_safety: OutputSafety,
     /// Set when the app should exit after this update.
     quit: bool,
     theme: Theme,
@@ -269,9 +275,13 @@ impl App {
             (None, None) => Source::Empty,
         };
         let mut status = String::new();
-        let session = Self::session(sample_rate, source).unwrap_or_else(|e| {
+        let config = EngineConfig {
+            output_safety: args.output_safety,
+            ..EngineConfig::with_sample_rate(sample_rate)
+        };
+        let session = Self::session(config, source).unwrap_or_else(|e| {
             status = e;
-            Self::session(sample_rate, Source::Empty).expect("an empty patch always loads")
+            Self::session(config, Source::Empty).expect("an empty patch always loads")
         });
         let mut app = Self::assemble(output, sample_rate, session, 1, &args);
         if !status.is_empty() {
@@ -290,13 +300,13 @@ impl App {
 
     /// Builds an engine and loads a patch into it. On failure nothing else
     /// is touched, so a failed open leaves the running patch alone.
-    fn session(sample_rate: f32, source: Source) -> Result<Session, String> {
+    fn session(config: EngineConfig, source: Source) -> Result<Session, String> {
         let EngineParts {
             mut controller,
             engine,
             midi,
             telemetry,
-        } = create_engine(loom_modules::registry(), EngineConfig::with_sample_rate(sample_rate));
+        } = create_engine(loom_modules::registry(), config);
         let mut positions = BTreeMap::new();
         let (name, file) = match source {
             Source::Generated(n) => {
@@ -391,6 +401,7 @@ impl App {
             generation,
             sample_rate,
             no_audio: args.no_audio,
+            output_safety: args.output_safety,
             quit: false,
             theme: Theme::custom(
                 "Loom",
@@ -540,7 +551,11 @@ impl App {
             .as_ref()
             .map(|o| o.sample_rate() as f32)
             .unwrap_or(self.sample_rate);
-        let session = match Self::session(sample_rate, source) {
+        let config = EngineConfig {
+            output_safety: self.output_safety,
+            ..EngineConfig::with_sample_rate(sample_rate)
+        };
+        let session = match Self::session(config, source) {
             Ok(session) => session,
             Err(e) => {
                 let message = format!("Could not open the patch: {e}. The current patch is unchanged.");
@@ -560,6 +575,7 @@ impl App {
             generate: None,
             no_audio: self.no_audio,
             bench: self.measuring,
+            output_safety: self.output_safety,
         };
         let mut fresh = Self::assemble(output, sample_rate, session, self.generation + 1, &args);
         fresh.animating = self.animating;
@@ -2122,6 +2138,7 @@ mod tests {
             generate: None,
             no_audio: true,
             bench: false,
+            output_safety: OutputSafety::LowLatency,
         })
     }
 

@@ -12,6 +12,7 @@ use crate::midi_map::{
     ControlChangeSeen, MidiControl, MidiFeedback, MidiMapping, MidiMappingId, MidiReader, control_value, later,
 };
 use crate::registry::Registry;
+use crate::safety::OutputSafety;
 use crate::telemetry::{ProbeId, ProbeKind, Telemetry, TelemetrySender};
 use crate::transport::{TimeSignature, TransportSettings, clamp_tempo};
 use rtrb::{Consumer, Producer, RingBuffer};
@@ -771,6 +772,13 @@ impl Controller {
     /// Modules see it as a jump ([`TransportInfo::jumped`](crate::TransportInfo::jumped)).
     pub fn reset_transport(&mut self) -> Result<(), LoomError> {
         self.send(Command::ResetTransport)
+    }
+
+    /// Changes the safety stage on the final output (ADR-0019). The output
+    /// dips to silence for a moment and fades back in, so the change never
+    /// clicks.
+    pub fn set_output_safety(&mut self, mode: OutputSafety) -> Result<(), LoomError> {
+        self.send(Command::SetOutputSafety(mode))
     }
 
     fn send(&mut self, command: Command) -> Result<(), LoomError> {

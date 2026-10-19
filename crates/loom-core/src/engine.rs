@@ -13,6 +13,7 @@ use crate::live::{LiveTable, NO_CELL};
 use crate::midi::{MidiEvent, MidiMessage};
 use crate::midi_map::{MidiControl, MidiFeedback, later};
 use crate::module::{Module, PortIo, ProcessContext};
+use crate::safety::{OutputSafety, SafetyStage};
 use crate::telemetry::{MeterReading, SCOPE_CHUNK, ScopeChunk, TelemetrySender, measure};
 use crate::transport::{TimeSignature, Transport};
 use rtrb::{Consumer, Producer};
@@ -42,6 +43,9 @@ pub struct EngineConfig {
     /// Capacity of the scope queue, in chunks of
     /// [`SCOPE_CHUNK`](crate::SCOPE_CHUNK) samples.
     pub scope_capacity: usize,
+    /// The safety stage's mode when the engine starts (ADR-0019). Change it
+    /// later with [`Controller::set_output_safety`](crate::Controller::set_output_safety).
+    pub output_safety: OutputSafety,
 }
 
 impl Default for EngineConfig {
@@ -55,6 +59,7 @@ impl Default for EngineConfig {
             midi_capacity: 1024,
             meter_capacity: 1024,
             scope_capacity: 1024,
+            output_safety: OutputSafety::LowLatency,
         }
     }
 }
@@ -125,6 +130,7 @@ pub(crate) enum Command {
     SetTimeSignature(TimeSignature),
     SetRunning(bool),
     ResetTransport,
+    SetOutputSafety(OutputSafety),
 }
 
 pub(crate) enum Garbage {
@@ -160,6 +166,8 @@ pub struct Engine {
     /// Frames rendered since the engine started. Stamps telemetry and
     /// anchors the transport.
     frame: u64,
+    /// DC blocker, limiter, and fade on the summed output (ADR-0019).
+    safety: SafetyStage,
     config: EngineConfig,
     stats: Arc<EngineStats>,
 }
@@ -190,6 +198,7 @@ impl Engine {
             telemetry,
             transport: Transport::new(config.sample_rate),
             frame: 0,
+            safety: SafetyStage::new(config.output_safety, config.sample_rate),
             config,
             stats,
         }
@@ -345,6 +354,7 @@ impl Engine {
                 Command::SetTimeSignature(time_signature) => self.transport.set_time_signature(time_signature),
                 Command::SetRunning(running) => self.transport.set_running(self.frame, running),
                 Command::ResetTransport => self.transport.reset(self.frame),
+                Command::SetOutputSafety(mode) => self.safety.set_mode(mode),
             }
         }
     }
@@ -616,8 +626,7 @@ impl Engine {
                 *out += value;
             }
         }
-        clip_output(left);
-        clip_output(right);
+        self.safety.process(left, right);
 
         self.transport.end_block();
     }
@@ -687,30 +696,5 @@ fn fill_param(fill: &mut ParamFill, assignments: &[AssignmentRuntime], offset: u
         } else {
             spec.denormalize(position + added)
         };
-    }
-}
-
-/// The final output, as ADR-0007 asks: audio is not clipped on cables, only
-/// here, to its nominal range of -1 to 1. NaN and infinity become silence,
-/// so a broken patch can never send them to the device (#121).
-fn clip_output(samples: &mut [f32]) {
-    for sample in samples {
-        *sample = if sample.is_finite() {
-            sample.clamp(-1.0, 1.0)
-        } else {
-            0.0
-        };
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn clip_output_limits_the_range_and_silences_non_finite_samples() {
-        let mut samples = [0.25, -0.5, 1.5, -7.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY];
-        clip_output(&mut samples);
-        assert_eq!(samples, [0.25, -0.5, 1.0, -1.0, 0.0, 0.0, 0.0]);
     }
 }

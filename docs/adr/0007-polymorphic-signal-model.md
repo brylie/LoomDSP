@@ -22,7 +22,7 @@ A useful mental model for Eurorack users: **1.0 equals 10 volts.**
 
 | Type | Colour (proposal) | Range | Notes |
 |---|---|---|---|
-| Audio | Red | Bipolar, nominal -1.0 to 1.0 | Not clipped on cables. Clipping happens only at the final output. |
+| Audio | Red | Bipolar, nominal -1.0 to 1.0 | Not clipped on cables. Clipping happens only at the final output, after a safety stage ([ADR-0019](0019-output-safety-stage.md)). |
 | Modulation | Blue | Bipolar -1.0 to 1.0, or unipolar 0.0 to 1.0 | Envelopes are unipolar. LFOs are bipolar. |
 | Pitch | Orange | 0.1 per octave. 0.0 = middle C (MIDI note 60) | Same as 1 V per octave under the 1.0 = 10 V model. -1.0 to 1.0 covers 20 octaves. |
 | Phase | Purple | 0.0 to 1.0, wraps | Inputs wrap any value into range. |

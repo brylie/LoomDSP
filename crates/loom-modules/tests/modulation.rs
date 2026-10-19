@@ -2,8 +2,8 @@
 
 use loom_core::{
     AssignmentId, Controller, EngineConfig, EngineParts, MidiEvent, Module, ModuleConfig, ModuleDescriptor, ModuleId,
-    ModuleRole, Panel, ParamOptions, ParamSpec, Polarity, PortDefault, PortIo, PortSpec, ProbeKind, ProcessContext,
-    SignalType, create_engine,
+    ModuleRole, OutputSafety, Panel, ParamOptions, ParamSpec, Polarity, PortDefault, PortIo, PortSpec, ProbeKind,
+    ProcessContext, SignalType, create_engine,
 };
 use loom_modules::register_all;
 use std::sync::Arc;
@@ -82,7 +82,17 @@ fn engine() -> EngineParts {
     registry.register(&LINEAR).expect("linear");
     registry.register(&LOG).expect("log");
     registry.register(&STEPS).expect("steps");
-    create_engine(Arc::new(registry), EngineConfig::with_sample_rate(48_000.0))
+    // These tests read exact parameter values through Audio Out, so the
+    // safety stage is off (ADR-0019).
+    let config = EngineConfig {
+        output_safety: OutputSafety::Off,
+        ..EngineConfig::with_sample_rate(48_000.0)
+    };
+    let mut parts = create_engine(Arc::new(registry), config);
+    // Play past the fade-in, which runs even with the stage off.
+    let mut silence = [0.0; 1024];
+    parts.engine.process(&mut silence.clone(), &mut silence);
+    parts
 }
 
 fn render(parts: &mut EngineParts, frames: usize, block: usize) -> Vec<f32> {
@@ -674,11 +684,17 @@ fn engine_with_live_cells(cells: usize) -> EngineParts {
     let mut registry = loom_core::Registry::new();
     register_all(&mut registry).expect("built-ins");
     registry.register(&LINEAR).expect("linear");
+    // Exact values through Audio Out, as in `engine`: safety off, and
+    // past the fade-in (ADR-0019).
     let config = EngineConfig {
         max_live_values: cells,
+        output_safety: OutputSafety::Off,
         ..EngineConfig::with_sample_rate(48_000.0)
     };
-    create_engine(Arc::new(registry), config)
+    let mut parts = create_engine(Arc::new(registry), config);
+    let mut silence = [0.0; 1024];
+    parts.engine.process(&mut silence.clone(), &mut silence);
+    parts
 }
 
 /// The live value is the parameter's modulated value at the last frame of

@@ -181,6 +181,7 @@ Live performance is the top priority after the core patcher works.
 | FR-PERF-05 | A "panic" action silences all voices and resets stuck notes immediately. Mappable to a MIDI control. | Must | P1 | Stuck notes happen on stage. Recovery must be one press. |
 | FR-PERF-06 | A set list: an ordered list of patches and presets. Switching between them is click-free and loads in the background. | Should | P2 | A live set uses several instruments. |
 | FR-PERF-07 | Several patches can run at once (layers or splits across the keyboard). | Should | P2 | Common live setup, for example bass on the left hand and pad on the right. |
+| FR-PERF-08 | The final output passes a safety stage (DC blocker, limiter below full scale, fade-in) that is on by default and adds no latency by default. The player can choose a cleaner mode with a little latency, or turn it off ([output safety](../design/output-safety.md)). | Should | P1 | Patching anything to anything makes DC, full-scale noise, and sudden jumps easy to create by accident, often on stage through a PA. |
 
 ## 11. MIDI and control input (`MIDI`)
 
