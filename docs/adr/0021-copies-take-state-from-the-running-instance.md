@@ -1,6 +1,6 @@
 # ADR-0021: A new channel copy takes its state from the running instance
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-19
 - **Related requirements:** FR-GRAPH-01, FR-GRAPH-02, FR-SIG-07, NFR-RT-01, NFR-SND-02
 - **Specification:** [Changing a running patch](../design/live-patching.md), [Stereo cables](../design/stereo.md) rules 13 and 25 to 27

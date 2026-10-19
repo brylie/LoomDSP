@@ -3,7 +3,7 @@
 What carries over when the player edits a patch while it plays, so a new cable joins the running sound with no cold start, click, or gap.
 
 - **Kind:** living specification.
-- **Status:** Draft. Rules 1 to 4 describe the engine as built. Rules 5 and 6 are proposed in [#203](https://github.com/brylie/LoomDSP/issues/203).
+- **Status:** Rules 1 to 4 Implemented. Rules 5 and 6 Agreed, from the research in [#203](https://github.com/brylie/LoomDSP/issues/203), not built yet. Rule 6 is built with stereo copies (#23).
 - **Decision behind it:** [ADR-0002](../adr/0002-graph-execution-and-feedback.md) (schedules and inserted delays), [ADR-0021](../adr/0021-copies-take-state-from-the-running-instance.md) (state of channel copies).
 - **Use case and requirements:** FR-GRAPH-01, FR-GRAPH-02, FR-GRAPH-03, FR-SIG-07, NFR-RT-01, NFR-RT-05, NFR-SND-02
 - **Background:** [Hot patching](../learn/hot-patching.md): why a new path clicks, and why a crossfade does not fix it.
@@ -26,8 +26,8 @@ Every edit that changes the graph compiles a new schedule on the control thread.
 | Unit delays (user and inserted) | Yes, while the key stays | By key (`take_tap_state_from`). The key is the module ID, the delayed input, or the assignment ID. |
 | Transport, output safety, MIDI state | Yes | They live in the engine. |
 | Port buffers | Not needed | Every buffer is written before it is read in each block. |
-| A new inserted delay | **No: starts at 0** | Rule 5 proposes a fix. |
-| Copy 1 of a module that turns stereo | **No: starts from reset** | Not built yet (#23). Rule 6 proposes a fix. |
+| A new inserted delay | **No: starts at 0** | Rule 5 fixes it (not built yet). |
+| Copy 1 of a module that turns stereo | **No: starts from reset** | Not built yet (#23). Rule 6 fixes it. |
 | A module the player adds | No, by design | A new module is new hardware: it starts from reset. |
 
 ## Rules

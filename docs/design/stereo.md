@@ -3,7 +3,7 @@
 How the engine decides which cables carry stereo, and what modules do with it, so a stereo chain is one row of modules instead of two.
 
 - **Kind:** living specification.
-- **Status:** Agreed, not built yet ([#23](https://github.com/brylie/LoomDSP/issues/23)). Rules 25 to 27 (copy 1 takes copy 0's state) are Proposed by the research in [#203](https://github.com/brylie/LoomDSP/issues/203), with [ADR-0021](../adr/0021-copies-take-state-from-the-running-instance.md). Until they are agreed, rule 13's cold start stands.
+- **Status:** Agreed, not built yet ([#23](https://github.com/brylie/LoomDSP/issues/23)). Rules 25 to 27 (copy 1 takes copy 0's state) were added from the research in [#203](https://github.com/brylie/LoomDSP/issues/203), with [ADR-0021](../adr/0021-copies-take-state-from-the-running-instance.md).
 - **Decision behind it:** [ADR-0020](../adr/0020-inferred-channel-count.md), refining [ADR-0007](../adr/0007-polymorphic-signal-model.md). [ADR-0021](../adr/0021-copies-take-state-from-the-running-instance.md) for the state of copy 1.
 - **Use case and requirements:** FR-SIG-07, FR-SIG-01, FR-SIG-03, FR-CANVAS-12, NFR-RT-01
 - **Background:** [Stereo cables](../learn/stereo-cables.md): why copies, how each signal type downmixes, why a downmix can cancel. [Hot patching](../learn/hot-patching.md): why a cold copy 1 clicks.
@@ -128,7 +128,7 @@ How the canvas shows a stereo cable is FR-CANVAS-12 (P2). See Open points.
 
 24. **A patch with no stereo source compiles to the same schedule as before this feature.** Same module operations, buffers, and instances, and no width checks inside `process`. The only extra work is the inference pass on the control thread. *Why:* FR-SIG-07's reason for existing. Most patches are mono, and most cables carry control signals.
 
-### State of copy 1 (Proposed, #203)
+### State of copy 1
 
 25. **Copy 1 takes copy 0's state at the swap.** `Module` gets an optional method, `fn copy_state_from(&mut self, other: &dyn Module) -> bool`, whose default returns `false`. At the swap that first runs copy 1, after its parameters are set and before it first processes, the engine calls `copy1.copy_state_from(copy0)`. A module that implements it downcasts `other` to its own type (through `Module::as_any`, provided for every module by a blanket implementation), copies every field that changes while it runs, including parameter smoothing, and returns `true`. It returns `false` when `other` is another type. *Why:* measured with the SVF and the same signal on both sides, a cold copy 1 is off by -2 to -24 dB for 1 to 20 ms, and a crossfade only scales that down. Copied state makes the right side bit-identical to the left. See the [live patching spec](live-patching.md), rule 6, and ADR-0021.
 
@@ -172,4 +172,4 @@ How the canvas shows a stereo cable is FR-CANVAS-12 (P2). See Open points.
 
 ## Open points
 
-1. **Copy 1 starts from reset.** When a cable change makes a running chain stereo, the right side starts cold, so a filter or delay can click or sound different for a moment. #203 measured it and proposes rules 25 to 27 (copy state from copy 0) with ADR-0021. A crossfade was measured and rejected: it does not help when copy 1 settles slower than the fade. Until rules 25 to 27 are agreed, the cold start stands.
+1. **Copy 1 starts from reset** (closed). When a cable change makes a running chain stereo, the right side starts cold, so a filter or delay can click or sound different for a moment. Settled by #203: rules 25 to 27 (copy state from copy 0) and ADR-0021. A crossfade was measured and rejected: it does not help when copy 1 settles slower than the fade.
