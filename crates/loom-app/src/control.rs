@@ -16,7 +16,7 @@ use iced::futures::channel::mpsc;
 use iced::futures::{SinkExt, Stream};
 use iced::{Point, Rectangle, keyboard};
 use loom_canvas::{CanvasEvent, CanvasView, PortRef};
-use loom_core::{MidiEvent, ModuleId};
+use loom_core::{MidiControl, MidiEvent, ModuleId};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use std::any::Any;
@@ -344,9 +344,14 @@ pub(crate) enum Step {
     /// A control change sent to the engine: answer once the engine has
     /// taken it and the app has applied it (a mapped control moved, or the
     /// armed parameter learned it). `before` is the serial of the last
-    /// control change seen before it was sent.
+    /// control change seen before it was sent. The engine keeps only the
+    /// last change, so the command's own is the one that is newer and has
+    /// its control and value: a MIDI port's change that arrives first is
+    /// not taken for it.
     ControlChange {
         before: Option<u32>,
+        control: MidiControl,
+        value: u8,
         frames_left: u16,
     },
     Locate(String),
@@ -641,21 +646,32 @@ impl App {
             let Pending { call, step, .. } = pending;
             match step {
                 Step::Answer(answer) => call.answer(answer),
-                Step::ControlChange { before, frames_left } => {
-                    let seen = self.controller.last_control_change().map(|seen| seen.serial);
-                    if seen != before {
+                Step::ControlChange {
+                    before,
+                    control,
+                    value,
+                    frames_left,
+                } => {
+                    let seen = self.controller.last_control_change();
+                    if seen.is_some_and(|seen| {
+                        Some(seen.serial) != before && seen.control == control && seen.value == value
+                    }) {
                         // As the MIDI watch would. Applying it twice is
                         // harmless: an armed parameter learns only once.
                         self.midi_arrived();
                         call.answer(Ok(Map::new()));
                     } else if frames_left == 0 {
-                        call.answer(Err("the engine did not take the control change".to_string()));
+                        call.answer(Err(
+                            "the engine did not take the control change, or other MIDI came right after it".to_string(),
+                        ));
                     } else {
                         waiting.push(Pending {
                             frames: 1,
                             call,
                             step: Step::ControlChange {
                                 before,
+                                control,
+                                value,
                                 frames_left: frames_left - 1,
                             },
                         });
@@ -762,18 +778,18 @@ impl App {
                 channel,
                 ..
             } => {
-                let channel = channel.unwrap_or(1).clamp(1, 16) - 1;
-                let before = self.controller.last_control_change().map(|seen| seen.serial);
+                let control = MidiControl {
+                    channel: channel.unwrap_or(1).clamp(1, 16) - 1,
+                    controller: controller.min(127),
+                };
+                let value = value.min(127);
                 let step = Step::ControlChange {
-                    before,
+                    before: self.controller.last_control_change().map(|seen| seen.serial),
+                    control,
+                    value,
                     frames_left: FRAMES_FOR_ENGINE,
                 };
-                return match self.send_midi(MidiEvent::control_change(
-                    0,
-                    channel,
-                    controller.min(127),
-                    value.min(127),
-                )) {
+                return match self.send_midi(MidiEvent::control_change(0, control.channel, control.controller, value)) {
                     Ok(_) => (Then::AfterDraw(step), Task::batch(tasks)),
                     Err(error) => (Then::Now(Err(error)), Task::batch(tasks)),
                 };
@@ -1116,6 +1132,15 @@ mod tests {
             run(&mut app, r#"{"cmd": "cc", "controller": 1, "value": 64}"#),
             Ok(Map::new())
         );
+        // Another control change queued just before, as from a MIDI port:
+        // `cc` still waits for its own.
+        assert_eq!(app.send_midi(MidiEvent::control_change(0, 0, 2, 10)), Ok(Map::new()));
+        assert_eq!(
+            run(&mut app, r#"{"cmd": "cc", "controller": 3, "value": 99}"#),
+            Ok(Map::new())
+        );
+        let seen = app.controller.last_control_change().unwrap();
+        assert_eq!((seen.control.controller, seen.value), (3, 99));
 
         let added = run(&mut app, r#"{"cmd": "add", "kind": "loom.filter.svf@1"}"#).unwrap();
         let module = added["module"].as_u64().unwrap();
