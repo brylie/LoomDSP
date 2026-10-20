@@ -88,7 +88,20 @@ Both browsers (own patches and library) filter the same way:
 
 - **Author:** shows patches with an author that matches, ignoring case.
 - **Tags:** pick one or more tags; a patch must have every picked tag.
-- **Licence:** optional, for example "lets me change it" or "allows commercial use".
+- **Licence:** optional. Two filters, **Lets me change it** and **Allows commercial use**, and a third, **No licence stated**. Rule 9 says which patches each one matches.
+
+What each licence allows, for the licence filters:
+
+| Licence | Lets me change it | Allows commercial use |
+|---|---|---|
+| `CC0-1.0`, `CC-BY-4.0`, `CC-BY-SA-4.0` | Yes | Yes |
+| `CC-BY-ND-4.0` | No | Yes |
+| `CC-BY-NC-4.0`, `CC-BY-NC-SA-4.0` | Yes | No |
+| `CC-BY-NC-ND-4.0` | No | No |
+| Any other licence that SPDX marks as OSI-approved or FSF free (for example `MIT`, `Apache-2.0`, `GPL-3.0-or-later`) | Yes | Yes |
+| Any other licence | Unknown | Unknown |
+
+Open source and free software licences must allow both, by their own definitions, so the SPDX list answers for them. "Lets me change it" means the licence allows sharing a changed version; conditions such as credit or share-alike still apply and are shown with the licence.
 
 The browsers themselves (layout, where the user's patches are found, the library source) are specified separately. This spec gives only the data and the filter rules they share.
 
@@ -102,6 +115,7 @@ The browsers themselves (layout, where the user's patches are found, the library
 6. **A licence is an SPDX expression.** Usually a single identifier from the chooser. **Other** accepts any valid expression, such as `MIT` or `CC-BY-4.0 OR MIT`. *Why:* SPDX names are short, exact, and read by many tools, so a licence written once is understood everywhere.
 7. **No licence unless the user chose one.** The app never fills in a licence by itself: only the user's default or the user's choice for this patch. *Why:* a licence is the author's legal decision (FR-NATIVE-09).
 8. **Filters match the tidied form.** Author filters ignore case; tag filters compare tidied tags. *Why:* the same tidying on both sides means a search finds what a person expects.
+9. **A licence filter matches only what is known to be allowed.** For an expression, `A OR B` allows something if either side does, because the person who receives it may pick either licence. `A AND B` allows it only if both sides do, because both apply. `A WITH exception` counts as `A`. A patch with no licence, or with an unrecognised licence, matches neither **Lets me change it** nor **Allows commercial use**; **No licence stated** matches only patches with no licence. Unknown counts as not allowed. *Why:* a filter that promises reuse must never show a patch whose terms forbid it or say nothing. Showing too few patches is safe; showing too many is not.
 
 ## Acceptance criteria
 
@@ -113,6 +127,9 @@ The browsers themselves (layout, where the user's patches are found, the library
 - [ ] With "Your name" and a default licence set, a new patch starts with that author and licence.
 - [ ] Opening a patch by other authors and saving it keeps every author, and offers once to add the user's name at the end.
 - [ ] In a browser, filtering by two tags shows only patches with both, and filtering by author ignores case.
+- [ ] **Allows commercial use** matches `CC-BY-SA-4.0`, `MIT`, and `MIT OR CC-BY-NC-4.0`, and does not match `CC-BY-NC-4.0`, `MIT AND CC-BY-NC-4.0`, an unrecognised licence, or no licence.
+- [ ] **Lets me change it** matches `CC-BY-NC-4.0` and `CC-BY-ND-4.0 OR MIT`, and does not match `CC-BY-ND-4.0`.
+- [ ] **No licence stated** matches only patches without a `license` field.
 
 ## Out of scope
 
