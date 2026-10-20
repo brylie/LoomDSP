@@ -15,7 +15,9 @@ categories = ["multimedia::audio"]
 loom-core.workspace = true
 loom-rt.workspace = true
 cpal.workspace = true
+hound.workspace = true
 midir.workspace = true
+rtrb.workspace = true
 thiserror.workspace = true
 
 [lints]

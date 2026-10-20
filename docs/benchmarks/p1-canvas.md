@@ -64,7 +64,7 @@ Each line is `key=value` pairs separated by spaces. The numbers come from the ca
 cargo run --release -p loom-app -- examples/patches/subtractive.ron --measure-idle --bench-seconds 10
 ```
 
-For idle CPU, read Activity Monitor during the same run.
+For idle CPU, read Activity Monitor during the same run. Without an audio device, add `--fake-audio`: the engine then runs from a timer, so live values, lights, and meters move as with a device, and their redraws are counted too.
 
 Record from the stats bar, or the final line, after about 10 seconds:
 

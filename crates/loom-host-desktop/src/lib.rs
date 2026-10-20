@@ -11,15 +11,24 @@
 //!   and PipeWire/PulseAudio defaults.
 //! - MIDI ports are chosen at start. Hot-plugging comes in P1
 //!   (FR-MIDI-08).
+//!
+//! For development and tests, [`AudioOutput::clock`] plays the engine from
+//! a timer thread instead of a device, and [`AudioOutput::record`] saves
+//! what the engine plays to a WAV file.
 
 #![warn(missing_docs)]
+
+mod record;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use loom_core::{Engine, MidiEvent, MidiSender};
 use loom_rt::ScopedFlushDenormals;
-use std::sync::atomic::{AtomicU64, Ordering};
+use record::{Recording, Tap};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 /// Errors from the desktop host.
 #[derive(Debug, thiserror::Error)]
@@ -47,6 +56,9 @@ pub enum HostError {
     /// An error from the MIDI backend.
     #[error("MIDI error: {0}")]
     Midi(String),
+    /// The recording file could not be created or written.
+    #[error("recording: {0}")]
+    Record(String),
 }
 
 fn audio_error(error: impl std::fmt::Display) -> HostError {
@@ -93,9 +105,19 @@ fn device_name(device: &cpal::Device) -> String {
 /// Open the device first, so you know the sample rate to create the engine
 /// with. Then call [`AudioOutput::start`].
 pub struct AudioOutput {
-    device: cpal::Device,
-    config: cpal::StreamConfig,
+    kind: Kind,
     name: String,
+    record: Option<PathBuf>,
+}
+
+/// What plays the engine.
+enum Kind {
+    Device {
+        device: cpal::Device,
+        config: cpal::StreamConfig,
+    },
+    /// A timer thread, with no device.
+    Clock { sample_rate: u32, block: u32 },
 }
 
 impl AudioOutput {
@@ -142,7 +164,32 @@ impl AudioOutput {
         if let Some(frames) = options.buffer_size {
             config.buffer_size = cpal::BufferSize::Fixed(frames);
         }
-        Ok(Self { device, config, name })
+        Ok(Self {
+            kind: Kind::Device { device, config },
+            name,
+            record: None,
+        })
+    }
+
+    /// An output with no device: a timer thread plays the engine at
+    /// `sample_rate`, `block` frames at a time, and the sound goes nowhere.
+    /// For machines without audio, such as CI, and for agents: live values,
+    /// lights, and meters move as with a device.
+    pub fn clock(sample_rate: u32, block: u32) -> Self {
+        Self {
+            kind: Kind::Clock {
+                sample_rate: sample_rate.max(1),
+                block: block.max(1),
+            },
+            name: "no device (clock)".to_string(),
+            record: None,
+        }
+    }
+
+    /// Also saves what the engine plays to a WAV file (32-bit float,
+    /// stereo). The file is created when audio starts.
+    pub fn record(&mut self, path: impl Into<PathBuf>) {
+        self.record = Some(path.into());
     }
 
     /// Device name.
@@ -152,86 +199,199 @@ impl AudioOutput {
 
     /// Sample rate in Hz. Create the engine with this rate.
     pub fn sample_rate(&self) -> u32 {
-        self.config.sample_rate
+        match &self.kind {
+            Kind::Device { config, .. } => config.sample_rate,
+            Kind::Clock { sample_rate, .. } => *sample_rate,
+        }
     }
 
     /// Number of output channels.
     pub fn channels(&self) -> u16 {
-        self.config.channels
+        match &self.kind {
+            Kind::Device { config, .. } => config.channels,
+            Kind::Clock { .. } => 2,
+        }
     }
 
     /// Requested buffer size, if fixed.
     pub fn buffer_size(&self) -> Option<u32> {
-        match self.config.buffer_size {
-            cpal::BufferSize::Fixed(frames) => Some(frames),
-            cpal::BufferSize::Default => None,
+        match &self.kind {
+            Kind::Device { config, .. } => match config.buffer_size {
+                cpal::BufferSize::Fixed(frames) => Some(frames),
+                cpal::BufferSize::Default => None,
+            },
+            Kind::Clock { block, .. } => Some(*block),
         }
     }
 
     /// Starts audio. The engine moves to the audio thread.
-    pub fn start(self, mut engine: Engine) -> Result<RunningAudio, HostError> {
+    pub fn start(self, engine: Engine) -> Result<RunningAudio, HostError> {
         let stats = Arc::new(CallbackStats::default());
-        let channels = usize::from(self.config.channels.max(1));
-        let sample_rate = f64::from(self.config.sample_rate);
-
-        // Pre-allocate scratch buffers before the stream starts. The audio
-        // callback must not allocate (NFR-RT-01).
-        const SCRATCH: usize = 8192;
-        let mut left = vec![0.0f32; SCRATCH];
-        let mut right = vec![0.0f32; SCRATCH];
-
-        let callback_stats = stats.clone();
-        let data_callback = move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-            let _ftz = ScopedFlushDenormals::new();
-            let started = Instant::now();
-            let frames = data.len() / channels;
-
-            let mut done = 0;
-            while done < frames {
-                let n = (frames - done).min(SCRATCH);
-                engine.process(&mut left[..n], &mut right[..n]);
-                let out = &mut data[done * channels..(done + n) * channels];
-                for (frame, (l, r)) in out.chunks_exact_mut(channels).zip(left.iter().zip(right.iter())) {
-                    if channels == 1 {
-                        frame[0] = 0.5 * (l + r);
-                    } else {
-                        frame[0] = *l;
-                        frame[1] = *r;
-                        frame[2..].fill(0.0);
-                    }
-                }
-                done += n;
+        let sample_rate = self.sample_rate();
+        let (recording, tap) = match &self.record {
+            Some(path) => {
+                let (recording, tap) = Recording::start(path, sample_rate)?;
+                (Some(recording), Some(tap))
             }
-
-            let budget = frames as f64 / sample_rate;
-            let load = started.elapsed().as_secs_f64() / budget.max(1e-9);
-            callback_stats.record(frames, load);
+            None => (None, None),
         };
+        let mut render = Render::new(
+            engine,
+            usize::from(self.channels().max(1)),
+            sample_rate,
+            stats.clone(),
+            tap,
+        );
 
-        let error_stats = stats.clone();
-        let error_callback = move |_error: cpal::Error| {
-            // Printing here could block the audio thread on some backends.
-            // Count it; the control thread reports it.
-            error_stats.stream_errors.fetch_add(1, Ordering::Relaxed);
+        let player = match self.kind {
+            Kind::Device { device, config } => {
+                let data_callback = move |data: &mut [f32], _: &cpal::OutputCallbackInfo| render.render(data);
+                let error_stats = stats.clone();
+                let error_callback = move |_error: cpal::Error| {
+                    // Printing here could block the audio thread on some backends.
+                    // Count it; the control thread reports it.
+                    error_stats.stream_errors.fetch_add(1, Ordering::Relaxed);
+                };
+                let stream = device
+                    .build_output_stream::<f32, _, _>(config, data_callback, error_callback, None)
+                    .map_err(audio_error)?;
+                stream.play().map_err(audio_error)?;
+                Player::Device(stream)
+            }
+            Kind::Clock { sample_rate, block } => Player::Clock(Clock::start(render, sample_rate, block)?),
         };
-
-        let stream = self
-            .device
-            .build_output_stream::<f32, _, _>(self.config, data_callback, error_callback, None)
-            .map_err(audio_error)?;
-        stream.play().map_err(audio_error)?;
         Ok(RunningAudio {
-            _stream: stream,
+            _player: player,
+            recording,
             stats,
             name: self.name,
-            sample_rate: self.config.sample_rate,
+            sample_rate,
         })
     }
 }
 
-/// Audio that is playing. Audio stops when this is dropped.
+/// Renders the engine into interleaved output buffers, and records it if
+/// asked. Runs on the audio thread: it must not allocate (NFR-RT-01).
+struct Render {
+    engine: Engine,
+    left: Vec<f32>,
+    right: Vec<f32>,
+    channels: usize,
+    sample_rate: f64,
+    stats: Arc<CallbackStats>,
+    tap: Option<Tap>,
+}
+
+/// Frames the scratch buffers hold. Larger device buffers are rendered in
+/// parts.
+const SCRATCH: usize = 8192;
+
+impl Render {
+    fn new(engine: Engine, channels: usize, sample_rate: u32, stats: Arc<CallbackStats>, tap: Option<Tap>) -> Self {
+        // Pre-allocate scratch buffers before audio starts.
+        Self {
+            engine,
+            left: vec![0.0; SCRATCH],
+            right: vec![0.0; SCRATCH],
+            channels,
+            sample_rate: f64::from(sample_rate),
+            stats,
+            tap,
+        }
+    }
+
+    fn render(&mut self, data: &mut [f32]) {
+        let _ftz = ScopedFlushDenormals::new();
+        let started = Instant::now();
+        let channels = self.channels;
+        let frames = data.len() / channels;
+
+        let mut done = 0;
+        while done < frames {
+            let n = (frames - done).min(SCRATCH);
+            let (left, right) = (&mut self.left[..n], &mut self.right[..n]);
+            self.engine.process(left, right);
+            if let Some(tap) = &mut self.tap {
+                tap.push(left, right);
+            }
+            let out = &mut data[done * channels..(done + n) * channels];
+            for (frame, (l, r)) in out.chunks_exact_mut(channels).zip(left.iter().zip(right.iter())) {
+                if channels == 1 {
+                    frame[0] = 0.5 * (l + r);
+                } else {
+                    frame[0] = *l;
+                    frame[1] = *r;
+                    frame[2..].fill(0.0);
+                }
+            }
+            done += n;
+        }
+
+        let budget = frames as f64 / self.sample_rate;
+        let load = started.elapsed().as_secs_f64() / budget.max(1e-9);
+        self.stats.record(frames, load);
+    }
+}
+
+/// What keeps audio playing. Never read: dropping it stops audio.
+#[allow(dead_code)]
+enum Player {
+    Device(cpal::Stream),
+    Clock(Clock),
+}
+
+/// A timer thread that plays the engine in real time, with no device.
+struct Clock {
+    stop: Arc<AtomicBool>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl Clock {
+    fn start(mut render: Render, sample_rate: u32, block: u32) -> Result<Self, HostError> {
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread_stop = stop.clone();
+        let mut buffer = vec![0.0f32; block as usize * 2];
+        let period = Duration::from_secs_f64(f64::from(block) / f64::from(sample_rate));
+        let thread = std::thread::Builder::new()
+            .name("loom-audio-clock".to_string())
+            .spawn(move || {
+                let mut next = Instant::now();
+                while !thread_stop.load(Ordering::Relaxed) {
+                    render.render(&mut buffer);
+                    next += period;
+                    let now = Instant::now();
+                    if next > now {
+                        std::thread::sleep(next - now);
+                    } else if now - next > Duration::from_secs(1) {
+                        // The thread was held up (a debugger, a sleeping
+                        // laptop): carry on from now instead of catching up.
+                        next = now;
+                    }
+                }
+            })
+            .map_err(audio_error)?;
+        Ok(Self {
+            stop,
+            thread: Some(thread),
+        })
+    }
+}
+
+impl Drop for Clock {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+/// Audio that is playing. Audio stops when this is dropped, and then a
+/// recording is closed.
 pub struct RunningAudio {
-    _stream: cpal::Stream,
+    // Fields drop in order: audio stops before the recording closes.
+    _player: Player,
+    recording: Option<Recording>,
     stats: Arc<CallbackStats>,
     name: String,
     sample_rate: u32,
@@ -251,6 +411,12 @@ impl RunningAudio {
     /// Sample rate in Hz.
     pub fn sample_rate(&self) -> u32 {
         self.sample_rate
+    }
+
+    /// Frames left out of the recording because the writer fell behind.
+    /// Zero when not recording.
+    pub fn recording_dropped(&self) -> u64 {
+        self.recording.as_ref().map_or(0, Recording::dropped)
     }
 }
 

@@ -1929,6 +1929,7 @@ name = "loom-app"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "hound",
  "iced",
  "iced_runtime",
  "iced_wgpu",
@@ -1981,9 +1982,11 @@ name = "loom-host-desktop"
 version = "0.1.0"
 dependencies = [
  "cpal",
+ "hound",
  "loom-core",
  "loom-rt",
  "midir",
+ "rtrb",
  "thiserror 2.0.21",
 ]
 

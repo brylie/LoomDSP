@@ -30,6 +30,7 @@ clap.workspace = true
 rfd.workspace = true
 
 [dev-dependencies]
+hound.workspace = true
 iced_runtime.workspace = true
 
 [lints]
