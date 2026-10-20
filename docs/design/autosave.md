@@ -61,7 +61,7 @@ All sessions share one recovery folder, in the operating system's per-user data 
 
 *Why these folders:* macOS and Windows use the same base folder as [preferences](preferences.md#where-the-file-lives), so all LoomDSP files on one machine are in one place. On Linux the XDG specification separates settings (config) from data the app keeps between runs (state); a recovery copy is state.
 
-Inside it, **one folder per session**, named `<start time>-<process ID>`, for example `20261020T143005-48211`. Each session folder holds:
+Inside it, one `scan.lock` file that instances lock briefly at start (see How the app knows the last run crashed), and **one folder per session**, named `<start time>-<process ID>`, for example `20261020T143005-48211`. Each session folder holds:
 
 | File | Content |
 |---|---|
@@ -94,8 +94,12 @@ A command-line flag `--recovery-dir <folder>` uses another folder instead. *Why:
 
 At start, before the window opens, the app:
 
-1. creates its own session folder and takes the lock on its `lock` file;
-2. looks at every other session folder. If it can take that folder's lock, the session that owned it is no longer running. If it cannot, another instance is running, and the app leaves that folder alone.
+1. takes an exclusive lock on `recovery/scan.lock`, waiting if another instance holds it;
+2. creates its own session folder and takes the lock on its `lock` file;
+3. looks at every other session folder. If it can take that folder's lock, the session that owned it is no longer running. If it cannot, another instance is running, and the app leaves that folder alone. It keeps holding the lock of every orphan it found until it has dealt with that orphan, so no other instance offers or deletes the same one;
+4. releases `scan.lock`.
+
+*Why `scan.lock`:* without it, two instances starting at the same moment could each see the other's new folder before its lock is taken, and delete it as an empty orphan. Under `scan.lock`, a folder is never looked at between its creation and its lock. The scan touches only small files, so another instance waits a few milliseconds at most.
 
 A clean exit deletes the session's own folder, as the last thing it does. So a folder whose lock is free was left by a session that did not exit cleanly: a crash, a forced kill, or a power loss.
 
@@ -130,13 +134,15 @@ If the window is closed or the dialog cannot be shown, the result is **Not Now**
 
 **Non-interactive runs** never ask and never touch other sessions' folders: `--screenshot`, `--dump-ui`, `--bench`, `--measure`, `--measure-idle`, `--control`, `--control-script`, and `--no-recovery`. They also write no recovery copy. *Why:* scripts and tests must not stop at a dialog, and must not use up or delete a real user's recovery copy.
 
-### When the saved file is newer than the copy
+### When the saved file has changed since the copy
 
-Before asking, the app reads the modification time of `file`. If it is later than `file_modified`, the file was saved after the copy's session last saved or opened it: by another instance, by hand, or by a sync tool. The question then adds a line:
+Before asking, the app reads the modification time of `file`. If it is **different from** `file_modified`, later or earlier, the file was changed after the copy's session last saved or opened it: by another instance, by hand, by a sync tool, or by restoring a backup (which can bring back an older time). The question then adds a line:
 
-> "drone.ron" was saved again after this copy was taken. Restoring will not overwrite it.
+> "drone.ron" has changed since this copy was taken. Restoring will not overwrite it.
 
-And Restore opens the copy **without a current file** (see After a restore), so Save asks where to write instead of replacing the newer file.
+*Why any difference, not only a later time:* an earlier time does not prove the file is the same. Only an equal time is taken as "unchanged".
+
+And Restore opens the copy **without a current file** (see After a restore), so Save asks where to write instead of replacing the changed file.
 
 If `file` no longer exists, the question adds: `"drone.ron" no longer exists.` Restore again opens the copy without a current file.
 
@@ -147,7 +153,7 @@ If `file` no longer exists, the question adds: `"drone.ron" no longer exists.` R
 | Restored patch | Current file | Unsaved mark | Title |
 |---|---|---|---|
 | Had a file, file unchanged since | The same file | Set | `* drone.ron - LoomDSP` |
-| Had a file, file newer or missing | None | Set | `* drone (recovered) - LoomDSP` |
+| Had a file, file changed or missing | None | Set | `* drone (recovered) - LoomDSP` |
 | Never saved | None | Set | `* Untitled - LoomDSP` |
 
 - The patch is **always marked unsaved**. *Why:* it differs from what is on disk, or there is nothing on disk. The mark tells the player to save it.
@@ -163,11 +169,13 @@ If `file` no longer exists, the question adds: `"drone.ron" no longer exists.` R
 1. On the UI thread, the app builds the patch data with `Patch::from_graph` and the module positions, as Save does. This is a copy of plain data and is fast.
 2. It sends that data to a **recovery writer thread**: one plain `std::thread` that the app starts with the session and stops at exit. The channel holds one pending copy. A newer copy replaces an older one that the writer has not started.
 3. The writer turns the patch into RON text and writes `patch.ron` through `Patch::save` (a temporary file and a rename, so a crash during the write leaves the old copy whole), then `info.ron` the same way.
+
+**`patch.ron` and `info.ron` always belong to the same patch.** The writer deletes them together whenever the copy is deleted (a save, New, Open, Don't Save), `info.ron` first, then `patch.ron`. Their content only changes together at those moments: between them, a new write changes `patch.ron` and only the `written` time in `info.ron`. So after a crash the folder holds a matching pair, `patch.ron` alone, or `info.ron` alone. `patch.ron` without `info.ron` is offered as a patch never saved, with no current file and the time of `patch.ron` itself. `info.ron` without `patch.ron` is an orphan with no copy, and is deleted. *Why:* a crash between the two writes must never pair a new patch with an old file path, because Save would then overwrite the wrong file.
 4. The writer sends the result back to the UI thread as a message.
 
 *Why a thread of its own:* file writes can block for a long time on a slow or network disk, and the UI thread must keep drawing. The audio thread is never involved (hard rule 1). *Why latest wins:* only the newest copy matters. A queue of old copies would only delay it.
 
-Deleting `patch.ron` when the patch becomes saved goes through the same writer, in order with the writes. *Why:* a delete must never overtake a write that was sent before it.
+Deleting the copy when the patch becomes saved goes through the same writer, in order with the writes. *Why:* a delete must never overtake a write that was sent before it.
 
 Save, Open, and New stay on the UI thread as today ([files.md](files.md)). Only recovery writes use the writer thread.
 
@@ -177,7 +185,7 @@ The first failure shows in the status bar, with no modal:
 
 > Autosave failed: <system reason>. Your changes are not protected against a crash. Save to keep them.
 
-The app keeps trying on the normal schedule. It does not repeat the message while writes keep failing, and says `Autosave works again.` after the first write that succeeds. *Why:* a full disk should not interrupt playing, but the player must know their safety net is gone.
+The app tries again every 10 seconds while the copy is still out of date, whether or not new changes come. It does not repeat the message while writes keep failing, and says `Autosave works again.` after the first write that succeeds. *Why:* a full disk should not interrupt playing, but the player must know their safety net is gone.
 
 If the recovery folder cannot be created or locked at start, autosave is off for the session and the status bar says: `Autosave is off: <system reason>.` The app still starts. *Why:* the app must reach a playing state on stage even when its data folder is broken, as with [preferences](preferences.md#reading-the-file).
 
@@ -186,14 +194,14 @@ If the recovery folder cannot be created or locked at start, autosave is off for
 On window close or quit, after any "Save changes?" question ([files.md](files.md#asking-before-losing-work)):
 
 1. the app stops the writer thread and waits for its current write, if any, to finish;
-2. it deletes `patch.ron` and `info.ron`;
+2. it deletes `info.ron`, then `patch.ron`;
 3. it closes the `lock` file, which releases the lock, and deletes the session folder.
 
 *Why this order:* Windows cannot delete a file that is still open, so the lock is closed before the folder goes. The copy is deleted first, so another instance that takes the free lock in that moment finds no `patch.ron` and only removes an empty folder.
 
 **Don't Save** counts as a clean exit: the user chose to drop the changes, so the copy goes with them. **Cancel** keeps the app open and changes nothing. If deleting the folder fails, the next start finds an orphan; if it holds a `patch.ron`, the user is asked about it. *Why:* a leftover question is better than lost work.
 
-On New or Open, after the question about unsaved changes, the session's `patch.ron` is deleted, because the new patch starts with no unsaved changes. The session folder and lock stay. *Why:* the session goes on; only its patch changed.
+On New or Open, after the question about unsaved changes, the session's copy (`info.ron`, then `patch.ron`) is deleted, because the new patch starts with no unsaved changes. The session folder and lock stay. *Why:* the session goes on; only its patch changed.
 
 ## Rules
 
@@ -202,7 +210,7 @@ On New or Open, after the question about unsaved changes, the session's `patch.r
 3. **One recovery folder per session, held by an OS file lock.** *Why:* it tells a crashed session from a running one, and lets instances run side by side.
 4. **Writing never stalls the UI and never touches the audio thread.** The UI thread only builds plain patch data; a writer thread does the I/O. *Why:* hard rule 1 for audio, and a frozen UI on stage is as bad as a crash.
 5. **Writes are atomic and in order.** Each file is written through a temporary file and a rename, and writes and deletes reach the disk in the order they were sent. *Why:* a crash during a write must leave the previous copy whole.
-6. **A restored patch is always marked unsaved, and never silently overwrites a newer file.** *Why:* the player decides which version wins.
+6. **A restored patch is always marked unsaved, and never silently overwrites a file that changed since the copy.** *Why:* the player decides which version wins.
 7. **Recovery lives in `loom-app` only.** No engine crate reads or writes recovery files. *Why:* hard rule 6.
 8. **Non-interactive runs neither ask nor touch recovery files.** *Why:* tests and scripts must not block on a dialog or consume a user's copy.
 
@@ -219,11 +227,15 @@ Tests point `--recovery-dir` (or the function behind it) at a temporary folder. 
 - [ ] Given an orphan folder with a free lock and no `patch.ron`, when the app starts, then it is deleted without a question.
 - [ ] Given the offer, when Discard is chosen, the orphan folder is gone. When Not Now is chosen, the folder is unchanged and the offer appears at the next start.
 - [ ] Given an orphan with a current file unchanged since, when restored, then the current file is that file and the title shows the unsaved mark.
-- [ ] Given an orphan whose current file was modified after `file_modified`, then the offer carries the "saved again" line, and after Restore there is no current file and the saved file is unchanged.
+- [ ] Given an orphan whose current file was modified after `file_modified`, then the offer carries the "has changed" line, and after Restore there is no current file and the saved file is unchanged.
 - [ ] Given an orphan for a never-saved patch, when restored, then the title is `* Untitled - LoomDSP`.
 - [ ] After a restore, the new session's `patch.ron` exists before the orphan folder is deleted.
 - [ ] Given an orphan whose `patch.ron` does not parse, when Restore is chosen, then the error appears, the app starts empty, and the orphan folder is unchanged.
 - [ ] Given a recovery folder that cannot be written, when a change is made, then the status bar shows the failure once and the app keeps running.
+- [ ] Given a failed write and no further changes, when the folder becomes writable again, then a copy is written within 10 s and the status bar says autosave works again.
+- [ ] Given two instances started at the same moment against one recovery folder, then neither deletes or offers the other's session folder (test with two threads or processes, many runs).
+- [ ] Given an orphan with `patch.ron` and no `info.ron`, when restored, then there is no current file.
+- [ ] Given an orphan whose current file has a modification time earlier than `file_modified`, then the offer carries the "has changed" line, and after Restore there is no current file.
 - [ ] Given `--screenshot`, `--dump-ui`, `--control`, or `--no-recovery`, when an orphan exists, then no dialog appears and the orphan is unchanged.
 - [ ] On clean exit, and on exit after Don't Save, the session folder is deleted.
 - [ ] Given the default paths, then on each OS the folder matches the table in Where the recovery copy lives. (Unit test of the path function, with the environment variables set by the test.)
