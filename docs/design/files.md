@@ -63,7 +63,7 @@ New, Open, closing the window, and quitting from the OS menu all ask when there 
 - **Don't Save:** continues without saving.
 - **Cancel:** stops the command.
 
-Quit from the OS menu is the same as closing the window. The app handles the window's close request. A quit that does not reach the app as a close request (for example Cmd+Q on macOS, if the window system skips it) cannot ask: check this by hand. On Linux the question needs `zenity` or `kdialog` (the portal backend does not draw message boxes). Without one, the app does not continue: it keeps the patch and the status bar says to save first. A crash or a forced kill cannot ask; autosave and recovery are out of scope.
+Quit from the OS menu is the same as closing the window. The app handles the window's close request. A quit that does not reach the app as a close request (for example Cmd+Q on macOS, if the window system skips it) cannot ask: check this by hand. On Linux the question needs `zenity` or `kdialog` (the portal backend does not draw message boxes). Without one, the app does not continue: it keeps the patch and the status bar says to save first. A crash or a forced kill cannot ask; [autosave and crash recovery](autosave.md) cover that case.
 
 ### Open replaces the patch
 
@@ -124,7 +124,7 @@ A failed save keeps the unsaved mark. A save writes to a temporary file in the s
 ## Out of scope
 
 - Several patches in several windows (later; needs one engine per window).
-- Recent files list, remembered folders, autosave, and crash recovery.
+- Recent files list and remembered folders. Autosave and crash recovery have their own spec: [autosave.md](autosave.md).
 - Embedded assets (FR-FILE-06) and migrations (FR-FILE-02, from the first release).
 - Drag a file onto the window to open it.
 
