@@ -220,6 +220,9 @@ See ADR-0008.
 | FR-FILE-05 | Loading a patch with an unknown module shows a placeholder and keeps the data. | Should | P1 | Graceful handling of missing modules from newer versions. |
 | FR-FILE-06 | A patch can embed assets (wavetables, samples, panel images) or reference them. | Should | P2 | Exported plugins and shared patches must be self-contained. |
 | FR-FILE-07 | A JSON export of the patch format, for tools outside the Rust world. | Could | P4 | Only if third-party tools ask for it. |
+| FR-FILE-08 | A patch lists its authors, one per entry, in credit order. A preference sets the user's own name for new patches. | Should | P2 | Sharing needs credit, and most licences require it. Several authors must stay distinct. See the [patch metadata spec](../design/patch-metadata.md). |
+| FR-FILE-09 | A patch has tags: short lowercase words joined by hyphens, stored in the file. | Should | P2 | People find their patches again by what they are, not by file name. One spelling per idea makes filters match. |
+| FR-FILE-10 | A patch states its licence as an SPDX expression. A chooser of plain questions picks a Creative Commons licence, and a preference sets a default. | Should | P2 | Shared patches need clear terms that tools can read. Musicians need plain questions, not a list of licences (ADR-0023). |
 
 ## 14. Native export (`NATIVE`), deferred
 
@@ -259,6 +262,8 @@ The sharing model follows VCV Rack: patches are files that people swap, and an e
 | FR-SHARE-03 | Record the live output to an audio file while performing. | Should | P3 | Sharing results matters as much as sharing patches. Recording must not risk the audio thread. |
 | FR-SHARE-04 | Browse and open example and community patches from inside the app. The library is a public git repository, so there are no accounts. | Could | P4 | Lowers the barrier to learning from others. A git repository is free to host and easy to contribute to. |
 | FR-SHARE-05 | Third-party modules can be distributed and installed without rebuilding LoomDSP from source. | Should | P4 | VCV Rack's ecosystem depends on this. How to do it safely is open (OQ-18). |
+| FR-SHARE-06 | Browse the user's own patches on this computer, with search and filters by author, tag, and licence. | Should | P2 | A growing collection of patches is hard to find by file name alone. |
+| FR-SHARE-07 | The example and community library (FR-SHARE-04) filters by author, tag, and licence in the same way as FR-SHARE-06. | Should | P4 | One way of finding patches everywhere. Licence filters show what a player may reuse. |
 
 ## 17. Module SDK and published crates (`SDK`)
 

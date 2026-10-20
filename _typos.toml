@@ -7,3 +7,5 @@ extend-exclude = ["*.lock", "*.png", "target/", ".agents/"]
 [default.extend-words]
 # A resonance of the vocal tract; formant filters shape sounds toward vowels.
 formant = "formant"
+# Creative Commons NoDerivatives, as in the SPDX licence CC-BY-ND-4.0.
+ND = "ND"
