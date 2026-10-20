@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-13
 - **Related requirements:** FR-FILE-01 to 07
+- **Specification:** [Open, Save, and Save As](../design/files.md), [Autosave and crash recovery](../design/autosave.md)
 
 ## Context
 

@@ -15,7 +15,7 @@ Build living musical systems by connecting small modules: oscillators and filter
 
 ## Try it
 
-You need [Rust](https://rustup.rs) 1.88 or newer. New to the app? Read [Getting started](docs/guide/getting-started.md).
+You need [Rust](https://rustup.rs) 1.99 or newer. New to the app? Read [Getting started](docs/guide/getting-started.md).
 
 ```sh
 # Open a patch in the desktop app (canvas, inspector, live audio)
