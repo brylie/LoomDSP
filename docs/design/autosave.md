@@ -158,7 +158,7 @@ Before asking, the app reads the modification time and size of `file`. If either
 
 When the player chooses Restore, the app reads the time and size again, just before it sets the current file. If they changed while the question was open, the copy opens without a current file, as above. *Why:* the file can change while the dialog waits.
 
-*Why not a content hash:* the time and size together catch every realistic change: a save by another instance, a sync, or a backup restored. A file rewritten with exactly the same time and size and different content would need a deliberate tool. Hashing would add a dependency and a read of the whole file at every open and save, for a case that does not occur in practice.
+*Why not a content hash:* the time and size together catch the usual changes: a save by another instance, a sync, or a backup restored. They do not prove the content is the same (see Limitation 6). A content hash would add a dependency and a read of the whole file at every open and save. This is an accepted trade-off.
 
 And Restore opens the copy **without a current file** (see After a restore), so Save asks where to write instead of replacing the changed file.
 
@@ -282,6 +282,7 @@ Known gaps, accepted to keep the first version simple. Each can be revisited if 
 3. **Only the newest orphan is offered at each start.** Others wait for later starts. Someone with many orphans must restore or discard them one start at a time.
 4. **Orphans are kept until the user acts.** Not Now keeps a copy for ever. Each is a few kilobytes.
 5. **The undo history is not restored.**
+6. **A changed file can look unchanged.** The app compares the file's modification time and size, not its content. A file changed to the same size within the timestamp resolution of its file system (2 seconds on FAT), or by a tool that keeps the old modification time, looks unchanged. Restore then keeps the path, and Save writes over that change.
 
 ## Settled in review
 
