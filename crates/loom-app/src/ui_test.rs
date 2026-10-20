@@ -95,7 +95,7 @@ impl Ui {
             patch: Some(path),
             generate: None,
             no_audio: true,
-            bench: false,
+            bench: crate::bench::Options::default(),
             output_safety: OutputSafety::LowLatency,
             view: screenshot::Options::default(),
             dump_ui: false,

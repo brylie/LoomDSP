@@ -5,6 +5,7 @@
 //! canvas against the performance gates in NFR-PERF-04.
 
 mod alerts;
+mod bench;
 mod browser;
 mod clipboard;
 mod files;
@@ -35,7 +36,7 @@ use loom_core::{
 use loom_host_desktop::{AudioOptions, AudioOutput, CallbackStats, MidiConnection, RunningAudio, SharedMidi};
 use loom_patch::Patch;
 use modulation::PolarityChoice;
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -51,9 +52,9 @@ struct Args {
     /// Do not open an audio device.
     #[arg(long)]
     no_audio: bool,
-    /// Start measuring frame rate with the camera moving (performance gate).
-    #[arg(long)]
-    bench: bool,
+    /// Measuring the frame rate: --bench, --measure, --bench-seconds.
+    #[command(flatten)]
+    bench: bench::Options,
     /// Safety stage on the output: low-latency, clean, or off (ADR-0019).
     /// A command-line flag until the app has preferences.
     #[arg(long, default_value_t = OutputSafety::LowLatency)]
@@ -261,7 +262,9 @@ struct App {
     /// its centre.
     browser_key: u64,
     frame_key: u64,
-    meter: FrameMeter,
+    meter: bench::FrameMeter,
+    /// Frame-rate lines on stdout, when started with --bench or --measure.
+    report: Option<bench::Report>,
     measuring: bool,
     animating: bool,
     /// MIDI learn mode (`docs/design/midi-learn.md`).
@@ -482,9 +485,10 @@ impl App {
             browser: None,
             browser_key: 0,
             frame_key: 0,
-            meter: FrameMeter::default(),
-            measuring: args.bench,
-            animating: args.bench,
+            meter: bench::FrameMeter::default(),
+            report: bench::Report::new(&args.bench, Instant::now()),
+            measuring: args.bench.measuring(),
+            animating: args.bench.bench,
             learning: false,
             armed: None,
             learn_view: LearnView::default(),
@@ -628,7 +632,10 @@ impl App {
             patch: None,
             generate: None,
             no_audio: self.no_audio,
-            bench: self.measuring,
+            bench: bench::Options {
+                measure: self.measuring,
+                ..Default::default()
+            },
             output_safety: self.output_safety,
             view: screenshot::Options::default(),
             dump_ui: false,
@@ -636,6 +643,7 @@ impl App {
         };
         let mut fresh = Self::assemble(output, sample_rate, session, self.generation + 1, &args, true);
         fresh.animating = self.animating;
+        fresh.report = self.report.take();
         // The canvas keeps its state across the rebuild and compares these
         // keys with the ones it saw: they must keep counting up. A new frame
         // key also resets pan and zoom to show the whole patch.
@@ -865,6 +873,24 @@ impl App {
         }
         let dragging = self.depth_drag.flatten();
         scene::update_panel_values_dragging(&mut self.values, &self.controller, &shown, dragging);
+    }
+
+    /// Prints the frame-meter line once a second, for --bench and
+    /// --measure, and ends the run after --bench-seconds.
+    fn report_frame(&mut self, now: Instant) {
+        if let Some(line) = self.report.as_mut().and_then(|r| r.frame(&self.meter, now)) {
+            println!("{line}");
+        }
+        self.end_report(now);
+    }
+
+    /// Prints the final line and exits once --bench-seconds have passed.
+    fn end_report(&mut self, now: Instant) {
+        if let Some(report) = self.report.as_ref().filter(|r| r.done(now)) {
+            println!("{}", report.summary(&self.meter, now));
+            self.report = None;
+            self.quit = true;
+        }
     }
 
     /// Takes the latest dropout count for the stats bar warning. Runs on
@@ -1366,7 +1392,7 @@ impl App {
             }
             Message::Measure(on) => {
                 self.measuring = on;
-                self.meter = FrameMeter::default();
+                self.meter = bench::FrameMeter::default();
                 if !on {
                     self.animating = false;
                 }
@@ -1376,10 +1402,11 @@ impl App {
                 if on {
                     self.measuring = true;
                 }
-                self.meter = FrameMeter::default();
+                self.meter = bench::FrameMeter::default();
             }
             Message::Frame(now) => {
                 self.meter.record(now);
+                self.report_frame(now);
                 scene::update_live_values(&mut self.values, &self.controller);
                 self.controller.collect_garbage();
                 self.update_dropouts(now);
@@ -1388,6 +1415,8 @@ impl App {
             Message::Tick => {
                 self.controller.collect_garbage();
                 self.update_dropouts(Instant::now());
+                // Measure was switched off: the run still ends on time.
+                self.end_report(Instant::now());
             }
             Message::Meters(levels) => {
                 self.meter_levels.extend(levels);
@@ -1837,7 +1866,7 @@ impl App {
     fn stats_bar(&self) -> Element<'_, Message> {
         let graph = self.controller.graph();
         let frames = if self.measuring {
-            self.meter.summary()
+            self.meter.stats().summary()
         } else {
             "redraws on change".to_string()
         };
@@ -1953,42 +1982,6 @@ F or Home frames the patch. Delete removes the selection.\n\
 Cmd/Ctrl+C copies, X cuts, V pastes at the pointer, and D duplicates the selection.\n\
 MIDI learn: click a control, then move a knob on your controller. Escape ends it.";
 
-/// Frame timing over the last second.
-#[derive(Default)]
-struct FrameMeter {
-    times: VecDeque<Instant>,
-    seen: u64,
-    worst: Duration,
-}
-
-impl FrameMeter {
-    fn record(&mut self, now: Instant) {
-        self.seen += 1;
-        if let Some(&last) = self.times.back()
-            && self.seen > 10
-        {
-            // Skip the first frames, which include start-up work.
-            self.worst = self.worst.max(now - last);
-        }
-        self.times.push_back(now);
-        while self.times.front().is_some_and(|&t| now - t > Duration::from_secs(1)) {
-            self.times.pop_front();
-        }
-    }
-
-    fn summary(&self) -> String {
-        let fps = self.times.len().saturating_sub(1);
-        let average = match (self.times.front(), self.times.back()) {
-            (Some(first), Some(last)) if fps > 0 => (*last - *first).as_secs_f64() * 1000.0 / fps as f64,
-            _ => 0.0,
-        };
-        format!(
-            "{fps} fps | frame {average:.1} ms (worst {:.1} ms)",
-            self.worst.as_secs_f64() * 1000.0
-        )
-    }
-}
-
 /// The keys the open browser handles, whether or not a widget used them.
 fn browser_key(event: iced::Event, _status: iced::event::Status, _window: iced::window::Id) -> Option<Message> {
     use iced::keyboard::{Event, Key, key::Named};
@@ -2016,7 +2009,7 @@ mod tests {
             patch: None,
             generate: None,
             no_audio: true,
-            bench: false,
+            bench: bench::Options::default(),
             output_safety: OutputSafety::LowLatency,
             view: screenshot::Options::default(),
             dump_ui: false,

@@ -36,9 +36,25 @@ Tile, port, and cable data is built on the CPU and uploaded only when the scene 
 cargo run --release -p loom-app -- --generate 300 --bench
 ```
 
-`--bench` turns on **Measure** (redraw every frame and count) and **Move camera** (a slow loop of pan and zoom). Run it at full window size on the built-in Retina display. To test the "100 visible" case, switch off **Move camera**, zoom in until about 100 tiles are on screen (titles visible), then switch it back on. The camera loops around the current view.
+`--bench` turns on **Measure** (redraw every frame and count) and **Move camera** (a slow loop of pan and zoom). `--measure` turns on only **Measure**, so the camera stays still. Run it at full window size on the built-in Retina display. To test the "100 visible" case, switch off **Move camera**, zoom in until about 100 tiles are on screen (titles visible), then switch it back on. The camera loops around the current view.
 
-Record from the stats bar after about 10 seconds:
+Both flags also print the numbers to stdout once a second, so a script or an agent can read them. `--bench-seconds N` exits after N seconds with a final line, averaged over the whole run after the first 10 frames:
+
+```sh
+cargo run --release -p loom-app -- examples/patches/fm-feedback.ron --measure --bench-seconds 10
+```
+
+The output looks like this:
+
+```text
+fps=120.0 avg_ms=8.33 worst_ms=9.10
+...
+final fps=119.8 avg_ms=8.35 worst_ms=9.40 frames=1190 seconds=10.0
+```
+
+Each line is `key=value` pairs separated by spaces. `worst_ms` is the slowest frame since the start. Both flags redraw every frame, so they measure drawing cost, not idle CPU: for idle, run without them and read Activity Monitor.
+
+Record from the stats bar, or the final line, after about 10 seconds:
 
 | Run | fps | frame avg | worst | Notes |
 |---|---|---|---|---|
