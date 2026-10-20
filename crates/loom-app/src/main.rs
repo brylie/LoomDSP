@@ -693,6 +693,8 @@ impl App {
         fresh.animating = self.animating;
         fresh.reporter = self.reporter.take();
         fresh.control = std::mem::take(&mut self.control);
+        // Commands waiting to be drawn still get their answer.
+        fresh.control_pending = std::mem::take(&mut self.control_pending);
         // The canvas keeps its state across the rebuild and compares these
         // keys with the ones it saw: they must keep counting up. A new frame
         // key also resets pan and zoom to show the whole patch.

@@ -1021,6 +1021,26 @@ mod tests {
         assert!(app.quit);
     }
 
+    /// A command waiting to be drawn keeps its answer when another patch
+    /// is opened before the frame comes.
+    #[test]
+    fn opening_a_patch_keeps_waiting_answers() {
+        let mut app = App::new(crate::tests::app_args());
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let call = Call {
+            command: Command::Select { modules: Vec::new() },
+            reply: Reply(Arc::new(Mutex::new(Some(sender)))),
+        };
+        let _ = app.control(call);
+        assert!(app.control_waiting());
+        let patch = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches/sine.ron");
+        assert!(app.replace(crate::Source::File(&patch)));
+        for _ in 0..FRAMES_BEFORE_ANSWER {
+            let _ = app.update(Message::ControlFrame);
+        }
+        assert_eq!(receiver.try_recv(), Ok(Ok(Map::new())));
+    }
+
     /// `locate` finds a control, a port, and a text where the headless UI
     /// harness finds them.
     #[test]
