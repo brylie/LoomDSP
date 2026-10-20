@@ -17,7 +17,7 @@ use iced::futures::{SinkExt, Stream};
 use iced::{Point, Rectangle, keyboard};
 use loom_canvas::PanelValues;
 use loom_canvas::{CanvasEvent, CanvasView, PortRef};
-use loom_core::{MidiControl, MidiEvent, ModuleId, WidgetKind};
+use loom_core::{Graph, MidiControl, MidiEvent, ModuleId, WidgetKind};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use std::any::Any;
@@ -374,6 +374,8 @@ const MAX_SAMPLE_MS: u64 = 30_000;
 pub(crate) struct Sampling {
     module: u32,
     widget: usize,
+    /// The name the widget is bound to, to tell that it is still there.
+    name: String,
     meter: bool,
     ms: u64,
     start: Option<Instant>,
@@ -383,14 +385,21 @@ pub(crate) struct Sampling {
 impl Sampling {
     /// Records the frame at `now`. True once the time is up: that frame is
     /// not recorded, so every entry is inside the asked time.
-    fn record(&mut self, values: &PanelValues, now: Instant) -> Result<bool, String> {
+    fn record(&mut self, graph: &Graph, values: &PanelValues, now: Instant) -> Result<bool, String> {
         let start = *self.start.get_or_insert(now);
         let elapsed = now.duration_since(start);
         if elapsed >= Duration::from_millis(self.ms) {
             return Ok(true);
         }
+        // The value table keeps a removed module's last values, so ask the
+        // graph whether the widget is still drawn.
+        let drawn = graph
+            .node(ModuleId(self.module))
+            .and_then(|node| node.descriptor.panel.widgets.get(self.widget))
+            .is_some_and(|w| w.bind == self.name);
         let value = values
             .get(self.module, self.widget)
+            .filter(|_| drawn)
             .ok_or_else(|| format!("module {} was removed while sampling", self.module))?;
         // Milliseconds, to the microsecond.
         let mut entry = fields(json!({
@@ -731,7 +740,7 @@ impl App {
                     // The live values this frame draws, even when nothing
                     // else asks for frames.
                     crate::scene::update_live_values(&mut self.values, &self.controller);
-                    match sampling.record(&self.values, now) {
+                    match sampling.record(self.controller.graph(), &self.values, now) {
                         Err(error) => call.answer(Err(error)),
                         Ok(true) => call.answer(Ok(fields(json!({ "frames": sampling.frames })))),
                         Ok(false) => waiting.push(Pending {
@@ -1012,6 +1021,7 @@ impl App {
         Ok(Sampling {
             module,
             widget,
+            name: name.to_string(),
             meter: widgets[widget].kind == WidgetKind::Meter,
             ms,
             start: None,
@@ -1369,6 +1379,34 @@ mod tests {
         assert!(error.contains("no control, light, or meter `nonsense`"), "{error}");
         let error = run(&mut app, r#"{"cmd": "sample", "target": "4:resonance", "ms": 0}"#).unwrap_err();
         assert!(error.contains("from 1 to"), "{error}");
+        assert!(!app.control_waiting());
+    }
+
+    /// Removing the sampled module ends the sample with an error, not with
+    /// the last values it drew, which the value table still holds.
+    #[test]
+    fn removing_the_sampled_module_ends_the_sample() {
+        let mut app = App::new(crate::Args {
+            patch: Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches/subtractive.ron")),
+            ..crate::tests::app_args()
+        });
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let call = Call {
+            command: Command::Sample {
+                target: "4:resonance".to_string(),
+                ms: 10_000,
+            },
+            reply: Reply(Arc::new(Mutex::new(Some(sender)))),
+        };
+        let _ = app.control(call);
+        for _ in 0..=FRAMES_BEFORE_ANSWER {
+            let _ = app.update(Message::ControlFrame(Instant::now()));
+        }
+        assert!(receiver.try_recv().is_err(), "still sampling");
+        let _ = app.update(Message::Canvas(CanvasEvent::Delete(vec![4])));
+        let _ = app.update(Message::ControlFrame(Instant::now()));
+        let error = receiver.try_recv().unwrap().unwrap_err();
+        assert!(error.contains("removed while sampling"), "{error}");
         assert!(!app.control_waiting());
     }
 
