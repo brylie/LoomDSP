@@ -7,7 +7,7 @@ Authors, tags, and a licence stored in every patch, so people who share patches 
 - **Decision behind it:** [ADR-0023](../adr/0023-patch-licences-spdx-and-creative-commons.md) (licences); the patch format is [ADR-0008](../adr/0008-patch-format-ron.md).
 - **Use case and requirements:** UC7, UC9, FR-FILE-08, FR-FILE-09, FR-FILE-10, FR-SHARE-06, FR-SHARE-07, FR-NATIVE-09.
 - **Prior art:** package manifests list several authors, one per entry (as `Cargo.toml` does). Topic tags on code hosting sites are lowercase words joined by hyphens. Creative Commons offers a licence chooser that asks two questions. We use those conventions, in our own words and UI.
-- **Issues:** to be filed with this draft.
+- **Issues:** [#243](https://github.com/brylie/LoomDSP/issues/243) (decide), [#244](https://github.com/brylie/LoomDSP/issues/244) (file fields and patch info), [#245](https://github.com/brylie/LoomDSP/issues/245) (preferences), [#246](https://github.com/brylie/LoomDSP/issues/246) (own patch browser), [#247](https://github.com/brylie/LoomDSP/issues/247) (library filters).
 - **Code:** none yet. The patch format is `crates/loom-patch/src/lib.rs` (`Patch`).
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
