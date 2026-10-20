@@ -100,6 +100,12 @@ pub enum Command {
         #[serde(default)]
         modifiers: Vec<String>,
     },
+    Press {
+        button: String,
+    },
+    Arm {
+        target: String,
+    },
     Locate {
         target: String,
     },
@@ -523,6 +529,52 @@ fn refuse_dialog_keys(key: &keyboard::Key, modifiers: keyboard::Modifiers) -> Re
     }
 }
 
+/// The toolbar buttons `press` clicks, by stable name. Labels are not
+/// used: they change while the app runs ("Hold note" becomes "Release
+/// note") and may be reworded.
+const BUTTONS: [&str; 4] = ["learn", "hold", "undo", "redo"];
+
+/// The message a toolbar button sends, or why it cannot be pressed: it
+/// opens a dialog (rule 9), it is disabled, or there is no such button.
+/// Add module is left out: it opens the browser at the pointer, which a
+/// script does not have, and the `add` command adds a module directly.
+fn press_message(app: &App, name: &str) -> Result<Message, String> {
+    let (message, disabled) = match name {
+        "learn" => (Message::ToggleLearn, None),
+        "hold" => (
+            Message::HoldNote,
+            app.midi
+                .is_none()
+                .then_some("Hold note is disabled: no audio is playing the engine"),
+        ),
+        "undo" => (
+            Message::Undo,
+            app.history
+                .undo_step()
+                .is_none()
+                .then_some("Undo is disabled: nothing to undo"),
+        ),
+        "redo" => (
+            Message::Redo,
+            app.history
+                .redo_step()
+                .is_none()
+                .then_some("Redo is disabled: nothing to redo"),
+        ),
+        "new" | "open" | "save" | "save-as" => {
+            return Err(format!(
+                "the {name} button opens a dialog; use the `open` or `save` command instead"
+            ));
+        }
+        "add" => return Err("use the `add` command to add a module".to_string()),
+        _ => return Err(format!("no toolbar button `{name}`; buttons: {}", BUTTONS.join(", "))),
+    };
+    match disabled {
+        Some(reason) => Err(reason.to_string()),
+        None => Ok(message),
+    }
+}
+
 /// The key press and release, as the keyboard listener sends them.
 fn key_events(key: keyboard::Key, modifiers: keyboard::Modifiers) -> [keyboard::Event; 2] {
     let physical = keyboard::key::Physical::Unidentified(keyboard::key::NativeCode::Unidentified);
@@ -699,6 +751,14 @@ impl App {
                     }
                     Map::new()
                 }),
+            Command::Press { button } => press_message(self, &button).map(|message| {
+                send(self, message);
+                Map::new()
+            }),
+            Command::Arm { target } => self.arm_command(&target).map(|message| {
+                send(self, message);
+                Map::new()
+            }),
             Command::Locate { target } => return (Then::AfterDraw(Step::Locate(target)), Task::batch(tasks)),
             Command::Screenshot { path } => return (Then::AfterDraw(Step::Screenshot(path)), Task::batch(tasks)),
             Command::Wait { .. } => Ok(Map::new()),
@@ -774,6 +834,29 @@ impl App {
             .map(|n| n.params[index])
             .unwrap_or_default();
         Ok(fields(json!({ "value": stored })))
+    }
+
+    /// The message an inspector row sends in learn mode: it arms the
+    /// parameter, or disarms it if it is armed.
+    fn arm_command(&self, target: &str) -> Result<Message, String> {
+        if !self.learning {
+            return Err("MIDI learn is off; press `learn` first".to_string());
+        }
+        let Some((module, Some(param))) = split_target(target) else {
+            return Err(format!(
+                "`{target}` is not a parameter; use `module:param`, like `4:cutoff`"
+            ));
+        };
+        let node = self
+            .controller
+            .graph()
+            .node(ModuleId(module))
+            .ok_or_else(|| format!("no module {module}"))?;
+        let descriptor = node.descriptor;
+        let index = descriptor
+            .param_index(param)
+            .ok_or_else(|| format!("module {module} ({}) has no parameter `{param}`", descriptor.name))?;
+        Ok(Message::LearnParam { module, index })
     }
 
     fn add_command(&mut self, kind: &str, at: Option<[f32; 2]>) -> Answer {
@@ -1019,6 +1102,73 @@ mod tests {
 
         assert_eq!(run(&mut app, r#"{"cmd": "quit"}"#), Ok(Map::new()));
         assert!(app.quit);
+    }
+
+    /// The MIDI learn check from #256: turn learn mode on, arm a control,
+    /// send a control change, turn learn mode off, and read the mapping.
+    #[test]
+    fn a_script_maps_a_control_in_learn_mode() {
+        let mut app = App::new(crate::Args {
+            patch: Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches/subtractive.ron")),
+            fake_audio: true,
+            no_audio: false,
+            ..crate::tests::app_args()
+        });
+        let ok = Ok(Map::new());
+        assert!(
+            run(&mut app, r#"{"cmd": "arm", "target": "4:cutoff"}"#)
+                .unwrap_err()
+                .contains("press `learn` first")
+        );
+        assert_eq!(run(&mut app, r#"{"cmd": "press", "button": "learn"}"#), ok);
+        assert!(app.learning);
+        assert_eq!(run(&mut app, r#"{"cmd": "select", "modules": [4]}"#), ok);
+        assert_eq!(run(&mut app, r#"{"cmd": "arm", "target": "4:cutoff"}"#), ok);
+        let row = &run(&mut app, r#"{"cmd": "snapshot"}"#).unwrap()["snapshot"]["inspector"]["module"]["params"][0];
+        assert_eq!(row["mode"]["learn"]["armed"], json!(true), "{row}");
+
+        assert_eq!(run(&mut app, r#"{"cmd": "cc", "controller": 21, "value": 64}"#), ok);
+        // The fake audio clock plays the engine, which records the control
+        // change; the app then hears of it as from the MIDI watch.
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while app.armed.is_some() {
+            assert!(std::time::Instant::now() < deadline, "the control change arrived");
+            std::thread::sleep(Duration::from_millis(10));
+            let _ = app.update(Message::Midi);
+        }
+        assert_eq!(run(&mut app, r#"{"cmd": "press", "button": "learn"}"#), ok);
+        assert!(!app.learning);
+        assert_eq!(run(&mut app, r#"{"cmd": "press", "button": "hold"}"#), ok);
+        assert!(app.holding);
+
+        let row = &run(&mut app, r#"{"cmd": "snapshot"}"#).unwrap()["snapshot"]["inspector"]["module"]["params"][0];
+        let mapping = row["mapping"].as_str().unwrap_or_default();
+        assert!(mapping.contains("21"), "{row}");
+    }
+
+    /// `press` refuses what a click could not do: dialogs (rule 9),
+    /// disabled buttons, and unknown names.
+    #[test]
+    fn press_refuses_dialogs_disabled_buttons_and_unknown_names() {
+        // No audio: Hold note is disabled. Nothing done yet: nor are Undo
+        // and Redo.
+        let mut app = App::new(crate::tests::app_args());
+        for name in ["new", "open", "save", "save-as"] {
+            let error = run(&mut app, &format!(r#"{{"cmd": "press", "button": "{name}"}}"#)).unwrap_err();
+            assert!(error.contains("opens a dialog"), "{name}: {error}");
+        }
+        for (name, reason) in [
+            ("hold", "Hold note is disabled"),
+            ("undo", "nothing to undo"),
+            ("redo", "nothing to redo"),
+        ] {
+            let error = run(&mut app, &format!(r#"{{"cmd": "press", "button": "{name}"}}"#)).unwrap_err();
+            assert!(error.contains(reason), "{name}: {error}");
+        }
+        let error = run(&mut app, r#"{"cmd": "press", "button": "MIDI learn"}"#).unwrap_err();
+        assert!(error.contains("buttons: learn, hold, undo, redo"), "{error}");
+        let error = run(&mut app, r#"{"cmd": "press", "button": "add"}"#).unwrap_err();
+        assert!(error.contains("`add` command"), "{error}");
     }
 
     /// A command waiting to be drawn keeps its answer when another patch

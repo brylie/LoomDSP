@@ -35,7 +35,7 @@ cargo run --release -p loom-app -- examples/patches/fm-feedback.ron --measure --
 cargo run --release -p loom-app -- examples/patches/subtractive.ron --measure-idle --bench-seconds 10   # frames the idle app draws, with rebuild counts
 cargo run --release -p loom-app -- examples/patches/subtractive.ron --fake-audio --record /tmp/app.wav   # engine runs with no device; output saved
 cargo run --release -p loom-app -- examples/patches/subtractive.ron --fake-audio --control loom.sock   # drive the running app; then:
-echo '{"cmd":"set","module":4,"param":"cutoff","value":800}' | nc -U loom.sock   # also snapshot, locate, screenshot, note, key, undo, quit
+echo '{"cmd":"set","module":4,"param":"cutoff","value":800}' | nc -U loom.sock   # also snapshot, locate, screenshot, note, key, press, undo, quit
 scripts/bundle-macos.sh                                              # LoomDSP.app, so macOS automation tools can drive the window
 cargo run --release -p loom-app -- examples/patches/subtractive.ron --screenshot /tmp/canvas.png   # canvas to PNG, no window
 cargo run --release -p loom-app -- examples/patches/subtractive.ron --screenshot /tmp/knob.png --zoom 2 --scale 2 --focus 4:cutoff

@@ -6,7 +6,7 @@ A development-only way for a script or an AI agent to drive the running app by n
 - **Status:** Implemented
 - **Decision behind it:** None. It builds on the plain-data UI snapshot ([ADR-0021](../adr/0021-plain-data-view-models-and-keyed-identity.md)).
 - **Use case and requirements:** Developer tooling. No user requirement.
-- **Issues:** [#207](https://github.com/brylie/LoomDSP/issues/207) (part 3), related [#190](https://github.com/brylie/LoomDSP/issues/190) (accessibility).
+- **Issues:** [#207](https://github.com/brylie/LoomDSP/issues/207) (part 3), `press` and `arm`: [#256](https://github.com/brylie/LoomDSP/issues/256); related [#190](https://github.com/brylie/LoomDSP/issues/190) (accessibility).
 - **Code:** `crates/loom-app/src/control.rs`; the clock and recorder it relies on are in `crates/loom-host-desktop`.
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
@@ -60,6 +60,8 @@ Any client that can write lines to a Unix socket works, such as `nc -U /tmp/loom
 | `note` | `note`, optional `velocity` (default 100), `on` | A MIDI note on or off on channel 1, as a MIDI port sends it | |
 | `cc` | `controller`, `value`, optional `channel` (1 to 16, default 1) | A MIDI control change | |
 | `key` | `key` (a character, or `escape`, `enter`, `tab`, `space`, `delete`, `backspace`, `up`, `down`, `left`, `right`, `home`, `end`, `pageup`, `pagedown`), optional `modifiers` (`cmd`, `ctrl`, `shift`, `alt`) | A key press and release, as the keyboard listener sends them | |
+| `press` | `button`: `learn` (MIDI learn), `hold` (Hold note), `undo`, `redo` | Clicks a toolbar button by name, through the message it sends. Refused when the button is disabled, opens a dialog (rule 9), or is Add module (use `add`) | |
+| `arm` | `target`: a parameter (`"4:cutoff"`) | In MIDI learn mode, arms the parameter, or disarms it if armed, as its inspector row does. Refused when learn mode is off | |
 | `locate` | `target`: a module (`"4"`), a control by parameter name or a port by name (`"4:cutoff"`, `"3:out"`), or any other text shown in the window (`"Cutoff"`) | Nothing | The centre and size, in logical window pixels |
 | `screenshot` | `path` | Saves a PNG of the whole window as it was last drawn: canvas, inspector, and bars | The image size in pixels, and the scale factor |
 | `wait` | `ms` | Replies after this long, with the app running | |
@@ -70,12 +72,12 @@ Any client that can write lines to a Unix socket works, such as `nc -U /tmp/loom
 1. **Off unless asked for.** Nothing listens unless the app is started with `--control`. *Why:* a music app should not open a door on a user's machine without being asked.
 2. **Local only.** It listens on a local socket, never on the network. *Why:* commands can open and save files; only processes of the same user should reach it.
 3. **Same path as the UI.** Each command becomes the `Message` the UI would send, and goes through `App::update`. So undo steps, the status bar, and errors are the ones a person would get. *Why:* a check through the channel should test what users get, not a side door.
-4. **Names, not indices.** Parameters and ports are named as in patch files (`"4:cutoff"`, `"3:out"`). *Why:* names are stable IDs, and a script that reads like the patch is easy to check.
+4. **Names, not indices.** Parameters and ports are named as in patch files (`"4:cutoff"`, `"3:out"`). Toolbar buttons have fixed names, not their labels: a label can change while the app runs (Hold note becomes Release note). *Why:* names are stable IDs, and a script that reads like the patch is easy to check.
 5. **One at a time, in order.** A reply comes once the command has been applied and the window has drawn it: the app waits two frames (the one already on its way, then the one with the change) before it answers, captures, or searches the window. An error, `snapshot`, and `quit` answer at once. *Why:* the next `snapshot`, `locate`, or `screenshot` then sees the result, with no sleeps in the script.
 6. **Nothing on the audio thread.** MIDI goes through the same shared sender as a MIDI port. The engine is reached only through the `Controller`. *Why:* real-time safety (hard rule 1).
 7. **No messages while idle.** The listener wakes the app only when a command arrives. *Why:* every message redraws the window, and `--measure-idle` must still count zero frames for an idle patch.
 8. **Errors are replies, not crashes.** A bad command gets `ok: false` and a message naming what was wrong. The app keeps running. *Why:* an agent learns from the error and tries again.
-9. **No dialogs.** While the channel is on, errors that would open a dialog (a failed open or save) go to the reply and the status bar instead. Commands never open a file dialog or ask to save: `key` refuses the New, Open, and Save shortcuts (Cmd or Ctrl with N, O, or S) and points to the `open` and `save` commands. *Why:* a modal dialog would stop the app, and nobody is there to close it.
+9. **No dialogs.** While the channel is on, errors that would open a dialog (a failed open or save) go to the reply and the status bar instead. Commands never open a file dialog or ask to save: `key` refuses the New, Open, and Save shortcuts (Cmd or Ctrl with N, O, or S), and `press` refuses the `new`, `open`, `save`, and `save-as` buttons. Both point to the `open` and `save` commands. *Why:* a modal dialog would stop the app, and nobody is there to close it.
 10. **`:name` looks for a parameter first,** then an output, then an input. *Why:* a module's parameter and port names rarely clash; when they do, the control is what a script most often wants.
 11. **A script file runs the same commands.** `--control-script FILE` reads commands from a file, one per line (blank lines skipped), and prints each reply to stdout. At the end of the file the app keeps running, unless the last command is `quit`. *Why:* the same code serves a quick check with no client, and a check that can be saved next to a patch.
 12. **Unix only, for now.** The socket needs Unix domain sockets (macOS and Linux). On Windows `--control` says it is not supported; `--control-script` works everywhere. *Why:* Rust's standard library has Unix sockets on Unix only. TCP on loopback can come later if Windows needs it.
