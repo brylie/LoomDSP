@@ -5,10 +5,14 @@
 //! it as JSON, so a person or an agent can check a patch without a window.
 //! It is built from the same scene, panel values, and inspector model the
 //! window draws, so it cannot drift from the view.
+//!
+//! Places and sizes are in world units, the canvas's own coordinates, so a
+//! script can check layout rules (a badge covers no port) without a
+//! screenshot, and aim `--pointer` or `--center` without working them out.
 
 use crate::inspector::Inspector;
 use crate::{App, Args};
-use loom_canvas::{ModulationMark, WidgetViewKind};
+use loom_canvas::{ModulationMark, PORT_HIT_RADIUS, PortRef, WidgetViewKind};
 use serde::Serialize;
 
 /// Everything the snapshot holds.
@@ -24,9 +28,47 @@ pub struct UiSnapshot {
     pub redo: Option<String>,
     /// The selected module IDs.
     pub selection: Vec<u32>,
+    /// How far from a port's centre a click still hits it, in world units.
+    /// The canvas widens it when zoomed out below 7 / 9 (about 0.78).
+    pub port_hit_radius: f32,
     /// One per module, in scene order.
     pub tiles: Vec<Tile>,
+    /// One per cable the canvas draws.
+    pub cables: Vec<Cable>,
     pub inspector: Inspector,
+}
+
+/// A point in world units.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct Point {
+    pub x: f32,
+    pub y: f32,
+}
+
+impl From<iced::Point> for Point {
+    fn from(p: iced::Point) -> Self {
+        Self { x: p.x, y: p.y }
+    }
+}
+
+/// A rectangle in world units, from its top-left corner.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct Rect {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+impl From<iced::Rectangle> for Rect {
+    fn from(r: iced::Rectangle) -> Self {
+        Self {
+            x: r.x,
+            y: r.y,
+            width: r.width,
+            height: r.height,
+        }
+    }
 }
 
 /// One module tile on the canvas.
@@ -34,18 +76,48 @@ pub struct UiSnapshot {
 pub struct Tile {
     pub id: u32,
     pub title: String,
+    pub bounds: Rect,
+    /// One per input, from the top.
+    pub inputs: Vec<Input>,
     /// One per output: its label and how many assignments it drives.
     pub outputs: Vec<Output>,
     /// The panel's widgets, in focus order.
     pub widgets: Vec<Widget>,
 }
 
+/// An input port on a tile.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Input {
+    pub label: String,
+    pub centre: Point,
+}
+
 /// An output port on a tile.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Output {
     pub label: String,
+    pub centre: Point,
     /// The badge: assignments it drives, counting those that are off.
     pub badge: u32,
+    /// Where the badge is drawn, or `None` when it shows none.
+    pub badge_bounds: Option<Rect>,
+}
+
+/// A cable, by its two ends.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Cable {
+    pub from: CableEnd,
+    pub to: CableEnd,
+}
+
+/// One end of a cable: an output for `from`, an input for `to`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CableEnd {
+    pub module: u32,
+    /// The port's index on its side of the tile, from the top.
+    pub index: usize,
+    /// The port's centre.
+    pub point: Point,
 }
 
 /// One panel widget and its value.
@@ -54,6 +126,7 @@ pub struct Widget {
     pub label: String,
     /// knob, toggle, radio, button, light, or meter.
     pub kind: &'static str,
+    pub bounds: Rect,
     /// Control position, light brightness, or meter RMS level.
     pub position: f32,
     /// A meter's peak level. 0 for other widgets.
@@ -107,12 +180,25 @@ impl App {
             .map(|m| Tile {
                 id: m.id,
                 title: m.title.clone(),
+                bounds: m.bounds().into(),
+                inputs: m
+                    .inputs
+                    .iter()
+                    .enumerate()
+                    .map(|(index, p)| Input {
+                        label: p.label.clone(),
+                        centre: m.input_position(index).into(),
+                    })
+                    .collect(),
                 outputs: m
                     .outputs
                     .iter()
-                    .map(|p| Output {
+                    .enumerate()
+                    .map(|(index, p)| Output {
                         label: p.label.clone(),
+                        centre: m.output_position(index).into(),
                         badge: p.badge,
+                        badge_bounds: m.badge_bounds(index).map(Rect::from),
                     })
                     .collect(),
                 widgets: m
@@ -125,6 +211,7 @@ impl App {
                         Widget {
                             label: w.label.clone(),
                             kind: kind_name(&w.kind),
+                            bounds: m.widget_bounds(index).expect("a widget of this panel").into(),
                             position: value.position,
                             peak: value.peak,
                             text: value.text,
@@ -135,13 +222,35 @@ impl App {
                     .collect(),
             })
             .collect();
+        // The canvas skips cables to modules or ports it does not have.
+        let end = |module: u32, output: bool, index: usize| {
+            let point = self.scene.port_position(PortRef { module, output, index })?;
+            Some(CableEnd {
+                module,
+                index,
+                point: point.into(),
+            })
+        };
+        let cables = self
+            .scene
+            .cables()
+            .iter()
+            .filter_map(|c| {
+                Some(Cable {
+                    from: end(c.from.0, true, c.from.1)?,
+                    to: end(c.to.0, false, c.to.1)?,
+                })
+            })
+            .collect();
         UiSnapshot {
             title: self.title(),
             status: self.status.clone(),
             undo: self.history.undo_step().map(|s| s.name().to_string()),
             redo: self.history.redo_step().map(|s| s.name().to_string()),
             selection: self.selection.iter().copied().collect(),
+            port_hit_radius: PORT_HIT_RADIUS,
             tiles,
+            cables,
             inspector: self.inspector_model(),
         }
     }
