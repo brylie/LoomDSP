@@ -28,7 +28,7 @@ Comment on an issue before you start, so two people do not do the same work.
 
 ## Build and test
 
-You need Rust 1.88 or newer. On Linux, install the ALSA development package (`libasound2-dev`).
+You need Rust 1.99 or newer. On Linux, install the ALSA development package (`libasound2-dev`).
 
 ```sh
 cargo build --workspace
@@ -72,7 +72,7 @@ Every pull request runs these jobs. All must pass before merging (the "CI succes
 | Test | All tests on Linux, macOS (Apple Silicon), and Windows, plus benchmarks compile | `cargo test --workspace` |
 | Coverage | Line coverage, shown in the job summary | `cargo llvm-cov --workspace` (install [cargo-llvm-cov](https://github.com/taiki-e/cargo-llvm-cov)) |
 | Docs | API docs build without warnings | `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` |
-| MSRV | Still builds with Rust 1.88 | `cargo +1.88 check --workspace` |
+| MSRV | Still builds with Rust 1.99 | `cargo +1.99 check --workspace` |
 | WebAssembly | Engine crates build for `wasm32-unknown-unknown` | `cargo build --target wasm32-unknown-unknown -p loom-core -p loom-modules -p loom-patch -p loom-rt` |
 | Licences | Only permissive licences, no known vulnerabilities | `cargo deny check` (install [cargo-deny](https://github.com/EmbarkStudios/cargo-deny)) |
 | Spelling | Typos in code and docs | `typos` (install [typos-cli](https://github.com/crate-ci/typos)) |

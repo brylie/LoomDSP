@@ -65,7 +65,7 @@ Inside it, **one folder per session**, named `<start time>-<process ID>`, for ex
 
 | File | Content |
 |---|---|
-| `lock` | Empty. The session holds an exclusive OS file lock on it for its whole run. |
+| `lock` | Empty. The session holds an exclusive OS file lock on it for its whole run, through `std::fs::File::try_lock` (Rust 1.89 and later; the workspace needs 1.99). |
 | `patch.ron` | The recovery copy. An ordinary patch file: Open can load it by hand. Present only while there are unsaved changes. |
 | `info.ron` | Facts about the copy (below). |
 
@@ -237,16 +237,24 @@ Tests point `--recovery-dir` (or the function behind it) at a temporary folder. 
 - Restoring the undo history.
 - A list of all orphans to restore or discard at once (see Open points).
 - Recovery for several windows (there is one window per app; see [files.md](files.md#out-of-scope)).
-- Survival of a copy written just before an OS crash or power loss. The atomic rename keeps the old copy whole, but the last copy may not have reached the disk. Flushing to disk is an open point.
+- Forcing each copy to disk (`fsync`) before the rename. See Limitations.
 - A preference to change the timing or turn autosave off. The [preferences](preferences.md) window can gain one later.
 - Recovery in the web runtime and in `loom play` and `loom render`.
 
+## Limitations
+
+Known gaps, accepted to keep the first version simple. Each can be revisited if it causes trouble in practice.
+
+1. **Up to about 10 seconds of work can be lost.** That is the longest wait between autosaves while changes keep coming.
+2. **Power loss or an OS crash can lose the last copy.** The writer does not force the copy to disk (`fsync`) before the rename. After a power loss, the newest copy may be missing, or on some file systems the renamed file may be empty. An app crash or a forced kill is not affected, because the operating system still writes out what the app wrote. A failed write never leaves a half-written copy in place of a good one: the old copy stays whole until the rename. An empty or broken copy is handled like any copy that does not load: the error shows, the app starts empty, and the folder is kept. *Why accept it:* power loss is rare, and the copy is a safety net, not the user's file.
+3. **Only the newest orphan is offered at each start.** Others wait for later starts. Someone with many orphans must restore or discard them one start at a time.
+4. **Orphans are kept until the user acts.** Not Now keeps a copy for ever. Each is a few kilobytes.
+5. **The undo history is not restored.**
+
 ## Open points
 
-1. **File lock API.** `std::fs::File::try_lock` is stable from Rust 1.89, and the workspace's `rust-version` is 1.88. *Leaning:* raise `rust-version` to 1.89 (mise already installs the latest Rust). The other option is a small lock crate under MIT or Apache-2.0, checked with `cargo deny`.
-2. **Folder crate.** The same choice as preferences, plus the Linux state folder. *Leaning:* the [`dirs`](https://crates.io/crates/dirs) crate (its `state_dir` gives the XDG state folder on Linux), shared with preferences.
-3. **Several orphans.** *Leaning:* offer the newest only, as above. If users collect many orphans through Not Now, add a "Recover unsaved patches..." window that lists them.
-4. **Old orphans.** Not Now keeps a copy for ever. *Leaning:* keep them; a few kilobytes each. Revisit if the list window (point 3) comes.
-5. **Flush to disk.** `Patch::save` does not call `fsync`, so a power loss can lose the last copy, or on some file systems leave an empty file after the rename. *Leaning:* the writer calls `sync_all` on the temporary file before the rename. It runs off the UI thread, so its cost does not matter, and the requirement names battery loss as a case.
-6. **Panic in UI code.** NFR-REL-02 asks that a UI panic does not stop audio. If the app later survives UI panics, it could also write a copy at once from the panic hook. *Leaning:* not in this spec; the 10 s bound is enough for now.
-7. **Restore and the command-line patch.** *Leaning:* the offer comes first and Restore wins, as above. The other option is to skip the offer when a patch is given on the command line, which helps scripts but risks the stage case.
+1. **Folder crate.** The same choice as preferences, plus the Linux state folder. *Leaning:* the [`dirs`](https://crates.io/crates/dirs) crate (its `state_dir` gives the XDG state folder on Linux), shared with preferences.
+2. **A list of orphans.** If users collect many orphans through Not Now (Limitations 3 and 4), add a "Recover unsaved patches..." window that lists them. *Leaning:* wait until someone needs it.
+3. **Panic in UI code.** NFR-REL-02 asks that a UI panic does not stop audio. If the app later survives UI panics, it could also write a copy at once from the panic hook. *Leaning:* not in this spec; the 10 s bound is enough for now.
+
+Settled in review: the file lock uses `std::fs::File::try_lock`, and the workspace's minimum Rust version is raised to 1.99, the latest stable release; the writer does not `fsync` (Limitation 2); only the newest orphan is offered (Limitation 3); with a patch on the command line, the offer comes first and Restore wins.

@@ -8,7 +8,7 @@ LoomDSP is early (Phase 1). The app can open, edit, save, and play patches. See 
 
 ## Install and run
 
-You need [Rust](https://rustup.rs) 1.88 or newer. There are no installers yet, so you build the app from source.
+You need [Rust](https://rustup.rs) 1.99 or newer. There are no installers yet, so you build the app from source.
 
 ```sh
 git clone https://github.com/brylie/LoomDSP

@@ -119,11 +119,11 @@ jobs:
       - run: cargo doc --workspace --no-deps
 
   msrv:
-    name: Minimum Rust version (1.88)
+    name: Minimum Rust version (1.99)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@1.88
+      - uses: dtolnay/rust-toolchain@1.99
       - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: Swatinem/rust-cache@v2
       # Library and binary code only: dev-dependencies (benchmarks) may need
