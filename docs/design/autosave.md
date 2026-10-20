@@ -76,6 +76,7 @@ Inside it, one `scan.lock` file that instances lock briefly at start (see How th
     version: 1,
     file: Some("/Users/me/Documents/drone.ron"),
     file_modified: Some("2026-10-20T14:02:11Z"),
+    file_size: Some(4812),
     written: "2026-10-20T14:31:47Z",
 )
 ```
@@ -84,6 +85,7 @@ Inside it, one `scan.lock` file that instances lock briefly at start (see How th
 |---|---|
 | `file` | The current file when the copy was taken, or `None` for a patch never saved. |
 | `file_modified` | The modification time of the current file when the session last opened or saved it. `None` when there is no current file. |
+| `file_size` | The size in bytes of the current file at that moment. `None` when there is no current file. |
 | `written` | When the copy was written. |
 
 *Why one folder per session, not one per patch or one for all:* one window holds one patch, so a session and its patch are the same thing. A folder per session lets two app instances run side by side without overwriting each other's copy, and a patch never saved has no file name to key on. *Why a plain patch file:* if the app itself cannot start, a user can still find `patch.ron` and open it.
@@ -148,11 +150,15 @@ If the window is closed or the dialog cannot be shown, the result is **Not Now**
 
 ### When the saved file has changed since the copy
 
-Before asking, the app reads the modification time of `file`. If it is **different from** `file_modified`, later or earlier, the file was changed after the copy's session last saved or opened it: by another instance, by hand, by a sync tool, or by restoring a backup (which can bring back an older time). The question then adds a line:
+Before asking, the app reads the modification time and size of `file`. If either is **different from** `file_modified` or `file_size` (a time later or earlier), the file was changed after the copy's session last saved or opened it: by another instance, by hand, by a sync tool, or by restoring a backup (which can bring back an older time). The question then adds a line:
 
 > "drone.ron" has changed since this copy was taken. Restoring will not overwrite it.
 
-*Why any difference, not only a later time:* an earlier time does not prove the file is the same. Only an equal time is taken as "unchanged".
+*Why any difference, not only a later time:* an earlier time does not prove the file is the same. Only an equal time and an equal size are taken as "unchanged".
+
+When the player chooses Restore, the app reads the time and size again, just before it sets the current file. If they changed while the question was open, the copy opens without a current file, as above. *Why:* the file can change while the dialog waits.
+
+*Why not a content hash:* the time and size together catch every realistic change: a save by another instance, a sync, or a backup restored. A file rewritten with exactly the same time and size and different content would need a deliberate tool. Hashing would add a dependency and a read of the whole file at every open and save, for a case that does not occur in practice.
 
 And Restore opens the copy **without a current file** (see After a restore), so Save asks where to write instead of replacing the changed file.
 
@@ -182,7 +188,7 @@ If `file` no longer exists, the question adds: `"drone.ron" no longer exists.` R
 2. It sends that data to a **recovery writer thread**: one plain `std::thread` that the app starts with the session and stops at exit. The channel holds one pending copy. A newer copy replaces an older one that the writer has not started.
 3. The writer turns the patch into RON text and writes `patch.ron` through `Patch::save` (a temporary file and a rename, so a crash during the write leaves the old copy whole), then `info.ron` the same way.
 
-**`patch.ron` and `info.ron` always belong to the same patch.** The writer deletes them together whenever the copy is deleted (a save, New, Open, Don't Save), `info.ron` first, then `patch.ron`. Their content only changes together at those moments: between them, a new write changes `patch.ron` and only the `written` time in `info.ron`. So after a crash the folder holds a matching pair, `patch.ron` alone, or `info.ron` alone. `patch.ron` without `info.ron` is offered as a patch never saved, with no current file and the time of `patch.ron` itself. `info.ron` without `patch.ron` is an orphan with no copy, and is deleted. *Why:* a crash between the two writes must never pair a new patch with an old file path, because Save would then overwrite the wrong file.
+**`patch.ron` and `info.ron` always belong to the same patch.** The writer deletes them together whenever the copy is deleted (a save, New, Open, Don't Save), `info.ron` first, then `patch.ron`. Their content only changes together at those moments: between them, a new write changes `patch.ron` and only the `written` time in `info.ron`. So after a crash the folder holds a matching pair, `patch.ron` alone, or `info.ron` alone. `patch.ron` without `info.ron`, or with an `info.ron` that does not parse, is offered as a patch never saved, with no current file and the time of `patch.ron` itself. `info.ron` without `patch.ron` is an orphan with no copy, and is deleted. *Why:* a crash between the two writes must never pair a new patch with an old file path, because Save would then overwrite the wrong file.
 4. The writer sends the result back to the UI thread as a message.
 
 *Why a thread of its own:* file writes can block for a long time on a slow or network disk, and the UI thread must keep drawing. The audio thread is never involved (hard rule 1). *Why latest wins:* only the newest copy matters. A queue of old copies would only delay it.
@@ -205,11 +211,11 @@ If the recovery folder cannot be created or locked at start, autosave is off for
 
 On window close or quit, after any "Save changes?" question ([files.md](files.md#asking-before-losing-work)):
 
-1. the app stops the writer thread and waits for its current write, if any, to finish;
+1. the app stops the writer thread and waits up to 2 seconds for its current write, if any, to finish. If the write is still running after that, the app exits at once and skips steps 2 and 3. The session folder stays behind as an orphan. At the next start it is deleted without a question if it holds no `patch.ron`, and offered as usual if it does;
 2. it deletes `info.ron`, then `patch.ron`;
 3. it closes the `lock` file, which releases the lock, and deletes the session folder.
 
-*Why this order:* Windows cannot delete a file that is still open, so the lock is closed before the folder goes. The copy is deleted first, so another instance that takes the free lock in that moment finds no `patch.ron` and only removes an empty folder.
+*Why the 2 second limit:* a write can hang on a slow or network disk, and closing the app must never hang with it. Leaving the folder is safe: it holds either the old copy or the new one (the rename is atomic), and at worst the player sees one extra question at the next start. *Why this order:* Windows cannot delete a file that is still open, so the lock is closed before the folder goes. The copy is deleted first, so another instance that takes the free lock in that moment finds no `patch.ron` and only removes an empty folder.
 
 **Don't Save** counts as a clean exit: the user chose to drop the changes, so the copy goes with them. **Cancel** keeps the app open and changes nothing. If deleting the folder fails, the next start finds an orphan; if it holds a `patch.ron`, the user is asked about it. *Why:* a leftover question is better than lost work.
 
@@ -250,6 +256,8 @@ Tests point `--recovery-dir` (or the function behind it) at a temporary folder. 
 - [ ] Given an orphan whose current file has a modification time earlier than `file_modified`, then the offer carries the "has changed" line, and after Restore there is no current file.
 - [ ] Given `--screenshot`, `--dump-ui`, `--control`, or `--no-recovery`, when an orphan exists, then no dialog appears and the orphan is unchanged.
 - [ ] On clean exit, and on exit after Don't Save, the session folder is deleted.
+- [ ] Given a write that does not finish (a writer blocked by the test), when the window closes, then the app exits within 2.5 s and the session folder is left for the next start.
+- [ ] Given an orphan whose current file has the same modification time but a different size, then the offer carries the "has changed" line. Given a file that changes while the question is open, then after Restore there is no current file.
 - [ ] Given the default paths, then on each OS the folder matches the table in Where the recovery copy lives. (Unit test of the path function, with the environment variables set by the test.)
 - [ ] With a 300-module patch (`--generate 300`), building the copy on the UI thread takes under 1 ms (benchmark, in [p1-canvas.md](../benchmarks/p1-canvas.md) or its own note).
 - [ ] **Manual check.** On macOS, Windows, and Linux: make changes, wait 3 s, kill the app with the OS (Activity Monitor, Task Manager, `kill -9`). Start it again: the offer appears, Restore brings back the changes, and the title shows the unsaved mark.
