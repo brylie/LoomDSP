@@ -409,6 +409,15 @@ pub type Perform = Box<dyn FnMut(&Path, &Job) -> Result<(), String> + Send>;
 fn perform(dir: &Path, job: &Job) -> Result<(), String> {
     match job {
         Job::Write(patch, info) => {
+            // A copy for another file goes first, so a crash between the
+            // two writes below can never pair this patch with that file.
+            // A pending delete that this write replaced lands here.
+            let old = fs::read_to_string(dir.join(INFO))
+                .ok()
+                .and_then(|text| ron::from_str::<Info>(&text).ok());
+            if old.is_none_or(|old| old.file != info.file) {
+                remove_copy(dir).map_err(|e| e.to_string())?;
+            }
             patch.save(dir.join(PATCH)).map_err(|e| e.to_string())?;
             let text = ron::ser::to_string_pretty(info, ron::ser::PrettyConfig::new()).map_err(|e| e.to_string())?;
             write_atomic(&dir.join(INFO), &text).map_err(|e| e.to_string())

@@ -404,6 +404,27 @@ fn a_copy_without_good_info_has_no_file() {
 
 // --- The session and its writer ---
 
+/// A write for another file deletes the old pair first: if the write
+/// then fails (or the app crashes) before `info.ron` is replaced, no
+/// `info.ron` is left naming the old file next to the new patch.
+#[test]
+fn a_write_for_another_file_clears_the_old_pair_first() {
+    let root = TempDir::new("otherfile");
+    let (a, b) = (root.0.join("a.ron"), root.0.join("b.ron"));
+    let dir = root.0.join("session");
+    fs::create_dir(&dir).unwrap();
+    let write =
+        |file: &Path, name: &str| Job::Write(Box::new(patch(name)), Info::new(Some(file), None, SystemTime::now()));
+    perform(&dir, &write(&a, "a")).unwrap();
+    // The same file again keeps the pair while it writes.
+    perform(&dir, &write(&a, "a2")).unwrap();
+    assert_eq!(Patch::load(dir.join(PATCH)).unwrap(), patch("a2"));
+    // Make the next patch write fail: a folder where the temp file goes.
+    fs::create_dir(dir.join(format!(".{PATCH}.{}.tmp", std::process::id()))).unwrap();
+    assert!(perform(&dir, &write(&b, "b")).is_err());
+    assert!(!dir.join(INFO).exists(), "no info.ron names a.ron any more");
+}
+
 fn session_with(root: &Path, perform: Perform) -> Session {
     start_with(root, perform).unwrap().session
 }
