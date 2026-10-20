@@ -6,7 +6,7 @@ A development-only way for a script or an AI agent to drive the running app by n
 - **Status:** Implemented
 - **Decision behind it:** None. It builds on the plain-data UI snapshot ([ADR-0021](../adr/0021-plain-data-view-models-and-keyed-identity.md)).
 - **Use case and requirements:** Developer tooling. No user requirement.
-- **Issues:** [#207](https://github.com/brylie/LoomDSP/issues/207) (part 3), `press` and `arm`: [#256](https://github.com/brylie/LoomDSP/issues/256); `sample`: [#255](https://github.com/brylie/LoomDSP/issues/255); related [#190](https://github.com/brylie/LoomDSP/issues/190) (accessibility).
+- **Issues:** [#207](https://github.com/brylie/LoomDSP/issues/207) (part 3), `press` and `arm`: [#256](https://github.com/brylie/LoomDSP/issues/256); places in the snapshot: [#250](https://github.com/brylie/LoomDSP/issues/250); `sample`: [#255](https://github.com/brylie/LoomDSP/issues/255); related [#190](https://github.com/brylie/LoomDSP/issues/190) (accessibility).
 - **Code:** `crates/loom-app/src/control.rs`; the clock and recorder it relies on are in `crates/loom-host-desktop`.
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
@@ -68,6 +68,21 @@ Any client that can write lines to a Unix socket works, such as `nc -U /tmp/loom
 | `wait` | `ms` | Replies after this long, with the app running | |
 | `quit` | | Closes the app, without asking to save | |
 
+### Places in the snapshot
+
+The snapshot from `snapshot` and `--dump-ui` says where things are on the canvas, in world units: the canvas's own coordinates, before pan and zoom. They come from the same scene the canvas draws and hits, so they cannot drift from it. *Why:* a test or script can check a layout rule, such as "no badge covers another tile's port", and aim `--pointer` or `--center`, without a screenshot.
+
+| Field | What it is |
+|---|---|
+| `port_hit_radius` | How far from a port's centre a click still hits it. Zoomed out below about 0.78, the canvas widens it so it stays 7 pixels on screen |
+| `tiles[].bounds` | The tile rectangle |
+| `tiles[].inputs[].centre`, `tiles[].outputs[].centre` | A port's centre, as `{x, y}` |
+| `tiles[].outputs[].badge_bounds` | The assignment count badge, or `null` when the output shows none |
+| `tiles[].widgets[].bounds` | A widget's rectangle on the panel |
+| `cables[]` | Each cable the canvas draws, by its two ends: `from` (an output) and `to` (an input), each with `module`, `index` (from the top of its side), and `point` (the port's centre) |
+
+A rectangle is `{x, y, width, height}`, from its top-left corner. `locate` answers in window pixels instead, because that is where pixel-based automation clicks.
+
 ## Rules
 
 1. **Off unless asked for.** Nothing listens unless the app is started with `--control`. *Why:* a music app should not open a door on a user's machine without being asked.
@@ -98,6 +113,7 @@ Any client that can write lines to a Unix socket works, such as `nc -U /tmp/loom
 - [ ] With `--control` and `--measure-idle` and no commands, an idle patch counts no extra frames.
 - [ ] `tests/no_alloc.rs` still passes.
 - [ ] AGENTS.md lists the command, and an example session.
+- [ ] The snapshot's badge, port, widget, and cable places match the scene the canvas draws and hits (`the_snapshot_places_what_the_canvas_draws`).
 
 ## Out of scope
 

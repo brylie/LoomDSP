@@ -60,6 +60,7 @@
 | **Schedule** | The ordered list of module calls the engine runs each block. Built on a control thread. |
 | **SharedArrayBuffer (SAB)** | Browser memory that the main thread and the audio thread can both read and write. |
 | **SIMD** | Single Instruction, Multiple Data. One CPU instruction processes several values at once. |
+| **SPDX** | The standard list of short licence names, and a way to combine them, read by many tools. For example `CC-BY-SA-4.0` or `MIT`. A patch states its licence this way ([ADR-0023](../adr/0023-patch-licences-spdx-and-creative-commons.md)). |
 | **SPSC queue** | Single-producer, single-consumer queue. One thread writes, one thread reads, no locks. |
 | **Slot** | A place inside an abstraction that holds any part filling a given role. Swapping the part keeps the cables and carries values across by name (FR-ENCAP-08). |
 | **Stack** | A sub-patch mode that runs N copies of its contents, each with its own spread values. How LoomDSP does unison for any module, not only oscillators (FR-ENCAP-10). |

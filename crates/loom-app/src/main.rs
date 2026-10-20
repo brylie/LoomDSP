@@ -3142,4 +3142,49 @@ mod tests {
         assert_eq!((line.target, line.enabled), (filter.0, false));
         assert!(line.text.ends_with("(off)"), "{}", line.text);
     }
+
+    /// The snapshot's places are the ones the canvas draws and hits: a
+    /// badge, a port, a widget, and a cable's ends.
+    #[test]
+    fn the_snapshot_places_what_the_canvas_draws() {
+        use loom_canvas::{Hit, PortRef};
+        let mut app = app();
+        let (env, sine, filter, _, widget) = two_sources(&mut app);
+        app.controller.connect_named(sine, "out", filter, "in").unwrap();
+        app.commit();
+        let snapshot = app.ui_snapshot();
+        let tile = |id: ModuleId| snapshot.tiles.iter().find(|t| t.id == id.0).expect("a tile");
+        let view = app.scene.module(env.0).unwrap();
+
+        let output = &tile(env).outputs[0];
+        let badge = output.badge_bounds.expect("the envelope drives one assignment");
+        let drawn = view.badge_bounds(0).unwrap();
+        assert_eq!(badge, drawn.into());
+        let port = PortRef {
+            module: env.0,
+            output: true,
+            index: 0,
+        };
+        assert_eq!(
+            app.scene.hit(drawn.center(), snapshot.port_hit_radius),
+            Hit::Badge(port)
+        );
+        let centre = Point::new(output.centre.x, output.centre.y);
+        assert_eq!(app.scene.hit(centre, snapshot.port_hit_radius), Hit::Port(port));
+        assert_eq!(tile(env).bounds, view.bounds().into());
+        assert_eq!(tile(sine).outputs[0].badge_bounds.map(|b| b.width), Some(drawn.width));
+
+        let knob = tile(filter).widgets[widget].bounds;
+        let filter_view = app.scene.module(filter.0).unwrap();
+        assert_eq!(knob, filter_view.widget_bounds(widget).unwrap().into());
+
+        let cable = snapshot
+            .cables
+            .iter()
+            .find(|c| c.to.module == filter.0)
+            .expect("a cable");
+        assert_eq!((cable.from.module, cable.from.index), (sine.0, 0));
+        assert_eq!(cable.from.point, tile(sine).outputs[0].centre);
+        assert_eq!(cable.to.point, tile(filter).inputs[cable.to.index].centre);
+    }
 }

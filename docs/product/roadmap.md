@@ -104,6 +104,7 @@ Scope:
 - Design spike: how notes travel on cables (OQ-16), so P3 can build note effects on a settled model.
 - Roles, slots, and traits (ADR-0017): a specification first, then slots in abstractions, sub-patch modes, role-bound panel widgets, and traits in the SDK (FR-ENCAP-08 to 10, FR-PANEL-11, FR-SDK-07, 08). Patch-wide scale and tuning (FR-LIB-29).
 - The catalogue's P2 module types, including the first abstractions: a synth voice and an effect chain with swappable slots.
+- Patch authors, tags, and licence, and a browser for the user's own patches that filters by them (FR-FILE-08 to 10, FR-SHARE-06, ADR-0023, [specification](../design/patch-metadata.md)).
 
 Exit criteria:
 - [ ] An 8-voice polysynth built from primitives, with a 6-knob panel, runs within the CPU budget.
@@ -139,7 +140,7 @@ Exit criteria:
 Scope:
 - Self-contained patch files with embedded assets (FR-SHARE-01, FR-FILE-06).
 - Missing-module handling for shared patches (FR-SHARE-02).
-- Patch library browser backed by a public git repository (FR-SHARE-04).
+- Patch library browser backed by a public git repository, filtered by author, tag, and licence (FR-SHARE-04, FR-SHARE-07).
 - Decide how third-party modules are distributed: compile-in or sandboxed WebAssembly (OQ-18, FR-SHARE-05).
 - Module SDK release, templates, contributor guide (FR-SDK-02 to 05).
 - Publish stable crates to crates.io (FR-SDK-06).

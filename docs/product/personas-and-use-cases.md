@@ -133,3 +133,13 @@ Goal: play group A round robin, each loop twice. After two rounds, play group B 
 7. Open the Looper Group to see how it works: cycles, a clock divider, a counter, and a step select. Change its rule, for example to pick the next loop at random, and save it as your own abstraction.
 
 Requirements: FR-LIB-14, FR-LIB-20 to FR-LIB-24. Decisions: ADR-0011, ADR-0012. Specification: [arrangement](../design/arrangement.md).
+
+### UC9. Share a patch with credit and a licence (Mira)
+
+1. Set "Your name" and a default licence once, in preferences. The licence chooser asks two plain questions: may others change it, and may they use it commercially.
+2. Make a patch with a friend. Add the friend as a second author, and tags such as `drone` and `ambient`.
+3. Post the patch file. Whoever opens it sees both authors, the tags, and the licence, with a link to what it allows.
+4. A month later, filter the patch browser by the `drone` tag to find it again among many patches.
+5. Someone else changes the patch and shares it on. Both original authors stay credited, and their name is added after them.
+
+Requirements: FR-FILE-08 to FR-FILE-10, FR-SHARE-06, FR-SHARE-07, FR-NATIVE-09. Decision: ADR-0023. Specification: [patch metadata](../design/patch-metadata.md).

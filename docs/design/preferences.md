@@ -170,6 +170,7 @@ Tests point `--preferences` (or the loading function behind it) at a temporary f
 ## Out of scope
 
 - Other preferences: audio device and MIDI device choice (FR-APP-01), sample rate and buffer size, theme, the last folder used by Open and Save ([files.md](files.md)). Each needs its own section here when it comes. The store and window are built so they can grow.
+- The user's author name and default licence for new patches. Their behaviour is in the [patch metadata spec](patch-metadata.md); they get a section here when it is agreed.
 - A native menu bar entry (LoomDSP > Settings on macOS). The app has no menu bar yet.
 - Preferences for `loom play` and `loom render`. The CLI keeps its flags.
 - Syncing preferences between machines.

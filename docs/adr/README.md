@@ -54,3 +54,4 @@ Why: an ADR is a record of why things are the way they are. If it is rewritten a
 | [0020](0020-inferred-channel-count.md) | Channel count inferred per cable, with per-channel copies | Proposed |
 | [0021](0021-plain-data-view-models-and-keyed-identity.md) | Plain-data view models and keyed widget identity | Proposed |
 | [0022](0022-copies-take-state-from-the-running-instance.md) | A new channel copy takes its state from the running instance | Accepted |
+| [0023](0023-patch-licences-spdx-and-creative-commons.md) | Patch licences as SPDX expressions, chosen through Creative Commons questions | Proposed |
