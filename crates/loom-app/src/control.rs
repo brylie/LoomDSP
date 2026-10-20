@@ -328,6 +328,10 @@ fn run_line(line: &str, tx: &mut mpsc::Sender<Call>) -> (Option<Value>, Answer) 
 /// that was already on its way, then the one that draws the change.
 const FRAMES_BEFORE_ANSWER: u8 = 2;
 
+/// Frames a `cc` waits for the engine to take the control change, after
+/// the frames that draw it: about two seconds at 60 frames per second.
+const FRAMES_FOR_ENGINE: u16 = 120;
+
 /// When a command is answered.
 enum Then {
     Now(Answer),
@@ -337,6 +341,14 @@ enum Then {
 /// What to do once the window has drawn a command's change.
 pub(crate) enum Step {
     Answer(Answer),
+    /// A control change sent to the engine: answer once the engine has
+    /// taken it and the app has applied it (a mapped control moved, or the
+    /// armed parameter learned it). `before` is the serial of the last
+    /// control change seen before it was sent.
+    ControlChange {
+        before: Option<u32>,
+        frames_left: u16,
+    },
     Locate(String),
     Screenshot(PathBuf),
 }
@@ -629,6 +641,26 @@ impl App {
             let Pending { call, step, .. } = pending;
             match step {
                 Step::Answer(answer) => call.answer(answer),
+                Step::ControlChange { before, frames_left } => {
+                    let seen = self.controller.last_control_change().map(|seen| seen.serial);
+                    if seen != before {
+                        // As the MIDI watch would. Applying it twice is
+                        // harmless: an armed parameter learns only once.
+                        self.midi_arrived();
+                        call.answer(Ok(Map::new()));
+                    } else if frames_left == 0 {
+                        call.answer(Err("the engine did not take the control change".to_string()));
+                    } else {
+                        waiting.push(Pending {
+                            frames: 1,
+                            call,
+                            step: Step::ControlChange {
+                                before,
+                                frames_left: frames_left - 1,
+                            },
+                        });
+                    }
+                }
                 Step::Locate(target) => {
                     let operation = Find {
                         text: target.clone(),
@@ -731,12 +763,20 @@ impl App {
                 ..
             } => {
                 let channel = channel.unwrap_or(1).clamp(1, 16) - 1;
-                self.send_midi(MidiEvent::control_change(
+                let before = self.controller.last_control_change().map(|seen| seen.serial);
+                let step = Step::ControlChange {
+                    before,
+                    frames_left: FRAMES_FOR_ENGINE,
+                };
+                return match self.send_midi(MidiEvent::control_change(
                     0,
                     channel,
                     controller.min(127),
                     value.min(127),
-                ))
+                )) {
+                    Ok(_) => (Then::AfterDraw(step), Task::batch(tasks)),
+                    Err(error) => (Then::Now(Err(error)), Task::batch(tasks)),
+                };
             }
             Command::Key {
                 key: name,
@@ -930,12 +970,16 @@ mod tests {
             reply: Reply(Arc::new(Mutex::new(Some(sender)))),
         };
         let _ = app.control(call);
-        // As the window would: answers wait for the change to be drawn.
-        for _ in 0..FRAMES_BEFORE_ANSWER {
+        // As the window would: answers wait for the change to be drawn, and
+        // a `cc` for the engine to take it. Frames come about 60 a second.
+        for _ in 0..u32::from(FRAMES_BEFORE_ANSWER) + u32::from(FRAMES_FOR_ENGINE) {
             if let Ok(answer) = receiver.try_recv() {
                 return answer;
             }
             let _ = app.update(Message::ControlFrame);
+            if app.control_waiting() {
+                std::thread::sleep(Duration::from_millis(16));
+            }
         }
         receiver.try_recv().expect("answered after drawing")
     }
@@ -1127,15 +1171,11 @@ mod tests {
         let row = &run(&mut app, r#"{"cmd": "snapshot"}"#).unwrap()["snapshot"]["inspector"]["module"]["params"][0];
         assert_eq!(row["mode"]["learn"]["armed"], json!(true), "{row}");
 
+        // `cc` answers once the engine has taken the change and the armed
+        // parameter has learned it, so turning learn mode off next cannot
+        // lose the mapping.
         assert_eq!(run(&mut app, r#"{"cmd": "cc", "controller": 21, "value": 64}"#), ok);
-        // The fake audio clock plays the engine, which records the control
-        // change; the app then hears of it as from the MIDI watch.
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
-        while app.armed.is_some() {
-            assert!(std::time::Instant::now() < deadline, "the control change arrived");
-            std::thread::sleep(Duration::from_millis(10));
-            let _ = app.update(Message::Midi);
-        }
+        assert!(app.armed.is_none(), "the armed parameter learned the control");
         assert_eq!(run(&mut app, r#"{"cmd": "press", "button": "learn"}"#), ok);
         assert!(!app.learning);
         assert_eq!(run(&mut app, r#"{"cmd": "press", "button": "hold"}"#), ok);
