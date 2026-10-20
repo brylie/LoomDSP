@@ -186,8 +186,8 @@ enum Message {
     BenchDone,
     /// A command from the control channel.
     Control(control::Call),
-    /// A frame while control commands wait to be drawn.
-    ControlFrame,
+    /// A frame while control commands wait to be drawn, or sample it.
+    ControlFrame(Instant),
     /// The window was searched for a `locate` command.
     Located {
         call: control::Call,
@@ -996,7 +996,7 @@ impl App {
             // stays idle.
             .chain(
                 self.control_waiting()
-                    .then(|| iced::window::frames().map(|_| Message::ControlFrame)),
+                    .then(|| iced::window::frames().map(Message::ControlFrame)),
             );
         let autosave = match &self.recovery {
             Some(_) => iced::time::every(recovery::TICK).map(|_| Message::Autosave),
@@ -1533,7 +1533,7 @@ impl App {
                 })
             }
             Message::Control(call) => self.control(call),
-            Message::ControlFrame => self.control_frame(),
+            Message::ControlFrame(now) => self.control_frame(now),
             Message::Located { call, target, found } => {
                 self.located(&call, &target, &found);
                 Task::none()
@@ -1595,7 +1595,7 @@ impl App {
     fn handle(&mut self, message: Message) {
         match message {
             // `update` runs these: they return tasks.
-            Message::Browser(_) | Message::Control(_) | Message::ControlFrame | Message::Located { .. } => {}
+            Message::Browser(_) | Message::Control(_) | Message::ControlFrame(_) | Message::Located { .. } => {}
             Message::Key(_) if self.browser.is_some() => {}
             Message::Canvas(event) => self.canvas_event(event),
             Message::Param {

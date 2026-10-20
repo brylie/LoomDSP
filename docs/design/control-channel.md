@@ -6,7 +6,7 @@ A development-only way for a script or an AI agent to drive the running app by n
 - **Status:** Implemented
 - **Decision behind it:** None. It builds on the plain-data UI snapshot ([ADR-0021](../adr/0021-plain-data-view-models-and-keyed-identity.md)).
 - **Use case and requirements:** Developer tooling. No user requirement.
-- **Issues:** [#207](https://github.com/brylie/LoomDSP/issues/207) (part 3), `press` and `arm`: [#256](https://github.com/brylie/LoomDSP/issues/256); related [#190](https://github.com/brylie/LoomDSP/issues/190) (accessibility).
+- **Issues:** [#207](https://github.com/brylie/LoomDSP/issues/207) (part 3), `press` and `arm`: [#256](https://github.com/brylie/LoomDSP/issues/256); `sample`: [#255](https://github.com/brylie/LoomDSP/issues/255); related [#190](https://github.com/brylie/LoomDSP/issues/190) (accessibility).
 - **Code:** `crates/loom-app/src/control.rs`; the clock and recorder it relies on are in `crates/loom-host-desktop`.
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
@@ -64,6 +64,7 @@ Any client that can write lines to a Unix socket works, such as `nc -U /tmp/loom
 | `arm` | `target`: a parameter (`"4:cutoff"`) | In MIDI learn mode, arms the parameter, or disarms it if armed, as its inspector row does. Refused when learn mode is off | |
 | `locate` | `target`: a module (`"4"`), a control by parameter name or a port by name (`"4:cutoff"`, `"3:out"`), or any other text shown in the window (`"Cutoff"`) | Nothing | The centre and size, in logical window pixels |
 | `screenshot` | `path` | Saves a PNG of the whole window as it was last drawn: canvas, inspector, and bars | The image size in pixels, and the scale factor |
+| `sample` | `target`: a control, light, or meter by the name it is bound to (`"4:resonance"`), `ms` (1 to 30000) | Records what the canvas draws for this widget, once per frame, for this long | `frames`: one entry per drawn frame. `t`: milliseconds since the first entry. `position`: the knob position, light brightness, or meter level, from 0 to 1. `live`: a knob's live modulated value, as a position, while its dot is drawn. `peak`: a meter's peak level |
 | `wait` | `ms` | Replies after this long, with the app running | |
 | `quit` | | Closes the app, without asking to save | |
 
@@ -75,13 +76,14 @@ Any client that can write lines to a Unix socket works, such as `nc -U /tmp/loom
 4. **Names, not indices.** Parameters and ports are named as in patch files (`"4:cutoff"`, `"3:out"`). Toolbar buttons have fixed names, not their labels: a label can change while the app runs (Hold note becomes Release note). *Why:* names are stable IDs, and a script that reads like the patch is easy to check.
 5. **One at a time, in order.** A reply comes once the command has been applied and the window has drawn it: the app waits two frames (the one already on its way, then the one with the change) before it answers, captures, or searches the window. A `cc` also waits for the engine to take its control change (up to about two seconds; a change from a MIDI port in between is not taken for it), so a script that arms a parameter, sends a `cc`, and then turns learn mode off keeps the mapping. An error, `snapshot`, and `quit` answer at once. *Why:* the next `snapshot`, `locate`, or `screenshot` then sees the result, with no sleeps in the script.
 6. **Nothing on the audio thread.** MIDI goes through the same shared sender as a MIDI port. The engine is reached only through the `Controller`. *Why:* real-time safety (hard rule 1).
-7. **No messages while idle.** The listener wakes the app only when a command arrives. *Why:* every message redraws the window, and `--measure-idle` must still count zero frames for an idle patch.
+7. **No messages while idle.** The listener wakes the app only when a command arrives. The app asks for frames only while a command waits to be drawn or a `sample` runs. *Why:* every message redraws the window, and `--measure-idle` must still count zero frames for an idle patch.
 8. **Errors are replies, not crashes.** A bad command gets `ok: false` and a message naming what was wrong. The app keeps running. *Why:* an agent learns from the error and tries again.
 9. **No dialogs.** While the channel is on, errors that would open a dialog (a failed open or save) go to the reply and the status bar instead. Commands never open a file dialog or ask to save: `key` refuses the New, Open, and Save shortcuts (Cmd or Ctrl with N, O, or S), and `press` refuses the `new`, `open`, `save`, and `save-as` buttons. Both point to the `open` and `save` commands. *Why:* a modal dialog would stop the app, and nobody is there to close it.
 10. **`:name` looks for a parameter first,** then an output, then an input. *Why:* a module's parameter and port names rarely clash; when they do, the control is what a script most often wants.
 11. **A script file runs the same commands.** `--control-script FILE` reads commands from a file, one per line (blank lines skipped), and prints each reply to stdout. At the end of the file the app keeps running, unless the last command is `quit`. *Why:* the same code serves a quick check with no client, and a check that can be saved next to a patch.
 12. **Unix only, for now.** The socket needs Unix domain sockets (macOS and Linux). On Windows `--control` says it is not supported; `--control-script` works everywhere. *Why:* Rust's standard library has Unix sockets on Unix only. TCP on loopback can come later if Windows needs it.
 13. **Short socket paths.** A socket path must be shorter than about 100 bytes (104 on macOS, 108 on Linux). A relative path is fine. A socket file left by an earlier run is replaced; any other file at that path is never touched, not even when the app quits. The app removes its socket when it quits. *Why:* the limit is the operating system's; a long temporary folder path fails with "path must be shorter than SUN_LEN".
+14. **`sample` measures, a person judges.** It gives one entry per frame with the frame's time, so a script can find the largest jump between frames, frames where the value did not change, and gaps between frames. It starts after the two frames of rule 5. The live values are read each frame it records, even when no modulation asks for frames. *Why:* "does the dot move smoothly" then becomes numbers; a person only has to judge how it looks.
 
 ## Acceptance criteria
 
@@ -92,6 +94,7 @@ Any client that can write lines to a Unix socket works, such as `nc -U /tmp/loom
 - [ ] A script file with a `quit` at the end runs and exits with status 0.
 - [ ] `set` on a mapped parameter, then `undo`, restores the value, as in the UI.
 - [ ] A bad command gets `ok: false` with a message, and the next command works.
+- [ ] A test with `--fake-audio`, a note held, and the filter envelope modulating Resonance samples the knob and sees its live value change from frame to frame. Afterwards the app asks for no more frames.
 - [ ] With `--control` and `--measure-idle` and no commands, an idle patch counts no extra frames.
 - [ ] `tests/no_alloc.rs` still passes.
 - [ ] AGENTS.md lists the command, and an example session.

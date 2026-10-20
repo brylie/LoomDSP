@@ -15,8 +15,9 @@ use iced::advanced::widget::{Id, Operation};
 use iced::futures::channel::mpsc;
 use iced::futures::{SinkExt, Stream};
 use iced::{Point, Rectangle, keyboard};
+use loom_canvas::PanelValues;
 use loom_canvas::{CanvasEvent, CanvasView, PortRef};
-use loom_core::{MidiControl, MidiEvent, ModuleId};
+use loom_core::{MidiControl, MidiEvent, ModuleId, WidgetKind};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use std::any::Any;
@@ -24,7 +25,7 @@ use std::hash::{Hash, Hasher};
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// Command-line options for the control channel.
 #[derive(clap::Args, Debug, Clone, Default)]
@@ -111,6 +112,10 @@ pub enum Command {
     },
     Screenshot {
         path: PathBuf,
+    },
+    Sample {
+        target: String,
+        ms: u64,
     },
     Wait {
         ms: u64,
@@ -356,6 +361,51 @@ pub(crate) enum Step {
     },
     Locate(String),
     Screenshot(PathBuf),
+    /// A widget's value, recorded every frame until the time is up.
+    Sample(Sampling),
+}
+
+/// The longest `sample`, well inside the time a listener waits for an
+/// answer.
+const MAX_SAMPLE_MS: u64 = 30_000;
+
+/// A `sample` in progress: one entry per frame, with the values the canvas
+/// draws for one widget.
+pub(crate) struct Sampling {
+    module: u32,
+    widget: usize,
+    meter: bool,
+    ms: u64,
+    start: Option<Instant>,
+    frames: Vec<Value>,
+}
+
+impl Sampling {
+    /// Records the frame at `now`. True once the time is up: that frame is
+    /// not recorded, so every entry is inside the asked time.
+    fn record(&mut self, values: &PanelValues, now: Instant) -> Result<bool, String> {
+        let start = *self.start.get_or_insert(now);
+        let elapsed = now.duration_since(start);
+        if elapsed >= Duration::from_millis(self.ms) {
+            return Ok(true);
+        }
+        let value = values
+            .get(self.module, self.widget)
+            .ok_or_else(|| format!("module {} was removed while sampling", self.module))?;
+        // Milliseconds, to the microsecond.
+        let mut entry = fields(json!({
+            "t": elapsed.as_micros() as f64 / 1000.0,
+            "position": value.position,
+        }));
+        if let Some(live) = value.live {
+            entry.insert("live".to_string(), json!(live));
+        }
+        if self.meter {
+            entry.insert("peak".to_string(), json!(value.peak));
+        }
+        self.frames.push(Value::Object(entry));
+        Ok(false)
+    }
 }
 
 /// A command waiting for the window to draw.
@@ -634,7 +684,7 @@ impl App {
 
     /// Counts a frame for the commands waiting to be drawn, and finishes
     /// those that are (rule 5).
-    pub(crate) fn control_frame(&mut self) -> Task<Message> {
+    pub(crate) fn control_frame(&mut self, now: Instant) -> Task<Message> {
         let mut tasks = Vec::new();
         let mut waiting = Vec::new();
         for mut pending in std::mem::take(&mut self.control_pending) {
@@ -675,6 +725,20 @@ impl App {
                                 frames_left: frames_left - 1,
                             },
                         });
+                    }
+                }
+                Step::Sample(mut sampling) => {
+                    // The live values this frame draws, even when nothing
+                    // else asks for frames.
+                    crate::scene::update_live_values(&mut self.values, &self.controller);
+                    match sampling.record(&self.values, now) {
+                        Err(error) => call.answer(Err(error)),
+                        Ok(true) => call.answer(Ok(fields(json!({ "frames": sampling.frames })))),
+                        Ok(false) => waiting.push(Pending {
+                            frames: 1,
+                            call,
+                            step: Step::Sample(sampling),
+                        }),
                     }
                 }
                 Step::Locate(target) => {
@@ -817,6 +881,13 @@ impl App {
             }),
             Command::Locate { target } => return (Then::AfterDraw(Step::Locate(target)), Task::batch(tasks)),
             Command::Screenshot { path } => return (Then::AfterDraw(Step::Screenshot(path)), Task::batch(tasks)),
+            Command::Sample { target, ms } => {
+                let then = match self.sample_command(&target, ms) {
+                    Ok(sampling) => Then::AfterDraw(Step::Sample(sampling)),
+                    Err(error) => Then::Now(Err(error)),
+                };
+                return (then, Task::batch(tasks));
+            }
             Command::Wait { .. } => Ok(Map::new()),
             Command::Quit => {
                 self.quit = true;
@@ -915,6 +986,39 @@ impl App {
         Ok(Message::LearnParam { module, index })
     }
 
+    /// Checks a `sample` target: a panel widget by the name it is bound
+    /// to, a parameter for a control or a display value for a light.
+    fn sample_command(&self, target: &str, ms: u64) -> Result<Sampling, String> {
+        if !(1..=MAX_SAMPLE_MS).contains(&ms) {
+            return Err(format!("`ms` must be from 1 to {MAX_SAMPLE_MS}"));
+        }
+        let Some((module, Some(name))) = split_target(target) else {
+            return Err(format!(
+                "`{target}` is not a control, light, or meter; use `module:name`, like `4:cutoff`"
+            ));
+        };
+        let node = self
+            .controller
+            .graph()
+            .node(ModuleId(module))
+            .ok_or_else(|| format!("no module {module}"))?;
+        let widgets = node.descriptor.panel.widgets;
+        let widget = widgets.iter().position(|w| w.bind == name).ok_or_else(|| {
+            format!(
+                "module {module} ({}) has no control, light, or meter `{name}`",
+                node.descriptor.name
+            )
+        })?;
+        Ok(Sampling {
+            module,
+            widget,
+            meter: widgets[widget].kind == WidgetKind::Meter,
+            ms,
+            start: None,
+            frames: Vec::new(),
+        })
+    }
+
     fn add_command(&mut self, kind: &str, at: Option<[f32; 2]>) -> Answer {
         // Patch files name a kind with its version (`loom.filter.svf@1`).
         let id = kind.split_once('@').map_or(kind, |(id, _)| id);
@@ -992,7 +1096,7 @@ mod tests {
             if let Ok(answer) = receiver.try_recv() {
                 return answer;
             }
-            let _ = app.update(Message::ControlFrame);
+            let _ = app.update(Message::ControlFrame(Instant::now()));
             if app.control_waiting() {
                 std::thread::sleep(Duration::from_millis(16));
             }
@@ -1211,6 +1315,63 @@ mod tests {
         assert!(mapping.contains("21"), "{row}");
     }
 
+    /// `sample` records a knob's live value once per frame (#255): with the
+    /// filter envelope modulating Resonance and a note held, the live dot
+    /// moves. Then the app asks for no more frames (rule 7).
+    #[test]
+    fn sample_follows_a_live_value_frame_by_frame() {
+        let mut app = App::new(crate::Args {
+            patch: Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches/subtractive.ron")),
+            fake_audio: true,
+            no_audio: false,
+            ..crate::tests::app_args()
+        });
+        let resonance = app
+            .controller
+            .graph()
+            .node(ModuleId(4))
+            .unwrap()
+            .descriptor
+            .param_index("resonance")
+            .unwrap();
+        let _ = app.update(Message::Assign {
+            source: loom_core::OutputRef {
+                module: ModuleId(5),
+                port: 0,
+            },
+            module: 4,
+            index: resonance,
+        });
+        assert_eq!(
+            run(&mut app, r#"{"cmd": "note", "note": 60, "on": true}"#),
+            Ok(Map::new())
+        );
+
+        let sample = run(&mut app, r#"{"cmd": "sample", "target": "4:resonance", "ms": 300}"#).unwrap();
+        assert!(!app.control_waiting());
+        let frames = sample["frames"].as_array().unwrap();
+        assert!(frames.len() > 3, "{sample:?}");
+        let times: Vec<f64> = frames.iter().map(|f| f["t"].as_f64().unwrap()).collect();
+        assert_eq!(times[0], 0.0);
+        assert!(times.windows(2).all(|t| t[0] < t[1]), "{times:?}");
+        assert!(times.iter().all(|&t| t < 300.0), "{times:?}");
+        let live: Vec<f64> = frames.iter().map(|f| f["live"].as_f64().unwrap()).collect();
+        assert!(
+            live.windows(2).any(|l| l[0] != l[1]),
+            "the live value did not move: {live:?}"
+        );
+        assert!(
+            frames.iter().all(|f| f.get("peak").is_none()),
+            "only meters have a peak"
+        );
+
+        let error = run(&mut app, r#"{"cmd": "sample", "target": "4:nonsense", "ms": 100}"#).unwrap_err();
+        assert!(error.contains("no control, light, or meter `nonsense`"), "{error}");
+        let error = run(&mut app, r#"{"cmd": "sample", "target": "4:resonance", "ms": 0}"#).unwrap_err();
+        assert!(error.contains("from 1 to"), "{error}");
+        assert!(!app.control_waiting());
+    }
+
     /// `press` refuses what a click could not do: dialogs (rule 9),
     /// disabled buttons, and unknown names.
     #[test]
@@ -1251,7 +1412,7 @@ mod tests {
         let patch = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches/sine.ron");
         assert!(app.replace(crate::Source::File(&patch)));
         for _ in 0..FRAMES_BEFORE_ANSWER {
-            let _ = app.update(Message::ControlFrame);
+            let _ = app.update(Message::ControlFrame(Instant::now()));
         }
         assert_eq!(receiver.try_recv(), Ok(Ok(Map::new())));
     }
