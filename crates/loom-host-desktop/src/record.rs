@@ -8,8 +8,8 @@
 
 use crate::HostError;
 use std::path::Path;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -51,6 +51,9 @@ impl Tap {
 pub(crate) struct Recording {
     done: Arc<AtomicBool>,
     dropped: Arc<AtomicU64>,
+    /// The first write error. The recording stops there; what was written
+    /// before stays readable.
+    error: Arc<Mutex<Option<String>>>,
     thread: Option<JoinHandle<()>>,
 }
 
@@ -68,36 +71,42 @@ impl Recording {
         let (producer, mut consumer) = rtrb::RingBuffer::<f32>::new(capacity);
         let done = Arc::new(AtomicBool::new(false));
         let dropped = Arc::new(AtomicU64::new(0));
+        let error = Arc::new(Mutex::new(None));
         let thread_done = done.clone();
+        let thread_error = error.clone();
         let thread = std::thread::Builder::new()
             .name("loom-record".to_string())
             .spawn(move || {
-                let mut flushed = Instant::now();
-                loop {
-                    // Read the flag before draining, so nothing pushed before
-                    // the stop is left behind.
-                    let stop = thread_done.load(Ordering::Acquire) || consumer.is_abandoned();
-                    let ready = consumer.slots();
-                    if let Ok(chunk) = consumer.read_chunk(ready) {
-                        let (a, b) = chunk.as_slices();
-                        for &sample in a.iter().chain(b) {
-                            // A write error (disk full) ends the recording;
-                            // the samples so far stay readable.
-                            if writer.write_sample(sample).is_err() {
-                                return;
+                let write = || -> Result<(), hound::Error> {
+                    let mut flushed = Instant::now();
+                    loop {
+                        // Read the flag before draining, so nothing pushed
+                        // before the stop is left behind.
+                        let stop = thread_done.load(Ordering::Acquire) || consumer.is_abandoned();
+                        let ready = consumer.slots();
+                        if let Ok(chunk) = consumer.read_chunk(ready) {
+                            let (a, b) = chunk.as_slices();
+                            for &sample in a.iter().chain(b) {
+                                writer.write_sample(sample)?;
                             }
+                            chunk.commit_all();
                         }
-                        chunk.commit_all();
+                        if stop {
+                            return writer.finalize();
+                        }
+                        if flushed.elapsed() >= FLUSH {
+                            writer.flush()?;
+                            flushed = Instant::now();
+                        }
+                        std::thread::sleep(DRAIN);
                     }
-                    if stop {
-                        let _ = writer.finalize();
-                        return;
-                    }
-                    if flushed.elapsed() >= FLUSH {
-                        let _ = writer.flush();
-                        flushed = Instant::now();
-                    }
-                    std::thread::sleep(DRAIN);
+                };
+                // A write error (a full disk) ends the recording. Later
+                // frames no longer fit the ring and count as dropped.
+                if let Err(e) = write()
+                    && let Ok(mut slot) = thread_error.lock()
+                {
+                    *slot = Some(e.to_string());
                 }
             })
             .map_err(record_error)?;
@@ -109,6 +118,7 @@ impl Recording {
             Self {
                 done,
                 dropped,
+                error,
                 thread: Some(thread),
             },
             tap,
@@ -118,6 +128,11 @@ impl Recording {
     /// Frames dropped because the ring was full.
     pub(crate) fn dropped(&self) -> u64 {
         self.dropped.load(Ordering::Relaxed)
+    }
+
+    /// The write error that stopped the recording, if one did.
+    pub(crate) fn error(&self) -> Option<String> {
+        self.error.lock().ok().and_then(|e| e.clone())
     }
 }
 

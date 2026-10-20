@@ -35,8 +35,23 @@ pub struct Options {
     pub measure_idle: bool,
     /// With --bench, --measure, or --measure-idle: exit after this many
     /// seconds, with a final summary line.
-    #[arg(long, value_name = "N", requires = "measuring")]
+    #[arg(long, value_name = "N", requires = "measuring", value_parser = seconds)]
     pub bench_seconds: Option<f64>,
+}
+
+/// The longest run `--bench-seconds` takes: a day. Longer is surely a typo,
+/// and infinity or NaN would not make a duration at all.
+const MAX_SECONDS: f64 = 86_400.0;
+
+fn seconds(text: &str) -> Result<f64, String> {
+    let s: f64 = text
+        .parse()
+        .map_err(|_| format!("`{text}` is not a number of seconds"))?;
+    if s.is_finite() && (0.0..=MAX_SECONDS).contains(&s) {
+        Ok(s)
+    } else {
+        Err(format!("give a number of seconds from 0 to {MAX_SECONDS}"))
+    }
 }
 
 impl Options {
@@ -48,7 +63,9 @@ impl Options {
     /// The stdout report, when one of the flags asks for it.
     pub fn reporter(&self) -> Option<Reporter> {
         (self.bench || self.measure || self.measure_idle).then(|| Reporter {
-            seconds: self.bench_seconds.map(|s| Duration::from_secs_f64(s.max(0.0))),
+            seconds: self
+                .bench_seconds
+                .map(|s| Duration::from_secs_f64(s.clamp(0.0, MAX_SECONDS))),
         })
     }
 }
@@ -259,6 +276,15 @@ mod tests {
             worst: Duration::ZERO,
         };
         assert!(line(&w).starts_with("fps=0.0 avg_ms=0.00 worst_ms=0.00 frames=0 "));
+    }
+
+    #[test]
+    fn bench_seconds_must_be_a_usable_duration() {
+        assert_eq!(seconds("10"), Ok(10.0));
+        assert_eq!(seconds("0.5"), Ok(0.5));
+        for bad in ["inf", "NaN", "-1", "1e30", "ten"] {
+            assert!(seconds(bad).is_err(), "{bad}");
+        }
     }
 
     #[test]

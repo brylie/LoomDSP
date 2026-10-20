@@ -171,9 +171,23 @@ impl Hash for Listener {
 pub fn close(listeners: &[Listener]) {
     for listener in listeners {
         if let Listener::Socket(path) = listener {
+            remove_socket(path);
+        }
+    }
+}
+
+/// Removes a socket file, and never any other kind of file: a mistaken
+/// `--control` path must not delete a user's file.
+fn remove_socket(path: &std::path::Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::FileTypeExt;
+        if std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_socket()) {
             let _ = std::fs::remove_file(path);
         }
     }
+    #[cfg(not(unix))]
+    let _ = path;
 }
 
 /// How long a listener waits for the app to answer one command.
@@ -203,7 +217,7 @@ fn listen(path: &std::path::Path, mut tx: mpsc::Sender<Call>) {
     // A socket left by an earlier run is replaced; any other file is not.
     if let Ok(meta) = std::fs::symlink_metadata(path) {
         if meta.file_type().is_socket() {
-            let _ = std::fs::remove_file(path);
+            remove_socket(path);
         } else {
             eprintln!("loom-app: control: {} exists and is not a socket", path.display());
             return;
@@ -234,7 +248,7 @@ fn listen(path: &std::path::Path, mut tx: mpsc::Sender<Call>) {
             }
         }
     }
-    let _ = std::fs::remove_file(path);
+    remove_socket(path);
 }
 
 #[cfg(not(unix))]
@@ -302,6 +316,30 @@ fn run_line(line: &str, tx: &mut mpsc::Sender<Call>) -> (Option<Value>, Answer) 
         .recv_timeout(ANSWER_TIMEOUT)
         .unwrap_or_else(|_| Err("the app did not answer".to_string()));
     (id, answer)
+}
+
+/// Frames to wait before answering, so the change is drawn: the frame
+/// that was already on its way, then the one that draws the change.
+const FRAMES_BEFORE_ANSWER: u8 = 2;
+
+/// When a command is answered.
+enum Then {
+    Now(Answer),
+    AfterDraw(Step),
+}
+
+/// What to do once the window has drawn a command's change.
+pub(crate) enum Step {
+    Answer(Answer),
+    Locate(String),
+    Screenshot(PathBuf),
+}
+
+/// A command waiting for the window to draw.
+pub(crate) struct Pending {
+    frames: u8,
+    call: Call,
+    step: Step,
 }
 
 /// What a widget operation found in the live window.
@@ -469,6 +507,22 @@ fn modifiers(names: &[String]) -> Result<keyboard::Modifiers, String> {
     })
 }
 
+/// Refuses the file shortcuts (New, Open, Save, Save As): they open a file
+/// dialog or ask to save, which would stop the app with nobody to answer
+/// (rule 9). The `open` and `save` commands do the same without a dialog.
+fn refuse_dialog_keys(key: &keyboard::Key, modifiers: keyboard::Modifiers) -> Result<(), String> {
+    let keyboard::Key::Character(c) = key else {
+        return Ok(());
+    };
+    if modifiers.command() && matches!(c.as_str(), "n" | "o" | "s") {
+        Err(format!(
+            "the {c} shortcut opens a dialog; use the `open` or `save` command instead"
+        ))
+    } else {
+        Ok(())
+    }
+}
+
 /// The key press and release, as the keyboard listener sends them.
 fn key_events(key: keyboard::Key, modifiers: keyboard::Modifiers) -> [keyboard::Event; 2] {
     let physical = keyboard::key::Physical::Unidentified(keyboard::key::NativeCode::Unidentified);
@@ -496,26 +550,72 @@ impl App {
     /// Runs a command from the control channel and answers it, now or once
     /// the task it returns has run.
     pub(crate) fn control(&mut self, call: Call) -> Task<Message> {
-        let (answer, task) = self.run_command(&call);
-        match answer {
-            Some(answer) => {
-                call.answer(answer);
-                task
-            }
-            // The task answers.
-            None => task,
+        let (then, task) = self.run_command(&call);
+        match then {
+            // An error, or a command that changes nothing on screen.
+            Then::Now(answer) => call.answer(answer),
+            Then::AfterDraw(step) => self.control_pending.push(Pending {
+                frames: FRAMES_BEFORE_ANSWER,
+                call,
+                step,
+            }),
         }
+        task
     }
 
-    /// The answer, unless a task gives it later, and the tasks the UI
-    /// messages returned.
-    fn run_command(&mut self, call: &Call) -> (Option<Answer>, Task<Message>) {
+    /// Counts a frame for the commands waiting to be drawn, and finishes
+    /// those that are (rule 5).
+    pub(crate) fn control_frame(&mut self) -> Task<Message> {
+        let mut tasks = Vec::new();
+        let mut waiting = Vec::new();
+        for mut pending in std::mem::take(&mut self.control_pending) {
+            pending.frames = pending.frames.saturating_sub(1);
+            if pending.frames > 0 {
+                waiting.push(pending);
+                continue;
+            }
+            let Pending { call, step, .. } = pending;
+            match step {
+                Step::Answer(answer) => call.answer(answer),
+                Step::Locate(target) => {
+                    let operation = Find {
+                        text: target.clone(),
+                        found: Found::default(),
+                    };
+                    tasks.push(
+                        iced_runtime::task::widget(operation).map(move |found| Message::Located {
+                            call: call.clone(),
+                            target: target.clone(),
+                            found,
+                        }),
+                    );
+                }
+                Step::Screenshot(path) => tasks.push(
+                    iced::window::latest()
+                        .then(|id| match id {
+                            Some(id) => iced::window::screenshot(id).map(Some),
+                            None => Task::done(None),
+                        })
+                        .map(move |shot| call.answer(save_screenshot(shot, &path)))
+                        .discard(),
+                ),
+            }
+        }
+        self.control_pending = waiting;
+        Task::batch(tasks)
+    }
+
+    /// True while a command waits for the window to draw.
+    pub(crate) fn control_waiting(&self) -> bool {
+        !self.control_pending.is_empty()
+    }
+
+    /// What to answer, now or after drawing, and the tasks the UI messages
+    /// returned.
+    fn run_command(&mut self, call: &Call) -> (Then, Task<Message>) {
         let mut tasks = Vec::new();
         let mut send = |app: &mut App, message: Message| tasks.push(app.update(message));
         let answer = match call.command.clone() {
-            Command::Snapshot => serde_json::to_value(self.ui_snapshot())
-                .map(|snapshot| Map::from_iter([("snapshot".to_string(), snapshot)]))
-                .map_err(|e| e.to_string()),
             Command::Select { modules, .. } => self.check_modules(&modules).map(|()| {
                 send(self, Message::Canvas(CanvasEvent::Select(modules)));
                 Map::new()
@@ -590,43 +690,38 @@ impl App {
                 key: name,
                 modifiers: names,
                 ..
-            } => key(&name).and_then(|k| Ok((k, modifiers(&names)?))).map(|(k, m)| {
-                for event in key_events(k, m) {
-                    send(self, Message::Key(event));
-                }
-                Map::new()
-            }),
-            Command::Locate { target, .. } => {
-                let operation = Find {
-                    text: target.clone(),
-                    found: Found::default(),
-                };
-                let call = call.clone();
-                let task = iced_runtime::task::widget(operation).map(move |found| Message::Located {
-                    call: call.clone(),
-                    target: target.clone(),
-                    found,
-                });
-                return (None, Task::batch(tasks.into_iter().chain([task])));
-            }
-            Command::Screenshot { path, .. } => {
-                let call = call.clone();
-                let task = iced::window::latest()
-                    .then(|id| match id {
-                        Some(id) => iced::window::screenshot(id).map(Some),
-                        None => Task::done(None),
-                    })
-                    .map(move |shot| call.answer(save_screenshot(shot, &path)))
-                    .discard();
-                return (None, Task::batch(tasks.into_iter().chain([task])));
-            }
+            } => key(&name)
+                .and_then(|k| Ok((k, modifiers(&names)?)))
+                .and_then(|(k, m)| refuse_dialog_keys(&k, m).map(|()| (k, m)))
+                .map(|(k, m)| {
+                    for event in key_events(k, m) {
+                        send(self, Message::Key(event));
+                    }
+                    Map::new()
+                }),
+            Command::Locate { target } => return (Then::AfterDraw(Step::Locate(target)), Task::batch(tasks)),
+            Command::Screenshot { path } => return (Then::AfterDraw(Step::Screenshot(path)), Task::batch(tasks)),
             Command::Wait { .. } => Ok(Map::new()),
             Command::Quit => {
                 self.quit = true;
-                Ok(Map::new())
+                return (Then::Now(Ok(Map::new())), Task::batch(tasks));
+            }
+            Command::Snapshot => {
+                return (
+                    Then::Now(
+                        serde_json::to_value(self.ui_snapshot())
+                            .map(|snapshot| Map::from_iter([("snapshot".to_string(), snapshot)]))
+                            .map_err(|e| e.to_string()),
+                    ),
+                    Task::none(),
+                );
             }
         };
-        (Some(answer), Task::batch(tasks))
+        let then = match answer {
+            Ok(answer) => Then::AfterDraw(Step::Answer(Ok(answer))),
+            Err(error) => Then::Now(Err(error)),
+        };
+        (then, Task::batch(tasks))
     }
 
     fn check_modules(&self, modules: &[u32]) -> Result<(), String> {
@@ -752,7 +847,14 @@ mod tests {
             reply: Reply(Arc::new(Mutex::new(Some(sender)))),
         };
         let _ = app.control(call);
-        receiver.try_recv().expect("answered at once")
+        // As the window would: answers wait for the change to be drawn.
+        for _ in 0..FRAMES_BEFORE_ANSWER {
+            if let Ok(answer) = receiver.try_recv() {
+                return answer;
+            }
+            let _ = app.update(Message::ControlFrame);
+        }
+        receiver.try_recv().expect("answered after drawing")
     }
 
     #[test]
@@ -764,6 +866,33 @@ mod tests {
         ));
         assert!(parse(r#"{"cmd": "fly"}"#).is_err());
         assert!(parse(r#"{"cmd": "select", "modules": [1], "extra": 1}"#).is_err());
+    }
+
+    /// File shortcuts would open a dialog nobody can close (rule 9).
+    #[test]
+    fn file_shortcuts_are_refused() {
+        let cmd = keyboard::Modifiers::COMMAND;
+        for c in ["n", "o", "s"] {
+            let key = keyboard::Key::Character(c.into());
+            assert!(refuse_dialog_keys(&key, cmd).is_err(), "{c}");
+            assert!(
+                refuse_dialog_keys(&key, cmd | keyboard::Modifiers::SHIFT).is_err(),
+                "{c}"
+            );
+            assert!(refuse_dialog_keys(&key, keyboard::Modifiers::default()).is_ok(), "{c}");
+        }
+        assert!(refuse_dialog_keys(&keyboard::Key::Character("z".into()), cmd).is_ok());
+    }
+
+    /// A mistaken `--control` path that names a regular file is never
+    /// deleted, when the app closes or otherwise.
+    #[test]
+    fn closing_leaves_other_files_alone() {
+        let path = std::env::temp_dir().join(format!("loom-control-not-a-socket-{}", std::process::id()));
+        std::fs::write(&path, "keep me").unwrap();
+        close(&[Listener::Socket(path.clone())]);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "keep me");
+        std::fs::remove_file(&path).unwrap();
     }
 
     #[test]

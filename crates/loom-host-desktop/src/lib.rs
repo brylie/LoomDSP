@@ -423,6 +423,12 @@ impl RunningAudio {
     pub fn recording_dropped(&self) -> u64 {
         self.recording.as_ref().map_or(0, Recording::dropped)
     }
+
+    /// Why the recording stopped early (for example a full disk), if it
+    /// did. `None` when it is fine or there is none.
+    pub fn recording_error(&self) -> Option<String> {
+        self.recording.as_ref().and_then(Recording::error)
+    }
 }
 
 /// Audio callback timing, updated by the audio thread.

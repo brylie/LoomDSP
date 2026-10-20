@@ -150,6 +150,8 @@ enum Message {
     BenchDone,
     /// A command from the control channel.
     Control(control::Call),
+    /// A frame while control commands wait to be drawn.
+    ControlFrame,
     /// The window was searched for a `locate` command.
     Located {
         call: control::Call,
@@ -293,6 +295,10 @@ struct App {
     /// The control channel's listeners. While there are any, errors go to
     /// the status bar and the reply, not to a dialog.
     control: Vec<control::Listener>,
+    /// Commands waiting for the window to draw their change.
+    control_pending: Vec<control::Pending>,
+    /// True once a failed `--record` has been reported.
+    recording_failed: bool,
     measuring: bool,
     animating: bool,
     /// MIDI learn mode (`docs/design/midi-learn.md`).
@@ -523,6 +529,8 @@ impl App {
             meter: bench::FrameMeter::default(),
             reporter: args.bench.reporter(),
             control: args.control.listeners(),
+            control_pending: Vec::new(),
+            recording_failed: false,
             measuring: args.bench.redraws(),
             animating: args.bench.bench,
             learning: false,
@@ -754,7 +762,13 @@ impl App {
         let control = self
             .control
             .iter()
-            .map(|listener| Subscription::run_with(listener.clone(), control::stream).map(Message::Control));
+            .map(|listener| Subscription::run_with(listener.clone(), control::stream).map(Message::Control))
+            // Frames only while a command waits to be drawn, so an idle app
+            // stays idle.
+            .chain(
+                self.control_waiting()
+                    .then(|| iced::window::frames().map(|_| Message::ControlFrame)),
+            );
         let report = match &self.reporter {
             Some(reporter) => Subscription::run_with(reporter.clone(), bench::stream).map(|()| Message::BenchDone),
             None => Subscription::none(),
@@ -951,6 +965,14 @@ impl App {
         if let Some(stats) = &self.audio_stats {
             let s = stats.snapshot();
             self.dropouts.update(s.overruns + s.stream_errors, now);
+        }
+        // A recording that stopped early (a full disk) is reported once.
+        if !self.recording_failed
+            && let Some(error) = self._audio.as_ref().and_then(RunningAudio::recording_error)
+        {
+            self.recording_failed = true;
+            self.status = format!("The recording stopped: {error}");
+            eprintln!("loom-app: {}", self.status);
         }
     }
 
@@ -1277,6 +1299,7 @@ impl App {
                 })
             }
             Message::Control(call) => self.control(call),
+            Message::ControlFrame => self.control_frame(),
             Message::Located { call, target, found } => {
                 self.located(&call, &target, &found);
                 Task::none()
@@ -1334,7 +1357,7 @@ impl App {
     fn handle(&mut self, message: Message) {
         match message {
             // `update` runs these: they return tasks.
-            Message::Browser(_) | Message::Control(_) | Message::Located { .. } => {}
+            Message::Browser(_) | Message::Control(_) | Message::ControlFrame | Message::Located { .. } => {}
             Message::Key(_) if self.browser.is_some() => {}
             Message::Canvas(event) => self.canvas_event(event),
             Message::Param {
