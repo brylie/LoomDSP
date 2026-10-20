@@ -331,6 +331,50 @@ fn a_broken_copy_is_kept() {
     assert_eq!(fs::read_to_string(crashed.join("patch.ron")).unwrap(), "not a patch");
 }
 
+/// A copy that reads but does not load into the engine (here, an
+/// unknown module) is a failed restore: the error shows and the copy stays,
+/// also after autosave has run.
+#[test]
+fn a_copy_that_does_not_load_is_kept() {
+    let setup = Setup::new("noload");
+    let mut app = setup.boot(Some(setup.file()), &mut Answer::new(Choice::NotNow));
+    let crashed = edit_and_keep(&mut app);
+    drop(app);
+    let unknown = r#"Patch(version: 1, name: "x", modules: [PatchModule(id: 1, kind: "loom.no.such-module@1")])"#;
+    fs::write(crashed.join("patch.ron"), unknown).unwrap();
+    assert!(Patch::from_ron(unknown).is_ok(), "the copy reads");
+
+    let mut answer = Answer::new(Choice::Restore);
+    let mut app = setup.boot(None, &mut answer);
+    assert_eq!(answer.errors.len(), 1, "{:?}", answer.errors);
+    assert!(answer.errors[0].starts_with("Could not restore the unsaved changes: "));
+    assert_eq!(
+        app.title(),
+        "Untitled - LoomDSP",
+        "starts empty, not marked as restored"
+    );
+    let t0 = Instant::now();
+    for i in 0..10 {
+        app.autosave(t0 + recovery::QUIET * i);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(fs::read_to_string(crashed.join("patch.ron")).unwrap(), unknown, "kept");
+}
+
+/// Save As after restoring a copy whose file changed starts next to that
+/// file, under a name that does not replace it.
+#[test]
+fn save_as_after_a_changed_restore_starts_in_the_folder() {
+    let setup = Setup::new("hint");
+    let mut app = setup.boot(Some(setup.file()), &mut Answer::new(Choice::NotNow));
+    edit_and_keep(&mut app);
+    drop(app);
+    fs::remove_file(setup.file()).unwrap();
+    let app = setup.boot(None, &mut Answer::new(Choice::Restore));
+    assert_eq!(app.file, None);
+    assert_eq!(app.save_hint, Some(setup.tmp.0.join("drone (recovered).ron")));
+}
+
 /// Restore wins over a patch given on the command line, and says so.
 #[test]
 fn restore_replaces_the_command_line_patch() {

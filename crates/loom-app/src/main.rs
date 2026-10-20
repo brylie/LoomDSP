@@ -282,6 +282,9 @@ struct App {
     /// The title's name for a patch with no file, when it is not
     /// "Untitled": a restored copy whose file changed.
     shown_name: Option<String>,
+    /// Where Save As starts when there is no current file: next to a
+    /// restored copy's changed or missing file.
+    save_hint: Option<PathBuf>,
     /// The patch as it was last opened or saved, to tell unsaved work
     /// apart. `None` when nothing on disk holds this patch (a restored copy).
     saved_content: Option<Patch>,
@@ -431,15 +434,19 @@ impl App {
         // The file is checked after the answer: it can change while the
         // question is open.
         let mut restore_failed = false;
-        let recovered = restore.and_then(|orphan| match orphan.load() {
+        let mut restore_error = |e: &str, orphan: recovery::Orphan, notes: &mut Vec<String>| {
+            let message = format!(
+                "Could not restore the unsaved changes: {e}. The copy is kept at {}.",
+                orphan.patch_path().display()
+            );
+            prompt.error(&message);
+            notes.push(message);
+            // Dropping the orphan keeps its folder for a later start.
+        };
+        let mut recovered = restore.and_then(|orphan| match orphan.load() {
             Ok(patch) => Some((orphan.file_state(), orphan, patch)),
             Err(e) => {
-                let message = format!(
-                    "Could not restore the unsaved changes: {e}. The copy is kept at {}.",
-                    orphan.patch_path().display()
-                );
-                prompt.error(&message);
-                notes.push(message);
+                restore_error(&e, orphan, &mut notes);
                 restore_failed = true;
                 None
             }
@@ -458,7 +465,12 @@ impl App {
             ..EngineConfig::with_sample_rate(sample_rate)
         };
         let session = Self::session(config, source).unwrap_or_else(|e| {
-            status = e;
+            // A copy that reads but does not load (an unknown module) is a
+            // failed restore too: the orphan is kept, not adopted.
+            match recovered.take() {
+                Some((_, orphan, _)) => restore_error(&e, orphan, &mut notes),
+                None => status = e,
+            }
             Self::session(config, Source::Empty).expect("an empty patch always loads")
         });
         let mut app = Self::assemble(output, sample_rate, session, 1, &args, true);
@@ -491,7 +503,13 @@ impl App {
             }
             recovery::FileState::Changed(path) | recovery::FileState::Missing(path) => {
                 let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned());
-                self.shown_name = Some(format!("{} (recovered)", stem.as_deref().unwrap_or("Untitled")));
+                let name = format!("{} (recovered)", stem.as_deref().unwrap_or("Untitled"));
+                // Save As starts in the file's folder, under a name that
+                // does not replace it.
+                self.save_hint = path
+                    .parent()
+                    .map(|dir| dir.join(format!("{name}.{}", files::EXTENSION)));
+                self.shown_name = Some(name);
             }
             recovery::FileState::NeverSaved => {}
         }
@@ -673,6 +691,7 @@ impl App {
             file,
             stamp,
             shown_name: None,
+            save_hint: None,
             saved_content: None,
             recovery: None,
             generation,
@@ -751,6 +770,7 @@ impl App {
                 self.stamp = recovery::Stamp::of(&path);
                 self.file = Some(path);
                 self.shown_name = None;
+                self.save_hint = None;
                 self.history.mark_saved();
                 self.saved_content = Some(patch);
                 // The file holds the work now: the copy goes.
@@ -781,7 +801,7 @@ impl App {
 
     fn save_as(&mut self) -> bool {
         self.finish_edits();
-        match files::pick_save(self.file.as_deref()) {
+        match files::pick_save(self.file.as_deref().or(self.save_hint.as_deref())) {
             Some(path) => self.write_to(path),
             None => false,
         }

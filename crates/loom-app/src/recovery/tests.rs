@@ -96,6 +96,50 @@ fn writes_within_ten_seconds_while_changes_keep_coming() {
     assert!(after >= LONGEST - Duration::from_millis(500), "not early: {after:?}");
 }
 
+/// A gesture that never pauses writes every 10 s, not on every tick once
+/// the first 10 s are over.
+#[test]
+fn a_long_gesture_writes_every_ten_seconds() {
+    let mut s = Schedule::default();
+    let t0 = Instant::now();
+    let mut writes = Vec::new();
+    for i in 0..120u32 {
+        let now = t0 + TICK * i;
+        if let Some(Action::Write(p)) = s.tick(now, Some(patch(&format!("v{i}")))) {
+            writes.push(now - t0);
+            s.sent(i.into(), Some(p));
+            s.done(i.into(), true, now);
+        }
+    }
+    // Changes for 59.5 s: one write each 10 s, at 10 s to 50 s.
+    assert_eq!(writes.len(), 5, "{writes:?}");
+    for pair in writes.windows(2) {
+        assert!(pair[1] - pair[0] >= LONGEST, "{writes:?}");
+    }
+}
+
+/// A failed job may have changed the folder part way. Going back to what
+/// was on disk before still writes it again once the retry is due.
+#[test]
+fn after_a_failure_the_folder_is_not_trusted() {
+    let mut s = Schedule::default();
+    let t0 = Instant::now();
+    s.tick(t0, Some(patch("a")));
+    s.tick(t0 + QUIET, Some(patch("a")));
+    s.sent(1, Some(patch("a")));
+    s.done(1, true, t0 + QUIET);
+    // An edit to b fails, perhaps after patch.ron was replaced.
+    let t1 = t0 + QUIET * 2;
+    s.tick(t1, Some(patch("b")));
+    s.tick(t1 + QUIET, Some(patch("b")));
+    s.sent(2, Some(patch("b")));
+    s.done(2, false, t1 + QUIET);
+    // Undo back to a: the copy is written again, not taken as on disk.
+    let after = t1 + QUIET + RETRY;
+    s.tick(after, Some(patch("a")));
+    assert_eq!(s.tick(after + QUIET, Some(patch("a"))), Some(Action::Write(patch("a"))));
+}
+
 /// Nothing to keep and nothing on disk: nothing to do.
 #[test]
 fn no_unsaved_work_writes_nothing() {
@@ -280,6 +324,16 @@ fn an_unusable_folder_is_an_error() {
 }
 
 // --- The copy and its file ---
+
+/// A relative file path is kept as an absolute one, so a start from
+/// another folder still finds the file.
+#[test]
+fn info_keeps_an_absolute_path() {
+    let info = Info::new(Some(Path::new("drone.ron")), None, SystemTime::now());
+    let file = info.file.unwrap();
+    assert!(file.is_absolute(), "{}", file.display());
+    assert_eq!(file, std::env::current_dir().unwrap().join("drone.ron"));
+}
 
 /// `info.ron` round-trips, and times keep their full precision.
 #[test]

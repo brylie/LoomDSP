@@ -97,7 +97,8 @@ impl Info {
         let stamp = file.and(stamp);
         Self {
             version: 1,
-            file: file.map(Path::to_path_buf),
+            // Absolute, so a later start from another folder finds it.
+            file: file.map(|f| std::path::absolute(f).unwrap_or_else(|_| f.to_path_buf())),
             file_modified: stamp.and_then(|s| timestamp(s.modified)),
             file_size: stamp.map(|s| s.size),
             written: timestamp(written).unwrap_or_default(),
@@ -442,6 +443,11 @@ struct WriterState {
     busy: bool,
     stop: bool,
     done: Vec<(u64, Result<(), String>)>,
+    /// Set at clean exit: the session's lock, closed by the thread before
+    /// it deletes the folder.
+    finish: Option<File>,
+    /// True once the thread deleted the folder at clean exit.
+    finished: bool,
 }
 
 struct Shared {
@@ -478,6 +484,19 @@ impl Writer {
                             if state.stop {
                                 return;
                             }
+                            if let Some(lock) = state.finish.take() {
+                                drop(state);
+                                // On this thread, so a slow disk cannot
+                                // hold up the window closing.
+                                let _ = remove_copy(&dir);
+                                // Windows cannot delete a file that is still open.
+                                drop(lock);
+                                let deleted = fs::remove_dir_all(&dir).is_ok();
+                                let mut state = thread.lock();
+                                state.finished = deleted;
+                                thread.changed.notify_all();
+                                return;
+                            }
                             if let Some(job) = state.job.take() {
                                 state.busy = true;
                                 break job;
@@ -508,19 +527,21 @@ impl Writer {
         std::mem::take(&mut self.shared.lock().done)
     }
 
-    /// Stops the thread. Waits up to `wait` for a job in progress, and
-    /// returns false if it is still running.
-    fn stop(&self, wait: Duration) -> bool {
+    /// Clean exit: drops any job not started, lets the thread finish the
+    /// one in progress, then has it close `lock` and delete the folder.
+    /// Waits up to `wait` for all of that, and returns false if the folder
+    /// was not deleted in time.
+    fn finish(&self, lock: File, wait: Duration) -> bool {
         let mut state = self.shared.lock();
-        state.stop = true;
         state.job = None;
+        state.finish = Some(lock);
         self.shared.changed.notify_all();
         let (state, _) = self
             .shared
             .changed
-            .wait_timeout_while(state, wait, |s| s.busy)
+            .wait_timeout_while(state, wait, |s| !s.finished)
             .unwrap_or_else(PoisonError::into_inner);
-        !state.busy
+        state.finished
     }
 }
 
@@ -550,6 +571,9 @@ pub struct Schedule {
     first_unwritten: Option<Instant>,
     /// What the folder holds, as far as the writer reported.
     on_disk: Option<Patch>,
+    /// True after a failed job: it may have changed the folder part way,
+    /// so `on_disk` is not trusted until a job succeeds.
+    unknown: bool,
     /// The job sent and not yet reported, with its target.
     sending: Option<(u64, Option<Patch>)>,
     /// After a failure, no attempt before this time.
@@ -566,7 +590,7 @@ impl Schedule {
             self.last_change = Some(now);
             self.seen = Some(target.clone());
         }
-        if target == self.on_disk {
+        if !self.unknown && target == self.on_disk {
             self.first_unwritten = None;
             return None;
         }
@@ -585,6 +609,9 @@ impl Schedule {
                 let overdue = now.duration_since(first) >= LONGEST;
                 (quiet || overdue || self.write_now).then(|| {
                     self.write_now = false;
+                    // Changes made from here on wait at most another 10 s,
+                    // so a long gesture writes every 10 s, not every tick.
+                    self.first_unwritten = Some(now);
                     Action::Write(patch)
                 })
             }
@@ -608,8 +635,10 @@ impl Schedule {
         }
         if ok {
             self.on_disk = target;
+            self.unknown = false;
             self.retry_at = None;
         } else {
+            self.unknown = true;
             self.retry_at = Some(now + RETRY);
         }
     }
@@ -622,6 +651,8 @@ impl Schedule {
 
 /// This run's recovery folder, its lock, and its writer.
 pub struct Session {
+    /// The session folder. The writer owns the work on it; tests look in.
+    #[cfg(test)]
     dir: PathBuf,
     lock: Option<File>,
     writer: Writer,
@@ -637,6 +668,7 @@ impl Session {
     fn new(dir: PathBuf, lock: File, perform: Perform) -> Self {
         Self {
             writer: Writer::spawn(dir.clone(), perform),
+            #[cfg(test)]
             dir,
             lock: Some(lock),
             schedule: Schedule::default(),
@@ -698,21 +730,19 @@ impl Session {
         status
     }
 
-    /// Clean exit: stops the writer and deletes the folder. If a write is
-    /// still running after [`EXIT_WAIT`], leaves the folder for the next
-    /// start and returns false.
+    /// Clean exit: the writer finishes its job in progress and deletes the
+    /// folder. If that takes longer than [`EXIT_WAIT`] (a stuck write, a
+    /// slow disk), the app goes on without it: the folder is left for the
+    /// next start, and this returns false.
     pub fn finish(self) -> bool {
         self.finish_within(EXIT_WAIT)
     }
 
     fn finish_within(mut self, wait: Duration) -> bool {
-        if !self.writer.stop(wait) {
-            return false;
+        match self.lock.take() {
+            Some(lock) => self.writer.finish(lock, wait),
+            None => false,
         }
-        let _ = remove_copy(&self.dir);
-        // Windows cannot delete a file that is still open.
-        self.lock = None;
-        fs::remove_dir_all(&self.dir).is_ok()
     }
 }
 

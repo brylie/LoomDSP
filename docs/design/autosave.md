@@ -34,7 +34,7 @@ The desktop app keeps a recovery copy of the open patch while it has unsaved cha
 
 ### When autosave runs
 
-The app writes a recovery copy **2 seconds after the last change**. If changes keep coming without a 2 second pause (a long knob turn, a long drag), it writes anyway **10 seconds after the first change it has not written yet**. So at most about 10 seconds of work can be lost.
+The app writes a recovery copy **2 seconds after the last change**. If changes keep coming without a 2 second pause (a long knob turn, a long drag), it writes anyway **10 seconds after the first change it has not written yet**. So at most about 10 seconds of work can be lost. A gesture that never pauses is written every 10 seconds: each write starts the 10 seconds again.
 
 | Value | Setting |
 |---|---|
@@ -83,7 +83,7 @@ Inside it, one `scan.lock` file that instances lock briefly at start (see How th
 
 | Field | Meaning |
 |---|---|
-| `file` | The current file when the copy was taken, or `None` for a patch never saved. |
+| `file` | The current file when the copy was taken, as an absolute path, or `None` for a patch never saved. *Why absolute:* the next start may run from another folder. |
 | `file_modified` | The modification time of the current file when the session last opened or saved it. `None` when there is no current file. |
 | `file_size` | The size in bytes of the current file at that moment. `None` when there is no current file. |
 | `written` | When the copy was written. |
@@ -178,10 +178,10 @@ If `file` no longer exists, the question adds: `"drone.ron" no longer exists.` R
 
 - The status bar says `Restored unsaved changes from 20 October, 14:31.`
 - The patch is **always marked unsaved**. *Why:* it differs from what is on disk, or there is nothing on disk. The mark tells the player to save it.
-- It **keeps its file path** only when the file is unchanged since the copy's session last touched it. Then Save writes the recovered work where the player expects. Otherwise there is no current file, and Save acts as Save As, starting in the file's folder.
+- It **keeps its file path** only when the file is unchanged since the copy's session last touched it. Then Save writes the recovered work where the player expects. Otherwise there is no current file, and Save acts as Save As, starting in the file's folder with the name `drone (recovered).ron`, so the changed file is not offered for replacing.
 - The undo history is empty. *Why:* the history is not saved in the copy. The patch counts as changed, as after `History::clear` ([files.md](files.md#what-counts-as-an-unsaved-change)).
 - Positions come from the copy, as for Open. Selection, pan, and zoom are reset.
-- Restore builds a new engine and controller, as Open does ([files.md](files.md#open-replaces-the-patch)). If the copy does not load, the app shows `Could not restore the unsaved changes: <the patch error>. The copy is kept at <path to patch.ron>.`, keeps the orphan folder, and starts empty.
+- Restore builds a new engine and controller, as Open does ([files.md](files.md#open-replaces-the-patch)). If the copy does not load (it does not read, or it reads but names a module or parameter the app does not know), the app shows `Could not restore the unsaved changes: <the patch error>. The copy is kept at <path to patch.ron>.`, keeps the orphan folder, and starts empty.
 
 **The orphan is deleted only after the new session has its own copy.** Right after a successful restore, the app writes the new session's recovery copy at once (no 2 second wait), and deletes the orphan folder when that write succeeds. *Why:* if the app crashes again during the restore, the work must still be somewhere.
 
@@ -214,11 +214,13 @@ If the recovery folder cannot be created or locked at start, autosave is off for
 
 On window close or quit, after any "Save changes?" question ([files.md](files.md#asking-before-losing-work)):
 
-1. the app stops the writer thread and waits up to 2 seconds for its current write, if any, to finish. If the write is still running after that, the app exits at once and skips steps 2 and 3. The session folder stays behind as an orphan. At the next start it is deleted without a question if it holds no `patch.ron`, and offered as usual if it does;
+1. the writer thread drops any job it has not started and finishes the one in progress, if any;
 2. it deletes `info.ron`, then `patch.ron`;
 3. it closes the `lock` file, which releases the lock, and deletes the session folder.
 
-*Why the 2 second limit:* a write can hang on a slow or network disk, and closing the app must never hang with it. Leaving the folder is safe: it holds either the old copy or the new one (the rename is atomic), and at worst the player sees one extra question at the next start. *Why this order:* Windows cannot delete a file that is still open, so the lock is closed before the folder goes. The copy is deleted first, so another instance that takes the free lock in that moment finds no `patch.ron` and only removes an empty folder.
+The app waits up to 2 seconds for all three steps. If they are not done by then, it exits anyway. The session folder stays behind as an orphan. At the next start it is deleted without a question if it holds no `patch.ron`, and offered as usual if it does.
+
+*Why the 2 second limit, and why on the writer thread:* a write or a delete can hang on a slow or network disk, and closing the app must never hang with it. Leaving the folder is safe: it holds either the old copy or the new one (the rename is atomic), and at worst the player sees one extra question at the next start. *Why this order:* Windows cannot delete a file that is still open, so the lock is closed before the folder goes. The copy is deleted first, so another instance that takes the free lock in that moment finds no `patch.ron` and only removes an empty folder.
 
 **Don't Save** counts as a clean exit: the user chose to drop the changes, so the copy goes with them. **Cancel** keeps the app open and changes nothing. If deleting the folder fails, the next start finds an orphan; if it holds a `patch.ron`, the user is asked about it. *Why:* a leftover question is better than lost work.
 
