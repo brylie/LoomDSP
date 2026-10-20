@@ -477,7 +477,7 @@ pub fn render(
     Ok(Headless::screenshot(&mut renderer, size, scale, palette.background))
 }
 
-fn write_png(path: &Path, size: Size<u32>, rgba: &[u8]) -> Result<(), String> {
+pub(crate) fn write_png(path: &Path, size: Size<u32>, rgba: &[u8]) -> Result<(), String> {
     let error = |e: &dyn std::fmt::Display| format!("cannot write {}: {e}", path.display());
     let file = std::fs::File::create(path).map_err(|e| error(&e))?;
     let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), size.width, size.height);

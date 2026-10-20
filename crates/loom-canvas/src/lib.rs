@@ -22,8 +22,8 @@ mod widget;
 pub use camera::{Camera, MAX_ZOOM, MIN_ZOOM};
 pub use controls::{ModulationMark, PanelValues, WidgetValue};
 pub use scene::{
-    CableView, GRID, Hit, HoverText, LABEL_COLUMNS, ModulationView, ModuleView, PanelView, PortRef, PortShape,
-    PortView, Scene, TILE_WIDTH, WidgetView, WidgetViewKind, fit_label, snap, tile_size,
+    CableView, GRID, Hit, HoverText, LABEL_COLUMNS, ModulationView, ModuleView, PORT_HIT_RADIUS, PanelView, PortRef,
+    PortShape, PortView, Scene, TILE_WIDTH, WidgetView, WidgetViewKind, fit_label, snap, tile_size,
 };
 pub use theme::Palette;
 pub use widget::{CanvasEvent, CanvasView, LearnView, PatchCanvas, Still, StillDrag};

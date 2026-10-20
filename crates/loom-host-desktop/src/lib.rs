@@ -242,6 +242,8 @@ impl AudioOutput {
             stats.clone(),
             tap,
         );
+        // A late block on the clock cannot be heard: it is not a dropout.
+        render.count_overruns = matches!(self.kind, Kind::Device { .. });
 
         let player = match self.kind {
             Kind::Device { device, config } => {
@@ -280,6 +282,8 @@ struct Render {
     sample_rate: f64,
     stats: Arc<CallbackStats>,
     tap: Option<Tap>,
+    /// Count blocks that took longer than their duration as overruns.
+    count_overruns: bool,
 }
 
 /// Frames the scratch buffers hold. Larger device buffers are rendered in
@@ -297,6 +301,7 @@ impl Render {
             sample_rate: f64::from(sample_rate),
             stats,
             tap,
+            count_overruns: true,
         }
     }
 
@@ -329,7 +334,7 @@ impl Render {
 
         let budget = frames as f64 / self.sample_rate;
         let load = started.elapsed().as_secs_f64() / budget.max(1e-9);
-        self.stats.record(frames, load);
+        self.stats.record(frames, load, self.count_overruns);
     }
 }
 
@@ -461,13 +466,13 @@ pub struct StatsSnapshot {
 }
 
 impl CallbackStats {
-    fn record(&self, frames: usize, load: f64) {
+    fn record(&self, frames: usize, load: f64, count_overrun: bool) {
         let permille = (load * 1000.0) as u64;
         self.callbacks.fetch_add(1, Ordering::Relaxed);
         self.frames.fetch_add(frames as u64, Ordering::Relaxed);
         self.last_load_permille.store(permille, Ordering::Relaxed);
         self.max_load_permille.fetch_max(permille, Ordering::Relaxed);
-        if load > 1.0 {
+        if count_overrun && load > 1.0 {
             self.overruns.fetch_add(1, Ordering::Relaxed);
         }
         let frames = frames as u64;

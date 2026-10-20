@@ -8,6 +8,7 @@ mod alerts;
 mod bench;
 mod browser;
 mod clipboard;
+mod control;
 mod files;
 mod inspector;
 mod layout;
@@ -64,6 +65,9 @@ struct Args {
     /// Measuring the frame rate: --bench, --measure, --bench-seconds.
     #[command(flatten)]
     bench: bench::Options,
+    /// The control channel: --control, --control-script.
+    #[command(flatten)]
+    control: control::Options,
     /// Safety stage on the output: low-latency, clean, or off (ADR-0019).
     /// A command-line flag until the app has preferences.
     #[arg(long, default_value_t = OutputSafety::LowLatency)]
@@ -144,6 +148,14 @@ enum Message {
     Measure(bool),
     /// The --bench-seconds run is over.
     BenchDone,
+    /// A command from the control channel.
+    Control(control::Call),
+    /// The window was searched for a `locate` command.
+    Located {
+        call: control::Call,
+        target: String,
+        found: control::Found,
+    },
     Animate(bool),
     Frame(Instant),
     Tick,
@@ -278,6 +290,9 @@ struct App {
     /// The stdout report, when started with --bench, --measure, or
     /// --measure-idle.
     reporter: Option<bench::Reporter>,
+    /// The control channel's listeners. While there are any, errors go to
+    /// the status bar and the reply, not to a dialog.
+    control: Vec<control::Listener>,
     measuring: bool,
     animating: bool,
     /// MIDI learn mode (`docs/design/midi-learn.md`).
@@ -507,6 +522,7 @@ impl App {
             frame_key: 0,
             meter: bench::FrameMeter::default(),
             reporter: args.bench.reporter(),
+            control: args.control.listeners(),
             measuring: args.bench.redraws(),
             animating: args.bench.bench,
             learning: false,
@@ -554,7 +570,7 @@ impl App {
                     "Could not save \"{}\": {e}. Your changes are not saved.",
                     files::display_name(Some(&path))
                 );
-                files::show_error(&message);
+                self.show_error(&message);
                 self.status = message;
                 false
             }
@@ -622,7 +638,7 @@ impl App {
             let message = format!(
                 "Could not open the patch: the audio device is not available ({e}). The current patch is unchanged."
             );
-            files::show_error(&message);
+            self.show_error(&message);
             self.status = message;
             return false;
         }
@@ -638,7 +654,7 @@ impl App {
             Ok(session) => session,
             Err(e) => {
                 let message = format!("Could not open the patch: {e}. The current patch is unchanged.");
-                files::show_error(&message);
+                self.show_error(&message);
                 self.status = message;
                 return false;
             }
@@ -659,6 +675,7 @@ impl App {
                 measure: self.measuring,
                 ..Default::default()
             },
+            control: control::Options::default(),
             output_safety: self.output_safety,
             view: screenshot::Options::default(),
             dump_ui: false,
@@ -667,6 +684,7 @@ impl App {
         let mut fresh = Self::assemble(output, sample_rate, session, self.generation + 1, &args, true);
         fresh.animating = self.animating;
         fresh.reporter = self.reporter.take();
+        fresh.control = std::mem::take(&mut self.control);
         // The canvas keeps its state across the rebuild and compares these
         // keys with the ones it saw: they must keep counting up. A new frame
         // key also resets pan and zoom to show the whole patch.
@@ -674,6 +692,15 @@ impl App {
         fresh.frame_key = self.frame_key + 1;
         *self = fresh;
         true
+    }
+
+    /// Tells the user that something failed, in a dialog, unless the
+    /// control channel is on: a dialog would stop the app with nobody to
+    /// close it (`docs/design/control-channel.md`, rule 9).
+    fn show_error(&self, message: &str) {
+        if self.control.is_empty() {
+            files::show_error(message);
+        }
     }
 
     fn new_patch(&mut self) {
@@ -724,19 +751,27 @@ impl App {
         };
         let telemetry = Subscription::run_with(self.monitor.clone(), monitor::stream).map(Message::Meters);
         let close = iced::window::close_requests().map(|_| Message::CloseRequested);
+        let control = self
+            .control
+            .iter()
+            .map(|listener| Subscription::run_with(listener.clone(), control::stream).map(Message::Control));
         let report = match &self.reporter {
             Some(reporter) => Subscription::run_with(reporter.clone(), bench::stream).map(|()| Message::BenchDone),
             None => Subscription::none(),
         };
-        Subscription::batch([
-            main,
-            live,
-            self.light_watch(),
-            telemetry,
-            self.midi_watch(),
-            close,
-            report,
-        ])
+        Subscription::batch(
+            [
+                main,
+                live,
+                self.light_watch(),
+                telemetry,
+                self.midi_watch(),
+                close,
+                report,
+            ]
+            .into_iter()
+            .chain(control),
+        )
     }
 
     /// Wakes the UI when control changes arrive, while there is something to
@@ -1241,6 +1276,11 @@ impl App {
                     generation,
                 })
             }
+            Message::Control(call) => self.control(call),
+            Message::Located { call, target, found } => {
+                self.located(&call, &target, &found);
+                Task::none()
+            }
             message if self.clipboard_key(&message).is_some() => self.clipboard_command(&message),
             message => {
                 self.handle(message);
@@ -1249,8 +1289,9 @@ impl App {
         };
         if self.quit {
             // Stop audio now, so a recording is closed before the process
-            // ends.
+            // ends, and leave no control socket behind.
             self._audio = None;
+            control::close(&self.control);
             Task::batch([task, iced::exit()])
         } else if !was_open && self.browser.is_some() {
             Task::batch([task, browser::Browser::focus()])
@@ -1292,7 +1333,8 @@ impl App {
 
     fn handle(&mut self, message: Message) {
         match message {
-            Message::Browser(_) => {}
+            // `update` runs these: they return tasks.
+            Message::Browser(_) | Message::Control(_) | Message::Located { .. } => {}
             Message::Key(_) if self.browser.is_some() => {}
             Message::Canvas(event) => self.canvas_event(event),
             Message::Param {
@@ -2026,7 +2068,7 @@ mod tests {
         App::new(app_args())
     }
 
-    fn app_args() -> Args {
+    pub(crate) fn app_args() -> Args {
         Args {
             patch: None,
             generate: None,
@@ -2034,6 +2076,7 @@ mod tests {
             fake_audio: false,
             record: None,
             bench: bench::Options::default(),
+            control: control::Options::default(),
             output_safety: OutputSafety::LowLatency,
             view: screenshot::Options::default(),
             dump_ui: false,

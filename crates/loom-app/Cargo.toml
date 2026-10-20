@@ -28,10 +28,11 @@ serde_json.workspace = true
 iced = { workspace = true, features = ["smol"] }
 clap.workspace = true
 rfd.workspace = true
+# Runs widget operations on the live window, for the control channel.
+iced_runtime.workspace = true
 
 [dev-dependencies]
 hound.workspace = true
-iced_runtime.workspace = true
 
 [lints]
 workspace = true

@@ -98,6 +98,7 @@ impl Ui {
             fake_audio: false,
             record: None,
             bench: crate::bench::Options::default(),
+            control: crate::control::Options::default(),
             output_safety: OutputSafety::LowLatency,
             view: screenshot::Options::default(),
             dump_ui: false,
