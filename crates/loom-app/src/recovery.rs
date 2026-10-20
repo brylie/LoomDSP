@@ -446,8 +446,9 @@ struct WriterState {
     /// Set at clean exit: the session's lock, closed by the thread before
     /// it deletes the folder.
     finish: Option<File>,
-    /// True once the thread deleted the folder at clean exit.
-    finished: bool,
+    /// Set once the thread ended its clean-exit work: true if it deleted
+    /// the folder. A failed delete ends the wait too.
+    finished: Option<bool>,
 }
 
 struct Shared {
@@ -493,7 +494,7 @@ impl Writer {
                                 drop(lock);
                                 let deleted = fs::remove_dir_all(&dir).is_ok();
                                 let mut state = thread.lock();
-                                state.finished = deleted;
+                                state.finished = Some(deleted);
                                 thread.changed.notify_all();
                                 return;
                             }
@@ -539,9 +540,9 @@ impl Writer {
         let (state, _) = self
             .shared
             .changed
-            .wait_timeout_while(state, wait, |s| !s.finished)
+            .wait_timeout_while(state, wait, |s| s.finished.is_none())
             .unwrap_or_else(PoisonError::into_inner);
-        state.finished
+        state.finished == Some(true)
     }
 }
 

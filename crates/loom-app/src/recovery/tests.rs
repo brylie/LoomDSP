@@ -534,6 +534,21 @@ fn failures_are_reported_once() {
     assert!(session.finish());
 }
 
+/// A folder that cannot be deleted at exit ends the wait at once, not
+/// after the full 2 s.
+#[test]
+fn a_failed_cleanup_does_not_wait() {
+    let root = TempDir::new("cleanup");
+    let Startup { session, .. } = start(&root.0).unwrap();
+    let dir = session.dir.clone();
+    // A file in place of the folder: remove_dir_all fails on it.
+    fs::remove_dir_all(&dir).unwrap();
+    fs::write(&dir, "not a folder").unwrap();
+    let t = Instant::now();
+    assert!(!session.finish());
+    assert!(t.elapsed() < Duration::from_secs(1), "{:?}", t.elapsed());
+}
+
 /// A write that never finishes does not hold up the exit, and the folder
 /// is left for the next start.
 #[test]
