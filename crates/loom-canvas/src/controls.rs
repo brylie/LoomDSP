@@ -147,6 +147,7 @@ pub(crate) struct ControlGeometry {
 
 impl ControlGeometry {
     pub fn build(scene: &Scene, values: &PanelValues, palette: &Palette) -> Self {
+        crate::stats::count(crate::stats::Counter::ControlBuilds);
         let mut arcs = Vec::new();
         let mut shapes = Vec::new();
         for module in scene.modules() {

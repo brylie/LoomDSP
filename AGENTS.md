@@ -32,6 +32,7 @@ cargo run --release -p loom-cli -- render examples/patches/subtractive.ron -o /t
 cargo run --release -p loom-app -- examples/patches/fm-feedback.ron   # desktop app
 cargo run --release -p loom-app -- --generate 300 --bench            # canvas frame-rate test
 cargo run --release -p loom-app -- examples/patches/fm-feedback.ron --measure --bench-seconds 10   # frame rate as text, camera still, then exit
+cargo run --release -p loom-app -- examples/patches/subtractive.ron --measure-idle --bench-seconds 10   # frames the idle app draws, with rebuild counts
 scripts/bundle-macos.sh                                              # LoomDSP.app, so macOS automation tools can drive the window
 cargo run --release -p loom-app -- examples/patches/subtractive.ron --screenshot /tmp/canvas.png   # canvas to PNG, no window
 cargo run --release -p loom-app -- examples/patches/subtractive.ron --screenshot /tmp/knob.png --zoom 2 --scale 2 --focus 4:cutoff

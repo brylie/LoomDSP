@@ -428,6 +428,26 @@ mod tests {
         assert_eq!(ui.app.controller.graph().cables().count(), cables + 1);
     }
 
+    /// Turning a knob on a tile builds the panel controls again, but never
+    /// the tiles, ports, and cables (ADR-0010). The counters are this
+    /// thread's, so other tests running at the same time do not count.
+    #[test]
+    fn turning_a_knob_builds_only_the_controls() {
+        use loom_canvas::stats::RenderCounts;
+        let mut ui = Ui::open("subtractive.ron");
+        let cutoff = |ui: &Ui| ui.app.controller.graph().node(ModuleId(4)).expect("filter").params[0];
+        let before_value = cutoff(&ui);
+        let before = RenderCounts::this_thread();
+
+        let knob = ui.control(4, "cutoff");
+        ui.drag(knob, Point::new(knob.x, knob.y - 40.0), 8);
+
+        let after = RenderCounts::this_thread();
+        assert_ne!(cutoff(&ui), before_value, "the drag turned the knob");
+        assert!(after.control_builds > before.control_builds, "{before:?} -> {after:?}");
+        assert_eq!(after.scene_builds, before.scene_builds, "{before:?} -> {after:?}");
+    }
+
     /// Ctrl+Z (Cmd+Z on macOS) reaches the app through the canvas and
     /// undoes the cable the drag made.
     #[test]

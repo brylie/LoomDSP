@@ -14,6 +14,7 @@ mod controls;
 mod gpu;
 mod hover;
 mod scene;
+pub mod stats;
 mod theme;
 mod tile_text;
 mod widget;

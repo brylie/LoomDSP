@@ -1,12 +1,18 @@
-//! Frame-rate measurement: the stats bar numbers, and the same numbers as
-//! text on stdout for scripts and agents.
+//! Frame-rate measurement: the stats bar numbers, and a report on stdout
+//! for scripts and agents.
 //!
-//! `--bench` measures with the camera moving and `--measure` with it
-//! still. Both redraw every frame, print one line a second, and with
-//! `--bench-seconds` exit after a set time with a final line. The method
-//! and results are in `docs/benchmarks/p1-canvas.md`.
+//! `--bench` redraws every frame with the camera moving, `--measure` with
+//! it still, and `--measure-idle` draws only what the app would draw
+//! anyway. All three print one line a second from the canvas counters
+//! (`loom_canvas::stats`), and with `--bench-seconds` exit after a set time
+//! with a final line. The method and results are in
+//! `docs/benchmarks/p1-canvas.md`.
 
+use iced::futures::Stream;
+use iced::futures::channel::mpsc;
+use loom_canvas::stats::{self, RenderCounts};
 use std::collections::VecDeque;
+use std::hash::{Hash, Hasher};
 use std::time::{Duration, Instant};
 
 /// Command-line options for measuring the frame rate.
@@ -23,16 +29,27 @@ pub struct Options {
     /// drawing the patch as it is.
     #[arg(long, group = "measuring")]
     pub measure: bool,
-    /// With --bench or --measure: exit after this many seconds, with a
-    /// final summary line.
+    /// Print the same numbers without forcing a redraw: counts only the
+    /// frames the app draws by itself. An idle patch should draw none.
+    #[arg(long, group = "measuring")]
+    pub measure_idle: bool,
+    /// With --bench, --measure, or --measure-idle: exit after this many
+    /// seconds, with a final summary line.
     #[arg(long, value_name = "N", requires = "measuring")]
     pub bench_seconds: Option<f64>,
 }
 
 impl Options {
-    /// True when the app starts measuring.
-    pub fn measuring(&self) -> bool {
+    /// True when the app redraws every frame from the start.
+    pub fn redraws(&self) -> bool {
         self.bench || self.measure
+    }
+
+    /// The stdout report, when one of the flags asks for it.
+    pub fn reporter(&self) -> Option<Reporter> {
+        (self.bench || self.measure || self.measure_idle).then(|| Reporter {
+            seconds: self.bench_seconds.map(|s| Duration::from_secs_f64(s.max(0.0))),
+        })
     }
 }
 
@@ -52,18 +69,10 @@ impl Stats {
             self.fps, self.average_ms, self.worst_ms
         )
     }
-
-    /// One stdout line: `key=value` pairs, so a script can split on spaces
-    /// and `=`.
-    pub fn line(&self) -> String {
-        format!(
-            "fps={:.1} avg_ms={:.2} worst_ms={:.2}",
-            self.fps, self.average_ms, self.worst_ms
-        )
-    }
 }
 
-/// Frame timing over the last second, and the worst frame since the start.
+/// Frame timing for the stats bar: the last second, and the worst frame
+/// since the start.
 #[derive(Default)]
 pub struct FrameMeter {
     times: VecDeque<Instant>,
@@ -102,134 +111,164 @@ impl FrameMeter {
     }
 }
 
-/// Prints the meter's numbers once a second, and says when the run is over.
-pub struct Report {
-    start: Instant,
-    next: Instant,
-    end: Option<Instant>,
-    /// Frames after the warm-up: the first and the last, and how many.
-    first: Option<Instant>,
-    last: Option<Instant>,
-    frames: u64,
-    seen: u64,
+/// Prints a line a second to stdout from its own thread, and ends the run
+/// after `--bench-seconds`.
+///
+/// It reads the canvas counters and sends the app nothing until the run
+/// ends: in Iced every message redraws the window, so a timer in the app
+/// would add the very frames an idle measurement looks for.
+#[derive(Debug, Clone)]
+pub struct Reporter {
+    seconds: Option<Duration>,
 }
 
-impl Report {
-    /// A report for these options, or `None` when the app does not measure
-    /// from the command line.
-    pub fn new(options: &Options, now: Instant) -> Option<Self> {
-        options.measuring().then(|| Self {
-            start: now,
-            next: now + Duration::from_secs(1),
-            end: options.bench_seconds.map(|s| now + Duration::from_secs_f64(s.max(0.0))),
-            first: None,
-            last: None,
-            frames: 0,
-            seen: 0,
-        })
+impl Hash for Reporter {
+    // One report per run: opening another patch keeps it going.
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        "loom-app bench report".hash(state);
     }
+}
 
-    /// Counts a frame. Returns a line to print when a second has passed.
-    pub fn frame(&mut self, meter: &FrameMeter, now: Instant) -> Option<String> {
-        self.seen += 1;
-        if self.seen > WARM_UP {
-            self.first.get_or_insert(now);
-            self.last = Some(now);
-            self.frames += 1;
-        }
-        (now >= self.next).then(|| {
-            // Skip any whole seconds without a frame, so the lines do not
-            // come in a burst after a stall.
-            while self.next <= now {
-                self.next += Duration::from_secs(1);
+/// Runs the report. Yields once, when `--bench-seconds` have passed.
+pub fn stream(reporter: &Reporter) -> impl Stream<Item = ()> + use<> {
+    let (mut tx, rx) = mpsc::channel(1);
+    let seconds = reporter.seconds;
+    std::thread::spawn(move || {
+        let start = Instant::now();
+        let first = RenderCounts::process();
+        let end = seconds.map(|s| start + s);
+        // The final line starts from the first line, so start-up work is
+        // left out of its averages.
+        let mut settled: Option<(Instant, RenderCounts)> = None;
+        let mut last = (start, first);
+        let mut next = start + Duration::from_secs(1);
+        loop {
+            let wake = end.map_or(next, |end| next.min(end));
+            std::thread::sleep(wake.saturating_duration_since(Instant::now()));
+            if tx.is_closed() {
+                return;
             }
-            meter.stats().line()
-        })
-    }
+            let now = Instant::now();
+            let counts = RenderCounts::process();
+            if end.is_some_and(|end| now >= end) {
+                let (from, at) = settled.unwrap_or((start, first));
+                println!("final {}", line(&Window::new(first, at, counts, now - from)));
+                let _ = tx.try_send(());
+                return;
+            }
+            println!("{}", line(&Window::new(first, last.1, counts, now - last.0)));
+            settled.get_or_insert((now, counts));
+            last = (now, counts);
+            next += Duration::from_secs(1);
+        }
+    });
+    rx
+}
 
-    /// True once `--bench-seconds` have passed.
-    pub fn done(&self, now: Instant) -> bool {
-        self.end.is_some_and(|end| now >= end)
-    }
+/// What a report line describes: frames over a stretch of time, and the
+/// totals since the report started.
+struct Window {
+    frames: u64,
+    elapsed: Duration,
+    totals: RenderCounts,
+    worst: Duration,
+}
 
-    /// The final line: averages over the whole run after the warm-up.
-    pub fn summary(&self, meter: &FrameMeter, now: Instant) -> String {
-        let intervals = self.frames.saturating_sub(1);
-        let span = match (self.first, self.last) {
-            (Some(first), Some(last)) => (last - first).as_secs_f64(),
-            _ => 0.0,
-        };
-        let (fps, average_ms) = if intervals > 0 && span > 0.0 {
-            (intervals as f64 / span, span * 1000.0 / intervals as f64)
-        } else {
-            (0.0, 0.0)
-        };
-        let total = Stats {
-            fps,
-            average_ms,
-            worst_ms: meter.stats().worst_ms,
-        };
-        format!(
-            "final {} frames={} seconds={:.1}",
-            total.line(),
-            self.frames,
-            (now - self.start).as_secs_f64()
-        )
+impl Window {
+    /// `start` is when the report began, `from` the start of this stretch,
+    /// and `now` its end.
+    fn new(start: RenderCounts, from: RenderCounts, now: RenderCounts, elapsed: Duration) -> Self {
+        Self {
+            frames: now.frames - from.frames,
+            elapsed,
+            totals: since(start, now),
+            worst: stats::longest_frame_gap(),
+        }
     }
+}
+
+fn since(a: RenderCounts, b: RenderCounts) -> RenderCounts {
+    RenderCounts {
+        frames: b.frames - a.frames,
+        scene_builds: b.scene_builds - a.scene_builds,
+        control_builds: b.control_builds - a.control_builds,
+        scene_uploads: b.scene_uploads - a.scene_uploads,
+        control_uploads: b.control_uploads - a.control_uploads,
+        overlay_uploads: b.overlay_uploads - a.overlay_uploads,
+    }
+}
+
+/// One stdout line: `key=value` pairs, so a script can split on spaces and
+/// `=`. `fps` and `avg_ms` cover the stretch; `worst_ms` is the longest gap
+/// between two frames since the start; the counts are totals since the
+/// report started.
+fn line(w: &Window) -> String {
+    let seconds = w.elapsed.as_secs_f64();
+    let fps = if seconds > 0.0 { w.frames as f64 / seconds } else { 0.0 };
+    let average_ms = if w.frames > 0 {
+        seconds * 1000.0 / w.frames as f64
+    } else {
+        0.0
+    };
+    let t = &w.totals;
+    format!(
+        "fps={fps:.1} avg_ms={average_ms:.2} worst_ms={:.2} frames={} scene_builds={} control_builds={} \
+         scene_uploads={} control_uploads={} overlay_uploads={}",
+        w.worst.as_secs_f64() * 1000.0,
+        t.frames,
+        t.scene_builds,
+        t.control_builds,
+        t.scene_uploads,
+        t.control_uploads,
+        t.overlay_uploads
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Feeds frames 10 ms apart, starting at `start`.
-    fn run(meter: &mut FrameMeter, report: &mut Report, start: Instant, count: u32) -> Vec<String> {
-        (0..count)
-            .filter_map(|i| {
-                let now = start + Duration::from_millis(10 * u64::from(i));
-                meter.record(now);
-                report.frame(meter, now)
-            })
-            .collect()
-    }
-
     #[test]
-    fn prints_a_line_a_second_in_a_stable_form() {
-        let start = Instant::now();
-        let options = Options {
-            measure: true,
-            ..Default::default()
+    fn a_line_is_key_value_pairs() {
+        let w = Window {
+            frames: 120,
+            elapsed: Duration::from_secs(1),
+            totals: RenderCounts {
+                frames: 600,
+                scene_builds: 1,
+                control_builds: 2,
+                scene_uploads: 1,
+                control_uploads: 2,
+                overlay_uploads: 0,
+            },
+            worst: Duration::from_millis(9),
         };
-        let mut report = Report::new(&options, start).unwrap();
-        let mut meter = FrameMeter::default();
-        let lines = run(&mut meter, &mut report, start, 350);
-        assert_eq!(lines.len(), 3);
-        assert_eq!(lines[1], "fps=100.0 avg_ms=10.00 worst_ms=10.00");
-        assert!(!report.done(start + Duration::from_secs(60)));
-    }
-
-    #[test]
-    fn ends_after_the_given_seconds_with_a_summary() {
-        let start = Instant::now();
-        let options = Options {
-            bench: true,
-            bench_seconds: Some(2.0),
-            ..Default::default()
-        };
-        let mut report = Report::new(&options, start).unwrap();
-        let mut meter = FrameMeter::default();
-        run(&mut meter, &mut report, start, 201);
-        let end = start + Duration::from_secs(2);
-        assert!(report.done(end));
-        assert!(!report.done(end - Duration::from_millis(1)));
         assert_eq!(
-            report.summary(&meter, end),
-            "final fps=100.0 avg_ms=10.00 worst_ms=10.00 frames=191 seconds=2.0"
+            line(&w),
+            "fps=120.0 avg_ms=8.33 worst_ms=9.00 frames=600 scene_builds=1 control_builds=2 \
+             scene_uploads=1 control_uploads=2 overlay_uploads=0"
         );
     }
 
     #[test]
-    fn no_report_without_a_flag() {
-        assert!(Report::new(&Options::default(), Instant::now()).is_none());
+    fn an_idle_line_has_no_frames() {
+        let w = Window {
+            frames: 0,
+            elapsed: Duration::from_secs(1),
+            totals: RenderCounts::default(),
+            worst: Duration::ZERO,
+        };
+        assert!(line(&w).starts_with("fps=0.0 avg_ms=0.00 worst_ms=0.00 frames=0 "));
+    }
+
+    #[test]
+    fn report_only_with_a_flag() {
+        assert!(Options::default().reporter().is_none());
+        let idle = Options {
+            measure_idle: true,
+            ..Default::default()
+        };
+        assert!(idle.reporter().is_some());
+        assert!(!idle.redraws());
     }
 }

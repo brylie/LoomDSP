@@ -133,6 +133,8 @@ enum Message {
     /// The window asked to close.
     CloseRequested,
     Measure(bool),
+    /// The --bench-seconds run is over.
+    BenchDone,
     Animate(bool),
     Frame(Instant),
     Tick,
@@ -263,8 +265,9 @@ struct App {
     browser_key: u64,
     frame_key: u64,
     meter: bench::FrameMeter,
-    /// Frame-rate lines on stdout, when started with --bench or --measure.
-    report: Option<bench::Report>,
+    /// The stdout report, when started with --bench, --measure, or
+    /// --measure-idle.
+    reporter: Option<bench::Reporter>,
     measuring: bool,
     animating: bool,
     /// MIDI learn mode (`docs/design/midi-learn.md`).
@@ -486,8 +489,8 @@ impl App {
             browser_key: 0,
             frame_key: 0,
             meter: bench::FrameMeter::default(),
-            report: bench::Report::new(&args.bench, Instant::now()),
-            measuring: args.bench.measuring(),
+            reporter: args.bench.reporter(),
+            measuring: args.bench.redraws(),
             animating: args.bench.bench,
             learning: false,
             armed: None,
@@ -643,7 +646,7 @@ impl App {
         };
         let mut fresh = Self::assemble(output, sample_rate, session, self.generation + 1, &args, true);
         fresh.animating = self.animating;
-        fresh.report = self.report.take();
+        fresh.reporter = self.reporter.take();
         // The canvas keeps its state across the rebuild and compares these
         // keys with the ones it saw: they must keep counting up. A new frame
         // key also resets pan and zoom to show the whole patch.
@@ -701,7 +704,19 @@ impl App {
         };
         let telemetry = Subscription::run_with(self.monitor.clone(), monitor::stream).map(Message::Meters);
         let close = iced::window::close_requests().map(|_| Message::CloseRequested);
-        Subscription::batch([main, live, self.light_watch(), telemetry, self.midi_watch(), close])
+        let report = match &self.reporter {
+            Some(reporter) => Subscription::run_with(reporter.clone(), bench::stream).map(|()| Message::BenchDone),
+            None => Subscription::none(),
+        };
+        Subscription::batch([
+            main,
+            live,
+            self.light_watch(),
+            telemetry,
+            self.midi_watch(),
+            close,
+            report,
+        ])
     }
 
     /// Wakes the UI when control changes arrive, while there is something to
@@ -873,24 +888,6 @@ impl App {
         }
         let dragging = self.depth_drag.flatten();
         scene::update_panel_values_dragging(&mut self.values, &self.controller, &shown, dragging);
-    }
-
-    /// Prints the frame-meter line once a second, for --bench and
-    /// --measure, and ends the run after --bench-seconds.
-    fn report_frame(&mut self, now: Instant) {
-        if let Some(line) = self.report.as_mut().and_then(|r| r.frame(&self.meter, now)) {
-            println!("{line}");
-        }
-        self.end_report(now);
-    }
-
-    /// Prints the final line and exits once --bench-seconds have passed.
-    fn end_report(&mut self, now: Instant) {
-        if let Some(report) = self.report.as_ref().filter(|r| r.done(now)) {
-            println!("{}", report.summary(&self.meter, now));
-            self.report = None;
-            self.quit = true;
-        }
     }
 
     /// Takes the latest dropout count for the stats bar warning. Runs on
@@ -1404,9 +1401,9 @@ impl App {
                 }
                 self.meter = bench::FrameMeter::default();
             }
+            Message::BenchDone => self.quit = true,
             Message::Frame(now) => {
                 self.meter.record(now);
-                self.report_frame(now);
                 scene::update_live_values(&mut self.values, &self.controller);
                 self.controller.collect_garbage();
                 self.update_dropouts(now);
@@ -1415,8 +1412,6 @@ impl App {
             Message::Tick => {
                 self.controller.collect_garbage();
                 self.update_dropouts(Instant::now());
-                // Measure was switched off: the run still ends on time.
-                self.end_report(Instant::now());
             }
             Message::Meters(levels) => {
                 self.meter_levels.extend(levels);

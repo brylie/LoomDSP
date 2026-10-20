@@ -3,6 +3,7 @@
 use crate::camera::Camera;
 use crate::controls::ControlGeometry;
 use crate::scene::{PORT_RADIUS, PortShape, Scene};
+use crate::stats::{self, Counter};
 use crate::theme::Palette;
 use crate::tile_text::{self, TextKind};
 use bytemuck::{Pod, Zeroable};
@@ -165,6 +166,7 @@ pub struct Geometry {
 impl Geometry {
     /// Builds instances for every module, port, and cable in a scene.
     pub fn build(scene: &Scene, palette: &Palette) -> Self {
+        stats::count(Counter::SceneBuilds);
         let mut connected: HashSet<(u32, bool, usize)> = HashSet::new();
         let mut cables = Vec::with_capacity(scene.cables().len());
         for cable in scene.cables() {
@@ -541,10 +543,12 @@ impl Primitive for CanvasPrimitive {
             pad: 0.0,
         };
         queue.write_buffer(&pipeline.globals, 0, bytemuck::bytes_of(&globals));
+        stats::frame();
 
         if pipeline.uploaded != self.geometry.generation {
             pipeline.scene_cables.upload(device, queue, &self.geometry.cables);
             pipeline.scene_shapes.upload(device, queue, &self.geometry.shapes);
+            stats::count(Counter::SceneUploads);
             pipeline.uploaded = self.geometry.generation;
             pipeline.tiles = self.geometry.tiles;
             pipeline.markers = self.geometry.markers();
@@ -556,17 +560,21 @@ impl Primitive for CanvasPrimitive {
         {
             pipeline.control_arcs.upload(device, queue, &controls.arcs);
             pipeline.control_shapes.upload(device, queue, &controls.shapes);
+            stats::count(Counter::ControlUploads);
             pipeline.controls_uploaded = controls.key;
         }
         // The overlay is built every frame, but often does not change: a
         // live dot moving under still modulation lines changes only the
         // controls.
         let cables: &[u8] = bytemuck::cast_slice(&self.overlay.cables);
+        let shapes: &[u8] = bytemuck::cast_slice(&self.overlay.shapes);
+        if pipeline.overlay_uploaded.0 != cables || pipeline.overlay_uploaded.1 != shapes {
+            stats::count(Counter::OverlayUploads);
+        }
         if pipeline.overlay_uploaded.0 != cables {
             pipeline.overlay_cables.upload(device, queue, &self.overlay.cables);
             pipeline.overlay_uploaded.0 = cables.to_vec();
         }
-        let shapes: &[u8] = bytemuck::cast_slice(&self.overlay.shapes);
         if pipeline.overlay_uploaded.1 != shapes {
             pipeline.overlay_shapes.upload(device, queue, &self.overlay.shapes);
             pipeline.overlay_uploaded.1 = shapes.to_vec();

@@ -38,21 +38,33 @@ cargo run --release -p loom-app -- --generate 300 --bench
 
 `--bench` turns on **Measure** (redraw every frame and count) and **Move camera** (a slow loop of pan and zoom). `--measure` turns on only **Measure**, so the camera stays still. Run it at full window size on the built-in Retina display. To test the "100 visible" case, switch off **Move camera**, zoom in until about 100 tiles are on screen (titles visible), then switch it back on. The camera loops around the current view.
 
-Both flags also print the numbers to stdout once a second, so a script or an agent can read them. `--bench-seconds N` exits after N seconds with a final line, averaged over the whole run after the first 10 frames:
+Both flags also print the numbers to stdout once a second, so a script or an agent can read them. `--bench-seconds N` exits after N seconds with a final line:
 
 ```sh
-cargo run --release -p loom-app -- examples/patches/fm-feedback.ron --measure --bench-seconds 10
+cargo run --release -p loom-app -- examples/patches/subtractive.ron --measure --bench-seconds 3
 ```
 
-The output looks like this:
+The output (MacBook, external 72 Hz display, 2026-10-20):
 
 ```text
-fps=120.0 avg_ms=8.33 worst_ms=9.10
-...
-final fps=119.8 avg_ms=8.35 worst_ms=9.40 frames=1190 seconds=10.0
+fps=58.9 avg_ms=16.98 worst_ms=24.77 frames=59 scene_builds=1 control_builds=1 scene_uploads=1 control_uploads=1 overlay_uploads=0
+fps=71.8 avg_ms=13.92 worst_ms=24.77 frames=131 scene_builds=1 control_builds=1 scene_uploads=1 control_uploads=1 overlay_uploads=0
+final fps=71.9 avg_ms=13.91 worst_ms=24.77 frames=203 scene_builds=1 control_builds=1 scene_uploads=1 control_uploads=1 overlay_uploads=0
 ```
 
-Each line is `key=value` pairs separated by spaces. `worst_ms` is the slowest frame since the start. Both flags redraw every frame, so they measure drawing cost, not idle CPU: for idle, run without them and read Activity Monitor.
+Each line is `key=value` pairs separated by spaces. The numbers come from the canvas itself (`loom_canvas::stats`), so they count frames really drawn:
+
+- `fps` and `avg_ms`: frames in the last second, and the average time between them. On the final line, from the first line to the end, so start-up is left out.
+- `worst_ms`: the longest gap between two frames since the start, after the first 10.
+- `frames`, `scene_builds`, `control_builds`, `scene_uploads`, `control_uploads`, `overlay_uploads`: totals since the start. A still or moving camera should build and upload the scene once. A knob turn adds control builds and uploads, never scene builds.
+
+**Idle.** `--measure` and `--bench` redraw every frame, so they measure drawing cost. `--measure-idle` prints the same lines without forcing a redraw: it counts only the frames the app draws by itself. The report runs on its own thread and sends the app no messages, so it adds no frames. An idle patch should print `frames=0` (the panels spec, Redraw). Today it prints about 2 frames a second, from the stats bar refresh ([#90](https://github.com/brylie/LoomDSP/issues/90)):
+
+```sh
+cargo run --release -p loom-app -- examples/patches/subtractive.ron --measure-idle --bench-seconds 10
+```
+
+For idle CPU, read Activity Monitor during the same run.
 
 Record from the stats bar, or the final line, after about 10 seconds:
 
@@ -62,7 +74,7 @@ Record from the stats bar, or the final line, after about 10 seconds:
 | Same, zoomed to about 100 tiles visible (titles shown) | | | | |
 | Same, zoomed in to about 20 tiles (port labels shown) | | | | |
 | `examples/patches/fm-feedback.ron`, **Measure** on, camera still | | | | |
-| Idle: **Measure** off, nothing moving. Activity Monitor CPU % and GPU % | | | | |
+| Idle: `--measure-idle`, nothing moving. Frames drawn, and Activity Monitor CPU % and GPU % | | | | |
 
 Pass criteria (NFR-PERF-04): 60 fps with 300 modules in the patch and 100 visible, while panning and zooming. An idle patch uses close to no CPU or GPU. The 4 live scopes come with module views (next P1 step) and are measured then.
 
