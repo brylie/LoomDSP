@@ -3,13 +3,13 @@
 The desktop app keeps a recovery copy of the open patch while it has unsaved changes, and after a crash it offers to bring that copy back.
 
 - **Kind:** living specification.
-- **Status:** Draft
+- **Status:** Agreed
 - **Decision behind it:** none of its own. Builds on [ADR-0008](../adr/0008-patch-format-ron.md) (the patch format) and [Open, Save, and Save As](files.md), which leaves autosave and crash recovery out of its scope.
 - **Use case and requirements:** NFR-REL-01 (the app autosaves and recovers after a crash), UC3 (perform live).
 - **Background:** none.
 - **Prior art:** most desktop editors keep a hidden copy of unsaved work and offer it after a crash. We use only that convention: a quiet background copy, and a question at the next start.
 - **Issues:** [#15](https://github.com/brylie/LoomDSP/issues/15).
-- **Code:** none yet. It will live in `crates/loom-app` (a new `recovery.rs`), next to `files.rs`. It reuses `Patch::from_graph` and `Patch::save` from `loom-patch`.
+- **Code:** none yet. It will live in `crates/loom-app` (a new `recovery.rs`), next to `files.rs`. It reuses `Patch::from_graph` and `Patch::save` from `loom-patch`, and finds the folders with the `etcetera` crate.
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
      built. See README.md in this folder. -->
@@ -57,7 +57,7 @@ All sessions share one recovery folder, in the operating system's per-user data 
 |---|---|
 | macOS | `~/Library/Application Support/LoomDSP/recovery/` |
 | Windows | `%LOCALAPPDATA%\LoomDSP\recovery\` |
-| Linux and other Unix | `$XDG_STATE_HOME/loomdsp/recovery/`, or `~/.local/state/loomdsp/recovery/` when `XDG_STATE_HOME` is unset or empty |
+| Linux and other Unix | `$XDG_STATE_HOME/loomdsp/recovery/`, or `~/.local/state/loomdsp/recovery/` when `XDG_STATE_HOME` is unset, empty, or not an absolute path |
 
 *Why these folders:* macOS and Windows use the same base folder as [preferences](preferences.md#where-the-file-lives), so all LoomDSP files on one machine are in one place. On Linux the XDG specification separates settings (config) from data the app keeps between runs (state); a recovery copy is state.
 
@@ -89,6 +89,18 @@ Inside it, one `scan.lock` file that instances lock briefly at start (see How th
 *Why one folder per session, not one per patch or one for all:* one window holds one patch, so a session and its patch are the same thing. A folder per session lets two app instances run side by side without overwriting each other's copy, and a patch never saved has no file name to key on. *Why a plain patch file:* if the app itself cannot start, a user can still find `patch.ron` and open it.
 
 A command-line flag `--recovery-dir <folder>` uses another folder instead. *Why:* tests must not read or change the real folder, as with `--preferences`.
+
+### Finding the folders
+
+The [`etcetera`](https://crates.io/crates/etcetera) crate (MIT or Apache-2.0) finds the per-user folders. Each row of the table in Where the recovery copy lives comes from one of its strategies:
+
+| OS | Strategy and function |
+|---|---|
+| macOS | `Apple`, `data_dir()` |
+| Windows | `Windows`, `cache_dir()` (the Local AppData known folder; its `data_dir()` is the roaming folder, which we do not want) |
+| Linux and other Unix | `Xdg`, `state_dir()` |
+
+*Why `etcetera`, not `dirs`:* `dirs` depends on `option-ext`, which is MPL-2.0, and `deny.toml` does not allow MPL (ADR-0006). `etcetera` depends only on `cfg-if` and `windows-sys`. The paths in the table are what matters: the unit test of the path function checks them, whatever the crate.
 
 ### How the app knows the last run crashed
 
@@ -128,7 +140,7 @@ For a patch never saved, the name is `Untitled`. The time is `written`, in local
 
 If the window is closed or the dialog cannot be shown, the result is **Not Now**. On Linux without `zenity` or `kdialog` (see [files.md](files.md#asking-before-losing-work)), the status bar says: `Unsaved changes from a crash were kept. Install zenity or kdialog to restore them, or open <path to patch.ron>.` *Why:* nothing is ever deleted without the user's choice.
 
-**Several orphans** (two instances crashed, or the user chose Not Now before): the app asks about the newest one only. The others stay for later starts. *Why:* one window holds one patch, so one restore per start is all the app can do. A list would be a larger design (see Open points).
+**Several orphans** (two instances crashed, or the user chose Not Now before): the app asks about the newest one only. The others stay for later starts. *Why:* one window holds one patch, so one restore per start is all the app can do. A list would be a larger design (see Later).
 
 **A patch path on the command line:** the offer still comes first. Restore replaces the command-line patch, and the status bar says so. The other two choices load the command-line patch as usual. *Why:* the player who restarts after a crash usually starts the app the same way as before, and the copy has more recent work.
 
@@ -247,7 +259,7 @@ Tests point `--recovery-dir` (or the function behind it) at a temporary folder. 
 
 - Autosaving to the patch's own file. Autosave only writes recovery copies; the user's file changes only when they save. *Why:* the user decides when their file changes.
 - Restoring the undo history.
-- A list of all orphans to restore or discard at once (see Open points).
+- A list of all orphans to restore or discard at once (see Later).
 - Recovery for several windows (there is one window per app; see [files.md](files.md#out-of-scope)).
 - Forcing each copy to disk (`fsync`) before the rename. See Limitations.
 - A preference to change the timing or turn autosave off. The [preferences](preferences.md) window can gain one later.
@@ -263,10 +275,21 @@ Known gaps, accepted to keep the first version simple. Each can be revisited if 
 4. **Orphans are kept until the user acts.** Not Now keeps a copy for ever. Each is a few kilobytes.
 5. **The undo history is not restored.**
 
+## Settled in review
+
+- The file lock uses `std::fs::File::try_lock`. The workspace's minimum Rust version is raised to 1.99, the latest stable release.
+- The folders come from `etcetera` (Finding the folders).
+- The writer does not `fsync` (Limitation 2).
+- Only the newest orphan is offered at each start (Limitation 3).
+- With a patch on the command line, the offer comes first and Restore wins.
+
+## Later
+
+Not needed to build this spec. Each becomes an issue when it is needed.
+
+- **A list of orphans.** If users collect many orphans through Not Now (Limitations 3 and 4), add a "Recover unsaved patches..." window that lists them.
+- **A copy from the panic hook.** NFR-REL-02 asks that a UI panic does not stop audio. If the app later survives UI panics, it could also write a copy at once from the panic hook. The 10 s bound is enough for now.
+
 ## Open points
 
-1. **Folder crate.** The same choice as preferences, plus the Linux state folder. *Leaning:* the [`dirs`](https://crates.io/crates/dirs) crate (its `state_dir` gives the XDG state folder on Linux), shared with preferences.
-2. **A list of orphans.** If users collect many orphans through Not Now (Limitations 3 and 4), add a "Recover unsaved patches..." window that lists them. *Leaning:* wait until someone needs it.
-3. **Panic in UI code.** NFR-REL-02 asks that a UI panic does not stop audio. If the app later survives UI panics, it could also write a copy at once from the panic hook. *Leaning:* not in this spec; the 10 s bound is enough for now.
-
-Settled in review: the file lock uses `std::fs::File::try_lock`, and the workspace's minimum Rust version is raised to 1.99, the latest stable release; the writer does not `fsync` (Limitation 2); only the newest orphan is offered (Limitation 3); with a patch on the command line, the offer comes first and Restore wins.
+None.
