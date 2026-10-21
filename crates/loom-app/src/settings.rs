@@ -383,41 +383,78 @@ impl App {
     /// new one (preferences.md, Restarting audio). Module state starts
     /// again; the patch, undo history, selection, view, MIDI mappings, and
     /// MIDI inputs are kept (Rule D6). On an error before the old engine
-    /// stops, nothing changes.
+    /// stops, nothing changes. If the new stream then fails to start, the
+    /// old device plays again, so a failed change leaves sound playing
+    /// (Rule D5).
     fn restart_audio(&mut self, output: AudioOutput) -> Result<(), String> {
         self.finish_edits();
-        let rate = output.sample_rate() as f32;
+        let parts = self
+            .rebuilt_engine(output.sample_rate() as f32)
+            .map_err(|e| format!("Could not restart audio: {e}. The audio is unchanged."))?;
+        let previous = self.rig.playing.clone();
+        self.stop_audio();
+        let device = output.name().to_string();
+        let error = match self.play(output, parts) {
+            Ok(()) => return Ok(()),
+            Err(e) => e,
+        };
+        // Back to the device that played before, as it was.
+        let restored = previous.as_ref().and_then(|old| {
+            let options = loom_host_desktop::AudioOptions {
+                device: Some(old.device.clone()),
+                exact: true,
+                sample_rate: Some(old.rate),
+                buffer_size: old.buffer,
+            };
+            let output = self.rig.host.open(&options).ok()?;
+            let parts = self.rebuilt_engine(output.sample_rate() as f32).ok()?;
+            self.play(output, parts).ok()
+        });
+        Err(match (restored, previous) {
+            (Some(()), Some(old)) => {
+                format!(
+                    "Could not use \"{device}\": {error}. Still playing on \"{}\".",
+                    old.device
+                )
+            }
+            _ => format!("Could not use \"{device}\": {error}. Audio is off."),
+        })
+    }
+
+    /// A new engine at `rate` holding the patch as it is now. The patch is
+    /// replayed as one undo step from nothing, so module and assignment IDs
+    /// stay the same and the history still applies.
+    fn rebuilt_engine(&self, rate: f32) -> Result<EngineParts, loom_core::LoomError> {
         let config = EngineConfig {
             output_safety: self.output_safety,
             ..EngineConfig::with_sample_rate(rate)
         };
+        let mut parts = create_engine(loom_modules::registry(), config);
+        let controller = &mut parts.controller;
+        let current = undo::Snapshot::take(&self.controller, &self.positions);
+        let empty = undo::Snapshot::take(controller, &BTreeMap::new());
+        if let Some(step) = undo::diff(&empty, &current, &BTreeSet::new()) {
+            undo::apply(&step, true, controller, &mut self.positions.clone())?;
+        }
+        // The transport keeps its tempo, time signature, and whether it
+        // runs. Its position starts at beat 0.
+        let transport = self.controller.transport();
+        controller.set_tempo(transport.tempo)?;
+        controller.set_time_signature(transport.time_signature)?;
+        controller.set_running(transport.running)?;
+        controller.commit()?;
+        Ok(parts)
+    }
+
+    /// Puts a new engine in place of the old one, which has stopped, and
+    /// plays it on `output`. On an error the app is left with no audio.
+    fn play(&mut self, output: AudioOutput, parts: EngineParts) -> Result<(), String> {
         let EngineParts {
-            mut controller,
+            controller,
             engine,
             midi,
             telemetry,
-        } = create_engine(loom_modules::registry(), config);
-        // The patch is replayed as one undo step from nothing, so module and
-        // assignment IDs stay the same and the history still applies.
-        let current = undo::Snapshot::take(&self.controller, &self.positions);
-        let empty = undo::Snapshot::take(&controller, &BTreeMap::new());
-        let mut positions = self.positions.clone();
-        let mut rebuild = |controller: &mut loom_core::Controller| -> Result<(), loom_core::LoomError> {
-            if let Some(step) = undo::diff(&empty, &current, &BTreeSet::new()) {
-                undo::apply(&step, true, controller, &mut positions)?;
-            }
-            // The transport keeps its tempo, time signature, and whether it
-            // runs. Its position starts at beat 0.
-            let transport = self.controller.transport();
-            controller.set_tempo(transport.tempo)?;
-            controller.set_time_signature(transport.time_signature)?;
-            controller.set_running(transport.running)?;
-            controller.commit()?;
-            Ok(())
-        };
-        rebuild(&mut controller).map_err(|e| format!("Could not restart audio: {e}. The audio is unchanged."))?;
-
-        self.stop_audio();
+        } = parts;
         self.rig.attach(midi, false);
         let playing = Playing::of(&output);
         let label = format!("{} at {} Hz", output.name(), output.sample_rate());
@@ -427,10 +464,11 @@ impl App {
         self.live = crate::live::Live::new();
         self.lights.clear();
         self.meter_levels.clear();
-        self.sample_rate = rate;
+        self.sample_rate = output.sample_rate() as f32;
         self.idle_engine = None;
         self.holding = false;
-        match output.start(engine) {
+        let started = self.rig.host.start(output, engine);
+        match started {
             Ok(audio) => {
                 self.audio_stats = Some(audio.stats().clone());
                 self._audio = Some(audio);
@@ -442,7 +480,7 @@ impl App {
                 self.audio_name = format!("no audio ({e})");
                 self.rig.playing = None;
                 self.midi = None;
-                return Err(format!("Could not start \"{}\": {e}. Audio is off.", playing.device));
+                return Err(e);
             }
         }
         // Probes for the meters on screen, in the new engine.
@@ -925,6 +963,31 @@ mod tests {
         assert_eq!(
             app.status,
             "Could not use \"Fake B\" at 48000 Hz: the device is busy. Still playing on \"Fake A\"."
+        );
+    }
+
+    #[test]
+    fn a_device_that_fails_to_start_hands_back_to_the_old_one() {
+        let dir = folder("wont-start");
+        let mut fake = Fake::new(&[fake::device("Fake A"), fake::device("Fake B")], &["Keys"]);
+        fake.wont_start.push("Fake B".into());
+        let fake = Rc::new(fake);
+        let mut app = start(args(&dir), &fake);
+        let constant = loom_modules::registry().resolve("loom.math.constant").unwrap();
+        app.add_module(constant, iced::Point::new(100.0, 100.0));
+        let modules = app.controller.graph().len();
+
+        change(&mut app, Change::Device(DeviceChoice::Named("Fake B".into())));
+        assert_eq!(fake.opened(), ["Fake A", "Fake B", "Fake A"], "back to the old device");
+        assert!(app._audio.is_some(), "sound is still playing");
+        assert_eq!(app.rig.playing.as_ref().unwrap().device, "Fake A");
+        assert_eq!(app.controller.graph().len(), modules, "with the same patch");
+        assert_eq!(app.history.len(), 1);
+        assert!(fake.is_open("Keys"));
+        assert!(!dir.join(FILE_NAME).exists(), "nothing saved");
+        assert_eq!(
+            app.status,
+            "Could not use \"Fake B\": the stream did not start. Still playing on \"Fake A\"."
         );
     }
 

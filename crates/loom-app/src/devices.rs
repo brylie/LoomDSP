@@ -7,7 +7,7 @@
 //! the saved choice and the command-line flags, and what the window offers.
 
 use crate::preferences::{AudioPrefs, BufferChoice, DeviceChoice, RateChoice};
-use loom_host_desktop::{AudioOptions, AudioOutput, MidiConnection, OutputInfo, Outputs, SharedMidi};
+use loom_host_desktop::{AudioOptions, AudioOutput, MidiConnection, OutputInfo, Outputs, RunningAudio, SharedMidi};
 use std::path::PathBuf;
 
 /// The flags that set devices for one run. They are never saved.
@@ -62,6 +62,11 @@ pub trait Host {
     fn outputs(&self) -> Result<Outputs, String>;
     /// Chooses an output, without starting it.
     fn open(&self, options: &AudioOptions) -> Result<AudioOutput, String>;
+    /// Starts an output with an engine. A device can still refuse here,
+    /// after it opened.
+    fn start(&self, output: AudioOutput, engine: loom_core::Engine) -> Result<RunningAudio, String> {
+        output.start(engine).map_err(|e| e.to_string())
+    }
     /// The names of the MIDI inputs.
     fn midi_inputs(&self) -> Result<Vec<String>, String>;
     /// Opens the MIDI input with this exact name.
@@ -390,6 +395,8 @@ pub mod fake {
         pub outputs: Outputs,
         /// Devices that fail to open.
         pub broken: Vec<String>,
+        /// Devices that open, then fail to start.
+        pub wont_start: Vec<String>,
         pub midi: Vec<String>,
         pub log: RefCell<Vec<Event>>,
         /// The open MIDI inputs, so a test can play notes on them.
@@ -492,6 +499,13 @@ pub mod fake {
             fake.log.borrow_mut().push(Event::Opened(name.clone()));
             let block = options.buffer_size.unwrap_or(256);
             Ok(AudioOutput::clock(rate, block).named(name))
+        }
+
+        fn start(&self, output: AudioOutput, engine: loom_core::Engine) -> Result<RunningAudio, String> {
+            if self.0.wont_start.iter().any(|name| name == output.name()) {
+                return Err("the stream did not start".to_string());
+            }
+            output.start(engine).map_err(|e| e.to_string())
         }
 
         fn midi_inputs(&self) -> Result<Vec<String>, String> {

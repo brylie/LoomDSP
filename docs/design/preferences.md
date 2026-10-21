@@ -250,6 +250,7 @@ Each choice applies as soon as it is made, and is saved, like Output safety.
 1. Opens the new device first. If that fails, the old audio keeps playing, nothing is saved, and the status bar says why: `Could not use "MOTU M4" at 192000 Hz: <reason>. Still playing on "MacBook Pro Speakers".`
 2. Fades the old engine out over 10 ms, then stops it ([output-safety.md](output-safety.md), rule 14). *Why:* stopping a stream mid-signal is a click, and a thump when the output holds a DC offset.
 3. Builds a new engine from the current patch, as it is now, with every unsaved edit, at the new rate. The new engine fades in over 10 ms, as every new engine does.
+   Some devices open and then refuse to start their stream. Then the app builds the engine again at the old rate and plays it on the old device, as it was. Nothing is saved, and the status bar says why: `Could not use "MOTU M4": <reason>. Still playing on "MacBook Pro Speakers".` *Why:* Rule D5, a failed change must leave sound playing. Only if the old device cannot start again either is audio off, and the status bar says so.
 4. Keeps everything that is not the engine: the patch file, unsaved changes, undo history, selection, view, MIDI learn mappings, and open MIDI inputs.
 
 The player hears a short gap, from about 20 ms to a few hundred, depending on the device. **This gap is accepted.** *Why:* a device change is setup, not performance. Keeping sound playing across two devices would need the engine to run on both at once, which is a large piece of work for a rare case.
