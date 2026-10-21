@@ -316,8 +316,11 @@ pub fn to_text(preferences: &Preferences) -> String {
         },
         midi: &preferences.midi,
     };
+    // Line feeds on every system, so the file is the same everywhere. RON
+    // uses CRLF on Windows by default.
     let config = ron::ser::PrettyConfig::new()
         .indentor("    ".to_string())
+        .new_line("\n".to_string())
         .struct_names(false);
     let mut text = ron::ser::to_string_pretty(&file, config).expect("preferences always serialize");
     text.push('\n');
