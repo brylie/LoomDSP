@@ -992,6 +992,32 @@ mod tests {
     }
 
     #[test]
+    fn when_neither_device_starts_audio_is_off_and_nothing_is_saved() {
+        let dir = folder("neither-starts");
+        let mut fake = Fake::new(&[fake::device("Fake A"), fake::device("Fake B")], &[]);
+        // Fake A started at boot, which does not go through the host's
+        // start; it refuses only when it is started again.
+        fake.wont_start.extend(["Fake A".into(), "Fake B".into()]);
+        let fake = Rc::new(fake);
+        let mut app = start(args(&dir), &fake);
+        assert!(app._audio.is_some());
+
+        change(&mut app, Change::Device(DeviceChoice::Named("Fake B".into())));
+        assert_eq!(
+            fake.opened(),
+            ["Fake A", "Fake B", "Fake A"],
+            "it tried the old device again"
+        );
+        assert!(app._audio.is_none(), "audio is off");
+        assert!(app.rig.playing.is_none());
+        assert!(!dir.join(FILE_NAME).exists(), "nothing saved");
+        assert_eq!(
+            app.status,
+            "Could not use \"Fake B\": the stream did not start. Audio is off."
+        );
+    }
+
+    #[test]
     fn a_device_change_opens_the_new_device_and_fades_the_old_one() {
         let dir = folder("device");
         let fake = two_devices();
