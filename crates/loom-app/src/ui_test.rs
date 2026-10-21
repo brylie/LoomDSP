@@ -48,7 +48,7 @@ use iced_runtime::Action;
 use iced_runtime::futures::futures::{FutureExt, StreamExt};
 use iced_runtime::user_interface::{Cache, UserInterface};
 use loom_canvas::{CanvasView, PortRef};
-use loom_core::{ModuleId, OutputSafety};
+use loom_core::ModuleId;
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -98,7 +98,8 @@ impl Ui {
             record: None,
             bench: crate::bench::Options::default(),
             control: crate::control::Options::default(),
-            output_safety: OutputSafety::LowLatency,
+            output_safety: None,
+            devices: crate::devices::Options::default(),
             view: screenshot::Options::default(),
             dump_ui: false,
             select: Vec::new(),

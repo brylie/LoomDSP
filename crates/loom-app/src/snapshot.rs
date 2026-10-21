@@ -261,11 +261,19 @@ impl App {
 /// `--screenshot-window`.
 pub fn headless(args: &Args) -> Result<App, String> {
     let config = loom_core::EngineConfig {
-        output_safety: args.output_safety,
+        output_safety: args.output_safety.unwrap_or_default(),
         ..loom_core::EngineConfig::with_sample_rate(48_000.0)
     };
     let session = App::session(config, args.source())?;
-    let mut app = App::assemble(Err("headless".to_string()), 48_000.0, session, 1, args, false);
+    let mut app = App::assemble(
+        Err("headless".to_string()),
+        48_000.0,
+        session,
+        1,
+        args,
+        crate::settings::Rig::empty(),
+        false,
+    );
     for &id in &args.select {
         if app.controller.graph().node(loom_core::ModuleId(id)).is_none() {
             return Err(format!("no module {id} in the patch"));

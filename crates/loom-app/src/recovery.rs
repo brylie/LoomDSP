@@ -429,7 +429,7 @@ fn perform(dir: &Path, job: &Job) -> Result<(), String> {
 
 /// Writes through a temporary file and a rename, so a crash never leaves
 /// half a file.
-fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
+pub(crate) fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
     let name = path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default();
     let temp = path.with_file_name(format!(".{name}.tmp"));
     fs::write(&temp, text)?;

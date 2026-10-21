@@ -11,6 +11,7 @@ mod bench;
 mod browser;
 mod clipboard;
 mod control;
+mod devices;
 mod files;
 mod inspector;
 mod layout;
@@ -20,9 +21,11 @@ mod live;
 mod modulation;
 mod monitor;
 mod param;
+mod preferences;
 mod recovery;
 mod scene;
 mod screenshot;
+mod settings;
 mod snapshot;
 #[cfg(test)]
 mod ui_test;
@@ -37,11 +40,12 @@ use loom_core::{
     AssignmentId, Controller, EngineConfig, EngineParts, InputRef, MidiEvent, ModuleDescriptor, ModuleId, OutputRef,
     OutputSafety, ProbeId, create_engine,
 };
-use loom_host_desktop::{AudioOptions, AudioOutput, CallbackStats, MidiConnection, RunningAudio, SharedMidi};
+use loom_host_desktop::{AudioOutput, CallbackStats, RunningAudio, SharedMidi};
 use loom_patch::Patch;
 use modulation::PolarityChoice;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -71,10 +75,14 @@ struct Args {
     /// The control channel: --control, --control-script.
     #[command(flatten)]
     control: control::Options,
-    /// Safety stage on the output: low-latency, clean, or off (ADR-0019).
-    /// A command-line flag until the app has preferences.
-    #[arg(long, default_value_t = OutputSafety::LowLatency)]
-    output_safety: OutputSafety,
+    /// Safety stage on the output for this run: low-latency, clean, or off
+    /// (ADR-0019). Without it, the saved preference applies. Not saved.
+    #[arg(long)]
+    output_safety: Option<OutputSafety>,
+    /// Devices and the preferences file: --preferences, --device,
+    /// --sample-rate, --buffer, --midi, --no-midi.
+    #[command(flatten)]
+    devices: devices::Options,
     /// Saving a still image of the canvas instead of opening a window.
     #[command(flatten)]
     view: screenshot::Options,
@@ -258,6 +266,8 @@ enum Message {
     Unassign(AssignmentId),
     /// A line under **Drives** selects its target module.
     SelectModule(u32),
+    /// A message for the Preferences window (`docs/design/preferences.md`).
+    Preferences(settings::Message),
     /// The clipboard was read for a paste at a world point, not yet snapped
     /// (`docs/design/clipboard.md`).
     /// `generation` is the engine's when the read began: a result that
@@ -324,8 +334,8 @@ struct App {
     live: Live,
     /// When the dropout count last grew, for the stats bar warning.
     dropouts: alerts::Dropouts,
-    /// Open MIDI inputs. Input stops when they are dropped.
-    midi_ports: Vec<MidiConnection>,
+    /// What belongs to the machine: preferences, devices, MIDI inputs.
+    rig: settings::Rig,
     audio_stats: Option<Arc<CallbackStats>>,
     audio_name: String,
     /// Note input shared by every MIDI port and the "Hold note" button.
@@ -415,10 +425,17 @@ impl App {
         Self::boot(args, &mut recovery::Dialogs)
     }
 
-    /// Starts the app: opens this run's recovery folder, offers a copy left
-    /// by a crash, then opens the patch (`docs/design/autosave.md`).
+    /// Starts the app on the real devices.
     fn boot(args: Args, prompt: &mut dyn recovery::Prompt) -> Self {
-        let mut notes = Vec::new();
+        Self::boot_with(args, prompt, Rc::new(devices::System))
+    }
+
+    /// Starts the app: reads the preferences, opens this run's recovery
+    /// folder, offers a copy left by a crash, then opens the patch and the
+    /// devices (`docs/design/autosave.md`, `docs/design/preferences.md`).
+    fn boot_with(args: Args, prompt: &mut dyn recovery::Prompt, host: Rc<dyn devices::Host>) -> Self {
+        let (store, mut notes) = settings::open_store(&args.devices);
+        let rig = settings::Rig::new(host, store, args.devices.clone(), args.output_safety.is_some());
         let mut session_folder = None;
         let mut restore = None;
         if let Some(root) = args.recovery_root() {
@@ -465,7 +482,8 @@ impl App {
             }
         });
 
-        let output = Self::open_output(args.no_audio, args.fake_audio, args.record.as_deref());
+        let (output, audio_notes) = settings::open_output(&rig, args.no_audio, args.fake_audio, args.record.as_deref());
+        notes.extend(audio_notes);
         let sample_rate = output.as_ref().map(|o| o.sample_rate() as f32).unwrap_or(48_000.0);
         let source = match &recovered {
             Some((_, _, patch)) => Source::Recovered(Box::new(patch.clone())),
@@ -474,7 +492,7 @@ impl App {
         };
         let mut status = String::new();
         let config = EngineConfig {
-            output_safety: args.output_safety,
+            output_safety: args.output_safety.unwrap_or(rig.store.saved().output_safety),
             ..EngineConfig::with_sample_rate(sample_rate)
         };
         let session = Self::session(config, source).unwrap_or_else(|e| {
@@ -486,7 +504,7 @@ impl App {
             }
             Self::session(config, Source::Empty).expect("an empty patch always loads")
         });
-        let mut app = Self::assemble(output, sample_rate, session, 1, &args, true);
+        let mut app = Self::assemble(output, sample_rate, session, 1, &args, rig, true);
         // The compile report gives way to anything that needs reading.
         let mut keep = !status.is_empty();
         if keep {
@@ -572,20 +590,6 @@ impl App {
         }
     }
 
-    fn open_output(no_audio: bool, fake_audio: bool, record: Option<&Path>) -> Result<AudioOutput, String> {
-        let mut output = if no_audio {
-            return Err("audio off".to_string());
-        } else if fake_audio {
-            AudioOutput::clock(48_000, 256)
-        } else {
-            AudioOutput::open(&AudioOptions::default()).map_err(|e| e.to_string())?
-        };
-        if let Some(path) = record {
-            output.record(path);
-        }
-        Ok(output)
-    }
-
     /// Builds an engine and loads a patch into it. On failure nothing else
     /// is touched, so a failed open leaves the running patch alone.
     fn session(config: EngineConfig, source: Source) -> Result<Session, String> {
@@ -635,13 +639,16 @@ impl App {
     }
 
     /// Attaches audio and MIDI to a session and builds the app around it.
-    /// Without `connect_midi`, no MIDI port is opened.
+    /// A rig that has MIDI inputs open already keeps them, pointed at the
+    /// new engine. Otherwise its inputs are opened, unless `connect_midi`
+    /// is false.
     fn assemble(
         output: Result<AudioOutput, String>,
         sample_rate: f32,
         session: Session,
         generation: u64,
         args: &Args,
+        mut rig: settings::Rig,
         connect_midi: bool,
     ) -> Self {
         let Session {
@@ -658,31 +665,21 @@ impl App {
 
         // Every MIDI input plays the patch, and the "Hold note" button works
         // alongside them, so a keyboard is never hidden behind another port.
-        let midi = loom_host_desktop::share_midi(sender);
-        let connected = if connect_midi {
-            loom_host_desktop::connect_all_midi(&midi)
-        } else {
-            Ok((Vec::new(), Vec::new()))
-        };
-        let midi_ports = match connected {
-            Ok((ports, errors)) => {
-                if let Some(error) = errors.first() {
-                    status = format!("MIDI: {error}");
-                }
-                ports
-            }
-            Err(e) => {
-                status = format!("MIDI: {e}");
-                Vec::new()
-            }
-        };
+        if let Some(error) = rig.attach(sender, connect_midi) {
+            status = error;
+        }
+        let midi = rig.midi_in.clone().expect("attached");
 
         let (audio, midi, audio_name, idle_engine) = match output {
             Ok(output) => {
                 let label = format!("{} at {} Hz", output.name(), output.sample_rate());
+                rig.playing = (!args.fake_audio).then(|| devices::Playing::of(&output));
                 match output.start(engine) {
                     Ok(audio) => (Some(audio), Some(midi), label, None),
-                    Err(e) => (None, None, format!("no audio ({e})"), None),
+                    Err(e) => {
+                        rig.playing = None;
+                        (None, None, format!("no audio ({e})"), None)
+                    }
                 }
             }
             Err(e) => (None, None, format!("no audio ({e})"), Some(engine)),
@@ -711,7 +708,7 @@ impl App {
             sample_rate,
             no_audio: args.no_audio,
             fake_audio: args.fake_audio,
-            output_safety: args.output_safety,
+            output_safety: args.output_safety.unwrap_or(rig.store.saved().output_safety),
             quit: false,
             theme: Theme::custom(
                 "Loom",
@@ -730,7 +727,7 @@ impl App {
             monitor: monitor::Monitor::new(telemetry, generation),
             live: Live::new(),
             dropouts: alerts::Dropouts::default(),
-            midi_ports,
+            rig,
             audio_name,
             midi,
             holding: false,
@@ -858,7 +855,7 @@ impl App {
         // playing. The engine is built at the rate of the device that will
         // play it.
         // A recording covers the first patch only: another would overwrite it.
-        let output = Self::open_output(self.no_audio, self.fake_audio, None);
+        let (output, _) = settings::open_output(&self.rig, self.no_audio, self.fake_audio, None);
         // Playing now and no device to play on afterwards: keep what plays.
         if let (Err(e), true) = (&output, self._audio.is_some()) {
             let message = format!(
@@ -885,12 +882,11 @@ impl App {
                 return false;
             }
         };
-        // Nothing can fail from here: free the audio device and MIDI inputs
-        // before the new engine takes them.
-        self._audio = None;
-        self.audio_stats = None;
+        // Nothing can fail from here: fade the old engine out and free the
+        // audio device before the new engine takes it. MIDI inputs stay
+        // open and move to the new engine.
+        self.stop_audio();
         self.midi = None;
-        self.midi_ports.clear();
         let args = Args {
             patch: None,
             generate: None,
@@ -902,14 +898,16 @@ impl App {
                 ..Default::default()
             },
             control: control::Options::default(),
-            output_safety: self.output_safety,
+            output_safety: Some(self.output_safety),
+            devices: devices::Options::default(),
             view: screenshot::Options::default(),
             dump_ui: false,
             select: Vec::new(),
             recovery_dir: None,
             no_recovery: true,
         };
-        let mut fresh = Self::assemble(output, sample_rate, session, self.generation + 1, &args, true);
+        let rig = std::mem::replace(&mut self.rig, settings::Rig::empty());
+        let mut fresh = Self::assemble(output, sample_rate, session, self.generation + 1, &args, rig, true);
         fresh.animating = self.animating;
         fresh.reporter = self.reporter.take();
         fresh.control = std::mem::take(&mut self.control);
@@ -1545,9 +1543,10 @@ impl App {
             }
         };
         if self.quit {
-            // Stop audio now, so a recording is closed before the process
-            // ends, and leave no control socket behind.
-            self._audio = None;
+            // Stop audio now, with a fade so it does not click, so a
+            // recording is closed before the process ends, and leave no
+            // control socket behind.
+            self.stop_audio();
             control::close(&self.control);
             // A clean exit: the recovery folder goes (autosave.md, Clean exit).
             if let Some(session) = self.recovery.take() {
@@ -1596,7 +1595,19 @@ impl App {
         match message {
             // `update` runs these: they return tasks.
             Message::Browser(_) | Message::Control(_) | Message::ControlFrame(_) | Message::Located { .. } => {}
-            Message::Key(_) if self.browser.is_some() => {}
+            Message::Preferences(message) => self.preferences(message),
+            Message::Key(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) if self.rig.window.is_some() => {
+                // The window takes Escape and its own shortcut, and keeps
+                // other keys from the canvas behind it.
+                match key.as_ref() {
+                    iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) => {
+                        self.preferences(settings::Message::Close)
+                    }
+                    iced::keyboard::Key::Character(",") if modifiers.command() => self.toggle_preferences(),
+                    _ => {}
+                }
+            }
+            Message::Key(_) if self.browser.is_some() || self.rig.window.is_some() => {}
             Message::Canvas(event) => self.canvas_event(event),
             Message::Param {
                 module,
@@ -1737,6 +1748,7 @@ impl App {
             Message::LiveFrame => scene::update_live_values(&mut self.values, &self.controller),
             Message::Autosave => self.autosave(Instant::now()),
             Message::Tick => {
+                self.send_pending_safety();
                 self.controller.collect_garbage();
                 self.update_dropouts(Instant::now());
             }
@@ -1811,6 +1823,7 @@ impl App {
                     iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("y") && !cfg!(target_os = "macos") => {
                         self.redo()
                     }
+                    iced::keyboard::Key::Character(",") => self.toggle_preferences(),
                     _ => {}
                 }
             }
@@ -1968,7 +1981,7 @@ impl App {
         else {
             return None;
         };
-        if !modifiers.command() || self.browser.is_some() {
+        if !modifiers.command() || self.browser.is_some() || self.rig.window.is_some() {
             return None;
         }
         ['c', 'x', 'd']
@@ -2093,7 +2106,7 @@ impl App {
             .values(&self.values)
             .frame_key(self.frame_key)
             .browser_key(self.browser_key)
-            .interactive(self.browser.is_none())
+            .interactive(self.browser.is_none() && self.rig.window.is_none())
             .animate(self.animating)
             .learn(self.learning.then_some(&self.learn_view));
         if let Some(still) = self.still {
@@ -2120,6 +2133,9 @@ impl App {
             let outside = mouse_area(space().width(Length::Fill).height(Length::Fill))
                 .on_press(Message::Browser(browser::Message::Close));
             layers = layers.push(outside).push(open.view().map(Message::Browser));
+        }
+        if let Some(window) = self.preferences_view() {
+            layers = layers.push(window);
         }
         layers.into()
     }
@@ -2156,6 +2172,13 @@ impl App {
                 } else {
                     button::secondary
                 }),
+            tooltip(
+                button(text("Preferences").size(13)).on_press(Message::Preferences(settings::Message::Open)),
+                container(text(if cfg!(target_os = "macos") { "Cmd+," } else { "Ctrl+," }).size(12))
+                    .padding(6)
+                    .style(container::rounded_box),
+                tooltip::Position::Bottom,
+            ),
         ]
         .spacing(8)
         .padding([6, 10])
@@ -2219,15 +2242,11 @@ impl App {
             }
             None => bar_text(&self.audio_name).color(DIM).into(),
         };
-        let midi = match self.midi_ports.as_slice() {
+        let midi = match self.rig.ports.as_slice() {
             [] => "MIDI: no inputs".to_string(),
             ports => format!(
                 "MIDI: {}",
-                ports
-                    .iter()
-                    .map(MidiConnection::port_name)
-                    .collect::<Vec<_>>()
-                    .join(", ")
+                ports.iter().map(|port| port.name()).collect::<Vec<_>>().join(", ")
             ),
         };
         row![
@@ -2342,7 +2361,8 @@ mod tests {
             record: None,
             bench: bench::Options::default(),
             control: control::Options::default(),
-            output_safety: OutputSafety::LowLatency,
+            output_safety: None,
+            devices: crate::devices::Options::default(),
             view: screenshot::Options::default(),
             dump_ui: false,
             select: Vec::new(),

@@ -66,7 +66,7 @@ fn audio_error(error: impl std::fmt::Display) -> HostError {
 }
 
 /// How to choose and configure the audio output.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AudioOptions {
     /// Case-insensitive part of the device name. `None` uses the default device.
     pub device: Option<String>,
