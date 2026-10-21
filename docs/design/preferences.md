@@ -171,7 +171,7 @@ Tests point `--preferences` (or the loading function behind it) at a temporary f
 
 The second section of the Preferences window: which audio output plays the patch, at which sample rate and buffer size, and which MIDI inputs play it. The app remembers the choice between runs.
 
-- **Status:** Draft. The sections above it may be agreed first; this one builds on them.
+- **Status:** Agreed. It builds on the file, flag, and window rules above, which are still Draft. Build those parts of them that this section needs (the file, its location, `--preferences`, and the window) together with it.
 - **Use case and requirements:** UC3 (perform live), FR-APP-01, FR-MIDI-01.
 - **Issues:** [#26](https://github.com/brylie/LoomDSP/issues/26). Related, not built here: [#27](https://github.com/brylie/LoomDSP/issues/27) (MIDI hot-plugging, FR-MIDI-08), [#28](https://github.com/brylie/LoomDSP/issues/28) (audio device loss, FR-APP-04), [#29](https://github.com/brylie/LoomDSP/issues/29) (audio input), [#163](https://github.com/brylie/LoomDSP/issues/163) (`loom play` opens every MIDI input).
 - **Code today:** the app always plays on the system default output at its default rate and buffer size (`App::open_output`, `AudioOptions::default()`), and opens every MIDI input at start (`loom_host_desktop::connect_all_midi`). `loom play` already takes `--device`, `--sample-rate`, `--buffer`, `--midi`, and `--no-midi`.
@@ -248,7 +248,7 @@ Each choice applies as soon as it is made, and is saved, like Output safety.
 **Restarting audio.** The engine runs inside the audio stream and is built for one sample rate, so a new device, rate, or buffer size needs a new stream and a new engine. The app:
 
 1. Opens the new device first. If that fails, the old audio keeps playing, nothing is saved, and the status bar says why: `Could not use "MOTU M4" at 192000 Hz: <reason>. Still playing on "MacBook Pro Speakers".`
-2. Fades the old engine out over 10 ms, using the output safety fade ([output-safety.md](output-safety.md), rule 8), then stops it. *Why:* stopping a stream mid-signal is a click.
+2. Fades the old engine out over 10 ms, then stops it ([output-safety.md](output-safety.md), rule 14). *Why:* stopping a stream mid-signal is a click, and a thump when the output holds a DC offset.
 3. Builds a new engine from the current patch, as it is now, with every unsaved edit, at the new rate. The new engine fades in over 10 ms, as every new engine does.
 4. Keeps everything that is not the engine: the patch file, unsaved changes, undo history, selection, view, MIDI learn mappings, and open MIDI inputs.
 
@@ -269,7 +269,7 @@ The app opens audio with the effective values: the saved values, unless a flag s
 | An input in `midi.off` | Not opened. | Nothing. |
 | Any other input | Opened, as today. A port that fails to open is reported, and the others still play. | As today. |
 
-The app always gets to a running patch. *Why:* the same reason as Reading the file. A missing interface must not stop the player from starting, and the message says what happened and where to fix it.
+The app always gets to a running patch, and it plays on the system default device rather than starting silent. *Why:* the same reason as Reading the file. A missing interface must not stop the player from starting, and the message says what happened and where to fix it. Silence would look like a broken app, and output safety still protects the speakers.
 
 ### Command-line flags
 
@@ -293,9 +293,10 @@ When a flag sets a value, a line under that control says `Set by --device for th
 - **D2. A fallback is never saved.** When the saved device, rate, or buffer size cannot be used at start, the app plays with something else and leaves the file alone. *Why:* the interface left at the studio is plugged in again tomorrow, and the player should not have to choose it again.
 - **D3. The app always starts and always plays if any output exists.** A missing saved device is a status bar message, not a modal and not silence. *Why:* the same as Rule 3.
 - **D4. Only what the device reports is offered.** Sample rates are the common rates (44100, 48000, 88200, 96000, 176400, 192000 Hz) that fall in one of the device's reported 32-bit float ranges. Buffer sizes are the powers of two from 16 to 4096 in the device's reported range. When a device does not report a buffer range, the app offers 64 to 2048 and falls back to the device default if the device refuses one. *Why:* a choice that fails when picked teaches the player to distrust the menu. Some systems report a huge rate range, so the list of common rates keeps the menu short. The engine gives the same output at any block size (hard rule 2), so the buffer size only changes latency and load, never the sound.
-- **D5. A device, rate, or buffer change opens the new device before stopping the old one, and fades out before it stops.** *Why:* a failed change must leave sound playing, and a stop mid-signal clicks.
+- **D5. A device, rate, or buffer change opens the new device before stopping the old one, and fades out before it stops.** *Why:* a failed change must leave sound playing, and a stop mid-signal clicks. Open, New, and quit fade out the same way ([output-safety.md](output-safety.md), rule 14).
 - **D6. A restart keeps the patch and the session, and resets module state.** *Why:* see State that does not survive a restart.
 - **D7. MIDI inputs are on unless turned off.** *Why:* see What is saved.
+- **D8. The window shows the buffer time, not the full output latency.** *Why:* the device and its driver add more delay, which some systems report and others do not, or report wrongly. A number that is right on one system and wrong on another is worse than a number that is clearly only the buffer. The full latency can be added when the host reports it reliably.
 
 ### Acceptance criteria
 
@@ -308,12 +309,12 @@ The host is behind a small trait in tests, with a fake list of devices, rates, a
 - [ ] Given a device that reports 32-bit float from 8000 to 384000 Hz, then the Sample rate menu lists Device default and the six common rates, and nothing else.
 - [ ] Given a playing patch with unsaved edits and three undo steps, when the player picks another rate, then the new engine runs at that rate, the edits and the three undo steps are still there, the file is saved, and the transport position is 0.
 - [ ] Given a playing patch, when the player picks a device that fails to open, then the old engine is still playing, the file is unchanged, and the status bar says why.
-- [ ] Given a change of device, then the last block of the old engine ends at 0, along a 10 ms fade. (Engine test of the fade-out command, at block sizes 1, 77, and 512.)
+- [ ] Given a playing patch, when the player changes the device, opens a patch, makes a new one, or quits, then the old engine is asked to fade out, and its stream is stopped only after it reports silence or after 100 ms. (App test with the fake host. The fade itself is tested in [output-safety.md](output-safety.md#acceptance-criteria).)
 - [ ] Given two MIDI inputs, when the player turns one off while a note is held on it, then that note is released, the input is closed, its name is in `midi.off`, and the other input still plays.
 - [ ] Given `midi: (off: ["Pad"])`, when an input named `Pad` and one named `Keys` exist at start, then only `Keys` is opened.
 - [ ] Given a saved `Named("Fake B")` and `--device "Fake A"`, when the app starts, then it plays on `Fake A`, the window shows the flag note, and the file still holds `Fake B`.
 - [ ] Given `--midi Keys`, then only inputs whose names contain `keys` are opened, even if they are in `midi.off`.
-- [ ] **Manual check.** On macOS, Windows, and Linux, with a USB audio interface and two MIDI controllers: pick the interface, 96 kHz, and the smallest offered buffer while a patch plays. The sound moves to the interface after a short gap with no click. Quit and start again: it plays on the interface. Unplug the interface and start again: it plays on the built-in output, with the message, and the window still shows the interface as the saved choice. Turn one controller off: it stops playing the patch, and after a restart it is still off.
+- [ ] **Manual check.** On macOS, Windows, and Linux, with a USB audio interface and two MIDI controllers: pick the interface, 96 kHz, and the smallest offered buffer while a patch plays. The sound moves to the interface after a short gap with no click. With output safety Off and a Constant of 0.5 into Audio Out, opening another patch gives no thump. Quit and start again: it plays on the interface. Unplug the interface and start again: it plays on the built-in output, with the message, and the window still shows the interface as the saved choice. Turn one controller off: it stops playing the patch, and after a restart it is still off.
 
 ### Out of scope
 
@@ -327,11 +328,13 @@ The host is behind a small trait in tests, with a fake list of devices, rates, a
 
 ### Open points
 
-- **Fall back to the default device, or start silent?** A player at a gig whose interface is not detected would hear the patch through the laptop speakers, perhaps loudly in a quiet room. Leaning: fall back, as written. Output safety still protects the speakers, the message is shown, and starting silent looks like a broken app. A later option could add "never fall back".
-- **Fade-out needs a new engine command.** Today Open and New drop the old engine mid-signal, so they may click too. Leaning: add a fade-out command to the safety stage here, and use it for Open and New in the same change.
-- **Does the transport keep running across a restart?** Leaning: yes, from beat 0, as written. A player who changes the buffer size while a sequence plays expects it to carry on.
-- **Format of the "default" choices.** This section uses RON enum names (`SystemDefault`, `Named("...")`). Leaning: keep them. They say what they mean when the file is edited by hand, and a device name can never be mistaken for the default (ALSA has a real device called `default`).
-- **Show the latency of the device itself?** The buffer time is only part of the delay; the device and driver add more, which some systems report. Leaning: show the buffer time only now, and the full output latency when the host reports it reliably.
+None. Settled in review:
+
+- **Missing interface at start:** fall back to the system default device, not silence (see At start).
+- **Fade-out:** a new engine command, used for Open, New, quit, and device changes ([output-safety.md](output-safety.md), rule 14).
+- **Transport across a restart:** it keeps running, from beat 0 (see State that does not survive a restart).
+- **Format of the default choices:** RON enum names (`SystemDefault`, `Named("...")`). They say what they mean when the file is edited by hand, and a device name can never be mistaken for the default (ALSA has a real device called `default`).
+- **Latency shown:** the buffer time only (Rule D8).
 
 ## Out of scope
 

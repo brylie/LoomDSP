@@ -3,12 +3,12 @@
 A safety stage on the engine's final output, so a patch mistake cannot harm the player's speakers or ears.
 
 - **Kind:** living specification.
-- **Status:** Implemented. Agreed in #131, built in the same change. The app preference waits for a preferences store (see Out of scope).
+- **Status:** Implemented, except rule 14 (fade-out before an engine stops), which is Agreed and not built yet. Rules 1 to 13 were agreed in #131 and built in the same change. The app preference waits for a preferences store (see Out of scope).
 - **Decision behind it:** [ADR-0019](../adr/0019-output-safety-stage.md), which extends the output rule of [ADR-0007](../adr/0007-polymorphic-signal-model.md).
 - **Use case and requirements:** UC3 (perform live), UC8 (a generative system left running), FR-PERF-08, FR-PERF-05, NFR-SND-02, NFR-SND-03, NFR-RT-01.
 - **Background:** [Output safety explainer](../learn/output-safety.md): why DC harms speakers, why a hard clip is not enough, and what lookahead buys.
 - **Prior art:** most DAWs leave the master bus unprotected and expect the user to add a limiter. Hardware mixers and PA processors often have a fixed output limiter. We describe our own stage here.
-- **Issues:** [#131](https://github.com/brylie/LoomDSP/issues/131). Related: [#25](https://github.com/brylie/LoomDSP/issues/25) (Panic), [#130](https://github.com/brylie/LoomDSP/issues/130) (silenced samples in the stats bar), [#121](https://github.com/brylie/LoomDSP/issues/121), [#123](https://github.com/brylie/LoomDSP/pull/123).
+- **Issues:** [#131](https://github.com/brylie/LoomDSP/issues/131); rule 14 comes from [#26](https://github.com/brylie/LoomDSP/issues/26) (device selection). Related: [#200](https://github.com/brylie/LoomDSP/issues/200) (listening checks), [#25](https://github.com/brylie/LoomDSP/issues/25) (Panic), [#130](https://github.com/brylie/LoomDSP/issues/130) (silenced samples in the stats bar), [#121](https://github.com/brylie/LoomDSP/issues/121), [#123](https://github.com/brylie/LoomDSP/pull/123).
 - **Code:** `crates/loom-core/src/safety.rs`, run at the end of `Engine::run_block`. Mode changes: `Controller::set_output_safety`. Flags: `crates/loom-cli/src/main.rs`, `crates/loom-app/src/main.rs`. Tests: `crates/loom-modules/tests/output_safety.rs`.
 
 ## Goal
@@ -62,6 +62,7 @@ The engine sums its Audio Out modules, as today. Then the left and right channel
 11. **The stage is real-time safe, block-size invariant, and deterministic.** The lookahead delay line is allocated when the engine is built, at the device rate, even in Low latency mode. All state advances one sample at a time. *Why:* hard rules 1 to 3. Allocating up front means switching to Clean never allocates on the audio thread.
 12. **The order with Panic and a master volume.** A future master volume sits before the stage, so the limiter protects whatever volume is set. Panic (#25) may use the stage's fade to ramp out and back in. Panic's own spec decides what it resets. *Why:* a volume after the limiter could push the output over the ceiling again.
 13. **Offline render and plugins default to Off.** *Why:* a render is how we check what a patch really does (reference renders, NFR-SND-03 comparisons), and a plugin host has its own master section. Both can opt in.
+14. **Fade-out before an engine stops.** The host can ask the engine to fade out. The fade then ramps from where it is now to 0, in a straight line, at the same rate as the fade-in (0 to 1 takes 10 ms), and the output stays at 0 until the engine is dropped. It works in every mode, Off included. The engine reports when its output has reached 0, and the host stops the stream then, or after 100 ms if no report comes. The app fades out before Open, New, a device change ([preferences.md](preferences.md#audio-and-midi-devices)), and quit. *Why:* stopping a stream mid-signal steps the output to 0, which is the same click as a first sample that is not 0 (rule 8). In Off mode a held DC offset, such as a Constant into Audio Out, makes a thump when it stops. The DC blocker cannot help there, because the step happens after it. The 100 ms limit keeps a stuck audio thread from holding up the app. A device that has already gone (FR-APP-04) cannot be faded, because its stream no longer runs.
 
 ## Acceptance criteria
 
@@ -76,6 +77,7 @@ Each is an engine test in `crates/loom-modules/tests/output_safety.rs` unless it
 - [x] **Mode change.** Switching mode while a signal plays dips the output to 0 within 10 ms, along a straight line down, and it plays again in the new mode. (Engine test, and a unit test that checks no step is larger than one fade step.)
 - [x] **No allocation.** `tests/no_alloc.rs` covers processing in every mode, and a mode change.
 - [x] **Determinism.** Two runs of the same patch in each mode are bit-identical.
+- [ ] **Fade-out before stop (rule 14).** Given a Constant of 0.5 into Audio Out in each mode, including Off, when the host asks for a fade-out, then the output falls to 0 in a straight line within 10 ms, with no step larger than one fade step, stays at 0, and the engine reports it is silent. The same at block sizes 1, 77, and 512. A fade-out that starts during the fade-in, or during a mode-change dip, starts from the gain it has reached. `tests/no_alloc.rs` covers the fade-out.
 - [ ] **Manual check.** In the app, with each `--output-safety` mode, Noise at gain 4 into Audio Out plays at a steady level under the ceiling (Low latency, Clean) or clips (Off), and loading a patch does not click. The app has no meter on the final output yet, so this is a listening check.
 
 ## Out of scope
@@ -89,4 +91,4 @@ Each is an engine test in `crates/loom-modules/tests/output_safety.rs` unless it
 
 ## Open points
 
-- **Fade-in on device restart.** When the device drops out and comes back (FR-APP-04), should the stage fade in again? Leaning: yes, once device recovery exists.
+- None. *Settled:* when the device drops out and comes back (FR-APP-04), the stage fades in again, because the app builds a new engine for it and every new engine fades in (rule 8).

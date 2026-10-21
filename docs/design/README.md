@@ -70,8 +70,8 @@ Copy [template.md](template.md). Keep it to one feature. Link the ADR, requireme
 | [MIDI learn](midi-learn.md) | None (builds on [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md) and [ADR-0013](../adr/0013-modules-carry-their-own-panel.md)) | Agreed, P1 |
 | [Module browser](module-browser.md) | None (builds on [ADR-0010](../adr/0010-own-patch-canvas.md)) | Implemented, P1 |
 | [Copy, paste, and duplicate](clipboard.md) | None (builds on [ADR-0008](../adr/0008-patch-format-ron.md)) | Implemented, P1 |
-| [Output safety](output-safety.md) | [ADR-0019](../adr/0019-output-safety-stage.md) | Implemented, P1 |
+| [Output safety](output-safety.md) | [ADR-0019](../adr/0019-output-safety-stage.md) | Implemented, P1; rule 14 (fade-out) Agreed |
 | [Autosave and crash recovery](autosave.md) | None (builds on [ADR-0008](../adr/0008-patch-format-ron.md) and [files](files.md)) | Implemented, P1 |
-| [App preferences](preferences.md) | None (builds on [ADR-0019](../adr/0019-output-safety-stage.md)) | Draft, P1 (output safety; audio and MIDI devices) |
+| [App preferences](preferences.md) | None (builds on [ADR-0019](../adr/0019-output-safety-stage.md)) | Audio and MIDI devices Agreed; output safety Draft; P1 |
 | [Patch metadata](patch-metadata.md) | [ADR-0023](../adr/0023-patch-licences-spdx-and-creative-commons.md) | Draft, P2 and P4 |
 | [Control channel](control-channel.md) | None (builds on [ADR-0021](../adr/0021-plain-data-view-models-and-keyed-identity.md)) | Implemented, developer tooling |
