@@ -20,11 +20,6 @@ use serde::Serialize;
 /// 48 kHz.
 const METER_WINDOW: usize = 4_800;
 
-/// Frames between reads of the meter queue: one block of 128 frames, so it
-/// holds at most one reading per meter and never fills, up to the queue's
-/// 1024 readings.
-const METER_READ: usize = 128;
-
 /// Everything the snapshot holds.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct UiSnapshot {
@@ -193,10 +188,13 @@ impl App {
         self.process(frames - window);
         // The meters show the end of the run: earlier readings are dropped.
         let _ = self.monitor.take_readings();
+        // The queue is read after every block, so it holds at most one
+        // reading per meter and never fills, up to its capacity in meters.
+        let block = self.controller.config().max_block;
         let mut readings = Vec::new();
         let mut remaining = window;
         while remaining > 0 {
-            let n = remaining.min(METER_READ);
+            let n = remaining.min(block);
             self.process(n);
             readings.extend(self.monitor.take_readings());
             remaining -= n;
