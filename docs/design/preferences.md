@@ -3,7 +3,7 @@
 A per-machine preferences file and window for the desktop app, so a player sets things like output safety once and the app remembers them.
 
 - **Kind:** living specification.
-- **Status:** Draft, and built. The file, its location, `--preferences`, the window, and the Output safety section were built with [Audio and MIDI devices](#audio-and-midi-devices) (#26), which needs them. Each [open point](#open-points) was built as its leaning says. Agreeing the open points is still to do; a different answer changes the code.
+- **Status:** Implemented. Built with [Audio and MIDI devices](#audio-and-midi-devices) in #26 (#275, #276), and agreed after it: the [open points](#settled-points) are settled as built. The manual checks are still to do.
 - **Decision behind it:** None. Builds on [ADR-0019](../adr/0019-output-safety-stage.md), which says the output safety mode belongs to the machine, not the patch.
 - **Use case and requirements:** UC3 (perform live), FR-APP-01 (desktop app, with audio and MIDI device selection), FR-MIDI-01, FR-PERF-08, NFR-SND-02.
 - **Background:** [Output safety explainer](../learn/output-safety.md), for the first setting.
@@ -171,7 +171,7 @@ Tests point `--preferences` (or the loading function behind it) at a temporary f
 
 The second section of the Preferences window: which audio output plays the patch, at which sample rate and buffer size, and which MIDI inputs play it. The app remembers the choice between runs.
 
-- **Status:** Agreed, and built in #26, except the manual check. It builds on the file, flag, and window rules above, which are still Draft. Those parts were built with it.
+- **Status:** Implemented in #26 (#275, #276), except the manual check. It builds on the file, flag, and window rules above, which were built with it.
 - **Use case and requirements:** UC3 (perform live), FR-APP-01, FR-MIDI-01.
 - **Issues:** [#26](https://github.com/brylie/LoomDSP/issues/26). Related, not built here: [#27](https://github.com/brylie/LoomDSP/issues/27) (MIDI hot-plugging, FR-MIDI-08), [#28](https://github.com/brylie/LoomDSP/issues/28) (audio device loss, FR-APP-04), [#29](https://github.com/brylie/LoomDSP/issues/29) (audio input), [#163](https://github.com/brylie/LoomDSP/issues/163) (`loom play` opens every MIDI input).
 - **Code:** `crates/loom-app/src/devices.rs` (the `Host` trait, what is offered, the choice at start, and a fake host for tests), `crates/loom-app/src/settings.rs` (the window, restarting audio, MIDI inputs), and `crates/loom-host-desktop` (`outputs`, `RunningAudio::stop`, `MidiConnection::close`). `loom play` keeps its own `--device`, `--sample-rate`, `--buffer`, `--midi`, and `--no-midi`.
@@ -348,13 +348,15 @@ None. Settled in review:
 - Several Preferences windows, or a window separate from the main one.
 - Migrating a file with a version above 1. Version 1 is the only version until the first release.
 
-## Open points
+## Settled points
 
-- **Windows: `%LOCALAPPDATA%` or `%APPDATA%`?** `%APPDATA%` roams with the user's account to other computers on a managed network. Leaning: `%LOCALAPPDATA%`, because these settings describe this computer's hardware. A setting like Off is right for one rig and wrong for another.
-- **Which crate finds the folders?** Leaning: [`etcetera`](https://crates.io/crates/etcetera) (MIT or Apache-2.0), as [autosave](autosave.md#finding-the-folders) does: the paths in the table come from `Apple` `data_dir()` (its `config_dir()` is `~/Library/Preferences`), `Windows` `cache_dir()` (its `config_dir()` is the roaming folder), and `Xdg` `config_dir()`. Not `dirs`: it depends on `option-ext`, which is MPL-2.0 and not allowed by `deny.toml`. Writing it by hand from environment variables is the other option. The paths in the table are what matters; the crate must produce them.
-- **macOS: Application Support, or `~/Library/Preferences`?** `~/Library/Preferences` is meant for files the system manages (property lists). Leaning: Application Support, because we write our own RON file.
-- **Unknown fields: drop or keep on write?** This spec drops them, so a newer app's settings would be lost if an older app writes the file. Leaning: drop during the early alpha, and keep them once there is a release.
-- **Confirm before choosing Off?** Choosing Off removes protection with one click. Leaning: no confirmation. The line under Off says what it does, and the change is easy to undo. A confirmation would get in the way of the CV-hardware player, who is the reason Off exists.
-- **Two app instances.** Each reads the file at start, and the last one to write wins. Leaning: accept this. Settings change rarely, and the file is never half-written.
-- **Toolbar space.** The toolbar is getting full. Leaning: a text button now, and a gear icon when the app has icons.
-- **Does Panic (#25) or device recovery (FR-APP-04) need anything here?** Leaning: no. They build engines with the effective value like any other rebuild.
+Each is settled as it was built. All follow the leaning the draft gave, except the folders: the draft leaned toward the `etcetera` crate, and the code finds them by hand.
+
+- **Windows: `%LOCALAPPDATA%`, not `%APPDATA%`.** `%APPDATA%` roams with the user's account to other computers on a managed network. These settings describe this computer's hardware: a setting like Off is right for one rig and wrong for another.
+- **The folders are found by hand, from environment variables.** `preferences::path_for` builds each path in the table from `HOME`, `LOCALAPPDATA`, or `XDG_CONFIG_HOME`. *Why:* it is a plain function of the operating system and its variables, so one unit test checks the path on every system, and it needs no crate. Not `dirs`: it depends on `option-ext`, which is MPL-2.0 and not allowed by `deny.toml`. [Autosave](autosave.md#finding-the-folders) uses `etcetera`, which gives the same base folders on macOS and Windows.
+- **macOS: Application Support, not `~/Library/Preferences`.** `~/Library/Preferences` is meant for files the system manages (property lists). We write our own RON file.
+- **Unknown fields are dropped on write during the early alpha.** A newer app's settings are lost if an older app writes the file. Once there is a release, unknown fields are kept. *Why:* until then nobody runs two versions, and keeping fields needs code we do not need yet.
+- **No confirmation before choosing Off.** The line under Off says what it does, and the change is easy to undo. A confirmation would get in the way of the CV-hardware player, who is the reason Off exists.
+- **Two app instances: the last one to write wins.** Each reads the file at start. Settings change rarely, and the file is never half-written.
+- **Toolbar: a text button.** It becomes a gear icon when the app has icons.
+- **Panic (#25) and device recovery (FR-APP-04) need nothing here.** They build engines with the effective value, like any other rebuild.
