@@ -435,6 +435,8 @@ A hint is an option on the parameter, in `ParamOptions`. It names one widget fro
 ### Writing a panel by hand
 
 - A module can still declare its panel in full. Then nothing is derived for it, and the registry checks it as today ([Panel declaration](#panel-declaration-67)).
+- **A module's hand-written panel shows every parameter that is not "inspector only".** The registry refuses a module panel that leaves one out, and names it. *Why:* the hint is then the one place that says a parameter is not on the tile. A forgotten knob is caught at registration, and a reader of the descriptor sees the choice. This rule is for module panels only. A sub-patch panel and a front panel show what their user chose, because a performance panel with every parameter on it is not minimal. The inspector shows every parameter either way.
+- *Why keep "inspector only" at all:* some parameters are set once and never played, such as a seed or a MIDI channel. On a tile they take space from the controls that are played, and every derived panel would show them.
 - The derived panel is a pure function of the descriptor, computed once when the module type is registered. *Why:* the same module must always look the same, and nothing about it may be rebuilt per frame.
 
 ### Acceptance criteria: default panels
@@ -442,19 +444,22 @@ A hint is an option on the parameter, in `ParamOptions`. It names one widget fro
 - [ ] Each built-in module except Button gets its panel derived, with "inspector only" hints where P1 keeps a parameter in the inspector. Its widgets, bindings, and focus order equal today's hand-written panel (test). Positions may change.
 - [ ] Deriving the panel twice from one descriptor gives equal panels (test).
 - [ ] The registry refuses a hint outside its parameter's group, with a message that names the parameter (test).
+- [ ] The registry refuses a hand-written module panel that leaves out a parameter without an "inspector only" hint, with a message that names the parameter (test).
 - [ ] A test module with a 2-choice named parameter gets radio buttons, a 0 to 1 parameter without names a toggle, and a 12-choice named parameter a select list (test, once the select list exists).
 
 ## Exposed controls in a sub-patch
 
 **Status:** Draft, P2. Decision: [ADR-0025](../adr/0025-one-design-language-and-derived-panels.md). Requirements: FR-ENCAP-03, FR-PANEL-03, FR-PANEL-09.
 
-A sub-patch's surface is made of the same controls as its inside. *Why:* a user who enters a sub-patch, or leaves it, must not have to learn a new set of controls. The knob outside is the knob inside.
+A sub-patch's surface is made of the same widgets as its inside. *Why:* a user who enters a sub-patch, or leaves it, must not have to learn a new set of widgets. The knob outside is the knob inside, and so is the light, the scope, and the curve.
+
+**Any widget can be exposed:** a control, a light, a readout, a meter, a scope, a curve, a step grid, or a waveform. The surface widget binds to the same inner item: a parameter, a display value, an output's probe, or a data slot. Parameters follow the rules below. A display shows the same live value inside and out. An editor on the surface edits the inner module's data, and each edit is one undo step, whichever side it is made on.
 
 - **Exposing copies the parameter's spec.** When an inner parameter is exposed (FR-ENCAP-03), the sub-patch's new parameter takes its label, description, unit, mapping, choice names, and hint. The user can give it a new name and a narrower range. The mapping and the kind of value stay. *Why:* a logarithmic cutoff must still turn like a cutoff, and a named choice must still show its names.
 - **The same widget on both sides.** The surface shows the widget the inner tile shows for that parameter: a fader inside is a fader outside. In the panel editor, the user can switch it for another widget in the same group, as a hint does.
 - **One parameter, two controls.** Both controls are bound to the same parameter, so they move together, show the same modulation, and an edit on either is one undo step (FR-PANEL-03).
-- **A sub-patch with no designed panel** gets a panel derived from its exposed parameters, by the rules in [Default panels](#default-panels), in the order they were exposed. When the user opens the panel editor, it starts from that panel.
-- **Seeing the link.** Inside the sub-patch, a control that is exposed has a small mark, a shape and not only a colour (NFR-UX-03), and its hover text adds "Exposed as" and the surface label. On the surface, the hover text adds which inner module and parameter it controls. *Why:* entering a sub-patch, the user should find the knob they just turned outside without searching.
+- **A sub-patch with no designed panel** gets a panel derived from what it exposes. Each exposed item keeps the widget it has inside, and the widgets are placed by the [Default panels layout](#layout-1) rules, in the order the items were exposed. When the user opens the panel editor, it starts from that panel.
+- **Seeing the link.** Inside the sub-patch, a widget that is exposed has a small mark, a shape and not only a colour (NFR-UX-03), and its hover text adds "Exposed as" and the surface label. On the surface, the hover text adds which inner module and parameter it controls. *Why:* entering a sub-patch, the user should find the knob they just turned outside without searching.
 
 ### Acceptance criteria: exposed controls
 
@@ -462,13 +467,11 @@ A sub-patch's surface is made of the same controls as its inside. *Why:* a user 
 - [ ] Turning the surface control moves the inner control, and the reverse. One undo step reverts either (`Ui` harness).
 - [ ] A sub-patch with three exposed parameters and no designed panel shows three widgets in the order exposed.
 - [ ] An exposed control inside the sub-patch has its mark and its "Exposed as" hover text (UI snapshot).
+- [ ] A light and a curve exposed from inside a sub-patch show on its surface. The light follows the inner display value, and a point dragged on the surface curve moves on the inner curve. One undo step reverts it (`Ui` harness).
 
 ## Open points
 
 - Can users change the layout of a built-in module's panel? Its look cannot change (ADR-0025).
 - How third-party modules add display kinds through the SDK.
 - The exact format of display values: how many per module, and whether they share the meter queue or use a latest-value buffer.
-- Whether a front panel may have a background image or a logo. Widgets keep the shared look either way (ADR-0025).
-- Whether a hand-written panel must place every parameter that has no "inspector only" hint.
-- Whether a sub-patch can expose an inner display value or data slot, so a light or a curve editor shows on its surface. Leaning: yes, bound to the same inner item, as for parameters.
 - A derived display value gets a light. Once display values carry a unit and range ([#118](https://github.com/brylie/LoomDSP/issues/118)), should those with a unit get a readout or a meter instead?
