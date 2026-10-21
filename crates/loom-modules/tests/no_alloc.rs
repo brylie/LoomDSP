@@ -127,6 +127,15 @@ fn audio_thread_never_allocates() {
                 parts.engine.process(&mut left[..frames], &mut right[..frames]);
             });
         }
+        // The fade-out before a stop (rule 14) is applied on the audio
+        // thread too, and runs until the engine is silent.
+        parts.controller.fade_out().unwrap();
+        for frames in [1, 128, 1024] {
+            assert_no_alloc(|| {
+                parts.engine.process(&mut left[..frames], &mut right[..frames]);
+            });
+        }
+        assert!(parts.engine.is_silent());
         let stats = parts.controller.stats();
         assert!(stats.dropped_scope.load(std::sync::atomic::Ordering::Relaxed) > 0);
     }

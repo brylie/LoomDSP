@@ -80,6 +80,11 @@ pub(crate) struct SafetyStage {
     mode: OutputSafety,
     /// A mode waiting for the fade to reach 0 (rule 9).
     pending: Option<OutputSafety>,
+    /// True after [`SafetyStage::fade_out`]: the fade goes to 0 and stays
+    /// there (rule 14).
+    stopping: bool,
+    /// True once the stage is stopping and its last sample was 0.
+    silent: bool,
     dc: [DcBlocker; 2],
     limiter: Limiter,
     fade: Fade,
@@ -90,6 +95,8 @@ impl SafetyStage {
         let mut stage = Self {
             mode,
             pending: None,
+            stopping: false,
+            silent: false,
             dc: [DcBlocker::new(sample_rate), DcBlocker::new(sample_rate)],
             limiter: Limiter::new(sample_rate),
             fade: Fade::new(sample_rate),
@@ -113,11 +120,27 @@ impl SafetyStage {
     /// Changes the mode. The output dips to silence, the mode changes, and
     /// it fades back in.
     pub(crate) fn set_mode(&mut self, mode: OutputSafety) {
-        if mode == self.pending.unwrap_or(self.mode) {
+        if self.stopping || mode == self.pending.unwrap_or(self.mode) {
             return;
         }
         self.pending = Some(mode);
         self.fade.rising = false;
+    }
+
+    /// Fades the output to 0 from the gain it has now, and keeps it there
+    /// (rule 14). A mode change on its way is dropped: nothing fades back in.
+    pub(crate) fn fade_out(&mut self) {
+        self.stopping = true;
+        self.pending = None;
+        self.fade.rising = false;
+        // A Clean fade-in still waiting for its first sample is at 0 already.
+        self.fade.hold = 0;
+    }
+
+    /// True once [`SafetyStage::fade_out`] was called and the last sample
+    /// out was silent.
+    pub(crate) fn is_silent(&self) -> bool {
+        self.silent
     }
 
     /// Runs the stage over a block, in place.
@@ -132,6 +155,7 @@ impl SafetyStage {
             let gain = self.fade.tick();
             *l = (a * gain).clamp(-1.0, 1.0);
             *r = (b * gain).clamp(-1.0, 1.0);
+            self.silent = self.stopping && gain == 0.0;
             if gain == 0.0
                 && let Some(mode) = self.pending.take()
             {
@@ -441,5 +465,34 @@ mod tests {
         // No jump bigger than one fade step, plus the DC blocker's drift.
         let step = 0.5 / length as f32 + 1e-3;
         assert!(out.windows(2).all(|w| (w[1] - w[0]).abs() <= step));
+    }
+
+    #[test]
+    fn a_fade_out_during_a_dip_goes_down_and_stays_down() {
+        let mut stage = SafetyStage::new(OutputSafety::Off, RATE);
+        let length = samples(FADE_SECONDS, RATE);
+        run(&mut stage, &vec![0.5; 2 * length]);
+        stage.set_mode(OutputSafety::Clean);
+        run(&mut stage, &vec![0.5; length / 2]);
+        stage.fade_out();
+        // A mode asked for while stopping changes nothing.
+        stage.set_mode(OutputSafety::LowLatency);
+        let out = run(&mut stage, &vec![0.5; 2 * length]);
+        assert!(out.windows(2).all(|w| w[1] <= w[0]), "only goes down");
+        let silent = out.iter().position(|&s| s == 0.0).unwrap();
+        assert!(silent <= length / 2 + 1, "{silent}");
+        assert!(out[silent..].iter().all(|&s| s == 0.0), "and stays at 0");
+        assert!(stage.is_silent());
+        assert_eq!(stage.mode, OutputSafety::Off);
+    }
+
+    #[test]
+    fn a_fade_out_while_clean_waits_for_its_first_sample_is_silent_at_once() {
+        let mut stage = SafetyStage::new(OutputSafety::Clean, RATE);
+        stage.fade_out();
+        assert!(!stage.is_silent(), "nothing played yet");
+        let out = run(&mut stage, &[0.5; 4]);
+        assert_eq!(out, [0.0; 4]);
+        assert!(stage.is_silent());
     }
 }

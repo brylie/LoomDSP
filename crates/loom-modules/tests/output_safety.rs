@@ -188,3 +188,88 @@ fn a_mode_change_dips_to_silence_and_comes_back() {
     }
     assert!(rms(&left[3_000..]) > 0.1, "and plays again in the new mode");
 }
+
+/// A frame that every size in [`BLOCKS`] reaches at a buffer boundary, so a
+/// command sent there lands on the same sample at every size.
+const ON_EVERY_BOUNDARY: usize = 77 * 512;
+
+/// Renders `frames` frames, asks for a fade-out, and renders `after` more,
+/// at every size in [`BLOCKS`]. Checks the sizes agree and returns the left
+/// channel after the request, with whether the engine said it was silent.
+fn fade_out_all(mode: OutputSafety, value: f32, frames: usize, after: usize) -> (Vec<f32>, bool) {
+    let mut results = Vec::new();
+    for block in BLOCKS {
+        let mut parts = constant(mode, value);
+        render(&mut parts, frames, block, &[]);
+        assert!(!parts.engine.is_silent(), "not silent before the request");
+        parts.controller.fade_out().unwrap();
+        let (left, right) = render(&mut parts, after, block, &[]);
+        assert_eq!(left, right, "both sides fade together");
+        results.push((left, parts.engine.is_silent()));
+    }
+    for (result, block) in results.iter().zip(BLOCKS) {
+        assert_eq!(result, &results[0], "block size {block} matches block size 1");
+    }
+    results.swap_remove(0)
+}
+
+#[test]
+fn audio_fades_out_before_the_engine_stops() {
+    let length = samples(FADE_SECONDS, SAMPLE_RATE);
+    let after = 3 * length;
+    for mode in MODES {
+        let (faded, silent) = fade_out_all(mode, 0.5, ON_EVERY_BOUNDARY, after);
+        assert!(silent, "{mode:?}: the engine reports silence");
+        // The same engine without the fade-out.
+        let mut plain = constant(mode, 0.5);
+        render(&mut plain, ON_EVERY_BOUNDARY, 512, &[]);
+        let (plain, _) = render(&mut plain, after, 512, &[]);
+        for (i, (&out, &signal)) in faded.iter().zip(&plain).enumerate() {
+            // A straight line from 1 to 0 over 10 ms, then 0.
+            let gain = length.saturating_sub(i) as f32 / length as f32;
+            assert_eq!(out, signal * gain, "{mode:?}, frame {i}");
+        }
+        assert!(faded[length..].iter().all(|&x| x == 0.0), "{mode:?}: stays silent");
+    }
+    // In Off the held offset itself falls in a straight line: no thump.
+    let (faded, _) = fade_out_all(OutputSafety::Off, 0.5, ON_EVERY_BOUNDARY, after);
+    let step = 0.5 / length as f32;
+    assert!(faded.windows(2).all(|w| (w[0] - w[1]).abs() <= step + 1e-6));
+    assert_eq!(faded[0], 0.5, "it starts where the output was");
+}
+
+#[test]
+fn a_fade_out_starts_from_the_gain_it_has_reached() {
+    let length = samples(FADE_SECONDS, SAMPLE_RATE);
+    // Half way up the fade-in. 240 frames at 48 kHz, a whole number of
+    // buffers of 1 and of 240 frames.
+    let half = length / 2;
+    for block in [1, half] {
+        let mut parts = constant(OutputSafety::Off, 0.5);
+        let (rising, _) = render(&mut parts, half, block, &[]);
+        parts.controller.fade_out().unwrap();
+        let (falling, _) = render(&mut parts, length, block, &[]);
+        let last = rising[half - 1];
+        assert!((last - 0.25).abs() < 0.01, "half way up ({last})");
+        // It goes on from there, and down, never back to full level. The
+        // Constant's own smoothing still moves the signal a little, so allow
+        // a little more than one fade step.
+        let step = 1.5 * 0.5 / length as f32;
+        assert!((falling[0] - last).abs() <= step, "block {block}");
+        assert!(falling.windows(2).all(|w| w[1] <= w[0]), "block {block}");
+        assert!(falling[half + 1..].iter().all(|&x| x == 0.0), "block {block}");
+        assert!(parts.engine.is_silent());
+    }
+
+    // During a mode-change dip it keeps going down, and does not come back
+    // in the new mode.
+    let mut parts = constant(OutputSafety::Off, 0.5);
+    render(&mut parts, 4 * length, 128, &[]);
+    parts.controller.set_output_safety(OutputSafety::LowLatency).unwrap();
+    let (dipping, _) = render(&mut parts, half, half, &[]);
+    parts.controller.fade_out().unwrap();
+    let (falling, _) = render(&mut parts, 4 * length, 128, &[]);
+    assert!(dipping.windows(2).all(|w| w[1] <= w[0]));
+    assert!(falling[0] <= dipping[half - 1] + 1.5 * 0.5 / length as f32);
+    assert!(falling[half + 1..].iter().all(|&x| x == 0.0), "it does not come back");
+}

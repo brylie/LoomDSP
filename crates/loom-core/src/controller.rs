@@ -781,6 +781,14 @@ impl Controller {
         self.send(Command::SetOutputSafety(mode))
     }
 
+    /// Asks the engine to fade its output to silence over at most 10 ms and
+    /// stay silent, before the host stops it (output safety, rule 14). The
+    /// engine then reports [`Engine::is_silent`](crate::Engine::is_silent).
+    /// There is no way back: build a new engine to play again.
+    pub fn fade_out(&mut self) -> Result<(), LoomError> {
+        self.send(Command::FadeOut)
+    }
+
     fn send(&mut self, command: Command) -> Result<(), LoomError> {
         self.commands.push(command).map_err(|_| LoomError::QueueFull)
     }

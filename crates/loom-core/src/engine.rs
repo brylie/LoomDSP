@@ -131,6 +131,8 @@ pub(crate) enum Command {
     SetRunning(bool),
     ResetTransport,
     SetOutputSafety(OutputSafety),
+    /// Fade the output to silence and keep it there (output safety, rule 14).
+    FadeOut,
 }
 
 pub(crate) enum Garbage {
@@ -211,6 +213,15 @@ impl Engine {
     /// Engine settings.
     pub fn config(&self) -> &EngineConfig {
         &self.config
+    }
+
+    /// True once the engine was asked to fade out
+    /// ([`Controller::fade_out`](crate::Controller::fade_out)) and the last
+    /// sample it rendered was silent. Every later sample is silent too, so
+    /// the host may stop the stream once the device has played what is
+    /// rendered (output safety, rule 14).
+    pub fn is_silent(&self) -> bool {
+        self.safety.is_silent()
     }
 
     /// Renders `left.len()` frames (both slices must have the same length).
@@ -363,6 +374,7 @@ impl Engine {
                 Command::SetRunning(running) => self.transport.set_running(self.frame, running),
                 Command::ResetTransport => self.transport.reset(self.frame),
                 Command::SetOutputSafety(mode) => self.safety.set_mode(mode),
+                Command::FadeOut => self.safety.fade_out(),
             }
         }
     }
