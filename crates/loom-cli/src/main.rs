@@ -362,6 +362,7 @@ fn start_live(path: &Path, args: &AudioArgs, hold_note: Option<u8>) -> Result<Li
         device: args.device.clone(),
         sample_rate: args.sample_rate,
         buffer_size: args.buffer,
+        exact: false,
     })?;
     let config = EngineConfig {
         output_safety: args.output_safety,

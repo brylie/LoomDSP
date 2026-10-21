@@ -9,8 +9,8 @@
 //! - Output only (no audio input yet).
 //! - 32-bit float devices only. This covers CoreAudio, WASAPI shared mode,
 //!   and PipeWire/PulseAudio defaults.
-//! - MIDI ports are chosen at start. Hot-plugging comes in P1
-//!   (FR-MIDI-08).
+//! - MIDI ports are chosen at start, or opened and closed by name. Hot-plugging
+//!   comes in P1 (FR-MIDI-08).
 //!
 //! For development and tests, [`AudioOutput::clock`] plays the engine from
 //! a timer thread instead of a device, and [`AudioOutput::record`] saves
@@ -70,6 +70,9 @@ fn audio_error(error: impl std::fmt::Display) -> HostError {
 pub struct AudioOptions {
     /// Case-insensitive part of the device name. `None` uses the default device.
     pub device: Option<String>,
+    /// Match [`AudioOptions::device`] to the whole name, exactly, instead of
+    /// to a part of it. A choice saved from a list knows the full name.
+    pub exact: bool,
     /// Requested sample rate. `None` uses the device default.
     pub sample_rate: Option<u32>,
     /// Requested buffer size in frames. `None` uses the device default.
@@ -81,6 +84,63 @@ pub fn output_device_names() -> Result<Vec<String>, HostError> {
     let host = cpal::default_host();
     let devices = host.output_devices().map_err(audio_error)?;
     Ok(devices.map(|d| device_name(&d)).collect())
+}
+
+/// What an output device offers, for a settings window.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutputInfo {
+    /// Full device name.
+    pub name: String,
+    /// The rate the device uses when none is asked for, in Hz.
+    pub default_rate: u32,
+    /// Sample rate ranges, in Hz, of the device's 32-bit float
+    /// configurations, lowest and highest included.
+    pub rates: Vec<(u32, u32)>,
+    /// Buffer sizes in frames the device accepts, lowest and highest
+    /// included, or `None` if it does not say.
+    pub buffer: Option<(u32, u32)>,
+}
+
+/// The output devices, and the name of the system default.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Outputs {
+    /// Name of the system default output, if there is one.
+    pub default: Option<String>,
+    /// Every output device that works with 32-bit float.
+    pub devices: Vec<OutputInfo>,
+}
+
+/// Lists the output devices and what each offers. Asking can take a moment
+/// on some systems, so call it when a list is needed, not every frame.
+pub fn outputs() -> Result<Outputs, HostError> {
+    let host = cpal::default_host();
+    let default = host.default_output_device().map(|d| device_name(&d));
+    let mut devices = Vec::new();
+    for device in host.output_devices().map_err(audio_error)? {
+        // A device that cannot say what it offers cannot be chosen.
+        let (Ok(default_config), Ok(configs)) = (device.default_output_config(), device.supported_output_configs())
+        else {
+            continue;
+        };
+        let mut rates = Vec::new();
+        let mut buffer: Option<(u32, u32)> = None;
+        for range in configs.filter(|r| r.sample_format() == cpal::SampleFormat::F32) {
+            rates.push((range.min_sample_rate(), range.max_sample_rate()));
+            if let cpal::SupportedBufferSize::Range { min, max } = *range.buffer_size() {
+                buffer = Some(buffer.map_or((min, max), |(lo, hi)| (lo.min(min), hi.max(max))));
+            }
+        }
+        if rates.is_empty() {
+            continue;
+        }
+        devices.push(OutputInfo {
+            name: device_name(&device),
+            default_rate: default_config.sample_rate(),
+            rates,
+            buffer,
+        });
+    }
+    Ok(Outputs { default, devices })
 }
 
 /// Names of all MIDI input ports.
@@ -126,6 +186,10 @@ impl AudioOutput {
         let host = cpal::default_host();
         let device = match &options.device {
             None => host.default_output_device(),
+            Some(wanted) if options.exact => host
+                .output_devices()
+                .map_err(audio_error)?
+                .find(|d| device_name(d) == *wanted),
             Some(wanted) => {
                 let wanted = wanted.to_lowercase();
                 host.output_devices()
@@ -184,6 +248,13 @@ impl AudioOutput {
             name: "no device (clock)".to_string(),
             record: None,
         }
+    }
+
+    /// Gives the output another name, for an output with no device that
+    /// stands in for one in tests.
+    pub fn named(mut self, name: impl Into<String>) -> Self {
+        self.name = name.into();
+        self
     }
 
     /// Also saves what the engine plays to a WAV file (32-bit float,
@@ -263,7 +334,7 @@ impl AudioOutput {
             Kind::Clock { sample_rate, block } => Player::Clock(Clock::start(render, sample_rate, block)?),
         };
         Ok(RunningAudio {
-            _player: player,
+            player: Some(player),
             recording,
             stats,
             name: self.name,
@@ -310,6 +381,10 @@ impl Render {
         let started = Instant::now();
         let channels = self.channels;
         let frames = data.len() / channels;
+        // A buffer that starts silent stays silent: the fade-out has ended.
+        if self.engine.is_silent() {
+            self.stats.silent_buffers.fetch_add(1, Ordering::Relaxed);
+        }
 
         let mut done = 0;
         while done < frames {
@@ -391,11 +466,21 @@ impl Drop for Clock {
     }
 }
 
+/// Buffers of silence the device must be handed after the engine reports
+/// silence, before the stream stops (output safety, rule 14). The engine
+/// renders ahead of what the device plays, so stopping at the report could
+/// drop the end of the fade.
+pub const SILENT_BUFFERS_BEFORE_STOP: u64 = 2;
+
+/// The longest [`RunningAudio::stop`] waits for the fade-out.
+pub const STOP_LIMIT: Duration = Duration::from_millis(100);
+
 /// Audio that is playing. Audio stops when this is dropped, and then a
-/// recording is closed.
+/// recording is closed. To stop without a click, ask the engine to fade out
+/// ([`loom_core::Controller::fade_out`]) and call [`RunningAudio::stop`].
 pub struct RunningAudio {
     // Fields drop in order: audio stops before the recording closes.
-    _player: Player,
+    player: Option<Player>,
     recording: Option<Recording>,
     stats: Arc<CallbackStats>,
     name: String,
@@ -403,6 +488,25 @@ pub struct RunningAudio {
 }
 
 impl RunningAudio {
+    /// Stops audio once the engine has faded out: after it reported silence
+    /// and the device was handed [`SILENT_BUFFERS_BEFORE_STOP`] more
+    /// buffers, or after `limit`, whichever comes first. Returns true if it
+    /// stopped on the silence. Ask the engine to fade out first.
+    pub fn stop(mut self, limit: Duration) -> bool {
+        let started = Instant::now();
+        let silent = loop {
+            if self.stats.silent_buffers.load(Ordering::Relaxed) >= SILENT_BUFFERS_BEFORE_STOP {
+                break true;
+            }
+            if started.elapsed() >= limit {
+                break false;
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        };
+        self.player = None;
+        silent
+    }
+
     /// Callback timing counters.
     pub fn stats(&self) -> &Arc<CallbackStats> {
         &self.stats
@@ -448,6 +552,8 @@ pub struct CallbackStats {
     last_load_permille: AtomicU64,
     smallest_buffer: AtomicU64,
     largest_buffer: AtomicU64,
+    /// Buffers rendered after the engine reported silence.
+    silent_buffers: AtomicU64,
 }
 
 /// A copy of [`CallbackStats`] at one moment.
@@ -469,6 +575,8 @@ pub struct StatsSnapshot {
     pub smallest_buffer: u64,
     /// Largest buffer the device asked for, in frames.
     pub largest_buffer: u64,
+    /// Buffers handed to the device after the engine faded out to silence.
+    pub silent_buffers: u64,
 }
 
 impl CallbackStats {
@@ -500,6 +608,7 @@ impl CallbackStats {
             last_load: self.last_load_permille.load(Ordering::Relaxed) as f64 / 1000.0,
             smallest_buffer: self.smallest_buffer.load(Ordering::Relaxed),
             largest_buffer: self.largest_buffer.load(Ordering::Relaxed),
+            silent_buffers: self.silent_buffers.load(Ordering::Relaxed),
         }
     }
 }
@@ -528,9 +637,67 @@ pub fn send_midi(midi: &SharedMidi, event: MidiEvent) -> bool {
         .send(event)
 }
 
-/// An open MIDI input. MIDI stops when this is dropped.
+/// One MIDI input's path into the engine. It remembers which notes are held
+/// on that input, so closing the input can release them.
+pub struct MidiInputState {
+    midi: SharedMidi,
+    /// One bit per note, per channel.
+    held: [u128; 16],
+}
+
+impl MidiInputState {
+    /// A path into `midi` with no notes held.
+    pub fn new(midi: SharedMidi) -> Self {
+        Self { midi, held: [0; 16] }
+    }
+
+    /// Sends one message from the input to the engine, applied at the start
+    /// of the next audio buffer. SysEx and longer messages are dropped.
+    pub fn receive(&mut self, bytes: &[u8]) {
+        let Some(&status) = bytes.first() else { return };
+        if status == 0xF0 || bytes.len() > 3 {
+            return;
+        }
+        if let [status, note, velocity] = *bytes
+            && note < 128
+        {
+            let channel = usize::from(status & 0x0F);
+            let bit = 1u128 << note;
+            match status & 0xF0 {
+                0x90 if velocity > 0 => self.held[channel] |= bit,
+                0x80 | 0x90 => self.held[channel] &= !bit,
+                _ => {}
+            }
+        }
+        // Frame 0: applied at the start of the next audio buffer
+        // (NFR-PERF-07). Sub-buffer timestamps come later.
+        send_midi(&self.midi, MidiEvent::from_bytes(0, bytes));
+    }
+
+    /// Sends a note off for every note held on this input.
+    pub fn release_all(&mut self) {
+        for (channel, held) in self.held.iter_mut().enumerate() {
+            for note in 0..128u8 {
+                if *held & (1u128 << note) != 0 {
+                    send_midi(&self.midi, MidiEvent::note_off(0, channel as u8, note));
+                }
+            }
+            *held = 0;
+        }
+    }
+
+    /// True if any note is held on this input.
+    pub fn holds_notes(&self) -> bool {
+        self.held.iter().any(|&h| h != 0)
+    }
+}
+
+/// An open MIDI input. MIDI stops when this is dropped. [`close`] it to
+/// also release the notes held on it.
+///
+/// [`close`]: MidiConnection::close
 pub struct MidiConnection {
-    _connection: midir::MidiInputConnection<SharedMidi>,
+    connection: midir::MidiInputConnection<MidiInputState>,
     port_name: String,
 }
 
@@ -538,6 +705,13 @@ impl MidiConnection {
     /// Name of the connected port.
     pub fn port_name(&self) -> &str {
         &self.port_name
+    }
+
+    /// Closes the input, then releases the notes that were held on it, so
+    /// none hangs.
+    pub fn close(self) {
+        let (_, mut state) = self.connection.close();
+        state.release_all();
     }
 }
 
@@ -559,20 +733,11 @@ fn open_port(
         .connect(
             port,
             "loomdsp-in",
-            |_timestamp, bytes, midi: &mut SharedMidi| {
-                if bytes.first().is_some_and(|&status| status != 0xF0) && bytes.len() <= 3 {
-                    // Frame 0: applied at the start of the next audio buffer
-                    // (NFR-PERF-07). Sub-buffer timestamps come later.
-                    send_midi(midi, MidiEvent::from_bytes(0, bytes));
-                }
-            },
-            midi,
+            |_timestamp, bytes, state: &mut MidiInputState| state.receive(bytes),
+            MidiInputState::new(midi),
         )
         .map_err(|e| HostError::Midi(format!("{port_name}: {e}")))?;
-    Ok(MidiConnection {
-        _connection: connection,
-        port_name,
-    })
+    Ok(MidiConnection { connection, port_name })
 }
 
 /// Connects one MIDI input port to the engine.
@@ -606,6 +771,17 @@ pub fn connect_midi(port: Option<&str>, midi: SharedMidi) -> Result<Option<MidiC
     open_port(input, &chosen, midi).map(Some)
 }
 
+/// Connects the MIDI input port whose name is exactly `name`.
+pub fn connect_midi_named(name: &str, midi: SharedMidi) -> Result<MidiConnection, HostError> {
+    let input = midi_input()?;
+    let port = input
+        .ports()
+        .into_iter()
+        .find(|p| input.port_name(p).is_ok_and(|n| n == name))
+        .ok_or_else(|| HostError::NoMidiPort(Some(name.to_string())))?;
+    open_port(input, &port, midi)
+}
+
 /// Connects every MIDI input port to the engine, so any keyboard or
 /// controller plays without choosing it first. Ports that fail to open are
 /// returned as errors next to the ones that worked.
@@ -621,4 +797,92 @@ pub fn connect_all_midi(midi: &SharedMidi) -> Result<(Vec<MidiConnection>, Vec<H
         }
     }
     Ok((connections, errors))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use loom_core::{EngineConfig, EngineParts, OutputSafety, create_engine};
+
+    /// A held offset into Audio Out with no safety stage, so the output
+    /// stays at 0.5 until it fades: a thump if the stream stopped mid-way.
+    fn held_offset() -> EngineParts {
+        let config = EngineConfig {
+            output_safety: OutputSafety::Off,
+            ..EngineConfig::with_sample_rate(48_000.0)
+        };
+        let mut parts = create_engine(loom_modules::registry(), config);
+        let c = &mut parts.controller;
+        let constant = c.add_module("loom.math.constant").unwrap();
+        c.set_param_named(constant, "value", 0.5).unwrap();
+        let out = c.add_module("loom.io.audio-out").unwrap();
+        c.connect_named(constant, "out", out, "left").unwrap();
+        c.commit().unwrap();
+        parts
+    }
+
+    #[test]
+    fn a_stream_stops_after_the_fade_and_two_silent_buffers() {
+        let mut parts = held_offset();
+        let audio = AudioOutput::clock(48_000, 64).start(parts.engine).unwrap();
+        let stats = audio.stats().clone();
+        std::thread::sleep(Duration::from_millis(30));
+        parts.controller.fade_out().unwrap();
+        let started = Instant::now();
+        assert!(audio.stop(STOP_LIMIT), "stopped on the silence");
+        assert!(started.elapsed() < STOP_LIMIT);
+        assert!(stats.snapshot().silent_buffers >= SILENT_BUFFERS_BEFORE_STOP);
+    }
+
+    #[test]
+    fn a_stream_that_never_goes_silent_stops_at_the_limit() {
+        let parts = held_offset();
+        let audio = AudioOutput::clock(48_000, 64).start(parts.engine).unwrap();
+        let started = Instant::now();
+        // No fade-out asked for: the engine never reports silence.
+        assert!(!audio.stop(STOP_LIMIT));
+        let waited = started.elapsed();
+        assert!(waited >= STOP_LIMIT && waited < 10 * STOP_LIMIT, "{waited:?}");
+    }
+
+    #[test]
+    fn closing_an_input_releases_its_held_notes() {
+        let config = EngineConfig {
+            output_safety: OutputSafety::Off,
+            ..EngineConfig::with_sample_rate(48_000.0)
+        };
+        let mut parts = create_engine(loom_modules::registry(), config);
+        let c = &mut parts.controller;
+        let note = c.add_module("loom.midi.note").unwrap();
+        let out = c.add_module("loom.io.audio-out").unwrap();
+        c.connect_named(note, "gate", out, "left").unwrap();
+        c.commit().unwrap();
+        let mut state = MidiInputState::new(share_midi(parts.midi));
+        let mut gate = |engine: &mut Engine| {
+            let (mut left, mut right) = (vec![0.0; 1024], vec![0.0; 1024]);
+            engine.process(&mut left, &mut right);
+            left[1023]
+        };
+        gate(&mut parts.engine);
+
+        state.receive(&[0x92, 60, 100]);
+        state.receive(&[0x92, 62, 100]);
+        state.receive(&[0x92, 62, 0]);
+        assert!(state.holds_notes());
+        assert_eq!(gate(&mut parts.engine), 1.0, "the note plays");
+
+        state.release_all();
+        assert!(!state.holds_notes());
+        assert_eq!(gate(&mut parts.engine), 0.0, "and is released");
+    }
+
+    #[test]
+    fn sysex_and_long_messages_are_not_sent() {
+        let parts = create_engine(loom_modules::registry(), EngineConfig::default());
+        let mut state = MidiInputState::new(share_midi(parts.midi));
+        state.receive(&[0xF0, 1, 2]);
+        state.receive(&[0x90, 60, 100, 1]);
+        state.receive(&[]);
+        assert!(!state.holds_notes());
+    }
 }

@@ -2082,6 +2082,7 @@ dependencies = [
  "cpal",
  "hound",
  "loom-core",
+ "loom-modules",
  "loom-rt",
  "midir",
  "rtrb",
