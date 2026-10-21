@@ -8,7 +8,7 @@
 use crate::live::{Level, Levels};
 use iced::futures::Stream;
 use iced::futures::channel::mpsc;
-use loom_core::{ProbeId, Telemetry};
+use loom_core::{MeterReading, ProbeId, Telemetry};
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
@@ -33,6 +33,19 @@ impl Monitor {
             telemetry: Arc::new(Mutex::new(Some(telemetry))),
             generation,
         }
+    }
+}
+
+impl Monitor {
+    /// Takes the meter readings waiting now, on the caller's thread. For
+    /// `--frames`, which runs the engine with no telemetry thread.
+    pub fn take_readings(&self) -> Vec<MeterReading> {
+        let mut telemetry = self.telemetry.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(telemetry) = telemetry.as_mut() else {
+            return Vec::new();
+        };
+        telemetry.scope().for_each(drop);
+        telemetry.meters().collect()
     }
 }
 

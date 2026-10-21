@@ -87,8 +87,8 @@ struct Args {
     #[arg(long, value_name = "MODULE", requires = "inspect")]
     select: Vec<u32>,
     /// With --dump-ui or --screenshot-window: first run the engine for N
-    /// frames at 48 kHz on silent input, so live values and lights show
-    /// where the engine left them.
+    /// frames at 48 kHz on silent input, so live values, lights, and meters
+    /// show where the engine left them.
     #[arg(long, value_name = "N", requires = "inspect")]
     frames: Option<usize>,
     /// Keep autosave recovery copies in this folder instead of the

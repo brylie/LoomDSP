@@ -39,29 +39,9 @@ fn an_unknown_module_fails() {
     assert!(String::from_utf8_lossy(&result.stderr).contains("no module 999"));
 }
 
-/// A constant holds an envelope's gate high and modulates a filter's
-/// cutoff, so a running engine lights the envelope's level light and moves
-/// the cutoff knob's live dot. Written as `name`: tests run in parallel.
-fn running(name: &str) -> PathBuf {
-    let patch = r#"Patch(
-    version: 1,
-    name: "Running",
-    modules: [
-        PatchModule(id: 1, kind: "loom.math.constant@1", params: {"value": 1.0}),
-        PatchModule(id: 2, kind: "loom.env.adsr@1"),
-        PatchModule(id: 3, kind: "loom.filter.svf@1"),
-    ],
-    cables: [
-        PatchCable(from: (1, "out"), to: (2, "gate")),
-    ],
-    modulation: [
-        (source: (1, "out"), target: (3, "cutoff"), depth: 0.25),
-    ],
-)
-"#;
-    let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(name);
-    std::fs::write(&path, patch).expect("patch written");
-    path
+/// The `--frames` test patch: see the comment at its top.
+fn running() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/patches/running.ron")
 }
 
 /// The widget bound to `label` on module `id`.
@@ -83,7 +63,7 @@ fn json_of(result: &Output) -> serde_json::Value {
 
 #[test]
 fn frames_run_the_engine_first() {
-    let patch = running("running-dump.ron");
+    let patch = running();
     let still = json_of(&dump_of(&patch, &[]));
     assert_eq!(
         widget(&still, 3, "Cutoff")["live"],
@@ -91,6 +71,7 @@ fn frames_run_the_engine_first() {
         "the engine has not run"
     );
     assert_eq!(widget(&still, 2, "level")["position"], 0.0);
+    assert_eq!(widget(&still, 4, "Out")["position"], 0.0);
 
     let ran = json_of(&dump_of(&patch, &["--frames", "4800"]));
     let knob = widget(&ran, 3, "Cutoff");
@@ -101,6 +82,12 @@ fn frames_run_the_engine_first() {
     );
     let level = widget(&ran, 2, "level")["position"].as_f64().unwrap();
     assert!(level > 0.5, "the gate is held: {level}");
+    // A steady 0.6 is -4.4 dB, which a meter from -60 dB to 0 dB shows at
+    // about 0.926.
+    let meter = widget(&ran, 4, "Out");
+    let (rms, peak) = (meter["position"].as_f64().unwrap(), meter["peak"].as_f64().unwrap());
+    assert!((rms - 0.926).abs() < 0.01, "the meter shows the constant: {meter}");
+    assert!((peak - rms).abs() < 0.01, "a constant peaks at its RMS level: {meter}");
 }
 
 #[test]
