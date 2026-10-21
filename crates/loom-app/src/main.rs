@@ -1084,11 +1084,18 @@ impl App {
 
     /// Runs the engine for `frames` frames on silent buffers, as an audio
     /// device would. For tests and `--frames`: the window never runs the
-    /// idle engine.
+    /// idle engine. Runs in chunks, so a long run needs no long buffers;
+    /// the engine gives the same output at any block size.
     fn process(&mut self, frames: usize) {
+        const CHUNK: usize = 4096;
         let engine = self.idle_engine.as_mut().expect("an audio device plays the engine");
-        let (mut left, mut right) = (vec![0.0; frames], vec![0.0; frames]);
-        engine.process(&mut left, &mut right);
+        let (mut left, mut right) = (vec![0.0; CHUNK], vec![0.0; CHUNK]);
+        let mut remaining = frames;
+        while remaining > 0 {
+            let n = remaining.min(CHUNK);
+            engine.process(&mut left[..n], &mut right[..n]);
+            remaining -= n;
+        }
     }
 
     /// Rebuilds the scene after the graph changed.
