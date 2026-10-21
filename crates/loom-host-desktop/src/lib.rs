@@ -858,7 +858,7 @@ mod tests {
         c.connect_named(note, "gate", out, "left").unwrap();
         c.commit().unwrap();
         let mut state = MidiInputState::new(share_midi(parts.midi));
-        let mut gate = |engine: &mut Engine| {
+        let gate = |engine: &mut Engine| {
             let (mut left, mut right) = (vec![0.0; 1024], vec![0.0; 1024]);
             engine.process(&mut left, &mut right);
             left[1023]
