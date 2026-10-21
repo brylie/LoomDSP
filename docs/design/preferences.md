@@ -3,12 +3,12 @@
 A per-machine preferences file and window for the desktop app, so a player sets things like output safety once and the app remembers them.
 
 - **Kind:** living specification.
-- **Status:** Draft
+- **Status:** Draft. [Audio and MIDI devices](#audio-and-midi-devices) has its own status.
 - **Decision behind it:** None. Builds on [ADR-0019](../adr/0019-output-safety-stage.md), which says the output safety mode belongs to the machine, not the patch.
-- **Use case and requirements:** UC3 (perform live), FR-APP-01 (desktop app), FR-PERF-08, NFR-SND-02.
+- **Use case and requirements:** UC3 (perform live), FR-APP-01 (desktop app, with audio and MIDI device selection), FR-MIDI-01, FR-PERF-08, NFR-SND-02.
 - **Background:** [Output safety explainer](../learn/output-safety.md), for the first setting.
 - **Prior art:** most desktop apps keep settings in a file in the operating system's per-user settings folder, and open a settings window with Cmd+, on macOS. We use only those conventions.
-- **Issues:** follows [#131](https://github.com/brylie/LoomDSP/issues/131). No issue yet.
+- **Issues:** follows [#131](https://github.com/brylie/LoomDSP/issues/131); [#201](https://github.com/brylie/LoomDSP/issues/201) (output safety), [#26](https://github.com/brylie/LoomDSP/issues/26) (devices).
 - **Code:** none yet. Today the mode is the `--output-safety` flag in `crates/loom-app/src/main.rs` (`Args`). The app passes it into every `EngineConfig` it builds.
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
@@ -18,7 +18,7 @@ A per-machine preferences file and window for the desktop app, so a player sets 
 
 "My audio interface sends control voltages to my modular, so I run with output safety off. I don't want to type a flag every time I start LoomDSP. And when I play through the PA at a gig, I want to turn safety back on from inside the app, without restarting."
 
-The app needs one place for settings that belong to this computer and its hardware, not to a patch. Output safety is the first. Audio and MIDI devices, and others, can follow later (see Out of scope).
+The app needs one place for settings that belong to this computer and its hardware, not to a patch. Output safety is the first. Audio and MIDI devices are the second ([their own section](#audio-and-midi-devices)). Others can follow later (see Out of scope).
 
 ## Terms
 
@@ -111,7 +111,7 @@ If the player changes the setting in the Preferences window during a run started
 
 It opens as a modal panel over the canvas, like the app's other dialogs. Esc or a **Close** button closes it. Audio keeps playing while it is open.
 
-The panel has one section in this version:
+The panel has two sections: Output safety, described here, and [Audio and MIDI devices](#audio-and-midi-devices).
 
 **Output safety.** Three choices, one selected:
 
@@ -167,9 +167,175 @@ Tests point `--preferences` (or the loading function behind it) at a temporary f
 - [ ] Given the default paths, then on each OS the path matches the table in Where the file lives. (Unit test of the path function, with the environment variables set by the test.)
 - [ ] **Manual check.** On macOS, Windows, and Linux: Cmd+, or Ctrl+, opens the window. With Noise at gain 4 playing, switching between all three modes dips and returns without a click, and the level changes as expected (under the ceiling in Low latency and Clean, clipped in Off). After restarting the app, the last choice is still selected.
 
+## Audio and MIDI devices
+
+The second section of the Preferences window: which audio output plays the patch, at which sample rate and buffer size, and which MIDI inputs play it. The app remembers the choice between runs.
+
+- **Status:** Draft. The sections above it may be agreed first; this one builds on them.
+- **Use case and requirements:** UC3 (perform live), FR-APP-01, FR-MIDI-01.
+- **Issues:** [#26](https://github.com/brylie/LoomDSP/issues/26). Related, not built here: [#27](https://github.com/brylie/LoomDSP/issues/27) (MIDI hot-plugging, FR-MIDI-08), [#28](https://github.com/brylie/LoomDSP/issues/28) (audio device loss, FR-APP-04), [#29](https://github.com/brylie/LoomDSP/issues/29) (audio input), [#163](https://github.com/brylie/LoomDSP/issues/163) (`loom play` opens every MIDI input).
+- **Code today:** the app always plays on the system default output at its default rate and buffer size (`App::open_output`, `AudioOptions::default()`), and opens every MIDI input at start (`loom_host_desktop::connect_all_midi`). `loom play` already takes `--device`, `--sample-rate`, `--buffer`, `--midi`, and `--no-midi`.
+
+### Goal
+
+"At home I play through my laptop speakers. In the studio I use my USB interface at 96 kHz with a small buffer, so the keys feel tight. I want to pick the interface once and have LoomDSP use it next time. I have two keyboards plugged in, and one of them is a drum pad I use with another program, so I want to turn that one off."
+
+### What is saved
+
+Two new fields in `preferences.ron`. They hold the player's choice, not what the app found at start (see Rule D2).
+
+```ron
+(
+    version: 1,
+    output_safety: "low-latency",
+    audio: (
+        device: Named("MOTU M4"),
+        sample_rate: Hz(96000),
+        buffer: Frames(128),
+    ),
+    midi: (
+        off: ["Pad Controller MIDI 1"],
+    ),
+)
+```
+
+| Field | Values | Default |
+|---|---|---|
+| `audio.device` | `SystemDefault`, or `Named("<full device name>")` | `SystemDefault` |
+| `audio.sample_rate` | `DeviceDefault`, or `Hz(<rate>)` | `DeviceDefault` |
+| `audio.buffer` | `DeviceDefault`, or `Frames(<size>)` | `DeviceDefault` |
+| `midi.off` | A list of full MIDI input names | `[]` (every input on) |
+
+- `SystemDefault` follows the operating system's choice, and changes when the player changes it there. `Named` sticks to one device. *Why:* a laptop player wants "whatever macOS is set to". A studio player wants "the interface, never the speakers". They are different choices, and both need a way to say so.
+- A device is matched by its full name, exactly. *Why:* `loom play --device` matches part of a name, which is quick to type but can pick the wrong one of two similar interfaces. A saved choice is made by clicking, so the full name is known.
+- MIDI saves the inputs that are **off**, not the ones that are on. *Why:* a controller the app has never seen plays at once, with no trip to the Preferences window. This is what the app does today, what #163 proposes for `loom play`, and what #27 needs when a controller is plugged in on stage.
+- A bad value in one of these fields falls back to that field's default, like any other field (Reading the file).
+
+### The window section
+
+Below Output safety:
+
+**Audio output**
+
+| Control | Choices |
+|---|---|
+| Device | **System default (`<name of the current system default>`)**, then every output device by name. |
+| Sample rate | **Device default (`<rate>` Hz)**, then the rates this device offers (see Rule D4). |
+| Buffer size | **Device default**, then the sizes this device offers. Each size shows its time at the chosen rate, for example `128 frames · 1.3 ms`. |
+
+A line under the section shows what is playing now: `Playing on "MOTU M4" at 96000 Hz, 128 frames (1.3 ms).` With `--no-audio` it says `Audio is off for this run (--no-audio).` With `--fake-audio`, `No device for this run (--fake-audio).` In both cases the controls still change the saved value.
+
+The device list is read when the window opens, and again from a **Refresh** button next to it. *Why:* asking the system for devices can take a moment on some systems, so it is not done every frame. Live device changes are #27 and #28.
+
+**MIDI inputs**
+
+One row per MIDI input, with a check box: checked is on. Under them: `New MIDI inputs are on until you turn them off.` An input that is in `midi.off` but not plugged in now is not listed. It stays in the file.
+
+With no MIDI inputs: `No MIDI inputs found.`
+
+There is no channel filter here. *Why:* the MIDI Note module already has a Channel parameter, and a MIDI learn mapping matches one channel ([midi-learn.md](midi-learn.md), rule 5). A second filter on the input would be a second place to look when a note does not play.
+
+### What a change does
+
+Each choice applies as soon as it is made, and is saved, like Output safety.
+
+| Change | What happens |
+|---|---|
+| Turn a MIDI input on or off | That input is opened or closed. Notes held on an input that is turned off are released. Audio does not stop. |
+| Device, sample rate, or buffer size | The app restarts audio on the new settings (below). |
+| A value that is already in effect | Nothing: no write, no restart. |
+
+**Restarting audio.** The engine runs inside the audio stream and is built for one sample rate, so a new device, rate, or buffer size needs a new stream and a new engine. The app:
+
+1. Opens the new device first. If that fails, the old audio keeps playing, nothing is saved, and the status bar says why: `Could not use "MOTU M4" at 192000 Hz: <reason>. Still playing on "MacBook Pro Speakers".`
+2. Fades the old engine out over 10 ms, using the output safety fade ([output-safety.md](output-safety.md), rule 8), then stops it. *Why:* stopping a stream mid-signal is a click.
+3. Builds a new engine from the current patch, as it is now, with every unsaved edit, at the new rate. The new engine fades in over 10 ms, as every new engine does.
+4. Keeps everything that is not the engine: the patch file, unsaved changes, undo history, selection, view, MIDI learn mappings, and open MIDI inputs.
+
+The player hears a short gap, from about 20 ms to a few hundred, depending on the device. **This gap is accepted.** *Why:* a device change is setup, not performance. Keeping sound playing across two devices would need the engine to run on both at once, which is a large piece of work for a rare case.
+
+**State that does not survive a restart.** Every module starts again from its initial state, as when a patch is opened: oscillator phases, envelopes, filter memory, delay lines and their tails, sequencer positions, and held notes. Parameter values, cables, and modulation are kept, because they are in the patch. The transport keeps its tempo and time signature and whether it is running, and its position starts at beat 0. *Why:* module state is often measured in samples (a delay line of 48000 samples is 1 second at 48 kHz and 0.5 seconds at 96 kHz), so carrying it across a rate change would need each module to convert it. A clean start is what opening a patch already does, so it holds no surprise. A buffer-size change alone could in principle keep the engine, but one path for all three changes is simpler to test.
+
+### At start
+
+The app opens audio with the effective values: the saved values, unless a flag sets them for this run (below).
+
+| Situation | What the app does | Status bar |
+|---|---|---|
+| Saved device is plugged in | Plays on it. | Nothing. |
+| Saved `Named` device is not plugged in | Plays on the system default device. The saved choice is unchanged. | `Audio: "MOTU M4" is not connected. Playing on "MacBook Pro Speakers". Choose a device in Preferences.` |
+| Saved rate or buffer size is not offered by the device that opened | Uses the device default for that value. The saved choice is unchanged. | `Audio: "MacBook Pro Speakers" does not offer 96000 Hz. Using 48000 Hz.` |
+| No output device at all | Starts with no audio, as today. | As today. |
+| An input in `midi.off` | Not opened. | Nothing. |
+| Any other input | Opened, as today. A port that fails to open is reported, and the others still play. | As today. |
+
+The app always gets to a running patch. *Why:* the same reason as Reading the file. A missing interface must not stop the player from starting, and the message says what happened and where to fix it.
+
+### Command-line flags
+
+The app takes the same flags as `loom play`, with the same rule as `--output-safety`: a flag sets the effective value for this run and is never saved.
+
+| Flag | Effect for this run |
+|---|---|
+| `--device <part of name>` | Plays on the first output device whose name contains it, case-insensitive. If none matches, the app starts with no audio and says so. |
+| `--sample-rate <Hz>` | Uses that rate. |
+| `--buffer <frames>` | Uses that buffer size. |
+| `--midi <part of name>` | Opens only the matching inputs, whatever `midi.off` says. |
+| `--no-midi` | Opens no MIDI input. |
+
+When a flag sets a value, a line under that control says `Set by --device for this run.`, as Output safety does. Changing it in the window applies, is saved, and wins for the rest of the run.
+
+*Why the flags:* scripts and agents use the control channel with `--fake-audio` and need a known setup, and a player can rescue a run on a strange machine without editing files. Matching `loom play` keeps one set of names.
+
+### Rules
+
+- **D1. Devices belong to the machine, never the patch.** A patch cannot name a device, rate, buffer size, or MIDI input. *Why:* the same patch must play on any machine. The issue asks for it.
+- **D2. A fallback is never saved.** When the saved device, rate, or buffer size cannot be used at start, the app plays with something else and leaves the file alone. *Why:* the interface left at the studio is plugged in again tomorrow, and the player should not have to choose it again.
+- **D3. The app always starts and always plays if any output exists.** A missing saved device is a status bar message, not a modal and not silence. *Why:* the same as Rule 3.
+- **D4. Only what the device reports is offered.** Sample rates are the common rates (44100, 48000, 88200, 96000, 176400, 192000 Hz) that fall in one of the device's reported 32-bit float ranges. Buffer sizes are the powers of two from 16 to 4096 in the device's reported range. When a device does not report a buffer range, the app offers 64 to 2048 and falls back to the device default if the device refuses one. *Why:* a choice that fails when picked teaches the player to distrust the menu. Some systems report a huge rate range, so the list of common rates keeps the menu short. The engine gives the same output at any block size (hard rule 2), so the buffer size only changes latency and load, never the sound.
+- **D5. A device, rate, or buffer change opens the new device before stopping the old one, and fades out before it stops.** *Why:* a failed change must leave sound playing, and a stop mid-signal clicks.
+- **D6. A restart keeps the patch and the session, and resets module state.** *Why:* see State that does not survive a restart.
+- **D7. MIDI inputs are on unless turned off.** *Why:* see What is saved.
+
+### Acceptance criteria
+
+The host is behind a small trait in tests, with a fake list of devices, rates, and buffer ranges, so these run without hardware.
+
+- [ ] Given no `audio` or `midi` field, when the app starts, then it plays on the system default device at its default rate and buffer size, and opens every MIDI input.
+- [ ] Given `device: Named("Fake B")` and devices `Fake A` (default) and `Fake B`, when the app starts, then it plays on `Fake B`.
+- [ ] Given `device: Named("Fake B")` and only `Fake A`, when the app starts, then it plays on `Fake A`, the status bar names both, and the file is unchanged.
+- [ ] Given `sample_rate: Hz(96000)` and a device that offers 44100 to 48000, when the app starts, then it plays at the device default rate, and the file is unchanged.
+- [ ] Given a device that reports 32-bit float from 8000 to 384000 Hz, then the Sample rate menu lists Device default and the six common rates, and nothing else.
+- [ ] Given a playing patch with unsaved edits and three undo steps, when the player picks another rate, then the new engine runs at that rate, the edits and the three undo steps are still there, the file is saved, and the transport position is 0.
+- [ ] Given a playing patch, when the player picks a device that fails to open, then the old engine is still playing, the file is unchanged, and the status bar says why.
+- [ ] Given a change of device, then the last block of the old engine ends at 0, along a 10 ms fade. (Engine test of the fade-out command, at block sizes 1, 77, and 512.)
+- [ ] Given two MIDI inputs, when the player turns one off while a note is held on it, then that note is released, the input is closed, its name is in `midi.off`, and the other input still plays.
+- [ ] Given `midi: (off: ["Pad"])`, when an input named `Pad` and one named `Keys` exist at start, then only `Keys` is opened.
+- [ ] Given a saved `Named("Fake B")` and `--device "Fake A"`, when the app starts, then it plays on `Fake A`, the window shows the flag note, and the file still holds `Fake B`.
+- [ ] Given `--midi Keys`, then only inputs whose names contain `keys` are opened, even if they are in `midi.off`.
+- [ ] **Manual check.** On macOS, Windows, and Linux, with a USB audio interface and two MIDI controllers: pick the interface, 96 kHz, and the smallest offered buffer while a patch plays. The sound moves to the interface after a short gap with no click. Quit and start again: it plays on the interface. Unplug the interface and start again: it plays on the built-in output, with the message, and the window still shows the interface as the saved choice. Turn one controller off: it stops playing the patch, and after a restart it is still off.
+
+### Out of scope
+
+- Audio input device (#29). Its spec decides one duplex stream or two, and clock drift between two devices. When it is agreed, the input device gets its own row in this section, saved the same way.
+- Reacting to devices plugged in or out while the app runs: MIDI (#27) and audio (#28). This section reads the lists at start, when the window opens, and on Refresh.
+- Output channel choice (for example outputs 3 and 4 of an 8-channel interface). Today the engine plays on the first two channels. This needs its own section.
+- A MIDI channel filter on an input. See The window section.
+- Choosing the host audio API (for example ASIO or JACK instead of WASAPI or ALSA). The app uses the system's default API.
+- Per-device MIDI mappings (FR-MIDI-06, P2).
+- Device choice in `loom play`. It keeps its flags; #163 changes its MIDI default.
+
+### Open points
+
+- **Fall back to the default device, or start silent?** A player at a gig whose interface is not detected would hear the patch through the laptop speakers, perhaps loudly in a quiet room. Leaning: fall back, as written. Output safety still protects the speakers, the message is shown, and starting silent looks like a broken app. A later option could add "never fall back".
+- **Fade-out needs a new engine command.** Today Open and New drop the old engine mid-signal, so they may click too. Leaning: add a fade-out command to the safety stage here, and use it for Open and New in the same change.
+- **Does the transport keep running across a restart?** Leaning: yes, from beat 0, as written. A player who changes the buffer size while a sequence plays expects it to carry on.
+- **Format of the "default" choices.** This section uses RON enum names (`SystemDefault`, `Named("...")`). Leaning: keep them. They say what they mean when the file is edited by hand, and a device name can never be mistaken for the default (ALSA has a real device called `default`).
+- **Show the latency of the device itself?** The buffer time is only part of the delay; the device and driver add more, which some systems report. Leaning: show the buffer time only now, and the full output latency when the host reports it reliably.
+
 ## Out of scope
 
-- Other preferences: audio device and MIDI device choice (FR-APP-01), sample rate and buffer size, theme, the last folder used by Open and Save ([files.md](files.md)). Each needs its own section here when it comes. The store and window are built so they can grow.
+- Other preferences: theme, the last folder used by Open and Save ([files.md](files.md)). Each needs its own section here when it comes. The store and window are built so they can grow.
 - The user's author name and default licence for new patches. Their behaviour is in the [patch metadata spec](patch-metadata.md); they get a section here when it is agreed.
 - A native menu bar entry (LoomDSP > Settings on macOS). The app has no menu bar yet.
 - Preferences for `loom play` and `loom render`. The CLI keeps its flags.
