@@ -48,6 +48,8 @@ Every panel uses the same widget set.
 
 *Why one set:* users learn each control once. A new widget is added to the set, not drawn by one module, so every module and every panel can use it.
 
+The widgets after P1, with their bindings, modulation display, keyboard use, and the catalogue entries that need them, are planned in [Panel widgets](panel-widgets.md) (Draft, [ADR-0024](../adr/0024-widgets-follow-the-kind-of-value.md)). It names the slider "fader", the selector "select list", and the graph "curve", and adds a number, a readout, an XY scope, and a waveform.
+
 ## Bindings
 
 - **Control to parameter.** A control takes its range, unit, and mapping (linear, logarithmic, whole numbers) from the parameter's `ParamSpec`, through `ParamSpec::normalize` and `denormalize` ([parameter mapping](modulation.md#parameter-mapping), Agreed). *Why:* the slider mapping work in the inspector (logarithmic Hz, snapping integers) then applies everywhere for free.
