@@ -56,3 +56,4 @@ Why: an ADR is a record of why things are the way they are. If it is rewritten a
 | [0022](0022-copies-take-state-from-the-running-instance.md) | A new channel copy takes its state from the running instance | Accepted |
 | [0023](0023-patch-licences-spdx-and-creative-commons.md) | Patch licences as SPDX expressions, chosen through Creative Commons questions | Proposed |
 | [0024](0024-widgets-follow-the-kind-of-value.md) | Widgets follow the kind of value, and structured data has shared kinds | Proposed |
+| [0025](0025-one-design-language-and-derived-panels.md) | One design language, and panels derived from the declaration | Proposed |

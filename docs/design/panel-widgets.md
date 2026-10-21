@@ -169,7 +169,7 @@ The current choice is shown as text. Clicking it shows the other choices in a li
 
 ### Radio buttons or a select list?
 
-They bind to the same parameter, so the author or the panel editor can switch one for the other.
+They bind to the same parameter, so the author or the panel editor can switch one for the other. A [default panel](panels.md#default-panels) applies these rules when the module gives no hint.
 
 - **Radio buttons** when there are 5 choices or fewer and the panel has room. *Why:* all choices are visible at once, and one click picks any of them. On stage, seeing the options matters.
 - **Select list** when there are more choices, when the names are long, or when the panel is small. Unison voices from 1 to 16, a function choice, a scale, or a musical division such as 1/16 or 2 bars are select lists.
