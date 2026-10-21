@@ -12,7 +12,7 @@ Status: **Draft** (2026-10-17). Open for discussion.
 
 Each entry is a **module type**, not a module ID. A type says what a module does. A built module has a released ID such as `loom.osc.sine`, and released IDs never change (AGENTS.md, hard rule 5).
 
-- One type can be built as more than one module. For example, the Oscillator type is built today as `loom.osc.sine` and `loom.osc.saw`. A cheap special-purpose module is often worth keeping next to a general one.
+- One type can be built as more than one module. For example, the Oscillator type is built today as `loom.osc.sine`, `loom.osc.saw`, `loom.osc.pulse`, and `loom.osc.triangle`. A cheap special-purpose module is often worth keeping next to a general one.
 - **Catalogue IDs** look like `MT-FILTER-02` (MT for "module type"). They are stable, like requirement IDs: if an entry is dropped, mark it **Withdrawn** instead of reusing the ID. Issues say "Implements MT-FILTER-02", so the link survives renames.
 - **Primitive** entries are modules with one job. **Abstraction** entries are open patches made from primitives (FR-LIB-24): they work as one module, and you can open and change them.
 - **Traits** are shared options, listed by name. They are defined in [Traits](#traits).
@@ -55,7 +55,7 @@ Timing is phase-driven: a ramp from 0 to 1 sets where in a cycle a module is ([P
 
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
-| MT-SRC-01 | Oscillator | A band-limited periodic wave with pitch, phase, and frequency modulation inputs, hard sync, and a sub output. The shape comes from the shape source trait. Can be read by an external phase, so it also works as a lookup table. | Shape source, Timebase, Retrigger, Quality | P1 | FR-LIB-02 | Built in part (`loom.osc.sine`, `loom.osc.saw`) |
+| MT-SRC-01 | Oscillator | A band-limited periodic wave with pitch, phase, and frequency modulation inputs, hard sync, and a sub output. The shape comes from the shape source trait. Can be read by an external phase, so it also works as a lookup table. | Shape source, Timebase, Retrigger, Quality | P1 | FR-LIB-02 | Built in part (`loom.osc.sine`, `loom.osc.saw`, `loom.osc.pulse`, `loom.osc.triangle`) |
 | MT-SRC-02 | Noise | White, pink, and other noise colours. | Seed | P1 | FR-LIB-02 | Built in part (`loom.osc.noise`: white noise only) |
 | MT-SRC-03 | Additive oscillator | Builds a tone from many sine partials, with level control per partial and per group. | Quality | P4 | New | Planned |
 | MT-SRC-04 | Chaotic source | Signals from chaotic systems, such as iterated maps, attractors, and stochastic waveforms. | Seed | P4 | New | Planned |

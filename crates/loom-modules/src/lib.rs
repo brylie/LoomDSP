@@ -29,6 +29,8 @@ pub static ALL: &[&ModuleDescriptor] = &[
     &phase::PHASE_TRIGGER,
     &osc::SINE,
     &osc::SAW,
+    &osc::PULSE,
+    &osc::TRIANGLE,
     &osc::NOISE,
     &filter::SVF,
     &env::ADSR,

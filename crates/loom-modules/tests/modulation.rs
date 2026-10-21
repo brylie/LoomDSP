@@ -563,6 +563,16 @@ fn depth_zero_added_during_a_glide_continues_the_glide() {
     };
     let run = |assign| glide_with_depth_zero("loom.filter.svf", "cutoff", 200.0, 8_000.0, "lowpass", noise, assign);
     assert_close(&run(true), &run(false), 1e-4);
+
+    let phase = |rig: &mut Rig| {
+        let phase = rig.parts.controller.add_module("loom.phase.generator").unwrap();
+        rig.parts
+            .controller
+            .connect_named(phase, "phase", rig.sink, "phase")
+            .unwrap();
+    };
+    let run = |assign| glide_with_depth_zero("loom.osc.pulse", "width", 0.2, 0.8, "out", phase, assign);
+    assert_close(&run(true), &run(false), 1e-4);
 }
 
 /// Guards the controller path: an assignment to a module that is not a DSP
