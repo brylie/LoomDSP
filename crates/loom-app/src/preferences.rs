@@ -412,7 +412,7 @@ pub fn broken_path(path: &Path) -> PathBuf {
 /// An operating system family, for [`path_for`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Os {
-    MacOs,
+    Mac,
     Windows,
     /// Linux and other Unix.
     Unix,
@@ -420,7 +420,7 @@ pub enum Os {
 
 impl Os {
     pub const CURRENT: Self = if cfg!(target_os = "macos") {
-        Self::MacOs
+        Self::Mac
     } else if cfg!(windows) {
         Self::Windows
     } else {
@@ -434,7 +434,7 @@ impl Os {
 pub fn path_for(os: Os, env: impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
     let set = |name: &str| env(name).filter(|value| !value.is_empty()).map(PathBuf::from);
     let dir = match os {
-        Os::MacOs => set("HOME")?.join("Library").join("Application Support").join("LoomDSP"),
+        Os::Mac => set("HOME")?.join("Library").join("Application Support").join("LoomDSP"),
         Os::Windows => set("LOCALAPPDATA")?.join("LoomDSP"),
         Os::Unix => set("XDG_CONFIG_HOME")
             .or_else(|| set("HOME").map(|home| home.join(".config")))?
@@ -613,8 +613,10 @@ mod tests {
         let blocker = dir.join("blocked");
         std::fs::write(&blocker, "").unwrap();
         let mut store = Store::at(Some(blocker.join(FILE_NAME)));
-        let mut preferences = Preferences::default();
-        preferences.output_safety = OutputSafety::Clean;
+        let preferences = Preferences {
+            output_safety: OutputSafety::Clean,
+            ..Preferences::default()
+        };
         let error = store.save(preferences).unwrap_err();
         assert!(error.ends_with("The change applies until you quit."), "{error}");
         assert_eq!(store.saved().output_safety, OutputSafety::Clean);
@@ -626,7 +628,7 @@ mod tests {
             move |name: &str| vars.iter().find(|(n, _)| *n == name).map(|(_, v)| v.to_string())
         };
         assert_eq!(
-            path_for(Os::MacOs, env(&[("HOME", "/Users/ada")])),
+            path_for(Os::Mac, env(&[("HOME", "/Users/ada")])),
             Some(PathBuf::from(
                 "/Users/ada/Library/Application Support/LoomDSP/preferences.ron"
             ))

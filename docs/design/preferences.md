@@ -3,13 +3,13 @@
 A per-machine preferences file and window for the desktop app, so a player sets things like output safety once and the app remembers them.
 
 - **Kind:** living specification.
-- **Status:** Draft. [Audio and MIDI devices](#audio-and-midi-devices) has its own status.
+- **Status:** Draft, and built. The file, its location, `--preferences`, the window, and the Output safety section were built with [Audio and MIDI devices](#audio-and-midi-devices) (#26), which needs them. Each [open point](#open-points) was built as its leaning says. Agreeing the open points is still to do; a different answer changes the code.
 - **Decision behind it:** None. Builds on [ADR-0019](../adr/0019-output-safety-stage.md), which says the output safety mode belongs to the machine, not the patch.
 - **Use case and requirements:** UC3 (perform live), FR-APP-01 (desktop app, with audio and MIDI device selection), FR-MIDI-01, FR-PERF-08, NFR-SND-02.
 - **Background:** [Output safety explainer](../learn/output-safety.md), for the first setting.
 - **Prior art:** most desktop apps keep settings in a file in the operating system's per-user settings folder, and open a settings window with Cmd+, on macOS. We use only those conventions.
 - **Issues:** follows [#131](https://github.com/brylie/LoomDSP/issues/131); [#201](https://github.com/brylie/LoomDSP/issues/201) (output safety), [#26](https://github.com/brylie/LoomDSP/issues/26) (devices).
-- **Code:** none yet. Today the mode is the `--output-safety` flag in `crates/loom-app/src/main.rs` (`Args`). The app passes it into every `EngineConfig` it builds.
+- **Code:** the file in `crates/loom-app/src/preferences.rs`; the window and what its choices do in `crates/loom-app/src/settings.rs`; devices in `crates/loom-app/src/devices.rs`. Tests: the `tests` modules of those three files.
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
      built. See README.md in this folder. -->
@@ -153,28 +153,28 @@ With `--no-audio`, there is no engine to tell. The choice is saved and used by t
 
 Tests point `--preferences` (or the loading function behind it) at a temporary folder. They never touch the real file.
 
-- [ ] Given no preferences file, when the app starts, then the mode is Low latency and no file is created.
-- [ ] Given a file with `output_safety: "clean"`, when the app starts, then the first `EngineConfig` has `OutputSafety::Clean`.
-- [ ] Given a file that does not parse, when the app starts, then the mode is Low latency, the status bar shows the error, and the file is unchanged.
-- [ ] Given that broken file, when the player picks Clean, then the old file is now `preferences.broken.ron` and `preferences.ron` holds `clean`.
-- [ ] Given broken files `studio.ron` and `stage.ron` in one folder, when the app runs once with each through `--preferences` and the player changes a setting each time, then the folder holds `studio.broken.ron` and `stage.broken.ron`, each with its own old contents.
-- [ ] Given `output_safety: "loud"` and a valid later field, when the app starts, then the mode is Low latency, the later field is used, and the status bar names the bad value.
-- [ ] Given a saved `clean` and `--output-safety low-latency`, when the app starts, then the engine runs Low latency. Given a saved `clean` and no flag, then it runs Clean.
-- [ ] Given a saved `clean` and `--output-safety off`, when the app starts, then the engine runs Off, the window shows Off with the flag note, and after quitting the file still holds `clean`.
-- [ ] Given a running engine, when the player picks Off, then the app sends one `SetOutputSafety(Off)` command, writes the file, and the next patch it opens builds its engine with Off.
-- [ ] Given the mode already in effect, when the player picks it again, then no command is sent and the file's modification time does not change.
-- [ ] Given a folder that cannot be written, when the player picks Clean, then the engine runs Clean and the status bar says the change applies until quit.
-- [ ] Given the default paths, then on each OS the path matches the table in Where the file lives. (Unit test of the path function, with the environment variables set by the test.)
+- [x] Given no preferences file, when the app starts, then the mode is Low latency and no file is created.
+- [x] Given a file with `output_safety: "clean"`, when the app starts, then the first `EngineConfig` has `OutputSafety::Clean`.
+- [x] Given a file that does not parse, when the app starts, then the mode is Low latency, the status bar shows the error, and the file is unchanged.
+- [x] Given that broken file, when the player picks Clean, then the old file is now `preferences.broken.ron` and `preferences.ron` holds `clean`.
+- [x] Given broken files `studio.ron` and `stage.ron` in one folder, when the app runs once with each through `--preferences` and the player changes a setting each time, then the folder holds `studio.broken.ron` and `stage.broken.ron`, each with its own old contents.
+- [x] Given `output_safety: "loud"` and a valid later field, when the app starts, then the mode is Low latency, the later field is used, and the status bar names the bad value.
+- [x] Given a saved `clean` and `--output-safety low-latency`, when the app starts, then the engine runs Low latency. Given a saved `clean` and no flag, then it runs Clean.
+- [x] Given a saved `clean` and `--output-safety off`, when the app starts, then the engine runs Off, the window shows Off with the flag note, and after quitting the file still holds `clean`.
+- [x] Given a running engine, when the player picks Off, then the app sends one `SetOutputSafety(Off)` command, writes the file, and the next patch it opens builds its engine with Off.
+- [x] Given the mode already in effect, when the player picks it again, then no command is sent and the file's modification time does not change.
+- [x] Given a folder that cannot be written, when the player picks Clean, then the engine runs Clean and the status bar says the change applies until quit.
+- [x] Given the default paths, then on each OS the path matches the table in Where the file lives. (Unit test of the path function, with the environment variables set by the test.)
 - [ ] **Manual check.** On macOS, Windows, and Linux: Cmd+, or Ctrl+, opens the window. With Noise at gain 4 playing, switching between all three modes dips and returns without a click, and the level changes as expected (under the ceiling in Low latency and Clean, clipped in Off). After restarting the app, the last choice is still selected.
 
 ## Audio and MIDI devices
 
 The second section of the Preferences window: which audio output plays the patch, at which sample rate and buffer size, and which MIDI inputs play it. The app remembers the choice between runs.
 
-- **Status:** Agreed. It builds on the file, flag, and window rules above, which are still Draft. Build those parts of them that this section needs (the file, its location, `--preferences`, and the window) together with it.
+- **Status:** Agreed, and built in #26, except the manual check. It builds on the file, flag, and window rules above, which are still Draft. Those parts were built with it.
 - **Use case and requirements:** UC3 (perform live), FR-APP-01, FR-MIDI-01.
 - **Issues:** [#26](https://github.com/brylie/LoomDSP/issues/26). Related, not built here: [#27](https://github.com/brylie/LoomDSP/issues/27) (MIDI hot-plugging, FR-MIDI-08), [#28](https://github.com/brylie/LoomDSP/issues/28) (audio device loss, FR-APP-04), [#29](https://github.com/brylie/LoomDSP/issues/29) (audio input), [#163](https://github.com/brylie/LoomDSP/issues/163) (`loom play` opens every MIDI input).
-- **Code today:** the app always plays on the system default output at its default rate and buffer size (`App::open_output`, `AudioOptions::default()`), and opens every MIDI input at start (`loom_host_desktop::connect_all_midi`). `loom play` already takes `--device`, `--sample-rate`, `--buffer`, `--midi`, and `--no-midi`.
+- **Code:** `crates/loom-app/src/devices.rs` (the `Host` trait, what is offered, the choice at start, and a fake host for tests), `crates/loom-app/src/settings.rs` (the window, restarting audio, MIDI inputs), and `crates/loom-host-desktop` (`outputs`, `RunningAudio::stop`, `MidiConnection::close`). `loom play` keeps its own `--device`, `--sample-rate`, `--buffer`, `--midi`, and `--no-midi`.
 
 ### Goal
 
@@ -264,7 +264,7 @@ The app opens audio with the effective values: the saved values, unless a flag s
 |---|---|---|
 | Saved device is plugged in | Plays on it. | Nothing. |
 | Saved `Named` device is not plugged in | Plays on the system default device. The saved choice is unchanged. | `Audio: "MOTU M4" is not connected. Playing on "MacBook Pro Speakers". Choose a device in Preferences.` |
-| Saved rate or buffer size is not offered by the device that opened | Uses the device default for that value. The saved choice is unchanged. | `Audio: "MacBook Pro Speakers" does not offer 96000 Hz. Using 48000 Hz.` |
+| Saved rate or buffer size is not offered by the device that opened | Uses the device default for that value. The saved choice is unchanged. | `Audio: "MacBook Pro Speakers" does not offer 96000 Hz. Using 48000 Hz.` For a buffer size: `Audio: "<device>" does not offer 128 frames. Using the device default.` |
 | No output device at all | Starts with no audio, as today. | As today. |
 | An input in `midi.off` | Not opened. | Nothing. |
 | Any other input | Opened, as today. A port that fails to open is reported, and the others still play. | As today. |
@@ -278,6 +278,7 @@ The app takes the same flags as `loom play`, with the same rule as `--output-saf
 | Flag | Effect for this run |
 |---|---|
 | `--device <part of name>` | Plays on the first output device whose name contains it, case-insensitive. If none matches, the app starts with no audio and says so. |
+| `--preferences <file>` | Reads and writes this file instead of the per-user one (see Where the file lives). |
 | `--sample-rate <Hz>` | Uses that rate. |
 | `--buffer <frames>` | Uses that buffer size. |
 | `--midi <part of name>` | Opens only the matching inputs, whatever `midi.off` says. |
@@ -302,18 +303,18 @@ When a flag sets a value, a line under that control says `Set by --device for th
 
 The host is behind a small trait in tests, with a fake list of devices, rates, and buffer ranges, so these run without hardware.
 
-- [ ] Given no `audio` or `midi` field, when the app starts, then it plays on the system default device at its default rate and buffer size, and opens every MIDI input.
-- [ ] Given `device: Named("Fake B")` and devices `Fake A` (default) and `Fake B`, when the app starts, then it plays on `Fake B`.
-- [ ] Given `device: Named("Fake B")` and only `Fake A`, when the app starts, then it plays on `Fake A`, the status bar names both, and the file is unchanged.
-- [ ] Given `sample_rate: Hz(96000)` and a device that offers 44100 to 48000, when the app starts, then it plays at the device default rate, and the file is unchanged.
-- [ ] Given a device that reports 32-bit float from 8000 to 384000 Hz, then the Sample rate menu lists Device default and the six common rates, and nothing else.
-- [ ] Given a playing patch with unsaved edits and three undo steps, when the player picks another rate, then the new engine runs at that rate, the edits and the three undo steps are still there, the file is saved, and the transport position is 0.
-- [ ] Given a playing patch, when the player picks a device that fails to open, then the old engine is still playing, the file is unchanged, and the status bar says why.
-- [ ] Given a playing patch, when the player changes the device, opens a patch, makes a new one, or quits, then the old engine is asked to fade out, and its stream is stopped only after it reports silence and two more buffers have gone to the device, or after 100 ms. (App test with the fake host. The fade itself is tested in [output-safety.md](output-safety.md#acceptance-criteria).)
-- [ ] Given two MIDI inputs, when the player turns one off while a note is held on it, then that note is released, the input is closed, its name is in `midi.off`, and the other input still plays.
-- [ ] Given `midi: (off: ["Pad"])`, when an input named `Pad` and one named `Keys` exist at start, then only `Keys` is opened.
-- [ ] Given a saved `Named("Fake B")` and `--device "Fake A"`, when the app starts, then it plays on `Fake A`, the window shows the flag note, and the file still holds `Fake B`.
-- [ ] Given `--midi Keys`, then only inputs whose names contain `keys` are opened, even if they are in `midi.off`.
+- [x] Given no `audio` or `midi` field, when the app starts, then it plays on the system default device at its default rate and buffer size, and opens every MIDI input.
+- [x] Given `device: Named("Fake B")` and devices `Fake A` (default) and `Fake B`, when the app starts, then it plays on `Fake B`.
+- [x] Given `device: Named("Fake B")` and only `Fake A`, when the app starts, then it plays on `Fake A`, the status bar names both, and the file is unchanged.
+- [x] Given `sample_rate: Hz(96000)` and a device that offers 44100 to 48000, when the app starts, then it plays at the device default rate, and the file is unchanged.
+- [x] Given a device that reports 32-bit float from 8000 to 384000 Hz, then the Sample rate menu lists Device default and the six common rates, and nothing else.
+- [x] Given a playing patch with unsaved edits and three undo steps, when the player picks another rate, then the new engine runs at that rate, the edits and the three undo steps are still there, the file is saved, and the transport position is 0.
+- [x] Given a playing patch, when the player picks a device that fails to open, then the old engine is still playing, the file is unchanged, and the status bar says why.
+- [x] Given a playing patch, when the player changes the device, opens a patch, makes a new one, or quits, then the old engine is asked to fade out, and its stream is stopped only after it reports silence and two more buffers have gone to the device, or after 100 ms. (App test with the fake host. The fade itself is tested in [output-safety.md](output-safety.md#acceptance-criteria).)
+- [x] Given two MIDI inputs, when the player turns one off while a note is held on it, then that note is released, the input is closed, its name is in `midi.off`, and the other input still plays.
+- [x] Given `midi: (off: ["Pad"])`, when an input named `Pad` and one named `Keys` exist at start, then only `Keys` is opened.
+- [x] Given a saved `Named("Fake B")` and `--device "Fake A"`, when the app starts, then it plays on `Fake A`, the window shows the flag note, and the file still holds `Fake B`.
+- [x] Given `--midi Keys`, then only inputs whose names contain `keys` are opened, even if they are in `midi.off`.
 - [ ] **Manual check.** On macOS, Windows, and Linux, with a USB audio interface and two MIDI controllers: pick the interface, 96 kHz, and the smallest offered buffer while a patch plays. The sound moves to the interface after a short gap with no click. With output safety Off and a Constant of 0.5 into Audio Out, opening another patch gives no thump. Quit and start again: it plays on the interface. Unplug the interface and start again: it plays on the built-in output, with the message, and the window still shows the interface as the saved choice. Turn one controller off: it stops playing the patch, and after a restart it is still off.
 
 ### Out of scope

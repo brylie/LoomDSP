@@ -409,15 +409,15 @@ pub mod fake {
 
     impl Fake {
         /// Devices by name, the first the system default, and MIDI inputs.
-        pub fn new(devices: &[OutputInfo], midi: &[&str]) -> Rc<Self> {
-            Rc::new(Self {
+        pub fn new(devices: &[OutputInfo], midi: &[&str]) -> Self {
+            Self {
                 outputs: Outputs {
                     default: devices.first().map(|d| d.name.clone()),
                     devices: devices.to_vec(),
                 },
                 midi: midi.iter().map(|s| s.to_string()).collect(),
                 ..Self::default()
-            })
+            }
         }
 
         pub fn opened(&self) -> Vec<String> {

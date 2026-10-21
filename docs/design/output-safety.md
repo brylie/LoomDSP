@@ -3,13 +3,13 @@
 A safety stage on the engine's final output, so a patch mistake cannot harm the player's speakers or ears.
 
 - **Kind:** living specification.
-- **Status:** Implemented, except rule 14 (fade-out before an engine stops), which is Agreed and not built yet. Rules 1 to 13 were agreed in #131 and built in the same change. The app preference waits for a preferences store (see Out of scope).
+- **Status:** Implemented. Rules 1 to 13 were agreed in #131 and built in the same change. Rule 14 (fade-out before an engine stops) was agreed in #274 and built in #26. The app preference is in the [preferences spec](preferences.md).
 - **Decision behind it:** [ADR-0019](../adr/0019-output-safety-stage.md), which extends the output rule of [ADR-0007](../adr/0007-polymorphic-signal-model.md).
 - **Use case and requirements:** UC3 (perform live), UC8 (a generative system left running), FR-PERF-08, FR-PERF-05, NFR-SND-02, NFR-SND-03, NFR-RT-01.
 - **Background:** [Output safety explainer](../learn/output-safety.md): why DC harms speakers, why a hard clip is not enough, and what lookahead buys.
 - **Prior art:** most DAWs leave the master bus unprotected and expect the user to add a limiter. Hardware mixers and PA processors often have a fixed output limiter. We describe our own stage here.
 - **Issues:** [#131](https://github.com/brylie/LoomDSP/issues/131); rule 14 comes from [#26](https://github.com/brylie/LoomDSP/issues/26) (device selection). Related: [#200](https://github.com/brylie/LoomDSP/issues/200) (listening checks), [#25](https://github.com/brylie/LoomDSP/issues/25) (Panic), [#130](https://github.com/brylie/LoomDSP/issues/130) (silenced samples in the stats bar), [#121](https://github.com/brylie/LoomDSP/issues/121), [#123](https://github.com/brylie/LoomDSP/pull/123).
-- **Code:** `crates/loom-core/src/safety.rs`, run at the end of `Engine::run_block`. Mode changes: `Controller::set_output_safety`. Flags: `crates/loom-cli/src/main.rs`, `crates/loom-app/src/main.rs`. Tests: `crates/loom-modules/tests/output_safety.rs`.
+- **Code:** `crates/loom-core/src/safety.rs`, run at the end of `Engine::run_block`. Mode changes: `Controller::set_output_safety`. Fade-out before a stop: `Controller::fade_out`, `Engine::is_silent`, and `RunningAudio::stop` in `crates/loom-host-desktop`. Flags: `crates/loom-cli/src/main.rs`, `crates/loom-app/src/main.rs`. Tests: `crates/loom-modules/tests/output_safety.rs`.
 
 ## Goal
 
@@ -77,12 +77,12 @@ Each is an engine test in `crates/loom-modules/tests/output_safety.rs` unless it
 - [x] **Mode change.** Switching mode while a signal plays dips the output to 0 within 10 ms, along a straight line down, and it plays again in the new mode. (Engine test, and a unit test that checks no step is larger than one fade step.)
 - [x] **No allocation.** `tests/no_alloc.rs` covers processing in every mode, and a mode change.
 - [x] **Determinism.** Two runs of the same patch in each mode are bit-identical.
-- [ ] **Fade-out before stop (rule 14).** Given a Constant of 0.5 into Audio Out in each mode, including Off, when the host asks for a fade-out, then the fade gain falls to 0 in a straight line within 10 ms, the output stays at 0 after that, and the engine reports it is silent. In Low latency and Clean, the output equals the same engine's output without the fade-out times that gain, because the DC blocker shapes the signal too. In Off, the output itself falls in a straight line, with no step larger than one fade step. The same at block sizes 1, 77, and 512. A fade-out that starts during the fade-in, or during a mode-change dip, starts from the gain it has reached. `tests/no_alloc.rs` covers the fade-out.
+- [x] **Fade-out before stop (rule 14).** Given a Constant of 0.5 into Audio Out in each mode, including Off, when the host asks for a fade-out, then the fade gain falls to 0 in a straight line within 10 ms, the output stays at 0 after that, and the engine reports it is silent. In Low latency and Clean, the output equals the same engine's output without the fade-out times that gain, because the DC blocker shapes the signal too. In Off, the output itself falls in a straight line, with no step larger than one fade step. The same at block sizes 1, 77, and 512. A fade-out that starts during the fade-in, or during a mode-change dip, starts from the gain it has reached. `tests/no_alloc.rs` covers the fade-out.
 - [ ] **Manual check.** In the app, with each `--output-safety` mode, Noise at gain 4 into Audio Out plays at a steady level under the ceiling (Low latency, Clean) or clips (Off), and loading a patch does not click. The app has no meter on the final output yet, so this is a listening check.
 
 ## Out of scope
 
-- A preferences store and a preferences window for the app. This spec only says the mode is a per-machine preference. Until that exists, the app takes a command-line flag. The store is specified in [App preferences](preferences.md) (Draft).
+- A preferences store and a preferences window for the app. This spec only says the mode is a per-machine preference. The store and window are specified in [App preferences](preferences.md).
 - A user-facing master volume.
 - Showing limiter activity in the stats bar. That belongs to [#130](https://github.com/brylie/LoomDSP/issues/130), which can count limited samples the same way it counts silenced ones.
 - Per-channel modes, for DC-coupled multi-channel interfaces. This waits for outputs beyond stereo.

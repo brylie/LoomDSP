@@ -560,16 +560,13 @@ impl App {
             .width(560)
             .max_height(720)
             .style(container::rounded_box);
-        Some(
-            opaque(
-                container(panel)
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .center(Length::Fill)
-                    .style(|_| container::background(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.4))),
-            )
-            .into(),
-        )
+        Some(opaque(
+            container(panel)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .center(Length::Fill)
+                .style(|_| container::background(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.4))),
+        ))
     }
 
     fn audio_section<'a>(
@@ -742,5 +739,447 @@ impl<T: PartialEq + Clone> Item<T> {
 impl<T> fmt::Display for Item<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.label)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::devices::fake::{self, Event, Fake};
+    use crate::preferences::FILE_NAME;
+    use crate::{Args, Source, recovery};
+    use std::path::PathBuf;
+    use std::time::Duration;
+
+    /// A folder for one test's preferences file.
+    fn folder(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("loom-settings-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Args for a run that plays on the fake devices, with the preferences
+    /// file in `dir`.
+    fn args(dir: &std::path::Path) -> Args {
+        Args {
+            no_audio: false,
+            no_recovery: true,
+            devices: devices::Options {
+                preferences: Some(dir.join(FILE_NAME)),
+                ..devices::Options::default()
+            },
+            ..crate::tests::app_args()
+        }
+    }
+
+    fn start(args: Args, fake: &Rc<Fake>) -> App {
+        App::boot_with(args, &mut recovery::Dialogs, Rc::new(fake::Shared(fake.clone())))
+    }
+
+    fn write(dir: &std::path::Path, text: &str) -> PathBuf {
+        let path = dir.join(FILE_NAME);
+        std::fs::write(&path, text).unwrap();
+        path
+    }
+
+    fn two_devices() -> Rc<Fake> {
+        Rc::new(Fake::new(&[fake::device("Fake A"), fake::device("Fake B")], &[]))
+    }
+
+    fn change(app: &mut App, change: Change) {
+        app.preferences(Message::Open);
+        app.preferences(Message::Audio(change));
+    }
+
+    #[test]
+    fn no_saved_devices_play_on_the_defaults_with_every_midi_input() {
+        let dir = folder("defaults");
+        let fake = Rc::new(Fake::new(
+            &[fake::device("Fake A"), fake::device("Fake B")],
+            &["Keys", "Pad"],
+        ));
+        let app = start(args(&dir), &fake);
+        assert_eq!(fake.opened(), ["Fake A"]);
+        assert_eq!(app.sample_rate, 48_000.0);
+        assert!(app._audio.is_some());
+        assert!(fake.is_open("Keys") && fake.is_open("Pad"));
+        assert_eq!(app.controller.config().output_safety, OutputSafety::LowLatency);
+        assert!(!dir.join(FILE_NAME).exists(), "starting writes nothing");
+        assert_eq!(
+            app.playing_line(),
+            "Playing on \"Fake A\" at 48000 Hz, 256 frames (5.3 ms)."
+        );
+    }
+
+    #[test]
+    fn a_saved_device_plays_when_it_is_there() {
+        let dir = folder("saved");
+        write(&dir, "(audio: (device: Named(\"Fake B\")))");
+        let fake = two_devices();
+        let _app = start(args(&dir), &fake);
+        assert_eq!(fake.opened(), ["Fake B"]);
+    }
+
+    #[test]
+    fn a_missing_device_falls_back_and_the_file_is_unchanged() {
+        let dir = folder("missing");
+        let text = "(audio: (device: Named(\"Fake B\")))";
+        let path = write(&dir, text);
+        let fake = Rc::new(Fake::new(&[fake::device("Fake A")], &[]));
+        let app = start(args(&dir), &fake);
+        assert_eq!(fake.opened(), ["Fake A"]);
+        assert!(app.status.contains("\"Fake B\" is not connected"), "{}", app.status);
+        assert!(app.status.contains("Playing on \"Fake A\""), "{}", app.status);
+        assert_eq!(std::fs::read_to_string(path).unwrap(), text);
+        assert_eq!(
+            app.rig.shown_audio().device,
+            DeviceChoice::Named("Fake B".into()),
+            "the window still shows the saved choice"
+        );
+    }
+
+    #[test]
+    fn a_rate_the_device_does_not_offer_plays_at_its_default() {
+        let dir = folder("rate");
+        let text = "(audio: (sample_rate: Hz(96000)))";
+        let path = write(&dir, text);
+        let app = start(args(&dir), &two_devices());
+        assert_eq!(app.sample_rate, 48_000.0);
+        assert!(
+            app.status.contains("does not offer 96000 Hz. Using 48000 Hz."),
+            "{}",
+            app.status
+        );
+        assert_eq!(std::fs::read_to_string(path).unwrap(), text);
+    }
+
+    #[test]
+    fn a_rate_change_keeps_the_patch_and_its_history() {
+        let dir = folder("restart");
+        let mut app = start(args(&dir), &two_devices());
+        let constant = loom_modules::registry().resolve("loom.math.constant").unwrap();
+        for x in [100.0, 200.0, 300.0] {
+            app.add_module(constant, iced::Point::new(x, 100.0));
+        }
+        app.controller.set_tempo(90.0).unwrap();
+        let before = undo::Snapshot::take(&app.controller, &app.positions);
+        let ids: Vec<_> = app.controller.graph().nodes().map(|(id, _)| id).collect();
+        assert_eq!(app.history.len(), 3);
+        assert!(app.unsaved());
+
+        change(&mut app, Change::Rate(RateChoice::Hz(44_100)));
+        assert_eq!(app.controller.config().sample_rate, 44_100.0);
+        assert_eq!(app.sample_rate, 44_100.0);
+        assert_eq!(
+            app.rig.last_stop,
+            Some(true),
+            "the old engine faded out before it stopped"
+        );
+        assert_eq!(
+            app.controller.graph().nodes().map(|(id, _)| id).collect::<Vec<_>>(),
+            ids
+        );
+        assert!(
+            undo::diff(
+                &before,
+                &undo::Snapshot::take(&app.controller, &app.positions),
+                &BTreeSet::new()
+            )
+            .is_none(),
+            "the same patch"
+        );
+        assert_eq!(app.history.len(), 3);
+        assert!(app.unsaved());
+        assert_eq!(app.controller.transport().tempo, 90.0);
+        assert_eq!(
+            crate::preferences::load(&dir.join(FILE_NAME))
+                .preferences
+                .audio
+                .sample_rate,
+            RateChoice::Hz(44_100)
+        );
+        // The undo history still applies to the new engine.
+        app.undo();
+        assert_eq!(app.controller.graph().len(), 2);
+
+        // Picking it again does nothing.
+        let generation = app.generation;
+        change(&mut app, Change::Rate(RateChoice::Hz(44_100)));
+        assert_eq!(app.generation, generation);
+    }
+
+    #[test]
+    fn a_device_that_fails_to_open_leaves_the_old_one_playing() {
+        let dir = folder("broken-device");
+        let mut fake = Fake::new(&[fake::device("Fake A"), fake::device("Fake B")], &[]);
+        fake.broken.push("Fake B".into());
+        let fake = Rc::new(fake);
+        let mut app = start(args(&dir), &fake);
+        let generation = app.generation;
+        change(&mut app, Change::Device(DeviceChoice::Named("Fake B".into())));
+        assert_eq!(app.generation, generation);
+        assert!(app._audio.is_some());
+        assert_eq!(app.rig.playing.as_ref().unwrap().device, "Fake A");
+        assert!(!dir.join(FILE_NAME).exists(), "nothing saved");
+        assert_eq!(
+            app.status,
+            "Could not use \"Fake B\" at 48000 Hz: the device is busy. Still playing on \"Fake A\"."
+        );
+    }
+
+    #[test]
+    fn a_device_change_opens_the_new_device_and_fades_the_old_one() {
+        let dir = folder("device");
+        let fake = two_devices();
+        let mut app = start(args(&dir), &fake);
+        change(&mut app, Change::Device(DeviceChoice::Named("Fake B".into())));
+        assert_eq!(fake.opened(), ["Fake A", "Fake B"]);
+        assert_eq!(app.rig.last_stop, Some(true));
+        assert_eq!(app.rig.playing.as_ref().unwrap().device, "Fake B");
+        assert_eq!(
+            crate::preferences::load(&dir.join(FILE_NAME)).preferences.audio.device,
+            DeviceChoice::Named("Fake B".into())
+        );
+    }
+
+    #[test]
+    fn open_new_and_quit_fade_out_first() {
+        let dir = folder("fade");
+        let mut app = start(args(&dir), &two_devices());
+        assert!(app.replace(Source::Empty));
+        assert_eq!(app.rig.last_stop, Some(true), "New faded out");
+        app.rig.last_stop = None;
+        app.quit = true;
+        let _ = app.update(crate::Message::Tick);
+        assert_eq!(app.rig.last_stop, Some(true), "quit faded out");
+    }
+
+    #[test]
+    fn turning_an_input_off_releases_its_notes_and_is_saved() {
+        let dir = folder("midi");
+        let fake = Rc::new(Fake::new(&[fake::device("Fake A")], &["Pad", "Keys"]));
+        let mut app = start(args(&dir), &fake);
+        let note = loom_modules::registry().resolve("loom.midi.note").unwrap();
+        app.add_module(note, iced::Point::new(100.0, 100.0));
+        let id = *app.selection.iter().next().unwrap();
+        let gate = app
+            .controller
+            .graph()
+            .node(loom_core::ModuleId(id))
+            .unwrap()
+            .descriptor
+            .display_index("gate")
+            .unwrap();
+        let wait_for = |app: &App, value: f32| {
+            for _ in 0..200 {
+                if app.controller.display(loom_core::ModuleId(id), gate) == Some(value) {
+                    return true;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            false
+        };
+        fake.play("Pad", &[0x90, 60, 100]);
+        assert!(wait_for(&app, 1.0), "the note plays");
+
+        app.preferences(Message::Midi("Pad".into(), false));
+        assert!(wait_for(&app, 0.0), "and is released");
+        assert!(!fake.is_open("Pad"));
+        assert!(fake.is_open("Keys"));
+        assert!(fake.log.borrow().contains(&Event::MidiClosed("Pad".into())));
+        assert_eq!(
+            crate::preferences::load(&dir.join(FILE_NAME)).preferences.midi.off,
+            ["Pad"]
+        );
+        fake.play("Keys", &[0x90, 62, 100]);
+        assert!(wait_for(&app, 1.0), "the other input still plays");
+        assert!(app._audio.is_some(), "audio did not stop");
+    }
+
+    #[test]
+    fn inputs_that_are_off_are_not_opened() {
+        let dir = folder("midi-off");
+        write(&dir, "(midi: (off: [\"Pad\"]))");
+        let fake = Rc::new(Fake::new(&[fake::device("Fake A")], &["Pad", "Keys"]));
+        let _app = start(args(&dir), &fake);
+        assert!(!fake.is_open("Pad"));
+        assert!(fake.is_open("Keys"));
+    }
+
+    #[test]
+    fn midi_inputs_stay_open_across_a_new_patch() {
+        let dir = folder("midi-new");
+        let fake = Rc::new(Fake::new(&[fake::device("Fake A")], &["Keys"]));
+        let mut app = start(args(&dir), &fake);
+        assert!(app.replace(Source::Empty));
+        assert!(fake.is_open("Keys"));
+        assert_eq!(fake.log.borrow().len(), 3, "opened once: {:?}", fake.log.borrow());
+    }
+
+    #[test]
+    fn the_device_flag_wins_for_this_run_only() {
+        let dir = folder("flag");
+        let path = write(&dir, "(audio: (device: Named(\"Fake B\")))");
+        let fake = two_devices();
+        let mut args = args(&dir);
+        args.devices.device = Some("Fake A".into());
+        let mut app = start(args, &fake);
+        assert_eq!(fake.opened(), ["Fake A"]);
+        assert_eq!(app.rig.shown_audio().device, DeviceChoice::Named("Fake A".into()));
+        assert!(app.rig.flags.device.is_some(), "the window shows the flag note");
+        app.quit = true;
+        let _ = app.update(crate::Message::Tick);
+        assert_eq!(
+            std::fs::read_to_string(path).unwrap(),
+            "(audio: (device: Named(\"Fake B\")))"
+        );
+    }
+
+    #[test]
+    fn the_midi_flag_opens_matching_inputs_even_when_off() {
+        let dir = folder("midi-flag");
+        write(&dir, "(midi: (off: [\"Keys 2\"]))");
+        let fake = Rc::new(Fake::new(&[fake::device("Fake A")], &["Pad", "Keys", "Keys 2"]));
+        let mut args = args(&dir);
+        args.devices.midi = Some("Keys".into());
+        let _app = start(args, &fake);
+        assert!(!fake.is_open("Pad"));
+        assert!(fake.is_open("Keys") && fake.is_open("Keys 2"));
+    }
+
+    #[test]
+    fn the_saved_output_safety_applies_unless_a_flag_sets_it() {
+        let dir = folder("safety");
+        write(&dir, "(output_safety: \"clean\")");
+        let fake = two_devices();
+        let app = start(args(&dir), &fake);
+        assert_eq!(app.controller.config().output_safety, OutputSafety::Clean);
+
+        let mut flagged = args(&dir);
+        flagged.output_safety = Some(OutputSafety::LowLatency);
+        let app = start(flagged, &fake);
+        assert_eq!(app.controller.config().output_safety, OutputSafety::LowLatency);
+        assert!(app.rig.safety_flag);
+    }
+
+    #[test]
+    fn the_safety_flag_is_shown_and_never_saved() {
+        let dir = folder("safety-flag");
+        let path = write(&dir, "(output_safety: \"clean\")");
+        let mut flagged = args(&dir);
+        flagged.output_safety = Some(OutputSafety::Off);
+        let mut app = start(flagged, &two_devices());
+        assert_eq!(app.controller.config().output_safety, OutputSafety::Off);
+        assert_eq!(app.output_safety, OutputSafety::Off, "the window shows Off");
+        assert!(app.rig.safety_flag, "with the flag note");
+        app.quit = true;
+        let _ = app.update(crate::Message::Tick);
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "(output_safety: \"clean\")");
+    }
+
+    #[test]
+    fn a_failed_save_still_changes_the_mode() {
+        let dir = folder("unwritable");
+        // A file where the settings folder should be: nothing can be saved.
+        std::fs::write(dir.join("blocked"), "").unwrap();
+        let mut args = args(&dir);
+        args.devices.preferences = Some(dir.join("blocked").join(FILE_NAME));
+        let mut app = start(args, &two_devices());
+        app.preferences(Message::Safety(OutputSafety::Clean));
+        assert_eq!(app.rig.sent, [OutputSafety::Clean], "the engine runs Clean");
+        assert!(
+            app.status.ends_with("The change applies until you quit."),
+            "{}",
+            app.status
+        );
+    }
+
+    #[test]
+    fn picking_a_mode_tells_the_engine_and_saves_it() {
+        let dir = folder("pick");
+        let path = dir.join(FILE_NAME);
+        let mut app = start(args(&dir), &two_devices());
+        app.preferences(Message::Safety(OutputSafety::Off));
+        assert_eq!(app.rig.sent, [OutputSafety::Off]);
+        assert_eq!(
+            crate::preferences::load(&path).preferences.output_safety,
+            OutputSafety::Off
+        );
+        let written = std::fs::metadata(&path).unwrap().modified().unwrap();
+
+        // The mode in effect: nothing sent, nothing written.
+        std::thread::sleep(Duration::from_millis(20));
+        app.preferences(Message::Safety(OutputSafety::Off));
+        assert_eq!(app.rig.sent, [OutputSafety::Off]);
+        assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), written);
+
+        assert!(app.replace(Source::Empty));
+        assert_eq!(
+            app.controller.config().output_safety,
+            OutputSafety::Off,
+            "the next engine too"
+        );
+    }
+
+    #[test]
+    fn a_broken_file_still_starts_with_safety_on() {
+        let dir = folder("broken-file");
+        let path = write(&dir, "(output_safety: \"off\"");
+        let mut app = start(args(&dir), &two_devices());
+        assert_eq!(app.controller.config().output_safety, OutputSafety::LowLatency);
+        assert!(app.status.contains("Could not read preferences"), "{}", app.status);
+        app.preferences(Message::Safety(OutputSafety::Clean));
+        assert_eq!(
+            std::fs::read_to_string(dir.join("preferences.broken.ron")).unwrap(),
+            "(output_safety: \"off\""
+        );
+        assert_eq!(
+            crate::preferences::load(&path).preferences.output_safety,
+            OutputSafety::Clean
+        );
+    }
+
+    #[test]
+    fn with_no_audio_a_choice_is_only_saved() {
+        let dir = folder("no-audio");
+        let fake = two_devices();
+        let mut app = start(
+            Args {
+                no_audio: true,
+                ..args(&dir)
+            },
+            &fake,
+        );
+        assert_eq!(app.playing_line(), "Audio is off for this run (--no-audio).");
+        change(&mut app, Change::Device(DeviceChoice::Named("Fake B".into())));
+        assert!(fake.opened().is_empty());
+        assert_eq!(
+            crate::preferences::load(&dir.join(FILE_NAME)).preferences.audio.device,
+            DeviceChoice::Named("Fake B".into())
+        );
+    }
+
+    #[test]
+    fn the_window_opens_and_closes_with_its_shortcut_and_escape() {
+        use iced::keyboard::{Event, Key, Modifiers, key::Named};
+        let mut app = start(args(&folder("keys")), &two_devices());
+        let press = |key: Key, modifiers: Modifiers| {
+            crate::Message::Key(Event::KeyPressed {
+                key: key.clone(),
+                modified_key: key,
+                physical_key: iced::keyboard::key::Physical::Unidentified(
+                    iced::keyboard::key::NativeCode::Unidentified,
+                ),
+                location: iced::keyboard::Location::Standard,
+                modifiers,
+                text: None,
+                repeat: false,
+            })
+        };
+        let _ = app.update(press(Key::Character(",".into()), Modifiers::COMMAND));
+        assert!(app.rig.window.is_some());
+        let _ = app.update(press(Key::Named(Named::Escape), Modifiers::empty()));
+        assert!(app.rig.window.is_none());
     }
 }

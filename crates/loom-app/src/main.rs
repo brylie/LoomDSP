@@ -1519,6 +1519,8 @@ impl App {
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
+        // A mode change the engine's full queue refused goes again now.
+        self.send_pending_safety();
         let was_open = self.browser.is_some();
         let task = match message {
             Message::Browser(message) => self.browser_message(message),
@@ -1748,7 +1750,6 @@ impl App {
             Message::LiveFrame => scene::update_live_values(&mut self.values, &self.controller),
             Message::Autosave => self.autosave(Instant::now()),
             Message::Tick => {
-                self.send_pending_safety();
                 self.controller.collect_garbage();
                 self.update_dropouts(Instant::now());
             }
