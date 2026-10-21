@@ -107,6 +107,9 @@ pub enum Command {
     Arm {
         target: String,
     },
+    Unmap {
+        target: String,
+    },
     Locate {
         target: String,
     },
@@ -888,6 +891,10 @@ impl App {
                 send(self, message);
                 Map::new()
             }),
+            Command::Unmap { target } => self.unmap_command(&target).map(|message| {
+                send(self, message);
+                Map::new()
+            }),
             Command::Locate { target } => return (Then::AfterDraw(Step::Locate(target)), Task::batch(tasks)),
             Command::Screenshot { path } => return (Then::AfterDraw(Step::Screenshot(path)), Task::batch(tasks)),
             Command::Sample { target, ms } => {
@@ -978,6 +985,28 @@ impl App {
         if !self.learning {
             return Err("MIDI learn is off; press `learn` first".to_string());
         }
+        let (module, index) = self.param_target(target)?;
+        Ok(Message::LearnParam { module, index })
+    }
+
+    /// The message a parameter's Remove MIDI mapping button sends. The
+    /// button is there in and out of learn mode, so the command is too.
+    fn unmap_command(&self, target: &str) -> Result<Message, String> {
+        let (module, index) = self.param_target(target)?;
+        if self
+            .controller
+            .graph()
+            .midi_mapping_of(ModuleId(module), index)
+            .is_none()
+        {
+            return Err(format!("{target} has no MIDI mapping"));
+        }
+        Ok(Message::Unmap { module, index })
+    }
+
+    /// A parameter by module and name, from `"4:cutoff"`: the module and
+    /// the parameter's index.
+    fn param_target(&self, target: &str) -> Result<(u32, usize), String> {
         let Some((module, Some(param))) = split_target(target) else {
             return Err(format!(
                 "`{target}` is not a parameter; use `module:param`, like `4:cutoff`"
@@ -992,7 +1021,7 @@ impl App {
         let index = descriptor
             .param_index(param)
             .ok_or_else(|| format!("module {module} ({}) has no parameter `{param}`", descriptor.name))?;
-        Ok(Message::LearnParam { module, index })
+        Ok((module, index))
     }
 
     /// Checks a `sample` target: a panel widget by the name it is bound
@@ -1323,6 +1352,70 @@ mod tests {
         let row = &run(&mut app, r#"{"cmd": "snapshot"}"#).unwrap()["snapshot"]["inspector"]["module"]["params"][0];
         let mapping = row["mapping"].as_str().unwrap_or_default();
         assert!(mapping.contains("21"), "{row}");
+    }
+
+    /// `unmap` removes a mapping as the Remove MIDI mapping button does
+    /// (#260): one undo step and the same status, in and out of learn mode.
+    #[test]
+    fn a_script_removes_a_mapping() {
+        let mut app = App::new(crate::Args {
+            patch: Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches/subtractive.ron")),
+            fake_audio: true,
+            no_audio: false,
+            ..crate::tests::app_args()
+        });
+        let ok = Ok(Map::new());
+        for line in [
+            r#"{"cmd": "select", "modules": [4]}"#,
+            r#"{"cmd": "press", "button": "learn"}"#,
+            r#"{"cmd": "arm", "target": "4:cutoff"}"#,
+            r#"{"cmd": "cc", "controller": 21, "value": 64}"#,
+            r#"{"cmd": "press", "button": "learn"}"#,
+        ] {
+            assert_eq!(run(&mut app, line), ok, "{line}");
+        }
+        let snapshot = |app: &mut App| run(app, r#"{"cmd": "snapshot"}"#).unwrap()["snapshot"].clone();
+        let row = &snapshot(&mut app)["inspector"]["module"]["params"][0];
+        assert!(row["mapping"].is_string(), "{row}");
+
+        assert_eq!(run(&mut app, r#"{"cmd": "unmap", "target": "4:cutoff"}"#), ok);
+        let after = snapshot(&mut app);
+        let row = &after["inspector"]["module"]["params"][0];
+        assert!(row["mapping"].is_null(), "{row}");
+        assert_eq!(after["undo"], json!("remove MIDI mapping"));
+        let status = after["status"].as_str().unwrap_or_default();
+        assert!(status.starts_with("Removed CC 21"), "{status}");
+
+        // Undo brings the mapping back, and in learn mode `unmap` removes
+        // it again, as the button in a learn row does.
+        assert!(run(&mut app, r#"{"cmd": "undo"}"#).is_ok());
+        assert_eq!(run(&mut app, r#"{"cmd": "press", "button": "learn"}"#), ok);
+        let row = &snapshot(&mut app)["inspector"]["module"]["params"][0];
+        assert!(row["mapping"].is_string(), "{row}");
+        assert_eq!(run(&mut app, r#"{"cmd": "unmap", "target": "4:cutoff"}"#), ok);
+        assert!(app.learning);
+        let row = &snapshot(&mut app)["inspector"]["module"]["params"][0];
+        assert!(row["mapping"].is_null(), "{row}");
+    }
+
+    /// `unmap` refuses a parameter that is not there, and one with no
+    /// mapping to remove. Neither makes an undo step.
+    #[test]
+    fn unmap_refuses_unknown_parameters_and_ones_with_no_mapping() {
+        let mut app = App::new(crate::Args {
+            patch: Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches/subtractive.ron")),
+            ..crate::tests::app_args()
+        });
+        for (target, reason) in [
+            ("99:cutoff", "no module 99"),
+            ("4:nonsense", "module 4 (SVF) has no parameter `nonsense`"),
+            ("4", "`4` is not a parameter"),
+            ("4:cutoff", "4:cutoff has no MIDI mapping"),
+        ] {
+            let error = run(&mut app, &format!(r#"{{"cmd": "unmap", "target": "{target}"}}"#)).unwrap_err();
+            assert!(error.contains(reason), "{target}: {error}");
+        }
+        assert!(app.history.undo_step().is_none());
     }
 
     /// `sample` records a knob's live value once per frame (#255): with the
