@@ -414,6 +414,7 @@ Each declared item gets one widget, by the first rule that matches:
 
 - The choice between radio buttons and a select list follows [Radio buttons or a select list?](panel-widgets.md#radio-buttons-or-a-select-list). Choice names come from the parameter ([#160](https://github.com/brylie/LoomDSP/issues/160)).
 - A widget that binds more than one parameter (button, XY pad) is never derived. *Why:* the rules cannot know which two parameters belong together. A module that wants one writes its panel by hand, as the Button module does today.
+- A widget bound to an output (meter, scope, XY scope, spectrum) is never derived either. *Why:* most outputs carry signals that nobody needs to watch on the tile, so a rule would add displays almost everywhere. A display module writes its panel by hand, as the Level Meter does today.
 - A whole-number parameter without names gets a knob, as in P1. Leaning: the number widget, once it exists ([panel-widgets.md, Number](panel-widgets.md#number)).
 
 ### Hints
@@ -441,7 +442,7 @@ A hint is an option on the parameter, in `ParamOptions`. It names one widget fro
 
 ### Acceptance criteria: default panels
 
-- [ ] Each built-in module except Button gets its panel derived, with "inspector only" hints where P1 keeps a parameter in the inspector. Its widgets, bindings, and focus order equal today's hand-written panel (test). Positions may change.
+- [ ] Each built-in module except Button and Level Meter gets its panel derived, with "inspector only" hints where P1 keeps a parameter in the inspector. Its widgets, bindings, and focus order equal today's hand-written panel (test). Positions may change.
 - [ ] Deriving the panel twice from one descriptor gives equal panels (test).
 - [ ] The registry refuses a hint outside its parameter's group, with a message that names the parameter (test).
 - [ ] The registry refuses a hand-written module panel that leaves out a parameter without an "inspector only" hint, with a message that names the parameter (test).

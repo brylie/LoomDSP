@@ -86,7 +86,7 @@ These rules hold for every widget. Each widget section below says only what diff
 
 1. **The same gesture means the same thing everywhere.** Each group has one set of gestures, and the groups follow the P1 widgets (panels.md, Interaction):
 
-   | Gesture | One number (knob, fader, number), XY pad, and the parts of a data editor | One choice (toggle, radio buttons, select list) | Display, and empty space in a display |
+   | Gesture | One number (knob, fader, number), XY pad, and the parts of a data editor (see below) | One choice (toggle, radio buttons, select list) | Display, and empty space in a display |
    |---|---|---|---|
    | Drag | Changes the value | Moves the tile | Moves the tile |
    | Shift-drag | 10 times finer | | |
@@ -94,7 +94,7 @@ These rules hold for every widget. Each widget section below says only what diff
    | Double-click | Resets to the default | Resets to the default | Opens the larger view, if the module has one |
    | Mouse wheel | Zooms the canvas | Zooms the canvas, except over an open select list | Zooms the canvas |
 
-   The button is its own case (panels.md, Interaction). *Why:* a gesture learned once must work on every widget, or users hesitate on stage. *Why a choice control does not change on a drag:* toggles and radio buttons already move the tile on a drag, and a value that changes during a drag meant to move the tile is heard at once.
+   The button is its own case (panels.md, Interaction). Data editors (curve, step grid, waveform) follow the first column for drags, Shift, and double-click, but a click acts on the part under the pointer: it selects a curve point or segment, adds a point on empty curve space, or flips a gate cell. Each widget's section gives the details. *Why:* a part of a data editor is a small control of its own, and clicking it should do the obvious thing, as clicking a toggle does. *Why:* a gesture learned once must work on every widget, or users hesitate on stage. *Why a choice control does not change on a drag:* toggles and radio buttons already move the tile on a drag, and a value that changes during a drag meant to move the tile is heard at once.
 2. **Drags are relative, never jumps.** Pressing a control does not move its value. Only movement does. There are two exceptions, both only while Alt is held, so Alt always means "the value follows the pointer": pressing an XY pad jumps the point to the pointer ([XY pad](#xy-pad)), and dragging across a value lane of a step grid draws the values ([Step grid](#step-grid)). *Why:* a value that jumps to the pointer is heard at once on stage. *Why one modifier for both:* a user who learns "Alt draws" on one widget knows it on the other.
 3. **Modulation shows the same way for the same kind of value.**
 
@@ -269,7 +269,7 @@ One widget draws and edits every curve: envelope shapes, transfer curves, drawn 
 
 | Gesture | On a point | On a segment | On empty space in the curve |
 |---|---|---|---|
-| Drag | Moves the point. It cannot pass its neighbours. End points move only up and down. | Up and down change the bend. | Moves the tile, as on any display. |
+| Drag | Moves the point. It cannot pass its neighbours. End points move only up and down. | Up and down change the bend. | Moves the tile, so a drag on empty space never edits the curve by accident. |
 | Shift-drag | 10 times finer | 10 times finer | |
 | Click | Selects the point | Selects the segment | Adds a point on the curve, at the pointer's `x` |
 | Double-click | Removes the point (not the end points) | Resets the bend to straight | Adds one point, as a click does |
