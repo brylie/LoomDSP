@@ -51,6 +51,31 @@ fn window(name: &str, args: &[&str]) -> Option<(u32, u32, Vec<u8>)> {
     capture(&subtractive(), "--screenshot-window", name, args)
 }
 
+/// A constant holds an envelope's gate high and modulates a filter's
+/// cutoff, so a running engine lights the envelope's level light and moves
+/// the cutoff knob's live dot. Written as `name`, as [`modulated`].
+fn running(name: &str) -> PathBuf {
+    let patch = r#"Patch(
+    version: 1,
+    name: "Running",
+    modules: [
+        PatchModule(id: 1, kind: "loom.math.constant@1", params: {"value": 1.0}),
+        PatchModule(id: 2, kind: "loom.env.adsr@1"),
+        PatchModule(id: 3, kind: "loom.filter.svf@1"),
+    ],
+    cables: [
+        PatchCable(from: (1, "out"), to: (2, "gate")),
+    ],
+    modulation: [
+        (source: (1, "out"), target: (3, "cutoff"), depth: 0.25),
+    ],
+)
+"#;
+    let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(name);
+    std::fs::write(&path, patch).expect("patch written");
+    path
+}
+
 fn capture(patch: &Path, flag: &str, name: &str, args: &[&str]) -> Option<(u32, u32, Vec<u8>)> {
     let out = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(name);
     let _ = std::fs::remove_file(&out);
@@ -194,6 +219,19 @@ fn renders_the_window_at_a_size_with_canvas_options() {
     assert_eq!((width, height), (1280, 800));
     let (_, _, resonance) = image("window-resonance.png", "4:resonance").expect("a GPU, as above");
     assert_ne!(cutoff, resonance, "focus changed nothing in the image");
+}
+
+/// --frames runs the engine before the window is drawn, so the lit light
+/// and the live dot change the image.
+#[test]
+fn renders_the_window_after_running_the_engine() {
+    let patch = running("running-window.ron");
+    let Some((_, _, still)) = capture(&patch, "--screenshot-window", "window-still.png", &[]) else {
+        return;
+    };
+    let (_, _, ran) =
+        capture(&patch, "--screenshot-window", "window-ran.png", &["--frames", "4800"]).expect("a GPU, as above");
+    assert_ne!(still, ran, "running the engine changed nothing in the image");
 }
 
 #[test]

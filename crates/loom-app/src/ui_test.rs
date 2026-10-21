@@ -102,6 +102,7 @@ impl Ui {
             view: screenshot::Options::default(),
             dump_ui: false,
             select: Vec::new(),
+            frames: None,
             recovery_dir: None,
             no_recovery: false,
         });

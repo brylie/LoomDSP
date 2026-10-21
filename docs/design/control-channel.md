@@ -16,7 +16,7 @@ A development-only way for a script or an AI agent to drive the running app by n
 
 An agent building a feature wants to check it in the real app: "select the filter, turn Cutoff to 800 Hz, play middle C, and show me the window". Today it has three partial tools:
 
-- `--screenshot`, `--screenshot-window`, and `--dump-ui` show a still frame of a patch at start. They cannot show what happens after an edit, a note, or some time passing.
+- `--screenshot`, `--screenshot-window`, and `--dump-ui` show a still frame of a patch at start. With `--frames`, `--dump-ui` and `--screenshot-window` can run the engine for a while first, but they cannot show what happens after an edit or a note.
 - The headless `Ui` harness drives the real view, but only inside a Rust test.
 - Desktop automation can see and click the window of `LoomDSP.app`, but by pixel only: the window has no accessibility tree (#190), so a control cannot be found by name or read.
 

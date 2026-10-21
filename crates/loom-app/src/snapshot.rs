@@ -171,6 +171,18 @@ fn kind_name(kind: &WidgetViewKind) -> &'static str {
 }
 
 impl App {
+    /// Runs the idle engine for `frames` frames, then takes the live values
+    /// and lights it left, through the same messages the window uses. With
+    /// no window to say which lights are on screen, it reads them all.
+    fn run_engine(&mut self, frames: usize) {
+        self.process(frames);
+        let _ = self.update(crate::Message::LiveFrame);
+        self.visible_displays = self.controller.graph().nodes().map(|(id, _)| id.0).collect();
+        if let Some(watch) = self.watched_lights() {
+            let _ = self.update(crate::Message::Lights(watch.read()));
+        }
+    }
+
     /// What the user sees now.
     pub(crate) fn ui_snapshot(&self) -> UiSnapshot {
         let tiles = self
@@ -257,8 +269,8 @@ impl App {
 }
 
 /// The app as the window builds it, without audio or MIDI, with the
-/// modules `--select` names selected. For `--dump-ui` and
-/// `--screenshot-window`.
+/// modules `--select` names selected and the engine run for `--frames`
+/// frames. For `--dump-ui` and `--screenshot-window`.
 pub fn headless(args: &Args) -> Result<App, String> {
     let config = loom_core::EngineConfig {
         output_safety: args.output_safety,
@@ -271,6 +283,9 @@ pub fn headless(args: &Args) -> Result<App, String> {
             return Err(format!("no module {id} in the patch"));
         }
         app.selection.insert(id);
+    }
+    if let Some(frames) = args.frames {
+        app.run_engine(frames);
     }
     Ok(app)
 }
