@@ -73,18 +73,29 @@ Structured data that a module keeps beyond its parameters comes in three shared 
 |---|---|---|---|
 | Curve | Up to 64 points with a bend per segment, and optional named markers | Curve | Segment envelope, curve reader, drawn transfer curve, drawn LFO shape |
 | Pattern | Up to 8 lanes of up to 64 steps. Each lane holds gates or values. | Step grid | Multi-lane sequencer, parameter sequencer, matrix |
-| Buffer | Audio frames, mono or stereo | Waveform | Buffer, buffer reader, slice map, grain engine, audio cycle |
+| Buffer | Audio frames, mono or stereo, up to a maximum length the module declares. Up to 64 slice points. | Waveform | Buffer, buffer reader, slice map, grain engine, audio cycle |
 
 - A module declares its data slots by name and kind, as it declares parameters. A widget binds to a slot by name. The registry refuses a curve widget on a pattern slot.
 - The limits above are fixed capacities. *Why:* new data is built on the control thread and swapped into the engine whole (ADR-0001), so the audio thread never allocates. A fixed capacity also keeps every editor's layout predictable. The numbers are leanings, to settle with [#50](https://github.com/brylie/LoomDSP/issues/50).
+- **A buffer's length is not one number for every module.** A one-shot sample and a 10-minute recording need very different sizes, so the module declares its maximum, such as a length in seconds. The control thread allocates the buffer at that size when the module is created or the maximum changes, never on the audio thread. A module that records into a buffer writes into that space and stops at its end. Slice points are part of the buffer data, so a slice map's slices travel with its audio when the buffer is copied.
 - *Why shared kinds:* the catalogue already says the segment envelope and the curve reader "use the shared curve data". If each module kept its own curve format, each would need its own editor, and users would learn a new gesture set per module. One kind also lets a user copy a curve from an envelope and paste it into a shaper.
 
 ## Shared rules
 
 These rules hold for every widget. Each widget section below says only what differs.
 
-1. **The same gesture means the same thing everywhere.** Drag changes a value. Shift-drag is 10 times finer. Double-click resets what is under the pointer to its default. The mouse wheel zooms the canvas, except over an open select list. Clicking a display selects its module. *Why:* a gesture learned once must work on every widget, or users hesitate on stage. These rules already hold for P1 widgets (panels.md, Interaction).
-2. **Drags are relative, never jumps.** Pressing a control does not move its value. Only movement does. The XY pad is the one exception, and only with a modifier key (see [XY pad](#xy-pad)). *Why:* a value that jumps to the pointer is heard at once on stage.
+1. **The same gesture means the same thing everywhere.** Each group has one set of gestures, and the groups follow the P1 widgets (panels.md, Interaction):
+
+   | Gesture | One number (knob, fader, number), XY pad, and the parts of a data editor | One choice (toggle, radio buttons, select list) | Display, and empty space in a display |
+   |---|---|---|---|
+   | Drag | Changes the value | Moves the tile | Moves the tile |
+   | Shift-drag | 10 times finer | | |
+   | Click | Selects the module | Acts: flips, picks, or opens the list | Selects the module |
+   | Double-click | Resets to the default | Resets to the default | Opens the larger view, if the module has one |
+   | Mouse wheel | Zooms the canvas | Zooms the canvas, except over an open select list | Zooms the canvas |
+
+   The button is its own case (panels.md, Interaction). *Why:* a gesture learned once must work on every widget, or users hesitate on stage. *Why a choice control does not change on a drag:* toggles and radio buttons already move the tile on a drag, and a value that changes during a drag meant to move the tile is heard at once.
+2. **Drags are relative, never jumps.** Pressing a control does not move its value. Only movement does. There are two exceptions, both only while Alt is held, so Alt always means "the value follows the pointer": pressing an XY pad jumps the point to the pointer ([XY pad](#xy-pad)), and dragging across a value lane of a step grid draws the values ([Step grid](#step-grid)). *Why:* a value that jumps to the pointer is heard at once on stage. *Why one modifier for both:* a user who learns "Alt draws" on one widget knows it on the other.
 3. **Modulation shows the same way for the same kind of value.**
 
    | Value | Range | Live value | When all assignments are off |
@@ -138,7 +149,7 @@ Toggle and radio buttons are Implemented. The select list joins them. All three 
 
 ### Choice names
 
-A whole-number parameter can name its values, such as "6 dB", "12 dB", "18 dB", "24 dB" for a filter slope. Radio buttons and select lists show these names. A parameter without names shows its number and unit, such as "4 voices". Choice names live in the `ParamSpec`, so the inspector shows them too ([#160](https://github.com/brylie/LoomDSP/issues/160)). This is the "stepped" mapping of FR-PANEL-04 ([#99](https://github.com/brylie/LoomDSP/issues/99)).
+A whole-number parameter can name its values, such as "6 dB", "12 dB", "18 dB", "24 dB" for a filter slope. Radio buttons and select lists show these names. A parameter without names shows its number and unit, such as "4 voices". Choice names live in the `ParamSpec`, so the inspector shows them too ([#160](https://github.com/brylie/LoomDSP/issues/160)). Today `WidgetKind::Radio` carries its own option labels. Those labels move to the parameter, and the radio widget reads them from there. *Why:* two places for the same names can disagree, and a radio button switched for a select list must show the same words. This is the "stepped" mapping of FR-PANEL-04 ([#99](https://github.com/brylie/LoomDSP/issues/99)).
 
 ### Select list
 
@@ -148,10 +159,10 @@ The current choice is shown as text. Clicking it shows the other choices in a li
 - **Closed:** a box with the current choice and a small down-pointing mark at the right end, which says "there is a list here" without colour.
 - **Click:** opens the list. The list shows every choice, the current one marked by a tick and a filled row. It opens below the box, or above when there is no room below, and always inside the canvas. Clicking a choice picks it and closes the list: one undo step. Clicking outside the list, pressing Escape, panning, or zooming closes it without a change.
 - **List size:** fixed screen size, 12 px text, like hover text, whatever the zoom. At most 12 rows are shown; a longer list scrolls, with the mouse wheel over the list. *Why fixed size:* the list is for reading and picking, so it must be readable at middle zoom. *Why the wheel scrolls here:* the open list covers the canvas, and scrolling it cannot change the sound.
-- **Drag on the closed box:** steps through the choices, up for the next, down for the previous, about 20 screen pixels per choice. *Why:* a performer can sweep through filter slopes without opening a list, as on a rotary switch. This is the same gesture as a knob on a whole-number parameter.
+- **Drag on the closed box:** moves the tile, as on toggles and radio buttons (rule 1). *Why not step through the choices:* a select list is a choice control, and choice controls do not change on a drag. A performer sweeps through choices with a MIDI controller or the arrow keys instead.
 - **Double-click:** resets to the default.
 - **Modulation:** a dot, as on radio buttons. The box shows the base choice.
-- **Keyboard:** focused, Up and Down step the choice at once, as with every whole-number control. Space or Enter opens the list. In the list, Up and Down move the highlight, Enter picks, and Escape closes without a change.
+- **Keyboard:** focused, Up and Down step the choice at once, as with every whole-number control. Space or Enter opens the list. This differs on purpose from toggles and radio buttons, where Space or Enter picks the next option. *Why:* a select list is used when there are many choices, so stepping one at a time with Space is slow, and Up and Down already step. In the list, Up and Down move the highlight, Enter picks, and Escape closes without a change.
 - **MIDI learn:** a controller sweeps through the choices, as on radio buttons.
 - **Middle zoom:** the box, a bar for the text, and the mark.
 - **Size (leaning):** 6 × 2. The caption is above or below the box, as for a knob.
@@ -261,10 +272,12 @@ One widget draws and edits every curve: envelope shapes, transfer curves, drawn 
 | Drag | Moves the point. It cannot pass its neighbours. End points move only up and down. | Up and down change the bend. | Moves the tile, as on any display. |
 | Shift-drag | 10 times finer | 10 times finer | |
 | Click | Selects the point | Selects the segment | Adds a point on the curve, at the pointer's `x` |
-| Double-click | Removes the point (not the end points) | Resets the bend to straight | |
+| Double-click | Removes the point (not the end points) | Resets the bend to straight | Adds one point, as a click does |
 | Drag a marker flag | Moves the marker to the nearest point | | |
 
 *Why click adds and double-click removes:* double-click means "back to the default" everywhere (rule 1). A curve's default is to have no extra point there, and a segment's default bend is straight.
+
+*Why double-click on empty space does not open the larger view, as on a display:* empty space in a curve is part of an editor, not a display. Its first click has already added a point. The curve's larger view opens from its corner mark (see Open points).
 
 - **Live position:** a module that reads the curve publishes where it reads, as a display value from 0 to 1. The curve draws a thin vertical line there and a dot where it meets the curve. The line moves with rule 7.
 - **Modulation:** not shown on the data (rule 3). For a shape from parameters, the shape follows the base values. See Open points for a live shape.
@@ -283,7 +296,8 @@ Rows of steps. Each row (lane) holds gates or values. A column shows the playing
 - **Playing step:** from a display value. The column has an outline and a filled marker above it. *Why both:* colour alone is not enough (rule 8).
 - **Pointer:**
   - Gate lane: click flips a cell. Dragging across cells sets each one to the state the first cell got. *Why:* painting a run of hits is one gesture.
-  - Value lane: drag up and down in a cell to change its value, relative, as a fader. Dragging sideways moves to the next cell and keeps changing values there, so a line can be drawn across a lane.
+  - Value lane: drag up and down in a cell to change its value, relative, as a fader. The drag stays on the cell where it started.
+  - Value lane, with Alt held: drag across the lane to draw. Each cell the pointer passes takes the value of the pointer's height in the lane. This is one of the two exceptions to rule 2. *Why:* drawing a line or a ramp across 16 cells must be one gesture, and only an absolute value can follow the pointer's path. *Why only with Alt:* a plain press must never change a step that is playing.
   - Double-click a cell resets it to the lane's default.
 - **Keyboard (rule 4):** Enter goes inside. Arrows move between cells. Space flips a gate cell. On a value cell, Space or Enter grabs it, Up and Down change it, and Enter or Escape lets go.
 - **Modulation:** cells are data and are not modulated (rule 3).
@@ -298,7 +312,7 @@ A buffer drawn as its outline, with markers for where a module reads.
 - **Binds to:** a module data slot of the buffer kind. Each marker binds to a parameter: start, end, loop start, loop end, a grain position. Slice points come from the module's data.
 - **Drawing:** the outline (lowest and highest sample per column) is computed on a control thread when the buffer changes, not per frame. *Why:* a buffer can hold millions of samples.
 - **Playheads:** from display values. A module that plays several reads at once (a grain engine) publishes the range they cover, drawn as a band.
-- **Pointer:** dragging a marker sets its parameter, relative. Shift for fine. Double-click a marker resets its parameter. Pressing the outline itself selects or moves the tile.
+- **Pointer:** dragging a marker sets its parameter, relative. Shift for fine. Double-click a marker resets its parameter. The outline itself is a display (rule 1): pressing it selects or moves the tile, and double-clicking it opens the larger view.
 - **Modulation:** each marker shows its reachable range as a band along the time axis, and its live position as a thin line (rule 3).
 - **Keyboard (rule 4):** markers are the parts. Arrows move between them; grab and move as on a curve.
 - **Middle zoom:** the outline only.
@@ -363,7 +377,7 @@ This is a plan. Each widget gets its own acceptance criteria when its section be
 
 ## Open points
 
-- **Larger view.** Curves, step grids, and waveforms are cramped on a tile. Leaning: a small corner mark on the widget opens a larger editor over the canvas, at fixed screen size, editing the same data. Double-click on empty space is not used for this, because it means "reset" on other widgets. Decide with [#61](https://github.com/brylie/LoomDSP/issues/61) (resizable tiles).
+- **Larger view.** Curves, step grids, and waveforms are cramped on a tile. Leaning: a small corner mark on the widget opens a larger editor over the canvas, at fixed screen size, editing the same data. On a waveform, double-clicking the outline opens it too, because the outline is a display (rule 1). A curve and a step grid have no display area to double-click, since every press there edits, so they use the corner mark only. Decide with [#61](https://github.com/brylie/LoomDSP/issues/61) (resizable tiles).
 - **Handles bound to parameters on a curve.** An ADSR shape could have handles that set attack, decay, sustain, and release directly. The waveform already binds markers to parameters, so this is the same idea. Leaning: yes, after the read-only shape view is built and tried.
 - **Live shape under modulation.** A shape from parameters could also draw, faintly, the shape at the live modulated values. Leaning: yes, if it needs no new engine data. The live value table ([modulation.md, Live value](modulation.md#live-value)) already has each modulated parameter.
 - **Typing a value on the tile.** Number widgets and knobs could take typed values. Leaning: not on the tile in P2; the inspector has a text field. Revisit with the panel editor.
