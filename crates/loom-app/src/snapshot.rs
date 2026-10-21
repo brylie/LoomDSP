@@ -20,9 +20,10 @@ use serde::Serialize;
 /// 48 kHz.
 const METER_WINDOW: usize = 4_800;
 
-/// Frames between reads of the meter queue. Four blocks of 128 frames, so a
-/// patch with up to 256 meters never fills the queue.
-const METER_READ: usize = 512;
+/// Frames between reads of the meter queue: one block of 128 frames, so it
+/// holds at most one reading per meter and never fills, up to the queue's
+/// 1024 readings.
+const METER_READ: usize = 128;
 
 /// Everything the snapshot holds.
 #[derive(Debug, Clone, PartialEq, Serialize)]
