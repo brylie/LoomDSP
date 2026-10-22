@@ -206,16 +206,24 @@ impl Module for Pulse {
 
             let mut y = if t < width { 1.0 } else { -1.0 };
             let step = dt.min(1.0 - dt);
+            let step_fall = dt_fall.min(1.0 - dt_fall);
+            // When the pulse or gap is narrower than `step + step_fall`, the
+            // two BLEP windows overlap; use a shared step so their slopes cancel.
+            let (step, step_fall) = if width < step + step_fall || 1.0 - width < step + step_fall {
+                let shared = step.max(step_fall);
+                (shared, shared)
+            } else {
+                (step, step_fall)
+            };
             if step > 0.0 && step < 0.5 {
                 // Jump at the start of the cycle (+2 ascending, -2 descending).
                 y += poly_blep(t, step);
             }
             // Jump when `t` crosses `width` (-2 ascending, +2 descending).
-            let step_fall = dt_fall.min(1.0 - dt_fall);
             if step_fall > 0.0 && step_fall < 0.5 {
                 y -= poly_blep(t_fall, step_fall);
             }
-            *out = y;
+            *out = y.clamp(-1.0, 1.0);
         }
     }
 
@@ -473,6 +481,33 @@ mod tests {
                 "expected polyBLEP-smoothed intermediate samples on {start}->{end} sweep, got {out:?}"
             );
         }
+    }
+
+    /// Regression test: overlapping BLEP windows with unequal edge velocities under audio-rate
+    /// width modulation must stay within `[-1, 1]`.
+    #[test]
+    fn pulse_overlapping_edges_with_unequal_velocities_stay_bounded() {
+        // At 1 Hz, the 5 ms smoother reaches its target in a single sample while preserving
+        // `previous` and `previous_fall`, reproducing audio-rate width jumps.
+        let config = ModuleConfig {
+            sample_rate: 1.0,
+            max_block: 64,
+        };
+        let ModuleRole::Dsp(create) = PULSE.role else {
+            unreachable!()
+        };
+        let mut pulse = create(&config);
+        // Step 1 sets `previous = 0.75` and `width = 0.80` (`previous_fall = 0.95`).
+        // Step 2 advances phase to `0.95` (`step = 0.20`) and width to `0.99` (`step_fall = 0.01`).
+        let mut out = [0.0; 1];
+        pulse.set_param(0, 0.80);
+        pulse.reset();
+        run(pulse.as_mut(), 1.0, &[&[0.75]], &[true], &mut [&mut out], &[]);
+        assert!(out[0].abs() <= 1.0 + 1e-6, "step 1: {}", out[0]);
+
+        pulse.set_param(0, 0.99);
+        run(pulse.as_mut(), 1.0, &[&[0.95]], &[true], &mut [&mut out], &[]);
+        assert!(out[0].abs() <= 1.0 + 1e-6, "step 2: {}", out[0]);
     }
 
     /// Checks that the triangle wave stays within `[-1, 1]` and matches sine phase alignment.
