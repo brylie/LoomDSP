@@ -66,6 +66,7 @@ Copy [template.md](template.md). Keep it to one feature. Link the ADR, requireme
 | [Port ranges](port-ranges.md) | None (builds on [ADR-0007](../adr/0007-polymorphic-signal-model.md)) | Tier 1 Agreed, Tiers 2 and 3 Draft, P1 and P2 |
 | [Module test harness](module-test-harness.md) | [ADR-0002](../adr/0002-graph-execution-and-feedback.md) | Implemented, P1 |
 | [Clock and transport](clock.md) | [ADR-0015](../adr/0015-one-transport-per-patch.md) | Engine sections, Clock Divide, and Phase Trigger Implemented (P1); rest Draft, P1 and P2 |
+| [Delay line and all-pass](delay.md) | [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md), [ADR-0002](../adr/0002-graph-execution-and-feedback.md), [ADR-0017](../adr/0017-primitives-traits-and-abstractions.md), [ADR-0020](../adr/0020-inferred-channel-count.md) | Agreed, P1 |
 | [Port and parameter text](port-and-parameter-text.md) | [ADR-0016](../adr/0016-ports-and-parameters-carry-their-own-text.md) | Implemented, P1 |
 | [Open, Save, and Save As](files.md) | None (builds on [ADR-0008](../adr/0008-patch-format-ron.md)) | Implemented, P1 |
 | [MIDI learn](midi-learn.md) | None (builds on [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md) and [ADR-0013](../adr/0013-modules-carry-their-own-panel.md)) | Agreed, P1 |

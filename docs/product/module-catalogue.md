@@ -100,6 +100,7 @@ Sampling is built from small parts, so one set of primitives covers one-shot pla
 | MT-FILTER-09 | Filter bank | Many band-pass filters in parallel, fixed or tuned. With high resonance it is a resonator bank. | | P4 | FR-LIB-15 | Planned |
 | MT-FILTER-10 | Hilbert pair | Splits a signal into two outputs 90 degrees apart, for frequency shifting and envelope detection. | Quality | P4 | New | Planned |
 | MT-FILTER-11 | Biquad | A general two-pole, two-zero filter set by coefficients, for building custom filters in a patch. | | P4 | New | Planned |
+| MT-FILTER-12 | All-pass stage | A first- or second-order all-pass filter tuned by pitch, for phasers and phase dispersion. | | P2 | FR-LIB-15 | Planned |
 
 ## Shapers and distortion
 
@@ -228,8 +229,8 @@ These depend on how notes travel on cables (OQ-16).
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
 | MT-DELAY-01 | One-sample delay | Delays by exactly one sample, to close feedback loops. | | P0 | FR-LIB-06 | Built (`loom.time.delay1`) |
-| MT-DELAY-02 | Delay line | An interpolated delay with a modulated time, for building effects and models. | Quality | P1 | FR-LIB-06 | Planned |
-| MT-DELAY-03 | All-pass | All-pass filters for phase effects and for building reverbs. | | P1 | FR-LIB-06 | Planned |
+| MT-DELAY-02 | Delay line | An interpolated delay with a modulated time, for building effects and models. | Quality | P1 | FR-LIB-06 | Specified (`loom.time.delay`, [delay](../design/delay.md)) |
+| MT-DELAY-03 | All-pass | A delay line with feedback and feed-forward that passes every frequency at equal level, for building reverbs and diffusers. | Quality | P1 | FR-LIB-06 | Specified (`loom.time.allpass`, [delay](../design/delay.md)) |
 | MT-DELAY-04 | Delay | A finished delay with several taps, feedback, filtering, ping-pong, and a choice of how it reacts when the time changes (pitch glide, crossfade, or jump). | Timebase, Character, Mix and output | P2 | FR-LIB-15 | Planned |
 | MT-DELAY-05 | Modulated delay | Short delays moved by an LFO, for chorus, ensemble, and flanging. | Spread, Mix and output | P2 | FR-LIB-09 | Planned |
 | MT-FX-01 | Reverb | A room, hall, plate, or spring sound from a network of delays and diffusers. | Character, Mix and output | P2 | FR-LIB-09 | Planned |
@@ -353,9 +354,9 @@ A user's own sub-patch can declare a role and then fill any matching slot (FR-EN
 |---|---|---|
 | P0 | 3 | 0 |
 | P1 | 34 | 0 |
-| P2 | 56 | 16 |
+| P2 | 57 | 16 |
 | P3 | 32 | 13 |
 | P4 | 46 | 30 |
-| **Total** | **171** | **59** |
+| **Total** | **172** | **59** |
 
 Plus 11 traits and 7 initial roles. The summary is counted from the tables above; update it when entries change.

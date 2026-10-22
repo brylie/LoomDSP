@@ -12,6 +12,7 @@ LoomDSP is also a way to learn modular sound design, for musicians and for the p
 | [Stereo cables](stereo-cables.md) | Why stereo is inferred and not on every cable, why most modules run as copies, and how each signal type is downmixed to mono. |
 | [Output safety](output-safety.md) | Why DC harms speakers, why a hard clip is not enough, what a limiter's lookahead costs, and why audio fades in. |
 | [Hot patching](hot-patching.md) | Why a new cable into a running patch can click, what state must carry over, and why a crossfade does not hide a cold start. |
+| [Delays and interpolation](delays-and-interpolation.md) | How a circular buffer works, why linear interpolation dulls sweeps and loops, why the all-pass needs two samples of delay, and how to tune a loop. |
 
 ## Writing one
 
