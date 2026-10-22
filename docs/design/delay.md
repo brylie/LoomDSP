@@ -3,7 +3,7 @@
 Two time-domain building blocks (`MT-DELAY-02` and `MT-DELAY-03`) for echoes, chorus, flanging, reverbs, and plucked-string models.
 
 - **Kind:** living specification.
-- **Status:** Agreed
+- **Status:** Implemented
 - **Decision behind it:** [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md) (memory allocated on the control thread), [ADR-0002](../adr/0002-graph-execution-and-feedback.md) (feedback loops and one-sample delays), [ADR-0017](../adr/0017-primitives-traits-and-abstractions.md) (primitives and traits), [ADR-0018](../adr/0018-clean-room-module-development.md) (clean-room development), [ADR-0020](../adr/0020-inferred-channel-count.md) (stereo channel rules).
 - **Use case and requirements:** UC1, UC2, FR-LIB-06, FR-SIG-07, NFR-RT-01, NFR-RT-02, NFR-SND-02.
 - **Background:** [Delays and interpolation](../learn/delays-and-interpolation.md): how a circular buffer works, why linear interpolation loses high frequencies, why the all-pass needs at least two samples of delay, and how to tune a delay loop.
@@ -152,18 +152,18 @@ Ignoring the filter, a string tuned to A3 ($f_0 = 220\text{ Hz}$) at $f_s = 48\,
 
 ## Acceptance criteria
 
-- [ ] Both modules register in `loom_modules::ALL`, pass `panels_follow_the_spec` and `parameters_in_hz_and_seconds_are_logarithmic`, and build for `wasm32-unknown-unknown`. (test)
-- [ ] Given an impulse into `loom.time.delay` at an integer delay of $N$ samples, the output is `1.0` at sample $N$ and `0.0` everywhere else. (unit test)
-- [ ] Given a ramp or sine into `loom.time.delay` at a fractional delay, the output matches the 4-point Catmull-Rom formula, and a slow sweep near 2.0 s at 192 kHz changes smoothly without `f32` stepping. (unit test)
-- [ ] Given negative values, sub-sample values, `NaN`, `+inf`, and `-inf` on the `time` input, `loom.time.delay` clamps to $[1, N_{\max}]$, `loom.time.allpass` clamps to $[2, N_{\max}]$, and every output sample is finite. (unit test)
-- [ ] Given `gain = 0` and the same delay in samples ($d \ge 2$), `loom.time.allpass` produces output equal (`==`) to `loom.time.delay`, including for quiet inputs down to $10^{-25}$. (unit test)
-- [ ] Given a steady-state sine wave at several frequencies into `loom.time.allpass` with an integer sample delay and `gain = 0.6`, after settling for several hundred echo periods, the output RMS matches the input RMS within `1e-4` relative error. (unit test)
-- [ ] Calling `reset()` on either module clears all buffered echoes to `0.0` and settles its parameter smoothers. (unit test)
-- [ ] Both modules have reference tests in `crates/loom-modules/tests/reference.rs` with audio-rate `time` modulation ($\pm 2\text{ ms}$) that pass block-size invariance across block sizes 1, 77, and 512. (test)
-- [ ] `crates/loom-modules/tests/no_alloc.rs` runs both modules while their `time` and `gain` parameters and `time` input change during playback, with zero allocations on the audio thread. (test)
-- [ ] Given `loom.time.delay` patched in a cable feedback loop without `loom.time.delay1`, the compiler reports 1 inserted delay, the echo period is `delay_samples + 1`, and the output is bit-identical at host buffer sizes 1, 32, 77, and 1024. (engine test)
-- [ ] Given a stereo source into `loom.time.delay` and `loom.time.allpass`, both channels process independently (`PerChannel`) while a stereo `time` input downmixes (`Downmix`). (engine test)
-- [ ] `examples/patches/plucked-string.ron` passes `loom-cli check` with no compiler-inserted delays and renders a plucked note with `loom-cli render`. (CLI check)
+- [x] Both modules register in `loom_modules::ALL`, pass `panels_follow_the_spec` and `parameters_in_hz_and_seconds_are_logarithmic`, and build for `wasm32-unknown-unknown`. (test)
+- [x] Given an impulse into `loom.time.delay` at an integer delay of $N$ samples, the output is `1.0` at sample $N$ and `0.0` everywhere else. (unit test)
+- [x] Given a ramp or sine into `loom.time.delay` at a fractional delay, the output matches the 4-point Catmull-Rom formula, and a slow sweep near 2.0 s at 192 kHz changes smoothly without `f32` stepping. (unit test)
+- [x] Given negative values, sub-sample values, `NaN`, `+inf`, and `-inf` on the `time` input, `loom.time.delay` clamps to $[1, N_{\max}]$, `loom.time.allpass` clamps to $[2, N_{\max}]$, and every output sample is finite. (unit test)
+- [x] Given `gain = 0` and the same delay in samples ($d \ge 2$), `loom.time.allpass` produces output equal (`==`) to `loom.time.delay`, including for quiet inputs down to $10^{-25}$. (unit test)
+- [x] Given a steady-state sine wave at several frequencies into `loom.time.allpass` with an integer sample delay and `gain = 0.6`, after settling for several hundred echo periods, the output RMS matches the input RMS within `1e-4` relative error. (unit test)
+- [x] Calling `reset()` on either module clears all buffered echoes to `0.0` and settles its parameter smoothers. (unit test)
+- [x] Both modules have reference tests in `crates/loom-modules/tests/reference.rs` with audio-rate `time` modulation ($\pm 2\text{ ms}$) that pass block-size invariance across block sizes 1, 77, and 512. (test)
+- [x] `crates/loom-modules/tests/no_alloc.rs` runs both modules while their `time` and `gain` parameters and `time` input change during playback, with zero allocations on the audio thread. (test)
+- [x] Given `loom.time.delay` patched in a cable feedback loop without `loom.time.delay1`, the compiler reports 1 inserted delay, the echo period is `delay_samples + 1`, and the output is bit-identical at host buffer sizes 1, 32, 77, and 1024. (engine test)
+- [x] Given a stereo source into `loom.time.delay` and `loom.time.allpass`, both channels process independently (`PerChannel`) while a stereo `time` input downmixes (`Downmix`). (engine test)
+- [x] `examples/patches/plucked-string.ron` passes `loom-cli check` with no compiler-inserted delays and renders a plucked note with `loom-cli render`. (CLI check)
 
 ## Out of scope
 

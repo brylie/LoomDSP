@@ -1,0 +1,38 @@
+// Karplus-Strong plucked string built from primitives:
+// a short noise burst excites a feedback loop with a delay line, a lowpass
+// damping filter, a loop gain, and an explicit 1-sample unit delay.
+Patch(
+    version: 1,
+    name: "Plucked string",
+    modules: [
+        // Tuned near A3 (220 Hz at 48 kHz): delay time + 1 sample from delay1
+        // + lowpass filter delay is one period (~4.545 ms).
+        PatchModule(id: 1, kind: "loom.time.delay@1", params: {"time": 0.00445}),
+        PatchModule(id: 2, kind: "loom.midi.note@1"),
+        PatchModule(id: 3, kind: "loom.env.adsr@1", params: {
+            "attack": 0.001,
+            "decay": 0.008,
+            "sustain": 0.0,
+            "release": 0.008,
+        }),
+        PatchModule(id: 4, kind: "loom.osc.noise@1"),
+        PatchModule(id: 5, kind: "loom.math.mul@1", params: {"gain": 0.6}),
+        PatchModule(id: 6, kind: "loom.math.add@1"),
+        PatchModule(id: 7, kind: "loom.filter.svf@1", params: {"cutoff": 3500.0, "resonance": 0.0}),
+        PatchModule(id: 8, kind: "loom.math.mul@1", params: {"gain": 0.985}),
+        PatchModule(id: 9, kind: "loom.time.delay1@1"),
+        PatchModule(id: 10, kind: "loom.io.audio-out@1"),
+    ],
+    cables: [
+        PatchCable(from: (2, "gate"), to: (3, "gate")),
+        PatchCable(from: (4, "out"), to: (5, "a")),
+        PatchCable(from: (3, "out"), to: (5, "b")),
+        PatchCable(from: (5, "out"), to: (6, "a")),
+        PatchCable(from: (9, "out"), to: (6, "b")),
+        PatchCable(from: (6, "out"), to: (1, "in")),
+        PatchCable(from: (1, "out"), to: (7, "in")),
+        PatchCable(from: (7, "lowpass"), to: (8, "a")),
+        PatchCable(from: (8, "out"), to: (9, "in")),
+        PatchCable(from: (1, "out"), to: (10, "left")),
+    ],
+)

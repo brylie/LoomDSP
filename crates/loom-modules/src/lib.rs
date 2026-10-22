@@ -21,6 +21,7 @@ pub mod math;
 pub mod midi;
 pub mod osc;
 pub mod phase;
+pub mod time;
 pub mod ui;
 
 /// Every built-in module.
@@ -43,6 +44,8 @@ pub static ALL: &[&ModuleDescriptor] = &[
     &display::METER,
     &logic::DIVIDE,
     &ui::BUTTON,
+    &time::DELAY,
+    &time::ALLPASS,
 ];
 
 // Every built-in port and parameter has a label and a description, or this

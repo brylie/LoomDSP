@@ -25,6 +25,7 @@ fn audio_thread_never_allocates() {
         "subtractive.ron",
         "fm-feedback.ron",
         "fm-feedback-delay1.ron",
+        "plucked-string.ron",
     ] {
         let mut parts = load(patch);
         let outputs: Vec<OutputRef> = parts
@@ -138,5 +139,49 @@ fn audio_thread_never_allocates() {
         assert!(parts.engine.is_silent());
         let stats = parts.controller.stats();
         assert!(stats.dropped_scope.load(std::sync::atomic::Ordering::Relaxed) > 0);
+    }
+}
+
+#[test]
+fn delay_and_allpass_never_allocate_while_sweeping_parameters_and_inputs() {
+    let mut parts = load("sine.ron");
+    let c = &mut parts.controller;
+    let lfo_phase = c.add_module("loom.phase.generator").unwrap();
+    let lfo = c.add_module("loom.osc.sine").unwrap();
+    let lfo_scale = c.add_module("loom.math.mul").unwrap();
+    let delay = c.add_module("loom.time.delay").unwrap();
+    let allpass = c.add_module("loom.time.allpass").unwrap();
+    c.set_param_named(lfo_scale, "gain", 0.005).unwrap();
+    c.connect_named(lfo_phase, "phase", lfo, "phase").unwrap();
+    c.connect_named(lfo, "out", lfo_scale, "a").unwrap();
+    // Feed the sine voice through the delay line and all-pass in series, with
+    // audio-rate time modulation on both.
+    let voice = loom_core::ModuleId(5);
+    let out = loom_core::ModuleId(6);
+    c.connect_named(voice, "out", delay, "in").unwrap();
+    c.connect_named(lfo_scale, "out", delay, "time").unwrap();
+    c.connect_named(delay, "out", allpass, "in").unwrap();
+    c.connect_named(lfo_scale, "out", allpass, "time").unwrap();
+    c.connect_named(allpass, "out", out, "right").unwrap();
+    c.commit().unwrap();
+
+    let mut left = vec![0.0; 1024];
+    let mut right = vec![0.0; 1024];
+    parts.midi.send(MidiEvent::note_on(0, 0, 60, 100));
+    for i in 0..200usize {
+        // Control thread: sweep delay time across the full 0.1 ms .. 2.0 s range
+        // and all-pass gain across -0.95 .. 0.95.
+        let delay_time = 0.0001 + (i as f32 / 199.0) * 1.9999;
+        let ap_time = 0.0001 + ((199 - i) as f32 / 199.0) * 0.1999;
+        let ap_gain = -0.95 + (i as f32 / 199.0) * 1.9;
+        parts.controller.set_param_named(delay, "time", delay_time).unwrap();
+        parts.controller.set_param_named(allpass, "time", ap_time).unwrap();
+        parts.controller.set_param_named(allpass, "gain", ap_gain).unwrap();
+        parts.controller.commit().unwrap();
+
+        let frames = [1, 32, 77, 128, 1024][i % 5];
+        assert_no_alloc(|| {
+            parts.engine.process(&mut left[..frames], &mut right[..frames]);
+        });
     }
 }

@@ -6,7 +6,7 @@
 //! listen to them, and commit them.
 
 use loom_core::{MidiEvent, ModuleRole};
-use loom_modules::{ALL, display, env, filter, logic, math, midi, osc, phase, ui};
+use loom_modules::{ALL, display, env, filter, logic, math, midi, osc, phase, time, ui};
 use loom_test::{Harness, Signal, reference};
 
 #[test]
@@ -204,6 +204,48 @@ fn button() {
 }
 
 #[test]
+fn delay() {
+    // A 220 Hz sine with a slow ±2 ms modulation around a 15 ms delay.
+    Harness::new(&time::DELAY)
+        .seconds(0.1)
+        .input(
+            "in",
+            Signal::from_fn(|frame| 0.5 * (frame as f32 * 220.0 / 48_000.0 * std::f32::consts::TAU).sin()),
+        )
+        .input(
+            "time",
+            Signal::from_fn(|frame| 0.002 * (frame as f32 * 5.0 / 48_000.0 * std::f32::consts::TAU).sin()),
+        )
+        .param("time", 0.015)
+        .check(reference!("delay"));
+}
+
+#[test]
+fn allpass() {
+    // A short 330 Hz tone burst diffused through a 7 ms Schroeder all-pass
+    // with ±1 ms modulation.
+    Harness::new(&time::ALLPASS)
+        .seconds(0.1)
+        .input(
+            "in",
+            Signal::from_fn(|frame| {
+                if frame < 480 {
+                    0.5 * (frame as f32 * 330.0 / 48_000.0 * std::f32::consts::TAU).sin()
+                } else {
+                    0.0
+                }
+            }),
+        )
+        .input(
+            "time",
+            Signal::from_fn(|frame| 0.001 * (frame as f32 * 7.0 / 48_000.0 * std::f32::consts::TAU).sin()),
+        )
+        .param("time", 0.007)
+        .param("gain", 0.6)
+        .check(reference!("allpass"));
+}
+
+#[test]
 fn every_dsp_module_has_a_reference_test() {
     // Add a test above when you add a module to `ALL`.
     let tested = [
@@ -223,6 +265,8 @@ fn every_dsp_module_has_a_reference_test() {
         &display::METER,
         &logic::DIVIDE,
         &ui::BUTTON,
+        &time::DELAY,
+        &time::ALLPASS,
     ]
     .map(|descriptor| descriptor.id);
     for descriptor in ALL {

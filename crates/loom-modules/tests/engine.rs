@@ -22,7 +22,7 @@ fn sine_patch_plays_a_note_and_is_silent_without_one() {
 #[test]
 fn renders_are_bit_identical_across_runs() {
     // NFR-SND-02
-    for patch in ["sine.ron", "subtractive.ron", "fm-feedback.ron"] {
+    for patch in ["sine.ron", "subtractive.ron", "fm-feedback.ron", "plucked-string.ron"] {
         let a = render(&mut load(patch), 48_000, 256, &one_note());
         let b = render(&mut load(patch), 48_000, 256, &one_note());
         assert_eq!(a, b, "{patch}");
@@ -33,7 +33,12 @@ fn renders_are_bit_identical_across_runs() {
 fn output_does_not_depend_on_host_buffer_size() {
     // FR-GRAPH-04 and the P1 exit criterion: feedback sounds the same at
     // buffer sizes 32 and 1024.
-    for patch in ["subtractive.ron", "fm-feedback.ron", "fm-feedback-delay1.ron"] {
+    for patch in [
+        "subtractive.ron",
+        "fm-feedback.ron",
+        "fm-feedback-delay1.ron",
+        "plucked-string.ron",
+    ] {
         let small = render(&mut load(patch), 48_000, 32, &one_note());
         let large = render(&mut load(patch), 48_000, 1024, &one_note());
         let odd = render(&mut load(patch), 48_000, 77, &one_note());
@@ -137,6 +142,11 @@ fn compiler_reports_feedback_loops() {
 
     // With an explicit unit delay, the compiler adds nothing.
     let parts = load("fm-feedback-delay1.ron");
+    let report = parts.controller.last_report();
+    assert_eq!(report.loops.len(), 1);
+    assert!(report.loops[0].inserted_delays.is_empty());
+
+    let parts = load("plucked-string.ron");
     let report = parts.controller.last_report();
     assert_eq!(report.loops.len(), 1);
     assert!(report.loops[0].inserted_delays.is_empty());
@@ -370,4 +380,70 @@ fn removing_a_probe_or_its_module_stops_telemetry() {
         port: 9,
     };
     assert!(parts.controller.add_probe(missing, ProbeKind::Meter).is_err());
+}
+
+#[test]
+fn delay_in_feedback_loop_gets_an_inserted_unit_delay_and_is_block_invariant() {
+    // docs/design/delay.md, rule 10: `loom.time.delay` is a normal DSP module,
+    // not a `UnitDelay`. A cable loop without an explicit `loom.time.delay1`
+    // gets a 1-sample unit delay inserted by the compiler, so the loop period
+    // is `delay_samples + 1`.
+    let build = || {
+        let config = EngineConfig {
+            output_safety: loom_core::OutputSafety::Off,
+            ..EngineConfig::with_sample_rate(1_000.0)
+        };
+        let mut parts = loom_core::create_engine(loom_modules::registry(), config);
+        let c = &mut parts.controller;
+        let trig = c.add_module("loom.phase.trigger").unwrap();
+        let add = c.add_module("loom.math.add").unwrap();
+        let delay = c.add_module("loom.time.delay").unwrap();
+        let mul = c.add_module("loom.math.mul").unwrap();
+        let out = c.add_module("loom.io.audio-out").unwrap();
+        // Default `time` is 0.2 s = 200 samples at 1,000 Hz (already settled).
+        // With the inserted 1-sample unit delay on the return cable, echoes
+        // are spaced by `200 + 1 = 201` samples.
+        c.set_param_named(mul, "gain", 0.5).unwrap();
+        c.connect_named(trig, "trigger", add, "a").unwrap();
+        c.connect_named(add, "out", delay, "in").unwrap();
+        c.connect_named(delay, "out", mul, "a").unwrap();
+        c.connect_named(mul, "out", add, "b").unwrap();
+        c.connect_named(delay, "out", out, "left").unwrap();
+        let report = c.commit().unwrap().clone();
+        assert_eq!(report.loops.len(), 1);
+        assert_eq!(report.loops[0].inserted_delays.len(), 1);
+        parts
+    };
+
+    let b1 = render(&mut build(), 700, 1, &[]);
+    let b32 = render(&mut build(), 700, 32, &[]);
+    let b77 = render(&mut build(), 700, 77, &[]);
+    let b512 = render(&mut build(), 700, 512, &[]);
+    assert_eq!(b1, b32, "1 vs 32");
+    assert_eq!(b32, b77, "32 vs 77");
+    assert_eq!(b32, b512, "32 vs 512");
+
+    // `loom.phase.trigger` fires 1.0 on frame 0 (bar start).
+    // First pass through the 200-sample delay line arrives at frame 200 (1.0),
+    // second pass after `200 + 1 = 201` samples at frame 401 (0.5),
+    // third pass at frame 602 (0.25).
+    let left = &b32.0;
+    assert!((left[200] - 1.0).abs() < 1e-4, "first echo at 200: {}", left[200]);
+    assert!((left[401] - 0.5).abs() < 1e-3, "second echo at 401: {}", left[401]);
+    assert!((left[602] - 0.25).abs() < 1e-3, "third echo at 602: {}", left[602]);
+}
+
+#[test]
+fn delay_and_allpass_ports_declare_per_channel_audio_and_downmix_time() {
+    // ADR-0020 and docs/design/delay.md, Stereo: `in` and `out` are
+    // `PerChannel`, `time` is `Downmix`.
+    use loom_core::Channels;
+    for descriptor in [&loom_modules::time::DELAY, &loom_modules::time::ALLPASS] {
+        assert_eq!(descriptor.inputs[0].name, "in");
+        assert_eq!(descriptor.inputs[0].channels, Channels::PerChannel);
+        assert_eq!(descriptor.inputs[1].name, "time");
+        assert_eq!(descriptor.inputs[1].channels, Channels::Downmix);
+        assert_eq!(descriptor.outputs[0].name, "out");
+        assert_eq!(descriptor.outputs[0].channels, Channels::PerChannel);
+    }
 }

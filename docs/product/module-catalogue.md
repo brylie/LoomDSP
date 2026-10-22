@@ -229,8 +229,8 @@ These depend on how notes travel on cables (OQ-16).
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
 | MT-DELAY-01 | One-sample delay | Delays by exactly one sample, to close feedback loops. | | P0 | FR-LIB-06 | Built (`loom.time.delay1`) |
-| MT-DELAY-02 | Delay line | An interpolated delay with a modulated time, for building effects and models. | Quality | P1 | FR-LIB-06 | Specified (`loom.time.delay`, [delay](../design/delay.md)) |
-| MT-DELAY-03 | All-pass | A delay line with feedback and feed-forward that passes every frequency at equal level, for building reverbs and diffusers. | Quality | P1 | FR-LIB-06 | Specified (`loom.time.allpass`, [delay](../design/delay.md)) |
+| MT-DELAY-02 | Delay line | An interpolated delay with a modulated time, for building effects and models. | Quality | P1 | FR-LIB-06 | Built in part (`loom.time.delay`: fixed Catmull-Rom cubic interpolation; Quality selector waits for TR-06; [delay](../design/delay.md)) |
+| MT-DELAY-03 | All-pass | A delay line with feedback and feed-forward that passes every frequency at equal level, for building reverbs and diffusers. | Quality | P1 | FR-LIB-06 | Built in part (`loom.time.allpass`: fixed Catmull-Rom cubic interpolation; Quality selector waits for TR-06; [delay](../design/delay.md)) |
 | MT-DELAY-04 | Delay | A finished delay with several taps, feedback, filtering, ping-pong, and a choice of how it reacts when the time changes (pitch glide, crossfade, or jump). | Timebase, Character, Mix and output | P2 | FR-LIB-15 | Planned |
 | MT-DELAY-05 | Modulated delay | Short delays moved by an LFO, for chorus, ensemble, and flanging. | Spread, Mix and output | P2 | FR-LIB-09 | Planned |
 | MT-FX-01 | Reverb | A room, hall, plate, or spring sound from a network of delays and diffusers. | Character, Mix and output | P2 | FR-LIB-09 | Planned |
