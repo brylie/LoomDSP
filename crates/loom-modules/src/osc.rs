@@ -205,12 +205,12 @@ impl Module for Pulse {
             self.previous_fall = t_fall;
 
             let mut y = if t < width { 1.0 } else { -1.0 };
-            if dt > 0.0 && dt < 0.5 {
-                // Rising jump (+2) at the start of the cycle.
-                y += poly_blep(t, dt);
+            let step = dt.min(1.0 - dt);
+            if step > 0.0 && step < 0.5 {
+                // Jump at the start of the cycle (+2 ascending, -2 descending).
+                y += poly_blep(t, step);
             }
-            // Falling jump (-2) when `t` crosses `width`, or rising jump (+2)
-            // when `width` sweeps past a slower or stationary `t`.
+            // Jump when `t` crosses `width` (-2 ascending, +2 descending).
             let step_fall = dt_fall.min(1.0 - dt_fall);
             if step_fall > 0.0 && step_fall < 0.5 {
                 y -= poly_blep(t_fall, step_fall);
@@ -301,11 +301,12 @@ impl Module for Triangle {
             let mut t_top = t - 0.25;
             t_top -= t_top.floor();
             let mut y = 4.0 * (t_top - 0.5).abs() - 1.0;
-            if dt > 0.0 && dt < 0.5 {
+            let step = dt.min(1.0 - dt);
+            if step > 0.0 && step < 0.5 {
                 let mut t_bottom = t - 0.75;
                 t_bottom -= t_bottom.floor();
-                // Slope changes by -8*dt at the top peak and +8*dt at the bottom peak.
-                y += 8.0 * dt * (poly_blamp(t_bottom, dt) - poly_blamp(t_top, dt));
+                // Slope changes by -8*step at the top peak and +8*step at the bottom peak.
+                y += 8.0 * step * (poly_blamp(t_bottom, step) - poly_blamp(t_top, step));
             }
             *out = y;
         }
@@ -546,15 +547,16 @@ mod tests {
             (sub_db, total_db)
         };
 
-        let render_module = |descriptor: &ModuleDescriptor| -> Vec<f32> {
+        let render_with_phase = |descriptor: &ModuleDescriptor, phase_in: &[f32]| -> Vec<f32> {
             let ModuleRole::Dsp(create) = descriptor.role else {
                 unreachable!()
             };
             let mut module = create(&config);
             let mut out = vec![0.0; WARMUP + N];
-            run(module.as_mut(), 48_000.0, &[&phase], &[true], &mut [&mut out], &[]);
+            run(module.as_mut(), 48_000.0, &[phase_in], &[true], &mut [&mut out], &[]);
             out[WARMUP..].to_vec()
         };
+        let render_module = |descriptor: &ModuleDescriptor| render_with_phase(descriptor, &phase);
 
         // Naive shapes at the same high note for comparison.
         let naive_saw: Vec<f32> = phase[WARMUP..].iter().map(|&t| 2.0 * t - 1.0).collect();
@@ -590,6 +592,19 @@ mod tests {
         assert!(
             tri_sub_db < -65.0 && tri_total_db < -40.0 && tri_total_db < naive_tri_total_db - 10.0,
             "triangle aliasing: sub {tri_sub_db:.1} dB (naive {naive_tri_sub_db:.1}), total {tri_total_db:.1} dB (naive {naive_tri_total_db:.1})"
+        );
+
+        // Descending phase ramp at the same frequency must also suppress aliasing.
+        let desc_phase: Vec<f32> = phase.iter().map(|&t| (1.0 - t) % 1.0).collect();
+        let (desc_pulse_sub_db, desc_pulse_total_db) = measure_aliasing(&render_with_phase(&PULSE, &desc_phase));
+        assert!(
+            desc_pulse_sub_db < -40.0 && desc_pulse_total_db < naive_pulse_total_db - 15.0,
+            "descending pulse aliasing: sub {desc_pulse_sub_db:.1} dB, total {desc_pulse_total_db:.1} dB"
+        );
+        let (desc_tri_sub_db, desc_tri_total_db) = measure_aliasing(&render_with_phase(&TRIANGLE, &desc_phase));
+        assert!(
+            desc_tri_sub_db < -65.0 && desc_tri_total_db < -40.0 && desc_tri_total_db < naive_tri_total_db - 10.0,
+            "descending triangle aliasing: sub {desc_tri_sub_db:.1} dB, total {desc_tri_total_db:.1} dB"
         );
     }
 }
