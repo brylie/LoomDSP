@@ -3,7 +3,7 @@
 How a delay line works inside a circular buffer, why moving the delay time needs cubic interpolation, why a delay-based all-pass needs at least two samples of delay, and how to tune a delay inside a feedback loop.
 
 - **Used by:** [Delay line and all-pass spec](../design/delay.md), [Module catalogue](../product/module-catalogue.md) (`MT-DELAY-02`, `MT-DELAY-03`).
-- **Code:** `crates/loom-modules/src/time.rs`.
+- **Code:** [`crates/loom-modules/src/time.rs`](../../crates/loom-modules/src/time.rs).
 
 ## A circular buffer moves two pointers, not the audio
 
@@ -81,7 +81,7 @@ When $g = 0$, the feedback and feed-forward paths vanish ($w[n] = x[n]$ and $y[n
 
 ## Tuning a delay line inside a feedback loop
 
-In an analog Eurorack system, a feedback cable is a continuous circuit with no sample clock, so signals feed back immediately. In digital modular tools such as VCV Rack and Bitwig Grid, any feedback cable needs at least one sample of delay so the loop can be computed one sample at a time. In LoomDSP, `loom.time.delay1` provides that one-sample loop break (placed by the user or inserted by the compiler, ADR-0002).
+In an analog Eurorack system, a feedback cable is a continuous circuit with no sample clock, so signals feed back immediately. In digital modular tools such as VCV Rack and Bitwig Grid, any feedback cable needs at least one sample of delay so the loop can be computed one sample at a time. In LoomDSP, `loom.time.delay1` provides that one-sample loop break (placed by the user or inserted by the compiler, [ADR-0002](../adr/0002-graph-execution-and-feedback.md)).
 
 Because `loom.time.delay` is an ordinary DSP module whose time can change at any moment, it does not replace `loom.time.delay1`. When you patch a loop around `loom.time.delay` and a damping filter (as in `examples/patches/plucked-string.ron`), the total time a wave takes to travel once around the loop is:
 

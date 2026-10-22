@@ -142,6 +142,9 @@ fn audio_thread_never_allocates() {
     }
 }
 
+/// Checks that `loom.time.delay` and `loom.time.allpass` never allocate on the
+/// audio thread while their `time` and `gain` parameters and `time` input
+/// cables change during playback.
 #[test]
 fn delay_and_allpass_never_allocate_while_sweeping_parameters_and_inputs() {
     let mut parts = load("sine.ron");

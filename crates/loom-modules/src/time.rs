@@ -140,6 +140,8 @@ struct DelayBuffer {
 }
 
 impl DelayBuffer {
+    /// Allocates a zeroed buffer for `max_seconds` at `sample_rate`, plus four
+    /// guard samples for the 4-point cubic stencil.
     fn new(max_seconds: f32, sample_rate: f32) -> Self {
         let max_samples = (f64::from(max_seconds) * f64::from(sample_rate)).ceil().max(2.0) as usize;
         // Four extra frames so `k + 2` at `k == max_samples` stays in bounds
@@ -151,6 +153,8 @@ impl DelayBuffer {
         }
     }
 
+    /// Clamps `raw_samples` to `[min_samples, max_samples]`, mapping `NaN` to
+    /// `min_samples`.
     #[inline]
     fn clamp_delay(&self, raw_samples: f64, min_samples: f64) -> f64 {
         if raw_samples.is_nan() {
@@ -189,6 +193,8 @@ impl DelayBuffer {
         ((c3 * t + c2) * t + c1) * t + c0
     }
 
+    /// Steps the write index forward by one sample, wrapping at the end of the
+    /// buffer.
     #[inline]
     fn advance(&mut self) {
         self.write += 1;
@@ -210,7 +216,8 @@ impl DelayBuffer {
 
     /// Schroeder all-pass step: reads at `raw_samples` clamped to
     /// `[2.0, max_samples]` (so `k - 1 >= 1` only reads past `w` values),
-    /// flushes denormals on the feedback product, writes `w`, and advances.
+    /// flushes denormals on the feedback product, sanitizes non-finite state
+    /// so a bad sample cannot circulate forever, writes `w`, and advances.
     #[inline]
     fn step_allpass(&mut self, input: f32, raw_samples: f64, gain: f32) -> f32 {
         let delay_samples = self.clamp_delay(raw_samples, 2.0);
@@ -219,19 +226,24 @@ impl DelayBuffer {
         if feedback.abs() < 1e-20 {
             feedback = 0.0;
         }
-        let w = input + feedback;
+        let mut w = input + feedback;
+        if !w.is_finite() {
+            w = 0.0;
+        }
         let out = delayed - gain * w;
         self.samples[self.write] = w;
         self.advance();
         out
     }
 
+    /// Zeroes all buffered samples and resets the write index.
     fn clear(&mut self) {
         self.samples.fill(0.0);
         self.write = 0;
     }
 }
 
+/// Runtime state for `loom.time.delay`.
 struct Delay {
     sample_rate: f64,
     /// Smoothed in normalised 0..1 knob position, matching `ParamFill`.
@@ -240,6 +252,7 @@ struct Delay {
 }
 
 impl Delay {
+    /// Creates a `Delay` with its buffer sized for `DELAY.params[0].max`.
     fn new(config: &ModuleConfig) -> Self {
         let spec = &DELAY.params[0];
         Self {
@@ -290,6 +303,7 @@ impl Module for Delay {
     }
 }
 
+/// Runtime state for `loom.time.allpass`.
 struct Allpass {
     sample_rate: f64,
     /// Smoothed in normalised 0..1 knob position, matching `ParamFill`.
@@ -299,6 +313,7 @@ struct Allpass {
 }
 
 impl Allpass {
+    /// Creates an `Allpass` with its buffer sized for `ALLPASS.params[0].max`.
     fn new(config: &ModuleConfig) -> Self {
         let time_spec = &ALLPASS.params[0];
         let gain_spec = &ALLPASS.params[1];
@@ -367,6 +382,7 @@ mod tests {
     use loom_core::testing::run;
     use std::f32::consts::TAU;
 
+    /// Builds a `loom.time.delay` instance settled at `time` seconds.
     fn make_delay(sample_rate: f32, time: f32) -> Box<dyn Module> {
         let ModuleRole::Dsp(create) = DELAY.role else {
             unreachable!()
@@ -380,6 +396,7 @@ mod tests {
         m
     }
 
+    /// Builds a `loom.time.allpass` instance settled at `time` seconds and `gain`.
     fn make_allpass(sample_rate: f32, time: f32, gain: f32) -> Box<dyn Module> {
         let ModuleRole::Dsp(create) = ALLPASS.role else {
             unreachable!()
@@ -394,6 +411,7 @@ mod tests {
         m
     }
 
+    /// Checks that an integer delay shifts an impulse by the exact number of samples.
     #[test]
     fn integer_delay_shifts_an_impulse_by_exact_samples() {
         let mut buf = DelayBuffer::new(0.1, 1_000.0);
@@ -425,6 +443,7 @@ mod tests {
         }
     }
 
+    /// Checks that 4-point Catmull-Rom reproduces a ramp and sweeps smoothly at 192 kHz.
     #[test]
     fn fractional_catmull_rom_matches_the_cubic_formula_and_sweeps_smoothly_at_long_delays() {
         // On a linear ramp x[n] = n, Catmull-Rom reproduces the line exactly
@@ -461,6 +480,7 @@ mod tests {
         assert_eq!(changed, 16, "f64 delay position must advance every frame at 192 kHz");
     }
 
+    /// Checks delay bounds clamping and NaN/infinity sanitisation on `time` and `in`.
     #[test]
     fn clamps_limits_and_sanitizes_nan_and_infinity_on_time_input() {
         // Delay line clamps to [1, max_samples]. At 1,000 Hz, 1 sample is a
@@ -510,8 +530,33 @@ mod tests {
         assert_eq!(ap_out[0], 0.0);
         assert_eq!(ap_out[1], 0.0);
         assert_eq!(ap_out[2], 1.0);
+
+        // A single non-finite audio sample into Allpass must not poison the
+        // feedback buffer; output remains finite and subsequent impulses still pass.
+        let mut allpass = make_allpass(1_000.0, 0.005, 0.6);
+        let mut bad_then_good = [0.0f32; 16];
+        bad_then_good[0] = f32::NAN;
+        bad_then_good[1] = f32::INFINITY;
+        bad_then_good[4] = 1.0;
+        let zero_time = [0.0f32; 16];
+        let mut rec_out = [0.0f32; 16];
+        run(
+            allpass.as_mut(),
+            1_000.0,
+            &[&bad_then_good, &zero_time],
+            &[true, false],
+            &mut [&mut rec_out],
+            &[],
+        );
+        assert!(rec_out.iter().all(|x| x.is_finite()), "{rec_out:?}");
+        assert!(
+            (rec_out[9] - 0.64).abs() < 1e-4,
+            "impulse after NaN recovers: {}",
+            rec_out[9]
+        );
     }
 
+    /// Checks that `loom.time.allpass` with `gain = 0` equals `loom.time.delay` for the same delay in samples.
     #[test]
     fn allpass_with_zero_gain_equals_delay_line_for_same_delay_in_samples() {
         // 1. Step level: identical `delay_samples >= 2.0`, including fractional
@@ -560,6 +605,7 @@ mod tests {
         assert_eq!(out_ap, out_delay);
     }
 
+    /// Checks the Schroeder all-pass impulse response and flat steady-state magnitude across frequencies.
     #[test]
     fn allpass_has_expected_impulse_response_and_flat_steady_state_magnitude() {
         // Impulse at D = 5 samples (0.005 s at 1,000 Hz) and g = 0.6:
@@ -621,6 +667,7 @@ mod tests {
         }
     }
 
+    /// Checks that `reset` zeroes buffered echoes and settles parameter smoothers on both modules.
     #[test]
     fn reset_clears_buffered_echoes_and_settles_smoothers() {
         let mut delay = make_delay(1_000.0, 0.01);

@@ -382,6 +382,9 @@ fn removing_a_probe_or_its_module_stops_telemetry() {
     assert!(parts.controller.add_probe(missing, ProbeKind::Meter).is_err());
 }
 
+/// Checks that `loom.time.delay` in a feedback loop without an explicit
+/// `loom.time.delay1` gets 1 compiler-inserted unit delay and renders
+/// identically across host buffer sizes 1, 32, 77, and 1024.
 #[test]
 fn delay_in_feedback_loop_gets_an_inserted_unit_delay_and_is_block_invariant() {
     // docs/design/delay.md, rule 10: `loom.time.delay` is a normal DSP module,
@@ -433,6 +436,9 @@ fn delay_in_feedback_loop_gets_an_inserted_unit_delay_and_is_block_invariant() {
     assert!((left[602] - 0.25).abs() < 1e-3, "third echo at 602: {}", left[602]);
 }
 
+/// Checks stereo port channel declarations (`PerChannel` / `Downmix`) and
+/// verifies that independent left and right delay and all-pass paths through
+/// the engine process each channel without crosstalk.
 #[test]
 fn delay_and_allpass_ports_and_left_right_engine_paths_are_independent() {
     // ADR-0020 and docs/design/delay.md, Stereo: `in` and `out` are
@@ -512,6 +518,7 @@ fn delay_and_allpass_ports_and_left_right_engine_paths_are_independent() {
     }
 }
 
+/// Checks that `examples/patches/plucked-string.ron` rings at A3 (220 Hz).
 #[test]
 fn plucked_string_patch_rings_at_a3() {
     // docs/design/delay.md, Worked example: `plucked-string.ron` is tuned to

@@ -203,6 +203,7 @@ fn button() {
     assert!(render.output("gate").iter().all(|&sample| sample == 1.0));
 }
 
+/// Reference render for `loom.time.delay`.
 #[test]
 fn delay() {
     // A 220 Hz sine with a slow ±2 ms modulation around a 15 ms delay.
@@ -220,6 +221,7 @@ fn delay() {
         .check(reference!("delay"));
 }
 
+/// Reference render for `loom.time.allpass`.
 #[test]
 fn allpass() {
     // A short 330 Hz tone burst diffused through a 7 ms Schroeder all-pass

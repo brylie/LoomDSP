@@ -5,7 +5,7 @@ Two time-domain building blocks (`MT-DELAY-02` and `MT-DELAY-03`) for echoes, ch
 - **Kind:** living specification.
 - **Status:** Implemented
 - **Decision behind it:** [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md) (memory allocated on the control thread), [ADR-0002](../adr/0002-graph-execution-and-feedback.md) (feedback loops and one-sample delays), [ADR-0017](../adr/0017-primitives-traits-and-abstractions.md) (primitives and traits), [ADR-0018](../adr/0018-clean-room-module-development.md) (clean-room development), [ADR-0020](../adr/0020-inferred-channel-count.md) (stereo channel rules).
-- **Use case and requirements:** UC1, UC2, FR-LIB-06, FR-SIG-07, NFR-RT-01, NFR-RT-02, NFR-SND-02.
+- **Use case and requirements:** [UC1](../product/personas-and-use-cases.md#uc1-build-an-instrument-from-primitives-mira-sanna), [UC2](../product/personas-and-use-cases.md#uc2-encapsulate-and-build-a-panel-mira-aino), [FR-LIB-06](../product/requirements.md#5-module-library-lib), [FR-SIG-07](../product/requirements.md#1-signal-model-sig), [NFR-RT-01](../product/non-functional-requirements.md#real-time-safety-rt), [NFR-RT-02](../product/non-functional-requirements.md#real-time-safety-rt), [NFR-SND-02](../product/non-functional-requirements.md#sound-quality-and-determinism-snd).
 - **Background:** [Delays and interpolation](../learn/delays-and-interpolation.md): how a circular buffer works, why linear interpolation loses high frequencies, why the all-pass needs at least two samples of delay, and how to tune a delay loop.
 - **Prior art:** hardware and modular delay lines with a voltage-controlled time input, and Manfred Schroeder's 1962 reverberation all-pass diffuser. Described in our own words and names.
 - **Issues:** [#40](https://github.com/brylie/LoomDSP/issues/40)
@@ -98,13 +98,13 @@ Both modules share one circular buffer and one 4-point Catmull-Rom (cubic Hermit
 
      $$b(0) \leftarrow x[n], \qquad y[n] = \operatorname{read}(d)$$
 
-   - **All-Pass (`loom.time.allpass`):** read $r[n] = \operatorname{read}(d)$ first (since $d \ge 2$, $k - 1 \ge 1$, so all four points $b(k - 1), \dots, b(k + 2)$ are past state samples $w[n - 1]$ or older), flush denormals on the feedback product, compute the new state $w[n]$ and output $y[n]$, write $w[n]$ at age $0$, and advance the write index:
+   - **All-Pass (`loom.time.allpass`):** read $r[n] = \operatorname{read}(d)$ first (since $d \ge 2$, $k - 1 \ge 1$, so all four points $b(k - 1), \dots, b(k + 2)$ are past state samples $w[n - 1]$ or older), flush denormals on the feedback product, compute the new state $w[n]$ (replacing non-finite $w[n]$ with $0$ so a bad input sample cannot circulate forever) and output $y[n]$, write $w[n]$ at age $0$, and advance the write index:
 
      $$r[n] = \operatorname{read}(d)$$
 
      $$f[n] = \begin{cases} 0 & \text{if } |g \cdot r[n]| < 10^{-20} \\ g \cdot r[n] & \text{otherwise} \end{cases}$$
 
-     $$w[n] = x[n] + f[n]$$
+     $$w[n] = \begin{cases} x[n] + f[n] & \text{if } x[n] + f[n] \text{ is finite} \\ 0 & \text{otherwise} \end{cases}$$
 
      $$y[n] = r[n] - g \cdot w[n]$$
 
@@ -148,7 +148,7 @@ Ignoring the filter, a string tuned to A3 ($f_0 = 220\text{ Hz}$) at $f_s = 48\,
 
 9. **With `gain = 0`, `loom.time.allpass` is a plain delay and is bit-identical to `loom.time.delay` for the same delay in samples ($d \ge 2$).** Denormals in the all-pass are flushed to `0.0` only on the feedback product $g \cdot r[n]$ when $|g \cdot r[n]| < 10^{-20}$ (matching `safety.rs`). *Why:* flushing $w[n]$ itself would zero out quiet input samples even when $g = 0$. Flushing only $g \cdot r[n]$ stops idle reverb tails from decaying into denormals while leaving $g = 0$ exact. (Because the two `time` knobs have different maximums, setting the same number of seconds on both knobs can round by 1 ULP in normalised position; the bit-identical guarantee is for the same delay $d$ in samples.)
 
-10. **Modulating the all-pass `time` colours the magnitude response slightly.** *Why:* a time-varying delay inside a feedback loop shifts frequencies and interpolates between samples, so the transfer function is strictly flat only when `time` is held still.
+10. **Fractional delays and `time` modulation colour high frequencies near Nyquist slightly.** *Why:* at an integer delay $D$ ($t = 0$), the Schroeder transfer function has $|H(e^{j\omega})| = 1$ at every frequency up to Nyquist. At fractional delays ($t \in (0, 1)$) or while `time` is modulated, the 4-point Catmull-Rom FIR interpolator has a magnitude below $1$ near Nyquist, trading strict Nyquist flatness for unconditional stability under audio-rate `time` modulation (Laakso et al., 1996).
 
 ## Acceptance criteria
 
