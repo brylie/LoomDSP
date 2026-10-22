@@ -81,12 +81,12 @@ When $g = 0$, the feedback and feed-forward paths vanish ($w[n] = x[n]$ and $y[n
 
 ## Tuning a delay line inside a feedback loop
 
-In Eurorack, VCV Rack, and Bitwig Grid, any feedback cable in a digital graph needs at least one sample of delay so the loop can be computed one sample at a time. In LoomDSP, `loom.time.delay1` provides that one-sample loop break (placed by the user or inserted by the compiler, ADR-0002).
+In an analog Eurorack system, a feedback cable is a continuous circuit with no sample clock, so signals feed back immediately. In digital modular tools such as VCV Rack and Bitwig Grid, any feedback cable needs at least one sample of delay so the loop can be computed one sample at a time. In LoomDSP, `loom.time.delay1` provides that one-sample loop break (placed by the user or inserted by the compiler, ADR-0002).
 
 Because `loom.time.delay` is an ordinary DSP module whose time can change at any moment, it does not replace `loom.time.delay1`. When you patch a loop around `loom.time.delay` and a damping filter (as in `examples/patches/plucked-string.ron`), the total time a wave takes to travel once around the loop is:
 
 $$\text{1 period} = \text{delay time} + \text{1 sample} + \text{filter delay}$$
 
-For example, at $48\,000\text{ Hz}$, one period of A2 ($110\text{ Hz}$) is $48\,000 / 110 \approx 436.36\text{ samples}$ ($9.091\text{ ms}$):
-1. Subtract `1` sample ($0.0208\text{ ms}$) for `loom.time.delay1`.
-2. Subtract the phase delay of the loop's low-pass filter (`loom.filter.svf`) at $110\text{ Hz}$. A brighter filter cutoff has a shorter phase delay; a darker cutoff delays the wave by several more samples and lowers the pitch slightly unless the delay time is shortened to match.
+For example, at $48\,000\text{ Hz}$, one period of A3 ($220\text{ Hz}$) is $48\,000 / 220 \approx 218.18\text{ samples}$ ($4.5455\text{ ms}$):
+1. Subtract `1` sample ($0.0208\text{ ms}$) for `loom.time.delay1`, leaving $217.18\text{ samples}$.
+2. Subtract the phase delay of the loop's low-pass filter (`loom.filter.svf`) at $220\text{ Hz}$. With `cutoff` at $3\,500\text{ Hz}$ and `resonance` at $0.0$, the filter delays $220\text{ Hz}$ by about $4.28\text{ samples}$, leaving $212.90\text{ samples}$ ($\approx 0.004435\text{ s}$) for the delay line's `time` knob. A darker cutoff delays the wave by more samples and lowers the pitch slightly unless the delay time is shortened to match.

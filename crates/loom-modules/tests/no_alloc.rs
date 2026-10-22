@@ -146,6 +146,18 @@ fn audio_thread_never_allocates() {
 fn delay_and_allpass_never_allocate_while_sweeping_parameters_and_inputs() {
     let mut parts = load("sine.ron");
     let c = &mut parts.controller;
+    let voice = c
+        .graph()
+        .nodes()
+        .find(|(_, node)| node.descriptor.id == "loom.math.mul")
+        .map(|(id, _)| id)
+        .expect("sine.ron has a VCA");
+    let out = c
+        .graph()
+        .nodes()
+        .find(|(_, node)| node.descriptor.id == "loom.io.audio-out")
+        .map(|(id, _)| id)
+        .expect("sine.ron has an audio-out");
     let lfo_phase = c.add_module("loom.phase.generator").unwrap();
     let lfo = c.add_module("loom.osc.sine").unwrap();
     let lfo_scale = c.add_module("loom.math.mul").unwrap();
@@ -156,8 +168,6 @@ fn delay_and_allpass_never_allocate_while_sweeping_parameters_and_inputs() {
     c.connect_named(lfo, "out", lfo_scale, "a").unwrap();
     // Feed the sine voice through the delay line and all-pass in series, with
     // audio-rate time modulation on both.
-    let voice = loom_core::ModuleId(5);
-    let out = loom_core::ModuleId(6);
     c.connect_named(voice, "out", delay, "in").unwrap();
     c.connect_named(lfo_scale, "out", delay, "time").unwrap();
     c.connect_named(delay, "out", allpass, "in").unwrap();

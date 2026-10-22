@@ -1,19 +1,22 @@
 // Karplus-Strong plucked string built from primitives:
 // a short noise burst excites a feedback loop with a delay line, a lowpass
 // damping filter, a loop gain, and an explicit 1-sample unit delay.
+// Plays A3 (220 Hz) on every key because the delay time is fixed and does not
+// follow note pitch.
 Patch(
     version: 1,
     name: "Plucked string",
     modules: [
-        // Tuned near A3 (220 Hz at 48 kHz): delay time + 1 sample from delay1
-        // + lowpass filter delay is one period (~4.545 ms).
-        PatchModule(id: 1, kind: "loom.time.delay@1", params: {"time": 0.00445}),
+        // Tuned to A3 (220 Hz at 48 kHz, period 218.18 samples):
+        // 212.88 samples (0.004435 s) + 1 sample from delay1 + 4.28 samples
+        // of phase delay from the 3500 Hz lowpass filter = 218.16 samples.
+        PatchModule(id: 1, kind: "loom.time.delay@1", params: {"time": 0.004435}),
         PatchModule(id: 2, kind: "loom.midi.note@1"),
         PatchModule(id: 3, kind: "loom.env.adsr@1", params: {
             "attack": 0.001,
-            "decay": 0.008,
+            "decay": 0.02,
             "sustain": 0.0,
-            "release": 0.008,
+            "release": 0.02,
         }),
         PatchModule(id: 4, kind: "loom.osc.noise@1"),
         PatchModule(id: 5, kind: "loom.math.mul@1", params: {"gain": 0.6}),

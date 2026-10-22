@@ -126,7 +126,7 @@ $$\text{loop period} = t_{\text{delay}} + \frac{1}{f_s} + \tau_{\text{filter}}(f
 - $1 / f_s$ is the extra sample from `loom.time.delay1`.
 - $\tau_{\text{filter}}(f_0)$ is the phase delay of the loop's low-pass filter at the fundamental frequency $f_0$.
 
-Ignoring the filter, a string tuned to A3 ($f_0 = 220\text{ Hz}$) at $f_s = 48\,000\text{ Hz}$ has a period of $48\,000 / 220 \approx 218.18\text{ samples}$ ($4.5455\text{ ms}$). Subtracting 1 sample for `delay1` leaves $217.18\text{ samples}$ ($\approx 0.004525\text{ s}$). With `loom.filter.svf` inside the loop, its phase delay at $220\text{ Hz}$ adds a few more samples depending on the cutoff, so `time` must be shortened by that amount as well, or tuned by ear.
+Ignoring the filter, a string tuned to A3 ($f_0 = 220\text{ Hz}$) at $f_s = 48\,000\text{ Hz}$ has a period of $48\,000 / 220 \approx 218.18\text{ samples}$ ($4.5455\text{ ms}$). Subtracting $1\text{ sample}$ for `delay1` leaves $217.18\text{ samples}$, and subtracting the phase delay of `loom.filter.svf` at $220\text{ Hz}$ (about $4.28\text{ samples}$ when `cutoff` is $3\,500\text{ Hz}$ and `resonance` is $0.0$) leaves $212.90\text{ samples}$ ($\approx 0.004435\text{ s}$).
 
 ## Rules
 
@@ -162,7 +162,7 @@ Ignoring the filter, a string tuned to A3 ($f_0 = 220\text{ Hz}$) at $f_s = 48\,
 - [x] Both modules have reference tests in `crates/loom-modules/tests/reference.rs` with audio-rate `time` modulation ($\pm 2\text{ ms}$) that pass block-size invariance across block sizes 1, 77, and 512. (test)
 - [x] `crates/loom-modules/tests/no_alloc.rs` runs both modules while their `time` and `gain` parameters and `time` input change during playback, with zero allocations on the audio thread. (test)
 - [x] Given `loom.time.delay` patched in a cable feedback loop without `loom.time.delay1`, the compiler reports 1 inserted delay, the echo period is `delay_samples + 1`, and the output is bit-identical at host buffer sizes 1, 32, 77, and 1024. (engine test)
-- [x] Given a stereo source into `loom.time.delay` and `loom.time.allpass`, both channels process independently (`PerChannel`) while a stereo `time` input downmixes (`Downmix`). (engine test)
+- [x] Both modules declare `in: PerChannel`, `time: Downmix`, and `out: PerChannel`, and independent left and right delay and all-pass paths through the engine process each channel without crosstalk. (engine test)
 - [x] `examples/patches/plucked-string.ron` passes `loom-cli check` with no compiler-inserted delays and renders a plucked note with `loom-cli render`. (CLI check)
 
 ## Out of scope

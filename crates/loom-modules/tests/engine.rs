@@ -415,13 +415,13 @@ fn delay_in_feedback_loop_gets_an_inserted_unit_delay_and_is_block_invariant() {
         parts
     };
 
-    let b1 = render(&mut build(), 700, 1, &[]);
-    let b32 = render(&mut build(), 700, 32, &[]);
-    let b77 = render(&mut build(), 700, 77, &[]);
-    let b512 = render(&mut build(), 700, 512, &[]);
+    let b1 = render(&mut build(), 1_024, 1, &[]);
+    let b32 = render(&mut build(), 1_024, 32, &[]);
+    let b77 = render(&mut build(), 1_024, 77, &[]);
+    let b1024 = render(&mut build(), 1_024, 1_024, &[]);
     assert_eq!(b1, b32, "1 vs 32");
     assert_eq!(b32, b77, "32 vs 77");
-    assert_eq!(b32, b512, "32 vs 512");
+    assert_eq!(b32, b1024, "32 vs 1024");
 
     // `loom.phase.trigger` fires 1.0 on frame 0 (bar start).
     // First pass through the 200-sample delay line arrives at frame 200 (1.0),
@@ -434,7 +434,7 @@ fn delay_in_feedback_loop_gets_an_inserted_unit_delay_and_is_block_invariant() {
 }
 
 #[test]
-fn delay_and_allpass_ports_declare_per_channel_audio_and_downmix_time() {
+fn delay_and_allpass_ports_and_left_right_engine_paths_are_independent() {
     // ADR-0020 and docs/design/delay.md, Stereo: `in` and `out` are
     // `PerChannel`, `time` is `Downmix`.
     use loom_core::Channels;
@@ -446,4 +446,106 @@ fn delay_and_allpass_ports_declare_per_channel_audio_and_downmix_time() {
         assert_eq!(descriptor.outputs[0].name, "out");
         assert_eq!(descriptor.outputs[0].channels, Channels::PerChannel);
     }
+
+    // Feed different left (sine) and right (saw) signals through a left and
+    // right delay line and all-pass in the engine, and check that each output
+    // channel equals that channel's input delayed, with no crosstalk.
+    let build_dry_or_wet = |with_delays: bool| {
+        let config = EngineConfig {
+            output_safety: loom_core::OutputSafety::Off,
+            ..EngineConfig::with_sample_rate(1_000.0)
+        };
+        let mut parts = loom_core::create_engine(loom_modules::registry(), config);
+        let c = &mut parts.controller;
+        let phase_l = c.add_module("loom.phase.generator").unwrap();
+        let sine_l = c.add_module("loom.osc.sine").unwrap();
+        let phase_r = c.add_module("loom.phase.generator").unwrap();
+        let saw_r = c.add_module("loom.osc.saw").unwrap();
+        let out = c.add_module("loom.io.audio-out").unwrap();
+        c.set_param_named(phase_r, "tune", 7.0).unwrap();
+        c.connect_named(phase_l, "phase", sine_l, "phase").unwrap();
+        c.connect_named(phase_r, "phase", saw_r, "phase").unwrap();
+        if with_delays {
+            // At 1,000 Hz, default `Delay.time` is 0.2 s (200 samples) and
+            // default `Allpass.time` is 0.01 s (10 samples). With `gain = 0`,
+            // the all-pass is a 10-sample delay, so each side is delayed by
+            // `200 + 10 = 210` samples.
+            let delay_l = c.add_module("loom.time.delay").unwrap();
+            let ap_l = c.add_module("loom.time.allpass").unwrap();
+            let delay_r = c.add_module("loom.time.delay").unwrap();
+            let ap_r = c.add_module("loom.time.allpass").unwrap();
+            c.set_param_named(ap_l, "gain", 0.0).unwrap();
+            c.set_param_named(ap_r, "gain", 0.0).unwrap();
+            c.connect_named(sine_l, "out", delay_l, "in").unwrap();
+            c.connect_named(delay_l, "out", ap_l, "in").unwrap();
+            c.connect_named(ap_l, "out", out, "left").unwrap();
+            c.connect_named(saw_r, "out", delay_r, "in").unwrap();
+            c.connect_named(delay_r, "out", ap_r, "in").unwrap();
+            c.connect_named(ap_r, "out", out, "right").unwrap();
+        } else {
+            c.connect_named(sine_l, "out", out, "left").unwrap();
+            c.connect_named(saw_r, "out", out, "right").unwrap();
+        }
+        c.commit().unwrap();
+        render(&mut parts, 512, 64, &[])
+    };
+
+    let (dry_l, dry_r) = build_dry_or_wet(false);
+    let (wet_l, wet_r) = build_dry_or_wet(true);
+    assert_ne!(dry_l, dry_r, "left and right sources differ");
+    // Wait past the 5 ms gain smoother on `ap_l` / `ap_r` (5 samples at 1 kHz)
+    // plus the 210-sample total delay: from frame 220 onward, each channel
+    // matches its own dry source shifted by 210 samples.
+    for i in 220..512 {
+        assert!(
+            (wet_l[i] - dry_l[i - 210]).abs() < 1e-4,
+            "left frame {i}: got {}, expected {}",
+            wet_l[i],
+            dry_l[i - 210]
+        );
+        assert!(
+            (wet_r[i] - dry_r[i - 210]).abs() < 1e-4,
+            "right frame {i}: got {}, expected {}",
+            wet_r[i],
+            dry_r[i - 210]
+        );
+    }
+}
+
+#[test]
+fn plucked_string_patch_rings_at_a3() {
+    // docs/design/delay.md, Worked example: `plucked-string.ron` is tuned to
+    // A3 (220 Hz at 48 kHz) once `time` (212.88 samples), `delay1` (1 sample),
+    // and the 3,500 Hz SVF lowpass phase delay (~4.28 samples) are summed.
+    let mut parts = load_raw("plucked-string.ron");
+    let note = [Note {
+        note: 57,
+        on: 1_000,
+        off: 24_000,
+    }];
+    let (left, _) = render(&mut parts, 48_000, 128, &note);
+    // Measure pitch in the steady decaying tail after the noise burst settles
+    // (frames 4,800..24,000 = 0.1 s..0.5 s) by finding the autocorrelation peak
+    // around the expected 218-sample period.
+    let tail = &left[4_800..24_000];
+    let corr = |lag: usize| -> f64 {
+        tail.iter()
+            .zip(&tail[lag..])
+            .map(|(&a, &b)| f64::from(a) * f64::from(b))
+            .sum()
+    };
+    let best_lag = (200..=235)
+        .max_by(|&a, &b| corr(a).partial_cmp(&corr(b)).unwrap())
+        .unwrap();
+    // Parabolic interpolation around `best_lag` for sub-sample period accuracy.
+    let y0 = corr(best_lag - 1);
+    let y1 = corr(best_lag);
+    let y2 = corr(best_lag + 1);
+    let delta = 0.5 * (y0 - y2) / (y0 - 2.0 * y1 + y2);
+    let period_samples = best_lag as f64 + delta;
+    let freq_hz = f64::from(SAMPLE_RATE) / period_samples;
+    assert!(
+        (freq_hz - 220.0).abs() < 0.5,
+        "expected ~220.0 Hz, got {freq_hz:.2} Hz (period {period_samples:.2} samples)"
+    );
 }
