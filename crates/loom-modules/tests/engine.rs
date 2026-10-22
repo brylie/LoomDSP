@@ -556,3 +556,90 @@ fn plucked_string_patch_rings_at_a3() {
         "expected ~220.0 Hz, got {freq_hz:.2} Hz (period {period_samples:.2} samples)"
     );
 }
+
+/// Checks that `loom.time.delay` and `loom.time.allpass` stay bounded and
+/// block-size invariant when modulated at audio rate through both the `time`
+/// input cable and wireless parameter assignments on `time` and `gain`.
+#[test]
+fn delay_and_allpass_stay_bounded_and_block_invariant_under_audio_rate_modulation() {
+    let build = |block_size: usize| -> (Vec<f32>, Vec<f32>) {
+        let config = EngineConfig {
+            output_safety: loom_core::OutputSafety::Off,
+            ..EngineConfig::with_sample_rate(SAMPLE_RATE)
+        };
+        let mut parts = loom_core::create_engine(loom_modules::registry(), config);
+        let c = &mut parts.controller;
+
+        // Audio source: 220 Hz saw oscillator.
+        let src_phase = c.add_module("loom.phase.generator").unwrap();
+        let src = c.add_module("loom.osc.saw").unwrap();
+        c.connect_named(src_phase, "phase", src, "phase").unwrap();
+
+        // Audio-rate modulator (~440 Hz sine) driving both the `time` cable
+        // (scaled to ±2 ms) and wireless assignments on `time` and `gain`.
+        let mod_phase = c.add_module("loom.phase.generator").unwrap();
+        c.set_param_named(mod_phase, "tune", 9.0).unwrap();
+        let mod_osc = c.add_module("loom.osc.sine").unwrap();
+        let mod_scale = c.add_module("loom.math.mul").unwrap();
+        c.set_param_named(mod_scale, "gain", 0.002).unwrap();
+        c.connect_named(mod_phase, "phase", mod_osc, "phase").unwrap();
+        c.connect_named(mod_osc, "out", mod_scale, "a").unwrap();
+
+        let delay = c.add_module("loom.time.delay").unwrap();
+        c.set_param_named(delay, "time", 0.008).unwrap();
+        let allpass = c.add_module("loom.time.allpass").unwrap();
+        c.set_param_named(allpass, "time", 0.008).unwrap();
+        c.set_param_named(allpass, "gain", 0.9).unwrap();
+        let out = c.add_module("loom.io.audio-out").unwrap();
+
+        c.connect_named(src, "out", delay, "in").unwrap();
+        c.connect_named(mod_scale, "out", delay, "time").unwrap();
+        c.connect_named(src, "out", allpass, "in").unwrap();
+        c.connect_named(mod_scale, "out", allpass, "time").unwrap();
+        c.connect_named(delay, "out", out, "left").unwrap();
+        c.connect_named(allpass, "out", out, "right").unwrap();
+
+        c.add_assignment_named(mod_osc, "out", delay, "time", 0.1).unwrap();
+        c.add_assignment_named(mod_osc, "out", allpass, "time", 0.1).unwrap();
+        c.add_assignment_named(mod_osc, "out", allpass, "gain", 0.1).unwrap();
+
+        let delay_ref = c.output_ref(delay, "out").unwrap();
+        let allpass_ref = c.output_ref(allpass, "out").unwrap();
+        let delay_probe = c.add_probe(delay_ref, ProbeKind::Scope).unwrap();
+        let allpass_probe = c.add_probe(allpass_ref, ProbeKind::Scope).unwrap();
+        c.commit().unwrap();
+
+        let total_frames = 4_096;
+        let mut left = vec![0.0f32; total_frames];
+        let mut right = vec![0.0f32; total_frames];
+        let mut offset = 0;
+        let mut delay_unclipped = Vec::with_capacity(total_frames);
+        let mut allpass_unclipped = Vec::with_capacity(total_frames);
+        while offset < total_frames {
+            let n = block_size.min(total_frames - offset);
+            parts
+                .engine
+                .process(&mut left[offset..offset + n], &mut right[offset..offset + n]);
+            for chunk in parts.telemetry.scope() {
+                if chunk.probe == delay_probe {
+                    delay_unclipped.extend_from_slice(chunk.samples());
+                } else if chunk.probe == allpass_probe {
+                    allpass_unclipped.extend_from_slice(chunk.samples());
+                }
+            }
+            offset += n;
+        }
+        assert_eq!(delay_unclipped.len(), total_frames);
+        assert_eq!(allpass_unclipped.len(), total_frames);
+        (delay_unclipped, allpass_unclipped)
+    };
+
+    let (ref_delay, ref_allpass) = build(1);
+    assert!(ref_delay.iter().all(|x| x.is_finite() && x.abs() <= 1.25 + 1e-5));
+    assert!(ref_allpass.iter().all(|x| x.is_finite() && x.abs() < 10.0));
+    for block in [32, 77, 512] {
+        let (d, ap) = build(block);
+        assert_eq!(d, ref_delay, "delay block size {block} differs from 1");
+        assert_eq!(ap, ref_allpass, "allpass block size {block} differs from 1");
+    }
+}

@@ -729,4 +729,177 @@ mod tests {
         );
         assert!(out.iter().all(|&x| x == 0.0), "{out:?}");
     }
+
+    /// Checks that `loom.time.delay` and `loom.time.allpass` stay finite and bounded under
+    /// audio-rate `time` modulation (both via the `time` input port and via parameter
+    /// modulation) at extreme feedback gains (`±0.95`), and that the all-pass tail decays
+    /// after the input stops.
+    #[test]
+    fn delay_and_allpass_stay_bounded_under_audio_rate_time_modulation() {
+        let sample_rate = 48_000.0;
+        let active_frames = 24_000;
+        let tail_frames = 24_000;
+        let total_frames = active_frames + tail_frames;
+
+        // Multi-tone + deterministic pseudo-noise excitation bounded to [-1.0, 1.0],
+        // followed by silence so we can verify tail decay under ongoing audio-rate modulation.
+        let mut seed = 0x1234_5678u32;
+        let mut next_noise = || {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (seed as f32 / u32::MAX as f32) * 2.0 - 1.0
+        };
+        let input: Vec<f32> = (0..total_frames)
+            .map(|n| {
+                if n < active_frames {
+                    let t = n as f32 / sample_rate;
+                    let tones = 0.5 * (TAU * 220.0 * t).sin() + 0.3 * (TAU * 1_760.0 * t).cos();
+                    (tones + 0.2 * next_noise()).clamp(-1.0, 1.0)
+                } else {
+                    0.0
+                }
+            })
+            .collect();
+
+        // Audio-rate `time` input combining 137 Hz, 1,100 Hz, and 6,000 Hz modulation
+        // plus fast deterministic jitter around a 5 ms base delay.
+        let time_in: Vec<f32> = (0..total_frames)
+            .map(|n| {
+                let t = n as f32 / sample_rate;
+                0.002 * (TAU * 137.0 * t).sin()
+                    + 0.0008 * (TAU * 1_100.0 * t).cos()
+                    + 0.0002 * (TAU * 6_000.0 * t).sin()
+                    + 0.0001 * next_noise()
+            })
+            .collect();
+
+        // 1. Delay line: Catmull-Rom L1 weight sum is 1 + t*(1 - t) <= 1.25, so for
+        // any input in [-1.0, 1.0] and any delay trajectory, |y[n]| <= 1.25.
+        let mut delay = make_delay(sample_rate, 0.005);
+        let mut delay_out = vec![0.0f32; total_frames];
+        run(
+            delay.as_mut(),
+            sample_rate,
+            &[&input, &time_in],
+            &[true, true],
+            &mut [&mut delay_out],
+            &[],
+        );
+        assert!(delay_out.iter().all(|x| x.is_finite()));
+        let delay_peak = delay_out.iter().fold(0.0f32, |acc, &x| acc.max(x.abs()));
+        assert!(
+            delay_peak <= 1.25 + 1e-5,
+            "delay output exceeded Catmull-Rom L1 bound: {delay_peak}"
+        );
+
+        // 2. All-pass at extreme positive and negative gains (±0.95) under audio-rate
+        // time modulation: outputs stay finite and bounded, and the tail decays once
+        // the input stops.
+        for gain in [0.95f32, -0.95f32] {
+            let mut ap = make_allpass(sample_rate, 0.005, gain);
+            let mut ap_out = vec![0.0f32; total_frames];
+            run(
+                ap.as_mut(),
+                sample_rate,
+                &[&input, &time_in],
+                &[true, true],
+                &mut [&mut ap_out],
+                &[],
+            );
+            assert!(
+                ap_out.iter().all(|x| x.is_finite()),
+                "non-finite sample for gain {gain}"
+            );
+            let peak = ap_out.iter().fold(0.0f32, |acc, &x| acc.max(x.abs()));
+            assert!(peak < 10.0, "allpass peak grew excessively for gain {gain}: {peak}");
+            let active_rms = (ap_out[..active_frames]
+                .iter()
+                .map(|&x| f64::from(x) * f64::from(x))
+                .sum::<f64>()
+                / active_frames as f64)
+                .sqrt();
+            let late_tail_rms = (ap_out[total_frames - 4_800..]
+                .iter()
+                .map(|&x| f64::from(x) * f64::from(x))
+                .sum::<f64>()
+                / 4_800.0)
+                .sqrt();
+            assert!(
+                late_tail_rms < active_rms * 0.05,
+                "allpass tail did not decay for gain {gain}: active_rms = {active_rms}, late_tail_rms = {late_tail_rms}"
+            );
+        }
+
+        // 3. Audio-rate sinusoidal and square-wave `time` modulation across frequencies
+        // (including deep sweeps that hit the 2-sample minimum clamp) at gain = ±0.95.
+        for mod_freq in [50.0f32, 440.0, 2_400.0, 9_600.0] {
+            let sweep_time: Vec<f32> = (0..total_frames)
+                .map(|n| {
+                    let phase = TAU * mod_freq * n as f32 / sample_rate;
+                    // Sweeps below -0.005 s to exercise the 2-sample minimum clamp at audio rate.
+                    0.006 * phase.sin() + 0.001 * if phase.cos() >= 0.0 { 1.0 } else { -1.0 }
+                })
+                .collect();
+            for gain in [0.95f32, -0.95f32] {
+                let mut ap = make_allpass(sample_rate, 0.005, gain);
+                let mut ap_out = vec![0.0f32; total_frames];
+                run(
+                    ap.as_mut(),
+                    sample_rate,
+                    &[&input, &sweep_time],
+                    &[true, true],
+                    &mut [&mut ap_out],
+                    &[],
+                );
+                assert!(ap_out.iter().all(|x| x.is_finite()));
+                let peak = ap_out.iter().fold(0.0f32, |acc, &x| acc.max(x.abs()));
+                assert!(
+                    peak < 15.0,
+                    "allpass peak unbounded at mod_freq = {mod_freq} Hz, gain = {gain}: {peak}"
+                );
+                let tail_peak = ap_out[total_frames - 2_400..]
+                    .iter()
+                    .fold(0.0f32, |acc, &x| acc.max(x.abs()));
+                assert!(
+                    tail_peak < 0.05,
+                    "allpass tail did not decay at mod_freq = {mod_freq} Hz, gain = {gain}: {tail_peak}"
+                );
+            }
+        }
+
+        // 4. Fractional delays t in {0.1, 0.25, 0.5, 0.75, 0.9} at maximum gain (0.95):
+        // because |F_t(e^{jw})| <= 1 for all frequencies, the steady-state output RMS
+        // never exceeds the input RMS.
+        let frames = 9_600;
+        let settle = 4_800;
+        for frac in [0.1f32, 0.25, 0.5, 0.75, 0.9] {
+            // Base knob = 0.0001 s (4.8 samples at 48 kHz); choose time_in so total
+            // delay is 12 + frac samples.
+            let target_samples = 12.0 + frac;
+            let time_in_val = (target_samples / sample_rate) - 0.0001;
+            let time_in = vec![time_in_val; frames];
+            for freq in [220.0f32, 1_760.0, 7_040.0, 14_080.0] {
+                let mut ap = make_allpass(sample_rate, 0.0001, 0.95);
+                let tone: Vec<f32> = (0..frames)
+                    .map(|n| (TAU * freq * n as f32 / sample_rate).sin())
+                    .collect();
+                let mut out = vec![0.0f32; frames];
+                run(
+                    ap.as_mut(),
+                    sample_rate,
+                    &[&tone, &time_in],
+                    &[true, true],
+                    &mut [&mut out],
+                    &[],
+                );
+                let rms =
+                    |s: &[f32]| (s.iter().map(|&x| f64::from(x) * f64::from(x)).sum::<f64>() / s.len() as f64).sqrt();
+                let in_rms = rms(&tone[settle..]);
+                let out_rms = rms(&out[settle..]);
+                assert!(
+                    out_rms <= in_rms * (1.0 + 1e-4),
+                    "fractional delay t = {frac} at {freq} Hz amplified steady-state tone: in_rms = {in_rms}, out_rms = {out_rms}"
+                );
+            }
+        }
+    }
 }
