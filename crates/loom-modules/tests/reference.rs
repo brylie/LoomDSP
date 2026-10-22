@@ -36,6 +36,7 @@ fn saw() {
         .check(reference!("saw"));
 }
 
+/// Reference render for `loom.osc.pulse`.
 #[test]
 fn pulse() {
     Harness::new(&osc::PULSE)
@@ -45,6 +46,7 @@ fn pulse() {
         .check(reference!("pulse"));
 }
 
+/// Reference render for `loom.osc.triangle`.
 #[test]
 fn triangle() {
     Harness::new(&osc::TRIANGLE)

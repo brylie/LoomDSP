@@ -41,6 +41,7 @@ pub static SINE: ModuleDescriptor = ModuleDescriptor {
     displays: &[],
 };
 
+/// State for `loom.osc.sine`.
 struct Sine;
 
 impl Module for Sine {
@@ -83,6 +84,7 @@ pub static SAW: ModuleDescriptor = ModuleDescriptor {
     displays: &[],
 };
 
+/// State for `loom.osc.saw`.
 struct Saw {
     previous: f32,
 }
@@ -164,6 +166,7 @@ pub static PULSE: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::Dsp(|config| {
         Box::new(Pulse {
             previous: 0.0,
+            previous_fall: 0.5,
             width: Smoothed::new(0.5, config.sample_rate, PULSE.params[0].options.smooth_seconds),
         })
     }),
@@ -171,8 +174,10 @@ pub static PULSE: ModuleDescriptor = ModuleDescriptor {
     displays: &[],
 };
 
+/// State for `loom.osc.pulse`.
 struct Pulse {
     previous: f32,
+    previous_fall: f32,
     width: Smoothed,
 }
 
@@ -192,14 +197,23 @@ impl Module for Pulse {
             let mut dt = t - self.previous;
             dt -= dt.floor();
             self.previous = t;
+
+            let mut t_fall = t - width;
+            t_fall -= t_fall.floor();
+            let mut dt_fall = t_fall - self.previous_fall;
+            dt_fall -= dt_fall.floor();
+            self.previous_fall = t_fall;
+
             let mut y = if t < width { 1.0 } else { -1.0 };
             if dt > 0.0 && dt < 0.5 {
-                // Rising jump (+2) at the start of the cycle, falling jump
-                // (-2) when the phase crosses `width`.
+                // Rising jump (+2) at the start of the cycle.
                 y += poly_blep(t, dt);
-                let mut t_fall = t - width;
-                t_fall -= t_fall.floor();
-                y -= poly_blep(t_fall, dt);
+            }
+            // Falling jump (-2) when `t` crosses `width`, or rising jump (+2)
+            // when `width` sweeps past a slower or stationary `t`.
+            let step_fall = dt_fall.min(1.0 - dt_fall);
+            if step_fall > 0.0 && step_fall < 0.5 {
+                y -= poly_blep(t_fall, step_fall);
             }
             *out = y;
         }
@@ -219,6 +233,7 @@ impl Module for Pulse {
         self.previous = 0.0;
         let target = self.width.target();
         self.width.reset(target);
+        self.previous_fall = 1.0 - target.clamp(0.01, 0.99);
     }
 }
 
@@ -253,6 +268,7 @@ pub static TRIANGLE: ModuleDescriptor = ModuleDescriptor {
     displays: &[],
 };
 
+/// State for `loom.osc.triangle`.
 struct Triangle {
     previous: f32,
 }
@@ -340,6 +356,7 @@ pub static NOISE: ModuleDescriptor = ModuleDescriptor {
     displays: &[],
 };
 
+/// State for `loom.osc.noise`.
 struct Noise {
     state: u32,
     /// The knob's base seed. Only `set_param` writes it.
@@ -389,6 +406,7 @@ mod tests {
     use super::*;
     use loom_core::testing::run;
 
+    /// Checks that the saw wave stays within `[-1, 1]` and rises across the cycle.
     #[test]
     fn saw_is_bounded_and_rises() {
         let config = ModuleConfig {
@@ -406,6 +424,7 @@ mod tests {
         assert!(out[10] > out[5]);
     }
 
+    /// Checks that pulse wave output stays within `[-1, 1]` and matches the expected duty cycle mean.
     #[test]
     fn pulse_duty_cycle_and_bounds() {
         let config = ModuleConfig {
@@ -429,6 +448,33 @@ mod tests {
         }
     }
 
+    /// Checks that sweeping `width` across a stationary phase still smooths the transition with polyBLEP.
+    #[test]
+    fn pulse_width_sweep_at_stationary_phase_is_smoothed() {
+        let config = ModuleConfig {
+            sample_rate: 4_000.0,
+            max_block: 64,
+        };
+        let ModuleRole::Dsp(create) = PULSE.role else {
+            unreachable!()
+        };
+        let phase = vec![0.5; 64];
+        for &(start, end) in &[(0.75, 0.25), (0.25, 0.75)] {
+            let mut pulse = create(&config);
+            pulse.set_param(0, start);
+            pulse.reset();
+            pulse.set_param(0, end);
+            let mut out = vec![0.0; 64];
+            run(pulse.as_mut(), 4_000.0, &[&phase], &[true], &mut [&mut out], &[]);
+            assert!(out.iter().all(|v| v.abs() <= 1.0 + 1e-6), "{start}->{end}: {out:?}");
+            assert!(
+                out.iter().any(|v| v.abs() < 0.99),
+                "expected polyBLEP-smoothed intermediate samples on {start}->{end} sweep, got {out:?}"
+            );
+        }
+    }
+
+    /// Checks that the triangle wave stays within `[-1, 1]` and matches sine phase alignment.
     #[test]
     fn triangle_is_bounded_and_sine_aligned() {
         let config = ModuleConfig {
