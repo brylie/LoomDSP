@@ -268,6 +268,7 @@ impl Delay {
 }
 
 impl Module for Delay {
+    /// Processes a block of audio through the interpolated delay line.
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let spec = &DELAY.params[0];
         let time_modulated = io.modulated(0);
@@ -283,12 +284,14 @@ impl Module for Delay {
         }
     }
 
+    /// Updates the target delay time in normalised 0..1 knob position.
     fn set_param(&mut self, index: usize, value: f32) {
         if index == 0 {
             self.time.set_target(DELAY.params[0].normalize(value));
         }
     }
 
+    /// Reports the current gliding delay time in seconds while the smoother is moving.
     fn param_glide(&self, index: usize) -> Option<f32> {
         if index == 0 {
             self.time.gliding().map(|pos| DELAY.params[0].denormalize(pos))
@@ -297,6 +300,7 @@ impl Module for Delay {
         }
     }
 
+    /// Clears the delay buffer and settles the delay-time smoother.
     fn reset(&mut self) {
         self.buffer.clear();
         self.time.reset(self.time.target());
@@ -331,6 +335,7 @@ impl Allpass {
 }
 
 impl Module for Allpass {
+    /// Processes a block of audio through the Schroeder delay-line all-pass filter.
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let time_spec = &ALLPASS.params[0];
         let time_modulated = io.modulated(0);
@@ -353,6 +358,7 @@ impl Module for Allpass {
         }
     }
 
+    /// Updates the target delay time or all-pass gain.
     fn set_param(&mut self, index: usize, value: f32) {
         match index {
             0 => self.time.set_target(ALLPASS.params[0].normalize(value)),
@@ -361,6 +367,7 @@ impl Module for Allpass {
         }
     }
 
+    /// Reports the current gliding parameter value while its smoother is moving.
     fn param_glide(&self, index: usize) -> Option<f32> {
         match index {
             0 => self.time.gliding().map(|pos| ALLPASS.params[0].denormalize(pos)),
@@ -369,6 +376,7 @@ impl Module for Allpass {
         }
     }
 
+    /// Clears the delay buffer and settles the time and gain smoothers.
     fn reset(&mut self) {
         self.buffer.clear();
         self.time.reset(self.time.target());
