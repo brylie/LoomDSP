@@ -266,6 +266,12 @@ A **Macro** module (FR-LIB-12) has one knob on its panel and one output equal to
 
 **Status:** Agreed. [#70](https://github.com/brylie/LoomDSP/issues/70), and [#20](https://github.com/brylie/LoomDSP/issues/20) for the arc and dot criteria.
 
+Text contrast, including off **Drives** lines, is checked by
+[`text_colours_meet_wcag_minimum`](../../crates/loom-app/src/theme.rs).
+Run `cargo test -p loom-app theme::tests` instead of repeating screenshot
+contrast measurements in future manual checklists. Keep the layout, zoom
+and interaction checks below.
+
 - [x] Dragging an output onto a tile control creates an assignment that follows the source's polarity, with depth 0.25 on a continuous parameter. Dropping on an input port still makes a cable.
 - [x] A drop on a toggle gives depth 1, and on a radio button with 3 options depth 0.5. With the toggle off, a unipolar source at 1 turns it on (test).
 - [x] Dropping the same output on the same parameter again adds nothing, and the status bar says why.

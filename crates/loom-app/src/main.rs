@@ -27,6 +27,7 @@ mod scene;
 mod screenshot;
 mod settings;
 mod snapshot;
+mod theme;
 #[cfg(test)]
 mod ui_test;
 mod undo;
@@ -48,6 +49,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use theme::{DIM, PALETTE};
 
 /// The modules a patch can use: the built-ins, and with `test_modules`
 /// also the `test.` modules from `loom_test::modules`, which have widgets
@@ -737,17 +739,7 @@ impl App {
             output_safety: args.output_safety.unwrap_or(rig.store.saved().output_safety),
             test_modules: args.test_modules,
             quit: false,
-            theme: Theme::custom(
-                "Loom",
-                iced::theme::Palette {
-                    background: Color::from_rgb8(0x22, 0x24, 0x2A),
-                    text: Color::from_rgb8(0xE6, 0xE8, 0xEE),
-                    primary: Color::from_rgb8(0xF5, 0xA6, 0x23),
-                    success: Color::from_rgb8(0x4C, 0xB0, 0x6E),
-                    warning: Color::from_rgb8(0xE8, 0xD2, 0x4A),
-                    danger: Color::from_rgb8(0xE0, 0x4F, 0x4F),
-                },
-            ),
+            theme: Theme::custom("Loom", PALETTE),
             audio_stats: audio.as_ref().map(|a| a.stats().clone()),
             _audio: audio,
             idle_engine,
@@ -2346,8 +2338,6 @@ fn remove_button<'a>(what: &'a str, on_press: Message) -> Element<'a, Message> {
 fn bar_text<'a>(content: impl text::IntoFragment<'a>) -> iced::widget::Text<'a> {
     text(content).size(12).wrapping(text::Wrapping::None)
 }
-
-const DIM: Color = Color::from_rgb(0.62, 0.65, 0.71);
 
 /// Stats bar colour for a warning level.
 fn severity_colour(severity: alerts::Severity) -> Color {
