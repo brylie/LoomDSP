@@ -134,6 +134,34 @@ jobs:
           disable_search: true
           fail_ci_if_error: false
 
+  loopback:
+    name: Loopback capture (audio QA, device capture)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      # PipeWire with its ALSA plugin, which is how cpal reaches it. A null
+      # sink is the loopback: the test plays into it and captures its
+      # monitor (docs/design/audio-qa.md, Device capture).
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev pipewire pipewire-alsa pipewire-pulse wireplumber pulseaudio-utils
+      - name: Null sink
+        run: |
+          systemctl --user start pipewire pipewire-pulse wireplumber
+          sleep 2
+          pactl load-module module-null-sink sink_name=loom_null
+          pactl set-default-sink loom_null
+          pactl set-default-source loom_null.monitor
+      - uses: Swatinem/rust-cache@v2
+      # Only the stop that must fade out. Its partner, which checks that a
+      # fixed 100 ms stop limit shows as a cut, cannot fail here: the
+      # PipeWire ALSA plugin plays out what it was handed after a stream
+      # closes, so it never cuts.
+      - run: cargo test -p loom-host-desktop -- --ignored --exact device_tests::a_stop_with_large_buffers_fades_out_on_the_device
+        env:
+          LOOM_LOOPBACK: pipewire
+
   docs:
     name: Docs (NFR-OSS-03)
     runs-on: ubuntu-latest
@@ -198,7 +226,7 @@ jobs:
   ci-success:
     name: CI success
     if: always()
-    needs: [fmt, clippy, test, coverage, docs, msrv, wasm, deny, typos]
+    needs: [fmt, clippy, test, coverage, loopback, docs, msrv, wasm, deny, typos]
     runs-on: ubuntu-latest
     steps:
       - name: Check all jobs passed

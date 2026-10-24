@@ -120,7 +120,7 @@ loom capture --device <part of name> -o out.wav --seconds N
 | `--seconds N` | How long to record. Required. |
 | `--sample-rate HZ` | Ask the device for this rate. The device default otherwise. |
 
-The file holds the device's first two channels. A mono device is written to both. When the stream is running, `loom capture` prints one line to stderr, `Capturing "<device>" at <rate> Hz`, so a script can wait for it before it starts the app. `loom devices` also lists audio inputs, so the name can be found.
+The file holds the device's first two channels. A mono device is written to both. When the first frames have arrived, `loom capture` prints one line to stderr, `Capturing "<device>" at <rate> Hz`, so a script can wait for it before it starts the app. The length (`--seconds`) counts from then. A running stream can take seconds to deliver its first frames (about 2 s with the ALSA plugin for PulseAudio), and audio played before them is not captured. If none arrive in 10 s, the run is broken (status 2). `loom devices` also lists audio inputs, so the name can be found.
 
 A QA run starts the capture, plays the app into the loopback output, and checks the file with `loom analyze`:
 
@@ -141,13 +141,17 @@ if [ "$app" -ne 0 ] || [ "$captured" -ne 0 ]; then cat /tmp/capture.log; exit 2;
 loom analyze /tmp/device.wav --max-step 0.01
 ```
 
-**Exit status.** 0 when the file was written with every frame. 2 when the device cannot be opened, the file cannot be written, frames were dropped, or the input stream reported an error (such as the device going away). *Why:* a dropped frame is a jump in the file that the device never played, so a step check on it would fail for the wrong reason. A script can tell a broken run (2) from a failed check in `loom analyze` (1).
+**Exit status.** 0 when the file was written with every frame. 2 when the device cannot be opened or delivers no frames in 10 s, the file cannot be written, frames were dropped, or the input stream reported an error (such as the device going away). *Why:* a dropped frame is a jump in the file that the device never played, so a step check on it would fail for the wrong reason. A script can tell a broken run (2) from a failed check in `loom analyze` (1).
 
 **Relation to audio input (#29).** Capture is a development tool, not audio input for patches. It opens a `cpal` input stream in `loom-host-desktop` and writes it to a file through the same ring and writer thread as `--record` (`Recorder`). Nothing reaches an engine, and there is no Audio In module. When #29 is built, it can reuse the device lookup and the input stream setup, but it has its own spec: latency, channel routing, and running input and output on two clocks are design questions for patches, not for this tool.
 
 **Clock drift.** A loopback device has one clock for both sides, so capture and playback cannot drift apart. When the input and output are different devices (an interface's output wired to another device's input), their clocks drift a little. Capture never resamples (rule 10). The checks of `loom analyze` (peak, step, DC) do not compare the capture with anything sample by sample, so drift does not change them. For the same reason, a capture is never compared sample by sample with a `--record` file or a reference render: the device adds latency, and the start time depends on the machine.
 
-**CI.** Not in CI for now. The hardware test is ignored by default, like the other device tests. CI covers the parts that need no device: the writer with a fake input, and the command's errors. Running capture on a Linux runner with a PulseAudio or PipeWire null sink looks possible, but it needs a sound server on the runner and `cpal` reaching it through ALSA. That is a follow-up issue, so this part does not wait on it.
+**CI.** The Loopback capture job runs the stop that must fade out (`a_stop_with_large_buffers_fades_out_on_the_device`) on an Ubuntu runner. It starts PipeWire, loads a null sink (`pactl load-module module-null-sink`), makes it the default sink and its monitor the default source, and sets `LOOM_LOOPBACK=pipewire`, so `cpal` plays and captures through the PipeWire ALSA plugin. It passed ten runs out of ten. The test waits for the capture's first frames before it plays, because some inputs take seconds to start. Three limits, found on the runner in October 2026:
+
+- **The cut check does not run in CI.** On PipeWire, its partner test (`a_fixed_100_ms_stop_limit_shows_as_a_cut`) fails: the ALSA plugin plays out what it was handed after a stream closes, so a stop never cuts there. The job can still catch a missing fade, a dropout, or a step inside the stream, but not a stop cut too early. That check still needs a loopback that cuts, such as BlackHole on macOS.
+- **PulseAudio is not used, because LoomDSP clicks on it.** With PulseAudio and its ALSA plugin, the capture took about 2 s to start, and two real faults showed up. At the start, the first 9 ms of the 10 ms fade-in never reached the sink: the capture jumps from 0 to 0.45. At the stop, the queue in the sound server holds more than the 2 silent buffers the stop waits for (`SILENT_BUFFERS_BEFORE_STOP`), so the fade was cut at 0.32. An extra 500 ms wait before the stop let the fade play out. Fixing this (waiting for the device's real latency) is a follow-up issue. Once it is fixed, both tests can run on a PulseAudio null sink in CI, where the cut check can fail.
+- **No other systems.** macOS runners have no loopback device, and Windows capture is not covered yet (see the table above).
 
 ### Virtual MIDI controllers
 
@@ -236,6 +240,7 @@ Each is a `loom-app` test that uses the stepped output, through `App::new` and `
 - [x] The writer is tested with a fake input in CI: frames pushed are written in order, and dropped frames are counted.
 - [x] A device that does not match exits with status 2 and names what it looked for. `loom devices` lists audio inputs.
 - [x] **Hardware test, ignored by default.** Given a Constant of 0.5 into Audio Out with output safety Off, playing into a loopback device (`LOOM_LOOPBACK`, for example `BlackHole`) with 4096-frame buffers, when the engine fades out and the stream stops, then the capture of the loopback holds the DC and the fade, and no step is larger than a 10 ms fade from 0.5 allows. A second test stops the same stream at a fixed 100 ms limit, as before the #26 fix, and checks that the capture does show the cut. *Why:* a check that cannot fail proves nothing.
+- [x] CI runs the first hardware test on a PipeWire null sink on Linux.
 - [x] The manual check for #26 (`docs/dev/manual-checks/issue-26-devices.md`) uses capture where it now relies on ears for clicks at a stop or a device change.
 
 ### Virtual MIDI controllers
@@ -260,7 +265,7 @@ Each is a `loom-app` test that uses the stepped output, through `App::new` and `
 - **True-peak (oversampled) measurement, loudness (LUFS), and spectrum analysis.** Add them when a check needs them.
 - **Starting and stopping a recording from the control channel.** A run records from start to quit.
 - **Audio input for patches** ([#29](https://github.com/brylie/LoomDSP/issues/29)). Capture only writes a file (device capture).
-- **Windows loopback capture, and capture in CI.** Follow-up issues (device capture).
+- **Windows loopback capture, the cut check in CI, and the PulseAudio faults found by capture.** Follow-up issues (device capture, CI).
 - **Finding silences.** A device that goes silent shows up today as a short file peak, an RMS near zero, or a peak of 0 in a `--from`/`--to` window. A measurement of the longest silent stretch, with a check, can be added to `loom analyze` when a check needs it.
 - **Virtual MIDI on Windows.** Windows has no virtual ports. A loopback driver could stand in, but it is third-party software, so the Windows check keeps two controllers.
 - **Running the virtual MIDI tests in CI.** The kernel on GitHub's hosted Linux runners has no ALSA sequencer module (`snd-seq`), not even in its extra modules package. What can run without a port does: the held-note tracking and the bytes a virtual controller sends are unit tests, and `loom midi-port` is tested on the built binary, where it exits with status 2.

@@ -29,6 +29,10 @@ pub struct Options {
 /// frames, or a stream error. `loom analyze` uses 1 for a failed check.
 const BROKEN: u8 = 2;
 
+/// How long `loom capture` waits for the input's first frames before it
+/// gives up with a broken run.
+const FIRST_FRAMES: Duration = Duration::from_secs(10);
+
 /// Runs `loom capture`. Exit status 0 when every frame the device
 /// delivered was written, and 2 otherwise.
 pub fn run(options: &Options) -> ExitCode {
@@ -50,6 +54,20 @@ fn capture(options: &Options) -> Result<(), String> {
         buffer_size: None,
     };
     let capture = Capture::start(&audio, &options.output).map_err(|e| e.to_string())?;
+    // A running stream may deliver its first frames seconds later (the
+    // ALSA plugin for PulseAudio takes about 2 s). Until then a script
+    // that starts playing would not be captured.
+    let waited = Instant::now();
+    while capture.frames() == 0 {
+        if waited.elapsed() >= FIRST_FRAMES {
+            return Err(format!(
+                "\"{}\" delivered no frames in {} s",
+                capture.name(),
+                FIRST_FRAMES.as_secs()
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
     // Scripts wait for this line before they start playing.
     eprintln!("Capturing \"{}\" at {} Hz", capture.name(), capture.sample_rate());
     wait(length);

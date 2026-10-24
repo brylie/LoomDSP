@@ -62,6 +62,17 @@ fn capture_a_stop(stop: impl FnOnce(RunningAudio)) -> Option<(Vec<f32>, u32)> {
         ..options
     };
     let capture = Capture::start(&input, &path).unwrap();
+    // Some inputs take seconds to deliver their first frames (the ALSA
+    // plugin for PulseAudio takes about 2 s), and the capture would
+    // miss the stream's start or all of it.
+    let waited = Instant::now();
+    while capture.frames() == 0 {
+        assert!(
+            waited.elapsed() < Duration::from_secs(10),
+            "the loopback's input delivered frames"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
 
     let config = EngineConfig {
         output_safety: OutputSafety::Off,
