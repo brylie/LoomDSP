@@ -15,7 +15,11 @@ fn midi_port(args: &[&str], input: &str) -> (i32, String, String) {
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    child.stdin.take().unwrap().write_all(input.as_bytes()).unwrap();
+    if let Err(e) = child.stdin.take().unwrap().write_all(input.as_bytes()) {
+        // The command exits at once when it cannot make the port, so its
+        // standard input may be closed already. The exit status decides.
+        assert_eq!(e.kind(), std::io::ErrorKind::BrokenPipe, "{e}");
+    }
     let out = child.wait_with_output().unwrap();
     (
         out.status.code().unwrap_or(-1),
