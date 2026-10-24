@@ -4,8 +4,8 @@
 //! screen ([`Live::sync`], called before every commit). [`Levels`] turns the
 //! meter readings into falling levels on the telemetry thread (see
 //! `monitor.rs`). [`ScopeTrace`] turns the samples of a scope probe into a
-//! stable, triggered trace with a fitting vertical range; no scope module
-//! draws it yet. See `docs/design/telemetry.md` and `docs/design/panels.md`.
+//! stable, triggered trace with a fitting vertical range; the scope module
+//! does not draw it yet (#62). See `docs/design/telemetry.md` and `docs/design/panels.md`.
 
 // Parts wait for the scope module: only tests call them.
 #![cfg_attr(not(test), allow(dead_code))]
@@ -205,10 +205,28 @@ impl History {
     }
 }
 
+/// Where a scope's trace starts: the level a rising edge must cross
+/// (`docs/design/panels.md`, Scope module, Trigger).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Trigger {
+    /// Halfway between the lowest and highest sample in the history, so
+    /// signals with an offset trigger too.
+    Auto,
+    /// A fixed level. If no edge crosses it, the trace runs free.
+    Level(f32),
+}
+
+impl Trigger {
+    /// The trigger a scope module's `auto` and `level` parameters ask for.
+    pub fn from_params(auto: f32, level: f32) -> Self {
+        if auto >= 0.5 { Self::Auto } else { Self::Level(level) }
+    }
+}
+
 /// A triggered oscilloscope trace for one scope probe (FR-VIS-02).
 ///
 /// Push every [`ScopeChunk`] of the probe, then call [`ScopeTrace::update`]
-/// once per frame with the window to show.
+/// once per frame with the window to show and the trigger.
 pub struct ScopeTrace {
     history: History,
     /// Samples to draw: one window plus one sample.
@@ -246,7 +264,7 @@ impl ScopeTrace {
     }
 
     /// Fills the trace with `window` samples from the latest trigger.
-    pub fn update(&mut self, window: usize) {
+    pub fn update(&mut self, window: usize, trigger: Trigger) {
         let window = window.max(1);
         let samples = self.history.samples.make_contiguous();
         self.span = window as f32;
@@ -255,7 +273,7 @@ impl ScopeTrace {
             self.triggered = false;
             return;
         }
-        match find_trigger(samples, window) {
+        match find_trigger(samples, window, trigger) {
             Some(position) => {
                 let start = position.floor() as usize;
                 self.offset = position - start as f32;
@@ -291,15 +309,16 @@ fn decay(level: f32, target: f32, dt: f32) -> f32 {
     if next < 0.001 { 0.0 } else { next }
 }
 
-/// The latest rising edge through the middle of the signal that still has a
-/// full window after it, as a sample position with a fraction.
+/// The latest rising edge through the trigger level that still has a full
+/// window after it, as a sample position with a fraction.
 ///
-/// The trigger level is halfway between the lowest and highest sample in
-/// the history, so signals with an offset (envelopes, pitch) trigger too. An edge
-/// counts only if the signal was clearly below the level before it
-/// (hysteresis of a tenth of the swing), so noise on a slow edge cannot
-/// trigger twice. Returns `None` for a flat signal or when no edge is found.
-fn find_trigger(samples: &[f32], window: usize) -> Option<f32> {
+/// With [`Trigger::Auto`] the level is halfway between the lowest and
+/// highest sample in the history, so signals with an offset (envelopes,
+/// pitch) trigger too. An edge counts only if the signal was clearly below
+/// the level before it (hysteresis of a tenth of the swing in the history),
+/// so noise on a slow edge cannot trigger twice. Returns `None` for a flat
+/// signal or when no edge is found.
+fn find_trigger(samples: &[f32], window: usize, trigger: Trigger) -> Option<f32> {
     let n = samples.len();
     let last_start = n.checked_sub(window + 1)?;
     // Level from the whole history (about a second), so that a slow signal
@@ -311,7 +330,10 @@ fn find_trigger(samples: &[f32], window: usize) -> Option<f32> {
     if swing.is_nan() || swing <= 1e-6 {
         return None;
     }
-    let level = low + swing * 0.5;
+    let level = match trigger {
+        Trigger::Auto => low + swing * 0.5,
+        Trigger::Level(level) => level,
+    };
     let arm = level - swing * 0.1;
 
     // Walk back from the newest possible start. A crossing between i - 1 and
@@ -432,7 +454,7 @@ mod tests {
         );
         assert_eq!(level(env), Level::default(), "no note, so the envelope is silent");
 
-        trace.update(960);
+        trace.update(960, Trigger::Auto);
         assert!(trace.triggered);
         assert_eq!(trace.trace.len(), 961, "20 ms at 48 kHz, plus one sample");
         assert_eq!(trace.range, 1.0);
@@ -456,10 +478,10 @@ mod tests {
     #[test]
     fn flat_trace_runs_free() {
         let mut trace = ScopeTrace::new(48_000.0);
-        trace.update(100);
+        trace.update(100, Trigger::Auto);
         assert!(trace.trace.is_empty() && !trace.triggered);
         trace.history.push(0, &[0.25; 500]);
-        trace.update(100);
+        trace.update(100, Trigger::Auto);
         assert!(!trace.triggered);
         assert_eq!(trace.trace.len(), 101);
         assert_eq!(trace.range, 0.5);
@@ -590,7 +612,7 @@ mod tests {
         // A sine starting at a quarter cycle: first rising crossing at one
         // period, 48 samples in.
         let samples = sine(1000.0, 48_000.0, 4800, 0.25);
-        let position = find_trigger(&samples, 480).unwrap();
+        let position = find_trigger(&samples, 480, Trigger::Auto).unwrap();
         let start = position.floor() as usize;
         let fraction = position - start as f32;
         let level = samples[start] + (samples[start + 1] - samples[start]) * fraction;
@@ -610,7 +632,7 @@ mod tests {
         let mut phases = Vec::new();
         for end in (8000..all.len()).step_by(800) {
             let samples = &all[end - 8000..end];
-            let position = find_trigger(samples, 960).unwrap();
+            let position = find_trigger(samples, 960, Trigger::Auto).unwrap();
             let absolute = (end - 8000) as f32 + position;
             phases.push((absolute * 440.0 / 48_000.0 + 0.1).fract());
         }
@@ -625,7 +647,7 @@ mod tests {
     fn trigger_works_with_offset() {
         // An envelope-like signal from 2.0 to 3.0.
         let samples: Vec<f32> = sine(100.0, 48_000.0, 4800, 0.0).iter().map(|x| 2.5 + 0.5 * x).collect();
-        let position = find_trigger(&samples, 480).unwrap();
+        let position = find_trigger(&samples, 480, Trigger::Auto).unwrap();
         let i = position.floor() as usize;
         let value = samples[i] + (samples[i + 1] - samples[i]) * (position - i as f32);
         assert!((value - 2.5).abs() < 1e-3, "trigger at {value}");
@@ -641,14 +663,45 @@ mod tests {
         samples[205] = -0.01;
         samples.extend(std::iter::repeat_n(1.0, 300));
         samples.extend((0..400).map(|i| 1.0 - i as f32 / 200.0));
-        let position = find_trigger(&samples, 600).unwrap();
+        let position = find_trigger(&samples, 600, Trigger::Auto).unwrap();
         assert!((199.0..201.0).contains(&position), "position {position}");
     }
 
     #[test]
+    fn trigger_at_a_fixed_level() {
+        // A sine from -1 to 1, triggered at 0.5: the trace starts where the
+        // rising wave crosses 0.5, not at the midpoint.
+        let samples = sine(1000.0, 48_000.0, 4800, 0.0);
+        let position = find_trigger(&samples, 480, Trigger::Level(0.5)).unwrap();
+        let i = position.floor() as usize;
+        let value = samples[i] + (samples[i + 1] - samples[i]) * (position - i as f32);
+        assert!((value - 0.5).abs() < 1e-3, "trigger at {value}");
+        assert!(samples[i + 1] > samples[i], "rising edge");
+    }
+
+    #[test]
+    fn fixed_level_out_of_reach_runs_free() {
+        // The sine never reaches 2.0, so there is no trigger, and the trace
+        // shows the latest window.
+        let samples = sine(1000.0, 48_000.0, 4800, 0.0);
+        assert_eq!(find_trigger(&samples, 480, Trigger::Level(2.0)), None);
+        let mut trace = ScopeTrace::new(48_000.0);
+        trace.history.push(0, &samples);
+        trace.update(480, Trigger::Level(2.0));
+        assert!(!trace.triggered);
+        assert_eq!(trace.trace.as_slice(), &samples[samples.len() - 481..]);
+    }
+
+    #[test]
+    fn trigger_follows_the_scope_parameters() {
+        assert_eq!(Trigger::from_params(1.0, 0.3), Trigger::Auto);
+        assert_eq!(Trigger::from_params(0.0, 0.3), Trigger::Level(0.3));
+    }
+
+    #[test]
     fn flat_signal_does_not_trigger() {
-        assert_eq!(find_trigger(&[0.5; 4096], 480), None);
-        assert_eq!(find_trigger(&[0.5; 10], 480), None);
+        assert_eq!(find_trigger(&[0.5; 4096], 480, Trigger::Auto), None);
+        assert_eq!(find_trigger(&[0.5; 10], 480, Trigger::Auto), None);
     }
 
     #[test]

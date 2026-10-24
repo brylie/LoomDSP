@@ -2,7 +2,7 @@
 //! (FR-LIB-17, ADR-0013).
 
 use loom_core::{
-    Channels, Module, ModuleDescriptor, ModuleRole, Panel, Polarity, PortDefault, PortIo, PortSpec, ProcessContext,
+    Channels, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, Polarity, PortDefault, PortIo, PortSpec, ProcessContext,
     SignalType, Widget,
 };
 
@@ -39,6 +39,8 @@ pub static METER: ModuleDescriptor = ModuleDescriptor {
     displays: &[],
 };
 
+/// Copies the input to the output. The meter and the scope share it: both
+/// only pass the signal through for a probe to read.
 struct Meter;
 
 impl Module for Meter {
@@ -47,3 +49,75 @@ impl Module for Meter {
         out.copy_from_slice(input);
     }
 }
+
+/// `loom.display.scope`: a mono oscilloscope (MT-VIEW-01, scope mode).
+/// Passes its input through, as the level meter does, so the app reads the
+/// signal from a scope probe on `out`. The parameters only tell the app how
+/// to draw the trace; they never change the audio. Spec:
+/// `docs/design/panels.md`, Scope module.
+pub static SCOPE: ModuleDescriptor = ModuleDescriptor {
+    id: "loom.display.scope",
+    version: 1,
+    name: "Scope",
+    category: "Display",
+    description: "Shows its input over time. Passes the input through unchanged.",
+    inputs: &[PortSpec {
+        name: "in",
+        label: "In",
+        signal: SignalType::Audio,
+        description: "The signal to show.",
+        default: PortDefault::Value(0.0),
+        polarity: Polarity::Bipolar,
+        channels: Channels::PerChannel,
+    }],
+    outputs: &[PortSpec {
+        name: "out",
+        label: "Out",
+        signal: SignalType::Audio,
+        description: "The input, unchanged.",
+        default: PortDefault::Value(0.0),
+        polarity: Polarity::Bipolar,
+        channels: Channels::PerChannel,
+    }],
+    params: &[
+        ParamSpec {
+            name: "window",
+            label: "Window",
+            description: "The time shown across the display.",
+            min: 0.001,
+            max: 1.0,
+            default: 0.02,
+            unit: "s",
+            options: ParamOptions::DEFAULT,
+        }
+        .logarithmic(),
+        ParamSpec {
+            name: "auto",
+            label: "Auto",
+            description: "Triggers halfway between the signal's lowest and highest values.",
+            min: 0.0,
+            max: 1.0,
+            default: 1.0,
+            unit: "",
+            options: ParamOptions::DEFAULT,
+        }
+        .integer(),
+        ParamSpec {
+            name: "level",
+            label: "Level",
+            description: "The trigger level while Auto is off.",
+            min: -1.0,
+            max: 1.0,
+            default: 0.0,
+            unit: "",
+            options: ParamOptions::DEFAULT,
+        },
+    ],
+    role: ModuleRole::Dsp(|_| Box::new(Meter)),
+    panel: Panel::new(
+        9,
+        3,
+        &[Widget::knob(0, 0, "window"), Widget::toggle(3, 0, "auto"), Widget::knob(6, 0, "level")],
+    ),
+    displays: &[],
+};
