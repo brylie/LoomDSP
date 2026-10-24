@@ -34,7 +34,7 @@ A fake audio output for Rust tests in `loom-app`, offered through the `devices::
 | What the app does | What the stepped output does |
 |---|---|
 | Starts a stream (a new engine) | The next `step` plays the new engine. |
-| Stops a stream (Open, New, quit, device change) | Plays the old engine until it reports silence and then the usual extra silent buffers, or until the stop limit is reached: `STOP_LIMIT` (100 ms) as frames at the stream's rate, rounded up to whole blocks. Then the stream ends. A stream cut at the limit ends with its last samples as they were. The tape is not filled with zeros, so the cut fails the click check of rule 4. |
+| Stops a stream (Open, New, quit, device change) | Plays the old engine until it reports silence and then the usual extra silent buffers, or until the stop limit is reached: the stop limit of output safety rule 14 (100 ms, or 10 ms plus four blocks if that is longer) as frames at the stream's rate, rounded up to whole blocks. Then the stream ends. A stream cut at the limit ends with its last samples as they were. The tape is not filled with zeros, so the cut fails the click check of rule 4. |
 | Changes the output safety mode | Nothing special. The next `step` plays the dip and the new mode. |
 
 The tape is one list of stereo samples for the whole test, across every stream, in the order they were played. Each stream's start is marked on the tape by its frame index, so a test can look at the frames around a switch.

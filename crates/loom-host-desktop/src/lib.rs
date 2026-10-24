@@ -499,8 +499,24 @@ impl Drop for Clock {
 /// drop the end of the fade.
 pub const SILENT_BUFFERS_BEFORE_STOP: u64 = 2;
 
-/// The longest [`RunningAudio::stop`] waits for the fade-out.
+/// The shortest limit [`RunningAudio::stop`] waits for the fade-out. With
+/// large buffers it waits longer: see [`stop_limit`].
 pub const STOP_LIMIT: Duration = Duration::from_millis(100);
+
+/// Buffers a stop needs, on top of the fade itself: one while the fade-out
+/// request waits for the next callback, one that renders the fade, and the
+/// silent ones after it.
+const BUFFERS_PER_STOP: u64 = 2 + SILENT_BUFFERS_BEFORE_STOP;
+
+/// How long a stop may wait for the fade-out with buffers of `frames` at
+/// `sample_rate`: `minimum`, or the fade plus [`BUFFERS_PER_STOP`] buffers
+/// if that is longer (output safety, rule 14). A fixed limit cut streams
+/// with large buffers before the fade reached the device, which clicked.
+pub fn stop_limit(minimum: Duration, frames: u64, sample_rate: u32) -> Duration {
+    let buffers = (BUFFERS_PER_STOP * frames) as f64 / f64::from(sample_rate.max(1));
+    let needed = Duration::from_secs_f64(f64::from(loom_core::safety::FADE_SECONDS) + buffers);
+    minimum.max(needed)
+}
 
 /// Audio that is playing. Audio stops when this is dropped. To stop
 /// without a click, ask the engine to fade out
@@ -515,13 +531,15 @@ pub struct RunningAudio {
 impl RunningAudio {
     /// Stops audio once the engine has faded out: after it reported silence
     /// and the device was handed [`SILENT_BUFFERS_BEFORE_STOP`] more
-    /// buffers, or after `limit`, whichever comes first. Returns true if it
-    /// stopped on the silence. Ask the engine to fade out first.
+    /// buffers, or at the limit, whichever comes first. The limit is
+    /// `limit`, or longer for large buffers ([`stop_limit`]). Returns true
+    /// if it stopped on the silence. Ask the engine to fade out first.
     ///
-    /// A stepped output plays the blocks itself, and counts `limit` in
+    /// A stepped output plays the blocks itself, and counts the limit in
     /// frames at its sample rate instead of waiting on the clock.
     pub fn stop(mut self, limit: Duration) -> bool {
         if let Some(Player::Stepped(attached)) = &self.player {
+            let limit = stop_limit(limit, attached.block() as u64, self.sample_rate);
             let limit = (limit.as_secs_f64() * f64::from(self.sample_rate)).ceil() as usize;
             let stats = self.stats.clone();
             let silent = attached.play_until(limit, || {
@@ -535,7 +553,10 @@ impl RunningAudio {
             if self.stats.silent_buffers.load(Ordering::Relaxed) >= SILENT_BUFFERS_BEFORE_STOP {
                 break true;
             }
-            if started.elapsed() >= limit {
+            // The largest buffer so far: the device may not have asked for
+            // one yet, or may ask for larger ones than at first.
+            let frames = self.stats.largest_buffer.load(Ordering::Relaxed);
+            if started.elapsed() >= stop_limit(limit, frames, self.sample_rate) {
                 break false;
             }
             std::thread::sleep(Duration::from_millis(1));
@@ -924,6 +945,46 @@ mod tests {
         assert!(!audio.stop(STOP_LIMIT));
         // 100 ms at 48 kHz, in whole 64-frame blocks.
         assert_eq!(tape.len(), 4800usize.div_ceil(64) * 64);
+    }
+
+    /// The stop limit is 100 ms for small buffers, and grows to the fade
+    /// plus four buffers for large ones (output safety, rule 14).
+    #[test]
+    fn the_stop_limit_grows_with_the_buffer() {
+        assert_eq!(stop_limit(STOP_LIMIT, 256, 48_000), STOP_LIMIT);
+        assert_eq!(stop_limit(STOP_LIMIT, 0, 48_000), STOP_LIMIT, "no buffer yet");
+        let large = stop_limit(STOP_LIMIT, 4096, 44_100);
+        // 10 ms + 4 * 4096 / 44100 s = 381.5 ms.
+        assert!((large.as_secs_f64() - 0.3815).abs() < 0.0005, "{large:?}");
+    }
+
+    /// With 4096-frame blocks at 44.1 kHz, one block is 93 ms. A stop still
+    /// plays the whole fade and two silent blocks, where a fixed 100 ms
+    /// limit cut it after the fade's block, before the device played it.
+    #[test]
+    fn a_stepped_stop_with_large_blocks_plays_the_whole_fade_out() {
+        let tape = Tape::new();
+        let config = EngineConfig {
+            output_safety: OutputSafety::Off,
+            ..EngineConfig::with_sample_rate(44_100.0)
+        };
+        let mut parts = create_engine(loom_modules::registry(), config);
+        let c = &mut parts.controller;
+        let constant = c.add_module("loom.math.constant").unwrap();
+        c.set_param_named(constant, "value", 0.5).unwrap();
+        let out = c.add_module("loom.io.audio-out").unwrap();
+        c.connect_named(constant, "out", out, "left").unwrap();
+        c.commit().unwrap();
+        let audio = AudioOutput::stepped(44_100, 4096, &tape).start(parts.engine).unwrap();
+        tape.step(4096);
+        assert_eq!(*tape.left().last().unwrap(), 0.5);
+        parts.controller.fade_out().unwrap();
+        assert!(audio.stop(STOP_LIMIT), "stopped on the silence, not at the limit");
+        let left = tape.left();
+        assert!(
+            left[left.len() - 2 * 4096..].iter().all(|&x| x == 0.0),
+            "the last two blocks are silent"
+        );
     }
 
     /// The same steps give the same tape.
