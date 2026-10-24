@@ -49,7 +49,9 @@ impl VirtualController {
         )))
     }
 
-    /// A controller called `name` that sends to `output`.
+    /// A controller called `name` that sends to `output`. Only `create` and
+    /// the tests call it, so it is not built where virtual ports do not exist.
+    #[cfg(any(test, target_os = "macos", target_os = "linux"))]
     fn with_output(name: &str, output: Output) -> Self {
         Self {
             output,
