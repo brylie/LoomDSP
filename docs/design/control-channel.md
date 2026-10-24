@@ -6,7 +6,7 @@ A development-only way for a script or an AI agent to drive the running app by n
 - **Status:** Implemented
 - **Decision behind it:** None. It builds on the plain-data UI snapshot ([ADR-0021](../adr/0021-plain-data-view-models-and-keyed-identity.md)).
 - **Use case and requirements:** Developer tooling. No user requirement.
-- **Issues:** [#207](https://github.com/brylie/LoomDSP/issues/207) (part 3), `press` and `arm`: [#256](https://github.com/brylie/LoomDSP/issues/256); places in the snapshot: [#250](https://github.com/brylie/LoomDSP/issues/250); `sample`: [#255](https://github.com/brylie/LoomDSP/issues/255); related [#190](https://github.com/brylie/LoomDSP/issues/190) (accessibility).
+- **Issues:** [#207](https://github.com/brylie/LoomDSP/issues/207) (part 3), `press` and `arm`: [#256](https://github.com/brylie/LoomDSP/issues/256); `unmap`: [#260](https://github.com/brylie/LoomDSP/issues/260); places in the snapshot: [#250](https://github.com/brylie/LoomDSP/issues/250); `sample`: [#255](https://github.com/brylie/LoomDSP/issues/255); related [#190](https://github.com/brylie/LoomDSP/issues/190) (accessibility).
 - **Code:** `crates/loom-app/src/control.rs`; the clock and recorder it relies on are in `crates/loom-host-desktop`.
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
@@ -65,6 +65,7 @@ Any client that can write lines to a Unix socket works, such as `nc -U /tmp/loom
 | `key` | `key` (a character, or `escape`, `enter`, `tab`, `space`, `delete`, `backspace`, `up`, `down`, `left`, `right`, `home`, `end`, `pageup`, `pagedown`), optional `modifiers` (`cmd`, `ctrl`, `shift`, `alt`) | A key press and release, as the keyboard listener sends them | |
 | `press` | `button`: `learn` (MIDI learn), `hold` (Hold note), `undo`, `redo` | Clicks a toolbar button by name, through the message it sends. Refused when the button is disabled, opens a dialog (rule 9), or is Add module (use `add`) | |
 | `arm` | `target`: a parameter (`"4:cutoff"`) | In MIDI learn mode, arms the parameter, or disarms it if armed, as its inspector row does. Refused when learn mode is off | |
+| `unmap` | `target`: a parameter (`"4:cutoff"`) | Removes the parameter's MIDI mapping, as its inspector row's Remove MIDI mapping button does: one undo step, in or out of learn mode. Refused when the parameter has no mapping | |
 | `locate` | `target`: a module (`"4"`), a control by parameter name or a port by name (`"4:cutoff"`, `"3:out"`), or any other text shown in the window (`"Cutoff"`) | Nothing | The centre and size, in logical window pixels |
 | `screenshot` | `path` | Saves a PNG of the whole window as it was last drawn: canvas, inspector, and bars | The image size in pixels, and the scale factor |
 | `sample` | `target`: a control, light, or meter by the name it is bound to (`"4:resonance"`), `ms` (1 to 30000) | Records what the canvas draws for this widget, once per frame, for this long | `frames`: one entry per drawn frame. `t`: milliseconds since the first entry. `position`: the knob position, light brightness, or meter level, from 0 to 1. `live`: a knob's live modulated value, as a position, while its dot is drawn. `peak`: a meter's peak level |
