@@ -6,7 +6,7 @@
 //! listen to them, and commit them.
 
 use loom_core::{MidiEvent, ModuleRole};
-use loom_modules::{ALL, display, env, filter, logic, math, midi, osc, phase, time, ui};
+use loom_modules::{ALL, display, env, filter, level, logic, math, midi, osc, phase, time, ui};
 use loom_test::{Harness, Signal, reference};
 
 #[test]
@@ -117,6 +117,18 @@ fn constant() {
         .seconds(0.01)
         .param("value", 3.0)
         .check(reference!("constant"));
+}
+
+/// Reference render for `loom.level.amp`: a tone through a 0.4 level with the
+/// gain glide settling, exponential response.
+#[test]
+fn amp() {
+    Harness::new(&level::AMP)
+        .seconds(0.05)
+        .input("in", Signal::phase(220.0))
+        .input("level", Signal::constant(0.4))
+        .param("response", 1.0)
+        .check(reference!("amp"));
 }
 
 #[test]
@@ -263,6 +275,7 @@ fn every_dsp_module_has_a_reference_test() {
         &math::ADD,
         &math::MUL,
         &math::CONSTANT,
+        &level::AMP,
         &midi::NOTE_IN,
         &display::METER,
         &logic::DIVIDE,

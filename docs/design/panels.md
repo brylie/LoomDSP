@@ -162,7 +162,7 @@ The first display module.
 | Light | 3 × 2 | A display value | Brightness is the value clamped to 0 to 1. Label below. |
 
 - **The registry refuses a panel that does not fit its module:** a binding to a parameter or display value the module does not have, a toggle, radio, or button on a parameter that does not match it, a button whose mode is missing, out of range, or the same parameter, a widget outside the panel, or two widgets that overlap. *Why:* a third-party module gets the same checks as a built-in one, at registration, not as a broken tile later.
-- **Built-in panels:** a knob for every parameter except the noise seed, MIDI Note's channel and bend range, and Button's `mode`, which stay in the inspector. Button's `on` is the button, not a knob. MIDI Note has a light for its gate, and ADSR a light for its level. Toggle and radio buttons are built and tested, but no P1 module uses them yet.
+- **Built-in panels:** a knob for every parameter except the noise seed, MIDI Note's channel and bend range, and Button's `mode`, which stay in the inspector. Button's `on` is the button, not a knob. MIDI Note has a light for its gate, and ADSR a light for its level. Toggle and radio buttons are built and tested; the amplifier's response is the first radio (MT-LEVEL-02).
 
 ### Display values ([#69](https://github.com/brylie/LoomDSP/issues/69))
 
