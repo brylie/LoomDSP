@@ -1,6 +1,6 @@
 # LoomDSP
 
-**Patch it, play it live, share it.** An open-source modular synthesizer and sound lab, written in Rust, built for the stage.
+**A free, open-source modular synthesizer and sound lab. Patch it, play it live, share it.**
 
 [![CI](https://github.com/brylie/LoomDSP/actions/workflows/ci.yml/badge.svg)](https://github.com/brylie/LoomDSP/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/brylie/LoomDSP/graph/badge.svg?token=3XZBL6OICG)](https://codecov.io/gh/brylie/LoomDSP)
@@ -12,40 +12,64 @@
 
 ![A subtractive synth patched from primitives in the LoomDSP desktop app: MIDI note, phase, saw, filter, two envelopes, and a VCA, with the filter's parameters in the inspector](docs/images/readme-subtractive.png)
 
-LoomDSP lets you build instruments and effects by connecting small modules on a canvas: oscillators, filters, envelopes, logic, and more. You hear every change as you make it. Then you play the result with a MIDI keyboard, and share the patch file with anyone.
+Build your own instruments and effects by connecting small modules with virtual cables: oscillators, filters, envelopes, logic, and more. Hear every change as you make it. Plug in a MIDI keyboard or controller and play what you built. Then send the patch file to a friend.
 
-The goal is bigger than a synth. LoomDSP is for **living musical systems**: patches that play, evolve, and arrange themselves with sequencers, loopers, counters, and logic, all patched the same way. Read the [vision](docs/product/vision.md).
+LoomDSP is free, with no accounts, no subscriptions, and no paid tiers. The whole thing is open source, so you can see how every module makes its sound, and nobody can take your instruments away.
 
-## Why LoomDSP
+## Who it is for
 
-- **Edit while it plays, with no dropouts.** Add, remove, and rewire modules during a performance. The audio thread never allocates, locks, or waits, and a test enforces it. In a 10-minute stress test, 11,026 live edits caused zero dropouts ([benchmark](docs/benchmarks/p0-engine.md)).
-- **Patch anything to anything.** Every cable carries the same kind of signal, in the spirit of Eurorack. Audio can modulate a filter, an envelope can drive pitch, and a gate can be audio. Colours guide you, but never block a connection.
-- **Real feedback loops.** Patch an oscillator back into itself. The engine finds every loop and runs it one sample at a time, so feedback FM and filter feedback sound right. If a loop needs a delay, the engine adds one and shows you where.
-- **Same sound, every time.** A patch gives bit-identical audio at any buffer size and on every run. Renders are repeatable, and random sources are seeded.
-- **Safe for your ears and speakers.** A DC blocker, a limiter, and a short fade-in sit before the output, so a wild patch never blasts you ([how it works](docs/learn/output-safety.md)).
-- **Fast, native, GPU-drawn.** Our own canvas runs at 120 fps with 300 modules on screen, on an M1 laptop ([benchmark](docs/benchmarks/p1-canvas.md)). No web view, no Electron.
-- **Learn as you patch.** Every module and control explains itself on hover. Behind the code are [explainers](docs/learn/README.md) on the theory: phase, feedback, stereo cables, and more.
-- **Open, all the way down.** Apache-2.0, with only permissive dependencies. Patches are plain text files that never run code, so sharing them is safe. Patches you make are yours.
+- **Musicians and performers** who want a patchable instrument they can change on stage without the sound cutting out.
+- **Sound designers** who want deep control, from a single oscillator up to whole systems, and sounds that come out the same every time.
+- **Modular synth fans** who like the Eurorack way of patching anything to anything, without the rack, the rails, or the price.
+- **Curious beginners** who want to learn how synthesis works by building it, one cable at a time.
+
+## What makes it different
+
+- **Edit while it plays, with no dropouts.** Add, remove, and rewire modules during a performance. In a 10-minute stress test, 11,026 live edits caused zero dropouts ([benchmark](docs/benchmarks/p0-engine.md)).
+- **Patch anything to anything.** Every cable carries the same kind of signal, as in Eurorack. Audio can modulate a filter, an envelope can drive pitch, and a gate can be audio. Colours guide you, but never block a connection.
+- **Real feedback.** Patch an oscillator back into itself for feedback FM, or feed a filter into its own input. The engine handles it sample by sample, so it sounds right.
+- **Same sound, every time.** A patch gives identical audio on every run and at any buffer size. Renders are repeatable.
+- **Safe for your ears and speakers.** A limiter and a short fade-in sit before the output, so a wild patch never blasts you ([how it works](docs/learn/output-safety.md)).
+- **Play it with real controllers.** Every connected MIDI keyboard works at once, and MIDI learn maps any knob to a control on your hardware.
+- **Smooth and responsive.** The canvas is drawn on the GPU and stays at 120 fps with 300 modules on screen, on an M1 laptop ([benchmark](docs/benchmarks/p1-canvas.md)).
+- **Learn as you patch.** Every module and control explains itself on hover, and the [explainers](docs/learn/README.md) cover the ideas behind them: phase, feedback, stereo cables, and more.
+- **Yours to keep.** Apache-2.0 licence. Patches are plain text files that never run code, so sharing them is safe, and the patches you make are yours under any licence you choose.
 
 ![Feedback FM: the sine's output feeds back into its own pitch. The dashed cable shows where the engine broke the loop with a one-sample delay](docs/images/readme-fm-feedback.png)
 
+## Where it is going
+
+The goal is bigger than a synth. LoomDSP is for **living musical systems**: patches that play, evolve, and arrange themselves with sequencers, loopers, counters, and logic, all patched the same way. Read the [vision](docs/product/vision.md).
+
+| Phase | What you get |
+|---|---|
+| **P0. Engine** (done) | A real-time engine that plays patch files with live MIDI. |
+| **P1. Desktop patcher** (now) | Build and play a synth from primitives, with MIDI controllers. |
+| P2. Panels and performance | Sub-patches with their own front panels, polyphony, presets, and a locked performance mode. |
+| P3. Living systems | Loopers, sequencers, scenes, counters, and logic: patches that arrange themselves on stage. |
+| P4. Sharing | Self-contained patch files, a patch library, and a module SDK for community modules. |
+
+Plugin export (CLAP, VST3) and a browser version may come later. See the full [roadmap](docs/product/roadmap.md).
+
 ## What you can do today
 
-LoomDSP is in **early alpha** (Phase 1 of the [roadmap](docs/product/roadmap.md)). It is not a finished instrument yet, but you can already:
+LoomDSP is in **early alpha** (Phase 1 of the roadmap). It is not a finished instrument yet, but you can already:
 
 - **Patch on a canvas.** Add modules from a searchable browser, or type to add one at the pointer. Drag cables, move tiles, copy, paste, and duplicate.
-- **Turn knobs on the modules themselves.** Each tile has its own panel of knobs, buttons, and lights. The inspector shows every parameter of the selected module.
+- **Turn knobs on the modules themselves.** Each tile has its own panel of knobs, buttons, and lights.
 - **Modulate any parameter.** Assign any output to a knob, and watch the range arc and the live value move.
-- **Play it.** Every connected MIDI keyboard works at once. Map any control to a MIDI knob with MIDI learn. No keyboard? Click **Hold note**.
+- **Play it.** Use a MIDI keyboard, or click **Hold note** if you have none.
 - **Work without fear.** Undo and redo for every edit, open and save patches, and autosave with crash recovery.
 - **Choose your audio device** and buffer size in the preferences window.
-- **Render and test from the command line.** Play a patch, render it to WAV, or find its feedback loops with the `loom` tool.
+- **Render to WAV** from the command line.
 
-Modules so far: phase generator, sine, band-limited saw, noise, state variable filter, ADSR, add, multiply, constant, one-sample delay, clock divider, phase trigger, level meter, button, MIDI note input, and audio output. Around 170 more are planned in the [module catalogue](docs/product/module-catalogue.md), and many are open for contributors.
+Modules so far: phase generator, sine, band-limited saw, noise, state variable filter, ADSR, add, multiply, constant, one-sample delay, clock divider, phase trigger, level meter, button, MIDI note input, and audio output. Around 170 more are planned in the [module catalogue](docs/product/module-catalogue.md).
+
+**Early alpha means breaking changes.** Until the architecture settles, module names and the patch format can change.
 
 ## Try it
 
-There are no installers yet, so you build from source. You need [Rust](https://rustup.rs) 1.99 or newer. On Linux, also install the ALSA development package (`libasound2-dev` on Debian and Ubuntu).
+There are no installers yet, so for now you build it from source. You need [Rust](https://rustup.rs) 1.99 or newer. On Linux, also install the ALSA development package (`libasound2-dev` on Debian and Ubuntu).
 
 ```sh
 git clone https://github.com/brylie/LoomDSP
@@ -80,27 +104,14 @@ cargo run --release -p loom-cli -- check examples/patches/fm-feedback.ron
 cargo run --release -p loom-cli -- stress examples/patches/subtractive.ron --seconds 600
 ```
 
-## Where it is going
-
-| Phase | What you get |
-|---|---|
-| **P0. Engine** (done) | A real-time engine that plays patch files with live MIDI. |
-| **P1. Desktop patcher** (now) | Build and play a synth from primitives, with MIDI controllers. |
-| P2. Panels and performance | Sub-patches with their own front panels, polyphony, presets, and a locked performance mode. |
-| P3. Living systems | Loopers, sequencers, scenes, counters, and logic: patches that arrange themselves on stage. |
-| P4. Sharing | Self-contained patch files, a patch library, and a module SDK for community modules. |
-
-Plugin export (CLAP, VST3) and a browser version may come later. The engine core already builds for WebAssembly, so the door stays open. See the full [roadmap](docs/product/roadmap.md).
-
-**Early alpha means breaking changes.** Until the architecture settles, module names, the patch format, and the Rust API can change.
-
 ## Get involved
 
-LoomDSP is a good project to learn modular synthesis, real-time audio, or Rust, and to have your work heard on stage.
+You do not need to write code to help.
 
-- **Write a module.** Most [`good first issue`](https://github.com/brylie/LoomDSP/labels/good%20first%20issue) tasks are new modules, each with a spec and a test harness that checks it for you.
 - **Try it and tell us.** Patch something, then open an [issue](https://github.com/brylie/LoomDSP/issues) with what felt good and what got in the way.
+- **Share a patch** or tell us which modules you want next.
 - **Improve the docs and explainers.** If something confused you, it will confuse the next person too.
+- **Write a module.** LoomDSP is built in Rust, and most [`good first issue`](https://github.com/brylie/LoomDSP/labels/good%20first%20issue) tasks are new modules, each with a spec and a test harness that checks it for you.
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) to get started. AI-assisted contributions are welcome under our [AI contribution policy](AI_POLICY.md). During October, issues labelled [`hacktoberfest`](https://github.com/brylie/LoomDSP/labels/hacktoberfest) count for Hacktoberfest.
 
