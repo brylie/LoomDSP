@@ -774,18 +774,61 @@ pub fn send_midi(midi: &SharedMidi, event: MidiEvent) -> bool {
         .send(event)
 }
 
+/// Which notes are held, one bit per note on each of the 16 channels. A
+/// MIDI input and a virtual controller each keep one, so each can release
+/// exactly the notes it holds.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct HeldNotes([u128; 16]);
+
+impl HeldNotes {
+    /// Follows one MIDI message: a note on holds its note, and a note off
+    /// (or a note on with velocity 0) lets it go. Other messages change
+    /// nothing.
+    pub fn track(&mut self, bytes: &[u8]) {
+        if let [status, note, velocity] = *bytes
+            && note < 128
+        {
+            let bit = 1u128 << note;
+            let held = &mut self.0[usize::from(status & 0x0F)];
+            match status & 0xF0 {
+                0x90 if velocity > 0 => *held |= bit,
+                0x80 | 0x90 => *held &= !bit,
+                _ => {}
+            }
+        }
+    }
+
+    /// The held notes as `(channel, note)`, in order. None is held after.
+    /// The iterator owns a copy, so the caller can send while it walks.
+    pub fn take(&mut self) -> impl Iterator<Item = (u8, u8)> + use<> {
+        let held = std::mem::take(&mut self.0);
+        (0..16u8).flat_map(move |channel| {
+            (0..128u8)
+                .filter(move |&note| held[usize::from(channel)] & (1u128 << note) != 0)
+                .map(move |note| (channel, note))
+        })
+    }
+
+    /// True if any note is held.
+    pub fn any(&self) -> bool {
+        self.0.iter().any(|&h| h != 0)
+    }
+}
+
 /// One MIDI input's path into the engine. It remembers which notes are held
 /// on that input, so closing the input can release them.
 pub struct MidiInputState {
     midi: SharedMidi,
-    /// One bit per note, per channel.
-    held: [u128; 16],
+    held: HeldNotes,
 }
 
 impl MidiInputState {
     /// A path into `midi` with no notes held.
     pub fn new(midi: SharedMidi) -> Self {
-        Self { midi, held: [0; 16] }
+        Self {
+            midi,
+            held: HeldNotes::default(),
+        }
     }
 
     /// Sends one message from the input to the engine, applied at the start
@@ -795,17 +838,7 @@ impl MidiInputState {
         if status == 0xF0 || bytes.len() > 3 {
             return;
         }
-        if let [status, note, velocity] = *bytes
-            && note < 128
-        {
-            let channel = usize::from(status & 0x0F);
-            let bit = 1u128 << note;
-            match status & 0xF0 {
-                0x90 if velocity > 0 => self.held[channel] |= bit,
-                0x80 | 0x90 => self.held[channel] &= !bit,
-                _ => {}
-            }
-        }
+        self.held.track(bytes);
         // Frame 0: applied at the start of the next audio buffer
         // (NFR-PERF-07). Sub-buffer timestamps come later.
         send_midi(&self.midi, MidiEvent::from_bytes(0, bytes));
@@ -813,19 +846,14 @@ impl MidiInputState {
 
     /// Sends a note off for every note held on this input.
     pub fn release_all(&mut self) {
-        for (channel, held) in self.held.iter_mut().enumerate() {
-            for note in 0..128u8 {
-                if *held & (1u128 << note) != 0 {
-                    send_midi(&self.midi, MidiEvent::note_off(0, channel as u8, note));
-                }
-            }
-            *held = 0;
+        for (channel, note) in self.held.take() {
+            send_midi(&self.midi, MidiEvent::note_off(0, channel, note));
         }
     }
 
     /// True if any note is held on this input.
     pub fn holds_notes(&self) -> bool {
-        self.held.iter().any(|&h| h != 0)
+        self.held.any()
     }
 }
 
@@ -1164,6 +1192,27 @@ mod tests {
         state.release_all();
         assert!(!state.holds_notes());
         assert_eq!(gate(&mut parts.engine), 0.0, "and is released");
+    }
+
+    /// Held notes are kept per channel, a note on with velocity 0 lets go,
+    /// and other messages change nothing.
+    #[test]
+    fn held_notes_follow_note_on_and_off() {
+        let mut held = HeldNotes::default();
+        held.track(&[0x90, 60, 100]);
+        held.track(&[0x93, 60, 100]);
+        held.track(&[0x9F, 127, 1]);
+        held.track(&[0x93, 62, 100]);
+        held.track(&[0x93, 62, 0]);
+        held.track(&[0xB0, 61, 100]);
+        held.track(&[0x90, 200, 100]);
+        held.track(&[0x90, 61]);
+        assert!(held.any());
+        assert_eq!(held.take().collect::<Vec<_>>(), [(0, 60), (3, 60), (15, 127)]);
+        assert!(!held.any(), "none is held after take");
+        held.track(&[0x90, 60, 100]);
+        held.track(&[0x80, 60, 64]);
+        assert_eq!(held, HeldNotes::default());
     }
 
     #[test]

@@ -38,7 +38,9 @@ fn plays_the_lines_or_says_why_it_cannot() {
     let name = format!("Loom cli test {}", std::process::id());
     let (status, stdout, stderr) = midi_port(&[&name, "--channel", "2"], "on 60\nbad\nwait 1\noff 60\non 62\n");
     if status == 2 {
-        assert!(stderr.starts_with("error: "), "{stderr}");
+        // The MIDI library may print its own lines first, as ALSA does
+        // when it finds no sequencer.
+        assert!(stderr.contains("error: "), "{stderr}");
         assert!(stdout.is_empty(), "{stdout}");
         return;
     }
