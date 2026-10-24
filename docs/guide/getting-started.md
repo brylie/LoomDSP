@@ -8,7 +8,21 @@ LoomDSP is early (Phase 1). The app can open, edit, save, and play patches. See 
 
 ## Install and run
 
-You need [Rust](https://rustup.rs) 1.99 or newer. There are no installers yet, so you build the app from source.
+### Download (easiest)
+
+1. Open the [latest release](https://github.com/brylie/LoomDSP/releases/latest) and download the file for your computer: `macos-arm64` for Apple Silicon Macs, `macos-x86_64` for Intel Macs, `windows-x86_64` for Windows, or `linux-x86_64` for Linux.
+2. Unzip it. On Linux, unpack the `.tar.gz` file.
+3. Open LoomDSP. These early alpha builds are not signed yet, so your system warns the first time:
+   - **macOS:** right-click `LoomDSP.app`, choose **Open**, then **Open** again. If macOS still refuses, allow it under System Settings, then Privacy & Security.
+   - **Windows:** on the "Windows protected your PC" screen, choose **More info**, then **Run anyway**.
+   - **Linux:** run `./loom-app` in a terminal. If it does not start, run `chmod +x loom-app` first.
+4. In the app, open `examples/patches/fm-feedback.ron` from the `examples` folder in the download.
+
+Each download also has a `README.txt` with these steps. To check a download, compare its SHA-256 with the `SHA256SUMS.txt` file on the release page.
+
+### Build from source
+
+If there is no download for your system, or you want the newest changes, you need [Rust](https://rustup.rs) 1.99 or newer.
 
 ```sh
 git clone https://github.com/brylie/LoomDSP

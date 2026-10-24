@@ -69,7 +69,28 @@ Modules so far: phase generator, sine, band-limited saw, noise, state variable f
 
 ## Try it
 
-There are no downloadable installers yet, so for now you build LoomDSP on your own computer. It takes three steps and no coding.
+### Download
+
+Get the file for your computer from the [latest release](https://github.com/brylie/LoomDSP/releases/latest), unzip it, and open LoomDSP.
+
+| System | File |
+|---|---|
+| macOS, Apple Silicon (M1 and newer) | `LoomDSP-...-macos-arm64.zip` |
+| macOS, Intel | `LoomDSP-...-macos-x86_64.zip` |
+| Windows | `LoomDSP-...-windows-x86_64.zip` |
+| Linux | `LoomDSP-...-linux-x86_64.tar.gz` |
+
+These early alpha builds are not signed yet, so macOS and Windows warn the first time. Each download has a `README.txt` with the steps:
+
+- **macOS:** right-click `LoomDSP.app`, choose **Open**, then **Open** again.
+- **Windows:** on the "Windows protected your PC" screen, choose **More info**, then **Run anyway**.
+- **Linux:** run `./loom-app` in a terminal.
+
+Open `examples/patches/subtractive.ron` from the app. Connect a MIDI keyboard first, or click **Hold note** in the toolbar, then turn the filter's **Cutoff** knob while the note plays. [Getting started](docs/guide/getting-started.md) walks you through your first patch.
+
+### Build it yourself
+
+If there is no download for your system, or you want the newest changes, build LoomDSP on your own computer. It takes three steps and no coding.
 
 1. **Install Rust**, the free tool that builds the app. Get it from [rustup.rs](https://rustup.rs) (version 1.99 or newer). On Linux, also install the ALSA development package (`libasound2-dev` on Debian and Ubuntu).
 2. **Download LoomDSP.** Either run `git clone https://github.com/brylie/LoomDSP`, or press **Code**, then **Download ZIP**, at the top of this page and unzip it. This gives you a folder named `LoomDSP` (or `LoomDSP-main` from the ZIP).
@@ -82,11 +103,9 @@ cargo run --release -p loom-app -- examples/patches/subtractive.ron
 
 If you used the ZIP, type `cd LoomDSP-main` instead.
 
-The first build takes a few minutes. Later starts are instant. Connect a MIDI keyboard before you start, or click **Hold note** in the toolbar. Then turn the filter's **Cutoff** knob while the note plays. [Getting started](docs/guide/getting-started.md) walks you through your first patch.
+The first build takes a few minutes. Later starts are instant.
 
-**On a Mac and want an app icon you can double-click?** Run `scripts/bundle-macos.sh`. It builds `target/release/LoomDSP.app`, which you can drag into your Applications folder. It is a plain development build without signing, so it works on the Mac that built it.
-
-Signed, ready-to-run downloads for macOS, Windows, and Linux are on the wish list. If they would help you, say so on an [issue](https://github.com/brylie/LoomDSP/issues).
+**On a Mac and want an app icon you can double-click?** Run `scripts/bundle-macos.sh`. It builds `target/release/LoomDSP.app`, which you can drag into your Applications folder. It is not signed, so it works on the Mac that built it.
 
 More things to try:
 
