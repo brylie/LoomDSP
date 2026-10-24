@@ -12,7 +12,7 @@ use crate::{App, undo};
 use iced::widget::{button, checkbox, column, container, opaque, pick_list, radio, row, rule, scrollable, space, text};
 use iced::{Element, Length};
 use loom_core::{EngineConfig, EngineParts, OutputSafety, create_engine};
-use loom_host_desktop::{AudioOutput, Outputs, STOP_LIMIT, SharedMidi};
+use loom_host_desktop::{AudioOutput, Outputs, Recorder, STOP_LIMIT, SharedMidi};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::rc::Rc;
@@ -71,6 +71,9 @@ pub struct Rig {
     pub safety_pending: Option<OutputSafety>,
     /// Whether the last audio stop waited for the fade-out to end, for tests.
     pub last_stop: Option<bool>,
+    /// The `--record` file. It belongs to the rig, not to one stream, so
+    /// it records every engine the run plays (audio-qa.md, Part 2).
+    pub recorder: Option<Recorder>,
     /// Every mode change sent to the engine, for tests.
     #[cfg(test)]
     pub sent: Vec<OutputSafety>,
@@ -104,9 +107,24 @@ impl Rig {
             window: None,
             safety_pending: None,
             last_stop: None,
+            recorder: None,
             #[cfg(test)]
             sent: Vec::new(),
         }
+    }
+
+    /// Sends what `output` will play to the recording, if there is one.
+    /// When the output runs at another sample rate, the recording ends
+    /// (audio-qa.md, rule 6): returns the status bar line, which is also
+    /// printed to stderr.
+    pub fn record_into(&mut self, output: &mut AudioOutput) -> Option<String> {
+        let recorder = self.recorder.as_ref()?;
+        let error = output.record(recorder).err()?;
+        // Dropping the recorder closes the file with what it holds.
+        self.recorder = None;
+        let message = format!("The recording stopped: {error}.");
+        eprintln!("loom-app: {message}");
+        Some(message)
     }
 
     /// A rig with no file and the real devices, for a headless app and as
@@ -182,13 +200,8 @@ impl Rig {
 /// Opens the audio output for a run: none with `--no-audio`, a timer with
 /// `--fake-audio`, and otherwise the saved device with the flags on top.
 /// Returns the output and status bar lines about fallbacks.
-pub fn open_output(
-    rig: &Rig,
-    no_audio: bool,
-    fake_audio: bool,
-    record: Option<&std::path::Path>,
-) -> (Result<AudioOutput, String>, Vec<String>) {
-    let (output, notes) = if no_audio {
+pub fn open_output(rig: &Rig, no_audio: bool, fake_audio: bool) -> (Result<AudioOutput, String>, Vec<String>) {
+    if no_audio {
         (Err("audio off".to_string()), Vec::new())
     } else if fake_audio {
         let rate = rig.flags.sample_rate.unwrap_or(48_000);
@@ -196,14 +209,7 @@ pub fn open_output(
         (Ok(AudioOutput::clock(rate, block)), Vec::new())
     } else {
         devices::open_at_start(&*rig.host, &rig.wanted())
-    };
-    let output = output.map(|mut output| {
-        if let Some(path) = record {
-            output.record(path);
-        }
-        output
-    });
-    (output, notes)
+    }
 }
 
 /// The preferences file for a run: `--preferences`, or the per-user file.
@@ -448,7 +454,7 @@ impl App {
 
     /// Puts a new engine in place of the old one, which has stopped, and
     /// plays it on `output`. On an error the app is left with no audio.
-    fn play(&mut self, output: AudioOutput, parts: EngineParts) -> Result<(), String> {
+    fn play(&mut self, mut output: AudioOutput, parts: EngineParts) -> Result<(), String> {
         let EngineParts {
             controller,
             engine,
@@ -467,6 +473,7 @@ impl App {
         self.sample_rate = output.sample_rate() as f32;
         self.idle_engine = None;
         self.holding = false;
+        let record_error = self.rig.record_into(&mut output);
         let started = self.rig.host.start(output, engine);
         match started {
             Ok(audio) => {
@@ -486,6 +493,10 @@ impl App {
         // Probes for the meters on screen, in the new engine.
         self.commit();
         self.refresh_values();
+        // After the commit, which sets the status line too.
+        if let Some(error) = record_error {
+            self.status = error;
+        }
         Ok(())
     }
 

@@ -22,6 +22,9 @@
 //! panel widget, parameter mapping, and output polarity, for tests that the
 //! built-in modules do not cover.
 //!
+//! [`analysis`] measures recorded audio (peak, clipping, steps, DC), for
+//! app tests and `loom analyze` (`docs/design/audio-qa.md`).
+//!
 //! References are 32-bit float WAV files, so a reviewer can listen to them.
 //! Create or update them with `LOOM_UPDATE_REFERENCES=1 cargo test`.
 //!
@@ -31,6 +34,7 @@
 
 #![warn(missing_docs)]
 
+pub mod analysis;
 pub mod modules;
 mod reference;
 mod signal;

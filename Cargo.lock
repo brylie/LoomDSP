@@ -2064,6 +2064,8 @@ dependencies = [
  "loom-modules",
  "loom-patch",
  "loom-rt",
+ "loom-test",
+ "serde_json",
 ]
 
 [[package]]
@@ -2123,6 +2125,7 @@ version = "0.1.0"
 dependencies = [
  "hound",
  "loom-core",
+ "serde",
 ]
 
 [[package]]

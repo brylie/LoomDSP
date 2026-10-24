@@ -3,12 +3,12 @@
 Tools that let tests, scripts, and QA agents check what the app actually plays, so safety checks on the final output do not depend on a person listening.
 
 - **Kind:** living specification.
-- **Status:** Draft. Parts 1 to 3 are proposed together and can be built in any order. Part 3 has no dependency on the others.
+- **Status:** Implemented. Agreed and built in [#320](https://github.com/brylie/LoomDSP/pull/320).
 - **Decision behind it:** None. It builds on [output safety](output-safety.md) (ADR-0019), the [control channel](control-channel.md), and the `devices::Host` trait from the [preferences spec](preferences.md).
 - **Use case and requirements:** Developer tooling. It protects UC3 (perform live), FR-PERF-08, NFR-SND-02, and NFR-SND-03 by testing them in the app, not only in the engine.
 - **Background:** [Output safety explainer](../learn/output-safety.md).
 - **Issues:** Part 1 [#318](https://github.com/brylie/LoomDSP/issues/318), Part 2 [#319](https://github.com/brylie/LoomDSP/issues/319), Part 3 [#317](https://github.com/brylie/LoomDSP/issues/317). Comes from [#200](https://github.com/brylie/LoomDSP/issues/200) (the listening checks for output safety). Related: [#130](https://github.com/brylie/LoomDSP/issues/130) (a meter or warning for the final output).
-- **Code:** not built yet. Planned: a stepped test output in `crates/loom-host-desktop` and `crates/loom-app/src/devices.rs`; the recording in `crates/loom-app/src/settings.rs`; measurements in `crates/loom-test`; `loom analyze` in `crates/loom-cli`.
+- **Code:** stepped output: `AudioOutput::stepped` and `Tape` in `crates/loom-host-desktop/src/stepped.rs`, offered by the fake host in `crates/loom-app/src/devices.rs`. App tests: `crates/loom-app/src/qa_tests.rs`. Recording: `Recorder` in `crates/loom-host-desktop/src/record.rs`, owned by `settings::Rig`. Measurements: `crates/loom-test/src/analysis.rs`. `loom analyze`: `crates/loom-cli/src/analyze.rs`, tests in `crates/loom-cli/tests/analyze.rs`.
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
      built. See README.md in this folder. -->
@@ -87,6 +87,8 @@ Options:
 | `--json` | Print JSON instead of text, for scripts and agents. |
 | `--max-peak X`, `--max-step X`, `--max-dc X` | Checks. When one fails, the command says which, and exits with status 1. |
 
+When the file cannot be read, the command exits with status 2. *Why:* a script can then tell a failed check from a broken run.
+
 The measurements are functions in `loom-test`, so the app tests of Part 1 and the command of Part 3 measure in the same way.
 
 ## Rules
@@ -94,7 +96,7 @@ The measurements are functions in `loom-test`, so the app tests of Part 1 and th
 1. **Time in the stepped output is counted in frames, never in wall-clock time.** A stop that waits for silence waits a number of frames. *Why:* the same test then gives the same tape on a fast laptop and a busy CI machine, and it needs no sleeps.
 2. **The stepped output runs the app's real code paths.** Tests reach it through `App::new` and `App::update`, with the same `Args`, preferences file, and messages the window sends. *Why:* the gap we want to close is the app's wiring. A test that builds its own engine would miss it.
 3. **The same test gives a bit-identical tape.** *Why:* determinism is a hard rule for the engine. It lets a failing tape be compared with a passing one, and saved as a reference when that helps.
-4. **Click checks are relative to the patch.** At a switch, the old stream ends at 0, the new stream starts at 0, and no step in the switch is larger than the largest step in the steady audio just before it. *Why:* a fixed limit would fail on bright patches and pass clicks on quiet ones.
+4. **Click checks are relative to the patch.** At a switch, the old stream ends at 0 and the new stream starts at 0. No step in the fade-out is larger than the largest step in the 100 ms before the switch, and no step in the fade-in is larger than the largest step in the 100 ms after it. Each limit has a margin of one fade step times the peak of that 100 ms, because the fade gain moves as well as the signal. *Why:* a fixed limit would fail on bright patches and pass clicks on quiet ones. The fade-in plays the new patch, so it is compared with the new patch: a sine followed by an FM patch must not fail because the FM patch is brighter.
 5. **The recording is what was sent to the output, nothing more.** No silence is added between streams. *Why:* the gap depends on the machine and the device, and adding it would make files differ from run to run.
 6. **A recording keeps one sample rate.** If a new stream runs at a different rate (a device change), the recording ends, and the status bar and stderr say why. *Why:* a WAV file has one sample rate. Resampling would change the very samples we want to check.
 7. **Recording never waits on the audio thread.** The existing writer thread and its dropped-frame count stay. *Why:* real-time safety (hard rule 1).
@@ -107,29 +109,29 @@ The measurements are functions in `loom-test`, so the app tests of Part 1 and th
 
 Each is a `loom-app` test that uses the stepped output, through `App::new` and `App::update`.
 
-- [ ] **Mode reaches the engine.** Given full-scale noise at gain 4, when the mode comes from `--output-safety`, and again from the preferences file, then Low latency and Clean never go over the ceiling, and Off has samples at full scale.
-- [ ] **DC through the app.** Given a Constant of 1.0 into Audio Out, then after 0.5 s every sample is under 0.001 in size in Low latency and Clean, and Off holds 1.0.
-- [ ] **No click on Open.** Given `sine.ron` with a held note, when `fm-feedback.ron` is opened and a note held, and then `sine.ron` is opened again, then each switch follows rule 4.
-- [ ] **No click on New, quit, or a device change.** The same check for each.
-- [ ] **No click on a mode change** from the preferences window: the output dips to 0 and comes back, with no step larger than rule 4 allows.
-- [ ] **Determinism.** Running the Open test twice gives bit-identical tapes.
+- [x] **Mode reaches the engine.** Given full-scale noise at gain 4, when the mode comes from `--output-safety`, and again from the preferences file, then Low latency and Clean never go over the ceiling, and Off has samples at full scale.
+- [x] **DC through the app.** Given a Constant of 1.0 into Audio Out, then after 0.5 s every sample is under 0.001 in size in Low latency and Clean, and Off holds 1.0.
+- [x] **No click on Open.** Given `sine.ron` with a held note, when `fm-feedback.ron` is opened and a note held, and then `sine.ron` is opened again, then each switch follows rule 4.
+- [x] **No click on New, quit, or a device change.** The same check for each.
+- [x] **No click on a mode change** from the preferences window: the output dips to 0 and comes back, with no step larger than rule 4 allows.
+- [x] **Determinism.** Running the Open test twice gives bit-identical tapes.
 
 ### Part 2
 
-- [ ] Given `--fake-audio --record FILE`, when a script opens two more patches and quits, then the file holds all three streams in order, and the app exits with status 0.
-- [ ] A change of device that changes the sample rate ends the recording, with a message in the status bar and on stderr.
-- [ ] The `--record` help text says the recording lasts until the app quits.
+- [x] Given `--fake-audio --record FILE`, when a script opens two more patches and quits, then the file holds all three streams in order, and the app exits with status 0.
+- [x] A change of device that changes the sample rate ends the recording, with a message in the status bar and on stderr.
+- [x] The `--record` help text says the recording lasts until the app quits.
 
 ### Part 3
 
-- [ ] Each measurement is a unit test in `loom-test` on small hand-made signals: a known peak, one step, a DC offset, a NaN.
-- [ ] `loom analyze` reads 16-bit, 24-bit, and 32-bit float files.
-- [ ] `--json` prints every measurement, and a test parses it.
-- [ ] A failed `--max-peak`, `--max-step`, or `--max-dc` check exits with status 1 and names the check. A passing one exits with status 0.
+- [x] Each measurement is a unit test in `loom-test` on small hand-made signals: a known peak, one step, a DC offset, a NaN.
+- [x] `loom analyze` reads 16-bit, 24-bit, and 32-bit float files.
+- [x] `--json` prints every measurement, and a test parses it.
+- [x] A failed `--max-peak`, `--max-step`, or `--max-dc` check exits with status 1 and names the check. A passing one exits with status 0.
 
 ### Manual
 
-- [ ] Run the Part 2 script and `loom analyze` on its file, and list the result in the pull request.
+- [x] Run the Part 2 script and `loom analyze` on its file, and list the result in the pull request.
 
 ## Out of scope
 
@@ -141,6 +143,4 @@ Each is a `loom-app` test that uses the stepped output, through `App::new` and `
 
 ## Open points
 
-- **Name of the stepped output.** Leaning: `AudioOutput::stepped(sample_rate, block)` next to `AudioOutput::clock`.
-- **Should the tape or the recording mark where each stream starts?** Leaning: the tape does (Part 1). The WAV file does not, because `loom analyze` finds the switch from the steps.
-- **Is "the steady audio just before" in rule 4 the last 100 ms?** Leaning: yes, long enough to hold several cycles of a low note.
+- None. *Settled:* the stepped output is `AudioOutput::stepped(sample_rate, block, &tape)`, next to `AudioOutput::clock`. The tape marks where each stream starts; the WAV file does not, because `loom analyze` finds a switch from the steps. The windows of rule 4 are 100 ms, long enough to hold several cycles of a low note.
