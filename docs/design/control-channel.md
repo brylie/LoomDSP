@@ -155,7 +155,7 @@ The fake host in `crates/loom-app/src/devices.rs` gets a device that starts, mak
 
 ### Out of scope
 
-- **A warning in the app** when the device stops calling back. The app could say so in the status bar, but that is a user feature for the preferences spec, not this tool. It is an open point there.
+- **A warning in the app** when the device stops calling back. The app could say so in the status bar, but that is a user feature, not this tool. It belongs with audio device loss ([#28](https://github.com/brylie/LoomDSP/issues/28)).
 - **Listening.** The script cannot hear a click at the device. `--record` and `loom analyze` cover what the engine plays.
 
 ## Rules
