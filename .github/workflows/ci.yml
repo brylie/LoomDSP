@@ -185,9 +185,6 @@ jobs:
   loopback:
     name: Loopback capture (audio QA, device capture)
     runs-on: ubuntu-latest
-    # Job-level, so the Codecov step's `if` can see it.
-    env:
-      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -214,22 +211,28 @@ jobs:
       # limit shows as a cut, cannot fail here: the PipeWire ALSA plugin
       # plays out what it was handed after a stream closes, so it never
       # cuts. Coverage is measured too: the Coverage job has no device, so
-      # the device code is covered only here.
+      # the device code is covered only here. `device_tests.rs` is left out,
+      # as in the Coverage job (`mise run coverage`).
       - name: Loopback tests, with coverage
         run: >-
           cargo llvm-cov nextest -p loom-host-desktop -p loom-cli --run-ignored only
           -E 'test(=device_tests::a_stop_with_large_buffers_fades_out_on_the_device) | test(=captures_a_loopback_device)'
+          --ignore-filename-regex 'device_tests\.rs$'
           --lcov --output-path lcov.info
         env:
           LOOM_LOOPBACK: pipewire
-      # Codecov merges this report with the Coverage job's.
+      # Codecov merges this report with the Coverage job's. The token is
+      # given to this step only, not to the job: the steps above build and
+      # run code from the pull request. Without the secret (a pull request
+      # from a fork), the upload fails and only warns.
       - name: Upload to Codecov
-        if: ${{ env.CODECOV_TOKEN != '' }}
+        if: ${{ !cancelled() && hashFiles('lcov.info') != '' }}
         uses: codecov/codecov-action@v7
         with:
-          token: ${{ env.CODECOV_TOKEN }}
+          token: ${{ secrets.CODECOV_TOKEN }}
           slug: brylie/LoomDSP
           files: lcov.info
+          disable_search: true
           flags: loopback
           fail_ci_if_error: false
 
