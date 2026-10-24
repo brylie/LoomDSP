@@ -363,10 +363,10 @@ impl AudioOutput {
             Kind::Device { device, config } => {
                 let data_callback = move |data: &mut [f32], _: &cpal::OutputCallbackInfo| render.render(data);
                 let error_stats = stats.clone();
-                let error_callback = move |_error: cpal::Error| {
+                let error_callback = move |error: cpal::Error| {
                     // Printing here could block the audio thread on some backends.
                     // Count it; the control thread reports it.
-                    error_stats.stream_errors.fetch_add(1, Ordering::Relaxed);
+                    error_stats.stream_error(error.kind());
                 };
                 #[cfg(target_os = "macos")]
                 let switched = settle_rate(&device, &config);
@@ -689,6 +689,8 @@ pub struct CallbackStats {
     frames: AtomicU64,
     overruns: AtomicU64,
     stream_errors: AtomicU64,
+    /// Overload notices before the first callback.
+    start_overloads: AtomicU64,
     /// Highest load seen, in parts per thousand.
     max_load_permille: AtomicU64,
     /// Load of the latest callback, in parts per thousand.
@@ -708,8 +710,14 @@ pub struct StatsSnapshot {
     pub frames: u64,
     /// Callbacks that took longer than their buffer duration.
     pub overruns: u64,
-    /// Errors reported by the audio backend (for example xruns).
+    /// Errors reported by the audio backend (for example xruns), except
+    /// the overload notices in `start_overloads`.
     pub stream_errors: u64,
+    /// Overload notices (xruns) that arrived before the stream's first
+    /// callback. No audio was rendered yet, so none was dropped: they are
+    /// not dropouts. macOS sends one as a stream starts with a very small
+    /// buffer, while the device switches to it.
+    pub start_overloads: u64,
     /// Highest load seen (1.0 = 100% of the time budget).
     pub max_load: f64,
     /// Load of the latest callback.
@@ -723,6 +731,18 @@ pub struct StatsSnapshot {
 }
 
 impl CallbackStats {
+    /// Counts an error the backend reported. An overload notice before the
+    /// first callback goes to `start_overloads`, not `stream_errors`: the
+    /// stream had rendered nothing, so nothing was lost (panels.md, Audio
+    /// load and dropouts). Every other error is a stream error.
+    fn stream_error(&self, kind: cpal::ErrorKind) {
+        if kind == cpal::ErrorKind::Xrun && self.callbacks.load(Ordering::Relaxed) == 0 {
+            self.start_overloads.fetch_add(1, Ordering::Relaxed);
+        } else {
+            self.stream_errors.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
     fn record(&self, frames: usize, load: f64, count_overrun: bool) {
         let permille = (load * 1000.0) as u64;
         self.callbacks.fetch_add(1, Ordering::Relaxed);
@@ -747,6 +767,7 @@ impl CallbackStats {
             frames: self.frames.load(Ordering::Relaxed),
             overruns: self.overruns.load(Ordering::Relaxed),
             stream_errors: self.stream_errors.load(Ordering::Relaxed),
+            start_overloads: self.start_overloads.load(Ordering::Relaxed),
             max_load: self.max_load_permille.load(Ordering::Relaxed) as f64 / 1000.0,
             last_load: self.last_load_permille.load(Ordering::Relaxed) as f64 / 1000.0,
             smallest_buffer: self.smallest_buffer.load(Ordering::Relaxed),
@@ -962,6 +983,23 @@ mod tests {
         c.connect_named(constant, "out", out, "left").unwrap();
         c.commit().unwrap();
         parts
+    }
+
+    /// An overload notice before the first callback is not a stream error:
+    /// nothing was rendered, so nothing dropped. After a callback it is, and
+    /// other errors always are.
+    #[test]
+    fn an_overload_before_the_first_callback_is_not_a_stream_error() {
+        let stats = CallbackStats::default();
+        stats.stream_error(cpal::ErrorKind::Xrun);
+        stats.stream_error(cpal::ErrorKind::StreamInvalidated);
+        let s = stats.snapshot();
+        assert_eq!((s.start_overloads, s.stream_errors), (1, 1));
+
+        stats.record(32, 0.1, true);
+        stats.stream_error(cpal::ErrorKind::Xrun);
+        let s = stats.snapshot();
+        assert_eq!((s.start_overloads, s.stream_errors), (1, 2));
     }
 
     #[test]

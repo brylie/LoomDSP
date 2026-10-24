@@ -37,7 +37,8 @@ cargo run --release -p loom-app -- examples/patches/subtractive.ron --fake-audio
 cargo run --release -p loom-cli -- analyze /tmp/app.wav --from 0.5 --max-peak 0.8913 --max-dc 0.001   # peak, clipping, largest step, DC; exit 1 if a check fails (--json for scripts)
 cargo run --release -p loom-app -- examples/patches/subtractive.ron --preferences /tmp/stage.ron --device "MOTU" --buffer 128   # preferences file, devices for this run
 cargo run --release -p loom-app -- examples/patches/subtractive.ron --fake-audio --control loom.sock   # drive the running app; then:
-echo '{"cmd":"set","module":4,"param":"cutoff","value":800}' | nc -U loom.sock   # also snapshot, locate, screenshot, sample, note, key, press, undo, quit
+echo '{"cmd":"set","module":4,"param":"cutoff","value":800}' | nc -U loom.sock   # also snapshot, locate, screenshot, sample, note, key, press, undo, new, quit
+echo '{"cmd":"audio","device":"BlackHole"}' | nc -U loom.sock   # real devices only, not --fake-audio; also output_safety, midi; snapshot's "audio" says if the device calls back
 scripts/bundle-macos.sh                                              # LoomDSP.app, so macOS automation tools can drive the window
 cargo run --release -p loom-app -- examples/patches/subtractive.ron --screenshot /tmp/canvas.png   # canvas to PNG, no window
 cargo run --release -p loom-app -- examples/patches/subtractive.ron --screenshot /tmp/knob.png --zoom 2 --scale 2 --focus 4:cutoff

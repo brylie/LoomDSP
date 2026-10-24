@@ -1,0 +1,14 @@
+{"id": "start", "cmd": "wait", "ms": 1000}
+{"id": "start", "cmd": "snapshot"}
+{"id": "2.2 device", "cmd": "audio", "device": "BlackHole"}
+{"id": "2.2 device", "cmd": "wait", "ms": 1000}
+{"id": "2.2 device", "cmd": "snapshot"}
+{"id": "2.3 rate", "cmd": "audio", "rate": 96000}
+{"id": "2.3 rate", "cmd": "wait", "ms": 1000}
+{"id": "2.3 rate", "cmd": "snapshot"}
+{"id": "2.4 buffer", "cmd": "audio", "buffer": 32}
+{"id": "2.4 buffer", "cmd": "wait", "ms": 1000}
+{"id": "2.4 buffer", "cmd": "snapshot"}
+{"id": "2.4 buffer", "cmd": "wait", "ms": 1000}
+{"id": "2.4 buffer", "cmd": "snapshot"}
+{"id": "end", "cmd": "quit"}
