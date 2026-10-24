@@ -107,8 +107,10 @@ impl VirtualController {
     }
 
     /// Sends a note off for every note this controller holds.
+    /// A note whose note off fails stays held, so a later call, or the
+    /// drop, tries it again.
     pub fn release_all(&mut self) -> Result<(), HostError> {
-        for (channel, note) in self.held.take() {
+        for (channel, note) in self.held.notes() {
             self.note_off(channel, note)?;
         }
         Ok(())
@@ -119,10 +121,12 @@ impl VirtualController {
         self.held.any()
     }
 
-    /// Sends raw MIDI bytes, and keeps track of the notes they hold.
+    /// Sends raw MIDI bytes. Once they are sent, it keeps track of the
+    /// notes they hold, so what it holds is what the app received.
     pub fn send(&mut self, bytes: &[u8]) -> Result<(), HostError> {
+        (self.output)(bytes).map_err(|e| HostError::Midi(format!("{}: {e}", self.name)))?;
         self.held.track(bytes);
-        (self.output)(bytes).map_err(|e| HostError::Midi(format!("{}: {e}", self.name)))
+        Ok(())
     }
 }
 
@@ -193,12 +197,31 @@ mod tests {
         assert_eq!(*sent.borrow(), [vec![0x82, 64, 0]]);
     }
 
-    /// A send that fails is an error that names the controller.
+    /// A send that fails is an error that names the controller, and
+    /// changes nothing: a failed note on holds no note, and a note whose
+    /// note off failed is still held, so the next release tries it again.
     #[test]
-    fn a_failed_send_names_the_controller() {
-        let mut pad = VirtualController::with_output("Pad", Box::new(|_| Err("gone".to_string())));
+    fn a_failed_send_names_the_controller_and_changes_nothing() {
+        let fail = Rc::new(std::cell::Cell::new(false));
+        let failing = fail.clone();
+        let mut pad = VirtualController::with_output(
+            "Pad",
+            Box::new(move |_| if failing.get() { Err("gone".to_string()) } else { Ok(()) }),
+        );
+        fail.set(true);
         let error = pad.note_on(0, 60, 100).unwrap_err().to_string();
         assert!(error.contains("Pad: gone"), "{error}");
+        assert!(!pad.holds_notes(), "a note on that failed holds nothing");
+
+        fail.set(false);
+        pad.note_on(0, 60, 100).unwrap();
+        pad.note_on(0, 62, 100).unwrap();
+        fail.set(true);
+        assert!(pad.release_all().is_err());
+        assert!(pad.holds_notes(), "the notes not released are still held");
+        fail.set(false);
+        pad.release_all().unwrap();
+        assert!(!pad.holds_notes());
     }
 
     /// The input list shows the port by its own name on macOS, and as

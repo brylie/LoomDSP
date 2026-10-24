@@ -798,15 +798,23 @@ impl HeldNotes {
         }
     }
 
-    /// The held notes as `(channel, note)`, in order. None is held after.
-    /// The iterator owns a copy, so the caller can send while it walks.
-    pub fn take(&mut self) -> impl Iterator<Item = (u8, u8)> + use<> {
-        let held = std::mem::take(&mut self.0);
+    /// The held notes as `(channel, note)`, in order. The iterator owns a
+    /// copy, so the caller can send, and change what is held, while it walks.
+    pub fn notes(&self) -> impl Iterator<Item = (u8, u8)> + use<> {
+        let held = self.0;
         (0..16u8).flat_map(move |channel| {
             (0..128u8)
                 .filter(move |&note| held[usize::from(channel)] & (1u128 << note) != 0)
                 .map(move |note| (channel, note))
         })
+    }
+
+    /// The held notes, as [`notes`](Self::notes) gives them. None is held
+    /// after.
+    pub fn take(&mut self) -> impl Iterator<Item = (u8, u8)> + use<> {
+        let notes = self.notes();
+        *self = Self::default();
+        notes
     }
 
     /// True if any note is held.
