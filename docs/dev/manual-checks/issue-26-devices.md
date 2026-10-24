@@ -120,7 +120,9 @@ cargo run --release -p loom-cli -- analyze target/check-device.wav --max-step 0.
 
 - It passes (exit status 0) if the engine faded out and faded in. A failure names the time of the largest step. The recording holds what the engine plays, so it does not show the gap itself or a click added by the device. Your ears check those.
 
-If the rates differ, the recording ended at the change, and only your ears check this step. Start the app again with the drone (2.1, without `--record`) and choose the interface before going on.
+If the rates differ, the recording ended at the change, and only your ears check this step. Quit the app.
+
+In both cases, start the app again with the drone (2.1, without `--record`) and choose the interface before going on. Steps 2.3 and 2.4 need the app running on the interface.
 
 **2.3. Pick 96 kHz.** In Sample rate, choose 96000 Hz.
 

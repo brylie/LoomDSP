@@ -54,7 +54,7 @@ impl Keys for VirtualController {
 }
 
 /// Runs `loom midi-port`. Exit status 0 at the end of input, 1 if sending
-/// fails, and 2 when the port cannot be created.
+/// or reading the input fails, and 2 when the port cannot be created.
 pub fn run(options: &Options) -> ExitCode {
     let mut port = match VirtualController::create(&options.name) {
         Ok(port) => port,
@@ -79,22 +79,41 @@ pub fn run(options: &Options) -> ExitCode {
 }
 
 /// Plays every line of `input` on `keys`, on `channel` (0 to 15), then
-/// releases the notes still held. A line that cannot be read is reported
-/// on `errors` with its line number, and skipped.
-fn play(input: impl BufRead, keys: &mut impl Keys, channel: u8, errors: &mut impl Write) -> Result<(), HostError> {
+/// releases the notes still held. A line that cannot be read, as a step or
+/// as text, is reported on `errors` with its line number, and skipped. An
+/// error reading the input itself stops the run, after the release, so a
+/// script does not pass with steps left unplayed.
+fn play(input: impl BufRead, keys: &mut impl Keys, channel: u8, errors: &mut impl Write) -> Result<(), String> {
+    let mut failed = None;
     for (index, line) in input.lines().enumerate() {
-        let Ok(line) = line else { break };
-        match parse(&line) {
-            Ok(None) => {}
-            Ok(Some(Step::On { note, velocity })) => keys.note_on(channel, note, velocity)?,
-            Ok(Some(Step::Off { note })) => keys.note_off(channel, note)?,
-            Ok(Some(Step::Wait(time))) => std::thread::sleep(time),
+        let line = match line {
+            Ok(line) => line,
+            Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
+                let _ = writeln!(errors, "line {}: {e}", index + 1);
+                continue;
+            }
+            Err(e) => {
+                failed = Some(format!("reading line {}: {e}", index + 1));
+                break;
+            }
+        };
+        let sent = match parse(&line) {
+            Ok(None) => Ok(()),
+            Ok(Some(Step::On { note, velocity })) => keys.note_on(channel, note, velocity),
+            Ok(Some(Step::Off { note })) => keys.note_off(channel, note),
+            Ok(Some(Step::Wait(time))) => {
+                std::thread::sleep(time);
+                Ok(())
+            }
             Err(e) => {
                 let _ = writeln!(errors, "line {}: {e}", index + 1);
+                Ok(())
             }
-        }
+        };
+        sent.map_err(|e| e.to_string())?;
     }
-    keys.release_all()
+    keys.release_all().map_err(|e| e.to_string())?;
+    failed.map_or(Ok(()), Err)
 }
 
 /// Reads one line: `on NOTE [VELOCITY]`, `off NOTE`, `wait MS`, or nothing
@@ -211,6 +230,18 @@ mod tests {
         )
         .unwrap();
         assert_eq!(keys.0, ["on 3 60 100", "off 3 60", "on 3 62 90", "release"]);
+        let errors = String::from_utf8(errors).unwrap();
+        assert!(errors.starts_with("line 2: "), "{errors}");
+    }
+
+    /// A line that is not UTF-8 text is reported and skipped, not taken as
+    /// the end of input.
+    #[test]
+    fn a_line_that_is_not_text_is_skipped() {
+        let mut keys = Log::default();
+        let mut errors = Vec::new();
+        play(&b"on 60\n\xFF\noff 60\n"[..], &mut keys, 0, &mut errors).unwrap();
+        assert_eq!(keys.0, ["on 0 60 100", "off 0 60", "release"]);
         let errors = String::from_utf8(errors).unwrap();
         assert!(errors.starts_with("line 2: "), "{errors}");
     }

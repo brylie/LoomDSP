@@ -114,7 +114,7 @@ It comes in three pieces, all built on one helper.
 | `wait MS` | Waits this many milliseconds before the next line. |
 | empty, or starting with `#` | Nothing. |
 
-`NOTE` is a MIDI note number, 0 to 127. `--channel N` picks the MIDI channel, 1 to 16, 1 if not given. At the end of input (Ctrl+D in a terminal), the command sends a note off for every note it still holds, removes the port, and exits with status 0. A line it cannot read is reported on standard error with its line number, and skipped. If the port cannot be created (Windows, or Linux without the ALSA sequencer), the command says why and exits with status 2.
+`NOTE` is a MIDI note number, 0 to 127. `--channel N` picks the MIDI channel, 1 to 16, 1 if not given. At the end of input (Ctrl+D in a terminal), the command sends a note off for every note it still holds, removes the port, and exits with status 0. A line it cannot read, as a step or as UTF-8 text, is reported on standard error with its line number, and skipped. If reading standard input itself fails, the command releases held notes and exits with status 1, so a script never passes with lines left unplayed. If the port cannot be created (Windows, or Linux without the ALSA sequencer), the command says why and exits with status 2.
 
 A person types the lines in a terminal to play the app by hand. A script pipes them in. Example, for the manual check of #26:
 
