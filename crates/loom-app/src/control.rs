@@ -1037,7 +1037,7 @@ impl App {
         let Some(stats) = self.audio_stats.clone() else {
             return json!({
                 "device": null, "rate": null, "buffer": null, "callbacks": 0,
-                "advanced": null, "stream_errors": 0, "overruns": 0,
+                "advanced": null, "stream_errors": 0, "start_overloads": 0, "overruns": 0,
             });
         };
         let now = stats.snapshot();
@@ -1057,6 +1057,7 @@ impl App {
             "callbacks": now.callbacks,
             "advanced": now.callbacks > before,
             "stream_errors": now.stream_errors,
+            "start_overloads": now.start_overloads,
             "overruns": now.overruns,
         })
     }
@@ -1760,6 +1761,7 @@ mod tests {
         assert_eq!(started["advanced"], json!(true), "a new stream counts from its start");
         assert_eq!(started["buffer"], json!(256));
         assert_eq!(started["stream_errors"], json!(0));
+        assert_eq!(started["start_overloads"], json!(0));
 
         let stalled = audio(run(&mut app, r#"{"cmd": "snapshot"}"#));
         assert_eq!(stalled["callbacks"], json!(STALL_AFTER));

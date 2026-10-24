@@ -111,7 +111,7 @@ Example, the rate and buffer steps of Part 2:
 > {"cmd": "audio", "buffer": 64}
 > {"cmd": "wait", "ms": 500}
 > {"cmd": "snapshot"}
-< {"ok": true, "snapshot": {...}, "audio": {"device": "BlackHole 2ch", "rate": 96000, "buffer": 64, "callbacks": 1520, "advanced": true, "stream_errors": 0, "overruns": 0}}
+< {"ok": true, "snapshot": {...}, "audio": {"device": "BlackHole 2ch", "rate": 96000, "buffer": 64, "callbacks": 1520, "advanced": true, "stream_errors": 0, "start_overloads": 0, "overruns": 0}}
 ```
 
 ### The `audio` field
@@ -125,7 +125,8 @@ The `snapshot` reply gets a second field, `audio`, next to `snapshot`. It reads 
 | `buffer` | The largest buffer the device has asked for so far, in frames, or `null` before the first callback |
 | `callbacks` | Callbacks since this stream started. With `--fake-audio`, the timer's callbacks |
 | `advanced` | True when `callbacks` grew since the previous `snapshot` reply, or since the stream started if this stream had no `snapshot` yet. `null` when nothing plays |
-| `stream_errors` | Errors the backend reported since the stream started |
+| `stream_errors` | Errors the backend reported since the stream started, except `start_overloads`. The stats bar counts these as dropouts |
+| `start_overloads` | Overload notices that came before the stream's first callback. They drop no audio and are not dropouts ([panels.md](panels.md#audio-load-and-dropouts-in-the-stats-bar)) |
 | `overruns` | Callbacks that took longer than their buffer |
 
 `--dump-ui` stays as it is: it has no stream to read.

@@ -284,6 +284,7 @@ The whole app still redraws twice a second for the stats bar's audio numbers. "N
 ### Audio load and dropouts in the stats bar
 
 - The stats bar always shows the audio load (the latest callback as a share of its time budget, and the highest so far) and the dropout count: callbacks that overran their buffer, plus errors reported by the audio device.
+- An overload notice from the device that comes before the stream's first callback is not a dropout. No audio was rendered yet, so none was lost. macOS sends one as a stream starts with a very small buffer (32 frames), while the device switches to it. *Why:* counting it turned the count red each time a performer chose a small buffer, for a glitch that never happened. A count that cries wolf gets ignored. (Found on BlackHole 2ch, 2026-10-24, [#26](https://github.com/brylie/LoomDSP/issues/26).)
 - Load is shown normally below 70%, in amber from 70%, and in red from 90%.
 - The dropout count is red for 10 seconds after it grows.
 - *Why:* a performer needs a warning before a problem is audible (FR-PERF-04), and must notice when one just happened. A count that stayed red forever would soon be ignored.
@@ -296,6 +297,7 @@ The whole app still redraws twice a second for the stats bar's audio numbers. "N
 - [x] Levels map -60 dB and below to empty and 0 dB to full. They rise at once and fall by the full range in a second. The peak line is never below the RMS bar.
 - [x] The telemetry thread sends nothing while the shown levels stay the same.
 - [x] Load below 70% is normal, from 70% amber, from 90% red. The dropout count is red for 10 seconds after it grows.
+- [x] An overload notice before a stream's first callback is not counted as a dropout (`an_overload_before_the_first_callback_is_not_a_stream_error`). Checked on macOS: BlackHole 2ch at 32 frames shows `dropouts 0`.
 - [x] A meter module after the VCA in `subtractive.ron` rises when a note plays and falls after it stops. A meter on the filter's output stays up with no note, because the saw runs all the time and only the VCA is gated. Tested twice: as meter readings in `loom-modules/tests/panels.rs`, and as drawn levels and colour bands in `loom-app/src/live.rs`. (This was a manual check that said "after the filter"; [#92](https://github.com/brylie/LoomDSP/issues/92) found that wording wrong.)
 
 ### Out of scope
