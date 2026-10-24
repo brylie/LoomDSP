@@ -2,8 +2,8 @@
 //! (FR-LIB-17, ADR-0013).
 
 use loom_core::{
-    Channels, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, Polarity, PortDefault, PortIo, PortSpec, ProcessContext,
-    SignalType, Widget,
+    Channels, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, Polarity, PortDefault, PortIo,
+    PortSpec, ProcessContext, SignalType, Widget,
 };
 
 /// `loom.display.meter`: a mono level meter. Passes its input through, so it
@@ -117,7 +117,11 @@ pub static SCOPE: ModuleDescriptor = ModuleDescriptor {
     panel: Panel::new(
         9,
         3,
-        &[Widget::knob(0, 0, "window"), Widget::toggle(3, 0, "auto"), Widget::knob(6, 0, "level")],
+        &[
+            Widget::knob(0, 0, "window"),
+            Widget::toggle(3, 0, "auto"),
+            Widget::knob(6, 0, "level"),
+        ],
     ),
     displays: &[],
 };

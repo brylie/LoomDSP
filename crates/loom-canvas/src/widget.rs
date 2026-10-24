@@ -448,10 +448,7 @@ enum Interaction {
     /// A button is held. Pointer up reports a release, wherever the pointer
     /// is, so a release always follows the press. The tile does not move.
     /// The app decides whether that release changes a parameter.
-    Holding {
-        module: u32,
-        widget: usize,
-    },
+    Holding { module: u32, widget: usize },
     Wiring {
         from: PortRef,
         /// True when the drag began by pulling a cable off an input. Then a
@@ -3844,7 +3841,10 @@ mod tests {
             index: 0,
         });
         let [a, b, c, d] = crate::scene::cable_curve(from.unwrap(), to.unwrap());
-        let middle = Point::new((a.x + 3.0 * b.x + 3.0 * c.x + d.x) / 8.0, (a.y + 3.0 * b.y + 3.0 * c.y + d.y) / 8.0);
+        let middle = Point::new(
+            (a.x + 3.0 * b.x + 3.0 * c.x + d.x) / 8.0,
+            (a.y + 3.0 * b.y + 3.0 * c.y + d.y) / 8.0,
+        );
         let events = right_click(&canvas, &mut State::default(), middle);
         assert!(
             matches!(

@@ -102,10 +102,14 @@ mod tests {
                 }
                 // The scope's `auto` is a toggle (panels.md, Scope module).
                 if descriptor.id == "loom.display.scope" && param.name == "auto" {
-                    assert_eq!(widget.map(|w| w.kind), Some(loom_core::WidgetKind::Toggle), "scope.auto");
+                    assert_eq!(
+                        widget.map(|w| w.kind),
+                        Some(loom_core::WidgetKind::Toggle),
+                        "scope.auto"
+                    );
                     continue;
                 }
-                let knob =widget.is_some_and(|w| w.kind == loom_core::WidgetKind::Knob);
+                let knob = widget.is_some_and(|w| w.kind == loom_core::WidgetKind::Knob);
                 let expected = !inspector_only.contains(&(descriptor.id, param.name));
                 assert_eq!(knob, expected, "{}.{}", descriptor.id, param.name);
             }
