@@ -1,6 +1,7 @@
-# cargo-nextest settings. CI's Coverage job runs the tests with nextest so it
-# can write a JUnit report for Codecov's test results. The Test job and local
-# runs still use plain `cargo test`.
+# cargo-nextest settings. The coverage task (`mise run coverage`, also run by
+# CI's Coverage job and the pre-push hook) runs the tests with nextest so it
+# can write a JUnit report for Codecov's test results. The Test job and
+# `mise run test` still use plain `cargo test`.
 
 # `--profile ci` writes target/nextest/ci/junit.xml.
 [profile.ci]

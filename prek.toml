@@ -1,17 +1,23 @@
 # Git hooks for LoomDSP, run by prek (https://prek.j178.dev).
 #
 # Setup, once per clone:
-#   mise install          # installs prek, typos, and cargo-deny (see mise.toml)
+#   mise trust            # let mise read mise.toml
+#   mise install          # installs Rust, prek, typos, cargo-deny, cargo-llvm-cov, cargo-nextest
 #   prek install          # installs the pre-commit and pre-push hooks
 #
 # Run by hand:
-#   prek run              # checks staged files
-#   prek run --all-files  # checks everything
+#   prek run                                     # checks staged files
+#   prek run --all-files                         # every pre-commit check
+#   prek run --hook-stage pre-push --all-files   # every pre-push check
 #
 # Why two stages: checks that take a second or two run on every commit, so
-# you hear about problems while the change is fresh. Slower checks (tests,
-# dependency licences) run before push. CI runs the same checks and more, so
-# these hooks give early feedback; they are not the final gate.
+# you hear about problems while the change is fresh. Slower checks (tests
+# with coverage, docs, the WebAssembly build, dependency licences) run before
+# push.
+#
+# The Rust checks call the tasks in mise.toml, which CI runs too, so a push
+# that passes these hooks passes the same checks in CI. CI also runs the
+# tests on Windows and Linux and checks the minimum Rust version.
 
 default_install_hook_types = ["pre-commit", "pre-push"]
 default_stages = ["pre-commit"]
@@ -85,7 +91,7 @@ pass_filenames = false
 id = "cargo-clippy"
 name = "cargo clippy"
 # Same lint policy as CI (workspace Cargo.toml), with warnings as errors.
-entry = "cargo clippy --workspace --all-targets --quiet -- -D warnings"
+entry = "mise run --quiet clippy"
 language = "system"
 files = "(\\.rs|Cargo\\.toml|Cargo\\.lock)$"
 pass_filenames = false
@@ -95,6 +101,7 @@ require_serial = true
 id = "typos"
 name = "typos (spelling)"
 # --force-exclude applies _typos.toml excludes to the files prek passes in.
+# Only the changed files are checked here; `mise run typos` checks them all.
 entry = "typos --force-exclude"
 language = "system"
 types = ["text"]
@@ -104,12 +111,45 @@ types = ["text"]
 # ---------------------------------------------------------------------------
 
 [[repos.hooks]]
-id = "cargo-test"
-name = "cargo test"
-# Debug build, so the no-allocation test on the audio path is active.
-entry = "cargo test --workspace --quiet"
+id = "coverage"
+name = "cargo test with line coverage"
+# Runs every test once (debug build, so the no-allocation test on the audio
+# path is active) and fails when line coverage is under the threshold that
+# GitHub enforces on pull requests (LOOM_COVERAGE_MIN in mise.toml).
+entry = "mise run --quiet coverage"
 language = "system"
-files = "(\\.rs|\\.ron|Cargo\\.toml|Cargo\\.lock)$"
+files = "(\\.rs|\\.ron|\\.wav|Cargo\\.toml|Cargo\\.lock|mise\\.toml)$"
+pass_filenames = false
+require_serial = true
+stages = ["pre-push"]
+
+[[repos.hooks]]
+id = "doctest"
+name = "cargo test --doc (examples in the API docs)"
+# Coverage does not run doc tests, so they run here.
+entry = "mise run --quiet doctest"
+language = "system"
+files = "(\\.rs|\\.md|Cargo\\.toml|Cargo\\.lock)$"
+pass_filenames = false
+require_serial = true
+stages = ["pre-push"]
+
+[[repos.hooks]]
+id = "cargo-doc"
+name = "cargo doc (warnings as errors)"
+entry = "mise run --quiet docs"
+language = "system"
+files = "(\\.rs|\\.md|Cargo\\.toml|Cargo\\.lock)$"
+pass_filenames = false
+require_serial = true
+stages = ["pre-push"]
+
+[[repos.hooks]]
+id = "wasm"
+name = "WebAssembly build of the engine crates"
+entry = "mise run --quiet wasm"
+language = "system"
+files = "(\\.rs|Cargo\\.toml|Cargo\\.lock)$"
 pass_filenames = false
 require_serial = true
 stages = ["pre-push"]
@@ -117,7 +157,7 @@ stages = ["pre-push"]
 [[repos.hooks]]
 id = "cargo-deny"
 name = "cargo deny (licences, advisories)"
-entry = "cargo deny check"
+entry = "mise run --quiet deny"
 language = "system"
 files = "(Cargo\\.toml|Cargo\\.lock|deny\\.toml)$"
 pass_filenames = false
