@@ -1,0 +1,60 @@
+/* Plain CSS, no build step. Colours switch with the system theme. */
+:root {
+  --bg: #fafaf7;
+  --fg: #1d1d22;
+  --muted: #5a5a66;
+  --accent: #b4410f;
+  --accent-fg: #ffffff;
+  --card: #ffffff;
+  --line: #deded6;
+  --code: #efeee8;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15151a;
+    --fg: #ecece6;
+    --muted: #a3a3b0;
+    --accent: #ff8a4c;
+    --accent-fg: #15151a;
+    --card: #1e1e25;
+    --line: #34343e;
+    --code: #24242c;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 1.0625rem/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+a { color: var(--accent); }
+a:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+main, .top, footer { max-width: 60rem; margin: 0 auto; padding: 0 1rem; }
+.top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0.5rem 1.5rem; padding-top: 1rem; padding-bottom: 1rem; }
+.brand { font-weight: 700; font-size: 1.25rem; color: var(--fg); text-decoration: none; }
+nav { display: flex; flex-wrap: wrap; gap: 0.25rem 1.25rem; }
+nav a { color: var(--fg); text-decoration: none; }
+nav a:hover { text-decoration: underline; }
+section { padding: 2rem 0; }
+h1 { font-size: clamp(2rem, 6vw, 3.25rem); line-height: 1.1; margin: 0.5rem 0 1rem; }
+h2 { font-size: 1.75rem; margin: 0 0 1rem; }
+h3 { margin: 0 0 0.25rem; font-size: 1.1rem; }
+.lead { font-size: 1.2rem; max-width: 40rem; color: var(--muted); }
+.badge { display: inline-block; margin: 0; padding: 0.1rem 0.75rem; border: 1px solid var(--accent); border-radius: 999px; color: var(--accent); font-size: 0.875rem; }
+.actions { display: flex; flex-wrap: wrap; gap: 0.75rem; margin: 1.5rem 0; }
+.button { display: inline-block; padding: 0.7rem 1.4rem; border: 2px solid var(--accent); border-radius: 0.5rem; background: var(--accent); color: var(--accent-fg); font-weight: 600; text-decoration: none; }
+.button.ghost { background: transparent; color: var(--accent); }
+.button:hover { filter: brightness(1.1); }
+img { max-width: 100%; height: auto; border-radius: 0.5rem; border: 1px solid var(--line); }
+figure { margin: 2rem 0 0; }
+figcaption { color: var(--muted); font-size: 0.95rem; margin-top: 0.5rem; }
+.cards, .points, .links { list-style: none; padding: 0; margin: 0; }
+.cards { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); }
+.cards li { background: var(--card); border: 1px solid var(--line); border-radius: 0.5rem; padding: 1rem; }
+.cards p { margin: 0; color: var(--muted); }
+.points li, .links li { padding: 0.4rem 0; }
+pre { overflow-x: auto; padding: 1rem; background: var(--code); border-radius: 0.5rem; }
+code { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 0.95em; }
+footer { border-top: 1px solid var(--line); margin-top: 2rem; padding-top: 1rem; padding-bottom: 2rem; color: var(--muted); font-size: 0.95rem; }
+footer p { margin: 0.25rem 0; }

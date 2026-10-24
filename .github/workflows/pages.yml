@@ -1,0 +1,60 @@
+name: Pages
+
+# Publishes the website in site/ to GitHub Pages. The screenshots come from
+# docs/images/ so the repository keeps one copy of each.
+#
+# One-time setup: Settings, Pages, Source: GitHub Actions.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "docs/images/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+# Do not cancel a deploy that is running.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build site
+    runs-on: ubuntu-latest
+    # configure-pages reads the Pages settings, which private repositories need.
+    permissions:
+      contents: read
+      pages: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/configure-pages@v5
+      - name: Stage the site
+        run: |
+          mkdir -p _site/images
+          cp -R site/. _site/
+          cp docs/images/*.png _site/images/
+          rm -f _site/README.md
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

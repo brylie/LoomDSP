@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LoomDSP: a free modular synthesizer and sound lab</title>
+  <meta name="description" content="LoomDSP is a free, open-source modular synthesizer and sound lab. Patch it, play it live with MIDI, and share it. Early alpha.">
+  <meta property="og:title" content="LoomDSP">
+  <meta property="og:description" content="Patch it, play it live, share it. A free, open-source modular synthesizer and sound lab.">
+  <meta property="og:type" content="website">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="#">LoomDSP</a>
+    <nav aria-label="Main">
+      <a href="#why">Why</a>
+      <a href="#download">Download</a>
+      <a href="#learn">Learn</a>
+      <a href="https://github.com/brylie/LoomDSP">GitHub</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <p class="badge">Early alpha</p>
+      <h1>Patch it. Play it live. Share it.</h1>
+      <p class="lead">LoomDSP is a free, open-source modular synthesizer and sound lab. Build instruments and effects by connecting small modules on a canvas. Hear every change as you make it. Then play the result with a MIDI keyboard.</p>
+      <p class="actions">
+        <a class="button" href="#download">Download</a>
+        <a class="button ghost" href="https://github.com/brylie/LoomDSP">View on GitHub</a>
+      </p>
+      <img class="shot" src="images/readme-subtractive.png" width="2720" height="1320" alt="A subtractive synth patched in the LoomDSP desktop app: a MIDI note, an oscillator, a filter, two envelopes, and an amplifier, with the filter's controls in the inspector.">
+    </section>
+
+    <section id="who">
+      <h2>Who it is for</h2>
+      <ul class="cards">
+        <li><h3>Live performers</h3><p>Play patches on stage with your MIDI controllers. Change them while they sound.</p></li>
+        <li><h3>Sound designers</h3><p>Build a sound from the smallest parts. Try odd ideas fast and keep the ones you like.</p></li>
+        <li><h3>Modular fans</h3><p>Patch anything to anything, with real feedback loops, and no rack to buy.</p></li>
+        <li><h3>Curious learners</h3><p>Every module explains itself on hover. Short guides explain the ideas behind the sound.</p></li>
+      </ul>
+    </section>
+
+    <section id="why">
+      <h2>What makes it different</h2>
+      <ul class="points">
+        <li><strong>Edit while it plays.</strong> Add, remove, and rewire modules during a performance with no dropouts.</li>
+        <li><strong>Patch anything to anything.</strong> Audio can shape a filter, and an envelope can drive pitch. Colours guide you but never block a cable.</li>
+        <li><strong>Real feedback loops.</strong> Patch an oscillator back into itself and it sounds right, one sample at a time.</li>
+        <li><strong>The same sound every time.</strong> A patch gives identical audio on every run, at any buffer size.</li>
+        <li><strong>Safe for your ears.</strong> A limiter and a short fade-in sit before the output, so a wild patch never blasts you.</li>
+        <li><strong>Fast and native.</strong> Drawn on the GPU. No web view, no Electron.</li>
+        <li><strong>Open all the way down.</strong> Apache-2.0 code. Patches are plain text files that never run code, and the patches you make are yours.</li>
+      </ul>
+      <figure>
+        <img src="images/readme-fm-feedback.png" width="2400" height="840" loading="lazy" alt="Feedback FM in LoomDSP: a sine wave's output feeds back into its own pitch. A dashed cable marks where the engine added a one-sample delay.">
+        <figcaption>Feedback FM. The sine feeds its own pitch. The dashed cable shows where the engine added a one-sample delay.</figcaption>
+      </figure>
+    </section>
+
+    <section id="download">
+      <h2>Download</h2>
+      <p>LoomDSP is in early alpha. It is not a finished instrument yet, and patches may stop loading between versions.</p>
+      <p class="actions">
+        <a class="button" href="https://github.com/brylie/LoomDSP/releases/latest">Get the latest release</a>
+      </p>
+      <p>Pick the file for your system on the release page. If there is no download for your system yet, build it from source:</p>
+<pre><code>git clone https://github.com/brylie/LoomDSP
+cd LoomDSP
+cargo run --release -p loom-app -- examples/patches/subtractive.ron</code></pre>
+      <p>You need <a href="https://rustup.rs">Rust</a> 1.99 or newer. On Linux, also install the ALSA development package (<code>libasound2-dev</code> on Debian and Ubuntu). The first build takes a few minutes.</p>
+    </section>
+
+    <section id="learn">
+      <h2>Learn and get involved</h2>
+      <ul class="links">
+        <li><a href="https://github.com/brylie/LoomDSP/blob/main/docs/guide/getting-started.md">Getting started</a>: run the app and patch your first sound</li>
+        <li><a href="https://github.com/brylie/LoomDSP/blob/main/docs/learn/README.md">Learn</a>: the theory behind the design, for musicians and developers</li>
+        <li><a href="https://github.com/brylie/LoomDSP/blob/main/docs/product/vision.md">Vision</a> and <a href="https://github.com/brylie/LoomDSP/blob/main/docs/product/roadmap.md">roadmap</a>: where LoomDSP is going</li>
+        <li><a href="https://github.com/brylie/LoomDSP/blob/main/docs/README.md">All documentation</a></li>
+        <li><a href="https://github.com/brylie/LoomDSP/issues">Report an issue</a> or tell us what felt good and what got in the way</li>
+        <li><a href="https://github.com/brylie/LoomDSP/blob/main/CONTRIBUTING.md">Contribute</a>: most starter tasks are new modules</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    <p>LoomDSP is open source under the <a href="https://github.com/brylie/LoomDSP/blob/main/LICENSE">Apache-2.0 licence</a>.</p>
+    <p><a href="https://github.com/brylie/LoomDSP">GitHub</a></p>
+  </footer>
+</body>
+</html>

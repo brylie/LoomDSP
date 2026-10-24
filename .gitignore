@@ -28,3 +28,4 @@ rustc-ice-*.txt
 
 # Release archives (scripts/package-release.sh)
 /dist
+/site/images/

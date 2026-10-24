@@ -90,9 +90,6 @@ jobs:
       code-quality: write
       # Find the pull request of a pushed commit.
       pull-requests: read
-    # Job-level, so the Codecov steps' `if` can see it.
-    env:
-      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -137,23 +134,32 @@ jobs:
           path: |
             target/lcov.info
             target/cobertura.xml
+      # Only this step and the uploads see the Codecov token. The steps
+      # above build and run code from the pull request, so the token is not
+      # in the job's env. This step only says whether the secret is set.
+      - name: Codecov token
+        id: codecov
+        if: ${{ !cancelled() }}
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        run: echo "set=$([ -n "$CODECOV_TOKEN" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
       # Optional: set the CODECOV_TOKEN repository secret to publish reports
       # and PR comments on codecov.io. Without it, this step is skipped.
       - name: Upload to Codecov
-        if: ${{ !cancelled() && env.CODECOV_TOKEN != '' && hashFiles('target/lcov.info') != '' }}
+        if: ${{ !cancelled() && steps.codecov.outputs.set == 'true' && hashFiles('target/lcov.info') != '' }}
         uses: codecov/codecov-action@v7
         with:
-          token: ${{ env.CODECOV_TOKEN }}
+          token: ${{ secrets.CODECOV_TOKEN }}
           slug: brylie/LoomDSP
           files: target/lcov.info
           disable_search: true
           fail_ci_if_error: false
       # Also after a test failure, so Codecov shows which tests failed.
       - name: Upload test results to Codecov
-        if: ${{ !cancelled() && env.CODECOV_TOKEN != '' }}
+        if: ${{ !cancelled() && steps.codecov.outputs.set == 'true' }}
         uses: codecov/codecov-action@v7
         with:
-          token: ${{ env.CODECOV_TOKEN }}
+          token: ${{ secrets.CODECOV_TOKEN }}
           slug: brylie/LoomDSP
           report_type: test_results
           files: target/nextest/ci/junit.xml
@@ -190,8 +196,10 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
       # PipeWire with its ALSA plugin, which is how cpal reaches it. A null
-      # sink is the loopback: the test plays into it and captures its
+      # sink is the loopback: the tests play into it and capture its
       # monitor (docs/design/audio-qa.md, Device capture).
       - run: sudo apt-get update && sudo apt-get install -y libasound2-dev pipewire pipewire-alsa pipewire-pulse wireplumber pulseaudio-utils
       - name: Null sink
@@ -202,13 +210,44 @@ jobs:
           pactl set-default-sink loom_null
           pactl set-default-source loom_null.monitor
       - uses: Swatinem/rust-cache@v2
-      # Only the stop that must fade out. Its partner, which checks that a
-      # fixed 100 ms stop limit shows as a cut, cannot fail here: the
-      # PipeWire ALSA plugin plays out what it was handed after a stream
-      # closes, so it never cuts.
-      - run: cargo test -p loom-host-desktop -- --ignored --exact device_tests::a_stop_with_large_buffers_fades_out_on_the_device
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: taiki-e/install-action@nextest
+      # Only the stop that must fade out, and `loom capture` itself. The
+      # partner of the stop test, which checks that a fixed 100 ms stop
+      # limit shows as a cut, cannot fail here: the PipeWire ALSA plugin
+      # plays out what it was handed after a stream closes, so it never
+      # cuts. Coverage is measured too: the Coverage job has no device, so
+      # the device code is covered only here. `device_tests.rs` is left out,
+      # as in the Coverage job (`mise run coverage`).
+      - name: Loopback tests, with coverage
+        run: >-
+          cargo llvm-cov nextest -p loom-host-desktop -p loom-cli --run-ignored only
+          -E 'test(=device_tests::a_stop_with_large_buffers_fades_out_on_the_device) | test(=captures_a_loopback_device)'
+          --ignore-filename-regex 'device_tests\.rs$'
+          --lcov --output-path lcov.info
         env:
           LOOM_LOOPBACK: pipewire
+      # Only this step and the uploads see the Codecov token. The steps
+      # above build and run code from the pull request, so the token is not
+      # in the job's env. This step only says whether the secret is set.
+      - name: Codecov token
+        id: codecov
+        if: ${{ !cancelled() }}
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        run: echo "set=$([ -n "$CODECOV_TOKEN" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+      # Codecov merges this report with the Coverage job's. Without the
+      # secret (a pull request from a fork), this step is skipped.
+      - name: Upload to Codecov
+        if: ${{ !cancelled() && steps.codecov.outputs.set == 'true' && hashFiles('lcov.info') != '' }}
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: brylie/LoomDSP
+          files: lcov.info
+          disable_search: true
+          flags: loopback
+          fail_ci_if_error: false
 
   docs:
     name: Docs (NFR-OSS-03)
