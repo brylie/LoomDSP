@@ -3,7 +3,7 @@
 Tools that let tests, scripts, and QA agents check what the app actually plays, so safety checks on the final output do not depend on a person listening.
 
 - **Kind:** living specification.
-- **Status:** Implemented. Agreed and built in [#320](https://github.com/brylie/LoomDSP/pull/320).
+- **Status:** Parts 1 to 3: Implemented. Agreed and built in [#320](https://github.com/brylie/LoomDSP/pull/320). Part 4: **Draft**, not agreed yet.
 - **Decision behind it:** None. It builds on [output safety](output-safety.md) (ADR-0019), the [control channel](control-channel.md), and the `devices::Host` trait from the [preferences spec](preferences.md).
 - **Use case and requirements:** Developer tooling. It protects UC3 (perform live), FR-PERF-08, NFR-SND-02, and NFR-SND-03 by testing them in the app, not only in the engine.
 - **Background:** [Output safety explainer](../learn/output-safety.md).
@@ -95,6 +95,50 @@ When the file cannot be read, or an option is not usable, the command exits with
 
 The measurements are functions in `loom-test`, so the app tests of Part 1 and the command of Part 3 measure in the same way.
 
+### Part 4: capture what reached a device (Draft)
+
+*Why:* `--record` saves what the engine rendered, before the device. It cannot see what happens after: a stream stopped before the device played its last buffers, a device that goes silent after a rate change, a gap at a device change. In the manual check for #26, Open with 4096-frame buffers clicked because a fixed 100 ms stop limit cut the stream before the fade reached the device. The `--record` file was clean, and only ears caught it.
+
+A loopback device closes that gap. It is a virtual device whose output is also an input: what an app plays into it can be recorded from it, sample for sample.
+
+| System | Loopback device |
+|---|---|
+| macOS | BlackHole (free, MIT licence), or any aggregate device that loops back. |
+| Linux | A PipeWire or PulseAudio null sink, captured from its monitor; or ALSA `snd-aloop`. |
+| Windows | Not covered yet. WASAPI loopback capture of an output is a different API in `cpal`; add it when a check needs it. |
+
+A new `loom` subcommand records an input device to a WAV file:
+
+```sh
+loom capture --device <part of name> -o out.wav --seconds N
+```
+
+| Option | Effect |
+|---|---|
+| `--device NAME` | Case-insensitive part of the input device name, as for `loom play`. Required. *Why:* the default input is usually a microphone, which is never what a QA run wants. |
+| `-o FILE`, `--output FILE` | The WAV file to write: 32-bit float, stereo, at the device's rate. |
+| `--seconds N` | How long to record. Required. |
+| `--sample-rate HZ` | Ask the device for this rate. The device default otherwise. |
+
+The file holds the device's first two channels. A mono device is written to both. When the stream is running, `loom capture` prints one line to stderr, `Capturing "<device>" at <rate> Hz`, so a script can wait for it before it starts the app. `loom devices` also lists audio inputs, so the name can be found.
+
+A QA run starts the capture, plays the app into the loopback output, and checks the file with `loom analyze`:
+
+```sh
+loom capture --device blackhole -o /tmp/device.wav --seconds 6 &
+loom-app examples/dev/check-dc.ron --output-safety off --device blackhole --buffer 4096 --control-script open-new-quit.jsonl
+wait
+loom analyze /tmp/device.wav --max-step 0.01
+```
+
+**Exit status.** 0 when the file was written with every frame. 2 when the device cannot be opened, the file cannot be written, or frames were dropped. *Why:* a dropped frame is a jump in the file that the device never played, so a step check on it would fail for the wrong reason. A script can tell a broken run (2) from a failed check in `loom analyze` (1).
+
+**Relation to audio input (#29).** Capture is a development tool, not audio input for patches. It opens a `cpal` input stream in `loom-host-desktop` and writes it to a file through the same ring and writer thread as `--record` (`Recorder`). Nothing reaches an engine, and there is no Audio In module. When #29 is built, it can reuse the device lookup and the input stream setup, but it has its own spec: latency, channel routing, and running input and output on two clocks are design questions for patches, not for this tool.
+
+**Clock drift.** A loopback device has one clock for both sides, so capture and playback cannot drift apart. When the input and output are different devices (an interface's output wired to another device's input), their clocks drift a little. Capture never resamples (rule 10). The checks of `loom analyze` (peak, step, DC) do not compare the capture with anything sample by sample, so drift does not change them. For the same reason, a capture is never compared sample by sample with a `--record` file or a reference render: the device adds latency, and the start time depends on the machine.
+
+**CI.** Not in CI for now. The hardware test is ignored by default, like the other device tests. CI covers the parts that need no device: the writer with a fake input, and the command's errors. Running capture on a Linux runner with a PulseAudio or PipeWire null sink looks possible, but it needs a sound server on the runner and `cpal` reaching it through ALSA. That is a follow-up issue, so this part does not wait on it.
+
 ## Rules
 
 1. **Time in the stepped output is counted in frames, never in wall-clock time.** A stop that waits for silence waits a number of frames. *Why:* the same test then gives the same tape on a fast laptop and a busy CI machine, and it needs no sleeps.
@@ -106,6 +150,8 @@ The measurements are functions in `loom-test`, so the app tests of Part 1 and th
 7. **Recording never waits on the audio thread.** The existing writer thread and its dropped-frame count stay. *Why:* real-time safety (hard rule 1).
 8. **`loom analyze` only measures.** It does not judge whether a sound is good. Checks pass or fail only on the limits given. *Why:* the same rule as `sample` on the control channel: tools measure, and a person or the test decides what is right for a patch.
 9. **Measurements are plain arithmetic on the samples.** Peak is not oversampled, and DC is a plain mean. *Why:* the numbers must be easy to check by hand, and must match what the engine's output safety stage limits (it also works on samples, not true peaks).
+10. **Capture writes what the device delivered, nothing more** (Part 4). It does not resample, align, trim, or fill gaps. Dropped frames are counted and reported, and make the run fail with status 2. *Why:* the point is to see what the device really did. Any repair would hide the very fault we look for.
+11. **Capture never waits on the audio thread** (Part 4). Its input callback only pushes into a ring, as `--record` does. *Why:* real-time safety (hard rule 1), and a slow callback could itself drop input.
 
 ## Acceptance criteria
 
@@ -136,6 +182,14 @@ Each is a `loom-app` test that uses the stepped output, through `App::new` and `
 - [x] A NaN sample fails every check given; with no checks, the file is only measured.
 - [x] A NaN or infinite time or limit, and `--from` after `--to`, exit with status 2.
 
+### Part 4 (Draft)
+
+- [ ] `loom capture` writes a 32-bit float stereo WAV at the device's rate, with the device's first two channels, or a mono channel on both.
+- [ ] The writer is tested with a fake input in CI: frames pushed are written in order, and dropped frames are counted.
+- [ ] A device that does not match exits with status 2 and names what it looked for. `loom devices` lists audio inputs.
+- [ ] **Hardware test, ignored by default.** Given a Constant of 0.5 into Audio Out with output safety Off, playing into a loopback device (`LOOM_LOOPBACK`, for example `BlackHole`) with 4096-frame buffers, when the engine fades out and the stream stops, then the capture of the loopback holds the DC and the fade, and no step is larger than a 10 ms fade from 0.5 allows. A second test stops the same stream at a fixed 100 ms limit, as before the #26 fix, and checks that the capture does show the cut. *Why:* a check that cannot fail proves nothing.
+- [ ] The manual check for #26 (`docs/dev/manual-checks/issue-26-devices.md`) uses capture where it now relies on ears for clicks at a stop or a device change.
+
 ### Manual
 
 - [x] Run the Part 2 script and `loom analyze` on its file, and list the result in the pull request.
@@ -147,6 +201,9 @@ Each is a `loom-app` test that uses the stepped output, through `App::new` and `
 - **A meter or warning for the final output in the app.** That is [#130](https://github.com/brylie/LoomDSP/issues/130).
 - **True-peak (oversampled) measurement, loudness (LUFS), and spectrum analysis.** Add them when a check needs them.
 - **Starting and stopping a recording from the control channel.** A run records from start to quit.
+- **Audio input for patches** ([#29](https://github.com/brylie/LoomDSP/issues/29)). Capture only writes a file (Part 4).
+- **Windows loopback capture, and capture in CI.** Follow-up issues (Part 4).
+- **Finding silences.** A device that goes silent shows up today as a short file peak, an RMS near zero, or a peak of 0 in a `--from`/`--to` window. A measurement of the longest silent stretch, with a check, can be added to `loom analyze` when a check needs it.
 
 ## Open points
 
