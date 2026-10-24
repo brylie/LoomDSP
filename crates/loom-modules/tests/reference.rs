@@ -151,6 +151,22 @@ fn meter() {
 }
 
 #[test]
+fn scope() {
+    // A pass-through, whatever its parameters: they only tell the app how to
+    // draw. The reference is its input, a 220 Hz sine at half level.
+    let sine = |frame: usize| 0.5 * (frame as f32 * 220.0 / 48_000.0 * std::f32::consts::TAU).sin();
+    let render = Harness::new(&display::SCOPE)
+        .seconds(0.02)
+        .param("window", 0.5)
+        .param("auto", 0.0)
+        .param("level", 0.3)
+        .input("in", Signal::from_fn(sine))
+        .check(reference!("scope"));
+    let expected: Vec<f32> = (0..render.frames()).map(sine).collect();
+    assert_eq!(render.output("out"), expected.as_slice());
+}
+
+#[test]
 fn divide() {
     // A trigger every 10 ms, divided by 3 with offset 1, reset at 55 ms.
     let render = Harness::new(&logic::DIVIDE)
@@ -265,6 +281,7 @@ fn every_dsp_module_has_a_reference_test() {
         &math::CONSTANT,
         &midi::NOTE_IN,
         &display::METER,
+        &display::SCOPE,
         &logic::DIVIDE,
         &ui::BUTTON,
         &time::DELAY,

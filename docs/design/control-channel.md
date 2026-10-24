@@ -56,6 +56,7 @@ Any client that can write lines to a Unix socket works, such as `nc -U /tmp/loom
 | `remove` | `modules` | Removes modules, as Delete does | |
 | `connect` | `from`, `to` (`"3:out"`, `"4:in"`) | Connects a cable | |
 | `disconnect` | `to` | Removes the cable into this input | |
+| `probe` | `from` (an output, `"3:out"`), `kind` (`scope` or `meter`) | Adds a scope or a level meter fed by the output, as the probe menu's Add scope and Add meter do ([panels](panels.md#add-scope-and-add-meter)) | `module`: the new module ID |
 | `undo`, `redo` | | As the toolbar buttons | The next `undo` and `redo` step names |
 | `open` | `path` | Opens a patch, as File > Open does after the dialog | |
 | `save` | `path` | Saves the patch, as Save As does after the dialog | |

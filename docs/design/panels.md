@@ -3,7 +3,7 @@
 How modules, sub-patches, and patches show controls and displays, and how users build them.
 
 - **Kind:** living specification. It changes as panels are built and used.
-- **Status:** Draft, except [Module panels on tiles](#module-panels-on-tiles-p1) and [Level meters and audio load](#level-meters-and-audio-load-p1), which are Implemented. [Labels and hover text](#labels-and-hover-text) is Implemented. [Default panels](#default-panels) and [Exposed controls in a sub-patch](#exposed-controls-in-a-sub-patch) are Draft.
+- **Status:** Draft, except [Module panels on tiles](#module-panels-on-tiles-p1) and [Level meters and audio load](#level-meters-and-audio-load-p1), which are Implemented. [Labels and hover text](#labels-and-hover-text) is Implemented. [Scope module](#scope-module) is Implemented, except drawing the trace ([#62](https://github.com/brylie/LoomDSP/issues/62)). [Default panels](#default-panels) and [Exposed controls in a sub-patch](#exposed-controls-in-a-sub-patch) are Draft.
 - **Decision behind it:** [ADR-0013](../adr/0013-modules-carry-their-own-panel.md) (modules carry their own panel), [ADR-0025](../adr/0025-one-design-language-and-derived-panels.md) (one design language, and panels derived from the declaration).
 - **Requirements:** FR-PANEL-*, FR-CANVAS-10, FR-CANVAS-11, FR-LIB-18, FR-VIS-01 to 04, FR-ENCAP-03, NFR-PERF-04, NFR-UX-01.
 - **Builds on:** [Telemetry](telemetry.md) for live data, [ADR-0010](../adr/0010-own-patch-canvas.md) for the canvas, [parameter mapping](modulation.md#parameter-mapping) for control values.
@@ -135,11 +135,51 @@ Lists in the inspector, such as a parameter's MIDI mapping or its modulation ass
 
 ## Scope module
 
-The first display module.
+**Status:** Implemented ([#60](https://github.com/brylie/LoomDSP/issues/60)). Drawing the trace is [#62](https://github.com/brylie/LoomDSP/issues/62), and a resizable tile is [#61](https://github.com/brylie/LoomDSP/issues/61). Catalogue: MT-VIEW-01 Probe, scope mode.
 
-- One audio input, and an optional pass-through output so it can sit inline.
-- A resizable tile with a scope display. Parameters: time window and trigger level.
-- **Add scope:** a one-step gesture on a cable or an output that places a scope module next to it, already connected. *Why:* a probe should be as quick as a glance, but the result is an ordinary module you can keep, move into a sub-patch, or put on a front panel.
+The first display module that shows a signal over time.
+
+### Module
+
+- **`loom.display.scope`**, category Display. One audio input `in` and one output `out` that passes `in` through, sample for sample, as the level meter does. *Why a pass-through output:* probes read outputs, so the app probes the scope's own `out`. The scope can sit inline in a signal path or hang off an output, and an unconnected scope needs no special case.
+- Parameters:
+
+| Name | Label | Range | Default | Notes |
+|---|---|---|---|---|
+| `window` | Window | 0.001 to 1 s | 0.02 s | Logarithmic. The time shown across the display. One second is the history `ScopeTrace` keeps. |
+| `auto` | Auto | 0 or 1 | 1 | Whole number. On: the trigger level is halfway between the lowest and highest sample, as in [telemetry](telemetry.md). |
+| `level` | Level | -1 to 1 | 0 | The trigger level while `auto` is off. |
+
+- Its panel: a knob for `window`, a toggle for `auto`, and a knob for `level`. The scope widget joins them in #62. Code: `SCOPE` in `loom-modules/src/display.rs`, `Trigger` in `loom-app/src/live.rs`, and `loom-app/src/probe_menu.rs`.
+- The parameters never change the audio. They tell the app how to draw the trace.
+- *Why an auto toggle:* most signals trigger well at their midpoint, including envelopes and pitch with an offset, which never cross 0. A fixed level is for picking one edge of a complex wave. A toggle keeps both without a knob that means two things.
+
+### Trigger
+
+- `ScopeTrace` takes the level from the module: automatic, or the fixed `level`. The rest of the trigger is unchanged: a rising edge, with hysteresis of a tenth of the history's swing, found to a fraction of a sample. The hysteresis never reaches below the lowest sample, so a fixed level near the bottom of the signal still triggers.
+- If no edge crosses a fixed level, the trace runs free, as for a flat signal.
+
+### Add scope and Add meter
+
+A one-step gesture on a cable or an output places a scope or a level meter next to it, already connected. *Why:* a probe should be as quick as a glance, but the result is an ordinary module you can keep, move into a sub-patch, or put on a front panel.
+
+- **Right-click** an output port or a cable to open a small menu with **Add scope** and **Add meter**. A right-drag still pans the canvas: the menu opens only if the pointer moved no more than 4 screen pixels between press and release, the same allowance as a double-click. Right-clicking anything else opens no menu.
+- The menu closes when an item is chosen, on Escape, or on a click outside it. While it is open, the canvas takes no pointer or key input, as with the module browser, so it cannot pan or zoom away from the menu.
+- **What it connects:** a new cable from the output to the new module's `in`. On a cable, the output is the cable's source. The cable stays as it is. *Why:* the sound path does not change, and outputs can feed many inputs.
+- **Where it goes:** with its top-left corner 3 grid units right of the output port, or of the point clicked on the cable, and its `in` port as close to the same height as the grid allows. If that overlaps a tile, it moves down in steps of 2 grid units until it does not.
+- The new module is selected. Adding it and its cable is one undo step. If the output is gone when an item is chosen, nothing is added and the status bar says why.
+- While the menu is open, the clipboard shortcuts (copy, cut, duplicate) do nothing.
+- The control channel offers the same action, so it can be checked in the running app.
+
+### Acceptance criteria: scope module
+
+- [x] The scope module passes its input through, bit for bit. It has a reference test and a block-size check.
+- [x] Its parameters are `window`, `auto`, and `level`, with the ranges above, and its panel has a knob, a toggle, and a knob for them.
+- [x] `ScopeTrace` with a fixed level triggers on that level, and runs free when nothing crosses it. With `auto` on it behaves as before.
+- [x] Right-clicking an output or a cable opens the menu. A right-drag pans and opens no menu. Right-clicking a tile, an input, or empty canvas opens none.
+- [x] Add scope and Add meter, on an output and on a cable, place a module whose `in` is connected to that output, next to it and overlapping no tile. The cable that was clicked stays. The new module is selected.
+- [x] Undo removes the new module and its cable in one step.
+- [x] Escape and a click outside close the menu and add nothing. While it is open, keys do not reach the canvas.
 
 ## Module panels on tiles (P1)
 
@@ -302,7 +342,7 @@ The whole app still redraws twice a second for the stats bar's audio numbers. "N
 
 ### Out of scope
 
-- Stereo meters, and a one-step "Add meter" gesture on a cable (it comes with "Add scope").
+- Stereo meters. ("Add meter" came with "Add scope": see [Add scope and Add meter](#add-scope-and-add-meter).)
 - Peak hold numbers and clip indicators.
 - Spectrum and scope displays.
 
@@ -380,7 +420,7 @@ What P1 builds. The rest of this spec is P2.
 
 - [ ] Module panels on tiles: see [their acceptance criteria](#acceptance-criteria-module-panels) above.
 - [ ] A scope module fed by a 440 Hz oscillator shows a stable trace.
-- [ ] "Add scope" on a cable places a connected scope module next to it. Undo removes it.
+- [x] "Add scope" on a cable places a connected scope module next to it. Undo removes it.
 - [ ] Cable opacity never depends on the signal. A test checks that the cable geometry is the same with and without telemetry.
 - [ ] With no displays on screen and no input, the app does not redraw. Check: the frame counter stays still for 10 seconds.
 - [ ] Zoomed far out, controls and displays are not drawn.

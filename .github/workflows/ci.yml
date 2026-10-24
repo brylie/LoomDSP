@@ -116,6 +116,8 @@ jobs:
         if: ${{ env.CODECOV_TOKEN != '' }}
         uses: codecov/codecov-action@v7
         with:
+          token: ${{ env.CODECOV_TOKEN }}
+          slug: brylie/LoomDSP
           files: lcov.info
           fail_ci_if_error: false
       # Also after a test failure, so Codecov shows which tests failed.
@@ -123,6 +125,8 @@ jobs:
         if: ${{ !cancelled() && env.CODECOV_TOKEN != '' }}
         uses: codecov/codecov-action@v7
         with:
+          token: ${{ env.CODECOV_TOKEN }}
+          slug: brylie/LoomDSP
           report_type: test_results
           files: target/nextest/ci/junit.xml
           disable_search: true

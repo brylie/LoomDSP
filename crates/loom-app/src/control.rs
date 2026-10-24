@@ -78,6 +78,10 @@ pub enum Command {
     Disconnect {
         to: String,
     },
+    Probe {
+        from: String,
+        kind: String,
+    },
     Undo,
     Redo,
     Open {
@@ -844,6 +848,7 @@ impl App {
                     send(self, Message::Canvas(CanvasEvent::Connect { from, to }));
                     Map::new()
                 }),
+            Command::Probe { from, kind, .. } => self.probe_command(&from, &kind, &mut send),
             Command::Disconnect { to, .. } => port(self, &to, false).map(|to| {
                 send(self, Message::Canvas(CanvasEvent::Disconnect(to)));
                 Map::new()
@@ -1201,6 +1206,32 @@ impl App {
         }
     }
 
+    /// Adds a scope or a meter fed by an output, as the probe menu does.
+    fn probe_command(&mut self, from: &str, kind: &str, send: &mut impl FnMut(&mut App, Message)) -> Answer {
+        let output = port(self, from, true)?;
+        let probe = match kind {
+            "scope" => crate::probe_menu::Probe::Scope,
+            "meter" => crate::probe_menu::Probe::Meter,
+            _ => return Err(format!("`{kind}` is not scope or meter")),
+        };
+        let world = self
+            .scene
+            .port_position(output)
+            .ok_or_else(|| format!("`{from}` is not on the canvas"))?;
+        let before: Vec<u32> = self.controller.graph().nodes().map(|(id, _)| id.0).collect();
+        send(self, Message::AddProbe { probe, output, world });
+        let added = self
+            .controller
+            .graph()
+            .nodes()
+            .map(|(id, _)| id.0)
+            .find(|id| !before.contains(id));
+        match added {
+            Some(module) => Ok(fields(json!({ "module": module }))),
+            None => Err(self.status.clone()),
+        }
+    }
+
     fn send_midi(&mut self, event: MidiEvent) -> Answer {
         let midi = self
             .midi
@@ -1415,6 +1446,27 @@ mod tests {
             Ok(Map::new())
         );
         assert!(app.controller.graph().node(ModuleId(module as u32)).is_none());
+
+        // `probe` adds a scope fed by the output, as the probe menu does.
+        let scope = run(&mut app, r#"{"cmd": "probe", "from": "3:out", "kind": "scope"}"#).unwrap();
+        let scope = ModuleId(scope["module"].as_u64().unwrap() as u32);
+        assert_eq!(
+            app.controller.graph().node(scope).unwrap().descriptor.id,
+            "loom.display.scope"
+        );
+        assert!(
+            app.controller
+                .graph()
+                .cables()
+                .any(|(from, to)| from.module == ModuleId(3) && to.module == scope)
+        );
+        assert!(
+            run(&mut app, r#"{"cmd": "probe", "from": "3:out", "kind": "spectrum"}"#)
+                .unwrap_err()
+                .contains("not scope or meter")
+        );
+        assert_eq!(run(&mut app, r#"{"cmd": "undo"}"#).map(|_| ()), Ok(()));
+        assert!(app.controller.graph().node(scope).is_none());
 
         assert_eq!(
             run(&mut app, r#"{"cmd": "key", "key": "z", "modifiers": ["cmd"]}"#),
