@@ -3,7 +3,12 @@
 # macOS desktop automation tools (which find apps by bundle) can see and
 # drive the window.
 #
-# For development only: no signing, no notarisation, no icon.
+# No signing, no notarisation, no icon. The release workflow
+# (docs/design/releases.md) uses it too, with these optional variables:
+#   LOOM_TARGET=x86_64-apple-darwin   build for another target triple
+#   LOOM_SKIP_BUILD=1                 use the binary that is already built
+#   LOOM_BUNDLE_ID=io.github.brylie.loomdsp   the bundle identifier
+#   LOOM_VERSION=0.1.0                the version shown by macOS
 #
 # Usage:
 #   scripts/bundle-macos.sh
@@ -21,11 +26,23 @@ if [ "$(uname -s)" != Darwin ]; then
     exit 1
 fi
 
-cargo build --release -p loom-app
+triple="${LOOM_TARGET:-}"
+if [ -z "${LOOM_SKIP_BUILD:-}" ]; then
+    if [ -n "$triple" ]; then
+        cargo build --release -p loom-app --target "$triple"
+    else
+        cargo build --release -p loom-app
+    fi
+fi
 
-target="${CARGO_TARGET_DIR:-target}/release"
+target="${CARGO_TARGET_DIR:-target}"
+if [ -n "$triple" ]; then
+    target="$target/$triple"
+fi
+target="$target/release"
 app="$target/LoomDSP.app"
-version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
+version="${LOOM_VERSION:-$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)}"
+bundle_id="${LOOM_BUNDLE_ID:-io.github.brylie.loomdsp.dev}"
 
 # Start from an empty bundle, so nothing from an older build is left in it.
 rm -rf "$app"
@@ -38,7 +55,7 @@ cat > "$app/Contents/Info.plist" <<PLIST
 <plist version="1.0">
 <dict>
     <key>CFBundleIdentifier</key>
-    <string>io.github.brylie.loomdsp.dev</string>
+    <string>$bundle_id</string>
     <key>CFBundleName</key>
     <string>LoomDSP</string>
     <key>CFBundleDisplayName</key>

@@ -1,0 +1,151 @@
+name: Release
+
+# Builds LoomDSP for macOS, Windows, and Linux and attaches the downloads to
+# a GitHub release. Push a tag such as v0.1.0-alpha.1 to publish. Run it by
+# hand (workflow_dispatch) for a dry run that builds and uploads artifacts
+# but publishes nothing. Rules and checks: docs/design/releases.md.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Works out the version, and stops early if the tag and Cargo.toml differ.
+  version:
+    name: Version
+    runs-on: ubuntu-latest
+    outputs:
+      # The name used in the files: the tag without its leading "v".
+      version: ${{ steps.v.outputs.version }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - id: v
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          cargo_version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
+          if [ "$REF_TYPE" = tag ]; then
+            version="${REF_NAME#v}"
+            core="${version%%-*}"
+            if [ "$core" != "$cargo_version" ]; then
+              echo "::error::Tag $REF_NAME does not match Cargo.toml version $cargo_version"
+              exit 1
+            fi
+          else
+            version="$cargo_version"
+          fi
+          prerelease=false
+          case "$version" in *-*) prerelease=true ;; esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build (${{ matrix.os }}-${{ matrix.arch }})
+    needs: version
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macos-latest is Apple Silicon. The Intel build is cross-compiled
+          # on it, so it is packed but cannot be run here to smoke-test it.
+          - { os: macos, arch: arm64, runner: macos-latest, triple: "", smoke: true }
+          - { os: macos, arch: x86_64, runner: macos-latest, triple: x86_64-apple-darwin, smoke: false }
+          - { os: windows, arch: x86_64, runner: windows-latest, triple: "", smoke: true }
+          # The oldest Ubuntu runner, so the binary works with the C library
+          # of more Linux systems.
+          - { os: linux, arch: x86_64, runner: ubuntu-22.04, triple: "", smoke: true }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.triple }}
+      - if: matrix.os == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.os }}-${{ matrix.arch }}
+      - name: Build
+        env:
+          TRIPLE: ${{ matrix.triple }}
+        run: |
+          if [ -n "$TRIPLE" ]; then
+            cargo build --release -p loom-app -p loom-cli --target "$TRIPLE"
+          else
+            cargo build --release -p loom-app -p loom-cli
+          fi
+      # Runs the binary that was just built, with no audio device and no
+      # window, so a build that cannot start fails here and not on a user's
+      # computer.
+      - name: Smoke test
+        if: matrix.smoke
+        env:
+          EXT: ${{ matrix.os == 'windows' && '.exe' || '' }}
+        run: |
+          bin=target/release
+          "$bin/loom-app$EXT" examples/patches/subtractive.ron --dump-ui --frames 4800 > ui.json
+          head -c 1 ui.json | grep -q '{'
+          "$bin/loom$EXT" render examples/patches/subtractive.ron -o smoke.wav --note 60
+          test -s smoke.wav
+      - name: Package
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          OS: ${{ matrix.os }}
+          ARCH: ${{ matrix.arch }}
+          TRIPLE: ${{ matrix.triple }}
+        run: sh scripts/package-release.sh "$OS" "$ARCH" ${TRIPLE:+"$TRIPLE"}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: LoomDSP-${{ matrix.os }}-${{ matrix.arch }}
+          path: dist/LoomDSP-*.*
+          if-no-files-found: error
+
+  # Only a pushed tag publishes. A manual run stops after the artifacts.
+  publish:
+    name: Publish release
+    if: github.ref_type == 'tag'
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    # The only job that can write releases.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum LoomDSP-* > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          PRERELEASE: ${{ needs.version.outputs.prerelease }}
+        run: |
+          cat > notes.md <<'NOTES'
+          **Early alpha, unsigned.** macOS and Windows warn the first time you open it. Each download has a README.txt with the steps. Patches made now can stop opening in later versions. Check a download against `SHA256SUMS.txt`.
+
+          NOTES
+          flags=""
+          if [ "$PRERELEASE" = true ]; then flags="--prerelease"; fi
+          gh release create "$TAG" dist/LoomDSP-* dist/SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "LoomDSP ${TAG#v}" \
+            --notes-file notes.md --generate-notes $flags

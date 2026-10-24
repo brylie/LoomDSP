@@ -29,7 +29,7 @@ Constraints:
 
 Option 2. A tag that starts with `v` triggers a GitHub Actions workflow. It builds the desktop app and the `loom` command-line tool on macOS, Windows, and Linux, packs each into a plain archive (a zip for macOS and Windows, a tar.gz for Linux), writes SHA-256 checksums, and attaches everything to a GitHub release. Tags with a pre-release suffix, such as `v0.1.0-alpha.1`, publish as pre-releases.
 
-Builds are unsigned for now. Signing steps exist in the workflow but run only when their secrets are set, so signing can start without a design change. Installers (option 3) and package managers (option 4) come later, on top of the same archives.
+Builds are unsigned for now. Every build goes through one packaging script, so signing can be added there later without a design change. Installers (option 3) and package managers (option 4) come later, on top of the same archives.
 
 ## Consequences
 

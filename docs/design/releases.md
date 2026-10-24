@@ -26,7 +26,9 @@ A maintainer pushes one tag, and the downloads appear on the release page with c
 | `v0.1.0-alpha.1` (any tag with a `-` suffix) | Pre-release |
 | `v1.0.0` (no suffix) | Full release |
 
-The tag, without the `v`, must equal the `version` in the workspace `Cargo.toml`. The workflow stops if they differ. *Why:* the version shown in the app and in the file names must not disagree with the tag.
+The tag, without the `v` and without any `-` suffix, must equal the `version` in the workspace `Cargo.toml`. The workflow stops if they differ. So `v0.1.0-alpha.1` needs version `0.1.0`. *Why:* the version shown in the app must not disagree with the tag. The suffix is a release label and does not change the code version.
+
+The file names use the whole tag without the `v` (`0.1.0-alpha.1`), so the downloads say which release they are from.
 
 ### Downloads
 
@@ -47,7 +49,7 @@ The release notes are generated from the merged pull requests, followed by a fix
 ### Workflow
 
 1. **Trigger.** A push of a tag matching `v*`, or a manual run (`workflow_dispatch`).
-2. **Check.** Confirm the tag matches the `Cargo.toml` version. A manual run uses the `Cargo.toml` version.
+2. **Check.** Confirm the tag matches the `Cargo.toml` version (see above). A manual run uses the `Cargo.toml` version.
 3. **Build.** One job per target builds `loom-app` and `loom` in release mode.
 4. **Smoke test.** Each job runs the binary it just built, with no audio device and no window:
    - `loom-app examples/patches/subtractive.ron --dump-ui --frames 4800` exits with code 0 and prints JSON.
@@ -60,14 +62,16 @@ A manual run stops after step 6. It uploads artifacts so a maintainer can downlo
 
 ### Signing
 
-The workflow has signing steps that run only when their secrets exist. With no secrets, the build is unsigned and the workflow still passes.
+The first releases are unsigned. The workflow has no signing steps, because signing needs paid certificates the project does not have, and signing code that cannot be tested should not run in a job that can write releases.
 
-| System | Secrets | What runs |
+When the certificates exist, signing is added in a later change that updates this section:
+
+| System | Needs | Where it goes |
 |---|---|---|
-| macOS | Developer ID certificate and notarisation credentials | Sign `LoomDSP.app`, notarise it, staple the ticket |
-| Windows | A signing certificate, or a signing service account | Sign `loom-app.exe` and `loom.exe` |
+| macOS | Developer ID certificate and notarisation credentials | `scripts/package-release.sh` signs `LoomDSP.app` before it is zipped. The workflow notarises the zip and staples the ticket. |
+| Windows | A signing certificate, or a signing service account | The workflow signs `loom-app.exe` and `loom.exe` before packaging. |
 
-*Why optional:* signing needs paid certificates the project does not have yet. Designing the steps now means turning signing on later is a settings change.
+*Why later, not now:* the unsigned path is the one we can test today. The ADR keeps the door open, because every build already goes through one packaging script.
 
 ### First launch
 
@@ -96,14 +100,13 @@ Each page says why the warning appears (the build is not signed yet) and how to 
 - [ ] Given a tag that does not match `Cargo.toml`, when it is pushed, then the workflow fails before building.
 - [ ] Given a tag with a `-` suffix, when the release is made, then it is marked as a pre-release.
 - [ ] Given a manual run, when it ends, then artifacts exist and no release was created.
-- [ ] Given no signing secrets, when the workflow runs, then it passes and the builds are unsigned.
 - [ ] Given a built binary, when the smoke test runs, then it exits with code 0 on each system.
 - [ ] Manual, on each system: download the release, check the checksum, open the app following `README.txt`, play `subtractive.ron` with a MIDI keyboard or **Hold note**, and hear sound.
 - [ ] Manual: `loom --help` runs from the unpacked Windows and Linux archives.
 
 ## Out of scope
 
-- Signing and notarisation certificates, and getting them (an issue).
+- Signing and notarisation, and getting the certificates (see Signing above).
 - Installers: a macOS disk image, a Windows MSI, a Linux AppImage.
 - Package managers (Homebrew, winget, Flathub).
 - Linux on ARM, and Windows on ARM.
