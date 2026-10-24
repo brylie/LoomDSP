@@ -31,7 +31,8 @@ impl VirtualController {
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     pub fn create(name: &str) -> Result<Self, HostError> {
         use midir::os::unix::VirtualOutput;
-        let output = midir::MidiOutput::new(CLIENT).map_err(|e| HostError::Midi(e.to_string()))?;
+        // No MIDI client at all: the system has no MIDI service.
+        let output = midir::MidiOutput::new(CLIENT).map_err(|e| HostError::NoMidiService(e.to_string()))?;
         let mut connection = output
             .create_virtual(name)
             .map_err(|e| HostError::Midi(format!("{name}: {e}")))?;
@@ -44,7 +45,7 @@ impl VirtualController {
     /// Virtual ports need macOS or Linux.
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     pub fn create(name: &str) -> Result<Self, HostError> {
-        Err(HostError::Midi(format!(
+        Err(HostError::NoMidiService(format!(
             "{name}: virtual MIDI ports need macOS or Linux"
         )))
     }

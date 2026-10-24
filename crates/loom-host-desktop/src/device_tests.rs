@@ -1,11 +1,12 @@
 //! Checks on a real audio device. They need hardware, so they are ignored
 //! by default: run them with
 //! `cargo test -p loom-host-desktop -- --ignored --test-threads=1`, so no
-//! two of them use a device at once
-//! (set `LOOM_DEVICE` to part of a device name; the default device
-//! otherwise). Each stream is silent, except in the capture tests, which
-//! play a DC offset into a loopback device (`LOOM_LOOPBACK`) and are
-//! skipped when it is not set.
+//! two of them use a device at once. `LOOM_DEVICE` names an output
+//! device by part of its name, and `LOOM_LOOPBACK` a loopback device. A
+//! test whose variable is not set, or whose device is not on this
+//! machine, prints `skipped:` and passes, so the run works on any
+//! machine (docs/dev/test-devices.md). Each stream is silent, except in
+//! the capture tests, which play a DC offset into the loopback device.
 //!
 //! In a file of their own, so coverage, measured on machines with no
 //! audio device, leaves them out.
@@ -13,10 +14,34 @@
 use super::*;
 use loom_core::{EngineConfig, OutputSafety, create_engine};
 
+/// The value of the environment variable `var`, or `None` after printing
+/// why the test is skipped. An empty value counts as unset.
+fn env_or_skip(var: &str, what: &str) -> Option<String> {
+    let value = std::env::var(var).ok().filter(|v| !v.is_empty());
+    if value.is_none() {
+        eprintln!("skipped: set {var} to {what} (docs/dev/test-devices.md)");
+    }
+    value
+}
+
+/// `result`'s value, or `None` after printing why the test is skipped
+/// when the hardware is not on this machine. Any other error fails the
+/// test.
+fn or_skip<T>(result: Result<T, HostError>) -> Option<T> {
+    match result {
+        Ok(value) => Some(value),
+        Err(e) if e.is_missing_hardware() => {
+            eprintln!("skipped: {e} (docs/dev/test-devices.md)");
+            None
+        }
+        Err(e) => panic!("{e}"),
+    }
+}
+
 /// Plays a silent engine on `options` for 0.7 s and returns the
-/// callbacks the device made.
-fn callbacks(options: &AudioOptions) -> u64 {
-    let output = AudioOutput::open(options).unwrap();
+/// callbacks the device made, or `None` when the device is not here.
+fn callbacks(options: &AudioOptions) -> Option<u64> {
+    let output = or_skip(AudioOutput::open(options))?;
     let config = EngineConfig {
         output_safety: OutputSafety::Off,
         ..EngineConfig::with_sample_rate(output.sample_rate() as f32)
@@ -27,7 +52,7 @@ fn callbacks(options: &AudioOptions) -> u64 {
     let made = audio.stats().snapshot().callbacks;
     parts.controller.fade_out().unwrap();
     audio.stop(STOP_LIMIT);
-    made
+    Some(made)
 }
 
 /// Plays `examples/dev/check-dc.ron` (a Constant of 0.5, output safety
@@ -42,17 +67,14 @@ fn capture_a_stop(stop: impl FnOnce(RunningAudio)) -> Option<(Vec<f32>, u32)> {
     // lock; the next one still runs.
     static LOOPBACK: Mutex<()> = Mutex::new(());
     let _one_at_a_time = LOOPBACK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let Ok(loopback) = std::env::var("LOOM_LOOPBACK") else {
-        eprintln!("skipped: set LOOM_LOOPBACK to part of a loopback device's name, such as BlackHole");
-        return None;
-    };
+    let loopback = env_or_skip("LOOM_LOOPBACK", "part of a loopback device's name")?;
     let options = AudioOptions {
         device: Some(loopback),
         exact: false,
         sample_rate: Some(LOOPBACK_RATE),
         buffer_size: Some(LOOPBACK_BUFFER),
     };
-    let output = AudioOutput::open(&options).unwrap();
+    let output = or_skip(AudioOutput::open(&options))?;
     let rate = output.sample_rate();
     let dir = record::TestDir::new(&format!("capture-{:?}", std::thread::current().id()));
     let path = dir.0.join("capture.wav");
@@ -61,7 +83,7 @@ fn capture_a_stop(stop: impl FnOnce(RunningAudio)) -> Option<(Vec<f32>, u32)> {
         buffer_size: None,
         ..options
     };
-    let capture = Capture::start(&input, &path).unwrap();
+    let capture = or_skip(Capture::start(&input, &path))?;
     // Some inputs take seconds to deliver their first frames (the ALSA
     // plugin for PulseAudio takes about 2 s), and the capture would
     // miss the stream's start or all of it.
@@ -190,14 +212,34 @@ fn a_fixed_100_ms_stop_limit_shows_as_a_cut() {
 #[test]
 #[ignore = "needs an audio device"]
 fn a_new_sample_rate_keeps_playing() {
-    let device = std::env::var("LOOM_DEVICE").ok();
+    let Some(device) = env_or_skip("LOOM_DEVICE", "part of an output device's name") else {
+        return;
+    };
     for rate in [44_100, 48_000, 96_000, 44_100] {
         let options = AudioOptions {
-            device: device.clone(),
+            device: Some(device.clone()),
             exact: false,
             sample_rate: Some(rate),
             buffer_size: Some(4096),
         };
-        assert!(callbacks(&options) > 0, "the stream at {rate} Hz plays");
+        let Some(made) = callbacks(&options) else { return };
+        assert!(made > 0, "the stream at {rate} Hz plays");
     }
+}
+
+/// Only errors that mean the hardware is not on this machine skip a test.
+/// A device that is here but refuses what is asked fails it.
+#[test]
+fn only_missing_hardware_skips_a_test() {
+    assert!(HostError::NoOutputDevice(Some("MOTU".into())).is_missing_hardware());
+    assert!(HostError::NoInputDevice(None).is_missing_hardware());
+    assert!(HostError::NoMidiPort(None).is_missing_hardware());
+    assert!(HostError::NoMidiService("no ALSA sequencer".into()).is_missing_hardware());
+    let rate = HostError::UnsupportedSampleRate {
+        device: "MOTU".into(),
+        rate: 96_000,
+    };
+    assert!(!rate.is_missing_hardware());
+    assert!(!HostError::Audio("stream failed".into()).is_missing_hardware());
+    assert!(!HostError::Midi("send failed".into()).is_missing_hardware());
 }

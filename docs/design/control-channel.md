@@ -150,7 +150,7 @@ The fake host in `crates/loom-app/src/devices.rs` gets a device that starts, mak
 - [x] App tests, through the control harness and the fake host: `output_safety`, `audio` (device, rate, buffer, and `"default"`), `midi`, and `new` change what the Preferences window shows, and replies give `playing` and `status`.
 - [x] A refused name, rate, or buffer gets `ok: false` with the offered values.
 - [x] With the stalling fake device, `advanced` is true and then false, and `callbacks` stops growing.
-- [x] `examples/dev/check-devices-part-2.jsonl` runs Part 2 of the manual check (device, 96 kHz, smallest buffer) on BlackHole with `--control-script`, and its replies show `advanced: true` after each change. Checked on macOS with BlackHole 2ch, 2026-10-24.
+- [x] `examples/dev/check-devices-part-2.jsonl` runs Part 2 of the manual check (device, 96 kHz, smallest buffer) with `--control-script`, and its replies show `advanced: true` after each change. Checked on macOS with BlackHole 2ch, 2026-10-24.
 - [x] The manual check says which steps the script replaces, and which still need ears.
 
 ### Out of scope
@@ -195,7 +195,7 @@ LOOM_DEVICE="MOTU" LOOM_RATE=96000 LOOM_BUFFER=64 \
 
 - [x] Unit tests for the replacement: a whole-string number, boolean, and string; a variable inside a longer string; two variables in one string; a quote and a backslash in a value; `$5` and `${x}` left alone; an unset and an empty variable refused with the variable's name.
 - [x] An app test runs a script file through `--control-script` with a variable set, and sees the command applied (for example `set` with `"value": "${LOOM_TEST_VALUE}"`).
-- [ ] `examples/dev/check-devices-part-2.jsonl` uses `${LOOM_DEVICE}`, `${LOOM_RATE}`, and `${LOOM_BUFFER}`, and the manual check says to set them. Checked on macOS with two different devices.
+- [x] `examples/dev/check-devices-part-2.jsonl` uses `${LOOM_DEVICE}`, `${LOOM_RATE}`, and `${LOOM_BUFFER}`, and the manual check says to set them. Checked on macOS with two different devices, 2026-10-25: BlackHole 2ch at 96 kHz with 32 frames, and External Headphones at 96 kHz with 64 frames. Every snapshot after a change had `advanced: true`, and the app exited with status 0.
 - [x] A script with an unset variable exits with status 2 and names it. Checked on macOS with `--fake-audio`, 2026-10-25.
 
 ### Out of scope

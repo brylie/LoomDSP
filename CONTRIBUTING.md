@@ -12,7 +12,7 @@ Thank you for helping. This guide explains how to build, test, and send changes.
 
 Good starting points: issues labelled [`good first issue`](https://github.com/brylie/LoomDSP/labels/good%20first%20issue) or [`help wanted`](https://github.com/brylie/LoomDSP/labels/help%20wanted). New modules are often a good first contribution: they are small, self-contained, and easy to test. Pick an issue without `needs spec agreed`: the others still have open questions ([ready to build](docs/design/README.md#ready-to-build)). The current phase's work is in the [P1 milestone](https://github.com/brylie/LoomDSP/milestone/1), roughly in priority order.
 
-To understand the code first, read [docs/dev/architecture.md](docs/dev/architecture.md).
+To understand the code first, read [docs/dev/architecture.md](docs/dev/architecture.md). To run the checks that need audio or MIDI hardware, see [docs/dev/test-devices.md](docs/dev/test-devices.md).
 
 ### Labels
 

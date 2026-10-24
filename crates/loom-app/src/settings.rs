@@ -1221,8 +1221,18 @@ mod tests {
         use loom_host_desktop::VirtualController;
         let dir = folder("real-midi");
         let run = format!("Loom test {}", std::process::id());
-        let mut pad = VirtualController::create(&format!("{run} Pad")).unwrap();
-        let mut keys = VirtualController::create(&format!("{run} Keys")).unwrap();
+        // Without a MIDI service (a container with no ALSA sequencer), skip.
+        let create = |name: String| match VirtualController::create(&name) {
+            Ok(port) => Some(port),
+            Err(e) if e.is_missing_hardware() => {
+                eprintln!("skipped: {e} (docs/dev/test-devices.md)");
+                None
+            }
+            Err(e) => panic!("{e}"),
+        };
+        let (Some(mut pad), Some(mut keys)) = (create(format!("{run} Pad")), create(format!("{run} Keys"))) else {
+            return;
+        };
         let (pad_name, keys_name) = (pad.input_name().unwrap(), keys.input_name().unwrap());
         let fake = Rc::new(Fake {
             real_midi: Some(run),

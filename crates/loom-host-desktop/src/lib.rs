@@ -72,9 +72,29 @@ pub enum HostError {
     /// An error from the MIDI backend.
     #[error("MIDI error: {0}")]
     Midi(String),
+    /// The system cannot make virtual MIDI ports: Windows, or Linux
+    /// without the ALSA sequencer (`/dev/snd/seq`).
+    #[error("no MIDI service for virtual ports: {0}")]
+    NoMidiService(String),
     /// The recording file could not be created or written.
     #[error("recording: {0}")]
     Record(String),
+}
+
+impl HostError {
+    /// True when the error means the hardware is not on this machine: no
+    /// device or port matched, or the system has none at all. Tests that
+    /// need hardware skip on these errors and fail on any other, so a
+    /// broken device still fails its test.
+    pub fn is_missing_hardware(&self) -> bool {
+        // A device that is here but cannot do what a test asks, such as a
+        // sample rate it does not offer, fails the test: the test should
+        // ask for what the device offers.
+        matches!(
+            self,
+            Self::NoOutputDevice(_) | Self::NoInputDevice(_) | Self::NoMidiPort(_) | Self::NoMidiService(_)
+        )
+    }
 }
 
 fn audio_error(error: impl std::fmt::Display) -> HostError {
@@ -1435,7 +1455,12 @@ mod virtual_midi_tests {
             })
         };
 
-        let mut keys = VirtualController::create(&format!("Loom test {}", std::process::id())).unwrap();
+        // Without a MIDI service (a container with no ALSA sequencer), skip.
+        let mut keys = match VirtualController::create(&format!("Loom test {}", std::process::id())) {
+            Ok(keys) => keys,
+            Err(e) if e.is_missing_hardware() => return eprintln!("skipped: {e} (docs/dev/test-devices.md)"),
+            Err(e) => panic!("{e}"),
+        };
         let name = keys.input_name().unwrap();
         let input = connect_midi_named(&name, share_midi(parts.midi)).unwrap();
         assert_eq!(input.port_name(), name);

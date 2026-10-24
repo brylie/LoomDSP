@@ -15,6 +15,8 @@ The automated tests already cover the logic with a fake host. This script checks
 - The built-in output of the computer (speakers or headphone jack).
 - A loopback device: BlackHole 2ch on macOS, or a PipeWire or PulseAudio null sink on Linux (`pactl load-module module-null-sink sink_name=loom-loop`, captured from its monitor). On Windows, skip the steps marked **(loopback)**.
 
+[Test devices](../test-devices.md) lists what to install on each system and the environment variables the tests and scripts read. A hardware test whose device is missing prints `skipped:`: write down each skip in Notes, because a skipped test checked nothing.
+
 ## Results to report
 
 Copy this into a comment on [#26](https://github.com/brylie/LoomDSP/issues/26) for each system, and fill it in as you go.
@@ -185,11 +187,22 @@ Either way, start the app again with the drone (`drone-record`, without `--recor
 - Listen: a short gap, then the tone, with no click and no crackle after it settles. Write the size down.
 - Look: if the device refused the size, the status bar says why and the tone still plays.
 
-**`device-script`: Or run Part 2 as a script.** The [control channel](../../design/control-channel.md#devices-and-stream-health) can make the choices in `interface-same-rate`, `rate-96k`, and `smallest-buffer` itself, and tell whether the device really calls back. It does not listen: your ears still check for clicks and crackle. The script picks the first device whose name contains `BlackHole` and the smallest buffer it offers, 32 frames. For your interface, copy the file and change the `device` and `buffer` lines. A refused size gets an error that lists the sizes offered.
+**`device-script`: Or run Part 2 as a script.** The [control channel](../../design/control-channel.md#devices-and-stream-health) can make the choices in `interface-same-rate`, `rate-96k`, and `smallest-buffer` itself, and tell whether the device really calls back. It does not listen: your ears still check for clicks and crackle. The script takes the device, rate, and buffer size from three environment variables ([script variables](../../design/control-channel.md#script-variables)), so the same file runs with any interface:
+
+| Variable | Set it to |
+|---|---|
+| `LOOM_DEVICE` | Part of your interface's name, as `loom devices` lists it |
+| `LOOM_RATE` | `96000`, or the highest rate the interface offers |
+| `LOOM_BUFFER` | The smallest buffer size the Buffer size list offers for the interface at that rate |
+
+If one is not set, the script stops at the first line that needs it, names the variable, and the app exits with status 2. A rate or size the device does not offer gets an error that lists what it offers.
 
 ```sh
-cargo run --release -p loom-app -- examples/dev/check-drone.ron --preferences target/check-prefs.ron --control-script examples/dev/check-devices-part-2.jsonl | jq -c 'if .snapshot then {id, audio} else . end'
+LOOM_DEVICE="<part of the interface name>" LOOM_RATE=96000 LOOM_BUFFER=<smallest size> \
+  cargo run --release -p loom-app -- examples/dev/check-drone.ron --preferences target/check-prefs.ron --control-script examples/dev/check-devices-part-2.jsonl | jq -c 'if .snapshot then {id, audio} else . end'
 ```
+
+On Windows, in PowerShell, set each variable first, for example `$env:LOOM_DEVICE = "<part of the name>"`.
 
 `--preferences` keeps the real preferences file out of it. Each `audio` reply gives the "Playing on" line. Each `snapshot` gives `audio.callbacks` and `audio.advanced`. The step passes when every snapshot after a change has `advanced: true`, the right `rate` and `buffer`, and `stream_errors` that stays the same after the first second. If `advanced` is false, the device stopped calling back while the app said it played: the bug fixed in `settle_rate`.
 

@@ -1,6 +1,7 @@
 //! Tests for `loom capture` (`docs/design/audio-qa.md`, Device capture). Most need
 //! no audio device. The one that needs a loopback device is ignored by
-//! default and skips when `LOOM_LOOPBACK` is not set; CI's Loopback
+//! default and skips when `LOOM_LOOPBACK` is not set or names no device
+//! on this machine (docs/dev/test-devices.md); CI's Loopback
 //! capture job runs it on a PipeWire null sink. What reaches a loopback
 //! during a stop is tested in `loom-host-desktop`'s ignored device tests.
 
@@ -63,16 +64,23 @@ fn devices_lists_audio_inputs() {
 /// `loom capture` records the input side of the loopback named by
 /// `LOOM_LOOPBACK` for half a second and exits with status 0. Nothing
 /// plays into the loopback, so the file holds silence: this checks the
-/// command, not what a device played. Needs `LOOM_LOOPBACK`.
+/// command, not what a device played. Needs `LOOM_LOOPBACK`, and skips
+/// when it is unset or names no input on this machine.
 #[test]
 #[ignore = "needs a loopback audio device"]
 fn captures_a_loopback_device() {
-    let Ok(loopback) = std::env::var("LOOM_LOOPBACK") else {
-        eprintln!("skipped: set LOOM_LOOPBACK to part of a loopback device's name, such as BlackHole");
+    let Some(loopback) = std::env::var("LOOM_LOOPBACK").ok().filter(|v| !v.is_empty()) else {
+        eprintln!("skipped: set LOOM_LOOPBACK to part of a loopback device's name (docs/dev/test-devices.md)");
         return;
     };
     let file = std::env::temp_dir().join(format!("loom-cli-capture-loopback-{}.wav", std::process::id()));
     let (status, stderr) = capture(&["--device", &loopback, "-o", file.to_str().unwrap(), "--seconds", "0.5"]);
+    // `loom` runs as its own process, so the test reads its message: the
+    // text of `HostError::NoInputDevice`. Any other failure fails the test.
+    if status == 2 && stderr.contains("no audio input device found") {
+        eprintln!("skipped: {} (docs/dev/test-devices.md)", stderr.trim());
+        return;
+    }
     assert_eq!(status, 0, "{stderr}");
     // Printed only once the first frames have arrived.
     assert!(stderr.contains("Capturing \""), "{stderr}");
