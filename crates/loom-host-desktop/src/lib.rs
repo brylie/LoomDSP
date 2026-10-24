@@ -591,7 +591,7 @@ pub const STOP_LIMIT: Duration = Duration::from_millis(100);
 const BUFFERS_PER_STOP: u64 = 2 + SILENT_BUFFERS_BEFORE_STOP;
 
 /// How long a stop may wait for the fade-out with buffers of `frames` at
-/// `sample_rate`: `minimum`, or the fade plus [`BUFFERS_PER_STOP`] buffers
+/// `sample_rate`: `minimum`, or the fade plus `BUFFERS_PER_STOP` buffers
 /// if that is longer (output safety, rule 14). A fixed limit cut streams
 /// with large buffers before the fade reached the device, which clicked.
 pub fn stop_limit(minimum: Duration, frames: u64, sample_rate: u32) -> Duration {
