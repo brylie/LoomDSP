@@ -1,5 +1,10 @@
 name: CI
 
+# Every Rust check runs a task from mise.toml, with tools installed by mise
+# at the versions mise.toml names. The git hooks (prek.toml) run the same
+# tasks, so a push that passes locally passes here. To change a check,
+# change its task in mise.toml, not the command here.
+
 on:
   push:
     branches: [main]
@@ -20,7 +25,8 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  # Warnings fail CI. Locally they stay warnings for a fast edit loop.
+  # Warnings fail CI. Locally they stay warnings for a fast edit loop, except
+  # in the clippy, docs, and wasm tasks, which set them as errors themselves.
   RUSTFLAGS: -D warnings
   RUSTDOCFLAGS: -D warnings
 
@@ -32,10 +38,8 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-      - run: cargo fmt --all --check
+      - uses: jdx/mise-action@v5
+      - run: mise run fmt
 
   clippy:
     name: Clippy
@@ -44,13 +48,11 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
+      - uses: jdx/mise-action@v5
       - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: Swatinem/rust-cache@v2
       # Lint groups are configured in the workspace Cargo.toml.
-      - run: cargo clippy --workspace --all-targets
+      - run: mise run clippy
 
   test:
     name: Test (${{ matrix.os }})
@@ -64,57 +66,87 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: jdx/mise-action@v5
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: Swatinem/rust-cache@v2
       # Debug build on purpose: the no-allocation test (NFR-RT-06) is only
       # active with debug assertions.
-      - run: cargo test --workspace
+      - run: mise run test
       - name: Benchmarks compile
         run: cargo bench -p loom-modules --no-run
 
+  # Line coverage for GitHub Code Quality. The "Restrict code coverage" rule
+  # of the main branch ruleset reads the uploaded report: at least
+  # LOOM_COVERAGE_MIN percent (mise.toml), and no more than 1 point below
+  # main. The rule does not wait for the upload, so this job is part of
+  # "CI success", which the ruleset requires.
+  # Docs: https://docs.github.com/en/code-security/how-tos/maintain-quality-code/set-up-code-coverage
   coverage:
     name: Coverage
     runs-on: ubuntu-latest
-    # Job-level, so the Codecov step's `if` can see it.
-    env:
-      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+    permissions:
+      contents: read
+      # Upload the report to GitHub's code coverage API.
+      code-quality: write
+      # Find the pull request of a pushed commit.
+      pull-requests: read
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: llvm-tools-preview
+          # The PR head commit, not the merge commit, so coverage line
+          # numbers match the diff.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: jdx/mise-action@v5
       - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@cargo-llvm-cov
-      # The CLI and desktop host need audio hardware, so they are measured
-      # but not expected to be covered by unit tests.
-      - name: Measure coverage
-        run: cargo llvm-cov --workspace --lcov --output-path lcov.info
+      # Runs the tests once, writes target/cobertura.xml, and fails under
+      # LOOM_COVERAGE_MIN.
+      - name: Tests with line coverage
+        run: mise run coverage
       - name: Coverage summary
+        if: ${{ !cancelled() && hashFiles('target/cobertura.xml') != '' }}
         run: |
+          cargo llvm-cov report > coverage.txt
           {
             echo '## Test coverage'
             echo
+            echo "Minimum line coverage: ${LOOM_COVERAGE_MIN}%"
+            echo
             echo '```'
-            cargo llvm-cov report --summary-only
+            head -n 3 coverage.txt
+            tail -n 1 coverage.txt
             echo '```'
+            echo
+            echo '<details><summary>Every file</summary>'
+            echo
+            echo '```'
+            cat coverage.txt
+            echo '```'
+            echo '</details>'
           } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() && hashFiles('target/cobertura.xml') != '' }}
         with:
-          name: coverage-lcov
-          path: lcov.info
-      # Optional: set the CODECOV_TOKEN repository secret to publish reports
-      # and PR comments on codecov.io. Without it, this step is skipped.
-      - name: Upload to Codecov
-        if: ${{ env.CODECOV_TOKEN != '' }}
-        uses: codecov/codecov-action@v7
+          name: coverage-cobertura
+          path: target/cobertura.xml
+      # Uploads on pushes to main (the baseline) and on pull requests, also
+      # when the coverage is under the minimum, so the PR comment shows why.
+      # A pull request from a fork gets a read-only token and cannot upload;
+      # see CONTRIBUTING.md, "Coverage and code quality gates".
+      - name: Upload coverage to GitHub
+        if: >-
+          ${{ !cancelled() && hashFiles('target/cobertura.xml') != '' && (
+            github.event_name == 'push' ||
+            (github.event_name == 'pull_request' &&
+             github.event.pull_request.head.repo.full_name == github.repository)
+          ) }}
+        uses: actions/upload-code-coverage@v1
         with:
-          files: lcov.info
-          fail_ci_if_error: false
+          file: target/cobertura.xml
+          language: Rust
+          label: code-coverage/llvm-cov
 
   docs:
     name: Docs (NFR-OSS-03)
@@ -123,10 +155,10 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: jdx/mise-action@v5
       - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: Swatinem/rust-cache@v2
-      - run: cargo doc --workspace --no-deps
+      - run: mise run docs
 
   msrv:
     name: Minimum Rust version (1.99)
@@ -135,12 +167,12 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@1.99
+      - uses: jdx/mise-action@v5
       - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: Swatinem/rust-cache@v2
-      # Library and binary code only: dev-dependencies (benchmarks) may need
-      # a newer compiler, and users never build them.
-      - run: cargo check --workspace
+      # Warnings are allowed here: a lint added in a newer compiler should
+      # not fail the check of an older one.
+      - run: mise run msrv
         env:
           RUSTFLAGS: ""
 
@@ -151,11 +183,9 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
+      - uses: jdx/mise-action@v5
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --target wasm32-unknown-unknown -p loom-rt -p loom-core -p loom-modules -p loom-patch
+      - run: mise run wasm
 
   deny:
     name: Licences and advisories (ADR-0006)
@@ -164,7 +194,8 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      - uses: jdx/mise-action@v5
+      - run: mise run deny
 
   typos:
     name: Spelling
@@ -173,9 +204,10 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: crate-ci/typos@v1
+      - uses: jdx/mise-action@v5
+      - run: mise run typos
 
-  # One check to mark as "required" in branch protection, instead of
+  # One check to mark as "required" in the main branch ruleset, instead of
   # listing every job. Fails if any job above failed or was cancelled.
   ci-success:
     name: CI success

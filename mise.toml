@@ -1,9 +1,89 @@
-# Development tools for LoomDSP. Run `mise install` once per clone.
+# Development tools and checks for LoomDSP.
+#
+# Setup, once per clone (see CONTRIBUTING.md):
+#   mise trust            # let mise read this file
+#   mise install          # installs the tools below
+#   prek install          # installs the git hooks (see prek.toml)
+#
+# The tasks below are the one list of quality checks. The git hooks
+# (prek.toml) and CI (.github/workflows/ci.yml) run these same tasks, so a
+# check that passes on your machine passes in CI. Run them by hand with
+# `mise run <task>`, or all of them with `mise run check`.
+
 [tools]
-rust = "latest"
+# clippy and rustfmt for the lint and format checks, llvm-tools for coverage,
+# and the WebAssembly target for the portability check (hard rule 6).
+rust = { version = "latest", components = "clippy,rustfmt,llvm-tools-preview", targets = "wasm32-unknown-unknown" }
+# Line coverage, for the coverage check and the CI upload.
+"aqua:taiki-e/cargo-llvm-cov" = "latest"
 # Git hook runner (see prek.toml).
 prek = "latest"
-# Used by the prek hooks and by CI.
+# Used by the checks below, in the hooks, and in CI.
 "aqua:crate-ci/typos" = "latest"
 "aqua:EmbarkStudios/cargo-deny" = "latest"
 gh = "latest"
+
+[env]
+# Minimum line coverage, in percent. It must match the "Restrict code
+# coverage" rule of the main branch ruleset on GitHub, so the local check
+# fails exactly when the pull request would be blocked.
+LOOM_COVERAGE_MIN = "80"
+
+[tasks.fmt]
+description = "Check formatting (cargo fmt --all fixes it)"
+run = "cargo fmt --all --check"
+
+[tasks.clippy]
+description = "Lint, with warnings as errors (lint groups are in Cargo.toml)"
+run = "cargo clippy --workspace --all-targets -- -D warnings"
+
+[tasks.test]
+description = "Run every test (debug build, so the no-allocation test is active)"
+run = "cargo test --workspace"
+
+[tasks.coverage]
+description = "Run every test with line coverage, and fail under LOOM_COVERAGE_MIN"
+# Debug build like `test`, so the no-allocation test still runs. The tests
+# run once; both reports are made from the same data. The Cobertura file is
+# what CI uploads to GitHub.
+run = [
+  "cargo llvm-cov --workspace --no-report",
+  "cargo llvm-cov report --cobertura --output-path target/cobertura.xml",
+  "cargo llvm-cov report --fail-under-lines {{env.LOOM_COVERAGE_MIN}}",
+]
+
+[tasks.coverage-html]
+description = "Open a line-by-line coverage report in the browser"
+run = "cargo llvm-cov --workspace --html --open"
+
+[tasks.docs]
+description = "Build the API docs, with warnings as errors"
+env = { RUSTDOCFLAGS = "-D warnings" }
+run = "cargo doc --workspace --no-deps"
+
+[tasks.wasm]
+description = "Build the engine crates for WebAssembly (hard rule 6)"
+# Warnings as errors, as in CI. This target is built only here, so the flag
+# does not cause rebuilds of the native build.
+env = { RUSTFLAGS = "-D warnings" }
+run = "cargo build --target wasm32-unknown-unknown -p loom-rt -p loom-core -p loom-modules -p loom-patch"
+
+[tasks.msrv]
+description = "Check that the workspace still builds with the minimum Rust version"
+# Library and binary code only: dev-dependencies (benchmarks) may need a
+# newer compiler, and users never build them. Keep in step with
+# `rust-version` in Cargo.toml.
+run = "mise exec rust@1.99 -- cargo check --workspace"
+
+[tasks.deny]
+description = "Check licences and advisories (ADR-0006)"
+run = "cargo deny check"
+
+[tasks.typos]
+description = "Check spelling"
+run = "typos"
+
+[tasks.check]
+description = "Run the checks CI runs (all but msrv and the three-OS test matrix)"
+# coverage runs the whole test suite, so `test` is not listed again.
+depends = ["fmt", "clippy", "typos", "deny", "docs", "wasm", "coverage"]

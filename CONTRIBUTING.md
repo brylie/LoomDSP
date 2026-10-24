@@ -30,13 +30,31 @@ Comment on an issue before you start, so two people do not do the same work.
 
 You need Rust 1.99 or newer. On Linux, install the ALSA development package (`libasound2-dev`).
 
+The tools come from [mise](https://mise.jdx.dev), at the versions in `mise.toml`. CI installs them the same way, so your machine and CI run the same versions. Once per clone:
+
+```sh
+mise trust      # let mise read mise.toml (it asks once per folder)
+mise install    # Rust with clippy, rustfmt, llvm-tools, and the wasm target; prek, typos, cargo-deny, cargo-llvm-cov
+```
+
+If you use git worktrees, each new worktree is a new folder, and mise asks to trust it again. To trust every worktree under one folder, add it to your global mise settings once:
+
+```sh
+mise settings add trusted_config_paths ~/path/to/your/worktrees
+```
+
+Then build and run the checks:
+
 ```sh
 cargo build --workspace
-cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
-cargo fmt --all --check
+mise run check        # every check CI runs, except the minimum Rust version and the Windows and Linux tests
+mise run test         # just the tests
+mise run coverage     # tests with line coverage; fails under the minimum
+mise run coverage-html   # browse which lines the tests reach
 cargo bench -p loom-modules          # optional, takes a few minutes
 ```
+
+`mise tasks` lists every check.
 
 Run the desktop app and the command-line tool:
 
@@ -47,37 +65,54 @@ cargo run --release -p loom-cli -- play examples/patches/subtractive.ron
 
 ### Git hooks (recommended)
 
-The repository uses [prek](https://prek.j178.dev) to run quick checks before each commit, so you hear about problems while the change is fresh. Tools come from [mise](https://mise.jdx.dev):
+The repository uses [prek](https://prek.j178.dev) to run the checks before each commit and push, so you hear about problems while the change is fresh, not minutes later from CI:
 
 ```sh
-mise install    # Rust, prek, typos, cargo-deny (from mise.toml)
 prek install    # installs the pre-commit and pre-push hooks
 ```
 
 | When | Checks |
 |---|---|
-| Every commit (a few seconds) | Whitespace, line endings, TOML/YAML syntax, large files, private keys, `cargo fmt`, `cargo clippy`, `typos`, and no direct commits to `main` |
-| Before push | `cargo test`, `cargo deny check` |
+| Every commit (a few seconds) | Whitespace, line endings, TOML/YAML syntax, large files, private keys, `cargo fmt`, `mise run clippy`, `typos` on the changed files, and no direct commits to `main` |
+| Before push | `mise run coverage` (every test, and the coverage minimum), `mise run docs`, `mise run wasm`, `mise run deny` |
 
-`cargo fmt` and the whitespace hooks fix files for you. When they do, the commit stops: review the changes, stage them, and commit again. Run everything by hand with `prek run --all-files`. The configuration is in `prek.toml`.
+`cargo fmt` and the whitespace hooks fix files for you. When they do, the commit stops: review the changes, stage them, and commit again. Run everything by hand with `prek run --all-files` and `prek run --hook-stage pre-push --all-files`. The configuration is in `prek.toml`.
+
+The first coverage run before a push builds the workspace again with coverage instrumentation, which takes a few minutes. Later runs only rebuild what changed.
 
 ### What CI checks
 
-Every pull request runs these jobs. All must pass before merging (the "CI success" check).
+Every pull request runs these jobs. All must pass before merging: the main branch ruleset requires the "CI success" check, which passes only when every job passed. Each job runs a task from `mise.toml`, so the local command is exactly what CI runs.
 
 | Job | What it checks | Run it locally |
 |---|---|---|
-| Format | `rustfmt` style | `cargo fmt --all --check` |
-| Clippy | Lint groups set in the workspace `Cargo.toml`: correctness, suspicious, complexity, perf, style, cargo | `cargo clippy --workspace --all-targets -- -D warnings` |
-| Test | All tests on Linux, macOS (Apple Silicon), and Windows, plus benchmarks compile | `cargo test --workspace` |
-| Coverage | Line coverage, shown in the job summary | `cargo llvm-cov --workspace` (install [cargo-llvm-cov](https://github.com/taiki-e/cargo-llvm-cov)) |
-| Docs | API docs build without warnings | `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` |
-| MSRV | Still builds with Rust 1.99 | `cargo +1.99 check --workspace` |
-| WebAssembly | Engine crates build for `wasm32-unknown-unknown` | `cargo build --target wasm32-unknown-unknown -p loom-core -p loom-modules -p loom-patch -p loom-rt` |
-| Licences | Only permissive licences, no known vulnerabilities | `cargo deny check` (install [cargo-deny](https://github.com/EmbarkStudios/cargo-deny)) |
-| Spelling | Typos in code and docs | `typos` (install [typos-cli](https://github.com/crate-ci/typos)) |
+| Format | `rustfmt` style | `mise run fmt` |
+| Clippy | Lint groups set in the workspace `Cargo.toml`: correctness, suspicious, complexity, perf, style, cargo | `mise run clippy` |
+| Test | All tests on Linux, macOS (Apple Silicon), and Windows, plus benchmarks compile | `mise run test` (on your OS) |
+| Coverage | Line coverage of all tests, at least the minimum, uploaded to GitHub | `mise run coverage` |
+| Docs | API docs build without warnings | `mise run docs` |
+| MSRV | Still builds with Rust 1.99 | `mise run msrv` |
+| WebAssembly | Engine crates build for `wasm32-unknown-unknown` | `mise run wasm` |
+| Licences | Only permissive licences, no known vulnerabilities | `mise run deny` |
+| Spelling | Typos in code and docs | `mise run typos` |
 
-Why warnings fail CI but not your local build: a warning while you are still editing is noise, but a warning on `main` is a problem someone else inherits.
+To change a check, change its task in `mise.toml`. The hooks and CI both pick it up.
+
+Why warnings fail CI but not your local build: a warning while you are still editing is noise, but a warning on `main` is a problem someone else inherits. `mise run clippy`, `docs`, and `wasm` treat warnings as errors, as CI does, so the checks catch them before you push.
+
+### Coverage and code quality gates
+
+Besides "CI success", the main branch ruleset has two gates from [GitHub Code Quality](https://docs.github.com/en/code-security/concepts/code-quality/code-quality).
+
+**Line coverage.** A pull request is blocked when its line coverage is under 80%, or more than 1 percentage point below `main`. The Coverage job uploads a Cobertura report (`target/cobertura.xml`) with [`actions/upload-code-coverage`](https://github.com/actions/upload-code-coverage), and a bot comments on the pull request with the total and the files that changed.
+
+- `mise run coverage` checks the minimum on your machine, and the pre-push hook runs it. The minimum is `LOOM_COVERAGE_MIN` in `mise.toml`. It must stay equal to the ruleset's value.
+- The "no more than 1 point below `main`" rule is checked only on GitHub, because it needs the coverage of `main` to compare with. If your change adds code, add tests for it in the same pull request.
+- Code that needs audio or MIDI hardware cannot be reached by tests. Keep it thin, and put the logic it calls where tests can reach it, as the app does with the `devices::Host` trait.
+
+**Pull requests from forks.** GitHub gives a fork's workflow a read-only token, so the Coverage job cannot upload its report. It still measures coverage, fails under the minimum, and attaches the report as the `coverage-cobertura` artifact, so the minimum is still checked. A maintainer checks the rest when reviewing. *Open point:* GitHub's documentation does not yet say whether the coverage rule blocks a pull request with no uploaded report or lets it through. We will record what it does on the next pull request from a fork.
+
+**Code quality findings.** A pull request is blocked by any Code Quality finding of severity "error". Code Quality's rule-based analysis uses CodeQL, which covers C#, Go, Java, JavaScript, Python, Ruby, and TypeScript, but not Rust. So for LoomDSP's Rust code, the quality gate is Clippy: CI runs it with warnings as errors, and the hooks run the same task. The CodeQL checks run only on GitHub, so there is no local command for them. If one blocks your pull request, its finding is shown inline on the pull request.
 
 Dependabot opens weekly pull requests for dependency updates.
 
