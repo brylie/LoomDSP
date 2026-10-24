@@ -1,5 +1,5 @@
 //! An output that plays only when a test asks (`docs/design/audio-qa.md`,
-//! Part 1).
+//! Stepped test output).
 //!
 //! The clock output runs on a timer, so a test that checks what was played
 //! can only sleep and hope. A stepped output instead plays the engine when

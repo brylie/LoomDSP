@@ -1,5 +1,5 @@
 //! `loom analyze`: measurements on a WAV file, with optional checks
-//! (`docs/design/audio-qa.md`, Part 3). It only measures; the limits a
+//! (`docs/design/audio-qa.md`, `loom analyze`). It only measures; the limits a
 //! script passes decide what fails.
 
 use loom_test::analysis::{self, Analysis};

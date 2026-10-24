@@ -72,7 +72,7 @@ pub struct Rig {
     /// Whether the last audio stop waited for the fade-out to end, for tests.
     pub last_stop: Option<bool>,
     /// The `--record` file. It belongs to the rig, not to one stream, so
-    /// it records every engine the run plays (audio-qa.md, Part 2).
+    /// it records every engine the run plays (audio-qa.md, Recording the whole run).
     pub recorder: Option<Recorder>,
     /// Every mode change sent to the engine, for tests.
     #[cfg(test)]

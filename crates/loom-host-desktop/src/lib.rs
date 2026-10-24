@@ -308,7 +308,7 @@ impl AudioOutput {
     /// [`Tape::step`], `block` frames at a time, and keeps every sample on
     /// `tape`. Many streams can share one tape, one after another. Time is
     /// counted in frames, never on the clock, so a test gives the same tape
-    /// on any machine (`docs/design/audio-qa.md`, Part 1).
+    /// on any machine (`docs/design/audio-qa.md`, Stepped test output).
     pub fn stepped(sample_rate: u32, block: u32, tape: &Tape) -> Self {
         Self {
             kind: Kind::Stepped {

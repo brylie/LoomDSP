@@ -1,5 +1,5 @@
 //! Capturing an input device to a WAV file, to check what really reached
-//! a device (`docs/design/audio-qa.md`, Part 4).
+//! a device (`docs/design/audio-qa.md`, Device capture).
 //!
 //! An app plays into a loopback device, and the capture records that
 //! device's input side. Unlike `--record`, which saves what the engine

@@ -3,11 +3,11 @@
 Tools that let tests, scripts, and QA agents check what the app actually plays, so safety checks on the final output do not depend on a person listening.
 
 - **Kind:** living specification.
-- **Status:** Parts 1 to 3: Implemented. Agreed and built in [#320](https://github.com/brylie/LoomDSP/pull/320). Part 4: Implemented. Agreed and built in the pull request that adds `loom capture`. Virtual MIDI controllers: agreed and built for [#26](https://github.com/brylie/LoomDSP/issues/26); run on macOS, not yet on Linux.
+- **Status:** Stepped test output, Recording the whole run, and `loom analyze`: Implemented. Agreed and built in [#320](https://github.com/brylie/LoomDSP/pull/320). Device capture: Implemented. Agreed and built in the pull request that adds `loom capture`. Virtual MIDI controllers: agreed and built for [#26](https://github.com/brylie/LoomDSP/issues/26); run on macOS, not yet on Linux.
 - **Decision behind it:** None. It builds on [output safety](output-safety.md) (ADR-0019), the [control channel](control-channel.md), and the `devices::Host` trait from the [preferences spec](preferences.md).
 - **Use case and requirements:** Developer tooling. It protects UC3 (perform live), FR-PERF-08, NFR-SND-02, and NFR-SND-03 by testing them in the app, not only in the engine.
 - **Background:** [Output safety explainer](../learn/output-safety.md).
-- **Issues:** Virtual MIDI controllers come from the manual check of [#26](https://github.com/brylie/LoomDSP/issues/26) (MIDI inputs on and off). Part 1 [#318](https://github.com/brylie/LoomDSP/issues/318), Part 2 [#319](https://github.com/brylie/LoomDSP/issues/319), Part 3 [#317](https://github.com/brylie/LoomDSP/issues/317). Comes from [#200](https://github.com/brylie/LoomDSP/issues/200) (the listening checks for output safety). Related: [#130](https://github.com/brylie/LoomDSP/issues/130) (a meter or warning for the final output).
+- **Issues:** Virtual MIDI controllers come from the manual check of [#26](https://github.com/brylie/LoomDSP/issues/26) (MIDI inputs on and off). Stepped test output [#318](https://github.com/brylie/LoomDSP/issues/318), Recording the whole run [#319](https://github.com/brylie/LoomDSP/issues/319), `loom analyze` [#317](https://github.com/brylie/LoomDSP/issues/317). Comes from [#200](https://github.com/brylie/LoomDSP/issues/200) (the listening checks for output safety). Related: [#130](https://github.com/brylie/LoomDSP/issues/130) (a meter or warning for the final output).
 - **Code:** stepped output: `AudioOutput::stepped` and `Tape` in `crates/loom-host-desktop/src/stepped.rs`, offered by the fake host in `crates/loom-app/src/devices.rs`. App tests: `crates/loom-app/src/qa_tests.rs`. Recording: `Recorder` in `crates/loom-host-desktop/src/record.rs`, owned by `settings::Rig`. Measurements: `crates/loom-test/src/analysis.rs`. `loom analyze`: `crates/loom-cli/src/analyze.rs`, tests in `crates/loom-cli/tests/analyze.rs`. Capture: `Capture` in `crates/loom-host-desktop/src/capture.rs`, its loopback tests in `device_tests` in `crates/loom-host-desktop/src/lib.rs`, and `loom capture` in `crates/loom-cli/src/capture.rs`, tests in `crates/loom-cli/tests/capture.rs`. Virtual MIDI: `VirtualController` in `crates/loom-host-desktop/src/virtual_midi.rs`, `loom midi-port` in `crates/loom-cli/src/midi_port.rs`, the fake host's `real_midi` option in `crates/loom-app/src/devices.rs`, and the ignored tests `closing_a_real_input_releases_its_held_notes` (`loom-host-desktop`) and `turning_a_real_input_off_releases_its_notes_and_is_saved` (`loom-app`, `settings.rs`).
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
@@ -27,7 +27,7 @@ Today the engine tests cover every output safety rule (see the [acceptance crite
 
 ## Behaviour
 
-### Part 1: a stepped test output
+### Stepped test output
 
 A fake audio output for Rust tests in `loom-app`, offered through the `devices::Host` fake. Nothing plays it by itself. The test calls `step(frames)`, and the output plays the current engine for that many frames, in blocks of the device's buffer size. It keeps every sample it plays, on a tape the test can read.
 
@@ -39,7 +39,7 @@ A fake audio output for Rust tests in `loom-app`, offered through the `devices::
 
 The tape is one list of stereo samples for the whole test, across every stream, in the order they were played. Each stream's start is marked on the tape by its frame index, so a test can look at the frames around a switch.
 
-### Part 2: `--record` covers the whole run
+### Recording the whole run
 
 Today `--record out.wav` saves one stream and stops when another patch is opened. With this change the recording belongs to the app, not to one stream. It keeps going across Open, New, a device change, and a mode change, and it ends when the app quits.
 
@@ -63,7 +63,7 @@ loom-app examples/patches/sine.ron --fake-audio --record /tmp/switch.wav --contr
 loom analyze /tmp/switch.wav
 ```
 
-### Part 3: `loom analyze`
+### `loom analyze`
 
 A `loom` subcommand that reads a WAV file (16-bit, 24-bit, or 32-bit float) and prints measurements for each channel:
 
@@ -93,9 +93,9 @@ When the file cannot be read, or an option is not usable, the command exits with
 
 **JSON.** `--json` prints every measurement as a number. JSON has no infinity, so a level of silence in dBFS (negative infinity) prints as `null`. No other measurement can be infinite, because broken samples are left out.
 
-The measurements are functions in `loom-test`, so the app tests of Part 1 and the command of Part 3 measure in the same way.
+The measurements are functions in `loom-test`, so the app tests of the stepped test output and `loom analyze` measure in the same way.
 
-### Part 4: capture what reached a device
+### Device capture
 
 *Why:* `--record` saves what the engine rendered, before the device. It cannot see what happens after: a stream stopped before the device played its last buffers, a device that goes silent after a rate change, a gap at a device change. In the manual check for #26, Open with 4096-frame buffers clicked because a fixed 100 ms stop limit cut the stream before the fade reached the device. The `--record` file was clean, and only ears caught it.
 
@@ -191,19 +191,19 @@ loom-app examples/patches/subtractive.ron   # terminal 3, started after the port
 2. **The stepped output runs the app's real code paths.** Tests reach it through `App::new` and `App::update`, with the same `Args`, preferences file, and messages the window sends. *Why:* the gap we want to close is the app's wiring. A test that builds its own engine would miss it.
 3. **The same test gives a bit-identical tape.** *Why:* determinism is a hard rule for the engine. It lets a failing tape be compared with a passing one, and saved as a reference when that helps.
 4. **Click checks are relative to the patch.** At a switch, the old stream ends at 0 and the new stream starts at 0. No step in the fade-out is larger than the largest step in the 100 ms before the switch, and no step in the fade-in is larger than the largest step in the 100 ms after it. Each limit has a margin of one fade step times the peak of that 100 ms, because the fade gain moves as well as the signal. *Why:* a fixed limit would fail on bright patches and pass clicks on quiet ones. The fade-in plays the new patch, so it is compared with the new patch: a sine followed by an FM patch must not fail because the FM patch is brighter.
-5. **The recording is what was sent to the output, nothing more.** No silence is added between streams, and the file does not mark where a stream starts. *Why:* the gap depends on the machine and the device, and adding it would make files differ from run to run. Rule 4 is checked on the tape of Part 1, which marks each stream's start. A recording gives a coarser check: `loom analyze` reports the largest step in the whole file, or between `--from` and `--to`, so a click at any switch shows up there. It does not find switches or apply rule 4 to each one.
+5. **The recording is what was sent to the output, nothing more.** No silence is added between streams, and the file does not mark where a stream starts. *Why:* the gap depends on the machine and the device, and adding it would make files differ from run to run. Rule 4 is checked on the tape of the stepped test output, which marks each stream's start. A recording gives a coarser check: `loom analyze` reports the largest step in the whole file, or between `--from` and `--to`, so a click at any switch shows up there. It does not find switches or apply rule 4 to each one.
 6. **A recording keeps one sample rate.** If a new stream runs at a different rate (a device change), the recording ends, and the status bar and stderr say why. *Why:* a WAV file has one sample rate. Resampling would change the very samples we want to check.
 7. **Recording never waits on the audio thread.** The existing writer thread and its dropped-frame count stay. *Why:* real-time safety (hard rule 1).
 8. **`loom analyze` only measures.** It does not judge whether a sound is good. Checks pass or fail only on the limits given. *Why:* the same rule as `sample` on the control channel: tools measure, and a person or the test decides what is right for a patch.
 9. **Measurements are plain arithmetic on the samples.** Peak is not oversampled, and DC is a plain mean. *Why:* the numbers must be easy to check by hand, and must match what the engine's output safety stage limits (it also works on samples, not true peaks).
-10. **Capture writes what the device delivered, nothing more** (Part 4). It does not resample, align, trim, or fill gaps. Dropped frames and input stream errors are counted and reported, and make the run fail with status 2. *Why:* the point is to see what the device really did. Any repair would hide the very fault we look for.
-11. **Capture never waits on the audio thread** (Part 4). Its input callback only pushes into a ring, as `--record` does. *Why:* real-time safety (hard rule 1), and a slow callback could itself drop input.
+10. **Capture writes what the device delivered, nothing more** (device capture). It does not resample, align, trim, or fill gaps. Dropped frames and input stream errors are counted and reported, and make the run fail with status 2. *Why:* the point is to see what the device really did. Any repair would hide the very fault we look for.
+11. **Capture never waits on the audio thread** (device capture). Its input callback only pushes into a ring, as `--record` does. *Why:* real-time safety (hard rule 1), and a slow callback could itself drop input.
 12. **A virtual controller goes through the same MIDI code as hardware** (virtual MIDI). The app does not know or check that a port is virtual. *Why:* the point is to test the real path. A special case in the app would test something else.
 13. **Tests that use virtual ports open only their own ports** (virtual MIDI). Their port names hold the process ID, and the fake host opens only inputs whose names contain it. *Why:* a test must not grab, or play into, the developer's real controllers, and two test runs at once must not see each other's ports.
 
 ## Acceptance criteria
 
-### Part 1
+### Stepped test output
 
 Each is a `loom-app` test that uses the stepped output, through `App::new` and `App::update`.
 
@@ -214,14 +214,14 @@ Each is a `loom-app` test that uses the stepped output, through `App::new` and `
 - [x] **No click on a mode change** from the preferences window: the output dips to 0 and comes back, with no step larger than rule 4 allows.
 - [x] **Determinism.** Running the Open test twice gives bit-identical tapes.
 
-### Part 2
+### Recording the whole run
 
 - [x] Given `--fake-audio --record FILE`, when a script opens two more patches and quits, then the file holds all three streams in order, and the app exits with status 0.
 - [x] A change of device that changes the sample rate ends the recording, with a message in the status bar and on stderr.
 - [x] A device at another sample rate that fails to start does not end the recording: the old device plays again, and its stream goes into the same file.
 - [x] The `--record` help text says the recording lasts until the app quits.
 
-### Part 3
+### `loom analyze`
 
 - [x] Each measurement is a unit test in `loom-test` on small hand-made signals: a known peak, one step, a DC offset, a NaN.
 - [x] `loom analyze` reads 16-bit, 24-bit, and 32-bit float files.
@@ -230,7 +230,7 @@ Each is a `loom-app` test that uses the stepped output, through `App::new` and `
 - [x] A NaN sample fails every check given; with no checks, the file is only measured.
 - [x] A NaN or infinite time or limit, and `--from` after `--to`, exit with status 2.
 
-### Part 4
+### Device capture
 
 - [x] `loom capture` writes a 32-bit float stereo WAV at the device's rate, with the device's first two channels, or a mono channel on both.
 - [x] The writer is tested with a fake input in CI: frames pushed are written in order, and dropped frames are counted.
@@ -250,7 +250,7 @@ Each is a `loom-app` test that uses the stepped output, through `App::new` and `
 
 ### Manual
 
-- [x] Run the Part 2 script and `loom analyze` on its file, and list the result in the pull request.
+- [x] Run the script from Recording the whole run and `loom analyze` on its file, and list the result in the pull request.
 
 ## Out of scope
 
@@ -259,8 +259,8 @@ Each is a `loom-app` test that uses the stepped output, through `App::new` and `
 - **A meter or warning for the final output in the app.** That is [#130](https://github.com/brylie/LoomDSP/issues/130).
 - **True-peak (oversampled) measurement, loudness (LUFS), and spectrum analysis.** Add them when a check needs them.
 - **Starting and stopping a recording from the control channel.** A run records from start to quit.
-- **Audio input for patches** ([#29](https://github.com/brylie/LoomDSP/issues/29)). Capture only writes a file (Part 4).
-- **Windows loopback capture, and capture in CI.** Follow-up issues (Part 4).
+- **Audio input for patches** ([#29](https://github.com/brylie/LoomDSP/issues/29)). Capture only writes a file (device capture).
+- **Windows loopback capture, and capture in CI.** Follow-up issues (device capture).
 - **Finding silences.** A device that goes silent shows up today as a short file peak, an RMS near zero, or a peak of 0 in a `--from`/`--to` window. A measurement of the longest silent stretch, with a check, can be added to `loom analyze` when a check needs it.
 - **Virtual MIDI on Windows.** Windows has no virtual ports. A loopback driver could stand in, but it is third-party software, so the Windows check keeps two controllers.
 - **Running the virtual MIDI tests in CI.** The kernel on GitHub's hosted Linux runners has no ALSA sequencer module (`snd-seq`), not even in its extra modules package. What can run without a port does: the held-note tracking and the bytes a virtual controller sends are unit tests, and `loom midi-port` is tested on the built binary, where it exits with status 2.

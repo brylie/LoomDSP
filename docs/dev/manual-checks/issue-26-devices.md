@@ -4,7 +4,7 @@ A script for the two manual checks in [preferences.md](../../design/preferences.
 
 The automated tests already cover the logic with a fake host. This script checks what only real hardware shows: clicks, thumps, device names, and the real preferences file.
 
-`--record` saves what the engine rendered, before the device, so it cannot show a stream cut before the device played its fade. Where a click or thump at a stop is the question, the script also plays into a loopback device and records what reached it with `loom capture` ([audio QA, Part 4](../../design/audio-qa.md#part-4-capture-what-reached-a-device)). Your ears still check the real interface and the built-in output.
+`--record` saves what the engine rendered, before the device, so it cannot show a stream cut before the device played its fade. Where a click or thump at a stop is the question, the script also plays into a loopback device and records what reached it with `loom capture` ([audio QA, Device capture](../../design/audio-qa.md#device-capture)). Your ears still check the real interface and the built-in output.
 
 ## What you need
 

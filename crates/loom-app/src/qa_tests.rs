@@ -1,5 +1,5 @@
-//! What the app plays, checked on a stepped output (`docs/design/audio-qa.md`,
-//! Part 1, and the app test of Part 2). The fake devices play only when the
+//! What the app plays, checked on a stepped output (`docs/design/audio-qa.md`:
+//! Stepped test output, and the app test of Recording the whole run). The fake devices play only when the
 //! test steps the tape, so every check sees every sample, and the same test
 //! gives the same tape.
 //!
@@ -383,7 +383,7 @@ fn no_click_on_a_mode_change() {
 }
 
 /// `--record` keeps recording across two Opens until quit: the file holds
-/// every stream, in order, with nothing between them (Part 2).
+/// every stream, in order, with nothing between them (Recording the whole run).
 #[test]
 fn record_covers_the_whole_run() {
     let mut run = Setup {

@@ -1,5 +1,5 @@
 //! Tests for `loom capture` that need no audio device
-//! (`docs/design/audio-qa.md`, Part 4). The capture of a real loopback
+//! (`docs/design/audio-qa.md`, Device capture). The capture of a real loopback
 //! device is tested in `loom-host-desktop`'s ignored device tests.
 
 use std::process::Command;

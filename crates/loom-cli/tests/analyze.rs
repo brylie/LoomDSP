@@ -1,5 +1,5 @@
 //! Tests for `loom analyze`, run on the built binary
-//! (`docs/design/audio-qa.md`, Part 3).
+//! (`docs/design/audio-qa.md`, `loom analyze`).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

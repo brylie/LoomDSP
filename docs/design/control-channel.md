@@ -30,7 +30,7 @@ Started with a flag naming a Unix domain socket, for example:
 loom-app examples/patches/subtractive.ron --fake-audio --control /tmp/loom.sock
 ```
 
-Add `--record out.wav` to also save what the app plays, across `open` commands, until `quit`. `loom analyze out.wav` then measures it, for example to check that opening a patch gives no click ([audio QA harness](audio-qa.md#part-2---record-covers-the-whole-run)).
+Add `--record out.wav` to also save what the app plays, across `open` commands, until `quit`. `loom analyze out.wav` then measures it, for example to check that opening a patch gives no click ([audio QA harness](audio-qa.md#recording-the-whole-run)).
 
 Any client that can write lines to a Unix socket works, such as `nc -U /tmp/loom.sock` or `socat`. A client sends one JSON object per line and gets one JSON object per line back, in the same order. `id` is optional and comes back as it was sent:
 

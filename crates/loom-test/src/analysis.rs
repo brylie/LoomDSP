@@ -3,7 +3,7 @@
 //! The same functions serve the app tests (on the stepped output's tape)
 //! and `loom analyze` (on a WAV file), so both measure in the same way.
 //! Every measurement is plain arithmetic on the samples: no oversampling,
-//! no filtering. Spec: `docs/design/audio-qa.md`, Part 3.
+//! no filtering. Spec: `docs/design/audio-qa.md`, `loom analyze`.
 
 use serde::Serialize;
 use std::path::{Path, PathBuf};

@@ -1,5 +1,5 @@
 //! `loom capture`: records an input device, such as the input side of a
-//! loopback device, to a WAV file (`docs/design/audio-qa.md`, Part 4).
+//! loopback device, to a WAV file (`docs/design/audio-qa.md`, Device capture).
 //! `loom analyze` then checks what really reached the device.
 
 use loom_host_desktop::{AudioOptions, Capture, CaptureReport};

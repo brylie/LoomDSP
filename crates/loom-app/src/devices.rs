@@ -434,7 +434,7 @@ pub mod fake {
         pub ports: RefCell<Vec<(String, Rc<RefCell<MidiInputState>>)>>,
         /// With a tape, every device is a stepped output on it: it plays
         /// only when the test steps the tape, and keeps every sample
-        /// (audio-qa.md, Part 1). Without one, devices run on a timer.
+        /// (audio-qa.md, Stepped test output). Without one, devices run on a timer.
         pub tape: Option<loom_host_desktop::Tape>,
         /// With a text, MIDI goes through the real `midir` inputs instead
         /// of `midi`, but only those whose names contain the text, so a
