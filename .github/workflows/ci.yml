@@ -90,9 +90,6 @@ jobs:
       code-quality: write
       # Find the pull request of a pushed commit.
       pull-requests: read
-    # Job-level, so the Codecov steps' `if` can see it.
-    env:
-      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -137,23 +134,32 @@ jobs:
           path: |
             target/lcov.info
             target/cobertura.xml
+      # Only this step and the uploads see the Codecov token. The steps
+      # above build and run code from the pull request, so the token is not
+      # in the job's env. This step only says whether the secret is set.
+      - name: Codecov token
+        id: codecov
+        if: ${{ !cancelled() }}
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        run: echo "set=$([ -n "$CODECOV_TOKEN" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
       # Optional: set the CODECOV_TOKEN repository secret to publish reports
       # and PR comments on codecov.io. Without it, this step is skipped.
       - name: Upload to Codecov
-        if: ${{ !cancelled() && env.CODECOV_TOKEN != '' && hashFiles('target/lcov.info') != '' }}
+        if: ${{ !cancelled() && steps.codecov.outputs.set == 'true' && hashFiles('target/lcov.info') != '' }}
         uses: codecov/codecov-action@v7
         with:
-          token: ${{ env.CODECOV_TOKEN }}
+          token: ${{ secrets.CODECOV_TOKEN }}
           slug: brylie/LoomDSP
           files: target/lcov.info
           disable_search: true
           fail_ci_if_error: false
       # Also after a test failure, so Codecov shows which tests failed.
       - name: Upload test results to Codecov
-        if: ${{ !cancelled() && env.CODECOV_TOKEN != '' }}
+        if: ${{ !cancelled() && steps.codecov.outputs.set == 'true' }}
         uses: codecov/codecov-action@v7
         with:
-          token: ${{ env.CODECOV_TOKEN }}
+          token: ${{ secrets.CODECOV_TOKEN }}
           slug: brylie/LoomDSP
           report_type: test_results
           files: target/nextest/ci/junit.xml
@@ -221,12 +227,19 @@ jobs:
           --lcov --output-path lcov.info
         env:
           LOOM_LOOPBACK: pipewire
-      # Codecov merges this report with the Coverage job's. The token is
-      # given to this step only, not to the job: the steps above build and
-      # run code from the pull request. Without the secret (a pull request
-      # from a fork), the upload fails and only warns.
+      # Only this step and the uploads see the Codecov token. The steps
+      # above build and run code from the pull request, so the token is not
+      # in the job's env. This step only says whether the secret is set.
+      - name: Codecov token
+        id: codecov
+        if: ${{ !cancelled() }}
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        run: echo "set=$([ -n "$CODECOV_TOKEN" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+      # Codecov merges this report with the Coverage job's. Without the
+      # secret (a pull request from a fork), this step is skipped.
       - name: Upload to Codecov
-        if: ${{ !cancelled() && hashFiles('lcov.info') != '' }}
+        if: ${{ !cancelled() && steps.codecov.outputs.set == 'true' && hashFiles('lcov.info') != '' }}
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
