@@ -90,10 +90,13 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: taiki-e/install-action@nextest
       # The CLI and desktop host need audio hardware, so they are measured
-      # but not expected to be covered by unit tests.
+      # but not expected to be covered by unit tests. nextest runs the tests
+      # so the `ci` profile (.config/nextest.toml) writes a JUnit report.
+      # It skips doctests; the Test job still runs them.
       - name: Measure coverage
-        run: cargo llvm-cov --workspace --lcov --output-path lcov.info
+        run: cargo llvm-cov nextest --workspace --profile ci --lcov --output-path lcov.info
       - name: Coverage summary
         run: |
           {
@@ -114,6 +117,15 @@ jobs:
         uses: codecov/codecov-action@v7
         with:
           files: lcov.info
+          fail_ci_if_error: false
+      # Also after a test failure, so Codecov shows which tests failed.
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() && env.CODECOV_TOKEN != '' }}
+        uses: codecov/codecov-action@v7
+        with:
+          report_type: test_results
+          files: target/nextest/ci/junit.xml
+          disable_search: true
           fail_ci_if_error: false
 
   docs:

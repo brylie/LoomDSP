@@ -1,0 +1,11 @@
+# cargo-nextest settings. CI's Coverage job runs the tests with nextest so it
+# can write a JUnit report for Codecov's test results. The Test job and local
+# runs still use plain `cargo test`.
+
+# `--profile ci` writes target/nextest/ci/junit.xml.
+[profile.ci]
+# Run every test even after one fails, so the report lists all failures.
+fail-fast = false
+
+[profile.ci.junit]
+path = "junit.xml"
