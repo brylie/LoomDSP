@@ -13,22 +13,26 @@
 //!   comes in P1 (FR-MIDI-08).
 //!
 //! For development and tests, [`AudioOutput::clock`] plays the engine from
-//! a timer thread instead of a device, and [`AudioOutput::record`] saves
-//! what the engine plays to a WAV file.
+//! a timer thread instead of a device, [`AudioOutput::stepped`] plays it only
+//! when a test asks and keeps every sample on a [`Tape`], and
+//! [`AudioOutput::record`] saves what the engine plays to a WAV file through
+//! a [`Recorder`] that can outlive many streams.
 
 #![warn(missing_docs)]
 
 mod record;
+mod stepped;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use loom_core::{Engine, MidiEvent, MidiSender};
 use loom_rt::ScopedFlushDenormals;
-use record::{Recording, Tap};
-use std::path::PathBuf;
+pub use record::Recorder;
+use record::Tap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
+pub use stepped::Tape;
 
 /// Errors from the desktop host.
 #[derive(Debug, thiserror::Error)]
@@ -167,7 +171,8 @@ fn device_name(device: &cpal::Device) -> String {
 pub struct AudioOutput {
     kind: Kind,
     name: String,
-    record: Option<PathBuf>,
+    /// Where the stream sends what it plays, if it is recorded.
+    record: Option<Tap>,
 }
 
 /// What plays the engine.
@@ -178,6 +183,8 @@ enum Kind {
     },
     /// A timer thread, with no device.
     Clock { sample_rate: u32, block: u32 },
+    /// Played only when a test steps the tape, with no device.
+    Stepped { sample_rate: u32, block: u32, tape: Tape },
 }
 
 impl AudioOutput {
@@ -250,6 +257,23 @@ impl AudioOutput {
         }
     }
 
+    /// An output with no device that plays only when a test calls
+    /// [`Tape::step`], `block` frames at a time, and keeps every sample on
+    /// `tape`. Many streams can share one tape, one after another. Time is
+    /// counted in frames, never on the clock, so a test gives the same tape
+    /// on any machine (`docs/design/audio-qa.md`, Part 1).
+    pub fn stepped(sample_rate: u32, block: u32, tape: &Tape) -> Self {
+        Self {
+            kind: Kind::Stepped {
+                sample_rate: sample_rate.max(1),
+                block: block.max(1),
+                tape: tape.clone(),
+            },
+            name: "no device (stepped)".to_string(),
+            record: None,
+        }
+    }
+
     /// Gives the output another name, for an output with no device that
     /// stands in for one in tests.
     pub fn named(mut self, name: impl Into<String>) -> Self {
@@ -257,10 +281,19 @@ impl AudioOutput {
         self
     }
 
-    /// Also saves what the engine plays to a WAV file (32-bit float,
-    /// stereo). The file is created when audio starts.
-    pub fn record(&mut self, path: impl Into<PathBuf>) {
-        self.record = Some(path.into());
+    /// Also sends what the engine plays to `recorder`, after what earlier
+    /// streams sent it. Refused when the recorder's sample rate is not this
+    /// output's: a WAV file has one rate.
+    pub fn record(&mut self, recorder: &Recorder) -> Result<(), HostError> {
+        let rate = self.sample_rate();
+        if recorder.sample_rate() != rate {
+            return Err(HostError::Record(format!(
+                "the recording is at {} Hz and the output at {rate} Hz",
+                recorder.sample_rate()
+            )));
+        }
+        self.record = Some(recorder.tap());
+        Ok(())
     }
 
     /// Device name.
@@ -272,7 +305,7 @@ impl AudioOutput {
     pub fn sample_rate(&self) -> u32 {
         match &self.kind {
             Kind::Device { config, .. } => config.sample_rate,
-            Kind::Clock { sample_rate, .. } => *sample_rate,
+            Kind::Clock { sample_rate, .. } | Kind::Stepped { sample_rate, .. } => *sample_rate,
         }
     }
 
@@ -280,7 +313,7 @@ impl AudioOutput {
     pub fn channels(&self) -> u16 {
         match &self.kind {
             Kind::Device { config, .. } => config.channels,
-            Kind::Clock { .. } => 2,
+            Kind::Clock { .. } | Kind::Stepped { .. } => 2,
         }
     }
 
@@ -291,27 +324,20 @@ impl AudioOutput {
                 cpal::BufferSize::Fixed(frames) => Some(frames),
                 cpal::BufferSize::Default => None,
             },
-            Kind::Clock { block, .. } => Some(*block),
+            Kind::Clock { block, .. } | Kind::Stepped { block, .. } => Some(*block),
         }
     }
 
     /// Starts audio. The engine moves to the audio thread.
-    pub fn start(self, engine: Engine) -> Result<RunningAudio, HostError> {
+    pub fn start(mut self, engine: Engine) -> Result<RunningAudio, HostError> {
         let stats = Arc::new(CallbackStats::default());
         let sample_rate = self.sample_rate();
-        let (recording, tap) = match &self.record {
-            Some(path) => {
-                let (recording, tap) = Recording::start(path, sample_rate)?;
-                (Some(recording), Some(tap))
-            }
-            None => (None, None),
-        };
         let mut render = Render::new(
             engine,
             usize::from(self.channels().max(1)),
             sample_rate,
             stats.clone(),
-            tap,
+            self.record.take(),
         );
         // A late block on the clock cannot be heard: it is not a dropout.
         render.count_overruns = matches!(self.kind, Kind::Device { .. });
@@ -332,10 +358,10 @@ impl AudioOutput {
                 Player::Device(stream)
             }
             Kind::Clock { sample_rate, block } => Player::Clock(Clock::start(render, sample_rate, block)?),
+            Kind::Stepped { block, tape, .. } => Player::Stepped(tape.attach(render, block as usize)),
         };
         Ok(RunningAudio {
             player: Some(player),
-            recording,
             stats,
             name: self.name,
             sample_rate,
@@ -345,7 +371,7 @@ impl AudioOutput {
 
 /// Renders the engine into interleaved output buffers, and records it if
 /// asked. Runs on the audio thread: it must not allocate (NFR-RT-01).
-struct Render {
+pub(crate) struct Render {
     engine: Engine,
     left: Vec<f32>,
     right: Vec<f32>,
@@ -376,7 +402,7 @@ impl Render {
         }
     }
 
-    fn render(&mut self, data: &mut [f32]) {
+    pub(crate) fn render(&mut self, data: &mut [f32]) {
         let _ftz = ScopedFlushDenormals::new();
         let started = Instant::now();
         let channels = self.channels;
@@ -418,6 +444,7 @@ impl Render {
 enum Player {
     Device(cpal::Stream),
     Clock(Clock),
+    Stepped(stepped::Attached),
 }
 
 /// A timer thread that plays the engine in real time, with no device.
@@ -475,13 +502,11 @@ pub const SILENT_BUFFERS_BEFORE_STOP: u64 = 2;
 /// The longest [`RunningAudio::stop`] waits for the fade-out.
 pub const STOP_LIMIT: Duration = Duration::from_millis(100);
 
-/// Audio that is playing. Audio stops when this is dropped, and then a
-/// recording is closed. To stop without a click, ask the engine to fade out
+/// Audio that is playing. Audio stops when this is dropped. To stop
+/// without a click, ask the engine to fade out
 /// ([`loom_core::Controller::fade_out`]) and call [`RunningAudio::stop`].
 pub struct RunningAudio {
-    // Fields drop in order: audio stops before the recording closes.
     player: Option<Player>,
-    recording: Option<Recording>,
     stats: Arc<CallbackStats>,
     name: String,
     sample_rate: u32,
@@ -492,7 +517,19 @@ impl RunningAudio {
     /// and the device was handed [`SILENT_BUFFERS_BEFORE_STOP`] more
     /// buffers, or after `limit`, whichever comes first. Returns true if it
     /// stopped on the silence. Ask the engine to fade out first.
+    ///
+    /// A stepped output plays the blocks itself, and counts `limit` in
+    /// frames at its sample rate instead of waiting on the clock.
     pub fn stop(mut self, limit: Duration) -> bool {
+        if let Some(Player::Stepped(attached)) = &self.player {
+            let limit = (limit.as_secs_f64() * f64::from(self.sample_rate)).ceil() as usize;
+            let stats = self.stats.clone();
+            let silent = attached.play_until(limit, || {
+                stats.silent_buffers.load(Ordering::Relaxed) >= SILENT_BUFFERS_BEFORE_STOP
+            });
+            self.player = None;
+            return silent;
+        }
         let started = Instant::now();
         let silent = loop {
             if self.stats.silent_buffers.load(Ordering::Relaxed) >= SILENT_BUFFERS_BEFORE_STOP {
@@ -520,18 +557,6 @@ impl RunningAudio {
     /// Sample rate in Hz.
     pub fn sample_rate(&self) -> u32 {
         self.sample_rate
-    }
-
-    /// Frames left out of the recording because the writer fell behind.
-    /// Zero when not recording.
-    pub fn recording_dropped(&self) -> u64 {
-        self.recording.as_ref().map_or(0, Recording::dropped)
-    }
-
-    /// Why the recording stopped early (for example a full disk), if it
-    /// did. `None` when it is fine or there is none.
-    pub fn recording_error(&self) -> Option<String> {
-        self.recording.as_ref().and_then(Recording::error)
     }
 }
 
@@ -843,6 +868,104 @@ mod tests {
         assert!(!audio.stop(STOP_LIMIT));
         let waited = started.elapsed();
         assert!(waited >= STOP_LIMIT && waited < 10 * STOP_LIMIT, "{waited:?}");
+    }
+
+    /// A stepped output plays only when stepped, in whole blocks, and marks
+    /// where each stream starts.
+    #[test]
+    fn a_stepped_output_plays_only_when_stepped() {
+        let tape = Tape::new();
+        let audio = AudioOutput::stepped(48_000, 64, &tape)
+            .start(held_offset().engine)
+            .unwrap();
+        assert!(tape.is_empty());
+        tape.step(100);
+        assert_eq!(tape.len(), 128, "two whole blocks");
+        assert_eq!(tape.left()[0], 0.0, "the fade-in starts at 0");
+        drop(audio);
+        tape.step(100);
+        assert_eq!(tape.len(), 128, "a stopped stream plays nothing");
+
+        let _audio = AudioOutput::stepped(48_000, 32, &tape)
+            .start(held_offset().engine)
+            .unwrap();
+        tape.step(32);
+        assert_eq!(tape.stream_starts(), vec![0, 128]);
+        assert_eq!(tape.len(), 160);
+    }
+
+    /// Stopping a stepped stream plays its fade-out down to silence and the
+    /// silent buffers, counted in frames, with no sleeping.
+    #[test]
+    fn a_stepped_stop_plays_the_fade_out() {
+        let tape = Tape::new();
+        let mut parts = held_offset();
+        let audio = AudioOutput::stepped(48_000, 64, &tape).start(parts.engine).unwrap();
+        tape.step(4800);
+        assert_eq!(*tape.left().last().unwrap(), 0.5);
+        parts.controller.fade_out().unwrap();
+        let before = tape.len();
+        assert!(audio.stop(STOP_LIMIT), "stopped on the silence");
+        let left = tape.left();
+        assert!(left.len() > before, "the fade-out was played");
+        assert!(left.len() - before <= 4800, "within the limit, in frames");
+        assert_eq!(*left.last().unwrap(), 0.0, "it ends at 0");
+        assert!(!tape.is_playing());
+    }
+
+    /// With no fade-out asked for, a stepped stop ends after the limit,
+    /// counted in frames.
+    #[test]
+    fn a_stepped_stop_that_never_goes_silent_stops_at_the_limit() {
+        let tape = Tape::new();
+        let audio = AudioOutput::stepped(48_000, 64, &tape)
+            .start(held_offset().engine)
+            .unwrap();
+        assert!(!audio.stop(STOP_LIMIT));
+        // 100 ms at 48 kHz, in whole 64-frame blocks.
+        assert_eq!(tape.len(), 4800usize.div_ceil(64) * 64);
+    }
+
+    /// The same steps give the same tape.
+    #[test]
+    fn stepped_tapes_are_repeatable() {
+        let run = || {
+            let tape = Tape::new();
+            let mut parts = held_offset();
+            let audio = AudioOutput::stepped(44_100, 77, &tape).start(parts.engine).unwrap();
+            tape.step(3000);
+            parts.controller.fade_out().unwrap();
+            audio.stop(STOP_LIMIT);
+            tape.left()
+        };
+        assert_eq!(run(), run());
+    }
+
+    /// One recorder takes every stream at its rate, and refuses another rate.
+    #[test]
+    fn a_recorder_spans_streams_and_keeps_one_rate() {
+        let dir = std::env::temp_dir().join(format!("loom-host-recorder-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("out.wav");
+        let recorder = Recorder::start(&path, 48_000).unwrap();
+        let tape = Tape::new();
+        for _ in 0..2 {
+            let mut parts = held_offset();
+            let mut output = AudioOutput::stepped(48_000, 64, &tape);
+            output.record(&recorder).unwrap();
+            let audio = output.start(parts.engine).unwrap();
+            tape.step(1000);
+            parts.controller.fade_out().unwrap();
+            assert!(audio.stop(STOP_LIMIT));
+        }
+        let mut other = AudioOutput::stepped(44_100, 64, &tape);
+        assert!(matches!(other.record(&recorder), Err(HostError::Record(_))));
+        drop(recorder);
+
+        let mut reader = hound::WavReader::open(&path).unwrap();
+        let left: Vec<f32> = reader.samples::<f32>().map(Result::unwrap).step_by(2).collect();
+        assert_eq!(left, tape.left(), "the file holds both streams, nothing between");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

@@ -32,7 +32,7 @@ flowchart BT
 | `loom-modules` | Every built-in module, plus integration tests and benchmarks. | Same as `loom-core`. |
 | `loom-patch` | Loads, saves, and migrates patch files. | Same as `loom-core`. |
 | `loom-test` | The module test harness: renders one module, checks block-size invariance, and compares with reference WAV files. | Desktop only, for tests. Only `dev-dependencies` use it. |
-| `loom-host-desktop` | Connects the engine to audio devices (cpal) and MIDI inputs (midir). For development, can also play it from a timer with no device, and record it to a WAV file. | Desktop only. The only crate that knows about audio APIs. |
+| `loom-host-desktop` | Connects the engine to audio devices (cpal) and MIDI inputs (midir). For development, can also play it from a timer with no device, play it only when a test steps a tape (`AudioOutput::stepped`), and record it to a WAV file across many streams (`Recorder`). | Desktop only. The only crate that knows about audio APIs. |
 | `loom-canvas` | The patch canvas: an Iced widget drawn by one custom GPU primitive. | Knows nothing about the engine. It draws a `Scene` and reports gestures. |
 | `loom-cli` | The `loom` command: list modules, check, render, play, stress-test. | |
 | `loom-app` | The desktop app: canvas, inspector, audio, MIDI. | Owns the application state. |

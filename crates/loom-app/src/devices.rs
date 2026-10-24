@@ -401,6 +401,10 @@ pub mod fake {
         pub log: RefCell<Vec<Event>>,
         /// The open MIDI inputs, so a test can play notes on them.
         pub ports: RefCell<Vec<(String, Rc<RefCell<MidiInputState>>)>>,
+        /// With a tape, every device is a stepped output on it: it plays
+        /// only when the test steps the tape, and keeps every sample
+        /// (audio-qa.md, Part 1). Without one, devices run on a timer.
+        pub tape: Option<loom_host_desktop::Tape>,
     }
 
     /// A device that offers 44.1 to 48 kHz, buffers of 32 to 1024 frames,
@@ -498,7 +502,11 @@ pub mod fake {
             }
             fake.log.borrow_mut().push(Event::Opened(name.clone()));
             let block = options.buffer_size.unwrap_or(256);
-            Ok(AudioOutput::clock(rate, block).named(name))
+            Ok(match &fake.tape {
+                Some(tape) => AudioOutput::stepped(rate, block, tape),
+                None => AudioOutput::clock(rate, block),
+            }
+            .named(name))
         }
 
         fn start(&self, output: AudioOutput, engine: loom_core::Engine) -> Result<RunningAudio, String> {
