@@ -26,6 +26,10 @@ jobs:
   build:
     name: Build site
     runs-on: ubuntu-latest
+    # configure-pages reads the Pages settings, which private repositories need.
+    permissions:
+      contents: read
+      pages: read
     steps:
       - uses: actions/checkout@v7
         with:
