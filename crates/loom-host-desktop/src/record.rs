@@ -173,12 +173,15 @@ impl Drop for Recorder {
     }
 }
 
-/// Writes every ready sample of `consumer`.
+/// Writes every ready whole frame of `consumer`. The audio thread pushes
+/// a frame's two samples one after the other, so the writer can find half
+/// a frame in the ring. That half waits for the next drain: hound refuses
+/// to write a header for a file that ends in half a frame.
 fn drain(
     writer: &mut hound::WavWriter<std::io::BufWriter<std::fs::File>>,
     consumer: &mut rtrb::Consumer<f32>,
 ) -> Result<(), hound::Error> {
-    let ready = consumer.slots();
+    let ready = consumer.slots() & !1;
     if let Ok(chunk) = consumer.read_chunk(ready) {
         let (a, b) = chunk.as_slices();
         for &sample in a.iter().chain(b) {

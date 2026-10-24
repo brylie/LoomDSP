@@ -380,7 +380,7 @@ impl AudioOutput {
                 stream.play().map_err(audio_error)?;
                 #[cfg(target_os = "macos")]
                 if switched {
-                    resume_after_switch(&stream, &stats, errors);
+                    resume_after_switch(&stream, &stats, errors)?;
                 }
                 Player::Device(stream)
             }
@@ -443,17 +443,20 @@ fn settle_rate(device: &cpal::Device, config: &cpal::StreamConfig) -> bool {
 /// the switch. A rate change from outside later on still pauses it.
 /// `errors` is the error count from before the stream was built: an error
 /// reported between building it and this call also starts it again.
+/// Fails if the stream cannot be started again, so the caller does not
+/// get a stream that stays silent.
 #[cfg(target_os = "macos")]
-fn resume_after_switch(stream: &cpal::Stream, stats: &CallbackStats, mut errors: u64) {
+fn resume_after_switch(stream: &cpal::Stream, stats: &CallbackStats, mut errors: u64) -> Result<(), HostError> {
     let started = Instant::now();
     while started.elapsed() < RATE_NOTICE_WINDOW {
         let now = stats.stream_errors.load(Ordering::Relaxed);
         if now != errors {
             errors = now;
-            let _ = stream.play();
+            stream.play().map_err(audio_error)?;
         }
         std::thread::sleep(Duration::from_millis(5));
     }
+    Ok(())
 }
 
 /// Renders the engine into interleaved output buffers, and records it if
@@ -1164,7 +1167,9 @@ mod tests {
 }
 
 /// Checks on a real audio device. They need hardware, so they are ignored
-/// by default: run them with `cargo test -p loom-host-desktop -- --ignored`
+/// by default: run them with
+/// `cargo test -p loom-host-desktop -- --ignored --test-threads=1`, so no
+/// two of them use a device at once
 /// (set `LOOM_DEVICE` to part of a device name; the default device
 /// otherwise). Each stream is silent, except in the capture tests, which
 /// play a DC offset into a loopback device (`LOOM_LOOPBACK`) and are
@@ -1198,6 +1203,11 @@ mod device_tests {
     /// captured left channel and the sample rate, or `None` when
     /// `LOOM_LOOPBACK` is not set.
     fn capture_a_stop(stop: impl FnOnce(RunningAudio)) -> Option<(Vec<f32>, u32)> {
+        // Two tests playing into one loopback at once would hear each
+        // other, so one capture runs at a time. A failed test poisons the
+        // lock; the next one still runs.
+        static LOOPBACK: Mutex<()> = Mutex::new(());
+        let _one_at_a_time = LOOPBACK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let Ok(loopback) = std::env::var("LOOM_LOOPBACK") else {
             eprintln!("skipped: set LOOM_LOOPBACK to part of a loopback device's name, such as BlackHole");
             return None;

@@ -73,7 +73,13 @@ Set the loopback's output volume to full first (on macOS: Audio MIDI Setup, Blac
 LOOM_DEVICE="<part of the interface name>" LOOM_LOOPBACK="<part of the loopback name>" cargo test -p loom-host-desktop -- --ignored --test-threads=1
 ```
 
-On Windows, set the variable first: `$env:LOOM_DEVICE = "<part of the name>"` in PowerShell. On macOS, the first capture asks for microphone access for the terminal. Allow it: without it, input devices deliver silence, and the loopback tests fail with "the loopback delivered sound".
+On Windows, in PowerShell (there is no loopback on Windows yet, so the loopback tests skip):
+
+```powershell
+$env:LOOM_DEVICE = "<part of the interface name>"; cargo test -p loom-host-desktop -- --ignored --test-threads=1
+```
+
+On macOS, the first capture asks for microphone access for the terminal. Allow it: without it, input devices deliver silence, and the loopback tests fail with "the loopback delivered sound".
 
 **0.5. Set the system default output to the built-in output** in the operating system's sound settings, not the interface.
 

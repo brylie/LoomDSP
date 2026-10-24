@@ -125,7 +125,8 @@ The file holds the device's first two channels. A mono device is written to both
 A QA run starts the capture, plays the app into the loopback output, and checks the file with `loom analyze`:
 
 ```sh
-loom capture --device blackhole -o /tmp/device.wav --seconds 6 &
+loom capture --device blackhole -o /tmp/device.wav --seconds 6 2> /tmp/capture.log &
+until grep -q Capturing /tmp/capture.log; do sleep 0.1; done
 loom-app examples/dev/check-dc.ron --output-safety off --device blackhole --buffer 4096 --control-script open-new-quit.jsonl
 wait
 loom analyze /tmp/device.wav --max-step 0.01
