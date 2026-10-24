@@ -19,6 +19,8 @@ Why: the design is still being found. Keeping early mistakes compatible would fr
 ## Commands
 
 ```sh
+mise run check                         # every check CI runs (tasks in mise.toml; `mise tasks` lists them)
+mise run coverage                      # tests with line coverage; fails under 80%, as the main ruleset does
 cargo build --workspace
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
@@ -64,7 +66,7 @@ The longer version, with diagrams, is [docs/dev/architecture.md](docs/dev/archit
 - **Canvas** (ADR-0010, `crates/loom-canvas`). An Iced widget drawn by one custom wgpu primitive (`canvas.wgsl`): instanced rounded rectangles and Bezier cable strips. The app builds a `Scene` from the graph; the canvas never edits it, it reports `CanvasEvent`s. GPU data is rebuilt only when the scene's generation changes, and pan or zoom only updates a uniform. Panel control values (`PanelValues`) have their own GPU buffer, so turning a knob never rebuilds tiles, ports, or cables. Keep it that way: do not rebuild GPU data every frame, and do not add shaders that run over the whole window for each shape.
 - **App** (`crates/loom-app`). Owns the `Controller`, module positions, and selection. What belongs to the machine (the preferences file, devices, MIDI inputs) is a `settings::Rig` that outlives each engine; devices are reached through the `devices::Host` trait, which tests replace with a fake ([preferences spec](docs/design/preferences.md)). UI crates are desktop only; the engine crates never depend on them. To test what a pointer or key event does, use the headless `Ui` harness in `crates/loom-app/src/ui_test.rs`: it sends real events to `App::view` and finds ports, controls, and text by name, not by pixel. App tests check what the user sees with `App::ui_snapshot()`, built from the same data the view draws (the inspector rows come from a plain-data model in `inspector.rs`). Without an audio device the app keeps the engine idle, and tests run it with `App::process(frames)`. `--fake-audio` plays it from a timer instead (`AudioOutput::clock`), so live values and lights move with no device, and `--record out.wav` saves what it plays. To check a change in the running app, use the control channel (`--control SOCKET` or `--control-script FILE`, [spec](docs/design/control-channel.md)): commands by name go through the same messages as the UI, and replies give the UI snapshot, where a named control is in the window, and a screenshot of the whole window.
 
-Before finishing a change, add `///` doc comments to new structs, functions, and tests, then run `prek run --all-files` (fmt, clippy, typos, file checks) and `cargo test --workspace`. CI runs the full list in CONTRIBUTING.md. Never bypass the hooks with `--no-verify`; fix the cause instead.
+Before finishing a change, add `///` doc comments to new structs, functions, and tests, then run `prek run --all-files` (fmt, clippy, typos, file checks) and `mise run check` (the checks CI runs, including tests with the 80% line coverage minimum). The tools come from `mise.toml`; in a new worktree, run `mise trust` and `mise install` first. CONTRIBUTING.md lists each check and the coverage and code quality gates. Never bypass the hooks with `--no-verify`; fix the cause instead.
 
 ## Hard rules
 
