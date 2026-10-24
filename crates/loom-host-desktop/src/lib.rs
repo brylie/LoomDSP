@@ -423,7 +423,9 @@ fn settle_rate(device: &cpal::Device, config: &cpal::StreamConfig) -> bool {
 #[cfg(target_os = "macos")]
 fn resume_after_switch(stream: &cpal::Stream, stats: &CallbackStats) {
     let started = Instant::now();
-    let mut errors = stats.stream_errors.load(Ordering::Relaxed);
+    // From zero, not from the count now: the stats are this stream's own,
+    // so an error already counted came after its first `play` and paused it.
+    let mut errors = 0;
     while started.elapsed() < RATE_NOTICE_WINDOW {
         let now = stats.stream_errors.load(Ordering::Relaxed);
         if now != errors {
@@ -574,7 +576,7 @@ pub const STOP_LIMIT: Duration = Duration::from_millis(100);
 const BUFFERS_PER_STOP: u64 = 2 + SILENT_BUFFERS_BEFORE_STOP;
 
 /// How long a stop may wait for the fade-out with buffers of `frames` at
-/// `sample_rate`: `minimum`, or the fade plus [`BUFFERS_PER_STOP`] buffers
+/// `sample_rate`: `minimum`, or the fade plus four buffers
 /// if that is longer (output safety, rule 14). A fixed limit cut streams
 /// with large buffers before the fade reached the device, which clicked.
 pub fn stop_limit(minimum: Duration, frames: u64, sample_rate: u32) -> Duration {
