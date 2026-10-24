@@ -6,7 +6,8 @@
 //! without touching the engine (NFR-PORT-02, OQ-11).
 //!
 //! Phase 0 limits:
-//! - Output only (no audio input yet).
+//! - Output only for the engine (no audio input yet). [`Capture`] records an
+//!   input device to a file, to check what reached a device.
 //! - 32-bit float devices only. This covers CoreAudio, WASAPI shared mode,
 //!   and PipeWire/PulseAudio defaults.
 //! - MIDI ports are chosen at start, or opened and closed by name. Hot-plugging
@@ -20,9 +21,11 @@
 
 #![warn(missing_docs)]
 
+mod capture;
 mod record;
 mod stepped;
 
+pub use capture::{Capture, CaptureReport};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use loom_core::{Engine, MidiEvent, MidiSender};
 use loom_rt::ScopedFlushDenormals;
@@ -37,6 +40,12 @@ pub use stepped::Tape;
 /// Errors from the desktop host.
 #[derive(Debug, thiserror::Error)]
 pub enum HostError {
+    /// No audio input device matched.
+    #[error("no audio input device found{}", .0.as_deref().map(|n| format!(" matching `{n}`")).unwrap_or_default())]
+    NoInputDevice(Option<String>),
+    /// The input device has no 32-bit float configuration.
+    #[error("audio device `{0}` does not support 32-bit float input")]
+    UnsupportedInputFormat(String),
     /// No audio output device matched.
     #[error("no audio output device found{}", .0.as_deref().map(|n| format!(" matching `{n}`")).unwrap_or_default())]
     NoOutputDevice(Option<String>),
@@ -88,6 +97,23 @@ pub fn output_device_names() -> Result<Vec<String>, HostError> {
     let host = cpal::default_host();
     let devices = host.output_devices().map_err(audio_error)?;
     Ok(devices.map(|d| device_name(&d)).collect())
+}
+
+/// Names of all audio input devices.
+pub fn input_device_names() -> Result<Vec<String>, HostError> {
+    let host = cpal::default_host();
+    let devices = host.input_devices().map_err(audio_error)?;
+    Ok(devices.map(|d| device_name(&d)).collect())
+}
+
+/// The first of `devices` whose name contains `wanted`, ignoring case, or
+/// is exactly `wanted` if `exact`.
+fn find_device(mut devices: impl Iterator<Item = cpal::Device>, wanted: &str, exact: bool) -> Option<cpal::Device> {
+    if exact {
+        return devices.find(|d| device_name(d) == wanted);
+    }
+    let wanted = wanted.to_lowercase();
+    devices.find(|d| device_name(d).to_lowercase().contains(&wanted))
 }
 
 /// What an output device offers, for a settings window.
@@ -193,16 +219,7 @@ impl AudioOutput {
         let host = cpal::default_host();
         let device = match &options.device {
             None => host.default_output_device(),
-            Some(wanted) if options.exact => host
-                .output_devices()
-                .map_err(audio_error)?
-                .find(|d| device_name(d) == *wanted),
-            Some(wanted) => {
-                let wanted = wanted.to_lowercase();
-                host.output_devices()
-                    .map_err(audio_error)?
-                    .find(|d| device_name(d).to_lowercase().contains(&wanted))
-            }
+            Some(wanted) => find_device(host.output_devices().map_err(audio_error)?, wanted, options.exact),
         }
         .ok_or_else(|| HostError::NoOutputDevice(options.device.clone()))?;
         let name = device_name(&device);
@@ -602,9 +619,16 @@ impl RunningAudio {
     ///
     /// A stepped output plays the blocks itself, and counts the limit in
     /// frames at its sample rate instead of waiting on the clock.
-    pub fn stop(mut self, limit: Duration) -> bool {
+    pub fn stop(self, limit: Duration) -> bool {
+        let sample_rate = self.sample_rate;
+        self.stop_within(|frames| stop_limit(limit, frames, sample_rate))
+    }
+
+    /// [`RunningAudio::stop`], with the limit for buffers of a number of
+    /// frames given by `limit`.
+    fn stop_within(mut self, limit: impl Fn(u64) -> Duration) -> bool {
         if let Some(Player::Stepped(attached)) = &self.player {
-            let limit = stop_limit(limit, attached.block() as u64, self.sample_rate);
+            let limit = limit(attached.block() as u64);
             let limit = (limit.as_secs_f64() * f64::from(self.sample_rate)).ceil() as usize;
             let stats = self.stats.clone();
             let silent = attached.play_until(limit, || {
@@ -621,7 +645,7 @@ impl RunningAudio {
             // The largest buffer so far: the device may not have asked for
             // one yet, or may ask for larger ones than at first.
             let frames = self.stats.largest_buffer.load(Ordering::Relaxed);
-            if started.elapsed() >= stop_limit(limit, frames, self.sample_rate) {
+            if started.elapsed() >= limit(frames) {
                 break false;
             }
             std::thread::sleep(Duration::from_millis(1));
@@ -1137,7 +1161,9 @@ mod tests {
 /// Checks on a real audio device. They need hardware, so they are ignored
 /// by default: run them with `cargo test -p loom-host-desktop -- --ignored`
 /// (set `LOOM_DEVICE` to part of a device name; the default device
-/// otherwise). Each stream is silent.
+/// otherwise). Each stream is silent, except in the capture tests, which
+/// play a DC offset into a loopback device (`LOOM_LOOPBACK`) and are
+/// skipped when it is not set.
 #[cfg(test)]
 mod device_tests {
     use super::*;
@@ -1158,6 +1184,116 @@ mod device_tests {
         parts.controller.fade_out().unwrap();
         audio.stop(STOP_LIMIT);
         made
+    }
+
+    /// Plays `examples/dev/check-dc.ron` (a Constant of 0.5, output safety
+    /// Off) into the loopback device named by `LOOM_LOOPBACK` with
+    /// 4096-frame buffers, captures the loopback's input side, and stops
+    /// the stream with `stop` after a fade-out request. Returns the
+    /// captured left channel and the sample rate, or `None` when
+    /// `LOOM_LOOPBACK` is not set.
+    fn capture_a_stop(stop: impl FnOnce(RunningAudio)) -> Option<(Vec<f32>, u32)> {
+        let Ok(loopback) = std::env::var("LOOM_LOOPBACK") else {
+            eprintln!("skipped: set LOOM_LOOPBACK to part of a loopback device's name, such as BlackHole");
+            return None;
+        };
+        let options = AudioOptions {
+            device: Some(loopback),
+            exact: false,
+            sample_rate: None,
+            buffer_size: Some(4096),
+        };
+        let output = AudioOutput::open(&options).unwrap();
+        let rate = output.sample_rate();
+        let dir = record::TestDir::new(&format!("capture-{:?}", std::thread::current().id()));
+        let path = dir.0.join("capture.wav");
+        let input = AudioOptions {
+            sample_rate: Some(rate),
+            buffer_size: None,
+            ..options
+        };
+        let capture = Capture::start(&input, &path).unwrap();
+
+        let config = EngineConfig {
+            output_safety: OutputSafety::Off,
+            ..EngineConfig::with_sample_rate(rate as f32)
+        };
+        let mut parts = create_engine(loom_modules::registry(), config);
+        let patch = concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/dev/check-dc.ron");
+        loom_patch::Patch::load(patch)
+            .unwrap()
+            .load_into(&mut parts.controller)
+            .unwrap();
+        let audio = output.start(parts.engine).unwrap();
+        std::thread::sleep(Duration::from_millis(600));
+        parts.controller.fade_out().unwrap();
+        stop(audio);
+        // Long enough for the device to play out what it was handed.
+        std::thread::sleep(Duration::from_millis(400));
+        let report = capture.stop().unwrap();
+        assert_eq!(report.dropped, 0, "no frame was dropped");
+
+        let mut reader = hound::WavReader::open(&path).unwrap();
+        let left = reader.samples::<f32>().step_by(2).map(Result::unwrap).collect();
+        Some((left, rate))
+    }
+
+    /// The level the capture holds, and its largest step between two
+    /// neighbouring samples. The loopback's volume scales the level, so
+    /// checks are relative to it.
+    fn level_and_step(samples: &[f32]) -> (f32, f32) {
+        let level = samples.iter().fold(0.0f32, |m, x| m.max(x.abs()));
+        let step = samples.windows(2).fold(0.0f32, |m, w| m.max((w[1] - w[0]).abs()));
+        eprintln!("captured level {level}, largest step {step}");
+        assert!(
+            level > 0.01,
+            "the loopback delivered sound (level {level}). On macOS the terminal needs microphone access."
+        );
+        (level, step)
+    }
+
+    /// The largest step a 10 ms fade from `level` may take at `rate`, with
+    /// a margin of 2.
+    fn fade_step(level: f32, rate: u32) -> f32 {
+        2.0 * level / (loom_core::safety::FADE_SECONDS * rate as f32)
+    }
+
+    /// A stop with 4096-frame buffers fades out on the device: the capture
+    /// of a loopback has no step larger than the 10 ms fade. With a fixed
+    /// 100 ms stop limit the stream was cut before the fade reached the
+    /// device (#26), which clicked. Needs `LOOM_LOOPBACK`.
+    #[test]
+    #[ignore = "needs a loopback audio device"]
+    fn a_stop_with_large_buffers_fades_out_on_the_device() {
+        let Some((samples, rate)) = capture_a_stop(|audio| {
+            audio.stop(STOP_LIMIT);
+        }) else {
+            return;
+        };
+        let (level, step) = level_and_step(&samples);
+        let limit = fade_step(level, rate);
+        assert!(
+            step <= limit,
+            "largest step {step} is over the fade's {limit} (level {level})"
+        );
+    }
+
+    /// The check above can fail: stopped at a fixed 100 ms limit, as
+    /// before the #26 fix, the capture shows the cut as a step of about
+    /// the whole level. Needs `LOOM_LOOPBACK`.
+    #[test]
+    #[ignore = "needs a loopback audio device"]
+    fn a_fixed_100_ms_stop_limit_shows_as_a_cut() {
+        let Some((samples, rate)) = capture_a_stop(|audio| {
+            audio.stop_within(|_| STOP_LIMIT);
+        }) else {
+            return;
+        };
+        let (level, step) = level_and_step(&samples);
+        assert!(
+            step > fade_step(level, rate),
+            "largest step {step} shows the cut (level {level})"
+        );
     }
 
     /// A stream at a new sample rate keeps playing. On macOS the notice of

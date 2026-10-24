@@ -25,3 +25,4 @@ workspace = true
 
 [dev-dependencies]
 loom-modules.workspace = true
+loom-patch.workspace = true

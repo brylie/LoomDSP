@@ -5,6 +5,7 @@
 //! stress-test live editing.
 
 mod analyze;
+mod capture;
 
 use clap::{Parser, Subcommand};
 use loom_core::{Controller, EngineConfig, EngineParts, MidiEvent, ModuleId, OutputSafety, create_engine};
@@ -32,7 +33,7 @@ enum Command {
         #[arg(short, long)]
         verbose: bool,
     },
-    /// List audio output devices and MIDI input ports.
+    /// List audio output and input devices and MIDI input ports.
     Devices,
     /// Load a patch and report what the compiler found (feedback loops,
     /// inserted delays).
@@ -71,6 +72,9 @@ enum Command {
     /// Measure a WAV file: peak, clipping, largest step, DC, and RMS, with
     /// optional checks for scripts (docs/design/audio-qa.md).
     Analyze(analyze::Options),
+    /// Record an audio input, such as a loopback device, to a WAV file, to
+    /// check what reached a device (docs/design/audio-qa.md).
+    Capture(capture::Options),
     /// Play a patch live with a MIDI controller.
     Play {
         /// Patch file (.ron).
@@ -135,6 +139,7 @@ fn main() -> ExitCode {
         Command::Devices => devices(),
         Command::Check { patch } => check(&patch),
         Command::Analyze(options) => return analyze::run(&options),
+        Command::Capture(options) => return capture::run(&options),
         Command::Render {
             patch,
             output,
@@ -208,6 +213,10 @@ fn modules(verbose: bool) -> Result<ExitCode> {
 fn devices() -> Result<ExitCode> {
     println!("Audio outputs:");
     for name in loom_host_desktop::output_device_names()? {
+        println!("  {name}");
+    }
+    println!("Audio inputs:");
+    for name in loom_host_desktop::input_device_names()? {
         println!("  {name}");
     }
     println!("MIDI inputs:");

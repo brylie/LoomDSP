@@ -2086,6 +2086,7 @@ dependencies = [
  "hound",
  "loom-core",
  "loom-modules",
+ "loom-patch",
  "loom-rt",
  "midir",
  "rtrb",
