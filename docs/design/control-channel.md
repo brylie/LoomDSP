@@ -6,7 +6,7 @@ A development-only way for a script or an AI agent to drive the running app by n
 - **Status:** Implemented
 - **Decision behind it:** None. It builds on the plain-data UI snapshot ([ADR-0021](../adr/0021-plain-data-view-models-and-keyed-identity.md)).
 - **Use case and requirements:** Developer tooling. No user requirement.
-- **Issues:** [#207](https://github.com/brylie/LoomDSP/issues/207) (part 3), `press` and `arm`: [#256](https://github.com/brylie/LoomDSP/issues/256); places in the snapshot: [#250](https://github.com/brylie/LoomDSP/issues/250); `sample`: [#255](https://github.com/brylie/LoomDSP/issues/255); devices and stream health: [#26](https://github.com/brylie/LoomDSP/issues/26); related [#190](https://github.com/brylie/LoomDSP/issues/190) (accessibility).
+- **Issues:** [#207](https://github.com/brylie/LoomDSP/issues/207) (part 3), `press` and `arm`: [#256](https://github.com/brylie/LoomDSP/issues/256); places in the snapshot: [#250](https://github.com/brylie/LoomDSP/issues/250); `sample`: [#255](https://github.com/brylie/LoomDSP/issues/255); devices and stream health: [#26](https://github.com/brylie/LoomDSP/issues/26); script variables: [#340](https://github.com/brylie/LoomDSP/issues/340); related [#190](https://github.com/brylie/LoomDSP/issues/190) (accessibility).
 - **Code:** `crates/loom-app/src/control.rs`; the clock and recorder it relies on are in `crates/loom-host-desktop`.
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
@@ -158,6 +158,51 @@ The fake host in `crates/loom-app/src/devices.rs` gets a device that starts, mak
 - **A warning in the app** when the device stops calling back. The app could say so in the status bar, but that is a user feature for the preferences spec, not this tool. It is an open point there.
 - **Listening.** The script cannot hear a click at the device. `--record` and `loom analyze` cover what the engine plays.
 
+## Script variables
+
+**Status: Draft.** Issue: [#340](https://github.com/brylie/LoomDSP/issues/340).
+
+A script that names a device runs only on a machine with that device. `examples/dev/check-devices-part-2.jsonl` sent `"device": "BlackHole"`, `"rate": 96000`, and `"buffer": 32`: one virtual device on one Mac, and a rate and buffer size that another device may not offer, so rule S2 refuses them. A script file is plain JSON lines and cannot read the environment, so every other developer had to edit it.
+
+### Behaviour
+
+`--control-script` replaces `${NAME}` in the string values of a command with the environment variable `NAME`, after the line is read as JSON and before the command runs.
+
+| In the script | `LOOM_RATE=96000` | Becomes |
+|---|---|---|
+| `"rate": "${LOOM_RATE}"` | the whole string is one variable | `"rate": 96000`, a number |
+| `"device": "${LOOM_DEVICE}"` with `LOOM_DEVICE=MOTU` | the whole string is one variable | `"device": "MOTU"`, a string |
+| `"path": "${HOME}/out.png"` | the variable is part of a string | `"path": "/Users/ada/out.png"`, text |
+
+Example, Part 2 of the manual check on any machine:
+
+```sh
+LOOM_DEVICE="MOTU" LOOM_RATE=96000 LOOM_BUFFER=64 \
+  cargo run --release -p loom-app -- examples/dev/check-drone.ron \
+  --preferences target/check-prefs.ron --control-script examples/dev/check-devices-part-2.jsonl
+```
+
+### Rules
+
+- **V1. Script files only.** The socket (`--control`) takes commands as they are sent. *Why:* a client on the socket is a program that can build its own command. A script file is the only form that cannot.
+- **V2. Inside string values only.** The line is parsed as JSON first, and only string values are searched, never keys or the raw text. *Why:* a value with a quote or a backslash in it, such as a Windows path, cannot break the JSON.
+- **V3. A whole-string variable keeps its type.** When a string is exactly one `${NAME}`, the value becomes a JSON number or `true` / `false` if it reads as one, and a string otherwise. A variable inside a longer string is always text. *Why:* `rate`, `buffer`, and `value` take numbers, and `on` takes a boolean. Without this, a script could not choose them.
+- **V4. An unset variable stops the script.** The reply is `ok: false` and names the variable, the script ends there, and the app quits with status 2. An empty variable counts as unset. There are no default values. *Why:* a silent default such as BlackHole is the bug this section fixes. Status 2 is "could not run", not "a check failed" (status 1), as for `loom analyze`.
+- **V5. Names are `[A-Z0-9_]`, starting with a letter.** `$` with anything else, such as `$5` or `${x}`, is left as it is. *Why:* environment variable names on every system fit this, and a price or a regular expression in a string stays as written.
+- **V6. The reply says what was used.** A reply to a command that had variables gets a `vars` field: each name and the value it had, for example `"vars": {"LOOM_DEVICE": "MOTU"}`. *Why:* the person reading the output sees which device the run used, without the replies growing for commands that had none.
+
+### Acceptance criteria
+
+- [ ] Unit tests for the replacement: a whole-string number, boolean, and string; a variable inside a longer string; two variables in one string; a quote and a backslash in a value; `$5` and `${x}` left alone; an unset and an empty variable refused with the variable's name.
+- [ ] An app test runs a script file through `--control-script` with a variable set, and sees the command applied (for example `set` with `"value": "${LOOM_TEST_VALUE}"`).
+- [ ] `examples/dev/check-devices-part-2.jsonl` uses `${LOOM_DEVICE}`, `${LOOM_RATE}`, and `${LOOM_BUFFER}`, and the manual check says to set them. Checked on macOS with two different devices.
+- [ ] A script with an unset variable exits with status 2 and names it.
+
+### Out of scope
+
+- Variables on the socket (V1).
+- Default values (`${NAME:-default}`), loops, and conditions. A script that needs those is better written in a real language against the socket.
+
 ## Rules
 
 1. **Off unless asked for.** Nothing listens unless the app is started with `--control`. *Why:* a music app should not open a door on a user's machine without being asked.
@@ -170,7 +215,7 @@ The fake host in `crates/loom-app/src/devices.rs` gets a device that starts, mak
 8. **Errors are replies, not crashes.** A bad command gets `ok: false` and a message naming what was wrong. The app keeps running. *Why:* an agent learns from the error and tries again.
 9. **No dialogs.** While the channel is on, errors that would open a dialog (a failed open or save) go to the reply and the status bar instead. Commands never open a file dialog or ask to save: `key` refuses the New, Open, and Save shortcuts (Cmd or Ctrl with N, O, or S), and `press` refuses the `new`, `open`, `save`, and `save-as` buttons. Both point to the `new`, `open`, and `save` commands. *Why:* a modal dialog would stop the app, and nobody is there to close it.
 10. **`:name` looks for a parameter first,** then an output, then an input. *Why:* a module's parameter and port names rarely clash; when they do, the control is what a script most often wants.
-11. **A script file runs the same commands.** `--control-script FILE` reads commands from a file, one per line (blank lines skipped), and prints each reply to stdout. At the end of the file the app keeps running, unless the last command is `quit`. *Why:* the same code serves a quick check with no client, and a check that can be saved next to a patch.
+11. **A script file runs the same commands.** `--control-script FILE` reads commands from a file, one per line (blank lines skipped), and prints each reply to stdout. It can take values from the environment ([Script variables](#script-variables)). At the end of the file the app keeps running, unless the last command is `quit`. *Why:* the same code serves a quick check with no client, and a check that can be saved next to a patch.
 12. **Unix only, for now.** The socket needs Unix domain sockets (macOS and Linux). On Windows `--control` says it is not supported; `--control-script` works everywhere. *Why:* Rust's standard library has Unix sockets on Unix only. TCP on loopback can come later if Windows needs it.
 13. **Short socket paths.** A socket path must be shorter than about 100 bytes (104 on macOS, 108 on Linux). A relative path is fine. A socket file left by an earlier run is replaced; any other file at that path is never touched, not even when the app quits. The app removes its socket when it quits. *Why:* the limit is the operating system's; a long temporary folder path fails with "path must be shorter than SUN_LEN".
 14. **`sample` measures, a person judges.** It gives one entry per frame with the frame's time, so a script can find the largest jump between frames, frames where the value did not change, and gaps between frames. It starts after the two frames of rule 5. The live values are read each frame it records, even when no modulation asks for frames. *Why:* "does the dot move smoothly" then becomes numbers; a person only has to judge how it looks.
