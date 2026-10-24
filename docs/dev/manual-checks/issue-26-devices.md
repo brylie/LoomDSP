@@ -171,7 +171,7 @@ Wait for `Capturing "<loopback>" at <rate> Hz`, then in a second terminal:
 cargo run --release -p loom-app -- examples/dev/check-drone.ron --device "<loopback>" --buffer 4096
 ```
 
-In Preferences, choose the interface, wait two seconds, choose the loopback again, wait two seconds, and quit, all within the 30 seconds. Then:
+In Preferences, choose the interface, wait two seconds, choose the loopback again, wait two seconds, and quit, all within the 30 seconds. Wait for the capture in the first terminal to end. It must end with `Wrote <n> frames` and no `error:` line: a capture that dropped frames or saw a stream error proves nothing. Then:
 
 ```sh
 cargo run --release -p loom-cli -- analyze target/check-device-side.wav --max-step 0.01
@@ -237,7 +237,7 @@ Wait for `Capturing`, then in a second terminal:
 cargo run --release -p loom-app -- examples/dev/check-dc.ron --output-safety off --device "<loopback>" --sample-rate 48000 --buffer 4096 --control-script target/check-stops.jsonl
 ```
 
-When the capture has ended:
+When the capture has ended, with `Wrote <n> frames` and no `error:` line:
 
 ```sh
 cargo run --release -p loom-cli -- analyze target/check-dc-device.wav --max-step 0.01
