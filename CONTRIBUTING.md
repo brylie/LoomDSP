@@ -70,7 +70,7 @@ Every pull request runs these jobs. All must pass before merging (the "CI succes
 | Format | `rustfmt` style | `cargo fmt --all --check` |
 | Clippy | Lint groups set in the workspace `Cargo.toml`: correctness, suspicious, complexity, perf, style, cargo | `cargo clippy --workspace --all-targets -- -D warnings` |
 | Test | All tests on Linux, macOS (Apple Silicon), and Windows, plus benchmarks compile | `cargo test --workspace` |
-| Coverage | Line coverage, shown in the job summary. Runs the tests with nextest and sends coverage and test results to Codecov | `cargo llvm-cov nextest --workspace` (install [cargo-llvm-cov](https://github.com/taiki-e/cargo-llvm-cov) and [cargo-nextest](https://nexte.st)) |
+| Coverage | Line coverage, shown in the job summary. Runs the tests with nextest and sends coverage and test results to Codecov | `cargo llvm-cov nextest --workspace --profile ci` (install [cargo-llvm-cov](https://github.com/taiki-e/cargo-llvm-cov) and [cargo-nextest](https://nexte.st)) |
 | Docs | API docs build without warnings | `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` |
 | MSRV | Still builds with Rust 1.99 | `cargo +1.99 check --workspace` |
 | WebAssembly | Engine crates build for `wasm32-unknown-unknown` | `cargo build --target wasm32-unknown-unknown -p loom-core -p loom-modules -p loom-patch -p loom-rt` |
