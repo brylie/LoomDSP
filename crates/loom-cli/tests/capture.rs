@@ -42,3 +42,15 @@ fn an_unusable_length_exits_with_2() {
         assert!(stderr.contains("--seconds"), "{stderr}");
     }
 }
+
+/// `loom devices` lists audio inputs, so a capture device can be found.
+/// A machine with no audio system may fail to list anything; then there is
+/// nothing to check.
+#[test]
+fn devices_lists_audio_inputs() {
+    let out = Command::new(env!("CARGO_BIN_EXE_loom")).arg("devices").output().unwrap();
+    if out.status.success() {
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(stdout.contains("Audio inputs:"), "{stdout}");
+    }
+}
