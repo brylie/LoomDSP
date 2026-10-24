@@ -331,6 +331,20 @@ mod tests {
         assert_eq!(samples, [1.0, 2.0, 5.0, 6.0, 9.0, 9.0, 10.0, 10.0]);
     }
 
+    /// Closing a recording that wrote without error reports no error, and
+    /// leaves a readable file with what was pushed.
+    #[test]
+    fn close_reports_no_error_after_a_clean_recording() {
+        let dir = TestDir::new("record-close");
+        let path = dir.0.join("out.wav");
+        let recorder = Recorder::start(&path, 48_000).unwrap();
+        let mut tap = recorder.tap();
+        tap.push(&[0.25; 10], &[0.5; 10]);
+        drop(tap);
+        assert_eq!(recorder.close(), None);
+        assert_eq!(hound::WavReader::open(&path).unwrap().len(), 20);
+    }
+
     /// A full ring drops frames and counts them.
     #[test]
     fn a_full_ring_drops_and_counts() {

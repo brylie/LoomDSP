@@ -126,9 +126,18 @@ A QA run starts the capture, plays the app into the loopback output, and checks 
 
 ```sh
 loom capture --device blackhole -o /tmp/device.wav --seconds 6 2> /tmp/capture.log &
-until grep -q Capturing /tmp/capture.log; do sleep 0.1; done
-loom-app examples/dev/check-dc.ron --output-safety off --device blackhole --buffer 4096 --control-script open-new-quit.jsonl
-wait
+capture=$!
+until grep -q Capturing /tmp/capture.log; do
+  # A capture that failed to start never prints the line.
+  kill -0 "$capture" 2>/dev/null || { cat /tmp/capture.log; wait "$capture"; exit $?; }
+  sleep 0.1
+done
+loom-app examples/dev/check-dc.ron --output-safety off --device blackhole --sample-rate 48000 --buffer 4096 --control-script open-and-quit.jsonl
+app=$?
+wait "$capture"
+captured=$?
+# A failed app or a broken capture leaves a file that proves nothing.
+if [ "$app" -ne 0 ] || [ "$captured" -ne 0 ]; then cat /tmp/capture.log; exit 2; fi
 loom analyze /tmp/device.wav --max-step 0.01
 ```
 
@@ -138,7 +147,7 @@ loom analyze /tmp/device.wav --max-step 0.01
 
 **Clock drift.** A loopback device has one clock for both sides, so capture and playback cannot drift apart. When the input and output are different devices (an interface's output wired to another device's input), their clocks drift a little. Capture never resamples (rule 10). The checks of `loom analyze` (peak, step, DC) do not compare the capture with anything sample by sample, so drift does not change them. For the same reason, a capture is never compared sample by sample with a `--record` file or a reference render: the device adds latency, and the start time depends on the machine.
 
-**CI.** The Loopback capture job runs the stop that must fade out (`a_stop_with_large_buffers_fades_out_on_the_device`) on an Ubuntu runner. It starts PipeWire, loads a null sink (`pactl load-module module-null-sink`), makes it the default sink and its monitor the default source, and sets `LOOM_LOOPBACK=pipewire`, so `cpal` plays and captures through the PipeWire ALSA plugin. It passed five runs out of five. The test waits for the capture's first frames before it plays, because some inputs take seconds to start. Three limits, found on the runner in October 2026:
+**CI.** The Loopback capture job runs the stop that must fade out (`a_stop_with_large_buffers_fades_out_on_the_device`) on an Ubuntu runner. It starts PipeWire, loads a null sink (`pactl load-module module-null-sink`), makes it the default sink and its monitor the default source, and sets `LOOM_LOOPBACK=pipewire`, so `cpal` plays and captures through the PipeWire ALSA plugin. It passed ten runs out of ten. The test waits for the capture's first frames before it plays, because some inputs take seconds to start. Three limits, found on the runner in October 2026:
 
 - **The cut check does not run in CI.** On PipeWire, its partner test (`a_fixed_100_ms_stop_limit_shows_as_a_cut`) fails: the ALSA plugin plays out what it was handed after a stream closes, so a stop never cuts there. The job can still catch a missing fade, a dropout, or a step inside the stream, but not a stop cut too early. That check still needs a loopback that cuts, such as BlackHole on macOS.
 - **PulseAudio is not used, because LoomDSP clicks on it.** With PulseAudio and its ALSA plugin, the capture took about 2 s to start, and two real faults showed up. At the start, the first 9 ms of the 10 ms fade-in never reached the sink: the capture jumps from 0 to 0.45. At the stop, the queue in the sound server holds more than the 2 silent buffers the stop waits for (`SILENT_BUFFERS_BEFORE_STOP`), so the fade was cut at 0.32. An extra 500 ms wait before the stop let the fade play out. Fixing this (waiting for the device's real latency) is a follow-up issue. Once it is fixed, both tests can run on a PulseAudio null sink in CI, where the cut check can fail.

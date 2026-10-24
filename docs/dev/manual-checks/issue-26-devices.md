@@ -28,9 +28,9 @@ Smallest buffer offered at 96 kHz:
 MIDI controllers (names as listed):
 Loopback device (name as listed, or none):
 
-Part 1, output safety:     1.1 [ ]  1.2 [ ]  1.3 [ ]  1.4 [ ]
 Part 0, device tests:      0.4 [ ]
-Part 2, device change:     2.1 [ ]  2.2 [ ]  2.3 [ ]  2.4 [ ]  2.6 [ ]
+Part 1, output safety:     1.1 [ ]  1.2 [ ]  1.3 [ ]  1.4 [ ]
+Part 2, device change:     2.1 [ ]  2.2 [ ]  2.3 [ ]  2.4 [ ]  2.5 [ ]  2.6 [ ]
 Part 3, fade-out:          3.1 [ ]  3.2 [ ]  3.3 [ ]
 Part 4, restart:           4.1 [ ]  4.2 [ ]
 Part 5, MIDI inputs:       5.1 [ ]  5.2 [ ]  5.3 [ ]
@@ -157,8 +157,6 @@ Either way, start the app again with the drone (2.1, without `--record`) and cho
 - Listen: a short gap, then the tone, with no click and no crackle after it settles. Write the size down.
 - Look: if the device refused the size, the status bar says why and the tone still plays.
 
-Leave the app running for Part 3.
-
 **2.5. Or run Part 2 as a script.** The [control channel](../../design/control-channel.md#devices-and-stream-health) can make the choices in 2.2 to 2.4 itself, and tell whether the device really calls back. It does not listen: your ears still check for clicks and crackle. The script picks the first device whose name contains `BlackHole` and the smallest buffer it offers, 32 frames. For your interface, copy the file and change the `device` and `buffer` lines. A refused size gets an error that lists the sizes offered.
 
 ```sh
@@ -167,19 +165,19 @@ cargo run --release -p loom-app -- examples/dev/check-drone.ron --preferences ta
 
 `--preferences` keeps the real preferences file out of it. Each `audio` reply gives the "Playing on" line. Each `snapshot` gives `audio.callbacks` and `audio.advanced`. The step passes when every snapshot after a change has `advanced: true`, the right `rate` and `buffer`, and `stream_errors` that stays the same after the first second. If `advanced` is false, the device stopped calling back while the app said it played: the bug fixed in `settle_rate`.
 
-**2.6. (loopback) A device change, as the device played it.** Quit the app. In one terminal, start a capture, then start the drone on the loopback:
+**2.6. (loopback) A device change, as the device played it.** Quit the app. Set the loopback to 48 kHz first (on macOS in Audio MIDI Setup). Both commands below use 48 kHz: step 2.3 saved 96 kHz, and if the app switched the loopback's rate under the capture, the capture would end with an error. In one terminal, start a capture, then start the drone on the loopback:
 
 ```sh
-cargo run --release -p loom-cli -- capture --device "<loopback>" -o target/check-device-side.wav --seconds 30
+cargo run --release -p loom-cli -- capture --device "<loopback>" --sample-rate 48000 -o target/check-device-side.wav --seconds 30
 ```
 
 Wait for `Capturing "<loopback>" at <rate> Hz`, then in a second terminal:
 
 ```sh
-cargo run --release -p loom-app -- examples/dev/check-drone.ron --device "<loopback>" --buffer 4096
+cargo run --release -p loom-app -- examples/dev/check-drone.ron --device "<loopback>" --sample-rate 48000 --buffer 4096
 ```
 
-In Preferences, choose the interface, wait two seconds, choose the loopback again, wait two seconds, and quit, all within the 30 seconds. Then:
+In Preferences, choose the interface, wait two seconds, choose the loopback again, wait two seconds, and quit, all within the 30 seconds. Wait for the capture in the first terminal to end. It must end with `Wrote <n> frames` and no `error:` line: a capture that dropped frames or saw a stream error proves nothing. Then:
 
 ```sh
 cargo run --release -p loom-cli -- analyze target/check-device-side.wav --max-step 0.01
@@ -234,7 +232,7 @@ It passes if every stop faded out. A hard stop from 0.5 would be a step of 0.5. 
 Quit the app. Start the capture in one terminal:
 
 ```sh
-cargo run --release -p loom-cli -- capture --device "<loopback>" -o target/check-dc-device.wav --seconds 10
+cargo run --release -p loom-cli -- capture --device "<loopback>" --sample-rate 48000 -o target/check-dc-device.wav --seconds 10
 ```
 
 The capture runs at the loopback's current rate. The app's `--sample-rate 48000` switches the loopback to 48 kHz when it starts, so set the loopback to 48 kHz first (on macOS in Audio MIDI Setup), or the capture ends with an error. At 48 kHz a 4096-frame buffer is 85 ms long, as when Open clicked in #26. At 96 kHz the same buffer is short enough to hide the bug.
@@ -245,7 +243,7 @@ Wait for `Capturing`, then in a second terminal. `loom capture` prints it once t
 cargo run --release -p loom-app -- examples/dev/check-dc.ron --output-safety off --device "<loopback>" --sample-rate 48000 --buffer 4096 --control-script target/check-stops.jsonl
 ```
 
-When the capture has ended:
+When the capture has ended, with `Wrote <n> frames` and no `error:` line:
 
 ```sh
 cargo run --release -p loom-cli -- analyze target/check-dc-device.wav --max-step 0.01
@@ -304,7 +302,7 @@ Quit.
 
 - Turn Pad back on in Preferences, or leave it off if you like.
 - Put back the preferences file you set aside in step 0.3, if there was one.
-- Delete `target/check-device.wav`, `target/check-dc.wav`, `target/check-device-side.wav`, `target/check-dc-device.wav`, `target/check-stops.jsonl`, and `target/check-prefs.ron`.
+- Delete `target/check-device.wav`, `target/check-dc.wav`, `target/check-prefs.ron`, `target/check-device-side.wav`, `target/check-dc-device.wav`, and `target/check-stops.jsonl`.
 - Set the system default output back to what you use.
 
 ## When a step fails

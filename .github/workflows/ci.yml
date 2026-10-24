@@ -95,15 +95,17 @@ jobs:
       # but not expected to be covered by unit tests. nextest runs the tests
       # so the `ci` profile (.config/nextest.toml) writes a JUnit report.
       # It skips doctests; the Test job still runs them.
+      # Tests that need hardware live in `device_tests.rs` files. They are
+      # ignored here, so their code is left out of the measurement.
       - name: Measure coverage
-        run: cargo llvm-cov nextest --workspace --profile ci --lcov --output-path lcov.info
+        run: cargo llvm-cov nextest --workspace --profile ci --lcov --output-path lcov.info --ignore-filename-regex 'device_tests\.rs$'
       - name: Coverage summary
         run: |
           {
             echo '## Test coverage'
             echo
             echo '```'
-            cargo llvm-cov report --summary-only
+            cargo llvm-cov report --summary-only --ignore-filename-regex 'device_tests\.rs$'
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v7
