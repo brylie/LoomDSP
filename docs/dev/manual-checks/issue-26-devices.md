@@ -159,16 +159,16 @@ cargo run --release -p loom-app -- examples/dev/check-drone.ron --preferences ta
 
 `--preferences` keeps the real preferences file out of it. Each `audio` reply gives the "Playing on" line. Each `snapshot` gives `audio.callbacks` and `audio.advanced`. The step passes when every snapshot after a change has `advanced: true`, the right `rate` and `buffer`, and `stream_errors` that stays the same after the first second. If `advanced` is false, the device stopped calling back while the app said it played: the bug fixed in `settle_rate`.
 
-**2.6. (loopback) A device change, as the device played it.** Quit the app. In one terminal, start a capture, then start the drone on the loopback:
+**2.6. (loopback) A device change, as the device played it.** Quit the app. Set the loopback to 48 kHz first (on macOS in Audio MIDI Setup). Both commands below use 48 kHz: step 2.3 saved 96 kHz, and if the app switched the loopback's rate under the capture, the capture would end with an error. In one terminal, start a capture, then start the drone on the loopback:
 
 ```sh
-cargo run --release -p loom-cli -- capture --device "<loopback>" -o target/check-device-side.wav --seconds 30
+cargo run --release -p loom-cli -- capture --device "<loopback>" --sample-rate 48000 -o target/check-device-side.wav --seconds 30
 ```
 
 Wait for `Capturing "<loopback>" at <rate> Hz`, then in a second terminal:
 
 ```sh
-cargo run --release -p loom-app -- examples/dev/check-drone.ron --device "<loopback>" --buffer 4096
+cargo run --release -p loom-app -- examples/dev/check-drone.ron --device "<loopback>" --sample-rate 48000 --buffer 4096
 ```
 
 In Preferences, choose the interface, wait two seconds, choose the loopback again, wait two seconds, and quit, all within the 30 seconds. Wait for the capture in the first terminal to end. It must end with `Wrote <n> frames` and no `error:` line: a capture that dropped frames or saw a stream error proves nothing. Then:
@@ -226,7 +226,7 @@ It passes if every stop faded out. A hard stop from 0.5 would be a step of 0.5. 
 Quit the app. Start the capture in one terminal:
 
 ```sh
-cargo run --release -p loom-cli -- capture --device "<loopback>" -o target/check-dc-device.wav --seconds 10
+cargo run --release -p loom-cli -- capture --device "<loopback>" --sample-rate 48000 -o target/check-dc-device.wav --seconds 10
 ```
 
 The capture runs at the loopback's current rate. The app's `--sample-rate 48000` switches the loopback to 48 kHz when it starts, so set the loopback to 48 kHz first (on macOS in Audio MIDI Setup), or the capture ends with an error. At 48 kHz a 4096-frame buffer is 85 ms long, as when Open clicked in #26. At 96 kHz the same buffer is short enough to hide the bug.
