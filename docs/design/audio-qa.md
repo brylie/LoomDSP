@@ -120,7 +120,7 @@ loom capture --device <part of name> -o out.wav --seconds N
 | `--seconds N` | How long to record. Required. |
 | `--sample-rate HZ` | Ask the device for this rate. The device default otherwise. |
 
-The file holds the device's first two channels. A mono device is written to both. When the stream is running, `loom capture` prints one line to stderr, `Capturing "<device>" at <rate> Hz`, so a script can wait for it before it starts the app. `loom devices` also lists audio inputs, so the name can be found.
+The file holds the device's first two channels. A mono device is written to both. When the first frames have arrived, `loom capture` prints one line to stderr, `Capturing "<device>" at <rate> Hz`, so a script can wait for it before it starts the app. The length (`--seconds`) counts from then. A running stream can take seconds to deliver its first frames (about 2 s with the ALSA plugin for PulseAudio), and audio played before them is not captured. If none arrive in 10 s, the run is broken (status 2). `loom devices` also lists audio inputs, so the name can be found.
 
 A QA run starts the capture, plays the app into the loopback output, and checks the file with `loom analyze`:
 
@@ -132,7 +132,7 @@ wait
 loom analyze /tmp/device.wav --max-step 0.01
 ```
 
-**Exit status.** 0 when the file was written with every frame. 2 when the device cannot be opened, the file cannot be written, frames were dropped, or the input stream reported an error (such as the device going away). *Why:* a dropped frame is a jump in the file that the device never played, so a step check on it would fail for the wrong reason. A script can tell a broken run (2) from a failed check in `loom analyze` (1).
+**Exit status.** 0 when the file was written with every frame. 2 when the device cannot be opened or delivers no frames in 10 s, the file cannot be written, frames were dropped, or the input stream reported an error (such as the device going away). *Why:* a dropped frame is a jump in the file that the device never played, so a step check on it would fail for the wrong reason. A script can tell a broken run (2) from a failed check in `loom analyze` (1).
 
 **Relation to audio input (#29).** Capture is a development tool, not audio input for patches. It opens a `cpal` input stream in `loom-host-desktop` and writes it to a file through the same ring and writer thread as `--record` (`Recorder`). Nothing reaches an engine, and there is no Audio In module. When #29 is built, it can reuse the device lookup and the input stream setup, but it has its own spec: latency, channel routing, and running input and output on two clocks are design questions for patches, not for this tool.
 

@@ -73,6 +73,12 @@ Set the loopback's output volume to full first (on macOS: Audio MIDI Setup, Blac
 LOOM_DEVICE="<part of the interface name>" LOOM_LOOPBACK="<part of the loopback name>" cargo test -p loom-host-desktop -- --ignored --test-threads=1
 ```
 
+On a PipeWire null sink, the cut check cannot pass: PipeWire plays out what it was handed after a stream closes, so a stop never cuts there ([audio QA, Part 4, CI](../../design/audio-qa.md#part-4-capture-what-reached-a-device)). Skip it there, and write "cut check skipped (PipeWire)" in Notes:
+
+```sh
+LOOM_DEVICE="<part of the interface name>" LOOM_LOOPBACK=pipewire cargo test -p loom-host-desktop -- --ignored --test-threads=1 --skip a_fixed_100_ms_stop_limit_shows_as_a_cut
+```
+
 On Windows, in PowerShell (there is no loopback on Windows yet, so the loopback tests skip):
 
 ```powershell
@@ -233,7 +239,7 @@ cargo run --release -p loom-cli -- capture --device "<loopback>" -o target/check
 
 The capture runs at the loopback's current rate. The app's `--sample-rate 48000` switches the loopback to 48 kHz when it starts, so set the loopback to 48 kHz first (on macOS in Audio MIDI Setup), or the capture ends with an error. At 48 kHz a 4096-frame buffer is 85 ms long, as when Open clicked in #26. At 96 kHz the same buffer is short enough to hide the bug.
 
-Wait for `Capturing`, then in a second terminal:
+Wait for `Capturing`, then in a second terminal. `loom capture` prints it once the loopback's first frames have arrived, so the first stop is in the file:
 
 ```sh
 cargo run --release -p loom-app -- examples/dev/check-dc.ron --output-safety off --device "<loopback>" --sample-rate 48000 --buffer 4096 --control-script target/check-stops.jsonl
