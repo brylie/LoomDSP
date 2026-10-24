@@ -138,19 +138,23 @@ This checks that the old engine fades out before it stops (output safety rule 14
 cargo run --release -p loom-app -- examples/dev/check-dc.ron --output-safety off --record target/check-dc.wav
 ```
 
-- Listen: almost nothing, maybe a soft thump at start on some devices. A constant is not a sound. It plays on the interface at 96 kHz, as saved in Part 2.
+- Listen: almost nothing, maybe a soft thump at start on some devices. This is right: a constant is not a sound, only an offset that pushes the speaker cone out and holds it there. It plays on the interface at 96 kHz, as saved in Part 2.
 - Look: in Preferences, Output safety shows `Set by --output-safety for this run.`
+- **Do not touch the Constant's knob.** The recording must hold only the stops. A knob move shows up as a large step and fails the check below, even though it is smoothed and not a click.
 
 **3.2. Open another patch.** Use Open in the app to open `examples/dev/check-drone.ron`. Then make a new patch with New. Then quit.
 
-- Listen: no thump at Open, at New, or at quit.
+- Listen: no thump at Open, at New, or at quit. You hear the drone between Open and New.
 - Check the recording:
 
 ```sh
 cargo run --release -p loom-cli -- analyze target/check-dc.wav --max-step 0.01
 ```
 
-It passes if every stop faded out. A hard stop from 0.5 would be a step of 0.5.
+It passes if every stop faded out. A hard stop from 0.5 would be a step of 0.5. A fade over 10 ms takes steps of about 0.001, and the drone's own largest step is under 0.008.
+
+- Look: the peak is 0.5, and nothing is over the ceiling. A peak of 1.0 means the knob was moved: record again.
+- Look: the run is as long as you expect, and the drone is in it. If you remember an Open but the file has no drone, write that in Notes. The recording should continue across Open and New.
 
 ## Part 4: the choice is remembered, and a missing interface falls back
 
