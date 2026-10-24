@@ -9,7 +9,7 @@ The automated tests already cover the logic with a fake host. This script checks
 - The repository at the commit you are checking, with Rust installed.
 - Headphones or monitors. **Keep the volume low.** Part 1 plays noise far over full scale.
 - A USB audio interface that offers 96 kHz.
-- Two MIDI controllers. Call them **Keys** (the one you keep on) and **Pad** (the one you turn off).
+- Two MIDI inputs. Call them **Keys** (the one you keep on) and **Pad** (the one you turn off). On macOS and Linux, Part 5 makes them as virtual controllers with `loom midi-port`, so no hardware is needed. On Linux this needs the ALSA sequencer: `/dev/snd/seq` must exist (`sudo modprobe snd-seq` if not). On Windows, use two MIDI controllers.
 - The built-in output of the computer (speakers or headphone jack).
 
 ## Results to report
@@ -22,7 +22,7 @@ Commit:
 Built-in output name:
 Audio interface (name as listed):
 Smallest buffer offered at 96 kHz:
-MIDI controllers (names as listed):
+MIDI inputs (virtual or hardware, names as listed):
 
 Part 1, output safety:     1.1 [ ]  1.2 [ ]  1.3 [ ]  1.4 [ ]
 Part 2, device change:     2.1 [ ]  2.2 [ ]  2.3 [ ]  2.4 [ ]
@@ -40,13 +40,13 @@ Notes (anything odd, with the step number):
 cargo build --release -p loom-app -p loom-cli
 ```
 
-**0.2. List the devices.** Plug in the interface and both controllers first.
+**0.2. List the devices.** Plug in the interface first, and on Windows both controllers.
 
 ```sh
 cargo run --release -p loom-cli -- devices
 ```
 
-Write down the exact names of the built-in output, the interface, and both controllers.
+Write down the exact names of the built-in output and the interface, and on Windows both controllers.
 
 **0.3. Set the preferences file aside.** This check needs a fresh start, and it writes to the real per-user file, because remembering it between runs is part of the check.
 
@@ -189,27 +189,49 @@ Quit, and plug the interface back in.
 
 ## Part 5: MIDI inputs
 
-**5.1. Both controllers play.**
+**5.0. Make Keys and Pad.** On macOS and Linux, open two more terminals and start a virtual controller in each. Leave both running until the end of Part 5: the app finds MIDI inputs only when it starts, and on Linux a new port can get a new number.
+
+```sh
+cargo run --release -p loom-cli -- midi-port "Loom Keys"
+```
+
+```sh
+cargo run --release -p loom-cli -- midi-port "Loom Pad"
+```
+
+Each prints `MIDI input: <name>`. That is the name the app shows: `Loom Keys` on macOS, and something like `LoomDSP virtual:Loom Keys 128:0` on Linux. To play, type a line and press Enter: `on 60` holds middle C, `off 60` lets it go. A key stays held until you type its `off` line. Any controllers you have plugged in show in the app too. Leave them alone.
+
+On Windows, use the two hardware controllers. Where a step says "type `on 60` in Pad", hold middle C on Pad instead.
+
+The same checks also run as tests, through two virtual ports the test makes itself. On macOS and Linux, run them once, and note a failure:
+
+```sh
+cargo test -p loom-host-desktop -p loom-app -- --ignored real_input
+```
+
+**5.1. Both inputs play.**
 
 ```sh
 cargo run --release -p loom-app -- examples/patches/subtractive.ron
 ```
 
-- Play a note on Keys, then on Pad. Both play the patch.
-- Look: Preferences lists both controllers with their check boxes checked, and the line `New MIDI inputs are on until you turn them off.`
+- Type `on 60` in Keys, then `off 60`. Then the same in Pad. Both play the patch.
+- Look: Preferences lists Keys and Pad with their check boxes checked, and the line `New MIDI inputs are on until you turn them off.`
 
-**5.2. Turn Pad off while a note is held.** Hold a note on Pad. While you hold it, uncheck Pad in Preferences.
+**5.2. Turn Pad off while a note is held.** Type `on 60` in Pad, and do not type `off 60`. While the note sounds, uncheck Pad in Preferences.
 
-- Listen: the held note stops, even though you still hold the key. Audio does not stop.
-- Play Pad again: nothing. Play Keys: it plays.
-- Look: the preferences file has `off: ["<Pad name>"]`.
+- Listen: the held note stops, even though Pad still holds it. Audio does not stop.
+- Type `off 60`, then `on 62` and `off 62` in Pad: nothing. The same in Keys: it plays.
+- Look: the preferences file has `off: ["<Pad name>"]`, with the name exactly as the app shows it.
 
-Quit.
+Quit the app. Leave Keys and Pad running.
 
 **5.3. Start again.** Use the same command.
 
 - Look: Pad is still unchecked in Preferences.
-- Play Pad: nothing. Play Keys: it plays.
+- Type `on 60` and `off 60` in Pad: nothing. In Keys: it plays.
+
+Quit the app. Press Ctrl+D in the Keys and Pad terminals to end them.
 
 ## Clean up
 

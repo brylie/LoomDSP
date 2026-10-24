@@ -5,6 +5,7 @@
 //! stress-test live editing.
 
 mod analyze;
+mod midi_port;
 
 use clap::{Parser, Subcommand};
 use loom_core::{Controller, EngineConfig, EngineParts, MidiEvent, ModuleId, OutputSafety, create_engine};
@@ -71,6 +72,10 @@ enum Command {
     /// Measure a WAV file: peak, clipping, largest step, DC, and RMS, with
     /// optional checks for scripts (docs/design/audio-qa.md).
     Analyze(analyze::Options),
+    /// Create a virtual MIDI controller and play the notes read on standard
+    /// input: `on NOTE [VELOCITY]`, `off NOTE`, `wait MS`. macOS and Linux
+    /// only. The app lists it as a MIDI input, so start this first.
+    MidiPort(midi_port::Options),
     /// Play a patch live with a MIDI controller.
     Play {
         /// Patch file (.ron).
@@ -135,6 +140,7 @@ fn main() -> ExitCode {
         Command::Devices => devices(),
         Command::Check { patch } => check(&patch),
         Command::Analyze(options) => return analyze::run(&options),
+        Command::MidiPort(options) => return midi_port::run(&options),
         Command::Render {
             patch,
             output,

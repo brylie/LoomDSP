@@ -1106,6 +1106,64 @@ mod tests {
         assert!(app._audio.is_some(), "audio did not stop");
     }
 
+    /// The same check through real MIDI inputs: two virtual controllers,
+    /// opened by `midir` (audio-qa.md, Part 4). It needs the operating
+    /// system's MIDI service, so it is ignored by default: run it with
+    /// `cargo test -p loom-app -- --ignored` on macOS, or on Linux with the
+    /// ALSA sequencer.
+    #[test]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[ignore = "needs virtual MIDI ports (macOS, or Linux with ALSA)"]
+    fn turning_a_real_input_off_releases_its_notes_and_is_saved() {
+        use loom_host_desktop::VirtualController;
+        let dir = folder("real-midi");
+        let run = format!("Loom test {}", std::process::id());
+        let mut pad = VirtualController::create(&format!("{run} Pad")).unwrap();
+        let mut keys = VirtualController::create(&format!("{run} Keys")).unwrap();
+        let (pad_name, keys_name) = (pad.input_name().unwrap(), keys.input_name().unwrap());
+        let fake = Rc::new(Fake {
+            real_midi: Some(run),
+            ..Fake::new(&[fake::device("Fake A")], &[])
+        });
+        let mut app = start(args(&dir), &fake);
+        let open = |app: &App| app.rig.ports.iter().map(|p| p.name().to_string()).collect::<Vec<_>>();
+        assert_eq!(open(&app).len(), 2, "both ports open: {:?}", open(&app));
+
+        let note = loom_modules::registry().resolve("loom.midi.note").unwrap();
+        app.add_module(note, iced::Point::new(100.0, 100.0));
+        let id = loom_core::ModuleId(*app.selection.iter().next().unwrap());
+        let gate = app
+            .controller
+            .graph()
+            .node(id)
+            .unwrap()
+            .descriptor
+            .display_index("gate")
+            .unwrap();
+        let wait_for = |app: &App, value: f32| {
+            (0..400).any(|_| {
+                std::thread::sleep(Duration::from_millis(5));
+                app.controller.display(id, gate) == Some(value)
+            })
+        };
+        pad.note_on(0, 60, 100).unwrap();
+        assert!(wait_for(&app, 1.0), "the note plays");
+
+        app.preferences(Message::Midi(pad_name.clone(), false));
+        assert!(wait_for(&app, 0.0), "and is released, though the key is held");
+        assert!(pad.holds_notes());
+        assert_eq!(open(&app), std::slice::from_ref(&keys_name));
+        assert_eq!(
+            crate::preferences::load(&dir.join(FILE_NAME)).preferences.midi.off,
+            [pad_name]
+        );
+        pad.note_on(0, 64, 100).unwrap();
+        assert!(!wait_for(&app, 1.0), "the input that is off does not play");
+        keys.note_on(0, 62, 100).unwrap();
+        assert!(wait_for(&app, 1.0), "the other input still plays");
+        assert!(app._audio.is_some(), "audio did not stop");
+    }
+
     #[test]
     fn inputs_that_are_off_are_not_opened() {
         let dir = folder("midi-off");

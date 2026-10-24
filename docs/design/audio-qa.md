@@ -3,12 +3,12 @@
 Tools that let tests, scripts, and QA agents check what the app actually plays, so safety checks on the final output do not depend on a person listening.
 
 - **Kind:** living specification.
-- **Status:** Parts 1 to 3 implemented, agreed and built in [#320](https://github.com/brylie/LoomDSP/pull/320). Part 4 (virtual MIDI controllers) agreed.
+- **Status:** Parts 1 to 3 implemented, agreed and built in [#320](https://github.com/brylie/LoomDSP/pull/320). Part 4 (virtual MIDI controllers) agreed and built for [#26](https://github.com/brylie/LoomDSP/issues/26); run on macOS, not yet on Linux.
 - **Decision behind it:** None. It builds on [output safety](output-safety.md) (ADR-0019), the [control channel](control-channel.md), and the `devices::Host` trait from the [preferences spec](preferences.md).
 - **Use case and requirements:** Developer tooling. It protects UC3 (perform live), FR-PERF-08, NFR-SND-02, and NFR-SND-03 by testing them in the app, not only in the engine.
 - **Background:** [Output safety explainer](../learn/output-safety.md).
 - **Issues:** Part 4 comes from the manual check of [#26](https://github.com/brylie/LoomDSP/issues/26) (MIDI inputs on and off). Part 1 [#318](https://github.com/brylie/LoomDSP/issues/318), Part 2 [#319](https://github.com/brylie/LoomDSP/issues/319), Part 3 [#317](https://github.com/brylie/LoomDSP/issues/317). Comes from [#200](https://github.com/brylie/LoomDSP/issues/200) (the listening checks for output safety). Related: [#130](https://github.com/brylie/LoomDSP/issues/130) (a meter or warning for the final output).
-- **Code:** stepped output: `AudioOutput::stepped` and `Tape` in `crates/loom-host-desktop/src/stepped.rs`, offered by the fake host in `crates/loom-app/src/devices.rs`. App tests: `crates/loom-app/src/qa_tests.rs`. Recording: `Recorder` in `crates/loom-host-desktop/src/record.rs`, owned by `settings::Rig`. Measurements: `crates/loom-test/src/analysis.rs`. `loom analyze`: `crates/loom-cli/src/analyze.rs`, tests in `crates/loom-cli/tests/analyze.rs`.
+- **Code:** stepped output: `AudioOutput::stepped` and `Tape` in `crates/loom-host-desktop/src/stepped.rs`, offered by the fake host in `crates/loom-app/src/devices.rs`. App tests: `crates/loom-app/src/qa_tests.rs`. Recording: `Recorder` in `crates/loom-host-desktop/src/record.rs`, owned by `settings::Rig`. Measurements: `crates/loom-test/src/analysis.rs`. `loom analyze`: `crates/loom-cli/src/analyze.rs`, tests in `crates/loom-cli/tests/analyze.rs`. Virtual MIDI: `VirtualController` in `crates/loom-host-desktop/src/virtual_midi.rs`, `loom midi-port` in `crates/loom-cli/src/midi_port.rs`, the fake host's `real_midi` option in `crates/loom-app/src/devices.rs`, and the ignored tests `closing_a_real_input_releases_its_held_notes` (`loom-host-desktop`) and `turning_a_real_input_off_releases_its_notes_and_is_saved` (`loom-app`, `settings.rs`).
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
      built. See README.md in this folder. -->
@@ -103,7 +103,7 @@ Virtual ports exist on macOS (CoreMIDI) and on Linux (the ALSA sequencer, which 
 
 It comes in three pieces, all built on one helper.
 
-**The helper.** `VirtualController` in `loom-host-desktop`, built only on macOS and Linux. `VirtualController::create(name)` creates a virtual MIDI source called `name`. It sends raw MIDI bytes, note on, and note off. `input_name()` finds the name the app's MIDI input list shows for it. That name is `name` on macOS, but on Linux ALSA adds the client name and a port number, such as `LoomDSP virtual:Pad 128:0`. Dropping the helper removes the port.
+**The helper.** `VirtualController` in `loom-host-desktop`. `VirtualController::create(name)` creates a virtual MIDI source called `name`. It sends raw MIDI bytes, note on, and note off. `input_name()` finds the name the app's MIDI input list shows for it. That name is `name` on macOS, but on Linux ALSA adds the client name and a port number, such as `LoomDSP virtual:Pad 128:0`. Dropping the helper sends a note off for every note it holds, then removes the port. On other systems `create` returns an error that says virtual ports need macOS or Linux.
 
 **The command.** `loom midi-port NAME`: creates a virtual controller, prints the input name the app will show, and plays what it reads on standard input, one line at a time:
 
@@ -176,12 +176,13 @@ Each is a `loom-app` test that uses the stepped output, through `App::new` and `
 
 ### Part 4
 
-- [ ] `VirtualController` creates a port that `midi_input_names` lists, by the name `input_name` gives, on macOS and on Linux with the ALSA sequencer.
-- [ ] Ignored `loom-host-desktop` test: a note played on a virtual controller sounds through `connect_midi_named`, and `MidiConnection::close` releases it.
-- [ ] Ignored `loom-app` test: with two virtual controllers, turning one off through `settings::Message::Midi` releases its held note, the other still plays, audio does not stop, and `midi.off` is saved.
-- [ ] `loom midi-port` reads the lines in the table, skips a bad line with a message that has its line number, and releases held notes at the end of input. The parser has unit tests that run everywhere, Windows included.
+- [x] `VirtualController` creates a port that `midi_input_names` lists, by the name `input_name` gives, on macOS.
+- [ ] The same on Linux with the ALSA sequencer, and the two ignored tests below pass there.
+- [x] Ignored `loom-host-desktop` test: a note played on a virtual controller sounds through `connect_midi_named`, and `MidiConnection::close` releases it.
+- [x] Ignored `loom-app` test: with two virtual controllers, turning one off through `settings::Message::Midi` releases its held note, the other still plays, audio does not stop, and `midi.off` is saved.
+- [x] `loom midi-port` reads the lines in the table, skips a bad line with a message that has its line number, and releases held notes at the end of input. The parser has unit tests that run everywhere, Windows included.
 - [ ] Where virtual ports are not available, `loom midi-port` exits with status 2 and says why.
-- [ ] Part 5 of the [manual check for #26](../dev/manual-checks/issue-26-devices.md) uses `loom midi-port` on macOS and Linux, and two controllers only on Windows.
+- [x] Part 5 of the [manual check for #26](../dev/manual-checks/issue-26-devices.md) uses `loom midi-port` on macOS and Linux, and two controllers only on Windows.
 
 ### Manual
 

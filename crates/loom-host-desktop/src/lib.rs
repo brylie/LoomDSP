@@ -16,12 +16,14 @@
 //! a timer thread instead of a device, [`AudioOutput::stepped`] plays it only
 //! when a test asks and keeps every sample on a [`Tape`], and
 //! [`AudioOutput::record`] saves what the engine plays to a WAV file through
-//! a [`Recorder`] that can outlive many streams.
+//! a [`Recorder`] that can outlive many streams. A [`VirtualController`]
+//! plays MIDI into the app through a virtual port, on macOS and Linux.
 
 #![warn(missing_docs)]
 
 mod record;
 mod stepped;
+mod virtual_midi;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use loom_core::{Engine, MidiEvent, MidiSender};
@@ -33,6 +35,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 pub use stepped::Tape;
+pub use virtual_midi::VirtualController;
 
 /// Errors from the desktop host.
 #[derive(Debug, thiserror::Error)]
@@ -1176,5 +1179,54 @@ mod device_tests {
             };
             assert!(callbacks(&options) > 0, "the stream at {rate} Hz plays");
         }
+    }
+}
+
+/// Checks through virtual MIDI ports (`docs/design/audio-qa.md`, Part 4).
+/// They need the operating system's MIDI service, so they are ignored by
+/// default: run them with `cargo test -p loom-host-desktop -- --ignored` on
+/// macOS, or on Linux with the ALSA sequencer.
+#[cfg(all(test, any(target_os = "macos", target_os = "linux")))]
+mod virtual_midi_tests {
+    use super::*;
+    use loom_core::{EngineConfig, OutputSafety, create_engine};
+
+    /// A note played on a virtual controller reaches the engine through
+    /// `connect_midi_named`, and closing the connection releases it.
+    #[test]
+    #[ignore = "needs virtual MIDI ports (macOS, or Linux with ALSA)"]
+    fn closing_a_real_input_releases_its_held_notes() {
+        let config = EngineConfig {
+            output_safety: OutputSafety::Off,
+            ..EngineConfig::with_sample_rate(48_000.0)
+        };
+        let mut parts = create_engine(loom_modules::registry(), config);
+        let c = &mut parts.controller;
+        let note = c.add_module("loom.midi.note").unwrap();
+        let out = c.add_module("loom.io.audio-out").unwrap();
+        c.connect_named(note, "gate", out, "left").unwrap();
+        c.commit().unwrap();
+        let mut gate = || {
+            let (mut left, mut right) = (vec![0.0; 256], vec![0.0; 256]);
+            parts.engine.process(&mut left, &mut right);
+            left[255]
+        };
+        let mut wait_for = |value: f32| {
+            (0..200).any(|_| {
+                std::thread::sleep(Duration::from_millis(5));
+                gate() == value
+            })
+        };
+
+        let mut keys = VirtualController::create(&format!("Loom test {}", std::process::id())).unwrap();
+        let name = keys.input_name().unwrap();
+        let input = connect_midi_named(&name, share_midi(parts.midi)).unwrap();
+        assert_eq!(input.port_name(), name);
+        keys.note_on(0, 60, 100).unwrap();
+        assert!(wait_for(1.0), "the note plays");
+
+        input.close();
+        assert!(wait_for(0.0), "closing the input releases the held note");
+        assert!(keys.holds_notes(), "while the key is still held");
     }
 }
