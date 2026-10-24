@@ -42,14 +42,29 @@ impl Tap {
     /// or waits. Frames that do not fit are counted.
     pub(crate) fn push(&mut self, left: &[f32], right: &[f32]) {
         for (l, r) in left.iter().zip(right) {
-            if self.producer.slots() < 2 {
-                self.dropped.fetch_add(1, Ordering::Relaxed);
-                continue;
-            }
-            // Two free slots were just checked, and only this thread pushes.
-            let _ = self.producer.push(*l);
-            let _ = self.producer.push(*r);
+            self.push_frame(*l, *r);
         }
+    }
+
+    /// Pushes the first two channels of interleaved frames with `channels`
+    /// channels each, as from an input device. A mono frame goes to both
+    /// sides. Real-time safe, like [`Tap::push`].
+    pub(crate) fn push_interleaved(&mut self, data: &[f32], channels: usize) {
+        for frame in data.chunks_exact(channels.max(1)) {
+            let left = frame[0];
+            self.push_frame(left, frame.get(1).copied().unwrap_or(left));
+        }
+    }
+
+    /// Pushes one stereo frame, or counts it as dropped if it does not fit.
+    fn push_frame(&mut self, left: f32, right: f32) {
+        if self.producer.slots() < 2 {
+            self.dropped.fetch_add(1, Ordering::Relaxed);
+            return;
+        }
+        // Two free slots were just checked, and only this thread pushes.
+        let _ = self.producer.push(left);
+        let _ = self.producer.push(right);
     }
 }
 
@@ -134,8 +149,17 @@ impl Recorder {
     }
 }
 
-impl Drop for Recorder {
-    fn drop(&mut self) {
+impl Recorder {
+    /// Writes what is left, closes the file, and returns the write error
+    /// that stopped the recording, if one did. Dropping the recorder does
+    /// the same without the error.
+    pub fn close(mut self) -> Option<String> {
+        self.finish();
+        self.error()
+    }
+
+    /// Tells the writer to write what is left, and waits for it.
+    fn finish(&mut self) {
         self.done.store(true, Ordering::Release);
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
@@ -143,12 +167,21 @@ impl Drop for Recorder {
     }
 }
 
-/// Writes every ready sample of `consumer`.
+impl Drop for Recorder {
+    fn drop(&mut self) {
+        self.finish();
+    }
+}
+
+/// Writes every ready whole frame of `consumer`. The audio thread pushes
+/// a frame's two samples one after the other, so the writer can find half
+/// a frame in the ring. That half waits for the next drain: hound refuses
+/// to write a header for a file that ends in half a frame.
 fn drain(
     writer: &mut hound::WavWriter<std::io::BufWriter<std::fs::File>>,
     consumer: &mut rtrb::Consumer<f32>,
 ) -> Result<(), hound::Error> {
-    let ready = consumer.slots();
+    let ready = consumer.slots() & !1;
     if let Ok(chunk) = consumer.read_chunk(ready) {
         let (a, b) = chunk.as_slices();
         for &sample in a.iter().chain(b) {
@@ -274,6 +307,42 @@ mod tests {
         let left: Vec<f32> = reader.samples::<f32>().map(Result::unwrap).step_by(2).collect();
         let expected: Vec<f32> = [vec![1.0; 200], vec![2.0; 300], vec![3.0; 100]].concat();
         assert_eq!(left, expected);
+    }
+
+    /// Interleaved input frames keep their first two channels, and a mono
+    /// input is written to both sides. This is the writer `loom capture`
+    /// uses, tested here with a fake input in place of a device.
+    #[test]
+    fn interleaved_input_keeps_the_first_two_channels() {
+        let dir = TestDir::new("record-interleaved");
+        let path = dir.0.join("out.wav");
+        let recorder = Recorder::start(&path, 48_000).unwrap();
+        let mut quad = recorder.tap();
+        quad.push_interleaved(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], 4);
+        drop(quad);
+        let mut mono = recorder.tap();
+        mono.push_interleaved(&[9.0, 10.0], 1);
+        drop(mono);
+        assert_eq!(recorder.dropped(), 0);
+        drop(recorder);
+
+        let mut reader = hound::WavReader::open(&path).unwrap();
+        let samples: Vec<f32> = reader.samples::<f32>().map(Result::unwrap).collect();
+        assert_eq!(samples, [1.0, 2.0, 5.0, 6.0, 9.0, 9.0, 10.0, 10.0]);
+    }
+
+    /// Closing a recording that wrote without error reports no error, and
+    /// leaves a readable file with what was pushed.
+    #[test]
+    fn close_reports_no_error_after_a_clean_recording() {
+        let dir = TestDir::new("record-close");
+        let path = dir.0.join("out.wav");
+        let recorder = Recorder::start(&path, 48_000).unwrap();
+        let mut tap = recorder.tap();
+        tap.push(&[0.25; 10], &[0.5; 10]);
+        drop(tap);
+        assert_eq!(recorder.close(), None);
+        assert_eq!(hound::WavReader::open(&path).unwrap().len(), 20);
     }
 
     /// A full ring drops frames and counts them.

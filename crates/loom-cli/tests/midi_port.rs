@@ -1,5 +1,5 @@
 //! Tests for `loom midi-port`, run on the built binary
-//! (`docs/design/audio-qa.md`, Part 4).
+//! (`docs/design/audio-qa.md`, Part 5).
 
 use std::io::Write;
 use std::process::{Command, Stdio};

@@ -3,12 +3,12 @@
 Tools that let tests, scripts, and QA agents check what the app actually plays, so safety checks on the final output do not depend on a person listening.
 
 - **Kind:** living specification.
-- **Status:** Parts 1 to 3 implemented, agreed and built in [#320](https://github.com/brylie/LoomDSP/pull/320). Part 4 (virtual MIDI controllers) agreed and built for [#26](https://github.com/brylie/LoomDSP/issues/26); run on macOS, not yet on Linux.
+- **Status:** Parts 1 to 3: Implemented. Agreed and built in [#320](https://github.com/brylie/LoomDSP/pull/320). Part 4: Implemented. Agreed and built in the pull request that adds `loom capture`. Part 5 (virtual MIDI controllers): agreed and built for [#26](https://github.com/brylie/LoomDSP/issues/26); run on macOS, not yet on Linux.
 - **Decision behind it:** None. It builds on [output safety](output-safety.md) (ADR-0019), the [control channel](control-channel.md), and the `devices::Host` trait from the [preferences spec](preferences.md).
 - **Use case and requirements:** Developer tooling. It protects UC3 (perform live), FR-PERF-08, NFR-SND-02, and NFR-SND-03 by testing them in the app, not only in the engine.
 - **Background:** [Output safety explainer](../learn/output-safety.md).
-- **Issues:** Part 4 comes from the manual check of [#26](https://github.com/brylie/LoomDSP/issues/26) (MIDI inputs on and off). Part 1 [#318](https://github.com/brylie/LoomDSP/issues/318), Part 2 [#319](https://github.com/brylie/LoomDSP/issues/319), Part 3 [#317](https://github.com/brylie/LoomDSP/issues/317). Comes from [#200](https://github.com/brylie/LoomDSP/issues/200) (the listening checks for output safety). Related: [#130](https://github.com/brylie/LoomDSP/issues/130) (a meter or warning for the final output).
-- **Code:** stepped output: `AudioOutput::stepped` and `Tape` in `crates/loom-host-desktop/src/stepped.rs`, offered by the fake host in `crates/loom-app/src/devices.rs`. App tests: `crates/loom-app/src/qa_tests.rs`. Recording: `Recorder` in `crates/loom-host-desktop/src/record.rs`, owned by `settings::Rig`. Measurements: `crates/loom-test/src/analysis.rs`. `loom analyze`: `crates/loom-cli/src/analyze.rs`, tests in `crates/loom-cli/tests/analyze.rs`. Virtual MIDI: `VirtualController` in `crates/loom-host-desktop/src/virtual_midi.rs`, `loom midi-port` in `crates/loom-cli/src/midi_port.rs`, the fake host's `real_midi` option in `crates/loom-app/src/devices.rs`, and the ignored tests `closing_a_real_input_releases_its_held_notes` (`loom-host-desktop`) and `turning_a_real_input_off_releases_its_notes_and_is_saved` (`loom-app`, `settings.rs`).
+- **Issues:** Part 5 comes from the manual check of [#26](https://github.com/brylie/LoomDSP/issues/26) (MIDI inputs on and off). Part 1 [#318](https://github.com/brylie/LoomDSP/issues/318), Part 2 [#319](https://github.com/brylie/LoomDSP/issues/319), Part 3 [#317](https://github.com/brylie/LoomDSP/issues/317). Comes from [#200](https://github.com/brylie/LoomDSP/issues/200) (the listening checks for output safety). Related: [#130](https://github.com/brylie/LoomDSP/issues/130) (a meter or warning for the final output).
+- **Code:** stepped output: `AudioOutput::stepped` and `Tape` in `crates/loom-host-desktop/src/stepped.rs`, offered by the fake host in `crates/loom-app/src/devices.rs`. App tests: `crates/loom-app/src/qa_tests.rs`. Recording: `Recorder` in `crates/loom-host-desktop/src/record.rs`, owned by `settings::Rig`. Measurements: `crates/loom-test/src/analysis.rs`. `loom analyze`: `crates/loom-cli/src/analyze.rs`, tests in `crates/loom-cli/tests/analyze.rs`. Capture: `Capture` in `crates/loom-host-desktop/src/capture.rs`, its loopback tests in `device_tests` in `crates/loom-host-desktop/src/lib.rs`, and `loom capture` in `crates/loom-cli/src/capture.rs`, tests in `crates/loom-cli/tests/capture.rs`. Virtual MIDI: `VirtualController` in `crates/loom-host-desktop/src/virtual_midi.rs`, `loom midi-port` in `crates/loom-cli/src/midi_port.rs`, the fake host's `real_midi` option in `crates/loom-app/src/devices.rs`, and the ignored tests `closing_a_real_input_releases_its_held_notes` (`loom-host-desktop`) and `turning_a_real_input_off_releases_its_notes_and_is_saved` (`loom-app`, `settings.rs`).
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
      built. See README.md in this folder. -->
@@ -95,7 +95,61 @@ When the file cannot be read, or an option is not usable, the command exits with
 
 The measurements are functions in `loom-test`, so the app tests of Part 1 and the command of Part 3 measure in the same way.
 
-### Part 4: virtual MIDI controllers
+### Part 4: capture what reached a device
+
+*Why:* `--record` saves what the engine rendered, before the device. It cannot see what happens after: a stream stopped before the device played its last buffers, a device that goes silent after a rate change, a gap at a device change. In the manual check for #26, Open with 4096-frame buffers clicked because a fixed 100 ms stop limit cut the stream before the fade reached the device. The `--record` file was clean, and only ears caught it.
+
+A loopback device closes that gap. It is a virtual device whose output is also an input: what an app plays into it can be recorded from it, sample for sample.
+
+| System | Loopback device |
+|---|---|
+| macOS | BlackHole (free, MIT licence), or any aggregate device that loops back. |
+| Linux | A PipeWire or PulseAudio null sink, captured from its monitor; or ALSA `snd-aloop`. |
+| Windows | Not covered yet. WASAPI loopback capture of an output is a different API in `cpal`; add it when a check needs it. |
+
+A new `loom` subcommand records an input device to a WAV file:
+
+```sh
+loom capture --device <part of name> -o out.wav --seconds N
+```
+
+| Option | Effect |
+|---|---|
+| `--device NAME` | Case-insensitive part of the input device name, as for `loom play`. Required. *Why:* the default input is usually a microphone, which is never what a QA run wants. |
+| `-o FILE`, `--output FILE` | The WAV file to write: 32-bit float, stereo, at the device's rate. |
+| `--seconds N` | How long to record. Required. |
+| `--sample-rate HZ` | Ask the device for this rate. The device default otherwise. |
+
+The file holds the device's first two channels. A mono device is written to both. When the stream is running, `loom capture` prints one line to stderr, `Capturing "<device>" at <rate> Hz`, so a script can wait for it before it starts the app. `loom devices` also lists audio inputs, so the name can be found.
+
+A QA run starts the capture, plays the app into the loopback output, and checks the file with `loom analyze`:
+
+```sh
+loom capture --device blackhole -o /tmp/device.wav --seconds 6 2> /tmp/capture.log &
+capture=$!
+until grep -q Capturing /tmp/capture.log; do
+  # A capture that failed to start never prints the line.
+  kill -0 "$capture" 2>/dev/null || { cat /tmp/capture.log; wait "$capture"; exit $?; }
+  sleep 0.1
+done
+loom-app examples/dev/check-dc.ron --output-safety off --device blackhole --sample-rate 48000 --buffer 4096 --control-script open-and-quit.jsonl
+app=$?
+wait "$capture"
+captured=$?
+# A failed app or a broken capture leaves a file that proves nothing.
+if [ "$app" -ne 0 ] || [ "$captured" -ne 0 ]; then cat /tmp/capture.log; exit 2; fi
+loom analyze /tmp/device.wav --max-step 0.01
+```
+
+**Exit status.** 0 when the file was written with every frame. 2 when the device cannot be opened, the file cannot be written, frames were dropped, or the input stream reported an error (such as the device going away). *Why:* a dropped frame is a jump in the file that the device never played, so a step check on it would fail for the wrong reason. A script can tell a broken run (2) from a failed check in `loom analyze` (1).
+
+**Relation to audio input (#29).** Capture is a development tool, not audio input for patches. It opens a `cpal` input stream in `loom-host-desktop` and writes it to a file through the same ring and writer thread as `--record` (`Recorder`). Nothing reaches an engine, and there is no Audio In module. When #29 is built, it can reuse the device lookup and the input stream setup, but it has its own spec: latency, channel routing, and running input and output on two clocks are design questions for patches, not for this tool.
+
+**Clock drift.** A loopback device has one clock for both sides, so capture and playback cannot drift apart. When the input and output are different devices (an interface's output wired to another device's input), their clocks drift a little. Capture never resamples (rule 10). The checks of `loom analyze` (peak, step, DC) do not compare the capture with anything sample by sample, so drift does not change them. For the same reason, a capture is never compared sample by sample with a `--record` file or a reference render: the device adds latency, and the start time depends on the machine.
+
+**CI.** Not in CI for now. The hardware test is ignored by default, like the other device tests. CI covers the parts that need no device: the writer with a fake input, and the command's errors. Running capture on a Linux runner with a PulseAudio or PipeWire null sink looks possible, but it needs a sound server on the runner and `cpal` reaching it through ALSA. That is a follow-up issue, so this part does not wait on it.
+
+### Part 5: virtual MIDI controllers
 
 A way for tests and scripts to play the app through a real MIDI input, with no hardware. It uses a *virtual MIDI port*: a MIDI source that a program creates in the operating system's MIDI service. Other programs see it in their list of MIDI inputs, just like a controller plugged in by USB. The app opens it through the same `midir` code it uses for hardware, so `MidiConnection::close` and the release of held notes are tested for real.
 
@@ -142,8 +196,10 @@ loom-app examples/patches/subtractive.ron   # terminal 3, started after the port
 7. **Recording never waits on the audio thread.** The existing writer thread and its dropped-frame count stay. *Why:* real-time safety (hard rule 1).
 8. **`loom analyze` only measures.** It does not judge whether a sound is good. Checks pass or fail only on the limits given. *Why:* the same rule as `sample` on the control channel: tools measure, and a person or the test decides what is right for a patch.
 9. **Measurements are plain arithmetic on the samples.** Peak is not oversampled, and DC is a plain mean. *Why:* the numbers must be easy to check by hand, and must match what the engine's output safety stage limits (it also works on samples, not true peaks).
-10. **A virtual controller goes through the same MIDI code as hardware.** The app does not know or check that a port is virtual. *Why:* the point is to test the real path. A special case in the app would test something else.
-11. **Tests that use virtual ports open only their own ports.** Their port names hold the process ID, and the fake host opens only inputs whose names contain it. *Why:* a test must not grab, or play into, the developer's real controllers, and two test runs at once must not see each other's ports.
+10. **Capture writes what the device delivered, nothing more** (Part 4). It does not resample, align, trim, or fill gaps. Dropped frames and input stream errors are counted and reported, and make the run fail with status 2. *Why:* the point is to see what the device really did. Any repair would hide the very fault we look for.
+11. **Capture never waits on the audio thread** (Part 4). Its input callback only pushes into a ring, as `--record` does. *Why:* real-time safety (hard rule 1), and a slow callback could itself drop input.
+12. **A virtual controller goes through the same MIDI code as hardware** (Part 5). The app does not know or check that a port is virtual. *Why:* the point is to test the real path. A special case in the app would test something else.
+13. **Tests that use virtual ports open only their own ports** (Part 5). Their port names hold the process ID, and the fake host opens only inputs whose names contain it. *Why:* a test must not grab, or play into, the developer's real controllers, and two test runs at once must not see each other's ports.
 
 ## Acceptance criteria
 
@@ -176,6 +232,14 @@ Each is a `loom-app` test that uses the stepped output, through `App::new` and `
 
 ### Part 4
 
+- [x] `loom capture` writes a 32-bit float stereo WAV at the device's rate, with the device's first two channels, or a mono channel on both.
+- [x] The writer is tested with a fake input in CI: frames pushed are written in order, and dropped frames are counted.
+- [x] A device that does not match exits with status 2 and names what it looked for. `loom devices` lists audio inputs.
+- [x] **Hardware test, ignored by default.** Given a Constant of 0.5 into Audio Out with output safety Off, playing into a loopback device (`LOOM_LOOPBACK`, for example `BlackHole`) with 4096-frame buffers, when the engine fades out and the stream stops, then the capture of the loopback holds the DC and the fade, and no step is larger than a 10 ms fade from 0.5 allows. A second test stops the same stream at a fixed 100 ms limit, as before the #26 fix, and checks that the capture does show the cut. *Why:* a check that cannot fail proves nothing.
+- [x] The manual check for #26 (`docs/dev/manual-checks/issue-26-devices.md`) uses capture where it now relies on ears for clicks at a stop or a device change.
+
+### Part 5
+
 - [x] `VirtualController` creates a port that `midi_input_names` lists, by the name `input_name` gives, on macOS.
 - [ ] The same on Linux with the ALSA sequencer, and the two ignored tests below pass there.
 - [x] Ignored `loom-host-desktop` test: a note played on a virtual controller sounds through `connect_midi_named`, and `MidiConnection::close` releases it.
@@ -195,6 +259,9 @@ Each is a `loom-app` test that uses the stepped output, through `App::new` and `
 - **A meter or warning for the final output in the app.** That is [#130](https://github.com/brylie/LoomDSP/issues/130).
 - **True-peak (oversampled) measurement, loudness (LUFS), and spectrum analysis.** Add them when a check needs them.
 - **Starting and stopping a recording from the control channel.** A run records from start to quit.
+- **Audio input for patches** ([#29](https://github.com/brylie/LoomDSP/issues/29)). Capture only writes a file (Part 4).
+- **Windows loopback capture, and capture in CI.** Follow-up issues (Part 4).
+- **Finding silences.** A device that goes silent shows up today as a short file peak, an RMS near zero, or a peak of 0 in a `--from`/`--to` window. A measurement of the longest silent stretch, with a check, can be added to `loom analyze` when a check needs it.
 - **Virtual MIDI on Windows.** Windows has no virtual ports. A loopback driver could stand in, but it is third-party software, so the Windows check keeps two controllers.
 - **Running the virtual MIDI tests in CI.** The kernel on GitHub's hosted Linux runners has no ALSA sequencer module (`snd-seq`), not even in its extra modules package. What can run without a port does: the held-note tracking and the bytes a virtual controller sends are unit tests, and `loom midi-port` is tested on the built binary, where it exits with status 2.
 - **MIDI hot-plugging.** The app opening a port that appears while it runs is FR-MIDI-08.

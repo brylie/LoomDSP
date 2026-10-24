@@ -439,7 +439,7 @@ pub mod fake {
         /// With a text, MIDI goes through the real `midir` inputs instead
         /// of `midi`, but only those whose names contain the text, so a
         /// test with virtual ports never opens a real controller
-        /// (audio-qa.md, Part 4).
+        /// (audio-qa.md, Part 5).
         pub real_midi: Option<String>,
         /// Devices that start, make [`STALL_AFTER`] callbacks, and then
         /// stop calling back with no error, as a macOS device did after a

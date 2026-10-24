@@ -1,5 +1,5 @@
 //! `loom midi-port`: a virtual MIDI controller played from standard input
-//! (`docs/design/audio-qa.md`, Part 4). A person types the lines in a
+//! (`docs/design/audio-qa.md`, Part 5). A person types the lines in a
 //! terminal, or a script pipes them in.
 
 use loom_host_desktop::{HostError, VirtualController};

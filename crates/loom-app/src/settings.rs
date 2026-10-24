@@ -1210,7 +1210,7 @@ mod tests {
     }
 
     /// The same check through real MIDI inputs: two virtual controllers,
-    /// opened by `midir` (audio-qa.md, Part 4). It needs the operating
+    /// opened by `midir` (audio-qa.md, Part 5). It needs the operating
     /// system's MIDI service, so it is ignored by default: run it with
     /// `cargo test -p loom-app -- --ignored` on macOS, or on Linux with the
     /// ALSA sequencer.

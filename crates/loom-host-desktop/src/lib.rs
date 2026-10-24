@@ -6,7 +6,8 @@
 //! without touching the engine (NFR-PORT-02, OQ-11).
 //!
 //! Phase 0 limits:
-//! - Output only (no audio input yet).
+//! - Output only for the engine (no audio input yet). [`Capture`] records an
+//!   input device to a file, to check what reached a device.
 //! - 32-bit float devices only. This covers CoreAudio, WASAPI shared mode,
 //!   and PipeWire/PulseAudio defaults.
 //! - MIDI ports are chosen at start, or opened and closed by name. Hot-plugging
@@ -21,10 +22,12 @@
 
 #![warn(missing_docs)]
 
+mod capture;
 mod record;
 mod stepped;
 mod virtual_midi;
 
+pub use capture::{Capture, CaptureReport};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use loom_core::{Engine, MidiEvent, MidiSender};
 use loom_rt::ScopedFlushDenormals;
@@ -40,6 +43,12 @@ pub use virtual_midi::VirtualController;
 /// Errors from the desktop host.
 #[derive(Debug, thiserror::Error)]
 pub enum HostError {
+    /// No audio input device matched.
+    #[error("no audio input device found{}", .0.as_deref().map(|n| format!(" matching `{n}`")).unwrap_or_default())]
+    NoInputDevice(Option<String>),
+    /// The input device has no 32-bit float configuration.
+    #[error("audio device `{0}` does not support 32-bit float input")]
+    UnsupportedInputFormat(String),
     /// No audio output device matched.
     #[error("no audio output device found{}", .0.as_deref().map(|n| format!(" matching `{n}`")).unwrap_or_default())]
     NoOutputDevice(Option<String>),
@@ -91,6 +100,23 @@ pub fn output_device_names() -> Result<Vec<String>, HostError> {
     let host = cpal::default_host();
     let devices = host.output_devices().map_err(audio_error)?;
     Ok(devices.map(|d| device_name(&d)).collect())
+}
+
+/// Names of all audio input devices.
+pub fn input_device_names() -> Result<Vec<String>, HostError> {
+    let host = cpal::default_host();
+    let devices = host.input_devices().map_err(audio_error)?;
+    Ok(devices.map(|d| device_name(&d)).collect())
+}
+
+/// The first of `devices` whose name contains `wanted`, ignoring case, or
+/// is exactly `wanted` if `exact`.
+fn find_device(mut devices: impl Iterator<Item = cpal::Device>, wanted: &str, exact: bool) -> Option<cpal::Device> {
+    if exact {
+        return devices.find(|d| device_name(d) == wanted);
+    }
+    let wanted = wanted.to_lowercase();
+    devices.find(|d| device_name(d).to_lowercase().contains(&wanted))
 }
 
 /// What an output device offers, for a settings window.
@@ -167,6 +193,53 @@ fn device_name(device: &cpal::Device) -> String {
         .unwrap_or_else(|_| "<unnamed device>".to_string())
 }
 
+/// Chooses a 32-bit float configuration for the device called `name`:
+/// its `default`, if that is float at the rate asked for, or else the first
+/// float range of `ranges` that holds the rate. `ranges` is only asked for
+/// when needed, because asking can take a moment. With no float range at
+/// the rate, the error is [`HostError::UnsupportedSampleRate`] if a rate
+/// was asked for, and `unsupported` of the name if not. A buffer size in
+/// `options` is fixed in the result.
+fn choose_config<I>(
+    name: &str,
+    default: cpal::SupportedStreamConfig,
+    ranges: impl FnOnce() -> Result<I, HostError>,
+    options: &AudioOptions,
+    unsupported: fn(String) -> HostError,
+) -> Result<cpal::StreamConfig, HostError>
+where
+    I: IntoIterator<Item = cpal::SupportedStreamConfigRange>,
+{
+    let rate = options.sample_rate.unwrap_or(default.sample_rate());
+    let supported = if default.sample_format() == cpal::SampleFormat::F32 && rate == default.sample_rate() {
+        default
+    } else {
+        ranges()?
+            .into_iter()
+            .find(|r| {
+                r.sample_format() == cpal::SampleFormat::F32
+                    && r.min_sample_rate() <= rate
+                    && rate <= r.max_sample_rate()
+            })
+            .ok_or_else(|| {
+                if options.sample_rate.is_some() {
+                    HostError::UnsupportedSampleRate {
+                        device: name.to_string(),
+                        rate,
+                    }
+                } else {
+                    unsupported(name.to_string())
+                }
+            })?
+            .with_sample_rate(rate)
+    };
+    let mut config = supported.config();
+    if let Some(frames) = options.buffer_size {
+        config.buffer_size = cpal::BufferSize::Fixed(frames);
+    }
+    Ok(config)
+}
+
 /// A chosen audio output, not yet running.
 ///
 /// Open the device first, so you know the sample rate to create the engine
@@ -196,48 +269,19 @@ impl AudioOutput {
         let host = cpal::default_host();
         let device = match &options.device {
             None => host.default_output_device(),
-            Some(wanted) if options.exact => host
-                .output_devices()
-                .map_err(audio_error)?
-                .find(|d| device_name(d) == *wanted),
-            Some(wanted) => {
-                let wanted = wanted.to_lowercase();
-                host.output_devices()
-                    .map_err(audio_error)?
-                    .find(|d| device_name(d).to_lowercase().contains(&wanted))
-            }
+            Some(wanted) => find_device(host.output_devices().map_err(audio_error)?, wanted, options.exact),
         }
         .ok_or_else(|| HostError::NoOutputDevice(options.device.clone()))?;
         let name = device_name(&device);
 
         let default = device.default_output_config().map_err(audio_error)?;
-        let rate = options.sample_rate.unwrap_or(default.sample_rate());
-        let supported = if default.sample_format() == cpal::SampleFormat::F32 && rate == default.sample_rate() {
-            default
-        } else {
-            let mut ranges = device.supported_output_configs().map_err(audio_error)?;
-            let range = ranges
-                .find(|r| {
-                    r.sample_format() == cpal::SampleFormat::F32
-                        && r.min_sample_rate() <= rate
-                        && rate <= r.max_sample_rate()
-                })
-                .ok_or_else(|| {
-                    if options.sample_rate.is_some() {
-                        HostError::UnsupportedSampleRate {
-                            device: name.clone(),
-                            rate,
-                        }
-                    } else {
-                        HostError::UnsupportedFormat(name.clone())
-                    }
-                })?;
-            range.with_sample_rate(rate)
-        };
-        let mut config = supported.config();
-        if let Some(frames) = options.buffer_size {
-            config.buffer_size = cpal::BufferSize::Fixed(frames);
-        }
+        let config = choose_config(
+            &name,
+            default,
+            || device.supported_output_configs().map_err(audio_error),
+            options,
+            HostError::UnsupportedFormat,
+        )?;
         Ok(Self {
             kind: Kind::Device { device, config },
             name,
@@ -362,7 +406,7 @@ impl AudioOutput {
                 stream.play().map_err(audio_error)?;
                 #[cfg(target_os = "macos")]
                 if switched {
-                    resume_after_switch(&stream, &stats);
+                    resume_after_switch(&stream, &stats)?;
                 }
                 Player::Device(stream)
             }
@@ -423,8 +467,10 @@ fn settle_rate(device: &cpal::Device, config: &cpal::StreamConfig) -> bool {
 /// after a rate switch. A late notice of the switch pauses the stream (see
 /// [`settle_rate`]); starting it again is right, because this stream made
 /// the switch. A rate change from outside later on still pauses it.
+/// Fails if the stream cannot be started again, so the caller does not
+/// get a stream that stays silent.
 #[cfg(target_os = "macos")]
-fn resume_after_switch(stream: &cpal::Stream, stats: &CallbackStats) {
+fn resume_after_switch(stream: &cpal::Stream, stats: &CallbackStats) -> Result<(), HostError> {
     let started = Instant::now();
     // From zero, not from the count now: the stats are this stream's own,
     // so an error already counted came after its first `play` and paused it.
@@ -433,10 +479,11 @@ fn resume_after_switch(stream: &cpal::Stream, stats: &CallbackStats) {
         let now = stats.stream_errors.load(Ordering::Relaxed);
         if now != errors {
             errors = now;
-            let _ = stream.play();
+            stream.play().map_err(audio_error)?;
         }
         std::thread::sleep(Duration::from_millis(5));
     }
+    Ok(())
 }
 
 /// Renders the engine into interleaved output buffers, and records it if
@@ -607,9 +654,16 @@ impl RunningAudio {
     ///
     /// A stepped output plays the blocks itself, and counts the limit in
     /// frames at its sample rate instead of waiting on the clock.
-    pub fn stop(mut self, limit: Duration) -> bool {
+    pub fn stop(self, limit: Duration) -> bool {
+        let sample_rate = self.sample_rate;
+        self.stop_within(|frames| stop_limit(limit, frames, sample_rate))
+    }
+
+    /// [`RunningAudio::stop`], with the limit for buffers of a number of
+    /// frames given by `limit`.
+    fn stop_within(mut self, limit: impl Fn(u64) -> Duration) -> bool {
         if let Some(Player::Stepped(attached)) = &self.player {
-            let limit = stop_limit(limit, attached.block() as u64, self.sample_rate);
+            let limit = limit(attached.block() as u64);
             let limit = (limit.as_secs_f64() * f64::from(self.sample_rate)).ceil() as usize;
             let stats = self.stats.clone();
             let silent = attached.play_until(limit, || {
@@ -626,7 +680,7 @@ impl RunningAudio {
             // The largest buffer so far: the device may not have asked for
             // one yet, or may ask for larger ones than at first.
             let frames = self.stats.largest_buffer.load(Ordering::Relaxed);
-            if started.elapsed() >= stop_limit(limit, frames, self.sample_rate) {
+            if started.elapsed() >= limit(frames) {
                 break false;
             }
             std::thread::sleep(Duration::from_millis(1));
@@ -977,6 +1031,113 @@ mod tests {
     use super::*;
     use loom_core::{EngineConfig, EngineParts, OutputSafety, create_engine};
 
+    /// A configuration at `rate` in `format`, as a device reports it.
+    fn reported(rate: u32, format: cpal::SampleFormat) -> cpal::SupportedStreamConfig {
+        cpal::SupportedStreamConfig::new(2, rate, cpal::SupportedBufferSize::Unknown, format)
+    }
+
+    /// A range of rates in `format`, as a device reports it.
+    fn range(min: u32, max: u32, format: cpal::SampleFormat) -> cpal::SupportedStreamConfigRange {
+        cpal::SupportedStreamConfigRange::new(2, min, max, cpal::SupportedBufferSize::Unknown, format)
+    }
+
+    /// Options asking for `rate` and `buffer`, on any device.
+    fn asking(rate: Option<u32>, buffer: Option<u32>) -> AudioOptions {
+        AudioOptions {
+            sample_rate: rate,
+            buffer_size: buffer,
+            ..AudioOptions::default()
+        }
+    }
+
+    /// The device's float default at its own rate is used as it is, and
+    /// the ranges are not asked for.
+    #[test]
+    fn the_float_default_is_used_without_asking_for_ranges() {
+        let config = choose_config(
+            "Dev",
+            reported(48_000, cpal::SampleFormat::F32),
+            || -> Result<Vec<_>, HostError> { panic!("ranges were asked for") },
+            &asking(None, Some(256)),
+            HostError::UnsupportedFormat,
+        )
+        .unwrap();
+        assert_eq!(config.sample_rate, 48_000);
+        assert_eq!(config.buffer_size, cpal::BufferSize::Fixed(256));
+    }
+
+    /// Another rate, or a default that is not float, takes the first float
+    /// range that holds the rate.
+    #[test]
+    fn another_rate_or_format_takes_a_float_range() {
+        let ranges = || {
+            Ok(vec![
+                range(44_100, 192_000, cpal::SampleFormat::I16),
+                range(44_100, 96_000, cpal::SampleFormat::F32),
+            ])
+        };
+        let options = asking(Some(96_000), None);
+        let config = choose_config(
+            "Dev",
+            reported(48_000, cpal::SampleFormat::F32),
+            ranges,
+            &options,
+            HostError::UnsupportedFormat,
+        )
+        .unwrap();
+        assert_eq!(config.sample_rate, 96_000);
+        assert_eq!(config.buffer_size, cpal::BufferSize::Default);
+        let config = choose_config(
+            "Dev",
+            reported(48_000, cpal::SampleFormat::I16),
+            ranges,
+            &asking(None, None),
+            HostError::UnsupportedFormat,
+        )
+        .unwrap();
+        assert_eq!(config.sample_rate, 48_000);
+    }
+
+    /// With no float range at the rate, a rate asked for names the rate,
+    /// and no rate asked for names the format, as the caller chose.
+    #[test]
+    fn no_float_range_is_an_error() {
+        let ranges = || Ok(vec![range(44_100, 48_000, cpal::SampleFormat::F32)]);
+        let error = choose_config(
+            "Dev",
+            reported(48_000, cpal::SampleFormat::F32),
+            ranges,
+            &asking(Some(96_000), None),
+            HostError::UnsupportedFormat,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(error, HostError::UnsupportedSampleRate { rate: 96_000, .. }),
+            "{error}"
+        );
+        let error = choose_config(
+            "Dev",
+            reported(48_000, cpal::SampleFormat::I16),
+            || Ok(vec![range(44_100, 48_000, cpal::SampleFormat::I16)]),
+            &asking(None, None),
+            HostError::UnsupportedInputFormat,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(error, HostError::UnsupportedInputFormat(ref name) if name == "Dev"),
+            "{error}"
+        );
+        let error = choose_config(
+            "Dev",
+            reported(48_000, cpal::SampleFormat::I16),
+            || -> Result<Vec<_>, HostError> { Err(HostError::Audio("gone".into())) },
+            &asking(None, None),
+            HostError::UnsupportedFormat,
+        )
+        .unwrap_err();
+        assert!(matches!(error, HostError::Audio(_)), "{error}");
+    }
+
     /// A held offset into Audio Out with no safety stage, so the output
     /// stays at 0.5 until it fades: a thump if the stream stopped mid-way.
     fn held_offset() -> EngineParts {
@@ -1234,52 +1395,11 @@ mod tests {
     }
 }
 
-/// Checks on a real audio device. They need hardware, so they are ignored
-/// by default: run them with `cargo test -p loom-host-desktop -- --ignored`
-/// (set `LOOM_DEVICE` to part of a device name; the default device
-/// otherwise). Each stream is silent.
+/// Checks on a real audio device, ignored by default.
 #[cfg(test)]
-mod device_tests {
-    use super::*;
-    use loom_core::{EngineConfig, OutputSafety, create_engine};
+mod device_tests;
 
-    /// Plays a silent engine on `options` for 0.7 s and returns the
-    /// callbacks the device made.
-    fn callbacks(options: &AudioOptions) -> u64 {
-        let output = AudioOutput::open(options).unwrap();
-        let config = EngineConfig {
-            output_safety: OutputSafety::Off,
-            ..EngineConfig::with_sample_rate(output.sample_rate() as f32)
-        };
-        let mut parts = create_engine(loom_modules::registry(), config);
-        let audio = output.start(parts.engine).unwrap();
-        std::thread::sleep(Duration::from_millis(700));
-        let made = audio.stats().snapshot().callbacks;
-        parts.controller.fade_out().unwrap();
-        audio.stop(STOP_LIMIT);
-        made
-    }
-
-    /// A stream at a new sample rate keeps playing. On macOS the notice of
-    /// the rate switch used to pause the new stream, and the app went
-    /// silent after a rate change in Preferences.
-    #[test]
-    #[ignore = "needs an audio device"]
-    fn a_new_sample_rate_keeps_playing() {
-        let device = std::env::var("LOOM_DEVICE").ok();
-        for rate in [44_100, 48_000, 96_000, 44_100] {
-            let options = AudioOptions {
-                device: device.clone(),
-                exact: false,
-                sample_rate: Some(rate),
-                buffer_size: Some(4096),
-            };
-            assert!(callbacks(&options) > 0, "the stream at {rate} Hz plays");
-        }
-    }
-}
-
-/// Checks through virtual MIDI ports (`docs/design/audio-qa.md`, Part 4).
+/// Checks through virtual MIDI ports (`docs/design/audio-qa.md`, Part 5).
 /// They need the operating system's MIDI service, so they are ignored by
 /// default: run them with `cargo test -p loom-host-desktop -- --ignored` on
 /// macOS, or on Linux with the ALSA sequencer.

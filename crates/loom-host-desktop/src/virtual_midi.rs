@@ -1,5 +1,5 @@
 //! Virtual MIDI controllers, so tests and scripts can play the app through
-//! a real MIDI input with no hardware (`docs/design/audio-qa.md`, Part 4).
+//! a real MIDI input with no hardware (`docs/design/audio-qa.md`, Part 5).
 //!
 //! A virtual port is a MIDI source made by a program inside the operating
 //! system's MIDI service. Other programs list it as an input, like a
