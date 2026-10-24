@@ -334,7 +334,9 @@ fn find_trigger(samples: &[f32], window: usize, trigger: Trigger) -> Option<f32>
         Trigger::Auto => low + swing * 0.5,
         Trigger::Level(level) => level,
     };
-    let arm = level - swing * 0.1;
+    // Hysteresis of a tenth of the swing, but never as deep as the lowest
+    // sample: a fixed level near the bottom must still arm.
+    let arm = level - (swing * 0.1).min((level - low) * 0.5);
 
     // Walk back from the newest possible start. A crossing between i - 1 and
     // i is accepted once, walking further back, the signal dips below the
@@ -676,6 +678,18 @@ mod tests {
         let i = position.floor() as usize;
         let value = samples[i] + (samples[i + 1] - samples[i]) * (position - i as f32);
         assert!((value - 0.5).abs() < 1e-3, "trigger at {value}");
+        assert!(samples[i + 1] > samples[i], "rising edge");
+    }
+
+    #[test]
+    fn fixed_level_near_the_bottom_still_triggers() {
+        // At -0.95 a tenth of the swing would arm at -1.15, below the
+        // lowest sample, so no edge would ever count.
+        let samples = sine(1000.0, 48_000.0, 4800, 0.0);
+        let position = find_trigger(&samples, 480, Trigger::Level(-0.95)).unwrap();
+        let i = position.floor() as usize;
+        let value = samples[i] + (samples[i + 1] - samples[i]) * (position - i as f32);
+        assert!((value + 0.95).abs() < 1e-3, "trigger at {value}");
         assert!(samples[i + 1] > samples[i], "rising edge");
     }
 

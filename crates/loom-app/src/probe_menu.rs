@@ -314,6 +314,38 @@ mod app_tests {
         assert_eq!(app.history.undo_step().map(|s| s.name().to_string()), undo);
     }
 
+    /// Cut and duplicate do not change the patch behind the open menu.
+    #[test]
+    fn clipboard_keys_do_nothing_while_the_menu_is_open() {
+        let mut app = app();
+        let (output, _) = first_cable(&app);
+        let port = app.scene.port_position(output).unwrap();
+        let _ = app.update(Message::Canvas(CanvasEvent::Select(vec![output.module])));
+        let modules = app.controller.graph().nodes().count();
+        open(&mut app, output, port);
+        let _ = app.update(tests::command_key("d"));
+        let _ = app.update(tests::command_key("x"));
+        assert_eq!(app.controller.graph().nodes().count(), modules);
+        assert!(app.probe_menu.is_some());
+    }
+
+    /// If the output's module was removed while the menu was open, picking
+    /// an item adds nothing, makes no step, and says why.
+    #[test]
+    fn a_removed_output_adds_nothing() {
+        let mut app = app();
+        let (output, _) = first_cable(&app);
+        let port = app.scene.port_position(output).unwrap();
+        open(&mut app, output, port);
+        let _ = app.update(Message::Canvas(CanvasEvent::Delete(vec![output.module])));
+        let modules = app.controller.graph().nodes().count();
+        let undo = app.history.undo_step().map(|s| s.name().to_string());
+        let _ = app.update(Message::ProbeMenu(super::Message::Pick(Probe::Scope)));
+        assert_eq!(app.controller.graph().nodes().count(), modules);
+        assert_eq!(app.history.undo_step().map(|s| s.name().to_string()), undo);
+        assert!(app.status.contains("the output is gone"), "{}", app.status);
+    }
+
     /// The menu stays inside the canvas when opened near its edge.
     #[test]
     fn the_menu_stays_inside_the_canvas() {

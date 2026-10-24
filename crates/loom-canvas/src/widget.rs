@@ -1000,6 +1000,13 @@ impl<Message> PatchCanvas<'_, Message> {
                 if *button != mouse::Button::Left && matches!(state.interaction, Interaction::Holding { .. }) {
                     return;
                 }
+                // Only the right button's own release ends a right click. A
+                // left button let go meanwhile must not open the menu.
+                if *button != mouse::Button::Right
+                    && matches!(state.interaction, Interaction::Panning { click: Some(_), .. })
+                {
+                    return;
+                }
                 let interaction = std::mem::take(&mut state.interaction);
                 let gesture = matches!(
                     interaction,
@@ -3883,6 +3890,38 @@ mod tests {
             port,
         ));
         assert!(events.is_empty(), "{events:?}");
+    }
+
+    /// Letting go of another button during a right click opens no menu and
+    /// keeps the click, so the right release still opens it.
+    #[test]
+    fn only_the_right_release_opens_the_menu() {
+        let scene = chain();
+        let selected = BTreeSet::new();
+        let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+        let port = scene
+            .port_position(PortRef {
+                module: 1,
+                output: true,
+                index: 0,
+            })
+            .unwrap();
+        let mut state = State::default();
+        let pressed = drive(&canvas, &mut state, &click(mouse::Button::Right), port);
+        let left = drive(
+            &canvas,
+            &mut state,
+            &Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+            port,
+        );
+        assert!(pressed.is_empty() && left.is_empty(), "{left:?}");
+        let right = drive(
+            &canvas,
+            &mut state,
+            &Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Right)),
+            port,
+        );
+        assert!(matches!(right.as_slice(), [CanvasEvent::ProbeMenu { .. }]), "{right:?}");
     }
 
     /// A tile, an input, empty canvas, and a middle click open no menu.

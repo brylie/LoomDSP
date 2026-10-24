@@ -1684,6 +1684,17 @@ impl App {
             module: ModuleId(output.module),
             port: output.index,
         };
+        // The output may be gone: the control channel can remove its module
+        // while the menu is open.
+        let exists = self
+            .controller
+            .graph()
+            .node(source.module)
+            .is_some_and(|node| source.port < node.descriptor.outputs.len());
+        if !exists {
+            self.status = format!("Cannot {}: the output is gone", probe.verb());
+            return;
+        }
         self.close_slider_gesture();
         self.step_name = Some(probe.verb().to_string());
         self.edit(|app| {
@@ -1694,11 +1705,16 @@ impl App {
                     return;
                 }
             };
+            if let Err(e) = app.controller.connect(source, InputRef { module: id, port: 0 }) {
+                // A probe that is not connected shows nothing: take it back,
+                // so the edit makes no step.
+                let _ = app.controller.remove_module(id);
+                app.commit();
+                app.status = format!("Cannot {}: {e}", probe.verb());
+                return;
+            }
             app.positions.insert(id.0, corner);
             app.selection = BTreeSet::from([id.0]);
-            if let Err(e) = app.controller.connect(source, InputRef { module: id, port: 0 }) {
-                app.status = format!("Cannot {}: {e}", probe.verb());
-            }
             app.commit();
         });
         // `record` clears it, but an edit inside a gesture does not record.
@@ -2116,7 +2132,7 @@ impl App {
         else {
             return None;
         };
-        if !modifiers.command() || self.browser.is_some() || self.rig.window.is_some() {
+        if !modifiers.command() || self.browser.is_some() || self.probe_menu.is_some() || self.rig.window.is_some() {
             return None;
         }
         ['c', 'x', 'd']
@@ -3080,7 +3096,7 @@ mod tests {
     }
 
     /// Ctrl+`c` or Cmd+`c`.
-    fn command_key(c: &str) -> Message {
+    pub(crate) fn command_key(c: &str) -> Message {
         Message::Key(iced::keyboard::Event::KeyPressed {
             key: iced::keyboard::Key::Character(c.into()),
             modified_key: iced::keyboard::Key::Character(c.into()),

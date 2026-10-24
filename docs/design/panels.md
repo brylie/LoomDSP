@@ -156,7 +156,7 @@ The first display module that shows a signal over time.
 
 ### Trigger
 
-- `ScopeTrace` takes the level from the module: automatic, or the fixed `level`. The rest of the trigger is unchanged: a rising edge, with hysteresis of a tenth of the history's swing, found to a fraction of a sample.
+- `ScopeTrace` takes the level from the module: automatic, or the fixed `level`. The rest of the trigger is unchanged: a rising edge, with hysteresis of a tenth of the history's swing, found to a fraction of a sample. The hysteresis never reaches below the lowest sample, so a fixed level near the bottom of the signal still triggers.
 - If no edge crosses a fixed level, the trace runs free, as for a flat signal.
 
 ### Add scope and Add meter
@@ -167,7 +167,8 @@ A one-step gesture on a cable or an output places a scope or a level meter next 
 - The menu closes when an item is chosen, on Escape, or on a click outside it. While it is open, the canvas takes no pointer or key input, as with the module browser, so it cannot pan or zoom away from the menu.
 - **What it connects:** a new cable from the output to the new module's `in`. On a cable, the output is the cable's source. The cable stays as it is. *Why:* the sound path does not change, and outputs can feed many inputs.
 - **Where it goes:** with its top-left corner 3 grid units right of the output port, or of the point clicked on the cable, and its `in` port as close to the same height as the grid allows. If that overlaps a tile, it moves down in steps of 2 grid units until it does not.
-- The new module is selected. Adding it and its cable is one undo step.
+- The new module is selected. Adding it and its cable is one undo step. If the output is gone when an item is chosen, nothing is added and the status bar says why.
+- While the menu is open, the clipboard shortcuts (copy, cut, duplicate) do nothing.
 - The control channel offers the same action, so it can be checked in the running app.
 
 ### Acceptance criteria: scope module
