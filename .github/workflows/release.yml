@@ -58,10 +58,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # macos-latest is Apple Silicon. The Intel build is cross-compiled
-          # on it, so it is packed but cannot be run here to smoke-test it.
+          # macos-latest is Apple Silicon. The Intel build runs on a native
+          # Intel runner, so it is smoke-tested too.
           - { os: macos, arch: arm64, runner: macos-latest, triple: "", smoke: true }
-          - { os: macos, arch: x86_64, runner: macos-latest, triple: x86_64-apple-darwin, smoke: false }
+          - { os: macos, arch: x86_64, runner: macos-15-intel, triple: "", smoke: true }
           - { os: windows, arch: x86_64, runner: windows-latest, triple: "", smoke: true }
           # The oldest Ubuntu runner, so the binary works with the C library
           # of more Linux systems.
@@ -151,5 +151,6 @@ jobs:
           if [ "$PRERELEASE" = true ]; then flags="--prerelease"; fi
           gh release create "$TAG" dist/LoomDSP-*.zip dist/LoomDSP-*.tar.gz dist/SHA256SUMS.txt \
             --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
             --title "LoomDSP ${TAG#v}" \
             --notes-file notes.md --generate-notes $flags

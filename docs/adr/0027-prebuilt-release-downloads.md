@@ -38,4 +38,4 @@ Builds are unsigned for now. Every build goes through one packaging script, so s
 - A release is one pushed tag. The same workflow, run by hand, does a dry run that builds and uploads artifacts but publishes nothing.
 - The Linux build runs on an older Ubuntu runner so the binary works with the C library on more distributions.
 - Each release must be checked by a person on each OS, because audio devices cannot be tested in CI (see the spec).
-- Early alpha means a downloaded build can stop opening old patches. Release notes list every break (AGENTS.md).
+- Early alpha means a downloaded build can stop opening old patches. A maintainer adds every break that merged pull requests list to the release notes before announcing a release (see the spec).

@@ -71,7 +71,7 @@ Modules so far: phase generator, sine, band-limited saw, noise, state variable f
 
 ### Download
 
-Get the file for your computer from the [latest release](https://github.com/brylie/LoomDSP/releases/latest), unzip it, and open LoomDSP.
+Get the file for your computer from the [latest release](https://github.com/brylie/LoomDSP/releases/latest), extract it (unzip it, or unpack the `.tar.gz` on Linux), and open LoomDSP.
 
 | System | File |
 |---|---|
@@ -83,7 +83,7 @@ Get the file for your computer from the [latest release](https://github.com/bryl
 These early alpha builds are not signed yet, so macOS and Windows warn the first time. Each download has a `README.txt` with the steps:
 
 - **macOS:** right-click `LoomDSP.app`, choose **Open**, then **Open** again.
-- **Windows:** on the "Windows protected your PC" screen, choose **More info**, then **Run anyway**.
+- **Windows:** double-click `loom-app.exe`. On the "Windows protected your PC" screen, choose **More info**, then **Run anyway**.
 - **Linux:** run `./loom-app` in a terminal.
 
 Open `examples/patches/subtractive.ron` from the app. Connect a MIDI keyboard first, or click **Hold note** in the toolbar, then turn the filter's **Cutoff** knob while the note plays. [Getting started](docs/guide/getting-started.md) walks you through your first patch.

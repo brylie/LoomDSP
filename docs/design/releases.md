@@ -3,7 +3,7 @@
 How a tagged version of LoomDSP becomes downloads for macOS, Windows, and Linux, for people who do not build from source.
 
 - **Kind:** living specification.
-- **Status:** Draft
+- **Status:** Agreed
 - **Decision behind it:** [ADR-0027](../adr/0027-prebuilt-release-downloads.md)
 - **Use case and requirements:** NFR-PORT-01 (the app builds on all three systems), NFR-OSS-03.
 - **Code:** `.github/workflows/release.yml`, `scripts/bundle-macos.sh`, `scripts/package-release.sh`.
@@ -60,6 +60,15 @@ The release notes are generated from the merged pull requests, followed by a fix
 
 A manual run stops after step 6. It uploads artifacts so a maintainer can download and test them, and it publishes nothing.
 
+### Release checklist
+
+Before pushing a tag, a maintainer:
+
+1. Runs the workflow by hand and checks that it passes.
+2. Reads the descriptions of the pull requests merged since the last release, and notes every break they list (AGENTS.md requires each one to list its breaks).
+
+After the release is created, the maintainer edits its notes to add those breaks under a "Breaking changes" heading. *Why:* the generated notes list pull request titles only, so the breaks would be lost without this step, and a downloaded alpha can stop opening old patches.
+
 ### Signing
 
 The first releases are unsigned. The workflow has no signing steps, because signing needs paid certificates the project does not have, and signing code that cannot be tested should not run in a job that can write releases.
@@ -100,7 +109,8 @@ Each page says why the warning appears (the build is not signed yet) and how to 
 - [ ] Given a tag that does not match `Cargo.toml`, when it is pushed, then the workflow fails before building.
 - [ ] Given a tag with a `-` suffix, when the release is made, then it is marked as a pre-release.
 - [ ] Given a manual run, when it ends, then artifacts exist and no release was created.
-- [ ] Given a built binary, when the smoke test runs, then it exits with code 0 on each system.
+- [ ] Given a built binary, when the smoke test runs, then it exits with code 0 on each system, including Intel macOS.
+- [ ] Given a tag that was deleted before publishing, when the release step runs, then it fails and creates no release.
 - [ ] Manual, on each system: download the release, check the checksum, open the app following `README.txt`, play `subtractive.ron` with a MIDI keyboard or **Hold note**, and hear sound.
 - [ ] Manual: `loom --help` runs from the unpacked Windows and Linux archives.
 
@@ -117,4 +127,4 @@ Each page says why the warning appears (the build is not signed yet) and how to 
 
 - **Which Ubuntu runner is the oldest we support?** The leaning is the oldest hosted runner that still gets the ALSA and graphics packages the build needs. Decide when the workflow is first run.
 - **App icon.** The macOS bundle has no icon yet. An icon needs a design.
-- **Intel macOS.** If the Intel build is slow or fails, ship Apple Silicon only and say so.
+- **Intel macOS.** The Intel build runs on the `macos-15-intel` runner. If GitHub retires that runner, build Intel by cross-compiling on Apple Silicon (no smoke test), or ship Apple Silicon only and say so.
