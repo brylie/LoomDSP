@@ -16,6 +16,7 @@ pub mod display;
 pub mod env;
 pub mod filter;
 pub mod io;
+pub mod level;
 pub mod logic;
 pub mod math;
 pub mod midi;
@@ -38,6 +39,7 @@ pub static ALL: &[&ModuleDescriptor] = &[
     &math::ADD,
     &math::MUL,
     &math::CONSTANT,
+    &level::AMP,
     &io::UNIT_DELAY,
     &io::AUDIO_OUT,
     &midi::NOTE_IN,
@@ -85,6 +87,9 @@ mod tests {
             ("loom.midi.note", "bend-range"),
             ("loom.ui.button", "mode"),
         ];
+        // MT-LEVEL-02: the amplifier's response is the first radio (a few
+        // choices shown at once, docs/design/panels.md).
+        let radios = [("loom.level.amp", "response")];
         for descriptor in super::ALL {
             let panel = &descriptor.panel;
             for param in descriptor.params {
@@ -96,6 +101,15 @@ mod tests {
                             Some(loom_core::WidgetKind::Button { mode: "mode" })
                         ),
                         "button.on"
+                    );
+                    continue;
+                }
+                if radios.contains(&(descriptor.id, param.name)) {
+                    assert!(
+                        matches!(widget.map(|w| w.kind), Some(loom_core::WidgetKind::Radio { .. })),
+                        "{}.{} should be radio buttons",
+                        descriptor.id,
+                        param.name
                     );
                     continue;
                 }
