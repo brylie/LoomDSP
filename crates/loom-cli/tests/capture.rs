@@ -72,10 +72,19 @@ fn captures_a_loopback_device() {
         return;
     };
     let file = std::env::temp_dir().join(format!("loom-cli-capture-loopback-{}.wav", std::process::id()));
-    let (_status, _stderr) = capture(&["--device", &loopback, "-o", file.to_str().unwrap(), "--seconds", "0.5"]);
+    let (status, stderr) = capture(&["--device", &loopback, "-o", file.to_str().unwrap(), "--seconds", "0.5"]);
+    assert_eq!(status, 0, "{stderr}");
+    // Printed only once the first frames have arrived.
+    assert!(stderr.contains("Capturing \""), "{stderr}");
 
-    // TODO(human): check the run and the file it wrote, then drop the `_`
-    // from `_status` and `_stderr`.
+    let reader = hound::WavReader::open(&file).unwrap();
+    let spec = reader.spec();
+    assert_eq!((spec.channels, spec.bits_per_sample), (2, 32));
+    assert_eq!(spec.sample_format, hound::SampleFormat::Float);
+    // The length counts from the first frames, and the device delivers
+    // whole buffers, so the bounds are loose.
+    let seconds = f64::from(reader.duration()) / f64::from(spec.sample_rate);
+    assert!((0.4..2.0).contains(&seconds), "captured {seconds} s");
 
     let _ = std::fs::remove_file(file);
 }
