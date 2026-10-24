@@ -48,7 +48,10 @@ fn an_unusable_length_exits_with_2() {
 /// nothing to check.
 #[test]
 fn devices_lists_audio_inputs() {
-    let out = Command::new(env!("CARGO_BIN_EXE_loom")).arg("devices").output().unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_loom"))
+        .arg("devices")
+        .output()
+        .unwrap();
     if out.status.success() {
         let stdout = String::from_utf8_lossy(&out.stdout);
         assert!(stdout.contains("Audio inputs:"), "{stdout}");

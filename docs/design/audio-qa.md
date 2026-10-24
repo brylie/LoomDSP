@@ -132,8 +132,12 @@ until grep -q Capturing /tmp/capture.log; do
   kill -0 "$capture" 2>/dev/null || { cat /tmp/capture.log; wait "$capture"; exit $?; }
   sleep 0.1
 done
-loom-app examples/dev/check-dc.ron --output-safety off --device blackhole --buffer 4096 --control-script open-new-quit.jsonl
-wait
+loom-app examples/dev/check-dc.ron --output-safety off --device blackhole --sample-rate 48000 --buffer 4096 --control-script open-and-quit.jsonl
+app=$?
+wait "$capture"
+captured=$?
+# A failed app or a broken capture leaves a file that proves nothing.
+if [ "$app" -ne 0 ] || [ "$captured" -ne 0 ]; then cat /tmp/capture.log; exit 2; fi
 loom analyze /tmp/device.wav --max-step 0.01
 ```
 

@@ -3,6 +3,7 @@
 **Patch it, play it live, share it.** An open-source modular synthesizer and sound lab, written in Rust, built for the stage.
 
 [![CI](https://github.com/brylie/LoomDSP/actions/workflows/ci.yml/badge.svg)](https://github.com/brylie/LoomDSP/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/brylie/LoomDSP/graph/badge.svg?token=3XZBL6OICG)](https://codecov.io/gh/brylie/LoomDSP)
 [![Licence: Apache-2.0](https://img.shields.io/badge/licence-Apache--2.0-blue.svg)](LICENSE)
 [![Status: early alpha](https://img.shields.io/badge/status-early%20alpha-orange.svg)](docs/product/roadmap.md)
 <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->

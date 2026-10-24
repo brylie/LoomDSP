@@ -8,7 +8,7 @@
 //! reply line and reads the next command. While no command comes, the
 //! thread sends nothing, so the window does not redraw (rule 7).
 
-use crate::{App, Message};
+use crate::{App, Message, settings};
 use iced::Task;
 use iced::advanced::widget::operation::Outcome;
 use iced::advanced::widget::{Id, Operation};
@@ -17,7 +17,7 @@ use iced::futures::{SinkExt, Stream};
 use iced::{Point, Rectangle, keyboard};
 use loom_canvas::PanelValues;
 use loom_canvas::{CanvasEvent, CanvasView, PortRef};
-use loom_core::{Graph, MidiControl, MidiEvent, ModuleId, WidgetKind};
+use loom_core::{Graph, MidiControl, MidiEvent, ModuleId, OutputSafety, WidgetKind};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use std::any::Any;
@@ -125,6 +125,24 @@ pub enum Command {
         ms: u64,
     },
     Quit,
+    /// The output safety mode, as its radio button in Preferences.
+    OutputSafety {
+        mode: String,
+    },
+    /// One pick in one of the Preferences audio lists. `rate` and `buffer`
+    /// are a number or `"default"`.
+    Audio {
+        device: Option<String>,
+        rate: Option<Value>,
+        buffer: Option<Value>,
+    },
+    /// A MIDI input's check box in Preferences.
+    Midi {
+        input: String,
+        on: bool,
+    },
+    /// The toolbar New button, with no unsaved-changes dialog.
+    New,
 }
 
 /// What a command returns: fields to add to the reply, or an error.
@@ -367,6 +385,20 @@ pub(crate) enum Step {
     Screenshot(PathBuf),
     /// A widget's value, recorded every frame until the time is up.
     Sample(Sampling),
+    /// A Preferences change: the reply is read once it is drawn, so the
+    /// new stream has had a moment to call back.
+    Report(Report),
+}
+
+/// What a Preferences command replies with.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Report {
+    /// `playing` and `status`.
+    Safety,
+    /// `playing`, `status`, and `audio`.
+    Audio,
+    /// `status` and the open `inputs`.
+    Midi,
 }
 
 /// The longest `sample`, well inside the time a listener waits for an
@@ -643,7 +675,7 @@ fn press_message(app: &App, name: &str) -> Result<Message, String> {
         ),
         "new" | "open" | "save" | "save-as" => {
             return Err(format!(
-                "the {name} button opens a dialog; use the `open` or `save` command instead"
+                "the {name} button opens a dialog; use the `new`, `open`, or `save` command instead"
             ));
         }
         "add" => return Err("use the `add` command to add a module".to_string()),
@@ -709,6 +741,7 @@ impl App {
             let Pending { call, step, .. } = pending;
             match step {
                 Step::Answer(answer) => call.answer(answer),
+                Step::Report(report) => call.answer(Ok(self.preferences_reply(report))),
                 Step::ControlChange {
                     before,
                     control,
@@ -908,14 +941,71 @@ impl App {
                 return (Then::Now(Ok(Map::new())), Task::batch(tasks));
             }
             Command::Snapshot => {
-                return (
-                    Then::Now(
-                        serde_json::to_value(self.ui_snapshot())
-                            .map(|snapshot| Map::from_iter([("snapshot".to_string(), snapshot)]))
-                            .map_err(|e| e.to_string()),
-                    ),
-                    Task::none(),
-                );
+                let answer = serde_json::to_value(self.ui_snapshot())
+                    .map(|snapshot| {
+                        let audio = self.audio_health(true);
+                        Map::from_iter([("snapshot".to_string(), snapshot), ("audio".to_string(), audio)])
+                    })
+                    .map_err(|e| e.to_string());
+                return (Then::Now(answer), Task::none());
+            }
+            Command::OutputSafety { mode } => {
+                let mode = match mode.as_str() {
+                    "low-latency" => OutputSafety::LowLatency,
+                    "clean" => OutputSafety::Clean,
+                    "off" => OutputSafety::Off,
+                    _ => {
+                        let error = format!("unknown mode `{mode}`; modes: low-latency, clean, off");
+                        return (Then::Now(Err(error)), Task::none());
+                    }
+                };
+                send(self, Message::Preferences(settings::Message::Safety(mode)));
+                return (Then::AfterDraw(Step::Report(Report::Safety)), Task::batch(tasks));
+            }
+            Command::Audio { device, rate, buffer } => {
+                let choice = |value: Option<Value>, what: &str| match value {
+                    None => Ok(None),
+                    Some(Value::String(s)) if s == "default" => Ok(Some(None)),
+                    Some(value) => value
+                        .as_u64()
+                        .and_then(|n| u32::try_from(n).ok())
+                        .map(|n| Some(Some(n)))
+                        .ok_or_else(|| format!("`{what}` is a whole number or \"default\", not {value}")),
+                };
+                let read = self.read_device_lists();
+                let change = choice(rate, "rate").and_then(|rate| {
+                    let buffer = choice(buffer, "buffer")?;
+                    self.control_audio_change(device.as_deref(), rate, buffer)
+                });
+                if let Ok(change) = &change {
+                    send(self, Message::Preferences(settings::Message::Audio(change.clone())));
+                }
+                if read {
+                    self.forget_device_lists();
+                }
+                let then = match change {
+                    Ok(_) => Then::AfterDraw(Step::Report(Report::Audio)),
+                    Err(error) => Then::Now(Err(error)),
+                };
+                return (then, Task::batch(tasks));
+            }
+            Command::Midi { input, on } => {
+                let then = match self.control_midi_input(&input) {
+                    Ok(name) => {
+                        send(self, Message::Preferences(settings::Message::Midi(name, on)));
+                        Then::AfterDraw(Step::Report(Report::Midi))
+                    }
+                    Err(error) => Then::Now(Err(error)),
+                };
+                return (then, Task::batch(tasks));
+            }
+            Command::New => {
+                if self.replace(crate::Source::Empty) {
+                    self.status = "new patch".to_string();
+                    Ok(Map::new())
+                } else {
+                    Err(self.status.clone())
+                }
             }
         };
         let then = match answer {
@@ -923,6 +1013,58 @@ impl App {
             Err(error) => Then::Now(Err(error)),
         };
         (then, Task::batch(tasks))
+    }
+
+    /// The reply to a Preferences command, read as it is drawn.
+    fn preferences_reply(&mut self, report: Report) -> Map<String, Value> {
+        let mut reply = Map::new();
+        if !matches!(report, Report::Midi) {
+            reply.insert("playing".to_string(), Value::String(self.playing_line()));
+        }
+        reply.insert("status".to_string(), Value::String(self.status.clone()));
+        match report {
+            Report::Safety => {}
+            Report::Audio => {
+                reply.insert("audio".to_string(), self.audio_health(false));
+            }
+            Report::Midi => {
+                reply.insert("inputs".to_string(), json!(self.open_midi_inputs()));
+            }
+        }
+        reply
+    }
+
+    /// The `audio` field: the stream playing now and its callback counters
+    /// (control-channel.md, The `audio` field). `remember` makes these
+    /// counts the ones the next `advanced` compares with, as a `snapshot`
+    /// does.
+    fn audio_health(&mut self, remember: bool) -> Value {
+        let Some(stats) = self.audio_stats.clone() else {
+            return json!({
+                "device": null, "rate": null, "buffer": null, "callbacks": 0,
+                "advanced": null, "stream_errors": 0, "start_overloads": 0, "overruns": 0,
+            });
+        };
+        let now = stats.snapshot();
+        // A new stream counts from its start.
+        let before = match &self.control_seen {
+            Some((seen, callbacks)) if Arc::ptr_eq(seen, &stats) => *callbacks,
+            _ => 0,
+        };
+        if remember {
+            self.control_seen = Some((stats.clone(), now.callbacks));
+        }
+        let playing = self.rig.playing.as_ref();
+        json!({
+            "device": playing.map(|p| p.device.clone()),
+            "rate": playing.map(|p| p.rate),
+            "buffer": (now.largest_buffer > 0).then_some(now.largest_buffer),
+            "callbacks": now.callbacks,
+            "advanced": now.callbacks > before,
+            "stream_errors": now.stream_errors,
+            "start_overloads": now.start_overloads,
+            "overruns": now.overruns,
+        })
     }
 
     fn check_modules(&self, modules: &[u32]) -> Result<(), String> {
@@ -1533,5 +1675,156 @@ mod tests {
         };
         assert_eq!(locate(&ui.app, "Cutoff", &text).unwrap().x, 1.0);
         assert!(locate(&ui.app, "Cutoff", &Found::default()).is_err());
+    }
+
+    /// An app on the fake host, playing the subtractive patch, with its
+    /// preferences file in a folder of its own.
+    fn on_fake_devices(name: &str, fake: &std::rc::Rc<crate::devices::fake::Fake>) -> App {
+        let dir = std::env::temp_dir().join(format!("loom-control-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let args = crate::Args {
+            patch: Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches/subtractive.ron")),
+            no_audio: false,
+            no_recovery: true,
+            devices: crate::devices::Options {
+                preferences: Some(dir.join(crate::preferences::FILE_NAME)),
+                ..crate::devices::Options::default()
+            },
+            ..crate::tests::app_args()
+        };
+        App::boot_with(
+            args,
+            &mut crate::recovery::Dialogs,
+            std::rc::Rc::new(crate::devices::fake::Shared(fake.clone())),
+        )
+    }
+
+    /// The Preferences commands go through the window's messages: the
+    /// device, rate, buffer, output safety, and MIDI inputs change as a
+    /// click would change them, and each reply says what plays now
+    /// (control-channel.md, Devices and stream health).
+    #[test]
+    fn preferences_commands_change_what_the_window_shows() {
+        use crate::devices::fake::{self, Fake};
+        use crate::preferences::{BufferChoice, DeviceChoice, RateChoice};
+        let fake = std::rc::Rc::new(Fake::new(
+            &[fake::device("Fake A"), fake::device("Fake B")],
+            &["Keys", "Pad"],
+        ));
+        let mut app = on_fake_devices("preferences", &fake);
+
+        let reply = run(&mut app, r#"{"cmd": "audio", "device": "fake b"}"#).unwrap();
+        assert_eq!(app.rig.shown_audio().device, DeviceChoice::Named("Fake B".into()));
+        assert_eq!(fake.opened(), ["Fake A", "Fake B"]);
+        assert!(
+            reply["playing"]
+                .as_str()
+                .unwrap()
+                .starts_with("Playing on \"Fake B\" at 48000 Hz"),
+            "{reply:?}"
+        );
+        assert!(reply["status"].is_string());
+        assert_eq!(reply["audio"]["device"], json!("Fake B"));
+
+        let reply = run(&mut app, r#"{"cmd": "audio", "rate": 44100}"#).unwrap();
+        assert_eq!(app.rig.shown_audio().sample_rate, RateChoice::Hz(44_100));
+        assert!(reply["playing"].as_str().unwrap().contains("44100 Hz"), "{reply:?}");
+        let reply = run(&mut app, r#"{"cmd": "audio", "buffer": 64}"#).unwrap();
+        assert_eq!(app.rig.shown_audio().buffer, BufferChoice::Frames(64));
+        assert!(reply["playing"].as_str().unwrap().contains("64 frames"), "{reply:?}");
+
+        // What the window does not offer is refused, with what it offers.
+        let error = run(&mut app, r#"{"cmd": "audio", "rate": 96000}"#).unwrap_err();
+        assert!(error.contains("44100, 48000"), "{error}");
+        let error = run(&mut app, r#"{"cmd": "audio", "buffer": 100}"#).unwrap_err();
+        assert!(error.contains("32, 64"), "{error}");
+        let error = run(&mut app, r#"{"cmd": "audio", "device": "Fake"}"#).unwrap_err();
+        assert!(error.contains("several"), "{error}");
+        let error = run(&mut app, r#"{"cmd": "audio", "device": "Nowhere"}"#).unwrap_err();
+        assert!(error.contains("\"Fake A\", \"Fake B\""), "{error}");
+        assert!(run(&mut app, r#"{"cmd": "audio", "rate": 48000, "buffer": 64}"#).is_err());
+        assert!(run(&mut app, r#"{"cmd": "audio", "rate": "fast"}"#).is_err());
+        assert_eq!(fake.opened().len(), 4, "a refused change opens nothing");
+
+        run(&mut app, r#"{"cmd": "audio", "buffer": "default"}"#).unwrap();
+        assert_eq!(app.rig.shown_audio().buffer, BufferChoice::DeviceDefault);
+        run(&mut app, r#"{"cmd": "audio", "rate": "default"}"#).unwrap();
+        assert_eq!(app.rig.shown_audio().sample_rate, RateChoice::DeviceDefault);
+        run(&mut app, r#"{"cmd": "audio", "device": "default"}"#).unwrap();
+        assert_eq!(app.rig.shown_audio().device, DeviceChoice::SystemDefault);
+        assert_eq!(fake.opened().last().map(String::as_str), Some("Fake A"));
+        assert!(app.rig.window.is_none(), "the commands leave the window closed");
+
+        let reply = run(&mut app, r#"{"cmd": "output_safety", "mode": "clean"}"#).unwrap();
+        assert_eq!(app.output_safety, OutputSafety::Clean);
+        assert!(
+            reply["playing"].as_str().unwrap().starts_with("Playing on"),
+            "{reply:?}"
+        );
+        assert!(run(&mut app, r#"{"cmd": "output_safety", "mode": "loud"}"#).is_err());
+
+        let reply = run(&mut app, r#"{"cmd": "midi", "input": "pad", "on": false}"#).unwrap();
+        assert_eq!(reply["inputs"], json!(["Keys"]));
+        assert!(!fake.is_open("Pad"));
+        let reply = run(&mut app, r#"{"cmd": "midi", "input": "Pad", "on": true}"#).unwrap();
+        assert_eq!(reply["inputs"], json!(["Keys", "Pad"]));
+        assert!(run(&mut app, r#"{"cmd": "midi", "input": "Drums", "on": true}"#).is_err());
+
+        assert!(!app.controller.graph().is_empty());
+        assert_eq!(run(&mut app, r#"{"cmd": "new"}"#), Ok(Map::new()));
+        assert!(app.controller.graph().is_empty());
+        assert!(fake.is_open("Keys"), "New keeps the MIDI inputs");
+    }
+
+    /// With `--fake-audio` there are no device lists, so `audio` is refused
+    /// (rule S6). Output safety still changes.
+    #[test]
+    fn audio_is_refused_with_no_device() {
+        let mut app = App::new(crate::Args {
+            fake_audio: true,
+            no_audio: false,
+            ..crate::tests::app_args()
+        });
+        let error = run(&mut app, r#"{"cmd": "audio", "rate": 48000}"#).unwrap_err();
+        assert!(error.contains("--fake-audio"), "{error}");
+        assert!(run(&mut app, r#"{"cmd": "output_safety", "mode": "off"}"#).is_ok());
+        assert_eq!(app.output_safety, OutputSafety::Off);
+    }
+
+    /// A device can start, call back a few times, and then stop with no
+    /// error, while the app still says it plays. The snapshot's `audio`
+    /// field shows it: `advanced` turns false and `callbacks` stops.
+    #[test]
+    fn the_snapshot_sees_a_device_stop_calling_back() {
+        use crate::devices::fake::{self, Fake, STALL_AFTER};
+        let mut fake = Fake::new(&[fake::device("Fake A"), fake::device("Stuck")], &[]);
+        fake.stalls = vec!["Stuck".to_string()];
+        let fake = std::rc::Rc::new(fake);
+        let mut app = on_fake_devices("stall", &fake);
+
+        let audio = |answer: Answer| answer.unwrap()["audio"].clone();
+        let first = audio(run(&mut app, r#"{"cmd": "snapshot"}"#));
+        assert_eq!(first["device"], json!("Fake A"));
+        assert_eq!(first["rate"], json!(48_000));
+
+        run(&mut app, r#"{"cmd": "audio", "device": "Stuck"}"#).unwrap();
+        let started = audio(run(&mut app, r#"{"cmd": "snapshot"}"#));
+        assert_eq!(started["device"], json!("Stuck"));
+        assert_eq!(started["callbacks"], json!(STALL_AFTER));
+        assert_eq!(started["advanced"], json!(true), "a new stream counts from its start");
+        assert_eq!(started["buffer"], json!(256));
+        assert_eq!(started["stream_errors"], json!(0));
+        assert_eq!(started["start_overloads"], json!(0));
+
+        let stalled = audio(run(&mut app, r#"{"cmd": "snapshot"}"#));
+        assert_eq!(stalled["callbacks"], json!(STALL_AFTER));
+        assert_eq!(stalled["advanced"], json!(false));
+        // The line still says it plays: only the counters show the stall.
+        assert!(
+            app.playing_line().starts_with("Playing on \"Stuck\""),
+            "{}",
+            app.playing_line()
+        );
     }
 }
