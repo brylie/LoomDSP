@@ -389,6 +389,9 @@ struct App {
     control: Vec<control::Listener>,
     /// Commands waiting for the window to draw their change.
     control_pending: Vec<control::Pending>,
+    /// The stream and its callback count at the last control `snapshot`,
+    /// for its `advanced` field.
+    control_seen: Option<(Arc<CallbackStats>, u64)>,
     /// True once a failed `--record` has been reported.
     recording_failed: bool,
     measuring: bool,
@@ -792,6 +795,7 @@ impl App {
             reporter: args.bench.reporter(),
             control: args.control.listeners(),
             control_pending: Vec::new(),
+            control_seen: None,
             recording_failed: false,
             measuring: args.bench.redraws(),
             animating: args.bench.bench,

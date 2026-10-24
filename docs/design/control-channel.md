@@ -6,7 +6,7 @@ A development-only way for a script or an AI agent to drive the running app by n
 - **Status:** Implemented
 - **Decision behind it:** None. It builds on the plain-data UI snapshot ([ADR-0021](../adr/0021-plain-data-view-models-and-keyed-identity.md)).
 - **Use case and requirements:** Developer tooling. No user requirement.
-- **Issues:** [#207](https://github.com/brylie/LoomDSP/issues/207) (part 3), `press` and `arm`: [#256](https://github.com/brylie/LoomDSP/issues/256); places in the snapshot: [#250](https://github.com/brylie/LoomDSP/issues/250); `sample`: [#255](https://github.com/brylie/LoomDSP/issues/255); related [#190](https://github.com/brylie/LoomDSP/issues/190) (accessibility).
+- **Issues:** [#207](https://github.com/brylie/LoomDSP/issues/207) (part 3), `press` and `arm`: [#256](https://github.com/brylie/LoomDSP/issues/256); places in the snapshot: [#250](https://github.com/brylie/LoomDSP/issues/250); `sample`: [#255](https://github.com/brylie/LoomDSP/issues/255); devices and stream health: [#26](https://github.com/brylie/LoomDSP/issues/26); related [#190](https://github.com/brylie/LoomDSP/issues/190) (accessibility).
 - **Code:** `crates/loom-app/src/control.rs`; the clock and recorder it relies on are in `crates/loom-host-desktop`.
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
@@ -85,9 +85,9 @@ The snapshot from `snapshot` and `--dump-ui` says where things are on the canvas
 
 A rectangle is `{x, y, width, height}`, from its top-left corner. `locate` answers in window pixels instead, because that is where pixel-based automation clicks.
 
-## Devices and stream health (Draft)
+## Devices and stream health
 
-**Status: Draft.** Not built yet. Agree on this before building it.
+**Status: Agreed** (2026-10-24), and built. Issue: [#26](https://github.com/brylie/LoomDSP/issues/26) (its manual check).
 
 The [manual check for audio and MIDI devices](../dev/manual-checks/issue-26-devices.md) needs a person to click through Preferences, press New, and listen. Running it found two bugs that the app could not see: it said "Playing" while the device made no callbacks. These commands let a script do the clicking, and the `audio` field in the `snapshot` reply lets it see whether sound is really being made. A person still listens for clicks; the script does the rest.
 
@@ -132,7 +132,7 @@ The `snapshot` reply gets a second field, `audio`, next to `snapshot`. It reads 
 
 ### Rules for these commands
 
-- **S1. Same path as the window.** Each command becomes the `settings::Message` the Preferences window sends, and goes through `App::update` (rule 3). It works whether the window is open or not, and does not open it. *Why:* the check should test the code a person uses.
+- **S1. Same path as the window.** Each command becomes the `settings::Message` the Preferences window sends, and goes through `App::update` (rule 3). It works whether the window is open or not, and does not open it. With the window closed, the command reads the device lists for the change, as opening the window would, and drops them after. *Why:* the check should test the code a person uses.
 - **S2. Only what the window offers.** A name matches a listed device or MIDI input exactly, or else by a case-insensitive part of the name that matches exactly one entry (as `--device` does, but never picking the first of several). `rate` and `buffer` must be in the list the window shows for the chosen device. Anything else is refused, and the error lists what is offered. *Why:* a value the window cannot send tests a path no user reaches.
 - **S3. The reply comes after the restart.** `audio` replies once the stream has restarted (or failed and kept the old one, which the status says) and the window has drawn it (rule 5). The reply does not wait for the new stream's first callback; a script that needs one waits, then reads `snapshot`. *Why:* the restart is quick and synchronous; waiting for callbacks is the script's question to ask, with `advanced`.
 - **S4. Saved like the window saves.** These commands write the preferences file, as the window does. A script should start the app with `--preferences FILE`, so it never changes the real per-user file. A device flag (`--device`, `--sample-rate`, `--buffer`) is cleared by the command, as by the window.
@@ -145,11 +145,11 @@ The fake host in `crates/loom-app/src/devices.rs` gets a device that starts, mak
 
 ### Acceptance criteria
 
-- [ ] App tests, through the control harness and the fake host: `output_safety`, `audio` (device, rate, buffer, and `"default"`), `midi`, and `new` change what the Preferences window shows, and replies give `playing` and `status`.
-- [ ] A refused name, rate, or buffer gets `ok: false` with the offered values.
-- [ ] With the stalling fake device, `advanced` is true and then false, and `callbacks` stops growing.
-- [ ] `examples/dev/check-devices-part-2.jsonl` runs Part 2 of the manual check (device, 96 kHz, smallest buffer) on BlackHole with `--control-script`, and its replies show `advanced: true` after each change.
-- [ ] The manual check says which steps the script replaces, and which still need ears.
+- [x] App tests, through the control harness and the fake host: `output_safety`, `audio` (device, rate, buffer, and `"default"`), `midi`, and `new` change what the Preferences window shows, and replies give `playing` and `status`.
+- [x] A refused name, rate, or buffer gets `ok: false` with the offered values.
+- [x] With the stalling fake device, `advanced` is true and then false, and `callbacks` stops growing.
+- [x] `examples/dev/check-devices-part-2.jsonl` runs Part 2 of the manual check (device, 96 kHz, smallest buffer) on BlackHole with `--control-script`, and its replies show `advanced: true` after each change. Checked on macOS with BlackHole 2ch, 2026-10-24.
+- [x] The manual check says which steps the script replaces, and which still need ears.
 
 ### Out of scope
 

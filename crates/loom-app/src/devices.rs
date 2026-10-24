@@ -366,6 +366,37 @@ pub fn buffer_choices(info: &OutputInfo) -> Vec<BufferChoice> {
         .collect()
 }
 
+/// The entry in `names` that `wanted` names: the one equal to it, or else
+/// the only one that contains it, case-insensitive. Several matches are
+/// refused, never the first one picked (control-channel.md, rule S2).
+/// `what` names the list in errors, such as "audio output".
+pub fn match_name(names: &[String], wanted: &str, what: &str) -> Result<String, String> {
+    if let Some(name) = names.iter().find(|name| *name == wanted) {
+        return Ok(name.clone());
+    }
+    let lower = wanted.to_lowercase();
+    let found: Vec<&String> = names
+        .iter()
+        .filter(|name| name.to_lowercase().contains(&lower))
+        .collect();
+    match found.as_slice() {
+        [name] => Ok((*name).clone()),
+        [] => Err(format!("no {what} matches `{wanted}`; there are: {}", quoted(names))),
+        _ => Err(format!(
+            "several {what}s match `{wanted}`: {}; give more of the name",
+            quoted(&found.into_iter().cloned().collect::<Vec<_>>())
+        )),
+    }
+}
+
+/// Names in quotes, separated by commas, or "none".
+fn quoted(names: &[String]) -> String {
+    if names.is_empty() {
+        return "none".to_string();
+    }
+    names.iter().map(|n| format!("\"{n}\"")).collect::<Vec<_>>().join(", ")
+}
+
 /// Every choice the Sample rate menu offers.
 pub fn rate_choices(info: &OutputInfo) -> Vec<RateChoice> {
     std::iter::once(RateChoice::DeviceDefault)
@@ -405,7 +436,16 @@ pub mod fake {
         /// only when the test steps the tape, and keeps every sample
         /// (audio-qa.md, Part 1). Without one, devices run on a timer.
         pub tape: Option<loom_host_desktop::Tape>,
+        /// Devices that start, make [`STALL_AFTER`] callbacks, and then
+        /// stop calling back with no error, as a macOS device did after a
+        /// rate change. They play on [`Fake::stall_tape`].
+        pub stalls: Vec<String>,
+        /// The tape the stalling devices play on. Tests leave it alone.
+        pub stall_tape: loom_host_desktop::Tape,
     }
+
+    /// Callbacks a stalling device makes before it stops.
+    pub const STALL_AFTER: usize = 4;
 
     /// A device that offers 44.1 to 48 kHz, buffers of 32 to 1024 frames,
     /// and defaults to 48 kHz.
@@ -503,6 +543,7 @@ pub mod fake {
             fake.log.borrow_mut().push(Event::Opened(name.clone()));
             let block = options.buffer_size.unwrap_or(256);
             Ok(match &fake.tape {
+                _ if fake.stalls.contains(&name) => AudioOutput::stepped(rate, block, &fake.stall_tape),
                 Some(tape) => AudioOutput::stepped(rate, block, tape),
                 None => AudioOutput::clock(rate, block),
             }
@@ -513,7 +554,13 @@ pub mod fake {
             if self.0.wont_start.iter().any(|name| name == output.name()) {
                 return Err("the stream did not start".to_string());
             }
-            output.start(engine).map_err(|e| e.to_string())
+            let stalls = self.0.stalls.iter().any(|name| name == output.name());
+            let block = output.buffer_size().unwrap_or(256) as usize;
+            let running = output.start(engine).map_err(|e| e.to_string())?;
+            if stalls {
+                self.0.stall_tape.step(block * STALL_AFTER);
+            }
+            Ok(running)
         }
 
         fn midi_inputs(&self) -> Result<Vec<String>, String> {

@@ -136,6 +136,14 @@ If the rates differ, the recording ended at the change, and only your ears check
 
 Leave the app running for Part 3.
 
+**2.5. Or run Part 2 as a script.** The [control channel](../../design/control-channel.md#devices-and-stream-health) can make the choices in 2.2 to 2.4 itself, and tell whether the device really calls back. It does not listen: your ears still check for clicks and crackle. The script picks the first device whose name contains `BlackHole` and the smallest buffer it offers, 32 frames. For your interface, copy the file and change the `device` and `buffer` lines. A refused size gets an error that lists the sizes offered.
+
+```sh
+cargo run --release -p loom-app -- examples/dev/check-drone.ron --preferences target/check-prefs.ron --control-script examples/dev/check-devices-part-2.jsonl | jq -c 'if .snapshot then {id, audio} else . end'
+```
+
+`--preferences` keeps the real preferences file out of it. Each `audio` reply gives the "Playing on" line. Each `snapshot` gives `audio.callbacks` and `audio.advanced`. The step passes when every snapshot after a change has `advanced: true`, the right `rate` and `buffer`, and `stream_errors` that stays the same after the first second. If `advanced` is false, the device stopped calling back while the app said it played: the bug fixed in `settle_rate`.
+
 ## Part 3: fade-out when opening a patch
 
 This checks that the old engine fades out before it stops (output safety rule 14). A DC offset with no safety stage is the worst case: a hard stop is a thump.
@@ -215,7 +223,7 @@ Quit.
 
 - Turn Pad back on in Preferences, or leave it off if you like.
 - Put back the preferences file you set aside in step 0.3, if there was one.
-- Delete `target/check-device.wav` and `target/check-dc.wav`.
+- Delete `target/check-device.wav`, `target/check-dc.wav`, and `target/check-prefs.ron`.
 - Set the system default output back to what you use.
 
 ## When a step fails
