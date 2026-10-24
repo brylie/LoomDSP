@@ -113,7 +113,11 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: LoomDSP-${{ matrix.os }}-${{ matrix.arch }}
-          path: dist/LoomDSP-*.*
+          # Only the archives. The staging folder next to them has a dot in
+          # its name too, and must not be uploaded.
+          path: |
+            dist/LoomDSP-*.zip
+            dist/LoomDSP-*.tar.gz
           if-no-files-found: error
 
   # Only a pushed tag publishes. A manual run stops after the artifacts.
@@ -132,7 +136,7 @@ jobs:
           merge-multiple: true
       - name: Checksums
         working-directory: dist
-        run: sha256sum LoomDSP-* > SHA256SUMS.txt && cat SHA256SUMS.txt
+        run: sha256sum LoomDSP-*.zip LoomDSP-*.tar.gz > SHA256SUMS.txt && cat SHA256SUMS.txt
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -145,7 +149,7 @@ jobs:
           NOTES
           flags=""
           if [ "$PRERELEASE" = true ]; then flags="--prerelease"; fi
-          gh release create "$TAG" dist/LoomDSP-* dist/SHA256SUMS.txt \
+          gh release create "$TAG" dist/LoomDSP-*.zip dist/LoomDSP-*.tar.gz dist/SHA256SUMS.txt \
             --repo "$GITHUB_REPOSITORY" \
             --title "LoomDSP ${TAG#v}" \
             --notes-file notes.md --generate-notes $flags
