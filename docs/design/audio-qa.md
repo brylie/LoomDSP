@@ -153,7 +153,7 @@ loom analyze /tmp/device.wav --max-step 0.01
 
 A way for tests and scripts to play the app through a real MIDI input, with no hardware. It uses a *virtual MIDI port*: a MIDI source that a program creates in the operating system's MIDI service. Other programs see it in their list of MIDI inputs, just like a controller plugged in by USB. The app opens it through the same `midir` code it uses for hardware, so `MidiConnection::close` and the release of held notes are tested for real.
 
-Virtual ports exist on macOS (CoreMIDI) and on Linux (the ALSA sequencer, which needs the `snd-seq` kernel module). Windows has no virtual ports, so there Part 4 is not available and the manual check still needs hardware.
+Virtual ports exist on macOS (CoreMIDI) and on Linux (the ALSA sequencer, which needs the `snd-seq` kernel module). Windows has no virtual ports, so there virtual MIDI controllers are not available and the manual check still needs hardware.
 
 It comes in three pieces, all built on one helper.
 
