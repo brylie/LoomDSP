@@ -27,6 +27,9 @@ const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 /// How far in screen pixels the pointer may move between the two clicks of
 /// a double-click.
 const DOUBLE_CLICK_SLOP: f32 = 4.0;
+/// How far a right press may move, in screen pixels, and still count as a
+/// click that opens the probe menu rather than a pan.
+const CLICK_SLOP: f32 = 4.0;
 
 /// Titles are drawn when they would be at least this tall on screen.
 const TITLE_MIN_PX: f32 = 6.5;
@@ -144,6 +147,21 @@ pub enum CanvasEvent {
         /// Where the browser opens, in window coordinates.
         at: Point,
         /// The canvas area, in window coordinates, so the browser can stay
+        /// inside it.
+        area: Rectangle,
+    },
+    /// An output or a cable was right-clicked without moving: open the menu
+    /// with Add scope and Add meter (`docs/design/panels.md`, Add scope and
+    /// Add meter).
+    ProbeMenu {
+        /// The output to probe. On a cable, its source.
+        output: PortRef,
+        /// Where the menu was opened, in world units: the output port, or
+        /// the point clicked on the cable.
+        world: Point,
+        /// Where the menu opens, in window coordinates.
+        at: Point,
+        /// The canvas area, in window coordinates, so the menu can stay
         /// inside it.
         area: Rectangle,
     },
@@ -407,6 +425,10 @@ enum Interaction {
     Idle,
     Panning {
         last: Point,
+        /// Where a right press began, on screen, until the pointer moves
+        /// away from it. A release while it is set is a click, which may
+        /// open the probe menu.
+        click: Option<Point>,
     },
     Moving {
         ids: Vec<u32>,
@@ -426,10 +448,7 @@ enum Interaction {
     /// A button is held. Pointer up reports a release, wherever the pointer
     /// is, so a release always follows the press. The tile does not move.
     /// The app decides whether that release changes a parameter.
-    Holding {
-        module: u32,
-        widget: usize,
-    },
+    Holding { module: u32, widget: usize },
     Wiring {
         from: PortRef,
         /// True when the drag began by pulling a cable off an input. Then a
@@ -878,8 +897,17 @@ impl<Message> PatchCanvas<'_, Message> {
                 self.end_gestures(state, shell);
                 let world = state.camera.to_world(screen);
                 match button {
-                    mouse::Button::Middle | mouse::Button::Right => {
-                        state.interaction = Interaction::Panning { last: screen };
+                    mouse::Button::Middle => {
+                        state.interaction = Interaction::Panning {
+                            last: screen,
+                            click: None,
+                        };
+                    }
+                    mouse::Button::Right => {
+                        state.interaction = Interaction::Panning {
+                            last: screen,
+                            click: Some(screen),
+                        };
                     }
                     mouse::Button::Left => {
                         self.press(state, world, screen, bounds, shell);
@@ -896,9 +924,12 @@ impl<Message> PatchCanvas<'_, Message> {
                 state.cursor = Some(world);
                 let mut redraw = false;
                 match &mut state.interaction {
-                    Interaction::Panning { last } => {
+                    Interaction::Panning { last, click } => {
                         let delta = screen - *last;
                         *last = screen;
+                        if click.is_some_and(|start| start.distance(screen) > CLICK_SLOP) {
+                            *click = None;
+                        }
                         state.camera.pan(delta);
                         redraw = true;
                     }
@@ -969,6 +1000,13 @@ impl<Message> PatchCanvas<'_, Message> {
                 if *button != mouse::Button::Left && matches!(state.interaction, Interaction::Holding { .. }) {
                     return;
                 }
+                // Only the right button's own release ends a right click. A
+                // left button let go meanwhile must not open the menu.
+                if *button != mouse::Button::Right
+                    && matches!(state.interaction, Interaction::Panning { click: Some(_), .. })
+                {
+                    return;
+                }
                 let interaction = std::mem::take(&mut state.interaction);
                 let gesture = matches!(
                     interaction,
@@ -1027,6 +1065,11 @@ impl<Message> PatchCanvas<'_, Message> {
                     Interaction::Holding { module, widget } => {
                         if !Self::key_holds_button(state, module, widget) {
                             self.emit(shell, CanvasEvent::ButtonReleased { module, widget });
+                        }
+                    }
+                    Interaction::Panning { click: Some(_), .. } => {
+                        if let (Some(world), Some(screen)) = (world, screen) {
+                            self.open_probe_menu(state, world, screen, bounds, shell);
                         }
                     }
                     Interaction::Idle
@@ -1680,6 +1723,45 @@ impl<Message> PatchCanvas<'_, Message> {
             shell,
             CanvasEvent::OpenBrowser {
                 world,
+                at: Point::new(bounds.x + screen.x, bounds.y + screen.y),
+                area: bounds,
+            },
+        );
+    }
+
+    /// Sends [`CanvasEvent::ProbeMenu`] if an output or a cable is at this
+    /// point. Anything else opens no menu.
+    fn open_probe_menu(
+        &self,
+        state: &State,
+        world: Point,
+        screen: Point,
+        bounds: Rectangle,
+        shell: &mut Shell<'_, Message>,
+    ) {
+        let (output, anchor) = match self.scene.hit(world, state.hit_radius()) {
+            Hit::Port(port) if port.output => match self.scene.port_position(port) {
+                Some(position) => (port, position),
+                None => return,
+            },
+            Hit::Cable(i) => match self.scene.cables().get(i) {
+                Some(cable) => (
+                    PortRef {
+                        module: cable.from.0,
+                        output: true,
+                        index: cable.from.1,
+                    },
+                    world,
+                ),
+                None => return,
+            },
+            _ => return,
+        };
+        self.emit(
+            shell,
+            CanvasEvent::ProbeMenu {
+                output,
+                world: anchor,
                 at: Point::new(bounds.x + screen.x, bounds.y + screen.y),
                 area: bounds,
             },
@@ -2443,7 +2525,10 @@ mod tests {
                 applied: Vector::ZERO,
                 click: None,
             },
-            Interaction::Panning { last: Point::ORIGIN },
+            Interaction::Panning {
+                last: Point::ORIGIN,
+                click: None,
+            },
         ];
         for interaction in drags {
             let state = State {
@@ -3706,5 +3791,172 @@ mod tests {
         });
         let end = drive(&canvas, &mut state, &up, knob);
         assert_eq!(end, vec![CanvasEvent::GestureEnd]);
+    }
+
+    /// A right press and release at `at`, with no move in between.
+    fn right_click(canvas: &PatchCanvas<'_, CanvasEvent>, state: &mut State, at: Point) -> Vec<CanvasEvent> {
+        let mut events = drive(canvas, state, &click(mouse::Button::Right), at);
+        events.extend(drive(
+            canvas,
+            state,
+            &Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Right)),
+            at,
+        ));
+        events
+    }
+
+    /// Right-clicking an output opens the probe menu at that output
+    /// (panels.md, Add scope and Add meter).
+    #[test]
+    fn right_click_on_an_output_opens_the_probe_menu() {
+        let scene = chain();
+        let selected = BTreeSet::new();
+        let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+        let output = PortRef {
+            module: 1,
+            output: true,
+            index: 0,
+        };
+        let port = scene.port_position(output).unwrap();
+        let events = right_click(&canvas, &mut State::default(), port);
+        assert_eq!(
+            events,
+            vec![CanvasEvent::ProbeMenu {
+                output,
+                world: port,
+                at: port,
+                area: Rectangle::new(Point::ORIGIN, Size::new(800.0, 600.0)),
+            }]
+        );
+    }
+
+    /// Right-clicking a cable opens the menu for the cable's source, at the
+    /// point clicked.
+    #[test]
+    fn right_click_on_a_cable_opens_the_menu_for_its_source() {
+        let scene = chain();
+        let selected = BTreeSet::new();
+        let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+        let from = scene.port_position(PortRef {
+            module: 2,
+            output: true,
+            index: 0,
+        });
+        let to = scene.port_position(PortRef {
+            module: 3,
+            output: false,
+            index: 0,
+        });
+        let [a, b, c, d] = crate::scene::cable_curve(from.unwrap(), to.unwrap());
+        let middle = Point::new(
+            (a.x + 3.0 * b.x + 3.0 * c.x + d.x) / 8.0,
+            (a.y + 3.0 * b.y + 3.0 * c.y + d.y) / 8.0,
+        );
+        let events = right_click(&canvas, &mut State::default(), middle);
+        assert!(
+            matches!(
+                events.as_slice(),
+                [CanvasEvent::ProbeMenu { output: PortRef { module: 2, output: true, index: 0 }, world, .. }]
+                    if *world == middle
+            ),
+            "{events:?}"
+        );
+    }
+
+    /// A right-drag pans and opens no menu, even if it ends where it began.
+    #[test]
+    fn right_drag_pans_and_opens_no_menu() {
+        let scene = chain();
+        let selected = BTreeSet::new();
+        let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+        let port = scene
+            .port_position(PortRef {
+                module: 1,
+                output: true,
+                index: 0,
+            })
+            .unwrap();
+        let mut state = State::default();
+        let mut events = drive(&canvas, &mut state, &click(mouse::Button::Right), port);
+        let away = port + Vector::new(30.0, 0.0);
+        let moved = Event::Mouse(mouse::Event::CursorMoved { position: away });
+        events.extend(drive(&canvas, &mut state, &moved, away));
+        let back = Event::Mouse(mouse::Event::CursorMoved { position: port });
+        events.extend(drive(&canvas, &mut state, &back, port));
+        events.extend(drive(
+            &canvas,
+            &mut state,
+            &Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Right)),
+            port,
+        ));
+        assert!(events.is_empty(), "{events:?}");
+    }
+
+    /// Letting go of another button during a right click opens no menu and
+    /// keeps the click, so the right release still opens it.
+    #[test]
+    fn only_the_right_release_opens_the_menu() {
+        let scene = chain();
+        let selected = BTreeSet::new();
+        let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+        let port = scene
+            .port_position(PortRef {
+                module: 1,
+                output: true,
+                index: 0,
+            })
+            .unwrap();
+        let mut state = State::default();
+        let pressed = drive(&canvas, &mut state, &click(mouse::Button::Right), port);
+        let left = drive(
+            &canvas,
+            &mut state,
+            &Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+            port,
+        );
+        assert!(pressed.is_empty() && left.is_empty(), "{left:?}");
+        let right = drive(
+            &canvas,
+            &mut state,
+            &Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Right)),
+            port,
+        );
+        assert!(matches!(right.as_slice(), [CanvasEvent::ProbeMenu { .. }]), "{right:?}");
+    }
+
+    /// A tile, an input, empty canvas, and a middle click open no menu.
+    #[test]
+    fn right_click_elsewhere_opens_no_menu() {
+        let scene = chain();
+        let selected = BTreeSet::new();
+        let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+        let input = scene
+            .port_position(PortRef {
+                module: 2,
+                output: false,
+                index: 0,
+            })
+            .unwrap();
+        let tile = scene.module(1).unwrap().bounds().center();
+        for at in [input, tile, Point::new(300.0, 500.0)] {
+            let events = right_click(&canvas, &mut State::default(), at);
+            assert!(events.is_empty(), "{at:?}: {events:?}");
+        }
+        let output = scene
+            .port_position(PortRef {
+                module: 1,
+                output: true,
+                index: 0,
+            })
+            .unwrap();
+        let mut state = State::default();
+        let mut events = drive(&canvas, &mut state, &click(mouse::Button::Middle), output);
+        events.extend(drive(
+            &canvas,
+            &mut state,
+            &Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Middle)),
+            output,
+        ));
+        assert!(events.is_empty(), "{events:?}");
     }
 }

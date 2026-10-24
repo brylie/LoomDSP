@@ -42,6 +42,7 @@ pub static ALL: &[&ModuleDescriptor] = &[
     &io::AUDIO_OUT,
     &midi::NOTE_IN,
     &display::METER,
+    &display::SCOPE,
     &logic::DIVIDE,
     &ui::BUTTON,
     &time::DELAY,
@@ -96,6 +97,15 @@ mod tests {
                             Some(loom_core::WidgetKind::Button { mode: "mode" })
                         ),
                         "button.on"
+                    );
+                    continue;
+                }
+                // The scope's `auto` is a toggle (panels.md, Scope module).
+                if descriptor.id == "loom.display.scope" && param.name == "auto" {
+                    assert_eq!(
+                        widget.map(|w| w.kind),
+                        Some(loom_core::WidgetKind::Toggle),
+                        "scope.auto"
                     );
                     continue;
                 }

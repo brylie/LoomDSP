@@ -249,6 +249,109 @@ impl App {
         }
     }
 
+    /// The change a control channel `audio` command asks for, checked
+    /// against what the window offers (control-channel.md, rule S2). Give
+    /// exactly one of the three. The device lists are the window's, or read
+    /// now when the window is closed, as opening it would.
+    pub(crate) fn control_audio_change(
+        &self,
+        device: Option<&str>,
+        rate: Option<Option<u32>>,
+        buffer: Option<Option<u32>>,
+    ) -> Result<Change, String> {
+        if self.no_audio || self.fake_audio {
+            let flag = if self.no_audio { "--no-audio" } else { "--fake-audio" };
+            return Err(format!("there are no audio devices to choose with {flag}"));
+        }
+        let read;
+        let window = match &self.rig.window {
+            Some(window) => window,
+            None => {
+                read = Window::read(&*self.rig.host);
+                &read
+            }
+        };
+        let outputs = window
+            .outputs
+            .as_ref()
+            .map_err(|e| format!("could not list the audio outputs: {e}"))?;
+        let shown = self.rig.shown_audio();
+        let info = || {
+            let name = match &shown.device {
+                DeviceChoice::SystemDefault => outputs.default.as_ref(),
+                DeviceChoice::Named(name) => Some(name),
+            };
+            name.and_then(|name| outputs.devices.iter().find(|d| d.name == *name))
+                .ok_or_else(|| "the chosen device is not connected; choose a device first".to_string())
+        };
+        let offered = |values: Vec<u32>| values.iter().map(u32::to_string).collect::<Vec<_>>().join(", ");
+        match (device, rate, buffer) {
+            (Some("default"), None, None) => Ok(Change::Device(DeviceChoice::SystemDefault)),
+            (Some(wanted), None, None) => {
+                let names: Vec<String> = outputs.devices.iter().map(|d| d.name.clone()).collect();
+                devices::match_name(&names, wanted, "audio output")
+                    .map(|name| Change::Device(DeviceChoice::Named(name)))
+            }
+            (None, Some(None), None) => Ok(Change::Rate(RateChoice::DeviceDefault)),
+            (None, Some(Some(hz)), None) => {
+                let rates = devices::offered_rates(info()?);
+                if rates.contains(&hz) {
+                    Ok(Change::Rate(RateChoice::Hz(hz)))
+                } else {
+                    Err(format!(
+                        "{hz} Hz is not offered; rates: \"default\", {}",
+                        offered(rates)
+                    ))
+                }
+            }
+            (None, None, Some(None)) => Ok(Change::Buffer(BufferChoice::DeviceDefault)),
+            (None, None, Some(Some(frames))) => {
+                let sizes = devices::offered_buffers(info()?);
+                if sizes.contains(&frames) {
+                    Ok(Change::Buffer(BufferChoice::Frames(frames)))
+                } else {
+                    Err(format!(
+                        "{frames} frames is not offered; sizes: \"default\", {}",
+                        offered(sizes)
+                    ))
+                }
+            }
+            _ => Err("give exactly one of `device`, `rate`, or `buffer`".to_string()),
+        }
+    }
+
+    /// The window's device lists, read now when it is closed, so a control
+    /// channel change is checked as the window checks it. Returns true when
+    /// it read them, and the caller then calls [`App::forget_device_lists`].
+    pub(crate) fn read_device_lists(&mut self) -> bool {
+        if self.rig.window.is_some() {
+            return false;
+        }
+        self.rig.window = Some(Window::read(&*self.rig.host));
+        true
+    }
+
+    /// Drops the lists [`App::read_device_lists`] read, so the window stays
+    /// closed.
+    pub(crate) fn forget_device_lists(&mut self) {
+        self.rig.window = None;
+    }
+
+    /// The MIDI input a control channel `midi` command names (rule S2).
+    pub(crate) fn control_midi_input(&self, wanted: &str) -> Result<String, String> {
+        let names = match &self.rig.window {
+            Some(window) => window.midi.clone(),
+            None => self.rig.host.midi_inputs(),
+        }
+        .map_err(|e| format!("could not list the MIDI inputs: {e}"))?;
+        devices::match_name(&names, wanted, "MIDI input")
+    }
+
+    /// The MIDI inputs open now, by name.
+    pub(crate) fn open_midi_inputs(&self) -> Vec<String> {
+        self.rig.ports.iter().map(|port| port.name().to_string()).collect()
+    }
+
     /// Opens or closes the window, for Cmd+, or Ctrl+,.
     pub(crate) fn toggle_preferences(&mut self) {
         let message = if self.rig.window.is_some() {

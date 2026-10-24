@@ -22,6 +22,7 @@ mod modulation;
 mod monitor;
 mod param;
 mod preferences;
+mod probe_menu;
 #[cfg(test)]
 mod qa_tests;
 mod recovery;
@@ -209,6 +210,19 @@ enum Message {
     OpenBrowser,
     /// A message for the open module browser.
     Browser(browser::Message),
+    /// A message for the open probe menu.
+    ProbeMenu(probe_menu::Message),
+    /// Add a scope or a meter fed by an output, placed beside `world`
+    /// (`docs/design/panels.md`, Add scope and Add meter). The probe menu
+    /// and the control channel send it.
+    AddProbe {
+        /// What to add.
+        probe: probe_menu::Probe,
+        /// The output that feeds it.
+        output: loom_canvas::PortRef,
+        /// Where the menu was opened, in world units.
+        world: Point,
+    },
     HoldNote,
     /// File commands (`docs/design/files.md`).
     New,
@@ -379,6 +393,8 @@ struct App {
     /// Changed by the toolbar button; the canvas then opens the browser at
     /// its centre.
     browser_key: u64,
+    /// The probe menu, while it is open.
+    probe_menu: Option<probe_menu::ProbeMenu>,
     frame_key: u64,
     meter: bench::FrameMeter,
     /// The stdout report, when started with --bench, --measure, or
@@ -389,6 +405,9 @@ struct App {
     control: Vec<control::Listener>,
     /// Commands waiting for the window to draw their change.
     control_pending: Vec<control::Pending>,
+    /// The stream and its callback count at the last control `snapshot`,
+    /// for its `advanced` field.
+    control_seen: Option<(Arc<CallbackStats>, u64)>,
     /// True once a failed `--record` has been reported.
     recording_failed: bool,
     measuring: bool,
@@ -787,11 +806,13 @@ impl App {
             },
             browser: None,
             browser_key: 0,
+            probe_menu: None,
             frame_key: 0,
             meter: bench::FrameMeter::default(),
             reporter: args.bench.reporter(),
             control: args.control.listeners(),
             control_pending: Vec::new(),
+            control_seen: None,
             recording_failed: false,
             measuring: args.bench.redraws(),
             animating: args.bench.bench,
@@ -1654,6 +1675,56 @@ impl App {
         });
     }
 
+    /// Adds a scope or a meter fed by `output`, beside `world`, and selects
+    /// it. The module and its cable are one undo step.
+    fn add_probe(&mut self, probe: probe_menu::Probe, output: loom_canvas::PortRef, world: Point) {
+        let Some(descriptor) = self.modules.iter().copied().find(|d| d.id == probe.id()) else {
+            self.status = format!("Cannot {}: no module `{}`", probe.verb(), probe.id());
+            return;
+        };
+        let tiles: Vec<iced::Rectangle> = self.scene.modules().iter().map(|m| m.bounds()).collect();
+        let corner = probe_menu::place(descriptor, world, &tiles);
+        let source = OutputRef {
+            module: ModuleId(output.module),
+            port: output.index,
+        };
+        // The output may be gone: the control channel can remove its module
+        // while the menu is open.
+        let exists = self
+            .controller
+            .graph()
+            .node(source.module)
+            .is_some_and(|node| source.port < node.descriptor.outputs.len());
+        if !exists {
+            self.status = format!("Cannot {}: the output is gone", probe.verb());
+            return;
+        }
+        self.close_slider_gesture();
+        self.step_name = Some(probe.verb().to_string());
+        self.edit(|app| {
+            let id = match app.controller.add_module(descriptor.id) {
+                Ok(id) => id,
+                Err(e) => {
+                    app.status = format!("Cannot {}: {e}", probe.verb());
+                    return;
+                }
+            };
+            if let Err(e) = app.controller.connect(source, InputRef { module: id, port: 0 }) {
+                // A probe that is not connected shows nothing: take it back,
+                // so the edit makes no step.
+                let _ = app.controller.remove_module(id);
+                app.commit();
+                app.status = format!("Cannot {}: {e}", probe.verb());
+                return;
+            }
+            app.positions.insert(id.0, corner);
+            app.selection = BTreeSet::from([id.0]);
+            app.commit();
+        });
+        // `record` clears it, but an edit inside a gesture does not record.
+        self.step_name = None;
+    }
+
     fn handle(&mut self, message: Message) {
         match message {
             // `update` runs these: they return tasks.
@@ -1671,6 +1742,19 @@ impl App {
                 }
             }
             Message::Key(_) if self.browser.is_some() || self.rig.window.is_some() => {}
+            Message::Key(iced::keyboard::Event::KeyPressed { key, .. }) if self.probe_menu.is_some() => {
+                // The menu takes Escape and keeps other keys from the canvas.
+                if key == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) {
+                    self.probe_menu = None;
+                }
+            }
+            Message::Key(_) if self.probe_menu.is_some() => {}
+            Message::ProbeMenu(message) => {
+                if let (Some(menu), probe_menu::Message::Pick(probe)) = (self.probe_menu.take(), message) {
+                    self.add_probe(probe, menu.output, menu.world);
+                }
+            }
+            Message::AddProbe { probe, output, world } => self.add_probe(probe, output, world),
             Message::Canvas(event) => self.canvas_event(event),
             Message::Param {
                 module,
@@ -1996,6 +2080,15 @@ impl App {
                     self.arm((module, index));
                 }
             }
+            CanvasEvent::ProbeMenu {
+                output,
+                world,
+                at,
+                area,
+            } => {
+                self.close_slider_gesture();
+                self.probe_menu = Some(probe_menu::ProbeMenu::open(output, world, at, area));
+            }
             CanvasEvent::OpenBrowser { world, at, area } => {
                 self.close_slider_gesture();
                 self.browser = Some(browser::Browser::open(self.modules.clone(), world, at, area));
@@ -2043,7 +2136,7 @@ impl App {
         else {
             return None;
         };
-        if !modifiers.command() || self.browser.is_some() || self.rig.window.is_some() {
+        if !modifiers.command() || self.browser.is_some() || self.probe_menu.is_some() || self.rig.window.is_some() {
             return None;
         }
         ['c', 'x', 'd']
@@ -2168,7 +2261,7 @@ impl App {
             .values(&self.values)
             .frame_key(self.frame_key)
             .browser_key(self.browser_key)
-            .interactive(self.browser.is_none() && self.rig.window.is_none())
+            .interactive(self.browser.is_none() && self.probe_menu.is_none() && self.rig.window.is_none())
             .animate(self.animating)
             .learn(self.learning.then_some(&self.learn_view));
         if let Some(still) = self.still {
@@ -2195,6 +2288,12 @@ impl App {
             let outside = mouse_area(space().width(Length::Fill).height(Length::Fill))
                 .on_press(Message::Browser(browser::Message::Close));
             layers = layers.push(outside).push(open.view().map(Message::Browser));
+        }
+        if let Some(menu) = &self.probe_menu {
+            let outside = mouse_area(space().width(Length::Fill).height(Length::Fill))
+                .on_press(Message::ProbeMenu(probe_menu::Message::Close))
+                .on_right_press(Message::ProbeMenu(probe_menu::Message::Close));
+            layers = layers.push(outside).push(menu.view().map(Message::ProbeMenu));
         }
         if let Some(window) = self.preferences_view() {
             layers = layers.push(window);
@@ -2384,6 +2483,7 @@ Drag tiles to move them. Shift-click or drag a box to select several.\n\
 Drag a knob up or down; Shift for fine steps; double-click resets it.\n\
 With a module selected, Tab moves between its controls and the arrow keys change them.\n\
 Right-drag or two-finger scroll to pan. Wheel or Cmd/Ctrl-scroll to zoom.\n\
+Right-click an output or a cable to add a scope or a meter fed by it.\n\
 F or Home frames the patch. Delete removes the selection.\n\
 Cmd/Ctrl+C copies, X cuts, V pastes at the pointer, and D duplicates the selection.\n\
 MIDI learn: click a control, then move a knob on your controller. Escape ends it.";
@@ -3000,7 +3100,7 @@ mod tests {
     }
 
     /// Ctrl+`c` or Cmd+`c`.
-    fn command_key(c: &str) -> Message {
+    pub(crate) fn command_key(c: &str) -> Message {
         Message::Key(iced::keyboard::Event::KeyPressed {
             key: iced::keyboard::Key::Character(c.into()),
             modified_key: iced::keyboard::Key::Character(c.into()),
