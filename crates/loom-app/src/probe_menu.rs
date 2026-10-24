@@ -110,9 +110,19 @@ pub fn place(descriptor: &ModuleDescriptor, anchor: Point, tiles: &[Rectangle]) 
     // The first input's centre, measured from the tile's top, as
     // `ModuleView::input_position` places it.
     let input = loom_canvas::HEADER + loom_canvas::ROW * 0.5;
-    let mut corner = loom_canvas::snap(Point::new(anchor.x + GAP, anchor.y - input));
-    while tiles.iter().any(|tile| tile.intersects(&Rectangle::new(corner, size))) {
-        corner.y += STEP;
+    let start = loom_canvas::snap(Point::new(anchor.x + GAP, anchor.y - input));
+    let mut corner = start;
+    // Jump straight to the first step below a blocking tile: the same place
+    // stepping would reach. Each jump passes one tile, so this ends after at
+    // most one jump per tile. Far from the origin, f32 can no longer add a
+    // step, so stop if a jump does not move.
+    while let Some(tile) = tiles.iter().find(|tile| tile.intersects(&Rectangle::new(corner, size))) {
+        let steps = ((tile.y + tile.height - start.y) / STEP).ceil();
+        let next = start.y + steps * STEP;
+        if next <= corner.y {
+            break;
+        }
+        corner.y = next;
     }
     corner
 }
@@ -159,6 +169,25 @@ mod tests {
         let descriptor = &loom_modules::display::METER;
         let size = tile_size(1, 1, descriptor.panel.width, descriptor.panel.height);
         assert!(!blocker.intersects(&Rectangle::new(corner, size)));
+    }
+
+    /// Tiles stacked below each other push the module past all of them.
+    #[test]
+    fn moves_down_past_a_stack_of_tiles() {
+        let anchor = Point::new(132.0, 30.0);
+        let column = |y: f32| Rectangle::new(Point::new(200.0, y), Size::new(132.0, 60.0));
+        let tiles = [column(0.0), column(60.0), column(120.0)];
+        let corner = place(&loom_modules::display::METER, anchor, &tiles);
+        assert_eq!(corner, Point::new(168.0, 192.0));
+    }
+
+    /// Far from the origin, where f32 cannot add a step, placing still ends.
+    #[test]
+    fn placing_far_away_ends() {
+        let anchor = Point::new(132.0, 1.0e9);
+        let blocker = Rectangle::new(Point::new(150.0, 1.0e9 - 100.0), Size::new(132.0, 400.0));
+        let corner = place(&loom_modules::display::SCOPE, anchor, &[blocker]);
+        assert!(corner.y.is_finite());
     }
 }
 
