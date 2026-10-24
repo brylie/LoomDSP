@@ -160,7 +160,7 @@ The fake host in `crates/loom-app/src/devices.rs` gets a device that starts, mak
 
 ## Script variables
 
-**Status: Draft.** Issue: [#340](https://github.com/brylie/LoomDSP/issues/340).
+**Status: Agreed** (2026-10-25). Issue: [#340](https://github.com/brylie/LoomDSP/issues/340).
 
 A script that names a device runs only on a machine with that device. `examples/dev/check-devices-part-2.jsonl` sent `"device": "BlackHole"`, `"rate": 96000`, and `"buffer": 32`: one virtual device on one Mac, and a rate and buffer size that another device may not offer, so rule S2 refuses them. A script file is plain JSON lines and cannot read the environment, so every other developer had to edit it.
 
@@ -193,10 +193,10 @@ LOOM_DEVICE="MOTU" LOOM_RATE=96000 LOOM_BUFFER=64 \
 
 ### Acceptance criteria
 
-- [ ] Unit tests for the replacement: a whole-string number, boolean, and string; a variable inside a longer string; two variables in one string; a quote and a backslash in a value; `$5` and `${x}` left alone; an unset and an empty variable refused with the variable's name.
-- [ ] An app test runs a script file through `--control-script` with a variable set, and sees the command applied (for example `set` with `"value": "${LOOM_TEST_VALUE}"`).
+- [x] Unit tests for the replacement: a whole-string number, boolean, and string; a variable inside a longer string; two variables in one string; a quote and a backslash in a value; `$5` and `${x}` left alone; an unset and an empty variable refused with the variable's name.
+- [x] An app test runs a script file through `--control-script` with a variable set, and sees the command applied (for example `set` with `"value": "${LOOM_TEST_VALUE}"`).
 - [ ] `examples/dev/check-devices-part-2.jsonl` uses `${LOOM_DEVICE}`, `${LOOM_RATE}`, and `${LOOM_BUFFER}`, and the manual check says to set them. Checked on macOS with two different devices.
-- [ ] A script with an unset variable exits with status 2 and names it.
+- [x] A script with an unset variable exits with status 2 and names it. Checked on macOS with `--fake-audio`, 2026-10-25.
 
 ### Out of scope
 

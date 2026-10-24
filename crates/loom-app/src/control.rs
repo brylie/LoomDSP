@@ -234,7 +234,9 @@ pub fn stream(listener: &Listener) -> impl Stream<Item = Call> + use<> {
         Listener::Script(path) => match std::fs::File::open(&path) {
             Ok(file) => {
                 let mut tx = tx;
-                serve(BufReader::new(file), std::io::stdout(), &mut tx);
+                // Only a script reads the environment (V1).
+                let env = |name: &str| std::env::var(name).ok();
+                serve(BufReader::new(file), std::io::stdout(), &mut tx, Some(&env));
             }
             Err(e) => eprintln!("loom-app: control script {}: {e}", path.display()),
         },
@@ -271,7 +273,7 @@ fn listen(path: &std::path::Path, mut tx: mpsc::Sender<Call>) {
             Ok((stream, _)) => {
                 let _ = stream.set_nonblocking(false);
                 if let Ok(reader) = stream.try_clone() {
-                    serve(BufReader::new(reader), stream, &mut tx);
+                    serve(BufReader::new(reader), stream, &mut tx, None);
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => std::thread::sleep(Duration::from_millis(50)),
@@ -289,16 +291,33 @@ fn listen(_path: &std::path::Path, _tx: mpsc::Sender<Call>) {
     eprintln!("loom-app: --control needs Unix domain sockets, which this platform lacks; use --control-script");
 }
 
+/// Reads a variable for a script (`None` on the socket, rule V1).
+type Env<'a> = Option<&'a dyn Fn(&str) -> Option<String>>;
+
+/// The exit status the app ends with, set when a script stops early
+/// (Script variables, V4). 0 until then.
+static EXIT_STATUS: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
+/// Exit status for a script that could not run, as for `loom analyze`.
+const COULD_NOT_RUN: i32 = 2;
+
+/// The exit status a script asked for, or 0.
+pub fn exit_status() -> i32 {
+    EXIT_STATUS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Reads commands line by line, has the app run each one, and writes each
-/// reply as a line. Returns when the input ends or the app closes.
-fn serve(input: impl BufRead, mut output: impl Write, tx: &mut mpsc::Sender<Call>) {
+/// reply as a line. Returns when the input ends or the app closes. With
+/// `env`, `${NAME}` in string values is replaced first, and an unset
+/// variable ends the script and quits the app with status 2.
+fn serve(input: impl BufRead, mut output: impl Write, tx: &mut mpsc::Sender<Call>, env: Env) {
     for line in input.lines() {
         let Ok(line) = line else { return };
         let line = line.trim();
         if line.is_empty() {
             continue;
         }
-        let (id, answer) = run_line(line, tx);
+        let (id, answer, vars, stop) = run_line(line, tx, env);
         let mut reply = Map::new();
         if let Some(id) = id {
             reply.insert("id".to_string(), id);
@@ -313,7 +332,15 @@ fn serve(input: impl BufRead, mut output: impl Write, tx: &mut mpsc::Sender<Call
                 reply.insert("error".to_string(), Value::String(error));
             }
         }
+        if !vars.is_empty() {
+            reply.insert("vars".to_string(), Value::Object(vars));
+        }
         if writeln!(output, "{}", Value::Object(reply)).is_err() || output.flush().is_err() {
+            return;
+        }
+        if stop {
+            EXIT_STATUS.store(COULD_NOT_RUN, std::sync::atomic::Ordering::Relaxed);
+            let _ = send(Command::Quit, tx);
             return;
         }
         if tx.is_closed() {
@@ -322,20 +349,31 @@ fn serve(input: impl BufRead, mut output: impl Write, tx: &mut mpsc::Sender<Call
     }
 }
 
-/// Parses one line and gets its answer.
-fn run_line(line: &str, tx: &mut mpsc::Sender<Call>) -> (Option<Value>, Answer) {
+/// Parses one line and gets its answer, with the variables it used, and
+/// whether the script must stop because one was unset.
+fn run_line(line: &str, tx: &mut mpsc::Sender<Call>, env: Env) -> (Option<Value>, Answer, Map<String, Value>, bool) {
     let mut value: Value = match serde_json::from_str(line) {
         Ok(value) => value,
-        Err(e) => return (None, Err(format!("not JSON: {e}"))),
+        Err(e) => return (None, Err(format!("not JSON: {e}")), Map::new(), false),
     };
     let id = value.as_object_mut().and_then(|v| v.remove("id"));
+    let vars = match env.map(|env| crate::script_vars::substitute(&mut value, &env)) {
+        Some(Err(unset)) => return (id, Err(format!("{unset}; the script stops here")), Map::new(), true),
+        Some(Ok(vars)) => vars,
+        None => Map::new(),
+    };
     let command: Command = match serde_json::from_value(value) {
         Ok(command) => command,
-        Err(e) => return (id, Err(e.to_string())),
+        Err(e) => return (id, Err(e.to_string()), vars, false),
     };
+    (id, send(command, tx), vars, false)
+}
+
+/// Has the app run one command and waits for its answer.
+fn send(command: Command, tx: &mut mpsc::Sender<Call>) -> Answer {
     if let Command::Wait { ms } = command {
         std::thread::sleep(Duration::from_millis(ms));
-        return (id, Ok(Map::new()));
+        return Ok(Map::new());
     }
     let (sender, receiver) = std::sync::mpsc::channel();
     let call = Call {
@@ -343,12 +381,11 @@ fn run_line(line: &str, tx: &mut mpsc::Sender<Call>) -> (Option<Value>, Answer) 
         reply: Reply(Arc::new(Mutex::new(Some(sender)))),
     };
     if iced::futures::executor::block_on(tx.send(call)).is_err() {
-        return (id, Err("the app closed".to_string()));
+        return Err("the app closed".to_string());
     }
-    let answer = receiver
+    receiver
         .recv_timeout(ANSWER_TIMEOUT)
-        .unwrap_or_else(|_| Err("the app did not answer".to_string()));
-    (id, answer)
+        .unwrap_or_else(|_| Err("the app did not answer".to_string()))
 }
 
 /// Frames to wait before answering, so the change is drawn: the frame
@@ -1355,7 +1392,7 @@ mod tests {
         let input =
             "{\"id\": 1, \"cmd\": \"snapshot\"}\n\n{\"cmd\": \"fly\"}\n{\"id\": \"w\", \"cmd\": \"wait\", \"ms\": 1}\n";
         let mut output = Vec::new();
-        serve(input.as_bytes(), &mut output, &mut tx);
+        serve(input.as_bytes(), &mut output, &mut tx, None);
         drop(tx);
         app.join().unwrap();
         let lines: Vec<Value> = String::from_utf8(output)
@@ -1367,6 +1404,67 @@ mod tests {
         assert_eq!(lines[0], json!({ "id": 1, "ok": true, "seen": true }));
         assert_eq!(lines[1]["ok"], json!(false));
         assert_eq!(lines[2], json!({ "id": "w", "ok": true }));
+    }
+
+    /// Serves `script` with the variables in `vars` to a real app, as
+    /// `--control-script` does, and returns the replies.
+    fn serve_script(app: &mut App, script: &'static str, vars: &'static [(&'static str, &'static str)]) -> Vec<Value> {
+        let (mut tx, mut rx) = mpsc::channel::<Call>(1);
+        let client = std::thread::spawn(move || {
+            let env = |name: &str| vars.iter().find(|(k, _)| *k == name).map(|(_, v)| v.to_string());
+            let mut output = Vec::new();
+            serve(script.as_bytes(), &mut output, &mut tx, Some(&env));
+            output
+        });
+        // The app's side: take each call and draw frames until it is answered.
+        while !client.is_finished() {
+            if let Ok(call) = rx.try_recv() {
+                let _ = app.control(call);
+            }
+            let _ = app.update(Message::ControlFrame(Instant::now()));
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        String::from_utf8(client.join().unwrap())
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect()
+    }
+
+    /// A script's `${NAME}` takes its value from the environment, as a
+    /// number when the whole string is one variable, and the reply names
+    /// the variables used (Script variables, V3 and V6).
+    #[test]
+    fn a_script_takes_values_from_the_environment() {
+        let mut app = App::new(crate::Args {
+            patch: Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches/subtractive.ron")),
+            ..crate::tests::app_args()
+        });
+        let script = r#"{"cmd": "set", "module": 4, "param": "cutoff", "value": "${LOOM_TEST_VALUE}"}"#;
+        let replies = serve_script(&mut app, script, &[("LOOM_TEST_VALUE", "800")]);
+        assert_eq!(replies.len(), 1);
+        assert_eq!(replies[0]["ok"], json!(true), "{}", replies[0]);
+        assert_eq!(replies[0]["vars"], json!({"LOOM_TEST_VALUE": "800"}));
+        let cutoff = app.controller.graph().node(ModuleId(4)).unwrap().params[0];
+        assert!((cutoff - 800.0).abs() < 0.01, "cutoff is {cutoff}");
+    }
+
+    /// An unset variable ends the script with an error naming it, asks the
+    /// app to quit, and sets exit status 2; later lines do not run (V4).
+    #[test]
+    fn an_unset_variable_stops_the_script() {
+        let mut app = App::new(crate::tests::app_args());
+        let script = "{\"cmd\": \"audio\", \"device\": \"${LOOM_TEST_UNSET}\"}\n{\"cmd\": \"snapshot\"}\n";
+        let replies = serve_script(&mut app, script, &[]);
+        assert_eq!(replies.len(), 1, "the snapshot never ran");
+        assert_eq!(replies[0]["ok"], json!(false));
+        assert!(
+            replies[0]["error"].as_str().unwrap().contains("LOOM_TEST_UNSET"),
+            "{}",
+            replies[0]
+        );
+        assert!(app.quit, "the app was asked to quit");
+        assert_eq!(exit_status(), COULD_NOT_RUN);
     }
 
     #[test]

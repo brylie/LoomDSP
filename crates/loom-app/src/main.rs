@@ -28,6 +28,7 @@ mod qa_tests;
 mod recovery;
 mod scene;
 mod screenshot;
+mod script_vars;
 mod settings;
 mod snapshot;
 #[cfg(test)]
@@ -185,14 +186,19 @@ fn main() -> iced::Result {
         }
         return Ok(());
     }
-    iced::application(move || App::new(args.clone()), App::update, App::view)
+    let result = iced::application(move || App::new(args.clone()), App::update, App::view)
         .title(App::title)
         .theme(App::theme)
         .subscription(App::subscription)
         .exit_on_close_request(false)
         .window_size(WINDOW)
         .antialiasing(false)
-        .run()
+        .run();
+    // A control script that stopped early asks for its own status.
+    match control::exit_status() {
+        0 => result,
+        status => std::process::exit(status),
+    }
 }
 
 /// The window size the app opens with.
