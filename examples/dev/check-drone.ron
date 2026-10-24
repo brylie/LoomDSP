@@ -1,0 +1,18 @@
+// A steady sine at middle C, quiet, with no MIDI needed. For manual checks
+// that listen for a click while audio restarts (docs/dev/manual-checks).
+Patch(
+    version: 1,
+    name: "Check: drone",
+    modules: [
+        PatchModule(id: 1, kind: "loom.phase.generator@1"),
+        PatchModule(id: 2, kind: "loom.osc.sine@1"),
+        PatchModule(id: 3, kind: "loom.math.mul@1", params: {"gain": 0.2}),
+        PatchModule(id: 4, kind: "loom.io.audio-out@1"),
+    ],
+    cables: [
+        PatchCable(from: (1, "phase"), to: (2, "phase")),
+        PatchCable(from: (2, "out"), to: (3, "a")),
+        PatchCable(from: (3, "out"), to: (4, "left")),
+        PatchCable(from: (3, "out"), to: (4, "right")),
+    ],
+)

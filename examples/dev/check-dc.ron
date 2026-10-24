@@ -1,0 +1,14 @@
+// A constant 0.5 on both outputs: a DC offset. With output safety Off, a
+// stop without a fade-out is a thump. For the fade-out manual check.
+Patch(
+    version: 1,
+    name: "Check: DC",
+    modules: [
+        PatchModule(id: 1, kind: "loom.math.constant@1", params: {"value": 0.5}),
+        PatchModule(id: 2, kind: "loom.io.audio-out@1"),
+    ],
+    cables: [
+        PatchCable(from: (1, "out"), to: (2, "left")),
+        PatchCable(from: (1, "out"), to: (2, "right")),
+    ],
+)

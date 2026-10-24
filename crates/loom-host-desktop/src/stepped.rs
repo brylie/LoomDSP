@@ -125,6 +125,11 @@ pub(crate) struct Attached {
 }
 
 impl Attached {
+    /// Frames per block of this stream.
+    pub(crate) fn block(&self) -> usize {
+        self.tape.state().block
+    }
+
     /// Plays blocks until `done` says so, or until `limit` frames have been
     /// played. Returns true if it stopped because `done` said so.
     pub(crate) fn play_until(&self, limit: usize, done: impl Fn() -> bool) -> bool {

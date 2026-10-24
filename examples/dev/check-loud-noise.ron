@@ -1,0 +1,17 @@
+// Noise at gain 4, far over full scale. For the output safety manual check:
+// Low latency and Clean hold it under the ceiling, Off clips it.
+// Turn the volume down before playing it.
+Patch(
+    version: 1,
+    name: "Check: loud noise",
+    modules: [
+        PatchModule(id: 1, kind: "loom.osc.noise@1"),
+        PatchModule(id: 2, kind: "loom.math.mul@1", params: {"gain": 4.0}),
+        PatchModule(id: 3, kind: "loom.io.audio-out@1"),
+    ],
+    cables: [
+        PatchCable(from: (1, "out"), to: (2, "a")),
+        PatchCable(from: (2, "out"), to: (3, "left")),
+        PatchCable(from: (2, "out"), to: (3, "right")),
+    ],
+)

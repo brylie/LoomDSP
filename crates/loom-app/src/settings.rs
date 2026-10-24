@@ -510,8 +510,8 @@ impl App {
     }
 
     /// Stops audio without a click: the engine fades out, and the stream
-    /// stops after two more silent buffers, or after 100 ms (output safety,
-    /// rule 14). Used by Open, New, quit, and device changes.
+    /// stops after two more silent buffers, or at the stop limit (100 ms,
+    /// longer for large buffers; output safety, rule 14). Used by Open, New, quit, and device changes.
     pub(crate) fn stop_audio(&mut self) {
         if let Some(audio) = self._audio.take() {
             // A full queue cannot fade: the limit then stops the stream.
