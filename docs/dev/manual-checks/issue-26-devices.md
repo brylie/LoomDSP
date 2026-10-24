@@ -142,7 +142,9 @@ cargo run --release -p loom-app -- examples/dev/check-dc.ron --output-safety off
 - Look: in Preferences, Output safety shows `Set by --output-safety for this run.`
 - **Do not touch the Constant's knob.** The recording must hold only the stops. A knob move shows up as a large step and fails the check below, even though it is smoothed and not a click.
 
-**3.2. Open another patch.** Use Open in the app to open `examples/dev/check-drone.ron`. Then make a new patch with New. Then quit.
+**3.2. Open another patch.** Use Open in the app to open `examples/dev/check-drone.ron`, from the same checkout you run the app from. Then make a new patch with New. Then quit.
+
+The check patches are new on this branch, so another checkout of the repository may not have them. In a worktree under `.claude/worktrees/`, the dialog hides the `.claude` folder because its name starts with a dot. On macOS, press Cmd+Shift+G in the dialog and type the full path, or Cmd+Shift+. to show hidden folders. On Linux, Ctrl+L types a path, and Ctrl+H shows hidden folders.
 
 - Listen: no thump at Open, at New, or at quit. You hear the drone between Open and New.
 - Check the recording:
