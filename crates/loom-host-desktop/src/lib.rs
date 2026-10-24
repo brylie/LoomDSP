@@ -370,13 +370,17 @@ impl AudioOutput {
                 };
                 #[cfg(target_os = "macos")]
                 let switched = settle_rate(&device, &config);
+                // Errors are counted from before the stream exists, so a
+                // notice that pauses it before the watch starts is seen.
+                #[cfg(target_os = "macos")]
+                let errors = stats.stream_errors.load(Ordering::Relaxed);
                 let stream = device
                     .build_output_stream::<f32, _, _>(config, data_callback, error_callback, None)
                     .map_err(audio_error)?;
                 stream.play().map_err(audio_error)?;
                 #[cfg(target_os = "macos")]
                 if switched {
-                    resume_after_switch(&stream, &stats);
+                    resume_after_switch(&stream, &stats, errors);
                 }
                 Player::Device(stream)
             }
@@ -437,10 +441,11 @@ fn settle_rate(device: &cpal::Device, config: &cpal::StreamConfig) -> bool {
 /// after a rate switch. A late notice of the switch pauses the stream (see
 /// [`settle_rate`]); starting it again is right, because this stream made
 /// the switch. A rate change from outside later on still pauses it.
+/// `errors` is the error count from before the stream was built: an error
+/// reported between building it and this call also starts it again.
 #[cfg(target_os = "macos")]
-fn resume_after_switch(stream: &cpal::Stream, stats: &CallbackStats) {
+fn resume_after_switch(stream: &cpal::Stream, stats: &CallbackStats, mut errors: u64) {
     let started = Instant::now();
-    let mut errors = stats.stream_errors.load(Ordering::Relaxed);
     while started.elapsed() < RATE_NOTICE_WINDOW {
         let now = stats.stream_errors.load(Ordering::Relaxed);
         if now != errors {
@@ -1187,8 +1192,8 @@ mod device_tests {
     }
 
     /// Plays `examples/dev/check-dc.ron` (a Constant of 0.5, output safety
-    /// Off) into the loopback device named by `LOOM_LOOPBACK` with
-    /// 4096-frame buffers, captures the loopback's input side, and stops
+    /// Off) into the loopback device named by `LOOM_LOOPBACK` with buffers
+    /// of [`LOOPBACK_BUFFER`] frames at [`LOOPBACK_RATE`], captures the loopback's input side, and stops
     /// the stream with `stop` after a fade-out request. Returns the
     /// captured left channel and the sample rate, or `None` when
     /// `LOOM_LOOPBACK` is not set.
@@ -1200,8 +1205,8 @@ mod device_tests {
         let options = AudioOptions {
             device: Some(loopback),
             exact: false,
-            sample_rate: None,
-            buffer_size: Some(4096),
+            sample_rate: Some(LOOPBACK_RATE),
+            buffer_size: Some(LOOPBACK_BUFFER),
         };
         let output = AudioOutput::open(&options).unwrap();
         let rate = output.sample_rate();
@@ -1239,11 +1244,15 @@ mod device_tests {
     }
 
     /// The level the capture holds, and its largest step between two
-    /// neighbouring samples. The loopback's volume scales the level, so
+    /// neighbouring samples from the first sample at that level on: the
+    /// stop, not the start. The loopback's volume scales the level, so
     /// checks are relative to it.
     fn level_and_step(samples: &[f32]) -> (f32, f32) {
         let level = samples.iter().fold(0.0f32, |m, x| m.max(x.abs()));
-        let step = samples.windows(2).fold(0.0f32, |m, w| m.max((w[1] - w[0]).abs()));
+        let held = samples.iter().position(|x| x.abs() >= level).unwrap_or(0);
+        let step = samples[held..]
+            .windows(2)
+            .fold(0.0f32, |m, w| m.max((w[1] - w[0]).abs()));
         eprintln!("captured level {level}, largest step {step}");
         assert!(
             level > 0.01,
@@ -1258,42 +1267,66 @@ mod device_tests {
         2.0 * level / (loom_core::safety::FADE_SECONDS * rate as f32)
     }
 
-    /// A stop with 4096-frame buffers fades out on the device: the capture
-    /// of a loopback has no step larger than the 10 ms fade. With a fixed
-    /// 100 ms stop limit the stream was cut before the fade reached the
-    /// device (#26), which clicked. Needs `LOOM_LOOPBACK`.
+    /// The sample rate of the loopback tests. With [`LOOPBACK_BUFFER`],
+    /// a buffer is 85 ms long, as when Open clicked in #26. A fixed 100 ms
+    /// stop limit cut the fade only when buffers were that long in time:
+    /// at 96 kHz, 4096 frames are short enough for the fade to get through,
+    /// and devices often offer no larger buffer. The tests leave the
+    /// loopback at this rate.
+    const LOOPBACK_RATE: u32 = 48_000;
+
+    /// The buffer size of the loopback tests, in frames.
+    const LOOPBACK_BUFFER: u32 = 4096;
+
+    /// Stops tried by each loopback test. Where a stop lands between two
+    /// device callbacks changes from run to run, so one stop proves little.
+    const STOPS: usize = 5;
+
+    /// A stop with long buffers fades out on the device: in every
+    /// one of [`STOPS`] tries, the capture of a loopback has no step larger
+    /// than the 10 ms fade. With a fixed 100 ms stop limit the stream was
+    /// cut before the fade reached the device (#26), which clicked. Needs
+    /// `LOOM_LOOPBACK`.
     #[test]
     #[ignore = "needs a loopback audio device"]
     fn a_stop_with_large_buffers_fades_out_on_the_device() {
-        let Some((samples, rate)) = capture_a_stop(|audio| {
-            audio.stop(STOP_LIMIT);
-        }) else {
-            return;
-        };
-        let (level, step) = level_and_step(&samples);
-        let limit = fade_step(level, rate);
-        assert!(
-            step <= limit,
-            "largest step {step} is over the fade's {limit} (level {level})"
-        );
+        for _ in 0..STOPS {
+            let Some((samples, rate)) = capture_a_stop(|audio| {
+                audio.stop(STOP_LIMIT);
+            }) else {
+                return;
+            };
+            let (level, step) = level_and_step(&samples);
+            let limit = fade_step(level, rate);
+            assert!(
+                step <= limit,
+                "largest step {step} is over the fade's {limit} (level {level})"
+            );
+        }
     }
 
     /// The check above can fail: stopped at a fixed 100 ms limit, as
     /// before the #26 fix, the capture shows the cut as a step of about
-    /// the whole level. Needs `LOOM_LOOPBACK`.
+    /// the whole level. The cut depends on where the stop lands between
+    /// callbacks, so it is not in every stop: at least one of [`STOPS`]
+    /// tries shows it. Needs `LOOM_LOOPBACK`.
     #[test]
     #[ignore = "needs a loopback audio device"]
     fn a_fixed_100_ms_stop_limit_shows_as_a_cut() {
-        let Some((samples, rate)) = capture_a_stop(|audio| {
-            audio.stop_within(|_| STOP_LIMIT);
-        }) else {
-            return;
-        };
-        let (level, step) = level_and_step(&samples);
-        assert!(
-            step > fade_step(level, rate),
-            "largest step {step} shows the cut (level {level})"
-        );
+        let mut steps = Vec::new();
+        for _ in 0..STOPS {
+            let Some((samples, rate)) = capture_a_stop(|audio| {
+                audio.stop_within(|_| STOP_LIMIT);
+            }) else {
+                return;
+            };
+            let (level, step) = level_and_step(&samples);
+            if step > fade_step(level, rate) {
+                return;
+            }
+            steps.push(step);
+        }
+        panic!("no stop showed the cut: largest steps {steps:?}");
     }
 
     /// A stream at a new sample rate keeps playing. On macOS the notice of

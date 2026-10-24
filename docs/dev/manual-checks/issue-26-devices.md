@@ -129,7 +129,9 @@ cargo run --release -p loom-cli -- analyze target/check-device.wav --max-step 0.
 
 - It passes (exit status 0) if the engine faded out and faded in. A failure names the time of the largest step. The recording holds what the engine plays, so it does not show the gap itself or a click added by the device. Your ears check those.
 
-If the rates differ, the recording ended at the change, and only your ears check this step. Start the app again with the drone (2.1, without `--record`) and choose the interface before going on. Step 2.5 checks a device change on the device side.
+If the rates differ, the recording ended at the change, and only your ears check this step. Step 2.5 checks a device change on the device side.
+
+Either way, start the app again with the drone (2.1, without `--record`) and choose the interface before going on, if it is not running.
 
 **2.3. Pick 96 kHz.** In Sample rate, choose 96000 Hz.
 
@@ -213,10 +215,12 @@ Quit the app. Start the capture in one terminal:
 cargo run --release -p loom-cli -- capture --device "<loopback>" -o target/check-dc-device.wav --seconds 10
 ```
 
+The capture runs at the loopback's current rate. The app's `--sample-rate 48000` switches the loopback to 48 kHz when it starts, so set the loopback to 48 kHz first (on macOS in Audio MIDI Setup), or the capture ends with an error. At 48 kHz a 4096-frame buffer is 85 ms long, as when Open clicked in #26. At 96 kHz the same buffer is short enough to hide the bug.
+
 Wait for `Capturing`, then in a second terminal:
 
 ```sh
-cargo run --release -p loom-app -- examples/dev/check-dc.ron --output-safety off --device "<loopback>" --buffer 4096 --control-script target/check-stops.jsonl
+cargo run --release -p loom-app -- examples/dev/check-dc.ron --output-safety off --device "<loopback>" --sample-rate 48000 --buffer 4096 --control-script target/check-stops.jsonl
 ```
 
 When the capture has ended:
@@ -227,7 +231,7 @@ cargo run --release -p loom-cli -- analyze target/check-dc-device.wav --max-step
 
 - It passes if every stop faded out on the device: at the Open of the drone, at the Open of the DC patch, and at quit. A cut from the DC offset is a step of 0.5.
 - Look: the peak is 0.5. A lower peak means the loopback's volume is not full (step 0.4): the check is then too easy, so set the volume and capture again.
-- `--device` is for this run only, so the saved interface choice stays for Part 4.
+- `--device`, `--sample-rate`, and `--buffer` are for this run only, so the saved interface choice stays for Part 4.
 
 ## Part 4: the choice is remembered, and a missing interface falls back
 

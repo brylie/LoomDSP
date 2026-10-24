@@ -25,8 +25,8 @@ pub struct Options {
     sample_rate: Option<u32>,
 }
 
-/// Exit status of a broken run: no device, a write error, or dropped
-/// frames. `loom analyze` uses 1 for a failed check.
+/// Exit status of a broken run: no device, a write error, dropped
+/// frames, or a stream error. `loom analyze` uses 1 for a failed check.
 const BROKEN: u8 = 2;
 
 /// Runs `loom capture`. Exit status 0 when every frame the device
@@ -45,6 +45,8 @@ fn capture(options: &Options) -> Result<(), String> {
     if !options.seconds.is_finite() || options.seconds <= 0.0 {
         return Err(format!("--seconds must be a positive number, not {}", options.seconds));
     }
+    let length = Duration::try_from_secs_f64(options.seconds)
+        .map_err(|_| format!("--seconds is too large: {}", options.seconds))?;
     let audio = AudioOptions {
         device: Some(options.device.clone()),
         exact: false,
@@ -55,9 +57,12 @@ fn capture(options: &Options) -> Result<(), String> {
     // Scripts wait for this line before they start playing.
     eprintln!("Capturing \"{}\" at {} Hz", capture.name(), capture.sample_rate());
     let started = Instant::now();
-    let length = Duration::from_secs_f64(options.seconds);
-    while started.elapsed() < length {
-        std::thread::sleep((length - started.elapsed()).min(Duration::from_millis(50)));
+    loop {
+        let elapsed = started.elapsed();
+        if elapsed >= length {
+            break;
+        }
+        std::thread::sleep(length.saturating_sub(elapsed).min(Duration::from_millis(50)));
     }
     let report = capture.stop().map_err(|e| e.to_string())?;
     eprintln!(
@@ -69,6 +74,12 @@ fn capture(options: &Options) -> Result<(), String> {
         return Err(format!(
             "{} frames were dropped, so the file has jumps the device never played",
             report.dropped
+        ));
+    }
+    if report.stream_errors > 0 {
+        return Err(format!(
+            "the input stream reported {} errors, so the file may end early or have gaps",
+            report.stream_errors
         ));
     }
     Ok(())

@@ -24,6 +24,9 @@ pub struct CaptureReport {
     pub frames: u64,
     /// Frames that did not fit the ring and are missing from the file.
     pub dropped: u64,
+    /// Errors the input stream reported, such as the device going away.
+    /// The file may then end early or have a gap.
+    pub stream_errors: u64,
 }
 
 /// An input device being recorded to a WAV file. Stop it with
@@ -34,6 +37,7 @@ pub struct Capture {
     stream: cpal::Stream,
     recorder: Recorder,
     frames: Arc<AtomicU64>,
+    errors: Arc<AtomicU64>,
     name: String,
     sample_rate: u32,
 }
@@ -91,16 +95,22 @@ impl Capture {
             tap.push_interleaved(data, channels);
             counted.fetch_add((data.len() / channels) as u64, Ordering::Relaxed);
         };
-        // Printing here could block the audio thread on some backends, and
-        // an input error does not drop frames by itself: ignore it.
+        // Printing here could block the audio thread on some backends.
+        // Count it; `stop` reports it.
+        let errors = Arc::new(AtomicU64::new(0));
+        let error_count = errors.clone();
+        let error_callback = move |_error: cpal::Error| {
+            error_count.fetch_add(1, Ordering::Relaxed);
+        };
         let stream = device
-            .build_input_stream::<f32, _, _>(config, data_callback, |_| {}, None)
+            .build_input_stream::<f32, _, _>(config, data_callback, error_callback, None)
             .map_err(audio_error)?;
         stream.play().map_err(audio_error)?;
         Ok(Self {
             stream,
             recorder,
             frames,
+            errors,
             name,
             sample_rate,
         })
@@ -128,6 +138,7 @@ impl Capture {
             stream,
             recorder,
             frames,
+            errors,
             ..
         } = self;
         // The stream's callback holds the tap: dropping the stream ends it.
@@ -135,6 +146,7 @@ impl Capture {
         let report = CaptureReport {
             frames: frames.load(Ordering::Relaxed),
             dropped: recorder.dropped(),
+            stream_errors: errors.load(Ordering::Relaxed),
         };
         match recorder.close() {
             Some(e) => Err(HostError::Record(e)),

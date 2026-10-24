@@ -33,7 +33,7 @@ fn no_matching_device_exits_with_2() {
 /// any device is opened.
 #[test]
 fn an_unusable_length_exits_with_2() {
-    for seconds in ["0", "-1", "NaN", "inf"] {
+    for seconds in ["0", "-1", "NaN", "inf", "1e300"] {
         let (status, stderr) = capture(&["--device", "x", "-o", "unused.wav", "--seconds", seconds]);
         assert_eq!(status, 2, "--seconds {seconds}: {stderr}");
         assert!(stderr.contains("--seconds"), "{stderr}");
