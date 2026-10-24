@@ -335,12 +335,15 @@ fn serve(input: impl BufRead, mut output: impl Write, tx: &mut mpsc::Sender<Call
         if !vars.is_empty() {
             reply.insert("vars".to_string(), Value::Object(vars));
         }
-        if writeln!(output, "{}", Value::Object(reply)).is_err() || output.flush().is_err() {
-            return;
-        }
+        let write_failed = writeln!(output, "{}", Value::Object(reply)).is_err() || output.flush().is_err();
+        // A script that must stop still quits with its status, even when
+        // its reply could not be written (stdout closed).
         if stop {
             EXIT_STATUS.store(COULD_NOT_RUN, std::sync::atomic::Ordering::Relaxed);
             let _ = send(Command::Quit, tx);
+            return;
+        }
+        if write_failed {
             return;
         }
         if tx.is_closed() {
@@ -1464,6 +1467,43 @@ mod tests {
             replies[0]
         );
         assert!(app.quit, "the app was asked to quit");
+        assert_eq!(exit_status(), COULD_NOT_RUN);
+    }
+
+    /// Output that refuses every write, like a closed stdout.
+    struct Closed;
+
+    impl Write for Closed {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::ErrorKind::BrokenPipe.into())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Err(std::io::ErrorKind::BrokenPipe.into())
+        }
+    }
+
+    /// An unset variable still quits the app with status 2 when its reply
+    /// cannot be written (V4).
+    #[test]
+    fn an_unset_variable_quits_even_when_stdout_is_closed() {
+        let (mut tx, mut rx) = mpsc::channel::<Call>(1);
+        let app = std::thread::spawn(move || {
+            let mut quit = false;
+            while let Some(call) = iced::futures::executor::block_on(iced::futures::StreamExt::next(&mut rx)) {
+                quit |= matches!(call.command, Command::Quit);
+                call.answer(Ok(Map::new()));
+            }
+            quit
+        });
+        let env = |_: &str| None;
+        serve(
+            "{\"cmd\": \"audio\", \"device\": \"${LOOM_TEST_UNSET}\"}\n".as_bytes(),
+            Closed,
+            &mut tx,
+            Some(&env),
+        );
+        drop(tx);
+        assert!(app.join().unwrap(), "the app was asked to quit");
         assert_eq!(exit_status(), COULD_NOT_RUN);
     }
 
