@@ -58,7 +58,15 @@ Write down the exact names of the built-in output, the interface, and both contr
 
 If the file exists, rename it to `preferences.ron.before-check`. Put it back at the end.
 
-**0.4. Set the system default output to the built-in output** in the operating system's sound settings, not the interface.
+**0.4. Run the device test.** It plays silent streams at 44.1, 48, 96, and 44.1 kHz on the interface and checks that each one runs. On macOS a stream at a new rate used to stop at once, so the app went silent after a sample rate change.
+
+```sh
+LOOM_DEVICE="<part of the interface name>" cargo test -p loom-host-desktop -- --ignored
+```
+
+On Windows, set the variable first: `$env:LOOM_DEVICE = "<part of the name>"` in PowerShell.
+
+**0.5. Set the system default output to the built-in output** in the operating system's sound settings, not the interface.
 
 ## Part 1: output safety in the window
 

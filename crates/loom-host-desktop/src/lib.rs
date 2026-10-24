@@ -351,10 +351,16 @@ impl AudioOutput {
                     // Count it; the control thread reports it.
                     error_stats.stream_errors.fetch_add(1, Ordering::Relaxed);
                 };
+                #[cfg(target_os = "macos")]
+                let switched = settle_rate(&device, &config);
                 let stream = device
                     .build_output_stream::<f32, _, _>(config, data_callback, error_callback, None)
                     .map_err(audio_error)?;
                 stream.play().map_err(audio_error)?;
+                #[cfg(target_os = "macos")]
+                if switched {
+                    resume_after_switch(&stream, &stats);
+                }
                 Player::Device(stream)
             }
             Kind::Clock { sample_rate, block } => Player::Clock(Clock::start(render, sample_rate, block)?),
@@ -366,6 +372,65 @@ impl AudioOutput {
             name: self.name,
             sample_rate,
         })
+    }
+}
+
+/// How long [`settle_rate`] waits for the device to report its new rate.
+#[cfg(target_os = "macos")]
+const RATE_SETTLE_LIMIT: Duration = Duration::from_secs(1);
+
+/// How long [`resume_after_switch`] watches a new stream after a rate
+/// switch for the late notice of that switch.
+#[cfg(target_os = "macos")]
+const RATE_NOTICE_WINDOW: Duration = Duration::from_millis(500);
+
+/// Switches the device to the stream's sample rate before the stream is
+/// built, and waits until the device reports it. Does nothing when the
+/// device is at that rate already.
+///
+/// On macOS, building a stream at a new rate switches the device's rate,
+/// and the stream also listens for rate changes, which it treats as the
+/// device changing under it: it pauses. The notice of its own switch can
+/// arrive after it has started listening, so the new stream paused at once
+/// and the app went silent after a sample rate change. A short silent
+/// stream makes the switch first, so the real stream starts on a device
+/// that is already at its rate. Any error here is left for the real stream
+/// to report. Returns true if the rate was switched.
+///
+/// Some devices report the new rate before the notice is sent, so the
+/// notice can still pause the real stream: see [`resume_after_switch`].
+#[cfg(target_os = "macos")]
+fn settle_rate(device: &cpal::Device, config: &cpal::StreamConfig) -> bool {
+    let current = || device.default_output_config().map(|c| c.sample_rate()).ok();
+    if current() == Some(config.sample_rate) {
+        return false;
+    }
+    let silence = |data: &mut [f32], _: &cpal::OutputCallbackInfo| data.fill(0.0);
+    if let Ok(stream) = device.build_output_stream::<f32, _, _>(*config, silence, |_| {}, None) {
+        drop(stream);
+    }
+    let started = Instant::now();
+    while current() != Some(config.sample_rate) && started.elapsed() < RATE_SETTLE_LIMIT {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    true
+}
+
+/// Starts the stream again each time it reports an error in the moments
+/// after a rate switch. A late notice of the switch pauses the stream (see
+/// [`settle_rate`]); starting it again is right, because this stream made
+/// the switch. A rate change from outside later on still pauses it.
+#[cfg(target_os = "macos")]
+fn resume_after_switch(stream: &cpal::Stream, stats: &CallbackStats) {
+    let started = Instant::now();
+    let mut errors = stats.stream_errors.load(Ordering::Relaxed);
+    while started.elapsed() < RATE_NOTICE_WINDOW {
+        let now = stats.stream_errors.load(Ordering::Relaxed);
+        if now != errors {
+            errors = now;
+            let _ = stream.play();
+        }
+        std::thread::sleep(Duration::from_millis(5));
     }
 }
 
@@ -1066,5 +1131,50 @@ mod tests {
         state.receive(&[0x90, 60, 100, 1]);
         state.receive(&[]);
         assert!(!state.holds_notes());
+    }
+}
+
+/// Checks on a real audio device. They need hardware, so they are ignored
+/// by default: run them with `cargo test -p loom-host-desktop -- --ignored`
+/// (set `LOOM_DEVICE` to part of a device name; the default device
+/// otherwise). Each stream is silent.
+#[cfg(test)]
+mod device_tests {
+    use super::*;
+    use loom_core::{EngineConfig, OutputSafety, create_engine};
+
+    /// Plays a silent engine on `options` for 0.7 s and returns the
+    /// callbacks the device made.
+    fn callbacks(options: &AudioOptions) -> u64 {
+        let output = AudioOutput::open(options).unwrap();
+        let config = EngineConfig {
+            output_safety: OutputSafety::Off,
+            ..EngineConfig::with_sample_rate(output.sample_rate() as f32)
+        };
+        let mut parts = create_engine(loom_modules::registry(), config);
+        let audio = output.start(parts.engine).unwrap();
+        std::thread::sleep(Duration::from_millis(700));
+        let made = audio.stats().snapshot().callbacks;
+        parts.controller.fade_out().unwrap();
+        audio.stop(STOP_LIMIT);
+        made
+    }
+
+    /// A stream at a new sample rate keeps playing. On macOS the notice of
+    /// the rate switch used to pause the new stream, and the app went
+    /// silent after a rate change in Preferences.
+    #[test]
+    #[ignore = "needs an audio device"]
+    fn a_new_sample_rate_keeps_playing() {
+        let device = std::env::var("LOOM_DEVICE").ok();
+        for rate in [44_100, 48_000, 96_000, 44_100] {
+            let options = AudioOptions {
+                device: device.clone(),
+                exact: false,
+                sample_rate: Some(rate),
+                buffer_size: Some(4096),
+            };
+            assert!(callbacks(&options) > 0, "the stream at {rate} Hz plays");
+        }
     }
 }
