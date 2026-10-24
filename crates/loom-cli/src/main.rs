@@ -4,6 +4,8 @@
 //! load a patch, play it with a MIDI controller, render it to a file, and
 //! stress-test live editing.
 
+mod analyze;
+
 use clap::{Parser, Subcommand};
 use loom_core::{Controller, EngineConfig, EngineParts, MidiEvent, ModuleId, OutputSafety, create_engine};
 use loom_host_desktop::{AudioOptions, AudioOutput, StatsSnapshot};
@@ -66,6 +68,9 @@ enum Command {
         #[arg(long, default_value_t = OutputSafety::Off)]
         output_safety: OutputSafety,
     },
+    /// Measure a WAV file: peak, clipping, largest step, DC, and RMS, with
+    /// optional checks for scripts (docs/design/audio-qa.md).
+    Analyze(analyze::Options),
     /// Play a patch live with a MIDI controller.
     Play {
         /// Patch file (.ron).
@@ -129,6 +134,7 @@ fn main() -> ExitCode {
         Command::Modules { verbose } => modules(verbose),
         Command::Devices => devices(),
         Command::Check { patch } => check(&patch),
+        Command::Analyze(options) => return analyze::run(&options),
         Command::Render {
             patch,
             output,

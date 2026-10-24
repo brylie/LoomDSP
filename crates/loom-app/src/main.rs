@@ -22,6 +22,8 @@ mod modulation;
 mod monitor;
 mod param;
 mod preferences;
+#[cfg(test)]
+mod qa_tests;
 mod recovery;
 mod scene;
 mod screenshot;
@@ -79,7 +81,9 @@ struct Args {
     #[arg(long, conflicts_with = "no_audio")]
     fake_audio: bool,
     /// Save what the engine plays to this WAV file (32-bit float, stereo),
-    /// until the app closes or another patch is opened.
+    /// until the app quits. Opening a patch, New, and a device change keep
+    /// recording into the same file; a device at another sample rate ends
+    /// the recording.
     #[arg(long, value_name = "WAV", conflicts_with = "no_audio")]
     record: Option<PathBuf>,
     /// Measuring the frame rate: --bench, --measure, --bench-seconds.
@@ -461,7 +465,7 @@ impl App {
     /// devices (`docs/design/autosave.md`, `docs/design/preferences.md`).
     fn boot_with(args: Args, prompt: &mut dyn recovery::Prompt, host: Rc<dyn devices::Host>) -> Self {
         let (store, mut notes) = settings::open_store(&args.devices);
-        let rig = settings::Rig::new(host, store, args.devices.clone(), args.output_safety.is_some());
+        let mut rig = settings::Rig::new(host, store, args.devices.clone(), args.output_safety.is_some());
         let mut session_folder = None;
         let mut restore = None;
         if let Some(root) = args.recovery_root() {
@@ -508,8 +512,18 @@ impl App {
             }
         });
 
-        let (output, audio_notes) = settings::open_output(&rig, args.no_audio, args.fake_audio, args.record.as_deref());
+        let (output, audio_notes) = settings::open_output(&rig, args.no_audio, args.fake_audio);
         notes.extend(audio_notes);
+        if let (Some(path), Ok(output)) = (&args.record, &output) {
+            match loom_host_desktop::Recorder::start(path, output.sample_rate()) {
+                Ok(recorder) => rig.recorder = Some(recorder),
+                Err(e) => {
+                    let note = format!("Not recording: {e}.");
+                    eprintln!("loom-app: {note}");
+                    notes.push(note);
+                }
+            }
+        }
         let sample_rate = output.as_ref().map(|o| o.sample_rate() as f32).unwrap_or(48_000.0);
         let source = match &recovered {
             Some((_, _, patch)) => Source::Recovered(Box::new(patch.clone())),
@@ -697,9 +711,12 @@ impl App {
         let midi = rig.midi_in.clone().expect("attached");
 
         let (audio, midi, audio_name, idle_engine) = match output {
-            Ok(output) => {
+            Ok(mut output) => {
                 let label = format!("{} at {} Hz", output.name(), output.sample_rate());
                 rig.playing = (!args.fake_audio).then(|| devices::Playing::of(&output));
+                if let Some(error) = rig.record_into(&mut output) {
+                    status = error;
+                }
                 match output.start(engine) {
                     Ok(audio) => (Some(audio), Some(midi), label, None),
                     Err(e) => {
@@ -886,8 +903,8 @@ impl App {
         // Choosing the device does not start a stream, so the old patch keeps
         // playing. The engine is built at the rate of the device that will
         // play it.
-        // A recording covers the first patch only: another would overwrite it.
-        let (output, _) = settings::open_output(&self.rig, self.no_audio, self.fake_audio, None);
+        // A recording goes on into the same file (rig.recorder).
+        let (output, _) = settings::open_output(&self.rig, self.no_audio, self.fake_audio);
         // Playing now and no device to play on afterwards: keep what plays.
         if let (Err(e), true) = (&output, self._audio.is_some()) {
             let message = format!(
@@ -1241,7 +1258,7 @@ impl App {
         }
         // A recording that stopped early (a full disk) is reported once.
         if !self.recording_failed
-            && let Some(error) = self._audio.as_ref().and_then(RunningAudio::recording_error)
+            && let Some(error) = self.rig.recorder.as_ref().and_then(loom_host_desktop::Recorder::error)
         {
             self.recording_failed = true;
             self.status = format!("The recording stopped: {error}");
