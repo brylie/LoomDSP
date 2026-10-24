@@ -3,11 +3,11 @@
 Tools that let tests, scripts, and QA agents check what the app actually plays, so safety checks on the final output do not depend on a person listening.
 
 - **Kind:** living specification.
-- **Status:** Parts 1 to 3: Implemented. Agreed and built in [#320](https://github.com/brylie/LoomDSP/pull/320). Part 4: Implemented. Agreed and built in the pull request that adds `loom capture`. Part 5 (virtual MIDI controllers): agreed and built for [#26](https://github.com/brylie/LoomDSP/issues/26); run on macOS, not yet on Linux.
+- **Status:** Parts 1 to 3: Implemented. Agreed and built in [#320](https://github.com/brylie/LoomDSP/pull/320). Part 4: Implemented. Agreed and built in the pull request that adds `loom capture`. Virtual MIDI controllers: agreed and built for [#26](https://github.com/brylie/LoomDSP/issues/26); run on macOS, not yet on Linux.
 - **Decision behind it:** None. It builds on [output safety](output-safety.md) (ADR-0019), the [control channel](control-channel.md), and the `devices::Host` trait from the [preferences spec](preferences.md).
 - **Use case and requirements:** Developer tooling. It protects UC3 (perform live), FR-PERF-08, NFR-SND-02, and NFR-SND-03 by testing them in the app, not only in the engine.
 - **Background:** [Output safety explainer](../learn/output-safety.md).
-- **Issues:** Part 5 comes from the manual check of [#26](https://github.com/brylie/LoomDSP/issues/26) (MIDI inputs on and off). Part 1 [#318](https://github.com/brylie/LoomDSP/issues/318), Part 2 [#319](https://github.com/brylie/LoomDSP/issues/319), Part 3 [#317](https://github.com/brylie/LoomDSP/issues/317). Comes from [#200](https://github.com/brylie/LoomDSP/issues/200) (the listening checks for output safety). Related: [#130](https://github.com/brylie/LoomDSP/issues/130) (a meter or warning for the final output).
+- **Issues:** Virtual MIDI controllers come from the manual check of [#26](https://github.com/brylie/LoomDSP/issues/26) (MIDI inputs on and off). Part 1 [#318](https://github.com/brylie/LoomDSP/issues/318), Part 2 [#319](https://github.com/brylie/LoomDSP/issues/319), Part 3 [#317](https://github.com/brylie/LoomDSP/issues/317). Comes from [#200](https://github.com/brylie/LoomDSP/issues/200) (the listening checks for output safety). Related: [#130](https://github.com/brylie/LoomDSP/issues/130) (a meter or warning for the final output).
 - **Code:** stepped output: `AudioOutput::stepped` and `Tape` in `crates/loom-host-desktop/src/stepped.rs`, offered by the fake host in `crates/loom-app/src/devices.rs`. App tests: `crates/loom-app/src/qa_tests.rs`. Recording: `Recorder` in `crates/loom-host-desktop/src/record.rs`, owned by `settings::Rig`. Measurements: `crates/loom-test/src/analysis.rs`. `loom analyze`: `crates/loom-cli/src/analyze.rs`, tests in `crates/loom-cli/tests/analyze.rs`. Capture: `Capture` in `crates/loom-host-desktop/src/capture.rs`, its loopback tests in `device_tests` in `crates/loom-host-desktop/src/lib.rs`, and `loom capture` in `crates/loom-cli/src/capture.rs`, tests in `crates/loom-cli/tests/capture.rs`. Virtual MIDI: `VirtualController` in `crates/loom-host-desktop/src/virtual_midi.rs`, `loom midi-port` in `crates/loom-cli/src/midi_port.rs`, the fake host's `real_midi` option in `crates/loom-app/src/devices.rs`, and the ignored tests `closing_a_real_input_releases_its_held_notes` (`loom-host-desktop`) and `turning_a_real_input_off_releases_its_notes_and_is_saved` (`loom-app`, `settings.rs`).
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
@@ -149,7 +149,7 @@ loom analyze /tmp/device.wav --max-step 0.01
 
 **CI.** Not in CI for now. The hardware test is ignored by default, like the other device tests. CI covers the parts that need no device: the writer with a fake input, and the command's errors. Running capture on a Linux runner with a PulseAudio or PipeWire null sink looks possible, but it needs a sound server on the runner and `cpal` reaching it through ALSA. That is a follow-up issue, so this part does not wait on it.
 
-### Part 5: virtual MIDI controllers
+### Virtual MIDI controllers
 
 A way for tests and scripts to play the app through a real MIDI input, with no hardware. It uses a *virtual MIDI port*: a MIDI source that a program creates in the operating system's MIDI service. Other programs see it in their list of MIDI inputs, just like a controller plugged in by USB. The app opens it through the same `midir` code it uses for hardware, so `MidiConnection::close` and the release of held notes are tested for real.
 
@@ -198,8 +198,8 @@ loom-app examples/patches/subtractive.ron   # terminal 3, started after the port
 9. **Measurements are plain arithmetic on the samples.** Peak is not oversampled, and DC is a plain mean. *Why:* the numbers must be easy to check by hand, and must match what the engine's output safety stage limits (it also works on samples, not true peaks).
 10. **Capture writes what the device delivered, nothing more** (Part 4). It does not resample, align, trim, or fill gaps. Dropped frames and input stream errors are counted and reported, and make the run fail with status 2. *Why:* the point is to see what the device really did. Any repair would hide the very fault we look for.
 11. **Capture never waits on the audio thread** (Part 4). Its input callback only pushes into a ring, as `--record` does. *Why:* real-time safety (hard rule 1), and a slow callback could itself drop input.
-12. **A virtual controller goes through the same MIDI code as hardware** (Part 5). The app does not know or check that a port is virtual. *Why:* the point is to test the real path. A special case in the app would test something else.
-13. **Tests that use virtual ports open only their own ports** (Part 5). Their port names hold the process ID, and the fake host opens only inputs whose names contain it. *Why:* a test must not grab, or play into, the developer's real controllers, and two test runs at once must not see each other's ports.
+12. **A virtual controller goes through the same MIDI code as hardware** (virtual MIDI). The app does not know or check that a port is virtual. *Why:* the point is to test the real path. A special case in the app would test something else.
+13. **Tests that use virtual ports open only their own ports** (virtual MIDI). Their port names hold the process ID, and the fake host opens only inputs whose names contain it. *Why:* a test must not grab, or play into, the developer's real controllers, and two test runs at once must not see each other's ports.
 
 ## Acceptance criteria
 
@@ -238,7 +238,7 @@ Each is a `loom-app` test that uses the stepped output, through `App::new` and `
 - [x] **Hardware test, ignored by default.** Given a Constant of 0.5 into Audio Out with output safety Off, playing into a loopback device (`LOOM_LOOPBACK`, for example `BlackHole`) with 4096-frame buffers, when the engine fades out and the stream stops, then the capture of the loopback holds the DC and the fade, and no step is larger than a 10 ms fade from 0.5 allows. A second test stops the same stream at a fixed 100 ms limit, as before the #26 fix, and checks that the capture does show the cut. *Why:* a check that cannot fail proves nothing.
 - [x] The manual check for #26 (`docs/dev/manual-checks/issue-26-devices.md`) uses capture where it now relies on ears for clicks at a stop or a device change.
 
-### Part 5
+### Virtual MIDI controllers
 
 - [x] `VirtualController` creates a port that `midi_input_names` lists, by the name `input_name` gives, on macOS.
 - [ ] The same on Linux with the ALSA sequencer, and the two ignored tests below pass there.

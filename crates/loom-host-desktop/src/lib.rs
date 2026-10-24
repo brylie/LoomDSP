@@ -1399,7 +1399,7 @@ mod tests {
 #[cfg(test)]
 mod device_tests;
 
-/// Checks through virtual MIDI ports (`docs/design/audio-qa.md`, Part 5).
+/// Checks through virtual MIDI ports (`docs/design/audio-qa.md`, Virtual MIDI controllers).
 /// They need the operating system's MIDI service, so they are ignored by
 /// default: run them with `cargo test -p loom-host-desktop -- --ignored` on
 /// macOS, or on Linux with the ALSA sequencer.

@@ -5,8 +5,8 @@
 //! stress-test live editing.
 
 mod analyze;
-mod midi_port;
 mod capture;
+mod midi_port;
 
 use clap::{Parser, Subcommand};
 use loom_core::{Controller, EngineConfig, EngineParts, MidiEvent, ModuleId, OutputSafety, create_engine};
