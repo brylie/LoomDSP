@@ -95,8 +95,24 @@ jobs:
       # but not expected to be covered by unit tests. nextest runs the tests
       # so the `ci` profile (.config/nextest.toml) writes a JUnit report.
       # It skips doctests; the Test job still runs them.
+      # The virtual MIDI tests (audio-qa.md, Part 4) need the ALSA
+      # sequencer. Load it if the runner's kernel has it, and run them when
+      # /dev/snd/seq exists. This also checks Part 4 on Linux. The audio
+      # device test stays skipped: runners have no sound card.
+      - name: ALSA sequencer for the virtual MIDI tests
+        id: seq
+        run: |
+          sudo modprobe snd-seq \
+            || { sudo apt-get install -y "linux-modules-extra-$(uname -r)" && sudo modprobe snd-seq; } \
+            || true
+          if [ -e /dev/snd/seq ]; then
+            sudo chmod a+rw /dev/snd/seq
+            echo "ignored=--run-ignored all -E 'not test(a_new_sample_rate_keeps_playing)'" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::No ALSA sequencer, so the virtual MIDI tests are skipped."
+          fi
       - name: Measure coverage
-        run: cargo llvm-cov nextest --workspace --profile ci --lcov --output-path lcov.info
+        run: cargo llvm-cov nextest --workspace --profile ci ${{ steps.seq.outputs.ignored }} --lcov --output-path lcov.info
       - name: Coverage summary
         run: |
           {

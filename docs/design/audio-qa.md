@@ -124,7 +124,7 @@ loom midi-port "Loom Keys"    # terminal 2
 loom-app examples/patches/subtractive.ron   # terminal 3, started after the ports
 ```
 
-**The tests.** Ignored by default, like the device tests in `loom-host-desktop`, because they need the operating system's MIDI service, and CI machines usually have none. They run with `cargo test -- --ignored` on macOS, and on Linux with the ALSA sequencer.
+**The tests.** Ignored by default, like the device tests in `loom-host-desktop`, because they need the operating system's MIDI service, and CI machines usually have none. They run with `cargo test -- --ignored` on macOS, and on Linux with the ALSA sequencer. CI's Coverage job loads the sequencer on its Linux runner when the kernel has it, and then runs them too.
 
 - A `loom-host-desktop` test: a virtual controller plays a note into a `MidiConnection`, and `close` releases it in the engine.
 - A `loom-app` test that repeats the fake-host test of turning a MIDI input off, through real ports. The fake host gets an option to list and open real MIDI inputs, but only those whose names contain a given text, so the test never opens the controllers on the developer's desk. Audio stays fake (the timer output). The test creates two virtual controllers with names unique to the run, Keys and Pad, and starts the app with `App::boot_with`. It holds a note on Pad, sends `settings::Message::Midi(Pad, false)`, and checks that the note is released, Keys still plays, audio did not stop, and the preferences file has Pad in `midi.off`.
@@ -198,7 +198,6 @@ Each is a `loom-app` test that uses the stepped output, through `App::new` and `
 - **Virtual MIDI on Windows.** Windows has no virtual ports. A loopback driver could stand in, but it is third-party software, so the Windows check keeps two controllers.
 - **MIDI hot-plugging.** The app opening a port that appears while it runs is FR-MIDI-08.
 - **Other MIDI messages in `loom midi-port`.** Control change, pitch bend, and clock come when a check needs them.
-- **Running the virtual MIDI tests in CI.** Hosted Linux runners have no ALSA sequencer by default.
 
 ## Open points
 
