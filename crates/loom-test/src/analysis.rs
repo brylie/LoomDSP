@@ -6,7 +6,7 @@
 //! no filtering. Spec: `docs/design/audio-qa.md`, Part 3.
 
 use serde::Serialize;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Length of the windows the DC measurement averages over, in seconds.
 pub const DC_WINDOW_SECONDS: f64 = 0.1;
@@ -27,31 +27,76 @@ impl Audio {
     }
 }
 
+/// Why a WAV file could not be read. It names the file, and keeps the
+/// decoder's error as its source.
+#[derive(Debug)]
+pub struct ReadError {
+    /// The file that was read.
+    pub path: PathBuf,
+    /// What went wrong.
+    pub kind: ReadErrorKind,
+}
+
+/// What went wrong while reading a WAV file.
+#[derive(Debug)]
+pub enum ReadErrorKind {
+    /// The file could not be opened or decoded.
+    Decode(hound::Error),
+    /// A sample format other than 16-bit or 24-bit integer, or 32-bit float.
+    Unsupported {
+        /// Bits per sample.
+        bits: u16,
+        /// Integer or float.
+        format: hound::SampleFormat,
+    },
+}
+
+impl std::fmt::Display for ReadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let path = self.path.display();
+        match &self.kind {
+            ReadErrorKind::Decode(e) => write!(f, "{path}: {e}"),
+            ReadErrorKind::Unsupported { bits, format } => write!(
+                f,
+                "{path}: unsupported WAV format ({bits}-bit {format:?}); use 16-bit, 24-bit, or 32-bit float"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ReadError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match &self.kind {
+            ReadErrorKind::Decode(e) => Some(e),
+            ReadErrorKind::Unsupported { .. } => None,
+        }
+    }
+}
+
 /// Reads a WAV file: 16-bit or 24-bit integer, or 32-bit float. Integer
 /// samples are scaled to -1 to 1.
-pub fn read_wav(path: &Path) -> Result<Audio, String> {
-    let mut reader = hound::WavReader::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+pub fn read_wav(path: &Path) -> Result<Audio, ReadError> {
+    let error = |kind| ReadError {
+        path: path.to_path_buf(),
+        kind,
+    };
+    let mut reader = hound::WavReader::open(path).map_err(|e| error(ReadErrorKind::Decode(e)))?;
     let spec = reader.spec();
     let count = usize::from(spec.channels.max(1));
     let samples: Vec<f32> = match (spec.sample_format, spec.bits_per_sample) {
         (hound::SampleFormat::Float, 32) => reader
             .samples::<f32>()
             .collect::<Result<_, _>>()
-            .map_err(|e| e.to_string())?,
+            .map_err(|e| error(ReadErrorKind::Decode(e)))?,
         (hound::SampleFormat::Int, bits @ (16 | 24)) => {
             let scale = 1.0 / (1_i64 << (bits - 1)) as f32;
             reader
                 .samples::<i32>()
                 .map(|s| s.map(|v| v as f32 * scale))
                 .collect::<Result<_, _>>()
-                .map_err(|e| e.to_string())?
+                .map_err(|e| error(ReadErrorKind::Decode(e)))?
         }
-        (format, bits) => {
-            return Err(format!(
-                "{}: unsupported WAV format ({bits}-bit {format:?}); use 16-bit, 24-bit, or 32-bit float",
-                path.display()
-            ));
-        }
+        (format, bits) => return Err(error(ReadErrorKind::Unsupported { bits, format })),
     };
     let mut channels = vec![Vec::with_capacity(samples.len() / count); count];
     for frame in samples.chunks_exact(count) {
@@ -222,13 +267,22 @@ fn window_dc(samples: &[f32], window: usize) -> Option<f64> {
 }
 
 /// The largest step between neighbouring samples in `samples`, or 0 when
-/// there are fewer than two. For click checks on a tape.
+/// there are fewer than two. For click checks on a tape. Infinity when any
+/// sample is NaN or infinite, so a check never passes on broken audio
+/// (`f32::max` alone would skip a NaN).
 pub fn max_step(samples: &[f32]) -> f32 {
+    if samples.iter().any(|x| !x.is_finite()) {
+        return f32::INFINITY;
+    }
     samples.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0, f32::max)
 }
 
-/// The largest absolute sample in `samples`, or 0 when empty.
+/// The largest absolute sample in `samples`, or 0 when empty. Infinity when
+/// any sample is NaN or infinite.
 pub fn peak(samples: &[f32]) -> f32 {
+    if samples.iter().any(|x| !x.is_finite()) {
+        return f32::INFINITY;
+    }
     samples.iter().map(|x| x.abs()).fold(0.0, f32::max)
 }
 
@@ -319,6 +373,49 @@ mod tests {
         assert_eq!(a.from_seconds, 0.5);
         assert_eq!(a.channels[0].peak, 0.4);
         assert_eq!(a.channels[0].peak_at, 0.7);
+    }
+
+    /// The tape helpers give infinity for broken audio, never a small value
+    /// that a check could pass on.
+    #[test]
+    fn helpers_do_not_hide_non_finite_samples() {
+        assert_eq!(peak(&[0.1, f32::NAN]), f32::INFINITY);
+        assert_eq!(max_step(&[0.0, f32::NAN]), f32::INFINITY);
+        assert_eq!(peak(&[f32::NEG_INFINITY]), f32::INFINITY);
+        assert_eq!(peak(&[0.25, -0.5]), 0.5);
+        assert_eq!(max_step(&[0.25, -0.5]), 0.75);
+    }
+
+    /// A file in another format names the file and the format; a broken
+    /// file keeps the decoder's error as its source.
+    #[test]
+    fn read_errors_name_the_file_and_keep_the_source() {
+        use std::error::Error;
+        let dir = std::env::temp_dir().join(format!("loom-test-analysis-errors-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("8bit.wav");
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 8000,
+            bits_per_sample: 8,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut writer = hound::WavWriter::create(&path, spec).unwrap();
+        writer.write_sample(0_i8).unwrap();
+        writer.finalize().unwrap();
+        let e = read_wav(&path).unwrap_err();
+        assert!(
+            e.to_string().contains("8bit.wav") && e.to_string().contains("8-bit"),
+            "{e}"
+        );
+        assert!(e.source().is_none());
+
+        let broken = dir.join("broken.wav");
+        std::fs::write(&broken, b"not a wav file").unwrap();
+        let e = read_wav(&broken).unwrap_err();
+        assert!(e.to_string().contains("broken.wav"), "{e}");
+        assert!(e.source().is_some());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     /// Silence gives zeros, and a level of negative infinity dBFS.

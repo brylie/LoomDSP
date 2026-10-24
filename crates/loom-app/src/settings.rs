@@ -114,17 +114,23 @@ impl Rig {
     }
 
     /// Sends what `output` will play to the recording, if there is one.
-    /// When the output runs at another sample rate, the recording ends
-    /// (audio-qa.md, rule 6): returns the status bar line, which is also
+    /// Returns the refusal when the output runs at another sample rate. The
+    /// recording stays open: call [`Rig::end_recording`] once that output
+    /// has started. A stream that fails to start must not end the recording,
+    /// because the old device may then play again at the old rate.
+    pub fn record_into(&self, output: &mut AudioOutput) -> Option<loom_host_desktop::HostError> {
+        output.record(self.recorder.as_ref()?).err()
+    }
+
+    /// Ends the recording because a stream at another sample rate started
+    /// (audio-qa.md, rule 6). Returns the status bar line, which is also
     /// printed to stderr.
-    pub fn record_into(&mut self, output: &mut AudioOutput) -> Option<String> {
-        let recorder = self.recorder.as_ref()?;
-        let error = output.record(recorder).err()?;
+    pub fn end_recording(&mut self, error: &loom_host_desktop::HostError) -> String {
         // Dropping the recorder closes the file with what it holds.
         self.recorder = None;
         let message = format!("The recording stopped: {error}.");
         eprintln!("loom-app: {message}");
-        Some(message)
+        message
     }
 
     /// A rig with no file and the real devices, for a headless app and as
@@ -473,10 +479,13 @@ impl App {
         self.sample_rate = output.sample_rate() as f32;
         self.idle_engine = None;
         self.holding = false;
-        let record_error = self.rig.record_into(&mut output);
+        let refused = self.rig.record_into(&mut output);
         let started = self.rig.host.start(output, engine);
+        // Set on success; on an error this returns early.
+        let record_error;
         match started {
             Ok(audio) => {
+                record_error = refused.map(|e| self.rig.end_recording(&e));
                 self.audio_stats = Some(audio.stats().clone());
                 self._audio = Some(audio);
                 self.audio_name = label;

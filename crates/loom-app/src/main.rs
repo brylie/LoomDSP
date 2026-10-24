@@ -714,11 +714,14 @@ impl App {
             Ok(mut output) => {
                 let label = format!("{} at {} Hz", output.name(), output.sample_rate());
                 rig.playing = (!args.fake_audio).then(|| devices::Playing::of(&output));
-                if let Some(error) = rig.record_into(&mut output) {
-                    status = error;
-                }
+                let refused = rig.record_into(&mut output);
                 match output.start(engine) {
-                    Ok(audio) => (Some(audio), Some(midi), label, None),
+                    Ok(audio) => {
+                        if let Some(e) = refused {
+                            status = rig.end_recording(&e);
+                        }
+                        (Some(audio), Some(midi), label, None)
+                    }
                     Err(e) => {
                         rig.playing = None;
                         (None, None, format!("no audio ({e})"), None)

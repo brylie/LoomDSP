@@ -201,6 +201,28 @@ fn write(
     }
 }
 
+/// A folder for one test, removed when dropped, even if the test fails.
+#[cfg(test)]
+pub(crate) struct TestDir(pub(crate) std::path::PathBuf);
+
+#[cfg(test)]
+impl TestDir {
+    /// An empty folder named after the test and the process.
+    pub(crate) fn new(name: &str) -> Self {
+        let dir = std::env::temp_dir().join(format!("loom-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        Self(dir)
+    }
+}
+
+#[cfg(test)]
+impl Drop for TestDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -208,9 +230,8 @@ mod tests {
     /// One stream's frames are written as pushed.
     #[test]
     fn writes_what_was_pushed() {
-        let dir = std::env::temp_dir().join(format!("loom-record-test-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("out.wav");
+        let dir = TestDir::new("record-test");
+        let path = dir.0.join("out.wav");
         let recorder = Recorder::start(&path, 48_000).unwrap();
         let mut tap = recorder.tap();
         let left: Vec<f32> = (0..1000).map(|i| i as f32 / 1000.0).collect();
@@ -227,7 +248,6 @@ mod tests {
         assert_eq!(samples.len(), 2000);
         assert_eq!(samples[2 * 500], left[500]);
         assert_eq!(samples[2 * 500 + 1], right[500]);
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     /// Streams follow each other in the file in the order their taps were
@@ -235,9 +255,8 @@ mod tests {
     /// before the first has ended.
     #[test]
     fn streams_are_written_in_order_with_nothing_between() {
-        let dir = std::env::temp_dir().join(format!("loom-record-streams-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("out.wav");
+        let dir = TestDir::new("record-streams");
+        let path = dir.0.join("out.wav");
         let recorder = Recorder::start(&path, 48_000).unwrap();
         let mut first = recorder.tap();
         let mut second = recorder.tap();
@@ -255,22 +274,19 @@ mod tests {
         let left: Vec<f32> = reader.samples::<f32>().map(Result::unwrap).step_by(2).collect();
         let expected: Vec<f32> = [vec![1.0; 200], vec![2.0; 300], vec![3.0; 100]].concat();
         assert_eq!(left, expected);
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     /// A full ring drops frames and counts them.
     #[test]
     fn a_full_ring_drops_and_counts() {
-        let dir = std::env::temp_dir().join(format!("loom-record-full-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = TestDir::new("record-full");
         // 10 Hz: the ring holds 2 seconds, 20 frames.
-        let recorder = Recorder::start(&dir.join("out.wav"), 10).unwrap();
+        let recorder = Recorder::start(&dir.0.join("out.wav"), 10).unwrap();
         let mut tap = recorder.tap();
         // Hold the writer back by pushing faster than it drains.
         tap.push(&[0.0; 100], &[0.0; 100]);
         assert!(recorder.dropped() > 0);
         drop(tap);
         drop(recorder);
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

@@ -34,7 +34,7 @@ A fake audio output for Rust tests in `loom-app`, offered through the `devices::
 | What the app does | What the stepped output does |
 |---|---|
 | Starts a stream (a new engine) | The next `step` plays the new engine. |
-| Stops a stream (Open, New, quit, device change) | Plays the old engine until it reports silence and then the usual extra silent buffers, or until the stop limit is reached, counted in frames. Then the stream ends. |
+| Stops a stream (Open, New, quit, device change) | Plays the old engine until it reports silence and then the usual extra silent buffers, or until the stop limit is reached: `STOP_LIMIT` (100 ms) as frames at the stream's rate, rounded up to whole blocks. Then the stream ends. A stream cut at the limit ends with its last samples as they were. The tape is not filled with zeros, so the cut fails the click check of rule 4. |
 | Changes the output safety mode | Nothing special. The next `step` plays the dip and the new mode. |
 
 The tape is one list of stereo samples for the whole test, across every stream, in the order they were played. Each stream's start is marked on the tape by its frame index, so a test can look at the frames around a switch.
@@ -74,7 +74,7 @@ A `loom` subcommand that reads a WAV file (16-bit, 24-bit, or 32-bit float) and 
 | Peak | Largest absolute sample, linear and in dBFS, with its time. |
 | Over the ceiling | Samples larger in size than the output safety ceiling (-1 dBFS). |
 | At full scale | Samples of size 1.0 or more, which is what a hard clip leaves. |
-| Not finite | NaN and infinite samples. |
+| Not finite | NaN and infinite samples. The other measurements leave them out (see below). |
 | Largest step | Largest difference between two neighbouring samples, with its time. A click shows up here. |
 | DC | The mean of the whole file, and the largest mean of any 100 ms window. |
 | RMS | The level, linear and in dBFS. |
@@ -87,7 +87,11 @@ Options:
 | `--json` | Print JSON instead of text, for scripts and agents. |
 | `--max-peak X`, `--max-step X`, `--max-dc X` | Checks. When one fails, the command says which, and exits with status 1. |
 
-When the file cannot be read, the command exits with status 2. *Why:* a script can then tell a failed check from a broken run.
+When the file cannot be read, or an option is not usable, the command exits with status 2. Unusable options are a NaN or infinite time or limit, and `--from` after `--to`. *Why:* a script can then tell a failed check from a broken run. A NaN limit would also pass every check, because every comparison with NaN is false.
+
+**NaN and infinite samples.** Peak, Over the ceiling, At full scale, DC, and RMS leave them out and measure the finite samples. Largest step compares only two finite neighbours, so a step next to a broken sample is not counted. A DC window counts a broken sample as 0. Not finite counts them. Each check given (`--max-peak`, `--max-step`, `--max-dc`) fails for a channel with any such sample, whatever the other measurements say. With no checks, the file is only measured and the command exits with status 0. *Why:* the same rule as the module test harness ([rule 7](module-test-harness.md#rules)): a NaN in audio is always a bug, and broken audio must not pass a check because it was left out of the arithmetic.
+
+**JSON.** `--json` prints every measurement as a number. JSON has no infinity, so a level of silence in dBFS (negative infinity) prints as `null`. No other measurement can be infinite, because broken samples are left out.
 
 The measurements are functions in `loom-test`, so the app tests of Part 1 and the command of Part 3 measure in the same way.
 
@@ -97,7 +101,7 @@ The measurements are functions in `loom-test`, so the app tests of Part 1 and th
 2. **The stepped output runs the app's real code paths.** Tests reach it through `App::new` and `App::update`, with the same `Args`, preferences file, and messages the window sends. *Why:* the gap we want to close is the app's wiring. A test that builds its own engine would miss it.
 3. **The same test gives a bit-identical tape.** *Why:* determinism is a hard rule for the engine. It lets a failing tape be compared with a passing one, and saved as a reference when that helps.
 4. **Click checks are relative to the patch.** At a switch, the old stream ends at 0 and the new stream starts at 0. No step in the fade-out is larger than the largest step in the 100 ms before the switch, and no step in the fade-in is larger than the largest step in the 100 ms after it. Each limit has a margin of one fade step times the peak of that 100 ms, because the fade gain moves as well as the signal. *Why:* a fixed limit would fail on bright patches and pass clicks on quiet ones. The fade-in plays the new patch, so it is compared with the new patch: a sine followed by an FM patch must not fail because the FM patch is brighter.
-5. **The recording is what was sent to the output, nothing more.** No silence is added between streams. *Why:* the gap depends on the machine and the device, and adding it would make files differ from run to run.
+5. **The recording is what was sent to the output, nothing more.** No silence is added between streams, and the file does not mark where a stream starts. *Why:* the gap depends on the machine and the device, and adding it would make files differ from run to run. Rule 4 is checked on the tape of Part 1, which marks each stream's start. A recording gives a coarser check: `loom analyze` reports the largest step in the whole file, or between `--from` and `--to`, so a click at any switch shows up there. It does not find switches or apply rule 4 to each one.
 6. **A recording keeps one sample rate.** If a new stream runs at a different rate (a device change), the recording ends, and the status bar and stderr say why. *Why:* a WAV file has one sample rate. Resampling would change the very samples we want to check.
 7. **Recording never waits on the audio thread.** The existing writer thread and its dropped-frame count stay. *Why:* real-time safety (hard rule 1).
 8. **`loom analyze` only measures.** It does not judge whether a sound is good. Checks pass or fail only on the limits given. *Why:* the same rule as `sample` on the control channel: tools measure, and a person or the test decides what is right for a patch.
@@ -120,6 +124,7 @@ Each is a `loom-app` test that uses the stepped output, through `App::new` and `
 
 - [x] Given `--fake-audio --record FILE`, when a script opens two more patches and quits, then the file holds all three streams in order, and the app exits with status 0.
 - [x] A change of device that changes the sample rate ends the recording, with a message in the status bar and on stderr.
+- [x] A device at another sample rate that fails to start does not end the recording: the old device plays again, and its stream goes into the same file.
 - [x] The `--record` help text says the recording lasts until the app quits.
 
 ### Part 3
@@ -128,6 +133,8 @@ Each is a `loom-app` test that uses the stepped output, through `App::new` and `
 - [x] `loom analyze` reads 16-bit, 24-bit, and 32-bit float files.
 - [x] `--json` prints every measurement, and a test parses it.
 - [x] A failed `--max-peak`, `--max-step`, or `--max-dc` check exits with status 1 and names the check. A passing one exits with status 0.
+- [x] A NaN sample fails every check given; with no checks, the file is only measured.
+- [x] A NaN or infinite time or limit, and `--from` after `--to`, exit with status 2.
 
 ### Manual
 
@@ -143,4 +150,4 @@ Each is a `loom-app` test that uses the stepped output, through `App::new` and `
 
 ## Open points
 
-- None. *Settled:* the stepped output is `AudioOutput::stepped(sample_rate, block, &tape)`, next to `AudioOutput::clock`. The tape marks where each stream starts; the WAV file does not, because `loom analyze` finds a switch from the steps. The windows of rule 4 are 100 ms, long enough to hold several cycles of a low note.
+- None. *Settled:* the stepped output is `AudioOutput::stepped(sample_rate, block, &tape)`, next to `AudioOutput::clock`. The tape marks where each stream starts; the WAV file does not (rule 5). The windows of rule 4 are 100 ms, long enough to hold several cycles of a low note.

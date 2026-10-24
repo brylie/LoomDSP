@@ -944,9 +944,8 @@ mod tests {
     /// One recorder takes every stream at its rate, and refuses another rate.
     #[test]
     fn a_recorder_spans_streams_and_keeps_one_rate() {
-        let dir = std::env::temp_dir().join(format!("loom-host-recorder-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("out.wav");
+        let dir = record::TestDir::new("host-recorder");
+        let path = dir.0.join("out.wav");
         let recorder = Recorder::start(&path, 48_000).unwrap();
         let tape = Tape::new();
         for _ in 0..2 {
@@ -965,7 +964,6 @@ mod tests {
         let mut reader = hound::WavReader::open(&path).unwrap();
         let left: Vec<f32> = reader.samples::<f32>().map(Result::unwrap).step_by(2).collect();
         assert_eq!(left, tape.left(), "the file holds both streams, nothing between");
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

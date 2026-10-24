@@ -144,6 +144,48 @@ fn from_and_to_measure_a_part() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+/// NaN and infinite limits, NaN times, and `--from` after `--to` are
+/// refused with status 2, so a check can never pass by accident.
+#[test]
+fn unusable_options_exit_with_2() {
+    let dir = folder("options");
+    let path = dir.join("a.wav");
+    write(&path, &signal(), 32, hound::SampleFormat::Float);
+    let file = path.to_str().unwrap();
+    for args in [
+        vec!["--max-peak", "NaN"],
+        vec!["--max-step", "inf"],
+        vec!["--max-dc", "NaN"],
+        vec!["--to", "NaN"],
+        vec!["--from", "0.8", "--to", "0.2"],
+    ] {
+        let (status, _, stderr) = analyze(&[&[file][..], &args].concat());
+        assert_eq!(status, 2, "{args:?}");
+        assert!(stderr.contains(args[0]), "{args:?}: {stderr}");
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// A NaN sample fails every check given, even when the finite samples
+/// pass; with no checks, the file is only measured.
+#[test]
+fn non_finite_samples_fail_every_check() {
+    let dir = folder("nan");
+    let path = dir.join("a.wav");
+    let mut samples = signal();
+    samples[500] = f32::NAN;
+    write(&path, &samples, 32, hound::SampleFormat::Float);
+    let file = path.to_str().unwrap();
+    let (status, stdout, _) = analyze(&[file, "--json"]);
+    assert_eq!(status, 0, "measuring alone does not fail");
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(json["channels"][0]["non_finite"], 1);
+    let (status, _, stderr) = analyze(&[file, "--max-peak", "0.9", "--max-dc", "0.5"]);
+    assert_eq!(status, 1);
+    assert!(stderr.contains("--max-peak") && stderr.contains("--max-dc"), "{stderr}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 /// A file that cannot be read exits with status 2, not 1.
 #[test]
 fn an_unreadable_file_exits_with_2() {

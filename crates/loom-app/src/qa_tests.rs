@@ -80,6 +80,8 @@ struct Setup<'a> {
     record: Option<&'a str>,
     /// The devices; the first is the default.
     devices: Vec<OutputInfo>,
+    /// Devices that open, then fail to start.
+    wont_start: Vec<&'a str>,
 }
 
 /// Where a run's patch comes from.
@@ -97,6 +99,7 @@ impl<'a> Setup<'a> {
             preferences: None,
             record: None,
             devices: vec![fake::device("Fake A"), fake::device("Fake B")],
+            wont_start: Vec::new(),
         }
     }
 
@@ -117,6 +120,7 @@ impl<'a> Setup<'a> {
         let tape = Tape::new();
         let host = Fake {
             tape: Some(tape.clone()),
+            wont_start: self.wont_start.iter().map(|s| s.to_string()).collect(),
             ..Fake::new(&self.devices, &[])
         };
         let args = Args {
@@ -169,6 +173,8 @@ impl Drop for Run {
 /// audio it is compared with: that audio's largest step, plus one fade step
 /// times its peak, because the fade gain moves too.
 fn step_limit(steady: &[f32]) -> f32 {
+    // Broken audio would make the limit infinite and pass every check.
+    assert!(steady.iter().all(|x| x.is_finite()), "the steady audio is finite");
     max_step(steady) + peak(steady) / fade_frames() as f32 + 1e-6
 }
 
@@ -432,4 +438,39 @@ fn a_new_sample_rate_ends_the_recording() {
     let audio = loom_test::analysis::read_wav(&run.dir.join("run.wav")).unwrap();
     assert_eq!(audio.sample_rate, RATE as u32);
     assert!(audio.frames() >= played, "the first stream is in the file");
+}
+
+/// A device at another sample rate that fails to start does not end the
+/// recording: the old device plays again, and its new stream is recorded
+/// into the same file.
+#[test]
+fn a_failed_device_change_keeps_the_recording() {
+    let slow = OutputInfo {
+        default_rate: 44_100,
+        ..fake::device("Fake B")
+    };
+    let mut run = Setup {
+        record: Some("run.wav"),
+        devices: vec![fake::device("Fake A"), slow],
+        wont_start: vec!["Fake B"],
+        ..Setup::new("record-failed", PatchFrom::Example("sine.ron"))
+    }
+    .start();
+    run.play(0.2);
+    run.app.preferences(Prefs::Open);
+    run.app
+        .preferences(Prefs::Audio(Change::Device(DeviceChoice::Named("Fake B".into()))));
+    assert!(
+        run.app.status.contains("Still playing on \"Fake A\""),
+        "{}",
+        run.app.status
+    );
+    assert!(run.app.rig.recorder.is_some(), "the recording goes on");
+    run.play(0.2);
+    assert_eq!(run.tape.stream_starts().len(), 2, "Fake A plays again");
+    run.app.quit = true;
+    let _ = run.app.update(Message::Tick);
+    drop(run.app.rig.recorder.take());
+    let audio = loom_test::analysis::read_wav(&run.dir.join("run.wav")).unwrap();
+    assert_eq!(audio.channels[0], run.left(), "both streams are in the file");
 }

@@ -36,8 +36,12 @@ pub struct Options {
 const UNREADABLE: u8 = 2;
 
 /// Runs `loom analyze`. Exit status 0 when every check passes, 1 when one
-/// fails, and 2 when the file cannot be read.
+/// fails, and 2 when the file cannot be read or an option is not usable.
 pub fn run(options: &Options) -> ExitCode {
+    if let Err(e) = validate(options) {
+        eprintln!("error: {e}");
+        return ExitCode::from(UNREADABLE);
+    }
     let audio = match analysis::read_wav(&options.file) {
         Ok(audio) => audio,
         Err(e) => {
@@ -68,10 +72,53 @@ pub fn run(options: &Options) -> ExitCode {
     }
 }
 
+/// Refuses times and limits that would make a check meaningless: NaN or
+/// infinite values, and `--from` after `--to`. A NaN limit, for example,
+/// would pass every check, because every comparison with NaN is false.
+fn validate(options: &Options) -> Result<(), String> {
+    let finite = [
+        ("--from", options.from),
+        ("--to", options.to),
+        ("--max-peak", options.max_peak.map(f64::from)),
+        ("--max-step", options.max_step.map(f64::from)),
+        ("--max-dc", options.max_dc),
+    ];
+    for (flag, value) in finite {
+        if let Some(value) = value
+            && !value.is_finite()
+        {
+            return Err(format!("{flag} must be a finite number, not {value}"));
+        }
+    }
+    if let (Some(from), Some(to)) = (options.from, options.to)
+        && from > to
+    {
+        return Err(format!("--from {from} is after --to {to}"));
+    }
+    Ok(())
+}
+
 /// One line per failed check, naming the check, the channel, and the value.
+/// NaN and infinite samples fail every check given, as in the module test
+/// harness (module-test-harness.md, rule 7): broken audio must not pass
+/// because the other measurements leave those samples out.
 fn failures(result: &Analysis, options: &Options) -> Vec<String> {
     let mut out = Vec::new();
+    let checks = [
+        options.max_peak.map(|x| format!("--max-peak {x}")),
+        options.max_step.map(|x| format!("--max-step {x}")),
+        options.max_dc.map(|x| format!("--max-dc {x}")),
+    ];
     for (i, c) in result.channels.iter().enumerate() {
+        if c.non_finite > 0 {
+            for check in checks.iter().flatten() {
+                out.push(format!(
+                    "{check}: channel {} has {} NaN or infinite samples",
+                    i + 1,
+                    c.non_finite
+                ));
+            }
+        }
         if let Some(limit) = options.max_peak
             && c.peak > limit
         {
