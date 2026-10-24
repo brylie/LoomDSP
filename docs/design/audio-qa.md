@@ -3,11 +3,11 @@
 Tools that let tests, scripts, and QA agents check what the app actually plays, so safety checks on the final output do not depend on a person listening.
 
 - **Kind:** living specification.
-- **Status:** Implemented. Agreed and built in [#320](https://github.com/brylie/LoomDSP/pull/320).
+- **Status:** Parts 1 to 3 implemented, agreed and built in [#320](https://github.com/brylie/LoomDSP/pull/320). Part 4 (virtual MIDI controllers) agreed.
 - **Decision behind it:** None. It builds on [output safety](output-safety.md) (ADR-0019), the [control channel](control-channel.md), and the `devices::Host` trait from the [preferences spec](preferences.md).
 - **Use case and requirements:** Developer tooling. It protects UC3 (perform live), FR-PERF-08, NFR-SND-02, and NFR-SND-03 by testing them in the app, not only in the engine.
 - **Background:** [Output safety explainer](../learn/output-safety.md).
-- **Issues:** Part 1 [#318](https://github.com/brylie/LoomDSP/issues/318), Part 2 [#319](https://github.com/brylie/LoomDSP/issues/319), Part 3 [#317](https://github.com/brylie/LoomDSP/issues/317). Comes from [#200](https://github.com/brylie/LoomDSP/issues/200) (the listening checks for output safety). Related: [#130](https://github.com/brylie/LoomDSP/issues/130) (a meter or warning for the final output).
+- **Issues:** Part 4 comes from the manual check of [#26](https://github.com/brylie/LoomDSP/issues/26) (MIDI inputs on and off). Part 1 [#318](https://github.com/brylie/LoomDSP/issues/318), Part 2 [#319](https://github.com/brylie/LoomDSP/issues/319), Part 3 [#317](https://github.com/brylie/LoomDSP/issues/317). Comes from [#200](https://github.com/brylie/LoomDSP/issues/200) (the listening checks for output safety). Related: [#130](https://github.com/brylie/LoomDSP/issues/130) (a meter or warning for the final output).
 - **Code:** stepped output: `AudioOutput::stepped` and `Tape` in `crates/loom-host-desktop/src/stepped.rs`, offered by the fake host in `crates/loom-app/src/devices.rs`. App tests: `crates/loom-app/src/qa_tests.rs`. Recording: `Recorder` in `crates/loom-host-desktop/src/record.rs`, owned by `settings::Rig`. Measurements: `crates/loom-test/src/analysis.rs`. `loom analyze`: `crates/loom-cli/src/analyze.rs`, tests in `crates/loom-cli/tests/analyze.rs`.
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
@@ -95,6 +95,42 @@ When the file cannot be read, or an option is not usable, the command exits with
 
 The measurements are functions in `loom-test`, so the app tests of Part 1 and the command of Part 3 measure in the same way.
 
+### Part 4: virtual MIDI controllers
+
+A way for tests and scripts to play the app through a real MIDI input, with no hardware. It uses a *virtual MIDI port*: a MIDI source that a program creates in the operating system's MIDI service. Other programs see it in their list of MIDI inputs, just like a controller plugged in by USB. The app opens it through the same `midir` code it uses for hardware, so `MidiConnection::close` and the release of held notes are tested for real.
+
+Virtual ports exist on macOS (CoreMIDI) and on Linux (the ALSA sequencer, which needs the `snd-seq` kernel module). Windows has no virtual ports, so there Part 4 is not available and the manual check still needs hardware.
+
+It comes in three pieces, all built on one helper.
+
+**The helper.** `VirtualController` in `loom-host-desktop`, built only on macOS and Linux. `VirtualController::create(name)` creates a virtual MIDI source called `name`. It sends raw MIDI bytes, note on, and note off. `input_name()` finds the name the app's MIDI input list shows for it. That name is `name` on macOS, but on Linux ALSA adds the client name and a port number, such as `LoomDSP virtual:Pad 128:0`. Dropping the helper removes the port.
+
+**The command.** `loom midi-port NAME`: creates a virtual controller, prints the input name the app will show, and plays what it reads on standard input, one line at a time:
+
+| Line | Effect |
+|---|---|
+| `on NOTE [VELOCITY]` | Note on. Velocity 1 to 127, 100 if not given. |
+| `off NOTE` | Note off. |
+| `wait MS` | Waits this many milliseconds before the next line. |
+| empty, or starting with `#` | Nothing. |
+
+`NOTE` is a MIDI note number, 0 to 127. `--channel N` picks the MIDI channel, 1 to 16, 1 if not given. At the end of input (Ctrl+D in a terminal), the command sends a note off for every note it still holds, removes the port, and exits with status 0. A line it cannot read is reported on standard error with its line number, and skipped. If the port cannot be created (Windows, or Linux without the ALSA sequencer), the command says why and exits with status 2.
+
+A person types the lines in a terminal to play the app by hand. A script pipes them in. Example, for the manual check of #26:
+
+```sh
+loom midi-port "Loom Pad"     # terminal 1: leave it running, type "on 60" later
+loom midi-port "Loom Keys"    # terminal 2
+loom-app examples/patches/subtractive.ron   # terminal 3, started after the ports
+```
+
+**The tests.** Ignored by default, like the device tests in `loom-host-desktop`, because they need the operating system's MIDI service, and CI machines usually have none. They run with `cargo test -- --ignored` on macOS, and on Linux with the ALSA sequencer.
+
+- A `loom-host-desktop` test: a virtual controller plays a note into a `MidiConnection`, and `close` releases it in the engine.
+- A `loom-app` test that repeats the fake-host test of turning a MIDI input off, through real ports. The fake host gets an option to list and open real MIDI inputs, but only those whose names contain a given text, so the test never opens the controllers on the developer's desk. Audio stays fake (the timer output). The test creates two virtual controllers with names unique to the run, Keys and Pad, and starts the app with `App::boot_with`. It holds a note on Pad, sends `settings::Message::Midi(Pad, false)`, and checks that the note is released, Keys still plays, audio did not stop, and the preferences file has Pad in `midi.off`.
+
+**How the app sees a virtual port.** As any other MIDI input, by its full name. The app reads the list of inputs when it starts and when the Preferences window opens, and opens inputs only at start. So a port must exist before the app starts. A port created later shows in the Preferences list when the window is next opened, and a check box turned on there opens it. A port removed while the app runs is like a controller unplugged: nothing plays from it, and there is no hot-plugging yet (FR-MIDI-08).
+
 ## Rules
 
 1. **Time in the stepped output is counted in frames, never in wall-clock time.** A stop that waits for silence waits a number of frames. *Why:* the same test then gives the same tape on a fast laptop and a busy CI machine, and it needs no sleeps.
@@ -106,6 +142,8 @@ The measurements are functions in `loom-test`, so the app tests of Part 1 and th
 7. **Recording never waits on the audio thread.** The existing writer thread and its dropped-frame count stay. *Why:* real-time safety (hard rule 1).
 8. **`loom analyze` only measures.** It does not judge whether a sound is good. Checks pass or fail only on the limits given. *Why:* the same rule as `sample` on the control channel: tools measure, and a person or the test decides what is right for a patch.
 9. **Measurements are plain arithmetic on the samples.** Peak is not oversampled, and DC is a plain mean. *Why:* the numbers must be easy to check by hand, and must match what the engine's output safety stage limits (it also works on samples, not true peaks).
+10. **A virtual controller goes through the same MIDI code as hardware.** The app does not know or check that a port is virtual. *Why:* the point is to test the real path. A special case in the app would test something else.
+11. **Tests that use virtual ports open only their own ports.** Their port names hold the process ID, and the fake host opens only inputs whose names contain it. *Why:* a test must not grab, or play into, the developer's real controllers, and two test runs at once must not see each other's ports.
 
 ## Acceptance criteria
 
@@ -136,6 +174,15 @@ Each is a `loom-app` test that uses the stepped output, through `App::new` and `
 - [x] A NaN sample fails every check given; with no checks, the file is only measured.
 - [x] A NaN or infinite time or limit, and `--from` after `--to`, exit with status 2.
 
+### Part 4
+
+- [ ] `VirtualController` creates a port that `midi_input_names` lists, by the name `input_name` gives, on macOS and on Linux with the ALSA sequencer.
+- [ ] Ignored `loom-host-desktop` test: a note played on a virtual controller sounds through `connect_midi_named`, and `MidiConnection::close` releases it.
+- [ ] Ignored `loom-app` test: with two virtual controllers, turning one off through `settings::Message::Midi` releases its held note, the other still plays, audio does not stop, and `midi.off` is saved.
+- [ ] `loom midi-port` reads the lines in the table, skips a bad line with a message that has its line number, and releases held notes at the end of input. The parser has unit tests that run everywhere, Windows included.
+- [ ] Where virtual ports are not available, `loom midi-port` exits with status 2 and says why.
+- [ ] Part 5 of the [manual check for #26](../dev/manual-checks/issue-26-devices.md) uses `loom midi-port` on macOS and Linux, and two controllers only on Windows.
+
 ### Manual
 
 - [x] Run the Part 2 script and `loom analyze` on its file, and list the result in the pull request.
@@ -147,6 +194,10 @@ Each is a `loom-app` test that uses the stepped output, through `App::new` and `
 - **A meter or warning for the final output in the app.** That is [#130](https://github.com/brylie/LoomDSP/issues/130).
 - **True-peak (oversampled) measurement, loudness (LUFS), and spectrum analysis.** Add them when a check needs them.
 - **Starting and stopping a recording from the control channel.** A run records from start to quit.
+- **Virtual MIDI on Windows.** Windows has no virtual ports. A loopback driver could stand in, but it is third-party software, so the Windows check keeps two controllers.
+- **MIDI hot-plugging.** The app opening a port that appears while it runs is FR-MIDI-08.
+- **Other MIDI messages in `loom midi-port`.** Control change, pitch bend, and clock come when a check needs them.
+- **Running the virtual MIDI tests in CI.** Hosted Linux runners have no ALSA sequencer by default.
 
 ## Open points
 
