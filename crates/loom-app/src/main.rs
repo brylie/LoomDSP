@@ -282,6 +282,14 @@ enum Message {
     Undo,
     /// Replay the step undo took back.
     Redo,
+    /// An exact parameter value, in the parameter's units, sent as a knob
+    /// turn is. The control channel's `set` with a `value` uses it, so the
+    /// stored number is the one sent and not a round trip through a position.
+    ParamValue {
+        module: u32,
+        index: usize,
+        value: f32,
+    },
     /// An inspector slider was let go.
     SliderReleased,
     /// Open or close the **Add modulation** list under a parameter.
@@ -1319,6 +1327,17 @@ impl App {
     /// A switch to momentary also clears that button's gate. Both writes go
     /// in one step, so a full command queue leaves the mode and the gate as
     /// they were.
+    /// Sets a parameter as a knob turn does. A slider sends no start, so its
+    /// first change opens the gesture and letting go closes it.
+    fn turn_param(&mut self, module: u32, index: usize, value: f32) {
+        if !self.gesture {
+            self.gesture = true;
+            self.slider_gesture = true;
+        }
+        self.begin_edit();
+        self.set_param(module, index, value);
+    }
+
     fn set_param(&mut self, module: u32, index: usize, value: f32) {
         let changes = self
             .controller
@@ -1767,21 +1786,25 @@ impl App {
                 index,
                 position,
             } => {
-                if let Some(spec) = self
+                let value = self
                     .controller
                     .graph()
                     .node(ModuleId(module))
                     .and_then(|n| n.descriptor.params.get(index))
-                {
-                    let value = spec.denormalize(position);
-                    // A slider sends no start. Its first change opens the
-                    // gesture, and letting go closes it.
-                    if !self.gesture {
-                        self.gesture = true;
-                        self.slider_gesture = true;
-                    }
-                    self.begin_edit();
-                    self.set_param(module, index, value);
+                    .map(|spec| spec.denormalize(position));
+                if let Some(value) = value {
+                    self.turn_param(module, index, value);
+                }
+            }
+            Message::ParamValue { module, index, value } => {
+                let value = self
+                    .controller
+                    .graph()
+                    .node(ModuleId(module))
+                    .and_then(|n| n.descriptor.params.get(index))
+                    .map(|spec| spec.clamp(value));
+                if let Some(value) = value {
+                    self.turn_param(module, index, value);
                 }
             }
             Message::SliderReleased => self.close_slider_gesture(),
