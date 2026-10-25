@@ -140,9 +140,9 @@ impl Lfo {
 
     /// The wave at phase `p` in `[0, 1)`. Every shape crosses 0 going up at
     /// phase 0, so a sine and a triangle line up.
-    fn wave(&self, p: f64) -> f32 {
+    fn wave(shape: u8, p: f64) -> f32 {
         let fract = |x: f64| x - x.floor();
-        let value = match self.shape {
+        let value = match shape {
             0 => (TAU * p).sin(),
             1 => 1.0 - 4.0 * (fract(p + 0.25) - 0.5).abs(),
             2 => 2.0 * fract(p + 0.5) - 1.0,
@@ -161,19 +161,25 @@ impl Lfo {
 
 impl Module for Lfo {
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let rate_mod = io.modulated(1);
+        let (sync_mod, rate_mod, cycles_mod, shape_mod) =
+            (io.modulated(0), io.modulated(1), io.modulated(2), io.modulated(3));
         let ([phase_in], [out, out90, phase_out]) = io.split::<1, 3>();
         for i in 0..out.len() {
+            // Modulated values count for this frame only, so removing an
+            // assignment returns to the base value in the field.
+            let synced = sync_mod.map_or(self.synced, |s| s[i] >= 0.5);
+            let cycles = cycles_mod.map_or(self.cycles, |s| f64::from(s[i].round().max(1.0)));
+            let shape = shape_mod.map_or(self.shape, |s| s[i].round().max(0.0) as u8);
             let rate = f64::from(if let Some(samples) = rate_mod {
                 let _ = self.rate.tick();
                 samples[i]
             } else {
                 self.rate.tick()
             });
-            let p = if self.synced {
+            let p = if synced {
                 // `cycles` waves per input cycle. A whole number keeps the
                 // wave continuous where the input wraps.
-                let x = f64::from(phase_in[i]) * self.cycles;
+                let x = f64::from(phase_in[i]) * cycles;
                 if x.is_finite() { x - x.floor() } else { 0.0 }
             } else {
                 // The wave starts at phase 0, then the phase moves on.
@@ -182,9 +188,9 @@ impl Module for Lfo {
                 self.phase -= self.phase.floor();
                 p
             };
-            out[i] = self.wave(p);
+            out[i] = Self::wave(shape, p);
             let ahead = p + 0.25;
-            out90[i] = self.wave(ahead - ahead.floor());
+            out90[i] = Self::wave(shape, ahead - ahead.floor());
             phase_out[i] = p as f32;
         }
     }

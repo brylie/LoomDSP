@@ -480,9 +480,12 @@ impl Noise {
 
 impl Module for Noise {
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let seed = io.modulated(0);
+        let (seed, colour_mod) = (io.modulated(0), io.modulated(1));
         let ([], [out]) = io.split::<0, 1>();
         for (i, out) in out.iter_mut().enumerate() {
+            // The colour counts for this frame only; the base stays in the
+            // field, so removing an assignment returns to it.
+            let colour = colour_mod.map_or(self.colour, |s| s[i].round().max(0.0) as u8);
             // Restart the pattern when the seed in use changes, including
             // back to the base when an assignment is removed.
             let next = seed.map_or(self.seed, |samples| samples[i].round().max(1.0) as u32);
@@ -491,7 +494,7 @@ impl Module for Noise {
                 self.restart(next);
             }
             let white = Self::next_white(&mut self.state);
-            *out = match self.colour {
+            *out = match colour {
                 0 => white,
                 1 => self.pink(white),
                 _ => {

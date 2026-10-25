@@ -383,8 +383,13 @@ impl PhaseScale {
 
 impl Module for PhaseScale {
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        let (multiply_mod, divide_mod) = (io.modulated(0), io.modulated(1));
         let ([phase, reset], [out]) = io.split::<2, 1>();
         for (i, out) in out.iter_mut().enumerate() {
+            // A modulated value counts for this frame only. The base stays
+            // in the field, so removing the assignment returns to it.
+            let multiply = multiply_mod.map_or(self.multiply, |s| s[i].round().max(1.0) as i64);
+            let divide = divide_mod.map_or(self.divide, |s| s[i].round().max(1.0) as i64);
             let p = if phase[i].is_finite() { phase[i] } else { 0.0 };
             // A jump of more than half a cycle is a wrap, as in Phase
             // Trigger. Going forward adds a cycle and going backward takes
@@ -406,8 +411,8 @@ impl Module for PhaseScale {
             // The cycle we are in, among `divide` of them, plus how far
             // through the input cycle we are. Done in f64, so a long run
             // does not lose the fraction.
-            let cycle = self.wraps.rem_euclid(self.divide) as f64;
-            let scaled = (cycle + f64::from(p)) * self.multiply as f64 / self.divide as f64;
+            let cycle = self.wraps.rem_euclid(divide) as f64;
+            let scaled = (cycle + f64::from(p)) * multiply as f64 / divide as f64;
             let wrapped = (scaled - scaled.floor()) as f32;
             // An f32 can round up to exactly 1.
             *out = if wrapped >= 1.0 { 0.0 } else { wrapped };

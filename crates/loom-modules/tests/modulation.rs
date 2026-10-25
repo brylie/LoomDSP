@@ -765,3 +765,69 @@ fn a_full_queue_leaves_the_assignment_unchanged() {
     assert!(parts.controller.set_assignment_enabled(id, false).is_err());
     assert_eq!(*parts.controller.graph().assignment(id).unwrap(), before);
 }
+
+/// Phase Scale reads a modulated `multiply` per frame: a depth of 1 on a
+/// source of 1 takes `multiply` from its base of 1 to its top of 16.
+#[test]
+fn phase_scale_follows_a_modulated_multiply() {
+    let mut parts = engine();
+    let phase = module(&mut parts.controller, "test.linear", "level", 0.3);
+    let amount = module(&mut parts.controller, "test.linear", "level", 1.0);
+    let scale = parts.controller.add_module("loom.phase.scale").unwrap();
+    parts.controller.connect_named(phase, "out", scale, "phase").unwrap();
+    parts
+        .controller
+        .add_assignment_named(amount, "out", scale, "multiply", 1.0)
+        .unwrap();
+    listen(&mut parts.controller, scale, "phase");
+    parts.controller.commit().unwrap();
+    let left = render(&mut parts, 64, 64);
+    // 0.3 times 16 is 4.8, so the phase is 0.8. Unmodulated it would be 0.3.
+    assert!((left[40] - 0.8).abs() < 1e-3, "{}", left[40]);
+}
+
+/// The LFO reads a modulated `cycles` per frame.
+#[test]
+fn lfo_follows_a_modulated_cycles() {
+    let mut parts = engine();
+    let phase = module(&mut parts.controller, "test.linear", "level", 0.1);
+    let amount = module(&mut parts.controller, "test.linear", "level", 1.0);
+    let lfo = module(&mut parts.controller, "loom.mod.lfo", "sync", 1.0);
+    parts.controller.connect_named(phase, "out", lfo, "phase").unwrap();
+    parts
+        .controller
+        .add_assignment_named(amount, "out", lfo, "cycles", 1.0)
+        .unwrap();
+    listen(&mut parts.controller, lfo, "out");
+    parts.controller.commit().unwrap();
+    let left = render(&mut parts, 64, 64);
+    // 16 cycles of a phase of 0.1 is 1.6: a sine at 0.6 of a wave.
+    let expected = (std::f64::consts::TAU * (f64::from(0.1_f32) * 16.0).fract()).sin() as f32;
+    assert!((left[40] - expected).abs() < 1e-3, "{} vs {expected}", left[40]);
+}
+
+/// Noise reads a modulated `colour` per frame: a white noise modulated up to
+/// brown sounds exactly like brown noise at the same seed.
+#[test]
+fn noise_follows_a_modulated_colour() {
+    let brown = {
+        let mut parts = engine();
+        let noise = module(&mut parts.controller, "loom.osc.noise", "colour", 2.0);
+        listen(&mut parts.controller, noise, "out");
+        parts.controller.commit().unwrap();
+        render(&mut parts, 128, 128)
+    };
+    let modulated = {
+        let mut parts = engine();
+        let amount = module(&mut parts.controller, "test.linear", "level", 1.0);
+        let noise = parts.controller.add_module("loom.osc.noise").unwrap();
+        parts
+            .controller
+            .add_assignment_named(amount, "out", noise, "colour", 1.0)
+            .unwrap();
+        listen(&mut parts.controller, noise, "out");
+        parts.controller.commit().unwrap();
+        render(&mut parts, 128, 128)
+    };
+    assert_eq!(modulated, brown);
+}
