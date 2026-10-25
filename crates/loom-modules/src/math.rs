@@ -101,7 +101,7 @@ pub static MUL: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Multiply",
     category: "Math",
-    description: "Multiplies two signals and a gain. Use it as a VCA or ring modulator.",
+    description: "Multiplies two signals and a gain. Use it as a ring modulator. To control loudness, use Amplifier.",
     inputs: &[
         PortSpec {
             name: "a",
