@@ -542,7 +542,18 @@ mod tests {
         assert!(stats.playing);
         assert!(stats.label.contains("clock"), "{stats:?}");
         assert_eq!(stats.dropouts, 0);
-        assert_eq!(stats, app.stats_model(), "the bar and the snapshot read one model");
+        // The fake clock plays on its own thread, so the load can move
+        // between the two reads. Everything else must match.
+        let steady = |s: &Stats| Stats {
+            load: 0.0,
+            max_load: 0.0,
+            ..s.clone()
+        };
+        assert_eq!(
+            steady(&stats),
+            steady(&app.stats_model()),
+            "the bar and the snapshot read one model"
+        );
         assert!(stats.load_text().starts_with("load "), "{}", stats.load_text());
     }
 }
