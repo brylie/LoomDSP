@@ -85,7 +85,7 @@ If loading fails, the old patch stays running and untouched. The new engine is b
 - **Starting folder:** the folder of the current file; otherwise the user's Documents folder. The app does not remember a folder across runs in this version.
 - Save As to an existing file uses the dialog's own overwrite confirmation.
 - Save writes the patch where it was opened, except for examples (next).
-- **Examples open as copies** ([#182](https://github.com/brylie/LoomDSP/issues/182)). A file whose path has a folder named `examples` opens as an untitled patch with that content, named "<name> (example)" in the title. It is clean until edited. Save asks for a place, as Save As does, starting in the Documents folder. This applies to File > Open, a path given on the command line, and the control channel's `open`. *Why:* examples are templates. Saving over one rewrites the file as canonical RON, which drops its comments (`Patch::to_ron` does not keep them) and leaves a diff in the repository. Keeping comments would need a comment-preserving RON editor, which is out of scope. To change an example on purpose, use Save As and choose the same path. The `<name>.saved.ron` behaviour went away earlier.
+- **Examples open as copies** ([#182](https://github.com/brylie/LoomDSP/issues/182)). A file inside the app's **bundled examples folder** opens as an untitled patch with that content, named "<name> (example)" in the title. That folder is `examples/patches` of the repository when the app runs from a checkout, and the `examples` folder shipped inside the release bundle otherwise. A file anywhere else is the player's own, even in a folder called `examples`, and Save writes it as usual. The app finds the folder once at start, and tests give it a temporary one. The copy is clean until edited. Save asks for a place, as Save As does, starting in the Documents folder. This applies to File > Open, a path given on the command line, and the control channel's `open`. *Why:* examples are templates. Saving over one rewrites the file as canonical RON, which drops its comments (`Patch::to_ron` does not keep them) and leaves a diff in the repository. Matching the bundled folder, and not any folder name, keeps a player's own `~/Music/examples/set.ron` working with plain Save. Keeping comments would need a comment-preserving RON editor, which is out of scope. To change an example on purpose, use Save As and choose the same path. The `<name>.saved.ron` behaviour went away earlier.
 
 ### When something fails
 
@@ -120,7 +120,8 @@ A failed save keeps the unsaved mark. A save writes to a temporary file in the s
 - [ ] Given a read-only target, when saved, then the message appears and the mark stays.
 - [ ] After Open, undo is disabled, and the lights and meters show the new patch (manual check).
 - [ ] Saving does not leave a `*.saved.ron` file next to examples.
-- [ ] Opening a file under an `examples` folder gives an untitled patch with its content, and Save asks for a place. The example file is unchanged (test with a temporary `examples` folder). Closing the window after opening one asks nothing.
+- [ ] Opening a file inside the bundled examples folder gives an untitled patch with its content, and Save asks for a place. The example file is unchanged (test with a temporary examples folder). Closing the window after opening one asks nothing.
+- [ ] Opening a file in some other folder that happens to be named `examples` is not a copy, and Save writes it in place (test).
 - [ ] `cargo deny check` passes with the dialog crate on macOS, Windows, and Linux (CI).
 
 ## Out of scope
