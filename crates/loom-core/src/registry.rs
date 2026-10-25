@@ -127,17 +127,16 @@ impl Registry {
         // The compiler binds input defaults only for DSP modules. On a unit
         // delay or an audio output, an unconnected input reads 0, so any
         // other default would be accepted and then silently ignored.
-        if matches!(descriptor.role, ModuleRole::UnitDelay | ModuleRole::AudioOutput) {
-            if let Some(port) = descriptor
+        if matches!(descriptor.role, ModuleRole::UnitDelay | ModuleRole::AudioOutput)
+            && let Some(port) = descriptor
                 .inputs
                 .iter()
                 .find(|port| port.default != PortDefault::Value(0.0))
-            {
-                return Err(invalid(&format!(
-                    "input \"{}\" has a default that the engine ignores: only DSP modules can have a non-zero or transport default",
-                    port.name
-                )));
-            }
+        {
+            return Err(invalid(&format!(
+                "input \"{}\" has a default that the engine ignores: only DSP modules can have a non-zero or transport default",
+                port.name
+            )));
         }
         // Only DSP modules have a `Module` instance, so only they can read
         // parameters or publish display values. On any other role they would
