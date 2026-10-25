@@ -56,6 +56,15 @@ const fn mixer_mute(name: &'static str, label: &'static str) -> ParamSpec {
 /// Number of inputs on the mixer.
 const MIXER_INPUTS: usize = 4;
 
+/// The open state (1 open, 0 muted) for a modulated mute value.
+///
+/// From 0.5 up is muted, as a whole-number parameter rounds. NaN counts as
+/// open. *Why:* a NaN handed to the smoother would stay in its target for
+/// good, and the mixer would stay NaN until it was reset.
+fn open_state(mute: f32) -> f32 {
+    if mute >= 0.5 { 0.0 } else { 1.0 }
+}
+
 /// `loom.mix.mixer` (MT-MIX-01): four inputs, each with a level and a mute.
 pub static MIXER: ModuleDescriptor = ModuleDescriptor {
     id: "loom.mix.mixer",
@@ -145,7 +154,7 @@ impl Module for Mixer {
             for n in 0..MIXER_INPUTS {
                 // The smoother glides to the wanted state, so a modulated
                 // mute fades like a knob mute does.
-                let want = mute_mod[n].map_or(self.open_base[n], |s| 1.0 - s[i].round().clamp(0.0, 1.0));
+                let want = mute_mod[n].map_or(self.open_base[n], |s| open_state(s[i]));
                 if want != self.open[n].target() {
                     self.open[n].set_target(want);
                 }
@@ -282,6 +291,8 @@ impl Module for Crossfade {
                 self.mix.tick()
             }
             .clamp(0.0, 1.0);
+            // `clamp` passes NaN through. Use the middle for that frame.
+            let mix = if mix.is_nan() { 0.5 } else { mix };
             let (gain_a, gain_b) = if linear {
                 (1.0 - mix, mix)
             } else {
@@ -351,6 +362,17 @@ mod tests {
         );
         // 1.0 * 0.5 + 0.25 * 2.0 + 0.1 * 1.0 = 1.1
         assert!(out.iter().all(|v| (v - 1.1).abs() < 1e-6), "{out:?}");
+    }
+
+    /// A modulated mute from 0.5 up is muted; below it, and NaN, is open.
+    #[test]
+    fn modulated_mute_maps_nan_to_open() {
+        assert_eq!(open_state(0.0), 1.0);
+        assert_eq!(open_state(0.49), 1.0);
+        assert_eq!(open_state(0.5), 0.0);
+        assert_eq!(open_state(3.0), 0.0);
+        assert_eq!(open_state(f32::NAN), 1.0);
+        assert_eq!(open_state(f32::NEG_INFINITY), 1.0);
     }
 
     /// A mute fades over 5 ms instead of cutting (no click).
