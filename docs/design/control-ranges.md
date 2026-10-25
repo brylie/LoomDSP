@@ -3,7 +3,7 @@
 A choice of ranges for wide controls, such as Multiply's gain, so a player can make a knob fine and safe for the job it does in a patch.
 
 - **Kind:** living specification.
-- **Status:** Draft
+- **Status:** Agreed ([#122](https://github.com/brylie/LoomDSP/issues/122)). Not built.
 - **Decision behind it:** none yet. It extends [parameter mapping](modulation.md#parameter-mapping) (Agreed) and does not change a decision.
 - **Use case and requirements:** FR-MOD-09 (proposed here), FR-MOD-03, FR-MOD-08, FR-SIG-03.
 - **Background:** none yet. A short explainer on why feedback FM turns to noise at high depth would help (see Open points).
@@ -58,7 +58,7 @@ PatchModule(id: 5, kind: "loom.math.mul@1", params: {"gain": 0.08}, ranges: {"ga
 ## Acceptance criteria
 
 - [ ] The registry refuses a range outside the parameter's `min` and `max`, a range with `min >= max`, a default range not in the list, a default value outside the default range, and ranges on a logarithmic or whole-number parameter.
-- [ ] Add `offset`, Multiply `gain`, and Constant `value` offer the seven ranges in the table, with the default range from Open points (provisionally -1 to 1, to confirm before this spec is Agreed).
+- [ ] Add `offset`, Multiply `gain`, and Constant `value` offer the seven ranges in the table, with the default range from Open points (-1 to 1).
 - [ ] `normalize` and `denormalize` with a selected range map its bounds to positions 0 and 1, and clamp out-of-range values and NaN as they do today.
 - [ ] Selecting a smaller range clamps the value into it. Selecting a wider range leaves the value unchanged.
 - [ ] The tile knob and the inspector slider span the selected range. Keyboard steps are 1% and 0.1% of it.
@@ -78,8 +78,9 @@ PatchModule(id: 5, kind: "loom.math.mul@1", params: {"gain": 0.08}, ranges: {"ga
 
 ## Open points
 
-- **Default range.** Leaning: -1 to 1 for all three parameters. It is safe and fits pitch and audio. Multiply's default gain of 1 then sits at the top of the knob. The alternative, -10 to 10, keeps today's feel but is not safe by default.
-- **Rule 6 needs agreement.** It is the current leaning, with its reason, and should be confirmed before building.
+- **Default range: -1 to 1** for all three parameters (decided in [#122](https://github.com/brylie/LoomDSP/issues/122)). It is safe and fits pitch and audio. Multiply's default gain of 1 sits at the top of the knob, which is the natural place for "unity". *Why not -10 to 10:* it keeps today's feel but is not safe by default, which is the reason for this spec.
+- **Rule 6 is confirmed:** a smaller range clamps the value, a wider range keeps it.
+- **Clamp and Scale** ([P1 modules](p1-modules.md)) offer the same list for their limits and offset.
 - **Ranges from what is connected.** Could a range follow the signals around the module? [Port ranges](port-ranges.md) (Draft) proposes that ports declare nominal ranges and that the inspector offers a one-click **Match** for the Range selector. It never changes a range or value on its own, because that would break rules 6 and 7 here. Nothing in this spec waits for it.
 - **Other parameters.** Phase `tune` and `octave` are already in musical units and probably need no ranges. Check each new module as it comes.
 - **Explainer.** "Why feedback FM turns to noise", in `docs/learn/`: exponential pitch, the one-sample loop, aliasing above Nyquist, and how phase feedback (as on the DX7) differs from pitch feedback.

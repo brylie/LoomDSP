@@ -48,7 +48,7 @@ Timing is phase-driven: a ramp from 0 to 1 sets where in a cycle a module is ([P
 | MT-PHASE-04 | Phase reset | Restarts a phase at zero on a trigger. | | P2 | FR-LIB-01 | Planned |
 | MT-PHASE-05 | Phase warp | Changes how a phase moves within each cycle without changing its period: offset, bend, S-curve, skew, reverse, mirror, and smoothing that keeps the wrap point. | | P2 | FR-LIB-01 | Planned |
 | MT-PHASE-06 | Phase split | Divides one cycle into N parts and outputs a phase for each part. | | P3 | New | Planned |
-| MT-PHASE-08 | Phase wrap and fold | Brings any signal into the 0 to 1 phase range, by wrapping it around or by folding it back at the edges. | | P1 | FR-LIB-01 | Planned |
+| MT-PHASE-08 | Phase wrap and fold | Brings any signal into the 0 to 1 phase range, by wrapping it around or by folding it back at the edges. | | P1 | FR-LIB-01 | Specified (`loom.phase.wrap`, [P1 modules](../design/p1-modules.md)) |
 | MT-PHASE-07 | Span phase | A phase that covers N bars and is anchored to bar 1, so it has the same value at the same musical time after any jump. | | P3 | New | Planned |
 
 ## Sound sources
@@ -90,8 +90,8 @@ Sampling is built from small parts, so one set of primitives covers one-shot pla
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
 | MT-FILTER-01 | State variable filter | A resonant filter with low-pass, high-pass, band-pass, and notch outputs at once. | Character | P1 | FR-LIB-03 | Built in part (`loom.filter.svf`: no notch output yet) |
-| MT-FILTER-02 | Ladder low-pass | A four-pole resonant low-pass with saturation in its feedback path. | Character, Quality | P1 | FR-LIB-03 | Planned |
-| MT-FILTER-03 | One-pole filter | First-order low-pass and high-pass, for smoothing and gentle tone control. | | P1 | FR-LIB-03 | Planned |
+| MT-FILTER-02 | Ladder low-pass | A four-pole resonant low-pass with saturation in its feedback path. | Character, Quality | P1 | FR-LIB-03 | Specified (`loom.filter.ladder`, [P1 modules](../design/p1-modules.md)) |
+| MT-FILTER-03 | One-pole filter | First-order low-pass and high-pass, for smoothing and gentle tone control. | | P1 | FR-LIB-03 | Specified (`loom.filter.onepole`, [P1 modules](../design/p1-modules.md)) |
 | MT-FILTER-04 | Slope filter | Low-pass, high-pass, or all-pass with a selectable steepness. | | P2 | FR-LIB-03 | Planned |
 | MT-FILTER-05 | Comb filter | A tuned delay with feedback that boosts or cuts a harmonic series. | | P2 | FR-LIB-15 | Planned |
 | MT-FILTER-06 | Low-pass gate | A filter and an amplifier closed together by one control, for plucked and percussive tones. | Character | P2 | New | Planned |
@@ -117,13 +117,13 @@ Modulation assignments already scale and offset any parameter (ADR-0014), so the
 
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
-| MT-LEVEL-01 | Constant | Outputs a fixed value in a chosen unit: level, decibels, pitch, ratio, or plain number. | Smoothing | P1 | FR-LIB-05 | Built in part (`loom.math.constant`: plain number only, no unit choice) |
+| MT-LEVEL-01 | Constant | Outputs a fixed value in a chosen unit: a plain number, decibels (as a level), or pitch. Built as one module per unit. | Smoothing | P1 | FR-LIB-05 | Built in part (`loom.math.constant`: plain number only). Specified in [P1 modules](../design/p1-modules.md#constant-family-mt-level-01): `loom.level.constant`, `loom.pitch.constant`. Ratio is withdrawn from this entry |
 | MT-LEVEL-02 | Amplifier | Scales a signal by a control signal, with linear or exponential response. | | P1 | FR-LIB-05 | Built (`loom.level.amp`) |
-| MT-LEVEL-03 | Scale | Multiplies by a factor from -1 to +1 (so it can invert) and adds an offset, or maps one range onto another, including bipolar to unipolar and back. | | P1 | FR-LIB-05 | Planned |
-| MT-LEVEL-04 | Slew | Limits how fast a signal can rise or fall, with separate times for each direction. | | P1 | FR-LIB-04 | Planned |
-| MT-LEVEL-05 | Clamp | Keeps a signal between a lower and an upper limit. | | P1 | FR-LIB-05 | Planned |
-| MT-MIX-01 | Mixer | Sums several inputs, with level, pan, and mute per channel. At unity gain it is a quick merge. P1 builds level and mute. Pan comes later, with stereo signals. | | P1 | FR-LIB-05 | Planned |
-| MT-MIX-02 | Crossfade | Blends two signals by a control, with an equal-power or linear law. | | P1 | FR-LIB-05 | Planned |
+| MT-LEVEL-03 | Scale | Multiplies by a factor from -1 to +1 (so it can invert) and adds an offset, or maps one range onto another, including bipolar to unipolar and back. | | P1 | FR-LIB-05 | Specified (`loom.level.scale`, [P1 modules](../design/p1-modules.md)) |
+| MT-LEVEL-04 | Slew | Limits how fast a signal can rise or fall, with separate times for each direction. | | P1 | FR-LIB-04 | Specified (`loom.level.slew`, [P1 modules](../design/p1-modules.md)) |
+| MT-LEVEL-05 | Clamp | Keeps a signal between a lower and an upper limit. | | P1 | FR-LIB-05 | Specified (`loom.level.clamp`, [P1 modules](../design/p1-modules.md)) |
+| MT-MIX-01 | Mixer | Sums several inputs, with level, pan, and mute per channel. At unity gain it is a quick merge. P1 builds level and mute. Pan comes later, with stereo signals. | | P1 | FR-LIB-05 | Specified (`loom.mix.mixer`, [P1 modules](../design/p1-modules.md)) |
+| MT-MIX-02 | Crossfade | Blends two signals by a control, with an equal-power or linear law. | | P1 | FR-LIB-05 | Specified (`loom.mix.crossfade`, [P1 modules](../design/p1-modules.md)) |
 | MT-MIX-03 | Stereo tool | Pans, sets width, converts between left/right and mid/side, and splits or joins channels. P1 builds join and split. Pan, width, and mid/side come later. | | P1 | FR-SIG-07 | Planned |
 | MT-ROUTE-01 | Selector | Picks one of N inputs. It steps to the next on a trigger, jumps to the input a control value points at, or picks at random. | Seed, Smoothing | P2 | New | Planned |
 | MT-ROUTE-02 | Distributor | Sends one input to one of N outputs, with the same three ways to choose. | Seed | P2 | New | Planned |
@@ -144,12 +144,12 @@ Modulation assignments already scale and offset any parameter (ADR-0014), so the
 
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
-| MT-ENV-01 | Envelope | Shapes a level from a gate or trigger: AD, AR, ADSR, and ADSR with delay and hold, with curve control and an optional loop. The character trait gives plucked and slow, lagging responses. | Timebase, Character | P1 | FR-LIB-04 | Built in part (`loom.env.adsr`) |
+| MT-ENV-01 | Envelope | Shapes a level from a gate or trigger: AD, AR, ADSR, and ADSR with delay and hold, with curve control and an optional loop. The character trait gives plucked and slow, lagging responses. | Timebase, Character | P1 | FR-LIB-04 | Built in part (`loom.env.adsr`). AD mode specified in [P1 modules](../design/p1-modules.md#envelope-ad-mode-mt-env-01): renamed `loom.env.envelope` |
 | MT-ENV-02 | Segment envelope | An envelope drawn as any number of points, with a hold point or a loop between two points. Uses the shared curve data. | Timebase, Retrigger | P2 | FR-LIB-12 | Planned |
 | MT-ENV-03 | Function generator | A rise and a fall that can be triggered once, looped, or used to slew an input. | Timebase | P2 | New | Planned |
 | MT-ENV-04 | Envelope follower | Outputs the loudness of an audio signal as a control signal. | Sidechain | P2 | FR-LIB-12 | Planned |
 | MT-ENV-05 | Slope detector | Outputs whether a signal is rising, falling, or still. | | P4 | New | Planned |
-| MT-MOD-01 | LFO | A slow periodic signal, free or synced, with extra outputs at fixed phase offsets. The shape comes from the shape source trait. | Shape source, Timebase, Retrigger, Spread | P1 | FR-LIB-04 | Planned |
+| MT-MOD-01 | LFO | A slow periodic signal, free or synced, with extra outputs at fixed phase offsets. The shape comes from the shape source trait. | Shape source, Timebase, Retrigger, Spread | P1 | FR-LIB-04 | Specified (`loom.mod.lfo`, [P1 modules](../design/p1-modules.md)) |
 | MT-MOD-02 | Curve reader | Reads the shared curve data in one of three ways: by phase (it repeats), by time over seconds or bars (it runs once), or by value (it maps an input to an output). This one type covers drawn LFOs, section curves, velocity curves, and keytracking curves. | Timebase, Retrigger | P2 | FR-LIB-12, FR-LIB-16 | Planned |
 | MT-MOD-03 | Note values | Turns note information into control signals: keytracking, note count, and one gate per pitch class. | | P2 | FR-LIB-12 | Planned |
 | MT-MOD-04 | Vibrato (abstraction) | An LFO with a delay and a fade-in, scaled by mod wheel or pressure. | | P2 | FR-LIB-12 | Planned |
@@ -161,7 +161,7 @@ All random modules take a seed, so a patch sounds the same each time it loads (N
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
 | MT-RAND-01 | Random | A new random value on each trigger, within a range. In walk mode it moves by small steps instead, in one or two dimensions. | Seed, Smoothing | P2 | FR-LIB-12 | Planned |
-| MT-RAND-02 | Sample and hold | Captures the input on a trigger and holds it, or follows the input while a gate is high. | | P1 | FR-LIB-04 | Planned |
+| MT-RAND-02 | Sample and hold | Captures the input on a trigger and holds it, or follows the input while a gate is high. | | P1 | FR-LIB-04 | Specified (`loom.rand.sample-hold`, [P1 modules](../design/p1-modules.md)) |
 | MT-RAND-03 | Chance | Passes each trigger with a set probability, or sends it to output A or B by chance. Several lanes in one module. | Seed | P2 | FR-LIB-22 | Planned |
 
 ## Math and logic
@@ -172,9 +172,9 @@ All random modules take a seed, so a patch sounds the same each time it loads (N
 | MT-MATH-02 | Function | Applies one chosen function: power, root, exponential, logarithm, rounding, absolute value and sign, minimum, maximum, mean, or trigonometry. The tile shows the symbol. | | P2 | New | Planned |
 | MT-MATH-03 | Convert | Converts between units: linear and decibels, frequency and pitch. | | P1 | FR-SIG-05 | Built (`loom.math.convert`: dB, level, pitch, Hz; limits are -120 to 120 dB, 0.001 Hz, and pitch 1.0) |
 | MT-MATH-04 | Expression | Evaluates a short typed formula on its inputs. The formula is data, parsed and checked when the patch loads, never run as code (vision, principle 7). | | P4 | New | Planned |
-| MT-LOGIC-01 | Compare | Outputs a gate when one signal is above, below, or equal to another, inside a window, or on a rising or falling edge. P1 builds above and below. The other modes come later. | | P1 | FR-LIB-05 | Planned |
-| MT-LOGIC-02 | Logic | AND, OR, NOT, XOR, and their inverses, on two or more gates. | | P1 | FR-LIB-05 | Planned |
-| MT-LOGIC-03 | Memory | Stores a gate state: set and reset, toggle, data on a clock, and a latch that cycles through N states. | | P1 | FR-LIB-05 | Planned |
+| MT-LOGIC-01 | Compare | Outputs a gate when one signal is above, below, or equal to another, inside a window, or on a rising or falling edge. P1 builds above and below. The other modes come later. | | P1 | FR-LIB-05 | Specified (`loom.logic.compare`, [P1 modules](../design/p1-modules.md)) |
+| MT-LOGIC-02 | Logic | AND, OR, NOT, XOR, and their inverses, on two or more gates. | | P1 | FR-LIB-05 | Specified (`loom.logic.logic`, [P1 modules](../design/p1-modules.md)) |
+| MT-LOGIC-03 | Memory | Stores a gate state: set and reset, toggle, data on a clock, and a latch that cycles through N states. | | P1 | FR-LIB-05 | Specified (`loom.logic.memory`, [P1 modules](../design/p1-modules.md)) |
 | MT-LOGIC-04 | Counter | Counts triggers from 0 to N-1, outputs the count as a phase, and fires when it wraps. Covers countdowns and "after N times". | | P3 | FR-LIB-22 | Specified |
 | MT-LOGIC-05 | Step select | N gate outputs, one high at a time, chosen by a phase. | | P3 | FR-LIB-22 | Specified |
 | MT-LOGIC-06 | Shift register | Passes values or gates down a chain of stages on each clock. | | P3 | New | Planned |
@@ -263,7 +263,7 @@ These depend on how notes travel on cables (OQ-16).
 
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
-| MT-VIEW-01 | Probe | Shows signals on the tile: over time (scope), one against another (XY), or as a number in chosen units. | | P1 | FR-LIB-17 | Scope mode built (`loom.display.scope`, [panels](../design/panels.md#scope-module)); trace drawing in #62 |
+| MT-VIEW-01 | Probe | Shows signals on the tile: over time (scope), one against another (XY), or as a number in chosen units. | | P1 | FR-LIB-17 | Scope mode built (`loom.display.scope`, [panels](../design/panels.md#scope-module)); trace drawing specified in [panels](../design/panels.md#drawing-the-scope-trace). XY mode specified as `loom.display.xy` ([panel widgets](../design/panel-widgets.md#xy-scope)) |
 | MT-VIEW-02 | Level meter | Shows peak and average level. | | P1 | FR-LIB-17 | Built (`loom.display.meter`) |
 | MT-VIEW-03 | Spectrum | Shows the frequency content of a signal. | | P2 | FR-LIB-17 | Planned |
 | MT-VIEW-04 | Note monitor | Shows incoming notes and controller values, for checking a setup. | | P2 | New | Planned |
@@ -298,9 +298,9 @@ These depend on how notes travel on cables (OQ-16).
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
 | MT-IO-01 | Audio output | Sends a signal to an interface channel or host output. | | P0 | FR-LIB-07 | Built (`loom.io.audio-out`) |
-| MT-IO-02 | Audio input | Brings audio from an interface channel or host input into the patch. | | P1 | FR-LIB-07 | Planned |
+| MT-IO-02 | Audio input | Brings audio from an interface channel or host input into the patch. | | P1 | FR-LIB-07 | Specified (`loom.io.audio-in`, [audio input](../design/audio-input.md)) |
 | MT-IO-03 | Note input | Turns incoming notes into gate, pitch, and velocity signals, per voice. | | P0 | FR-LIB-07 | Built in part (`loom.midi.note`: one voice; per-voice output comes with polyphony in P2) |
-| MT-IO-04 | Controller input | Outputs a chosen MIDI controller, pitch bend, or aftertouch as a signal. | Smoothing | P1 | FR-LIB-07 | Planned |
+| MT-IO-04 | Controller input | Outputs a chosen MIDI controller, pitch bend, or aftertouch as a signal. | Smoothing | P1 | FR-LIB-07 | Specified (`loom.midi.controller`, [P1 modules](../design/p1-modules.md#controller-input-mt-io-04)) |
 | MT-IO-05 | Expression input | Outputs per-note pressure, timbre, and slide as signals. | | P2 | FR-VOICE-04 | Planned |
 | MT-IO-06 | Note output | Builds outgoing notes from gate, pitch, and velocity signals. | | P2 | FR-MIDI-04 | Planned |
 | MT-IO-07 | Controller output | Sends a signal out as a MIDI controller value. | | P2 | FR-MIDI-04 | Planned |

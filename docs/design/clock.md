@@ -3,7 +3,7 @@
 How musical time reaches every module: the patch transport, inputs that follow it without cables, and the modules that put time on cables and divide it.
 
 - **Kind:** living specification.
-- **Status:** Sections have their own status. **Implemented** for the engine slice ([#72](https://github.com/brylie/LoomDSP/issues/72)): the transport fields, signals derived from the transport, default inputs, rules 1 to 6 (except saving run state, which needs the Transport module), and engine and API. Also **Implemented**: the Clock Divide ([#48](https://github.com/brylie/LoomDSP/issues/48)) and Phase Trigger modules. Everything else is Draft: review it before building.
+- **Status:** Sections have their own status. **Implemented** for the engine slice ([#72](https://github.com/brylie/LoomDSP/issues/72)): the transport fields, signals derived from the transport, default inputs, rules 1 to 6 (except saving run state, which needs the Transport module), and engine and API. Also **Implemented**: the Clock Divide ([#48](https://github.com/brylie/LoomDSP/issues/48)) and Phase Trigger modules. The Transport ([#73](https://github.com/brylie/LoomDSP/issues/73)), Clock ([#74](https://github.com/brylie/LoomDSP/issues/74)), and Phase Scale ([#31](https://github.com/brylie/LoomDSP/issues/31)) modules, and rules 10 and 11, are **Agreed**. The Button's hold moves to a transient parameter (see Button details). The clock mark on ports is Agreed in [panels](panels.md#clock-mark-on-transport-inputs). The rest is Draft.
 - **Decision behind it:** [ADR-0015](../adr/0015-one-transport-per-patch.md) (one transport per patch). Builds on [ADR-0007](../adr/0007-polymorphic-signal-model.md) (phase and gate signals) and [ADR-0012](../adr/0012-arrangement-from-phase-driven-primitives.md) (arrangement from phase).
 - **Requirements:** FR-LIB-07, FR-LIB-16, FR-LIB-22, FR-LIB-25 to FR-LIB-27, FR-MIDI-07.
 - **Background:** [Phase and cycles](../learn/phase-and-cycles.md) explains phase signals and how the end of a cycle is found.
@@ -16,7 +16,7 @@ How musical time reaches every module: the patch transport, inputs that follow i
 
 ## The transport
 
-**Status:** the fields table is Implemented. "Controls live on the Transport module" and "Starting and stopping" are Draft ([#73](https://github.com/brylie/LoomDSP/issues/73)).
+**Status:** the fields table is Implemented. "Controls live on the Transport module" and "Starting and stopping" are Agreed ([#73](https://github.com/brylie/LoomDSP/issues/73)).
 
 The engine keeps one transport per patch.
 
@@ -53,7 +53,7 @@ A **Button** module (FR-LIB-12) gives a performance control for this. Its panel 
 
 ## Signals derived from the transport
 
-**Status:** Implemented. The rate phase row belongs to the Clock module ([#74](https://github.com/brylie/LoomDSP/issues/74)) and stays Draft.
+**Status:** Implemented. The rate phase row belongs to the Clock module ([#74](https://github.com/brylie/LoomDSP/issues/74)) and is Agreed.
 
 | Signal | Value |
 |---|---|
@@ -68,7 +68,7 @@ Phases are computed in `f64` and converted to `f32` last. A phase that rounds to
 
 ## Default inputs
 
-**Status:** Implemented, except the clock mark, which is UI work for later and stays Draft.
+**Status:** Implemented, except the clock mark, which is Agreed and not built ([#103](https://github.com/brylie/LoomDSP/issues/103)).
 
 A module can declare a **default** for any input. The default is used while nothing is connected.
 
@@ -79,7 +79,7 @@ A module can declare a **default** for any input. The default is used while noth
 | Playing | The transport's play gate. |
 
 - Connecting a cable replaces the default for that module. Removing the cable brings it back.
-- An input that is following the transport shows a small clock mark next to the port. *Why:* behaviour without a cable must still be visible.
+- An input that is following the transport shows a small clock mark next to the port ([the mark](panels.md#clock-mark-on-transport-inputs)). *Why:* behaviour without a cable must still be visible.
 - The engine computes each transport signal once per block into a shared buffer, and points unconnected inputs at it. *Why:* hundreds of synced modules cost one buffer, not hundreds.
 - The default is part of the module's static descriptor. It does not change with the module's parameters. A module that uses an input only in some modes ignores it in the others. *Why:* the compiler binds inputs when the patch changes, not when a parameter moves, so binding stays off the audio thread.
 - `PortIo::is_connected` still reports cables only. An input that follows its default reports false. *Why:* a module can still tell whether the user patched something, for example to show it or to pick a different behaviour.
@@ -88,15 +88,15 @@ Examples: the LFO's phase input in sync mode defaults to bar phase, with a rate 
 
 ## Modules
 
-**Status:** Clock Divide ([#48](https://github.com/brylie/LoomDSP/issues/48)), Phase Trigger, and Button ([#75](https://github.com/brylie/LoomDSP/issues/75)) are Implemented; see their details below the table. The other modules are Draft.
+**Status:** Clock Divide ([#48](https://github.com/brylie/LoomDSP/issues/48)), Phase Trigger, and Button ([#75](https://github.com/brylie/LoomDSP/issues/75)) are Implemented; see their details below the table. Transport, Clock, and Phase Scale are Agreed, with details below.
 
 | Module | Inputs | Outputs | Parameters | Behaviour |
 |---|---|---|---|---|
-| **Transport** `loom.clock.transport` | run (gate), reset (trigger) | bar phase, beat phase, playing (gate), bar (trigger), beat (trigger), jump (trigger) | tempo, time signature, run | Exactly one per patch, and cannot be deleted. Its panel controls the transport (see above). Jump fires when the position moves by anything other than normal playback (a reset, a host loop). |
+| **Transport** `loom.clock.transport` | run (gate), reset (trigger) | bar phase, beat phase, playing (gate), bar (trigger), beat (trigger), jump (trigger) | tempo, numerator, denominator, run, reset (transient) | Exactly one per patch, and cannot be deleted. Its panel controls the transport (see above). Jump fires when the position moves by anything other than normal playback (a reset, a host loop). |
 | **Clock** `loom.clock.clock` | none | phase, trigger, gate | rate, gate width | A phase at a musical rate: 4 bars, 2 bars, 1 bar, 1/2, 1/4, 1/8, 1/16, 1/32, each straight, dotted, or triplet. Trigger fires on each wrap. Gate is high for the first part of each cycle (gate width, 1 to 99 percent). |
-| **Button** `loom.ui.button` | none | gate | mode (toggle, momentary), on | A large button. The gate equals `on`. Toggle flips `on` on each press. Momentary holds `on` high while the button is held. |
+| **Button** `loom.ui.button` | none | gate | mode (toggle, momentary), on, hold (transient) | A large button. Toggle flips `on` on each press and the gate is `on`. Momentary holds `hold` high while the button is held and the gate is `hold`. |
 | **Clock Divide** `loom.logic.divide` | trigger, reset | trigger | N (1 to 64), offset (0 to N-1) | Counts rising edges. Fires on the triggers numbered N, 2N, 3N after a reset; offset k moves each firing k triggers earlier. With offset N-1 it fires on the first trigger. |
-| **Phase Scale** `loom.phase.scale` | phase, reset | phase | multiply (1 to 16), divide (1 to 16) | Scales a phase by multiply ÷ divide, and stays locked to it. Divide counts the input's wraps, so a divide of 2 wraps once every two input cycles, starting on the same bar. |
+| **Phase Scale** `loom.phase.scale` | phase, reset | phase | multiply (1 to 16), divide (1 to 16) | Scales a phase by multiply ÷ divide, and stays locked to it. Divide counts the input's wraps, so a divide of 2 wraps once every two input cycles, counted from the module's first cycle or its last reset. |
 | **Phase Trigger** `loom.phase.trigger` | phase | trigger | none | Fires a trigger each time the input phase wraps: forward from near 1 to near 0, or backward from near 0 to near 1. Turns any phase into triggers: a scaled phase, an LFO's phase, or the transport's bar phase. |
 
 *Why both Clock Divide and Phase Scale:* triggers are events, for counting and arrangement logic (ADR-0012). Phases are continuous, for anything that should move smoothly and in sync: LFOs, sequencers, cycles. Each domain needs its own divider. Phase Scale also gives polyrhythm: multiply 3, divide 2 plays three against two.
@@ -129,21 +129,21 @@ These details were settled while building the module.
 
 **Status:** Agreed ([#75](https://github.com/brylie/LoomDSP/issues/75)). Code: `loom.ui.button` in `loom-modules/src/ui.rs`, and `WidgetKind::Button` and `ButtonMode` in `loom-core`.
 
-- **Parameters.** `mode` is a whole number: 0 is Toggle (the default), 1 is Momentary. `on` is a whole number, 0 or 1, default 0. Both are saved. The output `gate` equals `on`. `process` ignores `mode`. *Why:* the gesture is what differs. The cable always carries the same gate. The registry requires `mode` to be a whole number from 0 to 1, and a different parameter from the one the button shows.
+- **Parameters.** `mode` is a choice: 0 Toggle (the default), 1 Momentary. `on` is a whole number, 0 or 1, default 0, and is saved: it is the toggle's latch. `hold` is a whole number, 0 or 1, default 0, and is [transient](transient-params.md): it is never saved. The output `gate` is `on` in Toggle mode and `hold` in Momentary mode. `process` reads `mode`. *Why:* the gesture decides which parameter changes, and the module decides which one counts. Keeping the hold out of the file means a patch saved while a button is held loads with the gate low. The registry requires `mode` to be a choice from 0 to 1, and `on` and `hold` to be different parameters from it and from each other.
 - **No extra threshold.** A whole-number parameter is rounded after the clamp ([modulation](modulation.md), rule 5), so the module only sees 0 or 1. The gate is that value, with no smoothing.
-- **Panel.** One button, 6 by 3 grid units, bound to `on`. Its fill shows the gate. Its caption is "On". `mode` stays in the inspector. *Why:* mode is a setup choice. A control for it on the tile would be easy to hit by mistake on a front panel.
+- **Panel.** One button, 6 by 3 grid units, bound to `on` and `hold` (the widget writes the one that its `mode` says). Its fill shows the gate. Its caption is "On". `mode` stays in the inspector. *Why:* mode is a setup choice. A control for it on the tile would be easy to hit by mistake on a front panel.
 - **The canvas reports the gesture.** A press, a release, or an arrow. It does not read `mode`. `ButtonMode` turns that report into a value. *Why:* the canvas reports input (ADR-0010). The same button widget can serve any module, including a later Transport reset.
 - **Toggle.** A press flips `on`. Space or Enter presses it. Arrow keys set 0 or 1, as for a toggle. A release changes nothing. A double-click is two presses, not a reset. *Why press, not release:* the gate should land on the beat. Waiting for release would add the length of the press as delay.
 - **Momentary.** A press sets `on` to 1. A release sets it to 0, including after the pointer has left the button, when another mouse button is pressed, or when the window loses focus. Releasing a mouse button other than the left one does not end a hold the left button is still keeping. Space and Enter are separate holds: each keeps the button high while that key is down, releasing one leaves it high while the other is still down, and pressing either on a different button releases the button that key was holding. The pointer counts as a hold too, so lifting it leaves the gate high while a key is still down, and releasing a key leaves the gate high while the pointer is still down. Arrow keys do nothing. *Why the extra releases:* otherwise the gate stays high with nobody holding it.
 - **The button does not drag the tile.** In both modes, pointer down on the button leaves the tile where it is. Drag the tile from its header.
 - **Key repeat is ignored.** A held key does not flip the gate again.
-- **Switching to Momentary clears the gate.** When a button's `mode` parameter changes to 1, the editor sets the parameter that button shows to 0, in the same step. If the command queue cannot take both writes, it writes neither. Setting Momentary again, while it is already Momentary, does not clear a hold. The rule follows the widget, not one module id. *Why:* the light and the gate must agree. A latched gate with no finger on the button would lie.
+- **Switching mode needs no clearing.** The two modes use different parameters, so a latched `on` does not show as a hold, and a hold does not change the latch. The gate follows the mode at once. *Why:* the old rule (clear `on` when the mode becomes Momentary) existed only because both modes shared one saved parameter ([#161](https://github.com/brylie/LoomDSP/issues/161)).
 - **Space.** When a panel control has keyboard focus, Space and Enter act on that control and do not toggle Run. Space toggles Run only when no panel control is focused: the canvas reports `ToggleRun` and the app calls `Controller::set_running`. A repeated Space does not toggle again. Enter with nothing focused does nothing. *Why:* if both ran, a focused Button patched into run would be asked to change twice. The focused control is the one being played. The canvas consumes the key, so Run's handler, when the Transport module is built ([#73](https://github.com/brylie/LoomDSP/issues/73)), must not also see it.
-- **A saved hold stays on.** If a patch is saved while a momentary button is held, it loads with `on` at 1. The next tap clears it. That takes Space held during a save, so P1 accepts it. A general way to leave a parameter out of the file, if one is ever needed, gets its own spec.
+- **A hold is never saved.** `hold` is transient, so a patch saved while a button is held loads with the gate low, and a hold does not mark the patch changed. A press and a release that land in the same buffer are applied in order, so a very short tap can be missed by the module; this is the commands queue's order and is out of scope.
 
 ## Rules
 
-**Status:** rules 1 to 6 are Implemented in the engine; saving run state in the patch waits for the Transport module ([#73](https://github.com/brylie/LoomDSP/issues/73)). Rules 7 to 9 are Draft.
+**Status:** rules 1 to 6 are Implemented in the engine; saving run state in the patch waits for the Transport module ([#73](https://github.com/brylie/LoomDSP/issues/73)). Rules 7 to 9 are Draft. Rules 10 and 11 are Agreed.
 
 1. **One transport, owned by the engine.** Modules read it; only the transport source changes it. *Why:* every synced module must agree on where the bar starts.
 2. **Position is double precision.** Phases are converted to `f32` only at the end. *Why:* in `f32`, position loses sample accuracy after a few minutes. An hour-long set must stay in step.
@@ -154,6 +154,9 @@ These details were settled while building the module.
 7. **A host or MIDI clock source replaces the internal one completely.** Tempo, play state, and position come from it. *Why:* in a DAW, the patch must follow the song.
 8. **Position jumps fire no skipped triggers.** When the position jumps, bar and beat triggers do not fire for the bars that were skipped, and the jump trigger fires once. *Why:* a host looping four bars must not burst out dozens of triggers.
 9. **Sub-patches share the patch transport.** A sub-patch can take a different phase through an input. *Why:* one time base, but time can still be bent by patching.
+
+10. **A time signature change is a jump, applied at once.** The engine applies it at the start of the next buffer, like any transport change. The position does not move; the bar grid does, so bar phase changes. The change counts as a jump: `jumped` is true for one call, the `jump` trigger fires once, and rule 8 applies, so no skipped bar triggers burst out. A stopped transport takes the change the same way. *Why:* it is the simplest rule that keeps every module honest. A module watching bar phase is told, instead of seeing a silent step. Applying it at the next bar line, as DAWs do, needs the engine to change the grid in the middle of a buffer, which breaks rule 4. A "wait for the bar" option can come later, from the control thread.
+11. **Run and reset inputs are read on a fixed grid.** When the Transport's `run` or `reset` input has a cable, the engine splits every block at multiples of 32 frames, counted from engine start, and handles the transport at the start of each segment of at most 32 frames. The module reads the inputs during a segment, and an edge it finds takes effect at the start of the next segment. So an edge takes effect 1 to 32 frames later (0.7 ms at 48 kHz), at any block size, and every phase is bit-identical at block sizes 1, 32, and 1024. With neither input connected, the engine does not split. *Why not split at the edge:* the edge is not known until the modules that make it have run, and those modules may read the transport. *Why a fixed grid:* the delay depends on the frame count, not on the buffer, so rule 5 holds. *Why not a longer grid:* a stop must feel immediate on stage.
 
 ## Engine and API
 
@@ -239,10 +242,14 @@ The Transport module's parameters (tempo, time signature, run) are saved like an
 - [ ] Ports that follow the transport show the clock mark.
 - [ ] Every patch has one Transport module. It cannot be deleted, and a second one cannot be added.
 - [ ] Run on the Transport panel toggles running. Space does the same when no panel control is focused. A focused control takes Space for itself. Stopping holds synced phases; running continues from there.
-- [x] The Button gate equals `on`, and every sample is 0 or 1. A toggle press flips `on`. A momentary press sets it to 1, and release sets it to 0, including when the pointer has left the button, when another mouse button is pressed, or when the window loses focus. Switching `mode` to Momentary clears `on`, and a full command queue leaves both values unchanged.
+- [x] The Button gate equals `on`, and every sample is 0 or 1. A toggle press flips `on`. A momentary press sets it to 1, and release sets it to 0, including when the pointer has left the button, when another mouse button is pressed, or when the window loses focus. Switching `mode` changes neither `on` nor `hold`. A patch saved while a momentary button is held loads with the gate low.
 - [ ] Reset returns to bar 1 and fires the jump trigger.
 - [ ] A toggle Button patched into run starts and stops the transport. While connected, the Run toggle follows the input.
-- [ ] Run state, tempo, and time signature survive save and load.
+- [ ] Run state, tempo, and time signature survive save and load. `reset` is not saved.
+- [ ] A patch without a Transport gets one on load, with a report. A patch with two fails with an error that names both. A second cannot be added, and the only one cannot be deleted.
+- [ ] With a cable on `run` or `reset`, bar phase, beat phase, and playing are bit-identical at block sizes 1, 32, and 1024, and an edge takes effect 1 to 32 frames later (rule 11).
+- [ ] A time signature change while playing sets `jumped` for one call, fires `jump` once, and fires no skipped bar triggers (rule 10), at block sizes 1, 32, and 1024.
+- [ ] Removing a cable from `run` leaves the transport as it was, and the toggle works again.
 
 ### Out of scope for P1
 
@@ -256,6 +263,4 @@ The Transport module's parameters (tempo, time signature, run) are saved like an
 
 - How tempo goes on a cable, if at all (a scale for BPM in the signal range).
 - Swing: a Clock parameter, a separate module that bends a phase, or both.
-- Should Clock have a phase input of its own, so it can follow a bent phase instead of the transport? Proposed answer: no. Clock stays on the transport, and a bent phase goes into Phase Trigger, which now exists. Settle this when building Clock ([#74](https://github.com/brylie/LoomDSP/issues/74)).
-- The Transport module's run and reset inputs ([#73](https://github.com/brylie/LoomDSP/issues/73)) are signals, but the transport updates at block starts (rule 4). If the engine reads them only at block starts, the response to a gate edge depends on block size, which breaks rule 5. Options: split the block at the edge so the change is sample accurate, or read the inputs on a fixed grid of frames that does not depend on block size. Decide before building #73.
-- What happens when the time signature changes while playing ([#73](https://github.com/brylie/LoomDSP/issues/73) exposes it as a parameter). Today the engine applies it at the next buffer. Bar phase is position divided by beats per bar, counted from bar 1, so the whole bar grid moves and bar phase jumps (in the first bar, 4/4 to 3/4 at beat 3 moves it from 0.5 to 0.67). `jumped` stays false. A module that watches for the bar phase wrap may then fire an extra bar trigger or miss one. Rule 3 covers tempo only. Options: apply it at once and count it as a jump; apply it at the next bar line, as most DAWs do; or keep the silent jump. Decide before building #73.
+- A "change at the next bar" option for the time signature, set from the control thread (rule 10).
