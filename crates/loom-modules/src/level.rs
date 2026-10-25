@@ -523,11 +523,16 @@ pub static SLEW: ModuleDescriptor = ModuleDescriptor {
 
 /// State for `loom.level.slew`: the rise and fall times, and `out`, the value
 /// the output has reached on its way to the input.
+///
+/// `out` is an `f64`. *Why:* a long rise makes a step of about 2e-6 per
+/// sample, and an `f32` at 64 or more cannot add a step that small (its
+/// spacing there is 7.6e-6), so a slewed Hz value would freeze. The output
+/// is cast to `f32` only when it is written.
 struct Slew {
     sample_rate: f32,
     rise: f32,
     fall: f32,
-    out: f32,
+    out: f64,
     /// True until the first frame, which sets the output with no ramp.
     fresh: bool,
 }
@@ -540,20 +545,22 @@ impl Module for Slew {
             if x.is_finite() {
                 if self.fresh {
                     // A new slew must not sweep up from 0.
-                    self.out = x;
+                    self.out = f64::from(x);
                     self.fresh = false;
                 } else {
                     let rise = rise_mod.map_or(self.rise, |s| s[i]).max(SLEW.params[0].min);
                     let fall = fall_mod.map_or(self.fall, |s| s[i]).max(SLEW.params[1].min);
                     // Constant rate: 1.0 of change takes `rise` or `fall` seconds.
-                    if x > self.out {
-                        self.out = (self.out + 1.0 / (rise * self.sample_rate)).min(x);
+                    let target = f64::from(x);
+                    let rate = f64::from(self.sample_rate);
+                    if target > self.out {
+                        self.out = (self.out + 1.0 / (f64::from(rise) * rate)).min(target);
                     } else {
-                        self.out = (self.out - 1.0 / (fall * self.sample_rate)).max(x);
+                        self.out = (self.out - 1.0 / (f64::from(fall) * rate)).max(target);
                     }
                 }
             }
-            *out = self.out;
+            *out = self.out as f32;
         }
     }
 
@@ -744,6 +751,19 @@ mod slew_tests {
         let out = slew(0.01, 0.02, &input);
         assert_eq!(out[0], 1.0);
         assert!((out[480] - 0.5).abs() < 1e-3, "{}", out[480]);
+    }
+
+    /// A long slew of a large value keeps moving: at 100, a step of 2e-6 per
+    /// sample is lost in an `f32`, but not in the `f64` the slew keeps.
+    #[test]
+    fn a_long_slew_of_a_large_value_does_not_freeze() {
+        // 10 s per 1.0 is a step of 1 / 480,000 per sample.
+        let mut input = vec![100.0];
+        input.extend(vec![200.0; 3_000]);
+        let out = slew(10.0, 10.0, &input);
+        let moved = f64::from(out[3_000]) - 100.0;
+        let expected = 3_000.0 / 480_000.0;
+        assert!((moved - expected).abs() < expected * 0.1, "{moved} vs {expected}");
     }
 
     /// A new slew starts at its input instead of sweeping from 0.
