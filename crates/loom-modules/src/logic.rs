@@ -231,12 +231,13 @@ struct Compare {
 
 impl Module for Compare {
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let hysteresis_mod = io.modulated(1);
+        let (mode_mod, hysteresis_mod) = (io.modulated(0), io.modulated(1));
         let ([a, b], [gate]) = io.split::<2, 1>();
         for (i, gate) in gate.iter_mut().enumerate() {
+            let below = mode_mod.map_or(self.below, |s| s[i] >= 0.5);
             let hysteresis = hysteresis_mod.map_or(self.hysteresis, |samples| samples[i]).max(0.0);
             // Flip the sign for Below, and it is the Above test.
-            let (a, b) = if self.below { (-a[i], -b[i]) } else { (a[i], b[i]) };
+            let (a, b) = if below { (-a[i], -b[i]) } else { (a[i], b[i]) };
             // Once high, the gate stays high until A falls `hysteresis`
             // below B. A noisy signal near B cannot chatter inside the band.
             let threshold = if self.high { b - hysteresis } else { b };
@@ -337,8 +338,13 @@ struct Logic {
 impl Module for Logic {
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let connected: [bool; 4] = std::array::from_fn(|n| io.is_connected(n));
+        let (op_mod, invert_mod) = (io.modulated(0), io.modulated(1));
         let (inputs, [out]) = io.split::<4, 1>();
         for (i, out) in out.iter_mut().enumerate() {
+            // Modulated values count for this frame only; the base stays in
+            // the fields.
+            let op = op_mod.map_or(self.op, |s| s[i].round().clamp(0.0, 2.0) as u8);
+            let invert = invert_mod.map_or(self.invert, |s| s[i] >= 0.5);
             let mut count = 0;
             let mut high = 0;
             for n in 0..4 {
@@ -348,13 +354,13 @@ impl Module for Logic {
                 }
             }
             // With no cable at all the result is low before `invert`.
-            let result = match self.op {
+            let result = match op {
                 _ if count == 0 => false,
                 0 => high == count,
                 1 => high > 0,
                 _ => high % 2 == 1,
             };
-            *out = trigger(result != self.invert);
+            *out = trigger(result != invert);
         }
     }
 
@@ -436,13 +442,15 @@ struct Memory {
 
 impl Module for Memory {
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        let mode_mod = io.modulated(0);
         let ([a, b], [out]) = io.split::<2, 1>();
         for (i, out) in out.iter_mut().enumerate() {
+            let mode = mode_mod.map_or(self.mode, |s| s[i].round().clamp(0.0, 2.0) as u8);
             // Both detectors see every frame in every mode, so changing the
             // mode never looks like an edge.
             let rise_a = self.edge_a.rising(a[i]);
             let rise_b = self.edge_b.rising(b[i]);
-            match self.mode {
+            match mode {
                 0 | 1 if rise_b => self.out = false, // reset wins a tie
                 0 if rise_a => self.out = true,
                 1 if rise_a => self.out = !self.out,
