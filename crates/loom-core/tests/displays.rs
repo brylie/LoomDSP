@@ -3,13 +3,17 @@
 //! never shows the old module's values, and nothing allocates on the audio
 //! thread.
 
-use assert_no_alloc::{AllocDisabler, assert_no_alloc};
+#[cfg(debug_assertions)]
+use assert_no_alloc::AllocDisabler;
+use assert_no_alloc::assert_no_alloc;
 use loom_core::{
     Channels, EngineConfig, EngineParts, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec,
     Polarity, PortDefault, PortIo, PortSpec, ProcessContext, Registry, SignalType, Widget, create_engine,
 };
 use std::sync::Arc;
 
+// `AllocDisabler` exists only in debug builds; in release the check is a no-op.
+#[cfg(debug_assertions)]
 #[global_allocator]
 static ALLOCATOR: AllocDisabler = AllocDisabler;
 

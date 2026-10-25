@@ -4,7 +4,11 @@
 //!
 //! This test binary installs an allocator that aborts if any allocation or
 //! deallocation happens inside `assert_no_alloc`. The check is active in
-//! debug builds, which is how `cargo test` runs.
+//! debug builds, which is how `cargo test` runs. `assert_no_alloc` has no
+//! `AllocDisabler` in release builds, so this file is empty there: a release
+//! build could not abort on allocation anyway.
+
+#![cfg(debug_assertions)]
 
 mod common;
 

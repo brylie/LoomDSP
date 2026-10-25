@@ -8,6 +8,10 @@
 //! full (FR-VIS-04, NFR-RT-07).
 //!
 //! The check is active in debug builds, which is how `cargo test` runs.
+//! `assert_no_alloc` has no `AllocDisabler` in release builds, so this file is
+//! empty there: a release build could not abort on allocation anyway.
+
+#![cfg(debug_assertions)]
 
 mod common;
 
