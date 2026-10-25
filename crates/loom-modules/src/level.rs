@@ -217,7 +217,7 @@ impl Module for ConstantLevel {
     }
 }
 
-/// `loom.level.clamp` (MT-LEVEL-03): limits a signal to a range.
+/// `loom.level.clamp` (MT-LEVEL-05): limits a signal to a range.
 pub static CLAMP: ModuleDescriptor = ModuleDescriptor {
     id: "loom.level.clamp",
     version: 1,
@@ -332,7 +332,7 @@ impl Module for Clamp {
     }
 }
 
-/// `loom.level.scale` (MT-LEVEL-05): `in * factor + offset`.
+/// `loom.level.scale` (MT-LEVEL-03): `in * factor + offset`.
 pub static SCALE: ModuleDescriptor = ModuleDescriptor {
     id: "loom.level.scale",
     version: 1,
