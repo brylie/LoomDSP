@@ -1322,11 +1322,6 @@ impl App {
         }
     }
 
-    /// Sets a parameter from a control on a tile or in the inspector.
-    ///
-    /// A switch to momentary also clears that button's gate. Both writes go
-    /// in one step, so a full command queue leaves the mode and the gate as
-    /// they were.
     /// Sets a parameter as a knob turn does. A slider sends no start, so its
     /// first change opens the gesture and letting go closes it.
     fn turn_param(&mut self, module: u32, index: usize, value: f32) {
@@ -1338,6 +1333,11 @@ impl App {
         self.set_param(module, index, value);
     }
 
+    /// Sets a parameter from a control on a tile or in the inspector.
+    ///
+    /// A switch to momentary also clears that button's gate. Both writes go
+    /// in one step, so a full command queue leaves the mode and the gate as
+    /// they were.
     fn set_param(&mut self, module: u32, index: usize, value: f32) {
         let changes = self
             .controller
