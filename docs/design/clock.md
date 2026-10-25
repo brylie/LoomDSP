@@ -88,7 +88,7 @@ Examples: the LFO's phase input in sync mode defaults to bar phase, with a rate 
 
 ## Modules
 
-**Status:** Clock Divide ([#48](https://github.com/brylie/LoomDSP/issues/48)), Phase Trigger, and Button ([#75](https://github.com/brylie/LoomDSP/issues/75)) are Implemented; see their details below the table. Transport, Clock, and Phase Scale are Agreed, with details below.
+**Status:** Clock Divide ([#48](https://github.com/brylie/LoomDSP/issues/48)), Phase Trigger, Button ([#75](https://github.com/brylie/LoomDSP/issues/75)), and Phase Scale ([#31](https://github.com/brylie/LoomDSP/issues/31)) are Implemented; see their details below the table. Transport and Clock are Agreed, with details below.
 
 | Module | Inputs | Outputs | Parameters | Behaviour |
 |---|---|---|---|---|
@@ -129,7 +129,7 @@ These details were settled while building the module.
 
 ### Phase Scale details
 
-**Status:** Agreed ([#31](https://github.com/brylie/LoomDSP/issues/31)).
+**Status:** Implemented ([#31](https://github.com/brylie/LoomDSP/issues/31)). Code: `loom.phase.scale` in `loom-modules/src/phase.rs`.
 
 - **Default input.** The `phase` input defaults to bar phase. With nothing connected, Phase Scale follows the transport, and Phase Scale into Phase Trigger multiplies the bar clock with no cables. *Why:* a constant phase never wraps, so a value default would make an unpatched Phase Scale output a flat 0 at every ratio. Phase Trigger keeps a value default, because on bar phase it would only repeat the Transport's bar trigger.
 
