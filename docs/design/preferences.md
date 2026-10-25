@@ -320,8 +320,8 @@ The host is behind a small trait in tests, with a fake list of devices, rates, a
 
 ### Out of scope
 
-- Audio input device (#29). Its spec decides one duplex stream or two, and clock drift between two devices. When it is agreed, the input device gets its own row in this section, saved the same way.
-- Reacting to devices plugged in or out while the app runs: MIDI (#27) and audio (#28). This section reads the lists at start, when the window opens, and on Refresh.
+- Audio input device: [audio input](audio-input.md) (#29) adds its row and saved field. The panic trigger has its own section in [panic](panic.md#midi-trigger).
+- Reacting to devices plugged in or out while the app runs: [device changes](device-changes.md) (#27, #28). This section reads the lists at start, when the window opens, and on Refresh.
 - Output channel choice (for example outputs 3 and 4 of an 8-channel interface). Today the engine plays on the first two channels. This needs its own section.
 - A MIDI channel filter on an input. See The window section.
 - Choosing the host audio API (for example ASIO or JACK instead of WASAPI or ALSA). The app uses the system's default API.

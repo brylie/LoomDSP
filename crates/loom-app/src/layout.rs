@@ -3,15 +3,40 @@
 
 use iced::Point;
 use loom_canvas::{GRID, TILE_WIDTH, tile_size};
+use loom_core::Node;
 use loom_core::{Controller, LoomError};
 use std::collections::BTreeMap;
 
-/// Horizontal distance between layout columns: a tile plus a gap for cables.
-const COLUMN: f32 = TILE_WIDTH + 4.0 * GRID;
+/// Horizontal gap between layout columns, for cables.
+const COLUMN_GAP: f32 = 4.0 * GRID;
 /// Vertical gap between tiles in a column.
 const GAP: f32 = 2.0 * GRID;
 
+/// Size of a module's tile in world units.
+fn size_of(node: &Node) -> iced::Size {
+    let d = node.descriptor;
+    tile_size(d.inputs.len(), d.outputs.len(), d.panel.width, d.panel.height)
+}
+
+/// Left edge of each column: every column is as wide as its widest tile,
+/// plus a gap for cables, so tiles in neighbouring columns never overlap.
+/// Columns without a tile are `TILE_WIDTH` wide.
+fn column_starts(widths: &[f32]) -> Vec<f32> {
+    let mut x = 0.0;
+    widths
+        .iter()
+        .map(|w| {
+            let start = x;
+            x += w + COLUMN_GAP;
+            start
+        })
+        .collect()
+}
+
 /// Places modules without a position in columns by signal-flow depth.
+///
+/// Each column is as wide as its widest tile (even tiles that already have
+/// a position count), so a wide panel never overlaps the next column.
 ///
 /// Layering with cycle breaking: a module is placed once all of its sources
 /// are placed. When only cycles remain, the lowest-ID unplaced module goes
@@ -46,6 +71,14 @@ pub fn auto_layout(controller: &Controller, positions: &mut BTreeMap<u32, Point>
         depth.insert(ready, d);
     }
 
+    let columns = depth.values().max().map_or(0, |d| d + 1);
+    let mut widths = vec![TILE_WIDTH; columns];
+    for (id, node) in graph.nodes() {
+        let column = depth.get(&id.0).copied().unwrap_or(0);
+        widths[column] = widths[column].max(size_of(node).width);
+    }
+    let starts = column_starts(&widths);
+
     let top = positions.values().map(|p| p.y + 10.0 * GRID).fold(0.0, f32::max);
     let mut next_y: BTreeMap<usize, f32> = BTreeMap::new();
     for (id, node) in graph.nodes() {
@@ -54,10 +87,8 @@ pub fn auto_layout(controller: &Controller, positions: &mut BTreeMap<u32, Point>
         }
         let column = depth.get(&id.0).copied().unwrap_or(0);
         let y = next_y.entry(column).or_insert(top);
-        positions.insert(id.0, Point::new(column as f32 * COLUMN, *y));
-        let d = node.descriptor;
-        let height = tile_size(d.inputs.len(), d.outputs.len(), d.panel.width, d.panel.height).height;
-        *y += height + GAP;
+        positions.insert(id.0, Point::new(starts[column], *y));
+        *y += size_of(node).height + GAP;
     }
 }
 
@@ -96,6 +127,13 @@ pub fn generate(controller: &mut Controller, n: usize) -> Result<(), LoomError> 
 pub fn generated_layout(controller: &Controller, positions: &mut BTreeMap<u32, Point>) {
     let ids: Vec<u32> = controller.graph().nodes().map(|(id, _)| id.0).collect();
     let row_height = 6.0 * GRID + GAP;
+    // One pitch for every column, wide enough for the widest tile.
+    let widest = controller
+        .graph()
+        .nodes()
+        .map(|(_, node)| size_of(node).width)
+        .fold(TILE_WIDTH, f32::max);
+    let column = widest + COLUMN_GAP;
     // The first two modules (output and note) sit on the left.
     for (i, id) in ids.iter().take(2).enumerate() {
         positions.insert(*id, Point::new(0.0, i as f32 * row_height));
@@ -106,7 +144,7 @@ pub fn generated_layout(controller: &Controller, positions: &mut BTreeMap<u32, P
         let block = v / per_block;
         let row = v % per_block;
         for (j, id) in voice.iter().enumerate() {
-            let x = COLUMN * (1.5 + (block * 5 + j) as f32);
+            let x = column * (1.5 + (block * 5 + j) as f32);
             positions.insert(*id, Point::new((x / GRID).round() * GRID, row as f32 * row_height));
         }
     }
@@ -115,6 +153,7 @@ pub fn generated_layout(controller: &Controller, positions: &mut BTreeMap<u32, P
 #[cfg(test)]
 mod tests {
     use super::*;
+    use loom_canvas::tile_size as canvas_tile_size;
     use loom_core::{EngineConfig, create_engine};
 
     #[test]
@@ -130,6 +169,56 @@ mod tests {
                 assert!(a != b, "two modules at {a:?}");
             }
         }
+    }
+
+    /// Whether the tile at `a` with size `sa` overlaps the one at `b`.
+    fn overlaps(a: Point, sa: iced::Size, b: Point, sb: iced::Size) -> bool {
+        a.x < b.x + sb.width && b.x < a.x + sa.width && a.y < b.y + sb.height && b.y < a.y + sa.height
+    }
+
+    /// Asserts that no two tiles in the graph overlap.
+    fn assert_no_overlap(controller: &Controller, positions: &BTreeMap<u32, Point>) {
+        let tiles: Vec<_> = controller
+            .graph()
+            .nodes()
+            .map(|(id, node)| {
+                let d = node.descriptor;
+                let size = canvas_tile_size(d.inputs.len(), d.outputs.len(), d.panel.width, d.panel.height);
+                (id.0, positions[&id.0], size)
+            })
+            .collect();
+        for (i, (ia, pa, sa)) in tiles.iter().enumerate() {
+            for (ib, pb, sb) in &tiles[i + 1..] {
+                assert!(!overlaps(*pa, *sa, *pb, *sb), "tiles {ia} and {ib} overlap");
+            }
+        }
+    }
+
+    #[test]
+    fn wide_panels_do_not_overlap_the_next_column() {
+        let mut registry = loom_core::Registry::new();
+        loom_modules::register_all(&mut registry).unwrap();
+        loom_test::modules::register(&mut registry).unwrap();
+        let mut parts = create_engine(std::sync::Arc::new(registry), EngineConfig::default());
+        let c = &mut parts.controller;
+        let wide = c.add_module("test.panel").unwrap();
+        let next = c.add_module("loom.math.mul").unwrap();
+        let after = c.add_module("loom.math.mul").unwrap();
+        c.connect_named(wide, "uni", next, "a").unwrap();
+        c.connect_named(next, "out", after, "a").unwrap();
+        c.commit().unwrap();
+        let mut positions = BTreeMap::new();
+        auto_layout(c, &mut positions);
+        assert_no_overlap(c, &positions);
+    }
+
+    #[test]
+    fn generated_layout_has_no_overlap() {
+        let mut parts = create_engine(loom_modules::registry(), EngineConfig::default());
+        generate(&mut parts.controller, 40).unwrap();
+        let mut positions = BTreeMap::new();
+        generated_layout(&parts.controller, &mut positions);
+        assert_no_overlap(&parts.controller, &positions);
     }
 
     #[test]

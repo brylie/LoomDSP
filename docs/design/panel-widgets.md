@@ -3,7 +3,7 @@
 The baseline set of panel widgets that LoomDSP modules, sub-patches, and front panels share, so each kind of interaction has one common way to work.
 
 - **Kind:** living specification.
-- **Status:** Draft. Nothing here is ready to build. The widgets that exist today (knob, toggle, radio buttons, button, light, meter) are specified and Implemented in [panels.md](panels.md#module-panels-on-tiles-p1); this document only plans what comes next and the shared rules that tie them together.
+- **Status:** Draft, except the XY scope section, which is Agreed. Nothing else here is ready to build. The widgets that exist today (knob, toggle, radio buttons, button, light, meter) are specified and Implemented in [panels.md](panels.md#module-panels-on-tiles-p1); this document only plans what comes next and the shared rules that tie them together.
 - **Decision behind it:** [ADR-0024](../adr/0024-widgets-follow-the-kind-of-value.md) (widgets follow the kind of value, and structured data has shared kinds with one editor each). Builds on [ADR-0013](../adr/0013-modules-carry-their-own-panel.md) (modules carry their own panel).
 - **Use case and requirements:** UC2, UC3. FR-PANEL-02, FR-PANEL-03, FR-PANEL-04, FR-LIB-02, FR-LIB-12, FR-LIB-16, FR-LIB-17, FR-LIB-18, FR-LIB-19, FR-LIB-29, FR-MOD-04, FR-VIS-02, FR-VIS-03, NFR-UX-01, NFR-UX-02, NFR-UX-03.
 - **Builds on:** [panels.md](panels.md) (widgets, layout, interaction, level of detail, redraw), [modulation.md](modulation.md) (range arcs, dots, live value), [telemetry.md](telemetry.md) (probes), [port and parameter text](port-and-parameter-text.md) (labels and descriptions).
@@ -248,9 +248,23 @@ Specified in [panels.md](panels.md#scope-module), built in [#60](https://github.
 
 ### XY scope
 
+**Status:** Agreed for P1 ([#280](https://github.com/brylie/LoomDSP/issues/280)). This is the only widget in this document that is ready to build; the rest stays Draft.
+
 One signal against another: the first moves the trace left and right, the second up and down. A circle means two sines a quarter cycle apart. A line means the two signals are the same. A stereo signal shows how wide it is.
 
-- **Binds to:** two outputs of its module, `x` and `y`. The module is the Probe (MT-VIEW-01) in XY mode: two inputs, each passed through to an output, as the level meter does.
+- **Module: `loom.display.xy`**, category Display, the XY mode of the Probe (MT-VIEW-01). It is its own module because its widget, ports, and parameters differ from the scope's ([merge rule](../adr/0017-primitives-traits-and-abstractions.md)).
+
+| | |
+|---|---|
+| Inputs | `x`, `y` (default 0) |
+| Outputs | `x_out`, `y_out`, each passing its input through bit for bit |
+| Parameters | `range`: a choice, 0 to 2 for ±0.1, ±1, ±10 (default 1). `time`: 0.001 to 0.1 s, logarithmic, default 0.02. `rotate`: toggle, default 0 |
+| Panel | The XY scope widget, a knob for `time`, a radio for `range`, a toggle for `rotate` |
+
+- The app probes the pair `(x_out, y_out)` with a [paired probe](telemetry.md#paired-probes). An unconnected input reads 0 and draws a dot or a line along an axis.
+- **`time`** is how much history the trace shows. The trace draws at most 2048 points. When `time` holds more frames than that, the app keeps every Nth pair, with `N` the frame count divided by 2048, rounded up (at 48 kHz, 0.1 s is 4800 frames, so `N` is 3). *Why:* the knob then changes the length of the trace over its whole range, and the point count stays fixed. Older points fade, so the newest part is brightest.
+- **`rotate`** (mid and side view) turns the trace by 45 degrees: with the new axes `(x + y) / √2` across and `(y − x) / √2` up. A mono signal (`x` equal to `y`) is then a vertical line. The audio is untouched.
+- **Binds to:** two outputs of its module, `x_out` and `y_out`. The module is the Probe (MT-VIEW-01) in XY mode: two inputs, each passed through to an output, as the level meter does.
 - **Data: a paired probe.** One telemetry probe carries both outputs' samples from the same block, interleaved, in one chunk. *Why not two scope probes:* each queue drops chunks on its own when full, so two probes can pair a sample of `x` with a sample of `y` from another block. The trace would then show shapes that are not in the signal.
 - **Drawing:** a line through the last points, as many as fill the module's time window. Older points fade, so the newest part of the trace is brightest. A faint cross marks 0 on both axes.
 - **Range:** from -1 to 1 on both axes by default. The module offers other ranges, as the [control ranges](control-ranges.md) do for parameters, for example -0.1 to 0.1 for small control signals and -10 to 10 for large ones. Points outside the range are clamped to the edge, never wrapped.
@@ -260,8 +274,9 @@ One signal against another: the first moves the trace left and right, the second
 - **Screen reader:** the label, and "XY scope of" the two input labels.
 - **Redraw:** every frame while on screen and the signal moves. A still or silent signal draws no frames.
 - **Middle zoom:** the frame and a single point at the latest position.
-- **Size (leaning):** 6 × 6, resizable once tiles are.
-- **Explainer:** needs one in `docs/learn/` on reading an XY scope (phase, stereo width, and why a circle means a quarter cycle).
+- **Size:** 6 × 6 grid units, resizable with the tile ([panels](panels.md#resizable-tiles)).
+- **Explainer:** `docs/learn/reading-an-xy-scope.md` (phase, stereo width, and why a circle means a quarter cycle), written with the widget and linked from this section and the module's help.
+- **Acceptance criteria**, following the checklist in [Acceptance criteria](#acceptance-criteria): the registry refuses an XY scope bound to anything but two outputs of its own module; a sine on `x` and a quarter-cycle-later sine on `y` draw a circle (geometry test on the point list); equal signals draw a diagonal and, with `rotate`, a vertical line; points outside `range` clamp to the edge and never wrap; two samples in a trace always come from the same block (paired-probe test); the widget is in `App::ui_snapshot`; middle zoom draws the frame and one point; a silent or still signal draws no frames; the widget is on a test module from [#208](https://github.com/brylie/LoomDSP/issues/208).
 
 ### Spectrum
 

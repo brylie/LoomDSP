@@ -63,9 +63,24 @@ The app hands the `Telemetry` handle from `create_engine` to a telemetry thread 
 
 The planned direction for displays: signal displays are modules in the grid, not views laid over the canvas (ADR-0011, everything is a module). A scope module saves with the patch, sits next to the signal it shows, travels inside sub-patches, and can go on a front panel. It animates only while its tile is visible and large enough to read.
 
+## Paired probes
+
+**Status:** Agreed ([#280](https://github.com/brylie/LoomDSP/issues/280)).
+
+The XY scope ([panel widgets](panel-widgets.md#xy-scope)) draws one signal against another. Two scope probes cannot do this: each queue drops chunks on its own when full, so a sample of `x` could be paired with a sample of `y` from another block, and the trace would show shapes that are not in the signal.
+
+- **Probe.** `Controller::add_probe_pair(x_output, y_output)` returns a `ProbeId`. It is one probe with two buffer pointers in the schedule.
+- **Chunk.** After each internal block, the engine copies the block into `PairChunk`s: up to 32 frames each, `x` and `y` interleaved (64 values), with the probe ID and the frame number of the first frame, like `ScopeChunk`. Both values of a frame always come from the same block, the same chunk, and the same push. *Why 32 frames:* the same byte size as a 64-sample scope chunk.
+- **Queue.** A third bounded queue, `pair_capacity` (default 1024 chunks, about 0.7 s of one pair at 48 kHz). Full queue: drop the newest chunk and count it in `EngineStats::dropped_pairs` (rule 2). *Why separate:* rule 3.
+- **Read.** `Telemetry::pairs()` takes every waiting chunk, oldest first. A gap in frame numbers means chunks were dropped; the UI clears its history, as `ScopeTrace` does.
+- **Feedback loops.** A pair inside a loop sees every frame, like a scope, because loop modules run one frame at a time and the copy happens after the block.
+- **Both ports must be outputs of the same patch level.** The registry refuses nothing else. If `x_output` and `y_output` are the same port, the trace is a diagonal line.
+- No sound change (rule 6); a test checks bit-identical output with and without a pair. The `no_alloc` test covers adding and removing a pair.
+- App side: `XyTrace` keeps the last `time` seconds of pairs. It draws at most 2048 points, keeping every Nth pair when there are more ([XY scope](panel-widgets.md#xy-scope)).
+
 ## Tests
 
-- `crates/loom-modules/tests/engine.rs`: the scope reproduces the probed signal sample for sample, meters match each block, probes inside feedback loops see every sample, full queues drop telemetry but not audio, and removed probes stop sending.
+- `crates/loom-modules/tests/engine.rs` (and, for paired probes, a test that every `PairChunk` frame has the `x` and `y` of the same engine frame, with the queue both drained and full): the scope reproduces the probed signal sample for sample, meters match each block, probes inside feedback loops see every sample, full queues drop telemetry but not audio, and removed probes stop sending.
 - `crates/loom-modules/tests/no_alloc.rs`: every output probed while the graph is edited, with queues both drained and full.
 - `crates/loom-app/src/live.rs`: no probes until something asks; meters on screen get probes and lose them off screen; RMS over every frame since the last drain; silent probes are forgotten; telemetry from a running engine reaches meter levels and a triggered trace; probes follow removed modules and the activity switch. Trigger: rising edges, the same phase across frames with a period that is not a whole number of samples, signals with an offset, noise on the edge, flat signals. Gaps clear the history. Range steps.
 

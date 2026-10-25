@@ -234,6 +234,9 @@ pub(crate) struct Schedule {
     pub probes: Vec<ProbeOp>,
     pub transport: TransportBuffers,
     pub fills: Vec<ParamFill>,
+    /// Indices into `fills`, sorted by fill key. Built on the control thread
+    /// so [`Schedule::take_smooth_state_from`] can merge two sorted lists.
+    pub fill_order: Vec<u32>,
     pub assignments: Vec<AssignmentRuntime>,
     pub param_ptrs: Vec<(u16, *const f32)>,
     /// MIDI mappings, sorted by control.
@@ -265,6 +268,7 @@ impl Schedule {
             probes: Vec::new(),
             transport: TransportBuffers::default(),
             fills: Vec::new(),
+            fill_order: Vec::new(),
             assignments: Vec::new(),
             param_ptrs: Vec::new(),
             midi_maps: Vec::new(),
@@ -303,16 +307,27 @@ impl Schedule {
     /// A fill that is new, because its parameter just got its first
     /// assignment, starts from `glide(slot, param)` instead: the value the
     /// module itself was gliding through, so the parameter does not step.
-    /// Runs on the audio thread: no allocation.
+    /// Fills sit in execution order, which is not key order, so both
+    /// schedules keep a `fill_order` index sorted by key. Walking the two
+    /// indices together matches every key in one pass, like
+    /// [`Schedule::take_tap_state_from`]. The order matters: a merge only
+    /// works if both lists are sorted by the same key.
+    /// Runs on the audio thread: no allocation, linear time.
     pub fn take_smooth_state_from(&mut self, old: &Schedule, glide: impl Fn(usize, usize) -> Option<f32>) {
-        for fill in &mut self.fills {
+        let mut j = 0;
+        for &i in &self.fill_order {
+            let fill = &mut self.fills[i as usize];
+            while j < old.fill_order.len() && old.fills[old.fill_order[j] as usize].key < fill.key {
+                j += 1;
+            }
             let Some(smooth) = fill.smooth.as_mut() else {
                 continue;
             };
             let previous = old
-                .fills
-                .iter()
-                .find(|previous| previous.key == fill.key)
+                .fill_order
+                .get(j)
+                .map(|&k| &old.fills[k as usize])
+                .filter(|previous| previous.key == fill.key)
                 .map(|previous| previous.smooth);
             match previous {
                 Some(Some(previous)) => *smooth = previous,
@@ -972,6 +987,9 @@ pub(crate) fn compile(
         .collect();
     debug_assert!(sources.is_sorted_by_key(|&(key, _)| key));
 
+    let mut fill_order: Vec<u32> = (0..fills.len() as u32).collect();
+    fill_order.sort_unstable_by_key(|&i| fills[i as usize].key);
+
     let schedule = Schedule {
         _buffers: buffers,
         _zero: zero,
@@ -987,6 +1005,7 @@ pub(crate) fn compile(
         probes,
         transport,
         fills,
+        fill_order,
         assignments: compiled
             .iter()
             .map(|assignment| AssignmentRuntime {
@@ -1207,5 +1226,82 @@ mod tests {
         let bar = schedule.transport.bar_phase.expect("still used") as *const f32;
         assert_eq!(input_ptr(&schedule, 1, 1), bar);
         assert_eq!(input_ptr(&schedule, 0, 0), bar);
+    }
+
+    /// A schedule with one smoothed fill per key, stored in the given order
+    /// (execution order, not key order). Each fill's smoother targets `target(key)`.
+    fn schedule_with_fills(keys: &[u64], target: impl Fn(u64) -> f32) -> Schedule {
+        static SPEC: ParamSpec = ParamSpec {
+            name: "p",
+            label: "p",
+            description: "A test parameter.",
+            min: 0.0,
+            max: 1.0,
+            default: 0.0,
+            unit: "",
+            options: crate::descriptor::ParamOptions::DEFAULT,
+        };
+        let mut schedule = Schedule::empty();
+        for &key in keys {
+            let mut smooth = Smoothed::new(0.0, 48_000.0, 0.01);
+            smooth.set_target(target(key));
+            schedule.fills.push(ParamFill {
+                key,
+                slot: (key >> 32) as u32,
+                param: key as u16,
+                spec: &SPEC,
+                base: 0.75,
+                smooth: Some(smooth),
+                buffer: std::ptr::null_mut(),
+                sources: Vec::new(),
+                live: crate::live::NO_CELL,
+            });
+        }
+        schedule.fill_order = (0..keys.len() as u32).collect();
+        schedule.fill_order.sort_by_key(|&i| schedule.fills[i as usize].key);
+        schedule
+    }
+
+    #[test]
+    fn smooth_state_carries_over_by_key_across_many_shuffled_fills() {
+        const N: u64 = 2_000;
+        // 1_999 is prime, so this stride visits every index in a scrambled order.
+        let shuffled = |keep: fn(u64) -> bool| -> Vec<u64> {
+            (0..N)
+                .map(|i| (i * 1_999) % N)
+                .filter(|&i| keep(i))
+                .map(|i| ((i / 4) << 32) | (i % 4))
+                .collect()
+        };
+        let old = schedule_with_fills(&shuffled(|i| i % 3 != 0), |key| 0.25 + (key >> 32) as f32 / 1_000.0);
+        let mut new = schedule_with_fills(&shuffled(|i| i % 2 == 0), |_| 0.5);
+        let calls = std::cell::Cell::new(0);
+        new.take_smooth_state_from(&old, |slot, _| {
+            calls.set(calls.get() + 1);
+            (slot % 2 == 0).then_some(0.1)
+        });
+
+        // The reference: the quadratic scan this merge replaced.
+        let mut expected_new = 0;
+        for fill in &new.fills {
+            let smooth = fill.smooth.as_ref().unwrap();
+            match old.fills.iter().find(|previous| previous.key == fill.key) {
+                Some(previous) => {
+                    assert_eq!(smooth.target(), previous.smooth.as_ref().unwrap().target());
+                    assert_eq!(smooth.current(), previous.smooth.as_ref().unwrap().current());
+                }
+                None => {
+                    expected_new += 1;
+                    if fill.slot % 2 == 0 {
+                        assert!((smooth.current() - 0.1).abs() < 1e-6);
+                        assert_eq!(smooth.target(), fill.spec.normalize(0.75));
+                    } else {
+                        assert_eq!(smooth.target(), 0.5, "no glide: left as built");
+                    }
+                }
+            }
+        }
+        assert_eq!(calls.get(), expected_new);
+        assert!(expected_new > 0 && expected_new < new.fills.len());
     }
 }

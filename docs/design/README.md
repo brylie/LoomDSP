@@ -56,8 +56,8 @@ Copy [template.md](template.md). Keep it to one feature. Link the ADR, requireme
 |---|---|---|
 | [Arrangement](arrangement.md) | [ADR-0012](../adr/0012-arrangement-from-phase-driven-primitives.md) | Draft, P3 |
 | [Telemetry](telemetry.md) | [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md) | Implemented, P1 |
-| [Panels](panels.md) | [ADR-0013](../adr/0013-modules-carry-their-own-panel.md), [ADR-0025](../adr/0025-one-design-language-and-derived-panels.md) | Module panels on tiles, level meters, and audio load Implemented (P1); labels and hover text Implemented; rest Draft |
-| [Panel widgets](panel-widgets.md) | [ADR-0024](../adr/0024-widgets-follow-the-kind-of-value.md) | Draft, P2 |
+| [Panels](panels.md) | [ADR-0013](../adr/0013-modules-carry-their-own-panel.md), [ADR-0025](../adr/0025-one-design-language-and-derived-panels.md) | Module panels on tiles, level meters, and audio load Implemented (P1); labels and hover text Implemented; P1 additions (choice names, trigger lights, clock mark, load colour, keyboard, activity, scope trace, resizable tiles) Agreed; rest Draft |
+| [Panel widgets](panel-widgets.md) | [ADR-0024](../adr/0024-widgets-follow-the-kind-of-value.md) | XY scope Agreed (P1); rest Draft, P2 |
 | [Stereo cables](stereo.md) | [ADR-0020](../adr/0020-inferred-channel-count.md), [ADR-0022](../adr/0022-copies-take-state-from-the-running-instance.md) | Agreed, P1 |
 | [Changing a running patch](live-patching.md) | [ADR-0002](../adr/0002-graph-execution-and-feedback.md), [ADR-0022](../adr/0022-copies-take-state-from-the-running-instance.md) | Rules 1 to 5 Implemented; rule 6 Agreed, P1 |
 | [Modulation](modulation.md) | [ADR-0014](../adr/0014-modulation-without-cables.md) | Engine and parameter mapping Agreed (P1); editing slice 1 Agreed; slices 2 and 3 Draft |
@@ -77,6 +77,9 @@ Copy [template.md](template.md). Keep it to one feature. Link the ADR, requireme
 | [App preferences](preferences.md) | None (builds on [ADR-0019](../adr/0019-output-safety-stage.md)) | Implemented, P1 |
 | [Patch metadata](patch-metadata.md) | [ADR-0023](../adr/0023-patch-licences-spdx-and-creative-commons.md) | Draft, P2 and P4 |
 | [Control channel](control-channel.md) | None (builds on [ADR-0021](../adr/0021-plain-data-view-models-and-keyed-identity.md)) | Implemented, developer tooling |
+| [Panic](panic.md) | None (builds on [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md) and [ADR-0019](../adr/0019-output-safety-stage.md)) | Agreed, P1 |
+| [Devices plugged in and out](device-changes.md) | None (builds on [preferences](preferences.md)) | Agreed, P1 |
+| [Audio input](audio-input.md) | None (builds on [ADR-0020](../adr/0020-inferred-channel-count.md)) | Agreed, P1 |
 | [P1 module ports and parameters](p1-modules.md) | None (builds on [ADR-0007](../adr/0007-polymorphic-signal-model.md)) | Agreed, P1 |
 | [Transient parameters](transient-params.md) | None (builds on [ADR-0008](../adr/0008-patch-format-ron.md)) | Agreed, P1 |
 | [Audio QA harness](audio-qa.md) | None (builds on [ADR-0019](../adr/0019-output-safety-stage.md)) | Implemented, developer tooling |

@@ -111,6 +111,27 @@ fn mul() {
         .check(reference!("mul"));
 }
 
+/// Reference render for `loom.math.sub`: a phase ramp minus a constant.
+#[test]
+fn sub() {
+    Harness::new(&math::SUB)
+        .seconds(0.02)
+        .input("a", Signal::phase(100.0))
+        .input("b", Signal::constant(0.25))
+        .check(reference!("sub"));
+}
+
+/// Reference render for `loom.math.div`: B is 0 for the first 100 frames
+/// (output 0), then 2 (halves A).
+#[test]
+fn div() {
+    Harness::new(&math::DIV)
+        .seconds(0.02)
+        .input("a", Signal::phase(100.0))
+        .input("b", Signal::from_fn(|frame| if frame < 100 { 0.0 } else { 2.0 }))
+        .check(reference!("div"));
+}
+
 /// Reference render for `loom.level.amp`: exponential response, a falling level.
 #[test]
 fn amp() {
@@ -302,6 +323,8 @@ fn every_dsp_module_has_a_reference_test() {
         &env::ADSR,
         &math::ADD,
         &math::MUL,
+        &math::SUB,
+        &math::DIV,
         &math::CONSTANT,
         &math::CONVERT,
         &level::AMP,

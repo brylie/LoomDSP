@@ -180,7 +180,7 @@ impl App {
     /// lights, and meter levels it left, through the same messages the
     /// window uses. With no window to say what is on screen, every module
     /// counts as shown.
-    fn run_engine(&mut self, frames: usize) {
+    pub(crate) fn run_engine(&mut self, frames: usize) {
         self.visible_displays = self.controller.graph().nodes().map(|(id, _)| id.0).collect();
         // Meters need their probes before the engine runs.
         self.sync_probes();

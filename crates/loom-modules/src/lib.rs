@@ -38,6 +38,8 @@ pub static ALL: &[&ModuleDescriptor] = &[
     &env::ADSR,
     &math::ADD,
     &math::MUL,
+    &math::SUB,
+    &math::DIV,
     &math::CONSTANT,
     &math::CONVERT,
     &level::AMP,
