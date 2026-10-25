@@ -138,6 +138,8 @@ fn convert() {
         .seconds(0.01)
         .input("in", Signal::from_fn(|frame| frame as f32 / 480.0 * 0.2 - 0.1))
         .param("mode", 2.0)
+        // Hz values reach hundreds, so one float step differs between maths libraries.
+        .tolerance(1e-3)
         .check(reference!("convert"));
 }
 

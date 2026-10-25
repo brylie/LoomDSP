@@ -327,7 +327,8 @@ impl Convert {
         match self.mode {
             0 => 10.0_f32.powf(x.clamp(CONVERT_FLOOR_DB, CONVERT_CEIL_DB) / 20.0),
             1 => (20.0 * x.abs().log10()).clamp(CONVERT_FLOOR_DB, CONVERT_CEIL_DB),
-            2 => loom_core::signal::pitch::to_hz(x.min(CONVERT_CEIL_PITCH)),
+            // Not `min`: it would turn NaN into a number.
+            2 => loom_core::signal::pitch::to_hz(if x > CONVERT_CEIL_PITCH { CONVERT_CEIL_PITCH } else { x }),
             _ => loom_core::signal::pitch::from_hz(x.clamp(CONVERT_FLOOR_HZ, CONVERT_CEIL_HZ)),
         }
     }
@@ -370,6 +371,14 @@ mod convert_tests {
     fn db_round_trip() {
         for db in [-60.0, -6.0, 0.0, 12.0] {
             assert!((run(1, run(0, db)) - db).abs() < 1e-3, "{db}");
+        }
+    }
+
+    /// A NaN input stays NaN in every mode.
+    #[test]
+    fn nan_passes_through() {
+        for mode in 0..4 {
+            assert!(run(mode, f32::NAN).is_nan(), "mode {mode}");
         }
     }
 
