@@ -325,7 +325,7 @@ The whole app still redraws twice a second for the stats bar's audio numbers. "N
 
 - The stats bar always shows the audio load (the latest callback as a share of its time budget, and the highest so far) and the dropout count: callbacks that overran their buffer, plus errors reported by the audio device.
 - An overload notice from the device that comes before the stream's first callback is not a dropout. No audio was rendered yet, so none was lost. macOS sends one as a stream starts with a very small buffer (32 frames), while the device switches to it. *Why:* counting it turned the count red each time a performer chose a small buffer, for a glitch that never happened. A count that cries wolf gets ignored. (Found on BlackHole 2ch, 2026-10-24, [#26](https://github.com/brylie/LoomDSP/issues/26).)
-- Load is shown normally below 70%, in amber from 70%, and in red from 90%.
+- Load is shown normally below 70%, in amber from 70%, and in red from 90%. The colour follows the highest load since the last tick, and the "max" is the highest in the last 10 seconds ([P1 additions](#audio-load-colour)).
 - The dropout count is red for 10 seconds after it grows.
 - *Why:* a performer needs a warning before a problem is audible (FR-PERF-04), and must notice when one just happened. A count that stayed red forever would soon be ignored.
 
@@ -433,6 +433,128 @@ What P1 builds. The rest of this spec is P2.
 - XY pad, themes, custom skins (P2).
 - Restyling built-in panels.
 - Docked views at the window edge. Displays are modules.
+
+## P1 additions
+
+**Status:** Agreed. Each subsection names its issue. These close the gaps that building the P1 panels found.
+
+### Choice names
+
+([#160](https://github.com/brylie/LoomDSP/issues/160).) A whole-number parameter can name its values.
+
+- `ParamOptions` gets `.choices(&[...])`: one name per value, from `min` to `max` in steps of 1, so `max - min + 1` names. Names are short Title Case words or numbers with a unit ("Toggle", "Momentary", "24 dB"), at most 16 characters. The registry refuses names on a parameter that is not whole-number, a count that does not match, and an empty name, with an error that names the parameter.
+- **The inspector** shows a parameter with names as radio buttons when there are 4 or fewer, otherwise as a pick list (the [radio or select rule](panel-widgets.md#radio-buttons-or-a-select-list) with the inspector's width). It never shows the slider with a bare number. A parameter without names keeps the slider.
+- **A radio widget on a tile reads the names from the parameter.** `Widget::radio` no longer carries its own labels. *Why:* two lists for one parameter can disagree, and a panel that swaps radio buttons for a select list must show the same words ([panel-widgets](panel-widgets.md#choice-names)).
+- **Text for a value** (hover text of a modulated control, the UI snapshot, the status bar) is the name when there is one, otherwise the number and unit.
+- The names are stored in the descriptor, not in patches. Reword them freely (ADR-0016).
+- The tile does not need them for Button's `mode`, which stays in the inspector.
+
+### Display value text
+
+([#118](https://github.com/brylie/LoomDSP/issues/118).) Display values get the same text as ports and parameters, in [port and parameter text](port-and-parameter-text.md#display-values).
+
+### Lights for one-sample triggers
+
+([#114](https://github.com/brylie/LoomDSP/issues/114).) A one-sample trigger is almost never the latest value, so a light that reads the latest value stays dark. The fix has two parts, so cables keep their one-sample triggers.
+
+- **A display value has a kind:** `Level` (today) or `Trigger`. A module writes a `Trigger` value as 1.0 if any trigger arrived in the block it just ran, else 0.0.
+- **The table latches it.** For a `Trigger` value, the engine stores with `max` instead of replacing: a 1.0 stays until the UI reads it. The UI reads a `Trigger` cell with `swap(0)`. *Why:* many blocks pass between two drawn frames. The latch makes the light show "fired since the last read", which is the truth the player cares about. Nothing waits and nothing allocates (ADR-0013).
+- **The light holds on screen.** A read of 1.0 lights the light at full, and it fades to dark over 120 ms of UI time. *Why:* a trigger at 4 per second must be a visible flash, not a one-frame flicker.
+- **Redraw.** A fading light asks for frames for 120 ms after the last trigger, then none. An idle patch draws nothing.
+- **Two readers are not supported.** The table has one reader, the UI. A second consumer (cable activity, scopes) uses its own mechanism ([activity](#signal-activity-on-ports)).
+- Clock Divide and Phase Trigger each get a light on their trigger output. A test sends one one-sample trigger and sees the light lit.
+
+### Clock mark on transport inputs
+
+([#103](https://github.com/brylie/LoomDSP/issues/103).)
+
+- An input that has no cable and a default of bar phase, beat phase, or playing shows a **clock mark**: a small ring with two short hands, drawn between the port marker and its label, in the module's accent colour at reduced strength. It is the same mark for all three; the hover text tells them apart ("Follows the bar phase while nothing is connected").
+- It is hidden when a cable is connected, and returns when the cable is removed.
+- It shows at the zoom where port labels show, and as a plain dot at the middle zoom. It is not drawn at far zoom.
+- `PortView` gets `follows_transport: Option<TransportSignal>`, set by the app from the descriptor's `PortDefault` and the cable state. The mark is part of the scene's GPU data, which changes only when cables change (ADR-0010).
+- It is in the UI snapshot as a port field, so the control channel can find it.
+
+### Audio load colour
+
+([#102](https://github.com/brylie/LoomDSP/issues/102).) This replaces the first and third bullets of [Audio load and dropouts](#audio-load-and-dropouts-in-the-stats-bar).
+
+- `CallbackStats` keeps `peak_since_read`: the highest load of any callback since the last read. The stats bar reads and clears it once per tick, and **colours the load by that peak**, not by the latest callback. *Why:* a spike shorter than one tick is the warning of a coming dropout, and the latest sample almost never catches it.
+- The number shown is the load of the latest callback, as now.
+- **"Max" is the highest load in the last 10 seconds,** not since the app started. It is a ring of tick peaks. *Why:* after one spike, a since-start maximum says 95% for the rest of the night and stops being useful.
+- Amber from 70%, red from 90%, as now. The dropout count stays red for 10 seconds after it grows.
+- If [#90](https://github.com/brylie/LoomDSP/issues/90) changes how the bar updates, the window is "per tick", not "per 500 ms".
+- Test: feed one callback at 95% among thousands at 20% and see the bar turn red for that tick; after 10 seconds of quiet, the max falls.
+
+### Keyboard without a mouse
+
+([#101](https://github.com/brylie/LoomDSP/issues/101).) Closes the gap that nothing selects a module by key. Keys have three owners, tried in this order, and the first one that has a use for the key takes it:
+
+1. **A focused panel control** (knob, toggle, radio, button).
+2. **The canvas** (selection, movement, clipboard, undo).
+3. **Global keys** (Space for Run).
+
+| Key | Panel control focused | Module selected | Nothing selected |
+|---|---|---|---|
+| Tab, Shift-Tab | Next or previous control of the module; after the last, the next module | Next or previous module in reading order | Selects the first or last module |
+| Enter | Acts on the control (toggle, press) | Focuses the module's first control | Nothing |
+| Space | Acts on a toggle, radio, or button. A knob does not take it | Toggles Run | Toggles Run |
+| Arrow keys | Change the value ([Interaction](#interaction-68)) | Move the selected modules one grid unit; Shift moves 10 | Nothing |
+| Escape | Clears control focus | Clears the selection | Nothing (after the other uses of Escape: a drag, then pinned lines) |
+
+- **Reading order** is top to bottom by tile top, then left to right, then by module ID. It is the same order as Tab in the module browser's results.
+- Tab selects the module, so the inspector and the highlight follow. Focus on a control also selects its module.
+- `focus_keys` no longer swallows Space and Enter for a knob: a key with no use passes on to the next owner. *Why:* a swallowed key is a key that does nothing.
+- Moving by keys is one undo step per key press group (repeats within 500 ms join one step).
+- Test: select a module, focus a knob, change its value, and leave, by keys alone.
+
+### Signal activity on ports
+
+([#63](https://github.com/brylie/LoomDSP/issues/63).) Cables stay still ([Cables do not animate](#cables-do-not-animate)). Ports show whether they carry a signal.
+
+- **Two states:** *carrying* (a filled marker in the signal colour) and *silent* (the marker as now). Input ports show the state of the output feeding them.
+- **Carrying** means the output's largest absolute value in the last tick was above 0.0001 (−80 dB). *Why:* DC offsets and constants count as signal, since a Constant of 0.5 is a live control. Exactly 0 and noise below −80 dB are silent.
+- **Where it is measured.** With the activity display on (Preferences, default on), `Live::sync` keeps a `Meter` probe on every output that has a cable ([telemetry](telemetry.md#in-the-desktop-app)). The telemetry thread already keeps the peak since the last drain. No new engine path is needed. One-sample triggers count, because the peak covers every frame of every block. When the display is off, no probes are added. *Why reuse meters:* the cost is already measured, and the code is built and waiting (`Live`).
+- **Rate.** The UI reads the peaks 5 times a second. A port becomes *carrying* at once, and *silent* after 2 reads (400 ms) with nothing. *Why:* gates and slow envelopes would flicker otherwise.
+- **Redraw.** The markers are drawn from a small buffer of port states, like the panel values buffer, so a change never rebuilds tiles, ports, or cables (ADR-0010). A state change draws one frame. No change, no frames.
+- Cables do not change brightness. Hover focus rules are unchanged.
+- At middle and far zoom the markers are not drawn (they are port-sized).
+
+### Drawing the scope trace
+
+([#62](https://github.com/brylie/LoomDSP/issues/62).)
+
+- **Where.** The scope widget fills the panel area of the scope tile. Its frame is drawn with the tile; the trace is a line strip clipped to the frame.
+- **Data.** Each frame the app copies the points that fit the module's `window` into one small vertex buffer (at most 1024 points: more are skipped by stride, keeping the min and max of each group). It uploads that buffer and nothing else. Tiles, ports, and cables are not rebuilt (ADR-0010).
+- **Steady wave.** `ScopeTrace::offset` shifts the trace by the fraction of a sample between the trigger and the first point, so a periodic wave does not shimmer.
+- **Follows the camera.** The trace is in tile space, so pan and zoom only change the camera uniform.
+- **Level of detail.** Drawn at the zoom where controls are drawn. At the middle zoom a flat line at the frame's centre, brightness following the level. Not drawn at far zoom.
+- **Redraw.** The scope draws a frame only when it is on screen, big enough to read, and its data changed. A silent or still signal draws none. An idle patch or an off-screen scope does not redraw.
+- **Size.** The widget takes the space the panel gives it, and grows with a resized tile ([resizable tiles](#resizable-tiles)).
+- Acceptance: four live scopes on screen keep 60 fps on the reference laptop (NFR-PERF-04, ADR-0010 gate 2).
+
+### Resizable tiles
+
+([#61](https://github.com/brylie/LoomDSP/issues/61).)
+
+- **The handle.** A small grip at the bottom-right corner of a tile that has a **growable** widget (a scope, a meter, an XY scope, later a spectrum or curve). Other tiles have no handle. Dragging it changes the tile's size and snaps to the grid. The cursor shows a resize cursor over it.
+- **Minimum and maximum.** The minimum is the size the panel declares (the tile cannot be smaller than its layout). The maximum is 64 by 64 grid units.
+- **What grows.** Only growable widgets. They take all extra width and height. Other widgets keep their size and position, top left.
+- **Ports.** Inputs stay on the left edge and outputs on the right, spread evenly over the new height, in port order. Cable ends, hit-testing, and hover follow the new size.
+- **Saved.** The patch file gets an optional `size: (w, h)` next to the position, in grid units. A tile without one has its declared size. Files without the field load unchanged (ADR-0008).
+- **Undo.** One resize drag is one undo step. The size is part of the clipboard: paste keeps it.
+- **Cost.** A resize changes the scene once, when the drag ends, and shows a live outline while dragging. Nothing is rebuilt per frame (ADR-0010).
+- **Keyboard.** With a growable tile selected, Shift-arrow keys resize by one grid unit. *Why:* NFR-UX-01.
+
+### Acceptance criteria: P1 additions
+
+- [ ] Choice names: the registry refuses a wrong count, an empty name, and names on a continuous parameter. The inspector shows "Toggle" and "Momentary" for Button's `mode` and a slider for a parameter without names. No module hard-codes names in its panel.
+- [ ] A one-sample trigger into a Clock Divide or Phase Trigger output light lights it, and it fades in 120 ms. No frames are drawn after the fade.
+- [ ] A transport-following input shows the clock mark with no cable, loses it when a cable is connected, and has it back when the cable is removed.
+- [ ] A 95% callback spike turns the load amber or red for its tick. After 10 seconds the max falls.
+- [ ] By keys alone: Tab to a module, Enter into its panel, change a knob, Escape out twice. Space on a focused toggle acts on the toggle, not on Run. Arrow keys move the selected module by one grid unit.
+- [ ] An output with a cable shows *carrying* within 200 ms of a signal above −80 dB, and *silent* 400 ms after it stops. A one-sample trigger lights it. Cable geometry is the same with and without activity.
+- [ ] The scope draws its trace in the tile, holds still for a periodic wave, and four scopes keep 60 fps.
+- [ ] A growable tile resizes to the grid within its limits. Ports and cable ends follow. The size is saved and loads. Old patches load. One drag is one undo step.
 
 ## Default panels
 
