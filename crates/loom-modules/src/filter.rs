@@ -297,8 +297,12 @@ impl Module for OnePole {
                 pitch::to_hz(pitch::from_hz(samples[i]) + cutoff_mod[i])
             } else {
                 pitch::to_hz(cutoff_pitch + cutoff_mod[i])
-            }
-            .clamp(0.5, nyquist_limit);
+            };
+            // Cables are never clipped, so a NaN can arrive on the cutoff
+            // (after a divide upstream, say). `clamp` passes NaN through,
+            // and it would reach the state and stay there. Use a safe
+            // cutoff for that frame instead. Infinity is clamped as usual.
+            let cutoff_hz = if cutoff_hz.is_nan() { 1_000.0 } else { cutoff_hz }.clamp(0.5, nyquist_limit);
             // Trapezoidal one-pole. Warping the cutoff with `tan` puts the
             // -3 dB point exactly on the cutoff at any rate.
             let g = (PI * cutoff_hz / self.sample_rate).tan();
@@ -415,6 +419,28 @@ mod tests {
                 assert!((db + 3.01).abs() < 0.1, "cutoff {cutoff}: {db} dB");
             }
         }
+    }
+
+    /// A NaN on the cutoff cable does not poison the filter state: the
+    /// output is finite during the NaN and the filter works afterwards.
+    #[test]
+    fn onepole_recovers_from_nan_on_the_cutoff_cable() {
+        let mut filter = make(&ONEPOLE, &[(0, 1_000.0)]);
+        let input = vec![0.5; 256];
+        let mut cutoff_mod = vec![0.0; 256];
+        cutoff_mod[10..14].fill(f32::NAN);
+        let (mut lp, mut hp) = (vec![0.0; 256], vec![0.0; 256]);
+        run(
+            filter.as_mut(),
+            RATE,
+            &[&input, &cutoff_mod],
+            &[true, true],
+            &mut [&mut lp, &mut hp],
+            &[],
+        );
+        assert!(lp.iter().chain(&hp).all(|v| v.is_finite()), "{lp:?}");
+        // A constant input of 0.5 settles near 0.5 at the lowpass.
+        assert!((lp[255] - 0.5).abs() < 0.05, "{}", lp[255]);
     }
 
     /// A NaN in the input does not poison the filter state.
