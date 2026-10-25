@@ -3485,6 +3485,11 @@ mod tests {
         };
         let expected = |frames: usize| ((frames - 1) as f64 * beats_per_frame / beats_per_bar) as f32;
 
+        // The bar phase is read as live minus knob position, which holds
+        // only while the knob plus the phase stays below 1 (no clamp). The
+        // test reaches a bar phase of about 0.05.
+        let base = tile_widget(&app, filter, widget).position;
+        assert!(base < 0.9, "the knob at {base} leaves no room above it for the phase");
         assert!(settings.running, "a new patch starts running");
         let _ = app.update(Message::Canvas(CanvasEvent::ToggleRun));
         assert!(!app.controller.transport().running);

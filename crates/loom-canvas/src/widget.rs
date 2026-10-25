@@ -1177,9 +1177,10 @@ impl<Message> PatchCanvas<'_, Message> {
     /// so it is checked first, as `press` does: there a press drags depth,
     /// and the cursor says so (modulation.md, Arc drag).
     fn hover_interaction(&self, state: &State) -> mouse::Interaction {
-        let on_ring = self.learn.is_none()
-            && matches!(state.hover, Some(Hit::Widget { .. } | Hit::Module(_)))
-            && state.cursor.is_some_and(|world| self.range_ring_at(world).is_some());
+        let on_ring = state
+            .hover
+            .zip(state.cursor)
+            .is_some_and(|(hit, world)| self.depth_drag_at(&hit, world).is_some());
         if on_ring {
             return mouse::Interaction::ResizingVertically;
         }
@@ -1192,6 +1193,17 @@ impl<Message> PatchCanvas<'_, Message> {
             Some(Hit::Module(_)) => mouse::Interaction::Grab,
             _ => mouse::Interaction::default(),
         }
+    }
+
+    /// The modulated knob whose ring a press at `world` would grab to drag
+    /// depth, given what the hit test found there. Not in MIDI learn mode.
+    /// `press` and the hover cursor both ask this one method, so the cursor
+    /// always tells the truth about the press (#198 was the two disagreeing).
+    fn depth_drag_at(&self, hit: &Hit, world: Point) -> Option<(u32, usize)> {
+        if self.learn.is_some() || !matches!(hit, Hit::Widget { .. } | Hit::Module(_)) {
+            return None;
+        }
+        self.range_ring_at(world)
     }
 
     /// The modulated knob whose range ring is under `world`, if any.
@@ -1555,10 +1567,7 @@ impl<Message> PatchCanvas<'_, Message> {
         state.focus_first = false;
         // The ring of a modulated knob reaches a little past the knob's
         // cell, so it is found before the hit test's answer is used.
-        if self.learn.is_none()
-            && matches!(hit, Hit::Widget { .. } | Hit::Module(_))
-            && let Some((module, widget)) = self.range_ring_at(world)
-        {
+        if let Some((module, widget)) = self.depth_drag_at(&hit, world) {
             // The selection stays as it is: a selected source module is one
             // way the drag picks its assignment (modulation.md, Arc drag).
             self.begin(
