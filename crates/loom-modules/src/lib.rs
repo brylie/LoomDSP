@@ -35,6 +35,7 @@ pub static ALL: &[&ModuleDescriptor] = &[
     &osc::TRIANGLE,
     &osc::NOISE,
     &filter::SVF,
+    &filter::ONEPOLE,
     &env::ADSR,
     &math::ADD,
     &math::MUL,
