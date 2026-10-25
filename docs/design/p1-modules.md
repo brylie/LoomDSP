@@ -244,10 +244,15 @@ Both follow `loom.filter.svf`: an `in` port, a `cutoff` input in pitch units add
 |---|---|
 | Input | `in`, `cutoff` (pitch, default 0) |
 | Output | `out` |
-| Parameters | `cutoff`: 20 to 20000 Hz, logarithmic, default 1000. `resonance`: 0 to 1, default 0.2. `drive`: 0 to 1, default 0 |
+| Parameters | `cutoff`: 20 to 20000 Hz, logarithmic, default 1000. `resonance`: 0 to 1, default 0.2. `drive`: 0 to 1, default 0. `slope`: a choice, 0 12 dB, 1 18 dB, 2 24 dB (default) |
+| Panel | Radio buttons for `slope`, knobs for the rest |
 
-- Four cascaded one-pole low-pass stages with feedback from the last stage to the input. 24 dB per octave. At `resonance` 1 the loop self-oscillates at the cutoff.
+- **One module with a slope setting, not several modules.** The slope picks how many one-pole stages sit in the loop: 2, 3, or 4. *Why:* a player who wants a gentler filter should not have to swap modules, and the stages are the same code. The 6 dB slope is the [one-pole filter](#one-pole-locloomfilteronepole), which has no resonance.
+- Cascaded one-pole low-pass stages with feedback from the last stage of the chosen length back to the input. `out` is that last stage.
+- **Resonance scales the feedback gain `k`.** `k = resonance × k_max`, with `k_max` 4 at 24 dB, 8 at 18 dB, and 8 at 12 dB. *Why:* for N identical stages, the loop reaches self-oscillation when `(1 + s)^N = -k` has a root on the imaginary axis. That is `k = 4` for N = 4 (at the cutoff) and `k = 8` for N = 3 (at 1.7 times the cutoff). So at `resonance` 1, the 24 dB and 18 dB slopes self-oscillate. Two stages never reach it: at `k = 8` the 12 dB slope has a peak of about +4 dB, which is a strong resonance but not a whistle.
+- **No gain compensation.** The low end thins as resonance rises, as on a classic ladder. *Why:* it is part of the character the catalogue entry describes. A player who wants the level kept raises `drive` or follows the filter with an amplifier.
 - A saturating curve (tanh) sits in the feedback path. `drive` scales the input into the first stage: 0 is clean, 1 pushes the loop hard. *Why:* saturation limits the self-oscillation to a stable level and gives the sound its character.
+- **Changing `slope` while playing** keeps the stage states and only moves the tap and the feedback point. A stage that was not in the loop keeps running, so the change is not a reset. The tap and `k_max` change over 10 ms like other smoothed parameters. *Why:* a live switch must not click or restart the sound.
 - Designed from published theory only (ADR-0018): Stilson and Smith, "Analyzing the Moog VCF with Considerations for Digital Implementation" (1996), and V. Zavalishin, "The Art of VA Filter Design" (stage and feedback topology, zero-delay form). Cite them in the code and the pull request.
 - **Stability.** The cutoff is clamped to 0.45 of the sample rate. NaN and infinity in the input give 0 and clear the stage state. No allocation.
 - No oversampling in P1, so heavy drive can alias. The catalogue's Quality trait is the place for it later.
@@ -285,7 +290,7 @@ Every module also needs the checklist items in rule 6 above. The module-specific
 - [ ] Sample and hold captures on the same frame at all three block sizes. Slew takes `time` seconds to rise by 1.0, and a new module starts at its input.
 - [ ] A synced LFO with nothing connected wraps with the bar phase at block sizes 1, 77, and 512. A free LFO ignores a cable on `phase`.
 - [ ] Envelope AD mode measures the attack and decay times, retriggers in decay without a click, and matches at all three block sizes.
-- [ ] The one-pole outputs are 3 dB down at their cutoff. The ladder self-oscillates near the cutoff at resonance 1, stays finite at any input, and does not exceed 0 dBFS by more than the output stage allows.
+- [ ] The one-pole outputs are 3 dB down at their cutoff. The ladder is about 12, 18, and 24 dB per octave steeper above the cutoff for each `slope`. At resonance 1, the 24 dB slope self-oscillates at the cutoff and the 18 dB slope at about 1.7 times it. The 12 dB slope does not self-oscillate (peak near +4 dB). It stays finite at any input, and a `slope` change while playing is click-free.
 - [ ] Controller input lands CC, bend, and aftertouch events on the sample of their offset at block sizes 1, 77, and 512.
 
 ## Out of scope
