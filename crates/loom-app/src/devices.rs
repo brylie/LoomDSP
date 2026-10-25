@@ -517,6 +517,33 @@ pub mod fake {
         }
     }
 
+    /// The host `App::new` uses in tests: the real audio outputs, but no
+    /// MIDI inputs, so a controller plugged into the machine cannot change
+    /// a result. Opening a MIDI port through it is a test bug.
+    pub struct NoMidi;
+
+    impl Host for NoMidi {
+        fn outputs(&self) -> Result<Outputs, String> {
+            System.outputs()
+        }
+
+        fn open(&self, options: &AudioOptions) -> Result<AudioOutput, String> {
+            System.open(options)
+        }
+
+        fn start(&self, output: AudioOutput, engine: loom_core::Engine) -> Result<RunningAudio, String> {
+            System.start(output, engine)
+        }
+
+        fn midi_inputs(&self) -> Result<Vec<String>, String> {
+            Ok(Vec::new())
+        }
+
+        fn open_midi(&self, name: &str, _midi: SharedMidi) -> Result<Box<dyn MidiPort>, String> {
+            panic!("a test opened the MIDI port `{name}`; use fake::Shared with its own ports");
+        }
+    }
+
     /// The fake behind an `Rc`, so its MIDI ports can reach it.
     pub struct Shared(pub Rc<Fake>);
 
