@@ -68,7 +68,7 @@ Every render fails if a port or parameter has an empty label or description, and
 | `.check_block_sizes()` | Renders with block sizes 1, 77, and 512 and fails unless all three are bit-identical. |
 | `.check_reference(path)` | Renders in blocks of 512 and compares with the reference file. |
 | `.check(path)` | Both checks. This is what most tests call. |
-| `.check_non_finite_recovery()` | For each input in turn, and for each of NaN, infinity, and minus infinity, puts that value on the input for 8 frames from frame 1000, as a connected cable. Renders in blocks of 1 frame (as a feedback loop calls the module) and of 512. Fails unless every output is finite again 480 frames (10 ms at 48 kHz) after the bad frames, up to the end of the render. Every other frame and input reads what the render reads without the check. |
+| `.check_non_finite_recovery()` | For each input in turn, and for each of NaN, infinity, and minus infinity, puts that value on the input for 8 frames from frame 1000, as a connected cable. Renders in blocks of 1 frame (as a feedback loop calls the module) and of 512. Fails unless every output is finite again 10 ms after the bad frames (480 frames at 48 kHz, scaled with the sample rate), up to the end of the render. Every other frame and input reads what the render reads without the check. |
 
 `reference!("name")` gives `tests/reference/name.wav` inside the crate that calls it.
 

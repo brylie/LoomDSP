@@ -66,10 +66,11 @@ pub const BAD_START: usize = 1_000;
 /// [`Harness::check_non_finite_recovery`].
 pub const BAD_FRAMES: usize = 8;
 
-/// Frames a module may take to give finite output again after the
-/// non-finite input ends, in [`Harness::check_non_finite_recovery`]. About
-/// 10 ms at 48 kHz.
-pub const RECOVERY_FRAMES: usize = 480;
+/// Time a module may take to give finite output again after the
+/// non-finite input ends, in [`Harness::check_non_finite_recovery`], in
+/// seconds. The check turns it into frames at the harness's sample rate, so
+/// the rule is the same 10 ms at any rate (480 frames at 48 kHz).
+pub const RECOVERY_SECONDS: f64 = 0.010;
 
 /// Default sample rate, in Hz.
 pub const DEFAULT_SAMPLE_RATE: f32 = 48_000.0;
@@ -386,7 +387,7 @@ impl Harness {
     /// (as a feedback loop calls the module) and of [`MAX_BLOCK`]. The input
     /// counts as connected. Every other frame and input reads what the
     /// render reads without the check: its signal, or its port default. It
-    /// panics unless every output is finite again from [`RECOVERY_FRAMES`]
+    /// panics unless every output is finite again from [`RECOVERY_SECONDS`]
     /// after the bad frames to the end of the render.
     ///
     /// Only inputs get bad values. Parameters cannot: the engine fills a
@@ -396,13 +397,14 @@ impl Harness {
     /// A module passes when it ignores a non-finite input or recovers from
     /// it. It fails when it keeps the value in its state, because the patch
     /// then stays broken after its input is sane again. The render must be
-    /// long enough to show that: at least [`BAD_START`] + [`BAD_FRAMES`] +
-    /// [`RECOVERY_FRAMES`] frames, and longer for a module that holds
+    /// long enough to show that: more than [`BAD_START`] + [`BAD_FRAMES`]
+    /// frames plus [`RECOVERY_SECONDS`] of frames, and longer for a module that holds
     /// samples, such as a delay, so a held bad value would come out again.
     #[track_caller]
     pub fn check_non_finite_recovery(&self) {
         let frames = self.frame_count();
-        let clean_from = BAD_START + BAD_FRAMES + RECOVERY_FRAMES;
+        let recovery_frames = (RECOVERY_SECONDS * f64::from(self.sample_rate)).ceil() as usize;
+        let clean_from = BAD_START + BAD_FRAMES + recovery_frames;
         assert!(
             frames > clean_from,
             "{}: the render is {frames} frames long, but the non-finite check needs more than {clean_from}",

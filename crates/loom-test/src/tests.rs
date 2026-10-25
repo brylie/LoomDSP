@@ -495,3 +495,14 @@ fn a_module_without_state_recovers() {
 fn a_short_render_cannot_show_recovery() {
     Harness::new(&ECHO).frames(1_000).check_non_finite_recovery();
 }
+
+/// The recovery window is 10 ms at any sample rate, so a render at 96 kHz
+/// needs 960 recovery frames, not 480.
+#[test]
+#[should_panic(expected = "but the non-finite check needs more than 1968")]
+fn the_recovery_window_scales_with_the_sample_rate() {
+    Harness::new(&ECHO)
+        .sample_rate(96_000.0)
+        .frames(1_900)
+        .check_non_finite_recovery();
+}
