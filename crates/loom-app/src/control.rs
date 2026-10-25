@@ -1795,12 +1795,14 @@ mod tests {
             canvas: Some(ui.canvas()),
             text: None,
         };
+        // The two sides round differently, so allow a tiny difference.
+        let near = |a: Point, b: Point| (a.x - b.x).abs() < 0.01 && (a.y - b.y).abs() < 0.01;
         let knob = locate(&ui.app, "4:cutoff", &found).unwrap();
-        assert_eq!(knob.center(), ui.control(4, "cutoff"));
+        assert!(near(knob.center(), ui.control(4, "cutoff")));
         let out = locate(&ui.app, "8:out", &found).unwrap();
-        assert_eq!(out.center(), ui.output(8, "out"));
+        assert!(near(out.center(), ui.output(8, "out")));
         let input = locate(&ui.app, "9:right", &found).unwrap();
-        assert_eq!(input.center(), ui.input(9, "right"));
+        assert!(near(input.center(), ui.input(9, "right")));
         let tile = locate(&ui.app, "4", &found).unwrap();
         assert!(tile.contains(knob.center()));
         assert!(locate(&ui.app, "4:nonsense", &found).is_err());
