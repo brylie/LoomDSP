@@ -270,12 +270,16 @@ impl Wrap {
 
 impl Module for Wrap {
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        let mode_mod = io.modulated(0);
         let ([input], [out]) = io.split::<1, 1>();
-        for (out, &x) in out.iter_mut().zip(input) {
+        for (i, (out, &x)) in out.iter_mut().zip(input).enumerate() {
+            // A modulated mode counts for this frame only; the base stays
+            // in the field.
+            let fold = mode_mod.map_or(self.fold, |s| s[i] >= 0.5);
             // A phase module must not pass NaN on to oscillators.
             *out = if !x.is_finite() {
                 0.0
-            } else if self.fold {
+            } else if fold {
                 Self::fold(x)
             } else {
                 Self::wrap(x)
