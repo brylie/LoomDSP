@@ -382,11 +382,16 @@ impl Harness {
     ///
     /// For each input in turn, and for each of NaN, infinity, and minus
     /// infinity, it renders with that value on the input for
-    /// [`BAD_FRAMES`] frames from frame [`BAD_START`]. The input counts as
-    /// connected. Every other frame and input reads what the render reads
-    /// without the check: its signal, or its port default. It panics unless
-    /// every output is finite again from [`RECOVERY_FRAMES`] after the bad
-    /// frames to the end of the render.
+    /// [`BAD_FRAMES`] frames from frame [`BAD_START`], in blocks of 1 frame
+    /// (as a feedback loop calls the module) and of [`MAX_BLOCK`]. The input
+    /// counts as connected. Every other frame and input reads what the
+    /// render reads without the check: its signal, or its port default. It
+    /// panics unless every output is finite again from [`RECOVERY_FRAMES`]
+    /// after the bad frames to the end of the render.
+    ///
+    /// Only inputs get bad values. Parameters cannot: the engine fills a
+    /// modulated parameter through `ParamSpec::denormalize`, which turns NaN
+    /// into the default and clamps infinity.
     ///
     /// A module passes when it ignores a non-finite input or recovers from
     /// it. It fails when it keeps the value in its state, because the patch
@@ -410,20 +415,23 @@ impl Harness {
                 inputs[port][BAD_START..BAD_START + BAD_FRAMES].fill(bad);
                 let mut connected = connected.clone();
                 connected[port] = true;
-                let render = self.run(MAX_BLOCK, &inputs, &connected);
-                for (output, samples) in render.outputs.iter().enumerate() {
-                    if let Some(frame) = samples[clean_from..].iter().position(|value| !value.is_finite()) {
-                        let frame = clean_from + frame;
-                        panic!(
-                            "{}: after {bad} on input `{}` (frames {BAD_START} to {}), output `{}` is still {} at \
-                             frame {frame}. A module must ignore a non-finite input or recover from it, not keep \
-                             it in its state.",
-                            self.descriptor.id,
-                            spec.name,
-                            BAD_START + BAD_FRAMES - 1,
-                            self.descriptor.outputs[output].name,
-                            samples[frame],
-                        );
+                // Block size 1 is how a feedback loop calls the module.
+                for block in [1, MAX_BLOCK] {
+                    let render = self.run(block, &inputs, &connected);
+                    for (output, samples) in render.outputs.iter().enumerate() {
+                        if let Some(frame) = samples[clean_from..].iter().position(|value| !value.is_finite()) {
+                            let frame = clean_from + frame;
+                            panic!(
+                                "{}: after {bad} on input `{}` (frames {BAD_START} to {}), output `{}` is still {} at \
+                             frame {frame} (block size {block}). A module must ignore a non-finite input or recover \
+                             from it, not keep it in its state.",
+                                self.descriptor.id,
+                                spec.name,
+                                BAD_START + BAD_FRAMES - 1,
+                                self.descriptor.outputs[output].name,
+                                samples[frame],
+                            );
+                        }
                     }
                 }
             }

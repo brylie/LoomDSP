@@ -162,12 +162,6 @@ impl Module for Svf {
             let v2 = self.ic2 + a2 * self.ic1 + a3 * v3;
             self.ic1 = 2.0 * v1 - self.ic1;
             self.ic2 = 2.0 * v2 - self.ic2;
-            // A non-finite modulated resonance can still reach the state.
-            // Start again from silence rather than keep it.
-            if !(self.ic1.is_finite() && self.ic2.is_finite()) {
-                self.ic1 = 0.0;
-                self.ic2 = 0.0;
-            }
 
             lp[i] = v2;
             bp[i] = v1;
