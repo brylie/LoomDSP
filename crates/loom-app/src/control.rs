@@ -500,6 +500,24 @@ pub(crate) struct Pending {
     step: Step,
 }
 
+/// Ends the running `sample`s with an error and keeps the other waiting
+/// commands, for when another patch is opened. A sample would otherwise go
+/// on with whatever module has the same ID and widget name in the new
+/// patch (rule 14).
+pub(crate) fn end_samples(pending: Vec<Pending>) -> Vec<Pending> {
+    let mut kept = Vec::new();
+    for waiting in pending {
+        if matches!(waiting.step, Step::Sample(_)) {
+            waiting
+                .call
+                .answer(Err("another patch was opened while sampling".to_string()));
+        } else {
+            kept.push(waiting);
+        }
+    }
+    kept
+}
+
 /// What a widget operation found in the live window.
 #[derive(Debug, Clone, Default)]
 pub struct Found {
@@ -1741,6 +1759,124 @@ mod tests {
         assert!(!app.control_waiting());
     }
 
+    /// An idle-engine app with an envelope whose gate is held, so its
+    /// light and output move. Returns the app and the envelope's ID.
+    fn held_envelope() -> (App, u32) {
+        let mut app = App::new(crate::tests::app_args());
+        let gate = app.controller.add_module("loom.math.constant").unwrap();
+        app.controller.set_param_named(gate, "value", 1.0).unwrap();
+        let env = app.controller.add_module("loom.env.adsr").unwrap();
+        app.controller.set_param_named(env, "decay", 0.3).unwrap();
+        app.controller.set_param_named(env, "sustain", 0.2).unwrap();
+        app.controller.connect_named(gate, "out", env, "gate").unwrap();
+        app.commit();
+        (app, env.0)
+    }
+
+    /// Runs a command like `run`, and between frames runs the idle engine
+    /// and hands the app its lights and meter levels, as a playing stream
+    /// and the window's subscriptions would. A `sample` of a light or a
+    /// meter needs both; the tests have no subscriptions.
+    fn run_playing(app: &mut App, line: &str) -> Answer {
+        let command: Command = serde_json::from_str(line).unwrap();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let call = Call {
+            command,
+            reply: Reply(Arc::new(Mutex::new(Some(sender)))),
+        };
+        let _ = app.control(call);
+        for _ in 0..500 {
+            if let Ok(answer) = receiver.try_recv() {
+                return answer;
+            }
+            // 50 ms of sound a frame.
+            app.run_engine(2400);
+            let _ = app.update(Message::ControlFrame(Instant::now()));
+            std::thread::sleep(Duration::from_millis(16));
+        }
+        receiver.try_recv().expect("answered")
+    }
+
+    /// `sample` records a light: its brightness (`position`) changes while
+    /// the envelope behind it falls from its peak to its sustain.
+    #[test]
+    fn sample_records_a_light() {
+        let (mut app, env) = held_envelope();
+        let line = format!(r#"{{"cmd": "sample", "target": "{env}:level", "ms": 400}}"#);
+        let sample = run_playing(&mut app, &line).unwrap();
+        let frames = sample["frames"].as_array().unwrap();
+        assert!(frames.len() >= 2, "{sample:?}");
+        let light: Vec<f64> = frames.iter().map(|f| f["position"].as_f64().unwrap()).collect();
+        assert!(
+            light.windows(2).any(|l| l[0] != l[1]),
+            "the light did not change: {light:?}"
+        );
+        assert!(
+            frames.iter().all(|f| f.get("peak").is_none()),
+            "only meters have a peak"
+        );
+    }
+
+    /// `sample` records a meter on a patch with sound: every entry has a
+    /// `peak` at or above its `position` (the RMS level).
+    #[test]
+    fn sample_records_a_meter() {
+        let (mut app, env) = held_envelope();
+        let added = run(
+            &mut app,
+            &format!(r#"{{"cmd": "probe", "from": "{env}:out", "kind": "meter"}}"#),
+        )
+        .unwrap();
+        let meter = added["module"].as_u64().unwrap();
+        let line = format!(r#"{{"cmd": "sample", "target": "{meter}:out", "ms": 400}}"#);
+        let sample = run_playing(&mut app, &line).unwrap();
+        let frames = sample["frames"].as_array().unwrap();
+        assert!(frames.len() >= 2, "{sample:?}");
+        for frame in frames {
+            let position = frame["position"].as_f64().unwrap();
+            let peak = frame["peak"].as_f64().unwrap_or_else(|| panic!("no peak: {frame}"));
+            assert!(peak >= position, "{frame}");
+        }
+        assert!(
+            frames.iter().any(|f| f["peak"].as_f64().unwrap() > 0.0),
+            "the meter saw no sound: {sample:?}"
+        );
+    }
+
+    /// Opening a patch ends a running `sample`, even when the new patch has
+    /// a module with the same ID and widget name (#270).
+    #[test]
+    fn opening_a_patch_ends_a_running_sample() {
+        let mut app = App::new(crate::Args {
+            patch: Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches/subtractive.ron")),
+            ..crate::tests::app_args()
+        });
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let call = Call {
+            command: Command::Sample {
+                target: "4:resonance".to_string(),
+                ms: 10_000,
+            },
+            reply: Reply(Arc::new(Mutex::new(Some(sender)))),
+        };
+        let _ = app.control(call);
+        for _ in 0..=FRAMES_BEFORE_ANSWER {
+            let _ = app.update(Message::ControlFrame(Instant::now()));
+        }
+        assert!(receiver.try_recv().is_err(), "still sampling");
+        // Module 4 of this patch also has a `resonance` control.
+        let patch = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches/subtractive.ron");
+        assert!(app.replace(crate::Source::File(&patch)));
+        assert_eq!(
+            receiver.try_recv().unwrap().unwrap_err(),
+            "another patch was opened while sampling"
+        );
+        assert!(!app.control_waiting());
+        // The new patch can be sampled again.
+        let sample = run(&mut app, r#"{"cmd": "sample", "target": "4:resonance", "ms": 50}"#).unwrap();
+        assert!(!sample["frames"].as_array().unwrap().is_empty());
+    }
+
     /// `press` refuses what a click could not do: dialogs (rule 9),
     /// disabled buttons, and unknown names.
     #[test]
@@ -1961,5 +2097,99 @@ mod tests {
             "{}",
             app.playing_line()
         );
+    }
+
+    /// A short folder for a socket: the path limit is the operating
+    /// system's (rule 13).
+    #[cfg(unix)]
+    fn socket_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("loom-sock-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// The socket replaces a stale one, answers each client one line per
+    /// command, accepts the next client, and is removed when the app closes.
+    #[cfg(unix)]
+    #[test]
+    fn socket_serves_clients_and_cleans_up() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::{UnixListener, UnixStream};
+        let dir = socket_dir("serve");
+        let path = dir.join("s");
+        // A socket file left by an earlier run.
+        drop(UnixListener::bind(&path).unwrap());
+        assert!(path.exists());
+
+        let (tx, mut rx) = mpsc::channel::<Call>(1);
+        let app = std::thread::spawn(move || {
+            // Answers three commands, then closes as the app does.
+            for _ in 0..3 {
+                let call = iced::futures::executor::block_on(iced::futures::StreamExt::next(&mut rx)).unwrap();
+                call.answer(Ok(fields(json!({ "seen": matches!(call.command, Command::Snapshot) }))));
+            }
+        });
+        let listener = {
+            let path = path.clone();
+            std::thread::spawn(move || listen(&path, tx))
+        };
+        let ask = |lines: &str, replies: usize| -> Vec<Value> {
+            let mut stream = loop {
+                if let Ok(stream) = UnixStream::connect(&path) {
+                    break stream;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            };
+            stream.write_all(lines.as_bytes()).unwrap();
+            let mut reader = BufReader::new(stream);
+            (0..replies)
+                .map(|_| {
+                    let mut line = String::new();
+                    reader.read_line(&mut line).unwrap();
+                    serde_json::from_str(&line).unwrap()
+                })
+                .collect()
+        };
+        let first = ask(
+            "{\"id\": 1, \"cmd\": \"snapshot\"}\n{\"id\": 2, \"cmd\": \"snapshot\"}\n",
+            2,
+        );
+        assert_eq!(first[0], json!({ "id": 1, "ok": true, "seen": true }));
+        assert_eq!(first[1], json!({ "id": 2, "ok": true, "seen": true }));
+        // The next client is accepted after the first one left.
+        let second = ask("{\"id\": 3, \"cmd\": \"snapshot\"}\n", 1);
+        assert_eq!(second[0], json!({ "id": 3, "ok": true, "seen": true }));
+
+        app.join().unwrap();
+        listener.join().unwrap();
+        assert!(!path.exists(), "the socket is removed when the app closes");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A regular file at the socket path is never touched (rule 13).
+    #[cfg(unix)]
+    #[test]
+    fn socket_leaves_a_regular_file_alone() {
+        let dir = socket_dir("file");
+        let path = dir.join("s");
+        std::fs::write(&path, "precious").unwrap();
+        let (tx, _rx) = mpsc::channel::<Call>(1);
+        listen(&path, tx);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "precious");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A path longer than the operating system allows is refused, and
+    /// `listen` returns instead of waiting.
+    #[cfg(unix)]
+    #[test]
+    fn socket_refuses_a_path_that_is_too_long() {
+        let dir = socket_dir("long");
+        let path = dir.join("s".repeat(200));
+        let (tx, _rx) = mpsc::channel::<Call>(1);
+        listen(&path, tx);
+        assert!(!path.exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

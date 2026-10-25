@@ -1007,8 +1007,9 @@ impl App {
         fresh.control = std::mem::take(&mut self.control);
         // The session goes on; only its patch changed.
         fresh.recovery = self.recovery.take();
-        // Commands waiting to be drawn still get their answer.
-        fresh.control_pending = std::mem::take(&mut self.control_pending);
+        // Commands waiting to be drawn still get their answer, except a
+        // `sample`, which would measure a module of the new patch.
+        fresh.control_pending = control::end_samples(std::mem::take(&mut self.control_pending));
         // The canvas keeps its state across the rebuild and compares these
         // keys with the ones it saw: they must keep counting up. A new frame
         // key also resets pan and zoom to show the whole patch.
