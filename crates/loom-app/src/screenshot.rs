@@ -64,8 +64,11 @@ pub struct Options {
     #[arg(long, value_name = "MODULE:PARAM", requires = "image")]
     pub focus: Option<Named>,
     /// Put the pointer here, as X,Y in world units, or as MODULE:NAME for
-    /// the centre of a control (by parameter) or else a port of that name,
-    /// outputs first. What is under it draws as hovered.
+    /// the centre of a control (by parameter), else a port of that name
+    /// (outputs first), else a light or a meter (by display value). Use
+    /// MODULE:display:NAME for a light or meter whose name a port also
+    /// has, such as 11:display:out on a Level Meter. What is under it
+    /// draws as hovered.
     #[arg(long, value_name = "X,Y|MODULE:NAME", requires = "image")]
     pub pointer: Option<Pointer>,
     /// Show hover text for what is under the pointer, or else for the
@@ -488,21 +491,14 @@ fn pick_up(controller: &mut Controller, target: &Named) -> Result<(PortRef, bool
     }
 }
 
-/// The world point of a named control's centre, or else of a port.
+/// The world point of a named control, port, light, or meter's centre,
+/// looked up in the order of rule 10 (`crate::targets`).
 fn find_point(controller: &Controller, scene: &Scene, target: &Named) -> Result<Point, String> {
-    let descriptor = descriptor(controller, target.module)?;
-    let module = scene.module(target.module).ok_or("module not in the scene")?;
-    if let Some(bounds) = control_index(descriptor, &target.name).and_then(|i| module.widget_bounds(i)) {
-        return Ok(bounds.center());
-    }
-    find_port(controller, target)
-        .and_then(|port| scene.port_position(port).ok_or_else(|| "port not in the scene".into()))
-        .map_err(|_| {
-            format!(
-                "module {} ({}) has no control or port `{}`",
-                target.module, descriptor.name, target.name
-            )
-        })
+    descriptor(controller, target.module)?;
+    let part = crate::targets::find(controller.graph(), target.module, &target.name)?;
+    crate::targets::world_bounds(scene, part)
+        .map(|bounds| bounds.center())
+        .map_err(|e| format!("{}:{}: {e}", target.module, target.name))
 }
 
 /// The output to pin. It must have a badge, so at least one assignment.
@@ -604,6 +600,35 @@ pub(crate) fn write_png(path: &Path, size: Size<u32>, rgba: &[u8]) -> Result<(),
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `--pointer` and `--center` find a light by its display value, and a
+    /// meter whose name its output also has by `display:` (#254).
+    #[test]
+    fn pointer_and_center_find_lights_and_meters() {
+        let mut app = crate::App::new(crate::tests::app_args());
+        let env = app.controller.add_module("loom.env.adsr").unwrap().0;
+        let meter = app.controller.add_module("loom.display.meter").unwrap().0;
+        app.commit();
+        let named = |s: String| s.parse::<Named>().unwrap();
+        let bounds = |module: u32, widget: usize| app.scene.module(module).unwrap().widget_bounds(widget).unwrap();
+        let light = app
+            .controller
+            .graph()
+            .node(ModuleId(env))
+            .unwrap()
+            .descriptor
+            .panel
+            .widgets
+            .iter()
+            .position(|w| w.bind == "level")
+            .unwrap();
+        let point = find_point(&app.controller, &app.scene, &named(format!("{env}:level"))).unwrap();
+        assert_eq!(point, bounds(env, light).center());
+        let point = find_point(&app.controller, &app.scene, &named(format!("{meter}:display:out"))).unwrap();
+        assert_eq!(point, bounds(meter, 0).center());
+        let port = find_point(&app.controller, &app.scene, &named(format!("{meter}:out"))).unwrap();
+        assert_ne!(port, bounds(meter, 0).center(), "without the prefix, the output");
+    }
 
     #[test]
     fn parses_options() {
