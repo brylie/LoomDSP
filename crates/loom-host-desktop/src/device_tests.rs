@@ -109,6 +109,7 @@ fn capture_a_stop(stop: impl FnOnce(RunningAudio) -> bool) -> Option<(Vec<f32>, 
         .load_into(&mut parts.controller)
         .unwrap();
     let audio = output.start(parts.engine).unwrap();
+    let stats = audio.stats().clone();
     std::thread::sleep(Duration::from_millis(600));
     parts.controller.fade_out().unwrap();
     let silent = stop(audio);
@@ -116,6 +117,13 @@ fn capture_a_stop(stop: impl FnOnce(RunningAudio) -> bool) -> Option<(Vec<f32>, 
     // Long enough for the device to play out what it was handed.
     std::thread::sleep(Duration::from_millis(400));
     let report = capture.stop().unwrap();
+    // A dropout with no error on either side happened in the device
+    // (for example the PipeWire graph), not in LoomDSP's callbacks.
+    let s = stats.snapshot();
+    eprintln!(
+        "output: {} callbacks, {} overruns, {} stream errors, {} start overloads; capture: {} frames, {} stream errors",
+        s.callbacks, s.overruns, s.stream_errors, s.start_overloads, report.frames, report.stream_errors
+    );
     assert_eq!(report.dropped, 0, "no frame was dropped");
 
     let mut reader = hound::WavReader::open(&path).unwrap();
@@ -123,41 +131,82 @@ fn capture_a_stop(stop: impl FnOnce(RunningAudio) -> bool) -> Option<(Vec<f32>, 
     Some((left, rate))
 }
 
-/// The level the capture holds, and its largest step between two
-/// neighbouring samples from the first sample at that level on: the
-/// stop, not the start. The loopback's volume scales the level, so
-/// checks are relative to it.
+/// The level the capture holds, and the largest step of the stop: from
+/// the last sample at that level on, where the fade must be. The
+/// loopback's volume scales the level, so checks are relative to it.
+///
+/// A step inside the stream before that is a dropout, not the stop: on
+/// a busy CI runner, PipeWire sometimes delivers one 512-frame quantum
+/// of silence and then the level again (#361). It is printed, with
+/// where it is, but does not count as the stop's step.
 fn level_and_step(samples: &[f32]) -> (f32, f32) {
     let level = samples.iter().fold(0.0f32, |m, x| m.max(x.abs()));
     let held = samples.iter().position(|x| x.abs() >= level).unwrap_or(0);
-    let (at, step) = samples[held..]
-        .windows(2)
-        .enumerate()
-        .fold((0, 0.0f32), |(at, m), (i, w)| {
-            let d = (w[1] - w[0]).abs();
-            if d > m { (held + i, d) } else { (at, m) }
-        });
-    // Where the step is tells a cut stop from a dropout inside the stream:
-    // a cut leaves silence after it, a dropout returns to the level.
+    let last = samples.iter().rposition(|x| x.abs() >= level).unwrap_or(0);
+    let (dropout_at, dropout) = largest_step(samples, held, last);
+    if dropout > 0.0 {
+        let back = samples[dropout_at + 1..=last]
+            .iter()
+            .position(|x| x.abs() >= level)
+            .map_or(last, |i| dropout_at + 1 + i);
+        eprintln!(
+            "dropout inside the stream: {} -> {} at frame {dropout_at}, back at the level at frame {back}",
+            samples[dropout_at],
+            samples[dropout_at + 1]
+        );
+    }
+    let (at, step) = largest_step(samples, last, samples.len().saturating_sub(1));
     eprintln!(
-        "captured level {level}, largest step {step}: {} -> {} at frame {at} of {}, level held from frame {held}",
+        "captured level {level}, held from frame {held} to {last}; the stop's largest step {step}: {} -> {} at frame {at} of {}",
         samples.get(at).copied().unwrap_or(0.0),
         samples.get(at + 1).copied().unwrap_or(0.0),
         samples.len()
     );
-    // The last frame at the level, and the next one after the step: a cut
-    // stop never comes back, a dropout does.
-    let last = samples.iter().rposition(|x| x.abs() >= level).unwrap_or(0);
-    let back = samples
-        .get(at + 1..)
-        .and_then(|rest| rest.iter().position(|x| x.abs() >= level * 0.9))
-        .map(|i| at + 1 + i);
-    eprintln!("last frame at the level: {last}; back at the level after the step: {back:?}");
     assert!(
         level > 0.01,
         "the loopback delivered sound (level {level}). On macOS the terminal needs microphone access."
     );
     (level, step)
+}
+
+/// The largest step between two neighbouring samples from frame `from`
+/// to frame `to`, and the frame it starts at. Zero when the range has
+/// fewer than two samples.
+fn largest_step(samples: &[f32], from: usize, to: usize) -> (usize, f32) {
+    samples
+        .get(from..=to)
+        .unwrap_or(&[])
+        .windows(2)
+        .enumerate()
+        .fold((from, 0.0f32), |(at, m), (i, w)| {
+            let d = (w[1] - w[0]).abs();
+            if d > m { (from + i, d) } else { (at, m) }
+        })
+}
+
+/// The stop's step ignores a dropout inside the stream but still sees a
+/// cut stop. The shapes are those of the CI capture in #361: a 512-frame
+/// gap of silence, the level again, then a 480-frame fade.
+#[test]
+fn the_stop_step_ignores_a_dropout_inside_the_stream() {
+    let fade: Vec<f32> = (0..480).map(|i| 0.5 * (1.0 - i as f32 / 480.0)).collect();
+    let stream = |gap: bool, end: &[f32]| {
+        let mut s = vec![0.0f32; 100];
+        s.extend(std::iter::repeat_n(0.5, 1000));
+        if gap {
+            s.extend(std::iter::repeat_n(0.0, 512));
+        }
+        s.extend(std::iter::repeat_n(0.5, 1000));
+        s.extend_from_slice(end);
+        s.extend(std::iter::repeat_n(0.0, 200));
+        s
+    };
+    let (level, step) = level_and_step(&stream(true, &fade));
+    assert_eq!(level, 0.5);
+    assert!(step <= fade_step(level, 48_000), "{step}");
+
+    let (_, step) = level_and_step(&stream(true, &[]));
+    assert_eq!(step, 0.5, "a cut stop is still a step of the whole level");
 }
 
 /// The largest step a 10 ms fade from `level` may take at `rate`, with
