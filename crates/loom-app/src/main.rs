@@ -2334,7 +2334,8 @@ impl App {
             self.stats_bar()
         ];
         // Always a stack, so opening the browser keeps the canvas's state
-        // (its camera) in the same place in the widget tree.
+        // (its camera) in the same place in the widget tree. Tested by
+        // `ui_test::tests::the_camera_survives_opening_the_browser`.
         let mut layers = stack![main];
         if let Some(open) = &self.browser {
             let outside = mouse_area(space().width(Length::Fill).height(Length::Fill))
@@ -3419,6 +3420,118 @@ mod tests {
         let _ = app.update(Message::Lights(watch.read()));
         let level = tile_widget(&app, env, light).position;
         assert!(level > 0.5, "the gate is held: {level}");
+    }
+
+    /// A meter on screen follows the engine through the app's `Meters`
+    /// path: empty before the engine runs, then a sine's level, with its
+    /// peak above the RMS level (#222).
+    #[test]
+    fn a_running_engine_fills_the_meter() {
+        let mut app = app();
+        let phase = app.controller.add_module("loom.phase.generator").unwrap();
+        let sine = app.controller.add_module("loom.osc.sine").unwrap();
+        let meter = app.controller.add_module("loom.display.meter").unwrap();
+        app.controller.connect_named(phase, "phase", sine, "phase").unwrap();
+        app.controller.connect_named(sine, "out", meter, "in").unwrap();
+        app.commit();
+        let d = app.controller.graph().node(meter).unwrap().descriptor;
+        let widget = d.panel.widgets.iter().position(|w| w.bind == "out").unwrap();
+        // On screen, so the meter gets a probe.
+        let _ = app.update(Message::Canvas(CanvasEvent::VisibleDisplays(vec![meter.0])));
+        let _ = app.update(Message::Meters(app.monitor.read()));
+        let before = tile_widget(&app, meter, widget);
+        assert_eq!((before.position, before.peak), (0.0, 0.0), "the engine has not run");
+
+        app.process(4_800);
+        let _ = app.update(Message::Meters(app.monitor.read()));
+        let shown = tile_widget(&app, meter, widget);
+        assert_eq!(shown.kind, "meter");
+        assert!(shown.position > 0.0, "a level: {shown:?}");
+        assert!(shown.peak > shown.position, "a sine peaks above its RMS: {shown:?}");
+        assert!(shown.peak > 0.99, "a full-scale sine: {shown:?}");
+    }
+
+    /// A MIDI mapping applied in the engine shows on the knob: a control
+    /// change sent through the engine's MIDI input moves the mapped cutoff
+    /// to the end of its range once the app reads it with `Midi` (#222).
+    #[test]
+    fn a_mapped_control_change_turns_the_knob() {
+        let mut app = app();
+        let (_, filter, cutoff, widget) = env_and_filter(&mut app);
+        let control = loom_core::MidiControl {
+            channel: 0,
+            controller: 74,
+        };
+        app.controller.map_midi(control, filter, cutoff).unwrap();
+        app.commit();
+        let midi = app.rig.midi_in.clone().expect("the idle engine's MIDI input");
+        let start = tile_widget(&app, filter, widget).position;
+        assert!(start > 0.0 && start < 1.0, "{start}");
+
+        for (value, position) in [(127, 1.0), (0, 0.0)] {
+            let change = loom_core::MidiEvent::from_bytes(0, &[0xB0, 74, value]);
+            assert!(loom_host_desktop::send_midi(&midi, change));
+            app.process(128);
+            let _ = app.update(Message::Midi);
+            let knob = tile_widget(&app, filter, widget);
+            assert_eq!(knob.position, position, "CC 74 at {value}: {knob:?}");
+            let param = app.controller.graph().node(filter).unwrap().params[cutoff];
+            let spec = &app.controller.graph().node(filter).unwrap().descriptor.params[cutoff];
+            assert_eq!(param, if value == 0 { spec.min } else { spec.max });
+        }
+    }
+
+    /// The transport moves only while it runs. Its position shows through a
+    /// Phase Scale that follows the bar phase and modulates a knob at depth
+    /// 1: the live dot sits the bar phase above the knob (#222). The
+    /// controller reports whether the transport runs, not its position.
+    #[test]
+    fn the_transport_position_moves_only_while_running() {
+        let mut app = app();
+        let scale = app.controller.add_module("loom.phase.scale").unwrap();
+        let (_, filter, cutoff, widget) = env_and_filter(&mut app);
+        app.controller.add_assignment(out(scale), filter, cutoff, 1.0).unwrap();
+        app.commit();
+        let settings = app.controller.transport();
+        let beats_per_frame = settings.tempo / 60.0 / f64::from(app.sample_rate);
+        let beats_per_bar = settings.time_signature.beats_per_bar();
+        // The bar phase the knob shows, from the live value of the last
+        // frame the engine ran.
+        let bar_phase = |app: &mut App, frames: usize| {
+            app.process(frames);
+            let _ = app.update(Message::LiveFrame);
+            let knob = tile_widget(app, filter, widget);
+            knob.live.expect("a live value") - knob.position
+        };
+        let expected = |frames: usize| ((frames - 1) as f64 * beats_per_frame / beats_per_bar) as f32;
+
+        // The bar phase is read as live minus knob position, which holds
+        // only while the knob plus the phase stays below 1 (no clamp). The
+        // test reaches a bar phase of about 0.05.
+        let base = tile_widget(&app, filter, widget).position;
+        assert!(base < 0.9, "the knob at {base} leaves no room above it for the phase");
+        assert!(settings.running, "a new patch starts running");
+        let _ = app.update(Message::Canvas(CanvasEvent::ToggleRun));
+        assert!(!app.controller.transport().running);
+        assert!(bar_phase(&mut app, 4_800).abs() < 1e-6, "stopped at bar 1");
+
+        let _ = app.update(Message::Canvas(CanvasEvent::ToggleRun));
+        assert!(app.controller.transport().running);
+        let first = bar_phase(&mut app, 4_800);
+        assert!((first - expected(4_800)).abs() < 1e-4, "{first} vs {}", expected(4_800));
+        let second = bar_phase(&mut app, 4_800);
+        assert!(
+            (second - expected(9_600)).abs() < 1e-4,
+            "{second} vs {}",
+            expected(9_600)
+        );
+
+        let _ = app.update(Message::Canvas(CanvasEvent::ToggleRun));
+        let held = bar_phase(&mut app, 4_800);
+        assert!(
+            (held - expected(9_600)).abs() < 1e-4,
+            "stopping holds the position: {held}"
+        );
     }
 
     /// Meter levels follow their probes: turning metering on and off many

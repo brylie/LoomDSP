@@ -349,6 +349,14 @@ pub(crate) fn knob_centre(rect: Rectangle) -> Point {
     Point::new(rect.x + rect.width * 0.5, rect.y + GRID - 1.0)
 }
 
+/// Centre of a knob's dial and the radius halfway across its range ring:
+/// where a press on a modulated knob drags depth, not the value
+/// (modulation.md, Arc drag). Both in world units. Tests use it to press
+/// on the ring without counting pixels.
+pub fn knob_range_ring(rect: Rectangle) -> (Point, f32) {
+    (knob_centre(rect), (RANGE_RING_INNER + RANGE_RING_OUTER) * 0.5)
+}
+
 /// Centre of a light: in the top row of its 3 × 2 cell.
 pub(crate) fn light_centre(rect: Rectangle) -> Point {
     Point::new(rect.x + rect.width * 0.5, rect.y + GRID * 0.5 + 1.0)
