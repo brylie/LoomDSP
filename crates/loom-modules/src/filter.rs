@@ -265,13 +265,17 @@ pub static ONEPOLE: ModuleDescriptor = ModuleDescriptor {
     displays: &[],
 };
 
+/// State for `loom.filter.onepole`: the smoothed cutoff and the integrator.
 struct OnePole {
     sample_rate: f32,
+    /// The cutoff in pitch units, smoothed over 10 ms.
     cutoff: Smoothed,
+    /// The trapezoidal integrator state: the lowpass output so far.
     state: f32,
 }
 
 impl OnePole {
+    /// A one-pole at 1 kHz with a cleared state.
     fn new(config: &ModuleConfig) -> Self {
         Self {
             sample_rate: config.sample_rate,
