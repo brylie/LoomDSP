@@ -505,6 +505,8 @@ pub static SLEW: ModuleDescriptor = ModuleDescriptor {
     displays: &[],
 };
 
+/// State for `loom.level.slew`: the rise and fall times, and `out`, the value
+/// the output has reached on its way to the input.
 struct Slew {
     sample_rate: f32,
     rise: f32,

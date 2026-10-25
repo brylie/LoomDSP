@@ -64,6 +64,8 @@ pub static SAMPLE_HOLD: ModuleDescriptor = ModuleDescriptor {
     displays: &[],
 };
 
+/// State for `loom.rand.sample-hold`: `track` is the mode, `edge` finds the
+/// trigger edges, and `held` is the value on the output.
 struct SampleHold {
     track: bool,
     edge: EdgeDetector,

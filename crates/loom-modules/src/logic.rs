@@ -223,6 +223,8 @@ pub static COMPARE: ModuleDescriptor = ModuleDescriptor {
     displays: &[],
 };
 
+/// State for `loom.logic.compare`: the mode, the dead band, and whether the
+/// gate is high now (the hysteresis needs it).
 struct Compare {
     below: bool,
     hysteresis: f32,
@@ -330,6 +332,8 @@ pub static LOGIC: ModuleDescriptor = ModuleDescriptor {
     displays: &[],
 };
 
+/// State for `loom.logic.logic`: the operation and the invert flag. The
+/// result is computed fresh each frame, so there is nothing else to keep.
 struct Logic {
     op: u8,
     invert: bool,
@@ -385,7 +389,7 @@ pub static MEMORY: ModuleDescriptor = ModuleDescriptor {
             name: "a",
             label: "A",
             signal: SignalType::Gate,
-            description: "Set a rising edge turns the output on (Set and reset), flips it (Toggle), or is the level to remember (Data).",
+            description: "In Set and reset, a rising edge turns the output on. In Toggle, a rising edge flips it. In Data, this is the level to remember.",
             default: PortDefault::Value(0.0),
             polarity: Polarity::Unipolar,
             channels: Channels::Downmix,
@@ -432,6 +436,8 @@ pub static MEMORY: ModuleDescriptor = ModuleDescriptor {
     displays: &["state"],
 };
 
+/// State for `loom.logic.memory`: the mode, the remembered gate, and one edge
+/// detector for each input.
 #[derive(Default)]
 struct Memory {
     mode: u8,
