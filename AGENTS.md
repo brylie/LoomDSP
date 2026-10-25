@@ -91,13 +91,14 @@ Build into the target folder cargo already uses. Do not set `CARGO_TARGET_DIR` o
 Before writing code for a feature, read its specification in `docs/design/` (the issue links it).
 
 - Build only what the spec says, from sections marked **Agreed**. Do not build what it lists as out of scope.
-- If the spec does not answer a question about behaviour (a gesture, a default, what the user sees), do not guess. Ask, or propose a spec change first.
+- If the spec does not answer a question about behaviour (a gesture, a default, what the user sees), do not guess. Ask, and write the answer into the spec as **Agreed** in the same pull request.
+- Merge only Agreed or Implemented spec text. Never merge a spec, or points inside one, marked *Proposed* or Draft. A question that comes up while building is settled before the pull request merges, not left as a proposal for later. A draft spec stays on its branch, with no pull request, until its open questions are answered. Draft sections already on `main` are older; settle them when their work starts.
 - If the code shows the spec is wrong, update the spec in the same pull request and say so in the description.
 - Check every acceptance criterion: as a test where possible, otherwise as a manual check listed in the pull request.
 - If the issue and the spec disagree, the spec wins. Say so in the pull request.
 - No spec is needed for bug fixes, refactoring, tests, or changes that do not change behaviour.
 
-Why: a gap in the spec gets filled with a guess, and a well-built guess is costly to undo. See [docs/design/README.md](docs/design/README.md#spec-first).
+Why: a gap in the spec gets filled with a guess, and a well-built guess is costly to undo. Merged proposals cost a second round of review and a follow-up issue each, for points that one question before the merge would have settled. See [docs/design/README.md](docs/design/README.md#spec-first).
 
 ## Prior art
 
