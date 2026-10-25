@@ -141,7 +141,7 @@ fn level_and_step(samples: &[f32]) -> (f32, f32) {
     // a cut leaves silence after it, a dropout returns to the level.
     eprintln!(
         "captured level {level}, largest step {step}: {} -> {} at frame {at} of {}, level held from frame {held}",
-        samples[at],
+        samples.get(at).copied().unwrap_or(0.0),
         samples.get(at + 1).copied().unwrap_or(0.0),
         samples.len()
     );
