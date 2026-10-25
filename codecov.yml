@@ -1,0 +1,25 @@
+# Codecov settings. Docs: https://docs.codecov.com/docs/codecovyml-reference
+
+codecov:
+  notify:
+    # Each commit uploads two reports: the Coverage job and the loopback job
+    # (flag `loopback`). Wait for both before posting a status, so a status
+    # is never judged on half the data.
+    after_n_builds: 2
+
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        # Some tests depend on timing, so a few lines can run in one CI run
+        # and not the next. Fail only when total coverage falls by more
+        # than 1% from the base commit.
+        threshold: 1%
+    patch:
+      default:
+        target: auto
+
+comment:
+  # Post the PR comment only once both reports are in, like the statuses.
+  after_n_builds: 2
