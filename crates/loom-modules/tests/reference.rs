@@ -6,7 +6,7 @@
 //! listen to them, and commit them.
 
 use loom_core::{MidiEvent, ModuleRole};
-use loom_modules::{ALL, display, env, filter, level, logic, math, midi, mix, osc, phase, time, ui};
+use loom_modules::{ALL, display, env, filter, level, logic, math, midi, mix, osc, phase, rand, time, ui};
 use loom_test::{Harness, Signal, reference};
 
 #[test]
@@ -343,6 +343,11 @@ fn every_dsp_module_has_a_reference_test() {
         &level::SCALE,
         &mix::MIXER,
         &mix::CROSSFADE,
+        &logic::COMPARE,
+        &logic::LOGIC,
+        &logic::MEMORY,
+        &rand::SAMPLE_HOLD,
+        &level::SLEW,
         &env::ADSR,
         &math::ADD,
         &math::MUL,
@@ -459,4 +464,70 @@ fn level_constant() {
         .seconds(0.01)
         .param("level", -6.0)
         .check(reference!("level_constant"));
+}
+
+/// A 100 Hz triangle-ish ramp for the gate modules, 0 to 1.
+fn ramp() -> Signal {
+    Signal::from_fn(|frame| (frame % 480) as f32 / 480.0)
+}
+
+/// Reference render for `loom.logic.compare`: a ramp against 0.5.
+#[test]
+fn compare() {
+    Harness::new(&logic::COMPARE)
+        .seconds(0.02)
+        .input("a", ramp())
+        .input("b", Signal::constant(0.5))
+        .param("hysteresis", 0.1)
+        .check(reference!("compare"));
+}
+
+/// Reference render for `loom.logic.logic`: Xor of two gates, inverted.
+#[test]
+fn logic_gates() {
+    Harness::new(&logic::LOGIC)
+        .seconds(0.02)
+        .input("in1", Signal::gate(0.0, 0.01))
+        .input("in2", Signal::gate(0.005, 0.015))
+        .param("op", 2.0)
+        .param("invert", 1.0)
+        .check(reference!("logic"));
+}
+
+/// Reference render for `loom.logic.memory`: toggle mode.
+#[test]
+fn memory() {
+    Harness::new(&logic::MEMORY)
+        .seconds(0.04)
+        .input("a", Signal::gate(0.005, 0.007))
+        .input("b", Signal::gate(0.03, 0.032))
+        .param("mode", 1.0)
+        .check(reference!("memory"));
+}
+
+/// Reference render for `loom.rand.sample-hold`: a ramp held on a trigger.
+#[test]
+fn sample_hold() {
+    Harness::new(&rand::SAMPLE_HOLD)
+        .seconds(0.02)
+        .input("in", ramp())
+        .input(
+            "trigger",
+            Signal::from_fn(|frame| if frame % 200 == 0 { 1.0 } else { 0.0 }),
+        )
+        .check(reference!("sample_hold"));
+}
+
+/// Reference render for `loom.level.slew`: a square wave slowed down.
+#[test]
+fn slew() {
+    Harness::new(&level::SLEW)
+        .seconds(0.04)
+        .input(
+            "in",
+            Signal::from_fn(|frame| if (frame / 480) % 2 == 0 { 1.0 } else { -1.0 }),
+        )
+        .param("rise", 0.005)
+        .param("fall", 0.01)
+        .check(reference!("slew"));
 }

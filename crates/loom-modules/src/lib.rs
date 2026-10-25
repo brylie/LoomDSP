@@ -23,6 +23,7 @@ pub mod midi;
 pub mod mix;
 pub mod osc;
 pub mod phase;
+pub mod rand;
 pub mod time;
 pub mod ui;
 
@@ -58,6 +59,11 @@ pub static ALL: &[&ModuleDescriptor] = &[
     &display::METER,
     &display::SCOPE,
     &logic::DIVIDE,
+    &logic::COMPARE,
+    &logic::LOGIC,
+    &logic::MEMORY,
+    &rand::SAMPLE_HOLD,
+    &level::SLEW,
     &ui::BUTTON,
     &time::DELAY,
     &time::ALLPASS,
@@ -147,6 +153,11 @@ mod tests {
                     ("loom.mix.mixer", "mute2"),
                     ("loom.mix.mixer", "mute3"),
                     ("loom.mix.mixer", "mute4"),
+                    ("loom.logic.compare", "mode"),
+                    ("loom.logic.logic", "op"),
+                    ("loom.logic.logic", "invert"),
+                    ("loom.logic.memory", "mode"),
+                    ("loom.rand.sample-hold", "mode"),
                 ];
                 if non_knob.contains(&(descriptor.id, param.name)) {
                     assert!(
@@ -173,6 +184,7 @@ mod tests {
             let expected: &[&str] = match descriptor.id {
                 "loom.midi.note" => &["gate"],
                 "loom.env.adsr" => &["level"],
+                "loom.logic.memory" => &["state"],
                 _ => &[],
             };
             assert_eq!(lights, expected, "{}", descriptor.id);

@@ -4,7 +4,7 @@
 //! Inputs count rising edges, and trigger outputs are high for one sample
 //! (ADR-0007), so a logic module never misses or merges a trigger.
 
-use loom_core::signal::{EdgeDetector, trigger};
+use loom_core::signal::{EdgeDetector, gate_is_high, trigger};
 use loom_core::{
     Channels, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, Polarity, PortDefault, PortIo,
     PortSpec, ProcessContext, SignalType, Widget,
@@ -143,6 +143,330 @@ impl Module for Divide {
         self.count = 0;
         self.trigger_in.reset();
         self.reset_in.reset();
+    }
+}
+
+/// `loom.logic.compare` (MT-LOGIC-01): a gate from comparing two signals.
+pub static COMPARE: ModuleDescriptor = ModuleDescriptor {
+    id: "loom.logic.compare",
+    version: 1,
+    name: "Compare",
+    category: "Logic",
+    description: "Makes a gate from two signals: high while A is above B, or while A is below B. Hysteresis keeps a noisy signal from chattering.",
+    inputs: &[
+        PortSpec {
+            name: "a",
+            label: "A",
+            signal: SignalType::Modulation,
+            description: "The signal to test.",
+            default: PortDefault::Value(0.0),
+            polarity: Polarity::Bipolar,
+            channels: Channels::Downmix,
+        },
+        PortSpec {
+            name: "b",
+            label: "B",
+            signal: SignalType::Modulation,
+            description: "The threshold A is compared with.",
+            default: PortDefault::Value(0.0),
+            polarity: Polarity::Bipolar,
+            channels: Channels::Downmix,
+        },
+    ],
+    outputs: &[PortSpec {
+        name: "gate",
+        label: "Gate",
+        signal: SignalType::Gate,
+        description: "High while the comparison holds. Equal values count as low.",
+        default: PortDefault::Value(0.0),
+        polarity: Polarity::Unipolar,
+        channels: Channels::PerChannel,
+    }],
+    params: &[
+        ParamSpec {
+            name: "mode",
+            label: "Mode",
+            description: "Above: high while A is above B. Below: high while A is below B.",
+            min: 0.0,
+            max: 1.0,
+            default: 0.0,
+            unit: "",
+            options: ParamOptions::DEFAULT,
+        }
+        .integer(),
+        ParamSpec {
+            name: "hysteresis",
+            label: "Hysteresis",
+            description: "A dead band around B. Once the gate is high, A must go this far past B the other way to end it.",
+            min: 0.0,
+            max: 1.0,
+            default: 0.0,
+            unit: "",
+            options: ParamOptions::DEFAULT,
+        },
+    ],
+    role: ModuleRole::Dsp(|_| {
+        Box::new(Compare {
+            below: false,
+            hysteresis: 0.0,
+            high: false,
+        })
+    }),
+    panel: Panel::new(
+        6,
+        4,
+        &[
+            Widget::radio(0, 0, "mode", &["Above", "Below"]),
+            Widget::knob(3, 0, "hysteresis"),
+        ],
+    ),
+    displays: &[],
+};
+
+struct Compare {
+    below: bool,
+    hysteresis: f32,
+    high: bool,
+}
+
+impl Module for Compare {
+    fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        let hysteresis_mod = io.modulated(1);
+        let ([a, b], [gate]) = io.split::<2, 1>();
+        for (i, gate) in gate.iter_mut().enumerate() {
+            let hysteresis = hysteresis_mod.map_or(self.hysteresis, |samples| samples[i]).max(0.0);
+            // Flip the sign for Below, and it is the Above test.
+            let (a, b) = if self.below { (-a[i], -b[i]) } else { (a[i], b[i]) };
+            // Once high, the gate stays high until A falls `hysteresis`
+            // below B. A noisy signal near B cannot chatter inside the band.
+            let threshold = if self.high { b - hysteresis } else { b };
+            self.high = a > threshold;
+            *gate = trigger(self.high);
+        }
+    }
+
+    fn set_param(&mut self, index: usize, value: f32) {
+        match index {
+            0 => self.below = value >= 0.5,
+            1 => self.hysteresis = value,
+            _ => {}
+        }
+    }
+
+    fn reset(&mut self) {
+        self.high = false;
+    }
+}
+
+/// One gate input of the logic module.
+const fn logic_input(name: &'static str, label: &'static str) -> PortSpec {
+    PortSpec {
+        name,
+        label,
+        signal: SignalType::Gate,
+        description: "A gate to combine. An input with no cable is ignored, not counted as low.",
+        default: PortDefault::Value(0.0),
+        polarity: Polarity::Unipolar,
+        channels: Channels::Downmix,
+    }
+}
+
+/// `loom.logic.logic` (MT-LOGIC-02): And, Or, and Xor of up to four gates.
+pub static LOGIC: ModuleDescriptor = ModuleDescriptor {
+    id: "loom.logic.logic",
+    version: 1,
+    name: "Logic",
+    category: "Logic",
+    description: "Combines up to four gates with And, Or, or Xor. Only inputs with a cable count. Invert gives Nand, Nor, Xnor, and Not.",
+    inputs: &[
+        logic_input("in1", "In 1"),
+        logic_input("in2", "In 2"),
+        logic_input("in3", "In 3"),
+        logic_input("in4", "In 4"),
+    ],
+    outputs: &[PortSpec {
+        name: "out",
+        label: "Out",
+        signal: SignalType::Gate,
+        description: "The result: exactly 0 or 1.",
+        default: PortDefault::Value(0.0),
+        polarity: Polarity::Unipolar,
+        channels: Channels::PerChannel,
+    }],
+    params: &[
+        ParamSpec {
+            name: "op",
+            label: "Operation",
+            description: "And: all connected inputs are high. Or: any is high. Xor: an odd number are high.",
+            min: 0.0,
+            max: 2.0,
+            default: 0.0,
+            unit: "",
+            options: ParamOptions::DEFAULT,
+        }
+        .integer(),
+        ParamSpec {
+            name: "invert",
+            label: "Invert",
+            description: "Flips the result.",
+            min: 0.0,
+            max: 1.0,
+            default: 0.0,
+            unit: "",
+            options: ParamOptions::DEFAULT,
+        }
+        .integer(),
+    ],
+    role: ModuleRole::Dsp(|_| Box::new(Logic { op: 0, invert: false })),
+    panel: Panel::new(
+        6,
+        4,
+        &[
+            Widget::radio(0, 0, "op", &["And", "Or", "Xor"]),
+            Widget::toggle(3, 0, "invert"),
+        ],
+    ),
+    displays: &[],
+};
+
+struct Logic {
+    op: u8,
+    invert: bool,
+}
+
+impl Module for Logic {
+    fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        let connected: [bool; 4] = std::array::from_fn(|n| io.is_connected(n));
+        let (inputs, [out]) = io.split::<4, 1>();
+        for (i, out) in out.iter_mut().enumerate() {
+            let mut count = 0;
+            let mut high = 0;
+            for n in 0..4 {
+                if connected[n] {
+                    count += 1;
+                    high += usize::from(gate_is_high(inputs[n][i]));
+                }
+            }
+            // With no cable at all the result is low before `invert`.
+            let result = match self.op {
+                _ if count == 0 => false,
+                0 => high == count,
+                1 => high > 0,
+                _ => high % 2 == 1,
+            };
+            *out = trigger(result != self.invert);
+        }
+    }
+
+    fn set_param(&mut self, index: usize, value: f32) {
+        match index {
+            0 => self.op = value as u8,
+            1 => self.invert = value >= 0.5,
+            _ => {}
+        }
+    }
+}
+
+/// `loom.logic.memory` (MT-LOGIC-03): a latch that keeps a gate until told.
+pub static MEMORY: ModuleDescriptor = ModuleDescriptor {
+    id: "loom.logic.memory",
+    version: 1,
+    name: "Memory",
+    category: "Logic",
+    description: "Remembers a gate. Set and reset, toggle, or data (a D latch) mode. Reset wins a tie.",
+    inputs: &[
+        PortSpec {
+            name: "a",
+            label: "A",
+            signal: SignalType::Gate,
+            description: "Set a rising edge turns the output on (Set and reset), flips it (Toggle), or is the level to remember (Data).",
+            default: PortDefault::Value(0.0),
+            polarity: Polarity::Unipolar,
+            channels: Channels::Downmix,
+        },
+        PortSpec {
+            name: "b",
+            label: "B",
+            signal: SignalType::Gate,
+            description: "A rising edge turns the output off (Set and reset, Toggle), or is the clock that remembers A (Data).",
+            default: PortDefault::Value(0.0),
+            polarity: Polarity::Unipolar,
+            channels: Channels::Downmix,
+        },
+    ],
+    outputs: &[PortSpec {
+        name: "out",
+        label: "Out",
+        signal: SignalType::Gate,
+        description: "The remembered gate. It starts low.",
+        default: PortDefault::Value(0.0),
+        polarity: Polarity::Unipolar,
+        channels: Channels::PerChannel,
+    }],
+    params: &[ParamSpec {
+        name: "mode",
+        label: "Mode",
+        description: "Set and reset, Toggle, or Data. Changing it keeps the state.",
+        min: 0.0,
+        max: 2.0,
+        default: 0.0,
+        unit: "",
+        options: ParamOptions::DEFAULT,
+    }
+    .integer()],
+    role: ModuleRole::Dsp(|_| Box::new(Memory::default())),
+    panel: Panel::new(
+        6,
+        4,
+        &[
+            Widget::radio(0, 0, "mode", &["Set and reset", "Toggle", "Data"]),
+            Widget::light(3, 0, "state"),
+        ],
+    ),
+    displays: &["state"],
+};
+
+#[derive(Default)]
+struct Memory {
+    mode: u8,
+    out: bool,
+    edge_a: EdgeDetector,
+    edge_b: EdgeDetector,
+}
+
+impl Module for Memory {
+    fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        let ([a, b], [out]) = io.split::<2, 1>();
+        for (i, out) in out.iter_mut().enumerate() {
+            // Both detectors see every frame in every mode, so changing the
+            // mode never looks like an edge.
+            let rise_a = self.edge_a.rising(a[i]);
+            let rise_b = self.edge_b.rising(b[i]);
+            match self.mode {
+                0 | 1 if rise_b => self.out = false, // reset wins a tie
+                0 if rise_a => self.out = true,
+                1 if rise_a => self.out = !self.out,
+                2 if rise_b => self.out = gate_is_high(a[i]),
+                _ => {}
+            }
+            *out = trigger(self.out);
+        }
+    }
+
+    fn set_param(&mut self, index: usize, value: f32) {
+        if index == 0 {
+            self.mode = value as u8;
+        }
+    }
+
+    fn reset(&mut self) {
+        self.out = false;
+        self.edge_a.reset();
+        self.edge_b.reset();
+    }
+
+    fn displays(&self, values: &mut [f32]) {
+        values[0] = trigger(self.out);
     }
 }
 
@@ -299,5 +623,170 @@ mod tests {
         for block in [1, 3, 64] {
             assert_eq!(render(block), whole, "block size {block}");
         }
+    }
+}
+
+#[cfg(test)]
+mod gate_tests {
+    use super::*;
+    use loom_core::ModuleConfig;
+    use loom_core::testing::run;
+
+    /// Runs `descriptor` once over `inputs` (one slice per input port) with
+    /// the given parameters, in blocks of `block` frames, and returns output 0.
+    fn process(
+        descriptor: &ModuleDescriptor,
+        params: &[(usize, f32)],
+        inputs: &[&[f32]],
+        connected: &[bool],
+        block: usize,
+    ) -> Vec<f32> {
+        let ModuleRole::Dsp(create) = descriptor.role else {
+            unreachable!()
+        };
+        let frames = inputs[0].len();
+        let mut m = create(&ModuleConfig {
+            sample_rate: 48_000.0,
+            max_block: block,
+        });
+        for &(index, value) in params {
+            m.set_param(index, value);
+        }
+        m.reset();
+        let mut out = vec![0.0; frames];
+        for start in (0..frames).step_by(block) {
+            let end = (start + block).min(frames);
+            let slices: Vec<&[f32]> = inputs.iter().map(|s| &s[start..end]).collect();
+            run(
+                m.as_mut(),
+                48_000.0,
+                &slices,
+                connected,
+                &mut [&mut out[start..end]],
+                &[],
+            );
+        }
+        out
+    }
+
+    /// Without hysteresis, equal values are low in both modes.
+    #[test]
+    fn compare_modes_and_equality() {
+        let a = [0.0, 0.5, 1.0];
+        let b = [0.5; 3];
+        assert_eq!(process(&COMPARE, &[], &[&a, &b], &[true, true], 3), [0.0, 0.0, 1.0]);
+        assert_eq!(
+            process(&COMPARE, &[(0, 1.0)], &[&a, &b], &[true, true], 3),
+            [1.0, 0.0, 0.0]
+        );
+    }
+
+    /// Noise smaller than the band does not make the gate chatter.
+    #[test]
+    fn compare_hysteresis_does_not_chatter() {
+        // Rises past B = 0.5, then wobbles by +-0.05 around B.
+        let mut a = vec![0.0, 0.8];
+        a.extend((0..100).map(|i| 0.5 + if i % 2 == 0 { 0.05 } else { -0.05 }));
+        let b = vec![0.5; a.len()];
+        let gate = process(&COMPARE, &[(1, 0.2)], &[&a, &b], &[true, true], 64);
+        let changes = gate.windows(2).filter(|w| w[0] != w[1]).count();
+        assert_eq!(changes, 1, "only the first rise: {gate:?}");
+        // With no hysteresis the same signal chatters.
+        let gate = process(&COMPARE, &[], &[&a, &b], &[true, true], 64);
+        assert!(gate.windows(2).filter(|w| w[0] != w[1]).count() > 10);
+    }
+
+    /// Logic ignores unconnected inputs, and invert flips the result.
+    #[test]
+    fn logic_counts_only_connected_inputs() {
+        let high = [1.0; 2];
+        let low = [0.0; 2];
+        // And of two wires, with the other two inputs unconnected.
+        let and = process(&LOGIC, &[], &[&high, &high, &low, &low], &[true, true, false, false], 2);
+        assert_eq!(and, [1.0, 1.0]);
+        // Or: one high is enough. Xor of two highs is low.
+        let or = process(
+            &LOGIC,
+            &[(0, 1.0)],
+            &[&high, &low, &low, &low],
+            &[true, true, false, false],
+            2,
+        );
+        assert_eq!(or, [1.0, 1.0]);
+        let xor = process(
+            &LOGIC,
+            &[(0, 2.0)],
+            &[&high, &high, &low, &low],
+            &[true, true, false, false],
+            2,
+        );
+        assert_eq!(xor, [0.0, 0.0]);
+        // Xor of three highs (odd) is high.
+        let xor3 = process(
+            &LOGIC,
+            &[(0, 2.0)],
+            &[&high, &high, &high, &low],
+            &[true, true, true, false],
+            2,
+        );
+        assert_eq!(xor3, [1.0, 1.0]);
+        // No cable: low, and Not (invert) makes it high.
+        assert_eq!(process(&LOGIC, &[], &[&high[..]; 4], &[false; 4], 2), [0.0, 0.0]);
+        assert_eq!(
+            process(&LOGIC, &[(1, 1.0)], &[&high[..]; 4], &[false; 4], 2),
+            [1.0, 1.0]
+        );
+        // Not: one connected input, Or, invert.
+        assert_eq!(
+            process(
+                &LOGIC,
+                &[(0, 1.0), (1, 1.0)],
+                &[&high, &low, &low, &low],
+                &[true, false, false, false],
+                2
+            ),
+            [0.0, 0.0]
+        );
+    }
+
+    /// Set and reset: reset wins a tie, and edges fall on the same frame at
+    /// any block size, including the first and last frame of a block.
+    #[test]
+    fn memory_set_reset_and_block_invariance() {
+        // a rises at 2 and 9, b rises at 5 and 9 (a tie).
+        let mut a = vec![0.0; 16];
+        let mut b = vec![0.0; 16];
+        a[2..4].fill(1.0);
+        a[9..11].fill(1.0);
+        b[5..7].fill(1.0);
+        b[9..11].fill(1.0);
+        let expected: Vec<f32> = (0..16).map(|i| if (2..5).contains(&i) { 1.0 } else { 0.0 }).collect();
+        for block in [1, 3, 4, 16] {
+            assert_eq!(
+                process(&MEMORY, &[], &[&a, &b], &[true, true], block),
+                expected,
+                "block {block}"
+            );
+        }
+    }
+
+    /// Toggle flips on each rising edge of A; B resets.
+    #[test]
+    fn memory_toggle_and_data() {
+        let mut a = vec![0.0; 12];
+        a[1..3].fill(1.0);
+        a[5..7].fill(1.0);
+        let mut b = vec![0.0; 12];
+        b[8] = 1.0;
+        let toggled = process(&MEMORY, &[(0, 1.0)], &[&a, &b], &[true, true], 12);
+        let want: Vec<f32> = (0..12).map(|i| if (1..5).contains(&i) { 1.0 } else { 0.0 }).collect();
+        assert_eq!(toggled, want);
+        // Data: on a clock edge the output takes the level of A.
+        let data = vec![0.0, 1.0, 1.0, 1.0, 0.0, 0.0];
+        let clock = vec![0.0, 0.0, 1.0, 0.0, 0.0, 1.0];
+        assert_eq!(
+            process(&MEMORY, &[(0, 2.0)], &[&data, &clock], &[true, true], 6),
+            [0.0, 0.0, 1.0, 1.0, 1.0, 0.0]
+        );
     }
 }
