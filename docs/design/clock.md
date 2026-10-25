@@ -84,7 +84,7 @@ A module can declare a **default** for any input. The default is used while noth
 - The default is part of the module's static descriptor. It does not change with the module's parameters. A module that uses an input only in some modes ignores it in the others. *Why:* the compiler binds inputs when the patch changes, not when a parameter moves, so binding stays off the audio thread.
 - `PortIo::is_connected` still reports cables only. An input that follows its default reports false. *Why:* a module can still tell whether the user patched something, for example to show it or to pick a different behaviour.
 
-Examples: the LFO's phase input in sync mode defaults to bar phase, with a rate parameter that scales it. Note Cycle and Audio Cycle default their bar phase input to the transport (FR-LIB-20).
+Examples: the LFO's phase input in sync mode defaults to bar phase, with a rate parameter that scales it. Note Cycle and Audio Cycle default their bar phase input to the transport (FR-LIB-20). Phase Scale defaults its phase input to bar phase (see Phase Scale details).
 
 ## Modules
 
@@ -126,6 +126,12 @@ These details were settled while building the module.
 - **Jumps.** A reset to 0 from above 0.5, or any other jump of more than half a cycle, looks the same on the cable as a wrap, and fires once. A smaller jump does not fire.
 - **Crossings and turnarounds.** To fire when a phase passes another position *p*, shift the phase by *-p* first, then use Phase Trigger. A ping-pong phase never wraps; take its turnarounds from the phase that drives it. [Phase and cycles](../learn/phase-and-cycles.md#phases-that-never-wrap) explains both with examples.
 - **Shared rule.** The rule lives in `loom_core::signal::WrapDetector`. Every trigger that marks the end of a cycle should use it: Phase Trigger now, and later the Clock trigger, the Transport's bar and beat triggers, and the end trigger of cycles (FR-LIB-20). *Why:* they must all agree on where a cycle ends.
+
+### Phase Scale details
+
+**Status:** Agreed ([#31](https://github.com/brylie/LoomDSP/issues/31)).
+
+- **Default input.** The `phase` input defaults to bar phase. With nothing connected, Phase Scale follows the transport, and Phase Scale into Phase Trigger multiplies the bar clock with no cables. *Why:* a constant phase never wraps, so a value default would make an unpatched Phase Scale output a flat 0 at every ratio. Phase Trigger keeps a value default, because on bar phase it would only repeat the Transport's bar trigger.
 
 ### Button details
 
@@ -240,6 +246,7 @@ The Transport module's parameters (tempo, time signature, run) are saved like an
 - [ ] Phase Scale with divide 2 wraps once per two input wraps, aligned with the input's bar. Multiply 3, divide 2 wraps three times per two input wraps.
 - [x] Phase Trigger fires one sample on each wrap of its input phase, forward or backward, and on the first frame only when the phase is exactly 0. The output is the same for any block size.
 - [ ] Phase Scale ([#31](https://github.com/brylie/LoomDSP/issues/31)) with multiply 4 into Phase Trigger fires four triggers per input cycle. The first is on the input's wrap. The output is the same at block sizes 1, 32, and 1024.
+- [ ] A Phase Scale with nothing connected to `phase` follows bar phase. A cable overrides it; removing the cable returns to the transport.
 - [ ] An LFO in sync mode with nothing connected follows bar phase. A cable overrides it; removing the cable returns to the transport.
 - [ ] Ports that follow the transport show the clock mark.
 - [ ] Every patch has one Transport module. It cannot be deleted, and a second one cannot be added.
