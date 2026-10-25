@@ -1,7 +1,7 @@
 //! Math building blocks (FR-LIB-05).
 //!
 //! Unconnected inputs fall back to a sensible default (0 for add, 1 for
-//! multiply), so a module is useful with only one cable.
+//! multiply and divide), so a module is useful with only one cable.
 
 use loom_core::{
     Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, Polarity,
@@ -180,6 +180,121 @@ impl Module for Mul {
 
     fn param_glide(&self, index: usize) -> Option<f32> {
         if index == 0 { self.gain.gliding() } else { None }
+    }
+}
+
+/// `loom.math.sub`: `a - b`.
+pub static SUB: ModuleDescriptor = ModuleDescriptor {
+    id: "loom.math.sub",
+    version: 1,
+    name: "Subtract",
+    category: "Math",
+    description: "Subtracts signal B from signal A.",
+    inputs: &[
+        PortSpec {
+            name: "a",
+            label: "A",
+            signal: SignalType::Modulation,
+            description: "The signal to subtract from.",
+            default: PortDefault::Value(0.0),
+            polarity: Polarity::Bipolar,
+            channels: Channels::Downmix,
+        },
+        PortSpec {
+            name: "b",
+            label: "B",
+            signal: SignalType::Modulation,
+            description: "The signal to subtract.",
+            default: PortDefault::Value(0.0),
+            polarity: Polarity::Bipolar,
+            channels: Channels::Downmix,
+        },
+    ],
+    outputs: &[PortSpec {
+        name: "out",
+        label: "Out",
+        signal: SignalType::Modulation,
+        description: "A minus B.",
+        default: PortDefault::Value(0.0),
+        polarity: Polarity::Bipolar,
+        channels: Channels::PerChannel,
+    }],
+    params: &[],
+    role: ModuleRole::Dsp(|_| Box::new(Sub)),
+    panel: Panel::new(2, 2, &[]),
+    displays: &[],
+};
+
+/// Stateless: each output sample depends only on the inputs at that sample.
+struct Sub;
+
+impl Module for Sub {
+    fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        let ([a, b], [out]) = io.split::<2, 1>();
+        for ((out, &a), &b) in out.iter_mut().zip(a).zip(b) {
+            *out = a - b;
+        }
+    }
+}
+
+/// Divisors with a magnitude at or below this give 0, not infinity.
+const DIVISOR_FLOOR: f32 = 1e-9;
+
+/// `loom.math.div`: `a / b`. An unconnected `b` counts as 1, and a `b` near
+/// zero gives 0, because cables are never clipped (ADR-0007) and infinity
+/// would reach every module downstream.
+pub static DIV: ModuleDescriptor = ModuleDescriptor {
+    id: "loom.math.div",
+    version: 1,
+    name: "Divide",
+    category: "Math",
+    description: "Divides signal A by signal B. Outputs 0 while B is near zero.",
+    inputs: &[
+        PortSpec {
+            name: "a",
+            label: "A",
+            signal: SignalType::Modulation,
+            description: "The signal to divide.",
+            default: PortDefault::Value(0.0),
+            polarity: Polarity::Bipolar,
+            channels: Channels::Downmix,
+        },
+        PortSpec {
+            name: "b",
+            label: "B",
+            signal: SignalType::Modulation,
+            description: "The divisor. Reads 1 while no cable is connected.",
+            default: PortDefault::Value(0.0),
+            polarity: Polarity::Bipolar,
+            channels: Channels::Downmix,
+        },
+    ],
+    outputs: &[PortSpec {
+        name: "out",
+        label: "Out",
+        signal: SignalType::Modulation,
+        description: "A divided by B, or 0 while B is within 1e-9 of zero.",
+        default: PortDefault::Value(0.0),
+        polarity: Polarity::Bipolar,
+        channels: Channels::PerChannel,
+    }],
+    params: &[],
+    role: ModuleRole::Dsp(|_| Box::new(Div)),
+    panel: Panel::new(2, 2, &[]),
+    displays: &[],
+};
+
+/// Stateless, so a NaN or infinity on an input cannot stay in the module.
+struct Div;
+
+impl Module for Div {
+    fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        let b_connected = io.is_connected(1);
+        let ([a, b], [out]) = io.split::<2, 1>();
+        for ((out, &a), &b) in out.iter_mut().zip(a).zip(b) {
+            let b = if b_connected { b } else { 1.0 };
+            *out = if b.abs() <= DIVISOR_FLOOR { 0.0 } else { a / b };
+        }
     }
 }
 
@@ -391,5 +506,61 @@ mod convert_tests {
                 assert!(run(mode, x).is_finite(), "mode {mode} input {x}");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod arithmetic_tests {
+    use super::*;
+    use loom_core::testing::run;
+
+    /// Runs a module over `a` and `b`, with `b` cabled or not.
+    fn apply(module: &mut dyn Module, a: &[f32], b: &[f32], b_connected: bool) -> Vec<f32> {
+        let mut out = vec![0.0; a.len()];
+        run(module, 48_000.0, &[a, b], &[true, b_connected], &mut [&mut out], &[]);
+        out
+    }
+
+    /// 3 minus 5 gives -2.
+    #[test]
+    fn subtract_known_point() {
+        assert_eq!(apply(&mut Sub, &[3.0], &[5.0], true), [-2.0]);
+    }
+
+    /// 6 divided by 3 gives 2.
+    #[test]
+    fn divide_known_point() {
+        assert_eq!(apply(&mut Div, &[6.0], &[3.0], true), [2.0]);
+    }
+
+    /// A zero or tiny divisor gives 0, never infinity or NaN, even for 0 / 0.
+    #[test]
+    fn divide_by_zero_gives_zero() {
+        let a = [1.0, -1.0, 0.0, 5.0, 5.0, 5.0];
+        let b = [0.0, 0.0, 0.0, -0.0, 1e-9, -1e-9];
+        assert_eq!(apply(&mut Div, &a, &b, true), [0.0; 6]);
+        assert_eq!(apply(&mut Div, &[1.0], &[2e-9], true), [5e8]);
+    }
+
+    /// With no cable on B, Divide passes A unchanged.
+    #[test]
+    fn divide_without_cable_passes_a() {
+        let a = [0.25, -3.0, 7.5];
+        assert_eq!(apply(&mut Div, &a, &[0.0; 3], false), a);
+    }
+
+    /// The modules keep no state, so a NaN or infinity on one frame does not
+    /// touch the next one.
+    #[test]
+    fn non_finite_input_does_not_stick() {
+        let a = [f32::NAN, f32::INFINITY, 1.0, 6.0];
+        let b = [1.0, 1.0, f32::NEG_INFINITY, 3.0];
+        let sub = apply(&mut Sub, &a, &b, true);
+        assert!(sub[0].is_nan() && sub[1].is_infinite() && sub[2].is_infinite());
+        assert_eq!(sub[3], 3.0);
+        let div = apply(&mut Div, &a, &b, true);
+        assert!(div[0].is_nan() && div[1].is_infinite());
+        assert_eq!(div[2], 0.0);
+        assert_eq!(div[3], 2.0);
     }
 }

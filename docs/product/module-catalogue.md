@@ -168,7 +168,7 @@ All random modules take a seed, so a patch sounds the same each time it loads (N
 
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
-| MT-MATH-01 | Arithmetic | Adds, subtracts, multiplies, or divides two or more signals. | | P1 | FR-LIB-05 | Built in part (`loom.math.add`, `loom.math.mul`) |
+| MT-MATH-01 | Arithmetic | Adds, subtracts, multiplies, or divides two or more signals. | | P1 | FR-LIB-05 | Built (`loom.math.add`, `loom.math.sub`, `loom.math.mul`, `loom.math.div`; Divide outputs 0 while B is within 1e-9 of zero) |
 | MT-MATH-02 | Function | Applies one chosen function: power, root, exponential, logarithm, rounding, absolute value and sign, minimum, maximum, mean, or trigonometry. The tile shows the symbol. | | P2 | New | Planned |
 | MT-MATH-03 | Convert | Converts between units: linear and decibels, frequency and pitch. | | P1 | FR-SIG-05 | Built (`loom.math.convert`: dB, level, pitch, Hz; limits are -120 to 120 dB, 0.001 Hz, and pitch 1.0) |
 | MT-MATH-04 | Expression | Evaluates a short typed formula on its inputs. The formula is data, parsed and checked when the patch loads, never run as code (vision, principle 7). | | P4 | New | Planned |
