@@ -175,3 +175,57 @@ impl Module for NoteIn {
         values[0] = if self.held_len > 0 { 1.0 } else { 0.0 };
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use loom_core::testing::run;
+    use loom_core::{MidiEvent, ModuleConfig};
+
+    /// The `gate` display value is 1 while a note is held and 0 after its
+    /// note-off (#106).
+    #[test]
+    fn display_shows_a_held_note() {
+        let ModuleRole::Dsp(create) = NOTE_IN.role else {
+            unreachable!()
+        };
+        let mut note_in = create(&ModuleConfig {
+            sample_rate: 1_000.0,
+            max_block: 64,
+        });
+        for (i, p) in NOTE_IN.params.iter().enumerate() {
+            note_in.set_param(i, p.default);
+        }
+        let mut display = [f32::NAN];
+        let (mut pitch, mut gate, mut velocity) = ([0.0; 64], [0.0; 64], [0.0; 64]);
+
+        note_in.displays(&mut display);
+        assert_eq!(display[0], 0.0, "no note yet");
+
+        let on = [MidiEvent::note_on(10, 0, 60, 100)];
+        run(
+            note_in.as_mut(),
+            1_000.0,
+            &[],
+            &[],
+            &mut [&mut pitch, &mut gate, &mut velocity],
+            &on,
+        );
+        note_in.displays(&mut display);
+        assert_eq!(gate[63], 1.0);
+        assert_eq!(display[0], 1.0, "held");
+
+        let off = [MidiEvent::note_off(10, 0, 60)];
+        run(
+            note_in.as_mut(),
+            1_000.0,
+            &[],
+            &[],
+            &mut [&mut pitch, &mut gate, &mut velocity],
+            &off,
+        );
+        note_in.displays(&mut display);
+        assert_eq!(gate[63], 0.0);
+        assert_eq!(display[0], 0.0, "released");
+    }
+}

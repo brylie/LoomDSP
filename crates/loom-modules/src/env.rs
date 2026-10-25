@@ -231,4 +231,37 @@ mod tests {
         assert!(out[1_999] < 0.01, "released, got {}", out[1_999]);
         assert!(out[5] > 0.0 && out[5] < 1.0, "attack ramps");
     }
+
+    /// The `level` display value is the output's last sample after the
+    /// attack, and 0 once the release has ended (#106).
+    #[test]
+    fn display_follows_the_level() {
+        let config = ModuleConfig {
+            sample_rate: 1_000.0,
+            max_block: 2_000,
+        };
+        let ModuleRole::Dsp(create) = ADSR.role else {
+            unreachable!()
+        };
+        let mut env = create(&config);
+        for (i, p) in ADSR.params.iter().enumerate() {
+            env.set_param(i, p.default);
+        }
+        let mut display = [f32::NAN];
+
+        // The default attack is 10 ms, 10 frames at 1 kHz.
+        let gate = [1.0; 50];
+        let mut out = [0.0; 50];
+        run(env.as_mut(), 1_000.0, &[&gate], &[true], &mut [&mut out], &[]);
+        env.displays(&mut display);
+        assert!(out[49] > 0.0, "past the attack, got {}", out[49]);
+        assert_eq!(display[0], out[49]);
+
+        let gate = [0.0; 2_000];
+        let mut out = [0.0; 2_000];
+        run(env.as_mut(), 1_000.0, &[&gate], &[true], &mut [&mut out], &[]);
+        env.displays(&mut display);
+        assert_eq!(out[1_999], 0.0, "released");
+        assert_eq!(display[0], 0.0);
+    }
 }
