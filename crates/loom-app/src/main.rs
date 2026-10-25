@@ -3477,7 +3477,7 @@ mod tests {
         let beats_per_bar = settings.time_signature.beats_per_bar();
         // The bar phase the knob shows, from the live value of the last
         // frame the engine ran.
-        let mut bar_phase = |app: &mut App, frames: usize| {
+        let bar_phase = |app: &mut App, frames: usize| {
             app.process(frames);
             let _ = app.update(Message::LiveFrame);
             let knob = tile_widget(app, filter, widget);
@@ -3495,11 +3495,18 @@ mod tests {
         let first = bar_phase(&mut app, 4_800);
         assert!((first - expected(4_800)).abs() < 1e-4, "{first} vs {}", expected(4_800));
         let second = bar_phase(&mut app, 4_800);
-        assert!((second - expected(9_600)).abs() < 1e-4, "{second} vs {}", expected(9_600));
+        assert!(
+            (second - expected(9_600)).abs() < 1e-4,
+            "{second} vs {}",
+            expected(9_600)
+        );
 
         let _ = app.update(Message::Canvas(CanvasEvent::ToggleRun));
         let held = bar_phase(&mut app, 4_800);
-        assert!((held - expected(9_600)).abs() < 1e-4, "stopping holds the position: {held}");
+        assert!(
+            (held - expected(9_600)).abs() < 1e-4,
+            "stopping holds the position: {held}"
+        );
     }
 
     /// Meter levels follow their probes: turning metering on and off many

@@ -3667,7 +3667,9 @@ mod tests {
         assert_eq!(cursor_at(&plain), mouse::Interaction::Grab);
 
         let learn = LearnView::default();
-        let learning = PatchCanvas::new(&scene, &none, |e| e).values(&values).learn(Some(&learn));
+        let learning = PatchCanvas::new(&scene, &none, |e| e)
+            .values(&values)
+            .learn(Some(&learn));
         assert_eq!(cursor_at(&learning), mouse::Interaction::Grab);
     }
 

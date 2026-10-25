@@ -620,10 +620,16 @@ mod tests {
         assert!((after_side - (start + 0.1)).abs() < 1e-4, "{start} -> {after_side}");
 
         let top = Point::new(centre.x, centre.y - radius);
-        assert!(top.y < cell.y, "the top of the ring {top:?} is above the cell at {cell:?}");
+        assert!(
+            top.y < cell.y,
+            "the top of the ring {top:?} is above the cell at {cell:?}"
+        );
         ui.drag(top, Point::new(top.x, top.y - 20.0), 4);
         let after_top = env_depth(&ui);
-        assert!((after_top - (after_side + 0.1)).abs() < 1e-4, "{after_side} -> {after_top}");
+        assert!(
+            (after_top - (after_side + 0.1)).abs() < 1e-4,
+            "{after_side} -> {after_top}"
+        );
 
         let before = cutoff_value(&ui);
         ui.drag(centre, Point::new(centre.x, centre.y - 20.0), 4);
