@@ -2,10 +2,12 @@
 //!
 //! Phase 0 has no UI yet. This tool proves the engine works end to end:
 //! load a patch, play it with a MIDI controller, render it to a file, and
-//! stress-test live editing.
+//! stress-test live editing. It also writes the module help pages
+//! (`loom modules --markdown`, `docs/design/help-pages.md`).
 
 mod analyze;
 mod capture;
+mod help_pages;
 mod midi_port;
 
 use clap::{Parser, Subcommand};
@@ -28,11 +30,21 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// List available modules.
+    /// List available modules, or write their help pages.
     Modules {
         /// Show ports and parameters.
         #[arg(short, long)]
         verbose: bool,
+        /// Write one Markdown help page per module into this folder, plus an
+        /// index (README.md), instead of listing. Text below a page's marker
+        /// line is kept. The repository's pages are in docs/modules
+        /// (`mise run help-pages`).
+        #[arg(long, value_name = "DIR")]
+        markdown: Option<PathBuf>,
+        /// With --markdown: write nothing, and fail if any page is out of
+        /// date.
+        #[arg(long, requires = "markdown")]
+        check: bool,
     },
     /// List audio output and input devices and MIDI input ports.
     Devices,
@@ -140,7 +152,16 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
-        Command::Modules { verbose } => modules(verbose),
+        Command::Modules {
+            markdown: Some(dir),
+            check,
+            ..
+        } => markdown(&dir, check),
+        Command::Modules {
+            verbose,
+            markdown: None,
+            ..
+        } => modules(verbose),
         Command::Devices => devices(),
         Command::Check { patch } => check(&patch),
         Command::Analyze(options) => return analyze::run(&options),
@@ -197,6 +218,46 @@ fn load_engine(path: &Path, config: EngineConfig) -> Result<(Patch, EngineParts)
 fn modules(verbose: bool) -> Result<ExitCode> {
     write_modules(&mut std::io::stdout().lock(), &loom_modules::registry(), verbose)?;
     Ok(ExitCode::SUCCESS)
+}
+
+/// Writes the help pages into `dir` and says what changed. Fails when a
+/// page could not be regenerated, so a script notices. With `check`, writes
+/// nothing and fails if any page is out of date.
+fn markdown(dir: &Path, check: bool) -> Result<ExitCode> {
+    if check {
+        let problems = help_pages::stale_pages(&loom_modules::registry(), dir)?;
+        for problem in &problems {
+            eprintln!("{problem}");
+        }
+        if problems.is_empty() {
+            println!("{}: every help page is current", dir.display());
+            return Ok(ExitCode::SUCCESS);
+        }
+        eprintln!("Regenerate with `{}`, then commit the pages.", help_pages::REGENERATE);
+        return Ok(ExitCode::FAILURE);
+    }
+    let report = help_pages::write_pages(&loom_modules::registry(), dir)?;
+    for path in &report.written {
+        println!("wrote {}", path.display());
+    }
+    if report.written.is_empty() {
+        println!("{}: every help page is current", dir.display());
+    }
+    for path in &report.unknown {
+        eprintln!(
+            "error: {} is for a module that does not exist. Move its notes, then delete it.",
+            path.display()
+        );
+    }
+    for path in &report.no_marker {
+        eprintln!(
+            "error: {} has no marker line, so it was not changed. Add this line where the generated part should end:\n  {}",
+            path.display(),
+            help_pages::MARKER
+        );
+    }
+    let ok = report.no_marker.is_empty() && report.unknown.is_empty();
+    Ok(if ok { ExitCode::SUCCESS } else { ExitCode::FAILURE })
 }
 
 /// Widest line `loom modules --verbose` writes, in columns, so it does not
@@ -840,5 +901,21 @@ mod tests {
             String::from_utf8(out).unwrap(),
             "  module notes:\n    test.quiet: input `in` has no description\n"
         );
+    }
+
+    /// `--markdown` writes the pages, `--check` then passes, and fails once
+    /// a page is out of date or for an unknown module.
+    #[test]
+    fn markdown_writes_then_checks() {
+        let dir = std::env::temp_dir().join(format!("loom-cli-markdown-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(markdown(&dir, true).unwrap(), ExitCode::FAILURE);
+        assert_eq!(markdown(&dir, false).unwrap(), ExitCode::SUCCESS);
+        assert_eq!(markdown(&dir, true).unwrap(), ExitCode::SUCCESS);
+        assert_eq!(markdown(&dir, false).unwrap(), ExitCode::SUCCESS);
+        std::fs::write(dir.join("loom.gone.module.md"), "Old notes.\n").unwrap();
+        assert_eq!(markdown(&dir, false).unwrap(), ExitCode::FAILURE);
+        assert_eq!(markdown(&dir, true).unwrap(), ExitCode::FAILURE);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

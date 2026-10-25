@@ -11,6 +11,7 @@ Status: **Phase 1, early** (2026-10-14). Requirements are a draft and open for d
 | [Getting started](guide/getting-started.md) | Musicians and testers | Run the desktop app, play a patch, and patch while it plays |
 | [Architecture](dev/architecture.md) | Developers | How the crates, threads, compiler, and canvas fit together, and where to start |
 | [Contributing](../CONTRIBUTING.md) | Developers | Build, test, hooks, CI, and pull requests |
+| [Module help pages](modules/README.md) | Everyone | One page per built-in module: ports, parameters, ranges, and notes |
 | [Learn](learn/README.md) | Everyone | The theory behind LoomDSP: phase, cycles, triggers, and why things work the way they do |
 
 ## Kinds of documents

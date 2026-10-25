@@ -83,5 +83,5 @@ A module's display values (the lights and step positions of [panels](panels.md#d
 ## Out of scope
 
 - Showing labels on tiles and in the inspector, and descriptions on hover: [Labels and hover text](panels.md#labels-and-hover-text) in panels.md (Implemented).
-- Generating help pages: #43.
+- Generating help pages: [module help pages](help-pages.md) (#43).
 - Text for panel widgets. (Display values are below.)

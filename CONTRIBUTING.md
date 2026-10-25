@@ -170,7 +170,8 @@ Start from the module's entry in the [module catalogue](docs/product/module-cata
 6. To read the transport inside `process`, use `ctx.transport()`. Take the position at frame `i` with `TransportInfo::position_at(i)`, or use `beat_phase_at(i)` and `bar_phase_at(i)`. Do not add a step per frame to the position yourself: it rounds differently at different block sizes, and the module would break block-size invariance.
 7. Give it a panel: a `Panel` in its descriptor with a knob for each parameter a performer would turn, and lights for display values. The registry refuses a panel that does not fit (see [module panels on tiles](docs/design/panels.md#module-panels-on-tiles-p1)).
 8. Add a reference test to `crates/loom-modules/tests/reference.rs` with the [module test harness](docs/design/module-test-harness.md) (`loom-test`). It checks that block size does not change the output and compares with a short reference render. Create the file with `LOOM_UPDATE_REFERENCES=1 cargo test -p loom-modules --test reference`, listen to it, and commit it. Reviewers can listen to it too. For smaller checks, write unit tests with `loom_core::testing::run`.
-9. Run the full test suite, then try the module in the app: `cargo run --release -p loom-app`, pick it in the toolbar, and click **Add**.
+9. Generate its help page with `mise run help-pages` (or `cargo run -p loom-cli -- modules --markdown docs/modules`), and commit the new page in [`docs/modules/`](docs/modules/README.md). Write longer notes and an example patch below the marker line at the end of the page; regenerating keeps them. A test fails while a page is out of date, so run it again whenever you change a descriptor ([help pages](docs/design/help-pages.md)).
+10. Run the full test suite, then try the module in the app: `cargo run --release -p loom-app`, pick it in the toolbar, and click **Add**.
 
 ## Working on the canvas and app
 

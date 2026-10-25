@@ -34,7 +34,7 @@ flowchart BT
 | `loom-test` | The module test harness: renders one module, checks block-size invariance, and compares with reference WAV files. | Desktop only, for tests. Only `dev-dependencies` use it. |
 | `loom-host-desktop` | Connects the engine to audio devices (cpal) and MIDI inputs (midir). For development, can also play it from a timer with no device, play it only when a test steps a tape (`AudioOutput::stepped`), and record it to a WAV file across many streams (`Recorder`). | Desktop only. The only crate that knows about audio APIs. |
 | `loom-canvas` | The patch canvas: an Iced widget drawn by one custom GPU primitive. | Knows nothing about the engine. It draws a `Scene` and reports gestures. |
-| `loom-cli` | The `loom` command: list modules, check, render, play, stress-test, measure WAV files, and act as a virtual MIDI controller for tests. | |
+| `loom-cli` | The `loom` command: list modules, check, render, play, stress-test, measure WAV files, and act as a virtual MIDI controller for tests. `loom modules --markdown` writes the module help pages in `docs/modules/` ([help pages](../design/help-pages.md)). | |
 | `loom-app` | The desktop app: canvas, inspector, audio, MIDI. | Owns the application state. |
 
 The engine crates never depend on UI or device crates. That keeps the same engine usable in the app, the command-line tool, tests, a future plugin, and the browser (NFR-PORT-02).
@@ -204,6 +204,7 @@ An unconnected input reads its `default`: a fixed value, or a transport signal s
 | Each module against a reference render, at block sizes 1, 77, and 512 | `crates/loom-modules/tests/reference.rs`, with `loom-test`. References are in `tests/reference/`. |
 | No allocation on the audio path, including telemetry | `crates/loom-modules/tests/no_alloc.rs` (debug builds). |
 | Every port and parameter has a label and a description | Compile time, `assert_documented(ALL)` in `crates/loom-modules/src/lib.rs`. |
+| Module help pages match the descriptors | `committed_pages_are_current` in `crates/loom-cli/src/help_pages.rs`. Regenerate with `mise run help-pages`. |
 | Transport and default inputs, including no allocation | `crates/loom-core/tests/transport.rs`, `transport_no_alloc.rs`. |
 | Same output at any buffer size, bit-identical runs | `crates/loom-modules/tests/`. |
 | Patch loading and round trips | `crates/loom-patch`. |

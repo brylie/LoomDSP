@@ -410,7 +410,7 @@ A user zooms in on Clock Divide. The knob says "Division", not `n`. They rest th
 
 - Translation (NFR-UX-04). Text is looked up by module ID and name when it comes.
 - Labels and descriptions for display values and panel widgets, so lights keep showing names.
-- Help pages (#43), and module descriptions in the module picker.
+- [Help pages](help-pages.md) (#43), and module descriptions in the module picker.
 - Touch: long-press for hover text.
 - A shorter delay for the next hover text once one has shown. Consider it if reading a column of ports feels slow in use.
 
