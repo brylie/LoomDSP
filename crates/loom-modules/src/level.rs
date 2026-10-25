@@ -276,6 +276,26 @@ pub static CLAMP: ModuleDescriptor = ModuleDescriptor {
     displays: &[],
 };
 
+/// Holds `x` between two limits, and never panics.
+///
+/// NaN in `x` becomes 0 first. The limits may cross (a modulated limit can
+/// pass the other), so the smaller one is the floor. A NaN limit is open:
+/// that side does not limit at all.
+/// *Why not `f32::clamp`:* it panics when a bound is NaN or the bounds are
+/// crossed, and a panic on the audio thread must never happen. And `min` and
+/// `max` alone would not do, because with one NaN limit both return the
+/// other limit, which would pin the output to it.
+fn limit(x: f32, low: f32, high: f32) -> f32 {
+    let x = if x.is_nan() { 0.0 } else { x };
+    let (floor, ceiling) = match (low.is_nan(), high.is_nan()) {
+        (false, false) => (low.min(high), low.max(high)),
+        (true, false) => (f32::NEG_INFINITY, high),
+        (false, true) => (low, f32::INFINITY),
+        (true, true) => (f32::NEG_INFINITY, f32::INFINITY),
+    };
+    x.max(floor).min(ceiling)
+}
+
 struct Clamp {
     low: Smoothed,
     high: Smoothed,
@@ -300,11 +320,7 @@ impl Module for Clamp {
                 }
                 None => self.high.tick(),
             };
-            // A modulated limit can cross the other one. Swapping keeps the
-            // output between them instead of stuck on one.
-            let (low, high) = if low <= high { (low, high) } else { (high, low) };
-            let x = if x.is_nan() { 0.0 } else { x };
-            *out = x.clamp(low, high);
+            *out = limit(x, low, high);
         }
     }
 
@@ -645,6 +661,20 @@ mod shaping_tests {
                 "{db} dB: {out:?}"
             );
         }
+    }
+
+    /// A NaN limit is ignored, crossed limits swap, and nothing panics.
+    #[test]
+    fn limit_never_panics_on_nan_or_crossed_limits() {
+        assert_eq!(limit(5.0, f32::NAN, 1.0), 1.0);
+        assert_eq!(limit(-5.0, -1.0, f32::NAN), -1.0);
+        // A NaN limit is open: it does not pin the output to the other one.
+        assert_eq!(limit(0.25, f32::NAN, 1.0), 0.25);
+        assert_eq!(limit(0.25, -1.0, f32::NAN), 0.25);
+        assert_eq!(limit(5.0, f32::NAN, f32::NAN), 5.0);
+        assert_eq!(limit(f32::NAN, f32::NAN, 1.0), 0.0);
+        assert_eq!(limit(5.0, 1.0, -1.0), 1.0);
+        assert_eq!(limit(f32::INFINITY, -1.0, 1.0), 1.0);
     }
 
     /// Clamp limits the signal, swaps crossed limits, and turns NaN into a
