@@ -133,23 +133,23 @@ impl Adsr {
 
 impl Module for Adsr {
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let attack = io.modulated(0);
-        let decay = io.modulated(1);
-        let sustain = io.modulated(2);
-        let release = io.modulated(3);
+        let attack = io.param(0);
+        let decay = io.param(1);
+        let sustain = io.param(2);
+        let release = io.param(3);
         let ([gate], [out]) = io.split::<1, 1>();
         for (i, (out, &g)) in out.iter_mut().zip(gate).enumerate() {
             // Modulated values live only for this frame. The fields keep the
             // knob's base, so removing an assignment returns to it.
-            let attack_step = attack.map_or(self.attack_step, |samples| {
-                1.0 / (samples[i] * self.sample_rate).max(1.0)
+            let attack_step = attack.map_or(i, self.attack_step, |seconds| {
+                1.0 / (seconds * self.sample_rate).max(1.0)
             });
-            let decay_coefficient = decay.map_or(self.decay_coefficient, |samples| {
-                exp_coefficient(samples[i], self.sample_rate)
+            let decay_coefficient = decay.map_or(i, self.decay_coefficient, |seconds| {
+                exp_coefficient(seconds, self.sample_rate)
             });
-            let sustain = sustain.map_or(self.sustain, |samples| samples[i]);
-            let release_coefficient = release.map_or(self.release_coefficient, |samples| {
-                exp_coefficient(samples[i], self.sample_rate)
+            let sustain = sustain.at_or(i, self.sustain);
+            let release_coefficient = release.map_or(i, self.release_coefficient, |seconds| {
+                exp_coefficient(seconds, self.sample_rate)
             });
             let high = gate_is_high(g);
             if high && !self.gate_was_high {

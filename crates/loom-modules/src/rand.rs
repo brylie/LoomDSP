@@ -74,10 +74,10 @@ struct SampleHold {
 
 impl Module for SampleHold {
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let mode_mod = io.modulated(0);
+        let mode_mod = io.param(0);
         let ([input, trigger], [out]) = io.split::<2, 1>();
         for (i, out) in out.iter_mut().enumerate() {
-            let track = mode_mod.map_or(self.track, |s| s[i] >= 0.5);
+            let track = mode_mod.map_or(i, self.track, |v| v >= 0.5);
             // The detector sees every frame, so a mode change is no event.
             let rising = self.edge.rising(trigger[i]);
             let take = if track { gate_is_high(trigger[i]) } else { rising };

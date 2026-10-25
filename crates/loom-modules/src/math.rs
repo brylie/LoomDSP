@@ -71,15 +71,10 @@ struct Add {
 
 impl Module for Add {
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let modulated = io.modulated(0);
+        let param = io.param(0);
         let ([a, b], [out]) = io.split::<2, 1>();
         for (i, ((out, &a), &b)) in out.iter_mut().zip(a).zip(b).enumerate() {
-            let offset = if let Some(samples) = modulated {
-                let _ = self.offset.tick();
-                samples[i]
-            } else {
-                self.offset.tick()
-            };
+            let offset = param.at_or(i, self.offset.tick());
             *out = a + b + offset;
         }
     }
@@ -158,16 +153,11 @@ struct Mul {
 impl Module for Mul {
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let b_connected = io.is_connected(1);
-        let modulated = io.modulated(0);
+        let param = io.param(0);
         let ([a, b], [out]) = io.split::<2, 1>();
         for (i, ((out, &a), &b)) in out.iter_mut().zip(a).zip(b).enumerate() {
             let b = if b_connected { b } else { 1.0 };
-            let gain = if let Some(samples) = modulated {
-                let _ = self.gain.tick();
-                samples[i]
-            } else {
-                self.gain.tick()
-            };
+            let gain = param.at_or(i, self.gain.tick());
             *out = a * b * gain;
         }
     }
@@ -341,15 +331,10 @@ struct Constant {
 
 impl Module for Constant {
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let modulated = io.modulated(0);
+        let param = io.param(0);
         let ([], [out]) = io.split::<0, 1>();
         for (i, out) in out.iter_mut().enumerate() {
-            *out = if let Some(samples) = modulated {
-                let _ = self.value.tick();
-                samples[i]
-            } else {
-                self.value.tick()
-            };
+            *out = param.at_or(i, self.value.tick());
         }
     }
 
@@ -507,15 +492,10 @@ struct PitchConstant {
 
 impl Module for PitchConstant {
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let modulated = io.modulated(0);
+        let param = io.param(0);
         let ([], [out]) = io.split::<0, 1>();
         for (i, out) in out.iter_mut().enumerate() {
-            let semitones = if let Some(samples) = modulated {
-                let _ = self.semitones.tick();
-                samples[i]
-            } else {
-                self.semitones.tick()
-            };
+            let semitones = param.at_or(i, self.semitones.tick());
             // 0.1 per octave, so 12 semitones are 0.1.
             *out = semitones / 120.0;
         }

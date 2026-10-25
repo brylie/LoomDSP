@@ -113,16 +113,11 @@ impl Amp {
 impl Module for Amp {
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let level_connected = io.is_connected(1);
-        let modulated = io.modulated(0);
+        let modulated = io.param(0);
         let ([input, level], [out]) = io.split::<2, 1>();
         for (i, ((out, &input), &level)) in out.iter_mut().zip(input).zip(level).enumerate() {
             let level = if level_connected { self.curve(level) } else { 1.0 };
-            let gain = if let Some(samples) = modulated {
-                let _ = self.gain.tick();
-                samples[i]
-            } else {
-                self.gain.tick()
-            };
+            let gain = modulated.at_or(i, self.gain.tick());
             *out = input * level * gain;
         }
     }
@@ -188,15 +183,10 @@ struct ConstantLevel {
 
 impl Module for ConstantLevel {
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let modulated = io.modulated(0);
+        let modulated = io.param(0);
         let ([], [out]) = io.split::<0, 1>();
         for (i, out) in out.iter_mut().enumerate() {
-            let db = if let Some(samples) = modulated {
-                let _ = self.db.tick();
-                samples[i]
-            } else {
-                self.db.tick()
-            };
+            let db = modulated.at_or(i, self.db.tick());
             *out = 10.0_f32.powf(db / 20.0);
         }
     }
@@ -303,23 +293,11 @@ struct Clamp {
 
 impl Module for Clamp {
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let (low_mod, high_mod) = (io.modulated(0), io.modulated(1));
+        let (low_mod, high_mod) = (io.param(0), io.param(1));
         let ([input], [out]) = io.split::<1, 1>();
         for (i, (out, &x)) in out.iter_mut().zip(input).enumerate() {
-            let low = match low_mod {
-                Some(samples) => {
-                    let _ = self.low.tick();
-                    samples[i]
-                }
-                None => self.low.tick(),
-            };
-            let high = match high_mod {
-                Some(samples) => {
-                    let _ = self.high.tick();
-                    samples[i]
-                }
-                None => self.high.tick(),
-            };
+            let low = low_mod.at_or(i, self.low.tick());
+            let high = high_mod.at_or(i, self.high.tick());
             *out = limit(x, low, high);
         }
     }
@@ -414,23 +392,11 @@ struct Scale {
 
 impl Module for Scale {
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let (factor_mod, offset_mod) = (io.modulated(0), io.modulated(1));
+        let (factor_mod, offset_mod) = (io.param(0), io.param(1));
         let ([input], [out]) = io.split::<1, 1>();
         for (i, (out, &x)) in out.iter_mut().zip(input).enumerate() {
-            let factor = match factor_mod {
-                Some(samples) => {
-                    let _ = self.factor.tick();
-                    samples[i]
-                }
-                None => self.factor.tick(),
-            };
-            let offset = match offset_mod {
-                Some(samples) => {
-                    let _ = self.offset.tick();
-                    samples[i]
-                }
-                None => self.offset.tick(),
-            };
+            let factor = factor_mod.at_or(i, self.factor.tick());
+            let offset = offset_mod.at_or(i, self.offset.tick());
             *out = x * factor + offset;
         }
     }
@@ -539,7 +505,7 @@ struct Slew {
 
 impl Module for Slew {
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let (rise_mod, fall_mod) = (io.modulated(0), io.modulated(1));
+        let (rise_mod, fall_mod) = (io.param(0), io.param(1));
         let ([input], [out]) = io.split::<1, 1>();
         for (i, (out, &x)) in out.iter_mut().zip(input).enumerate() {
             if x.is_finite() {
@@ -548,8 +514,8 @@ impl Module for Slew {
                     self.out = f64::from(x);
                     self.fresh = false;
                 } else {
-                    let rise = rise_mod.map_or(self.rise, |s| s[i]).max(SLEW.params[0].min);
-                    let fall = fall_mod.map_or(self.fall, |s| s[i]).max(SLEW.params[1].min);
+                    let rise = rise_mod.at_or(i, self.rise).max(SLEW.params[0].min);
+                    let fall = fall_mod.at_or(i, self.fall).max(SLEW.params[1].min);
                     // Constant rate: 1.0 of change takes `rise` or `fall` seconds.
                     let target = f64::from(x);
                     let rate = f64::from(self.sample_rate);

@@ -69,10 +69,10 @@ impl Module for Button {
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         // Whole-number parameters arrive already rounded (modulation rule 5),
         // so this copy is 0 or 1. There is no second threshold here.
-        let modulated = io.modulated(ON);
+        let modulated = io.param(ON);
         let ([], [out]) = io.split::<0, 1>();
         for (i, sample) in out.iter_mut().enumerate() {
-            *sample = modulated.map_or(self.on, |samples| samples[i]);
+            *sample = modulated.at_or(i, self.on);
         }
     }
 

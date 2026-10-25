@@ -111,14 +111,14 @@ impl Divide {
 
 impl Module for Divide {
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let n = io.modulated(0);
-        let offset = io.modulated(1);
+        let n = io.param(0);
+        let offset = io.param(1);
         let ([trigger_in, reset], [out]) = io.split::<2, 1>();
         for (i, ((out, &t), &r)) in out.iter_mut().zip(trigger_in).zip(reset).enumerate() {
             // Modulated values live only for this frame. The fields keep the
             // knob's base, so removing an assignment returns to it.
-            let n = n.map_or(self.n, |samples| (samples[i] as u64).max(1));
-            let offset = offset.map_or(self.offset, |samples| samples[i] as u64);
+            let n = n.map_or(i, self.n, |v| (v as u64).max(1));
+            let offset = offset.map_or(i, self.offset, |v| v as u64);
             // Reset first, so a trigger on the same frame as a reset counts
             // as the first trigger after it.
             if self.reset_in.rising(r) {
@@ -233,11 +233,11 @@ struct Compare {
 
 impl Module for Compare {
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let (mode_mod, hysteresis_mod) = (io.modulated(0), io.modulated(1));
+        let (mode_mod, hysteresis_mod) = (io.param(0), io.param(1));
         let ([a, b], [gate]) = io.split::<2, 1>();
         for (i, gate) in gate.iter_mut().enumerate() {
-            let below = mode_mod.map_or(self.below, |s| s[i] >= 0.5);
-            let hysteresis = hysteresis_mod.map_or(self.hysteresis, |samples| samples[i]).max(0.0);
+            let below = mode_mod.map_or(i, self.below, |v| v >= 0.5);
+            let hysteresis = hysteresis_mod.at_or(i, self.hysteresis).max(0.0);
             // Flip the sign for Below, and it is the Above test.
             let (a, b) = if below { (-a[i], -b[i]) } else { (a[i], b[i]) };
             // Once high, the gate stays high until A falls `hysteresis`
@@ -342,13 +342,13 @@ struct Logic {
 impl Module for Logic {
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let connected: [bool; 4] = std::array::from_fn(|n| io.is_connected(n));
-        let (op_mod, invert_mod) = (io.modulated(0), io.modulated(1));
+        let (op_mod, invert_mod) = (io.param(0), io.param(1));
         let (inputs, [out]) = io.split::<4, 1>();
         for (i, out) in out.iter_mut().enumerate() {
             // Modulated values count for this frame only; the base stays in
             // the fields.
-            let op = op_mod.map_or(self.op, |s| s[i].round().clamp(0.0, 2.0) as u8);
-            let invert = invert_mod.map_or(self.invert, |s| s[i] >= 0.5);
+            let op = op_mod.map_or(i, self.op, |v| v.round().clamp(0.0, 2.0) as u8);
+            let invert = invert_mod.map_or(i, self.invert, |v| v >= 0.5);
             let mut count = 0;
             let mut high = 0;
             for n in 0..4 {
@@ -448,10 +448,10 @@ struct Memory {
 
 impl Module for Memory {
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let mode_mod = io.modulated(0);
+        let mode_mod = io.param(0);
         let ([a, b], [out]) = io.split::<2, 1>();
         for (i, out) in out.iter_mut().enumerate() {
-            let mode = mode_mod.map_or(self.mode, |s| s[i].round().clamp(0.0, 2.0) as u8);
+            let mode = mode_mod.map_or(i, self.mode, |v| v.round().clamp(0.0, 2.0) as u8);
             // Both detectors see every frame in every mode, so changing the
             // mode never looks like an edge.
             let rise_a = self.edge_a.rising(a[i]);

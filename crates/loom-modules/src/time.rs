@@ -271,14 +271,11 @@ impl Module for Delay {
     /// Processes a block of audio through the interpolated delay line.
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let spec = &DELAY.params[0];
-        let time_modulated = io.modulated(0);
+        let time_modulated = io.param(0);
         let ([input, time_in], [out]) = io.split::<2, 1>();
         for i in 0..input.len() {
             let pos = self.time.tick();
-            let base_time = match time_modulated {
-                Some(samples) => samples[i],
-                None => spec.denormalize(pos),
-            };
+            let base_time = time_modulated.at_or(i, spec.denormalize(pos));
             let raw_samples = (f64::from(base_time) + f64::from(time_in[i])) * self.sample_rate;
             out[i] = self.buffer.step_delay(input[i], raw_samples);
         }
@@ -338,21 +335,13 @@ impl Module for Allpass {
     /// Processes a block of audio through the Schroeder delay-line all-pass filter.
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let time_spec = &ALLPASS.params[0];
-        let time_modulated = io.modulated(0);
-        let gain_modulated = io.modulated(1);
+        let time_modulated = io.param(0);
+        let gain_modulated = io.param(1);
         let ([input, time_in], [out]) = io.split::<2, 1>();
         for i in 0..input.len() {
             let pos = self.time.tick();
-            let base_time = match time_modulated {
-                Some(samples) => samples[i],
-                None => time_spec.denormalize(pos),
-            };
-            let g_tick = self.gain.tick();
-            let gain = match gain_modulated {
-                Some(samples) => samples[i],
-                None => g_tick,
-            }
-            .clamp(-0.95, 0.95);
+            let base_time = time_modulated.at_or(i, time_spec.denormalize(pos));
+            let gain = gain_modulated.at_or(i, self.gain.tick()).clamp(-0.95, 0.95);
             let raw_samples = (f64::from(base_time) + f64::from(time_in[i])) * self.sample_rate;
             out[i] = self.buffer.step_allpass(input[i], raw_samples, gain);
         }

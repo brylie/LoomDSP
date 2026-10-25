@@ -133,26 +133,17 @@ impl Svf {
 
 impl Module for Svf {
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let cutoff_samples = io.modulated(0);
-        let resonance_samples = io.modulated(1);
+        let cutoff_param = io.param(0);
+        let resonance_param = io.param(1);
         let ([input, cutoff_mod], [lp, bp, hp, notch]) = io.split::<2, 4>();
         let nyquist_limit = self.sample_rate * 0.49;
         for i in 0..input.len() {
             // Tick even when modulated, so removing the assignment continues
             // the glide from here. The heard value is the engine buffer.
             let cutoff_pitch = self.cutoff.tick();
-            let cutoff_hz = if let Some(samples) = cutoff_samples {
-                pitch::to_hz(pitch::from_hz(samples[i]) + cutoff_mod[i])
-            } else {
-                pitch::to_hz(cutoff_pitch + cutoff_mod[i])
-            }
-            .clamp(5.0, nyquist_limit);
-            let resonance = if let Some(samples) = resonance_samples {
-                let _ = self.resonance.tick();
-                samples[i]
-            } else {
-                self.resonance.tick()
-            };
+            let cutoff_pitch = cutoff_param.map_or(i, cutoff_pitch, pitch::from_hz);
+            let cutoff_hz = pitch::to_hz(cutoff_pitch + cutoff_mod[i]).clamp(5.0, nyquist_limit);
+            let resonance = resonance_param.at_or(i, self.resonance.tick());
             // Resonance 0..1 maps to damping k = 2..0.02 (Q from 0.5 to 50).
             let k = 2.0 - 1.98 * resonance;
             let g = (PI * cutoff_hz / self.sample_rate).tan();
@@ -292,16 +283,13 @@ impl OnePole {
 
 impl Module for OnePole {
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let cutoff_samples = io.modulated(0);
+        let cutoff_param = io.param(0);
         let ([input, cutoff_mod], [lp, hp]) = io.split::<2, 2>();
         let nyquist_limit = self.sample_rate * 0.49;
         for i in 0..input.len() {
             let cutoff_pitch = self.cutoff.tick();
-            let cutoff_hz = if let Some(samples) = cutoff_samples {
-                pitch::to_hz(pitch::from_hz(samples[i]) + cutoff_mod[i])
-            } else {
-                pitch::to_hz(cutoff_pitch + cutoff_mod[i])
-            };
+            let cutoff_pitch = cutoff_param.map_or(i, cutoff_pitch, pitch::from_hz);
+            let cutoff_hz = pitch::to_hz(cutoff_pitch + cutoff_mod[i]);
             // Cables are never clipped, so a NaN can arrive on the cutoff
             // (after a divide upstream, say). `clamp` passes NaN through,
             // and it would reach the state and stay there. Use a safe

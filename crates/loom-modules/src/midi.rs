@@ -135,15 +135,15 @@ impl NoteIn {
 
 impl Module for NoteIn {
     fn process(&mut self, ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let channel = io.modulated(0);
-        let bend_range = io.modulated(1);
+        let channel = io.param(0);
+        let bend_range = io.param(1);
         let ([], [pitch_out, gate_out, velocity_out]) = io.split::<0, 3>();
         let mut events = ctx.midi().peekable();
         for i in 0..pitch_out.len() {
             // Modulated values live only for this frame. The fields keep the
             // knob's base, so removing an assignment returns to it.
-            let listen = channel.map_or(self.channel, |samples| samples[i].round() as u8);
-            let bend_range = bend_range.map_or(self.bend_range, |samples| samples[i]);
+            let listen = channel.map_or(i, self.channel, |v| v.round() as u8);
+            let bend_range = bend_range.at_or(i, self.bend_range);
             while let Some((frame, event)) = events.peek() {
                 if *frame > i {
                     break;

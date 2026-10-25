@@ -188,13 +188,30 @@ impl<'a> PortIo<'a> {
         Some(unsafe { std::slice::from_raw_parts(ptr.add(self.offset), self.frames) })
     }
 
-    /// The modulated value of parameter `index` at `frame` within this call.
+    /// Parameter `index` for this call, ready to read per frame with a
+    /// fallback to the module's own value. See [`Param`].
     ///
-    /// `None` when the parameter is not modulated. `frame` must be less than
-    /// [`PortIo::frames`].
+    /// This is the usual way to read a parameter that can be modulated. It
+    /// looks the parameter up once per call, and the result does not borrow
+    /// `self`, so it can be held across [`PortIo::split`].
     #[inline]
-    pub fn param_at(&self, index: usize, frame: usize) -> Option<f32> {
-        self.modulated(index).map(|samples| samples[frame])
+    pub fn param(&self, index: usize) -> Param<'a> {
+        Param {
+            samples: self.modulated(index),
+        }
+    }
+
+    /// The value of parameter `index` at `frame` within this call: the
+    /// modulated value when the parameter has an assignment, otherwise
+    /// `base`, the value the module keeps from
+    /// [`Module::set_param`](crate::Module::set_param).
+    ///
+    /// It looks the parameter up on every call. In a loop over frames, call
+    /// [`PortIo::param`] once before the loop instead. `frame` must be less
+    /// than [`PortIo::frames`].
+    #[inline]
+    pub fn param_at_or(&self, index: usize, frame: usize, base: f32) -> f32 {
+        self.param(index).at_or(frame, base)
     }
 
     /// Returns the first `I` inputs and the first `O` outputs at once.
@@ -232,6 +249,83 @@ impl<'a> PortIo<'a> {
     pub fn output(&mut self, index: usize) -> &mut [f32] {
         // SAFETY: guaranteed by the contract of `PortIo::new`.
         unsafe { std::slice::from_raw_parts_mut(self.outputs[index].add(self.offset), self.frames) }
+    }
+}
+
+/// One parameter of a module for one call to [`Module::process`], from
+/// [`PortIo::param`].
+///
+/// It answers "what is this parameter at frame `i`?" with a fallback: the
+/// modulated value when the parameter has an assignment, otherwise the base
+/// value the module passes in. The module keeps its base in the fields that
+/// [`Module::set_param`] owns and never writes a modulated value there, so
+/// when an assignment is removed the parameter returns to the knob's value.
+///
+/// It is `Copy` and does not borrow the [`PortIo`], so it can be held across
+/// [`PortIo::split`]. Reading it is one branch and one indexed load, the same
+/// cost as matching on [`PortIo::modulated`] by hand.
+///
+/// ```
+/// use loom_core::{Module, PortIo, ProcessContext};
+///
+/// /// Adds a fixed offset to its input. Parameter 0 is the offset.
+/// struct Offset {
+///     offset: f32,
+/// }
+///
+/// impl Module for Offset {
+///     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+///         let offset = io.param(0);
+///         let ([input], [out]) = io.split::<1, 1>();
+///         for (i, (out, &x)) in out.iter_mut().zip(input).enumerate() {
+///             *out = x + offset.at_or(i, self.offset);
+///         }
+///     }
+///
+///     fn set_param(&mut self, index: usize, value: f32) {
+///         if index == 0 {
+///             self.offset = value;
+///         }
+///     }
+/// }
+/// ```
+#[derive(Clone, Copy, Debug)]
+pub struct Param<'a> {
+    samples: Option<&'a [f32]>,
+}
+
+impl Param<'_> {
+    /// The value at `frame`: the modulated value when the parameter has an
+    /// assignment, otherwise `base`. `frame` must be less than
+    /// [`PortIo::frames`].
+    ///
+    /// `base` is always evaluated, so a smoothed base keeps ticking while the
+    /// parameter is modulated. Removing the assignment then continues the
+    /// glide from where it is.
+    #[inline]
+    pub fn at_or(&self, frame: usize, base: f32) -> f32 {
+        match self.samples {
+            Some(samples) => samples[frame],
+            None => base,
+        }
+    }
+
+    /// Like [`Param::at_or`] for a parameter the module keeps in another
+    /// form, such as a whole number, a switch, or a pitch. `convert` turns a
+    /// modulated value into that form. It is not called when the parameter
+    /// has no assignment, and then `base` is returned as it is.
+    #[inline]
+    pub fn map_or<T>(&self, frame: usize, base: T, convert: impl FnOnce(f32) -> T) -> T {
+        match self.samples {
+            Some(samples) => convert(samples[frame]),
+            None => base,
+        }
+    }
+
+    /// True when the parameter has an assignment in this call.
+    #[inline]
+    pub fn is_modulated(&self) -> bool {
+        self.samples.is_some()
     }
 }
 
@@ -291,5 +385,35 @@ pub mod testing {
         // unique and cannot alias the shared input slices.
         let mut io = unsafe { PortIo::new(&input_ptrs, &output_ptrs, &[], mask, 0, frames) };
         module.process(&ctx, &mut io);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `Param` gives the modulated sample where a parameter has a buffer and
+    /// the base everywhere else, also after `split` and with an offset.
+    #[test]
+    fn param_falls_back_to_the_base() {
+        let modulated = [0.0, 0.1, 0.2, 0.3];
+        let mut out = [0.0f32; 4];
+        let outputs = [out.as_mut_ptr()];
+        let params = [(1u16, modulated.as_ptr())];
+        // SAFETY: each buffer holds `offset + frames` = 4 floats and outlives
+        // `io`; the one output does not alias the parameter buffer.
+        let mut io = unsafe { PortIo::new(&[], &outputs, &params, 0, 1, 3) };
+        let (plain, swept) = (io.param(0), io.param(1));
+        assert!(!plain.is_modulated());
+        assert!(swept.is_modulated());
+        assert_eq!(io.param_at_or(1, 0, 9.0), 0.1);
+        assert_eq!(io.param_at_or(0, 0, 9.0), 9.0);
+        let ([], [out]) = io.split::<0, 1>();
+        for (i, out) in out.iter_mut().enumerate() {
+            *out = plain.at_or(i, 5.0) + swept.at_or(i, 100.0);
+        }
+        assert_eq!(out, &[5.1, 5.2, 5.3]);
+        assert_eq!(swept.map_or(2, 0u8, |v| (v * 10.0).round() as u8), 3);
+        assert_eq!(plain.map_or(2, 7u8, |_| 0), 7);
     }
 }

@@ -183,16 +183,10 @@ struct Pulse {
 
 impl Module for Pulse {
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let modulated = io.modulated(0);
+        let modulated = io.param(0);
         let ([phase], [out]) = io.split::<1, 1>();
         for (i, (out, &p)) in out.iter_mut().zip(phase).enumerate() {
-            let width = if let Some(samples) = modulated {
-                let _ = self.width.tick();
-                samples[i]
-            } else {
-                self.width.tick()
-            }
-            .clamp(0.01, 0.99);
+            let width = modulated.at_or(i, self.width.tick()).clamp(0.01, 0.99);
             let t = p - p.floor();
             let mut dt = t - self.previous;
             dt -= dt.floor();
@@ -480,15 +474,15 @@ impl Noise {
 
 impl Module for Noise {
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let (seed, colour_mod) = (io.modulated(0), io.modulated(1));
+        let (seed, colour_mod) = (io.param(0), io.param(1));
         let ([], [out]) = io.split::<0, 1>();
         for (i, out) in out.iter_mut().enumerate() {
             // The colour counts for this frame only; the base stays in the
             // field, so removing an assignment returns to it.
-            let colour = colour_mod.map_or(self.colour, |s| s[i].round().max(0.0) as u8);
+            let colour = colour_mod.map_or(i, self.colour, |v| v.round().max(0.0) as u8);
             // Restart the pattern when the seed in use changes, including
             // back to the base when an assignment is removed.
-            let next = seed.map_or(self.seed, |samples| samples[i].round().max(1.0) as u32);
+            let next = seed.map_or(i, self.seed, |v| v.round().max(1.0) as u32);
             if next != self.active {
                 self.active = next;
                 self.restart(next);

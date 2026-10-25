@@ -3,7 +3,7 @@
 //! Spec: `docs/design/p1-modules.md`, Mixing and shaping.
 
 use loom_core::{
-    Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, Polarity,
+    Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, Param, ParamOptions, ParamSpec, Polarity,
     PortDefault, PortIo, PortSpec, ProcessContext, SignalType, Widget,
 };
 use loom_rt::Smoothed;
@@ -146,24 +146,19 @@ impl Mixer {
 
 impl Module for Mixer {
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let modulated: [Option<&[f32]>; MIXER_INPUTS] = std::array::from_fn(|n| io.modulated(n));
-        let mute_mod: [Option<&[f32]>; MIXER_INPUTS] = std::array::from_fn(|n| io.modulated(MIXER_INPUTS + n));
+        let modulated: [Param<'_>; MIXER_INPUTS] = std::array::from_fn(|n| io.param(n));
+        let mute_mod: [Param<'_>; MIXER_INPUTS] = std::array::from_fn(|n| io.param(MIXER_INPUTS + n));
         let (inputs, [out]) = io.split::<MIXER_INPUTS, 1>();
         for (i, out) in out.iter_mut().enumerate() {
             let mut sum = 0.0;
             for n in 0..MIXER_INPUTS {
                 // The smoother glides to the wanted state, so a modulated
                 // mute fades like a knob mute does.
-                let want = mute_mod[n].map_or(self.open_base[n], |s| open_state(s[i]));
+                let want = mute_mod[n].map_or(i, self.open_base[n], open_state);
                 if want != self.open[n].target() {
                     self.open[n].set_target(want);
                 }
-                let level = if let Some(samples) = modulated[n] {
-                    let _ = self.levels[n].tick();
-                    samples[i]
-                } else {
-                    self.levels[n].tick()
-                };
+                let level = modulated[n].at_or(i, self.levels[n].tick());
                 sum += inputs[n][i] * level * self.open[n].tick();
             }
             *out = sum;
@@ -280,17 +275,11 @@ struct Crossfade {
 
 impl Module for Crossfade {
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let (modulated, law_mod) = (io.modulated(0), io.modulated(1));
+        let (modulated, law_mod) = (io.param(0), io.param(1));
         let ([a, b], [out]) = io.split::<2, 1>();
         for (i, out) in out.iter_mut().enumerate() {
-            let linear = law_mod.map_or(self.linear, |s| s[i] >= 0.5);
-            let mix = if let Some(samples) = modulated {
-                let _ = self.mix.tick();
-                samples[i]
-            } else {
-                self.mix.tick()
-            }
-            .clamp(0.0, 1.0);
+            let linear = law_mod.map_or(i, self.linear, |v| v >= 0.5);
+            let mix = modulated.at_or(i, self.mix.tick()).clamp(0.0, 1.0);
             // `clamp` passes NaN through. Use the middle for that frame.
             let mix = if mix.is_nan() { 0.5 } else { mix };
             let (gain_a, gain_b) = if linear {
