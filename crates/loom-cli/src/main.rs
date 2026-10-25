@@ -253,7 +253,14 @@ fn write_text(out: &mut impl Write, label: &str, description: &str) -> std::io::
         if !line.is_empty() {
             line.push(' ');
         }
-        line.push_str(word);
+        // A word wider than the line is split, so no row exceeds the limit.
+        for c in word.chars() {
+            if line.chars().count() == width {
+                writeln!(out, "{:TEXT_INDENT$}{line}", "")?;
+                line.clear();
+            }
+            line.push(c);
+        }
     }
     if !line.is_empty() {
         writeln!(out, "{:TEXT_INDENT$}{line}", "")?;
@@ -778,6 +785,16 @@ mod tests {
             text.lines()
                 .all(|l| l.starts_with("        ") && l.chars().count() <= MODULES_MAX_COLUMNS)
         );
+    }
+
+    /// A single word wider than the line is split, not left to wrap.
+    #[test]
+    fn oversized_word_is_split() {
+        let mut out = Vec::new();
+        write_text(&mut out, "", &"x".repeat(120)).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.lines().count() >= 3);
+        assert!(text.lines().all(|l| l.chars().count() <= MODULES_MAX_COLUMNS));
     }
 
     /// Registry notes print under `module notes:`; none prints nothing.
