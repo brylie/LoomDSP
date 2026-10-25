@@ -62,6 +62,7 @@ Why decisions are kept apart from specifications: a decision record explains *wh
 | [Phase 0 engine](benchmarks/p0-engine.md) | Feedback loop cost, example patch cost, live and offline stress results |
 | [Phase 0 UI spikes](benchmarks/p0-ui-spikes.md) | Iced + iced_nodegraph and egui-snarl, measured on the reference laptop |
 | [Phase 1 canvas](benchmarks/p1-canvas.md) | Our own canvas: how to measure it, and the results |
+| [Phase 1 modulation](benchmarks/p1-modulation.md) | Cost of a modulated filter cutoff, and of 1 to 16 assignments on one parameter |
 
 ## How to read requirement IDs
 
