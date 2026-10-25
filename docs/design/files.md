@@ -8,7 +8,7 @@ How a user opens, saves, and closes patch files in the desktop app, and how the 
 - **Use case and requirements:** FR-FILE-01, FR-APP-01.
 - **Background:** none.
 - **Prior art:** every desktop editor has these commands. We use only the common conventions: shortcuts, a dot or star for unsaved work, and a three-button question.
-- **Issues:** [#14](https://github.com/brylie/LoomDSP/issues/14). Follow-ups this spec absorbs: the lights watcher and telemetry monitor must follow a new engine; `*.saved.ron` files next to examples; Open clears the undo history ([undo](undo.md#commands)).
+- **Issues:** [#14](https://github.com/brylie/LoomDSP/issues/14), [#182](https://github.com/brylie/LoomDSP/issues/182) (examples open as copies: Agreed, not built). Follow-ups this spec absorbs: the lights watcher and telemetry monitor must follow a new engine; `*.saved.ron` files next to examples; Open clears the undo history ([undo](undo.md#commands)).
 - **Code:** `crates/loom-app/src/files.rs` (dialogs, title, extension), and `App::session`, `App::replace`, `App::save`, and `App::can_discard` in `main.rs`. `History::mark_saved` and `is_saved` in `undo.rs`. `Patch::save` in `loom-patch` writes through a temporary file. The lights, telemetry, and MIDI watchers take an engine generation in their subscription identity.
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
@@ -84,7 +84,8 @@ If loading fails, the old patch stays running and untouched. The new engine is b
 - **Extension:** `.ron`. Save As adds it if the user omits it. The filter shows `.ron` files.
 - **Starting folder:** the folder of the current file; otherwise the user's Documents folder. The app does not remember a folder across runs in this version.
 - Save As to an existing file uses the dialog's own overwrite confirmation.
-- Save writes the patch where it was opened. Opening an example and pressing Save would overwrite the example, so the first Save of a file under `examples/` is not special-cased; the user can use Save As. The `<name>.saved.ron` behaviour goes away.
+- Save writes the patch where it was opened, except for examples (next).
+- **Examples open as copies** ([#182](https://github.com/brylie/LoomDSP/issues/182)). A file whose path has a folder named `examples` opens as an untitled patch with that content, named "<name> (example)" in the title. It is clean until edited. Save asks for a place, as Save As does, starting in the Documents folder. This applies to File > Open, a path given on the command line, and the control channel's `open`. *Why:* examples are templates. Saving over one rewrites the file as canonical RON, which drops its comments (`Patch::to_ron` does not keep them) and leaves a diff in the repository. Keeping comments would need a comment-preserving RON editor, which is out of scope. To change an example on purpose, use Save As and choose the same path. The `<name>.saved.ron` behaviour went away earlier.
 
 ### When something fails
 
@@ -119,6 +120,7 @@ A failed save keeps the unsaved mark. A save writes to a temporary file in the s
 - [ ] Given a read-only target, when saved, then the message appears and the mark stays.
 - [ ] After Open, undo is disabled, and the lights and meters show the new patch (manual check).
 - [ ] Saving does not leave a `*.saved.ron` file next to examples.
+- [ ] Opening a file under an `examples` folder gives an untitled patch with its content, and Save asks for a place. The example file is unchanged (test with a temporary `examples` folder). Closing the window after opening one asks nothing.
 - [ ] `cargo deny check` passes with the dialog crate on macOS, Windows, and Linux (CI).
 
 ## Out of scope

@@ -71,6 +71,27 @@ Any client that can write lines to a Unix socket works, such as `nc -U /tmp/loom
 | `wait` | `ms` | Replies after this long, with the app running | |
 | `quit` | | Closes the app, without asking to save | |
 
+### Pointer commands
+
+**Status:** Agreed ([#251](https://github.com/brylie/LoomDSP/issues/251)). Not built.
+
+Commands for the checks that need a hand today: hover lines, pinning a badge and pressing Escape, the drop highlight, and a range arc drag. A target is the same text as `locate` takes, or window coordinates `x` and `y` in logical pixels.
+
+| Command | Fields | Does |
+|---|---|---|
+| `hover` | `target` or `x`, `y` | Moves the pointer there |
+| `press`, `release` | `target` or `x`, `y`, optional `button` (`left` default, `right`, `middle`), optional `modifiers` | Mouse button down or up at the pointer, or at the target |
+| `drag` | `from`, `to` (each a `target` or `[x, y]`), optional `steps` (default 10), `button`, `modifiers` | Press at `from`, move in `steps` equal moves to `to`, release |
+| `scroll` | `target` or `x`, `y`, `dy` (lines, negative is down), optional `dx`, `modifiers` | A wheel step |
+
+- **Same path as the UI.** Each command becomes the pointer events a real pointer sends, in order, through the same event handling as the window (rule 3). A `drag` is a press, `steps` moves, and a release, each applied and drawn before the next. So a cable drag, an arc drag, a tile move, and a drop all work.
+- **How events are injected** is an implementation choice (a message into the iced event stream, or the `Ui` harness run against the live `App::view`). The rules above must hold either way: the same handlers, undo steps, and status messages.
+- **`target`** is resolved at the time of the event. A target that is not on screen is an error. A `drag` with a `to` target resolves it at the last move, so a target that appears during the drag (a highlight) works.
+- **Reply.** `ok`, and the pointer position. The snapshot gains `pointer`: `x`, `y`, `buttons` (down), `hover` (the name of the control, port, or badge under it, if any), `pinned` (the pinned output), and `drag` (what is being dragged, if anything), so a script can check each step.
+- **`key`** with `escape` already exists, so "pin a badge, press Escape" is `hover`, `press`, `release`, `key`.
+- **Still no dialogs** (rule 9), and no events outside the window.
+- **Idle.** A pointer command wakes the app and asks for frames until it is drawn. `--measure-idle` counts no frames when no command arrives (rule 7).
+
 ### Places in the snapshot
 
 The snapshot from `snapshot` and `--dump-ui` says where things are on the canvas, in world units: the canvas's own coordinates, before pan and zoom. They come from the same scene the canvas draws and hits, so they cannot drift from it. *Why:* a test or script can check a layout rule, such as "no badge covers another tile's port", and aim `--pointer` or `--center`, without a screenshot.
@@ -146,6 +167,11 @@ The `snapshot` reply gets a second field, `audio`, next to `snapshot`. It reads 
 The fake host in `crates/loom-app/src/devices.rs` gets a device that starts, makes a few callbacks, and then stops calling back, with no error. This is what the macOS rate change did. An app test opens it through `audio`, reads `snapshot` (`advanced` is true), and reads it again (`advanced` is false). The fake counts in steps, not on the clock, so the test needs no sleeps.
 
 ### Acceptance criteria
+
+- [ ] A control script hovers an output, pins its badge, presses Escape, and the snapshot shows each step (`hover`, `pinned`).
+- [ ] A control script drags a knob's range arc, with Shift, and the assignment's depth changes as in [#217](https://github.com/brylie/LoomDSP/issues/217).
+- [ ] A `drag` from an output to an inspector row or a tile control makes an assignment, and one undo step undoes it.
+- [ ] `--measure-idle` still counts no frames when no command arrives.
 
 - [x] App tests, through the control harness and the fake host: `output_safety`, `audio` (device, rate, buffer, and `"default"`), `midi`, and `new` change what the Preferences window shows, and replies give `playing` and `status`.
 - [x] A refused name, rate, or buffer gets `ok: false` with the offered values.
@@ -237,7 +263,7 @@ LOOM_DEVICE="MOTU" LOOM_RATE=96000 LOOM_BUFFER=64 \
 
 ## Out of scope
 
-- **Pointer events.** Pressing, dragging, and hovering at window coordinates: desktop automation does that, with `locate` to aim. The headless `Ui` harness covers it in tests.
+- **Touch and multi-pointer events.** Not modelled. Pointer commands cover one mouse.
 - **Remote access** over the network, and authentication.
 - **A scripting language.** Clients are any language that writes JSON lines.
 - **Users.** It is not a feature of the app for musicians, and is not in the help.

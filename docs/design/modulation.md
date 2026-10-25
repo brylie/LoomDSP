@@ -96,7 +96,7 @@ Undo ([#12](https://github.com/brylie/LoomDSP/issues/12), [undo.md](undo.md)) is
 A dot on a modulated knob shows the value the engine gives the parameter (FR-MOD-04).
 
 - **The engine publishes one value per modulated parameter per block** into a latest-value table, the same pattern as display values (ADR-0013). The table is a set of atomics, allocated once with the engine. After each block the engine stores each value in its cell. The UI loads it with `Controller::modulated(module, param)` when it draws. Nothing waits and nothing allocates on the audio thread. *Why not a telemetry queue:* a queue suits streams such as scope chunks. A dot needs only the latest number, and a queue would drop records when the UI is slow and make the UI keep its own map. *Why not compute it in the app:* the app would copy the engine's maths, and get it wrong inside feedback loops, during smoothing, and where the compiler delays an assignment.
-- **Fixed size.** The table has a fixed number of cells, set in the engine config next to `max_modules`. The default is 256. The compiler gives each modulated parameter a cell when it builds the schedule. If a patch has more modulated parameters than cells, the extra ones still sound right but show no dot, and the compiler reports it once as a warning. *Why:* the table is allocated once, so no schedule swap allocates for it. 256 is far more than a stage patch uses. This is why no ADR is needed: it stays a copy of the display table pattern.
+- **Fixed size.** The table has a fixed number of cells, set in the engine config next to `max_modules`. The default is 256. The compiler gives each modulated parameter a cell when it builds the schedule. If a patch has more modulated parameters than cells, the extra ones still sound right but show no dot, and the compiler reports it as a warning. **The app shows the warning when the patch goes from within the table to over it, and again after it has been within the table in between.** It does not repeat on each compile while the patch stays over. Opening another patch starts afresh. *Why:* repeating the same warning after every structural edit teaches the player to ignore the status bar. A test compiles a patch of 257 modulated parameters twice and sees one warning, then removes one, adds one, and sees a second. *Why:* the table is allocated once, so no schedule swap allocates for it. 256 is far more than a stage patch uses. This is why no ADR is needed: it stays a copy of the display table pattern.
 - **Owner check.** Each cell stores the module ID and parameter index that own it, checked before and after reading, as display values do. *Why:* after a recompile a cell may move to another parameter, and the old knob must not show the new value.
 - **Which frame.** The last frame of the block. *Why:* it is the value the parameter has when the block ends, which matches display values. An average would hide fast sources, and a peak would show values the parameter only touches. At audio rate the dot jumps from frame to frame. That is honest, and the range arc already shows the span.
 - **Which value.** The value after step 1 of rule 12, mapped to the control's 0 to 1 position with `ParamSpec::normalize`. So the dot is the engine's modulated value before any module input adds to it, the same thing the range arc shows.
@@ -107,6 +107,7 @@ A dot on a modulated knob shows the value the engine gives the parameter (FR-MOD
 
 - **On hover:** pointing at an output port that drives assignments, at its badge, or at a modulated control draws thin dashed lines between the source port and its targets, and highlights the tiles. They disappear when the pointer leaves. Hovering a port still shows its hover text. Selecting a module shows its lines too, following the same focus rules as cables.
 - **Pinned lines:** clicking a badge keeps that output's lines visible after the pointer leaves. Clicking the badge again, or pressing Escape, hides them. The badge shows that it is pinned. Only one output is pinned at a time: clicking another badge moves the pin. Escape hides pinned lines before anything else, except a drag in progress ([Inspector drop](#inspector-drop)). Only when nothing is pinned does it do what it does today. *Why the badge and not the port:* pressing an output port starts dragging a cable or an assignment, so a click there must not also mean something else. *Why one pin:* the pinned source also picks which assignment an arc drag changes (below), so it must be unambiguous.
+- **Lines for assignments that are off** are drawn thinner (half the weight) and at 40% strength, with the same dashes. *Why:* the ring on the control is dimmed when its assignments are off, and the line should say the same thing: it is there, but nothing flows. Not drawing it would hide the routing that the player might want to turn back on.
 - **Drawing.** The canvas draws the lines as cable-like strips. It rebuilds them when the hovered or pinned source, the selection, the assignments, or a module position changes, and never every frame. Pan and zoom only update the camera, like cables (ADR-0010).
 
 #### Arc drag
@@ -134,7 +135,7 @@ Dragging the range arc on a tile knob changes the depth of one assignment.
 
 ### Inspector drop
 
-**Status:** Agreed. Not built yet: [#188](https://github.com/brylie/LoomDSP/issues/188) builds it, after slice 2. The [spike in #186](https://github.com/brylie/LoomDSP/issues/186#issuecomment-6252045730) showed that Iced can carry the drag.
+**Status:** Agreed, with every open point answered below (Escape, the drag line, which rows, learn mode). Not built yet: [#188](https://github.com/brylie/LoomDSP/issues/188) builds it, after slice 2. The [spike in #186](https://github.com/brylie/LoomDSP/issues/186#issuecomment-6252045730) showed that Iced can carry the drag.
 
 Dropping an output on a parameter row in the inspector makes an assignment, the same as a drop on a tile control. *Why:* the inspector shows every parameter, including ones that are not on the tile, and dragging is faster than picking from the **Add modulation** list.
 
@@ -148,9 +149,24 @@ Dropping an output on a parameter row in the inspector makes an assignment, the 
 
 ### Slice 3: the modulation matrix
 
-**Status:** Draft.
+**Status:** Agreed ([#71](https://github.com/brylie/LoomDSP/issues/71)). Not built.
 
 A panel beside the inspector. Columns: on, source (module and output), target (module and parameter), depth, polarity. Sort and filter by module, or show only the selected module. Every cell can be edited by keyboard (NFR-UX-01). **Add**, then pick a source and a target, creates an assignment. Delete removes the selected row.
+
+Details settled for the build:
+
+- **Where.** A tab in the right-hand column next to **Inspector**. The window shows one of them at a time. It remembers the last tab for the session only. *Why:* the window is already full; a tab costs no space.
+- **Rows.** One per assignment, in the order the engine applies them (rule 12), grouped by target when sorted by target. Columns: **On** (check box), **Source** ("Module name · Output label"), **Target** ("Module name · Parameter label"), **Depth** (a number from −100 to 100 percent, typed or dragged), **Polarity** (a choice: the same choices as the inspector).
+- **Sort.** Click a column title to sort by it; click again to reverse. The default is the engine's order.
+- **Filter.** A text field matches the module or parameter name. A check box **Selected module only** shows rows whose source or target is the selected module. Filters hide rows; they never change assignments.
+- **Add.** The **Add** button opens two pick lists (source output, target parameter) with the same rules as a drop: the target can be a knob, toggle, or radio parameter; the depth is the default depth; a duplicate adds nothing and the status bar says so.
+- **Remove.** The **×** button of [Removing an item](panels.md#removing-an-item), or Delete on the selected row.
+- **Keyboard.** Up and Down move between rows; Left and Right between cells; Enter edits the cell (toggle, open the choice, or type); Escape leaves the cell; Tab leaves the table.
+- **Selection.** Selecting a row selects the target module on the canvas and shows the assignment's line (as if pinned) without pinning it. Selecting a module on the canvas does not move the selected row.
+- **Edits** go through the controller and undo like the inspector's: a depth drag is one step ([Undo](#undo)).
+- **Rows follow the graph.** A row for a deleted module disappears; undo brings it back in place.
+- **Level.** Only the current patch level is listed (below).
+- **Redraw.** The panel redraws only when assignments, filters, or the selection change. Live values are not shown here.
 
 The matrix shows the assignments of the current patch level only. Assignments inside a sub-patch are not listed. *Why:* an assignment never crosses a patch level (rule 10), so the ones inside a sub-patch belong to it. Open the sub-patch to see them, as with its cables.
 
@@ -312,9 +328,15 @@ A **Macro** module (FR-LIB-12) has one knob on its panel and one output equal to
 
 ### Acceptance criteria: slice 3
 
-**Status:** Draft. [#71](https://github.com/brylie/LoomDSP/issues/71).
+**Status:** Agreed. [#71](https://github.com/brylie/LoomDSP/issues/71).
 
-- [ ] The matrix lists every assignment in the current patch level, and every cell can be edited by keyboard.
+- [ ] The matrix lists every assignment in the current patch level, and every cell can be edited by keyboard (a test drives it with keys alone).
+- [ ] Sorting by each column, the text filter, and **Selected module only** show the right rows and change no assignment (test).
+- [ ] **Add** makes an assignment with the default depth; a duplicate adds nothing and the status bar says so (test).
+- [ ] Editing on, depth, or polarity, and removing a row, are undo steps like the inspector's; undo restores a removed row in place (test).
+- [ ] Selecting a row selects its target module and shows its line without pinning (test).
+- [ ] Assignments inside a sub-patch are not listed (test).
+- [ ] With the matrix open and nothing changing, the app draws no frames (manual check, `--measure-idle`).
 
 ### Acceptance criteria: undo
 
