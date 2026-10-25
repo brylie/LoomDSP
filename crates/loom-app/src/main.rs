@@ -1309,6 +1309,9 @@ impl App {
     fn sync_probes(&mut self) {
         let wanted = self.metered_outputs();
         self.live.sync(&mut self.controller, &wanted);
+        // Probe IDs are never reused, so a level of a removed probe is dead.
+        let live: std::collections::HashSet<ProbeId> = self.live.probes().collect();
+        self.meter_levels.retain(|probe, _| live.contains(probe));
         if let Err(e) = self.controller.commit() {
             self.status = format!("error: {e}");
         }
@@ -1905,7 +1908,10 @@ impl App {
                 self.update_dropouts(Instant::now());
             }
             Message::Meters(levels) => {
-                self.meter_levels.extend(levels);
+                // A reading may arrive after its probe was removed.
+                let live: std::collections::HashSet<ProbeId> = self.live.probes().collect();
+                self.meter_levels
+                    .extend(levels.into_iter().filter(|(probe, _)| live.contains(probe)));
                 self.refresh_values();
             }
             Message::Lights(readings) => {
@@ -3332,6 +3338,34 @@ mod tests {
         let _ = app.update(Message::Lights(watch.read()));
         let level = tile_widget(&app, env, light).position;
         assert!(level > 0.5, "the gate is held: {level}");
+    }
+
+    /// Meter levels follow their probes: turning metering on and off many
+    /// times leaves at most one level per live probe, and none once the
+    /// cable is gone.
+    #[test]
+    fn removed_probes_lose_their_levels() {
+        let mut app = app();
+        let gate = app.controller.add_module("loom.math.constant").unwrap();
+        let env = app.controller.add_module("loom.env.adsr").unwrap();
+        app.controller.connect_named(gate, "out", env, "gate").unwrap();
+        app.commit();
+        for _ in 0..20 {
+            app.live.set_activity(true);
+            app.sync_probes();
+            app.process(64);
+            let probe = app.live.probes().next().expect("a probe on the cable");
+            let level = live::Level { rms: 0.5, peak: 0.6 };
+            let _ = app.update(Message::Meters(vec![(probe, level)]));
+            assert_eq!(app.meter_levels.len(), 1);
+
+            app.live.set_activity(false);
+            app.sync_probes();
+            assert!(app.meter_levels.is_empty(), "{:?}", app.meter_levels);
+            // A late reading for the removed probe is ignored.
+            let _ = app.update(Message::Meters(vec![(probe, level)]));
+            assert!(app.meter_levels.is_empty());
+        }
     }
 
     /// The inspector lists a parameter's assignments in order, with the one

@@ -50,6 +50,11 @@ impl Live {
         self.meters.get(&output).copied()
     }
 
+    /// The probes this `Live` still owns.
+    pub fn probes(&self) -> impl Iterator<Item = ProbeId> + '_ {
+        self.meters.values().copied()
+    }
+
     /// True if any probe is active, so telemetry may arrive.
     pub fn has_probes(&self) -> bool {
         !self.meters.is_empty()
