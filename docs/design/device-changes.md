@@ -17,12 +17,13 @@ What the app does when a MIDI controller is plugged in or removed, and when the 
 
 ### Behaviour
 
-- **The app watches the list of MIDI inputs** once a second, on a thread that is not the audio thread (the system offers no portable callback, so the app polls). The Preferences window shows the same list and updates when it changes, so MIDI needs no Refresh button.
+- **The app watches the list of MIDI inputs** four times a second, on a thread that is not the audio thread (the system offers no portable callback, so the app polls). The Preferences window shows the same list and updates when it changes, so MIDI needs no Refresh button.
 - **A new input** that is not in `midi.off` is opened at once. The status bar says `MIDI: "Keys" connected.` An input in `midi.off` stays closed.
 - **A removed input** is closed. Every note it was holding is released, in the engine, with a note off for each. The status bar says `MIDI: "Keys" disconnected.` The app keeps running.
 - **An input that comes back** is opened as a new connection. Its notes are not doubled, because the old connection was closed when it was removed and a connection never outlives its device.
 - **Two inputs with the same name** (two identical controllers) are told apart by their order on the system, and shown as `Pad` and `Pad (2)`. A saved `midi.off` entry matches by full name, so turning off `Pad` turns off the first. *Why:* the system gives no better identity portably.
-- **Debounce.** An input that is missing for less than one poll is not noticed; there is nothing to release. An input that disappears and reappears within 250 ms is treated as a change of port, not two events, so rapid plugging does not make 20 messages.
+- **Any sign that a connection is gone counts as a removal,** even if the name is listed again: an error from the input connection, or a change of the port's identity (the system's port ID, where the host gives one) seen in a poll. The app closes the old connection, releases its notes, and opens the new one. *Why:* a key held when the cable comes out and released while it is unplugged never sends its note off. Waiting for the name to leave the list would miss a quick replug and leave the note stuck. There is no minimum gap: a removal is a removal.
+- **The limit.** A gap shorter than one poll (250 ms) with neither an error nor an identity change cannot be seen. That is the cost of polling, and it is accepted. A note held across such a gap is released the next time its key is pressed and released, or by panic ([panic](panic.md)).
 
 ### Held notes belong to an input
 
@@ -40,6 +41,7 @@ The fake host has a list of inputs that tests change.
 - [ ] Given the same input back, then notes play once (not doubled).
 - [ ] Given two inputs holding the same note, when one is removed, then the note stays on until the other releases it.
 - [ ] Given an input removed and added 10 times quickly (with the fake host), then there is no panic, no stuck note, and no leaked connection.
+- [ ] Given a held note, when the input is removed and re-added with the same name before the next poll but with a new port identity (or after a connection error), then the old connection is closed, a note off is delivered, and notes play once on the new connection.
 - [ ] The allocation tests pass while inputs come and go.
 - [ ] Manual, on macOS, Windows, and Linux, with a real controller (list the OS version and model in the pull request): plug in while the app runs and play; unplug with a held note and hear it stop; plug back in and play; unplug and plug 10 times quickly.
 

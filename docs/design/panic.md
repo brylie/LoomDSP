@@ -53,7 +53,7 @@ Panic is an app action, not a parameter, so [MIDI learn](midi-learn.md) (which m
 ## Rules
 
 1. **One command.** `Command::Panic` goes through the command queue, takes effect at the start of a buffer, and does all four steps in the audio thread without allocating. *Why:* hard rule 1, and one place for the order.
-2. **Steps 1 and 4 are sample-exact ramps** and the reset happens between them, on a buffer boundary at or after the end of the fade. The result is bit-identical at block sizes 1, 77, and 512, for the same command at the same frame. *Why:* hard rules 2 and 3.
+2. **Steps 1 and 4 are sample-exact ramps, and the reset is sample-exact too.** The fade is 10 ms counted in frames from the frame where panic takes effect. The reset happens at the frame where the fade reaches 0, inside a block if need be (the engine splits the block there, as it does for other sample-exact changes), and the fade-in starts on the next frame. The result is bit-identical at block sizes 1, 77, and 512 for the same command at the same frame. *Why:* resetting at the next buffer boundary would start the fade-in at a different frame for each block size, which breaks hard rules 2 and 3.
 3. **A second panic during the fade** restarts nothing: it is ignored until the first one finishes. *Why:* mashing the key must not lengthen the silence.
 4. **Panic needs no audio device.** With `--fake-audio` or no device, the engine handles the command the next time it is processed. *Why:* tests.
 

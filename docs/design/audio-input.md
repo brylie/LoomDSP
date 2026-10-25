@@ -49,10 +49,10 @@ An Audio In module that brings sound from an interface into the patch, so LoomDS
 
 Two different devices run on two crystals, so their clocks drift by a few parts per million. P1 handles it without resampling:
 
-- **Underrun** (the ring has too few frames): the missing frames are zero, and `input_underruns` goes up by 1.
+- **Underrun** (the ring has too few frames for the block): the block is zero, reading pauses until the ring is back at the target fill (one buffer), and `input_underruns` goes up by 1.
 - **Overrun** (the ring is more than 2 buffers full): the oldest frames are dropped down to the target, and `input_overruns` goes up by 1.
 
-Each correction is at most one block, so a drift of 20 ppm at 48 kHz corrects about once every 50 seconds, with a small click. The counters appear in the stats bar next to the dropouts, in amber, only while they are above 0 and have grown in the last 10 seconds. *Why not resample:* a drift-following resampler is a real piece of work with its own quality questions. Same-device operation, the common case on stage, never corrects. Resampling is out of scope and can be added behind the same ring.
+Both corrections restore the target fill, so they behave the same way, and a slow input clock does not click on every block. Each correction is about one buffer of sound, so the interval between corrections is one buffer divided by the drift. At 20 ppm and 48 kHz the drift is about 1 frame a second, so a 256-frame buffer gives a correction about every 4 minutes, with one small click. The counters appear in the stats bar next to the dropouts, in amber, only while they are above 0 and have grown in the last 10 seconds. *Why not resample:* a drift-following resampler is a real piece of work with its own quality questions. Same-device operation, the common case on stage, never corrects. Resampling is out of scope and can be added behind the same ring.
 
 ## Latency
 
