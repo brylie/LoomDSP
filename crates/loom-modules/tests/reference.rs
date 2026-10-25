@@ -338,6 +338,7 @@ fn every_dsp_module_has_a_reference_test() {
         &filter::ONEPOLE,
         &phase::WRAP,
         &math::PITCH_CONSTANT,
+        &level::CONSTANT,
         &level::CLAMP,
         &level::SCALE,
         &mix::MIXER,
@@ -449,4 +450,13 @@ fn crossfade() {
         .input("b", Signal::constant(0.5))
         .param("mix", 0.25)
         .check(reference!("crossfade"));
+}
+
+/// Reference render for `loom.level.constant`: -6 dB.
+#[test]
+fn level_constant() {
+    Harness::new(&level::CONSTANT)
+        .seconds(0.01)
+        .param("level", -6.0)
+        .check(reference!("level_constant"));
 }
