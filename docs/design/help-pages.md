@@ -38,7 +38,7 @@ The index lists every module by category, with its name, ID, and description, an
 
 1. **The descriptor is the one source.** The generated part only shows descriptor fields. *Why:* the descriptor is what the engine and the app use, so a page made from it cannot disagree with the module.
 2. **Regeneration keeps everything below the marker.** *Why:* notes and example patches take real thought to write, and a descriptor change must not erase them.
-3. **A page without the marker is not touched.** The command reports it and exits with an error. *Why:* the page may hold hand-written text that the command cannot tell apart from an old generated part.
+3. **A page without the marker is not touched.** Only a line that is exactly the marker counts; a page that quotes it inside other text has none. The command reports it and exits with an error. *Why:* the page may hold hand-written text that the command cannot tell apart from an old generated part.
 4. **A page of a module that no longer exists is reported, not deleted.** The command exits with an error, so its notes can be moved before the page is removed by hand. *Why:* same as rule 3.
 5. **A test fails while the committed pages are out of date** (`committed_pages_are_current` in `help_pages.rs`). Its message names each stale page and says how to regenerate. *Why:* CI then keeps the pages and the descriptors in step, without a person remembering.
 6. **Line endings do not count.** A checkout with Windows line endings is not stale. *Why:* CI runs the tests on Windows too.

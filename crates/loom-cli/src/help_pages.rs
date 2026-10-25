@@ -116,10 +116,18 @@ fn expected(registry: &Registry, dir: &Path) -> io::Result<Vec<(PathBuf, Expecte
 }
 
 /// The text after the marker line, or `None` if the page has no marker.
+///
+/// Only a line that is exactly the marker counts. A page that quotes the
+/// marker inside other text has no marker, so rule 3 keeps it as it is.
 fn notes_of(page: &str) -> Option<String> {
-    let start = page.find(MARKER)?;
-    let rest = &page[start + MARKER.len()..];
-    Some(rest.strip_prefix('\n').unwrap_or(rest).to_string())
+    let mut start = 0;
+    for line in page.split_inclusive('\n') {
+        start += line.len();
+        if line.trim_end_matches('\n') == MARKER {
+            return Some(page[start..].to_string());
+        }
+    }
+    None
 }
 
 /// Reads a file with Windows line endings turned into `\n`, so a checkout
@@ -390,6 +398,19 @@ mod tests {
              check the diff, and commit the pages.",
             problems.join("\n  ")
         );
+    }
+
+    /// Only a whole line counts as the marker. A page that quotes it inside
+    /// other text has no marker, so its hand-written text is never cut.
+    #[test]
+    fn the_marker_counts_only_as_a_whole_line() {
+        assert_eq!(notes_of(&format!("# A\n{MARKER}\nnotes\n")).as_deref(), Some("notes\n"));
+        assert_eq!(notes_of(&format!("# A\n{MARKER}")).as_deref(), Some(""));
+        assert_eq!(
+            notes_of(&format!("Keep the line `{MARKER}` when you edit.\nmine\n")),
+            None
+        );
+        assert_eq!(notes_of("# A\nno marker\n"), None);
     }
 
     /// Notes below the marker survive regeneration, and a second run writes
