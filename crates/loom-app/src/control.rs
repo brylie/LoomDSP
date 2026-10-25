@@ -1134,21 +1134,18 @@ impl App {
         let index = descriptor
             .param_index(param)
             .ok_or_else(|| format!("module {module} ({}) has no parameter `{param}`", descriptor.name))?;
-        let spec = &descriptor.params[index];
-        let position = match (value, position) {
-            (Some(value), None) => spec.normalize(value),
-            (None, Some(position)) => position,
-            _ => return Err("give `value` or `position`, not both".to_string()),
-        };
-        // As a knob turn: one change, then let go, so it is one undo step.
-        send(
-            self,
-            Message::Param {
+        // As a knob turn: one change, then let go, so it is one undo step. A
+        // `value` goes in as it is, so it is not bent by a position round trip.
+        let message = match (value, position) {
+            (Some(value), None) => Message::ParamValue { module, index, value },
+            (None, Some(position)) => Message::Param {
                 module,
                 index,
                 position,
             },
-        );
+            _ => return Err("give `value` or `position`, not both".to_string()),
+        };
+        send(self, message);
         send(self, Message::SliderReleased);
         let stored = self
             .controller
@@ -1525,8 +1522,8 @@ mod tests {
             r#"{"cmd": "set", "module": 4, "param": "cutoff", "value": 800}"#,
         )
         .unwrap();
-        let stored = set["value"].as_f64().unwrap();
-        assert!((stored - 800.0).abs() < 0.5, "{stored}");
+        assert_eq!(set["value"], json!(800.0));
+        assert_eq!(app.controller.graph().node(ModuleId(4)).unwrap().params[0], 800.0);
         let set = run(
             &mut app,
             r#"{"cmd": "set", "module": 4, "param": "cutoff", "position": 0}"#,
@@ -1544,7 +1541,7 @@ mod tests {
         let undone = run(&mut app, r#"{"cmd": "undo"}"#).unwrap();
         assert!(undone["redo"].is_string(), "{undone:?}");
         let cutoff = app.controller.graph().node(ModuleId(4)).unwrap().params[0];
-        assert!((cutoff - 800.0).abs() < 0.5, "{cutoff}");
+        assert_eq!(cutoff, 800.0);
 
         let snapshot = run(&mut app, r#"{"cmd": "snapshot"}"#).unwrap();
         assert_eq!(snapshot["snapshot"]["selection"], json!([4]));

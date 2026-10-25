@@ -51,7 +51,7 @@ Any client that can write lines to a Unix socket works, such as `nc -U /tmp/loom
 |---|---|---|---|
 | `snapshot` | | Nothing | `snapshot`: the UI snapshot, the same JSON as `--dump-ui`, with live values |
 | `select` | `modules` | Selects these modules, as clicks would | |
-| `set` | `module`, `param`, and `value` (in the parameter's units) or `position` (0 to 1, as the knob) | Sets a parameter, as the knob does: one undo step | The value as stored (clamped, rounded for whole numbers) |
+| `set` | `module`, `param`, and `value` (in the parameter's units) or `position` (0 to 1, as the knob) | Sets a parameter, as the knob does: one undo step | The value as stored (clamped, rounded for whole numbers). A `value` is stored exactly as sent, not through a knob position |
 | `add` | `kind` (with or without `@1`), optional `at` (`[x, y]` on the canvas; default: below the patch) | Adds a module, as the browser does | `module`: the new module ID |
 | `remove` | `modules` | Removes modules, as Delete does | |
 | `connect` | `from`, `to` (`"3:out"`, `"4:in"`) | Connects a cable | |
