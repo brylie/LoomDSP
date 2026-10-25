@@ -456,9 +456,17 @@ fn format_stats(s: &StatsSnapshot) -> String {
 }
 
 /// The live status line of `stress`: elapsed seconds, edit count, then the
-/// audio statistics. Kept short so it fits in one row of a narrow terminal.
+/// audio statistics. It leaves out the peak load that `format_stats` shows, so
+/// it fits in one row of a narrow terminal.
 fn format_stress_line(elapsed_secs: f32, edits: u64, s: &StatsSnapshot) -> String {
-    format!("{elapsed_secs:.0}s e{edits} {}", format_stats(s))
+    format!(
+        "{elapsed_secs:.0}s e{edits} load {:.1}% buf {}..{} over {} err {}",
+        s.last_load * 100.0,
+        s.smallest_buffer,
+        s.largest_buffer,
+        s.overruns,
+        s.stream_errors
+    )
 }
 
 fn play(path: &Path, args: &AudioArgs, note: Option<u8>) -> Result<ExitCode> {
@@ -651,6 +659,20 @@ mod tests {
         assert!(typical.chars().count() <= 50, "{typical}");
     }
 
+    /// The play line fits in 50 columns for ordinary audio numbers.
+    #[test]
+    fn play_line_fits_50_columns_for_ordinary_values() {
+        let ordinary = StatsSnapshot {
+            last_load: 0.999,
+            max_load: 0.999,
+            smallest_buffer: 4096,
+            largest_buffer: 4096,
+            ..Default::default()
+        };
+        let line = format_stats(&ordinary);
+        assert!(line.chars().count() <= 50, "{line}");
+    }
+
     /// The whole stress line fits in one row for an ordinary run: up to 99 s,
     /// 9,999 edits, and usual audio numbers. Extreme values may still wrap.
     #[test]
@@ -663,6 +685,6 @@ mod tests {
             ..Default::default()
         };
         let line = format_stress_line(99.0, 9_999, &ordinary);
-        assert!(line.chars().count() <= STATS_MAX_COLUMNS, "{line}");
+        assert!(line.chars().count() <= 50, "{line}");
     }
 }
