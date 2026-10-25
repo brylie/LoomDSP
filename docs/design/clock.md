@@ -164,7 +164,7 @@ These details were settled while building the module.
 - The engine owns the transport. It is not part of the schedule, so editing the patch never moves it. *Why:* adding a module while playing must not restart the bar.
 - A new engine starts running, at 120 BPM, in 4/4, at position 0.
 - The control thread changes the transport through the `Controller`: set tempo, set time signature, set running, and reset. Each change goes through the command queue, like a parameter change, and takes effect at the start of the next buffer. *Why:* no locks, and one path for every change. The Transport module ([#73](https://github.com/brylie/LoomDSP/issues/73)) and the app will use the same calls.
-- Tempo is clamped to 20 to 300 BPM, as a parameter is. A time signature out of range is refused with an error, and the transport does not change. *Why:* a clamped tempo is still a sensible tempo. There is no sensible nearest value for 7/3.
+- Tempo is clamped to 20 to 300 BPM, as a parameter is. A time signature out of range is refused with an error, and the transport does not change. *Why:* a clamped tempo is still a sensible tempo. There is no sensible nearest value for 7/3. `TransportInfo::new`, the constructor for testing modules alone, panics on an invalid time signature for the same reason; a NaN bar phase would hide the mistake.
 
 ### Position
 

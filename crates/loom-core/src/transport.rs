@@ -111,7 +111,21 @@ pub struct TransportInfo {
 impl TransportInfo {
     /// The transport at `position` beats, for testing modules alone. It has
     /// not jumped; see [`TransportInfo::with_jump`].
+    ///
+    /// Tempo is clamped, as the engine does. A time signature that
+    /// [`TimeSignature::is_valid`] refuses has no sensible nearest value, and
+    /// a numerator of 0 would make every bar phase NaN. So this is a
+    /// programming error in the test, and it panics with a clear message.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `settings.time_signature` is not valid.
     pub fn new(sample_rate: f32, settings: TransportSettings, position: f64) -> Self {
+        assert!(
+            settings.time_signature.is_valid(),
+            "invalid time signature {}: the numerator must be 1 to 32 and the denominator 1, 2, 4, 8, or 16",
+            settings.time_signature
+        );
         let tempo = clamp_tempo(settings.tempo);
         Self {
             playing: settings.running,
@@ -275,6 +289,10 @@ impl Transport {
     }
 
     pub fn set_time_signature(&mut self, time_signature: TimeSignature) {
+        debug_assert!(
+            time_signature.is_valid(),
+            "the Controller refuses invalid time signatures"
+        );
         self.settings.time_signature = time_signature;
     }
 
@@ -373,6 +391,40 @@ mod tests {
         assert!(!TimeSignature::new(33, 4).is_valid());
         assert!(!TimeSignature::new(7, 3).is_valid());
         assert!(!TimeSignature::new(4, 32).is_valid());
+    }
+
+    /// A numerator of 0 would give a bar length of 0 and NaN phases, so the
+    /// testing constructor refuses it.
+    #[test]
+    #[should_panic(expected = "invalid time signature 0/4")]
+    fn new_refuses_numerator_zero() {
+        let settings = TransportSettings {
+            time_signature: TimeSignature::new(0, 4),
+            ..TransportSettings::default()
+        };
+        TransportInfo::new(48_000.0, settings, 0.0);
+    }
+
+    /// A denominator that is not a power of two up to 16 is refused too.
+    #[test]
+    #[should_panic(expected = "invalid time signature 7/3")]
+    fn new_refuses_denominator_three() {
+        let settings = TransportSettings {
+            time_signature: TimeSignature::new(7, 3),
+            ..TransportSettings::default()
+        };
+        TransportInfo::new(48_000.0, settings, 0.0);
+    }
+
+    /// Every valid time signature gives finite phases.
+    #[test]
+    fn new_with_valid_signature_has_finite_phases() {
+        let settings = TransportSettings {
+            time_signature: TimeSignature::new(7, 8),
+            ..TransportSettings::default()
+        };
+        let info = TransportInfo::new(48_000.0, settings, 1.0);
+        assert!(info.bar_phase_at(10).is_finite());
     }
 
     #[test]
