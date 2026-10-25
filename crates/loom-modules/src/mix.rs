@@ -111,6 +111,10 @@ struct Mixer {
     levels: [Smoothed; MIXER_INPUTS],
     /// 1 while the input is open and 0 while it is muted, so a mute fades.
     open: [Smoothed; MIXER_INPUTS],
+    /// The open state the mute toggles are set to, 1 or 0. A modulated mute
+    /// replaces it for as long as the assignment is there, and removing the
+    /// assignment returns to it.
+    open_base: [f32; MIXER_INPUTS],
 }
 
 impl Mixer {
@@ -126,6 +130,7 @@ impl Mixer {
         Self {
             levels: std::array::from_fn(level),
             open: std::array::from_fn(open),
+            open_base: [1.0; MIXER_INPUTS],
         }
     }
 }
@@ -133,10 +138,17 @@ impl Mixer {
 impl Module for Mixer {
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let modulated: [Option<&[f32]>; MIXER_INPUTS] = std::array::from_fn(|n| io.modulated(n));
+        let mute_mod: [Option<&[f32]>; MIXER_INPUTS] = std::array::from_fn(|n| io.modulated(MIXER_INPUTS + n));
         let (inputs, [out]) = io.split::<MIXER_INPUTS, 1>();
         for (i, out) in out.iter_mut().enumerate() {
             let mut sum = 0.0;
             for n in 0..MIXER_INPUTS {
+                // The smoother glides to the wanted state, so a modulated
+                // mute fades like a knob mute does.
+                let want = mute_mod[n].map_or(self.open_base[n], |s| 1.0 - s[i].round().clamp(0.0, 1.0));
+                if want != self.open[n].target() {
+                    self.open[n].set_target(want);
+                }
                 let level = if let Some(samples) = modulated[n] {
                     let _ = self.levels[n].tick();
                     samples[i]
@@ -152,7 +164,10 @@ impl Module for Mixer {
     fn set_param(&mut self, index: usize, value: f32) {
         match index {
             0..=3 => self.levels[index].set_target(value),
-            4..=7 => self.open[index - MIXER_INPUTS].set_target(1.0 - value),
+            4..=7 => {
+                self.open_base[index - MIXER_INPUTS] = 1.0 - value;
+                self.open[index - MIXER_INPUTS].set_target(1.0 - value);
+            }
             _ => {}
         }
     }
@@ -256,9 +271,10 @@ struct Crossfade {
 
 impl Module for Crossfade {
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let modulated = io.modulated(0);
+        let (modulated, law_mod) = (io.modulated(0), io.modulated(1));
         let ([a, b], [out]) = io.split::<2, 1>();
         for (i, out) in out.iter_mut().enumerate() {
+            let linear = law_mod.map_or(self.linear, |s| s[i] >= 0.5);
             let mix = if let Some(samples) = modulated {
                 let _ = self.mix.tick();
                 samples[i]
@@ -266,7 +282,7 @@ impl Module for Crossfade {
                 self.mix.tick()
             }
             .clamp(0.0, 1.0);
-            let (gain_a, gain_b) = if self.linear {
+            let (gain_a, gain_b) = if linear {
                 (1.0 - mix, mix)
             } else {
                 // Audio from two sources adds in power, so the gains follow
