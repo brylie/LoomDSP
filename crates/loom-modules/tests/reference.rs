@@ -6,7 +6,7 @@
 //! listen to them, and commit them.
 
 use loom_core::{MidiEvent, ModuleRole};
-use loom_modules::{ALL, display, env, filter, level, logic, math, midi, mix, osc, phase, rand, time, ui};
+use loom_modules::{ALL, display, env, filter, level, lfo, logic, math, midi, mix, osc, phase, rand, time, ui};
 use loom_test::{Harness, Signal, reference};
 
 #[test]
@@ -348,6 +348,8 @@ fn every_dsp_module_has_a_reference_test() {
         &logic::MEMORY,
         &rand::SAMPLE_HOLD,
         &level::SLEW,
+        &phase::SCALE,
+        &lfo::LFO,
         &env::ADSR,
         &math::ADD,
         &math::MUL,
@@ -530,4 +532,57 @@ fn slew() {
         .param("rise", 0.005)
         .param("fall", 0.01)
         .check(reference!("slew"));
+}
+
+/// Reference render for `loom.osc.noise` in pink.
+#[test]
+fn noise_pink() {
+    Harness::new(&osc::NOISE)
+        .seconds(0.05)
+        .param("seed", 7.0)
+        .param("colour", 1.0)
+        .check(reference!("noise_pink"));
+}
+
+/// Reference render for `loom.osc.noise` in brown.
+#[test]
+fn noise_brown() {
+    Harness::new(&osc::NOISE)
+        .seconds(0.05)
+        .param("seed", 7.0)
+        .param("colour", 2.0)
+        .check(reference!("noise_brown"));
+}
+
+/// Reference render for `loom.phase.scale`: three against two on a 100 Hz phase.
+#[test]
+fn phase_scale() {
+    Harness::new(&phase::SCALE)
+        .seconds(0.05)
+        .input("phase", Signal::phase(100.0))
+        .param("multiply", 3.0)
+        .param("divide", 2.0)
+        .check(reference!("phase_scale"));
+}
+
+/// Reference render for `loom.mod.lfo`: a free triangle at 40 Hz.
+#[test]
+fn lfo_free() {
+    Harness::new(&lfo::LFO)
+        .seconds(0.05)
+        .param("rate", 40.0)
+        .param("shape", 1.0)
+        .check(reference!("lfo_free"));
+}
+
+/// Reference render for `loom.mod.lfo`: a synced square, two waves per cycle.
+#[test]
+fn lfo_synced() {
+    Harness::new(&lfo::LFO)
+        .seconds(0.05)
+        .input("phase", Signal::phase(50.0))
+        .param("sync", 1.0)
+        .param("cycles", 2.0)
+        .param("shape", 4.0)
+        .check(reference!("lfo_synced"));
 }

@@ -347,10 +347,11 @@ mod tests {
     #[test]
     fn a_name_that_starts_with_the_query_comes_first() {
         assert_eq!(search(&modules(), "saw")[0].id, "loom.osc.saw");
-        // "Phase" starts with "phase"; "Phase Trigger" too, and sorts after.
+        // "Phase" starts with "phase"; so do "Phase Scale" and "Phase
+        // Trigger", and they sort after it by name.
         assert_eq!(
-            ids(&search(&modules(), "phase"))[..2],
-            ["loom.phase.generator", "loom.phase.trigger"]
+            ids(&search(&modules(), "phase"))[..3],
+            ["loom.phase.generator", "loom.phase.scale", "loom.phase.trigger"]
         );
     }
 

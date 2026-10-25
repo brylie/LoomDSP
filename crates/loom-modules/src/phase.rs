@@ -290,6 +290,143 @@ impl Module for Wrap {
     }
 }
 
+/// `loom.phase.scale` (MT-PHASE-02): runs a phase faster or slower by a
+/// whole-number ratio, and stays locked to it.
+pub static SCALE: ModuleDescriptor = ModuleDescriptor {
+    id: "loom.phase.scale",
+    version: 1,
+    name: "Phase Scale",
+    category: "Phase",
+    description: "Runs a phase at multiply / divide times its speed, locked to the input. Divide counts the input's wraps from the first cycle or the last reset.",
+    inputs: &[
+        PortSpec {
+            name: "phase",
+            label: "Phase",
+            signal: SignalType::Phase,
+            description: "The phase to scale.",
+            default: PortDefault::Value(0.0),
+            polarity: Polarity::Unipolar,
+            channels: Channels::Downmix,
+        },
+        PortSpec {
+            name: "reset",
+            label: "Reset",
+            signal: SignalType::Gate,
+            description: "A rising edge starts counting the input's wraps again from zero.",
+            default: PortDefault::Value(0.0),
+            polarity: Polarity::Unipolar,
+            channels: Channels::Downmix,
+        },
+    ],
+    outputs: &[PortSpec {
+        name: "phase",
+        label: "Phase",
+        signal: SignalType::Phase,
+        description: "The scaled phase, from 0 to 1.",
+        default: PortDefault::Value(0.0),
+        polarity: Polarity::Unipolar,
+        channels: Channels::PerChannel,
+    }],
+    params: &[
+        ParamSpec {
+            name: "multiply",
+            label: "Multiply",
+            description: "How many times faster the output runs.",
+            min: 1.0,
+            max: 16.0,
+            default: 1.0,
+            unit: "",
+            options: ParamOptions::DEFAULT,
+        }
+        .integer(),
+        ParamSpec {
+            name: "divide",
+            label: "Divide",
+            description: "How many times slower the output runs: it wraps once every this many input wraps.",
+            min: 1.0,
+            max: 16.0,
+            default: 1.0,
+            unit: "",
+            options: ParamOptions::DEFAULT,
+        }
+        .integer(),
+    ],
+    role: ModuleRole::Dsp(|_| Box::new(PhaseScale::new())),
+    panel: Panel::new(6, 3, &[Widget::knob(0, 0, "multiply"), Widget::knob(3, 0, "divide")]),
+    displays: &[],
+};
+
+struct PhaseScale {
+    multiply: i64,
+    divide: i64,
+    /// The previous input phase. `None` before the first frame.
+    previous: Option<f32>,
+    /// Wraps of the input since the first cycle or the last reset. Taken
+    /// modulo `divide`, so a changed divide still lines up.
+    wraps: i64,
+    reset: EdgeDetector,
+}
+
+impl PhaseScale {
+    fn new() -> Self {
+        Self {
+            multiply: 1,
+            divide: 1,
+            previous: None,
+            wraps: 0,
+            reset: EdgeDetector::new(),
+        }
+    }
+}
+
+impl Module for PhaseScale {
+    fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        let ([phase, reset], [out]) = io.split::<2, 1>();
+        for (i, out) in out.iter_mut().enumerate() {
+            let p = if phase[i].is_finite() { phase[i] } else { 0.0 };
+            // A jump of more than half a cycle is a wrap, as in Phase
+            // Trigger. Going forward adds a cycle and going backward takes
+            // one away. The first frame has nothing to compare with.
+            if let Some(previous) = self.previous {
+                let step = p - previous;
+                if step < -0.5 {
+                    self.wraps += 1;
+                } else if step > 0.5 {
+                    self.wraps -= 1;
+                }
+            }
+            self.previous = Some(p);
+            // Reset on the same frame as a wrap: the reset comes first, so
+            // this frame is the first one of the new count.
+            if self.reset.rising(reset[i]) {
+                self.wraps = 0;
+            }
+            // The cycle we are in, among `divide` of them, plus how far
+            // through the input cycle we are. Done in f64, so a long run
+            // does not lose the fraction.
+            let cycle = self.wraps.rem_euclid(self.divide) as f64;
+            let scaled = (cycle + f64::from(p)) * self.multiply as f64 / self.divide as f64;
+            let wrapped = (scaled - scaled.floor()) as f32;
+            // An f32 can round up to exactly 1.
+            *out = if wrapped >= 1.0 { 0.0 } else { wrapped };
+        }
+    }
+
+    fn set_param(&mut self, index: usize, value: f32) {
+        match index {
+            0 => self.multiply = value.round().max(1.0) as i64,
+            1 => self.divide = value.round().max(1.0) as i64,
+            _ => {}
+        }
+    }
+
+    fn reset(&mut self) {
+        self.previous = None;
+        self.wraps = 0;
+        self.reset.reset();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -408,5 +545,84 @@ mod wrap_tests {
             assert_eq!(out[..3], [0.0, 0.0, 0.0]);
             assert!(out[3] > 0.0 && out[3] <= 1.0);
         }
+    }
+}
+
+#[cfg(test)]
+mod scale_tests {
+    use super::*;
+    use loom_core::signal::WrapDetector;
+    use loom_core::testing::run;
+
+    /// Runs Phase Scale over a phase that wraps every 100 frames, for
+    /// `cycles` input cycles, in blocks of `block` frames.
+    fn scaled(multiply: f32, divide: f32, cycles: usize, block: usize, reset: &[f32]) -> Vec<f32> {
+        let ModuleRole::Dsp(create) = SCALE.role else {
+            unreachable!()
+        };
+        let frames = cycles * 100;
+        let phase: Vec<f32> = (0..frames).map(|i| (i % 100) as f32 / 100.0).collect();
+        let mut reset_in = vec![0.0; frames];
+        reset_in[..reset.len()].copy_from_slice(reset);
+        let mut m = create(&ModuleConfig {
+            sample_rate: 48_000.0,
+            max_block: block,
+        });
+        m.set_param(0, multiply);
+        m.set_param(1, divide);
+        m.reset();
+        let mut out = vec![0.0; frames];
+        for start in (0..frames).step_by(block) {
+            let end = (start + block).min(frames);
+            run(
+                m.as_mut(),
+                48_000.0,
+                &[&phase[start..end], &reset_in[start..end]],
+                &[true, false],
+                &mut [&mut out[start..end]],
+                &[],
+            );
+        }
+        out
+    }
+
+    /// How many times an output phase wraps.
+    fn wraps(phase: &[f32]) -> usize {
+        let mut detector = WrapDetector::new();
+        // The first frame counts as a wrap when it is 0; skip it.
+        phase.iter().skip(1).filter(|&&p| detector.wrapped(p)).count()
+    }
+
+    /// Divide 2 wraps once per two input wraps; multiply 3 divide 2 wraps
+    /// three times per two input wraps; multiply 4 wraps four times per
+    /// cycle. All at block sizes 1, 32, and 1024.
+    #[test]
+    fn ratios_hold_at_any_block_size() {
+        for block in [1, 32, 1024] {
+            // Four input cycles, 400 frames. The wrap on the first frame is
+            // not counted, and the one that would land on frame 400 is past
+            // the end. So divide 2 gives 2 - 1 = 1 wrap, 3 over 2 gives
+            // 6 - 1 = 5, and multiply 4 gives 16 - 1 = 15.
+            assert_eq!(wraps(&scaled(1.0, 2.0, 4, block, &[])), 1, "divide 2, block {block}");
+            assert_eq!(wraps(&scaled(3.0, 2.0, 4, block, &[])), 5, "3 over 2, block {block}");
+            assert_eq!(wraps(&scaled(4.0, 1.0, 4, block, &[])), 15, "multiply 4, block {block}");
+        }
+    }
+
+    /// The output is the same at every block size, and reset starts the
+    /// count again.
+    #[test]
+    fn block_size_does_not_change_the_output_and_reset_restarts() {
+        let mut reset = vec![0.0; 150];
+        reset[150 - 1] = 1.0;
+        let reference = scaled(1.0, 2.0, 4, 1024, &reset);
+        assert_eq!(scaled(1.0, 2.0, 4, 1, &reset), reference);
+        assert_eq!(scaled(1.0, 2.0, 4, 32, &reset), reference);
+        // Without a reset, cycle 1 is the second half of the divided cycle.
+        let plain = scaled(1.0, 2.0, 2, 1024, &[]);
+        assert!((plain[100] - 0.5).abs() < 1e-6, "{}", plain[100]);
+        // A reset on frame 149 sends the count back, so frame 149 reads like
+        // the middle of the first of the two cycles.
+        assert!((reference[149] - 0.245).abs() < 1e-6, "{}", reference[149]);
     }
 }

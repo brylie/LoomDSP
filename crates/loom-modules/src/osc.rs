@@ -331,13 +331,13 @@ pub static NOISE: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Noise",
     category: "Oscillator",
-    description: "White noise. The seed makes renders repeatable (NFR-SND-04).",
+    description: "White, pink, or brown noise. The seed makes renders repeatable (NFR-SND-04).",
     inputs: &[],
     outputs: &[PortSpec {
         name: "out",
         label: "Out",
         signal: SignalType::Audio,
-        description: "White noise from -1 to 1.",
+        description: "Noise with the same loudness in every colour. White stays within -1 to 1; pink and brown can peak a little above.",
         default: PortDefault::Value(0.0),
         polarity: Polarity::Bipolar,
         channels: Channels::PerChannel,
@@ -352,20 +352,43 @@ pub static NOISE: ModuleDescriptor = ModuleDescriptor {
         unit: "",
         options: ParamOptions::DEFAULT,
     }
+    .integer(),
+    ParamSpec {
+        name: "colour",
+        label: "Colour",
+        description: "White falls flat across the spectrum, pink falls 3 dB per octave, and brown falls 6 dB per octave.",
+        min: 0.0,
+        max: 2.0,
+        default: 0.0,
+        unit: "",
+        options: ParamOptions::DEFAULT,
+    }
     .integer()],
-    role: ModuleRole::Dsp(|config: &ModuleConfig| {
-        let _ = config;
-        Box::new(Noise {
-            state: 1,
-            seed: 1,
-            active: 1,
-        })
-    }),
-    panel: Panel::EMPTY,
+    role: ModuleRole::Dsp(|config: &ModuleConfig| Box::new(Noise::new(config.sample_rate))),
+    panel: Panel::new(3, 4, &[Widget::radio(0, 0, "colour", &["White", "Pink", "Brown"])]),
     displays: &[],
 };
 
+/// Rows in the pink noise generator. Row `k` changes every `2^k` samples, so
+/// 16 rows reach down to well under 1 Hz at audio rates.
+const PINK_ROWS: usize = 16;
+
+/// The corner of the brown noise leak, in Hz. Far below the audible slope, so
+/// the -6 dB per octave fall holds above about 100 Hz.
+const BROWN_LEAK_HZ: f32 = 10.0;
+
 /// State for `loom.osc.noise`.
+///
+/// White noise comes from one xorshift stream, `state`. Pink and brown noise
+/// are built from the same white samples, so every colour at one seed shares
+/// its white stream. The pink rows draw from a separate stream, `aux`, so
+/// they never move the white one.
+///
+/// Pink noise is the Voss-McCartney method (R. F. Voss and J. Clarke, "1/f
+/// noise in music and speech", Nature 258, 1975; the row-update form is
+/// from Gardner, "White and brown music, fractal curves and 1/f
+/// fluctuations", Scientific American, 1978). Brown noise is a leaky
+/// integral of white noise, so it cannot drift away.
 struct Noise {
     state: u32,
     /// The knob's base seed. Only `set_param` writes it.
@@ -373,6 +396,86 @@ struct Noise {
     /// The seed `state` was last started from: the modulated seed while an
     /// assignment is active, otherwise the base.
     active: u32,
+    colour: u8,
+    /// Stream for the pink rows.
+    aux: u32,
+    rows: [f32; PINK_ROWS],
+    row_sum: f32,
+    counter: u32,
+    brown: f32,
+    /// Brown leak coefficient, just under 1.
+    leak: f32,
+    /// Brown input gain that keeps the RMS equal to white noise.
+    brown_gain: f32,
+}
+
+impl Noise {
+    fn new(sample_rate: f32) -> Self {
+        let leak = (-std::f32::consts::TAU * BROWN_LEAK_HZ / sample_rate).exp();
+        let mut noise = Self {
+            state: 1,
+            seed: 1,
+            active: 1,
+            colour: 0,
+            aux: 1,
+            rows: [0.0; PINK_ROWS],
+            row_sum: 0.0,
+            counter: 0,
+            brown: 0.0,
+            leak,
+            // The leaky integral of unit-variance noise has variance
+            // 1 / (1 - leak^2), so this gain restores a variance of 1.
+            brown_gain: (1.0 - leak * leak).sqrt(),
+        };
+        noise.restart(1);
+        noise
+    }
+
+    /// Starts every stream again from `seed`.
+    fn restart(&mut self, seed: u32) {
+        self.state = seed;
+        self.aux = seed ^ 0x9E37_79B9;
+        for row in 0..PINK_ROWS {
+            self.rows[row] = Self::next_white(&mut self.aux);
+        }
+        self.row_sum = self.rows.iter().sum();
+        self.counter = 0;
+        self.brown = 0.0;
+    }
+
+    /// One xorshift32 step, as a value from -1 to 1.
+    ///
+    /// xorshift32 is fast and deterministic, and good enough for audio noise.
+    fn next_white(state: &mut u32) -> f32 {
+        let mut x = *state;
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        *state = x;
+        (x as f32 / u32::MAX as f32) * 2.0 - 1.0
+    }
+
+    /// The next pink sample, given the next white one.
+    fn pink(&mut self, white: f32) -> f32 {
+        // Row k changes when bit k is the lowest set bit of the counter, so
+        // it changes every 2^k samples.
+        self.counter = self.counter.wrapping_add(1);
+        let row = self.counter.trailing_zeros() as usize;
+        if row < PINK_ROWS {
+            let value = Self::next_white(&mut self.aux);
+            self.row_sum += value - self.rows[row];
+            self.rows[row] = value;
+        }
+        // The running sum drifts by rounding. Summing again every 65,536
+        // samples keeps it exact enough, at no cost per sample.
+        if self.counter & 0xFFFF == 0 {
+            self.row_sum = self.rows.iter().sum();
+        }
+        // One white sample on top fills in the top of the spectrum. The sum
+        // of PINK_ROWS + 1 independent values has that many times the
+        // variance, so dividing by the square root restores white's RMS.
+        (self.row_sum + white) / ((PINK_ROWS + 1) as f32).sqrt()
+    }
 }
 
 impl Module for Noise {
@@ -385,28 +488,36 @@ impl Module for Noise {
             let next = seed.map_or(self.seed, |samples| samples[i].round().max(1.0) as u32);
             if next != self.active {
                 self.active = next;
-                self.state = next;
+                self.restart(next);
             }
-            // xorshift32: fast, deterministic, good enough for audio noise.
-            let mut x = self.state;
-            x ^= x << 13;
-            x ^= x >> 17;
-            x ^= x << 5;
-            self.state = x;
-            *out = (x as f32 / u32::MAX as f32) * 2.0 - 1.0;
+            let white = Self::next_white(&mut self.state);
+            *out = match self.colour {
+                0 => white,
+                1 => self.pink(white),
+                _ => {
+                    // Uniform noise has variance 1/3, so scaling to the
+                    // same RMS as white is the same gain.
+                    self.brown = self.leak * self.brown + self.brown_gain * white;
+                    self.brown
+                }
+            };
         }
     }
 
     fn set_param(&mut self, index: usize, value: f32) {
-        if index == 0 {
-            self.seed = value.round().max(1.0) as u32;
-            self.active = self.seed;
-            self.state = self.seed;
+        match index {
+            0 => {
+                self.seed = value.round().max(1.0) as u32;
+                self.active = self.seed;
+                self.restart(self.seed);
+            }
+            1 => self.colour = value as u8,
+            _ => {}
         }
     }
 
     fn reset(&mut self) {
-        self.state = self.active;
+        self.restart(self.active);
     }
 }
 
@@ -641,5 +752,140 @@ mod tests {
             desc_tri_sub_db < -65.0 && desc_tri_total_db < -40.0 && desc_tri_total_db < naive_tri_total_db - 10.0,
             "descending triangle aliasing: sub {desc_tri_sub_db:.1} dB, total {desc_tri_total_db:.1} dB"
         );
+    }
+}
+
+#[cfg(test)]
+mod noise_colour_tests {
+    use super::*;
+    use loom_core::testing::run;
+
+    const RATE: f32 = 48_000.0;
+
+    /// Renders `frames` samples of noise in the given colour (0 white, 1
+    /// pink, 2 brown) at the given seed, in blocks of `block` frames.
+    fn render(colour: f32, seed: f32, frames: usize, block: usize) -> Vec<f32> {
+        let ModuleRole::Dsp(create) = NOISE.role else {
+            unreachable!()
+        };
+        let mut noise = create(&ModuleConfig {
+            sample_rate: RATE,
+            max_block: block,
+        });
+        noise.set_param(0, seed);
+        noise.set_param(1, colour);
+        noise.reset();
+        let mut out = vec![0.0; frames];
+        for chunk in out.chunks_mut(block) {
+            run(noise.as_mut(), RATE, &[], &[], &mut [chunk], &[]);
+        }
+        out
+    }
+
+    fn rms(samples: &[f32]) -> f64 {
+        (samples.iter().map(|&v| f64::from(v) * f64::from(v)).sum::<f64>() / samples.len() as f64).sqrt()
+    }
+
+    /// An in-place radix-2 FFT. `re.len()` must be a power of two.
+    fn fft(re: &mut [f64], im: &mut [f64]) {
+        let n = re.len();
+        let mut j = 0;
+        for i in 1..n {
+            let mut bit = n >> 1;
+            while j & bit != 0 {
+                j ^= bit;
+                bit >>= 1;
+            }
+            j |= bit;
+            if i < j {
+                re.swap(i, j);
+                im.swap(i, j);
+            }
+        }
+        let mut len = 2;
+        while len <= n {
+            let angle = -std::f64::consts::TAU / len as f64;
+            for start in (0..n).step_by(len) {
+                for k in 0..len / 2 {
+                    let (sin, cos) = (angle * k as f64).sin_cos();
+                    let (a, b) = (start + k, start + k + len / 2);
+                    let (tr, ti) = (re[b] * cos - im[b] * sin, re[b] * sin + im[b] * cos);
+                    re[b] = re[a] - tr;
+                    im[b] = im[a] - ti;
+                    re[a] += tr;
+                    im[a] += ti;
+                }
+            }
+            len <<= 1;
+        }
+    }
+
+    /// The slope of the power spectral density between 100 Hz and 10 kHz, in
+    /// dB per octave. It averages the power per bin over one octave around
+    /// each frequency, over many Hann-windowed segments.
+    fn slope_db_per_octave(samples: &[f32]) -> f64 {
+        const SEGMENT: usize = 1 << 16;
+        let mut power = vec![0.0; SEGMENT / 2];
+        for segment in samples.as_chunks::<SEGMENT>().0 {
+            let mut re: Vec<f64> = segment
+                .iter()
+                .enumerate()
+                .map(|(i, &v)| {
+                    let hann = 0.5 - 0.5 * (std::f64::consts::TAU * i as f64 / SEGMENT as f64).cos();
+                    f64::from(v) * hann
+                })
+                .collect();
+            let mut im = vec![0.0; SEGMENT];
+            fft(&mut re, &mut im);
+            for (bin, p) in power.iter_mut().enumerate() {
+                *p += re[bin] * re[bin] + im[bin] * im[bin];
+            }
+        }
+        let bin_hz = f64::from(RATE) / SEGMENT as f64;
+        let mean_around = |centre: f64| {
+            let (low, high) = (
+                (centre / 2f64.sqrt() / bin_hz) as usize,
+                (centre * 2f64.sqrt() / bin_hz) as usize,
+            );
+            power[low..high].iter().sum::<f64>() / (high - low) as f64
+        };
+        let octaves = (10_000.0f64 / 100.0).log2();
+        10.0 * (mean_around(10_000.0) / mean_around(100.0)).log10() / octaves
+    }
+
+    /// Pink falls 3 dB per octave and brown 6, each within 1 dB; white is flat.
+    #[test]
+    fn slopes_follow_the_colour() {
+        let frames = 16 << 16;
+        for (colour, expected) in [(0.0, 0.0), (1.0, -3.0), (2.0, -6.0)] {
+            let slope = slope_db_per_octave(&render(colour, 7.0, frames, 4096));
+            assert!((slope - expected).abs() < 1.0, "colour {colour}: {slope} dB per octave");
+        }
+    }
+
+    /// Every colour has about the same loudness as white (within 3 dB), and
+    /// brown stays near zero over a minute.
+    #[test]
+    fn colours_match_white_in_level_and_brown_does_not_drift() {
+        let frames = 60 * RATE as usize;
+        let white = rms(&render(0.0, 3.0, frames, 4096));
+        for colour in [1.0, 2.0] {
+            let samples = render(colour, 3.0, frames, 4096);
+            let db = 20.0 * (rms(&samples) / white).log10();
+            assert!(db.abs() < 3.0, "colour {colour}: {db} dB from white");
+            let mean = samples.iter().map(|&v| f64::from(v)).sum::<f64>() / frames as f64;
+            assert!(mean.abs() < 0.05, "colour {colour}: mean {mean}");
+        }
+    }
+
+    /// The same seed gives the same noise at block sizes 1, 77, and 512, and
+    /// switching to white gives the same samples as before pink existed.
+    #[test]
+    fn same_seed_same_output_at_any_block_size() {
+        for colour in [0.0, 1.0, 2.0] {
+            let reference = render(colour, 5.0, 2_000, 512);
+            assert_eq!(render(colour, 5.0, 2_000, 1), reference, "colour {colour}, block 1");
+            assert_eq!(render(colour, 5.0, 2_000, 77), reference, "colour {colour}, block 77");
+        }
     }
 }
