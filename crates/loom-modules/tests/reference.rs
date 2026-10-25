@@ -79,6 +79,21 @@ fn svf() {
         .check(reference!("svf"));
 }
 
+/// Reference render for `loom.filter.onepole`: a square wave through a
+/// cutoff that sweeps up an octave.
+#[test]
+fn onepole() {
+    Harness::new(&filter::ONEPOLE)
+        .seconds(0.1)
+        .input(
+            "in",
+            Signal::from_fn(|frame| if (frame / 200) % 2 == 0 { 0.5 } else { -0.5 }),
+        )
+        .input("cutoff", Signal::from_fn(|frame| frame as f32 / 4_800.0 * 0.1))
+        .param("cutoff", 300.0)
+        .check(reference!("onepole"));
+}
+
 #[test]
 fn adsr() {
     Harness::new(&env::ADSR)
@@ -320,6 +335,7 @@ fn every_dsp_module_has_a_reference_test() {
         &osc::TRIANGLE,
         &osc::NOISE,
         &filter::SVF,
+        &filter::ONEPOLE,
         &env::ADSR,
         &math::ADD,
         &math::MUL,
