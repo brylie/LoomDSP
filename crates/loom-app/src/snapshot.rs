@@ -13,7 +13,7 @@
 use crate::inspector::Inspector;
 use crate::live::Levels;
 use crate::{App, Args};
-use loom_canvas::{ModulationMark, PORT_HIT_RADIUS, PortRef, WidgetViewKind};
+use loom_canvas::{ModulationMark, ModuleView, PORT_HIT_RADIUS, PortRef, TextKind, WidgetViewKind};
 use serde::Serialize;
 
 /// How much of a `--frames` run the meters show: the last 100 ms at
@@ -41,6 +41,40 @@ pub struct UiSnapshot {
     /// One per cable the canvas draws.
     pub cables: Vec<Cable>,
     pub inspector: Inspector,
+    /// The stats bar's audio numbers.
+    pub stats: Stats,
+    /// The pointer and what it is on, as the canvas last drew it. `None`
+    /// with no window (`--dump-ui`) or without the control channel.
+    pub pointer: Option<crate::pointer::PointerState>,
+}
+
+/// The stats bar's audio numbers, as the bar shows them (#234). Values
+/// that change every frame, such as the frame rate, are left out, so two
+/// snapshots of an idle app are equal.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Stats {
+    /// The audio label: the device and its rate, such as
+    /// `no device (clock) at 48000 Hz`, or why nothing plays.
+    pub label: String,
+    /// True when a stream plays. Only then does the bar show the load and
+    /// the dropouts.
+    pub playing: bool,
+    /// The latest callback's load, as a share of its time budget (1.0 is
+    /// 100%). 0 when nothing plays.
+    pub load: f64,
+    /// The highest load since the stream started.
+    pub max_load: f64,
+    /// Callbacks that ran late or failed since the stream started.
+    pub dropouts: u64,
+    /// Meter and scope readings the engine had to drop.
+    pub telemetry_dropped: u64,
+}
+
+impl Stats {
+    /// The load as the bar shows it: `load 3% (max 12%)`.
+    pub fn load_text(&self) -> String {
+        format!("load {:.0}% (max {:.0}%)", self.load * 100.0, self.max_load * 100.0)
+    }
 }
 
 /// A point in world units.
@@ -94,6 +128,10 @@ pub struct Tile {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Input {
     pub label: String,
+    /// The label as drawn, when the tile cuts it with "…" to fit, as
+    /// `Reson…` for `Resonance`. Left out when the whole label shows.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shown: Option<String>,
     pub centre: Point,
 }
 
@@ -101,6 +139,10 @@ pub struct Input {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Output {
     pub label: String,
+    /// The label as drawn, when the tile cuts it with "…" to fit, as
+    /// `Reson…` for `Resonance`. Left out when the whole label shows.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shown: Option<String>,
     pub centre: Point,
     /// The badge: assignments it drives, counting those that are off.
     pub badge: u32,
@@ -128,7 +170,12 @@ pub struct CableEnd {
 /// One panel widget and its value.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Widget {
+    /// The caption.
     pub label: String,
+    /// The label as drawn, when the tile cuts it with "…" to fit, as
+    /// `Reson…` for `Resonance`. Left out when the whole label shows.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shown: Option<String>,
     /// knob, toggle, radio, button, light, or meter.
     pub kind: &'static str,
     pub bounds: Rect,
@@ -162,6 +209,35 @@ impl From<ModulationMark> for Mark {
             ModulationMark::Ring => Self::Ring,
         }
     }
+}
+
+/// Labels a tile cuts, by what they label.
+struct Cut(Vec<(TextKind, String)>);
+
+impl Cut {
+    /// The label as drawn, if it is cut.
+    fn get(&self, kind: &TextKind) -> Option<&String> {
+        self.0.iter().find(|(k, _)| k == kind).map(|(_, shown)| shown)
+    }
+}
+
+/// The port labels and captions a tile cuts with "…", as drawn: the
+/// canvas's own text layout decides, so the snapshot cannot disagree with
+/// the tile.
+fn cut_labels(module: &ModuleView) -> Cut {
+    let mut cut = Cut(Vec::new());
+    loom_canvas::for_each_tile_text(module, |item| {
+        let label = match item.kind {
+            TextKind::Port(port) if port.output => module.outputs.get(port.index).map(|p| &p.label),
+            TextKind::Port(port) => module.inputs.get(port.index).map(|p| &p.label),
+            TextKind::Caption(index) => module.panel.widgets.get(index).map(|w| &w.label),
+            TextKind::Title | TextKind::Option(..) => None,
+        };
+        if label.is_some_and(|label| *label != item.content) {
+            cut.0.push((item.kind, item.content.into_owned()));
+        }
+    });
+    cut
 }
 
 fn kind_name(kind: &WidgetViewKind) -> &'static str {
@@ -209,55 +285,96 @@ impl App {
         }
     }
 
+    /// The stats bar's audio numbers. `App::stats_bar` draws them and the
+    /// snapshot holds them.
+    pub(crate) fn stats_model(&self) -> Stats {
+        let engine = self.controller.stats();
+        let telemetry_dropped = engine.dropped_meters.load(std::sync::atomic::Ordering::Relaxed)
+            + engine.dropped_scope.load(std::sync::atomic::Ordering::Relaxed);
+        let (playing, load, max_load) = match &self.audio_stats {
+            Some(stats) => {
+                let s = stats.snapshot();
+                (true, s.last_load, s.max_load)
+            }
+            None => (false, 0.0, 0.0),
+        };
+        Stats {
+            label: self.audio_name.clone(),
+            playing,
+            load,
+            max_load,
+            dropouts: self.dropouts.count(),
+            telemetry_dropped,
+        }
+    }
+
     /// What the user sees now.
     pub(crate) fn ui_snapshot(&self) -> UiSnapshot {
         let tiles = self
             .scene
             .modules()
             .iter()
-            .map(|m| Tile {
-                id: m.id,
-                title: m.title.clone(),
-                bounds: m.bounds().into(),
-                inputs: m
-                    .inputs
-                    .iter()
-                    .enumerate()
-                    .map(|(index, p)| Input {
-                        label: p.label.clone(),
-                        centre: m.input_position(index).into(),
-                    })
-                    .collect(),
-                outputs: m
-                    .outputs
-                    .iter()
-                    .enumerate()
-                    .map(|(index, p)| Output {
-                        label: p.label.clone(),
-                        centre: m.output_position(index).into(),
-                        badge: p.badge,
-                        badge_bounds: m.badge_bounds(index).map(Rect::from),
-                    })
-                    .collect(),
-                widgets: m
-                    .panel
-                    .widgets
-                    .iter()
-                    .enumerate()
-                    .map(|(index, w)| {
-                        let value = self.values.get(m.id, index).cloned().unwrap_or_default();
-                        Widget {
-                            label: w.label.clone(),
-                            kind: kind_name(&w.kind),
-                            bounds: m.widget_bounds(index).expect("a widget of this panel").into(),
-                            position: value.position,
-                            peak: value.peak,
-                            text: value.text,
-                            modulation: value.modulation.into(),
-                            live: value.live,
-                        }
-                    })
-                    .collect(),
+            .map(|m| {
+                let cut = cut_labels(m);
+                Tile {
+                    id: m.id,
+                    title: m.title.clone(),
+                    bounds: m.bounds().into(),
+                    inputs: m
+                        .inputs
+                        .iter()
+                        .enumerate()
+                        .map(|(index, p)| Input {
+                            label: p.label.clone(),
+                            shown: cut
+                                .get(&TextKind::Port(PortRef {
+                                    module: m.id,
+                                    output: false,
+                                    index,
+                                }))
+                                .cloned(),
+                            centre: m.input_position(index).into(),
+                        })
+                        .collect(),
+                    outputs: m
+                        .outputs
+                        .iter()
+                        .enumerate()
+                        .map(|(index, p)| Output {
+                            label: p.label.clone(),
+                            shown: cut
+                                .get(&TextKind::Port(PortRef {
+                                    module: m.id,
+                                    output: true,
+                                    index,
+                                }))
+                                .cloned(),
+                            centre: m.output_position(index).into(),
+                            badge: p.badge,
+                            badge_bounds: m.badge_bounds(index).map(Rect::from),
+                        })
+                        .collect(),
+                    widgets: m
+                        .panel
+                        .widgets
+                        .iter()
+                        .enumerate()
+                        .map(|(index, w)| {
+                            let value = self.values.get(m.id, index).cloned().unwrap_or_default();
+                            Widget {
+                                label: w.label.clone(),
+                                shown: cut.get(&TextKind::Caption(index)).cloned(),
+                                kind: kind_name(&w.kind),
+                                bounds: m.widget_bounds(index).expect("a widget of this panel").into(),
+                                position: value.position,
+                                peak: value.peak,
+                                text: value.text,
+                                modulation: value.modulation.into(),
+                                live: value.live,
+                            }
+                        })
+                        .collect(),
+                }
             })
             .collect();
         // The canvas skips cables to modules or ports it does not have.
@@ -290,6 +407,8 @@ impl App {
             tiles,
             cables,
             inspector: self.inspector_model(),
+            stats: self.stats_model(),
+            pointer: self.pointer_state(),
         }
     }
 }
@@ -328,4 +447,102 @@ pub fn headless(args: &Args) -> Result<App, String> {
 /// JSON.
 pub fn run(args: &Args) -> Result<String, String> {
     serde_json::to_string_pretty(&headless(args)?.ui_snapshot()).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    /// The app with a patch from `examples/patches` and no audio.
+    fn open(patch: &str) -> App {
+        App::new(Args {
+            patch: Some(
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../examples/patches")
+                    .join(patch),
+            ),
+            ..crate::tests::app_args()
+        })
+    }
+
+    /// The SVF tile cuts its Resonance caption, and the snapshot says what
+    /// is drawn. A label that fits has no `shown`.
+    #[test]
+    fn a_cut_label_shows_what_the_tile_draws() {
+        let snapshot = open("subtractive.ron").ui_snapshot();
+        let svf = snapshot.tiles.iter().find(|t| t.title == "SVF").unwrap();
+        let resonance = svf.widgets.iter().find(|w| w.label == "Resonance").unwrap();
+        assert_eq!(resonance.shown.as_deref(), Some("Reson…"));
+        let cutoff = svf.widgets.iter().find(|w| w.label == "Cutoff").unwrap();
+        assert_eq!(cutoff.shown, None);
+        let json = serde_json::to_value(resonance).unwrap();
+        assert_eq!(json["label"], "Resonance");
+        assert_eq!(json["shown"], "Reson…");
+        assert!(serde_json::to_value(cutoff).unwrap().get("shown").is_none());
+    }
+
+    /// Every label the example patches cut, so a change that cuts more is
+    /// noticed. Update the list when a cut is meant.
+    #[test]
+    fn the_example_patches_cut_only_these_labels() {
+        let mut cut = Vec::new();
+        for patch in [
+            "fm-feedback-delay1.ron",
+            "fm-feedback.ron",
+            "plucked-string.ron",
+            "sine.ron",
+            "subtractive.ron",
+        ] {
+            for tile in open(patch).ui_snapshot().tiles {
+                let ports = tile.inputs.iter().map(|p| (&p.label, &p.shown));
+                let ports = ports.chain(tile.outputs.iter().map(|p| (&p.label, &p.shown)));
+                let all = ports.chain(tile.widgets.iter().map(|w| (&w.label, &w.shown)));
+                for (label, shown) in all {
+                    if let Some(shown) = shown {
+                        cut.push(format!("{patch} {}: {label} -> {shown}", tile.title));
+                    }
+                }
+            }
+        }
+        let expected = [
+            "plucked-string.ron SVF: Bandpass -> Bandp…",
+            "plucked-string.ron SVF: Highpass -> Highpa…",
+            "plucked-string.ron SVF: Resonance -> Reson…",
+            "subtractive.ron SVF: Bandpass -> Bandp…",
+            "subtractive.ron SVF: Highpass -> Highpa…",
+            "subtractive.ron SVF: Resonance -> Reson…",
+        ];
+        assert_eq!(cut, expected);
+    }
+
+    /// With no audio the stats show the label and zero load, and the
+    /// snapshot has no pointer: nothing drew one.
+    #[test]
+    fn the_stats_without_audio() {
+        let snapshot = open("sine.ron").ui_snapshot();
+        assert!(!snapshot.stats.playing);
+        assert_eq!(snapshot.stats.load, 0.0);
+        assert_eq!(snapshot.stats.max_load, 0.0);
+        assert_eq!(snapshot.stats.dropouts, 0);
+        assert!(snapshot.stats.label.contains("no audio"), "{:?}", snapshot.stats);
+        assert_eq!(snapshot.pointer, None);
+    }
+
+    /// With `--fake-audio` the clock plays: the label names it, the bar
+    /// shows the load, and no dropouts are counted.
+    #[test]
+    fn the_stats_name_the_clock_with_fake_audio() {
+        let app = App::new(Args {
+            fake_audio: true,
+            no_audio: false,
+            ..crate::tests::app_args()
+        });
+        let stats = app.ui_snapshot().stats;
+        assert!(stats.playing);
+        assert!(stats.label.contains("clock"), "{stats:?}");
+        assert_eq!(stats.dropouts, 0);
+        assert_eq!(stats, app.stats_model(), "the bar and the snapshot read one model");
+        assert!(stats.load_text().starts_with("load "), "{}", stats.load_text());
+    }
 }

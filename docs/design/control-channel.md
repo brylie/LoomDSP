@@ -6,8 +6,8 @@ A development-only way for a script or an AI agent to drive the running app by n
 - **Status:** Implemented
 - **Decision behind it:** None. It builds on the plain-data UI snapshot ([ADR-0021](../adr/0021-plain-data-view-models-and-keyed-identity.md)).
 - **Use case and requirements:** Developer tooling. No user requirement.
-- **Issues:** [#207](https://github.com/brylie/LoomDSP/issues/207) (part 3), `press` and `arm`: [#256](https://github.com/brylie/LoomDSP/issues/256); places in the snapshot: [#250](https://github.com/brylie/LoomDSP/issues/250); `sample`: [#255](https://github.com/brylie/LoomDSP/issues/255); devices and stream health: [#26](https://github.com/brylie/LoomDSP/issues/26); script variables: [#340](https://github.com/brylie/LoomDSP/issues/340); related [#190](https://github.com/brylie/LoomDSP/issues/190) (accessibility).
-- **Code:** `crates/loom-app/src/control.rs`; the clock and recorder it relies on are in `crates/loom-host-desktop`.
+- **Issues:** [#207](https://github.com/brylie/LoomDSP/issues/207) (part 3), `press` and `arm`: [#256](https://github.com/brylie/LoomDSP/issues/256); pointer commands: [#251](https://github.com/brylie/LoomDSP/issues/251); lights, meters, and screenshot areas: [#254](https://github.com/brylie/LoomDSP/issues/254); stats and cut labels in the snapshot: [#234](https://github.com/brylie/LoomDSP/issues/234); places in the snapshot: [#250](https://github.com/brylie/LoomDSP/issues/250); `sample`: [#255](https://github.com/brylie/LoomDSP/issues/255); devices and stream health: [#26](https://github.com/brylie/LoomDSP/issues/26); script variables: [#340](https://github.com/brylie/LoomDSP/issues/340); related [#190](https://github.com/brylie/LoomDSP/issues/190) (accessibility).
+- **Code:** `crates/loom-app/src/control.rs`, `pointer.rs` (pointer commands), `targets.rs` (names); the clock and recorder it relies on are in `crates/loom-host-desktop`.
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
      built. See README.md in this folder. -->
@@ -62,18 +62,18 @@ Any client that can write lines to a Unix socket works, such as `nc -U /tmp/loom
 | `save` | `path` | Saves the patch, as Save As does after the dialog | |
 | `note` | `note`, optional `velocity` (default 100), `on` | A MIDI note on or off on channel 1, as a MIDI port sends it | |
 | `cc` | `controller`, `value`, optional `channel` (1 to 16, default 1) | A MIDI control change. Replies once the engine has taken it and the app has applied it: mapped controls moved, or the armed parameter learned it | |
-| `key` | `key` (a character, or `escape`, `enter`, `tab`, `space`, `delete`, `backspace`, `up`, `down`, `left`, `right`, `home`, `end`, `pageup`, `pagedown`), optional `modifiers` (`cmd`, `ctrl`, `shift`, `alt`) | A key press and release, as the keyboard listener sends them | |
-| `press` | `button`: `learn` (MIDI learn), `hold` (Hold note), `undo`, `redo` | Clicks a toolbar button by name, through the message it sends. Refused when the button is disabled, opens a dialog (rule 9), or is Add module (use `add`) | |
+| `key` | `key` (a character, or `escape`, `enter`, `tab`, `space`, `delete`, `backspace`, `up`, `down`, `left`, `right`, `home`, `end`, `pageup`, `pagedown`), optional `modifiers` (`cmd`, `ctrl`, `shift`, `alt`) | A key press and release, each on its own frame, sent to the window view at the pointer as a real key is. A widget can take it (the canvas takes Escape while a badge is pinned); what none takes goes to the app as the keyboard listener sends it | |
+| `press` | `button`: `learn` (MIDI learn), `hold` (Hold note), `undo`, `redo` | Clicks a toolbar button by name, through the message it sends. Refused when the button is disabled, opens a dialog (rule 9), or is Add module (use `add`). A `press` with a mouse button name, with no `button`, or with `target`, `x`, or `y` is the pointer command of that name ([Pointer commands](#pointer-commands)) | |
 | `arm` | `target`: a parameter (`"4:cutoff"`) | In MIDI learn mode, arms the parameter, or disarms it if armed, as its inspector row does. Refused when learn mode is off | |
-| `locate` | `target`: a module (`"4"`), a control by parameter name or a port by name (`"4:cutoff"`, `"3:out"`), or any other text shown in the window (`"Cutoff"`) | Nothing | The centre and size, in logical window pixels |
-| `screenshot` | `path` | Saves a PNG of the whole window as it was last drawn: canvas, inspector, and bars | The image size in pixels, and the scale factor |
+| `locate` | `target`: a module (`"4"`), a control, port, light, or meter by name (`"4:cutoff"`, `"3:out"`, `"5:level"`, rule 10), with `display:`, `input:`, `output:`, or `badge:` to name a light or meter, a port, or an output's badge directly (`"11:display:out"`, `"4:input:cutoff"`, `"5:badge:out"`), or any other text shown in the window (`"Cutoff"`) | Nothing | The centre and size, in logical window pixels |
+| `screenshot` | `path`, and optionally `target` (as `locate` takes it) with `margin` (logical pixels on each side, default 0), or `rect` (`[x, y, width, height]` in logical window pixels) | Saves a PNG of the whole window as it was last drawn: canvas, inspector, and bars. With `target` or `rect`, only that area, cut to the window | The image size in pixels, and the scale factor. With an area, also `area`: the area saved, as `x`, `y`, `width`, `height` in logical window pixels |
 | `sample` | `target`: a control, light, or meter by the name it is bound to (`"4:resonance"`), `ms` (1 to 30000) | Records what the canvas draws for this widget, once per frame, for this long | `frames`: one entry per drawn frame. `t`: milliseconds since the first entry. `position`: the knob position, light brightness, or meter level, from 0 to 1. `live`: a knob's live modulated value, as a position, while its dot is drawn. `peak`: a meter's peak level |
 | `wait` | `ms` | Replies after this long, with the app running | |
 | `quit` | | Closes the app, without asking to save | |
 
 ### Pointer commands
 
-**Status:** Agreed ([#251](https://github.com/brylie/LoomDSP/issues/251)). Not built.
+**Status:** Agreed ([#251](https://github.com/brylie/LoomDSP/issues/251)), and built. The points marked *Proposed* came up while building it and wait for review.
 
 Commands for the checks that need a hand today: hover lines, pinning a badge and pressing Escape, the drop highlight, and a range arc drag. A target is the same text as `locate` takes, or window coordinates `x` and `y` in logical pixels.
 
@@ -92,6 +92,40 @@ Commands for the checks that need a hand today: hover lines, pinning a badge and
 - **Still no dialogs** (rule 9), and no events outside the window.
 - **Idle.** A pointer command wakes the app and asks for frames until it is drawn. `--measure-idle` counts no frames when no command arrives (rule 7).
 
+How it is built: `pointer::Injector` wraps the whole window view. A command's events wait in a queue. On each redraw the injector sends the next one to the view, with the script's pointer as the cursor, and asks for another frame. The runtime can send one redraw to the view up to three times; only the first takes an event. Answers come two frames after the last event, as for other commands (rule 5).
+
+*Proposed* (2026-10-25), points the agreed text did not settle:
+
+- **`press` shares its name with the toolbar command.** A `press` whose `button` names a toolbar button (`learn`, `hold`, `undo`, `redo`, and the refused ones), with no `target`, `x`, or `y`, is the toolbar's. Every other `press`, including one with no `button`, is the mouse button. *Why:* both commands keep their agreed names, and no script that uses the toolbar `press` changes.
+- **`key` goes through the view.** Before, `key` went straight to the app. The canvas never saw it, so "pin a badge, press Escape" could not work. Now it is a real key event at the pointer, and what no widget takes reaches the app as before.
+- **A badge target.** `MODULE:badge:OUTPUT` (`"5:badge:out"`) is an output's assignment count badge, for `locate`, `screenshot`, and the pointer commands. It is an error when the output shows no badge. *Why:* pinning a badge needs a click on it, and its place on the canvas is only in world units in the snapshot.
+- **Modifiers last one command.** `modifiers` are pressed before the command's first event and let go after its last. A `press` with Shift and a later `release` each need their own `modifiers`. Modifier keys reach the view only, not the keyboard listener.
+- **A real pointer takes over.** While a command's events go in, real pointer events in the window are dropped. After that, the script's pointer stays where it is until a real pointer event arrives; then the script's held buttons are let go where its pointer is, and the real pointer leads again.
+- **An error ends the command, and nothing stays held.** When a target is not found or not on screen, the command's remaining moves are dropped, but its releases and modifier changes still go in. A `drag` whose `to` is not found yet stays where it is, and fails only if `to` is still not found at the last move.
+- **Pop-ups.** Tooltips and other overlays get the real cursor, not the script's.
+
+The snapshot's `pointer` field is `null` without the control channel and in `--dump-ui`. With it on, it is read from the canvas once per drawn frame:
+
+| Field | What it is |
+|---|---|
+| `x`, `y` | The pointer in logical window pixels, or `null` when it is outside the window |
+| `buttons` | Mouse buttons held down: `left`, `right`, `middle` |
+| `hover` | What is under the pointer on the canvas, or `null`: `{"kind": K, "target": T}` with `kind` one of `output`, `input`, `badge`, `control`, `display`, `tile`, and `target` a name `locate` takes that finds it again (`"5:out"`, `"5:badge:out"`, `"4:cutoff"`, `"4:input:cutoff"`, `"4"`). A light or a meter is hit as part of its tile. A cable is `{"kind": "cable", "from": "3:out", "to": "4:in"}` |
+| `pinned` | The output whose badge is pinned (`"5:out"`), or `null` |
+| `drag` | The drag in progress, or `null`: `{"kind": K}` with `kind` one of `pan`, `move` (with `modules`), `knob`, `button`, `depth` (each with `target`), `wire` (with `from` and `pulled`), `select` |
+
+Example, from `examples/dev/check-pin-badge.jsonl`:
+
+```text
+> {"cmd": "hover", "target": "5:badge:out"}
+< {"ok": true, "x": 401.5, "y": 287.0}
+> {"cmd": "press"}
+> {"cmd": "release"}
+> {"cmd": "snapshot"}
+< {"ok": true, "snapshot": {..., "pointer": {"x": 401.5, "y": 287.0, "buttons": [], "hover": {"kind": "badge", "target": "5:badge:out"}, "pinned": "5:out", "drag": null}}, ...}
+> {"cmd": "key", "key": "escape"}
+```
+
 ### Places in the snapshot
 
 The snapshot from `snapshot` and `--dump-ui` says where things are on the canvas, in world units: the canvas's own coordinates, before pan and zoom. They come from the same scene the canvas draws and hits, so they cannot drift from it. *Why:* a test or script can check a layout rule, such as "no badge covers another tile's port", and aim `--pointer` or `--center`, without a screenshot.
@@ -106,6 +140,21 @@ The snapshot from `snapshot` and `--dump-ui` says where things are on the canvas
 | `cables[]` | Each cable the canvas draws, by its two ends: `from` (an output) and `to` (an input), each with `module`, `index` (from the top of its side), and `point` (the port's centre) |
 
 A rectangle is `{x, y, width, height}`, from its top-left corner. `locate` answers in window pixels instead, because that is where pixel-based automation clicks.
+
+### Stats and cut labels in the snapshot
+
+**Status:** Agreed ([#234](https://github.com/brylie/LoomDSP/issues/234), with #258 folded in), and built.
+
+| Field | What it is |
+|---|---|
+| `stats.label` | The stats bar's audio label, such as `no device (clock) at 48000 Hz` |
+| `stats.playing` | True when a stream plays. Only then does the bar show load and dropouts |
+| `stats.load`, `stats.max_load` | The latest and highest callback load, as a share of the time budget (1.0 is 100%). 0 when nothing plays |
+| `stats.dropouts` | The dropout count the bar shows |
+| `stats.telemetry_dropped` | Meter and scope readings the engine dropped |
+| `tiles[].inputs[].shown`, `tiles[].outputs[].shown`, `tiles[].widgets[].shown` | The label as the tile draws it, when it is cut with "…" (`{"label": "Resonance", "shown": "Reson…"}`). Left out when the whole label shows |
+
+`App::stats_bar` draws from the same `stats` model, and `shown` comes from the canvas's own tile text layout, so the snapshot cannot disagree with the window. The frame rate is left out, so two snapshots of an idle app are equal. Titles are not listed: they are clipped at the tile edge, not cut with "…". A mapping label shown in place of a caption in MIDI learn mode is not listed either.
 
 ## Devices and stream health
 
@@ -168,10 +217,10 @@ The fake host in `crates/loom-app/src/devices.rs` gets a device that starts, mak
 
 ### Acceptance criteria
 
-- [ ] A control script hovers an output, pins its badge, presses Escape, and the snapshot shows each step (`hover`, `pinned`).
-- [ ] A control script drags a knob's range arc, with Shift, and the assignment's depth changes as in [#217](https://github.com/brylie/LoomDSP/issues/217).
-- [ ] A `drag` from an output to an inspector row or a tile control makes an assignment, and one undo step undoes it.
-- [ ] `--measure-idle` still counts no frames when no command arrives.
+- [x] A control script hovers an output, pins its badge, presses Escape, and the snapshot shows each step (`hover`, `pinned`). App test `a_script_hovers_pins_a_badge_and_unpins_it_with_escape`, and `examples/dev/check-pin-badge.jsonl` in the real app.
+- [x] A control script drags a knob's range arc, with Shift, and the assignment's depth changes as in [#217](https://github.com/brylie/LoomDSP/issues/217). App test `a_script_drags_a_range_arc`.
+- [x] A `drag` from an output to a tile control makes an assignment, and one undo step undoes it. App test `a_script_drags_an_output_onto_a_control`. An inspector row as the drop target is not tested yet.
+- [x] `--measure-idle` still counts no frames when no command arrives.
 
 - [x] App tests, through the control harness and the fake host: `output_safety`, `audio` (device, rate, buffer, and `"default"`), `midi`, and `new` change what the Preferences window shows, and replies give `playing` and `status`.
 - [x] A refused name, rate, or buffer gets `ok: false` with the offered values.
@@ -240,7 +289,7 @@ LOOM_DEVICE="MOTU" LOOM_RATE=96000 LOOM_BUFFER=64 \
 7. **No messages while idle.** The listener wakes the app only when a command arrives. The app asks for frames only while a command waits to be drawn or a `sample` runs. *Why:* every message redraws the window, and `--measure-idle` must still count zero frames for an idle patch.
 8. **Errors are replies, not crashes.** A bad command gets `ok: false` and a message naming what was wrong. The app keeps running. *Why:* an agent learns from the error and tries again.
 9. **No dialogs.** While the channel is on, errors that would open a dialog (a failed open or save) go to the reply and the status bar instead. Commands never open a file dialog or ask to save: `key` refuses the New, Open, and Save shortcuts (Cmd or Ctrl with N, O, or S), and `press` refuses the `new`, `open`, `save`, and `save-as` buttons. Both point to the `new`, `open`, and `save` commands. *Why:* a modal dialog would stop the app, and nobody is there to close it.
-10. **`:name` looks for a parameter first,** then an output, then an input. *Why:* a module's parameter and port names rarely clash; when they do, the control is what a script most often wants.
+10. **`:name` looks for a parameter first,** then an output, then an input, then a display value (a light or a meter). `MODULE:display:NAME` looks for a display value only: the Level Meter's meter shows its output `out`, so `11:out` is the output and `11:display:out` the meter. `MODULE:input:NAME` and `MODULE:output:NAME` look for a port only: the SVF's `4:cutoff` is its knob, and `4:input:cutoff` its Cutoff input. `MODULE:badge:OUTPUT` is an output's badge. `--pointer` and `--center` use the same names. A name the snapshot gives (`hover`, `pinned`, `drag`) always finds the same part again: it has a prefix exactly when the plain name finds something else. *Why:* a module's parameter and port names rarely clash; when they do, the control is what a script most often wants. A display value comes last because it often repeats a port's name.
 11. **A script file runs the same commands.** `--control-script FILE` reads commands from a file, one per line (blank lines skipped), and prints each reply to stdout. It can take values from the environment ([Script variables](#script-variables)). At the end of the file the app keeps running, unless the last command is `quit`. *Why:* the same code serves a quick check with no client, and a check that can be saved next to a patch.
 12. **Unix only, for now.** The socket needs Unix domain sockets (macOS and Linux). On Windows `--control` says it is not supported; `--control-script` works everywhere. *Why:* Rust's standard library has Unix sockets on Unix only. TCP on loopback can come later if Windows needs it.
 13. **Short socket paths.** A socket path must be shorter than about 100 bytes (104 on macOS, 108 on Linux). A relative path is fine. A socket file left by an earlier run is replaced; any other file at that path is never touched, not even when the app quits. The app removes its socket when it quits. *Why:* the limit is the operating system's; a long temporary folder path fails with "path must be shorter than SUN_LEN".

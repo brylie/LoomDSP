@@ -108,6 +108,12 @@ impl Ui {
             no_recovery: false,
             test_modules: false,
         });
+        Self::with_app(app)
+    }
+
+    /// Draws the first frame of an app built by the test, for example one
+    /// that plays with `--fake-audio`.
+    pub fn with_app(app: App) -> Self {
         // `ICED_TEST_BACKEND=tiny-skia` forces the renderer CI falls back
         // to without a GPU, as for Iced's own test crate.
         let backend = std::env::var("ICED_TEST_BACKEND").ok();

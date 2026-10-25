@@ -21,6 +21,7 @@ mod live;
 mod modulation;
 mod monitor;
 mod param;
+mod pointer;
 mod preferences;
 mod probe_menu;
 #[cfg(test)]
@@ -31,6 +32,7 @@ mod screenshot;
 mod script_vars;
 mod settings;
 mod snapshot;
+mod targets;
 #[cfg(test)]
 mod ui_test;
 mod undo;
@@ -249,6 +251,7 @@ enum Message {
         call: control::Call,
         target: String,
         found: control::Found,
+        then: control::AfterSearch,
     },
     Animate(bool),
     Frame(Instant),
@@ -419,6 +422,9 @@ struct App {
     control: Vec<control::Listener>,
     /// Commands waiting for the window to draw their change.
     control_pending: Vec<control::Pending>,
+    /// The control channel's pointer and its events on their way to the
+    /// view (`pointer.rs`).
+    pointer: pointer::Pointer,
     /// The stream and its callback count at the last control `snapshot`,
     /// for its `advanced` field.
     control_seen: Option<(Arc<CallbackStats>, u64)>,
@@ -831,6 +837,7 @@ impl App {
             reporter: args.bench.reporter(),
             control: args.control.listeners(),
             control_pending: Vec::new(),
+            pointer: pointer::Pointer::new(!args.control.listeners().is_empty()),
             control_seen: None,
             recording_failed: false,
             measuring: args.bench.redraws(),
@@ -1005,6 +1012,8 @@ impl App {
         fresh.animating = self.animating;
         fresh.reporter = self.reporter.take();
         fresh.control = std::mem::take(&mut self.control);
+        // The script's pointer stays where it was, over the new patch.
+        fresh.pointer = self.pointer.clone();
         // The session goes on; only its patch changed.
         fresh.recovery = self.recovery.take();
         // Commands waiting to be drawn still get their answer, except a
@@ -1650,10 +1659,12 @@ impl App {
             }
             Message::Control(call) => self.control(call),
             Message::ControlFrame(now) => self.control_frame(now),
-            Message::Located { call, target, found } => {
-                self.located(&call, &target, &found);
-                Task::none()
-            }
+            Message::Located {
+                call,
+                target,
+                found,
+                then,
+            } => self.located(call, &target, &found, then),
             message if self.clipboard_key(&message).is_some() => self.clipboard_command(&message),
             message => {
                 self.handle(message);
@@ -2340,7 +2351,24 @@ impl App {
         if let Some(window) = self.preferences_view() {
             layers = layers.push(window);
         }
-        layers.into()
+        // The control channel's pointer events go in here, as a real
+        // pointer's would (control-channel.md, Pointer commands).
+        let browser_open = self.browser.is_some();
+        pointer::Injector::new(layers, self, move |key, status| {
+            // As the subscriptions do: `keyboard::listen` passes on what no
+            // widget took, and the open browser hears every key.
+            let mut messages = Vec::new();
+            if status == iced::event::Status::Ignored {
+                messages.push(Message::Key(key.clone()));
+            }
+            if browser_open
+                && let Some(message) = browser_key(iced::Event::Keyboard(key), status, iced::window::Id::unique())
+            {
+                messages.push(message);
+            }
+            messages
+        })
+        .into()
     }
 
     fn toolbar(&self) -> Element<'_, Message> {
@@ -2423,27 +2451,19 @@ impl App {
         };
         // Load and dropouts are always shown, and turn amber or red before
         // a problem is audible (FR-PERF-04).
-        let audio: Element<'_, Message> = match &self.audio_stats {
-            Some(stats) => {
-                let s = stats.snapshot();
-                let engine = self.controller.stats();
-                let dropped = engine.dropped_meters.load(std::sync::atomic::Ordering::Relaxed)
-                    + engine.dropped_scope.load(std::sync::atomic::Ordering::Relaxed);
-                let load = bar_text(format!(
-                    "load {:.0}% (max {:.0}%)",
-                    s.last_load * 100.0,
-                    s.max_load * 100.0
-                ))
-                .color(severity_colour(alerts::load_severity(s.last_load)));
-                let dropouts = bar_text(format!("dropouts {}", self.dropouts.count()))
-                    .color(severity_colour(self.dropouts.severity(Instant::now())));
-                let mut items = row![bar_text(&self.audio_name).color(DIM), load, dropouts].spacing(10);
-                if dropped > 0 {
-                    items = items.push(bar_text(format!("telemetry dropped {dropped}")).color(DIM));
-                }
-                items.into()
+        // The snapshot reads the same model, so the two cannot disagree.
+        let stats = self.stats_model();
+        let audio: Element<'_, Message> = if stats.playing {
+            let load = bar_text(stats.load_text()).color(severity_colour(alerts::load_severity(stats.load)));
+            let dropouts = bar_text(format!("dropouts {}", stats.dropouts))
+                .color(severity_colour(self.dropouts.severity(Instant::now())));
+            let mut items = row![bar_text(stats.label).color(DIM), load, dropouts].spacing(10);
+            if stats.telemetry_dropped > 0 {
+                items = items.push(bar_text(format!("telemetry dropped {}", stats.telemetry_dropped)).color(DIM));
             }
-            None => bar_text(&self.audio_name).color(DIM).into(),
+            items.into()
+        } else {
+            bar_text(stats.label).color(DIM).into()
         };
         let midi = match self.rig.ports.as_slice() {
             [] => "MIDI: no inputs".to_string(),

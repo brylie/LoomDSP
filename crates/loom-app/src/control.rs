@@ -8,6 +8,7 @@
 //! reply line and reads the next command. While no command comes, the
 //! thread sends nothing, so the window does not redraw (rule 7).
 
+use crate::pointer::{Aim, Step as PointerStep};
 use crate::{App, Message, settings};
 use iced::Task;
 use iced::advanced::widget::operation::Outcome;
@@ -105,8 +106,51 @@ pub enum Command {
         #[serde(default)]
         modifiers: Vec<String>,
     },
+    /// A toolbar button by name, or a mouse button down (Pointer
+    /// commands): a `button` that names a toolbar button with no `target`,
+    /// `x`, or `y` is the toolbar's.
     Press {
-        button: String,
+        button: Option<String>,
+        target: Option<String>,
+        x: Option<f32>,
+        y: Option<f32>,
+        #[serde(default)]
+        modifiers: Vec<String>,
+    },
+    /// A mouse button up, at the pointer or at the target.
+    Release {
+        button: Option<String>,
+        target: Option<String>,
+        x: Option<f32>,
+        y: Option<f32>,
+        #[serde(default)]
+        modifiers: Vec<String>,
+    },
+    /// Moves the pointer.
+    Hover {
+        target: Option<String>,
+        x: Option<f32>,
+        y: Option<f32>,
+    },
+    /// Press at `from`, move in `steps` to `to`, release. Each end is a
+    /// target or `[x, y]`.
+    Drag {
+        from: Value,
+        to: Value,
+        steps: Option<u32>,
+        button: Option<String>,
+        #[serde(default)]
+        modifiers: Vec<String>,
+    },
+    /// A wheel step, in lines. Negative `dy` is down.
+    Scroll {
+        target: Option<String>,
+        x: Option<f32>,
+        y: Option<f32>,
+        dy: f32,
+        dx: Option<f32>,
+        #[serde(default)]
+        modifiers: Vec<String>,
     },
     Arm {
         target: String,
@@ -114,8 +158,13 @@ pub enum Command {
     Locate {
         target: String,
     },
+    /// The window, or the area around a target (`margin` in logical
+    /// pixels), or a rectangle `[x, y, width, height]`.
     Screenshot {
         path: PathBuf,
+        target: Option<String>,
+        margin: Option<f32>,
+        rect: Option<[f32; 4]>,
     },
     Sample {
         target: String,
@@ -422,7 +471,12 @@ pub(crate) enum Step {
         frames_left: u16,
     },
     Locate(String),
-    Screenshot(PathBuf),
+    /// A window capture, of the whole window or of an area.
+    Screenshot(PathBuf, Area),
+    /// Pointer or key events on their way to the view, by the command's
+    /// serial: answered once they have all gone in and been drawn. True
+    /// when the reply gives the pointer position.
+    Pointer(u64, bool),
     /// A widget's value, recorded every frame until the time is up.
     Sample(Sampling),
     /// A Preferences change: the reply is read once it is drawn, so the
@@ -518,6 +572,72 @@ pub(crate) fn end_samples(pending: Vec<Pending>) -> Vec<Pending> {
     kept
 }
 
+/// What part of the window a `screenshot` saves.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Area {
+    Window,
+    /// Logical window pixels.
+    Rect(Rectangle),
+    /// The area around a target, found once the window is drawn.
+    Target {
+        target: String,
+        margin: f32,
+    },
+}
+
+/// What to do once the window has been searched for a target.
+#[derive(Debug, Clone)]
+pub enum AfterSearch {
+    /// Answer a `locate`.
+    Locate,
+    /// Save the area around it, `margin` logical pixels wider on each side.
+    Screenshot { path: PathBuf, margin: f32 },
+}
+
+/// The mouse buttons by name. A `press` with one of these, or with no
+/// button, is a pointer command.
+const MOUSE_BUTTONS: [&str; 3] = ["left", "right", "middle"];
+
+/// The most moves a `drag` takes.
+const MAX_DRAG_STEPS: u32 = 1000;
+
+/// Where a pointer command aims: `target`, or `x` and `y`, or neither.
+fn aim(target: Option<String>, x: Option<f32>, y: Option<f32>) -> Result<Option<Aim>, String> {
+    match (target, x, y) {
+        (Some(target), None, None) => Ok(Some(Aim::Target(target))),
+        (None, Some(x), Some(y)) => Ok(Some(Aim::At(Point::new(x, y)))),
+        (None, None, None) => Ok(None),
+        _ => Err("give `target`, or `x` and `y`".to_string()),
+    }
+}
+
+/// One end of a `drag`: a target, or `[x, y]`.
+fn drag_end(value: &Value, which: &str) -> Result<Aim, String> {
+    match value {
+        Value::String(target) => Ok(Aim::Target(target.clone())),
+        Value::Array(xy) => match xy.as_slice() {
+            [x, y] => match (x.as_f64(), y.as_f64()) {
+                (Some(x), Some(y)) => Ok(Aim::At(Point::new(x as f32, y as f32))),
+                _ => Err(format!("`{which}` is a target or [x, y]")),
+            },
+            _ => Err(format!("`{which}` is a target or [x, y]")),
+        },
+        _ => Err(format!("`{which}` is a target or [x, y]")),
+    }
+}
+
+/// The steps of a pointer command, between setting its modifier keys and
+/// letting go of them.
+fn with_modifiers(modifiers: keyboard::Modifiers, steps: Vec<PointerStep>) -> Vec<PointerStep> {
+    if modifiers.is_empty() {
+        return steps;
+    }
+    std::iter::once(PointerStep::Modifiers(modifiers))
+        .chain(steps)
+        .chain(std::iter::once(PointerStep::Modifiers(keyboard::Modifiers::default())))
+        .collect()
+}
+
 /// What a widget operation found in the live window.
 #[derive(Debug, Clone, Default)]
 pub struct Found {
@@ -590,8 +710,8 @@ fn to_window(view: &CanvasView, world: Rectangle) -> Rectangle {
     Rectangle::new(a, iced::Size::new(b.x - a.x, b.y - a.y))
 }
 
-/// Where a target is in the window: a module, a control or a port by name
-/// (rule 10), or any text the window shows.
+/// Where a target is in the window: a module, a control, port, light, or
+/// meter by name (rule 10), or any text the window shows.
 pub fn locate(app: &App, target: &str, found: &Found) -> Result<Rectangle, String> {
     let Some((module, name)) = split_target(target) else {
         return found
@@ -606,28 +726,9 @@ pub fn locate(app: &App, target: &str, found: &Found) -> Result<Rectangle, Strin
     let Some(name) = name else {
         return Ok(to_window(view, tile.bounds()));
     };
-    let node = app.controller.graph().node(ModuleId(module)).ok_or("no module")?;
-    if let Some(widget) = node.descriptor.panel.widgets.iter().position(|w| w.bind == name) {
-        let world = tile.widget_bounds(widget).ok_or("the control is not drawn")?;
-        return Ok(to_window(view, world));
-    }
-    let port = port(app, target, true)
-        .or_else(|_| port(app, target, false))
-        .map_err(|_| {
-            format!(
-                "module {module} ({}) has no control or port `{name}`",
-                node.descriptor.name
-            )
-        })?;
-    let centre = app.scene.port_position(port).ok_or("the port is not drawn")?;
-    let r = loom_canvas::PORT_HIT_RADIUS;
-    Ok(to_window(
-        view,
-        Rectangle::new(
-            Point::new(centre.x - r, centre.y - r),
-            iced::Size::new(2.0 * r, 2.0 * r),
-        ),
-    ))
+    let part = crate::targets::find(app.controller.graph(), module, name)?;
+    let world = crate::targets::world_bounds(&app.scene, part)?;
+    Ok(to_window(view, world))
 }
 
 fn rect_fields(r: Rectangle) -> Map<String, Value> {
@@ -791,6 +892,15 @@ impl App {
         let mut tasks = Vec::new();
         let mut waiting = Vec::new();
         for mut pending in std::mem::take(&mut self.control_pending) {
+            // Pointer events go in one per frame. The answer waits for the
+            // last one to be drawn.
+            if let Step::Pointer(serial, _) = pending.step
+                && self.pointer.busy(serial)
+            {
+                pending.frames = FRAMES_BEFORE_ANSWER;
+                waiting.push(pending);
+                continue;
+            }
             pending.frames = pending.frames.saturating_sub(1);
             if pending.frames > 0 {
                 waiting.push(pending);
@@ -845,28 +955,20 @@ impl App {
                         }),
                     }
                 }
-                Step::Locate(target) => {
-                    let operation = Find {
-                        text: target.clone(),
-                        found: Found::default(),
+                Step::Pointer(serial, position) => {
+                    let answer = match self.pointer.take_error(serial) {
+                        Some(error) => Err(error),
+                        None if position => Ok(self.pointer_reply()),
+                        None => Ok(Map::new()),
                     };
-                    tasks.push(
-                        iced_runtime::task::widget(operation).map(move |found| Message::Located {
-                            call: call.clone(),
-                            target: target.clone(),
-                            found,
-                        }),
-                    );
+                    call.answer(answer);
                 }
-                Step::Screenshot(path) => tasks.push(
-                    iced::window::latest()
-                        .then(|id| match id {
-                            Some(id) => iced::window::screenshot(id).map(Some),
-                            None => Task::done(None),
-                        })
-                        .map(move |shot| call.answer(save_screenshot(shot, &path)))
-                        .discard(),
-                ),
+                Step::Locate(target) => tasks.push(search(call, target, AfterSearch::Locate)),
+                Step::Screenshot(path, Area::Target { target, margin }) => {
+                    tasks.push(search(call, target, AfterSearch::Screenshot { path, margin }));
+                }
+                Step::Screenshot(path, Area::Rect(area)) => tasks.push(capture(call, path, Some(area))),
+                Step::Screenshot(path, Area::Window) => tasks.push(capture(call, path, None)),
             }
         }
         self.control_pending = waiting;
@@ -967,25 +1069,153 @@ impl App {
                 key: name,
                 modifiers: names,
                 ..
-            } => key(&name)
-                .and_then(|k| Ok((k, modifiers(&names)?)))
-                .and_then(|(k, m)| refuse_dialog_keys(&k, m).map(|()| (k, m)))
-                .map(|(k, m)| {
-                    for event in key_events(k, m) {
-                        send(self, Message::Key(event));
+            } => {
+                // Through the view, as a real key: a widget such as the
+                // canvas can take it (Escape unpins a badge), and what none
+                // takes goes to the app as the keyboard listener sends it.
+                let then = match key(&name)
+                    .and_then(|k| Ok((k, modifiers(&names)?)))
+                    .and_then(|(k, m)| refuse_dialog_keys(&k, m).map(|()| (k, m)))
+                {
+                    Ok((k, m)) => {
+                        let steps = key_events(k, m).into_iter().map(PointerStep::Key).collect();
+                        Then::AfterDraw(Step::Pointer(self.pointer.push(steps), false))
                     }
+                    Err(error) => Then::Now(Err(error)),
+                };
+                return (then, Task::batch(tasks));
+            }
+            Command::Press {
+                button: Some(button),
+                target: None,
+                x: None,
+                y: None,
+                modifiers,
+            } if !MOUSE_BUTTONS.contains(&button.as_str()) => {
+                if !modifiers.is_empty() {
+                    return (
+                        Then::Now(Err("a toolbar button takes no `modifiers`".to_string())),
+                        Task::none(),
+                    );
+                }
+                press_message(self, &button).map(|message| {
+                    send(self, message);
                     Map::new()
-                }),
-            Command::Press { button } => press_message(self, &button).map(|message| {
-                send(self, message);
-                Map::new()
-            }),
+                })
+            }
+            Command::Press {
+                button,
+                target,
+                x,
+                y,
+                modifiers,
+            }
+            | Command::Release {
+                button,
+                target,
+                x,
+                y,
+                modifiers,
+            } => {
+                let down = matches!(call.command, Command::Press { .. });
+                let steps = aim(target, x, y).and_then(|aim| {
+                    let button = crate::pointer::button(button.as_deref())?;
+                    let modifiers = self::modifiers(&modifiers)?;
+                    let click = if down {
+                        PointerStep::Press(button)
+                    } else {
+                        PointerStep::Release(button)
+                    };
+                    let steps = aim.map(PointerStep::MoveTo).into_iter().chain([click]).collect();
+                    Ok(with_modifiers(modifiers, steps))
+                });
+                return (self.pointer_command(steps), Task::none());
+            }
+            Command::Hover { target, x, y } => {
+                let steps = aim(target, x, y).and_then(|aim| {
+                    aim.map(|aim| vec![PointerStep::MoveTo(aim)])
+                        .ok_or_else(|| "give `target`, or `x` and `y`".to_string())
+                });
+                return (self.pointer_command(steps), Task::none());
+            }
+            Command::Drag {
+                from,
+                to,
+                steps,
+                button,
+                modifiers,
+            } => {
+                let steps = (|| {
+                    let from = drag_end(&from, "from")?;
+                    let to = drag_end(&to, "to")?;
+                    let moves = steps.unwrap_or(10);
+                    if !(1..=MAX_DRAG_STEPS).contains(&moves) {
+                        return Err(format!("`steps` must be from 1 to {MAX_DRAG_STEPS}"));
+                    }
+                    let button = crate::pointer::button(button.as_deref())?;
+                    let modifiers = self::modifiers(&modifiers)?;
+                    let mut list = vec![PointerStep::MoveTo(from), PointerStep::Press(button)];
+                    list.extend((1..=moves).map(|i| PointerStep::Toward {
+                        to: to.clone(),
+                        t: i as f32 / moves as f32,
+                    }));
+                    list.push(PointerStep::Release(button));
+                    Ok(with_modifiers(modifiers, list))
+                })();
+                return (self.pointer_command(steps), Task::none());
+            }
+            Command::Scroll {
+                target,
+                x,
+                y,
+                dy,
+                dx,
+                modifiers,
+            } => {
+                let steps = aim(target, x, y).and_then(|aim| {
+                    let modifiers = self::modifiers(&modifiers)?;
+                    let wheel = PointerStep::Wheel {
+                        dx: dx.unwrap_or(0.0),
+                        dy,
+                    };
+                    let steps = aim.map(PointerStep::MoveTo).into_iter().chain([wheel]).collect();
+                    Ok(with_modifiers(modifiers, steps))
+                });
+                return (self.pointer_command(steps), Task::none());
+            }
             Command::Arm { target } => self.arm_command(&target).map(|message| {
                 send(self, message);
                 Map::new()
             }),
             Command::Locate { target } => return (Then::AfterDraw(Step::Locate(target)), Task::batch(tasks)),
-            Command::Screenshot { path } => return (Then::AfterDraw(Step::Screenshot(path)), Task::batch(tasks)),
+            Command::Screenshot {
+                path,
+                target,
+                margin,
+                rect,
+            } => {
+                let area = match (target, rect) {
+                    (None, None) if margin.is_none() => Ok(Area::Window),
+                    (Some(target), None) => match margin.unwrap_or(0.0) {
+                        m if m >= 0.0 && m.is_finite() => Ok(Area::Target { target, margin: m }),
+                        _ => Err("`margin` is a number of pixels, 0 or more".to_string()),
+                    },
+                    (None, Some([x, y, w, h])) if margin.is_none() => {
+                        if w > 0.0 && h > 0.0 {
+                            Ok(Area::Rect(Rectangle::new(Point::new(x, y), iced::Size::new(w, h))))
+                        } else {
+                            Err("`rect` is [x, y, width, height], with a width and height above 0".to_string())
+                        }
+                    }
+                    (None, _) => Err("`margin` goes with `target`".to_string()),
+                    (Some(_), Some(_)) => Err("give `target` or `rect`, not both".to_string()),
+                };
+                let then = match area {
+                    Ok(area) => Then::AfterDraw(Step::Screenshot(path, area)),
+                    Err(error) => Then::Now(Err(error)),
+                };
+                return (then, Task::batch(tasks));
+            }
             Command::Sample { target, ms } => {
                 let then = match self.sample_command(&target, ms) {
                     Ok(sampling) => Then::AfterDraw(Step::Sample(sampling)),
@@ -1071,6 +1301,22 @@ impl App {
             Err(error) => Then::Now(Err(error)),
         };
         (then, Task::batch(tasks))
+    }
+
+    /// Queues a pointer command's events, or refuses it.
+    fn pointer_command(&mut self, steps: Result<Vec<PointerStep>, String>) -> Then {
+        match steps {
+            Ok(steps) => Then::AfterDraw(Step::Pointer(self.pointer.push(steps), true)),
+            Err(error) => Then::Now(Err(error)),
+        }
+    }
+
+    /// The reply to a pointer command: where the pointer is.
+    fn pointer_reply(&self) -> Map<String, Value> {
+        match self.pointer.position() {
+            Some(p) => fields(json!({ "x": p.x, "y": p.y })),
+            None => Map::new(),
+        }
     }
 
     /// The reply to a Preferences command, read as it is drawn.
@@ -1299,21 +1545,97 @@ impl App {
         }
     }
 
-    /// Answers a `locate` once the window has been searched.
-    pub(crate) fn located(&mut self, call: &Call, target: &str, found: &Found) {
-        call.answer(locate(self, target, found).map(rect_fields));
+    /// Answers a `locate`, or takes a `screenshot` of the area around the
+    /// target, once the window has been searched.
+    pub(crate) fn located(&mut self, call: Call, target: &str, found: &Found, then: AfterSearch) -> Task<Message> {
+        let rect = locate(self, target, found);
+        match then {
+            AfterSearch::Locate => {
+                call.answer(rect.map(rect_fields));
+                Task::none()
+            }
+            AfterSearch::Screenshot { path, margin } => match rect {
+                Ok(rect) => capture(call, path, Some(rect.expand(margin))),
+                Err(error) => {
+                    call.answer(Err(error));
+                    Task::none()
+                }
+            },
+        }
     }
 }
 
-/// Saves a window capture as a PNG file.
-fn save_screenshot(shot: Option<iced::window::Screenshot>, path: &std::path::Path) -> Answer {
-    let shot = shot.ok_or("no window to capture")?;
+/// Searches the live window for a target, then does `then` with what it
+/// found.
+fn search(call: Call, target: String, then: AfterSearch) -> Task<Message> {
+    let operation = Find {
+        text: target.clone(),
+        found: Found::default(),
+    };
+    iced_runtime::task::widget(operation).map(move |found| Message::Located {
+        call: call.clone(),
+        target: target.clone(),
+        found,
+        then: then.clone(),
+    })
+}
+
+/// Captures the window as it was last drawn, and saves all of it, or the
+/// part inside `area` (logical window pixels).
+fn capture(call: Call, path: PathBuf, area: Option<Rectangle>) -> Task<Message> {
+    iced::window::latest()
+        .then(|id| match id {
+            Some(id) => iced::window::screenshot(id).map(Some),
+            None => Task::done(None),
+        })
+        .map(move |shot| call.answer(save_screenshot(shot, &path, area)))
+        .discard()
+}
+
+/// The part of a capture inside `area`, in physical pixels, cut to the
+/// image. `None` when nothing of it is inside.
+fn crop_region(size: iced::Size<u32>, scale: f32, area: Rectangle) -> Option<Rectangle<u32>> {
+    let x0 = (area.x * scale).floor().max(0.0);
+    let y0 = (area.y * scale).floor().max(0.0);
+    let x1 = ((area.x + area.width) * scale).ceil().min(size.width as f32);
+    let y1 = ((area.y + area.height) * scale).ceil().min(size.height as f32);
+    (x1 > x0 && y1 > y0).then_some(Rectangle {
+        x: x0 as u32,
+        y: y0 as u32,
+        width: (x1 - x0) as u32,
+        height: (y1 - y0) as u32,
+    })
+}
+
+/// Saves a window capture, or the part of it inside `area`, as a PNG file.
+/// The reply has the image size in pixels, the scale factor, and, for an
+/// area, the area saved in logical window pixels.
+fn save_screenshot(shot: Option<iced::window::Screenshot>, path: &std::path::Path, area: Option<Rectangle>) -> Answer {
+    let mut shot = shot.ok_or("no window to capture")?;
+    let mut saved = None;
+    if let Some(area) = area {
+        let region = crop_region(shot.size, shot.scale_factor, area).ok_or("the area is outside the window")?;
+        shot = shot
+            .crop(region)
+            .map_err(|e| format!("cannot cut the area out: {e:?}"))?;
+        let scale = shot.scale_factor;
+        saved = Some(json!({
+            "x": region.x as f32 / scale,
+            "y": region.y as f32 / scale,
+            "width": region.width as f32 / scale,
+            "height": region.height as f32 / scale,
+        }));
+    }
     crate::screenshot::write_png(path, shot.size, &shot.rgba)?;
-    Ok(fields(json!({
+    let mut reply = fields(json!({
         "width": shot.size.width,
         "height": shot.size.height,
         "scale": shot.scale_factor,
-    })))
+    }));
+    if let Some(saved) = saved {
+        reply.insert("area".to_string(), saved);
+    }
+    Ok(reply)
 }
 
 #[cfg(test)]
@@ -1620,15 +1942,6 @@ mod tests {
         );
         assert_eq!(run(&mut app, r#"{"cmd": "undo"}"#).map(|_| ()), Ok(()));
         assert!(app.controller.graph().node(scope).is_none());
-
-        assert_eq!(
-            run(&mut app, r#"{"cmd": "key", "key": "z", "modifiers": ["cmd"]}"#),
-            Ok(Map::new())
-        );
-        assert!(
-            app.controller.graph().node(ModuleId(module as u32)).is_some(),
-            "Cmd+Z undid the removal"
-        );
 
         assert_eq!(run(&mut app, r#"{"cmd": "quit"}"#), Ok(Map::new()));
         assert!(app.quit);
@@ -1948,6 +2261,526 @@ mod tests {
         };
         assert_eq!(locate(&ui.app, "Cutoff", &text).unwrap().x, 1.0);
         assert!(locate(&ui.app, "Cutoff", &Found::default()).is_err());
+    }
+
+    /// The subtractive patch in the headless UI harness, with the control
+    /// channel's pointer on, and the filter envelope (5) assigned to the
+    /// filter's Resonance, so its output has a badge and the knob a range
+    /// arc.
+    fn pointer_ui() -> crate::ui_test::Ui {
+        let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+        ui.app.pointer = crate::pointer::Pointer::new(true);
+        let resonance = ui
+            .app
+            .controller
+            .graph()
+            .node(ModuleId(4))
+            .unwrap()
+            .descriptor
+            .param_index("resonance")
+            .unwrap();
+        let _ = ui.app.update(Message::Assign {
+            source: loom_core::OutputRef {
+                module: ModuleId(5),
+                port: 0,
+            },
+            module: 4,
+            index: resonance,
+        });
+        ui.redraw();
+        ui
+    }
+
+    /// Runs a command on the harness's app as the window would: each frame
+    /// redraws the view, where pointer and key events go in, then counts a
+    /// control frame.
+    fn run_ui(ui: &mut crate::ui_test::Ui, line: &str) -> Answer {
+        let command: Command = serde_json::from_str(line).unwrap();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let call = Call {
+            command,
+            reply: Reply(Arc::new(Mutex::new(Some(sender)))),
+        };
+        let _ = ui.app.control(call);
+        for _ in 0..200 {
+            if let Ok(answer) = receiver.try_recv() {
+                return answer;
+            }
+            ui.redraw();
+            let _ = ui.app.update(Message::ControlFrame(Instant::now()));
+        }
+        receiver.try_recv().expect("answered after drawing")
+    }
+
+    /// The snapshot's `pointer` field.
+    fn pointer_of(ui: &mut crate::ui_test::Ui) -> Value {
+        run_ui(ui, r#"{"cmd": "snapshot"}"#).unwrap()["snapshot"]["pointer"].clone()
+    }
+
+    /// #251: hover an output, pin its badge, press Escape. The snapshot
+    /// shows each step, and the reply gives the pointer position.
+    #[test]
+    fn a_script_hovers_pins_a_badge_and_unpins_it_with_escape() {
+        let mut ui = pointer_ui();
+        let reply = run_ui(&mut ui, r#"{"cmd": "hover", "target": "5:out"}"#).unwrap();
+        let out = ui.output(5, "out");
+        assert!((reply["x"].as_f64().unwrap() as f32 - out.x).abs() < 0.01, "{reply:?}");
+        let pointer = pointer_of(&mut ui);
+        assert_eq!(
+            pointer["hover"],
+            json!({"kind": "output", "target": "5:out"}),
+            "{pointer}"
+        );
+        assert_eq!(pointer["pinned"], Value::Null);
+        assert_eq!(pointer["buttons"], json!([]));
+
+        run_ui(&mut ui, r#"{"cmd": "hover", "target": "5:badge:out"}"#).unwrap();
+        assert_eq!(
+            pointer_of(&mut ui)["hover"],
+            json!({"kind": "badge", "target": "5:badge:out"})
+        );
+        run_ui(&mut ui, r#"{"cmd": "press"}"#).unwrap();
+        assert_eq!(pointer_of(&mut ui)["buttons"], json!(["left"]));
+        run_ui(&mut ui, r#"{"cmd": "release"}"#).unwrap();
+        let pointer = pointer_of(&mut ui);
+        assert_eq!(pointer["pinned"], json!("5:out"), "{pointer}");
+        assert_eq!(pointer["buttons"], json!([]));
+
+        assert_eq!(run_ui(&mut ui, r#"{"cmd": "key", "key": "escape"}"#), Ok(Map::new()));
+        assert_eq!(pointer_of(&mut ui)["pinned"], Value::Null, "Escape unpinned the badge");
+        assert!(!ui.app.control_waiting(), "no frames asked for once done (rule 7)");
+        assert!(!ui.app.pointer.waiting());
+    }
+
+    /// #251, as in #217: a drag on a knob's range arc, with Shift, changes
+    /// the assignment's depth, not the knob, as one undo step.
+    #[test]
+    fn a_script_drags_a_range_arc() {
+        let mut ui = pointer_ui();
+        let depth = |ui: &crate::ui_test::Ui| ui.app.controller.graph().assignments().next().unwrap().1.depth;
+        let resonance = |ui: &crate::ui_test::Ui| ui.app.controller.graph().node(ModuleId(4)).unwrap().params[1];
+        let (before, value) = (depth(&ui), resonance(&ui));
+        // On the ring beside the knob: its centre is a grid step below the
+        // top of its cell, and the ring is about 12 units out.
+        let index = ui
+            .app
+            .controller
+            .graph()
+            .node(ModuleId(4))
+            .unwrap()
+            .descriptor
+            .param_index("resonance")
+            .unwrap();
+        let widget = ui
+            .app
+            .controller
+            .graph()
+            .node(ModuleId(4))
+            .unwrap()
+            .descriptor
+            .panel
+            .widgets
+            .iter()
+            .position(|w| w.bind == "resonance")
+            .unwrap();
+        assert_eq!(index, 1);
+        let rect = ui.app.scene.module(4).unwrap().widget_bounds(widget).unwrap();
+        let ring = Point::new(rect.center_x() + 12.0, rect.y + loom_canvas::GRID - 1.0);
+        let from = ui.canvas().to_window(ring);
+        let line = format!(
+            r#"{{"cmd": "drag", "from": [{}, {}], "to": [{}, {}], "steps": 6, "modifiers": ["shift"]}}"#,
+            from.x,
+            from.y,
+            from.x,
+            from.y - 60.0
+        );
+        let reply = run_ui(&mut ui, &line).unwrap();
+        assert!((reply["y"].as_f64().unwrap() as f32 - (from.y - 60.0)).abs() < 0.01);
+        assert_ne!(depth(&ui), before, "the drag changed the depth");
+        assert_eq!(resonance(&ui), value, "and not the knob");
+        run_ui(&mut ui, r#"{"cmd": "undo"}"#).unwrap();
+        assert_eq!(depth(&ui), before, "one undo step");
+    }
+
+    /// A drag from an output to a tile control makes an assignment, and one
+    /// undo takes it back. During the drag the snapshot shows the wire.
+    #[test]
+    fn a_script_drags_an_output_onto_a_control() {
+        let mut ui = pointer_ui();
+        let count = |ui: &crate::ui_test::Ui| ui.app.controller.graph().assignments().count();
+        let before = count(&ui);
+        run_ui(&mut ui, r#"{"cmd": "press", "target": "7:out"}"#).unwrap();
+        run_ui(&mut ui, r#"{"cmd": "hover", "target": "4:cutoff"}"#).unwrap();
+        let pointer = pointer_of(&mut ui);
+        assert_eq!(
+            pointer["drag"],
+            json!({"kind": "wire", "from": "7:out", "pulled": false}),
+            "{pointer}"
+        );
+        assert_eq!(pointer["hover"], json!({"kind": "control", "target": "4:cutoff"}));
+        run_ui(&mut ui, r#"{"cmd": "release"}"#).unwrap();
+        assert_eq!(count(&ui), before + 1, "the drop made an assignment");
+        assert_eq!(pointer_of(&mut ui)["drag"], Value::Null);
+
+        run_ui(&mut ui, r#"{"cmd": "undo"}"#).unwrap();
+        assert_eq!(count(&ui), before);
+        // The same in one command.
+        run_ui(&mut ui, r#"{"cmd": "drag", "from": "7:out", "to": "4:cutoff"}"#).unwrap();
+        assert_eq!(count(&ui), before + 1);
+    }
+
+    /// A real button let go while a script drag runs: the drag
+    /// goes on undisturbed, the release is not lost, and nothing reads as
+    /// held afterwards. Then a real pointer move takes over from the
+    /// script's pointer.
+    #[test]
+    fn a_real_release_during_a_script_drag_is_not_lost() {
+        let mut ui = pointer_ui();
+        // The real button goes down before the script starts.
+        ui.press();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let call = Call {
+            command: serde_json::from_str(r#"{"cmd": "drag", "from": "4:cutoff", "to": "4:resonance", "steps": 8}"#)
+                .unwrap(),
+            reply: Reply(Arc::new(Mutex::new(Some(sender)))),
+        };
+        let _ = ui.app.control(call);
+        // The press, then two moves.
+        for _ in 0..3 {
+            ui.redraw();
+        }
+        assert!(ui.app.pointer.waiting(), "the drag is still going in");
+        ui.release();
+        let mut answer = None;
+        for _ in 0..50 {
+            ui.redraw();
+            let _ = ui.app.update(Message::ControlFrame(Instant::now()));
+            if let Ok(a) = receiver.try_recv() {
+                answer = Some(a);
+                break;
+            }
+        }
+        assert!(answer.expect("answered").is_ok());
+        let pointer = pointer_of(&mut ui);
+        assert_eq!(pointer["buttons"], json!([]), "{pointer}");
+        assert_eq!(pointer["drag"], Value::Null, "{pointer}");
+
+        // A real move takes over: the snapshot follows the real pointer.
+        let canvas = ui.canvas();
+        let real = Point::new(canvas.bounds.x + 5.0, canvas.bounds.y + 5.0);
+        ui.move_to(real);
+        ui.redraw();
+        let pointer = pointer_of(&mut ui);
+        assert_eq!(
+            (pointer["x"].as_f64(), pointer["y"].as_f64()),
+            (Some(real.x as f64), Some(real.y as f64))
+        );
+    }
+
+    /// A capture is saved whole, or cut to an area that is reported in
+    /// logical pixels. An area outside the window, or no window, is an
+    /// error.
+    #[test]
+    fn a_capture_is_saved_whole_or_cut_to_an_area() {
+        let dir = std::env::temp_dir().join(format!("loom-control-shot-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("shot.png");
+        let shot = || {
+            Some(iced::window::Screenshot::new(
+                vec![255u8; 40 * 20 * 4],
+                iced::Size::new(40, 20),
+                2.0,
+            ))
+        };
+        let whole = save_screenshot(shot(), &path, None).unwrap();
+        assert_eq!(
+            (whole["width"].clone(), whole["height"].clone()),
+            (json!(40), json!(20))
+        );
+        assert!(whole.get("area").is_none());
+        let area = Rectangle::new(Point::new(2.0, 1.0), iced::Size::new(5.0, 4.0));
+        let cut = save_screenshot(shot(), &path, Some(area)).unwrap();
+        assert_eq!((cut["width"].clone(), cut["height"].clone()), (json!(10), json!(8)));
+        assert_eq!(cut["area"], json!({"x": 2.0, "y": 1.0, "width": 5.0, "height": 4.0}));
+        let outside = Rectangle::new(Point::new(100.0, 0.0), iced::Size::new(5.0, 4.0));
+        assert!(
+            save_screenshot(shot(), &path, Some(outside))
+                .unwrap_err()
+                .contains("outside the window")
+        );
+        assert!(save_screenshot(None, &path, None).unwrap_err().contains("no window"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// After the window is searched: `locate` answers, and a `screenshot`
+    /// of a target that is not there answers with the error at once.
+    #[test]
+    fn a_search_answers_locate_and_refuses_a_missing_screenshot_target() {
+        let mut ui = pointer_ui();
+        let found = Found {
+            canvas: Some(ui.canvas()),
+            text: None,
+        };
+        let ask = |ui: &mut crate::ui_test::Ui, target: &str, then: AfterSearch| {
+            let (sender, receiver) = std::sync::mpsc::channel();
+            let call = Call {
+                command: Command::Snapshot,
+                reply: Reply(Arc::new(Mutex::new(Some(sender)))),
+            };
+            let _ = ui.app.located(call, target, &found, then);
+            receiver.try_recv()
+        };
+        let answer = ask(&mut ui, "4:cutoff", AfterSearch::Locate).unwrap().unwrap();
+        assert!(answer["width"].as_f64().unwrap() > 0.0);
+        let then = AfterSearch::Screenshot {
+            path: PathBuf::from("unused.png"),
+            margin: 4.0,
+        };
+        let error = ask(&mut ui, "4:nope", then.clone()).unwrap().unwrap_err();
+        assert!(error.contains("`nope`"), "{error}");
+        // A target that is there waits for the window capture.
+        assert!(ask(&mut ui, "4:cutoff", then).is_err(), "not answered yet");
+        let _ = search(
+            Call {
+                command: Command::Snapshot,
+                reply: Reply(Arc::new(Mutex::new(None))),
+            },
+            "4".to_string(),
+            AfterSearch::Locate,
+        );
+    }
+
+    /// The snapshot names a tile under a light, a knob turn, a tile move,
+    /// and a pan.
+    #[test]
+    fn the_snapshot_names_what_the_pointer_is_on_and_does() {
+        let mut ui = pointer_ui();
+        run_ui(&mut ui, r#"{"cmd": "hover", "target": "5:level"}"#).unwrap();
+        // The canvas hits a light as part of its tile.
+        assert_eq!(pointer_of(&mut ui)["hover"], json!({"kind": "tile", "target": "5"}));
+        run_ui(&mut ui, r#"{"cmd": "press", "target": "4:cutoff"}"#).unwrap();
+        assert_eq!(
+            pointer_of(&mut ui)["drag"],
+            json!({"kind": "knob", "target": "4:cutoff"})
+        );
+        run_ui(&mut ui, r#"{"cmd": "release"}"#).unwrap();
+        let tile = ui.app.scene.module(4).unwrap().bounds();
+        let title = ui
+            .canvas()
+            .to_window(Point::new(tile.x + tile.width * 0.5, tile.y + 6.0));
+        run_ui(
+            &mut ui,
+            &format!(r#"{{"cmd": "hover", "x": {}, "y": {}}}"#, title.x, title.y),
+        )
+        .unwrap();
+        assert_eq!(pointer_of(&mut ui)["hover"], json!({"kind": "tile", "target": "4"}));
+        run_ui(&mut ui, r#"{"cmd": "press"}"#).unwrap();
+        assert_eq!(pointer_of(&mut ui)["drag"], json!({"kind": "move", "modules": [4]}));
+        run_ui(&mut ui, r#"{"cmd": "release"}"#).unwrap();
+        run_ui(&mut ui, r#"{"cmd": "press", "button": "middle"}"#).unwrap();
+        assert_eq!(pointer_of(&mut ui)["drag"], json!({"kind": "pan"}));
+        run_ui(&mut ui, r#"{"cmd": "release", "button": "middle"}"#).unwrap();
+    }
+
+    /// Pointer commands that cannot run say why.
+    #[test]
+    fn more_pointer_commands_are_refused() {
+        let mut ui = pointer_ui();
+        for (line, why) in [
+            (r#"{"cmd": "release"}"#, "not in the window yet"),
+            (r#"{"cmd": "scroll", "dy": 1}"#, "not in the window yet"),
+            (r#"{"cmd": "hover"}"#, "give `target`"),
+            (
+                r#"{"cmd": "drag", "from": "4:cutoff", "to": "4:resonance", "steps": 0}"#,
+                "from 1 to",
+            ),
+            (
+                r#"{"cmd": "drag", "from": [1], "to": "4:resonance"}"#,
+                "`from` is a target",
+            ),
+            (
+                r#"{"cmd": "drag", "from": ["a", "b"], "to": "4:resonance"}"#,
+                "`from` is a target",
+            ),
+            (
+                r#"{"cmd": "scroll", "target": "4", "dy": 1, "modifiers": ["hyper"]}"#,
+                "unknown modifier",
+            ),
+            (
+                r#"{"cmd": "press", "button": "learn", "modifiers": ["shift"]}"#,
+                "no `modifiers`",
+            ),
+            (r#"{"cmd": "key", "key": "hyper"}"#, "unknown key"),
+        ] {
+            let error = run_ui(&mut ui, line).unwrap_err();
+            assert!(error.contains(why), "{line}: {error}");
+        }
+        // With Shift, a press and release on a toggle-free spot work, and
+        // the modifiers are let go after.
+        run_ui(&mut ui, r#"{"cmd": "press", "x": 5, "y": 300, "modifiers": ["shift"]}"#).unwrap();
+        run_ui(&mut ui, r#"{"cmd": "release", "button": "left", "x": 5, "y": 300}"#).unwrap();
+        run_ui(&mut ui, r#"{"cmd": "press", "button": "right", "target": "4"}"#).unwrap();
+        assert_eq!(pointer_of(&mut ui)["buttons"], json!(["right"]));
+        run_ui(&mut ui, r#"{"cmd": "release", "button": "right"}"#).unwrap();
+        run_ui(&mut ui, r#"{"cmd": "scroll", "dy": -1, "dx": 1}"#).unwrap();
+    }
+
+    /// With the browser open, a key goes to it as its key subscription
+    /// sends it, and the stats bar draws the clock with `--fake-audio`.
+    #[test]
+    fn keys_reach_the_open_browser_and_the_bar_draws_the_clock() {
+        let app = App::new(crate::Args {
+            patch: Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches/subtractive.ron")),
+            fake_audio: true,
+            no_audio: false,
+            ..crate::tests::app_args()
+        });
+        let mut ui = crate::ui_test::Ui::with_app(app);
+        ui.app.pointer = crate::pointer::Pointer::new(true);
+        assert!(
+            ui.text("no device (clock) at 48000 Hz").is_some(),
+            "the bar shows the clock"
+        );
+        let _ = ui.app.update(Message::OpenBrowser);
+        ui.redraw();
+        assert!(ui.app.browser.is_some());
+        run_ui(&mut ui, r#"{"cmd": "key", "key": "escape"}"#).unwrap();
+        assert!(ui.app.browser.is_none(), "Escape closed the browser");
+    }
+
+    /// Keys go through the view: Cmd+Z, which no widget takes, reaches the
+    /// app and undoes, as from the keyboard.
+    #[test]
+    fn a_key_no_widget_takes_reaches_the_app() {
+        let mut ui = pointer_ui();
+        assert!(ui.app.history.undo_step().is_some());
+        let before = ui.app.controller.graph().assignments().count();
+        assert_eq!(
+            run_ui(&mut ui, r#"{"cmd": "key", "key": "z", "modifiers": ["cmd"]}"#),
+            Ok(Map::new())
+        );
+        assert_eq!(ui.app.controller.graph().assignments().count(), before - 1);
+    }
+
+    /// Bad pointer commands get an error, and nothing stays held.
+    #[test]
+    fn pointer_commands_refuse_what_they_cannot_aim_at() {
+        let mut ui = pointer_ui();
+        let error = run_ui(&mut ui, r#"{"cmd": "press"}"#).unwrap_err();
+        assert!(error.contains("not in the window yet"), "{error}");
+        let error = run_ui(&mut ui, r#"{"cmd": "hover", "target": "4:nonsense"}"#).unwrap_err();
+        assert!(
+            error.contains("no control, port, light, or meter `nonsense`"),
+            "{error}"
+        );
+        let error = run_ui(&mut ui, r#"{"cmd": "hover", "target": "3:badge:out"}"#).unwrap_err();
+        assert!(error.contains("no badge"), "{error}");
+        let error = run_ui(&mut ui, r#"{"cmd": "hover", "x": 3}"#).unwrap_err();
+        assert!(error.contains("give `target`, or `x` and `y`"), "{error}");
+        let error = run_ui(&mut ui, r#"{"cmd": "press", "button": "thumb", "x": 1, "y": 1}"#).unwrap_err();
+        assert!(error.contains("unknown mouse button"), "{error}");
+        let error = run_ui(&mut ui, r#"{"cmd": "drag", "from": "4:cutoff", "to": 5}"#).unwrap_err();
+        assert!(error.contains("`to` is a target or [x, y]"), "{error}");
+        // The drag's end is not found: the press is let go again.
+        let error = run_ui(&mut ui, r#"{"cmd": "drag", "from": "4:cutoff", "to": "4:nope"}"#).unwrap_err();
+        assert!(error.contains("`nope`"), "{error}");
+        assert_eq!(pointer_of(&mut ui)["buttons"], json!([]));
+        assert_eq!(pointer_of(&mut ui)["drag"], Value::Null);
+        // A wheel step over the canvas zooms it.
+        let zoom = ui.canvas().camera.zoom;
+        run_ui(&mut ui, r#"{"cmd": "scroll", "target": "4", "dy": 1}"#).unwrap();
+        assert!(ui.canvas().camera.zoom > zoom);
+    }
+
+    /// #254: `locate`, and so the pointer commands, find a light by its
+    /// display value and a meter that shares its output's name by
+    /// `display:`.
+    #[test]
+    fn locate_finds_lights_and_meters() {
+        let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+        let env = ui.app.controller.add_module("loom.env.adsr").unwrap().0;
+        let meter = ui.app.controller.add_module("loom.display.meter").unwrap().0;
+        ui.app.commit();
+        ui.redraw();
+        let found = Found {
+            canvas: Some(ui.canvas()),
+            text: None,
+        };
+        let view = found.canvas.unwrap();
+        let centre = |module: u32, widget: usize| {
+            view.to_window(
+                ui.app
+                    .scene
+                    .module(module)
+                    .unwrap()
+                    .widget_bounds(widget)
+                    .unwrap()
+                    .center(),
+            )
+        };
+        let near = |a: Point, b: Point| (a.x - b.x).abs() < 0.01 && (a.y - b.y).abs() < 0.01;
+        let light = ui
+            .app
+            .controller
+            .graph()
+            .node(ModuleId(env))
+            .unwrap()
+            .descriptor
+            .panel
+            .widgets
+            .iter()
+            .position(|w| w.bind == "level")
+            .unwrap();
+        let rect = locate(&ui.app, &format!("{env}:level"), &found).unwrap();
+        assert!(near(rect.center(), centre(env, light)));
+        let rect = locate(&ui.app, &format!("{meter}:display:out"), &found).unwrap();
+        assert!(near(rect.center(), centre(meter, 0)));
+        // Without the prefix the name is the output (rule 10).
+        let rect = locate(&ui.app, &format!("{meter}:out"), &found).unwrap();
+        let port = ui.output(meter, "out");
+        assert!(near(rect.center(), port));
+    }
+
+    /// The area a `screenshot` saves, in physical pixels: scaled, and cut
+    /// to the image.
+    #[test]
+    fn a_screenshot_area_is_scaled_and_cut_to_the_window() {
+        let size = iced::Size::new(200, 100);
+        let rect = |x, y, w, h| Rectangle::new(Point::new(x, y), iced::Size::new(w, h));
+        let region = crop_region(size, 2.0, rect(10.0, 5.0, 20.0, 10.0)).unwrap();
+        assert_eq!((region.x, region.y, region.width, region.height), (20, 10, 40, 20));
+        let region = crop_region(size, 1.0, rect(-10.0, 90.0, 30.0, 30.0)).unwrap();
+        assert_eq!((region.x, region.y, region.width, region.height), (0, 90, 20, 10));
+        assert!(crop_region(size, 1.0, rect(300.0, 0.0, 10.0, 10.0)).is_none());
+    }
+
+    /// `screenshot` takes `target` with `margin`, or `rect`, and refuses
+    /// what does not fit together before anything is drawn.
+    #[test]
+    fn screenshot_fields_are_checked() {
+        let mut app = App::new(crate::tests::app_args());
+        let bad = [
+            (
+                r#"{"cmd": "screenshot", "path": "x.png", "margin": 4}"#,
+                "goes with `target`",
+            ),
+            (
+                r#"{"cmd": "screenshot", "path": "x.png", "target": "4", "rect": [0, 0, 1, 1]}"#,
+                "not both",
+            ),
+            (
+                r#"{"cmd": "screenshot", "path": "x.png", "rect": [0, 0, 0, 1]}"#,
+                "above 0",
+            ),
+            (
+                r#"{"cmd": "screenshot", "path": "x.png", "target": "4", "margin": -1}"#,
+                "0 or more",
+            ),
+        ];
+        for (line, why) in bad {
+            let error = run(&mut app, line).unwrap_err();
+            assert!(error.contains(why), "{line}: {error}");
+        }
     }
 
     /// An app on the fake host, playing the subtractive patch, with its

@@ -242,7 +242,7 @@ fn fails(patch: &Path, args: &[&str]) -> String {
 #[test]
 fn an_unknown_control_fails() {
     assert!(fails(&subtractive(), &["--focus", "4:nope"]).contains("no control for parameter `nope`"));
-    assert!(fails(&subtractive(), &["--pointer", "4:nope"]).contains("no control or port `nope`"));
+    assert!(fails(&subtractive(), &["--pointer", "4:nope"]).contains("no control, port, light, or meter `nope`"));
 }
 
 #[test]

@@ -281,6 +281,62 @@ pub struct CanvasView {
     pub camera: Camera,
 }
 
+/// What the pointer is on and what it does, as the canvas sees it. The
+/// canvas reports it to widget operations as custom state, next to
+/// [`CanvasView`], so the app can show it in its UI snapshot.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CanvasPointer {
+    /// What is under the pointer, while it is over the canvas.
+    pub hover: Option<Hit>,
+    /// The output whose badge is pinned, while its badge shows.
+    pub pinned: Option<PortRef>,
+    /// The drag in progress, if any.
+    pub drag: Option<PointerDrag>,
+}
+
+/// A drag in progress on the canvas. See [`CanvasPointer::drag`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum PointerDrag {
+    /// The view is panned.
+    Pan,
+    /// Tiles are moved.
+    Move(Vec<u32>),
+    /// A knob is turned: module ID and widget index.
+    Knob(u32, usize),
+    /// A button is held: module ID and widget index.
+    Button(u32, usize),
+    /// A cable is pulled from a port.
+    Wire {
+        /// The port the cable starts at.
+        from: PortRef,
+        /// True when the cable was pulled off an input.
+        pulled: bool,
+    },
+    /// A knob's range arc is dragged: module ID and widget index.
+    Depth(u32, usize),
+    /// A selection box is drawn.
+    Select,
+}
+
+impl PointerDrag {
+    /// The drag an interaction is, or `None` when idle.
+    fn of(interaction: &Interaction) -> Option<Self> {
+        Some(match interaction {
+            Interaction::Idle => return None,
+            Interaction::Panning { .. } => Self::Pan,
+            Interaction::Moving { ids, .. } => Self::Move(ids.clone()),
+            Interaction::Turning { module, widget, .. } => Self::Knob(*module, *widget),
+            Interaction::Holding { module, widget } => Self::Button(*module, *widget),
+            Interaction::Wiring { from, pulled } => Self::Wire {
+                from: *from,
+                pulled: *pulled,
+            },
+            Interaction::Depth { module, widget, .. } => Self::Depth(*module, *widget),
+            Interaction::Selecting { .. } => Self::Select,
+        })
+    }
+}
+
 impl CanvasView {
     /// A world point in window coordinates.
     pub fn to_window(&self, world: Point) -> Point {
@@ -600,6 +656,13 @@ where
             camera: state.camera,
         };
         operation.custom(None, layout.bounds(), &mut view);
+        // What the pointer is on, for the control channel's snapshot.
+        let mut pointer = CanvasPointer {
+            hover: state.hover.filter(|hit| *hit != Hit::Nothing),
+            pinned: self.pin(state),
+            drag: PointerDrag::of(&state.interaction),
+        };
+        operation.custom(None, layout.bounds(), &mut pointer);
     }
 
     fn mouse_interaction(
