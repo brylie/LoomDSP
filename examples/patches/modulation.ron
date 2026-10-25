@@ -1,0 +1,51 @@
+// The subtractive voice, with its filter moved by modulation instead of
+// cables. Two assignments act on one cutoff knob, and they add up:
+// a slow sine LFO swings the cutoff around its base, and an envelope
+// opens it on each note.
+//
+// Cutoff is a logarithmic knob from 20 Hz to 20 kHz, so a depth of 0.1
+// is about one octave (docs/design/modulation.md, rules 2 and 5).
+// Play it with: loom play examples/patches/modulation.ron
+Patch(
+    version: 1,
+    name: "Modulation",
+    modules: [
+        // Keyboard: pitch and gate.
+        PatchModule(id: 1, kind: "loom.midi.note@1"),
+        // Audio oscillator: a saw at the keyboard pitch.
+        PatchModule(id: 2, kind: "loom.phase.generator@1"),
+        PatchModule(id: 3, kind: "loom.osc.saw@1"),
+        // Resonant lowpass filter. Its cutoff knob is the base that both
+        // assignments move.
+        PatchModule(id: 4, kind: "loom.filter.svf@1", params: {"cutoff": 300.0, "resonance": 0.6}),
+        // LFO: a phase ramp 7 octaves below middle C (about 2 Hz) shaped
+        // into a sine. Its pitch input is not patched, so it runs freely.
+        PatchModule(id: 5, kind: "loom.phase.generator@1", params: {"octave": -7.0}),
+        PatchModule(id: 6, kind: "loom.osc.sine@1"),
+        // Filter envelope. It reaches the cutoff only through an assignment.
+        PatchModule(id: 7, kind: "loom.env.adsr@1", params: {"decay": 0.4, "sustain": 0.2}),
+        // Amplitude envelope and VCA.
+        PatchModule(id: 8, kind: "loom.env.adsr@1", params: {"attack": 0.005, "release": 0.4}),
+        PatchModule(id: 9, kind: "loom.math.mul@1", params: {"gain": 0.3}),
+        PatchModule(id: 10, kind: "loom.io.audio-out@1"),
+    ],
+    cables: [
+        PatchCable(from: (1, "pitch"), to: (2, "pitch")),
+        PatchCable(from: (2, "phase"), to: (3, "phase")),
+        PatchCable(from: (3, "out"), to: (4, "in")),
+        PatchCable(from: (5, "phase"), to: (6, "phase")),
+        PatchCable(from: (1, "gate"), to: (7, "gate")),
+        PatchCable(from: (1, "gate"), to: (8, "gate")),
+        PatchCable(from: (4, "lowpass"), to: (9, "a")),
+        PatchCable(from: (8, "out"), to: (9, "b")),
+        PatchCable(from: (9, "out"), to: (10, "left")),
+    ],
+    modulation: [
+        // LFO to cutoff. The sine is bipolar, so it swings the cutoff
+        // about 0.8 octaves below and above the base.
+        PatchModulation(source: (6, "out"), target: (4, "cutoff"), depth: 0.08),
+        // Envelope to cutoff. The envelope is unipolar, so it only opens
+        // the filter: up to 3 octaves above the base at the peak.
+        PatchModulation(source: (7, "out"), target: (4, "cutoff"), depth: 0.3),
+    ],
+)
