@@ -348,18 +348,40 @@ impl Ui {
     /// The centre of the panel control bound to a parameter, by the
     /// parameter's stable name.
     pub fn control(&mut self, module: u32, param: &str) -> Point {
+        let rect = self.control_bounds(module, param);
+        self.canvas().to_window(rect.center())
+    }
+
+    /// The centre of a knob's dial and the radius halfway across its range
+    /// ring, in window coordinates, by the parameter's stable name. On a
+    /// modulated knob a press on that circle drags depth (modulation.md,
+    /// Arc drag).
+    pub fn range_ring(&mut self, module: u32, param: &str) -> (Point, f32) {
+        let rect = self.control_bounds(module, param);
+        let (centre, radius) = loom_canvas::knob_range_ring(rect);
+        let canvas = self.canvas();
+        (canvas.to_window(centre), radius * canvas.camera.zoom)
+    }
+
+    /// The cell of the panel control bound to a parameter, in world
+    /// coordinates.
+    pub fn control_bounds(&mut self, module: u32, param: &str) -> Rectangle {
         let target = screenshot::Named {
             module,
             name: param.to_string(),
         };
         let (_, widget) = screenshot::find_control(&self.app.controller, &target).unwrap_or_else(|e| panic!("{e}"));
-        let rect = self
-            .app
+        self.app
             .scene
             .module(module)
             .and_then(|m| m.widget_bounds(widget))
-            .expect("the scene has every panel widget");
-        self.canvas().to_window(rect.center())
+            .expect("the scene has every panel widget")
+    }
+
+    /// Holds these modifier keys, or none, for the steps that follow, as
+    /// the runtime reports a change in the held modifiers.
+    pub fn hold(&mut self, modifiers: keyboard::Modifiers) -> Vec<Message> {
+        self.step(&[Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers))])
     }
 
     /// The bounds of the first text widget that reads exactly `content`,
@@ -534,5 +556,129 @@ mod tests {
         assert_eq!(ui.app.selection, [4].into());
         let row = ui.text("Cutoff").expect("the inspector shows the Cutoff row");
         assert!(!canvas.bounds.intersects(&row), "the row {row:?} is beside the canvas");
+    }
+
+    /// Subtractive with the filter envelope (module 5) modulating the
+    /// filter cutoff (module 4) at the default depth. Returns that depth.
+    fn modulated_cutoff() -> (Ui, f32) {
+        let mut ui = Ui::open("subtractive.ron");
+        let cutoff = ui
+            .app
+            .controller
+            .graph()
+            .node(ModuleId(4))
+            .expect("filter")
+            .descriptor
+            .param_index("cutoff")
+            .expect("cutoff");
+        let _ = ui.app.update(Message::Assign {
+            source: OutputRef {
+                module: ModuleId(5),
+                port: 0,
+            },
+            module: 4,
+            index: cutoff,
+        });
+        ui.redraw();
+        let depth = env_depth(&ui);
+        (ui, depth)
+    }
+
+    /// The depth of the one assignment from the filter envelope.
+    fn env_depth(ui: &Ui) -> f32 {
+        let source = OutputRef {
+            module: ModuleId(5),
+            port: 0,
+        };
+        ui.app
+            .controller
+            .graph()
+            .assignments()
+            .find(|(_, a)| a.source == source)
+            .expect("the envelope modulates the cutoff")
+            .1
+            .depth
+    }
+
+    /// A press on the ring of a modulated knob, at its side and at its top
+    /// edge above the knob's cell, drags depth: up raises it. A press on
+    /// the knob's body turns the knob and leaves the depth (#217).
+    #[test]
+    fn the_range_ring_takes_a_depth_drag_at_its_side_and_top() {
+        let (mut ui, start) = modulated_cutoff();
+        let cutoff_value = |ui: &Ui| ui.app.controller.graph().node(ModuleId(4)).expect("filter").params[0];
+        let (centre, radius) = ui.range_ring(4, "cutoff");
+        let cell = {
+            let rect = ui.control_bounds(4, "cutoff");
+            ui.canvas().to_window(Point::new(rect.x, rect.y))
+        };
+
+        // 20 pixels up is a tenth of the range, as on the knob.
+        let side = Point::new(centre.x + radius, centre.y);
+        ui.drag(side, Point::new(side.x, side.y - 20.0), 4);
+        let after_side = env_depth(&ui);
+        assert!((after_side - (start + 0.1)).abs() < 1e-4, "{start} -> {after_side}");
+
+        let top = Point::new(centre.x, centre.y - radius);
+        assert!(top.y < cell.y, "the top of the ring {top:?} is above the cell at {cell:?}");
+        ui.drag(top, Point::new(top.x, top.y - 20.0), 4);
+        let after_top = env_depth(&ui);
+        assert!((after_top - (after_side + 0.1)).abs() < 1e-4, "{after_side} -> {after_top}");
+
+        let before = cutoff_value(&ui);
+        ui.drag(centre, Point::new(centre.x, centre.y - 20.0), 4);
+        assert_ne!(cutoff_value(&ui), before, "the body press turned the knob");
+        assert_eq!(env_depth(&ui), after_top, "the body press left the depth");
+    }
+
+    /// With Shift held, the same drag changes the depth by the knob's fine
+    /// ratio of a plain drag: a tenth (#217).
+    #[test]
+    fn shift_gives_fine_depth_steps() {
+        let (mut ui, start) = modulated_cutoff();
+        let (centre, radius) = ui.range_ring(4, "cutoff");
+        let side = Point::new(centre.x + radius, centre.y);
+        let up = Point::new(side.x, side.y - 20.0);
+
+        ui.drag(side, up, 4);
+        let plain = env_depth(&ui) - start;
+        ui.hold(keyboard::Modifiers::SHIFT);
+        ui.drag(side, up, 4);
+        ui.hold(keyboard::Modifiers::default());
+        let fine = env_depth(&ui) - start - plain;
+
+        assert!((plain - 0.1).abs() < 1e-4, "{plain}");
+        assert!((fine - plain * 0.1).abs() < 1e-5, "plain {plain}, fine {fine}");
+    }
+
+    /// A long drag stops at depth 1 going up and at -1 going down (#217).
+    #[test]
+    fn a_long_depth_drag_clamps_at_one() {
+        let (mut ui, _) = modulated_cutoff();
+        let (centre, radius) = ui.range_ring(4, "cutoff");
+        let side = Point::new(centre.x + radius, centre.y);
+
+        // 200 pixels is the whole range of the knob, so 600 crosses it.
+        ui.drag(side, Point::new(side.x, side.y - 600.0), 30);
+        assert_eq!(env_depth(&ui), 1.0);
+        ui.drag(side, Point::new(side.x, side.y + 600.0), 30);
+        assert_eq!(env_depth(&ui), -1.0);
+    }
+
+    /// One arc drag is one undo step: Ctrl or Cmd+Z brings back the depth
+    /// from before it (#217).
+    #[test]
+    fn one_depth_drag_is_one_undo_step() {
+        let (mut ui, start) = modulated_cutoff();
+        let steps = ui.app.history.len();
+        let (centre, radius) = ui.range_ring(4, "cutoff");
+        let side = Point::new(centre.x + radius, centre.y);
+
+        ui.drag(side, Point::new(side.x, side.y - 40.0), 8);
+        assert!((env_depth(&ui) - (start + 0.2)).abs() < 1e-4, "{}", env_depth(&ui));
+        assert_eq!(ui.app.history.len(), steps + 1, "the drag is one step");
+
+        ui.tap(keyboard::Key::Character("z".into()), keyboard::Modifiers::COMMAND);
+        assert_eq!(env_depth(&ui), start);
     }
 }

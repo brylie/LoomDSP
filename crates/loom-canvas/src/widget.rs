@@ -3647,9 +3647,8 @@ mod tests {
     fn the_range_ring_shows_the_resize_cursor_above_the_cell() {
         let (scene, values) = modulated_scene();
         let rect = scene.module(2).unwrap().widget_bounds(0).unwrap();
-        let centre = crate::controls::knob_centre(rect);
         // On the ring, just above the cell: the hit test finds the tile.
-        let distance = (crate::controls::RANGE_RING_INNER + crate::controls::RANGE_RING_OUTER) * 0.5;
+        let (centre, distance) = crate::controls::knob_range_ring(rect);
         let above = Point::new(centre.x, centre.y - distance);
         assert!(above.y < rect.y, "the point should be above the cell");
         let none = BTreeSet::new();
