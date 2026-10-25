@@ -71,6 +71,8 @@ The longer version, with diagrams, is [docs/dev/architecture.md](docs/dev/archit
 
 Before finishing a change, add `///` doc comments to new structs, functions, and tests, then run `prek run --all-files` (fmt, clippy, typos, file checks) and `mise run check` (the checks CI runs, including tests with the 80% line coverage minimum). The tools come from `mise.toml`; in a new worktree, run `mise trust` and `mise install` first. Without the trust step mise refuses to read `mise.toml`, so `mise run check` and every hook that uses mise fail. CONTRIBUTING.md lists each check and the coverage and code quality gates. Never bypass the hooks with `--no-verify`; fix the cause instead.
 
+Build into the target folder cargo already uses. Do not set `CARGO_TARGET_DIR` or pass `--target-dir` to make a folder of your own, even when another build holds the lock. Each new folder is a full build of 5 GB or more, and these folders stay on disk after the session ends. Waiting for the lock costs minutes; a full disk stops every session. To clear space, run `cargo clean` instead.
+
 ## Hard rules
 
 1. **Real-time safety.** Nothing reachable from `Engine::process` or `Module::process` may allocate, free, lock, wait, print, or do I/O. `tests/no_alloc.rs` enforces allocation rules.
