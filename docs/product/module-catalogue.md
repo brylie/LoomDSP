@@ -48,7 +48,7 @@ Timing is phase-driven: a ramp from 0 to 1 sets where in a cycle a module is ([P
 | MT-PHASE-04 | Phase reset | Restarts a phase at zero on a trigger. | | P2 | FR-LIB-01 | Planned |
 | MT-PHASE-05 | Phase warp | Changes how a phase moves within each cycle without changing its period: offset, bend, S-curve, skew, reverse, mirror, and smoothing that keeps the wrap point. | | P2 | FR-LIB-01 | Planned |
 | MT-PHASE-06 | Phase split | Divides one cycle into N parts and outputs a phase for each part. | | P3 | New | Planned |
-| MT-PHASE-08 | Phase wrap and fold | Brings any signal into the 0 to 1 phase range, by wrapping it around or by folding it back at the edges. | | P1 | FR-LIB-01 | Specified (`loom.phase.wrap`, [P1 modules](../design/p1-modules.md)) |
+| MT-PHASE-08 | Phase wrap and fold | Brings any signal into the 0 to 1 phase range, by wrapping it around or by folding it back at the edges. | | P1 | FR-LIB-01 | Built (`loom.phase.wrap`) |
 | MT-PHASE-07 | Span phase | A phase that covers N bars and is anchored to bar 1, so it has the same value at the same musical time after any jump. | | P3 | New | Planned |
 
 ## Sound sources
@@ -119,11 +119,11 @@ Modulation assignments already scale and offset any parameter (ADR-0014), so the
 |---|---|---|---|---|---|---|
 | MT-LEVEL-01 | Constant | Outputs a fixed value in a chosen unit: a plain number, decibels (as a level), or pitch. Built as one module per unit. | Smoothing | P1 | FR-LIB-05 | Built (`loom.math.constant`: a plain number; `loom.level.constant`: decibels; `loom.pitch.constant`: semitones; see [P1 modules](../design/p1-modules.md#constant-family-mt-level-01)). Ratio is withdrawn from this entry |
 | MT-LEVEL-02 | Amplifier | Scales a signal by a control signal, with linear or exponential response. | | P1 | FR-LIB-05 | Built (`loom.level.amp`) |
-| MT-LEVEL-03 | Scale | Multiplies by a factor from -1 to +1 (so it can invert) and adds an offset, or maps one range onto another, including bipolar to unipolar and back. | | P1 | FR-LIB-05 | Specified (`loom.level.scale`, [P1 modules](../design/p1-modules.md)) |
+| MT-LEVEL-03 | Scale | Multiplies by a factor from -1 to +1 (so it can invert) and adds an offset, or maps one range onto another, including bipolar to unipolar and back. | | P1 | FR-LIB-05 | Built (`loom.level.scale`) |
 | MT-LEVEL-04 | Slew | Limits how fast a signal can rise or fall, with separate times for each direction. | | P1 | FR-LIB-04 | Specified (`loom.level.slew`, [P1 modules](../design/p1-modules.md)) |
-| MT-LEVEL-05 | Clamp | Keeps a signal between a lower and an upper limit. | | P1 | FR-LIB-05 | Specified (`loom.level.clamp`, [P1 modules](../design/p1-modules.md)) |
-| MT-MIX-01 | Mixer | Sums several inputs, with level, pan, and mute per channel. At unity gain it is a quick merge. P1 builds level and mute. Pan comes later, with stereo signals. | | P1 | FR-LIB-05 | Specified (`loom.mix.mixer`, [P1 modules](../design/p1-modules.md)) |
-| MT-MIX-02 | Crossfade | Blends two signals by a control, with an equal-power or linear law. | | P1 | FR-LIB-05 | Specified (`loom.mix.crossfade`, [P1 modules](../design/p1-modules.md)) |
+| MT-LEVEL-05 | Clamp | Keeps a signal between a lower and an upper limit. | | P1 | FR-LIB-05 | Built (`loom.level.clamp`) |
+| MT-MIX-01 | Mixer | Sums several inputs, with level, pan, and mute per channel. At unity gain it is a quick merge. P1 builds level and mute. Pan comes later, with stereo signals. | | P1 | FR-LIB-05 | Built (`loom.mix.mixer`) |
+| MT-MIX-02 | Crossfade | Blends two signals by a control, with an equal-power or linear law. | | P1 | FR-LIB-05 | Built (`loom.mix.crossfade`) |
 | MT-MIX-03 | Stereo tool | Pans, sets width, converts between left/right and mid/side, and splits or joins channels. P1 builds join and split. Pan, width, and mid/side come later. | | P1 | FR-SIG-07 | Planned |
 | MT-ROUTE-01 | Selector | Picks one of N inputs. It steps to the next on a trigger, jumps to the input a control value points at, or picks at random. | Seed, Smoothing | P2 | New | Planned |
 | MT-ROUTE-02 | Distributor | Sends one input to one of N outputs, with the same three ways to choose. | Seed | P2 | New | Planned |
