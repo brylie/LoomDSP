@@ -459,6 +459,116 @@ impl Module for Scale {
     }
 }
 
+/// `loom.level.slew` (MT-LEVEL-04): limits how fast a signal can change.
+pub static SLEW: ModuleDescriptor = ModuleDescriptor {
+    id: "loom.level.slew",
+    version: 1,
+    name: "Slew",
+    category: "Level",
+    description: "Limits how fast a signal can rise and fall. Times are per 1.0 of change, so a glide takes the same time on any signal.",
+    inputs: &[PortSpec {
+        name: "in",
+        label: "In",
+        signal: SignalType::Modulation,
+        description: "The signal to slow down.",
+        default: PortDefault::Value(0.0),
+        polarity: Polarity::Bipolar,
+        channels: Channels::PerChannel,
+    }],
+    outputs: &[PortSpec {
+        name: "out",
+        label: "Out",
+        signal: SignalType::Modulation,
+        description: "The input, moving toward it at a limited speed.",
+        default: PortDefault::Value(0.0),
+        polarity: Polarity::Bipolar,
+        channels: Channels::PerChannel,
+    }],
+    params: &[
+        ParamSpec {
+            name: "rise",
+            label: "Rise",
+            description: "The time to go up by 1.0.",
+            min: 0.0005,
+            max: 10.0,
+            default: 0.05,
+            unit: "s",
+            options: ParamOptions::DEFAULT,
+        }
+        .logarithmic(),
+        ParamSpec {
+            name: "fall",
+            label: "Fall",
+            description: "The time to go down by 1.0.",
+            min: 0.0005,
+            max: 10.0,
+            default: 0.05,
+            unit: "s",
+            options: ParamOptions::DEFAULT,
+        }
+        .logarithmic(),
+    ],
+    role: ModuleRole::Dsp(|config| {
+        Box::new(Slew {
+            sample_rate: config.sample_rate,
+            rise: 0.05,
+            fall: 0.05,
+            out: 0.0,
+            fresh: true,
+        })
+    }),
+    panel: Panel::new(6, 3, &[Widget::knob(0, 0, "rise"), Widget::knob(3, 0, "fall")]),
+    displays: &[],
+};
+
+struct Slew {
+    sample_rate: f32,
+    rise: f32,
+    fall: f32,
+    out: f32,
+    /// True until the first frame, which sets the output with no ramp.
+    fresh: bool,
+}
+
+impl Module for Slew {
+    fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        let (rise_mod, fall_mod) = (io.modulated(0), io.modulated(1));
+        let ([input], [out]) = io.split::<1, 1>();
+        for (i, (out, &x)) in out.iter_mut().zip(input).enumerate() {
+            if x.is_finite() {
+                if self.fresh {
+                    // A new slew must not sweep up from 0.
+                    self.out = x;
+                    self.fresh = false;
+                } else {
+                    let rise = rise_mod.map_or(self.rise, |s| s[i]).max(SLEW.params[0].min);
+                    let fall = fall_mod.map_or(self.fall, |s| s[i]).max(SLEW.params[1].min);
+                    // Constant rate: 1.0 of change takes `rise` or `fall` seconds.
+                    if x > self.out {
+                        self.out = (self.out + 1.0 / (rise * self.sample_rate)).min(x);
+                    } else {
+                        self.out = (self.out - 1.0 / (fall * self.sample_rate)).max(x);
+                    }
+                }
+            }
+            *out = self.out;
+        }
+    }
+
+    fn set_param(&mut self, index: usize, value: f32) {
+        match index {
+            0 => self.rise = value,
+            1 => self.fall = value,
+            _ => {}
+        }
+    }
+
+    fn reset(&mut self) {
+        self.out = 0.0;
+        self.fresh = true;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -589,5 +699,55 @@ mod shaping_tests {
         let input = [-1.0, 0.0, 0.5, 1.0];
         assert_eq!(process(&SCALE, &[(0, -1.0)], &input), [1.0, 0.0, -0.5, -1.0]);
         assert_eq!(process(&SCALE, &[(0, 0.5), (1, 0.5)], &input), [0.0, 0.5, 0.75, 1.0]);
+    }
+}
+
+#[cfg(test)]
+mod slew_tests {
+    use super::*;
+    use loom_core::testing::run;
+
+    /// Runs the slew over `input` with the given rise and fall times.
+    fn slew(rise: f32, fall: f32, input: &[f32]) -> Vec<f32> {
+        let ModuleRole::Dsp(create) = SLEW.role else {
+            unreachable!()
+        };
+        let mut m = create(&loom_core::ModuleConfig {
+            sample_rate: 48_000.0,
+            max_block: input.len(),
+        });
+        m.set_param(0, rise);
+        m.set_param(1, fall);
+        m.reset();
+        let mut out = vec![0.0; input.len()];
+        run(m.as_mut(), 48_000.0, &[input], &[true], &mut [&mut out], &[]);
+        out
+    }
+
+    /// Going up by 1.0 takes `rise` seconds, down takes `fall`, and the
+    /// output stops on arrival.
+    #[test]
+    fn rises_and_falls_at_a_constant_rate() {
+        // 10 ms at 48 kHz is 480 samples per 1.0 of change.
+        let mut input = vec![0.0];
+        input.extend(vec![1.0; 600]);
+        let out = slew(0.01, 0.02, &input);
+        assert_eq!(out[0], 0.0);
+        assert!((out[240] - 0.5).abs() < 1e-3, "{}", out[240]);
+        assert!((out[480] - 1.0).abs() < 1e-3, "{}", out[480]);
+        assert_eq!(out[600], 1.0, "stops on arrival");
+        // Fall by 1.0 in 20 ms, so 0.5 at 480 samples.
+        let mut input = vec![1.0];
+        input.extend(vec![0.0; 1_000]);
+        let out = slew(0.01, 0.02, &input);
+        assert_eq!(out[0], 1.0);
+        assert!((out[480] - 0.5).abs() < 1e-3, "{}", out[480]);
+    }
+
+    /// A new slew starts at its input instead of sweeping from 0.
+    #[test]
+    fn starts_at_its_input() {
+        let out = slew(1.0, 1.0, &[0.7; 4]);
+        assert_eq!(out, [0.7; 4]);
     }
 }
