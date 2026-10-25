@@ -34,7 +34,7 @@ flowchart BT
 | `loom-test` | The module test harness: renders one module, checks block-size invariance, and compares with reference WAV files. | Desktop only, for tests. Only `dev-dependencies` use it. |
 | `loom-host-desktop` | Connects the engine to audio devices (cpal) and MIDI inputs (midir). For development, can also play it from a timer with no device, play it only when a test steps a tape (`AudioOutput::stepped`), and record it to a WAV file across many streams (`Recorder`). | Desktop only. The only crate that knows about audio APIs. |
 | `loom-canvas` | The patch canvas: an Iced widget drawn by one custom GPU primitive. | Knows nothing about the engine. It draws a `Scene` and reports gestures. |
-| `loom-cli` | The `loom` command: list modules, check, render, play, stress-test. | |
+| `loom-cli` | The `loom` command: list modules, check, render, play, stress-test, measure WAV files, and act as a virtual MIDI controller for tests. | |
 | `loom-app` | The desktop app: canvas, inspector, audio, MIDI. | Owns the application state. |
 
 The engine crates never depend on UI or device crates. That keeps the same engine usable in the app, the command-line tool, tests, a future plugin, and the browser (NFR-PORT-02).
@@ -52,10 +52,18 @@ flowchart LR
     subgraph audio[Audio thread]
         engine[Engine<br/>runs the Schedule]
     end
+    subgraph watchers[App watcher threads]
+        monitor[Telemetry thread<br/>monitor.rs]
+        lights[Light watcher<br/>lights.rs]
+        learn[Learn watcher<br/>learn.rs]
+    end
     controller -- "commands: new schedule,<br/>new module, parameter" --> engine
     engine -- "garbage: old schedules,<br/>removed modules" --> controller
-    engine -- "telemetry: meters,<br/>scope samples" --> app
-    ports -- "notes (SharedMidi)" --> engine
+    engine -- "telemetry queues:<br/>meters, scope samples" --> monitor
+    engine -- "display value table" --> lights
+    engine -- "MIDI feedback table" --> learn
+    monitor & lights & learn -- "messages, only<br/>on visible change" --> app
+    ports -- "notes and control<br/>changes (SharedMidi)" --> engine
     app -- "Hold note" --> engine
 ```
 
@@ -66,6 +74,25 @@ Telemetry for live views also leaves the audio thread through bounded queues: on
 The patch transport (tempo, time signature, running, position) lives in the engine, not in the schedule, so editing the patch never moves it ([ADR-0015](../adr/0015-one-transport-per-patch.md)). The controller changes it with commands, applied at buffer starts. At the start of each block the engine fills one shared buffer per transport signal that some unconnected input follows, such as bar phase. Details are in the [clock and transport specification](../design/clock.md).
 
 MIDI inputs and the Hold note button share one queue through a mutex (`SharedMidi`). Only the sending threads take that lock. The audio thread reads the queue without one.
+
+The last stage of every block is the output safety stage: a DC blocker, a limiter at -1 dBFS, and a fade-in, before the final clip to -1 to 1 (ADR-0019, `loom-core/src/safety.rs`). Cables inside the patch are never clipped. Details are in the [output safety specification](../design/output-safety.md).
+
+## Live data from the engine
+
+The UI shows four kinds of live data. Each leaves the audio thread without a lock or an allocation (FR-VIS-04), and each takes the path that suits it.
+
+| Data | How it leaves the engine | Who reads it in the app |
+|---|---|---|
+| Meter readings and scope samples, from port probes | Two bounded queues (`loom-core/src/telemetry.rs`). Every reading counts, so they queue. When a queue is full, the new message is dropped and counted. | The telemetry thread (`crates/loom-app/src/monitor.rs`). It drains the queues about 30 times a second, turns readings into falling levels, and wakes the UI only when a meter level moves by one of 256 steps. |
+| Display values, such as the light for a gate | A latest-value table (`loom-core/src/display.rs`): up to 4 atomic floats per module slot (`MAX_DISPLAYS`), allocated once with the engine. The engine stores after each block, through `Module::displays`. | The light watcher (`crates/loom-app/src/lights.rs`). It reads the lights on screen through a `DisplayReader` about 30 times a second, and wakes the UI only when a light's brightness moves by one of 256 levels. `Controller::display` reads one value on the UI thread. |
+| Live values of modulated parameters, for the dot on a knob | A latest-value table like the one for display values (`loom-core/src/live.rs`), with one cell per modulated parameter. | The UI thread, every frame, but only while audio runs and at least one assignment is on. |
+| MIDI control changes that move mapped parameters | A feedback table of atomics (`loom-core/src/midi_map.rs`), one entry per MIDI control. The engine applies the mapping itself, then records the value with a sequence number. | The learn watcher (`crates/loom-app/src/learn.rs`), about every 15 ms. When a control change arrives, the app calls `Controller::sync_midi`, which copies the new values into the graph, so the screen shows and saves what plays. |
+
+Why two kinds of path: a meter needs every reading to compute levels, so it uses a queue. A light or a knob dot needs only the latest value, so a table is enough, and a table can never fill up. In a table, each slot or cell also stores who owns it, and a reader checks the owner before and after reading. So a module in a reused slot never shows the values of the module that was there before.
+
+Every message to the app redraws the window. That is why the watchers run on their own threads and send a message only when something on screen changes: an idle patch draws nothing.
+
+A screen edit and a MIDI control change on the same parameter can race. The controller changes the graph at once, but the engine applies the edit at its next buffer. So a screen edit on a mapped parameter carries an edit token, and the engine records when it applied it, in the same sequence as control changes. `Controller::sync_midi` then applies a control change only if the engine received it after the edit. Details are in the [MIDI learn specification](../design/midi-learn.md).
 
 ## Life of an edit
 
@@ -89,6 +116,7 @@ The same path carries every structural edit: add, remove, connect, disconnect. P
 | Camera | `camera.rs` | Pan and zoom. Converts between world and screen positions. |
 | GPU data | `gpu.rs` | Turns a scene into instances: one rounded rectangle per tile, header, and port, and one entry per cable. Uploaded only when the generation changes. |
 | Shaders | `canvas.wgsl` | Rounded rectangles shade only their own pixels. Cables are curves built in the vertex shader. Pan and zoom change one small uniform buffer, which also holds the opacity of cables that are not in focus. |
+| Panel controls | `controls.rs` | Knobs, toggles, radio buttons, buttons, lights, and meters on tiles. Their live values live in `PanelValues`, which has its own generation number and its own GPU buffers. Turning a knob or a light changing rebuilds only these buffers, never the tiles, ports, or cables. |
 | Widget | `widget.rs` | Mouse and keyboard handling, and the per-frame overlay: selection and hover outlines, and the cables of selected and hovered modules drawn in front. Text goes through Iced and is skipped when too small to read. |
 
 Without the app's Measure toggle, the window redraws only when something changes.
@@ -127,6 +155,8 @@ pub static DIVIDE: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Gate,
             description: "The triggers to count.",
             default: PortDefault::Value(0.0),
+            polarity: Polarity::Unipolar,
+            channels: Channels::Downmix,
         },
         // ...
     ],
@@ -152,6 +182,8 @@ pub static DIVIDE: ModuleDescriptor = ModuleDescriptor {
 ```
 
 Names (`id`, port and parameter `name`) are stable IDs that patch files store. Labels and descriptions are text for people and can change at any time (ADR-0016). `loom-modules` checks at compile time that none is empty: `const _: () = loom_core::assert_documented(ALL);`. See [port and parameter text](../design/port-and-parameter-text.md).
+
+An unconnected input reads its `default`: a fixed value, or a transport signal such as `PortDefault::BarPhase`. A module reads the transport inside `process` with `ctx.transport()`, and takes the position at a frame with `TransportInfo::position_at(i)`, so the result is the same at any block size ([clock and transport](../design/clock.md)).
 
 ## Where to start
 

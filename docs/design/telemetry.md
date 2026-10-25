@@ -6,7 +6,7 @@ How meter and scope data travels from the audio thread to the UI.
 - **Decision behind it:** [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md) (lock-free boundary between control and audio threads).
 - **Requirements:** FR-VIS-04, NFR-RT-01, NFR-RT-07. It serves FR-VIS-01 (live values on ports) and FR-VIS-02 (scope on any cable).
 - **Issue:** [#6](https://github.com/brylie/LoomDSP/issues/6).
-- **Code:** `crates/loom-core/src/telemetry.rs`, `Engine::send_telemetry` in `engine.rs`, probes in `compile.rs`. App side: `crates/loom-app/src/live.rs`.
+- **Code:** `crates/loom-core/src/telemetry.rs`, `Engine::send_telemetry` in `engine.rs`, probes in `compile.rs`. App side: `crates/loom-app/src/live.rs` (probes and levels) and `monitor.rs` (the telemetry thread).
 
 ## How it works
 
@@ -63,6 +63,8 @@ The app hands the `Telemetry` handle from `create_engine` to a telemetry thread 
 
 The planned direction for displays: signal displays are modules in the grid, not views laid over the canvas (ADR-0011, everything is a module). A scope module saves with the patch, sits next to the signal it shows, travels inside sub-patches, and can go on a front panel. It animates only while its tile is visible and large enough to read.
 
+Module display values, such as the brightness of a light, do not use these queues. Only the latest value matters for them, so they use a latest-value table instead ([panels](panels.md#display-values-69)).
+
 ## Paired probes
 
 **Status:** Agreed ([#280](https://github.com/brylie/LoomDSP/issues/280)).
@@ -87,5 +89,4 @@ The XY scope ([panel widgets](panel-widgets.md#xy-scope)) draws one signal again
 ## Open points
 
 - The app draws meters (the level meter module and meter widgets) but not scopes yet (FR-VIS-02). Planned, in the [panels specification](panels.md): a scope module that reads its probe through these queues, drawn by the canvas inside its tile, and an activity display without constant motion (FR-VIS-01). Meters must not brighten cables: pulsing cables are tiring and hide the hover focus in large patches.
-- Module display values (a sequencer's current step, an envelope's stage) need a path of their own, beside port probes. See the panels specification.
 - Probes on one port are independent. Two views of the same port send the data twice.
