@@ -304,7 +304,9 @@ pub static SCALE: ModuleDescriptor = ModuleDescriptor {
             label: "Phase",
             signal: SignalType::Phase,
             description: "The phase to scale.",
-            default: PortDefault::Value(0.0),
+            // An unpatched Phase Scale follows the bar, so it works as a
+            // clock multiplier with no cables. A flat 0 would never wrap.
+            default: PortDefault::BarPhase,
             polarity: Polarity::Unipolar,
             channels: Channels::Downmix,
         },
