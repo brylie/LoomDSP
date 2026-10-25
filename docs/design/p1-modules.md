@@ -33,7 +33,7 @@ The catalogue type is built as three modules, one per unit. *Why not one module 
 | Module | Output | Parameter | Range | Default |
 |---|---|---|---|---|
 | `loom.math.constant` (exists) | The value, a plain number | `value` | Offers the [control ranges](control-ranges.md) | 0 |
-| `loom.level.constant` Constant (level) | `out`: a linear level factor | `level`, in dB | -60 to 12 dB, decibel mapping ([#99](https://github.com/brylie/LoomDSP/issues/99)) | 0 dB |
+| `loom.level.constant` Constant (level) | `out`: a linear level factor | `level`, in dB | -60 to 12 dB, linear mapping in dB (the decibel mapping with -inf at the bottom, [#99](https://github.com/brylie/LoomDSP/issues/99), comes later) | 0 dB |
 | `loom.pitch.constant` Constant (pitch) | `out` (pitch signal): 0.1 per octave | `semitones` | -48 to 48 | 0 |
 
 - Level output is `10^(dB/20)`. Pitch output is `semitones / 120`. *Why:* ADR-0007 gives the standard units of cables.
