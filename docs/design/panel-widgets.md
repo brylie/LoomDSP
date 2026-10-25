@@ -262,7 +262,7 @@ One signal against another: the first moves the trace left and right, the second
 | Panel | The XY scope widget, a knob for `time`, a radio for `range`, a toggle for `rotate` |
 
 - The app probes the pair `(x_out, y_out)` with a [paired probe](telemetry.md#paired-probes). An unconnected input reads 0 and draws a dot or a line along an axis.
-- **`time`** is how much history the trace shows, at most 2048 points. Older points fade, so the newest part is brightest.
+- **`time`** is how much history the trace shows. The trace draws at most 2048 points. When `time` holds more frames than that, the app keeps every Nth pair, with `N` the frame count divided by 2048, rounded up (at 48 kHz, 0.1 s is 4800 frames, so `N` is 3). *Why:* the knob then changes the length of the trace over its whole range, and the point count stays fixed. Older points fade, so the newest part is brightest.
 - **`rotate`** (mid and side view) turns the trace by 45 degrees: with the new axes `(x + y) / √2` across and `(y − x) / √2` up. A mono signal (`x` equal to `y`) is then a vertical line. The audio is untouched.
 - **Binds to:** two outputs of its module, `x_out` and `y_out`. The module is the Probe (MT-VIEW-01) in XY mode: two inputs, each passed through to an output, as the level meter does.
 - **Data: a paired probe.** One telemetry probe carries both outputs' samples from the same block, interleaved, in one chunk. *Why not two scope probes:* each queue drops chunks on its own when full, so two probes can pair a sample of `x` with a sample of `y` from another block. The trace would then show shapes that are not in the signal.

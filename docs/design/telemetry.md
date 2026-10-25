@@ -76,7 +76,7 @@ The XY scope ([panel widgets](panel-widgets.md#xy-scope)) draws one signal again
 - **Feedback loops.** A pair inside a loop sees every frame, like a scope, because loop modules run one frame at a time and the copy happens after the block.
 - **Both ports must be outputs of the same patch level.** The registry refuses nothing else. If `x_output` and `y_output` are the same port, the trace is a diagonal line.
 - No sound change (rule 6); a test checks bit-identical output with and without a pair. The `no_alloc` test covers adding and removing a pair.
-- App side: `XyTrace` keeps the last `time` seconds of pairs (at most 2048 points) for drawing.
+- App side: `XyTrace` keeps the last `time` seconds of pairs. It draws at most 2048 points, keeping every Nth pair when there are more ([XY scope](panel-widgets.md#xy-scope)).
 
 ## Tests
 

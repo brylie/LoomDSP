@@ -543,7 +543,7 @@ What P1 builds. The rest of this spec is P2.
 - **Saved.** The patch file gets an optional `size: (w, h)` next to the position, in grid units. A tile without one has its declared size. Files without the field load unchanged (ADR-0008).
 - **Undo.** One resize drag is one undo step. The size is part of the clipboard: paste keeps it.
 - **Cost.** A resize changes the scene once, when the drag ends, and shows a live outline while dragging. Nothing is rebuilt per frame (ADR-0010).
-- **Keyboard.** With a growable tile selected, Shift-arrow keys resize by one grid unit. *Why:* NFR-UX-01.
+- **Keyboard.** With a growable tile selected, Alt-arrow keys resize by one grid unit. Shift-arrow still moves the tile by 10 ([Keyboard without a mouse](#keyboard-without-a-mouse)). *Why:* NFR-UX-01. A separate modifier means the two rules never both apply to one key.
 
 ### Acceptance criteria: P1 additions
 
