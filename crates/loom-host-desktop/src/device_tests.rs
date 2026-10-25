@@ -145,6 +145,14 @@ fn level_and_step(samples: &[f32]) -> (f32, f32) {
         samples.get(at + 1).copied().unwrap_or(0.0),
         samples.len()
     );
+    // The last frame at the level, and the next one after the step: a cut
+    // stop never comes back, a dropout does.
+    let last = samples.iter().rposition(|x| x.abs() >= level).unwrap_or(0);
+    let back = samples
+        .get(at + 1..)
+        .and_then(|rest| rest.iter().position(|x| x.abs() >= level * 0.9))
+        .map(|i| at + 1 + i);
+    eprintln!("last frame at the level: {last}; back at the level after the step: {back:?}");
     assert!(
         level > 0.01,
         "the loopback delivered sound (level {level}). On macOS the terminal needs microphone access."
