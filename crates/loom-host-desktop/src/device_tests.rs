@@ -58,10 +58,12 @@ fn callbacks(options: &AudioOptions) -> Option<u64> {
 /// Plays `examples/dev/check-dc.ron` (a Constant of 0.5, output safety
 /// Off) into the loopback device named by `LOOM_LOOPBACK` with buffers
 /// of [`LOOPBACK_BUFFER`] frames at [`LOOPBACK_RATE`], captures the loopback's input side, and stops
-/// the stream with `stop` after a fade-out request. Returns the
-/// captured left channel and the sample rate, or `None` when
+/// the stream with `stop` after a fade-out request. `stop` returns true if
+/// the stream stopped on the engine's silence, false if it was cut at the
+/// limit; the answer is printed, so a failed check says which it was.
+/// Returns the captured left channel and the sample rate, or `None` when
 /// `LOOM_LOOPBACK` is not set.
-fn capture_a_stop(stop: impl FnOnce(RunningAudio)) -> Option<(Vec<f32>, u32)> {
+fn capture_a_stop(stop: impl FnOnce(RunningAudio) -> bool) -> Option<(Vec<f32>, u32)> {
     // Two tests playing into one loopback at once would hear each
     // other, so one capture runs at a time. A failed test poisons the
     // lock; the next one still runs.
@@ -109,7 +111,8 @@ fn capture_a_stop(stop: impl FnOnce(RunningAudio)) -> Option<(Vec<f32>, u32)> {
     let audio = output.start(parts.engine).unwrap();
     std::thread::sleep(Duration::from_millis(600));
     parts.controller.fade_out().unwrap();
-    stop(audio);
+    let silent = stop(audio);
+    eprintln!("stopped on the engine's silence: {silent}");
     // Long enough for the device to play out what it was handed.
     std::thread::sleep(Duration::from_millis(400));
     let report = capture.stop().unwrap();
@@ -127,10 +130,21 @@ fn capture_a_stop(stop: impl FnOnce(RunningAudio)) -> Option<(Vec<f32>, u32)> {
 fn level_and_step(samples: &[f32]) -> (f32, f32) {
     let level = samples.iter().fold(0.0f32, |m, x| m.max(x.abs()));
     let held = samples.iter().position(|x| x.abs() >= level).unwrap_or(0);
-    let step = samples[held..]
+    let (at, step) = samples[held..]
         .windows(2)
-        .fold(0.0f32, |m, w| m.max((w[1] - w[0]).abs()));
-    eprintln!("captured level {level}, largest step {step}");
+        .enumerate()
+        .fold((0, 0.0f32), |(at, m), (i, w)| {
+            let d = (w[1] - w[0]).abs();
+            if d > m { (held + i, d) } else { (at, m) }
+        });
+    // Where the step is tells a cut stop from a dropout inside the stream:
+    // a cut leaves silence after it, a dropout returns to the level.
+    eprintln!(
+        "captured level {level}, largest step {step}: {} -> {} at frame {at} of {}, level held from frame {held}",
+        samples[at],
+        samples.get(at + 1).copied().unwrap_or(0.0),
+        samples.len()
+    );
     assert!(
         level > 0.01,
         "the loopback delivered sound (level {level}). On macOS the terminal needs microphone access."
@@ -168,9 +182,7 @@ const STOPS: usize = 5;
 #[ignore = "needs a loopback audio device"]
 fn a_stop_with_large_buffers_fades_out_on_the_device() {
     for _ in 0..STOPS {
-        let Some((samples, rate)) = capture_a_stop(|audio| {
-            audio.stop(STOP_LIMIT);
-        }) else {
+        let Some((samples, rate)) = capture_a_stop(|audio| audio.stop(STOP_LIMIT)) else {
             return;
         };
         let (level, step) = level_and_step(&samples);
@@ -192,9 +204,7 @@ fn a_stop_with_large_buffers_fades_out_on_the_device() {
 fn a_fixed_100_ms_stop_limit_shows_as_a_cut() {
     let mut steps = Vec::new();
     for _ in 0..STOPS {
-        let Some((samples, rate)) = capture_a_stop(|audio| {
-            audio.stop_within(|_| STOP_LIMIT);
-        }) else {
+        let Some((samples, rate)) = capture_a_stop(|audio| audio.stop_within(|_| STOP_LIMIT)) else {
             return;
         };
         let (level, step) = level_and_step(&samples);
