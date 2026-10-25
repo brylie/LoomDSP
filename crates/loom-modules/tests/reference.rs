@@ -6,7 +6,7 @@
 //! listen to them, and commit them.
 
 use loom_core::{MidiEvent, ModuleRole};
-use loom_modules::{ALL, display, env, filter, level, logic, math, midi, osc, phase, time, ui};
+use loom_modules::{ALL, display, env, filter, level, logic, math, midi, mix, osc, phase, time, ui};
 use loom_test::{Harness, Signal, reference};
 
 #[test]
@@ -336,6 +336,12 @@ fn every_dsp_module_has_a_reference_test() {
         &osc::NOISE,
         &filter::SVF,
         &filter::ONEPOLE,
+        &phase::WRAP,
+        &math::PITCH_CONSTANT,
+        &level::CLAMP,
+        &level::SCALE,
+        &mix::MIXER,
+        &mix::CROSSFADE,
         &env::ADSR,
         &math::ADD,
         &math::MUL,
@@ -362,4 +368,85 @@ fn every_dsp_module_has_a_reference_test() {
             );
         }
     }
+}
+
+/// Reference render for `loom.phase.wrap`: a ramp from -1 to 3 wrapped.
+#[test]
+fn phase_wrap() {
+    Harness::new(&phase::WRAP)
+        .seconds(0.02)
+        .input("in", Signal::from_fn(|frame| frame as f32 / 240.0 - 1.0))
+        .check(reference!("phase_wrap"));
+}
+
+/// Reference render for `loom.phase.wrap` in fold mode.
+#[test]
+fn phase_fold() {
+    Harness::new(&phase::WRAP)
+        .seconds(0.02)
+        .input("in", Signal::from_fn(|frame| frame as f32 / 240.0 - 1.0))
+        .param("mode", 1.0)
+        .check(reference!("phase_fold"));
+}
+
+/// Reference render for `loom.pitch.constant`.
+#[test]
+fn pitch_constant() {
+    Harness::new(&math::PITCH_CONSTANT)
+        .seconds(0.01)
+        .param("semitones", 7.0)
+        .check(reference!("pitch_constant"));
+}
+
+/// Reference render for `loom.level.clamp`: a sine limited to +-0.5.
+#[test]
+fn clamp() {
+    Harness::new(&level::CLAMP)
+        .seconds(0.02)
+        .input(
+            "in",
+            Signal::from_fn(|frame| (frame as f32 / 480.0 * std::f32::consts::TAU).sin()),
+        )
+        .param("low", -0.5)
+        .param("high", 0.5)
+        .check(reference!("clamp"));
+}
+
+/// Reference render for `loom.level.scale`: bipolar to unipolar.
+#[test]
+fn scale() {
+    Harness::new(&level::SCALE)
+        .seconds(0.02)
+        .input(
+            "in",
+            Signal::from_fn(|frame| (frame as f32 / 480.0 * std::f32::consts::TAU).sin()),
+        )
+        .param("factor", 0.5)
+        .param("offset", 0.5)
+        .check(reference!("scale"));
+}
+
+/// Reference render for `loom.mix.mixer`: three inputs, one muted.
+#[test]
+fn mixer() {
+    Harness::new(&mix::MIXER)
+        .seconds(0.02)
+        .input("in1", Signal::phase(100.0))
+        .input("in2", Signal::constant(0.25))
+        .input("in3", Signal::constant(0.5))
+        .param("level1", 0.5)
+        .param("level2", 2.0)
+        .param("mute3", 1.0)
+        .check(reference!("mixer"));
+}
+
+/// Reference render for `loom.mix.crossfade`: equal power at mix 0.25.
+#[test]
+fn crossfade() {
+    Harness::new(&mix::CROSSFADE)
+        .seconds(0.02)
+        .input("a", Signal::phase(100.0))
+        .input("b", Signal::constant(0.5))
+        .param("mix", 0.25)
+        .check(reference!("crossfade"));
 }
