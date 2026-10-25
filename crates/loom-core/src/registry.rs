@@ -124,6 +124,21 @@ impl Registry {
             }
             _ => {}
         }
+        // The compiler binds input defaults only for DSP modules. On a unit
+        // delay or an audio output, an unconnected input reads 0, so any
+        // other default would be accepted and then silently ignored.
+        if matches!(descriptor.role, ModuleRole::UnitDelay | ModuleRole::AudioOutput) {
+            if let Some(port) = descriptor
+                .inputs
+                .iter()
+                .find(|port| port.default != PortDefault::Value(0.0))
+            {
+                return Err(invalid(&format!(
+                    "input \"{}\" has a default that the engine ignores: only DSP modules can have a non-zero or transport default",
+                    port.name
+                )));
+            }
+        }
         // Only DSP modules have a `Module` instance, so only they can read
         // parameters or publish display values. On any other role they would
         // be accepted and then silently do nothing.
@@ -492,6 +507,47 @@ mod tests {
         };
         let error = Registry::new().register(&DESCRIPTOR).unwrap_err();
         assert!(error.to_string().contains("more than 4 display values"), "{error}");
+    }
+
+    /// A unit delay or audio output with a default the engine would ignore
+    /// is refused, and the error names the module and the port.
+    #[test]
+    fn refuses_ignored_input_defaults_on_delay_and_output_roles() {
+        static DELAY_VALUE: ModuleDescriptor = ModuleDescriptor {
+            id: "test.delay_default",
+            version: 1,
+            name: "Delay Default",
+            category: "Test",
+            description: "",
+            inputs: &[port("in", crate::SignalType::Audio).with_default(PortDefault::Value(0.5))],
+            outputs: &[port("out", crate::SignalType::Audio)],
+            params: &[],
+            role: ModuleRole::UnitDelay,
+            panel: crate::Panel::EMPTY,
+            displays: &[],
+        };
+        static OUTPUT_TRANSPORT: ModuleDescriptor = ModuleDescriptor {
+            id: "test.output_default",
+            version: 1,
+            name: "Output Default",
+            category: "Test",
+            description: "",
+            inputs: &[
+                port("left", crate::SignalType::Audio),
+                port("right", crate::SignalType::Audio).with_default(PortDefault::Playing),
+            ],
+            outputs: &[],
+            params: &[],
+            role: ModuleRole::AudioOutput,
+            panel: crate::Panel::EMPTY,
+            displays: &[],
+        };
+        for (descriptor, port_name) in [(&DELAY_VALUE, "in"), (&OUTPUT_TRANSPORT, "right")] {
+            let text = Registry::new().register(descriptor).unwrap_err().to_string();
+            assert!(text.contains(descriptor.id), "{text}");
+            assert!(text.contains(&format!("\"{port_name}\"")), "{text}");
+            assert!(text.contains("ignores"), "{text}");
+        }
     }
 
     #[test]
