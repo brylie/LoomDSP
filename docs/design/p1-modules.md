@@ -216,7 +216,7 @@ The ADSR becomes the catalogue's Envelope: `loom.env.adsr` is renamed `loom.env.
 
 - **New parameters:** `mode`: 0 ADSR (default), 1 AD. `curve`: −1 to 1, default 0.
 - **AD mode:** a rising gate starts the attack, the attack runs to 1, the decay then runs from 1 to 0, and the output stays at 0. The gate going low changes nothing. `sustain` and `release` are ignored. *Why:* AD is a one-shot, so it works from a trigger as well as a gate (a trigger is a one-sample gate).
-- **Retrigger.** A rising gate during decay (or during the release of ADSR) starts a new attack from the current level up to 1. The attack time is the full `attack` time. *Why:* no click, and the time stays the knob's value.
+- **Retrigger.** A rising gate during attack or decay (or during the release of ADSR) starts a new attack from the current level up to 1. The attack time is the full `attack` time. *Why:* no click, and the time stays the knob's value.
 - **Curve.** Each stage has progress `x` from 0 to 1 over its time. The shaping power is `k = 2^(3 × curve)`, from 1/8 to 8. A rising stage is `1 − (1 − x)^k` and a falling stage is `(1 − x)^k`, between its start and end levels. At curve 0 every stage is linear. Positive curve is a fast start with a slow tail, as on analogue envelopes. Negative is a slow start. *Why:* one number gives the plucked and the swelling shapes.
 - **This changes the sound of the ADSR** (today: linear attack, exponential decay). The reference renders and examples change in the same pull request, and the description lists it.
 - Block sizes 1, 77, and 512 give identical output, with a retrigger in the middle of a decay.
@@ -224,7 +224,7 @@ The ADSR becomes the catalogue's Envelope: `loom.env.adsr` is renamed `loom.env.
 
 ## Filters (MT-FILTER-02, MT-FILTER-03)
 
-Both follow `loom.filter.svf`: an `in` port, a `cutoff` input in pitch units added to the `cutoff` parameter (so the cable and a knob combine), cutoff in Hz, 20 to 20000, logarithmic, smoothed over 10 ms.
+Both follow `loom.filter.svf`: an `in` port, a `cutoff` input in pitch units added to the `cutoff` parameter (so the cable and a knob combine), cutoff in Hz, logarithmic, smoothed over 10 ms. The ladder spans 20 to 20000 Hz. The one-pole goes down to 1 Hz, for smoothing.
 
 ### One-pole `loom.filter.onepole`
 
