@@ -9,3 +9,5 @@ extend-exclude = ["*.lock", "*.png", "target/", ".agents/"]
 formant = "formant"
 # Creative Commons NoDerivatives, as in the SPDX licence CC-BY-ND-4.0.
 ND = "ND"
+# "Resonance" cut with an ellipsis to fit a tile, as the snapshot shows it.
+Reson = "Reson"

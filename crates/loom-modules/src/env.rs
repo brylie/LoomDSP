@@ -133,23 +133,23 @@ impl Adsr {
 
 impl Module for Adsr {
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let attack = io.modulated(0);
-        let decay = io.modulated(1);
-        let sustain = io.modulated(2);
-        let release = io.modulated(3);
+        let attack = io.param(0);
+        let decay = io.param(1);
+        let sustain = io.param(2);
+        let release = io.param(3);
         let ([gate], [out]) = io.split::<1, 1>();
         for (i, (out, &g)) in out.iter_mut().zip(gate).enumerate() {
             // Modulated values live only for this frame. The fields keep the
             // knob's base, so removing an assignment returns to it.
-            let attack_step = attack.map_or(self.attack_step, |samples| {
-                1.0 / (samples[i] * self.sample_rate).max(1.0)
+            let attack_step = attack.map_or(i, self.attack_step, |seconds| {
+                1.0 / (seconds * self.sample_rate).max(1.0)
             });
-            let decay_coefficient = decay.map_or(self.decay_coefficient, |samples| {
-                exp_coefficient(samples[i], self.sample_rate)
+            let decay_coefficient = decay.map_or(i, self.decay_coefficient, |seconds| {
+                exp_coefficient(seconds, self.sample_rate)
             });
-            let sustain = sustain.map_or(self.sustain, |samples| samples[i]);
-            let release_coefficient = release.map_or(self.release_coefficient, |samples| {
-                exp_coefficient(samples[i], self.sample_rate)
+            let sustain = sustain.at_or(i, self.sustain);
+            let release_coefficient = release.map_or(i, self.release_coefficient, |seconds| {
+                exp_coefficient(seconds, self.sample_rate)
             });
             let high = gate_is_high(g);
             if high && !self.gate_was_high {
@@ -230,5 +230,38 @@ mod tests {
         assert!((out[999] - 0.7).abs() < 0.01, "sustain level, got {}", out[999]);
         assert!(out[1_999] < 0.01, "released, got {}", out[1_999]);
         assert!(out[5] > 0.0 && out[5] < 1.0, "attack ramps");
+    }
+
+    /// The `level` display value is the output's last sample after the
+    /// attack, and 0 once the release has ended (#106).
+    #[test]
+    fn display_follows_the_level() {
+        let config = ModuleConfig {
+            sample_rate: 1_000.0,
+            max_block: 2_000,
+        };
+        let ModuleRole::Dsp(create) = ADSR.role else {
+            unreachable!()
+        };
+        let mut env = create(&config);
+        for (i, p) in ADSR.params.iter().enumerate() {
+            env.set_param(i, p.default);
+        }
+        let mut display = [f32::NAN];
+
+        // The default attack is 10 ms, 10 frames at 1 kHz.
+        let gate = [1.0; 50];
+        let mut out = [0.0; 50];
+        run(env.as_mut(), 1_000.0, &[&gate], &[true], &mut [&mut out], &[]);
+        env.displays(&mut display);
+        assert!(out[49] > 0.0, "past the attack, got {}", out[49]);
+        assert_eq!(display[0], out[49]);
+
+        let gate = [0.0; 2_000];
+        let mut out = [0.0; 2_000];
+        run(env.as_mut(), 1_000.0, &[&gate], &[true], &mut [&mut out], &[]);
+        env.displays(&mut display);
+        assert_eq!(out[1_999], 0.0, "released");
+        assert_eq!(display[0], 0.0);
     }
 }

@@ -7,6 +7,10 @@
 //!
 //! The difference is the cost of per-sample feedback regions.
 //!
+//! The `modulation` groups measure parameter modulation (#139): an SVF
+//! whose cutoff is moved by a sine LFO, and one parameter with 0 to 16
+//! assignments, to show how the engine's fill scales.
+//!
 //! Run with: `cargo bench -p loom-modules`
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
@@ -99,7 +103,7 @@ fn patches(c: &mut Criterion) {
     let mut right = vec![0.0f32; BLOCK];
     let mut group = c.benchmark_group("patch");
     group.throughput(Throughput::Elements(BLOCK as u64));
-    for name in ["subtractive.ron", "fm-feedback.ron"] {
+    for name in ["subtractive.ron", "fm-feedback.ron", "modulation.ron"] {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../examples/patches")
             .join(name);
@@ -117,5 +121,106 @@ fn patches(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, feedback_regions, patches);
+/// How an SVF's cutoff is moved in [`modulated_svf`].
+#[derive(Clone, Copy)]
+enum Cutoff {
+    /// Not moved: the knob stays one value per block.
+    Still,
+    /// The LFO is cabled to the filter's cutoff input (pitch units).
+    Cable,
+    /// The LFO is assigned to the cutoff parameter (a per-sample buffer).
+    Assigned,
+}
+
+/// Noise into an SVF lowpass, with a sine LFO at about 2 Hz. The LFO runs
+/// in every case and goes to the right output, so only the cutoff path
+/// differs between cases.
+fn modulated_svf(cutoff: Cutoff) -> EngineParts {
+    let mut parts = create_engine(loom_modules::registry(), EngineConfig::default());
+    let c = &mut parts.controller;
+    let noise = c.add_module("loom.osc.noise").unwrap();
+    let svf = c.add_module("loom.filter.svf").unwrap();
+    c.set_param_named(svf, "cutoff", 800.0).unwrap();
+    c.connect_named(noise, "out", svf, "in").unwrap();
+    let phase = c.add_module("loom.phase.generator").unwrap();
+    c.set_param_named(phase, "octave", -7.0).unwrap();
+    let lfo = c.add_module("loom.osc.sine").unwrap();
+    c.connect_named(phase, "phase", lfo, "phase").unwrap();
+    let out = c.add_module("loom.io.audio-out").unwrap();
+    c.connect_named(svf, "lowpass", out, "left").unwrap();
+    c.connect_named(lfo, "out", out, "right").unwrap();
+    match cutoff {
+        Cutoff::Still => {}
+        Cutoff::Cable => {
+            c.connect_named(lfo, "out", svf, "cutoff").unwrap();
+        }
+        Cutoff::Assigned => {
+            c.add_assignment_named(lfo, "out", svf, "cutoff", 0.1).unwrap();
+        }
+    }
+    c.commit().unwrap();
+    parts
+}
+
+/// Noise into an SVF lowpass, with 16 constants. The first `n` constants
+/// are assigned to the cutoff, so the fill adds `n` sources per sample.
+/// All 16 run in every case, so the module work stays the same.
+fn assigned_svf(n: usize) -> EngineParts {
+    let mut parts = create_engine(loom_modules::registry(), EngineConfig::default());
+    let c = &mut parts.controller;
+    let noise = c.add_module("loom.osc.noise").unwrap();
+    let svf = c.add_module("loom.filter.svf").unwrap();
+    c.set_param_named(svf, "cutoff", 800.0).unwrap();
+    c.connect_named(noise, "out", svf, "in").unwrap();
+    let out = c.add_module("loom.io.audio-out").unwrap();
+    c.connect_named(svf, "lowpass", out, "left").unwrap();
+    for i in 0..16 {
+        let source = c.add_module("loom.math.constant").unwrap();
+        c.set_param_named(source, "value", 0.5).unwrap();
+        if i < n {
+            c.add_assignment_named(source, "out", svf, "cutoff", 0.01).unwrap();
+        }
+    }
+    c.commit().unwrap();
+    parts
+}
+
+/// Benchmarks a modulated SVF cutoff against an unmodulated one, and the
+/// fill with 0, 1, 4, and 16 assignments on one parameter (#139).
+fn modulation(c: &mut Criterion) {
+    let mut left = vec![0.0f32; BLOCK];
+    let mut right = vec![0.0f32; BLOCK];
+
+    let mut group = c.benchmark_group("modulation/svf_cutoff");
+    group.throughput(Throughput::Elements(BLOCK as u64));
+    for (label, cutoff) in [
+        ("still", Cutoff::Still),
+        ("cable", Cutoff::Cable),
+        ("assigned", Cutoff::Assigned),
+    ] {
+        let mut parts = modulated_svf(cutoff);
+        group.bench_function(label, |b| {
+            b.iter(|| {
+                parts.engine.process(&mut left, &mut right);
+                black_box(&left);
+            })
+        });
+    }
+    group.finish();
+
+    let mut group = c.benchmark_group("modulation/assignments");
+    group.throughput(Throughput::Elements(BLOCK as u64));
+    for n in [0usize, 1, 4, 16] {
+        let mut parts = assigned_svf(n);
+        group.bench_with_input(BenchmarkId::from_parameter(n), &n, |b, _| {
+            b.iter(|| {
+                parts.engine.process(&mut left, &mut right);
+                black_box(&left);
+            })
+        });
+    }
+    group.finish();
+}
+
+criterion_group!(benches, feedback_regions, patches, modulation);
 criterion_main!(benches);

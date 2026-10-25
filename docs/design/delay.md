@@ -98,6 +98,8 @@ Both modules share one circular buffer and one 4-point Catmull-Rom (cubic Hermit
 
      $$b(0) \leftarrow x[n], \qquad y[n] = \operatorname{read}(d)$$
 
+     A non-finite $x[n]$ is written as $0$, so a bad input sample does not come out again one delay time later ([#127](https://github.com/brylie/LoomDSP/issues/127)).
+
    - **All-Pass (`loom.time.allpass`):** read $r[n] = \operatorname{read}(d)$ first (since $d \ge 2$, $k - 1 \ge 1$, so all four points $b(k - 1), \dots, b(k + 2)$ are past state samples $w[n - 1]$ or older), flush denormals on the feedback product, compute the new state $w[n]$ (replacing non-finite $w[n]$ with $0$ so a bad input sample cannot circulate forever) and output $y[n]$, write $w[n]$ at age $0$, and advance the write index:
 
      $$r[n] = \operatorname{read}(d)$$

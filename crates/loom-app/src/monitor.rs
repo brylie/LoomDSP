@@ -49,6 +49,18 @@ impl Monitor {
     }
 }
 
+#[cfg(test)]
+impl Monitor {
+    /// Reads the meter queues once and turns the readings into levels, as
+    /// `lights::Watch::read` reads the lights. For tests, which have no
+    /// telemetry thread. One update, so the levels do not fall.
+    pub fn read(&self) -> Vec<(ProbeId, Level)> {
+        let mut levels = Levels::default();
+        levels.update(&self.take_readings(), Instant::now());
+        levels.all().collect()
+    }
+}
+
 impl Hash for Monitor {
     // One monitor per engine: the subscription restarts with a new engine.
     fn hash<H: Hasher>(&self, state: &mut H) {

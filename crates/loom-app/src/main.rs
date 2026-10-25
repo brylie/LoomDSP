@@ -21,6 +21,7 @@ mod live;
 mod modulation;
 mod monitor;
 mod param;
+mod pointer;
 mod preferences;
 mod probe_menu;
 #[cfg(test)]
@@ -31,6 +32,7 @@ mod screenshot;
 mod script_vars;
 mod settings;
 mod snapshot;
+mod targets;
 #[cfg(test)]
 mod ui_test;
 mod undo;
@@ -249,6 +251,7 @@ enum Message {
         call: control::Call,
         target: String,
         found: control::Found,
+        then: control::AfterSearch,
     },
     Animate(bool),
     Frame(Instant),
@@ -419,6 +422,9 @@ struct App {
     control: Vec<control::Listener>,
     /// Commands waiting for the window to draw their change.
     control_pending: Vec<control::Pending>,
+    /// The control channel's pointer and its events on their way to the
+    /// view (`pointer.rs`).
+    pointer: pointer::Pointer,
     /// The stream and its callback count at the last control `snapshot`,
     /// for its `advanced` field.
     control_seen: Option<(Arc<CallbackStats>, u64)>,
@@ -831,6 +837,7 @@ impl App {
             reporter: args.bench.reporter(),
             control: args.control.listeners(),
             control_pending: Vec::new(),
+            pointer: pointer::Pointer::new(!args.control.listeners().is_empty()),
             control_seen: None,
             recording_failed: false,
             measuring: args.bench.redraws(),
@@ -1005,6 +1012,8 @@ impl App {
         fresh.animating = self.animating;
         fresh.reporter = self.reporter.take();
         fresh.control = std::mem::take(&mut self.control);
+        // The script's pointer stays where it was, over the new patch.
+        fresh.pointer = self.pointer.clone();
         // The session goes on; only its patch changed.
         fresh.recovery = self.recovery.take();
         // Commands waiting to be drawn still get their answer, except a
@@ -1650,10 +1659,12 @@ impl App {
             }
             Message::Control(call) => self.control(call),
             Message::ControlFrame(now) => self.control_frame(now),
-            Message::Located { call, target, found } => {
-                self.located(&call, &target, &found);
-                Task::none()
-            }
+            Message::Located {
+                call,
+                target,
+                found,
+                then,
+            } => self.located(call, &target, &found, then),
             message if self.clipboard_key(&message).is_some() => self.clipboard_command(&message),
             message => {
                 self.handle(message);
@@ -2323,7 +2334,8 @@ impl App {
             self.stats_bar()
         ];
         // Always a stack, so opening the browser keeps the canvas's state
-        // (its camera) in the same place in the widget tree.
+        // (its camera) in the same place in the widget tree. Tested by
+        // `ui_test::tests::the_camera_survives_opening_the_browser`.
         let mut layers = stack![main];
         if let Some(open) = &self.browser {
             let outside = mouse_area(space().width(Length::Fill).height(Length::Fill))
@@ -2339,7 +2351,24 @@ impl App {
         if let Some(window) = self.preferences_view() {
             layers = layers.push(window);
         }
-        layers.into()
+        // The control channel's pointer events go in here, as a real
+        // pointer's would (control-channel.md, Pointer commands).
+        let browser_open = self.browser.is_some();
+        pointer::Injector::new(layers, self, move |key, status| {
+            // As the subscriptions do: `keyboard::listen` passes on what no
+            // widget took, and the open browser hears every key.
+            let mut messages = Vec::new();
+            if status == iced::event::Status::Ignored {
+                messages.push(Message::Key(key.clone()));
+            }
+            if browser_open
+                && let Some(message) = browser_key(iced::Event::Keyboard(key), status, iced::window::Id::unique())
+            {
+                messages.push(message);
+            }
+            messages
+        })
+        .into()
     }
 
     fn toolbar(&self) -> Element<'_, Message> {
@@ -2422,27 +2451,19 @@ impl App {
         };
         // Load and dropouts are always shown, and turn amber or red before
         // a problem is audible (FR-PERF-04).
-        let audio: Element<'_, Message> = match &self.audio_stats {
-            Some(stats) => {
-                let s = stats.snapshot();
-                let engine = self.controller.stats();
-                let dropped = engine.dropped_meters.load(std::sync::atomic::Ordering::Relaxed)
-                    + engine.dropped_scope.load(std::sync::atomic::Ordering::Relaxed);
-                let load = bar_text(format!(
-                    "load {:.0}% (max {:.0}%)",
-                    s.last_load * 100.0,
-                    s.max_load * 100.0
-                ))
-                .color(severity_colour(alerts::load_severity(s.last_load)));
-                let dropouts = bar_text(format!("dropouts {}", self.dropouts.count()))
-                    .color(severity_colour(self.dropouts.severity(Instant::now())));
-                let mut items = row![bar_text(&self.audio_name).color(DIM), load, dropouts].spacing(10);
-                if dropped > 0 {
-                    items = items.push(bar_text(format!("telemetry dropped {dropped}")).color(DIM));
-                }
-                items.into()
+        // The snapshot reads the same model, so the two cannot disagree.
+        let stats = self.stats_model();
+        let audio: Element<'_, Message> = if stats.playing {
+            let load = bar_text(stats.load_text()).color(severity_colour(alerts::load_severity(stats.load)));
+            let dropouts = bar_text(format!("dropouts {}", stats.dropouts))
+                .color(severity_colour(self.dropouts.severity(Instant::now())));
+            let mut items = row![bar_text(stats.label).color(DIM), load, dropouts].spacing(10);
+            if stats.telemetry_dropped > 0 {
+                items = items.push(bar_text(format!("telemetry dropped {}", stats.telemetry_dropped)).color(DIM));
             }
-            None => bar_text(&self.audio_name).color(DIM).into(),
+            items.into()
+        } else {
+            bar_text(stats.label).color(DIM).into()
         };
         let midi = match self.rig.ports.as_slice() {
             [] => "MIDI: no inputs".to_string(),
@@ -3399,6 +3420,118 @@ mod tests {
         let _ = app.update(Message::Lights(watch.read()));
         let level = tile_widget(&app, env, light).position;
         assert!(level > 0.5, "the gate is held: {level}");
+    }
+
+    /// A meter on screen follows the engine through the app's `Meters`
+    /// path: empty before the engine runs, then a sine's level, with its
+    /// peak above the RMS level (#222).
+    #[test]
+    fn a_running_engine_fills_the_meter() {
+        let mut app = app();
+        let phase = app.controller.add_module("loom.phase.generator").unwrap();
+        let sine = app.controller.add_module("loom.osc.sine").unwrap();
+        let meter = app.controller.add_module("loom.display.meter").unwrap();
+        app.controller.connect_named(phase, "phase", sine, "phase").unwrap();
+        app.controller.connect_named(sine, "out", meter, "in").unwrap();
+        app.commit();
+        let d = app.controller.graph().node(meter).unwrap().descriptor;
+        let widget = d.panel.widgets.iter().position(|w| w.bind == "out").unwrap();
+        // On screen, so the meter gets a probe.
+        let _ = app.update(Message::Canvas(CanvasEvent::VisibleDisplays(vec![meter.0])));
+        let _ = app.update(Message::Meters(app.monitor.read()));
+        let before = tile_widget(&app, meter, widget);
+        assert_eq!((before.position, before.peak), (0.0, 0.0), "the engine has not run");
+
+        app.process(4_800);
+        let _ = app.update(Message::Meters(app.monitor.read()));
+        let shown = tile_widget(&app, meter, widget);
+        assert_eq!(shown.kind, "meter");
+        assert!(shown.position > 0.0, "a level: {shown:?}");
+        assert!(shown.peak > shown.position, "a sine peaks above its RMS: {shown:?}");
+        assert!(shown.peak > 0.99, "a full-scale sine: {shown:?}");
+    }
+
+    /// A MIDI mapping applied in the engine shows on the knob: a control
+    /// change sent through the engine's MIDI input moves the mapped cutoff
+    /// to the end of its range once the app reads it with `Midi` (#222).
+    #[test]
+    fn a_mapped_control_change_turns_the_knob() {
+        let mut app = app();
+        let (_, filter, cutoff, widget) = env_and_filter(&mut app);
+        let control = loom_core::MidiControl {
+            channel: 0,
+            controller: 74,
+        };
+        app.controller.map_midi(control, filter, cutoff).unwrap();
+        app.commit();
+        let midi = app.rig.midi_in.clone().expect("the idle engine's MIDI input");
+        let start = tile_widget(&app, filter, widget).position;
+        assert!(start > 0.0 && start < 1.0, "{start}");
+
+        for (value, position) in [(127, 1.0), (0, 0.0)] {
+            let change = loom_core::MidiEvent::from_bytes(0, &[0xB0, 74, value]);
+            assert!(loom_host_desktop::send_midi(&midi, change));
+            app.process(128);
+            let _ = app.update(Message::Midi);
+            let knob = tile_widget(&app, filter, widget);
+            assert_eq!(knob.position, position, "CC 74 at {value}: {knob:?}");
+            let param = app.controller.graph().node(filter).unwrap().params[cutoff];
+            let spec = &app.controller.graph().node(filter).unwrap().descriptor.params[cutoff];
+            assert_eq!(param, if value == 0 { spec.min } else { spec.max });
+        }
+    }
+
+    /// The transport moves only while it runs. Its position shows through a
+    /// Phase Scale that follows the bar phase and modulates a knob at depth
+    /// 1: the live dot sits the bar phase above the knob (#222). The
+    /// controller reports whether the transport runs, not its position.
+    #[test]
+    fn the_transport_position_moves_only_while_running() {
+        let mut app = app();
+        let scale = app.controller.add_module("loom.phase.scale").unwrap();
+        let (_, filter, cutoff, widget) = env_and_filter(&mut app);
+        app.controller.add_assignment(out(scale), filter, cutoff, 1.0).unwrap();
+        app.commit();
+        let settings = app.controller.transport();
+        let beats_per_frame = settings.tempo / 60.0 / f64::from(app.sample_rate);
+        let beats_per_bar = settings.time_signature.beats_per_bar();
+        // The bar phase the knob shows, from the live value of the last
+        // frame the engine ran.
+        let bar_phase = |app: &mut App, frames: usize| {
+            app.process(frames);
+            let _ = app.update(Message::LiveFrame);
+            let knob = tile_widget(app, filter, widget);
+            knob.live.expect("a live value") - knob.position
+        };
+        let expected = |frames: usize| ((frames - 1) as f64 * beats_per_frame / beats_per_bar) as f32;
+
+        // The bar phase is read as live minus knob position, which holds
+        // only while the knob plus the phase stays below 1 (no clamp). The
+        // test reaches a bar phase of about 0.05.
+        let base = tile_widget(&app, filter, widget).position;
+        assert!(base < 0.9, "the knob at {base} leaves no room above it for the phase");
+        assert!(settings.running, "a new patch starts running");
+        let _ = app.update(Message::Canvas(CanvasEvent::ToggleRun));
+        assert!(!app.controller.transport().running);
+        assert!(bar_phase(&mut app, 4_800).abs() < 1e-6, "stopped at bar 1");
+
+        let _ = app.update(Message::Canvas(CanvasEvent::ToggleRun));
+        assert!(app.controller.transport().running);
+        let first = bar_phase(&mut app, 4_800);
+        assert!((first - expected(4_800)).abs() < 1e-4, "{first} vs {}", expected(4_800));
+        let second = bar_phase(&mut app, 4_800);
+        assert!(
+            (second - expected(9_600)).abs() < 1e-4,
+            "{second} vs {}",
+            expected(9_600)
+        );
+
+        let _ = app.update(Message::Canvas(CanvasEvent::ToggleRun));
+        let held = bar_phase(&mut app, 4_800);
+        assert!(
+            (held - expected(9_600)).abs() < 1e-4,
+            "stopping holds the position: {held}"
+        );
     }
 
     /// Meter levels follow their probes: turning metering on and off many

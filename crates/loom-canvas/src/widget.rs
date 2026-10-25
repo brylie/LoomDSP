@@ -281,6 +281,62 @@ pub struct CanvasView {
     pub camera: Camera,
 }
 
+/// What the pointer is on and what it does, as the canvas sees it. The
+/// canvas reports it to widget operations as custom state, next to
+/// [`CanvasView`], so the app can show it in its UI snapshot.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CanvasPointer {
+    /// What is under the pointer, while it is over the canvas.
+    pub hover: Option<Hit>,
+    /// The output whose badge is pinned, while its badge shows.
+    pub pinned: Option<PortRef>,
+    /// The drag in progress, if any.
+    pub drag: Option<PointerDrag>,
+}
+
+/// A drag in progress on the canvas. See [`CanvasPointer::drag`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum PointerDrag {
+    /// The view is panned.
+    Pan,
+    /// Tiles are moved.
+    Move(Vec<u32>),
+    /// A knob is turned: module ID and widget index.
+    Knob(u32, usize),
+    /// A button is held: module ID and widget index.
+    Button(u32, usize),
+    /// A cable is pulled from a port.
+    Wire {
+        /// The port the cable starts at.
+        from: PortRef,
+        /// True when the cable was pulled off an input.
+        pulled: bool,
+    },
+    /// A knob's range arc is dragged: module ID and widget index.
+    Depth(u32, usize),
+    /// A selection box is drawn.
+    Select,
+}
+
+impl PointerDrag {
+    /// The drag an interaction is, or `None` when idle.
+    fn of(interaction: &Interaction) -> Option<Self> {
+        Some(match interaction {
+            Interaction::Idle => return None,
+            Interaction::Panning { .. } => Self::Pan,
+            Interaction::Moving { ids, .. } => Self::Move(ids.clone()),
+            Interaction::Turning { module, widget, .. } => Self::Knob(*module, *widget),
+            Interaction::Holding { module, widget } => Self::Button(*module, *widget),
+            Interaction::Wiring { from, pulled } => Self::Wire {
+                from: *from,
+                pulled: *pulled,
+            },
+            Interaction::Depth { module, widget, .. } => Self::Depth(*module, *widget),
+            Interaction::Selecting { .. } => Self::Select,
+        })
+    }
+}
+
 impl CanvasView {
     /// A world point in window coordinates.
     pub fn to_window(&self, world: Point) -> Point {
@@ -600,6 +656,13 @@ where
             camera: state.camera,
         };
         operation.custom(None, layout.bounds(), &mut view);
+        // What the pointer is on, for the control channel's snapshot.
+        let mut pointer = CanvasPointer {
+            hover: state.hover.filter(|hit| *hit != Hit::Nothing),
+            pinned: self.pin(state),
+            drag: PointerDrag::of(&state.interaction),
+        };
+        operation.custom(None, layout.bounds(), &mut pointer);
     }
 
     fn mouse_interaction(
@@ -617,15 +680,7 @@ where
             Interaction::Holding { .. } => mouse::Interaction::Pointer,
             Interaction::Wiring { .. } => mouse::Interaction::Crosshair,
             Interaction::Selecting { .. } => mouse::Interaction::Crosshair,
-            Interaction::Idle if cursor.is_over(layout.bounds()) => match state.hover {
-                Some(Hit::Port(_) | Hit::Badge(_)) => mouse::Interaction::Pointer,
-                Some(Hit::Widget { module, widget }) => match self.widget_kind(module, widget) {
-                    Some(WidgetViewKind::Knob { .. }) => mouse::Interaction::ResizingVertically,
-                    _ => mouse::Interaction::Pointer,
-                },
-                Some(Hit::Module(_)) => mouse::Interaction::Grab,
-                _ => mouse::Interaction::default(),
-            },
+            Interaction::Idle if cursor.is_over(layout.bounds()) => self.hover_interaction(state),
             Interaction::Idle => mouse::Interaction::default(),
         }
     }
@@ -1180,6 +1235,40 @@ impl<Message> PatchCanvas<'_, Message> {
         })
     }
 
+    /// The cursor for the pointer resting over the canvas with no gesture.
+    /// The ring of a modulated knob reaches a little past the knob's cell,
+    /// so it is checked first, as `press` does: there a press drags depth,
+    /// and the cursor says so (modulation.md, Arc drag).
+    fn hover_interaction(&self, state: &State) -> mouse::Interaction {
+        let on_ring = state
+            .hover
+            .zip(state.cursor)
+            .is_some_and(|(hit, world)| self.depth_drag_at(&hit, world).is_some());
+        if on_ring {
+            return mouse::Interaction::ResizingVertically;
+        }
+        match state.hover {
+            Some(Hit::Port(_) | Hit::Badge(_)) => mouse::Interaction::Pointer,
+            Some(Hit::Widget { module, widget }) => match self.widget_kind(module, widget) {
+                Some(WidgetViewKind::Knob { .. }) => mouse::Interaction::ResizingVertically,
+                _ => mouse::Interaction::Pointer,
+            },
+            Some(Hit::Module(_)) => mouse::Interaction::Grab,
+            _ => mouse::Interaction::default(),
+        }
+    }
+
+    /// The modulated knob whose ring a press at `world` would grab to drag
+    /// depth, given what the hit test found there. Not in MIDI learn mode.
+    /// `press` and the hover cursor both ask this one method, so the cursor
+    /// always tells the truth about the press (#198 was the two disagreeing).
+    fn depth_drag_at(&self, hit: &Hit, world: Point) -> Option<(u32, usize)> {
+        if self.learn.is_some() || !matches!(hit, Hit::Widget { .. } | Hit::Module(_)) {
+            return None;
+        }
+        self.range_ring_at(world)
+    }
+
     /// The modulated knob whose range ring is under `world`, if any.
     fn range_ring_at(&self, world: Point) -> Option<(u32, usize)> {
         let module = self.scene.modules().iter().rev().find(|m| m.bounds().contains(world))?;
@@ -1541,10 +1630,7 @@ impl<Message> PatchCanvas<'_, Message> {
         state.focus_first = false;
         // The ring of a modulated knob reaches a little past the knob's
         // cell, so it is found before the hit test's answer is used.
-        if self.learn.is_none()
-            && matches!(hit, Hit::Widget { .. } | Hit::Module(_))
-            && let Some((module, widget)) = self.range_ring_at(world)
-        {
+        if let Some((module, widget)) = self.depth_drag_at(&hit, world) {
             // The selection stays as it is: a selected source module is one
             // way the drag picks its assignment (modulation.md, Arc drag).
             self.begin(
@@ -3623,6 +3709,40 @@ mod tests {
             Point::new(centre.x + 12.0, centre.y),
         );
         assert!(matches!(state.interaction, Interaction::Depth { .. }));
+    }
+
+    /// Just above a modulated knob's cell, on its ring, the pointer shows
+    /// the depth drag cursor. Over an unmodulated knob there, and in MIDI
+    /// learn mode, it shows the tile's grab cursor, as a press there grabs
+    /// the tile (#198).
+    #[test]
+    fn the_range_ring_shows_the_resize_cursor_above_the_cell() {
+        let (scene, values) = modulated_scene();
+        let rect = scene.module(2).unwrap().widget_bounds(0).unwrap();
+        // On the ring, just above the cell: the hit test finds the tile.
+        let (centre, distance) = crate::controls::knob_range_ring(rect);
+        let above = Point::new(centre.x, centre.y - distance);
+        assert!(above.y < rect.y, "the point should be above the cell");
+        let none = BTreeSet::new();
+        let cursor_at = |canvas: &PatchCanvas<'_, CanvasEvent>| {
+            let mut state = State::default();
+            drive(canvas, &mut state, &moved(above), above);
+            assert!(matches!(state.hover, Some(Hit::Module(2))), "{:?}", state.hover);
+            canvas.hover_interaction(&state)
+        };
+
+        let modulated = PatchCanvas::new(&scene, &none, |e| e).values(&values);
+        assert_eq!(cursor_at(&modulated), mouse::Interaction::ResizingVertically);
+
+        let plain_values = PanelValues::new();
+        let plain = PatchCanvas::new(&scene, &none, |e| e).values(&plain_values);
+        assert_eq!(cursor_at(&plain), mouse::Interaction::Grab);
+
+        let learn = LearnView::default();
+        let learning = PatchCanvas::new(&scene, &none, |e| e)
+            .values(&values)
+            .learn(Some(&learn));
+        assert_eq!(cursor_at(&learning), mouse::Interaction::Grab);
     }
 
     /// A knob with no enabled assignment has no ring to grab: a press there

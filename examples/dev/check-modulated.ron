@@ -1,0 +1,35 @@
+// The subtractive example with the filter envelope (5) assigned to
+// Resonance, so its output shows a badge and the knob a range arc. For
+// pointer checks with the control channel (check-pin-badge.jsonl).
+Patch(
+    version: 1,
+    name: "Check: modulated",
+    modules: [
+        PatchModule(id: 1, kind: "loom.midi.note@1"),
+        PatchModule(id: 2, kind: "loom.phase.generator@1"),
+        PatchModule(id: 3, kind: "loom.osc.saw@1"),
+        PatchModule(id: 4, kind: "loom.filter.svf@1", params: {"cutoff": 300.0, "resonance": 0.6}),
+        // Filter envelope, scaled to +3 octaves (pitch units: 0.1 per octave).
+        PatchModule(id: 5, kind: "loom.env.adsr@1", params: {"decay": 0.4, "sustain": 0.2}),
+        PatchModule(id: 6, kind: "loom.math.mul@1", params: {"gain": 0.3}),
+        // Amplitude envelope and VCA.
+        PatchModule(id: 7, kind: "loom.env.adsr@1", params: {"attack": 0.005, "release": 0.4}),
+        PatchModule(id: 8, kind: "loom.math.mul@1", params: {"gain": 0.3}),
+        PatchModule(id: 9, kind: "loom.io.audio-out@1"),
+    ],
+    cables: [
+        PatchCable(from: (1, "pitch"), to: (2, "pitch")),
+        PatchCable(from: (2, "phase"), to: (3, "phase")),
+        PatchCable(from: (3, "out"), to: (4, "in")),
+        PatchCable(from: (1, "gate"), to: (5, "gate")),
+        PatchCable(from: (5, "out"), to: (6, "a")),
+        PatchCable(from: (6, "out"), to: (4, "cutoff")),
+        PatchCable(from: (1, "gate"), to: (7, "gate")),
+        PatchCable(from: (4, "lowpass"), to: (8, "a")),
+        PatchCable(from: (7, "out"), to: (8, "b")),
+        PatchCable(from: (8, "out"), to: (9, "left")),
+    ],
+    modulation: [
+        (source: (5, "out"), target: (4, "resonance"), depth: 0.4),
+    ],
+)

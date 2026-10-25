@@ -223,10 +223,16 @@ jobs:
         run: >-
           cargo llvm-cov nextest -p loom-host-desktop -p loom-cli --run-ignored only
           -E 'test(=device_tests::a_stop_with_large_buffers_fades_out_on_the_device) | test(=captures_a_loopback_device)'
-          --ignore-filename-regex 'device_tests\.rs$'
-          --lcov --output-path lcov.info
+          --no-report
         env:
           LOOM_LOOPBACK: pipewire
+      # A separate step, so the report is written even when a test failed.
+      # Codecov waits for this report and the Coverage job's
+      # (`after_n_builds` in codecov.yml); without it, no status is posted.
+      # The step above still fails the job.
+      - name: Loopback coverage report
+        if: ${{ !cancelled() }}
+        run: cargo llvm-cov report --ignore-filename-regex 'device_tests\.rs$' --lcov --output-path lcov.info
       # Only this step and the uploads see the Codecov token. The steps
       # above build and run code from the pull request, so the token is not
       # in the job's env. This step only says whether the secret is set.

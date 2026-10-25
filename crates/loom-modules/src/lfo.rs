@@ -161,21 +161,15 @@ impl Lfo {
 
 impl Module for Lfo {
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let (sync_mod, rate_mod, cycles_mod, shape_mod) =
-            (io.modulated(0), io.modulated(1), io.modulated(2), io.modulated(3));
+        let (sync_mod, rate_mod, cycles_mod, shape_mod) = (io.param(0), io.param(1), io.param(2), io.param(3));
         let ([phase_in], [out, out90, phase_out]) = io.split::<1, 3>();
         for i in 0..out.len() {
             // Modulated values count for this frame only, so removing an
             // assignment returns to the base value in the field.
-            let synced = sync_mod.map_or(self.synced, |s| s[i] >= 0.5);
-            let cycles = cycles_mod.map_or(self.cycles, |s| f64::from(s[i].round().max(1.0)));
-            let shape = shape_mod.map_or(self.shape, |s| s[i].round().max(0.0) as u8);
-            let rate = f64::from(if let Some(samples) = rate_mod {
-                let _ = self.rate.tick();
-                samples[i]
-            } else {
-                self.rate.tick()
-            });
+            let synced = sync_mod.map_or(i, self.synced, |v| v >= 0.5);
+            let cycles = cycles_mod.map_or(i, self.cycles, |v| f64::from(v.round().max(1.0)));
+            let shape = shape_mod.map_or(i, self.shape, |v| v.round().max(0.0) as u8);
+            let rate = f64::from(rate_mod.at_or(i, self.rate.tick()));
             let p = if synced {
                 // `cycles` waves per input cycle. A whole number keeps the
                 // wave continuous where the input wraps.

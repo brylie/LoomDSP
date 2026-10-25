@@ -444,3 +444,65 @@ fn signals() {
 fn too_few_samples_fail() {
     Signal::samples([1.0, 2.0]).render(3, 1.0);
 }
+
+/// Sums its input forever: keeps any NaN it is given. Wrong on purpose.
+static SUM: ModuleDescriptor = ModuleDescriptor {
+    id: "test.sum",
+    version: 1,
+    name: "Sum",
+    category: "Test",
+    description: "Keeps a running sum.",
+    inputs: &[port("in", SignalType::Modulation)],
+    outputs: &[port("out", SignalType::Modulation)],
+    params: &[],
+    role: ModuleRole::Dsp(|_| Box::new(Sum(0.0))),
+    panel: loom_core::Panel::EMPTY,
+    displays: &[],
+};
+
+/// The running sum of [`SUM`].
+struct Sum(f32);
+
+impl Module for Sum {
+    fn process(&mut self, _: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        let ([input], [out]) = io.split::<1, 1>();
+        for (out, &x) in out.iter_mut().zip(input) {
+            self.0 += x;
+            *out = self.0;
+        }
+    }
+}
+
+/// A module that keeps a NaN in its state fails, naming the input, the
+/// value, and the output.
+#[test]
+#[should_panic(expected = "test.sum: after NaN on input `in` (frames 1000 to 1007), output `out` is still NaN")]
+fn a_module_that_keeps_a_non_finite_input_fails() {
+    Harness::new(&SUM).frames(2_000).check_non_finite_recovery();
+}
+
+/// A module with no state passes: its output is finite again as soon as
+/// the input is. Unconnected inputs are checked too.
+#[test]
+fn a_module_without_state_recovers() {
+    Harness::new(&ECHO).frames(2_000).check_non_finite_recovery();
+    ramp(0.0).frames(2_000).check_non_finite_recovery();
+}
+
+/// The render must be long enough to show recovery.
+#[test]
+#[should_panic(expected = "but the non-finite check needs more than 1488")]
+fn a_short_render_cannot_show_recovery() {
+    Harness::new(&ECHO).frames(1_000).check_non_finite_recovery();
+}
+
+/// The recovery window is 10 ms at any sample rate, so a render at 96 kHz
+/// needs 960 recovery frames, not 480.
+#[test]
+#[should_panic(expected = "but the non-finite check needs more than 1968")]
+fn the_recovery_window_scales_with_the_sample_rate() {
+    Harness::new(&ECHO)
+        .sample_rate(96_000.0)
+        .frames(1_900)
+        .check_non_finite_recovery();
+}

@@ -22,7 +22,13 @@ fn sine_patch_plays_a_note_and_is_silent_without_one() {
 #[test]
 fn renders_are_bit_identical_across_runs() {
     // NFR-SND-02
-    for patch in ["sine.ron", "subtractive.ron", "fm-feedback.ron", "plucked-string.ron"] {
+    for patch in [
+        "sine.ron",
+        "subtractive.ron",
+        "fm-feedback.ron",
+        "plucked-string.ron",
+        "modulation.ron",
+    ] {
         let a = render(&mut load(patch), 48_000, 256, &one_note());
         let b = render(&mut load(patch), 48_000, 256, &one_note());
         assert_eq!(a, b, "{patch}");
@@ -38,6 +44,7 @@ fn output_does_not_depend_on_host_buffer_size() {
         "fm-feedback.ron",
         "fm-feedback-delay1.ron",
         "plucked-string.ron",
+        "modulation.ron",
     ] {
         let small = render(&mut load(patch), 48_000, 32, &one_note());
         let large = render(&mut load(patch), 48_000, 1024, &one_note());
@@ -514,6 +521,49 @@ fn delay_and_allpass_ports_and_left_right_engine_paths_are_independent() {
             "right frame {i}: got {}, expected {}",
             wet_r[i],
             dry_r[i - 210]
+        );
+    }
+}
+
+/// Checks that the assignments in `examples/patches/modulation.ron` change
+/// the sound: the same patch with its `modulation` list removed plays
+/// something different, and so does the patch with only the LFO or only
+/// the envelope assignment removed, so each one is heard on its own
+/// (#150, FR-MOD-01).
+#[test]
+fn modulation_patch_differs_from_the_same_patch_without_assignments() {
+    let config = || EngineConfig {
+        output_safety: loom_core::OutputSafety::Off,
+        ..EngineConfig::with_sample_rate(SAMPLE_RATE)
+    };
+    let patch = loom_patch::Patch::load(patch_path("modulation.ron")).expect("example patch loads");
+    assert_eq!(patch.modulation.len(), 2, "an LFO and an envelope on the cutoff");
+    let play = |patch: &loom_patch::Patch| {
+        let mut parts = loom_core::create_engine(loom_modules::registry(), config());
+        patch.load_into(&mut parts.controller).expect("example patch is valid");
+        render(&mut parts, 48_000, 128, &one_note()).0
+    };
+    let modulated = play(&patch);
+    assert!(rms(&modulated[1_000..20_000]) > 0.01, "note should be audible");
+
+    // The patch without the assignments named by `remove`, by source module.
+    let without = |remove: &[u32]| {
+        let mut changed = patch.clone();
+        changed.modulation.retain(|m| !remove.contains(&m.source.0));
+        assert_eq!(
+            changed.modulation.len(),
+            2 - remove.len(),
+            "{remove:?} names assignments"
+        );
+        changed
+    };
+    for (what, remove) in [("both", &[5, 6][..]), ("the LFO", &[5][..]), ("the envelope", &[6][..])] {
+        let other = play(&without(remove));
+        let difference: Vec<f32> = modulated.iter().zip(&other).map(|(a, b)| a - b).collect();
+        let difference = rms(&difference[1_000..20_000]);
+        assert!(
+            difference > 0.01,
+            "removing {what} should change the sound, difference RMS {difference}"
         );
     }
 }

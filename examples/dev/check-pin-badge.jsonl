@@ -1,0 +1,11 @@
+{"id": "start", "cmd": "wait", "ms": 1000}
+{"id": "hover-output", "cmd": "hover", "target": "5:out"}
+{"id": "hovered", "cmd": "snapshot"}
+{"id": "hover-badge", "cmd": "hover", "target": "5:badge:out"}
+{"id": "click-badge", "cmd": "press"}
+{"id": "click-badge", "cmd": "release"}
+{"id": "pinned", "cmd": "snapshot"}
+{"id": "pinned-shot", "cmd": "screenshot", "path": "${LOOM_OUT}/pinned-badge.png", "target": "5:badge:out", "margin": 40}
+{"id": "unpin", "cmd": "key", "key": "escape"}
+{"id": "unpinned", "cmd": "snapshot"}
+{"id": "end", "cmd": "quit"}
