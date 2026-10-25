@@ -527,7 +527,9 @@ fn delay_and_allpass_ports_and_left_right_engine_paths_are_independent() {
 
 /// Checks that the assignments in `examples/patches/modulation.ron` change
 /// the sound: the same patch with its `modulation` list removed plays
-/// something different (#150, FR-MOD-01).
+/// something different, and so does the patch with only the LFO or only
+/// the envelope assignment removed, so each one is heard on its own
+/// (#150, FR-MOD-01).
 #[test]
 fn modulation_patch_differs_from_the_same_patch_without_assignments() {
     let config = || EngineConfig {
@@ -536,22 +538,34 @@ fn modulation_patch_differs_from_the_same_patch_without_assignments() {
     };
     let patch = loom_patch::Patch::load(patch_path("modulation.ron")).expect("example patch loads");
     assert_eq!(patch.modulation.len(), 2, "an LFO and an envelope on the cutoff");
-    let mut bare = patch.clone();
-    bare.modulation.clear();
     let play = |patch: &loom_patch::Patch| {
         let mut parts = loom_core::create_engine(loom_modules::registry(), config());
         patch.load_into(&mut parts.controller).expect("example patch is valid");
         render(&mut parts, 48_000, 128, &one_note()).0
     };
     let modulated = play(&patch);
-    let unmodulated = play(&bare);
     assert!(rms(&modulated[1_000..20_000]) > 0.01, "note should be audible");
-    let difference: Vec<f32> = modulated.iter().zip(&unmodulated).map(|(a, b)| a - b).collect();
-    assert!(
-        rms(&difference[1_000..20_000]) > 0.01,
-        "the assignments should change the sound, difference RMS {}",
-        rms(&difference[1_000..20_000])
-    );
+
+    // The patch without the assignments named by `remove`, by source module.
+    let without = |remove: &[u32]| {
+        let mut changed = patch.clone();
+        changed.modulation.retain(|m| !remove.contains(&m.source.0));
+        assert_eq!(
+            changed.modulation.len(),
+            2 - remove.len(),
+            "{remove:?} names assignments"
+        );
+        changed
+    };
+    for (what, remove) in [("both", &[5, 6][..]), ("the LFO", &[5][..]), ("the envelope", &[6][..])] {
+        let other = play(&without(remove));
+        let difference: Vec<f32> = modulated.iter().zip(&other).map(|(a, b)| a - b).collect();
+        let difference = rms(&difference[1_000..20_000]);
+        assert!(
+            difference > 0.01,
+            "removing {what} should change the sound, difference RMS {difference}"
+        );
+    }
 }
 
 /// Checks that `examples/patches/plucked-string.ron` rings at A3 (220 Hz).

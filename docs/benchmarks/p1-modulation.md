@@ -22,7 +22,7 @@ Two groups in `crates/loom-modules/benches/engine.rs`:
 
 The `patch` group also gained `modulation.ron`, the example patch from [#150](https://github.com/brylie/LoomDSP/issues/150).
 
-**The numbers are noisy.** Other builds and apps ran on the machine at the same time (load average 7 to 20 on 10 cores). The first run was thrown away. The tables give the medians of the next two runs, each with 3 s of warm-up and 10 s of measurement. Differences under about 0.5 µs are not meaningful here.
+**The numbers are noisy.** Other builds and apps ran on the machine at the same time: the load average was 5 to 7 on 10 cores during these runs, and another agent may have been building. The first of three runs was thrown away. The tables give the medians of the next two runs, each with 3 s of warm-up and 10 s of measurement. Differences under about 0.5 µs are not meaningful here.
 
 ## Results
 
@@ -30,28 +30,28 @@ Time per 128-frame block (median, two runs):
 
 | Case | Run 2 | Run 3 |
 |---|---:|---:|
-| svf_cutoff / still | 4.30 µs | 4.84 µs |
-| svf_cutoff / cable | 4.61 µs | 4.71 µs |
-| svf_cutoff / assigned | 6.08 µs | 6.17 µs |
-| assignments / 0 | 9.41 µs | 9.40 µs |
-| assignments / 1 | 13.26 µs | 11.49 µs |
-| assignments / 4 | 12.34 µs | 12.05 µs |
-| assignments / 16 | 14.21 µs | 14.22 µs |
+| svf_cutoff / still | 4.05 µs | 4.01 µs |
+| svf_cutoff / cable | 4.40 µs | 4.11 µs |
+| svf_cutoff / assigned | 6.40 µs | 5.69 µs |
+| assignments / 0 | 8.77 µs | 8.74 µs |
+| assignments / 1 | 10.34 µs | 10.42 µs |
+| assignments / 4 | 10.87 µs | 11.03 µs |
+| assignments / 16 | 12.54 µs | 12.58 µs |
 
-Example patches (one note playing), best of three runs:
+Example patches (one note playing), median of the same two runs (`fm-feedback.ron` from one run):
 
 | Patch | Time per block | Share of real-time budget |
 |---|---:|---:|
-| `subtractive.ron` (9 modules, cutoff by cable) | 5.8 µs | 0.22% |
-| `fm-feedback.ron` (8 modules, one 4-module loop) | 11.2 µs | 0.42% |
-| `modulation.ron` (10 modules, two assignments on the cutoff) | 8.3 µs | 0.31% |
+| `subtractive.ron` (9 modules, cutoff by cable) | 5.5 µs | 0.21% |
+| `fm-feedback.ron` (8 modules, one 4-module loop) | 10.0 µs | 0.38% |
+| `modulation.ron` (9 modules, two assignments on the cutoff) | 8.1 to 8.3 µs | 0.31% |
 
 ## What this means
 
-1. **A modulated cutoff costs about 1.3 to 1.8 µs more per block than a still one.** That is about 10 to 14 ns per sample, or 30 to 40% more for this small patch. In absolute terms it is small: 0.05% of the real-time budget.
+1. **A modulated cutoff costs about 1.7 to 2.4 µs more per block than a still one.** That is about 13 to 18 ns per sample, or 40 to 60% more for this small patch. In absolute terms it is small: under 0.1% of the real-time budget.
 2. **A cable to the cutoff input costs almost nothing.** The SVF already turns pitch into Hz and computes `tan()` every sample. The extra cost of an assignment is the fill itself: the sum, the smoothing of the base, and `denormalize`, then `from_hz` in the SVF.
-3. **The first assignment costs the most.** Going from 0 to 1 adds about 2 µs per block. After that each assignment adds about 0.18 µs per block (1.4 ns per sample): 16 assignments cost about 2.7 µs more than 1. The fill grows linearly and slowly. Run 2's value for 1 assignment is above its value for 4, which shows the noise.
-4. **`modulation.ron` costs about 2.5 µs more per block than `subtractive.ron`.** It has one more module (it adds the LFO, a phase generator and a sine, and drops the multiply that scaled the filter envelope) and two assignments on the cutoff.
+3. **The first assignment costs the most.** Going from 0 to 1 adds about 1.6 µs per block. After that each assignment adds about 0.15 µs per block (1.1 ns per sample): 16 assignments cost about 2.2 µs more than 1. The fill grows linearly and slowly.
+4. **`modulation.ron` costs about 2.7 µs more per block than `subtractive.ron`.** It has the same number of modules (it adds the LFO and drops the multiply that scaled the filter envelope), plus two assignments on the cutoff.
 
 The modulated cutoff does cost noticeably more than the still one, in relative terms. It is not a P1 problem. If a patch with many modulated filters needs it, these are the places to cut, from the most to the least promising:
 
@@ -59,7 +59,7 @@ The modulated cutoff does cost noticeably more than the still one, in relative t
 - **Make `denormalize` cheaper.** For a logarithmic parameter, `min × exp2(t × log2(max / min))` with `log2(max / min)` worked out once is cheaper than `powf`. This keeps today's API.
 - **Skip the base smoothing once it has settled.** When the knob is not moving, the fill could use one base value for the whole block.
 
-Measure again after [#138](https://github.com/brylie/LoomDSP/issues/138) (`PortIo::param_at`) lands, since it changes how modules read these buffers.
+Run these benchmarks again on a quiet machine once [#383](https://github.com/brylie/LoomDSP/pull/383) is merged. It changes how modules read modulated parameters ([#138](https://github.com/brylie/LoomDSP/issues/138), `PortIo::param_at`).
 
 ## How to reproduce
 
