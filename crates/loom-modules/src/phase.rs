@@ -207,6 +207,89 @@ impl Module for PhaseTrigger {
     }
 }
 
+/// `loom.phase.wrap` (MT-PHASE-08): brings any number into the phase range.
+pub static WRAP: ModuleDescriptor = ModuleDescriptor {
+    id: "loom.phase.wrap",
+    version: 1,
+    name: "Phase wrap and fold",
+    category: "Phase",
+    description: "Brings any signal into the phase range, 0 to 1. Wrap goes round the edge; fold turns back at the edges.",
+    inputs: &[PortSpec {
+        name: "in",
+        label: "In",
+        signal: SignalType::Modulation,
+        description: "The signal to bring into the phase range.",
+        default: PortDefault::Value(0.0),
+        polarity: Polarity::Bipolar,
+        channels: Channels::PerChannel,
+    }],
+    outputs: &[PortSpec {
+        name: "out",
+        label: "Out",
+        signal: SignalType::Phase,
+        description: "A phase from 0 to 1.",
+        default: PortDefault::Value(0.0),
+        polarity: Polarity::Unipolar,
+        channels: Channels::PerChannel,
+    }],
+    params: &[ParamSpec {
+        name: "mode",
+        label: "Mode",
+        description: "Wrap goes round the edge. Fold turns back at the edges.",
+        min: 0.0,
+        max: 1.0,
+        default: 0.0,
+        unit: "",
+        options: ParamOptions::DEFAULT,
+    }
+    .integer()],
+    role: ModuleRole::Dsp(|_| Box::new(Wrap { fold: false })),
+    panel: Panel::new(3, 3, &[Widget::radio(0, 0, "mode", &["Wrap", "Fold"])]),
+    displays: &[],
+};
+
+struct Wrap {
+    fold: bool,
+}
+
+impl Wrap {
+    /// `x - floor(x)`, always in `[0, 1)`.
+    fn wrap(x: f32) -> f32 {
+        let w = x - x.floor();
+        // A tiny negative `x` can round the result up to exactly 1.
+        if w >= 1.0 { 0.0 } else { w }
+    }
+
+    /// A triangle fold into `[0, 1]`: 1 stays 1, 1.25 comes back to 0.75.
+    fn fold(x: f32) -> f32 {
+        let t = x - 2.0 * (x / 2.0).floor();
+        let folded = if t <= 1.0 { t } else { 2.0 - t };
+        folded.clamp(0.0, 1.0)
+    }
+}
+
+impl Module for Wrap {
+    fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        let ([input], [out]) = io.split::<1, 1>();
+        for (out, &x) in out.iter_mut().zip(input) {
+            // A phase module must not pass NaN on to oscillators.
+            *out = if !x.is_finite() {
+                0.0
+            } else if self.fold {
+                Self::fold(x)
+            } else {
+                Self::wrap(x)
+            };
+        }
+    }
+
+    fn set_param(&mut self, index: usize, value: f32) {
+        if index == 0 {
+            self.fold = value >= 0.5;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -284,5 +367,46 @@ mod tests {
     fn unconnected_input_fires_once_then_stays_low() {
         // An unconnected input reads zeros: a phase standing still at 0.
         assert_eq!(phase_trigger(&[0.0; 4]), [1.0, 0.0, 0.0, 0.0]);
+    }
+}
+
+#[cfg(test)]
+mod wrap_tests {
+    use super::*;
+
+    /// Wrap and fold give the values in the spec for the edges and for
+    /// negative input, and 0 for NaN and infinity.
+    #[test]
+    fn wrap_and_fold_values() {
+        let inputs = [-0.25, 0.0, 0.25, 1.0, 1.25, 2.0];
+        let wrapped = [0.75, 0.0, 0.25, 0.0, 0.25, 0.0];
+        let folded = [0.25, 0.0, 0.25, 1.0, 0.75, 0.0];
+        for ((x, w), f) in inputs.iter().zip(wrapped).zip(folded) {
+            assert_eq!(Wrap::wrap(*x), w, "wrap {x}");
+            assert_eq!(Wrap::fold(*x), f, "fold {x}");
+        }
+        // A tiny negative number must not give exactly 1.
+        assert!(Wrap::wrap(-1e-9) < 1.0);
+    }
+
+    /// NaN and infinity give 0 in both modes, through the module.
+    #[test]
+    fn non_finite_input_gives_zero() {
+        use loom_core::testing::run;
+        let input = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, 1.25];
+        for fold in [0.0, 1.0] {
+            let ModuleRole::Dsp(create) = WRAP.role else {
+                unreachable!()
+            };
+            let mut m = create(&ModuleConfig {
+                sample_rate: 48_000.0,
+                max_block: 4,
+            });
+            m.set_param(0, fold);
+            let mut out = [9.0; 4];
+            run(m.as_mut(), 48_000.0, &[&input], &[true], &mut [&mut out], &[]);
+            assert_eq!(out[..3], [0.0, 0.0, 0.0]);
+            assert!(out[3] > 0.0 && out[3] <= 1.0);
+        }
     }
 }

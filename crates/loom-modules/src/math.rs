@@ -464,6 +464,79 @@ impl Module for Convert {
     }
 }
 
+/// `loom.pitch.constant` (MT-LEVEL-01): a fixed pitch, set in semitones.
+pub static PITCH_CONSTANT: ModuleDescriptor = ModuleDescriptor {
+    id: "loom.pitch.constant",
+    version: 1,
+    name: "Constant (pitch)",
+    category: "Pitch",
+    description: "Outputs a fixed pitch, set in semitones from middle C.",
+    inputs: &[],
+    outputs: &[PortSpec {
+        name: "out",
+        label: "Out",
+        signal: SignalType::Pitch,
+        description: "The pitch, at 0.1 per octave.",
+        default: PortDefault::Value(0.0),
+        polarity: Polarity::Bipolar,
+        channels: Channels::PerChannel,
+    }],
+    params: &[ParamSpec {
+        name: "semitones",
+        label: "Semitones",
+        description: "How far from middle C the pitch is. 12 is one octave up.",
+        min: -48.0,
+        max: 48.0,
+        default: 0.0,
+        unit: "st",
+        options: ParamOptions::DEFAULT,
+    }
+    .smooth(0.005)],
+    role: ModuleRole::Dsp(|config| {
+        Box::new(PitchConstant {
+            semitones: Smoothed::new(0.0, config.sample_rate, PITCH_CONSTANT.params[0].options.smooth_seconds),
+        })
+    }),
+    panel: Panel::new(3, 3, &[Widget::knob(0, 0, "semitones")]),
+    displays: &[],
+};
+
+struct PitchConstant {
+    semitones: Smoothed,
+}
+
+impl Module for PitchConstant {
+    fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        let modulated = io.modulated(0);
+        let ([], [out]) = io.split::<0, 1>();
+        for (i, out) in out.iter_mut().enumerate() {
+            let semitones = if let Some(samples) = modulated {
+                let _ = self.semitones.tick();
+                samples[i]
+            } else {
+                self.semitones.tick()
+            };
+            // 0.1 per octave, so 12 semitones are 0.1.
+            *out = semitones / 120.0;
+        }
+    }
+
+    fn set_param(&mut self, index: usize, value: f32) {
+        if index == 0 {
+            self.semitones.set_target(value);
+        }
+    }
+
+    fn param_glide(&self, index: usize) -> Option<f32> {
+        if index == 0 { self.semitones.gliding() } else { None }
+    }
+
+    fn reset(&mut self) {
+        let target = self.semitones.target();
+        self.semitones.reset(target);
+    }
+}
+
 #[cfg(test)]
 mod convert_tests {
     use super::*;
@@ -562,5 +635,28 @@ mod arithmetic_tests {
         assert!(div[0].is_nan() && div[1].is_infinite());
         assert_eq!(div[2], 0.0);
         assert_eq!(div[3], 2.0);
+    }
+}
+
+#[cfg(test)]
+mod pitch_constant_tests {
+    use super::*;
+    use loom_core::testing::run;
+
+    /// 12 semitones output 0.1, one octave in the pitch signal.
+    #[test]
+    fn twelve_semitones_is_one_octave() {
+        let ModuleRole::Dsp(create) = PITCH_CONSTANT.role else {
+            unreachable!()
+        };
+        let mut m = create(&ModuleConfig {
+            sample_rate: 48_000.0,
+            max_block: 4,
+        });
+        m.set_param(0, 12.0);
+        m.reset();
+        let mut out = [0.0; 4];
+        run(m.as_mut(), 48_000.0, &[], &[], &mut [&mut out], &[]);
+        assert!(out.iter().all(|v| (v - 0.1).abs() < 1e-7), "{out:?}");
     }
 }
