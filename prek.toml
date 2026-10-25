@@ -15,6 +15,13 @@
 # with coverage, docs, the WebAssembly build, dependency licences) run before
 # push.
 #
+# Every hook that needs a tool runs it through mise (`mise run` or
+# `mise exec --`), so it uses the versions pinned in mise.toml and does not
+# depend on what is on PATH. This matters most in agent sandboxes and fresh
+# worktrees. mise refuses to read an untrusted mise.toml, and then every one
+# of these hooks fails, so run `mise trust` once per worktree (see above).
+# A repository cannot trust itself; that choice stays with the person.
+#
 # The Rust checks call the tasks in mise.toml, which CI runs too, so a push
 # that passes these hooks passes the same checks in CI. CI also runs the
 # tests on Windows and Linux and checks the minimum Rust version.
@@ -82,7 +89,7 @@ id = "cargo-fmt"
 name = "cargo fmt"
 # Formats in place. If it changes anything, the commit stops so you can
 # review and stage the result.
-entry = "cargo fmt --all"
+entry = "mise exec -- cargo fmt --all"
 language = "system"
 types = ["rust"]
 pass_filenames = false
@@ -102,7 +109,7 @@ id = "typos"
 name = "typos (spelling)"
 # --force-exclude applies _typos.toml excludes to the files prek passes in.
 # Only the changed files are checked here; `mise run typos` checks them all.
-entry = "typos --force-exclude"
+entry = "mise exec -- typos --force-exclude"
 language = "system"
 types = ["text"]
 
