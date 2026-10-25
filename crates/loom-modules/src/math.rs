@@ -253,3 +253,134 @@ impl Module for Constant {
         self.value.reset(target);
     }
 }
+
+/// Lowest level in decibels. A level of 0 gives this, never minus infinity.
+const CONVERT_FLOOR_DB: f32 = -120.0;
+/// Highest decibel value converted, so a huge input cannot make infinity.
+const CONVERT_CEIL_DB: f32 = 120.0;
+/// Lowest frequency converted to a pitch, in Hz. Inputs at or below 0 Hz use it.
+const CONVERT_FLOOR_HZ: f32 = 0.001;
+/// Highest frequency converted to a pitch, in Hz.
+const CONVERT_CEIL_HZ: f32 = 1.0e9;
+/// Highest pitch converted to Hz, so a huge input cannot make infinity.
+const CONVERT_CEIL_PITCH: f32 = 1.0;
+
+/// `loom.math.convert` (MT-MATH-03): converts one unit to another.
+pub static CONVERT: ModuleDescriptor = ModuleDescriptor {
+    id: "loom.math.convert",
+    version: 1,
+    name: "Convert",
+    category: "Math",
+    description: "Converts between decibels and level, and between pitch and frequency in Hz.",
+    inputs: &[PortSpec {
+        name: "in",
+        label: "In",
+        signal: SignalType::Modulation,
+        description: "The value to convert.",
+        default: PortDefault::Value(0.0),
+        polarity: Polarity::Bipolar,
+        channels: Channels::PerChannel,
+    }],
+    outputs: &[PortSpec {
+        name: "out",
+        label: "Out",
+        signal: SignalType::Modulation,
+        description: "The converted value.",
+        default: PortDefault::Value(0.0),
+        polarity: Polarity::Bipolar,
+        channels: Channels::PerChannel,
+    }],
+    params: &[ParamSpec {
+        name: "mode",
+        label: "Mode",
+        description: "Which conversion to do: dB to level, level to dB, pitch to Hz, or Hz to pitch.",
+        min: 0.0,
+        max: 3.0,
+        default: 0.0,
+        unit: "",
+        options: ParamOptions::DEFAULT,
+    }
+    .integer()],
+    role: ModuleRole::Dsp(|_| Box::new(Convert { mode: 0 })),
+    // Four radio buttons are 3 wide and 5 tall.
+    panel: Panel::new(
+        3,
+        5,
+        &[Widget::radio(
+            0,
+            0,
+            "mode",
+            &["dB to level", "Level to dB", "Pitch to Hz", "Hz to pitch"],
+        )],
+    ),
+    displays: &[],
+};
+
+struct Convert {
+    mode: u8,
+}
+
+impl Convert {
+    /// Converts one value in the current mode. Never gives infinity or NaN
+    /// for a finite input. A NaN input stays NaN.
+    fn convert(&self, x: f32) -> f32 {
+        match self.mode {
+            0 => 10.0_f32.powf(x.clamp(CONVERT_FLOOR_DB, CONVERT_CEIL_DB) / 20.0),
+            1 => (20.0 * x.abs().log10()).clamp(CONVERT_FLOOR_DB, CONVERT_CEIL_DB),
+            2 => loom_core::signal::pitch::to_hz(x.min(CONVERT_CEIL_PITCH)),
+            _ => loom_core::signal::pitch::from_hz(x.clamp(CONVERT_FLOOR_HZ, CONVERT_CEIL_HZ)),
+        }
+    }
+}
+
+impl Module for Convert {
+    fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        let ([input], [out]) = io.split::<1, 1>();
+        for (out, &x) in out.iter_mut().zip(input) {
+            *out = self.convert(x);
+        }
+    }
+
+    fn set_param(&mut self, index: usize, value: f32) {
+        if index == 0 {
+            self.mode = value.round().clamp(0.0, 3.0) as u8;
+        }
+    }
+}
+
+#[cfg(test)]
+mod convert_tests {
+    use super::*;
+
+    fn run(mode: u8, x: f32) -> f32 {
+        Convert { mode }.convert(x)
+    }
+
+    /// The conversions hit the known points from the issue.
+    #[test]
+    fn known_points() {
+        assert_eq!(run(0, 0.0), 1.0);
+        assert!((run(0, -6.02) - 0.5).abs() < 0.001);
+        assert!((run(2, 0.0) - 261.63).abs() < 0.01);
+        assert!(run(3, 261.625_58).abs() < 1e-6);
+    }
+
+    /// dB to level and back returns the input.
+    #[test]
+    fn db_round_trip() {
+        for db in [-60.0, -6.0, 0.0, 12.0] {
+            assert!((run(1, run(0, db)) - db).abs() < 1e-3, "{db}");
+        }
+    }
+
+    /// Silence and extreme inputs stay finite.
+    #[test]
+    fn stays_finite() {
+        assert_eq!(run(1, 0.0), -120.0);
+        for mode in 0..4 {
+            for x in [0.0, -1.0, 1e30, -1e30, f32::INFINITY, f32::NEG_INFINITY] {
+                assert!(run(mode, x).is_finite(), "mode {mode} input {x}");
+            }
+        }
+    }
+}

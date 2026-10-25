@@ -39,6 +39,7 @@ pub static ALL: &[&ModuleDescriptor] = &[
     &math::ADD,
     &math::MUL,
     &math::CONSTANT,
+    &math::CONVERT,
     &level::AMP,
     &io::UNIT_DELAY,
     &io::AUDIO_OUT,
@@ -116,6 +117,14 @@ mod tests {
                     assert!(
                         matches!(widget.map(|w| w.kind), Some(loom_core::WidgetKind::Radio { .. })),
                         "amp.response"
+                    );
+                    continue;
+                }
+                // Convert's mode is a radio, not a knob.
+                if descriptor.id == "loom.math.convert" && param.name == "mode" {
+                    assert!(
+                        matches!(widget.map(|w| w.kind), Some(loom_core::WidgetKind::Radio { .. })),
+                        "convert.mode"
                     );
                     continue;
                 }
