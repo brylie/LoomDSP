@@ -101,3 +101,18 @@ debug = 1
 
 [profile.bench]
 debug = 1
+
+# Tests render seconds to hours of audio. Optimise the engine crates in
+# dev and test builds; `debug_assertions` stay on, so the no-allocation
+# tests still run.
+[profile.dev.package.loom-core]
+opt-level = 3
+
+[profile.dev.package.loom-modules]
+opt-level = 3
+
+[profile.dev.package.loom-test]
+opt-level = 3
+
+[profile.dev.package.rtrb]
+opt-level = 3
