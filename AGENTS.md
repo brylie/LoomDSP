@@ -40,7 +40,7 @@ cargo run --release -p loom-cli -- analyze /tmp/app.wav --from 0.5 --max-peak 0.
 cargo run --release -p loom-cli -- midi-port "Loom Pad"   # virtual MIDI controller (macOS, Linux); type `on 60`, `off 60`, `wait 500`; start it before the app
 cargo run --release -p loom-app -- examples/patches/subtractive.ron --preferences /tmp/stage.ron --device "MOTU" --buffer 128   # preferences file, devices for this run
 cargo run --release -p loom-app -- examples/patches/subtractive.ron --fake-audio --control loom.sock   # drive the running app; then:
-echo '{"cmd":"set","module":4,"param":"cutoff","value":800}' | nc -U loom.sock   # also snapshot, locate, screenshot, sample, note, key, press, undo, new, quit
+echo '{"cmd":"set","module":4,"param":"cutoff","value":800}' | nc -U loom.sock   # also snapshot, locate, screenshot, sample, note, key, press, hover, drag, undo, new, quit
 echo '{"cmd":"audio","device":"BlackHole"}' | nc -U loom.sock   # real devices only, not --fake-audio; also output_safety, midi; snapshot's "audio" says if the device calls back
 scripts/bundle-macos.sh                                              # LoomDSP.app, so macOS automation tools can drive the window
 cargo run --release -p loom-app -- examples/patches/subtractive.ron --screenshot /tmp/canvas.png   # canvas to PNG, no window
