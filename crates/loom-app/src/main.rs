@@ -2323,7 +2323,8 @@ impl App {
             self.stats_bar()
         ];
         // Always a stack, so opening the browser keeps the canvas's state
-        // (its camera) in the same place in the widget tree.
+        // (its camera) in the same place in the widget tree. Tested by
+        // `ui_test::tests::the_camera_survives_opening_the_browser`.
         let mut layers = stack![main];
         if let Some(open) = &self.browser {
             let outside = mouse_area(space().width(Length::Fill).height(Length::Fill))

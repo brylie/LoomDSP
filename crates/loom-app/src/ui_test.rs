@@ -681,4 +681,36 @@ mod tests {
         ui.tap(keyboard::Key::Character("z".into()), keyboard::Modifiers::COMMAND);
         assert_eq!(env_depth(&ui), start);
     }
+
+    /// Opening the module browser and closing it keeps the canvas's camera.
+    /// Iced keeps widget state by place in the tree, and `App::view` always
+    /// wraps the window in a `stack!` so the canvas keeps its place when the
+    /// browser layer is added (#226, ADR-0021).
+    #[test]
+    fn the_camera_survives_opening_the_browser() {
+        let mut ui = Ui::open("subtractive.ron");
+        let canvas = ui.canvas();
+        let empty = Point::new(canvas.bounds.x + 8.0, canvas.bounds.y + 8.0);
+        ui.move_to(empty);
+        // A trackpad pans, and a mouse wheel zooms.
+        ui.step(&[Event::Mouse(mouse::Event::WheelScrolled {
+            delta: mouse::ScrollDelta::Pixels { x: 37.0, y: -23.0 },
+        })]);
+        ui.step(&[Event::Mouse(mouse::Event::WheelScrolled {
+            delta: mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 },
+        })]);
+        let moved = ui.canvas().camera;
+        assert_ne!(moved, canvas.camera, "the scroll moved the camera");
+
+        ui.tap(keyboard::Key::Character("a".into()), keyboard::Modifiers::default());
+        assert!(ui.app.browser.is_some(), "A opens the browser");
+        assert_eq!(ui.canvas().camera, moved, "with the browser open");
+        ui.tap(
+            keyboard::Key::Named(keyboard::key::Named::Escape),
+            keyboard::Modifiers::default(),
+        );
+        assert!(ui.app.browser.is_none(), "Escape closes the browser");
+
+        assert_eq!(ui.canvas().camera, moved, "after the browser closed");
+    }
 }
