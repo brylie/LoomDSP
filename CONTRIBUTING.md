@@ -200,6 +200,7 @@ Only permissively licensed dependencies are allowed (MIT, Apache-2.0, BSD, ISC, 
 - Include tests.
 - For a feature, link its specification and say which acceptance criteria the change meets. If the change differs from the spec, update the spec in the same pull request.
 - Explain what changed and why, in plain language.
+- If you changed a module descriptor's text, ports, or parameters, run `mise run help-pages` and commit the pages in `docs/modules/`. A test fails while they are out of date.
 - CI must pass.
 
 ## Writing style for docs

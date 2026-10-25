@@ -77,7 +77,7 @@ Copy [template.md](template.md). Keep it to one feature. Link the ADR, requireme
 | [App preferences](preferences.md) | None (builds on [ADR-0019](../adr/0019-output-safety-stage.md)) | Implemented, P1 |
 | [Patch metadata](patch-metadata.md) | [ADR-0023](../adr/0023-patch-licences-spdx-and-creative-commons.md) | Draft, P2 and P4 |
 | [Control channel](control-channel.md) | None (builds on [ADR-0021](../adr/0021-plain-data-view-models-and-keyed-identity.md)) | Implemented, developer tooling |
-| [Module help pages](help-pages.md) | None (builds on [ADR-0016](../adr/0016-ports-and-parameters-carry-their-own-text.md)) | Implemented, P1 |
+| [Module help pages](help-pages.md) | None (builds on [ADR-0016](../adr/0016-ports-and-parameters-carry-their-own-text.md)) | Agreed and Implemented, P1 |
 | [Panic](panic.md) | None (builds on [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md) and [ADR-0019](../adr/0019-output-safety-stage.md)) | Agreed, P1 |
 | [Devices plugged in and out](device-changes.md) | None (builds on [preferences](preferences.md)) | Agreed, P1 |
 | [Audio input](audio-input.md) | None (builds on [ADR-0020](../adr/0020-inferred-channel-count.md)) | Agreed, P1 |
