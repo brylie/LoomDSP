@@ -47,6 +47,7 @@ pub static ALL: &[&ModuleDescriptor] = &[
     &math::PITCH_CONSTANT,
     &math::CONVERT,
     &level::AMP,
+    &level::CONSTANT,
     &level::CLAMP,
     &level::SCALE,
     &mix::MIXER,

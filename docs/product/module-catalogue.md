@@ -117,7 +117,7 @@ Modulation assignments already scale and offset any parameter (ADR-0014), so the
 
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
-| MT-LEVEL-01 | Constant | Outputs a fixed value in a chosen unit: a plain number, decibels (as a level), or pitch. Built as one module per unit. | Smoothing | P1 | FR-LIB-05 | Built in part (`loom.math.constant`: plain number only). Specified in [P1 modules](../design/p1-modules.md#constant-family-mt-level-01): `loom.level.constant`, `loom.pitch.constant`. Ratio is withdrawn from this entry |
+| MT-LEVEL-01 | Constant | Outputs a fixed value in a chosen unit: a plain number, decibels (as a level), or pitch. Built as one module per unit. | Smoothing | P1 | FR-LIB-05 | Built (`loom.math.constant`: a plain number; `loom.level.constant`: decibels; `loom.pitch.constant`: semitones; see [P1 modules](../design/p1-modules.md#constant-family-mt-level-01)). Ratio is withdrawn from this entry |
 | MT-LEVEL-02 | Amplifier | Scales a signal by a control signal, with linear or exponential response. | | P1 | FR-LIB-05 | Built (`loom.level.amp`) |
 | MT-LEVEL-03 | Scale | Multiplies by a factor from -1 to +1 (so it can invert) and adds an offset, or maps one range onto another, including bipolar to unipolar and back. | | P1 | FR-LIB-05 | Specified (`loom.level.scale`, [P1 modules](../design/p1-modules.md)) |
 | MT-LEVEL-04 | Slew | Limits how fast a signal can rise or fall, with separate times for each direction. | | P1 | FR-LIB-04 | Specified (`loom.level.slew`, [P1 modules](../design/p1-modules.md)) |

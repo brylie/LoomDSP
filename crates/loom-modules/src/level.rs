@@ -144,6 +144,79 @@ impl Module for Amp {
     }
 }
 
+/// `loom.level.constant` (MT-LEVEL-01): a fixed level, set in decibels.
+pub static CONSTANT: ModuleDescriptor = ModuleDescriptor {
+    id: "loom.level.constant",
+    version: 1,
+    name: "Constant (level)",
+    category: "Level",
+    description: "Outputs a fixed level, set in decibels. 0 dB is a factor of 1.",
+    inputs: &[],
+    outputs: &[PortSpec {
+        name: "out",
+        label: "Out",
+        signal: SignalType::Modulation,
+        description: "The level as a factor: 10 to the power of dB over 20.",
+        default: PortDefault::Value(1.0),
+        polarity: Polarity::Unipolar,
+        channels: Channels::PerChannel,
+    }],
+    params: &[ParamSpec {
+        name: "level",
+        label: "Level",
+        description: "The level in decibels. 0 dB is 1.0 and -6 dB is about 0.5.",
+        min: -60.0,
+        max: 12.0,
+        default: 0.0,
+        unit: "dB",
+        options: ParamOptions::DEFAULT,
+    }
+    .smooth(0.005)],
+    role: ModuleRole::Dsp(|config| {
+        Box::new(ConstantLevel {
+            db: Smoothed::new(0.0, config.sample_rate, CONSTANT.params[0].options.smooth_seconds),
+        })
+    }),
+    panel: Panel::new(3, 3, &[Widget::knob(0, 0, "level")]),
+    displays: &[],
+};
+
+struct ConstantLevel {
+    /// The level in dB. Smoothed in dB, so a turn sounds even.
+    db: Smoothed,
+}
+
+impl Module for ConstantLevel {
+    fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        let modulated = io.modulated(0);
+        let ([], [out]) = io.split::<0, 1>();
+        for (i, out) in out.iter_mut().enumerate() {
+            let db = if let Some(samples) = modulated {
+                let _ = self.db.tick();
+                samples[i]
+            } else {
+                self.db.tick()
+            };
+            *out = 10.0_f32.powf(db / 20.0);
+        }
+    }
+
+    fn set_param(&mut self, index: usize, value: f32) {
+        if index == 0 {
+            self.db.set_target(value);
+        }
+    }
+
+    fn param_glide(&self, index: usize) -> Option<f32> {
+        if index == 0 { self.db.gliding() } else { None }
+    }
+
+    fn reset(&mut self) {
+        let target = self.db.target();
+        self.db.reset(target);
+    }
+}
+
 /// `loom.level.clamp` (MT-LEVEL-03): limits a signal to a range.
 pub static CLAMP: ModuleDescriptor = ModuleDescriptor {
     id: "loom.level.clamp",
@@ -448,6 +521,18 @@ mod shaping_tests {
         let mut out = vec![0.0; input.len()];
         run(m.as_mut(), 48_000.0, &[input], &[true], &mut [&mut out], &[]);
         out
+    }
+
+    /// Constant (level) outputs 1.0 at 0 dB and 0.5012 at -6 dB.
+    #[test]
+    fn constant_level_in_decibels() {
+        for (db, expected) in [(0.0, 1.0), (-6.0, 0.5012), (12.0, 3.981), (-60.0, 0.001)] {
+            let out = process(&CONSTANT, &[(0, db)], &[0.0; 4]);
+            assert!(
+                out.iter().all(|v| (v - expected).abs() < expected * 1e-3),
+                "{db} dB: {out:?}"
+            );
+        }
     }
 
     /// Clamp limits the signal, swaps crossed limits, and turns NaN into a

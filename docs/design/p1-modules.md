@@ -38,7 +38,7 @@ The catalogue type is built as three modules, one per unit. *Why not one module 
 
 - Level output is `10^(dB/20)`. Pitch output is `semitones / 120`. *Why:* ADR-0007 gives the standard units of cables.
 - Both smooth over 5 ms and ignore `value` modulation rules beyond the ordinary [parameter mapping](modulation.md#parameter-mapping).
-- **Constant (level) waits for #99,** which adds the decibel mapping. Constant (pitch) and the ranges for `loom.math.constant` do not.
+- **Constant (level) stores its value in dB with the linear mapping,** so the knob is even in dB and the lowest setting is -60 dB (a factor of 0.001). The decibel mapping with -inf at the bottom ([#99](https://github.com/brylie/LoomDSP/issues/99)) is a later change to the knob, not to the module. *Why:* a value in dB needs no new mapping to sound right; -inf is a nicety of the control. The ranges for `loom.math.constant` come with [control ranges](control-ranges.md).
 - **Ratio is dropped from MT-LEVEL-01.** Nothing says what a ratio outputs, and a ratio is `semitones / 12` through [Convert](https://github.com/brylie/LoomDSP/blob/main/crates/loom-modules/src/math.rs) when needed. The catalogue entry changes to match.
 - Existing patches that use `loom.math.constant` load and sound the same.
 
