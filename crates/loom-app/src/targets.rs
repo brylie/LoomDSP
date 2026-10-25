@@ -6,8 +6,11 @@
 //! output, an input, then a light or a meter by its display value. A
 //! script reaches a display that shares its name with something earlier
 //! with the `display:` prefix: the Level Meter's `11:out` is its output,
-//! and `11:display:out` is its meter. `badge:OUTPUT` names an output's
-//! assignment count badge, such as `5:badge:out`.
+//! and `11:display:out` is its meter. In the same way `input:NAME` and
+//! `output:NAME` name a port whose name a parameter or an output also has:
+//! the SVF's `4:cutoff` is its knob, and `4:input:cutoff` its input.
+//! `badge:OUTPUT` names an output's assignment count badge, such as
+//! `5:badge:out`.
 
 use loom_canvas::{PORT_HIT_RADIUS, PortRef, Scene};
 use loom_core::{Graph, ModuleId};
@@ -16,6 +19,10 @@ use loom_core::{Graph, ModuleId};
 pub const DISPLAY_PREFIX: &str = "display:";
 /// The prefix that names an output's assignment count badge.
 pub const BADGE_PREFIX: &str = "badge:";
+/// The prefix that names an input only.
+pub const INPUT_PREFIX: &str = "input:";
+/// The prefix that names an output only.
+pub const OUTPUT_PREFIX: &str = "output:";
 
 /// What a `MODULE:NAME` names on a tile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,7 +39,8 @@ pub enum Part {
 
 /// Finds `name` on module `module`, in the order of rule 10: parameter,
 /// output, input, then display value. `display:NAME` finds a display
-/// value only.
+/// value only, `input:NAME` an input, `output:NAME` an output, and
+/// `badge:NAME` an output's badge.
 pub fn find(graph: &Graph, module: u32, name: &str) -> Result<Part, String> {
     let node = graph
         .node(ModuleId(module))
@@ -63,18 +71,26 @@ pub fn find(graph: &Graph, module: u32, name: &str) -> Result<Part, String> {
             })
             .ok_or_else(|| format!("module {module} ({}) has no output `{name}`", descriptor.name));
     }
-    let port = |ports: &[loom_core::PortSpec], output| {
+    let port = |name: &str, output: bool| {
+        let ports = if output { descriptor.outputs } else { descriptor.inputs };
         ports
             .iter()
             .position(|p| p.name == name)
             .map(|index| Part::Port(PortRef { module, output, index }))
     };
+    for (prefix, output) in [(INPUT_PREFIX, false), (OUTPUT_PREFIX, true)] {
+        if let Some(name) = name.strip_prefix(prefix) {
+            let kind = if output { "output" } else { "input" };
+            return port(name, output)
+                .ok_or_else(|| format!("module {module} ({}) has no {kind} `{name}`", descriptor.name));
+        }
+    }
     widgets
         .iter()
         .position(|w| w.is_control() && w.bind == name)
         .map(|index| Part::Control(module, index))
-        .or_else(|| port(descriptor.outputs, true))
-        .or_else(|| port(descriptor.inputs, false))
+        .or_else(|| port(name, true))
+        .or_else(|| port(name, false))
         .or_else(|| display(name))
         .ok_or_else(|| {
             format!(
@@ -84,9 +100,11 @@ pub fn find(graph: &Graph, module: u32, name: &str) -> Result<Part, String> {
         })
 }
 
-/// The name that finds `part` again: `MODULE:NAME`, or
-/// `MODULE:display:NAME` for a display whose name is taken by a control or
-/// a port first. `None` when the module or port is gone.
+/// The name that finds `part` again: `MODULE:NAME` when that finds it, or
+/// else the name with the prefix of its kind (`display:`, `input:`,
+/// `output:`), for a part whose name something earlier in rule 10 also
+/// has. A badge always has `badge:`. `None` when the module or the part is
+/// gone.
 pub fn name(graph: &Graph, part: Part) -> Option<String> {
     let (module, plain) = match part {
         Part::Control(module, widget) | Part::Display(module, widget) => (
@@ -103,11 +121,17 @@ pub fn name(graph: &Graph, part: Part) -> Option<String> {
             (port.module, ports.get(port.index)?.name)
         }
     };
-    Some(match part {
-        Part::Badge(_) => format!("{module}:{BADGE_PREFIX}{plain}"),
-        Part::Display(..) if find(graph, module, plain) != Ok(part) => format!("{module}:{DISPLAY_PREFIX}{plain}"),
-        _ => format!("{module}:{plain}"),
-    })
+    let prefix = match part {
+        Part::Badge(_) => return Some(format!("{module}:{BADGE_PREFIX}{plain}")),
+        _ if find(graph, module, plain) == Ok(part) => "",
+        Part::Display(..) => DISPLAY_PREFIX,
+        Part::Port(port) if port.output => OUTPUT_PREFIX,
+        Part::Port(_) => INPUT_PREFIX,
+        // A control comes first in rule 10. Only a second control bound to
+        // the same parameter is not found by its name.
+        Part::Control(..) => return None,
+    };
+    Some(format!("{module}:{prefix}{plain}"))
 }
 
 /// Where a part is drawn, in world units: a widget's rectangle, the
@@ -186,5 +210,77 @@ mod tests {
         // No assignment, so no badge is drawn.
         assert!(world_bounds(&app.scene, badge).unwrap_err().contains("no badge"));
         assert!(find(graph, env, "badge:gate").is_err(), "inputs have no badge");
+    }
+
+    /// Every port, control, light, meter, and badge of every module has a
+    /// name that finds it again, with a prefix only where the plain name
+    /// finds something else: the SVF's `cutoff` input shares its name with
+    /// the `cutoff` parameter, so it is `input:cutoff`.
+    #[test]
+    fn every_part_of_every_module_round_trips_through_its_name() {
+        let mut app = crate::App::new(crate::tests::app_args());
+        for descriptor in loom_modules::ALL {
+            let id = app.controller.add_module(descriptor.id).unwrap().0;
+            let graph = app.controller.graph();
+            let mut parts = Vec::new();
+            for (index, widget) in descriptor.panel.widgets.iter().enumerate() {
+                parts.push(if widget.is_control() {
+                    Part::Control(id, index)
+                } else {
+                    Part::Display(id, index)
+                });
+            }
+            for (output, ports) in [(false, descriptor.inputs), (true, descriptor.outputs)] {
+                for index in 0..ports.len() {
+                    let port = PortRef {
+                        module: id,
+                        output,
+                        index,
+                    };
+                    parts.push(Part::Port(port));
+                    if output {
+                        parts.push(Part::Badge(port));
+                    }
+                }
+            }
+            for part in parts {
+                let text = name(graph, part).unwrap_or_else(|| panic!("{}: no name for {part:?}", descriptor.id));
+                let (module, rest) = text.split_once(':').unwrap();
+                assert_eq!(module.parse::<u32>().unwrap(), id);
+                assert_eq!(find(graph, id, rest), Ok(part), "{}: {text}", descriptor.id);
+            }
+        }
+    }
+
+    /// The prefixes, and what the lookup refuses.
+    #[test]
+    fn prefixes_and_errors() {
+        let mut app = crate::App::new(crate::tests::app_args());
+        let svf = app.controller.add_module("loom.filter.svf").unwrap().0;
+        let graph = app.controller.graph();
+        assert!(matches!(find(graph, svf, "cutoff"), Ok(Part::Control(..))));
+        let input = find(graph, svf, "input:cutoff").unwrap();
+        assert!(matches!(input, Part::Port(PortRef { output: false, .. })));
+        assert_eq!(name(graph, input), Some(format!("{svf}:input:cutoff")));
+        assert!(matches!(
+            find(graph, svf, "output:lowpass"),
+            Ok(Part::Port(PortRef { output: true, .. }))
+        ));
+        let error = find(graph, svf, "input:lowpass").unwrap_err();
+        assert!(error.contains("no input `lowpass`"), "{error}");
+        let error = find(graph, svf, "output:cutoff").unwrap_err();
+        assert!(error.contains("no output `cutoff`"), "{error}");
+        assert_eq!(find(graph, 999, "cutoff"), Err("no module 999".to_string()));
+        assert_eq!(name(graph, Part::Control(999, 0)), None);
+        assert_eq!(name(graph, Part::Control(svf, 99)), None);
+        let gone = PortRef {
+            module: svf,
+            output: true,
+            index: 99,
+        };
+        assert_eq!(name(graph, Part::Port(gone)), None);
+        // Not on the canvas: the scene has no module 999.
+        assert!(world_bounds(&app.scene, Part::Control(999, 0)).is_err());
+        assert!(world_bounds(&app.scene, Part::Port(PortRef { module: 999, ..gone })).is_err());
     }
 }

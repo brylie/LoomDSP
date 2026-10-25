@@ -67,8 +67,9 @@ pub struct Options {
     /// the centre of a control (by parameter), else a port of that name
     /// (outputs first), else a light or a meter (by display value). Use
     /// MODULE:display:NAME for a light or meter whose name a port also
-    /// has, such as 11:display:out on a Level Meter. What is under it
-    /// draws as hovered.
+    /// has, such as 11:display:out on a Level Meter, and MODULE:input:NAME
+    /// or MODULE:output:NAME for a port, such as 4:input:cutoff on the
+    /// SVF. What is under it draws as hovered.
     #[arg(long, value_name = "X,Y|MODULE:NAME", requires = "image")]
     pub pointer: Option<Pointer>,
     /// Show hover text for what is under the pointer, or else for the

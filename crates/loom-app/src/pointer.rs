@@ -91,6 +91,10 @@ struct Inner {
     buttons: Vec<mouse::Button>,
     /// Buttons a real pointer holds down.
     real_buttons: Vec<mouse::Button>,
+    /// Real button releases that came while a command's events went in.
+    /// They go to the view once the command is done, so nothing the real
+    /// pointer let go of stays held.
+    deferred: Vec<mouse::Button>,
     /// Where the current drag started.
     anchor: Option<Point>,
     /// Where the current drag's `to` was last found.
@@ -336,6 +340,37 @@ impl<'a, Message> Injector<'a, Message> {
         (op.found, op.pointer)
     }
 
+    /// A real pointer event takes over from the script, which first lets go
+    /// of what it holds, where its pointer is.
+    fn take_over(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &iced::Renderer,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        viewport: &Rectangle,
+    ) {
+        let held = {
+            let mut inner = self.pointer.0.borrow_mut();
+            inner.at.take().map(|at| (at, std::mem::take(&mut inner.buttons)))
+        };
+        let Some((at, buttons)) = held else { return };
+        for button in buttons {
+            let release = Event::Mouse(mouse::Event::ButtonReleased(button));
+            self.content.as_widget_mut().update(
+                tree,
+                &release,
+                layout,
+                mouse::Cursor::Available(at),
+                renderer,
+                clipboard,
+                shell,
+                viewport,
+            );
+        }
+    }
+
     /// Where a target is in the window now: the centre of what `locate`
     /// finds.
     fn resolve(
@@ -423,36 +458,23 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Injector<'_, Mess
     ) {
         let child = &mut tree.children[0];
         if let Event::Mouse(mouse_event) = event {
-            let held = {
+            {
                 let mut inner = self.pointer.0.borrow_mut();
-                // The script leads while its command runs.
-                if !inner.queue.is_empty() {
-                    return;
-                }
                 match mouse_event {
                     mouse::Event::ButtonPressed(b) => inner.real_buttons.push(*b),
                     mouse::Event::ButtonReleased(b) => inner.real_buttons.retain(|x| x != b),
                     _ => {}
                 }
-                // A real pointer event takes over from the script, which
-                // first lets go of what it holds.
-                inner.at.take().map(|at| (at, std::mem::take(&mut inner.buttons)))
-            };
-            if let Some((at, buttons)) = held {
-                for button in buttons {
-                    let release = Event::Mouse(mouse::Event::ButtonReleased(button));
-                    self.content.as_widget_mut().update(
-                        child,
-                        &release,
-                        layout,
-                        mouse::Cursor::Available(at),
-                        renderer,
-                        clipboard,
-                        shell,
-                        viewport,
-                    );
+                // The script leads while its command runs. A real release
+                // waits for the command to end.
+                if !inner.queue.is_empty() {
+                    if let mouse::Event::ButtonReleased(b) = mouse_event {
+                        inner.deferred.push(*b);
+                    }
+                    return;
                 }
             }
+            self.take_over(child, layout, renderer, clipboard, shell, viewport);
             self.content
                 .as_widget_mut()
                 .update(child, event, layout, cursor, renderer, clipboard, shell, viewport);
@@ -496,6 +518,31 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Injector<'_, Mess
             }
             // Draw this event, then send the next one.
             shell.request_redraw();
+            // Real releases held back while the command ran go in now.
+            let deferred = {
+                let mut inner = self.pointer.0.borrow_mut();
+                if inner.queue.is_empty() {
+                    std::mem::take(&mut inner.deferred)
+                } else {
+                    Vec::new()
+                }
+            };
+            if !deferred.is_empty() {
+                self.take_over(&mut tree.children[0], layout, renderer, clipboard, shell, viewport);
+                for button in deferred {
+                    let release = Event::Mouse(mouse::Event::ButtonReleased(button));
+                    self.content.as_widget_mut().update(
+                        &mut tree.children[0],
+                        &release,
+                        layout,
+                        cursor,
+                        renderer,
+                        clipboard,
+                        shell,
+                        viewport,
+                    );
+                }
+            }
         }
         let cursor = self.pointer.0.borrow().at.map_or(cursor, mouse::Cursor::Available);
         self.content.as_widget_mut().update(

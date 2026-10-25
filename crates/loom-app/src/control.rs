@@ -2429,6 +2429,225 @@ mod tests {
         assert_eq!(count(&ui), before + 1);
     }
 
+    /// A real button let go while a script drag runs: the drag
+    /// goes on undisturbed, the release is not lost, and nothing reads as
+    /// held afterwards. Then a real pointer move takes over from the
+    /// script's pointer.
+    #[test]
+    fn a_real_release_during_a_script_drag_is_not_lost() {
+        let mut ui = pointer_ui();
+        // The real button goes down before the script starts.
+        ui.press();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let call = Call {
+            command: serde_json::from_str(r#"{"cmd": "drag", "from": "4:cutoff", "to": "4:resonance", "steps": 8}"#)
+                .unwrap(),
+            reply: Reply(Arc::new(Mutex::new(Some(sender)))),
+        };
+        let _ = ui.app.control(call);
+        // The press, then two moves.
+        for _ in 0..3 {
+            ui.redraw();
+        }
+        assert!(ui.app.pointer.waiting(), "the drag is still going in");
+        ui.release();
+        let mut answer = None;
+        for _ in 0..50 {
+            ui.redraw();
+            let _ = ui.app.update(Message::ControlFrame(Instant::now()));
+            if let Ok(a) = receiver.try_recv() {
+                answer = Some(a);
+                break;
+            }
+        }
+        assert!(answer.expect("answered").is_ok());
+        let pointer = pointer_of(&mut ui);
+        assert_eq!(pointer["buttons"], json!([]), "{pointer}");
+        assert_eq!(pointer["drag"], Value::Null, "{pointer}");
+
+        // A real move takes over: the snapshot follows the real pointer.
+        let canvas = ui.canvas();
+        let real = Point::new(canvas.bounds.x + 5.0, canvas.bounds.y + 5.0);
+        ui.move_to(real);
+        ui.redraw();
+        let pointer = pointer_of(&mut ui);
+        assert_eq!(
+            (pointer["x"].as_f64(), pointer["y"].as_f64()),
+            (Some(real.x as f64), Some(real.y as f64))
+        );
+    }
+
+    /// A capture is saved whole, or cut to an area that is reported in
+    /// logical pixels. An area outside the window, or no window, is an
+    /// error.
+    #[test]
+    fn a_capture_is_saved_whole_or_cut_to_an_area() {
+        let dir = std::env::temp_dir().join(format!("loom-control-shot-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("shot.png");
+        let shot = || {
+            Some(iced::window::Screenshot::new(
+                vec![255u8; 40 * 20 * 4],
+                iced::Size::new(40, 20),
+                2.0,
+            ))
+        };
+        let whole = save_screenshot(shot(), &path, None).unwrap();
+        assert_eq!(
+            (whole["width"].clone(), whole["height"].clone()),
+            (json!(40), json!(20))
+        );
+        assert!(whole.get("area").is_none());
+        let area = Rectangle::new(Point::new(2.0, 1.0), iced::Size::new(5.0, 4.0));
+        let cut = save_screenshot(shot(), &path, Some(area)).unwrap();
+        assert_eq!((cut["width"].clone(), cut["height"].clone()), (json!(10), json!(8)));
+        assert_eq!(cut["area"], json!({"x": 2.0, "y": 1.0, "width": 5.0, "height": 4.0}));
+        let outside = Rectangle::new(Point::new(100.0, 0.0), iced::Size::new(5.0, 4.0));
+        assert!(
+            save_screenshot(shot(), &path, Some(outside))
+                .unwrap_err()
+                .contains("outside the window")
+        );
+        assert!(save_screenshot(None, &path, None).unwrap_err().contains("no window"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// After the window is searched: `locate` answers, and a `screenshot`
+    /// of a target that is not there answers with the error at once.
+    #[test]
+    fn a_search_answers_locate_and_refuses_a_missing_screenshot_target() {
+        let mut ui = pointer_ui();
+        let found = Found {
+            canvas: Some(ui.canvas()),
+            text: None,
+        };
+        let ask = |ui: &mut crate::ui_test::Ui, target: &str, then: AfterSearch| {
+            let (sender, receiver) = std::sync::mpsc::channel();
+            let call = Call {
+                command: Command::Snapshot,
+                reply: Reply(Arc::new(Mutex::new(Some(sender)))),
+            };
+            let _ = ui.app.located(call, target, &found, then);
+            receiver.try_recv()
+        };
+        let answer = ask(&mut ui, "4:cutoff", AfterSearch::Locate).unwrap().unwrap();
+        assert!(answer["width"].as_f64().unwrap() > 0.0);
+        let then = AfterSearch::Screenshot {
+            path: PathBuf::from("unused.png"),
+            margin: 4.0,
+        };
+        let error = ask(&mut ui, "4:nope", then.clone()).unwrap().unwrap_err();
+        assert!(error.contains("`nope`"), "{error}");
+        // A target that is there waits for the window capture.
+        assert!(ask(&mut ui, "4:cutoff", then).is_err(), "not answered yet");
+        let _ = search(
+            Call {
+                command: Command::Snapshot,
+                reply: Reply(Arc::new(Mutex::new(None))),
+            },
+            "4".to_string(),
+            AfterSearch::Locate,
+        );
+    }
+
+    /// The snapshot names a tile under a light, a knob turn, a tile move,
+    /// and a pan.
+    #[test]
+    fn the_snapshot_names_what_the_pointer_is_on_and_does() {
+        let mut ui = pointer_ui();
+        run_ui(&mut ui, r#"{"cmd": "hover", "target": "5:level"}"#).unwrap();
+        // The canvas hits a light as part of its tile.
+        assert_eq!(pointer_of(&mut ui)["hover"], json!({"kind": "tile", "target": "5"}));
+        run_ui(&mut ui, r#"{"cmd": "press", "target": "4:cutoff"}"#).unwrap();
+        assert_eq!(
+            pointer_of(&mut ui)["drag"],
+            json!({"kind": "knob", "target": "4:cutoff"})
+        );
+        run_ui(&mut ui, r#"{"cmd": "release"}"#).unwrap();
+        let tile = ui.app.scene.module(4).unwrap().bounds();
+        let title = ui
+            .canvas()
+            .to_window(Point::new(tile.x + tile.width * 0.5, tile.y + 6.0));
+        run_ui(
+            &mut ui,
+            &format!(r#"{{"cmd": "hover", "x": {}, "y": {}}}"#, title.x, title.y),
+        )
+        .unwrap();
+        assert_eq!(pointer_of(&mut ui)["hover"], json!({"kind": "tile", "target": "4"}));
+        run_ui(&mut ui, r#"{"cmd": "press"}"#).unwrap();
+        assert_eq!(pointer_of(&mut ui)["drag"], json!({"kind": "move", "modules": [4]}));
+        run_ui(&mut ui, r#"{"cmd": "release"}"#).unwrap();
+        run_ui(&mut ui, r#"{"cmd": "press", "button": "middle"}"#).unwrap();
+        assert_eq!(pointer_of(&mut ui)["drag"], json!({"kind": "pan"}));
+        run_ui(&mut ui, r#"{"cmd": "release", "button": "middle"}"#).unwrap();
+    }
+
+    /// Pointer commands that cannot run say why.
+    #[test]
+    fn more_pointer_commands_are_refused() {
+        let mut ui = pointer_ui();
+        for (line, why) in [
+            (r#"{"cmd": "release"}"#, "not in the window yet"),
+            (r#"{"cmd": "scroll", "dy": 1}"#, "not in the window yet"),
+            (r#"{"cmd": "hover"}"#, "give `target`"),
+            (
+                r#"{"cmd": "drag", "from": "4:cutoff", "to": "4:resonance", "steps": 0}"#,
+                "from 1 to",
+            ),
+            (
+                r#"{"cmd": "drag", "from": [1], "to": "4:resonance"}"#,
+                "`from` is a target",
+            ),
+            (
+                r#"{"cmd": "drag", "from": ["a", "b"], "to": "4:resonance"}"#,
+                "`from` is a target",
+            ),
+            (
+                r#"{"cmd": "scroll", "target": "4", "dy": 1, "modifiers": ["hyper"]}"#,
+                "unknown modifier",
+            ),
+            (
+                r#"{"cmd": "press", "button": "learn", "modifiers": ["shift"]}"#,
+                "no `modifiers`",
+            ),
+            (r#"{"cmd": "key", "key": "hyper"}"#, "unknown key"),
+        ] {
+            let error = run_ui(&mut ui, line).unwrap_err();
+            assert!(error.contains(why), "{line}: {error}");
+        }
+        // With Shift, a press and release on a toggle-free spot work, and
+        // the modifiers are let go after.
+        run_ui(&mut ui, r#"{"cmd": "press", "x": 5, "y": 300, "modifiers": ["shift"]}"#).unwrap();
+        run_ui(&mut ui, r#"{"cmd": "release", "button": "left", "x": 5, "y": 300}"#).unwrap();
+        run_ui(&mut ui, r#"{"cmd": "press", "button": "right", "target": "4"}"#).unwrap();
+        assert_eq!(pointer_of(&mut ui)["buttons"], json!(["right"]));
+        run_ui(&mut ui, r#"{"cmd": "release", "button": "right"}"#).unwrap();
+        run_ui(&mut ui, r#"{"cmd": "scroll", "dy": -1, "dx": 1}"#).unwrap();
+    }
+
+    /// With the browser open, a key goes to it as its key subscription
+    /// sends it, and the stats bar draws the clock with `--fake-audio`.
+    #[test]
+    fn keys_reach_the_open_browser_and_the_bar_draws_the_clock() {
+        let app = App::new(crate::Args {
+            patch: Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches/subtractive.ron")),
+            fake_audio: true,
+            no_audio: false,
+            ..crate::tests::app_args()
+        });
+        let mut ui = crate::ui_test::Ui::with_app(app);
+        ui.app.pointer = crate::pointer::Pointer::new(true);
+        assert!(
+            ui.text("no device (clock) at 48000 Hz").is_some(),
+            "the bar shows the clock"
+        );
+        let _ = ui.app.update(Message::OpenBrowser);
+        ui.redraw();
+        assert!(ui.app.browser.is_some());
+        run_ui(&mut ui, r#"{"cmd": "key", "key": "escape"}"#).unwrap();
+        assert!(ui.app.browser.is_none(), "Escape closed the browser");
+    }
+
     /// Keys go through the view: Cmd+Z, which no widget takes, reaches the
     /// app and undoes, as from the keyboard.
     #[test]
