@@ -25,5 +25,5 @@ pub use scene::{
     CableView, GRID, HEADER, Hit, HoverText, LABEL_COLUMNS, ModulationView, ModuleView, PORT_HIT_RADIUS, PanelView,
     PortRef, PortShape, PortView, ROW, Scene, TILE_WIDTH, WidgetView, WidgetViewKind, fit_label, snap, tile_size,
 };
-pub use theme::Palette;
+pub use theme::{MIN_TEXT_CONTRAST, Palette, contrast_ratio};
 pub use widget::{CanvasEvent, CanvasView, LearnView, PatchCanvas, Still, StillDrag};

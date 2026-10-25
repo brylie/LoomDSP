@@ -2479,7 +2479,7 @@ fn severity_colour(severity: alerts::Severity) -> Color {
     match severity {
         alerts::Severity::Normal => DIM,
         alerts::Severity::Warning => Color::from_rgb8(0xF5, 0xA6, 0x23),
-        alerts::Severity::Alarm => Color::from_rgb8(0xE0, 0x4F, 0x4F),
+        alerts::Severity::Alarm => Color::from_rgb8(0xEB, 0x6B, 0x6B),
     }
 }
 
@@ -2518,6 +2518,28 @@ mod tests {
 
     fn app() -> App {
         App::new(app_args())
+    }
+
+    /// Text in the window chrome meets WCAG 1.4.3 (4.5:1) on the theme
+    /// background: the theme text colour, the dimmed `DIM` text, and the
+    /// stats bar warning colours. Issue #257.
+    #[test]
+    fn window_text_meets_wcag_minimum_contrast() {
+        let theme = app().theme.palette();
+        let pairs = [
+            ("theme text on background", theme.text),
+            ("DIM text on background", DIM),
+            ("warning text on background", severity_colour(alerts::Severity::Warning)),
+            ("alarm text on background", severity_colour(alerts::Severity::Alarm)),
+        ];
+        for (name, text) in pairs {
+            let ratio = loom_canvas::contrast_ratio(text, theme.background);
+            assert!(
+                ratio >= loom_canvas::MIN_TEXT_CONTRAST,
+                "{name}: {ratio:.2}:1 is below {}:1",
+                loom_canvas::MIN_TEXT_CONTRAST
+            );
+        }
     }
 
     pub(crate) fn app_args() -> Args {
