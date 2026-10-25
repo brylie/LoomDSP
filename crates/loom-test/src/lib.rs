@@ -57,6 +57,20 @@ pub const MAX_BLOCK: usize = 512;
 /// Default largest difference from a reference, per sample.
 pub const DEFAULT_TOLERANCE: f32 = 1e-5;
 
+/// First frame of the non-finite input in
+/// [`Harness::check_non_finite_recovery`]. The module runs normally before
+/// it, so it has state to lose.
+pub const BAD_START: usize = 1_000;
+
+/// How many frames the non-finite input lasts in
+/// [`Harness::check_non_finite_recovery`].
+pub const BAD_FRAMES: usize = 8;
+
+/// Frames a module may take to give finite output again after the
+/// non-finite input ends, in [`Harness::check_non_finite_recovery`]. About
+/// 10 ms at 48 kHz.
+pub const RECOVERY_FRAMES: usize = 480;
+
 /// Default sample rate, in Hz.
 pub const DEFAULT_SAMPLE_RATE: f32 = 48_000.0;
 
@@ -228,6 +242,34 @@ impl Harness {
                 );
             }
         }
+        let (inputs, connected) = self.input_buffers();
+        self.run(block, &inputs, &connected)
+    }
+
+    /// Every input's samples for the whole render, and which inputs have a
+    /// cable. An unconnected input reads its port default.
+    fn input_buffers(&self) -> (Vec<Vec<f32>>, Vec<bool>) {
+        let frames = self.frame_count();
+        let transport = TransportInfo::new(self.sample_rate, self.transport, 0.0);
+        let inputs = self
+            .descriptor
+            .inputs
+            .iter()
+            .zip(&self.inputs)
+            .map(|(port, signal)| match signal {
+                Some(signal) => signal.render(frames, self.sample_rate),
+                None => default_signal(port.default, &transport, frames),
+            })
+            .collect();
+        let connected = self.inputs.iter().map(Option::is_some).collect();
+        (inputs, connected)
+    }
+
+    /// Runs a new instance of the module over `inputs` in blocks of `block`
+    /// frames.
+    #[track_caller]
+    fn run(&self, block: usize, inputs: &[Vec<f32>], connected: &[bool]) -> Render {
+        let descriptor = self.descriptor;
         let frames = self.frame_count();
         let ModuleRole::Dsp(create) = descriptor.role else {
             unreachable!("checked in Harness::new")
@@ -246,16 +288,6 @@ impl Harness {
         }
 
         let transport = TransportInfo::new(self.sample_rate, self.transport, 0.0);
-        let inputs: Vec<Vec<f32>> = descriptor
-            .inputs
-            .iter()
-            .zip(&self.inputs)
-            .map(|(port, signal)| match signal {
-                Some(signal) => signal.render(frames, self.sample_rate),
-                None => default_signal(port.default, &transport, frames),
-            })
-            .collect();
-        let connected: Vec<bool> = self.inputs.iter().map(Option::is_some).collect();
         for event in &self.midi {
             assert!(
                 (event.frame as usize) < frames,
@@ -288,7 +320,7 @@ impl Harness {
                 self.sample_rate,
                 transport.later(start),
                 &block_inputs,
-                &connected,
+                connected,
                 &mut block_outputs,
                 &block_midi,
             );
@@ -344,6 +376,58 @@ impl Harness {
         let render = self.check_block_sizes();
         self.compare_or_update(&render, path.as_ref(), reference::update_requested());
         render
+    }
+
+    /// Checks that the module recovers from a non-finite input (#127).
+    ///
+    /// For each input in turn, and for each of NaN, infinity, and minus
+    /// infinity, it renders with that value on the input for
+    /// [`BAD_FRAMES`] frames from frame [`BAD_START`]. The input counts as
+    /// connected. Every other frame and input reads what the render reads
+    /// without the check: its signal, or its port default. It panics unless
+    /// every output is finite again from [`RECOVERY_FRAMES`] after the bad
+    /// frames to the end of the render.
+    ///
+    /// A module passes when it ignores a non-finite input or recovers from
+    /// it. It fails when it keeps the value in its state, because the patch
+    /// then stays broken after its input is sane again. The render must be
+    /// long enough to show that: at least [`BAD_START`] + [`BAD_FRAMES`] +
+    /// [`RECOVERY_FRAMES`] frames, and longer for a module that holds
+    /// samples, such as a delay, so a held bad value would come out again.
+    #[track_caller]
+    pub fn check_non_finite_recovery(&self) {
+        let frames = self.frame_count();
+        let clean_from = BAD_START + BAD_FRAMES + RECOVERY_FRAMES;
+        assert!(
+            frames > clean_from,
+            "{}: the render is {frames} frames long, but the non-finite check needs more than {clean_from}",
+            self.descriptor.id
+        );
+        let (clean, connected) = self.input_buffers();
+        for (port, spec) in self.descriptor.inputs.iter().enumerate() {
+            for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+                let mut inputs = clean.clone();
+                inputs[port][BAD_START..BAD_START + BAD_FRAMES].fill(bad);
+                let mut connected = connected.clone();
+                connected[port] = true;
+                let render = self.run(MAX_BLOCK, &inputs, &connected);
+                for (output, samples) in render.outputs.iter().enumerate() {
+                    if let Some(frame) = samples[clean_from..].iter().position(|value| !value.is_finite()) {
+                        let frame = clean_from + frame;
+                        panic!(
+                            "{}: after {bad} on input `{}` (frames {BAD_START} to {}), output `{}` is still {} at \
+                             frame {frame}. A module must ignore a non-finite input or recover from it, not keep \
+                             it in its state.",
+                            self.descriptor.id,
+                            spec.name,
+                            BAD_START + BAD_FRAMES - 1,
+                            self.descriptor.outputs[output].name,
+                            samples[frame],
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[track_caller]

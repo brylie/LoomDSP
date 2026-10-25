@@ -204,11 +204,13 @@ impl DelayBuffer {
     }
 
     /// Delay-line step: writes `input` at age 0, reads at `raw_samples`
-    /// clamped to `[1.0, max_samples]`, and advances.
+    /// clamped to `[1.0, max_samples]`, and advances. A non-finite `input`
+    /// is written as 0, so a bad sample does not come out again one delay
+    /// time later (#127).
     #[inline]
     fn step_delay(&mut self, input: f32, raw_samples: f64) -> f32 {
         let delay_samples = self.clamp_delay(raw_samples, 1.0);
-        self.samples[self.write] = input;
+        self.samples[self.write] = if input.is_finite() { input } else { 0.0 };
         let out = self.read_catmull_rom(delay_samples);
         self.advance();
         out

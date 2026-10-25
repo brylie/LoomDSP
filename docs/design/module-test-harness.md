@@ -6,7 +6,7 @@ A test harness for module authors: render one module with given inputs and param
 - **Status:** Implemented, P1
 - **Decision behind it:** [ADR-0002](../adr/0002-graph-execution-and-feedback.md) ("The SDK harness must cover this").
 - **Use case and requirements:** FR-SDK-02, NFR-OSS-05.
-- **Issues:** [#42](https://github.com/brylie/LoomDSP/issues/42), [#208](https://github.com/brylie/LoomDSP/issues/208) (test modules)
+- **Issues:** [#42](https://github.com/brylie/LoomDSP/issues/42), [#208](https://github.com/brylie/LoomDSP/issues/208) (test modules), [#127](https://github.com/brylie/LoomDSP/issues/127) (non-finite inputs)
 - **Code:** `crates/loom-test`; the built-in modules use it in `crates/loom-modules/tests/reference.rs`.
 
 ## Goal
@@ -68,6 +68,7 @@ Every render fails if a port or parameter has an empty label or description, and
 | `.check_block_sizes()` | Renders with block sizes 1, 77, and 512 and fails unless all three are bit-identical. |
 | `.check_reference(path)` | Renders in blocks of 512 and compares with the reference file. |
 | `.check(path)` | Both checks. This is what most tests call. |
+| `.check_non_finite_recovery()` | For each input in turn, and for each of NaN, infinity, and minus infinity, puts that value on the input for 8 frames from frame 1000, as a connected cable. Fails unless every output is finite again 480 frames (10 ms at 48 kHz) after the bad frames, up to the end of the render. Every other frame and input reads what the render reads without the check. |
 
 `reference!("name")` gives `tests/reference/name.wav` inside the crate that calls it.
 
@@ -99,6 +100,7 @@ Every render fails if a port or parameter has an empty label or description, and
 5. **Block sizes must give bit-identical output.** *Why:* AGENTS.md hard rule 2. Block size 1 is how feedback loops call a module, which is the second entry point that ADR-0002 asks the harness to cover.
 6. **The reference comparison allows a small tolerance.** *Why:* `sin`, `exp`, and `tan` come from each platform's maths library, so macOS, Linux, and Windows can differ in the last bits. Block sizes are compared on one machine, so they need no tolerance.
 7. **Outputs must be finite.** A NaN or infinite sample fails every check, with the output and frame. *Why:* a NaN in audio is always a bug, and it would also make every comparison fail with a confusing message.
+8. **A module must not keep a non-finite input in its state.** It may ignore the value, or recover from it within 10 ms. While the bad value is on the input, its output may be anything. *Why:* cables carry any `f32` (ADR-0007). A filter or delay that keeps one NaN stays broken after its input is sane again, until the patch is reloaded. The final output turns NaN into silence, so the patch would go quiet with no sign of why. The check renders for the length the test sets, so a module that holds samples, such as a delay, needs a render longer than its delay time. `crates/loom-modules/tests/non_finite.rs` runs it on every built-in DSP module, with inputs on their defaults and on a busy signal.
 
 ## Acceptance criteria
 
@@ -112,6 +114,8 @@ Every render fails if a port or parameter has an empty label or description, and
 - [x] A non-finite output fails with the output and frame.
 - [x] Every built-in DSP module has a reference test and a block-size check.
 - [x] The module checklist in CONTRIBUTING.md points to the harness.
+- [x] `check_non_finite_recovery` fails for a module that keeps a NaN in its state, naming the module, input, value, output, and frame, and passes for a module without state. It fails when the render is too short to show recovery.
+- [x] Every built-in DSP module in `loom_modules::ALL` passes `check_non_finite_recovery`.
 
 ## Out of scope
 

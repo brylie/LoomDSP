@@ -142,7 +142,11 @@ impl Module for Svf {
             // the glide from here. The heard value is the engine buffer.
             let cutoff_pitch = self.cutoff.tick();
             let cutoff_pitch = cutoff_param.map_or(i, cutoff_pitch, pitch::from_hz);
-            let cutoff_hz = pitch::to_hz(cutoff_pitch + cutoff_mod[i]).clamp(5.0, nyquist_limit);
+            let cutoff_hz = pitch::to_hz(cutoff_pitch + cutoff_mod[i]);
+            // `clamp` passes NaN through, and it would reach the state and
+            // stay there (#127). Use a safe cutoff for that frame instead.
+            // Infinity is clamped as usual.
+            let cutoff_hz = if cutoff_hz.is_nan() { 1_000.0 } else { cutoff_hz }.clamp(5.0, nyquist_limit);
             let resonance = resonance_param.at_or(i, self.resonance.tick());
             // Resonance 0..1 maps to damping k = 2..0.02 (Q from 0.5 to 50).
             let k = 2.0 - 1.98 * resonance;
@@ -152,11 +156,18 @@ impl Module for Svf {
             let a3 = g * a2;
 
             let x = input[i];
+            let x = if x.is_finite() { x } else { 0.0 };
             let v3 = x - self.ic2;
             let v1 = a1 * self.ic1 + a2 * v3;
             let v2 = self.ic2 + a2 * self.ic1 + a3 * v3;
             self.ic1 = 2.0 * v1 - self.ic1;
             self.ic2 = 2.0 * v2 - self.ic2;
+            // A non-finite modulated resonance can still reach the state.
+            // Start again from silence rather than keep it.
+            if !(self.ic1.is_finite() && self.ic2.is_finite()) {
+                self.ic1 = 0.0;
+                self.ic2 = 0.0;
+            }
 
             lp[i] = v2;
             bp[i] = v1;
