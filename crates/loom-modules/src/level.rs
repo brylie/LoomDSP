@@ -144,6 +144,232 @@ impl Module for Amp {
     }
 }
 
+/// `loom.level.clamp` (MT-LEVEL-03): limits a signal to a range.
+pub static CLAMP: ModuleDescriptor = ModuleDescriptor {
+    id: "loom.level.clamp",
+    version: 1,
+    name: "Clamp",
+    category: "Level",
+    description: "Limits a signal to the range between two limits. NaN becomes 0 first, so Clamp makes a signal safe.",
+    inputs: &[PortSpec {
+        name: "in",
+        label: "In",
+        signal: SignalType::Modulation,
+        description: "The signal to limit.",
+        default: PortDefault::Value(0.0),
+        polarity: Polarity::Bipolar,
+        channels: Channels::PerChannel,
+    }],
+    outputs: &[PortSpec {
+        name: "out",
+        label: "Out",
+        signal: SignalType::Modulation,
+        description: "The input, held between the two limits.",
+        default: PortDefault::Value(0.0),
+        polarity: Polarity::Bipolar,
+        channels: Channels::PerChannel,
+    }],
+    params: &[
+        ParamSpec {
+            name: "low",
+            label: "Low",
+            description: "One limit. If it is above High, the two swap.",
+            min: -10.0,
+            max: 10.0,
+            default: -1.0,
+            unit: "",
+            options: ParamOptions::DEFAULT,
+        }
+        .smooth(0.005),
+        ParamSpec {
+            name: "high",
+            label: "High",
+            description: "The other limit. If it is below Low, the two swap.",
+            min: -10.0,
+            max: 10.0,
+            default: 1.0,
+            unit: "",
+            options: ParamOptions::DEFAULT,
+        }
+        .smooth(0.005),
+    ],
+    role: ModuleRole::Dsp(|config| {
+        Box::new(Clamp {
+            low: Smoothed::new(-1.0, config.sample_rate, CLAMP.params[0].options.smooth_seconds),
+            high: Smoothed::new(1.0, config.sample_rate, CLAMP.params[1].options.smooth_seconds),
+        })
+    }),
+    panel: Panel::new(6, 3, &[Widget::knob(0, 0, "low"), Widget::knob(3, 0, "high")]),
+    displays: &[],
+};
+
+struct Clamp {
+    low: Smoothed,
+    high: Smoothed,
+}
+
+impl Module for Clamp {
+    fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        let (low_mod, high_mod) = (io.modulated(0), io.modulated(1));
+        let ([input], [out]) = io.split::<1, 1>();
+        for (i, (out, &x)) in out.iter_mut().zip(input).enumerate() {
+            let low = match low_mod {
+                Some(samples) => {
+                    let _ = self.low.tick();
+                    samples[i]
+                }
+                None => self.low.tick(),
+            };
+            let high = match high_mod {
+                Some(samples) => {
+                    let _ = self.high.tick();
+                    samples[i]
+                }
+                None => self.high.tick(),
+            };
+            // A modulated limit can cross the other one. Swapping keeps the
+            // output between them instead of stuck on one.
+            let (low, high) = if low <= high { (low, high) } else { (high, low) };
+            let x = if x.is_nan() { 0.0 } else { x };
+            *out = x.clamp(low, high);
+        }
+    }
+
+    fn set_param(&mut self, index: usize, value: f32) {
+        match index {
+            0 => self.low.set_target(value),
+            1 => self.high.set_target(value),
+            _ => {}
+        }
+    }
+
+    fn param_glide(&self, index: usize) -> Option<f32> {
+        match index {
+            0 => self.low.gliding(),
+            1 => self.high.gliding(),
+            _ => None,
+        }
+    }
+
+    fn reset(&mut self) {
+        for smoothed in [&mut self.low, &mut self.high] {
+            let target = smoothed.target();
+            smoothed.reset(target);
+        }
+    }
+}
+
+/// `loom.level.scale` (MT-LEVEL-05): `in * factor + offset`.
+pub static SCALE: ModuleDescriptor = ModuleDescriptor {
+    id: "loom.level.scale",
+    version: 1,
+    name: "Scale",
+    category: "Level",
+    description: "Multiplies a signal by a factor and adds an offset. A factor of -1 inverts. Bipolar to unipolar is factor 0.5 with offset 0.5.",
+    inputs: &[PortSpec {
+        name: "in",
+        label: "In",
+        signal: SignalType::Modulation,
+        description: "The signal to scale.",
+        default: PortDefault::Value(0.0),
+        polarity: Polarity::Bipolar,
+        channels: Channels::PerChannel,
+    }],
+    outputs: &[PortSpec {
+        name: "out",
+        label: "Out",
+        signal: SignalType::Modulation,
+        description: "The input times the factor, plus the offset.",
+        default: PortDefault::Value(0.0),
+        polarity: Polarity::Bipolar,
+        channels: Channels::PerChannel,
+    }],
+    params: &[
+        ParamSpec {
+            name: "factor",
+            label: "Factor",
+            description: "What the input is multiplied by. -1 flips it upside down.",
+            min: -1.0,
+            max: 1.0,
+            default: 1.0,
+            unit: "",
+            options: ParamOptions::DEFAULT,
+        }
+        .smooth(0.005),
+        ParamSpec {
+            name: "offset",
+            label: "Offset",
+            description: "A fixed amount added after the factor.",
+            min: -10.0,
+            max: 10.0,
+            default: 0.0,
+            unit: "",
+            options: ParamOptions::DEFAULT,
+        }
+        .smooth(0.005),
+    ],
+    role: ModuleRole::Dsp(|config| {
+        Box::new(Scale {
+            factor: Smoothed::new(1.0, config.sample_rate, SCALE.params[0].options.smooth_seconds),
+            offset: Smoothed::new(0.0, config.sample_rate, SCALE.params[1].options.smooth_seconds),
+        })
+    }),
+    panel: Panel::new(6, 3, &[Widget::knob(0, 0, "factor"), Widget::knob(3, 0, "offset")]),
+    displays: &[],
+};
+
+struct Scale {
+    factor: Smoothed,
+    offset: Smoothed,
+}
+
+impl Module for Scale {
+    fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        let (factor_mod, offset_mod) = (io.modulated(0), io.modulated(1));
+        let ([input], [out]) = io.split::<1, 1>();
+        for (i, (out, &x)) in out.iter_mut().zip(input).enumerate() {
+            let factor = match factor_mod {
+                Some(samples) => {
+                    let _ = self.factor.tick();
+                    samples[i]
+                }
+                None => self.factor.tick(),
+            };
+            let offset = match offset_mod {
+                Some(samples) => {
+                    let _ = self.offset.tick();
+                    samples[i]
+                }
+                None => self.offset.tick(),
+            };
+            *out = x * factor + offset;
+        }
+    }
+
+    fn set_param(&mut self, index: usize, value: f32) {
+        match index {
+            0 => self.factor.set_target(value),
+            1 => self.offset.set_target(value),
+            _ => {}
+        }
+    }
+
+    fn param_glide(&self, index: usize) -> Option<f32> {
+        match index {
+            0 => self.factor.gliding(),
+            1 => self.offset.gliding(),
+            _ => None,
+        }
+    }
+
+    fn reset(&mut self) {
+        for smoothed in [&mut self.factor, &mut self.offset] {
+            let target = smoothed.target();
+            smoothed.reset(target);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -198,5 +424,55 @@ mod tests {
     fn unconnected_level_reads_one() {
         assert!((amp(0.0, None) - 0.8).abs() < 1e-6);
         assert!((amp(1.0, None) - 0.8).abs() < 1e-6);
+    }
+}
+
+#[cfg(test)]
+mod shaping_tests {
+    use super::*;
+    use loom_core::testing::run;
+
+    /// Runs a one-input module settled at `params` over `input`.
+    fn process(descriptor: &ModuleDescriptor, params: &[(usize, f32)], input: &[f32]) -> Vec<f32> {
+        let ModuleRole::Dsp(create) = descriptor.role else {
+            unreachable!()
+        };
+        let mut m = create(&loom_core::ModuleConfig {
+            sample_rate: 48_000.0,
+            max_block: input.len(),
+        });
+        for &(index, value) in params {
+            m.set_param(index, value);
+        }
+        m.reset();
+        let mut out = vec![0.0; input.len()];
+        run(m.as_mut(), 48_000.0, &[input], &[true], &mut [&mut out], &[]);
+        out
+    }
+
+    /// Clamp limits the signal, swaps crossed limits, and turns NaN into a
+    /// value inside the limits.
+    #[test]
+    fn clamp_limits_swaps_and_cleans_nan() {
+        let input = [-5.0, -0.5, 0.5, 5.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY];
+        assert_eq!(
+            process(&CLAMP, &[(0, -1.0), (1, 1.0)], &input),
+            [-1.0, -0.5, 0.5, 1.0, 0.0, 1.0, -1.0]
+        );
+        // Crossed limits give the same result as the right way round.
+        assert_eq!(
+            process(&CLAMP, &[(0, 1.0), (1, -1.0)], &input),
+            [-1.0, -0.5, 0.5, 1.0, 0.0, 1.0, -1.0]
+        );
+        // NaN lands inside limits that do not contain 0.
+        assert_eq!(process(&CLAMP, &[(0, 2.0), (1, 3.0)], &[f32::NAN]), [2.0]);
+    }
+
+    /// Scale inverts at factor -1 and maps bipolar to unipolar.
+    #[test]
+    fn scale_inverts_and_offsets() {
+        let input = [-1.0, 0.0, 0.5, 1.0];
+        assert_eq!(process(&SCALE, &[(0, -1.0)], &input), [1.0, 0.0, -0.5, -1.0]);
+        assert_eq!(process(&SCALE, &[(0, 0.5), (1, 0.5)], &input), [0.0, 0.5, 0.75, 1.0]);
     }
 }

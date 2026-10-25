@@ -20,6 +20,7 @@ pub mod level;
 pub mod logic;
 pub mod math;
 pub mod midi;
+pub mod mix;
 pub mod osc;
 pub mod phase;
 pub mod time;
@@ -29,6 +30,7 @@ pub mod ui;
 pub static ALL: &[&ModuleDescriptor] = &[
     &phase::PHASE,
     &phase::PHASE_TRIGGER,
+    &phase::WRAP,
     &osc::SINE,
     &osc::SAW,
     &osc::PULSE,
@@ -42,8 +44,13 @@ pub static ALL: &[&ModuleDescriptor] = &[
     &math::SUB,
     &math::DIV,
     &math::CONSTANT,
+    &math::PITCH_CONSTANT,
     &math::CONVERT,
     &level::AMP,
+    &level::CLAMP,
+    &level::SCALE,
+    &mix::MIXER,
+    &mix::CROSSFADE,
     &io::UNIT_DELAY,
     &io::AUDIO_OUT,
     &midi::NOTE_IN,
@@ -128,6 +135,27 @@ mod tests {
                     assert!(
                         matches!(widget.map(|w| w.kind), Some(loom_core::WidgetKind::Radio { .. })),
                         "convert.mode"
+                    );
+                    continue;
+                }
+                // Radios and toggles that stand in for a knob on these modules.
+                let non_knob = [
+                    ("loom.phase.wrap", "mode"),
+                    ("loom.mix.crossfade", "law"),
+                    ("loom.mix.mixer", "mute1"),
+                    ("loom.mix.mixer", "mute2"),
+                    ("loom.mix.mixer", "mute3"),
+                    ("loom.mix.mixer", "mute4"),
+                ];
+                if non_knob.contains(&(descriptor.id, param.name)) {
+                    assert!(
+                        matches!(
+                            widget.map(|w| w.kind),
+                            Some(loom_core::WidgetKind::Radio { .. } | loom_core::WidgetKind::Toggle)
+                        ),
+                        "{}.{}",
+                        descriptor.id,
+                        param.name
                     );
                     continue;
                 }
