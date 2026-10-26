@@ -260,6 +260,7 @@ impl<'a> PortIo<'a> {
 /// value the module passes in. The module keeps its base in the fields that
 /// [`Module::set_param`] owns and never writes a modulated value there, so
 /// when an assignment is removed the parameter returns to the knob's value.
+/// `docs/learn/modulation-without-cables.md` shows what goes wrong otherwise.
 ///
 /// It is `Copy` and does not borrow the [`PortIo`], so it can be held across
 /// [`PortIo::split`]. Reading it is one branch and one indexed load, the same

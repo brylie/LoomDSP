@@ -337,7 +337,7 @@ impl Harness {
 
     /// Renders with each of [`BLOCK_SIZES`] and panics unless the outputs
     /// are bit-identical and finite. Returns the render in blocks of
-    /// [`MAX_BLOCK`].
+    /// [`MAX_BLOCK`]. `docs/learn/block-size-invariance.md` explains why.
     #[track_caller]
     pub fn check_block_sizes(&self) -> Render {
         let reference = self.render();

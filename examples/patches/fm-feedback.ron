@@ -2,6 +2,7 @@
 // This is a cycle with no explicit delay, so the engine inserts a
 // one-sample delay automatically and runs the loop one sample at a time.
 // Run `loom check` on this file to see where the delay goes.
+// Turn the gain up and the tone turns to noise. Why: docs/learn/feedback-fm.md
 Patch(
     version: 1,
     name: "FM feedback",

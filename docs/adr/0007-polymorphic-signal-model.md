@@ -3,6 +3,7 @@
 - **Status:** Proposed
 - **Date:** 2026-10-13
 - **Related requirements:** FR-SIG-01 to 08, FR-MOD-01
+- **Explainers:** [Triggers and gates](../learn/triggers-and-gates.md), [Pitch at 0.1 per octave](../learn/pitch.md)
 
 ## Context
 

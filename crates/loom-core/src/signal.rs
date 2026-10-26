@@ -57,6 +57,7 @@ pub fn gate_is_high(value: f32) -> bool {
 ///
 /// Why one sample: a counter must never miss a trigger. A longer pulse would
 /// merge two triggers that come close together.
+/// `docs/learn/triggers-and-gates.md` explains the rule.
 #[inline]
 pub fn trigger(fired: bool) -> f32 {
     if fired { 1.0 } else { 0.0 }
@@ -153,6 +154,7 @@ impl WrapDetector {
 /// Why 0.1 per octave: it keeps 20 octaves inside the normalised -1.0 to 1.0
 /// range, so pitch can modulate anything and anything can modulate pitch.
 /// It is also 1 V/octave under the "1.0 = 10 V" model.
+/// `docs/learn/pitch.md` explains the scale and the conversions.
 pub mod pitch {
     /// Frequency of pitch 0.0 (middle C, MIDI note 60) in Hz.
     pub const REFERENCE_HZ: f32 = 261.625_58;

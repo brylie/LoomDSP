@@ -12,6 +12,14 @@ LoomDSP is also a way to learn modular sound design, for musicians and for the p
 | [Stereo cables](stereo-cables.md) | Why stereo is inferred and not on every cable, why most modules run as copies, and how each signal type is downmixed to mono. |
 | [Output safety](output-safety.md) | Why DC harms speakers, why a hard clip is not enough, what a limiter's lookahead costs, and why audio fades in. |
 | [Hot patching](hot-patching.md) | Why a new cable into a running patch can click, what state must carry over, and why a crossfade does not hide a cold start. |
+| [Feedback loops and the unit delay](feedback-loops.md) | Why a loop needs a one-sample delay, why loops run one sample at a time, and where the compiler puts the delay. |
+| [Why feedback FM turns to noise](feedback-fm.md) | Why pitch feedback swings by octaves, why the loop turns chaotic, how aliasing adds noise, and why phase feedback is tamer. |
+| [Triggers and gates](triggers-and-gates.md) | Why a trigger is one sample, why inputs count rising edges, and why a 1 ms pulse was rejected. |
+| [Pitch at 0.1 per octave](pitch.md) | How pitch relates to 1 V per octave, why 20 octaves fit in -1 to 1, and how to convert to Hz and MIDI notes. |
+| [Block-size invariance](block-size-invariance.md) | Why a module must sound the same at any block size, what breaks it, and how the harness checks it. |
+| [Real-time safety](real-time-safety.md) | Why the audio thread must not allocate, lock, or wait, and how LoomDSP keeps to that. |
+| [Modulation without cables](modulation-without-cables.md) | Why depth is a share of the knob, how polarity remaps a source, the stored-value trap, and why assignments are delayed before cables. |
+| [Stopping a stream without a click](stopping-a-stream.md) | Why the engine fades out, why the host waits for silent buffers, and why a new sample rate paused a stream on macOS. |
 | [Delays and interpolation](delays-and-interpolation.md) | How a circular buffer works, why linear interpolation dulls sweeps and loops, why the all-pass needs two samples of delay, and how to tune a loop. |
 
 ## Writing one

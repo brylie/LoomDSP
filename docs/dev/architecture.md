@@ -41,6 +41,8 @@ The engine crates never depend on UI or device crates. That keeps the same engin
 
 ## Threads
 
+Why the audio thread must never allocate, lock, or wait: [Real-time safety](../learn/real-time-safety.md). Why loops run one sample at a time: [Feedback loops and the unit delay](../learn/feedback-loops.md).
+
 ```mermaid
 flowchart LR
     subgraph ui[UI thread]

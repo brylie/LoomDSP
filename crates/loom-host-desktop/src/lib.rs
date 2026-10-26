@@ -466,6 +466,7 @@ const RATE_NOTICE_WINDOW: Duration = Duration::from_millis(500);
 ///
 /// Some devices report the new rate before the notice is sent, so the
 /// notice can still pause the real stream: see [`resume_after_switch`].
+/// `docs/learn/stopping-a-stream.md` tells the story.
 #[cfg(target_os = "macos")]
 fn settle_rate(device: &cpal::Device, config: &cpal::StreamConfig) -> bool {
     let current = || device.default_output_config().map(|c| c.sample_rate()).ok();
@@ -649,6 +650,7 @@ const BUFFERS_PER_STOP: u64 = 2 + SILENT_BUFFERS_BEFORE_STOP;
 /// `sample_rate`: `minimum`, or the fade plus four buffers
 /// if that is longer (output safety, rule 14). A fixed limit cut streams
 /// with large buffers before the fade reached the device, which clicked.
+/// `docs/learn/stopping-a-stream.md` explains the count.
 pub fn stop_limit(minimum: Duration, frames: u64, sample_rate: u32) -> Duration {
     let buffers = (BUFFERS_PER_STOP * frames) as f64 / f64::from(sample_rate.max(1));
     let needed = Duration::from_secs_f64(f64::from(loom_core::safety::FADE_SECONDS) + buffers);
