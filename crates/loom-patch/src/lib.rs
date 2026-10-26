@@ -29,7 +29,7 @@
 
 #![warn(missing_docs)]
 
-use loom_core::{Controller, Graph, InputRef, LoomError, MidiControl, ModuleId, OutputRef, Polarity};
+use loom_core::{Controller, Graph, InputRef, LoomError, MidiControl, ModuleId, OutputRef, ParamRange, Polarity};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -79,6 +79,12 @@ pub struct PatchModule {
     /// Position on the canvas, for the editor.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<(f32, f32)>,
+    /// Selected control ranges by parameter name, as `(min, max)`
+    /// (`docs/design/control-ranges.md`). Only ranges other than the
+    /// default are saved. A missing one gets the default range if the
+    /// value fits, else the smallest range that holds it.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub ranges: BTreeMap<String, (f32, f32)>,
 }
 
 /// A cable in a patch file: `(module id, port name)` to `(module id, port name)`.
@@ -351,10 +357,15 @@ impl Patch {
     /// Adds every module and cable to a controller and commits.
     ///
     /// The controller should be empty. Module IDs from the file are kept.
-    pub fn load_into(&self, controller: &mut Controller) -> Result<(), PatchError> {
+    /// Returns notes about what loaded differently from the file: a saved
+    /// control range that the parameter does not offer, or that does not
+    /// hold the saved value. Values never change (control-ranges.md, rule 7).
+    pub fn load_into(&self, controller: &mut Controller) -> Result<Vec<String>, PatchError> {
+        let mut notes = Vec::new();
         for module in &self.modules {
             let id = ModuleId(module.id);
             controller.add_module_with_id(id, &module.kind)?;
+            notes.extend(Self::load_ranges(module, controller)?);
             for (name, &value) in &module.params {
                 controller
                     .set_param_named(id, name, value)
@@ -402,7 +413,59 @@ impl Patch {
                 })?;
         }
         controller.commit()?;
-        Ok(())
+        Ok(notes)
+    }
+
+    /// Selects each parameter's control range before its value is set, so
+    /// the range never clamps a saved value (rule 7). Returns a note for
+    /// each saved range that was not kept.
+    fn load_ranges(module: &PatchModule, controller: &mut Controller) -> Result<Vec<String>, PatchError> {
+        let id = ModuleId(module.id);
+        let descriptor = controller
+            .graph()
+            .node(id)
+            .map(|n| n.descriptor)
+            .ok_or(LoomError::UnknownModule(id))?;
+        let unknown = |name: &str| PatchError::UnknownParam {
+            module: module.id,
+            param: name.to_string(),
+        };
+        let mut notes = Vec::new();
+        for name in module.ranges.keys() {
+            let index = descriptor.param_index(name).ok_or_else(|| unknown(name))?;
+            if descriptor.params[index].options.ranges.is_empty() {
+                notes.push(format!(
+                    "module {}: parameter `{name}` offers no ranges, so its saved range is ignored",
+                    module.id
+                ));
+            }
+        }
+        for (index, spec) in descriptor.params.iter().enumerate() {
+            let value = spec.clamp(module.params.get(spec.name).copied().unwrap_or(spec.default));
+            let saved = module
+                .ranges
+                .get(spec.name)
+                .map(|&(min, max)| ParamRange::new(min, max));
+            let Some((range, reported)) = spec.load_range(saved, value) else {
+                continue;
+            };
+            if reported && let Some(saved) = saved {
+                notes.push(format!(
+                    "module {}: parameter `{}` was saved with range {saved}, which {}; it loads with {range}",
+                    module.id,
+                    spec.name,
+                    if spec.options.ranges.contains(&saved) {
+                        format!("does not hold its value {value}")
+                    } else {
+                        "it does not offer".to_string()
+                    }
+                ));
+            }
+            if controller.graph().node(id).and_then(|n| n.range(index)) != Some(range) {
+                controller.set_range(id, index, range)?;
+            }
+        }
+        Ok(notes)
     }
 
     /// Refuses two MIDI mappings on one parameter or one control. The
@@ -443,6 +506,7 @@ impl Patch {
                 label: None,
                 params,
                 position: None,
+                ranges: ranges_to_save(node),
             });
         }
         for (from, to) in graph.cables() {
@@ -473,6 +537,20 @@ impl Patch {
         patch.canonicalise();
         patch
     }
+}
+
+/// The selected control ranges of a module that differ from the default,
+/// by parameter name, for saving.
+pub fn ranges_to_save(node: &loom_core::Node) -> BTreeMap<String, (f32, f32)> {
+    node.descriptor
+        .params
+        .iter()
+        .enumerate()
+        .filter_map(|(index, spec)| {
+            let range = node.range(index)?;
+            (Some(range) != spec.default_range()).then(|| (spec.name.to_string(), (range.min, range.max)))
+        })
+        .collect()
 }
 
 fn port_name(graph: &Graph, output: OutputRef) -> String {
@@ -520,6 +598,104 @@ Patch(
     ],
 )
 "#;
+
+    /// Loads `text` into a new engine. Returns the controller and the notes.
+    fn load_text(text: &str) -> (Controller, Vec<String>) {
+        let patch = Patch::from_ron(text).unwrap();
+        let mut parts = create_engine(loom_modules::registry(), EngineConfig::default());
+        let notes = patch.load_into(&mut parts.controller).unwrap();
+        (parts.controller, notes)
+    }
+
+    /// Value and selected range of Multiply #1's gain.
+    fn gain(controller: &Controller) -> (f32, Option<ParamRange>) {
+        let node = controller.graph().node(ModuleId(1)).unwrap();
+        (node.params[0], node.range(0))
+    }
+
+    /// control-ranges.md: a selected range saves next to the values and
+    /// loads back. The default range is not written.
+    #[test]
+    fn ranges_save_and_reload() {
+        let (mut c, notes) = load_text(
+            r#"Patch(version: 1, modules: [(id: 1, kind: "loom.math.mul@1"), (id: 2, kind: "loom.math.mul@1")])"#,
+        );
+        assert!(notes.is_empty());
+        assert_eq!(gain(&c), (1.0, Some(ParamRange::new(-1.0, 1.0))), "the default range");
+        c.set_range(ModuleId(1), 0, ParamRange::new(-0.1, 0.1)).unwrap();
+        c.set_param(ModuleId(1), 0, 0.08).unwrap();
+        let text = Patch::from_graph("ranges", c.graph()).to_ron().unwrap();
+        assert!(text.contains(r#"ranges: {"gain": (-0.1, 0.1)}"#), "{text}");
+        assert_eq!(
+            text.matches("ranges: {").count(),
+            1,
+            "module 2 keeps the default range: {text}"
+        );
+
+        let (reloaded, notes) = load_text(&text);
+        assert!(notes.is_empty(), "{notes:?}");
+        assert_eq!(gain(&reloaded), (0.08, Some(ParamRange::new(-0.1, 0.1))));
+        // Two instances keep separate ranges.
+        let other = reloaded.graph().node(ModuleId(2)).unwrap();
+        assert_eq!(other.range(0), Some(ParamRange::new(-1.0, 1.0)));
+    }
+
+    /// Rule 7: a value outside the default range loads unchanged, with the
+    /// smallest range that holds it. A saved range that does not hold the
+    /// value does the same, with a note.
+    #[test]
+    fn a_range_never_changes_a_loaded_value() {
+        let (c, notes) =
+            load_text(r#"Patch(version: 1, modules: [(id: 1, kind: "loom.math.mul@1", params: {"gain": 5.0})])"#);
+        assert!(notes.is_empty());
+        assert_eq!(gain(&c), (5.0, Some(ParamRange::new(-5.0, 5.0))));
+
+        let (c, notes) = load_text(
+            r#"Patch(version: 1, modules: [(id: 1, kind: "loom.math.mul@1", params: {"gain": 5.0}, ranges: {"gain": (-0.1, 0.1)})])"#,
+        );
+        assert_eq!(gain(&c), (5.0, Some(ParamRange::new(-5.0, 5.0))));
+        assert_eq!(notes.len(), 1);
+        assert!(
+            notes[0].contains("-0.1 to 0.1") && notes[0].contains("-5 to 5"),
+            "{notes:?}"
+        );
+
+        let (c, notes) = load_text(
+            r#"Patch(version: 1, modules: [(id: 1, kind: "loom.math.mul@1", params: {"gain": 0.5}, ranges: {"gain": (-2.0, 2.0)})])"#,
+        );
+        assert_eq!(gain(&c), (0.5, Some(ParamRange::new(-1.0, 1.0))));
+        assert!(notes[0].contains("does not offer"), "{notes:?}");
+
+        // A range on a parameter that offers none is ignored, with a note.
+        let (_, notes) = load_text(
+            r#"Patch(version: 1, modules: [(id: 1, kind: "loom.math.convert@1", ranges: {"mode": (0.0, 1.0)})])"#,
+        );
+        assert!(notes.iter().any(|n| n.contains("offers no ranges")), "{notes:?}");
+    }
+
+    /// Every example patch loads with the values in its file.
+    #[test]
+    fn example_patches_keep_their_values() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches");
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().is_none_or(|e| e != "ron") {
+                continue;
+            }
+            let patch = Patch::load(&path).unwrap();
+            let mut parts = create_engine(loom_modules::registry(), EngineConfig::default());
+            let notes = patch.load_into(&mut parts.controller).unwrap();
+            assert!(notes.is_empty(), "{}: {notes:?}", path.display());
+            for module in &patch.modules {
+                let node = parts.controller.graph().node(ModuleId(module.id)).unwrap();
+                for (name, &value) in &module.params {
+                    let index = node.descriptor.param_index(name).unwrap();
+                    let expected = node.descriptor.params[index].clamp(value);
+                    assert_eq!(node.params[index], expected, "{}: {} {name}", path.display(), module.id);
+                }
+            }
+        }
+    }
 
     #[test]
     fn loads_and_round_trips() {

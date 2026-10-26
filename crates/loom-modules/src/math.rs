@@ -4,10 +4,29 @@
 //! multiply and divide), so a module is useful with only one cable.
 
 use loom_core::{
-    Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, Polarity,
+    Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamRange, ParamSpec, Polarity,
     PortDefault, PortIo, PortSpec, ProcessContext, SignalType, Widget,
 };
 use loom_rt::Smoothed;
+
+/// The control ranges of the wide math parameters: Add `offset`, Multiply
+/// `gain`, and Constant `value` (`docs/design/control-ranges.md`). From the
+/// smallest up, so the first that holds a value is the smallest. A player
+/// picks one per module in the inspector. It limits the knob, not the
+/// signal on a cable.
+pub const WIDE_RANGES: &[ParamRange] = &[
+    ParamRange::new(-0.1, 0.1),
+    ParamRange::new(-1.0, 1.0),
+    ParamRange::new(0.0, 1.0),
+    ParamRange::new(-5.0, 5.0),
+    ParamRange::new(0.0, 5.0),
+    ParamRange::new(-10.0, 10.0),
+    ParamRange::new(0.0, 10.0),
+];
+
+/// The range a new Add, Multiply, or Constant starts with: safe, and fits
+/// pitch and audio (control-ranges.md, Open points).
+pub const DEFAULT_RANGE: ParamRange = ParamRange::new(-1.0, 1.0);
 
 /// `loom.math.add`: `a + b + offset`.
 pub static ADD: ModuleDescriptor = ModuleDescriptor {
@@ -55,7 +74,8 @@ pub static ADD: ModuleDescriptor = ModuleDescriptor {
         unit: "",
         options: ParamOptions::DEFAULT,
     }
-    .smooth(0.005)],
+    .smooth(0.005)
+    .ranges(WIDE_RANGES, DEFAULT_RANGE)],
     role: ModuleRole::Dsp(|config| {
         Box::new(Add {
             offset: Smoothed::new(0.0, config.sample_rate, ADD.params[0].options.smooth_seconds),
@@ -136,7 +156,8 @@ pub static MUL: ModuleDescriptor = ModuleDescriptor {
         unit: "",
         options: ParamOptions::DEFAULT,
     }
-    .smooth(0.005)],
+    .smooth(0.005)
+    .ranges(WIDE_RANGES, DEFAULT_RANGE)],
     role: ModuleRole::Dsp(|config| {
         Box::new(Mul {
             gain: Smoothed::new(1.0, config.sample_rate, MUL.params[0].options.smooth_seconds),
@@ -315,7 +336,8 @@ pub static CONSTANT: ModuleDescriptor = ModuleDescriptor {
         unit: "",
         options: ParamOptions::DEFAULT,
     }
-    .smooth(0.005)],
+    .smooth(0.005)
+    .ranges(WIDE_RANGES, DEFAULT_RANGE)],
     role: ModuleRole::Dsp(|config: &ModuleConfig| {
         Box::new(Constant {
             value: Smoothed::new(0.0, config.sample_rate, CONSTANT.params[0].options.smooth_seconds),

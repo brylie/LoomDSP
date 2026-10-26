@@ -100,6 +100,8 @@ fn final_output_is_clipped_and_never_non_finite() {
     let constant = c.add_module("loom.math.constant").unwrap();
     let out = c.add_module("loom.io.audio-out").unwrap();
     c.connect_named(constant, "out", out, "left").unwrap();
+    // The default control range is -1 to 1 (control-ranges.md).
+    c.set_range(constant, 0, loom_core::ParamRange::new(-5.0, 5.0)).unwrap();
     c.set_param_named(constant, "value", 5.0).unwrap();
     c.commit().unwrap();
     // Constant smooths its value, so look after the ramp.
@@ -119,6 +121,7 @@ fn final_output_is_clipped_and_never_non_finite() {
     let add = c.add_module("loom.math.add").unwrap();
     let mul = c.add_module("loom.math.mul").unwrap();
     c.set_param_named(add, "offset", 1.0).unwrap();
+    c.set_range(mul, 0, loom_core::ParamRange::new(-10.0, 10.0)).unwrap();
     c.set_param_named(mul, "gain", 10.0).unwrap();
     c.connect_named(add, "out", mul, "a").unwrap();
     c.connect_named(mul, "out", add, "a").unwrap();

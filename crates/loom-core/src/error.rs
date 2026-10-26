@@ -58,6 +58,16 @@ pub enum LoomError {
         /// The parameter name or index.
         param: String,
     },
+    /// A control range a parameter does not offer.
+    #[error("parameter `{param}` of module {module} offers no range {range}")]
+    NoSuchRange {
+        /// The module.
+        module: ModuleId,
+        /// The parameter name.
+        param: String,
+        /// The range asked for, as its name.
+        range: String,
+    },
     /// A MIDI channel or controller number is out of range.
     #[error("invalid MIDI control: channel {} and controller {} (channels are 0 to 15, controllers 0 to 127)", .0.channel, .0.controller)]
     InvalidMidiControl(MidiControl),

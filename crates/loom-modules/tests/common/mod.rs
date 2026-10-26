@@ -35,6 +35,19 @@ pub fn load_with(name: &str, config: EngineConfig) -> EngineParts {
     parts
 }
 
+/// Sets a parameter after selecting the smallest control range that holds
+/// `value`, as a loaded patch does (control-ranges.md, rule 7). Without
+/// it, a value outside the default range of Add, Multiply, or Constant is
+/// clamped into that range.
+pub fn set_wide(controller: &mut loom_core::Controller, module: ModuleId, name: &str, value: f32) {
+    let node = controller.graph().node(module).expect("module exists");
+    let index = node.descriptor.param_index(name).expect("parameter exists");
+    if let Some(range) = node.descriptor.params[index].smallest_range_holding(value) {
+        controller.set_range(module, index, range).expect("a listed range");
+    }
+    controller.set_param(module, index, value).expect("parameter exists");
+}
+
 /// A note held from frame `on` to frame `off`.
 pub struct Note {
     pub note: u8,

@@ -15,7 +15,7 @@ use iced::Point;
 use loom_canvas::CanvasEvent;
 use loom_core::{
     Assignment, AssignmentId, ButtonMode, Controller, InputRef, LoomError, MidiControl, ModuleDescriptor, ModuleId,
-    ModuleRole, OutputRef, WidgetKind,
+    ModuleRole, OutputRef, ParamRange, WidgetKind,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -27,6 +27,8 @@ pub const LIMIT: usize = 200;
 pub struct ModuleState {
     descriptor: &'static ModuleDescriptor,
     params: Vec<f32>,
+    /// The selected control range of each parameter (control-ranges.md).
+    ranges: Vec<Option<ParamRange>>,
     position: Option<Point>,
 }
 
@@ -34,6 +36,7 @@ impl PartialEq for ModuleState {
     fn eq(&self, other: &Self) -> bool {
         std::ptr::eq(self.descriptor, other.descriptor)
             && self.params == other.params
+            && self.ranges == other.ranges
             && self.position == other.position
     }
 }
@@ -62,6 +65,7 @@ impl Snapshot {
                         ModuleState {
                             descriptor: node.descriptor,
                             params: node.params.clone(),
+                            ranges: (0..node.params.len()).map(|index| node.range(index)).collect(),
                             position: positions.get(&id.0).copied(),
                         },
                     )
@@ -265,6 +269,17 @@ fn name(step: &Step) -> String {
         }
         .to_string();
     }
+    // A new range, with or without the value it clamped.
+    for (old, new) in step.modules.values() {
+        if let (Some(old), Some(new)) = (old, new)
+            && let Some(index) = (0..new.ranges.len()).find(|&i| old.ranges.get(i) != new.ranges.get(i))
+        {
+            return format!(
+                "change {} {} range",
+                new.descriptor.name, new.descriptor.params[index].label
+            );
+        }
+    }
     let moved: Vec<&ModuleState> = step
         .modules
         .values()
@@ -363,6 +378,16 @@ pub fn apply(
         let Some(state) = want else { continue };
         if have.is_none() {
             controller.add_module_with_id(ModuleId(id), &state.descriptor.kind())?;
+        }
+        // Ranges before values, so a range never clamps a value the step
+        // sets.
+        for (index, range) in state.ranges.iter().enumerate() {
+            let current = controller.graph().node(ModuleId(id)).and_then(|n| n.range(index));
+            if let Some(range) = *range
+                && current != Some(range)
+            {
+                controller.set_range(ModuleId(id), index, range)?;
+            }
         }
         let current = controller.graph().node(ModuleId(id)).map(|node| node.params.clone());
         // For a module that is already there, replay only what the step

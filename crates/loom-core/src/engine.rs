@@ -476,7 +476,7 @@ impl Engine {
             let maps = &self.schedule.midi_maps;
             let start = maps.partition_point(|map| map.control < control);
             for map in maps[start..].iter().take_while(|map| map.control == control) {
-                let base = crate::midi_map::control_value(map.spec, value);
+                let base = crate::midi_map::control_value(&map.spec, value);
                 set_base(
                     &mut self.slots,
                     &mut self.schedule.fills,
@@ -501,7 +501,7 @@ impl Engine {
             let (token, edited) = self.midi_feedback.read_edit(map.control);
             let newest = token == 0 || later(entry.sequence, edited);
             if entry.id == map.id && Some(entry.sequence) != map.synced && newest {
-                let base = crate::midi_map::control_value(map.spec, entry.value);
+                let base = crate::midi_map::control_value(&map.spec, entry.value);
                 set_base(
                     &mut self.slots,
                     &mut self.schedule.fills,

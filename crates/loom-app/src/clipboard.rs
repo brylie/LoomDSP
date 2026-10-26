@@ -12,7 +12,8 @@
 use iced::Point;
 use loom_canvas::GRID;
 use loom_core::{
-    Controller, Graph, InputRef, LoomError, ModuleDescriptor, ModuleId, ModuleRole, OutputRef, Polarity, Registry,
+    Controller, Graph, InputRef, LoomError, ModuleDescriptor, ModuleId, ModuleRole, OutputRef, ParamRange, Polarity,
+    Registry,
 };
 use loom_patch::{Patch, PatchCable, PatchError, PatchModulation, PatchModule, PatchPolarity};
 use std::collections::{BTreeMap, BTreeSet};
@@ -32,6 +33,8 @@ struct Member {
     descriptor: &'static ModuleDescriptor,
     /// One value per parameter of the descriptor.
     params: Vec<f32>,
+    /// The selected control range of each parameter, if it offers ranges.
+    ranges: Vec<Option<ParamRange>>,
     position: Option<Point>,
 }
 
@@ -92,6 +95,7 @@ impl Group {
                 id: id.0,
                 descriptor: node.descriptor,
                 params: node.params.clone(),
+                ranges: (0..node.params.len()).map(|index| node.range(index)).collect(),
                 position: positions.get(&id.0).copied(),
             })
             .collect();
@@ -165,10 +169,25 @@ impl Group {
                     .ok_or_else(|| format!("{} has no parameter `{name}`", descriptor.name))?;
                 params[index] = value;
             }
+            // As a patch loads: the range never changes the value
+            // (control-ranges.md, rule 7).
+            let ranges = descriptor
+                .params
+                .iter()
+                .zip(&params)
+                .map(|(spec, &value)| {
+                    let saved = module
+                        .ranges
+                        .get(spec.name)
+                        .map(|&(min, max)| ParamRange::new(min, max));
+                    spec.load_range(saved, spec.clamp(value)).map(|(range, _)| range)
+                })
+                .collect();
             modules.push(Member {
                 id: module.id,
                 descriptor,
                 params,
+                ranges,
                 position: module.position.map(|(x, y)| Point::new(x, y)),
             });
         }
@@ -237,6 +256,15 @@ impl Group {
                     .map(|(spec, value)| (spec.name.to_string(), *value))
                     .collect(),
                 position: member.position.map(|p| (p.x.round(), p.y.round())),
+                ranges: d
+                    .params
+                    .iter()
+                    .zip(&member.ranges)
+                    .filter_map(|(spec, range)| {
+                        let range = (*range)?;
+                        (Some(range) != spec.default_range()).then(|| (spec.name.to_string(), (range.min, range.max)))
+                    })
+                    .collect(),
             });
         }
         let output_name = |id: u32, port: usize| {
@@ -362,6 +390,15 @@ impl Group {
             let id = controller.add_module(&member.descriptor.kind())?;
             added.push(id.0);
             ids.insert(member.id, id);
+            // Ranges first, so they never clamp a pasted value.
+            for (index, range) in member.ranges.iter().enumerate() {
+                let current = controller.graph().node(id).and_then(|n| n.range(index));
+                if let Some(range) = *range
+                    && current != Some(range)
+                {
+                    controller.set_range(id, index, range)?;
+                }
+            }
             let changes: Vec<(usize, f32)> = member
                 .descriptor
                 .params

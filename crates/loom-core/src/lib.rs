@@ -38,8 +38,8 @@ pub use compile::{CompileReport, FeedbackLoop};
 pub use controller::{Controller, EngineParts, MidiSender, create_engine};
 pub use descriptor::{
     ButtonMode, Channels, DisplayKind, DisplaySpec, MAX_DISPLAYS, MissingText, ModuleConfig, ModuleDescriptor,
-    ModuleRole, Panel, ParamMapping, ParamOptions, ParamSpec, Polarity, PortDefault, PortSpec, SpecKind, Undocumented,
-    Widget, WidgetKind, assert_documented,
+    ModuleRole, Panel, ParamMapping, ParamOptions, ParamRange, ParamSpec, Polarity, PortDefault, PortSpec, SpecKind,
+    Undocumented, Widget, WidgetKind, assert_documented,
 };
 pub use display::{DisplayReader, DisplaySource, TriggerFlag};
 pub use engine::{Engine, EngineConfig, EngineStats};

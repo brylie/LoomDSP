@@ -195,7 +195,8 @@ pub fn update_panel_values_dragging(
         for (index, w) in d.panel.widgets.iter().enumerate() {
             let value = match d.param_index(w.bind) {
                 Some(p) if w.is_control() => {
-                    let spec = &d.params[p];
+                    // The knob spans the selected range (control-ranges.md).
+                    let spec = &node.spec(p).expect("the index is a parameter");
                     let value = node.params[p];
                     let all = reaches.get(&(id, p)).map_or(&[][..], Vec::as_slice);
                     let assigned = match &dragged {
@@ -284,7 +285,7 @@ pub fn meter_outputs(controller: &Controller, modules: &[u32]) -> Vec<((u32, usi
 /// The clear rides in the same list as the edit, so [`loom_core::Controller::set_params`]
 /// can send them together or not at all (clock.md, Button details).
 pub fn param_edits(node: &loom_core::Node, index: usize, value: f32) -> Vec<(usize, f32)> {
-    let Some(spec) = node.descriptor.params.get(index) else {
+    let Some(spec) = node.spec(index) else {
         return vec![(index, value)];
     };
     let next = spec.clamp(value);
@@ -298,12 +299,15 @@ pub fn param_edits(node: &loom_core::Node, index: usize, value: f32) -> Vec<(usi
     changes
 }
 
-/// The parameter a control is bound to, if the module and widget exist.
+/// The parameter a control is bound to, limited to its selected range, if
+/// the module and widget exist.
 pub fn control_param(controller: &Controller, module: u32, widget: usize) -> Option<(usize, WidgetKind, ParamSpec)> {
-    let d = controller.graph().node(ModuleId(module))?.descriptor;
+    let node = controller.graph().node(ModuleId(module))?;
+    let d = node.descriptor;
     let w = d.panel.widgets.get(widget).filter(|w| w.is_control())?;
     let index = d.param_index(w.bind)?;
-    Some((index, w.kind, d.params[index]))
+    // The control spans the selected range (control-ranges.md, rule 4).
+    Some((index, w.kind, node.spec(index)?))
 }
 
 /// Builds the scene for the controller's graph. Modules without a position

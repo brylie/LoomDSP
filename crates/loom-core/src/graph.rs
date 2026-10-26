@@ -1,6 +1,6 @@
 //! The editable patch graph, owned by the control thread.
 
-use crate::descriptor::{ModuleDescriptor, ModuleRole, Polarity};
+use crate::descriptor::{ModuleDescriptor, ModuleRole, ParamRange, ParamSpec, Polarity};
 use crate::midi_map::{MidiControl, MidiMapping, MidiMappingId};
 use std::collections::BTreeMap;
 use std::fmt;
@@ -72,9 +72,38 @@ pub struct Node {
     pub params: Vec<f32>,
     /// Engine slot holding the instance. `None` for engine-handled roles.
     pub(crate) slot: Option<usize>,
+    /// The selected control range of each parameter, or `None` for one that
+    /// offers no ranges (`docs/design/control-ranges.md`).
+    pub(crate) ranges: Vec<Option<ParamRange>>,
 }
 
 impl Node {
+    /// A node with default parameter values and default ranges.
+    pub(crate) fn new(descriptor: &'static ModuleDescriptor, slot: Option<usize>) -> Self {
+        Self {
+            descriptor,
+            params: descriptor.default_params(),
+            slot,
+            ranges: descriptor.params.iter().map(ParamSpec::default_range).collect(),
+        }
+    }
+
+    /// The selected control range of parameter `index`, if it offers ranges.
+    pub fn range(&self, index: usize) -> Option<ParamRange> {
+        self.ranges.get(index).copied().flatten()
+    }
+
+    /// Parameter `index` as its control maps it: limited to the selected
+    /// range, if it has one (control-ranges.md, rule 4). `None` if there is
+    /// no such parameter.
+    pub fn spec(&self, index: usize) -> Option<ParamSpec> {
+        let spec = self.descriptor.params.get(index)?;
+        Some(match self.range(index) {
+            Some(range) => spec.in_range(range),
+            None => *spec,
+        })
+    }
+
     /// True for modules the engine runs itself (unit delay, audio output).
     pub fn is_intrinsic(&self) -> bool {
         !matches!(self.descriptor.role, ModuleRole::Dsp(_))

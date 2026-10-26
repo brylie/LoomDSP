@@ -211,7 +211,11 @@ fn main() -> ExitCode {
 fn load_engine(path: &Path, config: EngineConfig) -> Result<(Patch, EngineParts)> {
     let patch = Patch::load(path)?;
     let mut parts = create_engine(loom_modules::registry(), config);
-    patch.load_into(&mut parts.controller)?;
+    // What loaded differently from the file, such as a saved control range
+    // that was not kept (control-ranges.md, rule 7). The patch still plays.
+    for note in patch.load_into(&mut parts.controller)? {
+        eprintln!("note: {note}");
+    }
     Ok((patch, parts))
 }
 

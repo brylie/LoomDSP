@@ -58,7 +58,20 @@ pub struct ParamRow {
     pub value: String,
     /// The MIDI control mapped to it.
     pub mapping: Option<String>,
+    /// The **Range** selector, for a parameter that offers ranges.
+    pub range: Option<RangeRow>,
     pub mode: ParamMode,
+}
+
+/// The **Range** selector next to a parameter's slider
+/// (`docs/design/control-ranges.md`).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RangeRow {
+    /// Each range's name, such as "-0.1 to 0.1", from the smallest up.
+    pub choices: Vec<String>,
+    /// Index of the selected range, or `None` for the parameter's full
+    /// range when no listed range held a loaded value.
+    pub selected: Option<usize>,
 }
 
 /// How a parameter row behaves.
@@ -194,7 +207,15 @@ impl App {
             .iter()
             .zip(&node.params)
             .enumerate()
-            .map(|(index, (spec, &value))| {
+            .map(|(index, (_, &value))| {
+                // The control spans the selected range (control-ranges.md).
+                let spec = &node.spec(index).expect("one spec per value");
+                let range = spec.options.ranges.first().map(|_| RangeRow {
+                    choices: spec.options.ranges.iter().map(ToString::to_string).collect(),
+                    selected: node
+                        .range(index)
+                        .and_then(|r| spec.options.ranges.iter().position(|&o| o == r)),
+                });
                 // Hovering the label shows what the canvas hover text shows
                 // (panels.md, Labels and hover text).
                 let hover = loom_canvas::HoverText::new(spec.label, spec.description, spec.name);
@@ -227,6 +248,7 @@ impl App {
                     name: hover.name,
                     value: param::format(spec, value),
                     mapping,
+                    range,
                     mode,
                 }
             })
@@ -379,7 +401,16 @@ fn module_view<'a>(m: ModuleRows) -> Element<'a, Message> {
                         space::horizontal(),
                         text(p.value).size(12).color(DIM),
                     ],
-                    value_control(id, index, control, position, step),
+                    match p.range {
+                        Some(range) => row![
+                            value_control(id, index, control, position, step),
+                            range_view(id, index, range),
+                        ]
+                        .spacing(6)
+                        .align_y(iced::Alignment::Center)
+                        .into(),
+                        None => value_control(id, index, control, position, step),
+                    },
                 ]
                 .spacing(2);
                 if let Some(control) = p.mapping {
@@ -443,6 +474,46 @@ fn value_control<'a>(
                 .width(Length::Fill)
                 .into()
         }
+    }
+}
+
+/// The **Range** selector: a pick list of the range names. A pick is one
+/// undo step.
+fn range_view<'a>(module: u32, index: usize, range: RangeRow) -> Element<'a, Message> {
+    let options: Vec<Named> = range
+        .choices
+        .into_iter()
+        .enumerate()
+        .map(|(i, name)| Named { index: i, name })
+        .collect();
+    let current = range.selected.and_then(|i| options.get(i).cloned());
+    tooltip(
+        pick_list(options, current, move |n: Named| Message::Range {
+            module,
+            index,
+            range: n.index,
+        })
+        .placeholder("Full")
+        .text_size(11)
+        .width(96),
+        container(text("Range: what a full turn of the control covers.").size(12))
+            .padding(6)
+            .style(container::rounded_box),
+        tooltip::Position::Top,
+    )
+    .into()
+}
+
+/// One entry of the **Range** list: its index and its name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Named {
+    index: usize,
+    name: String,
+}
+
+impl std::fmt::Display for Named {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.name)
     }
 }
 

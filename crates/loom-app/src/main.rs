@@ -301,6 +301,13 @@ enum Message {
         index: usize,
         choice: usize,
     },
+    /// A range was picked in a parameter's **Range** selector: index
+    /// `range` of the ranges it offers (`docs/design/control-ranges.md`).
+    Range {
+        module: u32,
+        index: usize,
+        range: usize,
+    },
     /// An inspector slider was let go.
     SliderReleased,
     /// Open or close the **Add modulation** list under a parameter.
@@ -481,6 +488,9 @@ struct Session {
     name: String,
     file: Option<PathBuf>,
     stamp: Option<recovery::Stamp>,
+    /// What loaded differently from the file, such as a saved control
+    /// range that was not kept (control-ranges.md, rule 7).
+    notes: Vec<String>,
 }
 
 impl App {
@@ -678,8 +688,9 @@ impl App {
             telemetry,
         } = create_engine(registry(test_modules), config);
         let mut positions = BTreeMap::new();
+        let mut notes = Vec::new();
         let mut load = |patch: &Patch, controller: &mut Controller| -> Result<String, String> {
-            patch.load_into(controller).map_err(|e| e.to_string())?;
+            notes = patch.load_into(controller).map_err(|e| e.to_string())?;
             for m in &patch.modules {
                 if let Some((x, y)) = m.position {
                     positions.insert(m.id, Point::new(x, y));
@@ -704,6 +715,9 @@ impl App {
             Source::Empty => ("Untitled".to_string(), None, None),
         };
         layout::auto_layout(&controller, &mut positions);
+        for note in &notes {
+            eprintln!("loom-app: {note}");
+        }
         Ok(Session {
             controller,
             engine,
@@ -713,6 +727,7 @@ impl App {
             name,
             file,
             stamp,
+            notes,
         })
     }
 
@@ -738,8 +753,9 @@ impl App {
             name,
             file,
             stamp,
+            notes,
         } = session;
-        let mut status = String::new();
+        let mut status = notes.join("; ");
 
         // Every MIDI input plays the patch, and the "Hold note" button works
         // alongside them, so a keyboard is never hidden behind another port.
@@ -1042,7 +1058,12 @@ impl App {
             return;
         };
         if self.replace(Source::File(&path)) {
-            self.status = format!("opened {}", path.display());
+            // A note about what loaded differently stays in view.
+            self.status = if self.status.is_empty() {
+                format!("opened {}", path.display())
+            } else {
+                format!("opened {}: {}", path.display(), self.status)
+            };
         }
     }
 
@@ -1337,6 +1358,33 @@ impl App {
         self.set_param(module, index, value);
     }
 
+    /// Selects a parameter's control range, as one undo step. A smaller
+    /// range clamps the value into it, a wider one keeps it (control-ranges.md,
+    /// rule 6). The commit puts the bounds into the schedule for modulation
+    /// and MIDI (rule 8).
+    fn set_range(&mut self, module: u32, index: usize, range: usize) {
+        let Some(range) = self
+            .controller
+            .graph()
+            .node(ModuleId(module))
+            .and_then(|n| n.descriptor.params.get(index))
+            .and_then(|spec| spec.options.ranges.get(range))
+            .copied()
+        else {
+            return;
+        };
+        self.close_slider_gesture();
+        self.edit(|app| {
+            if let Err(e) = app.controller.set_range(ModuleId(module), index, range) {
+                app.status = format!("error: {e}");
+                return;
+            }
+            app.touched.insert((module, index));
+            app.commit();
+        });
+        self.refresh_values();
+    }
+
     /// Sets a parameter from a control on a tile or in the inspector.
     ///
     /// A switch to momentary also clears that button's gate. Both writes go
@@ -1386,7 +1434,7 @@ impl App {
     /// assignment).
     fn assign(&mut self, source: OutputRef, target: ModuleId, index: usize) {
         let graph = self.controller.graph();
-        let Some(spec) = graph.node(target).and_then(|n| n.descriptor.params.get(index)).copied() else {
+        let Some(spec) = graph.node(target).and_then(|n| n.spec(index)) else {
             return;
         };
         let (from, to) = (
@@ -1776,7 +1824,7 @@ impl App {
                     .controller
                     .graph()
                     .node(ModuleId(module))
-                    .and_then(|n| n.descriptor.params.get(index))
+                    .and_then(|n| n.spec(index))
                     .map(|spec| spec.denormalize(position));
                 if let Some(value) = value {
                     self.turn_param(module, index, value);
@@ -1787,7 +1835,7 @@ impl App {
                     .controller
                     .graph()
                     .node(ModuleId(module))
-                    .and_then(|n| n.descriptor.params.get(index))
+                    .and_then(|n| n.spec(index))
                     .map(|spec| spec.clamp(value));
                 if let Some(value) = value {
                     self.turn_param(module, index, value);
@@ -1798,13 +1846,14 @@ impl App {
                     .controller
                     .graph()
                     .node(ModuleId(module))
-                    .and_then(|n| n.descriptor.params.get(index))
+                    .and_then(|n| n.spec(index))
                     .map(|spec| spec.clamp(spec.min + choice as f32));
                 if let Some(value) = value {
                     self.turn_param(module, index, value);
                     self.close_slider_gesture();
                 }
             }
+            Message::Range { module, index, range } => self.set_range(module, index, range),
             Message::SliderReleased => self.close_slider_gesture(),
             Message::AddModulation { module, index } => {
                 self.adding = if self.adding == Some((module, index)) {

@@ -219,6 +219,7 @@ mod tests {
                 descriptor,
                 params: Vec::new(),
                 slot: matches!(descriptor.role, ModuleRole::Dsp(_)).then_some(id.0 as usize),
+                ranges: Vec::new(),
             },
         );
         id

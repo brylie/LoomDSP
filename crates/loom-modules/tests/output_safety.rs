@@ -31,7 +31,7 @@ fn constant(mode: OutputSafety, value: f32) -> EngineParts {
     let mut parts = engine(mode, SAMPLE_RATE);
     let c = &mut parts.controller;
     let constant = c.add_module("loom.math.constant").unwrap();
-    c.set_param_named(constant, "value", value).unwrap();
+    set_wide(c, constant, "value", value);
     play(&mut parts, constant);
     parts.controller.commit().unwrap();
     parts
@@ -44,7 +44,7 @@ fn noise(mode: OutputSafety, gain: f32) -> (EngineParts, ModuleId) {
     let noise = c.add_module("loom.osc.noise").unwrap();
     let mul = c.add_module("loom.math.mul").unwrap();
     c.connect_named(noise, "out", mul, "a").unwrap();
-    c.set_param_named(mul, "gain", gain).unwrap();
+    set_wide(c, mul, "gain", gain);
     play(&mut parts, mul);
     parts.controller.commit().unwrap();
     (parts, mul)

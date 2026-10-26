@@ -129,7 +129,9 @@ pub(crate) struct ParamFill {
     pub key: u64,
     pub slot: u32,
     pub param: u16,
-    pub spec: &'static ParamSpec,
+    /// The parameter limited to its selected range, so modulation maps and
+    /// clamps inside it (control-ranges.md, rules 4, 5, and 8).
+    pub spec: ParamSpec,
     pub base: f32,
     pub smooth: Option<Smoothed>,
     pub buffer: *mut f32,
@@ -333,6 +335,17 @@ impl Schedule {
                 .filter(|previous| previous.key == fill.key)
                 .map(|previous| previous.smooth);
             match previous {
+                // The range changed: the glide goes on from the value it had
+                // reached, at that value's place in the new range, so the
+                // sound does not jump and no value is passed that was never
+                // set (control-ranges.md).
+                Some(Some(mut previous)) if previous_spec(old, j) != Some((fill.spec.min, fill.spec.max)) => {
+                    let old_spec = old.fills[old.fill_order[j] as usize].spec;
+                    let value = old_spec.denormalize(previous.current());
+                    previous.reset(fill.spec.normalize(value));
+                    previous.set_target(fill.spec.normalize(fill.base));
+                    *smooth = previous;
+                }
                 Some(Some(previous)) => *smooth = previous,
                 Some(None) => {}
                 None => {
@@ -344,6 +357,12 @@ impl Schedule {
             }
         }
     }
+}
+
+/// The bounds of fill `j` in `old`'s fill order.
+fn previous_spec(old: &Schedule, j: usize) -> Option<(f32, f32)> {
+    let fill = &old.fills[*old.fill_order.get(j)? as usize];
+    Some((fill.spec.min, fill.spec.max))
 }
 
 struct TapSpec {
@@ -854,7 +873,8 @@ pub(crate) fn compile(
         let fill_start = fills.len() as u32;
         let param_start = param_ptrs.len() as u32;
         for spec in &fills_of[v] {
-            let param_spec = &node.descriptor.params[spec.param];
+            // Prepared here, on the control thread: the selected range.
+            let param_spec = node.spec(spec.param).expect("fills name real parameters");
             let base = node.params.get(spec.param).copied().unwrap_or(param_spec.default);
             let smooth = (param_spec.options.smooth_seconds > 0.0).then(|| {
                 Smoothed::new(
@@ -1040,7 +1060,7 @@ fn compile_midi_maps(graph: &Graph, synced: &BTreeMap<MidiMappingId, u32>) -> Ve
                 synced: synced.get(&id).copied(),
                 slot: node.slot? as u32,
                 param: u16::try_from(mapping.param).ok()?,
-                spec: node.descriptor.params.get(mapping.param)?,
+                spec: node.spec(mapping.param)?,
             })
         })
         .collect();
@@ -1178,6 +1198,7 @@ mod tests {
                     descriptor: &FOLLOWER,
                     params: Vec::new(),
                     slot: Some(i as usize),
+                    ranges: Vec::new(),
                 },
             );
         }
@@ -1252,7 +1273,7 @@ mod tests {
                 key,
                 slot: (key >> 32) as u32,
                 param: key as u16,
-                spec: &SPEC,
+                spec: SPEC,
                 base: 0.75,
                 smooth: Some(smooth),
                 buffer: std::ptr::null_mut(),

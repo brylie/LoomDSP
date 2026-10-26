@@ -209,6 +209,44 @@ pub struct ParamOptions {
     /// steps of 1, or empty. Set with [`ParamSpec::choices`].
     /// Spec: `docs/design/panels.md`, Choice names.
     pub choices: &'static [&'static str],
+    /// The ranges a player can pick for this parameter's control, from the
+    /// smallest up, or empty. Set with [`ParamSpec::ranges`].
+    /// Spec: `docs/design/control-ranges.md`.
+    pub ranges: &'static [ParamRange],
+    /// The range a new module starts with. One of `ranges`.
+    pub default_range: Option<ParamRange>,
+}
+
+/// A span a control can cover: the values at the knob's minimum and maximum
+/// (`docs/design/control-ranges.md`). It limits the control, never the
+/// signal on a cable. Its name is its bounds, such as "-0.1 to 0.1".
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ParamRange {
+    /// Value at the knob's minimum.
+    pub min: f32,
+    /// Value at the knob's maximum.
+    pub max: f32,
+}
+
+impl ParamRange {
+    /// The range from `min` to `max`.
+    pub const fn new(min: f32, max: f32) -> Self {
+        Self { min, max }
+    }
+
+    /// True when `value` lies inside the range, bounds included.
+    pub fn contains(&self, value: f32) -> bool {
+        value >= self.min && value <= self.max
+    }
+}
+
+impl std::fmt::Display for ParamRange {
+    /// "-0.1 to 0.1": plain numbers, which need no translation (rule 9).
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // -0 reads as 0 to people.
+        let number = |v: f32| if v == 0.0 { 0.0 } else { v };
+        write!(f, "{} to {}", number(self.min), number(self.max))
+    }
 }
 
 impl ParamOptions {
@@ -218,6 +256,8 @@ impl ParamOptions {
         mapping: ParamMapping::Linear,
         smooth_seconds: 0.0,
         choices: &[],
+        ranges: &[],
+        default_range: None,
     };
 }
 
@@ -273,6 +313,100 @@ impl ParamSpec {
     pub const fn choices(mut self, names: &'static [&'static str]) -> Self {
         self.options.choices = names;
         self
+    }
+
+    /// Offers `ranges` for the control, from the smallest up, and starts
+    /// with `default`. The registry refuses ranges outside `min` and `max`,
+    /// a range with `min >= max`, a default not in the list, a default value
+    /// outside the default range, and ranges on a logarithmic or
+    /// whole-number parameter. Spec: `docs/design/control-ranges.md`.
+    pub const fn ranges(mut self, ranges: &'static [ParamRange], default: ParamRange) -> Self {
+        self.options.ranges = ranges;
+        self.options.default_range = Some(default);
+        self
+    }
+
+    /// The range a new module starts with, if the parameter offers ranges.
+    pub fn default_range(&self) -> Option<ParamRange> {
+        if self.options.ranges.is_empty() {
+            None
+        } else {
+            self.options.default_range
+        }
+    }
+
+    /// This parameter with its control limited to `range`: `min` and `max`
+    /// become the range's bounds, and the default is clamped into it. Every
+    /// user of the control maps through the result, so the inspector, the
+    /// tile knob, MIDI, and the engine's modulation agree (rule 4).
+    #[must_use]
+    pub fn in_range(&self, range: ParamRange) -> Self {
+        let mut spec = *self;
+        spec.min = range.min;
+        spec.max = range.max;
+        spec.default = self.default.clamp(range.min, range.max);
+        spec
+    }
+
+    /// The smallest range in the list that holds `value`: the first one, as
+    /// the list goes from the smallest up. `None` if none does, or the
+    /// parameter offers no ranges.
+    pub fn smallest_range_holding(&self, value: f32) -> Option<ParamRange> {
+        self.options.ranges.iter().copied().find(|range| range.contains(value))
+    }
+
+    /// The range a loaded module gets for this parameter (rule 7), and
+    /// whether the loader reports it. Ranges never change a saved value.
+    ///
+    /// No saved range: the default range if `value` fits, else the
+    /// smallest that holds it, with no report. A saved range in the list
+    /// that holds `value` is kept. Any other saved range gets the smallest
+    /// range that holds `value`, and a report. `value` must already be
+    /// clamped to `min` and `max`. `None` if the parameter offers no ranges.
+    pub fn load_range(&self, saved: Option<ParamRange>, value: f32) -> Option<(ParamRange, bool)> {
+        let default = self.default_range()?;
+        let fallback = self
+            .smallest_range_holding(value)
+            .unwrap_or(ParamRange::new(self.min, self.max));
+        Some(match saved {
+            None if default.contains(value) => (default, false),
+            None => (fallback, false),
+            Some(range) if self.options.ranges.contains(&range) && range.contains(value) => (range, false),
+            Some(_) => (fallback, true),
+        })
+    }
+
+    /// Checks the ranges, as the registry does (rules 2 and 3).
+    pub fn check_ranges(&self) -> Result<(), String> {
+        let ranges = self.options.ranges;
+        if ranges.is_empty() {
+            return Ok(());
+        }
+        let problem = |text: &str| Err(format!("parameter `{}`: {text}", self.name));
+        if self.options.integer || self.options.mapping != ParamMapping::Linear {
+            return problem("only linear parameters that are not whole numbers can offer ranges");
+        }
+        for range in ranges {
+            if range.min.is_nan() || range.max.is_nan() || range.min >= range.max {
+                return problem(&format!("range {range} has a minimum that is not below its maximum"));
+            }
+            if range.min < self.min || range.max > self.max {
+                return problem(&format!(
+                    "range {range} is outside the parameter's {} to {}",
+                    self.min, self.max
+                ));
+            }
+        }
+        let Some(default) = self.options.default_range.filter(|d| ranges.contains(d)) else {
+            return problem("the default range is not in the list");
+        };
+        if !default.contains(self.default) {
+            return problem(&format!(
+                "the default value {} is outside the default range {default}",
+                self.default
+            ));
+        }
+        Ok(())
     }
 
     /// The name of `value`, if this parameter names its values. The value
@@ -731,7 +865,7 @@ impl ModuleDescriptor {
         })
     }
 
-    /// Checks the display values, the choice names, and the panel: every widget binds to
+    /// Checks the display values, the choice names, the ranges, and the panel: every widget binds to
     /// something this module has, fits its binding, lies inside the panel,
     /// and overlaps no other widget. The registry runs this check.
     pub fn check_panel(&self) -> Result<(), String> {
@@ -740,6 +874,7 @@ impl ModuleDescriptor {
         }
         for param in self.params {
             param.check_choices()?;
+            param.check_ranges()?;
         }
         let panel = &self.panel;
         for (i, widget) in panel.widgets.iter().enumerate() {
@@ -1080,6 +1215,56 @@ mod tests {
         assert_eq!(SEED.denormalize(SEED.normalize(65_000.0)), 65_000.0);
         let step = 1.0 / (SEED.max - SEED.min);
         assert_eq!(SEED.denormalize(SEED.normalize(100.0) + step), 101.0);
+    }
+
+    const RANGES: &[ParamRange] = &[
+        ParamRange::new(-0.1, 0.1),
+        ParamRange::new(-1.0, 1.0),
+        ParamRange::new(-5.0, 5.0),
+    ];
+    const WIDE: ParamSpec = param("gain", -10.0, 10.0, 1.0, "").ranges(RANGES, ParamRange::new(-1.0, 1.0));
+
+    /// A selected range maps its bounds to positions 0 and 1, and clamps
+    /// values outside it and NaN as the full range does.
+    #[test]
+    fn a_selected_range_replaces_the_bounds() {
+        let fine = WIDE.in_range(RANGES[0]);
+        assert_eq!(fine.normalize(-0.1), 0.0);
+        assert_eq!(fine.normalize(0.1), 1.0);
+        assert_eq!(fine.normalize(0.05), 0.75);
+        assert_eq!(fine.denormalize(0.5), 0.0);
+        assert_eq!(fine.normalize(5.0), 1.0);
+        assert_eq!(fine.clamp(5.0), 0.1);
+        // The default is clamped into the range, for NaN and reset.
+        assert_eq!(fine.denormalize(f32::NAN), 0.1);
+        assert_eq!(fine.clamp(f32::NAN), 0.1);
+        // 100 times finer than the full range.
+        let full = WIDE.in_range(ParamRange::new(-10.0, 10.0));
+        let step = |spec: ParamSpec| spec.denormalize(0.51) - spec.denormalize(0.5);
+        assert!((step(full) / step(fine) - 100.0).abs() < 1e-2);
+        assert_eq!(RANGES[0].to_string(), "-0.1 to 0.1");
+        assert_eq!(ParamRange::new(0.0, 10.0).to_string(), "0 to 10");
+    }
+
+    /// Rule 7: a load never changes the value. It picks the default range,
+    /// the saved one, or the smallest that holds the value.
+    #[test]
+    fn a_loaded_range_holds_the_saved_value() {
+        let (default, fine, half) = (RANGES[1], RANGES[0], RANGES[2]);
+        assert_eq!(WIDE.default_range(), Some(default));
+        assert_eq!(WIDE.load_range(None, 0.5), Some((default, false)));
+        assert_eq!(WIDE.load_range(None, 3.0), Some((half, false)));
+        assert_eq!(WIDE.load_range(Some(fine), 0.05), Some((fine, false)));
+        // A saved range that does not hold the value, or is not offered.
+        assert_eq!(WIDE.load_range(Some(fine), 5.0), Some((half, true)));
+        assert_eq!(
+            WIDE.load_range(Some(ParamRange::new(-2.0, 2.0)), 0.5),
+            Some((default, true))
+        );
+        // No range in the list holds it: the full range.
+        assert_eq!(WIDE.load_range(None, 8.0), Some((ParamRange::new(-10.0, 10.0), false)));
+        assert_eq!(GAIN.load_range(None, 1.0), None);
+        assert_eq!(WIDE.check_ranges(), Ok(()));
     }
 
     /// A named value reads its name, after clamping and rounding. A

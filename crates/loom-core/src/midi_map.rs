@@ -101,7 +101,9 @@ pub(crate) struct MidiMapOp {
     pub synced: Option<u32>,
     pub slot: u32,
     pub param: u16,
-    pub spec: &'static ParamSpec,
+    /// The parameter limited to its selected range, so a control change
+    /// spans the range the knob does (control-ranges.md, rule 4).
+    pub spec: ParamSpec,
 }
 
 /// What the engine reports to the controller. See the module docs.
