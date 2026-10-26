@@ -506,3 +506,47 @@ fn the_recovery_window_scales_with_the_sample_rate() {
         .frames(1_900)
         .check_non_finite_recovery();
 }
+
+/// Two channels named for a patch's output, for the `check_channels` tests.
+fn stereo(offset: f32) -> Vec<Vec<f32>> {
+    vec![vec![0.25; 100], (0..100).map(|i| i as f32 * 0.01 + offset).collect()]
+}
+
+/// `check_channels` passes against the file `write` made from the same
+/// samples (#93).
+#[test]
+fn check_channels_matches_its_own_file() {
+    let file = TempReference::new("stereo");
+    let samples = stereo(0.0);
+    let channels = reference::Channels {
+        id: "test.ron",
+        names: vec!["left", "right"],
+        samples: &samples,
+        sample_rate: 1_000.0,
+    };
+    reference::write(&channels, &file.0);
+    check_channels(
+        "test.ron",
+        &["left", "right"],
+        &samples,
+        1_000.0,
+        &file.0,
+        DEFAULT_TOLERANCE,
+    );
+}
+
+/// A difference names the patch and the channel by the names given.
+#[test]
+#[should_panic(expected = "test.ron: output `right` differs from")]
+fn a_channel_that_differs_is_named() {
+    let file = TempReference::new("stereo-differs");
+    let (before, after) = (stereo(0.0), stereo(0.5));
+    let channels = |samples| reference::Channels {
+        id: "test.ron",
+        names: vec!["left", "right"],
+        samples,
+        sample_rate: 1_000.0,
+    };
+    reference::write(&channels(&before), &file.0);
+    reference::compare(&channels(&after), &file.0, DEFAULT_TOLERANCE);
+}

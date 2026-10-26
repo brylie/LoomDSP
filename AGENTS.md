@@ -29,6 +29,7 @@ cargo deny check                       # licences and advisories
 typos                                  # spelling
 cargo bench -p loom-modules
 LOOM_UPDATE_REFERENCES=1 cargo test -p loom-modules --test reference   # write module reference renders
+LOOM_UPDATE_REFERENCES=1 cargo test -p loom-modules --test patches     # write example patch reference renders
 mise run help-pages                    # regenerate the module help pages in docs/modules (loom modules --markdown)
 cargo run --release -p loom-cli -- check examples/patches/fm-feedback.ron
 cargo run --release -p loom-cli -- render examples/patches/subtractive.ron -o /tmp/out.wav --note 60

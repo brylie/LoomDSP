@@ -91,6 +91,15 @@ Every render fails if a port or parameter has an empty label or description, and
 - Their IDs start with `test.`, so they never clash with a real module.
 - The app registers them in its own tests, and in a normal run only with `--test-modules`. Only with that flag does its module browser list them. `examples/dev/test-widgets.ron` uses them: one of each widget, with an assignment on each control. Open it with `--test-modules`, `--dump-ui`, `--screenshot-window`, or the control channel to check a widget by hand. *Why:* some widgets are on no built-in module yet, so a manual check of them needs a patch, and a normal user should never see these modules.
 
+### Example patch references
+
+Golden-audio tests for whole patches, the other half of NFR-OSS-05 ([#93](https://github.com/brylie/LoomDSP/issues/93)), live in `crates/loom-modules/tests/patches.rs`. They run the engine, not one module, so they do not use `Harness`.
+
+- Every `.ron` file in `examples/patches/` is loaded into an engine with output safety off and plays middle C from 5 ms to 150 ms. The render is 0.2 s, so each file stays under 80 KB. *Why safety off:* the reference should hold what the patch makes, not what the limiter does to it. The safety stage has its own tests.
+- The render is played in host buffers of 1, 77, 256, and 1,000 frames, and all four must be bit-identical.
+- The stereo output is compared with `tests/reference/patches/<name>.wav` by `loom_test::check_channels`, which follows the same file rules as `check_reference`, including `LOOM_UPDATE_REFERENCES=1`. The tolerance is 1e-4. *Why larger:* a patch runs several modules in a row, some in feedback loops, so platform maths differences can grow more than in one module.
+- A new example patch without a reference fails the test. A reference without a patch fails too, so a removed or renamed patch leaves no stale file.
+
 ## Rules
 
 1. **Each render uses a new module instance**, made by the descriptor's factory, with every parameter set to its default first and then to the test's values. *Why:* this is how the engine creates a module (`Controller::add_module`), and no render can leak state into the next.
@@ -120,7 +129,6 @@ Every render fails if a port or parameter has an empty label or description, and
 ## Out of scope
 
 - Changing parameters, tempo, or the play state during a render. Use the engine tests in `loom-modules/tests/engine.rs`, or add it here when a module needs it.
-- Golden-audio tests for whole example patches (the other half of NFR-OSS-05). They run the engine, not one module.
 - Testing `reset`.
 - Plugin host tests.
 
