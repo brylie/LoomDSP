@@ -293,7 +293,7 @@ mod app_tests {
                 assert!(tile.x > world.x, "the new tile is right of where the menu opened");
                 assert!(!tiles.iter().any(|t| t.intersects(&tile)), "{probe:?} overlaps a tile");
                 assert_eq!(
-                    app.history.undo_step().map(|s| s.name().to_string()).as_deref(),
+                    app.edits.history.undo_step().map(|s| s.name().to_string()).as_deref(),
                     Some(probe.verb())
                 );
 
@@ -312,7 +312,7 @@ mod app_tests {
         let (output, _) = first_cable(&app);
         let port = app.scene.port_position(output).unwrap();
         let modules = app.controller.graph().nodes().count();
-        let undo = app.history.undo_step().map(|s| s.name().to_string());
+        let undo = app.edits.history.undo_step().map(|s| s.name().to_string());
 
         open(&mut app, output, port);
         let press = |key| {
@@ -340,7 +340,7 @@ mod app_tests {
         let _ = app.update(Message::ProbeMenu(super::Message::Close));
         assert!(app.probe_menu.is_none());
         assert_eq!(app.controller.graph().nodes().count(), modules);
-        assert_eq!(app.history.undo_step().map(|s| s.name().to_string()), undo);
+        assert_eq!(app.edits.history.undo_step().map(|s| s.name().to_string()), undo);
     }
 
     /// Cut and duplicate do not change the patch behind the open menu.
@@ -368,10 +368,10 @@ mod app_tests {
         open(&mut app, output, port);
         let _ = app.update(Message::Canvas(CanvasEvent::Delete(vec![output.module])));
         let modules = app.controller.graph().nodes().count();
-        let undo = app.history.undo_step().map(|s| s.name().to_string());
+        let undo = app.edits.history.undo_step().map(|s| s.name().to_string());
         let _ = app.update(Message::ProbeMenu(super::Message::Pick(Probe::Scope)));
         assert_eq!(app.controller.graph().nodes().count(), modules);
-        assert_eq!(app.history.undo_step().map(|s| s.name().to_string()), undo);
+        assert_eq!(app.edits.history.undo_step().map(|s| s.name().to_string()), undo);
         assert!(app.status.contains("the output is gone"), "{}", app.status);
     }
 

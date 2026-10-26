@@ -2,7 +2,8 @@
 //!
 //! Real-time rules (NFR-RT-01): nothing in this file allocates, frees, locks,
 //! or waits once the engine is running. Memory arrives pre-allocated through
-//! the command queue and leaves through the garbage queue. Telemetry leaves
+//! the command queue and leaves through the garbage queue.
+//! `docs/learn/real-time-safety.md` explains why. Telemetry leaves
 //! through its own queues and is dropped when they are full (NFR-RT-07).
 
 use crate::compile::{AssignmentRuntime, ModuleOp, ParamFill, Schedule, Step};

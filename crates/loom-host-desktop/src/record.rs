@@ -12,6 +12,7 @@
 //! streams.
 
 use crate::HostError;
+use std::io::{Seek, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -76,8 +77,9 @@ pub struct Recorder {
     streams: Sender<rtrb::Consumer<f32>>,
     done: Arc<AtomicBool>,
     dropped: Arc<AtomicU64>,
-    /// The first write error. The recording stops there; what was written
-    /// before stays readable.
+    /// The first write error. The recording stops there. What was written
+    /// before stays in the file, but a full disk can cut the last frame in
+    /// half, and a strict WAV reader then rejects the file.
     error: Arc<Mutex<Option<String>>>,
     thread: Option<JoinHandle<()>>,
 }
@@ -86,13 +88,25 @@ impl Recorder {
     /// Creates the WAV file (32-bit float, stereo) and starts the writer.
     /// Every stream recorded into it must run at `sample_rate`.
     pub fn start(path: &Path, sample_rate: u32) -> Result<Self, HostError> {
+        let file = std::fs::File::create(path).map_err(record_error)?;
+        Self::start_with(std::io::BufWriter::new(file), sample_rate)
+    }
+
+    /// Starts a recording into `out`, which must be at offset 0. [`start`]
+    /// passes a file; tests pass a writer that fails, as a full disk does.
+    ///
+    /// [`start`]: Recorder::start
+    fn start_with<W>(out: W, sample_rate: u32) -> Result<Self, HostError>
+    where
+        W: Write + Seek + Send + 'static,
+    {
         let spec = hound::WavSpec {
             channels: 2,
             sample_rate,
             bits_per_sample: 32,
             sample_format: hound::SampleFormat::Float,
         };
-        let mut writer = hound::WavWriter::create(path, spec).map_err(record_error)?;
+        let mut writer = hound::WavWriter::new(out, spec).map_err(record_error)?;
         let (streams, receiver) = mpsc::channel();
         let done = Arc::new(AtomicBool::new(false));
         let error = Arc::new(Mutex::new(None));
@@ -177,8 +191,8 @@ impl Drop for Recorder {
 /// a frame's two samples one after the other, so the writer can find half
 /// a frame in the ring. That half waits for the next drain: hound refuses
 /// to write a header for a file that ends in half a frame.
-fn drain(
-    writer: &mut hound::WavWriter<std::io::BufWriter<std::fs::File>>,
+fn drain<W: Write + Seek>(
+    writer: &mut hound::WavWriter<W>,
     consumer: &mut rtrb::Consumer<f32>,
 ) -> Result<(), hound::Error> {
     let ready = consumer.slots() & !1;
@@ -195,8 +209,8 @@ fn drain(
 /// The writer loop: drains the current stream's ring until that stream has
 /// ended and its ring is empty, then moves to the next. When the recorder
 /// drops, writes what every ring still holds.
-fn write(
-    writer: &mut hound::WavWriter<std::io::BufWriter<std::fs::File>>,
+fn write<W: Write + Seek>(
+    writer: &mut hound::WavWriter<W>,
     streams: &Receiver<rtrb::Consumer<f32>>,
     done: &AtomicBool,
 ) -> Result<(), hound::Error> {
@@ -343,6 +357,76 @@ mod tests {
         drop(tap);
         assert_eq!(recorder.close(), None);
         assert_eq!(hound::WavReader::open(&path).unwrap().len(), 20);
+    }
+
+    /// A writer that keeps what it is given in memory and fails once it
+    /// holds `limit` bytes, as a full disk does.
+    struct FullDisk {
+        bytes: Arc<Mutex<std::io::Cursor<Vec<u8>>>>,
+        limit: u64,
+    }
+
+    impl Write for FullDisk {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            let mut bytes = self.bytes.lock().unwrap();
+            if bytes.position() + buf.len() as u64 > self.limit {
+                return Err(std::io::Error::new(std::io::ErrorKind::StorageFull, "the disk is full"));
+            }
+            bytes.write(buf)
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl Seek for FullDisk {
+        fn seek(&mut self, to: std::io::SeekFrom) -> std::io::Result<u64> {
+            self.bytes.lock().unwrap().seek(to)
+        }
+    }
+
+    /// A write error stops the recording and is reported by
+    /// [`Recorder::error`] and [`Recorder::close`]. The samples pushed
+    /// before it are written (#237).
+    #[test]
+    fn a_failing_writer_reports_its_error() {
+        let bytes = Arc::new(Mutex::new(std::io::Cursor::new(Vec::new())));
+        // Room for the header and a few hundred samples.
+        let limit = 4096;
+        let disk = FullDisk {
+            bytes: bytes.clone(),
+            limit,
+        };
+        let recorder = Recorder::start_with(disk, 48_000).unwrap();
+        assert_eq!(recorder.error(), None);
+        let mut tap = recorder.tap();
+        let left: Vec<f32> = (0..2000).map(|i| i as f32).collect();
+        let right: Vec<f32> = left.iter().map(|x| -x).collect();
+        tap.push(&left, &right);
+        drop(tap);
+
+        let waited = Instant::now();
+        while recorder.error().is_none() {
+            assert!(waited.elapsed() < Duration::from_secs(10), "the writer failed");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let error = recorder.close().expect("close reports the error");
+        assert!(error.contains("the disk is full"), "{error}");
+
+        // What reached the disk before the error is the start of the stream.
+        let bytes = bytes.lock().unwrap().get_ref().clone();
+        assert!(bytes.len() as u64 <= limit);
+        let data = bytes.windows(4).position(|w| w == b"data").unwrap() + 8;
+        let written: Vec<f32> = bytes[data..]
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|b| f32::from_le_bytes(*b))
+            .collect();
+        assert!(written.len() > 100, "{} samples written", written.len());
+        let pushed = left.iter().zip(&right).flat_map(|(l, r)| [*l, *r]);
+        assert!(written.iter().copied().eq(pushed.take(written.len())));
     }
 
     /// A full ring drops frames and counts them.

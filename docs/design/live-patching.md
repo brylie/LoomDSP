@@ -6,7 +6,7 @@ What carries over when the player edits a patch while it plays, so a new cable j
 - **Status:** Rules 1 to 5 Implemented. Rule 7 Agreed ([#230](https://github.com/brylie/LoomDSP/issues/230)). Rule 6 Agreed, from the research in [#203](https://github.com/brylie/LoomDSP/issues/203), and built with stereo copies (#23).
 - **Decision behind it:** [ADR-0002](../adr/0002-graph-execution-and-feedback.md) (schedules and inserted delays), [ADR-0022](../adr/0022-copies-take-state-from-the-running-instance.md) (state of channel copies).
 - **Use case and requirements:** FR-GRAPH-01, FR-GRAPH-02, FR-GRAPH-03, FR-SIG-07, NFR-RT-01, NFR-RT-05, NFR-SND-02
-- **Background:** [Hot patching](../learn/hot-patching.md): why a new path clicks, and why a crossfade does not fix it.
+- **Background:** [Hot patching](../learn/hot-patching.md): why a new path clicks, and why a crossfade does not fix it. See also [Feedback loops and the unit delay](../learn/feedback-loops.md).
 - **Prior art:** in Eurorack, every module runs all the time, and a cable only connects what is already running. VCV Rack behaves the same way. Named only to explain the expectation.
 - **Issues:** #203, #23, [#230](https://github.com/brylie/LoomDSP/issues/230)
 - **Code:** `crates/loom-core/src/compile.rs` (`Schedule::take_tap_state_from`, `Schedule::sources`, `take_smooth_state_from`), `engine.rs` (`Command::SwapSchedule`, `last_frames`). Measurements: `crates/loom-modules/tests/hot_patch.rs`.

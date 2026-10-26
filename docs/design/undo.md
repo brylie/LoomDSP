@@ -9,7 +9,7 @@ How a user takes back and replays edits on the canvas, the inspector, and the pa
 - **Background:** none.
 - **Prior art:** every editor has undo. The only conventions we use are the common shortcuts and "one drag is one step".
 - **Issues:** [#12](https://github.com/brylie/LoomDSP/issues/12). Rules this spec collects from elsewhere: [modulation undo](modulation.md#undo), [MIDI learn](midi-learn.md) (out of scope list), [removing an item](panels.md#removing-an-item).
-- **Code:** `crates/loom-app/src/undo.rs` (snapshots, steps, history; tests in `undo/tests.rs`) and the edit wiring in `main.rs`. `Controller::restore_assignment` and `Controller::free_module_slots` in `loom-core`. `CanvasEvent::GestureStart` and `GestureEnd` in `loom-canvas`.
+- **Code:** `crates/loom-app/src/undo.rs` (snapshots, steps, history; tests in `undo/tests.rs`), `edits.rs` (the edit and gesture being recorded, and recording off after a failed commit; tests in `edits/tests.rs`), and the edit wiring in `main.rs`. `Controller::restore_assignment` and `Controller::free_module_slots` in `loom-core`. `CanvasEvent::GestureStart` and `GestureEnd` in `loom-canvas`.
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
      built. See README.md in this folder. -->

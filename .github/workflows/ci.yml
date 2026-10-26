@@ -294,15 +294,52 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: mise run wasm
 
+  # Licences, banned crates, and sources. They change only when our files
+  # change, so they block every pull request.
   deny:
-    name: Licences and advisories (ADR-0006)
+    name: Licences (ADR-0006)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: jdx/mise-action@v5
-      - run: mise run deny
+      - run: mise run deny-policy
+
+  # Security advisories change when the RustSec database changes, not when
+  # our files do. A new one would fail every open pull request, even a
+  # docs-only one (#143). So on a pull request the check runs only when it
+  # changes Cargo.toml, Cargo.lock, or deny.toml; a pull request cannot add
+  # a crate without changing Cargo.lock. Pushes to main, the weekly run,
+  # and a manual run always check, so a new advisory still turns main red.
+  # The job always runs, and a skipped check counts as a pass for "CI
+  # success". CONTRIBUTING.md says what to do when it fails.
+  advisories:
+    name: Security advisories (ADR-0006)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          # The merge commit and its first parent, the base branch.
+          fetch-depth: 2
+      - name: Dependencies changed
+        id: changed
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" != pull_request ]; then
+            echo "check=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only HEAD^1 HEAD | grep -qE '(^|/)(Cargo\.toml|Cargo\.lock|deny\.toml)$'; then
+            echo "check=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No dependency file changed, so advisories are checked on main and weekly, not here."
+            echo "check=false" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.changed.outputs.check == 'true'
+        uses: jdx/mise-action@v5
+      - if: steps.changed.outputs.check == 'true'
+        run: mise run deny-advisories
 
   typos:
     name: Spelling
@@ -319,7 +356,7 @@ jobs:
   ci-success:
     name: CI success
     if: always()
-    needs: [fmt, clippy, test, coverage, loopback, docs, msrv, wasm, deny, typos]
+    needs: [fmt, clippy, test, coverage, loopback, docs, msrv, wasm, deny, advisories, typos]
     runs-on: ubuntu-latest
     steps:
       - name: Check all jobs passed

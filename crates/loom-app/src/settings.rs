@@ -1169,7 +1169,7 @@ mod tests {
         app.controller.set_tempo(90.0).unwrap();
         let before = undo::Snapshot::take(&app.controller, &app.positions);
         let ids: Vec<_> = app.controller.graph().nodes().map(|(id, _)| id).collect();
-        assert_eq!(app.history.len(), 3);
+        assert_eq!(app.edits.history.len(), 3);
         assert!(app.unsaved());
 
         change(&mut app, Change::Rate(RateChoice::Hz(44_100)));
@@ -1193,7 +1193,7 @@ mod tests {
             .is_none(),
             "the same patch"
         );
-        assert_eq!(app.history.len(), 3);
+        assert_eq!(app.edits.history.len(), 3);
         assert!(app.unsaved());
         assert_eq!(app.controller.transport().tempo, 90.0);
         assert_eq!(
@@ -1248,7 +1248,7 @@ mod tests {
         assert!(app._audio.is_some(), "sound is still playing");
         assert_eq!(app.rig.playing.as_ref().unwrap().device, "Fake A");
         assert_eq!(app.controller.graph().len(), modules, "with the same patch");
-        assert_eq!(app.history.len(), 1);
+        assert_eq!(app.edits.history.len(), 1);
         assert!(fake.is_open("Keys"));
         assert!(!dir.join(FILE_NAME).exists(), "nothing saved");
         assert_eq!(
