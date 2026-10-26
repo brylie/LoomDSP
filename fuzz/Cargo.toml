@@ -1,0 +1,33 @@
+# Fuzz targets for LoomDSP (#44). Not part of the main workspace: cargo-fuzz
+# needs a nightly compiler, and the engine crates must stay buildable on
+# stable and for WebAssembly. Run with:
+#
+#   cargo +nightly fuzz run patch_loader -- -max_total_time=300
+#
+# See CONTRIBUTING.md, "Fuzzing".
+[package]
+name = "loom-fuzz"
+version = "0.0.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+loom-core = { path = "../crates/loom-core" }
+loom-modules = { path = "../crates/loom-modules" }
+loom-patch = { path = "../crates/loom-patch" }
+
+# Its own workspace, so the main one never builds it.
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "patch_loader"
+path = "fuzz_targets/patch_loader.rs"
+test = false
+doc = false
+bench = false

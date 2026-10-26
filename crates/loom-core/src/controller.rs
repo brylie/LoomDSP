@@ -192,6 +192,9 @@ impl Controller {
         if self.graph.nodes.contains_key(&id) {
             return Err(LoomError::DuplicateModuleId(id));
         }
+        if id > ModuleId::MAX {
+            return Err(LoomError::ModuleIdOutOfRange(id));
+        }
         self.collect_garbage();
         let slot = match descriptor.role {
             ModuleRole::Dsp(factory) => {
@@ -1015,6 +1018,19 @@ mod tests {
         let error = full.set_params(id, &[(0, 1.0), (1, 0.0)]).unwrap_err();
         assert!(matches!(error, LoomError::QueueFull), "{error}");
         assert_eq!(full.graph().node(id).unwrap().params, vec![0.0, 0.0]);
+    }
+
+    /// The largest module ID is refused with an error, not an overflow
+    /// panic, and an ID just below it still leaves room for the next free
+    /// one (#44).
+    #[test]
+    fn module_ids_past_the_largest_are_refused() {
+        let mut room = controller(8);
+        let error = room.add_module_with_id(ModuleId(u32::MAX), GATE.id).unwrap_err();
+        assert!(matches!(error, LoomError::ModuleIdOutOfRange(_)), "{error}");
+        room.add_module_with_id(ModuleId::MAX, GATE.id).unwrap();
+        let error = room.add_module(GATE.id).unwrap_err();
+        assert!(matches!(error, LoomError::ModuleIdOutOfRange(_)), "{error}");
     }
 
     /// An engine that no device plays takes edits for as long as someone

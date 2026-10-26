@@ -1,0 +1,10 @@
+// Module ID 4294967295 (u32::MAX). Adding it overflowed the next free ID
+// (a panic in debug builds), and the display table uses this value to mean
+// "no owner". It is now refused with an error. Found by review while
+// writing the fuzz target (#44).
+Patch(
+    version: 1,
+    modules: [
+        PatchModule(id: 4294967295, kind: "loom.osc.sine@1"),
+    ],
+)

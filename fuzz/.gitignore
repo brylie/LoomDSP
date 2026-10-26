@@ -1,0 +1,6 @@
+# Made by cargo fuzz runs. Inputs that found a bug go into
+# crates/loom-patch/tests/malformed/ instead, so the stable test keeps them.
+target
+corpus
+artifacts
+coverage

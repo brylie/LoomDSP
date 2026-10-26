@@ -11,6 +11,8 @@ members = [
     "crates/loom-canvas",
     "crates/loom-app",
 ]
+# Fuzz targets need nightly; they have their own workspace (#44).
+exclude = ["fuzz"]
 
 [workspace.package]
 version = "0.1.0"

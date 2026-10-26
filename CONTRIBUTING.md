@@ -117,6 +117,20 @@ Besides "CI success", the main branch ruleset has two gates from [GitHub Code Qu
 
 Dependabot opens weekly pull requests for dependency updates.
 
+### Fuzzing
+
+`fuzz/` holds a [cargo-fuzz](https://rust-fuzz.github.io/book/cargo-fuzz.html) target for the patch loader (#44). It reads random input as a patch, loads it into an engine with every built-in module, and plays a few buffers. Any input must give an error or a working engine, never a panic or a hang. cargo-fuzz needs a nightly compiler, so `fuzz/` is its own workspace, CI does not run it, and the engine crates still build on stable and for WebAssembly.
+
+```sh
+rustup toolchain install nightly --profile minimal
+cargo install cargo-fuzz
+cd fuzz
+mkdir -p corpus/patch_loader && cp ../examples/patches/*.ron corpus/patch_loader/
+cargo +nightly fuzz run patch_loader -- -max_total_time=300 -dict=patch.dict
+```
+
+Run it after a change to the patch format, the loader, or the controller. When it finds an input that breaks the loader, fix the cause, then copy the input from `fuzz/artifacts/` into `crates/loom-patch/tests/malformed/` with a comment that says what it found. `crates/loom-patch/tests/malformed.rs` loads every file there, plus edge cases and seeded random changes of the example patches, on stable in every CI job.
+
 ## Rules for audio code
 
 The audio thread has a hard deadline. At 48 kHz with 128-frame buffers, each buffer must finish in 2.67 ms, every time. So code that runs inside `Module::process` or `Engine::process` must not:

@@ -34,6 +34,10 @@ pub enum LoomError {
     /// A module ID is already used.
     #[error("module id {0} is already in use")]
     DuplicateModuleId(ModuleId),
+    /// A module ID is out of range. The largest `u32` is kept to mean "no
+    /// module" (#44).
+    #[error("module id {0} is too large (the largest is {max})", max = ModuleId::MAX.0)]
+    ModuleIdOutOfRange(ModuleId),
     /// A port name or index does not exist.
     #[error("module {module} has no {direction} port `{port}`")]
     NoSuchPort {

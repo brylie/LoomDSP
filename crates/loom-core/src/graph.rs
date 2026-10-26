@@ -9,6 +9,13 @@ use std::fmt;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ModuleId(pub u32);
 
+impl ModuleId {
+    /// The largest ID a module may have. `u32::MAX` is kept to mean "no
+    /// module" in the display table, and the next free ID must still fit
+    /// after the largest one (#44).
+    pub const MAX: ModuleId = ModuleId(u32::MAX - 1);
+}
+
 impl fmt::Display for ModuleId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "#{}", self.0)
