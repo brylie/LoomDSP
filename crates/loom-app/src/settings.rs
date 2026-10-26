@@ -28,6 +28,10 @@ pub enum Message {
     Audio(Change),
     /// Turn a MIDI input on or off.
     Midi(String, bool),
+    /// Start or stop learning the panic trigger.
+    PanicLearn,
+    /// Remove the panic trigger.
+    PanicClear,
 }
 
 /// A change to one audio setting.
@@ -74,6 +78,9 @@ pub struct Rig {
     /// The `--record` file. It belongs to the rig, not to one stream, so
     /// it records every engine the run plays (audio-qa.md, Recording the whole run).
     pub recorder: Option<Recorder>,
+    /// While the panic trigger is learned: the serial of the last control
+    /// change or note on before learn started. Only a later one sets it.
+    pub panic_learn: Option<u32>,
     /// Every mode change sent to the engine, for tests.
     #[cfg(test)]
     pub sent: Vec<OutputSafety>,
@@ -108,6 +115,7 @@ impl Rig {
             safety_pending: None,
             last_stop: None,
             recorder: None,
+            panic_learn: None,
             #[cfg(test)]
             sent: Vec::new(),
         }
@@ -246,6 +254,8 @@ impl App {
             Message::Safety(mode) => self.choose_output_safety(mode),
             Message::Audio(change) => self.change_audio(change),
             Message::Midi(name, on) => self.set_midi_input(&name, on),
+            Message::PanicLearn => self.learn_panic(),
+            Message::PanicClear => self.set_panic_pref(None),
         }
     }
 
@@ -575,6 +585,7 @@ impl App {
         let label = format!("{} at {} Hz", output.name(), output.sample_rate());
         self.generation += 1;
         self.controller = controller;
+        self.send_panic_trigger();
         self.monitor = crate::monitor::Monitor::new(telemetry, self.generation);
         self.live = crate::live::Live::new();
         self.lights.clear();
@@ -693,6 +704,31 @@ impl App {
 
         let audio = self.audio_section(window, note);
         let midi = self.midi_section(window, note);
+        let panic = column![
+            row![
+                text(self.panic_line()).size(13).width(Length::Fill),
+                button(
+                    text(if self.rig.panic_learn.is_some() {
+                        "Cancel"
+                    } else {
+                        "Learn"
+                    })
+                    .size(13)
+                )
+                .on_press(crate::Message::Preferences(Message::PanicLearn)),
+                button(text("Clear").size(13)).on_press_maybe(
+                    self.rig
+                        .store
+                        .saved()
+                        .panic
+                        .map(|_| crate::Message::Preferences(Message::PanicClear))
+                ),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center),
+            note("A control or pad that runs panic on every patch.".into()),
+        ]
+        .spacing(6);
 
         let panel = column![
             row![
@@ -709,7 +745,10 @@ impl App {
                     audio,
                     rule::horizontal(1),
                     heading("MIDI inputs"),
-                    midi
+                    midi,
+                    rule::horizontal(1),
+                    heading("Panic"),
+                    panic
                 ]
                 .spacing(12)
                 .padding([0, 12])
@@ -1207,6 +1246,63 @@ mod tests {
         fake.play("Keys", &[0x90, 62, 100]);
         assert!(wait_for(&app, 1.0), "the other input still plays");
         assert!(app._audio.is_some(), "audio did not stop");
+    }
+
+    /// The panic trigger (panic.md, MIDI trigger): Learn takes the next
+    /// control change, the mapping goes in `preferences.ron` and not in
+    /// the patch, a value of 0 does nothing, and 127 runs panic, which
+    /// releases a held note. Clear removes it.
+    #[test]
+    fn a_learned_panic_trigger_is_saved_and_runs_panic() {
+        let dir = folder("panic");
+        let fake = Rc::new(Fake::new(&[fake::device("Fake A")], &["Pad"]));
+        let mut app = start(args(&dir), &fake);
+        let note = loom_modules::registry().resolve("loom.midi.note").unwrap();
+        app.add_module(note, iced::Point::new(100.0, 100.0));
+        let id = loom_core::ModuleId(*app.selection.iter().next().unwrap());
+        let gate = app
+            .controller
+            .graph()
+            .node(id)
+            .unwrap()
+            .descriptor
+            .display_index("gate")
+            .unwrap();
+        let wait_for = |app: &App, value: f32| {
+            (0..400).any(|_| {
+                std::thread::sleep(Duration::from_millis(5));
+                app.controller.display(id, gate) == Some(value)
+            })
+        };
+
+        app.preferences(Message::Open);
+        app.preferences(Message::PanicLearn);
+        assert_eq!(app.panic_line(), "Waiting for MIDI...");
+        fake.play("Pad", &[0xB0, 123, 127]);
+        assert!(
+            (0..400).any(|_| {
+                std::thread::sleep(Duration::from_millis(5));
+                app.controller.last_control_change().is_some()
+            }),
+            "the control change reached the engine"
+        );
+        let _ = app.update(crate::Message::Midi);
+        assert_eq!(app.panic_line(), "Channel 1, controller 123");
+        let saved = crate::preferences::load(&dir.join(FILE_NAME)).preferences.panic;
+        assert_eq!(saved, Some(crate::preferences::PanicPref::Cc(0, 123)));
+        let patch = app.current_patch().to_ron().unwrap();
+        assert!(!patch.contains("123"), "the trigger is not in the patch: {patch}");
+
+        fake.play("Pad", &[0x90, 60, 100]);
+        assert!(wait_for(&app, 1.0), "the note plays");
+        fake.play("Pad", &[0xB0, 123, 0]);
+        assert!(!wait_for(&app, 0.0), "a value of 0 does nothing");
+        fake.play("Pad", &[0xB0, 123, 127]);
+        assert!(wait_for(&app, 0.0), "127 runs panic and the note is released");
+
+        app.preferences(Message::PanicClear);
+        assert_eq!(app.panic_line(), "None");
+        assert_eq!(crate::preferences::load(&dir.join(FILE_NAME)).preferences.panic, None);
     }
 
     /// The same check through real MIDI inputs: two virtual controllers,

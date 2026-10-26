@@ -488,6 +488,13 @@ impl Controller {
         self.midi_feedback.last()
     }
 
+    /// The last note on the engine received, or `None` before the first.
+    /// Its serial is counted with control changes, so learning a panic
+    /// trigger can take whichever came first after it started.
+    pub fn last_note_on(&self) -> Option<crate::midi_map::NoteOnSeen> {
+        self.midi_feedback.last_note()
+    }
+
     /// A handle that reads the last control change from any thread.
     pub fn midi_reader(&self) -> MidiReader {
         MidiReader::new(self.midi_feedback.clone())

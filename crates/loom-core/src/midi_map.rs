@@ -85,6 +85,17 @@ pub struct ControlChangeSeen {
     pub serial: u32,
 }
 
+/// The last note on the engine received, as the controller reads it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NoteOnSeen {
+    /// Channel, 0 to 15.
+    pub channel: u8,
+    /// Note number, 0 to 127.
+    pub note: u8,
+    /// Counted with control changes: a higher serial came later.
+    pub serial: u32,
+}
+
 /// The parameter value a control change sets: `value / 127` as a position,
 /// mapped through the parameter (spec, Playing).
 pub fn control_value(spec: &ParamSpec, value: u8) -> f32 {
@@ -112,6 +123,10 @@ pub(crate) struct MidiFeedback {
     edits: Box<[AtomicU64]>,
     /// `serial << 32 | channel << 16 | controller << 8 | value`. 0 is none.
     last: AtomicU64,
+    /// The last note on: `serial << 32 | channel << 8 | note`. 0 is none.
+    /// It shares the serial count with control changes, so the two can be
+    /// put in order (panic learn).
+    last_note: AtomicU64,
 }
 
 /// One feedback entry, unpacked.
@@ -128,7 +143,25 @@ impl MidiFeedback {
             entries: (0..CHANNELS * CONTROLLERS).map(|_| AtomicU64::new(0)).collect(),
             edits: (0..CHANNELS * CONTROLLERS).map(|_| AtomicU64::new(0)).collect(),
             last: AtomicU64::new(0),
+            last_note: AtomicU64::new(0),
         }
+    }
+
+    /// Engine: a note on arrived. `serial` is never 0.
+    pub fn record_note(&self, channel: u8, note: u8, serial: u32) {
+        let packed = (u64::from(serial) << 32) | (u64::from(channel & 0x0F) << 8) | u64::from(note & 0x7F);
+        self.last_note.store(packed, Ordering::Release);
+    }
+
+    /// Controller: the last note on, or `None` before the first.
+    pub fn last_note(&self) -> Option<NoteOnSeen> {
+        let packed = self.last_note.load(Ordering::Acquire);
+        let serial = (packed >> 32) as u32;
+        (serial != 0).then_some(NoteOnSeen {
+            channel: ((packed >> 8) & 0x0F) as u8,
+            note: (packed & 0x7F) as u8,
+            serial,
+        })
     }
 
     /// Engine: mapping `id` set its parameter from `value`. Only the low 24
@@ -217,6 +250,12 @@ impl MidiReader {
     /// first. Its serial changes with every control change, mapped or not.
     pub fn last_control_change(&self) -> Option<ControlChangeSeen> {
         self.feedback.last()
+    }
+
+    /// The last note on the engine received, or `None` before the first.
+    /// Its serial is counted with control changes.
+    pub fn last_note_on(&self) -> Option<NoteOnSeen> {
+        self.feedback.last_note()
     }
 }
 

@@ -6,7 +6,7 @@
 //! value the app does not know falls back to its own default alone (rule 3).
 //! No engine crate reads this file (rule 2).
 
-use loom_core::OutputSafety;
+use loom_core::{OutputSafety, PanicTrigger};
 use ron::value::RawValue;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -24,6 +24,27 @@ pub struct Preferences {
     pub output_safety: OutputSafety,
     pub audio: AudioPrefs,
     pub midi: MidiPrefs,
+    /// The MIDI message that runs panic (panic.md, MIDI trigger). It
+    /// belongs to the rig, so it is saved here and never in a patch.
+    pub panic: Option<PanicPref>,
+}
+
+/// The panic trigger as the file writes it: `Cc(channel, controller)` or
+/// `Note(channel, note)`, with channels from 0 as in patch files.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PanicPref {
+    Cc(u8, u8),
+    Note(u8, u8),
+}
+
+impl PanicPref {
+    /// The trigger the engine watches for.
+    pub fn trigger(self) -> PanicTrigger {
+        match self {
+            Self::Cc(channel, controller) => PanicTrigger::Cc { channel, controller },
+            Self::Note(channel, note) => PanicTrigger::Note { channel, note },
+        }
+    }
 }
 
 /// The audio output (preferences.md, What is saved).
@@ -160,6 +181,11 @@ fn parse(text: &str) -> Result<(Preferences, Vec<String>), String> {
                 preferences.output_safety = name.parse().unwrap_or_default();
             }
             "audio" => preferences.audio = audio(&mut notes, &raw),
+            "panic" => {
+                preferences.panic = field(&mut notes, "panic", &raw, &None, |p: &Option<PanicPref>| {
+                    p.is_none_or(|p| p.trigger().is_valid())
+                });
+            }
             "midi" => {
                 let off = section(&mut notes, "midi", &raw, |notes, name, raw| {
                     (name == "off").then(|| field::<Vec<String>>(notes, "midi.off", raw, &Vec::new(), |_| true))
@@ -294,6 +320,7 @@ struct FileOut<'a> {
     output_safety: &'static str,
     audio: AudioOut<'a>,
     midi: &'a MidiPrefs,
+    panic: Option<PanicPref>,
 }
 
 #[derive(Serialize)]
@@ -315,6 +342,7 @@ pub fn to_text(preferences: &Preferences) -> String {
             buffer: preferences.audio.buffer,
         },
         midi: &preferences.midi,
+        panic: preferences.panic,
     };
     // Line feeds on every system, so the file is the same everywhere. RON
     // uses CRLF on Windows by default.
@@ -471,6 +499,7 @@ mod tests {
                 sample_rate: RateChoice::Hz(96_000),
                 buffer: BufferChoice::Frames(128),
             },
+            panic: Some(PanicPref::Cc(0, 123)),
             midi: MidiPrefs {
                 off: vec!["Pad Controller MIDI 1".into()],
             },
@@ -491,6 +520,7 @@ mod tests {
             "Pad Controller MIDI 1",
         ],
     ),
+    panic: Some(Cc(0, 123)),
 )
 "#
         );

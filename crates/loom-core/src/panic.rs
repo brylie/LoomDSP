@@ -35,7 +35,9 @@ impl PanicTrigger {
     /// a note on. Other messages set nothing.
     pub fn learn(message: MidiMessage) -> Option<Self> {
         match message {
-            MidiMessage::ControlChange { channel, controller, .. } => Some(Self::Cc { channel, controller }),
+            MidiMessage::ControlChange {
+                channel, controller, ..
+            } => Some(Self::Cc { channel, controller }),
             MidiMessage::NoteOn { channel, note, .. } => Some(Self::Note { channel, note }),
             _ => None,
         }
@@ -95,9 +97,12 @@ impl TriggerWatch {
                 self.high = high;
                 rose
             }
-            (Some(PanicTrigger::Note { channel, note }), MidiMessage::NoteOn { channel: c, note: n, .. }) => {
-                c == channel && n == note
-            }
+            (
+                Some(PanicTrigger::Note { channel, note }),
+                MidiMessage::NoteOn {
+                    channel: c, note: n, ..
+                },
+            ) => c == channel && n == note,
             _ => false,
         }
     }

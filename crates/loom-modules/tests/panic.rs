@@ -115,7 +115,10 @@ fn a_held_note_stops_without_a_click() {
     for mode in [OutputSafety::LowLatency, OutputSafety::Off] {
         let (mut parts, _) = held_note(mode);
         let out = render_panic(&mut parts, frames, 128, at);
-        assert!(peak(&out[at - fade()..at]) > 0.1, "{mode}: the note plays before the panic");
+        assert!(
+            peak(&out[at - fade()..at]) > 0.1,
+            "{mode}: the note plays before the panic"
+        );
         assert_eq!(out[at + fade()], 0.0, "{mode}: silent within 10 ms");
         let limit = step_limit(&out[at - fade()..at]);
         let step = max_step(&out[at - 1..=at + fade()]);
@@ -219,7 +222,10 @@ fn panic_is_the_same_at_every_block_size() {
             })
             .collect();
         for (render, block) in renders.iter().zip(BLOCKS) {
-            assert_eq!(render, &renders[0], "block size {block} matches block size 1, panic at {at}");
+            assert_eq!(
+                render, &renders[0],
+                "block size {block} matches block size 1, panic at {at}"
+            );
         }
     }
 }
@@ -262,5 +268,8 @@ fn a_midi_trigger_runs_panic() {
     let fired = run(127);
     assert_eq!(fired[reset], 0.0, "panic ran");
     let ignored = run(0);
-    assert!(ignored[reset - 10..reset + 10].iter().any(|&x| x.abs() > 0.1), "no panic");
+    assert!(
+        ignored[reset - 10..reset + 10].iter().any(|&x| x.abs() > 0.1),
+        "no panic"
+    );
 }

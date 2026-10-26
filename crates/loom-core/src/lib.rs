@@ -47,7 +47,7 @@ pub use engine::{Engine, EngineConfig, EngineStats};
 pub use error::LoomError;
 pub use graph::{Assignment, AssignmentId, Graph, InputRef, ModuleId, Node, OutputRef};
 pub use midi::{MidiEvent, MidiMessage};
-pub use midi_map::{ControlChangeSeen, MidiControl, MidiMapping, MidiMappingId, MidiReader, control_value};
+pub use midi_map::{ControlChangeSeen, MidiControl, MidiMapping, MidiMappingId, MidiReader, NoteOnSeen, control_value};
 pub use module::{Module, Param, PortIo, ProcessContext, testing};
 pub use panic::PanicTrigger;
 pub use registry::{ModuleKind, Registry, RegistryNote};

@@ -85,6 +85,8 @@ pub enum Command {
     },
     Undo,
     Redo,
+    /// Runs panic (`docs/design/panic.md`).
+    Panic,
     Open {
         path: PathBuf,
     },
@@ -803,7 +805,7 @@ fn refuse_dialog_keys(key: &keyboard::Key, modifiers: keyboard::Modifiers) -> Re
 /// The toolbar buttons `press` clicks, by stable name. Labels are not
 /// used: they change while the app runs ("Hold note" becomes "Release
 /// note") and may be reworded.
-const BUTTONS: [&str; 4] = ["learn", "hold", "undo", "redo"];
+const BUTTONS: [&str; 5] = ["learn", "hold", "panic", "undo", "redo"];
 
 /// The message a toolbar button sends, or why it cannot be pressed: it
 /// opens a dialog (rule 9), it is disabled, or there is no such button.
@@ -818,6 +820,7 @@ fn press_message(app: &App, name: &str) -> Result<Message, String> {
                 .is_none()
                 .then_some("Hold note is disabled: no audio is playing the engine"),
         ),
+        "panic" => (Message::Panic, None),
         "undo" => (
             Message::Undo,
             app.history
@@ -1013,6 +1016,10 @@ impl App {
                 send(self, Message::Canvas(CanvasEvent::Disconnect(to)));
                 Map::new()
             }),
+            Command::Panic => {
+                send(self, Message::Panic);
+                Ok(Map::new())
+            }
             Command::Undo | Command::Redo => {
                 let undo = matches!(call.command, Command::Undo);
                 send(self, if undo { Message::Undo } else { Message::Redo });
@@ -2190,6 +2197,19 @@ mod tests {
         assert!(!sample["frames"].as_array().unwrap().is_empty());
     }
 
+    /// `panic` and `press` with `button: "panic"` run panic, also with no
+    /// audio device (panic.md, rule 4).
+    #[test]
+    fn the_panic_command_and_button_run_panic() {
+        let mut app = App::new(crate::tests::app_args());
+        let ok = Ok(Map::new());
+        assert_eq!(run(&mut app, r#"{"cmd": "panic"}"#), ok);
+        assert!(app.status.starts_with("Panic"), "{}", app.status);
+        app.status.clear();
+        assert_eq!(run(&mut app, r#"{"cmd": "press", "button": "panic"}"#), ok);
+        assert!(app.status.starts_with("Panic"), "{}", app.status);
+    }
+
     /// `press` refuses what a click could not do: dialogs (rule 9),
     /// disabled buttons, and unknown names.
     #[test]
@@ -2210,7 +2230,7 @@ mod tests {
             assert!(error.contains(reason), "{name}: {error}");
         }
         let error = run(&mut app, r#"{"cmd": "press", "button": "MIDI learn"}"#).unwrap_err();
-        assert!(error.contains("buttons: learn, hold, undo, redo"), "{error}");
+        assert!(error.contains("buttons: learn, hold, panic, undo, redo"), "{error}");
         let error = run(&mut app, r#"{"cmd": "press", "button": "add"}"#).unwrap_err();
         assert!(error.contains("`add` command"), "{error}");
     }

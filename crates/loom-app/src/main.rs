@@ -20,6 +20,7 @@ mod lights;
 mod live;
 mod modulation;
 mod monitor;
+mod panic;
 mod param;
 mod pointer;
 mod preferences;
@@ -232,6 +233,8 @@ enum Message {
         world: Point,
     },
     HoldNote,
+    /// Silence everything and clear stuck notes (`docs/design/panic.md`).
+    Panic,
     /// File commands (`docs/design/files.md`).
     New,
     Open,
@@ -856,6 +859,7 @@ impl App {
             still: None,
             step_name: None,
         };
+        app.send_panic_trigger();
         // A patch just loaded is the one on disk.
         app.history.mark_saved();
         app.saved_content = Some(app.current_patch());
@@ -1129,7 +1133,7 @@ impl App {
     /// In learn mode, it also listens for Escape.
     fn midi_watch(&self) -> Subscription<Message> {
         let mapped = self.controller.graph().midi_mappings().next().is_some();
-        let watch = (mapped || self.learning).then(|| {
+        let watch = (mapped || self.learning || self.rig.panic_learn.is_some()).then(|| {
             let watch = learn::Watch {
                 reader: self.controller.midi_reader(),
                 generation: self.generation,
@@ -1140,7 +1144,9 @@ impl App {
         // The search field takes Escape for itself, so the browser listens
         // to keys whether or not a widget used them.
         let browser = self.browser.is_some().then(|| iced::event::listen_with(browser_key));
-        Subscription::batch(watch.into_iter().chain(keys).chain(browser))
+        // The panic key works whatever has focus (panic.md).
+        let panic = Some(iced::event::listen_with(panic::key));
+        Subscription::batch(watch.into_iter().chain(keys).chain(browser).chain(panic))
     }
 
     /// Watches the lights on screen, and sends a message only when one
@@ -1251,6 +1257,9 @@ impl App {
     fn midi_arrived(&mut self) {
         if !self.controller.sync_midi().is_empty() {
             self.refresh_values();
+        }
+        if self.panic_midi_arrived() {
+            return;
         }
         let Some(armed) = self.armed else { return };
         let Some(seen) = self.controller.last_control_change() else {
@@ -1900,6 +1909,7 @@ impl App {
             Message::Undo => self.undo(),
             Message::Redo => self.redo(),
             Message::OpenBrowser => self.browser_key += 1,
+            Message::Panic => self.panic(),
             Message::HoldNote => {
                 if let Some(midi) = &self.midi {
                     self.holding = !self.holding;
@@ -2367,6 +2377,9 @@ impl App {
             if status == iced::event::Status::Ignored {
                 messages.push(Message::Key(key.clone()));
             }
+            if let Some(message) = panic::key(iced::Event::Keyboard(key.clone()), status, iced::window::Id::unique()) {
+                messages.push(message);
+            }
             if browser_open
                 && let Some(message) = browser_key(iced::Event::Keyboard(key), status, iced::window::Id::unique())
             {
@@ -2400,6 +2413,20 @@ impl App {
                 tooltip::Position::Bottom,
             ),
             hold,
+            tooltip(
+                button(text("Panic").size(13)).on_press(Message::Panic),
+                container(
+                    text(if cfg!(target_os = "macos") {
+                        "Silence everything: Cmd+."
+                    } else {
+                        "Silence everything: Ctrl+."
+                    })
+                    .size(12)
+                )
+                .padding(6)
+                .style(container::rounded_box),
+                tooltip::Position::Bottom,
+            ),
             self.history_button("Undo", "Undo", self.history.undo_step(), Message::Undo),
             self.history_button("Redo", "Redo", self.history.redo_step(), Message::Redo),
             button(text("MIDI learn").size(13))
@@ -3367,6 +3394,62 @@ mod tests {
             generation: app.generation,
         });
         assert_eq!(app.controller.graph().nodes().count(), before + 2);
+    }
+
+    /// Panic is not an edit: the value, the cables, and the unsaved mark
+    /// stay, and there is no new undo step (panic.md, Acceptance criteria).
+    #[test]
+    fn panic_is_not_an_edit() {
+        let mut app = app();
+        let (_, vca) = two_selected(&mut app);
+        app.edit(|app| {
+            app.controller.set_param_named(vca, "gain", 0.9).unwrap();
+            app.commit();
+        });
+        assert!(app.unsaved());
+        let steps = app.history.len();
+        let cables = app.controller.graph().cables().count();
+        app.holding = true;
+        let _ = app.update(Message::Panic);
+        assert!(app.status.starts_with("Panic"), "{}", app.status);
+        assert!(!app.holding, "Hold note lets go");
+        let gain = app
+            .controller
+            .graph()
+            .node(vca)
+            .unwrap()
+            .descriptor
+            .param_index("gain")
+            .unwrap();
+        assert_eq!(app.controller.graph().node(vca).unwrap().params[gain], 0.9);
+        assert_eq!(app.controller.graph().cables().count(), cables);
+        assert!(app.unsaved(), "the unsaved mark stays");
+        assert_eq!(app.history.len(), steps, "no undo step");
+    }
+
+    /// The panic key works with a text field focused, the toolbar button
+    /// runs it, and so do the control channel's `panic` and `press`.
+    #[test]
+    fn the_panic_key_button_and_command_run_panic() {
+        let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+        let _ = ui.app.update(Message::OpenBrowser);
+        ui.redraw();
+        ui.typewrite("sin");
+        let messages = ui.tap(
+            iced::keyboard::Key::Character(".".into()),
+            iced::keyboard::Modifiers::COMMAND,
+        );
+        assert!(messages.iter().any(|m| matches!(m, Message::Panic)), "{messages:?}");
+        assert!(ui.app.status.starts_with("Panic"), "{}", ui.app.status);
+
+        ui.app.status.clear();
+        let _ = ui.app.update(Message::Browser(browser::Message::Close));
+        ui.redraw();
+        let button = ui.text("Panic").expect("a Panic button on the toolbar");
+        ui.move_to(button.center());
+        let mut messages = ui.press();
+        messages.extend(ui.release());
+        assert!(messages.iter().any(|m| matches!(m, Message::Panic)), "{messages:?}");
     }
 
     /// A momentary press sets the transient hold: the tile shows it, but

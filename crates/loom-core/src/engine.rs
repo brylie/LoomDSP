@@ -160,7 +160,8 @@ pub struct Engine {
     midi: Vec<MidiEvent>,
     /// What MIDI mappings did, for the controller (MIDI learn).
     midi_feedback: Arc<MidiFeedback>,
-    /// Control changes received, for [`MidiFeedback::record`]. Never 0
+    /// Control changes and note ons received, for [`MidiFeedback::record`]
+    /// and [`MidiFeedback::record_note`]. Never 0
     /// after the first one.
     cc_serial: u32,
     /// One sequence for mapped control changes and screen edits, so the
@@ -531,6 +532,11 @@ impl Engine {
     /// the list, so modules still see them (rule 6).
     fn apply_midi_maps(&mut self) {
         for event in &self.midi {
+            if let MidiMessage::NoteOn { channel, note, .. } = event.message() {
+                self.cc_serial = self.cc_serial.wrapping_add(1).max(1);
+                self.midi_feedback.record_note(channel, note, self.cc_serial);
+                continue;
+            }
             let MidiMessage::ControlChange {
                 channel,
                 controller,
