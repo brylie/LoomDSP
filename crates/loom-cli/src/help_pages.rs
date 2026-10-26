@@ -315,6 +315,9 @@ fn range(p: &ParamSpec) -> String {
     if p.options.mapping == ParamMapping::Logarithmic {
         text.push_str(", logarithmic");
     }
+    if p.is_transient() {
+        text.push_str(", not saved");
+    }
     text
 }
 
@@ -350,7 +353,12 @@ fn widget(d: &ModuleDescriptor, w: &Widget) -> String {
         WidgetKind::Knob => format!("Knob: {}", param(w.bind)),
         WidgetKind::Toggle => format!("Toggle: {}", param(w.bind)),
         WidgetKind::Radio { options } => format!("Radio buttons: {} ({})", param(w.bind), cell(&options.join(", "))),
-        WidgetKind::Button { .. } => format!("Button: {}", param(w.bind)),
+        WidgetKind::Button { mode, hold } => format!(
+            "Button: {} (toggle), {} (momentary), chosen by {}",
+            param(w.bind),
+            param(hold),
+            param(mode)
+        ),
         WidgetKind::Light => format!("Light: `{}`", w.bind),
         WidgetKind::Meter => {
             let output = d

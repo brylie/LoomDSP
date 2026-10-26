@@ -1215,6 +1215,21 @@ impl App {
 
     /// Arms a parameter in learn mode, or disarms it if it is armed.
     fn arm(&mut self, param: learn::Param) {
+        let (module, index) = param;
+        let transient = self
+            .controller
+            .graph()
+            .node(ModuleId(module))
+            .and_then(|node| node.descriptor.params.get(index))
+            .is_some_and(|spec| spec.is_transient());
+        if transient {
+            // A live gesture cannot be mapped (transient-params.md).
+            self.status = format!(
+                "MIDI learn: {} is a live control and cannot be mapped",
+                learn::param_name(&self.controller, param)
+            );
+            return;
+        }
         if self.armed.is_some_and(|armed| armed.param == param) {
             self.armed = None;
             self.status = "MIDI learn: click a control to map it".to_string();
@@ -1352,39 +1367,30 @@ impl App {
     }
 
     /// Sets a parameter from a control on a tile or in the inspector.
-    ///
-    /// A switch to momentary also clears that button's gate. Both writes go
-    /// in one step, so a full command queue leaves the mode and the gate as
-    /// they were.
     fn set_param(&mut self, module: u32, index: usize, value: f32) {
-        let changes = self
-            .controller
-            .graph()
-            .node(ModuleId(module))
-            .map(|node| scene::param_edits(node, index, value))
-            .unwrap_or_else(|| vec![(index, value)]);
-        if let Err(e) = self.controller.set_params(ModuleId(module), &changes) {
+        if let Err(e) = self.controller.set_param(ModuleId(module), index, value) {
             self.status = format!("error: {e}");
         }
-        self.touched.extend(changes.iter().map(|&(i, _)| (module, i)));
+        self.touched.insert((module, index));
         self.refresh_values();
     }
 
     /// Applies a button gesture. The canvas names the gesture. [`loom_core::ButtonMode`]
-    /// names the value, from the mode parameter stored on the module.
+    /// names the value, from the mode parameter stored on the module. Toggle
+    /// writes the latch and Momentary the transient hold.
     fn apply_button(&mut self, module: u32, widget: usize, change: impl Fn(loom_core::ButtonMode, f32) -> Option<f32>) {
         let edit = self.controller.graph().node(ModuleId(module)).and_then(|node| {
             let panel_widget = node.descriptor.panel.widgets.get(widget)?;
-            let loom_core::WidgetKind::Button { mode } = panel_widget.kind else {
+            let loom_core::WidgetKind::Button { mode, .. } = panel_widget.kind else {
                 return None;
             };
             let mode_index = node.descriptor.param_index(mode)?;
-            let on_index = node.descriptor.param_index(panel_widget.bind)?;
+            let target = node.descriptor.control_param(panel_widget, &node.params)?;
             let next = change(
                 loom_core::ButtonMode::from_value(node.params[mode_index]),
-                node.params[on_index],
+                node.params[target],
             )?;
-            Some((on_index, next))
+            Some((target, next))
         });
         if let Some((index, value)) = edit {
             self.set_param(module, index, value);
@@ -3361,6 +3367,71 @@ mod tests {
             generation: app.generation,
         });
         assert_eq!(app.controller.graph().nodes().count(), before + 2);
+    }
+
+    /// A momentary press sets the transient hold: the tile shows it, but
+    /// the patch is unchanged, the saved file has no `hold`, the inspector
+    /// has no row for it, and a copy pastes a released button
+    /// (transient-params.md, Acceptance criteria).
+    #[test]
+    fn a_momentary_hold_is_not_part_of_the_patch() {
+        let mut app = app();
+        let id = app.controller.add_module("loom.ui.button").unwrap();
+        app.controller.set_param_named(id, "mode", 1.0).unwrap();
+        app.positions.insert(id.0, Point::new(0.0, 0.0));
+        app.commit();
+        app.history.clear();
+        app.history.mark_saved();
+        let hold = app
+            .controller
+            .graph()
+            .node(id)
+            .unwrap()
+            .descriptor
+            .param_index("hold")
+            .unwrap();
+        let held = |app: &App| app.controller.graph().node(id).unwrap().params[hold];
+
+        let _ = app.update(Message::Canvas(CanvasEvent::ButtonPressed {
+            module: id.0,
+            widget: 0,
+        }));
+        assert_eq!(held(&app), 1.0);
+        assert_eq!(tile_widget(&app, id, 0).position, 1.0, "a held button looks held");
+        assert!(!app.unsaved(), "a hold does not mark the patch changed");
+        assert_eq!(app.history.len(), 0, "a hold is no undo step");
+        let text = app.current_patch().to_ron().unwrap();
+        assert!(!text.contains("hold"), "{text}");
+        app.arm((id.0, hold));
+        assert!(app.armed.is_none(), "a hold cannot be a MIDI learn target");
+
+        app.selection = BTreeSet::from([id.0]);
+        let snapshot = app.ui_snapshot();
+        let rows = serde_json::to_string(&snapshot.inspector).unwrap();
+        assert!(!rows.contains("\"Hold\""), "{rows}");
+        let copied = app.copy().unwrap();
+        let before: BTreeSet<u32> = app.controller.graph().nodes().map(|(m, _)| m.0).collect();
+        let _ = app.update(Message::Pasted {
+            world: Point::new(400.0, 0.0),
+            text: Some(copied),
+            generation: app.generation,
+        });
+        let (pasted, node) = app
+            .controller
+            .graph()
+            .nodes()
+            .find(|(m, _)| !before.contains(&m.0))
+            .expect("a pasted button");
+        assert_ne!(pasted, id);
+        assert_eq!(node.params[hold], 0.0, "a pasted button is released");
+        assert_eq!(held(&app), 1.0, "the original is still held");
+
+        let _ = app.update(Message::Canvas(CanvasEvent::ButtonReleased {
+            module: id.0,
+            widget: 0,
+        }));
+        assert_eq!(held(&app), 0.0);
+        assert_eq!(tile_widget(&app, id, 0).position, 0.0);
     }
     /// The widget on module `id`'s tile at `widget`, as the snapshot shows it.
     fn tile_widget(app: &App, id: ModuleId, widget: usize) -> snapshot::Widget {

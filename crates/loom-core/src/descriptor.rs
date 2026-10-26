@@ -205,6 +205,12 @@ pub struct ParamOptions {
     /// the control's 0 to 1 position, and the modulation added on top is not
     /// smoothed. Spec: `docs/design/modulation.md`, rule 7.
     pub smooth_seconds: f32,
+    /// True for a live gesture that is not part of the patch, such as a
+    /// button's hold. It is sent to the engine like any parameter, but it is
+    /// not saved, not an undo step, and not a target for modulation or MIDI
+    /// learn. Only whole numbers with a default of 0 can be transient. Spec:
+    /// `docs/design/transient-params.md`.
+    pub transient: bool,
 }
 
 impl ParamOptions {
@@ -213,6 +219,7 @@ impl ParamOptions {
         integer: false,
         mapping: ParamMapping::Linear,
         smooth_seconds: 0.0,
+        transient: false,
     };
 }
 
@@ -259,6 +266,18 @@ impl ParamSpec {
     pub const fn smooth(mut self, seconds: f32) -> Self {
         self.options.smooth_seconds = seconds;
         self
+    }
+
+    /// Marks the parameter as transient: a live gesture that the patch does
+    /// not save (`docs/design/transient-params.md`).
+    pub const fn transient(mut self) -> Self {
+        self.options.transient = true;
+        self
+    }
+
+    /// True if the parameter is [transient](Self::transient).
+    pub const fn is_transient(&self) -> bool {
+        self.options.transient
     }
 
     /// Clamps a value into range, rounding whole-number parameters.
@@ -460,16 +479,18 @@ impl Widget {
         }
     }
 
-    /// A large button for a whole-number parameter from 0 to 1.
+    /// A large button for whole-number parameters from 0 to 1.
     ///
-    /// `mode` names a different whole-number parameter, from 0 to 1, that
-    /// chooses the gesture: 0 flips `param` on press, and 1 holds it high
-    /// while the button is held. The canvas does not read it. The editor
-    /// does, through [`ButtonMode`]. It does not have to be a widget.
+    /// `mode` names a whole-number parameter, from 0 to 1, that chooses the
+    /// gesture: 0 flips `param` (the saved latch) on press, and 1 holds
+    /// `hold` high while the button is held. `hold` is usually
+    /// [transient](ParamSpec::transient), so a hold is never saved. The
+    /// three are different parameters. The canvas does not read `mode`. The
+    /// editor does, through [`ButtonMode`]. It does not have to be a widget.
     /// Spec: `docs/design/clock.md`, Button details.
-    pub const fn button(x: u8, y: u8, param: &'static str, mode: &'static str) -> Self {
+    pub const fn button(x: u8, y: u8, param: &'static str, hold: &'static str, mode: &'static str) -> Self {
         Self {
-            kind: WidgetKind::Button { mode },
+            kind: WidgetKind::Button { mode, hold },
             x,
             y,
             bind: param,
@@ -511,14 +532,18 @@ pub enum WidgetKind {
     /// The level of one of the module's outputs, from a port probe: an RMS
     /// bar and a peak line, -60 dB to 0 dB.
     Meter,
-    /// A large button for a whole-number parameter from 0 to 1.
+    /// A large button for whole-number parameters from 0 to 1.
     ///
-    /// `mode` names the parameter that chooses the gesture. It is not the
-    /// value the button shows.
+    /// The widget's `bind` is the toggle latch. `mode` names the parameter
+    /// that chooses the gesture, and `hold` the parameter a momentary press
+    /// holds high.
     Button {
-        /// Whole-number parameter from 0 to 1: 0 flips on press, 1 holds
-        /// while pressed. Not the parameter the button shows.
+        /// Whole-number parameter from 0 to 1: 0 flips the latch on press,
+        /// 1 holds `hold` while pressed.
         mode: &'static str,
+        /// Whole-number parameter from 0 to 1 that is high while a
+        /// momentary press lasts. Usually transient.
+        hold: &'static str,
     },
 }
 
@@ -610,28 +635,36 @@ impl ModuleDescriptor {
         self.displays.iter().position(|&d| d == name)
     }
 
-    /// Parameters to set to 0 when `name` changes from `previous` to `next`.
-    ///
-    /// A button whose mode moves to momentary (1) clears the parameter the
-    /// button shows, so a latched gate does not stay high with nobody holding
-    /// it. Setting momentary again, while it is already momentary, clears
-    /// nothing. The rule follows the widget, so any module with a button
-    /// gets it. Spec: `docs/design/clock.md`, Button details.
-    pub fn button_gates_to_clear<'a>(
-        &'a self,
-        name: &'a str,
-        previous: f32,
-        next: f32,
-    ) -> impl Iterator<Item = usize> + 'a {
-        let switching = previous < 1.0 && next >= 1.0;
-        self.panel.widgets.iter().filter_map(move |widget| {
-            let WidgetKind::Button { mode } = widget.kind else {
-                return None;
-            };
-            (switching && mode == name)
-                .then(|| self.param_index(widget.bind))
-                .flatten()
-        })
+    /// Parameter values as the patch keeps them: each transient parameter
+    /// at its default, every other value as given. Undo, copy, and paste
+    /// use this, so a live gesture is never an edit or copied
+    /// (transient-params.md).
+    pub fn saved_values(&self, values: &[f32]) -> Vec<f32> {
+        values
+            .iter()
+            .enumerate()
+            .map(|(index, &value)| match self.params.get(index) {
+                Some(spec) if spec.is_transient() => spec.default,
+                _ => value,
+            })
+            .collect()
+    }
+
+    /// The parameter a control widget writes and shows, given the module's
+    /// parameter values. A button in momentary mode uses its `hold`; every
+    /// other control uses its `bind`. `None` if a name is missing or the
+    /// widget is not a control. Spec: `docs/design/clock.md`, Button details.
+    pub fn control_param(&self, widget: &Widget, params: &[f32]) -> Option<usize> {
+        if !widget.is_control() {
+            return None;
+        }
+        if let WidgetKind::Button { mode, hold } = widget.kind {
+            let mode = params.get(self.param_index(mode)?).copied()?;
+            if ButtonMode::from_value(mode) == ButtonMode::Momentary {
+                return self.param_index(hold);
+            }
+        }
+        self.param_index(widget.bind)
     }
 
     /// Checks the display values and the panel: every widget binds to
@@ -650,18 +683,27 @@ impl ModuleDescriptor {
                 };
                 // Copied before `param` is borrowed: a button names a second
                 // parameter, and the two borrows cannot overlap.
-                let mode_range = if let WidgetKind::Button { mode } = widget.kind {
-                    if mode == widget.bind {
+                let gate = |p: &ParamSpec| p.options.integer && p.min == 0.0 && p.max == 1.0;
+                if let WidgetKind::Button { mode, hold } = widget.kind {
+                    if mode == widget.bind || mode == hold {
                         return Err(name("mode must be a different parameter"));
+                    }
+                    if hold == widget.bind {
+                        return Err(name("hold must be a different parameter"));
                     }
                     let Some(mode_index) = self.param_index(mode) else {
                         return Err(name("no such mode parameter"));
                     };
-                    let mode_param = &self.params[mode_index];
-                    Some((mode_param.options.integer, mode_param.min, mode_param.max))
-                } else {
-                    None
-                };
+                    if !gate(&self.params[mode_index]) {
+                        return Err(name("mode must be a whole-number parameter from 0 to 1"));
+                    }
+                    let Some(hold_index) = self.param_index(hold) else {
+                        return Err(name("no such hold parameter"));
+                    };
+                    if !gate(&self.params[hold_index]) {
+                        return Err(name("hold must be a whole-number parameter from 0 to 1"));
+                    }
+                }
                 let param = &self.params[index];
                 let values = param.max - param.min + 1.0;
                 let integer = param.options.integer;
@@ -676,11 +718,6 @@ impl ModuleDescriptor {
                     }
                     WidgetKind::Button { .. } if !(integer && param.min == 0.0 && param.max == 1.0) => {
                         return Err(name("a button needs a whole-number parameter from 0 to 1"));
-                    }
-                    WidgetKind::Button { .. }
-                        if !mode_range.is_some_and(|(whole, min, max)| whole && min == 0.0 && max == 1.0) =>
-                    {
-                        return Err(name("mode must be a whole-number parameter from 0 to 1"));
                     }
                     _ => {}
                 }
@@ -1106,8 +1143,10 @@ mod tests {
         assert_eq!(ButtonMode::from_value(1.0), ButtonMode::Momentary);
     }
 
+    /// A button writes its latch in toggle mode and its hold in momentary
+    /// mode. Other controls write their bind.
     #[test]
-    fn switching_a_button_to_momentary_clears_its_gate() {
+    fn a_button_writes_the_parameter_its_mode_chooses() {
         const fn parameter(name: &'static str) -> ParamSpec {
             ParamSpec {
                 name,
@@ -1126,25 +1165,24 @@ mod tests {
             version: 1,
             name: "Buttons",
             category: "Test",
-            description: "Two buttons that share a mode.",
+            description: "A button and a toggle.",
             inputs: &[],
             outputs: &[],
-            params: &[parameter("mode"), parameter("on"), parameter("reset")],
+            params: &[parameter("mode"), parameter("on"), parameter("hold").transient()],
             role: ModuleRole::Dsp(|_| unreachable!("never created")),
             panel: Panel::new(
-                12,
+                9,
                 3,
-                &[
-                    Widget::button(0, 0, "on", "mode"),
-                    Widget::button(6, 0, "reset", "mode"),
-                ],
+                &[Widget::button(0, 0, "on", "hold", "mode"), Widget::toggle(6, 0, "mode")],
             ),
             displays: &[],
         };
-        let cleared: Vec<usize> = BUTTONS.button_gates_to_clear("mode", 0.0, 1.0).collect();
-        assert_eq!(cleared, vec![1, 2]);
-        assert!(BUTTONS.button_gates_to_clear("mode", 1.0, 1.0).next().is_none());
-        assert!(BUTTONS.button_gates_to_clear("mode", 1.0, 0.0).next().is_none());
-        assert!(BUTTONS.button_gates_to_clear("on", 0.0, 1.0).next().is_none());
+        let button = &BUTTONS.panel.widgets[0];
+        assert_eq!(BUTTONS.control_param(button, &[0.0, 0.0, 0.0]), Some(1));
+        assert_eq!(BUTTONS.control_param(button, &[1.0, 0.0, 0.0]), Some(2));
+        let toggle = &BUTTONS.panel.widgets[1];
+        assert_eq!(BUTTONS.control_param(toggle, &[1.0, 0.0, 0.0]), Some(0));
+        assert!(BUTTONS.params[2].is_transient());
+        assert!(!BUTTONS.params[1].is_transient());
     }
 }

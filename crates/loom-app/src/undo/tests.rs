@@ -349,6 +349,33 @@ fn a_momentary_button_hold_is_no_edit_and_a_toggle_press_is() {
     assert!(!is_edit(&c, &arrow), "a momentary arrow is no step");
 }
 
+/// A step recorded while a button is held leaves the hold out, so undo
+/// never sets the gate high again (#161).
+#[test]
+fn a_step_that_spans_a_hold_does_not_hold_again() {
+    let mut c = parts().controller;
+    let id = c.add_module("loom.ui.button").unwrap();
+    let d = c.graph().node(id).unwrap().descriptor;
+    let (mode, hold) = (d.param_index("mode").unwrap(), d.param_index("hold").unwrap());
+    let mut positions = BTreeMap::new();
+    let before = snap(&c, &positions);
+    c.set_param(id, hold, 1.0).unwrap();
+    c.commit().unwrap();
+    assert!(
+        diff(&before, &snap(&c, &positions), &BTreeSet::new()).is_none(),
+        "a hold is no step"
+    );
+    let step = record(&mut c, &mut positions, |c| {
+        c.set_param(id, mode, 1.0).unwrap();
+        c.set_param(id, hold, 0.0).unwrap();
+    });
+    c.set_param(id, hold, 1.0).unwrap();
+    undo(&step, &mut c, &mut positions);
+    let params = &c.graph().node(id).unwrap().params;
+    assert_eq!(params[mode], 0.0, "undo puts the mode back");
+    assert_eq!(params[hold], 1.0, "undo leaves the live hold alone");
+}
+
 #[test]
 fn moving_a_mapping_to_another_parameter_is_named_a_move() {
     let mut c = parts().controller;

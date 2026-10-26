@@ -91,7 +91,7 @@ impl Group {
             .map(|(id, node)| Member {
                 id: id.0,
                 descriptor: node.descriptor,
-                params: node.params.clone(),
+                params: node.descriptor.saved_values(&node.params),
                 position: positions.get(&id.0).copied(),
             })
             .collect();
@@ -165,6 +165,8 @@ impl Group {
                     .ok_or_else(|| format!("{} has no parameter `{name}`", descriptor.name))?;
                 params[index] = value;
             }
+            // A pasted module starts released (transient-params.md).
+            let params = descriptor.saved_values(&params);
             modules.push(Member {
                 id: module.id,
                 descriptor,

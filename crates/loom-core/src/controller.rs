@@ -291,7 +291,7 @@ impl Controller {
         depth: f32,
     ) -> Result<AssignmentId, LoomError> {
         self.check_output(source)?;
-        self.check_param(target, param)?;
+        self.check_target(target, param)?;
         let id = AssignmentId(self.next_assignment);
         self.next_assignment += 1;
         self.graph.assignments.insert(
@@ -318,7 +318,7 @@ impl Controller {
             return Err(LoomError::DuplicateAssignmentId(id));
         }
         self.check_output(assignment.source)?;
-        self.check_param(assignment.target, assignment.param)?;
+        self.check_target(assignment.target, assignment.param)?;
         self.next_assignment = self.next_assignment.max(id.0 + 1);
         self.graph.assignments.insert(
             id,
@@ -419,7 +419,7 @@ impl Controller {
         if !control.is_valid() {
             return Err(LoomError::InvalidMidiControl(control));
         }
-        self.check_param(target, param)?;
+        self.check_target(target, param)?;
         let replaced: Vec<MidiMappingId> = self
             .graph
             .midi_mappings()
@@ -918,6 +918,21 @@ impl Controller {
             })
     }
 
+    /// Checks a parameter that modulation or a MIDI mapping will drive. A
+    /// transient parameter is a live gesture, so it is refused
+    /// (transient-params.md).
+    fn check_target(&self, module: ModuleId, index: usize) -> Result<(), LoomError> {
+        self.check_param(module, index)?;
+        let spec = &self.node(module)?.descriptor.params[index];
+        if spec.is_transient() {
+            return Err(LoomError::TransientParam {
+                module,
+                param: spec.name.to_string(),
+            });
+        }
+        Ok(())
+    }
+
     fn check_param(&self, module: ModuleId, index: usize) -> Result<(), LoomError> {
         let node = self.node(module)?;
         if index >= node.descriptor.params.len() {
@@ -981,9 +996,9 @@ mod tests {
         description: "A button for the queue test.",
         inputs: &[],
         outputs: &[],
-        params: &[parameter("mode"), parameter("on")],
+        params: &[parameter("mode"), parameter("on"), parameter("hold").transient()],
         role: ModuleRole::Dsp(|_| Box::new(Silent)),
-        panel: Panel::new(6, 3, &[Widget::button(0, 0, "on", "mode")]),
+        panel: Panel::new(6, 3, &[Widget::button(0, 0, "on", "hold", "mode")]),
         displays: &[],
     };
 
@@ -1004,7 +1019,7 @@ mod tests {
         room.commit().unwrap();
         room.set_param_named(id, "on", 1.0).unwrap();
         room.set_params(id, &[(0, 1.0), (1, 0.0)]).unwrap();
-        assert_eq!(room.graph().node(id).unwrap().params, vec![1.0, 0.0]);
+        assert_eq!(room.graph().node(id).unwrap().params, vec![1.0, 0.0, 0.0]);
 
         // Inserting the module and swapping in its schedule fill a queue of
         // two. Two parameter commands do not fit, so neither value changes.
@@ -1013,6 +1028,23 @@ mod tests {
         full.commit().unwrap();
         let error = full.set_params(id, &[(0, 1.0), (1, 0.0)]).unwrap_err();
         assert!(matches!(error, LoomError::QueueFull), "{error}");
-        assert_eq!(full.graph().node(id).unwrap().params, vec![0.0, 0.0]);
+        assert_eq!(full.graph().node(id).unwrap().params, vec![0.0, 0.0, 0.0]);
+    }
+
+    /// A transient parameter is sent to the engine like any other, but it
+    /// cannot be a modulation target or a MIDI mapping target.
+    #[test]
+    fn a_transient_parameter_cannot_be_modulated_or_mapped() {
+        let mut room = controller(16);
+        let id = room.add_module(GATE.id).unwrap();
+        room.commit().unwrap();
+        assert_eq!(room.set_param_named(id, "hold", 1.0).unwrap(), 1.0);
+        let control = MidiControl {
+            channel: 0,
+            controller: 1,
+        };
+        let error = room.map_midi(control, id, 2).unwrap_err();
+        assert!(matches!(error, LoomError::TransientParam { .. }), "{error}");
+        assert!(room.map_midi(control, id, 1).is_ok());
     }
 }

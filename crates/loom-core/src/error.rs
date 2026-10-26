@@ -58,6 +58,15 @@ pub enum LoomError {
         /// The parameter name or index.
         param: String,
     },
+    /// A transient parameter cannot be modulated or mapped to MIDI, because
+    /// it carries a live gesture, not a setting (transient-params.md).
+    #[error("parameter `{param}` of module {module} is a live control and cannot be modulated or mapped")]
+    TransientParam {
+        /// The module.
+        module: ModuleId,
+        /// The parameter name.
+        param: String,
+    },
     /// A MIDI channel or controller number is out of range.
     #[error("invalid MIDI control: channel {} and controller {} (channels are 0 to 15, controllers 0 to 127)", .0.channel, .0.controller)]
     InvalidMidiControl(MidiControl),
