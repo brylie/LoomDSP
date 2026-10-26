@@ -94,7 +94,7 @@ impl Group {
             .map(|(id, node)| Member {
                 id: id.0,
                 descriptor: node.descriptor,
-                params: node.params.clone(),
+                params: node.descriptor.saved_values(&node.params),
                 ranges: (0..node.params.len()).map(|index| node.range(index)).collect(),
                 position: positions.get(&id.0).copied(),
             })
@@ -169,6 +169,8 @@ impl Group {
                     .ok_or_else(|| format!("{} has no parameter `{name}`", descriptor.name))?;
                 params[index] = value;
             }
+            // A pasted module starts released (transient-params.md).
+            let params = descriptor.saved_values(&params);
             // As a patch loads: the range never changes the value
             // (control-ranges.md, rule 7).
             let ranges = descriptor

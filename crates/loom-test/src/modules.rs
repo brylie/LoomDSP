@@ -73,6 +73,7 @@ const ON: usize = 4;
 /// | `choice` | whole-number, 0 to 2, named `a`, `b`, `c` | radio |
 /// | `gate` | whole-number, 0 to 1 | button |
 /// | `mode` | whole-number, 0 to 1 | none (the button's mode) |
+/// | `held` | whole-number, 0 to 1, transient | none (the button's hold) |
 ///
 /// Outputs `uni` (unipolar) and `bi` (bipolar) both write `level`. The
 /// light `lit` shows `on`, modulated, as of the last frame of the block.
@@ -94,10 +95,11 @@ pub static PANEL: ModuleDescriptor = ModuleDescriptor {
         param("choice", 0.0, 2.0, 0.0, "").integer().choices(&["a", "b", "c"]),
         param("gate", 0.0, 1.0, 0.0, "").integer(),
         param("mode", 0.0, 1.0, 0.0, "").integer(),
+        param("held", 0.0, 1.0, 0.0, "").integer().transient(),
     ],
     role: ModuleRole::Dsp(|_| {
         Box::new(TestPanel {
-            params: [0.0; 8],
+            params: [0.0; 9],
             lit: 0.0,
         })
     }),
@@ -113,7 +115,7 @@ pub static PANEL: ModuleDescriptor = ModuleDescriptor {
             Widget::toggle(0, 3, "on"),
             Widget::radio(3, 3, "choice"),
             Widget::light(6, 3, "lit"),
-            Widget::button(6, 5, "gate", "mode"),
+            Widget::button(6, 5, "gate", "held", "mode"),
         ],
     ),
     displays: &[DisplaySpec {
@@ -125,7 +127,7 @@ pub static PANEL: ModuleDescriptor = ModuleDescriptor {
 };
 
 struct TestPanel {
-    params: [f32; 8],
+    params: [f32; 9],
     /// `on` at the last frame of the last block, for the light.
     lit: f32,
 }
@@ -259,7 +261,10 @@ mod tests {
         assert!(knob("steps").options.integer);
         assert!(kinds.contains(&WidgetKind::Toggle));
         assert!(kinds.contains(&WidgetKind::Radio));
-        assert!(kinds.contains(&WidgetKind::Button { mode: "mode" }));
+        assert!(kinds.contains(&WidgetKind::Button {
+            mode: "mode",
+            hold: "held"
+        }));
         assert!(kinds.contains(&WidgetKind::Light));
         assert!(kinds.contains(&WidgetKind::Meter));
     }

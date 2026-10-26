@@ -86,6 +86,14 @@ impl Registry {
             return Err(invalid("an input default must be a finite number"));
         }
         for param in descriptor.params {
+            // Transient parameters (transient-params.md, rules 1 and 2): a
+            // hold or a press, which starts in the safe "nothing" state.
+            if param.is_transient() && !param.options.integer {
+                return Err(invalid("a transient parameter must be a whole number"));
+            }
+            if param.is_transient() && param.default != 0.0 {
+                return Err(invalid("a transient parameter must default to 0"));
+            }
             if param.options.mapping == ParamMapping::Logarithmic {
                 if param.options.integer {
                     return Err(invalid("a whole-number parameter cannot be logarithmic"));
@@ -567,6 +575,20 @@ mod tests {
         assert!(Registry::new().register(fine).is_ok());
     }
 
+    /// A transient parameter must be a whole number with a default of 0
+    /// (transient-params.md, rules 1 and 2).
+    #[test]
+    fn refuses_impossible_transient_parameters() {
+        let continuous = with_params!(param("hold", 0.0, 1.0, 0.0, "").transient());
+        let error = Registry::new().register(continuous).unwrap_err();
+        assert!(error.to_string().contains("whole number"), "{error}");
+        let held = with_params!(param("hold", 0.0, 1.0, 1.0, "").integer().transient());
+        let error = Registry::new().register(held).unwrap_err();
+        assert!(error.to_string().contains("default to 0"), "{error}");
+        let fine = with_params!(param("hold", 0.0, 1.0, 0.0, "").integer().transient());
+        assert!(Registry::new().register(fine).is_ok());
+    }
+
     /// A DSP module with two parameters, one display value, and a panel.
     macro_rules! with_panel {
         ($width:expr, $height:expr, [$($widget:expr),*]) => {{
@@ -584,6 +606,7 @@ mod tests {
                     param("on", 0.0, 1.0, 0.0, "").integer(),
                     param("slope", 0.0, 3.0, 0.0, "").integer().choices(&["6", "12", "18", "24"]),
                     param("mode", 0.0, 1.0, 0.0, "").integer(),
+                    param("hold", 0.0, 1.0, 0.0, "").integer().transient(),
                 ],
                 role: ModuleRole::Dsp(|_| unreachable!("never created")),
                 panel: crate::Panel::new($width, $height, &[$($widget),*]),
@@ -634,24 +657,40 @@ mod tests {
                 "`wet` (Meter): no such output",
             ),
             (
-                with_panel!(6, 3, [Widget::button(0, 0, "level", "mode")]),
+                with_panel!(6, 3, [Widget::button(0, 0, "level", "hold", "mode")]),
                 "a button needs",
             ),
             (
-                with_panel!(6, 3, [Widget::button(0, 0, "on", "missing")]),
+                with_panel!(6, 3, [Widget::button(0, 0, "on", "hold", "missing")]),
                 "no such mode parameter",
             ),
             (
-                with_panel!(6, 3, [Widget::button(0, 0, "on", "level")]),
+                with_panel!(6, 3, [Widget::button(0, 0, "on", "hold", "level")]),
                 "mode must be a whole-number parameter from 0 to 1",
             ),
             (
-                with_panel!(6, 3, [Widget::button(0, 0, "on", "slope")]),
+                with_panel!(6, 3, [Widget::button(0, 0, "on", "hold", "slope")]),
                 "mode must be a whole-number parameter from 0 to 1",
             ),
             (
-                with_panel!(6, 3, [Widget::button(0, 0, "on", "on")]),
+                with_panel!(6, 3, [Widget::button(0, 0, "on", "hold", "on")]),
                 "mode must be a different parameter",
+            ),
+            (
+                with_panel!(6, 3, [Widget::button(0, 0, "on", "mode", "mode")]),
+                "mode must be a different parameter",
+            ),
+            (
+                with_panel!(6, 3, [Widget::button(0, 0, "on", "on", "mode")]),
+                "hold must be a different parameter",
+            ),
+            (
+                with_panel!(6, 3, [Widget::button(0, 0, "on", "missing", "mode")]),
+                "no such hold parameter",
+            ),
+            (
+                with_panel!(6, 3, [Widget::button(0, 0, "on", "slope", "mode")]),
+                "hold must be a whole-number parameter from 0 to 1",
             ),
             (with_panel!(3, 2, [Widget::knob(0, 0, "level")]), "outside the panel"),
             (

@@ -11,8 +11,8 @@ use crate::preferences::{AudioPrefs, BufferChoice, DeviceChoice, Preferences, Ra
 use crate::{App, undo};
 use iced::widget::{button, checkbox, column, container, opaque, pick_list, radio, row, rule, scrollable, space, text};
 use iced::{Element, Length};
-use loom_core::{EngineConfig, EngineParts, OutputSafety, create_engine};
-use loom_host_desktop::{AudioOutput, Outputs, Recorder, STOP_LIMIT, SharedMidi};
+use loom_core::{EngineConfig, EngineParts, MidiInputId, OutputSafety, create_engine};
+use loom_host_desktop::{AudioOutput, MidiInputInfo, Outputs, Recorder, STOP_LIMIT, SharedMidi};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::rc::Rc;
@@ -28,6 +28,10 @@ pub enum Message {
     Audio(Change),
     /// Turn a MIDI input on or off.
     Midi(String, bool),
+    /// Start or stop learning the panic trigger.
+    PanicLearn,
+    /// Remove the panic trigger.
+    PanicClear,
 }
 
 /// A change to one audio setting.
@@ -74,6 +78,16 @@ pub struct Rig {
     /// The `--record` file. It belongs to the rig, not to one stream, so
     /// it records every engine the run plays (audio-qa.md, Recording the whole run).
     pub recorder: Option<Recorder>,
+    /// While the panic trigger is learned: the serial of the last control
+    /// change or note on before learn started. Only a later one sets it.
+    pub panic_learn: Option<u32>,
+    /// The MIDI inputs the last poll listed (device-changes.md). An input
+    /// that is new since then is opened; one that is gone, or listed under
+    /// a new identity, is closed.
+    pub seen_midi: Vec<MidiInputInfo>,
+    /// The last input id given out. Ids go round, so a closed input's id is
+    /// not given to the next one at once, and its late events are dropped.
+    pub last_input: u16,
     /// Every mode change sent to the engine, for tests.
     #[cfg(test)]
     pub sent: Vec<OutputSafety>,
@@ -108,6 +122,9 @@ impl Rig {
             safety_pending: None,
             last_stop: None,
             recorder: None,
+            panic_learn: None,
+            seen_midi: Vec::new(),
+            last_input: 0,
             #[cfg(test)]
             sent: Vec::new(),
         }
@@ -144,34 +161,28 @@ impl Rig {
         )
     }
 
-    /// Points MIDI at a new engine. The first time, it also opens the MIDI
-    /// inputs, when `connect` is true. Returns a status bar line about an
-    /// input that failed to open.
-    pub fn attach(&mut self, sender: loom_core::MidiSender, connect: bool) -> Option<String> {
+    /// Points MIDI at a new engine. Returns true the first time, when the
+    /// inputs are still to be opened.
+    pub fn attach(&mut self, sender: loom_core::MidiSender) -> bool {
         if let Some(midi) = &self.midi_in {
             *midi.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = sender;
-            return None;
+            return false;
         }
-        let midi = loom_host_desktop::share_midi(sender);
-        self.midi_in = Some(midi.clone());
-        if !connect {
-            return None;
-        }
-        let names = match self.host.midi_inputs() {
-            Ok(names) => names,
-            Err(e) => return Some(format!("MIDI: {e}")),
-        };
-        let mut error = None;
-        for name in devices::midi_at_start(&names, &self.store.saved().midi.off, &self.flags) {
-            // A port that fails is reported, and the others still play.
-            match self.host.open_midi(&name, midi.clone()) {
-                Ok(port) => self.ports.push(port),
-                Err(e) => {
-                    error.get_or_insert(format!("MIDI: {e}"));
-                }
+        self.midi_in = Some(loom_host_desktop::share_midi(sender));
+        true
+    }
+
+    /// An input id no open input uses, going round from the last one.
+    fn free_input(&mut self) -> Option<MidiInputId> {
+        let max = loom_core::MAX_MIDI_INPUTS;
+        for step in 1..max {
+            let id = (self.last_input + step - 1) % (max - 1) + 1;
+            if self.ports.iter().all(|port| port.input().0 != id) {
+                self.last_input = id;
+                return Some(MidiInputId(id));
             }
         }
-        error
+        None
     }
 
     /// The audio choice the window shows: the saved one, with the flags for
@@ -237,7 +248,12 @@ impl App {
                 self.rig.window = Some(Window::read(&*self.rig.host));
                 self.browser = None;
             }
-            Message::Close => self.rig.window = None,
+            Message::Close => {
+                self.rig.window = None;
+                // Learning a panic trigger needs the window open to show
+                // "Waiting for MIDI...", so closing it cancels the learn.
+                self.rig.panic_learn = None;
+            }
             Message::Refresh => {
                 if self.rig.window.is_some() {
                     self.rig.window = Some(Window::read(&*self.rig.host));
@@ -246,6 +262,8 @@ impl App {
             Message::Safety(mode) => self.choose_output_safety(mode),
             Message::Audio(change) => self.change_audio(change),
             Message::Midi(name, on) => self.set_midi_input(&name, on),
+            Message::PanicLearn => self.learn_panic(),
+            Message::PanicClear => self.set_panic_pref(None),
         }
     }
 
@@ -570,11 +588,13 @@ impl App {
             midi,
             telemetry,
         } = parts;
-        self.rig.attach(midi, false);
+        self.rig.attach(midi);
         let playing = Playing::of(&output);
         let label = format!("{} at {} Hz", output.name(), output.sample_rate());
         self.generation += 1;
         self.controller = controller;
+        self.send_panic_trigger();
+        self.connect_midi(false, false);
         self.monitor = crate::monitor::Monitor::new(telemetry, self.generation);
         self.live = crate::live::Live::new();
         self.lights.clear();
@@ -625,6 +645,110 @@ impl App {
         self.rig.playing = None;
     }
 
+    /// Opens a MIDI input: the engine first starts tracking its id, then
+    /// the host connects it. On an error nothing stays open.
+    fn open_input(&mut self, name: &str) -> Result<(), String> {
+        let midi = self.rig.midi_in.clone().ok_or("no engine to play")?;
+        let input = self.rig.free_input().ok_or("too many MIDI inputs are open")?;
+        self.controller.open_midi_input(input).map_err(|e| e.to_string())?;
+        match self.rig.host.open_midi(name, midi, input) {
+            Ok(port) => {
+                self.rig.ports.push(port);
+                Ok(())
+            }
+            Err(e) => {
+                let _ = self.controller.release_midi_input(input);
+                Err(e)
+            }
+        }
+    }
+
+    /// Closes open input `index`, and has the engine release every note it
+    /// held (device-changes.md, Held notes belong to an input).
+    fn close_input(&mut self, index: usize) {
+        let port = self.rig.ports.remove(index);
+        let input = port.input();
+        port.close();
+        let _ = self.controller.release_midi_input(input);
+    }
+
+    /// After a new engine is attached: tracks the open inputs on it, or the
+    /// first time opens the inputs the preferences and flags choose, when
+    /// `connect` is true. Returns a status bar line about an input that
+    /// failed to open; the others still play.
+    pub(crate) fn connect_midi(&mut self, first: bool, connect: bool) -> Option<String> {
+        for input in self.rig.ports.iter().map(|port| port.input()).collect::<Vec<_>>() {
+            let _ = self.controller.open_midi_input(input);
+        }
+        if !(first && connect) {
+            return None;
+        }
+        let list = match self.rig.host.midi_list() {
+            Ok(list) => list,
+            Err(e) => return Some(format!("MIDI: {e}")),
+        };
+        let names: Vec<String> = list.iter().map(|input| input.name.clone()).collect();
+        self.rig.seen_midi = list;
+        let mut error = None;
+        for name in devices::midi_at_start(&names, &self.rig.store.saved().midi.off, &self.rig.flags) {
+            if let Err(e) = self.open_input(&name) {
+                error.get_or_insert(format!("MIDI: {e}"));
+            }
+        }
+        error
+    }
+
+    /// Follows MIDI inputs plugged in and out (device-changes.md, MIDI
+    /// inputs). Runs four times a second. A new input that the preferences
+    /// and flags allow is opened. An input that is gone, or is listed under
+    /// a new identity, is closed and its notes released; one with a new
+    /// identity is opened again as a new connection. The window's list
+    /// follows too.
+    pub(crate) fn poll_midi(&mut self) {
+        let Ok(list) = self.rig.host.midi_list() else { return };
+        if let Some(window) = &mut self.rig.window {
+            window.midi = Ok(list.iter().map(|input| input.name.clone()).collect());
+        }
+        if self.rig.midi_in.is_none() || list == self.rig.seen_midi {
+            self.rig.seen_midi = list;
+            return;
+        }
+        let mut lines = Vec::new();
+        let mut reopen = Vec::new();
+        let mut index = 0;
+        while index < self.rig.ports.len() {
+            let port = &self.rig.ports[index];
+            let name = port.name().to_string();
+            match list.iter().find(|input| input.name == name) {
+                Some(input) if input.id == port.port_id() => index += 1,
+                found => {
+                    self.close_input(index);
+                    lines.push(format!("MIDI: \"{name}\" disconnected."));
+                    if found.is_some() {
+                        reopen.push(name);
+                    }
+                }
+            }
+        }
+        let names: Vec<String> = list.iter().map(|input| input.name.clone()).collect();
+        let wanted = devices::midi_at_start(&names, &self.rig.store.saved().midi.off, &self.rig.flags);
+        for name in wanted {
+            let new = !self.rig.seen_midi.iter().any(|seen| seen.name == name);
+            let open = self.rig.ports.iter().any(|port| port.name() == name);
+            if open || !(new || reopen.contains(&name)) {
+                continue;
+            }
+            match self.open_input(&name) {
+                Ok(()) => lines.push(format!("MIDI: \"{name}\" connected.")),
+                Err(e) => lines.push(format!("MIDI: could not open \"{name}\": {e}")),
+            }
+        }
+        self.rig.seen_midi = list;
+        if !lines.is_empty() {
+            self.status = lines.join(" ");
+        }
+    }
+
     /// Turns a MIDI input on or off. Notes held on an input that is turned
     /// off are released. Audio does not stop.
     fn set_midi_input(&mut self, name: &str, on: bool) {
@@ -632,16 +756,12 @@ impl App {
         match (on, open) {
             (true, Some(_)) | (false, None) => return,
             (true, None) => {
-                let Some(midi) = self.rig.midi_in.clone() else { return };
-                match self.rig.host.open_midi(name, midi) {
-                    Ok(port) => self.rig.ports.push(port),
-                    Err(e) => {
-                        self.status = format!("MIDI: {e}");
-                        return;
-                    }
+                if let Err(e) = self.open_input(name) {
+                    self.status = format!("MIDI: {e}");
+                    return;
                 }
             }
-            (false, Some(index)) => self.rig.ports.remove(index).close(),
+            (false, Some(index)) => self.close_input(index),
         }
         self.rig.flags.midi = None;
         self.rig.flags.no_midi = false;
@@ -693,6 +813,31 @@ impl App {
 
         let audio = self.audio_section(window, note);
         let midi = self.midi_section(window, note);
+        let panic = column![
+            row![
+                text(self.panic_line()).size(13).width(Length::Fill),
+                button(
+                    text(if self.rig.panic_learn.is_some() {
+                        "Cancel"
+                    } else {
+                        "Learn"
+                    })
+                    .size(13)
+                )
+                .on_press(crate::Message::Preferences(Message::PanicLearn)),
+                button(text("Clear").size(13)).on_press_maybe(
+                    self.rig
+                        .store
+                        .saved()
+                        .panic
+                        .map(|_| crate::Message::Preferences(Message::PanicClear))
+                ),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center),
+            note("A control or pad that runs panic on every patch.".into()),
+        ]
+        .spacing(6);
 
         let panel = column![
             row![
@@ -709,7 +854,10 @@ impl App {
                     audio,
                     rule::horizontal(1),
                     heading("MIDI inputs"),
-                    midi
+                    midi,
+                    rule::horizontal(1),
+                    heading("Panic"),
+                    panic
                 ]
                 .spacing(12)
                 .padding([0, 12])
@@ -1207,6 +1355,269 @@ mod tests {
         fake.play("Keys", &[0x90, 62, 100]);
         assert!(wait_for(&app, 1.0), "the other input still plays");
         assert!(app._audio.is_some(), "audio did not stop");
+    }
+
+    /// The panic trigger (panic.md, MIDI trigger): Learn takes the next
+    /// control change, the mapping goes in `preferences.ron` and not in
+    /// the patch, a value of 0 does nothing, and 127 runs panic, which
+    /// releases a held note. Clear removes it.
+    #[test]
+    fn a_learned_panic_trigger_is_saved_and_runs_panic() {
+        let dir = folder("panic");
+        let fake = Rc::new(Fake::new(&[fake::device("Fake A")], &["Pad"]));
+        let mut app = start(args(&dir), &fake);
+        let note = loom_modules::registry().resolve("loom.midi.note").unwrap();
+        app.add_module(note, iced::Point::new(100.0, 100.0));
+        let id = loom_core::ModuleId(*app.selection.iter().next().unwrap());
+        let gate = app
+            .controller
+            .graph()
+            .node(id)
+            .unwrap()
+            .descriptor
+            .display_index("gate")
+            .unwrap();
+        let wait_for = |app: &App, value: f32| {
+            (0..400).any(|_| {
+                std::thread::sleep(Duration::from_millis(5));
+                app.controller.display(id, gate) == Some(value)
+            })
+        };
+
+        app.preferences(Message::Open);
+        app.preferences(Message::PanicLearn);
+        assert_eq!(app.panic_line(), "Waiting for MIDI...");
+        fake.play("Pad", &[0xB0, 123, 127]);
+        assert!(
+            (0..400).any(|_| {
+                std::thread::sleep(Duration::from_millis(5));
+                app.controller.last_control_change().is_some()
+            }),
+            "the control change reached the engine"
+        );
+        let _ = app.update(crate::Message::Midi);
+        assert_eq!(app.panic_line(), "Channel 1, controller 123");
+        let saved = crate::preferences::load(&dir.join(FILE_NAME)).preferences.panic;
+        assert_eq!(saved, Some(crate::preferences::PanicPref::Cc(0, 123)));
+        let patch = app.current_patch().to_ron().unwrap();
+        assert!(!patch.contains("123"), "the trigger is not in the patch: {patch}");
+
+        fake.play("Pad", &[0x90, 60, 100]);
+        assert!(wait_for(&app, 1.0), "the note plays");
+        fake.play("Pad", &[0xB0, 123, 0]);
+        assert!(!wait_for(&app, 0.0), "a value of 0 does nothing");
+        fake.play("Pad", &[0xB0, 123, 127]);
+        assert!(wait_for(&app, 0.0), "127 runs panic and the note is released");
+
+        app.preferences(Message::PanicClear);
+        assert_eq!(app.panic_line(), "None");
+        assert_eq!(crate::preferences::load(&dir.join(FILE_NAME)).preferences.panic, None);
+    }
+
+    /// An app on the fake host with a MIDI Note module, and a check that
+    /// waits for its gate light to read a value.
+    fn note_app(dir: &std::path::Path, fake: &Rc<Fake>) -> (App, impl Fn(&App, f32) -> bool + use<>) {
+        let mut app = start(args(dir), fake);
+        let note = loom_modules::registry().resolve("loom.midi.note").unwrap();
+        app.add_module(note, iced::Point::new(100.0, 100.0));
+        let id = loom_core::ModuleId(*app.selection.iter().next().unwrap());
+        let gate = note.display_index("gate").unwrap();
+        let wait_for = move |app: &App, value: f32| {
+            (0..400).any(|_| {
+                std::thread::sleep(Duration::from_millis(5));
+                app.controller.display(id, gate) == Some(value)
+            })
+        };
+        (app, wait_for)
+    }
+
+    /// An input plugged in while the app runs is opened without opening
+    /// Preferences, and plays; one in `midi.off` is not opened.
+    #[test]
+    fn an_input_plugged_in_is_opened_unless_it_is_off() {
+        let dir = folder("plug");
+        write(&dir, "(midi: (off: [\"Drums\"]))");
+        let fake = Rc::new(Fake::new(&[fake::device("Fake A")], &[]));
+        let (mut app, wait_for) = note_app(&dir, &fake);
+        assert!(app.rig.ports.is_empty());
+        app.preferences(Message::Open);
+        fake.plug("Keys");
+        fake.plug("Drums");
+        app.poll_midi();
+        assert_eq!(app.open_midi_inputs(), ["Keys"]);
+        let listed = &app.rig.window.as_ref().unwrap().midi;
+        assert_eq!(
+            listed.as_deref(),
+            Ok(&["Keys".to_string(), "Drums".to_string()][..]),
+            "the window follows"
+        );
+        assert_eq!(app.status, "MIDI: \"Keys\" connected.");
+        fake.play("Keys", &[0x90, 60, 100]);
+        assert!(wait_for(&app, 1.0), "a note on it plays");
+    }
+
+    /// Unplugging an input with a held note releases it in the engine, and
+    /// the app keeps running. The input comes back as a new connection,
+    /// and notes play once.
+    #[test]
+    fn an_input_unplugged_releases_its_notes_and_comes_back() {
+        let dir = folder("unplug");
+        let fake = Rc::new(Fake::new(&[fake::device("Fake A")], &["Keys"]));
+        let (mut app, wait_for) = note_app(&dir, &fake);
+        fake.play("Keys", &[0x90, 60, 100]);
+        assert!(wait_for(&app, 1.0));
+        fake.unplug("Keys");
+        app.poll_midi();
+        assert!(wait_for(&app, 0.0), "the held note is released");
+        assert_eq!(app.status, "MIDI: \"Keys\" disconnected.");
+        assert!(!fake.is_open("Keys"));
+        assert!(app._audio.is_some(), "the app keeps playing");
+
+        fake.plug("Keys");
+        app.poll_midi();
+        assert_eq!(fake.open_count(), 1, "one connection, not two");
+        fake.play("Keys", &[0x90, 60, 100]);
+        assert!(wait_for(&app, 1.0));
+        fake.play("Keys", &[0x80, 60, 0]);
+        assert!(wait_for(&app, 0.0), "one note off ends it: it was not doubled");
+    }
+
+    /// Two inputs hold the same note. Removing one keeps the note until the
+    /// other lets go.
+    #[test]
+    fn a_shared_note_ends_with_its_last_input() {
+        let dir = folder("shared-note");
+        let fake = Rc::new(Fake::new(&[fake::device("Fake A")], &["Keys", "Pad"]));
+        let (mut app, wait_for) = note_app(&dir, &fake);
+        fake.play("Keys", &[0x90, 60, 100]);
+        fake.play("Pad", &[0x90, 60, 100]);
+        assert!(wait_for(&app, 1.0));
+        fake.unplug("Keys");
+        app.poll_midi();
+        assert!(!wait_for(&app, 0.0), "the pad still holds the note");
+        fake.play("Pad", &[0x80, 60, 0]);
+        assert!(wait_for(&app, 0.0));
+    }
+
+    /// A quick replug between two polls, with a new port identity, counts as
+    /// a removal: the old connection closes, its note is released, and the
+    /// new one plays. Ten quick cycles leak nothing and leave no stuck note.
+    #[test]
+    fn a_quick_replug_is_a_new_connection() {
+        let dir = folder("replug");
+        let fake = Rc::new(Fake::new(&[fake::device("Fake A")], &["Keys"]));
+        let (mut app, wait_for) = note_app(&dir, &fake);
+        fake.play("Keys", &[0x90, 60, 100]);
+        assert!(wait_for(&app, 1.0));
+        fake.unplug("Keys");
+        fake.plug("Keys");
+        app.poll_midi();
+        assert!(wait_for(&app, 0.0), "the old connection's note is released");
+        assert_eq!(fake.open_count(), 1);
+        for _ in 0..10 {
+            fake.play("Keys", &[0x90, 62, 100]);
+            fake.unplug("Keys");
+            app.poll_midi();
+            fake.plug("Keys");
+            app.poll_midi();
+        }
+        assert!(wait_for(&app, 0.0), "no stuck note");
+        assert_eq!(fake.open_count(), 1, "no leaked connection");
+        assert_eq!(app.open_midi_inputs(), ["Keys"]);
+        fake.play("Keys", &[0x90, 64, 100]);
+        assert!(wait_for(&app, 1.0), "and it still plays");
+    }
+
+    /// Two inputs with the same name are told apart by order.
+    #[test]
+    fn same_named_inputs_are_numbered() {
+        let dir = folder("same-names");
+        let fake = Rc::new(Fake::new(&[fake::device("Fake A")], &["Pad", "Pad"]));
+        let app = start(args(&dir), &fake);
+        assert_eq!(app.open_midi_inputs(), ["Pad", "Pad (2)"]);
+    }
+
+    /// An input that fails to open is reported, at start, when it is
+    /// plugged in, and when it is turned on, and the others still play. A
+    /// poll that finds nothing new says nothing, and a list that cannot be
+    /// read changes nothing.
+    #[test]
+    fn inputs_that_fail_are_reported_and_the_others_play() {
+        let dir = folder("broken-midi");
+        let fake = Rc::new(Fake::new(&[fake::device("Fake A")], &["Keys", "Busy"]));
+        fake.broken_midi.borrow_mut().push("Busy".into());
+        fake.broken_midi.borrow_mut().push("Late".into());
+        let mut app = start(args(&dir), &fake);
+        assert_eq!(app.open_midi_inputs(), ["Keys"]);
+        assert!(app.status.contains("Busy: the port is busy"), "{}", app.status);
+
+        app.status.clear();
+        app.poll_midi();
+        assert!(app.status.is_empty(), "nothing changed: {}", app.status);
+        fake.plug("Late");
+        app.poll_midi();
+        assert!(app.status.contains("could not open \"Late\""), "{}", app.status);
+        assert_eq!(app.open_midi_inputs(), ["Keys"]);
+
+        app.preferences(Message::Midi("Busy".into(), true));
+        assert!(app.status.starts_with("MIDI: Busy"), "{}", app.status);
+        assert_eq!(app.open_midi_inputs(), ["Keys"]);
+
+        fake.midi_list_fails.set(true);
+        fake.unplug("Keys");
+        app.poll_midi();
+        assert_eq!(app.open_midi_inputs(), ["Keys"], "an unreadable list closes nothing");
+    }
+
+    /// When the MIDI inputs cannot be listed at start, the status says so.
+    #[test]
+    fn an_unreadable_input_list_at_start_is_reported() {
+        let dir = folder("no-midi-service");
+        let fake = Rc::new(Fake::new(&[fake::device("Fake A")], &["Keys"]));
+        fake.midi_list_fails.set(true);
+        let app = start(args(&dir), &fake);
+        assert!(app.rig.ports.is_empty());
+        assert!(app.status.contains("the MIDI service is not running"), "{}", app.status);
+    }
+
+    /// The Panic section of the window: Learn shows it is waiting and turns
+    /// into Cancel, a second press cancels, and nothing arrived means no
+    /// trigger. The window draws in each state.
+    #[test]
+    fn the_panic_section_learns_and_cancels() {
+        let dir = folder("panic-window");
+        let fake = Rc::new(Fake::new(&[fake::device("Fake A")], &["Pad"]));
+        let mut app = start(args(&dir), &fake);
+        app.preferences(Message::Open);
+        assert!(app.preferences_view().is_some());
+        assert_eq!(app.panic_line(), "None");
+        app.preferences(Message::PanicLearn);
+        assert!(app.preferences_view().is_some());
+        let _ = app.update(crate::Message::Midi);
+        assert_eq!(app.panic_line(), "Waiting for MIDI...", "no MIDI came yet");
+        app.preferences(Message::PanicLearn);
+        assert!(app.status.contains("cancelled"), "{}", app.status);
+        assert_eq!(app.panic_line(), "None");
+
+        // A note on is learned too.
+        app.preferences(Message::PanicLearn);
+        fake.play("Pad", &[0x99, 36, 100]);
+        assert!(
+            (0..400).any(|_| {
+                std::thread::sleep(Duration::from_millis(5));
+                app.controller.last_note_on().is_some()
+            }),
+            "the note reached the engine"
+        );
+        let _ = app.update(crate::Message::Midi);
+        assert_eq!(app.panic_line(), "Channel 10, note 36");
+        assert!(app.preferences_view().is_some());
+
+        // Closing the window cancels a learn, so a later note on is not
+        // saved as the trigger where the player cannot see it.
+        app.preferences(Message::PanicLearn);
+        app.preferences(Message::Close);
+        assert_eq!(app.rig.panic_learn, None, "closing cancels the learn");
     }
 
     /// The same check through real MIDI inputs: two virtual controllers,

@@ -29,7 +29,9 @@
 
 #![warn(missing_docs)]
 
-use loom_core::{Controller, Graph, InputRef, LoomError, MidiControl, ModuleId, OutputRef, ParamRange, Polarity};
+use loom_core::{
+    Controller, Graph, InputRef, LoomError, MidiControl, ModuleId, OutputRef, ParamRange, Polarity, Registry,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -366,7 +368,17 @@ impl Patch {
             let id = ModuleId(module.id);
             controller.add_module_with_id(id, &module.kind)?;
             notes.extend(Self::load_ranges(module, controller)?);
+            let descriptor = controller.graph().node(id).map(|node| node.descriptor);
             for (name, &value) in &module.params {
+                // A saved value for a transient parameter is ignored: the
+                // module starts released (transient-params.md).
+                // `transient_values` lists them for `loom check`.
+                if descriptor
+                    .and_then(|d| d.param_index(name).map(|i| d.params[i]))
+                    .is_some_and(|spec| spec.is_transient())
+                {
+                    continue;
+                }
                 controller
                     .set_param_named(id, name, value)
                     .map_err(|error| match error {
@@ -468,6 +480,28 @@ impl Patch {
         Ok(notes)
     }
 
+    /// The saved values that [`Patch::load_into`] ignores because their
+    /// parameter is transient, as `(module id, parameter name)`. A module
+    /// kind the registry does not know is skipped; loading reports it.
+    pub fn transient_values(&self, registry: &Registry) -> Vec<(u32, String)> {
+        self.modules
+            .iter()
+            .filter_map(|module| Some((module, registry.resolve(&module.kind).ok()?)))
+            .flat_map(|(module, descriptor)| {
+                module
+                    .params
+                    .keys()
+                    .filter(|name| {
+                        descriptor
+                            .param_index(name)
+                            .is_some_and(|i| descriptor.params[i].is_transient())
+                    })
+                    .map(|name| (module.id, name.clone()))
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
     /// Refuses two MIDI mappings on one parameter or one control. The
     /// controller would quietly keep the last one, which hides the mistake.
     fn check_midi(&self) -> Result<(), PatchError> {
@@ -497,7 +531,9 @@ impl Patch {
                 .params
                 .iter()
                 .zip(&node.params)
-                .filter(|(spec, value)| **value != spec.default)
+                // A transient value is a live gesture, never saved
+                // (transient-params.md).
+                .filter(|(spec, value)| **value != spec.default && !spec.is_transient())
                 .map(|(spec, value)| (spec.name.to_string(), *value))
                 .collect();
             patch.modules.push(PatchModule {
@@ -705,6 +741,35 @@ Patch(
                 }
             }
         }
+    }
+
+    /// A held momentary Button saves no `hold`, and a saved `hold` loads as
+    /// released and is listed for `loom check` (transient-params.md).
+    #[test]
+    fn a_transient_hold_is_never_saved_or_loaded() {
+        let mut parts = create_engine(loom_modules::registry(), EngineConfig::default());
+        let c = &mut parts.controller;
+        let id = c.add_module("loom.ui.button").unwrap();
+        c.set_param_named(id, "mode", 1.0).unwrap();
+        c.set_param_named(id, "hold", 1.0).unwrap();
+        c.commit().unwrap();
+        let saved = Patch::from_graph("held", c.graph());
+        let text = saved.to_ron().unwrap();
+        assert!(!text.contains("hold"), "{text}");
+        assert!(text.contains("mode"), "{text}");
+
+        let file =
+            r#"Patch(version: 1, modules: [(id: 1, kind: "loom.ui.button@1", params: {"hold": 1.0, "on": 1.0})])"#;
+        let patch = Patch::from_ron(file).unwrap();
+        let registry = loom_modules::registry();
+        assert_eq!(patch.transient_values(&registry), vec![(1, "hold".to_string())]);
+        let mut parts = create_engine(registry, EngineConfig::default());
+        patch.load_into(&mut parts.controller).unwrap();
+        let node = parts.controller.graph().node(ModuleId(1)).unwrap();
+        let hold = node.descriptor.param_index("hold").unwrap();
+        let on = node.descriptor.param_index("on").unwrap();
+        assert_eq!(node.params[hold], 0.0);
+        assert_eq!(node.params[on], 1.0);
     }
 
     #[test]

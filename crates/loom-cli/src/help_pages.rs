@@ -323,6 +323,9 @@ fn range(p: &ParamSpec) -> String {
         text.push_str(", choices ");
         text.push_str(&cell(&p.options.choices.join(", ")));
     }
+    if p.is_transient() {
+        text.push_str(", not saved");
+    }
     text
 }
 
@@ -365,7 +368,12 @@ fn widget(d: &ModuleDescriptor, w: &Widget) -> String {
                 .map_or(&[][..], |p| p.options.choices);
             format!("Radio buttons: {} ({})", param(w.bind), cell(&choices.join(", ")))
         }
-        WidgetKind::Button { .. } => format!("Button: {}", param(w.bind)),
+        WidgetKind::Button { mode, hold } => format!(
+            "Button: {} (toggle), {} (momentary), chosen by {}",
+            param(w.bind),
+            param(hold),
+            param(mode)
+        ),
         WidgetKind::Light => {
             let light = d.displays.iter().find(|v| v.name == w.bind).map_or_else(
                 || format!("`{}`", w.bind),

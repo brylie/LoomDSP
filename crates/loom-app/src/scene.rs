@@ -193,8 +193,8 @@ pub fn update_panel_values_dragging(
     for (id, node) in controller.graph().nodes() {
         let d = node.descriptor;
         for (index, w) in d.panel.widgets.iter().enumerate() {
-            let value = match d.param_index(w.bind) {
-                Some(p) if w.is_control() => {
+            let value = match d.control_param(w, &node.params) {
+                Some(p) => {
                     // The knob spans the selected range (control-ranges.md).
                     let spec = &node.spec(p).expect("the index is a parameter");
                     let value = node.params[p];
@@ -279,33 +279,16 @@ pub fn meter_outputs(controller: &Controller, modules: &[u32]) -> Vec<((u32, usi
         .collect()
 }
 
-/// The parameter writes for one edit, including a button gate that a switch
-/// to momentary must clear.
-///
-/// The clear rides in the same list as the edit, so [`loom_core::Controller::set_params`]
-/// can send them together or not at all (clock.md, Button details).
-pub fn param_edits(node: &loom_core::Node, index: usize, value: f32) -> Vec<(usize, f32)> {
-    let Some(spec) = node.spec(index) else {
-        return vec![(index, value)];
-    };
-    let next = spec.clamp(value);
-    let mut changes = vec![(index, next)];
-    let previous = node.params.get(index).copied().unwrap_or(next);
-    for gate in node.descriptor.button_gates_to_clear(spec.name, previous, next) {
-        if gate != index && changes.iter().all(|(existing, _)| *existing != gate) {
-            changes.push((gate, 0.0));
-        }
-    }
-    changes
-}
-
 /// The parameter a control is bound to, limited to its selected range, if
 /// the module and widget exist.
+///
+/// A button in momentary mode is bound to its hold, and otherwise to its
+/// latch (clock.md, Button details).
 pub fn control_param(controller: &Controller, module: u32, widget: usize) -> Option<(usize, WidgetKind, ParamSpec)> {
     let node = controller.graph().node(ModuleId(module))?;
     let d = node.descriptor;
-    let w = d.panel.widgets.get(widget).filter(|w| w.is_control())?;
-    let index = d.param_index(w.bind)?;
+    let w = d.panel.widgets.get(widget)?;
+    let index = d.control_param(w, &node.params)?;
     // The control spans the selected range (control-ranges.md, rule 4).
     Some((index, w.kind, node.spec(index)?))
 }
@@ -499,8 +482,11 @@ mod tests {
         assert!((back - 0.5).abs() < 1e-4);
     }
 
+    /// A button shows its latch in toggle mode and its hold in momentary
+    /// mode, so a latched `on` does not show as a hold (clock.md, Button
+    /// details).
     #[test]
-    fn switching_a_button_to_momentary_clears_its_gate() {
+    fn a_button_shows_the_parameter_its_mode_chooses() {
         use loom_core::{EngineConfig, Registry, create_engine};
         use std::sync::Arc;
 
@@ -509,29 +495,16 @@ mod tests {
         let parts = create_engine(Arc::new(registry), EngineConfig::default());
         let mut controller = parts.controller;
         let id = controller.add_module("loom.ui.button").unwrap();
-        let mode = controller
-            .graph()
-            .node(id)
-            .unwrap()
-            .descriptor
-            .param_index("mode")
-            .unwrap();
-        let on = controller
-            .graph()
-            .node(id)
-            .unwrap()
-            .descriptor
-            .param_index("on")
-            .unwrap();
-        controller.set_param(id, on, 1.0).unwrap();
-
+        controller.set_param_named(id, "on", 1.0).unwrap();
+        let (index, _, _) = control_param(&controller, id.0, 0).unwrap();
+        assert_eq!(controller.graph().node(id).unwrap().descriptor.params[index].name, "on");
+        controller.set_param_named(id, "mode", 1.0).unwrap();
+        let (index, _, spec) = control_param(&controller, id.0, 0).unwrap();
+        assert_eq!(spec.name, "hold");
         let node = controller.graph().node(id).unwrap();
-        assert_eq!(param_edits(node, mode, 1.0), vec![(mode, 1.0), (on, 0.0)]);
-
-        controller.set_param(id, mode, 1.0).unwrap();
-        let node = controller.graph().node(id).unwrap();
-        assert_eq!(param_edits(node, mode, 1.0), vec![(mode, 1.0)]);
-        assert_eq!(param_edits(node, on, 1.0), vec![(on, 1.0)]);
+        // The latch is kept, and the hold is released.
+        assert_eq!(node.params[node.descriptor.param_index("on").unwrap()], 1.0);
+        assert_eq!(node.params[index], 0.0);
     }
 
     #[test]

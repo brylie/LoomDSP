@@ -205,6 +205,7 @@ Two new fields in `preferences.ron`. They hold the player's choice, not what the
 | `audio.sample_rate` | `DeviceDefault`, or `Hz(<rate>)` | `DeviceDefault` |
 | `audio.buffer` | `DeviceDefault`, or `Frames(<size>)` | `DeviceDefault` |
 | `midi.off` | A list of full MIDI input names | `[]` (every input on) |
+| `panic` | `None`, `Some(Cc(<channel>, <controller>))`, or `Some(Note(<channel>, <note>))`, channels from 0 ([panic](panic.md#midi-trigger)) | `None` |
 
 - `SystemDefault` follows the operating system's choice, and changes when the player changes it there. `Named` sticks to one device. *Why:* a laptop player wants "whatever macOS is set to". A studio player wants "the interface, never the speakers". They are different choices, and both need a way to say so.
 - A device is matched by its full name, exactly. *Why:* `loom play --device` matches part of a name, which is quick to type but can pick the wrong one of two similar interfaces. A saved choice is made by clicking, so the full name is known.

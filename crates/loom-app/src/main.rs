@@ -21,6 +21,7 @@ mod lights;
 mod live;
 mod modulation;
 mod monitor;
+mod panic;
 mod param;
 mod pointer;
 mod preferences;
@@ -233,6 +234,10 @@ enum Message {
         world: Point,
     },
     HoldNote,
+    /// Silence everything and clear stuck notes (`docs/design/panic.md`).
+    Panic,
+    /// Look for MIDI inputs plugged in or out (`docs/design/device-changes.md`).
+    MidiPoll,
     /// File commands (`docs/design/files.md`).
     New,
     Open,
@@ -773,9 +778,8 @@ impl App {
 
         // Every MIDI input plays the patch, and the "Hold note" button works
         // alongside them, so a keyboard is never hidden behind another port.
-        if let Some(error) = rig.attach(sender, connect_midi) {
-            status = error;
-        }
+        // The inputs are opened once the app is built, on its controller.
+        let first_midi = rig.attach(sender);
         let midi = rig.midi_in.clone().expect("attached");
 
         let (audio, midi, audio_name, idle_engine) = match output {
@@ -876,6 +880,10 @@ impl App {
             still: None,
             step_name: None,
         };
+        app.send_panic_trigger();
+        if let Some(error) = app.connect_midi(first_midi, connect_midi) {
+            app.status = error;
+        }
         // A patch just loaded is the one on disk.
         app.edits.history.mark_saved();
         app.saved_content = Some(app.current_patch());
@@ -1130,6 +1138,13 @@ impl App {
             Some(_) => iced::time::every(recovery::TICK).map(|_| Message::Autosave),
             None => Subscription::none(),
         };
+        // MIDI inputs plugged in and out are found by polling four times a
+        // second: the systems offer no portable callback (device-changes.md).
+        let midi_poll = if self.rig.midi_in.is_some() && !self.rig.flags.no_midi {
+            iced::time::every(Duration::from_millis(250)).map(|_| Message::MidiPoll)
+        } else {
+            Subscription::none()
+        };
         let report = match &self.reporter {
             Some(reporter) => Subscription::run_with(reporter.clone(), bench::stream).map(|()| Message::BenchDone),
             None => Subscription::none(),
@@ -1144,6 +1159,7 @@ impl App {
                 close,
                 report,
                 autosave,
+                midi_poll,
             ]
             .into_iter()
             .chain(control),
@@ -1155,7 +1171,7 @@ impl App {
     /// In learn mode, it also listens for Escape.
     fn midi_watch(&self) -> Subscription<Message> {
         let mapped = self.controller.graph().midi_mappings().next().is_some();
-        let watch = (mapped || self.learning).then(|| {
+        let watch = (mapped || self.learning || self.rig.panic_learn.is_some()).then(|| {
             let watch = learn::Watch {
                 reader: self.controller.midi_reader(),
                 generation: self.generation,
@@ -1166,7 +1182,9 @@ impl App {
         // The search field takes Escape for itself, so the browser listens
         // to keys whether or not a widget used them.
         let browser = self.browser.is_some().then(|| iced::event::listen_with(browser_key));
-        Subscription::batch(watch.into_iter().chain(keys).chain(browser))
+        // The panic key works whatever has focus (panic.md).
+        let panic = Some(iced::event::listen_with(panic::key));
+        Subscription::batch(watch.into_iter().chain(keys).chain(browser).chain(panic))
     }
 
     /// Watches the lights on screen, and sends a message only when one
@@ -1241,6 +1259,21 @@ impl App {
 
     /// Arms a parameter in learn mode, or disarms it if it is armed.
     fn arm(&mut self, param: learn::Param) {
+        let (module, index) = param;
+        let transient = self
+            .controller
+            .graph()
+            .node(ModuleId(module))
+            .and_then(|node| node.descriptor.params.get(index))
+            .is_some_and(|spec| spec.is_transient());
+        if transient {
+            // A live gesture cannot be mapped (transient-params.md).
+            self.status = format!(
+                "MIDI learn: {} is a live control and cannot be mapped",
+                learn::param_name(&self.controller, param)
+            );
+            return;
+        }
         if self.armed.is_some_and(|armed| armed.param == param) {
             self.armed = None;
             self.status = "MIDI learn: click a control to map it".to_string();
@@ -1262,6 +1295,9 @@ impl App {
     fn midi_arrived(&mut self) {
         if !self.controller.sync_midi().is_empty() {
             self.refresh_values();
+        }
+        if self.panic_midi_arrived() {
+            return;
         }
         let Some(armed) = self.armed else { return };
         let Some(seen) = self.controller.last_control_change() else {
@@ -1402,44 +1438,51 @@ impl App {
     }
 
     /// Sets a parameter from a control on a tile or in the inspector.
-    ///
-    /// A switch to momentary also clears that button's gate. Both writes go
-    /// in one step, so a full command queue leaves the mode and the gate as
-    /// they were.
     fn set_param(&mut self, module: u32, index: usize, value: f32) {
-        let changes = self
-            .controller
-            .graph()
-            .node(ModuleId(module))
-            .map(|node| scene::param_edits(node, index, value))
-            .unwrap_or_else(|| vec![(index, value)]);
-        if let Err(e) = self.controller.set_params(ModuleId(module), &changes) {
+        if let Err(e) = self.controller.set_param(ModuleId(module), index, value) {
             self.status = format!("error: {e}");
         }
-        for &(i, _) in &changes {
-            self.edits.touch(module, i);
-        }
+        self.edits.touch(module, index);
         self.refresh_values();
     }
 
     /// Applies a button gesture. The canvas names the gesture. [`loom_core::ButtonMode`]
-    /// names the value, from the mode parameter stored on the module.
+    /// names the value, from the mode parameter stored on the module. Toggle
+    /// writes the latch and Momentary the transient hold.
     fn apply_button(&mut self, module: u32, widget: usize, change: impl Fn(loom_core::ButtonMode, f32) -> Option<f32>) {
         let edit = self.controller.graph().node(ModuleId(module)).and_then(|node| {
             let panel_widget = node.descriptor.panel.widgets.get(widget)?;
-            let loom_core::WidgetKind::Button { mode } = panel_widget.kind else {
+            let loom_core::WidgetKind::Button { mode, .. } = panel_widget.kind else {
                 return None;
             };
             let mode_index = node.descriptor.param_index(mode)?;
-            let on_index = node.descriptor.param_index(panel_widget.bind)?;
+            let target = node.descriptor.control_param(panel_widget, &node.params)?;
             let next = change(
                 loom_core::ButtonMode::from_value(node.params[mode_index]),
-                node.params[on_index],
+                node.params[target],
             )?;
-            Some((on_index, next))
+            Some((target, next))
         });
         if let Some((index, value)) = edit {
             self.set_param(module, index, value);
+        }
+    }
+
+    /// Lets go of a button's transient hold, whatever the mode is now. The
+    /// mode can change during a momentary press (inspector, undo, or a MIDI
+    /// mapping), and the release then resolves to the latch. Without this
+    /// the hold would stay high and come back with Momentary mode.
+    fn release_hold(&mut self, module: u32, widget: usize) {
+        let held = self.controller.graph().node(ModuleId(module)).and_then(|node| {
+            let loom_core::WidgetKind::Button { hold, .. } = node.descriptor.panel.widgets.get(widget)?.kind else {
+                return None;
+            };
+            let index = node.descriptor.param_index(hold)?;
+            let default = node.descriptor.params[index].default;
+            (node.params[index] != default).then_some((index, default))
+        });
+        if let Some((index, default)) = held {
+            self.set_param(module, index, default);
         }
     }
 
@@ -1934,6 +1977,8 @@ impl App {
             Message::Undo => self.undo(),
             Message::Redo => self.redo(),
             Message::OpenBrowser => self.browser_key += 1,
+            Message::Panic => self.panic(),
+            Message::MidiPoll => self.poll_midi(),
             Message::HoldNote => {
                 if let Some(midi) = &self.midi {
                     self.holding = !self.holding;
@@ -2156,6 +2201,7 @@ impl App {
             }
             CanvasEvent::ButtonReleased { module, widget } => {
                 self.apply_button(module, widget, |mode, _current| mode.release());
+                self.release_hold(module, widget);
             }
             CanvasEvent::ButtonArrow { module, widget, high } => {
                 self.apply_button(module, widget, |mode, current| mode.arrow(current, high));
@@ -2399,6 +2445,9 @@ impl App {
             if status == iced::event::Status::Ignored {
                 messages.push(Message::Key(key.clone()));
             }
+            if let Some(message) = panic::key(iced::Event::Keyboard(key.clone()), status, iced::window::Id::unique()) {
+                messages.push(message);
+            }
             if browser_open
                 && let Some(message) = browser_key(iced::Event::Keyboard(key), status, iced::window::Id::unique())
             {
@@ -2432,6 +2481,20 @@ impl App {
                 tooltip::Position::Bottom,
             ),
             hold,
+            tooltip(
+                button(text("Panic").size(13)).on_press(Message::Panic),
+                container(
+                    text(if cfg!(target_os = "macos") {
+                        "Silence everything: Cmd+."
+                    } else {
+                        "Silence everything: Ctrl+."
+                    })
+                    .size(12)
+                )
+                .padding(6)
+                .style(container::rounded_box),
+                tooltip::Position::Bottom,
+            ),
             self.history_button("Undo", "Undo", self.edits.history.undo_step(), Message::Undo),
             self.history_button("Redo", "Redo", self.edits.history.redo_step(), Message::Redo),
             button(text("MIDI learn").size(13))
@@ -3403,6 +3466,130 @@ mod tests {
         });
         assert_eq!(app.controller.graph().nodes().count(), before + 2);
     }
+
+    /// Panic is not an edit: the value, the cables, and the unsaved mark
+    /// stay, and there is no new undo step (panic.md, Acceptance criteria).
+    #[test]
+    fn panic_is_not_an_edit() {
+        let mut app = app();
+        let (_, vca) = two_selected(&mut app);
+        app.edit(|app| {
+            app.controller.set_param_named(vca, "gain", 0.9).unwrap();
+            app.commit();
+        });
+        assert!(app.unsaved());
+        let steps = app.edits.history.len();
+        let cables = app.controller.graph().cables().count();
+        app.holding = true;
+        let _ = app.update(Message::Panic);
+        // The MIDI poll runs while the app has an engine, and finds nothing.
+        let _ = app.subscription();
+        let _ = app.update(Message::MidiPoll);
+        assert!(app.status.starts_with("Panic"), "{}", app.status);
+        assert!(!app.holding, "Hold note lets go");
+        let gain = app
+            .controller
+            .graph()
+            .node(vca)
+            .unwrap()
+            .descriptor
+            .param_index("gain")
+            .unwrap();
+        assert_eq!(app.controller.graph().node(vca).unwrap().params[gain], 0.9);
+        assert_eq!(app.controller.graph().cables().count(), cables);
+        assert!(app.unsaved(), "the unsaved mark stays");
+        assert_eq!(app.edits.history.len(), steps, "no undo step");
+    }
+
+    /// The panic key works with a text field focused, the toolbar button
+    /// runs it, and so do the control channel's `panic` and `press`.
+    #[test]
+    fn the_panic_key_button_and_command_run_panic() {
+        let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+        let _ = ui.app.update(Message::OpenBrowser);
+        ui.redraw();
+        ui.typewrite("sin");
+        let messages = ui.tap(
+            iced::keyboard::Key::Character(".".into()),
+            iced::keyboard::Modifiers::COMMAND,
+        );
+        assert!(messages.iter().any(|m| matches!(m, Message::Panic)), "{messages:?}");
+        assert!(ui.app.status.starts_with("Panic"), "{}", ui.app.status);
+
+        ui.app.status.clear();
+        let _ = ui.app.update(Message::Browser(browser::Message::Close));
+        ui.redraw();
+        let button = ui.text("Panic").expect("a Panic button on the toolbar");
+        ui.move_to(button.center());
+        let mut messages = ui.press();
+        messages.extend(ui.release());
+        assert!(messages.iter().any(|m| matches!(m, Message::Panic)), "{messages:?}");
+    }
+
+    /// A momentary press sets the transient hold: the tile shows it, but
+    /// the patch is unchanged, the saved file has no `hold`, the inspector
+    /// has no row for it, and a copy pastes a released button
+    /// (transient-params.md, Acceptance criteria).
+    #[test]
+    fn a_momentary_hold_is_not_part_of_the_patch() {
+        let mut app = app();
+        let id = app.controller.add_module("loom.ui.button").unwrap();
+        app.controller.set_param_named(id, "mode", 1.0).unwrap();
+        app.positions.insert(id.0, Point::new(0.0, 0.0));
+        app.commit();
+        app.edits.history.clear();
+        app.edits.history.mark_saved();
+        let hold = app
+            .controller
+            .graph()
+            .node(id)
+            .unwrap()
+            .descriptor
+            .param_index("hold")
+            .unwrap();
+        let held = |app: &App| app.controller.graph().node(id).unwrap().params[hold];
+
+        let _ = app.update(Message::Canvas(CanvasEvent::ButtonPressed {
+            module: id.0,
+            widget: 0,
+        }));
+        assert_eq!(held(&app), 1.0);
+        assert_eq!(tile_widget(&app, id, 0).position, 1.0, "a held button looks held");
+        assert!(!app.unsaved(), "a hold does not mark the patch changed");
+        assert_eq!(app.edits.history.len(), 0, "a hold is no undo step");
+        let text = app.current_patch().to_ron().unwrap();
+        assert!(!text.contains("hold"), "{text}");
+        app.arm((id.0, hold));
+        assert!(app.armed.is_none(), "a hold cannot be a MIDI learn target");
+
+        app.selection = BTreeSet::from([id.0]);
+        let snapshot = app.ui_snapshot();
+        let rows = serde_json::to_string(&snapshot.inspector).unwrap();
+        assert!(!rows.contains("\"Hold\""), "{rows}");
+        let copied = app.copy().unwrap();
+        let before: BTreeSet<u32> = app.controller.graph().nodes().map(|(m, _)| m.0).collect();
+        let _ = app.update(Message::Pasted {
+            world: Point::new(400.0, 0.0),
+            text: Some(copied),
+            generation: app.generation,
+        });
+        let (pasted, node) = app
+            .controller
+            .graph()
+            .nodes()
+            .find(|(m, _)| !before.contains(&m.0))
+            .expect("a pasted button");
+        assert_ne!(pasted, id);
+        assert_eq!(node.params[hold], 0.0, "a pasted button is released");
+        assert_eq!(held(&app), 1.0, "the original is still held");
+
+        let _ = app.update(Message::Canvas(CanvasEvent::ButtonReleased {
+            module: id.0,
+            widget: 0,
+        }));
+        assert_eq!(held(&app), 0.0);
+        assert_eq!(tile_widget(&app, id, 0).position, 0.0);
+    }
     /// The widget on module `id`'s tile at `widget`, as the snapshot shows it.
     fn tile_widget(app: &App, id: ModuleId, widget: usize) -> snapshot::Widget {
         let snapshot = app.ui_snapshot();
@@ -4002,6 +4189,29 @@ mod tests {
         );
     }
 
+    /// A mode change during a momentary press does not leave the hold
+    /// stuck high: the release lets go of it in any mode (review of #402).
+    #[test]
+    fn a_release_clears_the_hold_after_a_mode_change() {
+        let mut app = app();
+        let id = app.controller.add_module("loom.ui.button").unwrap();
+        app.commit();
+        let node = app.controller.graph().node(id).unwrap();
+        let mode = node.descriptor.param_index("mode").unwrap();
+        let hold = node.descriptor.param_index("hold").unwrap();
+        let (module, widget) = (id.0, 0);
+        let held = |app: &App| app.controller.graph().node(id).unwrap().params[hold];
+
+        app.controller.set_param(id, mode, 1.0).unwrap();
+        let _ = app.update(Message::Canvas(CanvasEvent::ButtonPressed { module, widget }));
+        assert_eq!(held(&app), 1.0, "the hold is down");
+        app.controller.set_param(id, mode, 0.0).unwrap();
+        let _ = app.update(Message::Canvas(CanvasEvent::ButtonReleased { module, widget }));
+        assert_eq!(held(&app), 0.0, "the release let go of the hold");
+        app.controller.set_param(id, mode, 1.0).unwrap();
+        assert_eq!(held(&app), 0.0, "Momentary mode comes back released");
+    }
+
     /// A momentary button hold makes no step, and a toggle press does
     /// (undo.md, What is not undoable). A button sends a press and a
     /// release, with no gesture around them.
@@ -4016,10 +4226,12 @@ mod tests {
             .descriptor
             .param_index(node.descriptor.panel.widgets[0].bind)
             .unwrap();
+        // Momentary mode writes the transient hold, not the latch (#161).
+        let hold = node.descriptor.param_index("hold").unwrap();
         let (module, widget) = (id.0, 0);
-        let press = |app: &mut App, release: bool| {
+        let press = |app: &mut App, param: usize, release: bool| {
             let _ = app.update(Message::Canvas(CanvasEvent::ButtonPressed { module, widget }));
-            let held = app.controller.graph().node(id).unwrap().params[on];
+            let held = app.controller.graph().node(id).unwrap().params[param];
             if release {
                 let _ = app.update(Message::Canvas(CanvasEvent::ButtonReleased { module, widget }));
             }
@@ -4029,16 +4241,16 @@ mod tests {
         app.controller.set_param(id, mode, 1.0).unwrap();
         app.commit();
         let steps = app.edits.history.len();
-        assert_eq!(press(&mut app, false), 1.0, "the hold is down");
+        assert_eq!(press(&mut app, hold, false), 1.0, "the hold is down");
         assert_eq!(app.edits.history.len(), steps, "a momentary press is no step");
         let _ = app.update(Message::Canvas(CanvasEvent::ButtonReleased { module, widget }));
-        assert_eq!(app.controller.graph().node(id).unwrap().params[on], 0.0);
+        assert_eq!(app.controller.graph().node(id).unwrap().params[hold], 0.0);
         assert_eq!(app.edits.history.len(), steps, "nor is its release");
 
         app.controller.set_param(id, mode, 0.0).unwrap();
         app.commit();
         let steps = app.edits.history.len();
-        assert_eq!(press(&mut app, true), 1.0, "the toggle is on");
+        assert_eq!(press(&mut app, on, true), 1.0, "the toggle is on");
         assert_eq!(app.edits.history.len(), steps + 1, "a toggle press is a step");
         assert_eq!(app.controller.graph().node(id).unwrap().params[on], 1.0, "and stays on");
     }

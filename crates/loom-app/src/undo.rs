@@ -64,7 +64,10 @@ impl Snapshot {
                         id.0,
                         ModuleState {
                             descriptor: node.descriptor,
-                            params: node.params.clone(),
+                            // A transient value is a live gesture, not an
+                            // edit, so undo sees it at its default
+                            // (transient-params.md).
+                            params: node.descriptor.saved_values(&node.params),
                             ranges: (0..node.params.len()).map(|index| node.range(index)).collect(),
                             position: positions.get(&id.0).copied(),
                         },
@@ -138,7 +141,7 @@ fn is_momentary_button(controller: &Controller, module: u32, widget: usize) -> b
         let Some(panel_widget) = node.descriptor.panel.widgets.get(widget) else {
             return false;
         };
-        let WidgetKind::Button { mode } = panel_widget.kind else {
+        let WidgetKind::Button { mode, .. } = panel_widget.kind else {
             return false;
         };
         node.descriptor

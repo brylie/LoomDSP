@@ -156,6 +156,10 @@ impl Ui {
                 if browser_open && let Some(message) = crate::browser_key(event.clone(), status, window::Id::unique()) {
                     messages.push(message);
                 }
+                // The panic key listens to every key event (panic.md).
+                if let Some(message) = crate::panic::key(event.clone(), status, window::Id::unique()) {
+                    messages.push(message);
+                }
             }
         });
         self.clipboard = clipboard;

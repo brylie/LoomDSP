@@ -207,6 +207,9 @@ impl App {
             .iter()
             .zip(&node.params)
             .enumerate()
+            // A transient parameter has no row: it is played on its panel
+            // widget only (transient-params.md).
+            .filter(|(_, (spec, _))| !spec.is_transient())
             .map(|(index, (_, &value))| {
                 // The control spans the selected range (control-ranges.md).
                 let spec = &node.spec(index).expect("one spec per value");

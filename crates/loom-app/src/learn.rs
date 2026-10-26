@@ -53,7 +53,9 @@ pub fn stream(watch: &Watch) -> impl Stream<Item = u32> + use<> {
         // before a parameter was armed.
         let mut last = None;
         while !tx.is_closed() {
-            let now = reader.last_control_change().map(|seen| seen.serial);
+            // Control changes and note ons share one serial count.
+            let note = reader.last_note_on().map(|seen| seen.serial);
+            let now = reader.last_control_change().map(|seen| seen.serial).max(note);
             if let Some(serial) = now.filter(|_| now != last) {
                 match tx.try_send(serial) {
                     Ok(()) => last = now,
