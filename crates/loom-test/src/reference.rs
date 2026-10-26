@@ -136,8 +136,8 @@ pub(crate) fn compare(channels: &Channels<'_>, path: &Path, tolerance: f32) {
 /// module, such as a whole patch through the engine (`#93`). `id` names
 /// what rendered them, and `names` names each channel, for messages.
 ///
-/// Panics, with what differs, when a channel differs by more than
-/// `tolerance` at any frame, or when the file is missing or has another
+/// Panics, with what differs, when a sample is NaN or infinite, when a
+/// channel differs by more than `tolerance` at any frame, or when the file is missing or has another
 /// channel count, sample rate, or length.
 #[track_caller]
 pub fn check_channels(id: &str, names: &[&str], samples: &[Vec<f32>], sample_rate: f32, path: &Path, tolerance: f32) {
@@ -146,6 +146,12 @@ pub fn check_channels(id: &str, names: &[&str], samples: &[Vec<f32>], sample_rat
         samples.iter().all(|c| c.len() == samples[0].len()),
         "{id}: every channel has the same length"
     );
+    // A NaN or infinite sample fails every check, and is never written.
+    for (name, channel) in names.iter().zip(samples) {
+        if let Some((frame, sample)) = channel.iter().enumerate().find(|(_, s)| !s.is_finite()) {
+            panic!("{id}: output `{name}` is {sample} at frame {frame}");
+        }
+    }
     let channels = Channels {
         id,
         names: names.to_vec(),

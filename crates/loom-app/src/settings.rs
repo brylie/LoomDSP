@@ -544,7 +544,7 @@ impl App {
             output_safety: self.output_safety,
             ..EngineConfig::with_sample_rate(rate)
         };
-        let mut parts = create_engine(loom_modules::registry(), config);
+        let mut parts = create_engine(crate::registry(self.test_modules), config);
         let controller = &mut parts.controller;
         let current = undo::Snapshot::take(&self.controller, &self.positions);
         let empty = undo::Snapshot::take(controller, &BTreeMap::new());
@@ -585,6 +585,8 @@ impl App {
         self.monitor = crate::monitor::Monitor::new(telemetry, self.generation);
         self.live = crate::live::Live::new();
         self.idle_engine = Some(engine);
+        // The stopped engine's live values are gone; show the new one's.
+        self.refresh_values();
     }
 
     /// Puts a new engine in place of the old one, which has stopped, and

@@ -1049,16 +1049,24 @@ mod tests {
         let (mut room, mut engine) = (parts.controller, parts.engine);
         let id = room.add_module(GATE.id).unwrap();
         room.commit().unwrap();
+        engine.apply_pending();
+        let setup_swaps = room.stats().schedule_swaps.load(Ordering::Relaxed);
+        let mut extra = None;
         for i in 0..1000 {
             room.set_param_named(id, "on", (i % 2) as f32).unwrap();
-            // A commit swaps in a schedule; the old one is garbage.
+            // Adding or removing a module makes the commit swap in a new
+            // schedule, so the old one comes back as garbage.
+            match extra.take() {
+                None => extra = Some(room.add_module(GATE.id).unwrap()),
+                Some(module) => room.remove_module(module).unwrap(),
+            }
             room.commit().unwrap();
             engine.apply_pending();
             room.collect_garbage();
         }
         let stats = room.stats();
         assert_eq!(stats.buffers.load(Ordering::Relaxed), 0, "nothing rendered");
+        assert_eq!(stats.schedule_swaps.load(Ordering::Relaxed), setup_swaps + 1000);
         assert_eq!(stats.leaked.load(Ordering::Relaxed), 0, "nothing leaked");
-        assert!(stats.schedule_swaps.load(Ordering::Relaxed) > 0);
     }
 }
