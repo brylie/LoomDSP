@@ -224,6 +224,19 @@ impl Engine {
         self.safety.is_silent()
     }
 
+    /// Applies pending changes without rendering audio, for an engine that
+    /// no device plays. The command queue then never fills, and replaced
+    /// memory goes back to the controller to be freed (#220).
+    ///
+    /// It does only what [`process`](Self::process) does first: no MIDI is
+    /// read, no module runs, the transport does not move, and no telemetry,
+    /// display, or live value is published. Commands are applied in order
+    /// either way, so the next `process` call gives the same output as if
+    /// this call had not happened. Real-time safe, like `process`.
+    pub fn apply_pending(&mut self) {
+        self.apply_commands();
+    }
+
     /// Renders `left.len()` frames (both slices must have the same length).
     ///
     /// Applies pending changes first, at this buffer boundary (FR-GRAPH-02).

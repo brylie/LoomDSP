@@ -21,6 +21,9 @@ use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 /// param index`, and module IDs count up from 1, so no key has this value.
 const NO_OWNER: u64 = u64::MAX;
 
+/// The bits of a cell that has no value yet: a quiet NaN.
+const EMPTY: u32 = 0x7FC0_0000;
+
 /// "No cell", stored in a parameter fill that has none.
 pub(crate) const NO_CELL: u32 = u32::MAX;
 
@@ -38,14 +41,16 @@ impl LiveTable {
     }
 
     /// Engine: gives `cell` to the parameter with `key`, unless it already
-    /// has it. The value starts at 0 until the first block stores one.
+    /// has it. The cell holds no value until the first block stores one,
+    /// so an engine that applies edits but renders nothing (no audio
+    /// device, #220) shows no dot rather than a dot at 0.
     pub fn claim(&self, cell: u32, key: u64) {
         let cell = cell as usize;
         if self.owners[cell].load(Ordering::Relaxed) == key {
             return;
         }
         self.owners[cell].store(NO_OWNER, Ordering::Release);
-        self.values[cell].store(0, Ordering::Release);
+        self.values[cell].store(EMPTY, Ordering::Release);
         self.owners[cell].store(key, Ordering::Release);
     }
 
@@ -70,7 +75,8 @@ impl LiveTable {
         let value = f32::from_bits(self.values[cell].load(Ordering::Acquire));
         // If the cell changed hands while we read, the value may belong to
         // the next parameter. Its owner change is visible by now.
-        (self.owners[cell].load(Ordering::Acquire) == key).then_some(value)
+        // A cell with no value yet holds NaN.
+        (self.owners[cell].load(Ordering::Acquire) == key && !value.is_nan()).then_some(value)
     }
 }
 
@@ -137,9 +143,11 @@ mod tests {
         assert_eq!(table.read(0, 7), Some(0.25));
         assert_eq!(table.read(0, 8), None);
         // Moved to another parameter: the old one reads nothing, and the
-        // new one starts at 0.
+        // new one has no value until a block stores one.
         table.claim(0, 8);
         assert_eq!(table.read(0, 7), None);
+        assert_eq!(table.read(0, 8), None);
+        table.write(0, 0.0);
         assert_eq!(table.read(0, 8), Some(0.0));
         table.release(0);
         assert_eq!(table.read(0, 8), None);

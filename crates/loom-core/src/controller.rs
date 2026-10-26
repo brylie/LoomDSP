@@ -952,6 +952,7 @@ mod tests {
     use super::*;
     use crate::module::{Module, PortIo, ProcessContext};
     use crate::{Panel, ParamOptions, ParamSpec, Widget};
+    use std::sync::atomic::Ordering;
 
     struct Silent;
 
@@ -1014,5 +1015,34 @@ mod tests {
         let error = full.set_params(id, &[(0, 1.0), (1, 0.0)]).unwrap_err();
         assert!(matches!(error, LoomError::QueueFull), "{error}");
         assert_eq!(full.graph().node(id).unwrap().params, vec![0.0, 0.0]);
+    }
+
+    /// An engine that no device plays takes edits for as long as someone
+    /// calls `Engine::apply_pending` (#220). It renders nothing: no buffer
+    /// is counted, and nothing leaks, because replaced schedules come back
+    /// to the controller.
+    #[test]
+    fn apply_pending_drains_the_queue_without_rendering() {
+        let mut registry = Registry::new();
+        registry.register(&GATE).expect("test module is valid");
+        let config = EngineConfig {
+            command_capacity: 4,
+            ..EngineConfig::default()
+        };
+        let parts = create_engine(Arc::new(registry), config);
+        let (mut room, mut engine) = (parts.controller, parts.engine);
+        let id = room.add_module(GATE.id).unwrap();
+        room.commit().unwrap();
+        for i in 0..1000 {
+            room.set_param_named(id, "on", (i % 2) as f32).unwrap();
+            // A commit swaps in a schedule; the old one is garbage.
+            room.commit().unwrap();
+            engine.apply_pending();
+            room.collect_garbage();
+        }
+        let stats = room.stats();
+        assert_eq!(stats.buffers.load(Ordering::Relaxed), 0, "nothing rendered");
+        assert_eq!(stats.leaked.load(Ordering::Relaxed), 0, "nothing leaked");
+        assert!(stats.schedule_swaps.load(Ordering::Relaxed) > 0);
     }
 }

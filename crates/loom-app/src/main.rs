@@ -383,11 +383,12 @@ struct App {
     quit: bool,
     theme: Theme,
     _audio: Option<RunningAudio>,
-    /// The engine, when no audio device plays it. Nothing in the app runs
-    /// it; tests run it by hand with `App::process`, so they can check what
-    /// depends on a running engine (live values, lights, meters). Keeping
-    /// it costs the real audio path nothing: there is none.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// The engine, when no audio device plays it. The app never renders
+    /// with it: each update only applies the queued edits
+    /// (`App::drain_idle_engine`), so the queue never fills. Tests run it by
+    /// hand with `App::process`, so they can check what depends on a
+    /// running engine (live values, lights, meters). Keeping it costs the
+    /// real audio path nothing: there is none.
     idle_engine: Option<loom_core::Engine>,
     /// Meter and scope data from the engine, drained on the telemetry
     /// thread so the queues never fill.
@@ -856,6 +857,8 @@ impl App {
             still: None,
             step_name: None,
         };
+        // A stream that failed to start took the engine with it.
+        app.keep_engine_idle();
         // A patch just loaded is the one on disk.
         app.history.mark_saved();
         app.saved_content = Some(app.current_patch());
@@ -1176,6 +1179,17 @@ impl App {
             lights: watched,
             generation: self.generation,
         })
+    }
+
+    /// Applies the edits queued for the idle engine, and frees what it
+    /// hands back, after every update. Without it, nothing would drain the
+    /// command queue when no device plays, and edits would fail once it is
+    /// full (#220). It renders no audio, so lights and meters stay still.
+    fn drain_idle_engine(&mut self) {
+        if let Some(engine) = self.idle_engine.as_mut() {
+            engine.apply_pending();
+            self.controller.collect_garbage();
+        }
     }
 
     /// Runs the engine for `frames` frames on silent buffers, as an audio
@@ -1671,6 +1685,7 @@ impl App {
                 Task::none()
             }
         };
+        self.drain_idle_engine();
         if self.quit {
             // Stop audio now, with a fade so it does not click, so a
             // recording is closed before the process ends, and leave no
@@ -2676,6 +2691,31 @@ mod tests {
             }
             std::thread::sleep(Duration::from_millis(30));
         }
+    }
+
+    /// Without an audio device the app keeps taking edits (#220). Each
+    /// update applies the idle engine's queued commands, so 5,000 knob
+    /// moves, far more than the queue holds, never fill it. The engine
+    /// renders nothing in the meantime.
+    #[test]
+    fn no_audio_keeps_taking_edits() {
+        let mut app = app();
+        assert!(app._audio.is_none() && app.idle_engine.is_some());
+        let filter = app.controller.add_module("loom.filter.svf").unwrap();
+        app.commit();
+        let capacity = loom_core::EngineConfig::default().command_capacity;
+        for i in 0..5_000 {
+            let _ = app.update(Message::Param {
+                module: filter.0,
+                index: 0,
+                position: (i % 100) as f32 / 100.0,
+            });
+            assert!(!app.status.contains("queue is full"), "move {i}: {}", app.status);
+        }
+        assert!(5_000 > capacity);
+        let stats = app.controller.stats();
+        assert_eq!(stats.buffers.load(std::sync::atomic::Ordering::Relaxed), 0);
+        assert_eq!(stats.leaked.load(std::sync::atomic::Ordering::Relaxed), 0);
     }
 
     fn open_at(app: &mut App, world: Point) {

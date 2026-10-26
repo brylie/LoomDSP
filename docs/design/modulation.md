@@ -101,7 +101,7 @@ A dot on a modulated knob shows the value the engine gives the parameter (FR-MOD
 - **Which frame.** The last frame of the block. *Why:* it is the value the parameter has when the block ends, which matches display values. An average would hide fast sources, and a peak would show values the parameter only touches. At audio rate the dot jumps from frame to frame. That is honest, and the range arc already shows the span.
 - **Which value.** The value after step 1 of rule 12, mapped to the control's 0 to 1 position with `ParamSpec::normalize`. So the dot is the engine's modulated value before any module input adds to it, the same thing the range arc shows.
 - **Drawing.** The UI reads the values once per drawn frame, for knobs with enabled assignments, while the patch has one. The dot positions go into the canvas's `PanelValues` buffer, so a moving dot never rebuilds tiles, ports, or cables (ADR-0010).
-- **No dot** when every assignment on the knob is off, or when the parameter has no cell. Toggles and radio buttons show no live value: their modulation dot already says they are modulated, and a flickering state on a small control is hard to read.
+- **No dot** when every assignment on the knob is off, when the parameter has no cell, or before the engine has run a block with the cell. *Why the last one:* without an audio device the engine applies edits but runs no blocks (#220), and a dot at 0 would show a value the parameter never has. Toggles and radio buttons show no live value: their modulation dot already says they are modulated, and a flickering state on a small control is hard to read.
 
 #### Lines
 

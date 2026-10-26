@@ -561,8 +561,35 @@ impl App {
         Ok(parts)
     }
 
+    /// Gives the app an idle engine after a stream failed to start. The
+    /// failed stream dropped the engine it was given, so nothing would drain
+    /// the controller's queue, and edits would fail once it is full (#220).
+    /// The new engine holds the patch as it is now, at the current rate.
+    /// Does nothing while a device plays or an idle engine is in place.
+    pub(crate) fn keep_engine_idle(&mut self) {
+        if self._audio.is_some() || self.idle_engine.is_some() {
+            return;
+        }
+        let Ok(parts) = self.rebuilt_engine(self.sample_rate) else {
+            return;
+        };
+        let EngineParts {
+            controller,
+            engine,
+            midi,
+            telemetry,
+        } = parts;
+        self.rig.attach(midi, false);
+        self.generation += 1;
+        self.controller = controller;
+        self.monitor = crate::monitor::Monitor::new(telemetry, self.generation);
+        self.live = crate::live::Live::new();
+        self.idle_engine = Some(engine);
+    }
+
     /// Puts a new engine in place of the old one, which has stopped, and
-    /// plays it on `output`. On an error the app is left with no audio.
+    /// plays it on `output`. On an error the app is left with no audio,
+    /// and an idle engine that takes edits.
     fn play(&mut self, mut output: AudioOutput, parts: EngineParts) -> Result<(), String> {
         let EngineParts {
             controller,
@@ -599,6 +626,7 @@ impl App {
                 self.audio_name = format!("no audio ({e})");
                 self.rig.playing = None;
                 self.midi = None;
+                self.keep_engine_idle();
                 return Err(e);
             }
         }
@@ -1138,6 +1166,21 @@ mod tests {
             app.status,
             "Could not use \"Fake B\": the stream did not start. Audio is off."
         );
+
+        // The failed stream took its engine; an idle one takes its place,
+        // so edits still work, well past the queue's size (#220).
+        assert!(app.idle_engine.is_some());
+        let constant = loom_modules::registry().resolve("loom.math.constant").unwrap();
+        app.add_module(constant, iced::Point::new(100.0, 100.0));
+        let id = *app.selection.first().unwrap();
+        for i in 0..2_000 {
+            let _ = app.update(crate::Message::Param {
+                module: id,
+                index: 0,
+                position: (i % 100) as f32 / 100.0,
+            });
+            assert!(!app.status.contains("queue is full"), "move {i}: {}", app.status);
+        }
     }
 
     #[test]
