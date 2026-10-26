@@ -353,7 +353,7 @@ enum Message {
     },
 }
 
-/// "opened <path>", followed by the load notes when there are any, so a note
+/// `opened <path>`, followed by the load notes when there are any, so a note
 /// about what loaded differently stays in view.
 fn opened_status(path: &std::path::Path, notes: &[String]) -> String {
     if notes.is_empty() {
