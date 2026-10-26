@@ -691,6 +691,19 @@ impl App {
         Ok(())
     }
 
+    /// Extracts the underlying reason from an audio restart error message for
+    /// reporting in the status bar.
+    pub(crate) fn unwrap_reopen_error(raw: &str) -> &str {
+        let mut s = raw;
+        if let Some(rest) = s.strip_prefix("Could not use \"")
+            && let Some(idx) = rest.find("\": ")
+        {
+            s = &rest[idx + 3..];
+        }
+        let without_suffix = s.strip_suffix(". Audio is off.").unwrap_or(s);
+        without_suffix.strip_suffix('.').unwrap_or(without_suffix)
+    }
+
     /// Stops audio immediately without fading out. Used when the audio device
     /// was lost or disconnected (device-changes.md, Audio device loss).
     pub(crate) fn stop_audio_immediate(&mut self) {
@@ -884,11 +897,7 @@ impl App {
                     }
                     if lost.attempts >= 10 {
                         let raw = lost.last_error.as_deref().unwrap_or("no audio output device found");
-                        let prefix = format!("Could not use \"{}\": ", lost.device);
-                        let reason = raw
-                            .strip_prefix(&prefix)
-                            .and_then(|s| s.strip_suffix(". Audio is off."))
-                            .unwrap_or(raw);
+                        let reason = Self::unwrap_reopen_error(raw);
                         let message = format!(
                             "Audio: could not reopen \"{}\": {reason}. Choose a device in Preferences.",
                             lost.device
@@ -927,11 +936,7 @@ impl App {
                     }
                     if lost.attempts >= 10 {
                         let raw = lost.last_error.as_deref().unwrap_or("could not start stream");
-                        let prefix = format!("Could not use \"{}\": ", lost.device);
-                        let reason = raw
-                            .strip_prefix(&prefix)
-                            .and_then(|s| s.strip_suffix(". Audio is off."))
-                            .unwrap_or(raw);
+                        let reason = Self::unwrap_reopen_error(raw);
                         let message = format!(
                             "Audio: could not reopen \"{}\": {reason}. Choose a device in Preferences.",
                             lost.device
@@ -2200,5 +2205,57 @@ mod tests {
         assert!(app.rig.window.is_some());
         let _ = app.update(press(Key::Named(Named::Escape), Modifiers::empty()));
         assert!(app.rig.window.is_none());
+    }
+
+    /// unwrap_reopen_error strips the restart wrapper while preserving raw reasons.
+    #[test]
+    fn unwrap_reopen_error_normalizes_various_formats() {
+        assert_eq!(
+            App::unwrap_reopen_error("Could not use \"Fake B\": the stream did not start. Audio is off."),
+            "the stream did not start"
+        );
+        assert_eq!(
+            App::unwrap_reopen_error("Could not use \"Fake A\": the device is busy. Audio is off."),
+            "the device is busy"
+        );
+        assert_eq!(
+            App::unwrap_reopen_error("the stream did not start."),
+            "the stream did not start"
+        );
+        assert_eq!(
+            App::unwrap_reopen_error("the stream did not start"),
+            "the stream did not start"
+        );
+        assert_eq!(
+            App::unwrap_reopen_error("no audio output device found"),
+            "no audio output device found"
+        );
+    }
+
+    /// When the initial device fails to open at boot, the app reports the error and preserves the idle engine.
+    #[test]
+    fn boot_open_failure_leaves_engine_idle_and_reports_error() {
+        let dir = folder("boot-open-fail");
+        let fake = Fake::new(&[fake::device("Fake A"), fake::device("Fake B")], &[]);
+        fake.broken.borrow_mut().push("Fake A".into());
+        let fake = Rc::new(fake);
+        let app = start(args(&dir), &fake);
+        assert!(app._audio.is_none());
+        assert!(app.idle_engine.is_some());
+        assert!(
+            app.audio_name.contains("the device is busy"),
+            "audio_name: {:?}",
+            app.audio_name
+        );
+    }
+
+    /// AudioPoll subscription is active when audio is enabled, and Message::AudioPoll triggers poll_audio.
+    #[test]
+    fn audio_poll_subscription_and_message_handling() {
+        let dir = folder("audio-poll-sub");
+        let fake = two_devices();
+        let mut app = start(args(&dir), &fake);
+        let _ = app.subscription();
+        let _ = app.update(crate::Message::AudioPoll);
     }
 }

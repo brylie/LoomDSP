@@ -714,11 +714,74 @@ fn lost_system_default_reopen_failure_retries_and_stops() {
         run.app.check_audio(now);
     }
 
-    assert!(run.app.status.contains("could not reopen \"Fake A\""));
+    assert_eq!(
+        run.app.status,
+        "Audio: could not reopen \"Fake A\": the stream did not start. Choose a device in Preferences."
+    );
     assert!(run.app._audio.is_none());
 
     // Subsequent checks do not retry
     now += Duration::from_secs(1);
     run.app.check_audio(now);
-    assert!(run.app.status.contains("could not reopen \"Fake A\""));
+    assert_eq!(
+        run.app.status,
+        "Audio: could not reopen \"Fake A\": the stream did not start. Choose a device in Preferences."
+    );
+}
+
+/// When reopening a lost Named device fails at the open step (e.g. device is busy),
+/// retry logic increments attempts and reports the error reason.
+#[test]
+fn lost_named_device_open_failure_retries_and_stops() {
+    let mut run = Setup {
+        preferences: Some("Preferences(version: 1, audio: (device: Named(\"Fake B\")))"),
+        ..Setup::new("lost-named-busy", PatchFrom::Example("sine.ron"))
+    }
+    .start();
+
+    // Lose Fake B
+    run.host.remove_device("Fake B");
+    run.app.check_audio(Instant::now());
+    assert!(run.app._audio.is_none());
+
+    // Fake B comes back, but fails to open
+    run.host.add_device(fake::device("Fake B"));
+    run.host.broken.borrow_mut().push("Fake B".into());
+
+    let mut now = Instant::now();
+    for _ in 1..=10 {
+        now += Duration::from_secs(1);
+        run.app.check_audio(now);
+    }
+
+    assert_eq!(
+        run.app.status,
+        "Audio: could not reopen \"Fake B\": the device is busy. Choose a device in Preferences."
+    );
+    assert!(run.app._audio.is_none());
+}
+
+/// When SystemDefault is lost and no default output device is found at all, retries stop after 10 attempts.
+#[test]
+fn lost_system_default_with_no_devices_stops_after_ten_attempts() {
+    let mut run = Setup::new("lost-default-none", PatchFrom::Example("sine.ron")).start();
+
+    // Remove Fake A and Fake B so no devices remain
+    run.host.remove_device("Fake A");
+    run.host.remove_device("Fake B");
+    run.app.check_audio(Instant::now());
+
+    assert!(run.app._audio.is_none());
+    assert!(run.app.rig.lost_audio.is_some());
+
+    let mut now = Instant::now();
+    for _ in 1..=10 {
+        now += Duration::from_secs(1);
+        run.app.check_audio(now);
+    }
+
+    assert_eq!(
+        run.app.status,
+        "Audio: could not reopen \"Fake A\": no audio output device found. Choose a device in Preferences."
+    );
 }

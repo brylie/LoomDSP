@@ -537,19 +537,6 @@ impl AudioOutput {
             Kind::Device { ref device, config } => {
                 let render_box = Box::new(render);
                 let render_ptr = Box::into_raw(render_box);
-                /// Wrapper for passing raw pointer to the audio callback closure.
-                struct RenderPtr(*mut Render);
-                // SAFETY: RenderPtr is sent to the audio callback closure.
-                unsafe impl Send for RenderPtr {}
-                impl RenderPtr {
-                    /// Calls render on the underlying Render pointer.
-                    unsafe fn render(&self, data: &mut [f32]) {
-                        // SAFETY: caller guarantees the pointee is valid and exclusively accessed.
-                        unsafe {
-                            (*self.0).render(data);
-                        }
-                    }
-                }
                 let ptr = RenderPtr(render_ptr);
                 let data_callback = move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                     // SAFETY: render_ptr is kept alive until StreamHandle drops.
@@ -776,6 +763,23 @@ impl Render {
     }
 }
 
+/// Wrapper for passing raw pointer to the audio callback closure or clock thread.
+struct RenderPtr(*mut Render);
+
+// SAFETY: Rendering access is exclusive to the audio callback or clock thread, respectively,
+// and stream teardown or thread joining completes before Render is reclaimed.
+unsafe impl Send for RenderPtr {}
+
+impl RenderPtr {
+    /// Calls render on the underlying Render pointer.
+    unsafe fn render(&self, data: &mut [f32]) {
+        // SAFETY: caller guarantees the pointee is valid and exclusively accessed.
+        unsafe {
+            (*self.0).render(data);
+        }
+    }
+}
+
 /// Keeps a cpal stream and its render state alive until dropped.
 struct StreamHandle {
     stream: Option<cpal::Stream>,
@@ -816,19 +820,6 @@ impl Clock {
         let period = Duration::from_secs_f64(f64::from(block) / f64::from(sample_rate));
         let render_box = Box::new(render);
         let render_ptr = Box::into_raw(render_box);
-        /// Wrapper for passing raw pointer to the clock thread closure.
-        struct RenderPtr(*mut Render);
-        // SAFETY: RenderPtr is sent to the clock thread closure.
-        unsafe impl Send for RenderPtr {}
-        impl RenderPtr {
-            /// Calls render on the underlying Render pointer.
-            unsafe fn render(&self, data: &mut [f32]) {
-                // SAFETY: caller guarantees the pointee is valid and exclusively accessed.
-                unsafe {
-                    (*self.0).render(data);
-                }
-            }
-        }
         let ptr = RenderPtr(render_ptr);
         let thread = match std::thread::Builder::new()
             .name("loom-audio-clock".to_string())
@@ -1782,6 +1773,94 @@ mod tests {
         state.receive(&[]);
         assert!(!state.holds_notes());
     }
+
+    /// Marking a running stream dead stops it and reports `is_dead`.
+    #[test]
+    fn marking_a_running_stream_dead_reports_is_dead() {
+        let parts = create_engine(loom_modules::registry(), EngineConfig::default());
+        let audio = AudioOutput::clock(48_000, 64).start(parts.engine).unwrap();
+        assert!(!audio.is_dead());
+        assert!(!audio.stats().is_dead());
+        audio.mark_dead();
+        assert!(audio.is_dead());
+        assert!(audio.stats().is_dead());
+        assert!(audio.stats().snapshot().is_dead);
+        audio.stop_immediate();
+    }
+
+    /// StartError implements formatting, source, and conversion to HostError.
+    #[test]
+    fn start_error_formatting_and_traits() {
+        let output = AudioOutput::clock(48_000, 256);
+        let parts = create_engine(loom_modules::registry(), EngineConfig::default());
+        let err = StartError {
+            output,
+            engine: parts.engine,
+            error: HostError::Audio("backend failed".into()),
+        };
+        assert_eq!(format!("{err}"), "audio error: backend failed");
+        assert!(format!("{err:?}").contains("StartError"));
+        use std::error::Error;
+        assert!(err.source().is_some());
+        let host_err: HostError = err.into();
+        assert_eq!(format!("{host_err}"), "audio error: backend failed");
+    }
+
+    /// CallbackStats supports clearing the dead flag and non-fatal error kinds.
+    #[test]
+    fn callback_stats_dead_flag_clearing() {
+        let stats = CallbackStats::default();
+        assert!(!stats.is_dead());
+        stats.mark_dead();
+        assert!(stats.is_dead());
+        stats.clear_dead();
+        assert!(!stats.is_dead());
+        stats.stream_error(cpal::ErrorKind::DeviceChanged);
+        assert!(!stats.is_dead());
+        stats.stream_error(cpal::ErrorKind::StreamInvalidated);
+        assert!(stats.is_dead());
+    }
+
+    /// StreamHandle drops its stream and safely frees the Render pointer.
+    #[test]
+    fn stream_handle_drops_safely() {
+        let parts = create_engine(loom_modules::registry(), EngineConfig::default());
+        let stats = Arc::new(CallbackStats::default());
+        let render = Render::new(parts.engine, 2, 48_000, stats, None);
+        let render_ptr = Box::into_raw(Box::new(render));
+        let handle = StreamHandle {
+            stream: None,
+            render: render_ptr,
+        };
+        drop(handle);
+    }
+
+    /// RenderPtr safely delegates render calls.
+    #[test]
+    fn render_ptr_delegates_render() {
+        let parts = create_engine(loom_modules::registry(), EngineConfig::default());
+        let stats = Arc::new(CallbackStats::default());
+        let render = Render::new(parts.engine, 2, 48_000, stats, None);
+        let render_ptr = Box::into_raw(Box::new(render));
+        let ptr = RenderPtr(render_ptr);
+        let mut buffer = [0.0f32; 64];
+        // SAFETY: render_ptr is uniquely owned in this test and freed after render completes.
+        unsafe {
+            ptr.render(&mut buffer);
+            drop(Box::from_raw(render_ptr));
+        }
+    }
+
+    /// Render::into_parts returns engine and optional tap.
+    #[test]
+    fn render_into_parts_returns_engine_and_tap() {
+        let parts = create_engine(loom_modules::registry(), EngineConfig::default());
+        let stats = Arc::new(CallbackStats::default());
+        let render = Render::new(parts.engine, 2, 48_000, stats, None);
+        let (engine, tap) = render.into_parts();
+        assert!(tap.is_none());
+        assert!(!engine.is_silent());
+    }
 }
 
 /// Checks on a real audio device, ignored by default.
@@ -1839,52 +1918,5 @@ mod virtual_midi_tests {
         input.close();
         assert!(wait_for(0.0), "closing the input releases the held note");
         assert!(keys.holds_notes(), "while the key is still held");
-    }
-
-    /// Marking a running stream dead stops it and reports `is_dead`.
-    #[test]
-    fn marking_a_running_stream_dead_reports_is_dead() {
-        let parts = create_engine(loom_modules::registry(), EngineConfig::default());
-        let audio = AudioOutput::clock(48_000, 64).start(parts.engine).unwrap();
-        assert!(!audio.is_dead());
-        assert!(!audio.stats().is_dead());
-        audio.mark_dead();
-        assert!(audio.is_dead());
-        assert!(audio.stats().is_dead());
-        assert!(audio.stats().snapshot().is_dead);
-        audio.stop_immediate();
-    }
-
-    /// StartError implements formatting, source, and conversion to HostError.
-    #[test]
-    fn start_error_formatting_and_traits() {
-        let output = AudioOutput::clock(48_000, 256);
-        let parts = create_engine(loom_modules::registry(), EngineConfig::default());
-        let err = StartError {
-            output,
-            engine: parts.engine,
-            error: HostError::Audio("backend failed".into()),
-        };
-        assert_eq!(format!("{err}"), "audio error: backend failed");
-        assert!(format!("{err:?}").contains("StartError"));
-        use std::error::Error;
-        assert!(err.source().is_some());
-        let host_err: HostError = err.into();
-        assert_eq!(format!("{host_err}"), "audio error: backend failed");
-    }
-
-    /// CallbackStats supports clearing the dead flag and non-fatal error kinds.
-    #[test]
-    fn callback_stats_dead_flag_clearing() {
-        let stats = CallbackStats::default();
-        assert!(!stats.is_dead());
-        stats.mark_dead();
-        assert!(stats.is_dead());
-        stats.clear_dead();
-        assert!(!stats.is_dead());
-        stats.stream_error(cpal::ErrorKind::DeviceChanged);
-        assert!(!stats.is_dead());
-        stats.stream_error(cpal::ErrorKind::StreamInvalidated);
-        assert!(stats.is_dead());
     }
 }

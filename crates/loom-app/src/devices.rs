@@ -933,4 +933,13 @@ mod tests {
         let started = host.start(output, parts.engine);
         assert!(started.is_ok());
     }
+
+    /// Verifies that the default Host::start implementation handles outputs.
+    #[test]
+    fn host_start_default_implementation() {
+        let output = AudioOutput::clock(48_000, 256);
+        let parts = loom_core::create_engine(loom_modules::registry(), loom_core::EngineConfig::default());
+        let started = System.start(output, parts.engine);
+        assert!(started.is_ok());
+    }
 }
