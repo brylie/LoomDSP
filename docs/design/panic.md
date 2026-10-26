@@ -3,13 +3,13 @@
 One key, one button, and one MIDI trigger that silence everything and clear stuck notes at once, without a click.
 
 - **Kind:** living specification.
-- **Status:** Agreed on merge. Not built.
+- **Status:** Implemented ([#25](https://github.com/brylie/LoomDSP/issues/25)). The manual check on a real device is listed in the pull request.
 - **Decision behind it:** none. It builds on [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md) (commands) and [ADR-0019](../adr/0019-output-safety-stage.md) (output safety).
 - **Use case and requirements:** UC3, FR-PERF-05.
 - **Background:** [Output safety](../learn/output-safety.md).
 - **Prior art:** "all notes off" and "panic" buttons on hardware and software synthesizers. Named only to explain the expectation.
 - **Issues:** [#25](https://github.com/brylie/LoomDSP/issues/25).
-- **Code:** a new engine command next to `ResetModule` in `crates/loom-core/src/engine.rs`, `Controller::panic`, a toolbar button and key in `crates/loom-app`.
+- **Code:** `Command::Panic` and `Command::SetPanicTrigger` in `crates/loom-core/src/engine.rs`, `crates/loom-core/src/panic.rs`, the panic fade in `safety.rs`, `Controller::panic` and `Controller::set_panic_trigger`, and `crates/loom-app/src/panic.rs` (key, button, Preferences section).
 
 ## Goal
 

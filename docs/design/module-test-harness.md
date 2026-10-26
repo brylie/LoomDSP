@@ -5,6 +5,7 @@ A test harness for module authors: render one module with given inputs and param
 - **Kind:** living specification.
 - **Status:** Implemented, P1
 - **Decision behind it:** [ADR-0002](../adr/0002-graph-execution-and-feedback.md) ("The SDK harness must cover this").
+- **Background:** [Block-size invariance](../learn/block-size-invariance.md): why a module must sound the same at any block size, and what breaks it.
 - **Use case and requirements:** FR-SDK-02, NFR-OSS-05.
 - **Issues:** [#42](https://github.com/brylie/LoomDSP/issues/42), [#208](https://github.com/brylie/LoomDSP/issues/208) (test modules), [#127](https://github.com/brylie/LoomDSP/issues/127) (non-finite inputs)
 - **Code:** `crates/loom-test`; the built-in modules use it in `crates/loom-modules/tests/reference.rs`.

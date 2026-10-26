@@ -85,6 +85,8 @@ pub enum Command {
     },
     Undo,
     Redo,
+    /// Runs panic (`docs/design/panic.md`).
+    Panic,
     Open {
         path: PathBuf,
     },
@@ -803,7 +805,7 @@ fn refuse_dialog_keys(key: &keyboard::Key, modifiers: keyboard::Modifiers) -> Re
 /// The toolbar buttons `press` clicks, by stable name. Labels are not
 /// used: they change while the app runs ("Hold note" becomes "Release
 /// note") and may be reworded.
-const BUTTONS: [&str; 4] = ["learn", "hold", "undo", "redo"];
+const BUTTONS: [&str; 5] = ["learn", "hold", "panic", "undo", "redo"];
 
 /// The message a toolbar button sends, or why it cannot be pressed: it
 /// opens a dialog (rule 9), it is disabled, or there is no such button.
@@ -818,16 +820,19 @@ fn press_message(app: &App, name: &str) -> Result<Message, String> {
                 .is_none()
                 .then_some("Hold note is disabled: no audio is playing the engine"),
         ),
+        "panic" => (Message::Panic, None),
         "undo" => (
             Message::Undo,
-            app.history
+            app.edits
+                .history
                 .undo_step()
                 .is_none()
                 .then_some("Undo is disabled: nothing to undo"),
         ),
         "redo" => (
             Message::Redo,
-            app.history
+            app.edits
+                .history
                 .redo_step()
                 .is_none()
                 .then_some("Redo is disabled: nothing to redo"),
@@ -1013,6 +1018,10 @@ impl App {
                 send(self, Message::Canvas(CanvasEvent::Disconnect(to)));
                 Map::new()
             }),
+            Command::Panic => {
+                send(self, Message::Panic);
+                Ok(Map::new())
+            }
             Command::Undo | Command::Redo => {
                 let undo = matches!(call.command, Command::Undo);
                 send(self, if undo { Message::Undo } else { Message::Redo });
@@ -1985,44 +1994,41 @@ mod tests {
         assert!(mapping.contains("21"), "{row}");
     }
 
-    /// `sample` records a knob's live value once per frame (#255): with the
-    /// filter envelope modulating Resonance and a note held, the live dot
-    /// moves. Then the app asks for no more frames (rule 7).
+    /// `sample` records a knob's live value once per frame (#255): with a
+    /// held envelope modulating a filter's Resonance, the live dot moves.
+    /// Then the app asks for no more frames (rule 7).
     #[test]
     fn sample_follows_a_live_value_frame_by_frame() {
-        let mut app = App::new(crate::Args {
-            patch: Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches/subtractive.ron")),
-            fake_audio: true,
-            no_audio: false,
-            ..crate::tests::app_args()
-        });
+        // The idle engine, run by `run_playing` between frames, so the
+        // frame count does not depend on how fast this machine draws. A
+        // held envelope stands in for a played note, which needs audio.
+        let (mut app, env) = held_envelope();
+        let filter = app.controller.add_module("loom.filter.svf").unwrap();
+        app.commit();
         let resonance = app
             .controller
             .graph()
-            .node(ModuleId(4))
+            .node(filter)
             .unwrap()
             .descriptor
             .param_index("resonance")
             .unwrap();
         let _ = app.update(Message::Assign {
             source: loom_core::OutputRef {
-                module: ModuleId(5),
+                module: ModuleId(env),
                 port: 0,
             },
-            module: 4,
+            module: filter.0,
             index: resonance,
         });
-        assert_eq!(
-            run(&mut app, r#"{"cmd": "note", "note": 60, "on": true}"#),
-            Ok(Map::new())
-        );
 
-        let sample = run(&mut app, r#"{"cmd": "sample", "target": "4:resonance", "ms": 300}"#).unwrap();
+        let line = format!(r#"{{"cmd": "sample", "target": "{}:resonance", "ms": 300}}"#, filter.0);
+        let sample = run_playing(&mut app, &line).unwrap();
         assert!(!app.control_waiting());
         let frames = sample["frames"].as_array().unwrap();
-        // A busy CI machine draws few frames in 300 ms; two are enough to
-        // see the live value move.
-        assert!(frames.len() >= 2, "{sample:?}");
+        // One entry per test-clock frame inside the 300 ms: at 0, 16.667,
+        // and so on up to 283.3 ms. The count does not depend on the machine.
+        assert_eq!(frames.len(), 18, "{sample:?}");
         let times: Vec<f64> = frames.iter().map(|f| f["t"].as_f64().unwrap()).collect();
         assert_eq!(times[0], 0.0);
         assert!(times.windows(2).all(|t| t[0] < t[1]), "{times:?}");
@@ -2037,9 +2043,11 @@ mod tests {
             "only meters have a peak"
         );
 
-        let error = run(&mut app, r#"{"cmd": "sample", "target": "4:nonsense", "ms": 100}"#).unwrap_err();
+        let line = format!(r#"{{"cmd": "sample", "target": "{}:nonsense", "ms": 100}}"#, filter.0);
+        let error = run(&mut app, &line).unwrap_err();
         assert!(error.contains("no control, light, or meter `nonsense`"), "{error}");
-        let error = run(&mut app, r#"{"cmd": "sample", "target": "4:resonance", "ms": 0}"#).unwrap_err();
+        let line = format!(r#"{{"cmd": "sample", "target": "{}:resonance", "ms": 0}}"#, filter.0);
+        let error = run(&mut app, &line).unwrap_err();
         assert!(error.contains("from 1 to"), "{error}");
         assert!(!app.control_waiting());
     }
@@ -2086,10 +2094,19 @@ mod tests {
         (app, env.0)
     }
 
+    /// The time between two frames of [`run_playing`]: 60 frames a second,
+    /// as a window draws.
+    const TEST_FRAME: Duration = Duration::from_micros(16_667);
+
     /// Runs a command like `run`, and between frames runs the idle engine
     /// and hands the app its lights and meter levels, as a playing stream
-    /// and the window's subscriptions would. A `sample` of a light or a
-    /// meter needs both; the tests have no subscriptions.
+    /// and the window's subscriptions would. A `sample` of a live value, a
+    /// light, or a meter needs both; the tests have no subscriptions.
+    ///
+    /// The frames come from a test clock, not the wall clock: each one is
+    /// [`TEST_FRAME`] after the last, with that much sound run before it.
+    /// So a `sample` of `ms` milliseconds always records the same number
+    /// of frames, however busy the machine is (#328).
     fn run_playing(app: &mut App, line: &str) -> Answer {
         let command: Command = serde_json::from_str(line).unwrap();
         let (sender, receiver) = std::sync::mpsc::channel();
@@ -2098,14 +2115,16 @@ mod tests {
             reply: Reply(Arc::new(Mutex::new(Some(sender)))),
         };
         let _ = app.control(call);
+        let sound = (app.controller.config().sample_rate * TEST_FRAME.as_secs_f32()).round() as usize;
+        let mut now = Instant::now();
+        // Enough frames for the longest `sample` in these tests.
         for _ in 0..500 {
             if let Ok(answer) = receiver.try_recv() {
                 return answer;
             }
-            // 50 ms of sound a frame.
-            app.run_engine(2400);
-            let _ = app.update(Message::ControlFrame(Instant::now()));
-            std::thread::sleep(Duration::from_millis(16));
+            app.run_engine(sound);
+            let _ = app.update(Message::ControlFrame(now));
+            now += TEST_FRAME;
         }
         receiver.try_recv().expect("answered")
     }
@@ -2190,6 +2209,19 @@ mod tests {
         assert!(!sample["frames"].as_array().unwrap().is_empty());
     }
 
+    /// `panic` and `press` with `button: "panic"` run panic, also with no
+    /// audio device (panic.md, rule 4).
+    #[test]
+    fn the_panic_command_and_button_run_panic() {
+        let mut app = App::new(crate::tests::app_args());
+        let ok = Ok(Map::new());
+        assert_eq!(run(&mut app, r#"{"cmd": "panic"}"#), ok);
+        assert!(app.status.starts_with("Panic"), "{}", app.status);
+        app.status.clear();
+        assert_eq!(run(&mut app, r#"{"cmd": "press", "button": "panic"}"#), ok);
+        assert!(app.status.starts_with("Panic"), "{}", app.status);
+    }
+
     /// `press` refuses what a click could not do: dialogs (rule 9),
     /// disabled buttons, and unknown names.
     #[test]
@@ -2210,7 +2242,7 @@ mod tests {
             assert!(error.contains(reason), "{name}: {error}");
         }
         let error = run(&mut app, r#"{"cmd": "press", "button": "MIDI learn"}"#).unwrap_err();
-        assert!(error.contains("buttons: learn, hold, undo, redo"), "{error}");
+        assert!(error.contains("buttons: learn, hold, panic, undo, redo"), "{error}");
         let error = run(&mut app, r#"{"cmd": "press", "button": "add"}"#).unwrap_err();
         assert!(error.contains("`add` command"), "{error}");
     }
@@ -2653,7 +2685,7 @@ mod tests {
     #[test]
     fn a_key_no_widget_takes_reaches_the_app() {
         let mut ui = pointer_ui();
-        assert!(ui.app.history.undo_step().is_some());
+        assert!(ui.app.edits.history.undo_step().is_some());
         let before = ui.app.controller.graph().assignments().count();
         assert_eq!(
             run_ui(&mut ui, r#"{"cmd": "key", "key": "z", "modifiers": ["cmd"]}"#),

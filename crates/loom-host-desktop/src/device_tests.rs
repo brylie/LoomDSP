@@ -139,6 +139,14 @@ fn capture_a_stop(stop: impl FnOnce(RunningAudio) -> bool) -> Option<(Vec<f32>, 
 /// a busy CI runner, PipeWire sometimes delivers one 512-frame quantum
 /// of silence and then the level again (#361). It is printed, with
 /// where it is, but does not count as the stop's step.
+///
+/// Why it is likely not LoomDSP's: in the failures, the stream stopped
+/// on the engine's silence, the gap came about 160 ms before the
+/// fade-out was asked for, and two failures had it at the same frame
+/// (24063) of the first try on a fresh sink. That fits the PipeWire
+/// graph settling on the new stream's 4096-frame latency more than a
+/// callback that ran late. The overrun and stream error counts printed
+/// with each capture tell the two apart if it comes back.
 fn level_and_step(samples: &[f32]) -> (f32, f32) {
     let level = samples.iter().fold(0.0f32, |m, x| m.max(x.abs()));
     let held = samples.iter().position(|x| x.abs() >= level).unwrap_or(0);

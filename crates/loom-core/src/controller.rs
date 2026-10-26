@@ -299,7 +299,7 @@ impl Controller {
         depth: f32,
     ) -> Result<AssignmentId, LoomError> {
         self.check_output(source)?;
-        self.check_param(target, param)?;
+        self.check_target(target, param)?;
         let id = AssignmentId(self.next_assignment);
         self.next_assignment += 1;
         self.graph.assignments.insert(
@@ -326,7 +326,7 @@ impl Controller {
             return Err(LoomError::DuplicateAssignmentId(id));
         }
         self.check_output(assignment.source)?;
-        self.check_param(assignment.target, assignment.param)?;
+        self.check_target(assignment.target, assignment.param)?;
         self.next_assignment = self.next_assignment.max(id.0 + 1);
         self.graph.assignments.insert(
             id,
@@ -427,7 +427,7 @@ impl Controller {
         if !control.is_valid() {
             return Err(LoomError::InvalidMidiControl(control));
         }
-        self.check_param(target, param)?;
+        self.check_target(target, param)?;
         let replaced: Vec<MidiMappingId> = self
             .graph
             .midi_mappings()
@@ -494,6 +494,13 @@ impl Controller {
     /// MIDI learn. `None` before the first one.
     pub fn last_control_change(&self) -> Option<ControlChangeSeen> {
         self.midi_feedback.last()
+    }
+
+    /// The last note on the engine received, or `None` before the first.
+    /// Its serial is counted with control changes, so learning a panic
+    /// trigger can take whichever came first after it started.
+    pub fn last_note_on(&self) -> Option<crate::midi_map::NoteOnSeen> {
+        self.midi_feedback.last_note()
     }
 
     /// A handle that reads the last control change from any thread.
@@ -797,6 +804,45 @@ impl Controller {
         self.send(Command::FadeOut)
     }
 
+    /// Starts tracking the notes held on MIDI input `input`. Call it before
+    /// events stamped with `input` reach the engine; events from an input
+    /// that is not open are dropped. Opening an input that is open releases
+    /// its notes first. Spec: `docs/design/device-changes.md`, Held notes
+    /// belong to an input.
+    pub fn open_midi_input(&mut self, input: crate::MidiInputId) -> Result<(), LoomError> {
+        let index = check_input_id(input)?;
+        self.send(Command::OpenInput {
+            index,
+            held: Box::default(),
+        })
+    }
+
+    /// Stops tracking MIDI input `input`: the engine sends a note off for
+    /// every note it held, unless another input still holds that note, and
+    /// drops later events stamped with it. Call it when the input is closed
+    /// or gone.
+    pub fn release_midi_input(&mut self, input: crate::MidiInputId) -> Result<(), LoomError> {
+        let index = check_input_id(input)?;
+        self.send(Command::ReleaseInput(index))
+    }
+
+    /// Runs panic (`docs/design/panic.md`): the engine fades its output to
+    /// silence over 10 ms, releases every held note and resets every
+    /// module at the silent frame, and fades back in over 10 ms. It is not
+    /// an edit: the graph, the parameters, and the transport do not change.
+    /// A panic sent while one is running is ignored.
+    pub fn panic(&mut self) -> Result<(), LoomError> {
+        self.send(Command::Panic)
+    }
+
+    /// Sets the MIDI message that runs panic in the engine, or `None` for
+    /// no trigger. The engine looks for it in its own MIDI path, so it
+    /// works with no UI thread. The trigger belongs to the player's rig,
+    /// so it is not part of the graph or the patch.
+    pub fn set_panic_trigger(&mut self, trigger: Option<crate::PanicTrigger>) -> Result<(), LoomError> {
+        self.send(Command::SetPanicTrigger(trigger))
+    }
+
     fn send(&mut self, command: Command) -> Result<(), LoomError> {
         self.commands.push(command).map_err(|_| LoomError::QueueFull)
     }
@@ -926,6 +972,21 @@ impl Controller {
             })
     }
 
+    /// Checks a parameter that modulation or a MIDI mapping will drive. A
+    /// transient parameter is a live gesture, so it is refused
+    /// (transient-params.md).
+    fn check_target(&self, module: ModuleId, index: usize) -> Result<(), LoomError> {
+        self.check_param(module, index)?;
+        let spec = &self.node(module)?.descriptor.params[index];
+        if spec.is_transient() {
+            return Err(LoomError::TransientParam {
+                module,
+                param: spec.name.to_string(),
+            });
+        }
+        Ok(())
+    }
+
     fn check_param(&self, module: ModuleId, index: usize) -> Result<(), LoomError> {
         let node = self.node(module)?;
         if index >= node.descriptor.params.len() {
@@ -951,6 +1012,14 @@ impl Controller {
 }
 
 /// Clamps a modulation depth to -1..1. NaN becomes 0, which adds nothing.
+/// The table index of a MIDI input id, if it is in range.
+fn check_input_id(input: crate::MidiInputId) -> Result<usize, LoomError> {
+    if input.0 == 0 || input.0 >= crate::MAX_MIDI_INPUTS {
+        return Err(LoomError::InvalidMidiInput(input.0));
+    }
+    Ok(usize::from(input.0))
+}
+
 fn clamp_depth(depth: f32) -> f32 {
     if depth.is_nan() { 0.0 } else { depth.clamp(-1.0, 1.0) }
 }
@@ -990,9 +1059,9 @@ mod tests {
         description: "A button for the queue test.",
         inputs: &[],
         outputs: &[],
-        params: &[parameter("mode"), parameter("on")],
+        params: &[parameter("mode"), parameter("on"), parameter("hold").transient()],
         role: ModuleRole::Dsp(|_| Box::new(Silent)),
-        panel: Panel::new(6, 3, &[Widget::button(0, 0, "on", "mode")]),
+        panel: Panel::new(6, 3, &[Widget::button(0, 0, "on", "hold", "mode")]),
         displays: &[],
     };
 
@@ -1013,7 +1082,7 @@ mod tests {
         room.commit().unwrap();
         room.set_param_named(id, "on", 1.0).unwrap();
         room.set_params(id, &[(0, 1.0), (1, 0.0)]).unwrap();
-        assert_eq!(room.graph().node(id).unwrap().params, vec![1.0, 0.0]);
+        assert_eq!(room.graph().node(id).unwrap().params, vec![1.0, 0.0, 0.0]);
 
         // Inserting the module and swapping in its schedule fill a queue of
         // two. Two parameter commands do not fit, so neither value changes.
@@ -1022,7 +1091,24 @@ mod tests {
         full.commit().unwrap();
         let error = full.set_params(id, &[(0, 1.0), (1, 0.0)]).unwrap_err();
         assert!(matches!(error, LoomError::QueueFull), "{error}");
-        assert_eq!(full.graph().node(id).unwrap().params, vec![0.0, 0.0]);
+        assert_eq!(full.graph().node(id).unwrap().params, vec![0.0, 0.0, 0.0]);
+    }
+
+    /// A transient parameter is sent to the engine like any other, but it
+    /// cannot be a modulation target or a MIDI mapping target.
+    #[test]
+    fn a_transient_parameter_cannot_be_modulated_or_mapped() {
+        let mut room = controller(16);
+        let id = room.add_module(GATE.id).unwrap();
+        room.commit().unwrap();
+        assert_eq!(room.set_param_named(id, "hold", 1.0).unwrap(), 1.0);
+        let control = MidiControl {
+            channel: 0,
+            controller: 1,
+        };
+        let error = room.map_midi(control, id, 2).unwrap_err();
+        assert!(matches!(error, LoomError::TransientParam { .. }), "{error}");
+        assert!(room.map_midi(control, id, 1).is_ok());
     }
 
     /// The largest module ID is refused with an error, not an overflow

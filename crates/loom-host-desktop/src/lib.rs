@@ -196,6 +196,88 @@ pub fn outputs() -> Result<Outputs, HostError> {
     Ok(Outputs { default, devices })
 }
 
+/// One MIDI input as the app lists it (`docs/design/device-changes.md`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MidiInputInfo {
+    /// The system's name, made unique in the list: a second input with the
+    /// same name is `Pad (2)`, a third `Pad (3)`, by their order on the
+    /// system.
+    pub name: String,
+    /// The system's identity for the port, as an opaque text. A port that
+    /// comes back with a new identity is a new connection.
+    pub id: String,
+}
+
+/// Names made unique by order: the first `Pad` stays `Pad`, the second is
+/// `Pad (2)`, and so on. The system gives no better identity portably.
+pub fn unique_names(names: &[String]) -> Vec<String> {
+    let mut seen: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    names
+        .iter()
+        .map(|name| {
+            let count = seen.entry(name.as_str()).or_insert(0);
+            *count += 1;
+            if *count == 1 {
+                name.clone()
+            } else {
+                format!("{name} ({count})")
+            }
+        })
+        .collect()
+}
+
+/// The inputs as listed: system names, in system order, made unique, each
+/// with its port identity. `ids` has one entry per name.
+pub fn input_infos(names: Vec<String>, ids: Vec<String>) -> Vec<MidiInputInfo> {
+    unique_names(&names)
+        .into_iter()
+        .zip(ids)
+        .map(|(name, id)| MidiInputInfo { name, id })
+        .collect()
+}
+
+/// Where the input listed as `name` is among `names`, the system names in
+/// system order. An error names the input when it is not there.
+pub fn find_input(names: &[String], name: &str) -> Result<usize, HostError> {
+    unique_names(names)
+        .iter()
+        .position(|n| n == name)
+        .ok_or_else(|| HostError::NoMidiPort(Some(name.to_string())))
+}
+
+/// The system names of a client's ports, in order.
+fn port_names(client: &midir::MidiInput, ports: &[midir::MidiInputPort]) -> Vec<String> {
+    ports
+        .iter()
+        .map(|port| client.port_name(port).unwrap_or_else(|_| "<unnamed port>".into()))
+        .collect()
+}
+
+/// The MIDI inputs now, with unique names and port identities.
+pub fn midi_inputs() -> Result<Vec<MidiInputInfo>, HostError> {
+    let client = midi_input()?;
+    let ports = client.ports();
+    Ok(input_infos(
+        port_names(&client, &ports),
+        ports.iter().map(|p| p.id()).collect(),
+    ))
+}
+
+/// Connects the MIDI input listed as `name` by [`midi_inputs`], with its
+/// events stamped as `input`, so the engine knows which notes it holds.
+pub fn connect_midi_input(
+    name: &str,
+    midi: SharedMidi,
+    input: loom_core::MidiInputId,
+) -> Result<MidiConnection, HostError> {
+    let client = midi_input()?;
+    let ports = client.ports();
+    let port = ports[find_input(&port_names(&client, &ports), name)?].clone();
+    let mut connection = open_port_as(client, &port, midi, input)?;
+    connection.port_name = name.to_string();
+    Ok(connection)
+}
+
 /// Names of all MIDI input ports.
 pub fn midi_input_names() -> Result<Vec<String>, HostError> {
     let input = midir::MidiInput::new("LoomDSP").map_err(|e| HostError::Midi(e.to_string()))?;
@@ -466,6 +548,7 @@ const RATE_NOTICE_WINDOW: Duration = Duration::from_millis(500);
 ///
 /// Some devices report the new rate before the notice is sent, so the
 /// notice can still pause the real stream: see [`resume_after_switch`].
+/// `docs/learn/stopping-a-stream.md` tells the story.
 #[cfg(target_os = "macos")]
 fn settle_rate(device: &cpal::Device, config: &cpal::StreamConfig) -> bool {
     let current = || device.default_output_config().map(|c| c.sample_rate()).ok();
@@ -649,6 +732,7 @@ const BUFFERS_PER_STOP: u64 = 2 + SILENT_BUFFERS_BEFORE_STOP;
 /// `sample_rate`: `minimum`, or the fade plus four buffers
 /// if that is longer (output safety, rule 14). A fixed limit cut streams
 /// with large buffers before the fade reached the device, which clicked.
+/// `docs/learn/stopping-a-stream.md` explains the count.
 pub fn stop_limit(minimum: Duration, frames: u64, sample_rate: u32) -> Duration {
     let buffers = (BUFFERS_PER_STOP * frames) as f64 / f64::from(sample_rate.max(1));
     let needed = Duration::from_secs_f64(f64::from(loom_core::safety::FADE_SECONDS) + buffers);
@@ -902,14 +986,24 @@ impl HeldNotes {
 pub struct MidiInputState {
     midi: SharedMidi,
     held: HeldNotes,
+    /// Stamped on every event, so the engine can tell inputs apart.
+    input: loom_core::MidiInputId,
 }
 
 impl MidiInputState {
-    /// A path into `midi` with no notes held.
+    /// A path into `midi` with no notes held, for a source the engine does
+    /// not track.
     pub fn new(midi: SharedMidi) -> Self {
+        Self::for_input(midi, loom_core::MidiInputId(0))
+    }
+
+    /// A path into `midi` whose events are stamped as `input`. Open the
+    /// input on the engine first ([`loom_core::Controller::open_midi_input`]).
+    pub fn for_input(midi: SharedMidi, input: loom_core::MidiInputId) -> Self {
         Self {
             midi,
             held: HeldNotes::default(),
+            input,
         }
     }
 
@@ -923,13 +1017,13 @@ impl MidiInputState {
         self.held.track(bytes);
         // Frame 0: applied at the start of the next audio buffer
         // (NFR-PERF-07). Sub-buffer timestamps come later.
-        send_midi(&self.midi, MidiEvent::from_bytes(0, bytes));
+        send_midi(&self.midi, MidiEvent::from_bytes(0, bytes).from_input(self.input));
     }
 
     /// Sends a note off for every note held on this input.
     pub fn release_all(&mut self) {
         for (channel, note) in self.held.take() {
-            send_midi(&self.midi, MidiEvent::note_off(0, channel, note));
+            send_midi(&self.midi, MidiEvent::note_off(0, channel, note).from_input(self.input));
         }
     }
 
@@ -946,12 +1040,18 @@ impl MidiInputState {
 pub struct MidiConnection {
     connection: midir::MidiInputConnection<MidiInputState>,
     port_name: String,
+    port_id: String,
 }
 
 impl MidiConnection {
     /// Name of the connected port.
     pub fn port_name(&self) -> &str {
         &self.port_name
+    }
+
+    /// The system's identity for the port, as [`MidiInputInfo::id`].
+    pub fn port_id(&self) -> &str {
+        &self.port_id
     }
 
     /// Closes the input, then releases the notes that were held on it, so
@@ -975,16 +1075,30 @@ fn open_port(
     port: &midir::MidiInputPort,
     midi: SharedMidi,
 ) -> Result<MidiConnection, HostError> {
+    open_port_as(input, port, midi, loom_core::MidiInputId(0))
+}
+
+fn open_port_as(
+    input: midir::MidiInput,
+    port: &midir::MidiInputPort,
+    midi: SharedMidi,
+    id: loom_core::MidiInputId,
+) -> Result<MidiConnection, HostError> {
     let port_name = input.port_name(port).unwrap_or_else(|_| "<unnamed port>".into());
+    let port_id = port.id();
     let connection = input
         .connect(
             port,
             "loomdsp-in",
             |_timestamp, bytes, state: &mut MidiInputState| state.receive(bytes),
-            MidiInputState::new(midi),
+            MidiInputState::for_input(midi, id),
         )
         .map_err(|e| HostError::Midi(format!("{port_name}: {e}")))?;
-    Ok(MidiConnection { connection, port_name })
+    Ok(MidiConnection {
+        connection,
+        port_name,
+        port_id,
+    })
 }
 
 /// Connects one MIDI input port to the engine.
@@ -1050,6 +1164,53 @@ pub fn connect_all_midi(midi: &SharedMidi) -> Result<(Vec<MidiConnection>, Vec<H
 mod tests {
     use super::*;
     use loom_core::{EngineConfig, EngineParts, OutputSafety, create_engine};
+
+    /// Two inputs with the same name are told apart by order.
+    #[test]
+    fn same_names_are_numbered_by_order() {
+        let names = ["Pad", "Keys", "Pad", "Pad"].map(String::from);
+        assert_eq!(unique_names(&names), ["Pad", "Keys", "Pad (2)", "Pad (3)"]);
+        assert_eq!(find_input(&names, "Pad (2)").unwrap(), 2);
+        assert_eq!(find_input(&names, "Keys").unwrap(), 1);
+        let missing = find_input(&names, "Drums").unwrap_err();
+        assert!(missing.to_string().contains("Drums"), "{missing}");
+        let ids = ["a", "b", "c", "d"].map(String::from).to_vec();
+        let infos = input_infos(names.to_vec(), ids);
+        assert_eq!(
+            infos[2],
+            MidiInputInfo {
+                name: "Pad (2)".into(),
+                id: "c".into()
+            }
+        );
+    }
+
+    /// An input's events carry its id, and so do the note offs it sends
+    /// when it closes.
+    #[test]
+    fn an_input_stamps_its_events() {
+        let parts = create_engine(loom_modules::registry(), EngineConfig::default());
+        let EngineParts {
+            mut engine,
+            midi,
+            mut controller,
+            ..
+        } = parts;
+        let midi = share_midi(midi);
+        let id = loom_core::MidiInputId(3);
+        controller.open_midi_input(id).unwrap();
+        let (mut l, mut r) = (vec![0.0; 64], vec![0.0; 64]);
+        engine.process(&mut l, &mut r);
+        let mut state = MidiInputState::for_input(midi, id);
+        state.receive(&[0x90, 60, 100]);
+        assert!(state.holds_notes());
+        engine.process(&mut l, &mut r);
+        assert_eq!(engine.held_notes(id), Some(1), "the note on carried the id");
+        state.release_all();
+        assert!(!state.holds_notes());
+        engine.process(&mut l, &mut r);
+        assert_eq!(engine.held_notes(id), Some(0), "the note off carried the id");
+    }
 
     /// A configuration at `rate` in `format`, as a device reports it.
     fn reported(rate: u32, format: cpal::SampleFormat) -> cpal::SupportedStreamConfig {

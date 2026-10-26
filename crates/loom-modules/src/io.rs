@@ -5,7 +5,8 @@ use loom_core::{Channels, ModuleDescriptor, ModuleRole, Panel, Polarity, PortDef
 /// `loom.time.delay1`: delays its input by exactly one sample.
 ///
 /// Put one in a feedback loop to choose where the loop's delay sits. A loop
-/// without one gets a delay inserted automatically (ADR-0002).
+/// without one gets a delay inserted automatically (ADR-0002). See
+/// `docs/learn/feedback-loops.md`.
 pub static UNIT_DELAY: ModuleDescriptor = ModuleDescriptor {
     id: "loom.time.delay1",
     version: 1,

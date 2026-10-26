@@ -148,6 +148,9 @@ impl App {
             .iter()
             .zip(&node.params)
             .enumerate()
+            // A transient parameter has no row: it is played on its panel
+            // widget only (transient-params.md).
+            .filter(|(_, (spec, _))| !spec.is_transient())
             .map(|(index, (spec, &value))| {
                 // Hovering the label shows what the canvas hover text shows
                 // (panels.md, Labels and hover text).

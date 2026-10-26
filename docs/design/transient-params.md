@@ -3,12 +3,12 @@
 Parameters that carry a live performance gesture to a module without being saved in the patch: a held button, a reset press.
 
 - **Kind:** living specification.
-- **Status:** Agreed on merge. Not built.
+- **Status:** Implemented ([#161](https://github.com/brylie/LoomDSP/issues/161)) for the Button's `hold`. The Transport's `reset` comes with the Transport module ([#73](https://github.com/brylie/LoomDSP/issues/73)).
 - **Decision behind it:** none. It extends the parameter model of [ADR-0016](../adr/0016-ports-and-parameters-carry-their-own-text.md) and the patch format of [ADR-0008](../adr/0008-patch-format-ron.md) without changing either decision.
 - **Use case and requirements:** UC3, FR-LIB-27, FR-LIB-12.
 - **Prior art:** none needed.
 - **Issues:** [#161](https://github.com/brylie/LoomDSP/issues/161).
-- **Code:** `ParamOptions` in `crates/loom-core/src/descriptor.rs`, `loom-patch`, and the button in `loom-modules/src/ui.rs`. Not built.
+- **Code:** `ParamOptions::transient` and `ModuleDescriptor::saved_values` in `crates/loom-core/src/descriptor.rs`, the registry check, `Patch::from_graph`, `load_into`, and `transient_values` in `loom-patch`, the button in `loom-modules/src/ui.rs`, and undo, clipboard, inspector, and MIDI learn in `loom-app`.
 
 ## Goal
 

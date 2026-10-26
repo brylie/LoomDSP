@@ -6,7 +6,7 @@ A choice of ranges for wide controls, such as Multiply's gain, so a player can m
 - **Status:** Agreed ([#122](https://github.com/brylie/LoomDSP/issues/122)). Not built.
 - **Decision behind it:** none yet. It extends [parameter mapping](modulation.md#parameter-mapping) (Agreed) and does not change a decision.
 - **Use case and requirements:** FR-MOD-09 (proposed here), FR-MOD-03, FR-MOD-08, FR-SIG-03.
-- **Background:** none yet. A short explainer on why feedback FM turns to noise at high depth would help (see Open points).
+- **Background:** [Why feedback FM turns to noise](../learn/feedback-fm.md): exponential pitch, the one-sample loop, and aliasing at high depth.
 - **Issues:** [#121](https://github.com/brylie/LoomDSP/issues/121) (the problem that started this), [#122](https://github.com/brylie/LoomDSP/issues/122) (this spec).
 - **Code:** not built.
 
@@ -83,4 +83,4 @@ PatchModule(id: 5, kind: "loom.math.mul@1", params: {"gain": 0.08}, ranges: {"ga
 - **Clamp and Scale** ([P1 modules](p1-modules.md)) offer the same list for their limits and offset.
 - **Ranges from what is connected.** Could a range follow the signals around the module? [Port ranges](port-ranges.md) (Draft) proposes that ports declare nominal ranges and that the inspector offers a one-click **Match** for the Range selector. It never changes a range or value on its own, because that would break rules 6 and 7 here. Nothing in this spec waits for it.
 - **Other parameters.** Phase `tune` and `octave` are already in musical units and probably need no ranges. Check each new module as it comes.
-- **Explainer.** "Why feedback FM turns to noise", in `docs/learn/`: exponential pitch, the one-sample loop, aliasing above Nyquist, and how phase feedback (as on the DX7) differs from pitch feedback.
+- **Explainer.** Written: [Why feedback FM turns to noise](../learn/feedback-fm.md).

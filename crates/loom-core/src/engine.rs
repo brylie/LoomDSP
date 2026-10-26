@@ -2,7 +2,8 @@
 //!
 //! Real-time rules (NFR-RT-01): nothing in this file allocates, frees, locks,
 //! or waits once the engine is running. Memory arrives pre-allocated through
-//! the command queue and leaves through the garbage queue. Telemetry leaves
+//! the command queue and leaves through the garbage queue.
+//! `docs/learn/real-time-safety.md` explains why. Telemetry leaves
 //! through its own queues and is dropped when they are full (NFR-RT-07).
 
 use crate::compile::{AssignmentRuntime, ModuleOp, ParamFill, Schedule, Step};
@@ -10,9 +11,10 @@ use crate::descriptor::{MAX_DISPLAYS, Polarity};
 use crate::display::DisplayTable;
 use crate::graph::AssignmentId;
 use crate::live::{LiveTable, NO_CELL};
-use crate::midi::{MidiEvent, MidiMessage};
+use crate::midi::{HeldSet, MAX_MIDI_INPUTS, MidiEvent, MidiMessage};
 use crate::midi_map::{MidiControl, MidiFeedback, later};
 use crate::module::{Module, PortIo, ProcessContext};
+use crate::panic::{PanicState, PanicTrigger, TriggerWatch};
 use crate::safety::{OutputSafety, SafetyStage};
 use crate::telemetry::{MeterReading, SCOPE_CHUNK, ScopeChunk, TelemetrySender, measure};
 use crate::transport::{TimeSignature, Transport};
@@ -133,11 +135,102 @@ pub(crate) enum Command {
     SetOutputSafety(OutputSafety),
     /// Fade the output to silence and keep it there (output safety, rule 14).
     FadeOut,
+    /// Fade out, reset every module, and fade back in (panic.md).
+    Panic,
+    /// The MIDI message that runs panic, from the player's preferences.
+    SetPanicTrigger(Option<PanicTrigger>),
+    /// Start tracking the notes of MIDI input `index`, in `held`.
+    OpenInput {
+        index: usize,
+        held: Box<HeldSet>,
+    },
+    /// Release every note MIDI input `index` holds, and stop tracking it.
+    ReleaseInput(usize),
 }
 
 pub(crate) enum Garbage {
     Module(#[allow(dead_code)] Box<dyn Module>),
     Schedule(#[allow(dead_code)] Box<Schedule>),
+    HeldSet(#[allow(dead_code)] Box<HeldSet>),
+}
+
+/// Notes held per tracked MIDI input, and how many inputs hold each note
+/// (`docs/design/device-changes.md`, Held notes belong to an input). All
+/// memory is allocated when the engine is built or arrives by command.
+struct InputNotes {
+    /// One set per open input, by id. `None` for an input that is not open.
+    inputs: Box<[Option<Box<HeldSet>>]>,
+    /// How many open inputs hold each note: channel * 128 + note.
+    holders: Box<[u8]>,
+    /// Note offs from released inputs, sent at the start of the next
+    /// buffer.
+    releases: Vec<MidiEvent>,
+}
+
+impl InputNotes {
+    fn new() -> Self {
+        Self {
+            inputs: (0..MAX_MIDI_INPUTS).map(|_| None).collect(),
+            holders: vec![0; 16 * 128].into_boxed_slice(),
+            releases: Vec::with_capacity(16 * 128),
+        }
+    }
+
+    /// Follows one event. Returns false if the modules must not see it:
+    /// it comes from an input that is not open, or it is a note off for a
+    /// note another input still holds.
+    fn follow(&mut self, event: &MidiEvent) -> bool {
+        if event.input == 0 {
+            return true;
+        }
+        let Some(Some(held)) = self.inputs.get_mut(usize::from(event.input)) else {
+            return false;
+        };
+        match event.message() {
+            MidiMessage::NoteOn { channel, note, .. } if !held.has(channel, note) => {
+                held.set(channel, note, true);
+                let count = &mut self.holders[usize::from(channel) * 128 + usize::from(note)];
+                *count = count.saturating_add(1);
+                true
+            }
+            MidiMessage::NoteOff { channel, note } if held.has(channel, note) => {
+                held.set(channel, note, false);
+                let count = &mut self.holders[usize::from(channel) * 128 + usize::from(note)];
+                *count = count.saturating_sub(1);
+                *count == 0
+            }
+            _ => true,
+        }
+    }
+
+    /// Takes input `index`'s set away, and queues a note off for each note
+    /// no other input holds. Returns the set, for freeing.
+    fn release(&mut self, index: usize) -> Option<Box<HeldSet>> {
+        let mut held = self.inputs.get_mut(index)?.take()?;
+        let (holders, releases) = (&mut self.holders, &mut self.releases);
+        held.drain(|channel, note| {
+            let count = &mut holders[usize::from(channel) * 128 + usize::from(note)];
+            *count = count.saturating_sub(1);
+            // The list holds every note of every channel, and the set has
+            // each note once, so it only fills when several inputs are
+            // released in one buffer. A dropped note off is then a note that
+            // the next release or panic clears.
+            if *count == 0 && releases.len() < releases.capacity() {
+                releases.push(MidiEvent::note_off(0, channel, note));
+            }
+        });
+        Some(held)
+    }
+
+    /// Forgets every held note, as panic does: the modules have just let
+    /// go of them all. Inputs stay open.
+    fn clear(&mut self) {
+        for held in self.inputs.iter_mut().flatten() {
+            held.drain(|_, _| {});
+        }
+        self.holders.fill(0);
+        self.releases.clear();
+    }
 }
 
 /// The audio-thread half of the engine. Call [`Engine::process`] from the
@@ -155,7 +248,8 @@ pub struct Engine {
     midi: Vec<MidiEvent>,
     /// What MIDI mappings did, for the controller (MIDI learn).
     midi_feedback: Arc<MidiFeedback>,
-    /// Control changes received, for [`MidiFeedback::record`]. Never 0
+    /// Control changes and note ons received, for [`MidiFeedback::record`]
+    /// and [`MidiFeedback::record_note`]. Never 0
     /// after the first one.
     cc_serial: u32,
     /// One sequence for mapped control changes and screen edits, so the
@@ -173,6 +267,12 @@ pub struct Engine {
     last_frames: usize,
     /// DC blocker, limiter, and fade on the summed output (ADR-0019).
     safety: SafetyStage,
+    /// Where a panic is (panic.md).
+    panic: PanicState,
+    /// The MIDI trigger for panic, and the state of its control.
+    panic_trigger: TriggerWatch,
+    /// The notes each tracked MIDI input holds.
+    input_notes: InputNotes,
     config: EngineConfig,
     stats: Arc<EngineStats>,
 }
@@ -205,6 +305,9 @@ impl Engine {
             frame: 0,
             last_frames: 0,
             safety: SafetyStage::new(config.output_safety, config.sample_rate),
+            panic: PanicState::Idle,
+            panic_trigger: TriggerWatch::default(),
+            input_notes: InputNotes::new(),
             config,
             stats,
         }
@@ -213,6 +316,16 @@ impl Engine {
     /// Engine settings.
     pub fn config(&self) -> &EngineConfig {
         &self.config
+    }
+
+    /// How many notes MIDI input `input` holds, or `None` if the engine does
+    /// not track it. For tests and diagnostics.
+    pub fn held_notes(&self, input: crate::MidiInputId) -> Option<usize> {
+        self.input_notes
+            .inputs
+            .get(usize::from(input.0))?
+            .as_ref()
+            .map(|held| held.count())
     }
 
     /// True once the engine was asked to fade out
@@ -245,14 +358,24 @@ impl Engine {
         let frames = left.len().min(right.len());
         self.apply_commands();
         self.collect_midi(frames);
+        self.watch_panic_trigger();
         self.apply_midi_maps();
 
         left[..frames].fill(0.0);
         right[..frames].fill(0.0);
 
+        // A panic that is already silent resets before any frame.
+        if self.panic == PanicState::Fading(0) {
+            self.panic_reset();
+        }
         let mut position = 0;
         while position < frames {
-            let n = (frames - position).min(self.config.max_block);
+            let mut n = (frames - position).min(self.config.max_block);
+            // The reset is sample-exact: the block ends at the frame where
+            // the panic fade reaches 0 (panic.md, rule 2).
+            if let PanicState::Fading(remaining) = self.panic {
+                n = n.min(remaining);
+            }
             self.run_block(
                 position,
                 n,
@@ -265,8 +388,59 @@ impl Engine {
             self.frame += n as u64;
             self.last_frames = n;
             position += n;
+            match self.panic {
+                PanicState::Fading(remaining) if remaining == n => self.panic_reset(),
+                PanicState::Fading(remaining) => self.panic = PanicState::Fading(remaining - n),
+                PanicState::Rising if self.safety.is_open() => self.panic = PanicState::Idle,
+                _ => {}
+            }
         }
         self.stats.buffers.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Starts a panic, unless one is running (panic.md, rule 3) or the
+    /// output is stopping.
+    fn start_panic(&mut self) {
+        if self.panic != PanicState::Idle {
+            return;
+        }
+        if let Some(frames) = self.safety.panic_fade() {
+            self.panic = PanicState::Fading(frames);
+        }
+    }
+
+    /// The silent frame of a panic (panic.md, step 2): every module is
+    /// reset, which also lets go of every held note, unit delays and
+    /// smoothing are cleared, and the output stage starts fresh and fades
+    /// back in. Parameters, cables, and the transport are kept.
+    fn panic_reset(&mut self) {
+        for module in self.slots.iter_mut().flatten() {
+            module.reset();
+        }
+        for tap in &mut self.schedule.taps {
+            tap.state = 0.0;
+        }
+        for fill in &mut self.schedule.fills {
+            if let Some(smooth) = fill.smooth.as_mut() {
+                smooth.reset(smooth.target());
+            }
+        }
+        self.input_notes.clear();
+        self.safety.panic_reset();
+        self.panic = PanicState::Rising;
+    }
+
+    /// Starts a panic if a MIDI message in this buffer is the panic
+    /// trigger. The message still reaches the modules (panic.md, MIDI
+    /// trigger).
+    fn watch_panic_trigger(&mut self) {
+        let mut fired = false;
+        for event in &self.midi {
+            fired |= self.panic_trigger.fires(event.message());
+        }
+        if fired {
+            self.start_panic();
+        }
     }
 
     /// Asks every module that has display values for them, after a block.
@@ -388,6 +562,24 @@ impl Engine {
                 Command::ResetTransport => self.transport.reset(self.frame),
                 Command::SetOutputSafety(mode) => self.safety.set_mode(mode),
                 Command::FadeOut => self.safety.fade_out(),
+                Command::Panic => self.start_panic(),
+                Command::SetPanicTrigger(trigger) => self.panic_trigger.set(trigger),
+                Command::OpenInput { index, held } => {
+                    // An input opened again starts clean: what it held is
+                    // released first.
+                    if let Some(old) = self.input_notes.release(index) {
+                        self.discard(Garbage::HeldSet(old));
+                    }
+                    match self.input_notes.inputs.get_mut(index) {
+                        Some(slot) => *slot = Some(held),
+                        None => self.discard(Garbage::HeldSet(held)),
+                    }
+                }
+                Command::ReleaseInput(index) => {
+                    if let Some(old) = self.input_notes.release(index) {
+                        self.discard(Garbage::HeldSet(old));
+                    }
+                }
             }
         }
     }
@@ -451,8 +643,19 @@ impl Engine {
 
     fn collect_midi(&mut self, frames: usize) {
         self.midi.clear();
+        // Note offs from inputs released since the last buffer go first.
+        for event in self.input_notes.releases.drain(..) {
+            if self.midi.len() == self.midi.capacity() {
+                self.stats.dropped_midi.fetch_add(1, Ordering::Relaxed);
+                continue;
+            }
+            self.midi.push(event);
+        }
         let last = frames.saturating_sub(1) as u32;
         while let Ok(mut event) = self.midi_in.pop() {
+            if !self.input_notes.follow(&event) {
+                continue;
+            }
             if self.midi.len() == self.midi.capacity() {
                 self.stats.dropped_midi.fetch_add(1, Ordering::Relaxed);
                 continue;
@@ -471,6 +674,11 @@ impl Engine {
     /// the list, so modules still see them (rule 6).
     fn apply_midi_maps(&mut self) {
         for event in &self.midi {
+            if let MidiMessage::NoteOn { channel, note, .. } = event.message() {
+                self.cc_serial = self.cc_serial.wrapping_add(1).max(1);
+                self.midi_feedback.record_note(channel, note, self.cc_serial);
+                continue;
+            }
             let MidiMessage::ControlChange {
                 channel,
                 controller,

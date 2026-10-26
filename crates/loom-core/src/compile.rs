@@ -2,6 +2,9 @@
 //!
 //! This runs on the control thread and may allocate freely.
 //!
+//! `docs/learn/feedback-loops.md` explains why loops need a one-sample delay
+//! and run one sample at a time.
+//!
 //! Steps:
 //! 1. Give every output port its own buffer.
 //! 2. Find strongly connected components (SCCs) with Tarjan's algorithm.

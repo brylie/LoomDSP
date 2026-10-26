@@ -137,6 +137,39 @@ impl SafetyStage {
         self.fade.hold = 0;
     }
 
+    /// Starts a panic fade (panic.md, step 1): the gain falls to 0 from
+    /// where it is now, one step per frame, whatever the mode. Returns how
+    /// many frames are left before the gain is 0, so the engine can reset
+    /// the modules at that frame. `None` while the stage is stopping: the
+    /// output is going silent anyway and must not come back.
+    pub(crate) fn panic_fade(&mut self) -> Option<usize> {
+        if self.stopping {
+            return None;
+        }
+        self.fade.rising = false;
+        // A Clean fade-in still waiting for its first sample is at 0 already.
+        self.fade.hold = 0;
+        Some(self.fade.position)
+    }
+
+    /// Clears the stage at the silent frame of a panic and fades back in
+    /// (panic.md, steps 3 and 4). A mode change that was waiting takes
+    /// effect now, as it would at any silence.
+    pub(crate) fn panic_reset(&mut self) {
+        if let Some(mode) = self.pending.take() {
+            self.mode = mode;
+        }
+        self.dc.iter_mut().for_each(DcBlocker::reset);
+        self.limiter.reset();
+        self.fade.position = 0;
+        self.fade_in();
+    }
+
+    /// True when the fade-in is complete and the gain is 1.
+    pub(crate) fn is_open(&self) -> bool {
+        self.fade.rising && self.fade.hold == 0 && self.fade.position == self.fade.length
+    }
+
     /// True once [`SafetyStage::fade_out`] was called and the last sample
     /// out was silent.
     pub(crate) fn is_silent(&self) -> bool {

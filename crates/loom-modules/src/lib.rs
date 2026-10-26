@@ -117,10 +117,18 @@ mod tests {
                     assert!(
                         matches!(
                             widget.map(|w| w.kind),
-                            Some(loom_core::WidgetKind::Button { mode: "mode" })
+                            Some(loom_core::WidgetKind::Button {
+                                mode: "mode",
+                                hold: "hold"
+                            })
                         ),
                         "button.on"
                     );
+                    continue;
+                }
+                // A transient parameter is reached through its widget only
+                // (transient-params.md): Button's `hold` is the button.
+                if param.is_transient() {
                     continue;
                 }
                 // The scope's `auto` is a toggle (panels.md, Scope module).
