@@ -93,10 +93,18 @@ Every pull request runs these jobs. All must pass before merging: the main branc
 | Docs | API docs build without warnings | `mise run docs` |
 | MSRV | Still builds with Rust 1.99 | `mise run msrv` |
 | WebAssembly | Engine crates build for `wasm32-unknown-unknown` | `mise run wasm` |
-| Licences | Only permissive licences, no known vulnerabilities | `mise run deny` |
+| Licences | Only permissive licences, no banned crates, only crates.io as a source | `mise run deny-policy` |
+| Security advisories | No dependency has a RustSec advisory. On a pull request, only when it changes `Cargo.toml`, `Cargo.lock`, or `deny.toml`; always on `main` and in the weekly run | `mise run deny-advisories` |
 | Spelling | Typos in code and docs | `mise run typos` |
 
 To change a check, change its task in `mise.toml`. The hooks and CI both pick it up.
+
+`mise run deny` runs both cargo-deny checks at once, as the pre-push hook does when a dependency file changed.
+
+**When the advisories check fails.** A new advisory is published against the RustSec database, not against your change, so CI checks advisories only where fixing one is part of the work: on `main`, in the weekly run, and in a pull request that changes the dependencies. Why: otherwise one new advisory fails every open pull request, docs-only ones too (#143). To fix a failure:
+
+1. Upgrade the crate to a version without the advisory (`cargo update -p <crate>`), or remove it, or replace it with a maintained one.
+2. If none of these is possible yet, add the advisory to `[advisories] ignore` in `deny.toml` as `{ id = "RUSTSEC-...", reason = "..." }`. The reason says why it does not affect LoomDSP, or what we wait for. Open an issue to remove the entry later.
 
 Why warnings fail CI but not your local build: a warning while you are still editing is noise, but a warning on `main` is a problem someone else inherits. `mise run clippy`, `docs`, and `wasm` treat warnings as errors, as CI does, so the checks catch them before you push.
 
