@@ -136,7 +136,8 @@ struct AudioArgs {
     /// Buffer size in frames. Default: device default.
     #[arg(long)]
     buffer: Option<u32>,
-    /// MIDI input port (part of the name). Default: first port found.
+    /// Open only the MIDI input port whose name contains this text. Default:
+    /// open every MIDI input port, as the app does.
     #[arg(long)]
     midi: Option<String>,
     /// Do not open any MIDI input.
@@ -493,7 +494,7 @@ fn render(
 
 struct Live {
     _audio: loom_host_desktop::RunningAudio,
-    _midi: Option<loom_host_desktop::MidiConnection>,
+    _midi: Vec<loom_host_desktop::MidiConnection>,
     stats: Arc<loom_host_desktop::CallbackStats>,
     controller: Controller,
 }
@@ -530,21 +531,28 @@ fn start_live(path: &Path, args: &AudioArgs, hold_note: Option<u8>) -> Result<Li
     let midi = if let Some(note) = hold_note {
         sender.send(MidiEvent::note_on(0, 0, note, 100));
         println!("midi:   holding note {note} (no MIDI input opened)");
-        None
+        Vec::new()
     } else if args.no_midi {
         println!("midi:   off");
-        None
+        Vec::new()
     } else {
-        match loom_host_desktop::connect_midi(args.midi.as_deref(), loom_host_desktop::share_midi(sender))? {
-            Some(connection) => {
-                println!("midi:   {}", connection.port_name());
-                Some(connection)
-            }
-            None => {
-                println!("midi:   no MIDI input found (use --note 60 to test without one)");
-                None
-            }
+        let midi = loom_host_desktop::share_midi(sender);
+        let (connections, errors) = match args.midi.as_deref() {
+            // A named port that is missing is an error, as before.
+            Some(wanted) => (
+                loom_host_desktop::connect_midi(Some(wanted), midi)?
+                    .into_iter()
+                    .collect(),
+                Vec::new(),
+            ),
+            None => loom_host_desktop::connect_all_midi(&midi)?,
+        };
+        let names: Vec<&str> = connections.iter().map(|c| c.port_name()).collect();
+        let errors: Vec<String> = errors.iter().map(ToString::to_string).collect();
+        for line in midi_lines(&names, &errors) {
+            println!("{line}");
         }
+        connections
     };
 
     let audio = output.start(engine)?;
@@ -554,6 +562,17 @@ fn start_live(path: &Path, args: &AudioArgs, hold_note: Option<u8>) -> Result<Li
         _midi: midi,
         controller,
     })
+}
+
+/// The start-up lines for MIDI: one per opened port, then one per port that
+/// failed to open. With nothing opened, a hint to test without a controller.
+fn midi_lines(opened: &[&str], errors: &[String]) -> Vec<String> {
+    let mut lines: Vec<String> = opened.iter().map(|name| format!("midi:   {name}")).collect();
+    lines.extend(errors.iter().map(|error| format!("midi:   could not open {error}")));
+    if opened.is_empty() {
+        lines.push("midi:   no MIDI input found (use --note 60 to test without one)".to_string());
+    }
+    lines
 }
 
 /// ANSI code that erases the cursor's terminal row, then returns to its start.
@@ -777,6 +796,20 @@ mod tests {
         assert!(line.chars().count() <= STATS_MAX_COLUMNS, "{line}");
         let typical = format_stats(&StatsSnapshot::default());
         assert!(typical.chars().count() <= 50, "{typical}");
+    }
+
+    /// Every opened MIDI port gets its own line, a port that failed is
+    /// reported after them, and the hint shows only when nothing opened.
+    #[test]
+    fn midi_lines_list_every_port_and_each_failure() {
+        let lines = midi_lines(&["Keys", "Pad"], &["Drums: busy".to_string()]);
+        assert_eq!(
+            lines,
+            ["midi:   Keys", "midi:   Pad", "midi:   could not open Drums: busy"]
+        );
+        let none = midi_lines(&[], &[]);
+        assert_eq!(none.len(), 1);
+        assert!(none[0].contains("no MIDI input found"), "{none:?}");
     }
 
     /// The play line fits in 50 columns for ordinary audio numbers.
