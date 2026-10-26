@@ -120,6 +120,15 @@ fn audio_thread_never_allocates() {
                 let mode = [OutputSafety::Clean, OutputSafety::Off, OutputSafety::LowLatency][i / 19 % 3];
                 parts.controller.set_output_safety(mode).unwrap();
             }
+            // Panic (panic.md) runs on the audio thread, and its reset can
+            // fall inside a buffer. It also runs from its MIDI trigger.
+            if i % 23 == 0 {
+                parts.controller.panic().unwrap();
+            }
+            if i == 0 {
+                let trigger = loom_core::PanicTrigger::Note { channel: 0, note: 62 };
+                parts.controller.set_panic_trigger(Some(trigger)).unwrap();
+            }
             // Drain telemetry for a while, then let the queues fill up.
             if i < 200 {
                 parts.telemetry.meters().for_each(drop);

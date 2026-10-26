@@ -789,6 +789,23 @@ impl Controller {
         self.send(Command::FadeOut)
     }
 
+    /// Runs panic (`docs/design/panic.md`): the engine fades its output to
+    /// silence over 10 ms, releases every held note and resets every
+    /// module at the silent frame, and fades back in over 10 ms. It is not
+    /// an edit: the graph, the parameters, and the transport do not change.
+    /// A panic sent while one is running is ignored.
+    pub fn panic(&mut self) -> Result<(), LoomError> {
+        self.send(Command::Panic)
+    }
+
+    /// Sets the MIDI message that runs panic in the engine, or `None` for
+    /// no trigger. The engine looks for it in its own MIDI path, so it
+    /// works with no UI thread. The trigger belongs to the player's rig,
+    /// so it is not part of the graph or the patch.
+    pub fn set_panic_trigger(&mut self, trigger: Option<crate::PanicTrigger>) -> Result<(), LoomError> {
+        self.send(Command::SetPanicTrigger(trigger))
+    }
+
     fn send(&mut self, command: Command) -> Result<(), LoomError> {
         self.commands.push(command).map_err(|_| LoomError::QueueFull)
     }

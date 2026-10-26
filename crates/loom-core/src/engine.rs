@@ -13,6 +13,7 @@ use crate::live::{LiveTable, NO_CELL};
 use crate::midi::{MidiEvent, MidiMessage};
 use crate::midi_map::{MidiControl, MidiFeedback, later};
 use crate::module::{Module, PortIo, ProcessContext};
+use crate::panic::{PanicState, PanicTrigger, TriggerWatch};
 use crate::safety::{OutputSafety, SafetyStage};
 use crate::telemetry::{MeterReading, SCOPE_CHUNK, ScopeChunk, TelemetrySender, measure};
 use crate::transport::{TimeSignature, Transport};
@@ -133,6 +134,10 @@ pub(crate) enum Command {
     SetOutputSafety(OutputSafety),
     /// Fade the output to silence and keep it there (output safety, rule 14).
     FadeOut,
+    /// Fade out, reset every module, and fade back in (panic.md).
+    Panic,
+    /// The MIDI message that runs panic, from the player's preferences.
+    SetPanicTrigger(Option<PanicTrigger>),
 }
 
 pub(crate) enum Garbage {
@@ -173,6 +178,10 @@ pub struct Engine {
     last_frames: usize,
     /// DC blocker, limiter, and fade on the summed output (ADR-0019).
     safety: SafetyStage,
+    /// Where a panic is (panic.md).
+    panic: PanicState,
+    /// The MIDI trigger for panic, and the state of its control.
+    panic_trigger: TriggerWatch,
     config: EngineConfig,
     stats: Arc<EngineStats>,
 }
@@ -205,6 +214,8 @@ impl Engine {
             frame: 0,
             last_frames: 0,
             safety: SafetyStage::new(config.output_safety, config.sample_rate),
+            panic: PanicState::Idle,
+            panic_trigger: TriggerWatch::default(),
             config,
             stats,
         }
@@ -232,14 +243,24 @@ impl Engine {
         let frames = left.len().min(right.len());
         self.apply_commands();
         self.collect_midi(frames);
+        self.watch_panic_trigger();
         self.apply_midi_maps();
 
         left[..frames].fill(0.0);
         right[..frames].fill(0.0);
 
+        // A panic that is already silent resets before any frame.
+        if self.panic == PanicState::Fading(0) {
+            self.panic_reset();
+        }
         let mut position = 0;
         while position < frames {
-            let n = (frames - position).min(self.config.max_block);
+            let mut n = (frames - position).min(self.config.max_block);
+            // The reset is sample-exact: the block ends at the frame where
+            // the panic fade reaches 0 (panic.md, rule 2).
+            if let PanicState::Fading(remaining) = self.panic {
+                n = n.min(remaining);
+            }
             self.run_block(
                 position,
                 n,
@@ -252,8 +273,58 @@ impl Engine {
             self.frame += n as u64;
             self.last_frames = n;
             position += n;
+            match self.panic {
+                PanicState::Fading(remaining) if remaining == n => self.panic_reset(),
+                PanicState::Fading(remaining) => self.panic = PanicState::Fading(remaining - n),
+                PanicState::Rising if self.safety.is_open() => self.panic = PanicState::Idle,
+                _ => {}
+            }
         }
         self.stats.buffers.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Starts a panic, unless one is running (panic.md, rule 3) or the
+    /// output is stopping.
+    fn start_panic(&mut self) {
+        if self.panic != PanicState::Idle {
+            return;
+        }
+        if let Some(frames) = self.safety.panic_fade() {
+            self.panic = PanicState::Fading(frames);
+        }
+    }
+
+    /// The silent frame of a panic (panic.md, step 2): every module is
+    /// reset, which also lets go of every held note, unit delays and
+    /// smoothing are cleared, and the output stage starts fresh and fades
+    /// back in. Parameters, cables, and the transport are kept.
+    fn panic_reset(&mut self) {
+        for module in self.slots.iter_mut().flatten() {
+            module.reset();
+        }
+        for tap in &mut self.schedule.taps {
+            tap.state = 0.0;
+        }
+        for fill in &mut self.schedule.fills {
+            if let Some(smooth) = fill.smooth.as_mut() {
+                smooth.reset(smooth.target());
+            }
+        }
+        self.safety.panic_reset();
+        self.panic = PanicState::Rising;
+    }
+
+    /// Starts a panic if a MIDI message in this buffer is the panic
+    /// trigger. The message still reaches the modules (panic.md, MIDI
+    /// trigger).
+    fn watch_panic_trigger(&mut self) {
+        let mut fired = false;
+        for event in &self.midi {
+            fired |= self.panic_trigger.fires(event.message());
+        }
+        if fired {
+            self.start_panic();
+        }
     }
 
     /// Asks every module that has display values for them, after a block.
@@ -375,6 +446,8 @@ impl Engine {
                 Command::ResetTransport => self.transport.reset(self.frame),
                 Command::SetOutputSafety(mode) => self.safety.set_mode(mode),
                 Command::FadeOut => self.safety.fade_out(),
+                Command::Panic => self.start_panic(),
+                Command::SetPanicTrigger(trigger) => self.panic_trigger.set(trigger),
             }
         }
     }

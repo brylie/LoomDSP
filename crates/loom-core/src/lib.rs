@@ -27,6 +27,7 @@ mod live;
 mod midi;
 mod midi_map;
 mod module;
+mod panic;
 mod registry;
 pub mod safety;
 pub mod signal;
@@ -48,6 +49,7 @@ pub use graph::{Assignment, AssignmentId, Graph, InputRef, ModuleId, Node, Outpu
 pub use midi::{MidiEvent, MidiMessage};
 pub use midi_map::{ControlChangeSeen, MidiControl, MidiMapping, MidiMappingId, MidiReader, control_value};
 pub use module::{Module, Param, PortIo, ProcessContext, testing};
+pub use panic::PanicTrigger;
 pub use registry::{ModuleKind, Registry, RegistryNote};
 pub use safety::OutputSafety;
 pub use signal::SignalType;
