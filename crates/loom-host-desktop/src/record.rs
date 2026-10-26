@@ -77,8 +77,9 @@ pub struct Recorder {
     streams: Sender<rtrb::Consumer<f32>>,
     done: Arc<AtomicBool>,
     dropped: Arc<AtomicU64>,
-    /// The first write error. The recording stops there; what was written
-    /// before stays readable.
+    /// The first write error. The recording stops there. What was written
+    /// before stays in the file, but a full disk can cut the last frame in
+    /// half, and a strict WAV reader then rejects the file.
     error: Arc<Mutex<Option<String>>>,
     thread: Option<JoinHandle<()>>,
 }
