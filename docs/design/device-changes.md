@@ -3,11 +3,11 @@
 What the app does when a MIDI controller is plugged in or removed, and when the audio interface disappears, while a patch plays.
 
 - **Kind:** living specification.
-- **Status:** Agreed on merge. Not built.
+- **Status:** MIDI inputs: Implemented ([#27](https://github.com/brylie/LoomDSP/issues/27)); the manual checks on real controllers are still to do. `midir` reports no error on an open connection, so a removal is seen as a missing name or a new port identity. Where the system keeps the same identity across a replug, a quick replug within one poll is the accepted limit below. Audio device loss: Agreed, not built ([#28](https://github.com/brylie/LoomDSP/issues/28)).
 - **Decision behind it:** none. It builds on [App preferences, Audio and MIDI devices](preferences.md#audio-and-midi-devices) and [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md).
 - **Use case and requirements:** UC3, FR-MIDI-08, FR-APP-04, NFR-UX-05.
 - **Issues:** [#27](https://github.com/brylie/LoomDSP/issues/27) (MIDI), [#28](https://github.com/brylie/LoomDSP/issues/28) (audio loss). Exit criteria for P1.
-- **Code:** `crates/loom-app/src/devices.rs` (the `Host` trait and its fake), `crates/loom-app/src/settings.rs`, `crates/loom-host-desktop`.
+- **Code:** `crates/loom-app/src/devices.rs` (the `Host` trait and its fake), `App::poll_midi` in `crates/loom-app/src/settings.rs`, `midi_inputs` and `connect_midi_input` in `crates/loom-host-desktop`, and the held-note sets (`InputNotes`) in `crates/loom-core/src/engine.rs`.
 
 ## Goal
 

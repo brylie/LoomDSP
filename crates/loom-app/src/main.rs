@@ -235,6 +235,8 @@ enum Message {
     HoldNote,
     /// Silence everything and clear stuck notes (`docs/design/panic.md`).
     Panic,
+    /// Look for MIDI inputs plugged in or out (`docs/design/device-changes.md`).
+    MidiPoll,
     /// File commands (`docs/design/files.md`).
     New,
     Open,
@@ -752,9 +754,8 @@ impl App {
 
         // Every MIDI input plays the patch, and the "Hold note" button works
         // alongside them, so a keyboard is never hidden behind another port.
-        if let Some(error) = rig.attach(sender, connect_midi) {
-            status = error;
-        }
+        // The inputs are opened once the app is built, on its controller.
+        let first_midi = rig.attach(sender);
         let midi = rig.midi_in.clone().expect("attached");
 
         let (audio, midi, audio_name, idle_engine) = match output {
@@ -860,6 +861,9 @@ impl App {
             step_name: None,
         };
         app.send_panic_trigger();
+        if let Some(error) = app.connect_midi(first_midi, connect_midi) {
+            app.status = error;
+        }
         // A patch just loaded is the one on disk.
         app.history.mark_saved();
         app.saved_content = Some(app.current_patch());
@@ -1108,6 +1112,13 @@ impl App {
             Some(_) => iced::time::every(recovery::TICK).map(|_| Message::Autosave),
             None => Subscription::none(),
         };
+        // MIDI inputs plugged in and out are found by polling four times a
+        // second: the systems offer no portable callback (device-changes.md).
+        let midi_poll = if self.rig.midi_in.is_some() && !self.rig.flags.no_midi {
+            iced::time::every(Duration::from_millis(250)).map(|_| Message::MidiPoll)
+        } else {
+            Subscription::none()
+        };
         let report = match &self.reporter {
             Some(reporter) => Subscription::run_with(reporter.clone(), bench::stream).map(|()| Message::BenchDone),
             None => Subscription::none(),
@@ -1122,6 +1133,7 @@ impl App {
                 close,
                 report,
                 autosave,
+                midi_poll,
             ]
             .into_iter()
             .chain(control),
@@ -1910,6 +1922,7 @@ impl App {
             Message::Redo => self.redo(),
             Message::OpenBrowser => self.browser_key += 1,
             Message::Panic => self.panic(),
+            Message::MidiPoll => self.poll_midi(),
             Message::HoldNote => {
                 if let Some(midi) = &self.midi {
                     self.holding = !self.holding;
