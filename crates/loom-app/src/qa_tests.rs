@@ -766,9 +766,9 @@ fn lost_named_device_open_failure_retries_and_stops() {
     assert!(run.app._audio.is_none());
 }
 
-/// When SystemDefault is lost and no default output device is found at all, retries stop after 10 attempts.
+/// When SystemDefault is lost and no output devices exist, it keeps watching without counting attempts.
 #[test]
-fn lost_system_default_with_no_devices_stops_after_ten_attempts() {
+fn lost_system_default_with_no_devices_continues_watching() {
     let mut run = Setup::new("lost-default-none", PatchFrom::Example("sine.ron")).start();
 
     // Remove Fake A and Fake B so no devices remain
@@ -779,6 +779,42 @@ fn lost_system_default_with_no_devices_stops_after_ten_attempts() {
     assert!(run.app._audio.is_none());
     assert!(run.app.rig.lost_audio.is_some());
 
+    // 12 seconds pass with no output device: attempts must stay 0
+    let mut now = Instant::now();
+    for _ in 1..=12 {
+        now += Duration::from_secs(1);
+        run.app.check_audio(now);
+    }
+    assert_eq!(run.app.rig.lost_audio.as_ref().unwrap().attempts, 0);
+
+    // When an interface is plugged in again, audio returns
+    run.host.add_device(fake::device("USB DAC"));
+    now += Duration::from_secs(1);
+    run.app.check_audio(now);
+    assert!(run.app._audio.is_some());
+    assert!(run.app.rig.lost_audio.is_none());
+    assert_eq!(
+        run.app.status,
+        "Audio: \"Fake A\" was lost. Now playing on \"USB DAC\"."
+    );
+}
+
+/// When SystemDefault retry repeatedly fails to reopen, retries stop after 10 attempts.
+#[test]
+fn lost_system_default_failing_to_reopen_stops_after_ten_attempts() {
+    let mut run = Setup::new("lost-default-broken-ten", PatchFrom::Example("sine.ron")).start();
+
+    run.host.remove_device("Fake A");
+    run.host.remove_device("Fake B");
+    run.app.check_audio(Instant::now());
+
+    assert!(run.app._audio.is_none());
+    assert!(run.app.rig.lost_audio.is_some());
+
+    // A broken device is plugged in and becomes the default
+    run.host.broken.borrow_mut().push("Broken DAC".into());
+    run.host.add_device(fake::device("Broken DAC"));
+
     let mut now = Instant::now();
     for _ in 1..=10 {
         now += Duration::from_secs(1);
@@ -787,8 +823,9 @@ fn lost_system_default_with_no_devices_stops_after_ten_attempts() {
 
     assert_eq!(
         run.app.status,
-        "Audio: could not reopen \"Fake A\": no audio output device found. Choose a device in Preferences."
+        "Audio: could not reopen \"Fake A\": the device is busy. Choose a device in Preferences."
     );
+    assert!(run.app._audio.is_none());
 }
 
 /// When SystemDefault is lost and a replacement device appears later, check_audio reconnects.

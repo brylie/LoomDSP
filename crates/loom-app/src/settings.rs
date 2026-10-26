@@ -894,11 +894,9 @@ impl App {
                                 lost.last_error = Some(e);
                             }
                         }
-                    } else {
-                        lost.attempts += 1;
                     }
                     if lost.attempts >= 10 {
-                        let raw = lost.last_error.as_deref().unwrap_or("no audio output device found");
+                        let raw = lost.last_error.as_deref().unwrap_or("could not reopen device");
                         let reason = Self::unwrap_reopen_error(raw);
                         let message = format!(
                             "Audio: could not reopen \"{}\": {reason}. Choose a device in Preferences.",
