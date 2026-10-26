@@ -1397,6 +1397,24 @@ impl App {
         }
     }
 
+    /// Lets go of a button's transient hold, whatever the mode is now. The
+    /// mode can change during a momentary press (inspector, undo, or a MIDI
+    /// mapping), and the release then resolves to the latch. Without this
+    /// the hold would stay high and come back with Momentary mode.
+    fn release_hold(&mut self, module: u32, widget: usize) {
+        let held = self.controller.graph().node(ModuleId(module)).and_then(|node| {
+            let loom_core::WidgetKind::Button { hold, .. } = node.descriptor.panel.widgets.get(widget)?.kind else {
+                return None;
+            };
+            let index = node.descriptor.param_index(hold)?;
+            let default = node.descriptor.params[index].default;
+            (node.params[index] != default).then_some((index, default))
+        });
+        if let Some((index, default)) = held {
+            self.set_param(module, index, default);
+        }
+    }
+
     /// Assigns an output to a parameter with the default depth, after the
     /// others on that parameter. A drop on a tile control and **Add
     /// modulation** both come here. An output that already drives the
@@ -2099,6 +2117,7 @@ impl App {
             }
             CanvasEvent::ButtonReleased { module, widget } => {
                 self.apply_button(module, widget, |mode, _current| mode.release());
+                self.release_hold(module, widget);
             }
             CanvasEvent::ButtonArrow { module, widget, high } => {
                 self.apply_button(module, widget, |mode, current| mode.arrow(current, high));
@@ -3854,6 +3873,29 @@ mod tests {
             app.edits.history.redo_step().map(undo::Step::name),
             Some("change SVF Cutoff")
         );
+    }
+
+    /// A mode change during a momentary press does not leave the hold
+    /// stuck high: the release lets go of it in any mode (review of #402).
+    #[test]
+    fn a_release_clears_the_hold_after_a_mode_change() {
+        let mut app = app();
+        let id = app.controller.add_module("loom.ui.button").unwrap();
+        app.commit();
+        let node = app.controller.graph().node(id).unwrap();
+        let mode = node.descriptor.param_index("mode").unwrap();
+        let hold = node.descriptor.param_index("hold").unwrap();
+        let (module, widget) = (id.0, 0);
+        let held = |app: &App| app.controller.graph().node(id).unwrap().params[hold];
+
+        app.controller.set_param(id, mode, 1.0).unwrap();
+        let _ = app.update(Message::Canvas(CanvasEvent::ButtonPressed { module, widget }));
+        assert_eq!(held(&app), 1.0, "the hold is down");
+        app.controller.set_param(id, mode, 0.0).unwrap();
+        let _ = app.update(Message::Canvas(CanvasEvent::ButtonReleased { module, widget }));
+        assert_eq!(held(&app), 0.0, "the release let go of the hold");
+        app.controller.set_param(id, mode, 1.0).unwrap();
+        assert_eq!(held(&app), 0.0, "Momentary mode comes back released");
     }
 
     /// A momentary button hold makes no step, and a toggle press does
