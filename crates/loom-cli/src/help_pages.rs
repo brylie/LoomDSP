@@ -540,6 +540,15 @@ mod tests {
         assert_eq!(name("", "x"), "`x`");
         assert_eq!(notes_of("no marker"), None);
         assert_eq!(notes_of(&format!("a\n{MARKER}\nb\n")).as_deref(), Some("b\n"));
+        assert_eq!(
+            extract_ron_snippet("```ron\nPatch()\n```\n").as_deref(),
+            Some("Patch()\n")
+        );
+        assert_eq!(
+            extract_ron_snippet("```ron\nPatch()\n// ```not a close\n```\n").as_deref(),
+            Some("Patch()\n// ```not a close\n")
+        );
+        assert_eq!(extract_ron_snippet("no fence"), None);
     }
 
     /// Extracts a RON snippet enclosed in ```ron ... ``` from markdown notes.
@@ -547,9 +556,16 @@ mod tests {
         let normalized = notes.replace("\r\n", "\n");
         let start_tag = "```ron\n";
         let start = normalized.find(start_tag)?;
-        let content_start = start + start_tag.len();
-        let end = normalized[content_start..].find("```")?;
-        Some(normalized[content_start..content_start + end].to_string())
+        let rest = &normalized[start + start_tag.len()..];
+        let mut len = 0;
+        for line in rest.split_inclusive('\n') {
+            let trimmed = line.trim_end_matches('\n').trim_end();
+            if trimmed.len() >= 3 && trimmed.chars().all(|c| c == '`') {
+                return Some(rest[..len].to_string());
+            }
+            len += line.len();
+        }
+        None
     }
 
     /// Every built-in module has an example patch in its help page (FR-LIB-11).
