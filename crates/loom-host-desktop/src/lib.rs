@@ -1190,17 +1190,26 @@ mod tests {
     #[test]
     fn an_input_stamps_its_events() {
         let parts = create_engine(loom_modules::registry(), EngineConfig::default());
-        let EngineParts { mut engine, midi, .. } = parts;
+        let EngineParts {
+            mut engine,
+            midi,
+            mut controller,
+            ..
+        } = parts;
         let midi = share_midi(midi);
-        let mut state = MidiInputState::for_input(midi, loom_core::MidiInputId(3));
-        state.receive(&[0x90, 60, 100]);
-        assert!(state.holds_notes());
-        state.release_all();
-        assert!(!state.holds_notes());
-        // The engine does not track input 3, so it drops both events.
+        let id = loom_core::MidiInputId(3);
+        controller.open_midi_input(id).unwrap();
         let (mut l, mut r) = (vec![0.0; 64], vec![0.0; 64]);
         engine.process(&mut l, &mut r);
-        assert_eq!(engine.held_notes(loom_core::MidiInputId(3)), None);
+        let mut state = MidiInputState::for_input(midi, id);
+        state.receive(&[0x90, 60, 100]);
+        assert!(state.holds_notes());
+        engine.process(&mut l, &mut r);
+        assert_eq!(engine.held_notes(id), Some(1), "the note on carried the id");
+        state.release_all();
+        assert!(!state.holds_notes());
+        engine.process(&mut l, &mut r);
+        assert_eq!(engine.held_notes(id), Some(0), "the note off carried the id");
     }
 
     /// A configuration at `rate` in `format`, as a device reports it.

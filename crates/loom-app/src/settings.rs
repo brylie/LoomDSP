@@ -248,7 +248,12 @@ impl App {
                 self.rig.window = Some(Window::read(&*self.rig.host));
                 self.browser = None;
             }
-            Message::Close => self.rig.window = None,
+            Message::Close => {
+                self.rig.window = None;
+                // Learning a panic trigger needs the window open to show
+                // "Waiting for MIDI...", so closing it cancels the learn.
+                self.rig.panic_learn = None;
+            }
             Message::Refresh => {
                 if self.rig.window.is_some() {
                     self.rig.window = Some(Window::read(&*self.rig.host));
@@ -1607,6 +1612,12 @@ mod tests {
         let _ = app.update(crate::Message::Midi);
         assert_eq!(app.panic_line(), "Channel 10, note 36");
         assert!(app.preferences_view().is_some());
+
+        // Closing the window cancels a learn, so a later note on is not
+        // saved as the trigger where the player cannot see it.
+        app.preferences(Message::PanicLearn);
+        app.preferences(Message::Close);
+        assert_eq!(app.rig.panic_learn, None, "closing cancels the learn");
     }
 
     /// The same check through real MIDI inputs: two virtual controllers,
