@@ -789,6 +789,7 @@ impl App {
 
         // 1. If audio is running, check for loss (dead stream, stall > 1s, missing device)
         if self._audio.is_some() {
+            let mut callbacks_advancing = false;
             if let Some(stats) = &self.audio_stats {
                 let snap = stats.snapshot();
                 if snap.is_dead {
@@ -798,10 +799,16 @@ impl App {
                 if snap.callbacks > self.audio_callbacks_seen {
                     self.audio_callbacks_seen = snap.callbacks;
                     self.audio_callbacks_advanced = now;
+                    callbacks_advancing = true;
                 } else if now.saturating_duration_since(self.audio_callbacks_advanced) > Duration::from_secs(1) {
                     let mut rate_changed = false;
+                    let device_default = matches!(
+                        self.rig.store.saved().audio.sample_rate,
+                        crate::preferences::RateChoice::DeviceDefault
+                    ) && self.rig.flags.sample_rate.is_none();
                     let current = self.rig.playing.as_ref().map(|p| (p.device.clone(), p.rate));
-                    if let Some((device_name, current_rate)) = current
+                    if device_default
+                        && let Some((device_name, current_rate)) = current
                         && let Ok(outputs) = self.rig.host.outputs()
                         && let Some(info) = outputs.devices.iter().find(|d| d.name == device_name)
                         && info.default_rate != current_rate
@@ -822,13 +829,15 @@ impl App {
                     }
                 }
             }
-            let playing_name = self.rig.playing.as_ref().map(|p| p.device.clone());
-            if let Some(device_name) = playing_name
-                && let Ok(outputs) = self.rig.host.outputs()
-                && !outputs.devices.iter().any(|d| d.name == device_name)
-            {
-                self.handle_audio_loss(&format!("\"{device_name}\" was unplugged"));
-                return;
+            if !callbacks_advancing {
+                let playing_name = self.rig.playing.as_ref().map(|p| p.device.clone());
+                if let Some(device_name) = playing_name
+                    && let Ok(outputs) = self.rig.host.outputs()
+                    && !outputs.devices.iter().any(|d| d.name == device_name)
+                {
+                    self.handle_audio_loss(&format!("\"{device_name}\" was unplugged"));
+                    return;
+                }
             }
         }
 
@@ -838,21 +847,55 @@ impl App {
         };
 
         if lost.was_system_default {
-            if let Ok(outputs) = self.rig.host.outputs()
-                && let Some(new_default) = outputs.default
-            {
-                let options = loom_host_desktop::AudioOptions {
-                    device: Some(new_default.clone()),
-                    exact: true,
-                    sample_rate: None,
-                    buffer_size: None,
-                };
-                if let Ok(output) = self.rig.host.open(&options)
-                    && self.restart_audio(output).is_ok()
-                {
-                    self.status = format!("Audio: \"{}\" was lost. Now playing on \"{new_default}\".", lost.device);
-                    self.rig.lost_audio = None;
-                    return;
+            if now.saturating_duration_since(lost.last_attempt) >= Duration::from_secs(1) {
+                lost.last_attempt = now;
+                if lost.attempts < 10 {
+                    if let Ok(outputs) = self.rig.host.outputs()
+                        && let Some(new_default) = outputs.default
+                    {
+                        let options = loom_host_desktop::AudioOptions {
+                            device: Some(new_default.clone()),
+                            exact: true,
+                            sample_rate: None,
+                            buffer_size: None,
+                        };
+                        match self.rig.host.open(&options) {
+                            Ok(output) => match self.restart_audio(output) {
+                                Ok(()) => {
+                                    self.status = format!(
+                                        "Audio: \"{}\" was lost. Now playing on \"{new_default}\".",
+                                        lost.device
+                                    );
+                                    self.rig.lost_audio = None;
+                                    return;
+                                }
+                                Err(e) => {
+                                    lost.attempts += 1;
+                                    lost.last_error = Some(e);
+                                }
+                            },
+                            Err(e) => {
+                                lost.attempts += 1;
+                                lost.last_error = Some(e);
+                            }
+                        }
+                    } else {
+                        lost.attempts += 1;
+                    }
+                    if lost.attempts >= 10 {
+                        let raw = lost.last_error.as_deref().unwrap_or("no audio output device found");
+                        let prefix = format!("Could not use \"{}\": ", lost.device);
+                        let reason = raw
+                            .strip_prefix(&prefix)
+                            .and_then(|s| s.strip_suffix(". Audio is off."))
+                            .unwrap_or(raw);
+                        let message = format!(
+                            "Audio: could not reopen \"{}\": {reason}. Choose a device in Preferences.",
+                            lost.device
+                        );
+                        self.status = message.clone();
+                        lost.message = message;
+                    }
                 }
             }
             self.rig.lost_audio = Some(lost);

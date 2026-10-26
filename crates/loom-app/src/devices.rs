@@ -764,7 +764,7 @@ pub mod fake {
 
 #[cfg(test)]
 mod tests {
-    use super::fake::device;
+    use super::fake::{NoMidi, device};
     use super::*;
 
     fn outputs(names: &[&str]) -> Outputs {
@@ -922,5 +922,15 @@ mod tests {
             "Playing on \"MOTU M4\" at 96000 Hz, 512 frames (5.3 ms)."
         );
         assert_eq!(chosen_by_device.describe(None), "Playing on \"MOTU M4\" at 96000 Hz.");
+    }
+
+    /// Verifies that NoMidi host implements start by delegating to output.start.
+    #[test]
+    fn no_midi_host_start() {
+        let host = NoMidi;
+        let output = AudioOutput::clock(48_000, 256);
+        let parts = loom_core::create_engine(loom_modules::registry(), loom_core::EngineConfig::default());
+        let started = host.start(output, parts.engine);
+        assert!(started.is_ok());
     }
 }

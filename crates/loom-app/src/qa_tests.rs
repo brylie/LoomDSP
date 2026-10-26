@@ -693,3 +693,32 @@ fn ten_consecutive_failed_reopens_stops_retrying() {
         "Audio: could not reopen \"Fake B\": the stream did not start. Choose a device in Preferences."
     );
 }
+
+/// When the system default device is lost and reopening fails, it retries once a second
+/// and stops after 10 attempts.
+#[test]
+fn lost_system_default_reopen_failure_retries_and_stops() {
+    let mut run = Setup::new("lost-default-fail", PatchFrom::Example("sine.ron")).start();
+
+    // Remove Fake A, leaving Fake B as default, but make Fake B fail to start
+    run.host.wont_start.borrow_mut().push("Fake B".into());
+    run.host.remove_device("Fake A");
+    run.app.check_audio(Instant::now());
+
+    assert!(run.app._audio.is_none());
+    assert!(run.app.rig.lost_audio.is_some());
+
+    let mut now = Instant::now();
+    for _ in 1..=10 {
+        now += Duration::from_secs(1);
+        run.app.check_audio(now);
+    }
+
+    assert!(run.app.status.contains("could not reopen \"Fake A\""));
+    assert!(run.app._audio.is_none());
+
+    // Subsequent checks do not retry
+    now += Duration::from_secs(1);
+    run.app.check_audio(now);
+    assert!(run.app.status.contains("could not reopen \"Fake A\""));
+}

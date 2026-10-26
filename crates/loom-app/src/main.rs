@@ -2062,7 +2062,6 @@ impl App {
             Message::LiveFrame => scene::update_live_values(&mut self.values, &self.controller),
             Message::Autosave => self.autosave(Instant::now()),
             Message::Tick => {
-                self.poll_audio();
                 self.controller.collect_garbage();
                 self.update_dropouts(Instant::now());
             }

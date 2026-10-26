@@ -537,10 +537,12 @@ impl AudioOutput {
             Kind::Device { ref device, config } => {
                 let render_box = Box::new(render);
                 let render_ptr = Box::into_raw(render_box);
+                /// Wrapper for passing raw pointer to the audio callback closure.
                 struct RenderPtr(*mut Render);
                 // SAFETY: RenderPtr is sent to the audio callback closure.
                 unsafe impl Send for RenderPtr {}
                 impl RenderPtr {
+                    /// Calls render on the underlying Render pointer.
                     unsafe fn render(&self, data: &mut [f32]) {
                         // SAFETY: caller guarantees the pointee is valid and exclusively accessed.
                         unsafe {
@@ -604,9 +606,8 @@ impl AudioOutput {
                     });
                 }
                 Player::Device(StreamHandle {
-                    _stream: stream,
-                    // SAFETY: ownership transferred to StreamHandle; dropped after stream is dropped.
-                    _render: unsafe { Box::from_raw(render_ptr) },
+                    stream: Some(stream),
+                    render: render_ptr,
                 })
             }
             Kind::Clock { sample_rate, block } => match Clock::start(render, sample_rate, block) {
@@ -691,9 +692,11 @@ fn resume_after_switch(stream: &cpal::Stream, stats: &CallbackStats) -> Result<(
         if now != errors {
             errors = now;
             stream.play().map_err(audio_error)?;
+            stats.clear_dead();
         }
         std::thread::sleep(Duration::from_millis(5));
     }
+    stats.clear_dead();
     Ok(())
 }
 
@@ -775,8 +778,18 @@ impl Render {
 
 /// Keeps a cpal stream and its render state alive until dropped.
 struct StreamHandle {
-    _stream: cpal::Stream,
-    _render: Box<Render>,
+    stream: Option<cpal::Stream>,
+    render: *mut Render,
+}
+
+impl Drop for StreamHandle {
+    fn drop(&mut self) {
+        drop(self.stream.take());
+        // SAFETY: the stream is dropped, stopping the audio callback, so no other thread accesses render.
+        unsafe {
+            drop(Box::from_raw(self.render));
+        }
+    }
 }
 
 /// What keeps audio playing. Never read: dropping it stops audio.
@@ -791,7 +804,7 @@ enum Player {
 struct Clock {
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
-    _render: Box<Render>,
+    render: *mut Render,
 }
 
 impl Clock {
@@ -803,10 +816,12 @@ impl Clock {
         let period = Duration::from_secs_f64(f64::from(block) / f64::from(sample_rate));
         let render_box = Box::new(render);
         let render_ptr = Box::into_raw(render_box);
+        /// Wrapper for passing raw pointer to the clock thread closure.
         struct RenderPtr(*mut Render);
         // SAFETY: RenderPtr is sent to the clock thread closure.
         unsafe impl Send for RenderPtr {}
         impl RenderPtr {
+            /// Calls render on the underlying Render pointer.
             unsafe fn render(&self, data: &mut [f32]) {
                 // SAFETY: caller guarantees the pointee is valid and exclusively accessed.
                 unsafe {
@@ -845,8 +860,7 @@ impl Clock {
         Ok(Self {
             stop,
             thread: Some(thread),
-            // SAFETY: ownership of the Box is kept in Clock until thread joins and Clock drops.
-            _render: unsafe { Box::from_raw(render_ptr) },
+            render: render_ptr,
         })
     }
 }
@@ -857,7 +871,10 @@ impl Drop for Clock {
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
-        // _render is dropped on the control thread after the thread has joined.
+        // SAFETY: the clock thread has joined, so render is no longer accessed by any thread.
+        unsafe {
+            drop(Box::from_raw(self.render));
+        }
     }
 }
 
@@ -1042,7 +1059,7 @@ impl CallbackStats {
             self.start_overloads.fetch_add(1, Ordering::Relaxed);
         } else {
             self.stream_errors.fetch_add(1, Ordering::Relaxed);
-            if kind != cpal::ErrorKind::Xrun {
+            if kind != cpal::ErrorKind::Xrun && kind != cpal::ErrorKind::DeviceChanged {
                 self.stream_dead.store(true, Ordering::Relaxed);
             }
         }
@@ -1056,6 +1073,12 @@ impl CallbackStats {
     /// Marks the stream as dead.
     pub fn mark_dead(&self) {
         self.stream_dead.store(true, Ordering::Relaxed);
+    }
+
+    /// Clears the dead flag (used when a stream successfully recovers,
+    /// such as after a sample rate switch).
+    pub fn clear_dead(&self) {
+        self.stream_dead.store(false, Ordering::Relaxed);
     }
 
     fn record(&self, frames: usize, load: f64, count_overrun: bool) {
@@ -1830,5 +1853,38 @@ mod virtual_midi_tests {
         assert!(audio.stats().is_dead());
         assert!(audio.stats().snapshot().is_dead);
         audio.stop_immediate();
+    }
+
+    /// StartError implements formatting, source, and conversion to HostError.
+    #[test]
+    fn start_error_formatting_and_traits() {
+        let output = AudioOutput::clock(48_000, 256);
+        let parts = create_engine(loom_modules::registry(), EngineConfig::default());
+        let err = StartError {
+            output,
+            engine: parts.engine,
+            error: HostError::Audio("backend failed".into()),
+        };
+        assert_eq!(format!("{err}"), "audio error: backend failed");
+        assert!(format!("{err:?}").contains("StartError"));
+        use std::error::Error;
+        assert!(err.source().is_some());
+        let host_err: HostError = err.into();
+        assert_eq!(format!("{host_err}"), "audio error: backend failed");
+    }
+
+    /// CallbackStats supports clearing the dead flag and non-fatal error kinds.
+    #[test]
+    fn callback_stats_dead_flag_clearing() {
+        let stats = CallbackStats::default();
+        assert!(!stats.is_dead());
+        stats.mark_dead();
+        assert!(stats.is_dead());
+        stats.clear_dead();
+        assert!(!stats.is_dead());
+        stats.stream_error(cpal::ErrorKind::DeviceChanged);
+        assert!(!stats.is_dead());
+        stats.stream_error(cpal::ErrorKind::StreamInvalidated);
+        assert!(stats.is_dead());
     }
 }
