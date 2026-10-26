@@ -400,8 +400,8 @@ impl App {
         UiSnapshot {
             title: self.title(),
             status: self.status.clone(),
-            undo: self.history.undo_step().map(|s| s.name().to_string()),
-            redo: self.history.redo_step().map(|s| s.name().to_string()),
+            undo: self.edits.history.undo_step().map(|s| s.name().to_string()),
+            redo: self.edits.history.redo_step().map(|s| s.name().to_string()),
             selection: self.selection.iter().copied().collect(),
             port_hit_radius: PORT_HIT_RADIUS,
             tiles,

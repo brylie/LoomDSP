@@ -682,13 +682,13 @@ mod tests {
     #[test]
     fn one_depth_drag_is_one_undo_step() {
         let (mut ui, start) = modulated_cutoff();
-        let steps = ui.app.history.len();
+        let steps = ui.app.edits.history.len();
         let (centre, radius) = ui.range_ring(4, "cutoff");
         let side = Point::new(centre.x + radius, centre.y);
 
         ui.drag(side, Point::new(side.x, side.y - 40.0), 8);
         assert!((env_depth(&ui) - (start + 0.2)).abs() < 1e-4, "{}", env_depth(&ui));
-        assert_eq!(ui.app.history.len(), steps + 1, "the drag is one step");
+        assert_eq!(ui.app.edits.history.len(), steps + 1, "the drag is one step");
 
         ui.tap(keyboard::Key::Character("z".into()), keyboard::Modifiers::COMMAND);
         assert_eq!(env_depth(&ui), start);

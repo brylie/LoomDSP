@@ -820,14 +820,16 @@ fn press_message(app: &App, name: &str) -> Result<Message, String> {
         ),
         "undo" => (
             Message::Undo,
-            app.history
+            app.edits
+                .history
                 .undo_step()
                 .is_none()
                 .then_some("Undo is disabled: nothing to undo"),
         ),
         "redo" => (
             Message::Redo,
-            app.history
+            app.edits
+                .history
                 .redo_step()
                 .is_none()
                 .then_some("Redo is disabled: nothing to redo"),
@@ -2663,7 +2665,7 @@ mod tests {
     #[test]
     fn a_key_no_widget_takes_reaches_the_app() {
         let mut ui = pointer_ui();
-        assert!(ui.app.history.undo_step().is_some());
+        assert!(ui.app.edits.history.undo_step().is_some());
         let before = ui.app.controller.graph().assignments().count();
         assert_eq!(
             run_ui(&mut ui, r#"{"cmd": "key", "key": "z", "modifiers": ["cmd"]}"#),
