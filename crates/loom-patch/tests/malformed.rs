@@ -133,15 +133,11 @@ fn edge_cases_load_safely() {
             false,
         ),
         (
-            format!(
-                "Patch(version: 1, modules: [PatchModule(id: 1, kind: \"loom.filter.svf@1\")], modulation: [PatchModulation(source: (1, \"lowpass\"), target: (1, \"cutoff\"), depth: NaN)])"
-            ),
+            "Patch(version: 1, modules: [PatchModule(id: 1, kind: \"loom.filter.svf@1\")], modulation: [PatchModulation(source: (1, \"lowpass\"), target: (1, \"cutoff\"), depth: NaN)])".to_string(),
             true,
         ),
         (
-            format!(
-                "Patch(version: 1, modules: [PatchModule(id: 1, kind: \"loom.filter.svf@1\")], midi: [PatchMidiMapping(target: (1, \"cutoff\"), channel: 255, controller: 255)])"
-            ),
+            "Patch(version: 1, modules: [PatchModule(id: 1, kind: \"loom.filter.svf@1\")], midi: [PatchMidiMapping(target: (1, \"cutoff\"), channel: 255, controller: 255)])".to_string(),
             false,
         ),
     ];
