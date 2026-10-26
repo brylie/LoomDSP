@@ -418,8 +418,10 @@ mod tests {
         assert!(bytes.len() as u64 <= limit);
         let data = bytes.windows(4).position(|w| w == b"data").unwrap() + 8;
         let written: Vec<f32> = bytes[data..]
-            .chunks_exact(4)
-            .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|b| f32::from_le_bytes(*b))
             .collect();
         assert!(written.len() > 100, "{} samples written", written.len());
         let pushed = left.iter().zip(&right).flat_map(|(l, r)| [*l, *r]);
