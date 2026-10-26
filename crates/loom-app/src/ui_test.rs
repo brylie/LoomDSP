@@ -564,6 +564,69 @@ mod tests {
         assert!(!canvas.bounds.intersects(&row), "the row {row:?} is beside the canvas");
     }
 
+    /// Adds a module of `kind`, selects it, and draws the inspector.
+    fn select_new(ui: &mut Ui, kind: &str) -> ModuleId {
+        let id = ui.app.controller.add_module(kind).expect("a built-in module");
+        ui.app.commit();
+        let _ = ui.app.update(Message::SelectModule(id.0));
+        ui.redraw();
+        id
+    }
+
+    /// panels.md, Choice names: the inspector shows Button's mode by name,
+    /// and a click on the second radio button below the row picks
+    /// "Momentary". The row's value text follows.
+    #[test]
+    fn a_click_on_a_choice_name_in_the_inspector_picks_it() {
+        let mut ui = Ui::open("subtractive.ron");
+        let button = select_new(&mut ui, "loom.ui.button");
+        let mode = ui
+            .app
+            .controller
+            .graph()
+            .node(button)
+            .unwrap()
+            .descriptor
+            .param_index("mode")
+            .unwrap();
+        assert!(ui.text("Toggle").is_some(), "the value is the name");
+        let label = ui.text("Mode").expect("the Mode row");
+        // The radio buttons sit under the row. Walk down until a click
+        // lands on the second one.
+        let mut picked = false;
+        for step in 0..30 {
+            let at = Point::new(label.x + 6.0, label.y + label.height + 2.0 + step as f32 * 2.0);
+            ui.move_to(at);
+            ui.press();
+            ui.release();
+            if ui.app.controller.graph().node(button).unwrap().params[mode] == 1.0 {
+                picked = true;
+                break;
+            }
+        }
+        assert!(picked, "a radio button under the Mode row picks Momentary");
+        assert!(ui.text("Momentary").is_some(), "the row's value follows");
+    }
+
+    /// More than four names get a pick list, and a parameter with ranges a
+    /// Range selector. Both draw, and the rows keep their labels and values.
+    #[test]
+    fn the_inspector_draws_pick_lists_and_range_selectors() {
+        let mut ui = Ui::open("subtractive.ron");
+        select_new(&mut ui, "loom.mod.lfo");
+        assert!(ui.text("Shape").is_some());
+        assert!(ui.text("Sine").is_some(), "the shape's value is its name");
+        let mul = select_new(&mut ui, "loom.math.mul");
+        assert!(ui.text("Gain").is_some());
+        let _ = ui.app.update(Message::Range {
+            module: mul.0,
+            index: 0,
+            range: 0,
+        });
+        ui.redraw();
+        assert!(ui.text("0.100").is_some(), "clamped into -0.1 to 0.1");
+    }
+
     /// Subtractive with the filter envelope (module 5) modulating the
     /// filter cutoff (module 4) at the default depth. Returns that depth.
     fn modulated_cutoff() -> (Ui, f32) {

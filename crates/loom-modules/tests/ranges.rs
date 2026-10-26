@@ -124,3 +124,61 @@ fn a_control_change_spans_the_selected_range() {
         assert!((gain - expected).abs() < 1e-6, "CC {value}: {gain}");
     }
 }
+
+/// `set_range` refuses a module or parameter that does not exist, and a
+/// range the parameter does not offer, naming the parameter and the range.
+/// The parameter's full range is accepted: a loaded value that no listed
+/// range holds keeps it (rule 7).
+#[test]
+fn set_range_refuses_what_is_not_offered() {
+    let mut parts = engine();
+    let c = &mut parts.controller;
+    let mul = c.add_module("loom.math.mul").unwrap();
+    let lfo = c.add_module("loom.mod.lfo").unwrap();
+    assert!(matches!(
+        c.set_range(ModuleId(99), 0, FINE),
+        Err(LoomError::UnknownModule(_))
+    ));
+    assert!(matches!(c.set_range(mul, 7, FINE), Err(LoomError::NoSuchParam { .. })));
+    let error = c.set_range(lfo, 0, FINE).unwrap_err();
+    assert!(matches!(error, LoomError::NoSuchRange { .. }), "{error:?}");
+    let error = c.set_range(mul, 0, ParamRange::new(0.0, 2.0)).unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        format!("parameter `gain` of module {mul} offers no range 0 to 2")
+    );
+
+    c.set_range(mul, 0, WIDE).unwrap();
+    c.set_param(mul, 0, 9.0).unwrap();
+    // -10 to 10 is both listed and the full range; the full range of a
+    // parameter is always accepted.
+    let full = ParamRange::new(-10.0, 10.0);
+    c.set_range(mul, 0, full).unwrap();
+    assert_eq!(gain(&parts, mul), (9.0, Some(full)));
+}
+
+/// A range change that must clamp the value, while the command queue is
+/// full, fails and leaves both the range and the value as they were.
+#[test]
+fn a_failed_clamp_keeps_the_old_range() {
+    let config = EngineConfig {
+        command_capacity: 4,
+        ..EngineConfig::with_sample_rate(48_000.0)
+    };
+    let mut parts = create_engine(loom_modules::registry(), config);
+    let c = &mut parts.controller;
+    let mul = c.add_module("loom.math.mul").unwrap();
+    c.set_param(mul, 0, 0.8).unwrap();
+    // Fill the queue: the engine is not running, so nothing drains it.
+    while c.set_param(mul, 0, 0.8).is_ok() {}
+    let error = c.set_range(mul, 0, FINE).unwrap_err();
+    assert!(matches!(error, LoomError::QueueFull), "{error:?}");
+    assert_eq!(gain(&parts, mul), (0.8, Some(DEFAULT)));
+    // Editing a parameter that does not exist names it.
+    let c = &mut parts.controller;
+    assert!(matches!(c.set_param(mul, 9, 0.0), Err(LoomError::NoSuchParam { .. })));
+    assert!(matches!(
+        c.set_params(mul, &[(9, 0.0)]),
+        Err(LoomError::NoSuchParam { .. })
+    ));
+}

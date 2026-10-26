@@ -727,6 +727,7 @@ impl Controller {
         {
             if let Some(node) = self.graph.nodes.get_mut(&module) {
                 node.ranges[index] = previous;
+                node.params[index] = value;
             }
             return Err(error);
         }

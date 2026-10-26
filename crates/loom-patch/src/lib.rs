@@ -666,6 +666,16 @@ Patch(
         assert_eq!(gain(&c), (0.5, Some(ParamRange::new(-1.0, 1.0))));
         assert!(notes[0].contains("does not offer"), "{notes:?}");
 
+        // A range for a parameter the module does not have is an error, as
+        // for a value.
+        let patch = Patch::from_ron(
+            r#"Patch(version: 1, modules: [(id: 1, kind: "loom.math.mul@1", ranges: {"nope": (0.0, 1.0)})])"#,
+        )
+        .unwrap();
+        let mut parts = create_engine(loom_modules::registry(), EngineConfig::default());
+        let error = patch.load_into(&mut parts.controller).unwrap_err();
+        assert!(matches!(error, PatchError::UnknownParam { module: 1, .. }), "{error}");
+
         // A range on a parameter that offers none is ignored, with a note.
         let (_, notes) = load_text(
             r#"Patch(version: 1, modules: [(id: 1, kind: "loom.math.convert@1", ranges: {"mode": (0.0, 1.0)})])"#,

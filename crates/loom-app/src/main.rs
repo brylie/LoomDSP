@@ -3442,7 +3442,9 @@ mod tests {
         app.controller.connect_named(gate, "out", env, "gate").unwrap();
         app.commit();
         app.process(4_800);
-        let _ = app.update(Message::Lights(watch.read()));
+        // A level light draws its value as it is, with no fade.
+        let mut fades = vec![lights::Fade::default(); watch.lights.len()];
+        let _ = app.update(Message::Lights(watch.shown(&mut fades, Instant::now())));
         let level = tile_widget(&app, env, light).position;
         assert!(level > 0.5, "the gate is held: {level}");
     }
@@ -3507,6 +3509,32 @@ mod tests {
         };
         assert_eq!(choices.len(), 5);
         assert_eq!(selected, 0);
+    }
+
+    /// A saved range that does not hold its value loads with the smallest
+    /// range that does, the value unchanged, and a note in the status bar
+    /// (control-ranges.md, rule 7).
+    #[test]
+    fn a_range_note_shows_in_the_status_bar() {
+        let dir = std::env::temp_dir().join(format!("loom-app-range-note-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("range.ron");
+        std::fs::write(
+            &path,
+            r#"Patch(version: 1, modules: [(id: 1, kind: "loom.math.mul@1", params: {"gain": 5.0}, ranges: {"gain": (-0.1, 0.1)})])"#,
+        )
+        .unwrap();
+        let app = App::new(Args {
+            patch: Some(path),
+            ..app_args()
+        });
+        let _ = std::fs::remove_dir_all(&dir);
+        let node = app.controller.graph().node(ModuleId(1)).unwrap();
+        assert_eq!(
+            (node.params[0], node.range(0)),
+            (5.0, Some(loom_core::ParamRange::new(-5.0, 5.0)))
+        );
+        assert!(app.status.contains("-0.1 to 0.1"), "{}", app.status);
     }
 
     /// control-ranges.md: Multiply's gain shows a **Range** selector. A
