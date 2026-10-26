@@ -46,7 +46,7 @@ pub use display::{DisplayReader, DisplaySource};
 pub use engine::{Engine, EngineConfig, EngineStats};
 pub use error::LoomError;
 pub use graph::{Assignment, AssignmentId, Graph, InputRef, ModuleId, Node, OutputRef};
-pub use midi::{MidiEvent, MidiMessage};
+pub use midi::{MAX_MIDI_INPUTS, MidiEvent, MidiInputId, MidiMessage};
 pub use midi_map::{ControlChangeSeen, MidiControl, MidiMapping, MidiMappingId, MidiReader, NoteOnSeen, control_value};
 pub use module::{Module, Param, PortIo, ProcessContext, testing};
 pub use panic::PanicTrigger;

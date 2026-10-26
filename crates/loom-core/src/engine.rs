@@ -10,7 +10,7 @@ use crate::descriptor::{MAX_DISPLAYS, Polarity};
 use crate::display::DisplayTable;
 use crate::graph::AssignmentId;
 use crate::live::{LiveTable, NO_CELL};
-use crate::midi::{MidiEvent, MidiMessage};
+use crate::midi::{HeldSet, MAX_MIDI_INPUTS, MidiEvent, MidiMessage};
 use crate::midi_map::{MidiControl, MidiFeedback, later};
 use crate::module::{Module, PortIo, ProcessContext};
 use crate::panic::{PanicState, PanicTrigger, TriggerWatch};
@@ -138,11 +138,98 @@ pub(crate) enum Command {
     Panic,
     /// The MIDI message that runs panic, from the player's preferences.
     SetPanicTrigger(Option<PanicTrigger>),
+    /// Start tracking the notes of MIDI input `index`, in `held`.
+    OpenInput {
+        index: usize,
+        held: Box<HeldSet>,
+    },
+    /// Release every note MIDI input `index` holds, and stop tracking it.
+    ReleaseInput(usize),
 }
 
 pub(crate) enum Garbage {
     Module(#[allow(dead_code)] Box<dyn Module>),
     Schedule(#[allow(dead_code)] Box<Schedule>),
+    HeldSet(#[allow(dead_code)] Box<HeldSet>),
+}
+
+/// Notes held per tracked MIDI input, and how many inputs hold each note
+/// (`docs/design/device-changes.md`, Held notes belong to an input). All
+/// memory is allocated when the engine is built or arrives by command.
+struct InputNotes {
+    /// One set per open input, by id. `None` for an input that is not open.
+    inputs: Box<[Option<Box<HeldSet>>]>,
+    /// How many open inputs hold each note: channel * 128 + note.
+    holders: Box<[u8]>,
+    /// Note offs from released inputs, sent at the start of the next
+    /// buffer.
+    releases: Vec<MidiEvent>,
+}
+
+impl InputNotes {
+    fn new() -> Self {
+        Self {
+            inputs: (0..MAX_MIDI_INPUTS).map(|_| None).collect(),
+            holders: vec![0; 16 * 128].into_boxed_slice(),
+            releases: Vec::with_capacity(16 * 128),
+        }
+    }
+
+    /// Follows one event. Returns false if the modules must not see it:
+    /// it comes from an input that is not open, or it is a note off for a
+    /// note another input still holds.
+    fn follow(&mut self, event: &MidiEvent) -> bool {
+        if event.input == 0 {
+            return true;
+        }
+        let Some(Some(held)) = self.inputs.get_mut(usize::from(event.input)) else {
+            return false;
+        };
+        match event.message() {
+            MidiMessage::NoteOn { channel, note, .. } if !held.has(channel, note) => {
+                held.set(channel, note, true);
+                let count = &mut self.holders[usize::from(channel) * 128 + usize::from(note)];
+                *count = count.saturating_add(1);
+                true
+            }
+            MidiMessage::NoteOff { channel, note } if held.has(channel, note) => {
+                held.set(channel, note, false);
+                let count = &mut self.holders[usize::from(channel) * 128 + usize::from(note)];
+                *count = count.saturating_sub(1);
+                *count == 0
+            }
+            _ => true,
+        }
+    }
+
+    /// Takes input `index`'s set away, and queues a note off for each note
+    /// no other input holds. Returns the set, for freeing.
+    fn release(&mut self, index: usize) -> Option<Box<HeldSet>> {
+        let mut held = self.inputs.get_mut(index)?.take()?;
+        let (holders, releases) = (&mut self.holders, &mut self.releases);
+        held.drain(|channel, note| {
+            let count = &mut holders[usize::from(channel) * 128 + usize::from(note)];
+            *count = count.saturating_sub(1);
+            // The list holds every note of every channel, and the set has
+            // each note once, so it only fills when several inputs are
+            // released in one buffer. A dropped note off is then a note that
+            // the next release or panic clears.
+            if *count == 0 && releases.len() < releases.capacity() {
+                releases.push(MidiEvent::note_off(0, channel, note));
+            }
+        });
+        Some(held)
+    }
+
+    /// Forgets every held note, as panic does: the modules have just let
+    /// go of them all. Inputs stay open.
+    fn clear(&mut self) {
+        for held in self.inputs.iter_mut().flatten() {
+            held.drain(|_, _| {});
+        }
+        self.holders.fill(0);
+        self.releases.clear();
+    }
 }
 
 /// The audio-thread half of the engine. Call [`Engine::process`] from the
@@ -183,6 +270,8 @@ pub struct Engine {
     panic: PanicState,
     /// The MIDI trigger for panic, and the state of its control.
     panic_trigger: TriggerWatch,
+    /// The notes each tracked MIDI input holds.
+    input_notes: InputNotes,
     config: EngineConfig,
     stats: Arc<EngineStats>,
 }
@@ -217,6 +306,7 @@ impl Engine {
             safety: SafetyStage::new(config.output_safety, config.sample_rate),
             panic: PanicState::Idle,
             panic_trigger: TriggerWatch::default(),
+            input_notes: InputNotes::new(),
             config,
             stats,
         }
@@ -225,6 +315,16 @@ impl Engine {
     /// Engine settings.
     pub fn config(&self) -> &EngineConfig {
         &self.config
+    }
+
+    /// How many notes MIDI input `input` holds, or `None` if the engine does
+    /// not track it. For tests and diagnostics.
+    pub fn held_notes(&self, input: crate::MidiInputId) -> Option<usize> {
+        self.input_notes
+            .inputs
+            .get(usize::from(input.0))?
+            .as_ref()
+            .map(|held| held.count())
     }
 
     /// True once the engine was asked to fade out
@@ -311,6 +411,7 @@ impl Engine {
                 smooth.reset(smooth.target());
             }
         }
+        self.input_notes.clear();
         self.safety.panic_reset();
         self.panic = PanicState::Rising;
     }
@@ -449,6 +550,22 @@ impl Engine {
                 Command::FadeOut => self.safety.fade_out(),
                 Command::Panic => self.start_panic(),
                 Command::SetPanicTrigger(trigger) => self.panic_trigger.set(trigger),
+                Command::OpenInput { index, held } => {
+                    // An input opened again starts clean: what it held is
+                    // released first.
+                    if let Some(old) = self.input_notes.release(index) {
+                        self.discard(Garbage::HeldSet(old));
+                    }
+                    match self.input_notes.inputs.get_mut(index) {
+                        Some(slot) => *slot = Some(held),
+                        None => self.discard(Garbage::HeldSet(held)),
+                    }
+                }
+                Command::ReleaseInput(index) => {
+                    if let Some(old) = self.input_notes.release(index) {
+                        self.discard(Garbage::HeldSet(old));
+                    }
+                }
             }
         }
     }
@@ -512,8 +629,19 @@ impl Engine {
 
     fn collect_midi(&mut self, frames: usize) {
         self.midi.clear();
+        // Note offs from inputs released since the last buffer go first.
+        for event in self.input_notes.releases.drain(..) {
+            if self.midi.len() == self.midi.capacity() {
+                self.stats.dropped_midi.fetch_add(1, Ordering::Relaxed);
+                continue;
+            }
+            self.midi.push(event);
+        }
         let last = frames.saturating_sub(1) as u32;
         while let Ok(mut event) = self.midi_in.pop() {
+            if !self.input_notes.follow(&event) {
+                continue;
+            }
             if self.midi.len() == self.midi.capacity() {
                 self.stats.dropped_midi.fetch_add(1, Ordering::Relaxed);
                 continue;

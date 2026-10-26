@@ -67,6 +67,9 @@ pub enum LoomError {
         /// The parameter name.
         param: String,
     },
+    /// A MIDI input id is 0 or not below [`MAX_MIDI_INPUTS`](crate::MAX_MIDI_INPUTS).
+    #[error("invalid MIDI input {0} (inputs are 1 to {max})", max = crate::MAX_MIDI_INPUTS - 1)]
+    InvalidMidiInput(u16),
     /// A MIDI channel or controller number is out of range.
     #[error("invalid MIDI control: channel {} and controller {} (channels are 0 to 15, controllers 0 to 127)", .0.channel, .0.controller)]
     InvalidMidiControl(MidiControl),

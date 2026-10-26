@@ -796,6 +796,28 @@ impl Controller {
         self.send(Command::FadeOut)
     }
 
+    /// Starts tracking the notes held on MIDI input `input`. Call it before
+    /// events stamped with `input` reach the engine; events from an input
+    /// that is not open are dropped. Opening an input that is open releases
+    /// its notes first. Spec: `docs/design/device-changes.md`, Held notes
+    /// belong to an input.
+    pub fn open_midi_input(&mut self, input: crate::MidiInputId) -> Result<(), LoomError> {
+        let index = check_input_id(input)?;
+        self.send(Command::OpenInput {
+            index,
+            held: Box::default(),
+        })
+    }
+
+    /// Stops tracking MIDI input `input`: the engine sends a note off for
+    /// every note it held, unless another input still holds that note, and
+    /// drops later events stamped with it. Call it when the input is closed
+    /// or gone.
+    pub fn release_midi_input(&mut self, input: crate::MidiInputId) -> Result<(), LoomError> {
+        let index = check_input_id(input)?;
+        self.send(Command::ReleaseInput(index))
+    }
+
     /// Runs panic (`docs/design/panic.md`): the engine fades its output to
     /// silence over 10 ms, releases every held note and resets every
     /// module at the silent frame, and fades back in over 10 ms. It is not
@@ -982,6 +1004,14 @@ impl Controller {
 }
 
 /// Clamps a modulation depth to -1..1. NaN becomes 0, which adds nothing.
+/// The table index of a MIDI input id, if it is in range.
+fn check_input_id(input: crate::MidiInputId) -> Result<usize, LoomError> {
+    if input.0 == 0 || input.0 >= crate::MAX_MIDI_INPUTS {
+        return Err(LoomError::InvalidMidiInput(input.0));
+    }
+    Ok(usize::from(input.0))
+}
+
 fn clamp_depth(depth: f32) -> f32 {
     if depth.is_nan() { 0.0 } else { depth.clamp(-1.0, 1.0) }
 }
