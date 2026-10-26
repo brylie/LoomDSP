@@ -33,7 +33,7 @@ The target jumps from 0 to 1. After 8 frames the smoothed gain is:
 | 4 | 2 | 0.190 |
 | 8 | 1 | 0.100 |
 
-The glide is three times slower at block 8 than at block 1. At 512 it would be slower still, and the gain would also move in steps you can hear. The fix is to step **per frame**, inside the loop, so the number of steps depends on the number of frames and not the number of calls. The same mistake appears in many forms:
+The glide is three times slower at block 4 than at block 1, and almost six times slower at block 8. At 512 it would be slower still, and the gain would also move in steps you can hear. The fix is to step **per frame**, inside the loop, so the number of steps depends on the number of frames and not the number of calls. The same mistake appears in many forms:
 
 - Computing an LFO value once per block and using it for every frame.
 - Advancing a phase by `block_length * step` and reading it only at the start of the block.
