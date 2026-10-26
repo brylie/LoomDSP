@@ -65,4 +65,4 @@ When the patch is edited while it plays, the delay's state carries over by key, 
 ## Further reading
 
 - Julius O. Smith, *Introduction to Digital Filters*, on the unit delay and feedback (free online at ccrma.stanford.edu/~jos).
-- Udo Zölzer (ed.), *DAFX: Digital Audio Effects*, on feedback delay structures.
+- U. Zölzer (ed.), *DAFX: Digital Audio Effects*, on feedback delay structures.
