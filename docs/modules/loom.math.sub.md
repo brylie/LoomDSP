@@ -28,3 +28,40 @@ Subtracts signal B from signal A.
 None.
 
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->
+
+## When to use it
+
+Use Subtract to compute the difference between signal A and signal B. It is useful for creating bipolar modulation from unipolar envelopes or phase cancellation effects.
+
+## Example patch
+
+Subtracts an envelope from a steady value to create an inverted modulation contour.
+
+```ron
+Patch(
+    version: 1,
+    name: "Inverted Envelope",
+    modules: [
+        PatchModule(id: 1, kind: "loom.math.constant@1", params: {"value": 1}),
+        PatchModule(id: 2, kind: "loom.env.adsr@1", params: {"attack": 0.05, "decay": 0.2, "sustain": 0.3, "release": 0.3}),
+        PatchModule(id: 3, kind: "loom.math.sub@1"),
+        PatchModule(id: 4, kind: "loom.phase.generator@1"),
+        PatchModule(id: 5, kind: "loom.osc.saw@1"),
+        PatchModule(id: 6, kind: "loom.filter.svf@1"),
+        PatchModule(id: 7, kind: "loom.io.audio-out@1"),
+    ],
+    cables: [
+        PatchCable(from: (1, "out"), to: (3, "a")),
+        PatchCable(from: (2, "out"), to: (3, "b")),
+        PatchCable(from: (3, "out"), to: (6, "cutoff")),
+        PatchCable(from: (4, "phase"), to: (5, "phase")),
+        PatchCable(from: (5, "out"), to: (6, "in")),
+        PatchCable(from: (6, "lowpass"), to: (7, "left")),
+    ],
+)
+```
+
+## See also
+
+- [Add](loom.math.add.md)
+- [Scale](loom.level.scale.md)

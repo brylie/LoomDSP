@@ -43,3 +43,36 @@ A slow wave. Free mode runs at a rate in Hz; synced mode follows a phase, by def
 - Knob: **Cycles** (`cycles`)
 
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->
+
+## When to use it
+
+Use LFO to produce cyclical modulation signals for vibrato, tremolo, filter sweeps, or pulse width modulation. Free mode runs at a specified frequency in Hertz, while Synced mode locks to bar phase or an external phase ramp.
+
+## Example patch
+
+Applies slow sine modulation to filter cutoff.
+
+```ron
+Patch(
+    version: 1,
+    name: "Filter LFO",
+    modules: [
+        PatchModule(id: 1, kind: "loom.mod.lfo@1", params: {"sync": 0, "rate": 0.5, "shape": 0}),
+        PatchModule(id: 2, kind: "loom.phase.generator@1"),
+        PatchModule(id: 3, kind: "loom.osc.saw@1"),
+        PatchModule(id: 4, kind: "loom.filter.svf@1", params: {"cutoff": 1200, "resonance": 0.3}),
+        PatchModule(id: 5, kind: "loom.io.audio-out@1"),
+    ],
+    cables: [
+        PatchCable(from: (1, "out"), to: (4, "cutoff")),
+        PatchCable(from: (2, "phase"), to: (3, "phase")),
+        PatchCable(from: (3, "out"), to: (4, "in")),
+        PatchCable(from: (4, "lowpass"), to: (5, "left")),
+    ],
+)
+```
+
+## See also
+
+- [Modulation without cables](../learn/modulation-without-cables.md)
+- [Modulation patch](../../examples/patches/modulation.ron)

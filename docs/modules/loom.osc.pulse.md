@@ -35,3 +35,32 @@ Band-limited pulse wave shaped from a phase input (polyBLEP).
 - Knob: **Width** (`width`)
 
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->
+
+## When to use it
+
+Use Pulse to generate square and pulse waveforms shaped from a phase input. PolyBLEP band-limiting suppresses digital aliasing across the audio spectrum. Adjust the width parameter for rich harmonic variation or classic pulse width modulation.
+
+## Example patch
+
+Plays a pulse wave driven by a phase generator.
+
+```ron
+Patch(
+    version: 1,
+    name: "Pulse Voice",
+    modules: [
+        PatchModule(id: 1, kind: "loom.phase.generator@1"),
+        PatchModule(id: 2, kind: "loom.osc.pulse@1", params: {"width": 0.25}),
+        PatchModule(id: 3, kind: "loom.io.audio-out@1"),
+    ],
+    cables: [
+        PatchCable(from: (1, "phase"), to: (2, "phase")),
+        PatchCable(from: (2, "out"), to: (3, "left")),
+    ],
+)
+```
+
+## See also
+
+- [Phase and cycles](../learn/phase-and-cycles.md)
+- [Saw](loom.osc.saw.md)

@@ -37,3 +37,38 @@ Limits a signal to the range between two limits. NaN becomes 0 first, so Clamp m
 - Knob: **High** (`high`)
 
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->
+
+## When to use it
+
+Use Clamp to limit a modulation or audio signal to a strict range between low and high bounds. It prevents extreme modulation values from destabilizing filters or wrapping phases. Any NaN input is converted to 0 first.
+
+## Example patch
+
+Restricts an LFO swing between 0 and 0.8.
+
+```ron
+Patch(
+    version: 1,
+    name: "Clamped LFO",
+    modules: [
+        PatchModule(id: 1, kind: "loom.mod.lfo@1", params: {"rate": 2}),
+        PatchModule(id: 2, kind: "loom.level.clamp@1", params: {"low": 0, "high": 0.8}),
+        PatchModule(id: 3, kind: "loom.phase.generator@1"),
+        PatchModule(id: 4, kind: "loom.osc.saw@1"),
+        PatchModule(id: 5, kind: "loom.filter.svf@1"),
+        PatchModule(id: 6, kind: "loom.io.audio-out@1"),
+    ],
+    cables: [
+        PatchCable(from: (1, "out"), to: (2, "in")),
+        PatchCable(from: (2, "out"), to: (5, "cutoff")),
+        PatchCable(from: (3, "phase"), to: (4, "phase")),
+        PatchCable(from: (4, "out"), to: (5, "in")),
+        PatchCable(from: (5, "lowpass"), to: (6, "left")),
+    ],
+)
+```
+
+## See also
+
+- [Scale](loom.level.scale.md)
+- [Output safety](../learn/output-safety.md)

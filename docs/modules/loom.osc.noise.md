@@ -34,3 +34,32 @@ None.
 - Radio buttons: **Colour** (`colour`) (White, Pink, Brown)
 
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->
+
+## When to use it
+
+Use Noise to generate non-periodic audio textures, percussion snares, wind sounds, or random modulation sources. Choose White for equal energy per Hertz, Pink for equal energy per octave, or Brown for a 6 dB per octave low frequency emphasis.
+
+## Example patch
+
+Filters pink noise with a resonant filter to create wind textures.
+
+```ron
+Patch(
+    version: 1,
+    name: "Wind Noise",
+    modules: [
+        PatchModule(id: 1, kind: "loom.osc.noise@1", params: {"colour": 1, "seed": 42}),
+        PatchModule(id: 2, kind: "loom.filter.svf@1", params: {"cutoff": 500, "resonance": 0.6}),
+        PatchModule(id: 3, kind: "loom.io.audio-out@1"),
+    ],
+    cables: [
+        PatchCable(from: (1, "out"), to: (2, "in")),
+        PatchCable(from: (2, "bandpass"), to: (3, "left")),
+    ],
+)
+```
+
+## See also
+
+- [Sample and hold](loom.rand.sample-hold.md)
+- [SVF](loom.filter.svf.md)

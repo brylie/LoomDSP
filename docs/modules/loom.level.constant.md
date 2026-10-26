@@ -33,3 +33,36 @@ None.
 - Knob: **Level** (`level`)
 
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->
+
+## When to use it
+
+Use Constant (level) to produce a fixed decibel level as a gain factor. It is ideal for setting steady channel gains, calibration targets, or reference levels. 0 dB outputs a factor of 1.0, while -6 dB outputs approximately 0.5.
+
+## Example patch
+
+Attenuates an oscillator signal by 6 dB before sending it to audio out.
+
+```ron
+Patch(
+    version: 1,
+    name: "Fixed Level Attenuation",
+    modules: [
+        PatchModule(id: 1, kind: "loom.phase.generator@1"),
+        PatchModule(id: 2, kind: "loom.osc.sine@1"),
+        PatchModule(id: 3, kind: "loom.level.constant@1", params: {"level": -6}),
+        PatchModule(id: 4, kind: "loom.level.amp@1"),
+        PatchModule(id: 5, kind: "loom.io.audio-out@1"),
+    ],
+    cables: [
+        PatchCable(from: (1, "phase"), to: (2, "phase")),
+        PatchCable(from: (2, "out"), to: (4, "in")),
+        PatchCable(from: (3, "out"), to: (4, "level")),
+        PatchCable(from: (4, "out"), to: (5, "left")),
+    ],
+)
+```
+
+## See also
+
+- [Amplifier](loom.level.amp.md)
+- [Convert](loom.math.convert.md)

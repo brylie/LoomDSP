@@ -33,3 +33,36 @@ None.
 - Knob: **Value** (`value`)
 
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->
+
+## When to use it
+
+Use Constant to output a fixed numerical voltage. It is useful for supplying manual pitch offsets, reference thresholds for comparators, or fixed modulation biases across the patch.
+
+## Example patch
+
+Supplies a fixed control voltage to open a filter cutoff.
+
+```ron
+Patch(
+    version: 1,
+    name: "Fixed Offset",
+    modules: [
+        PatchModule(id: 1, kind: "loom.phase.generator@1"),
+        PatchModule(id: 2, kind: "loom.osc.saw@1"),
+        PatchModule(id: 3, kind: "loom.math.constant@1", params: {"value": 0.2}),
+        PatchModule(id: 4, kind: "loom.filter.svf@1"),
+        PatchModule(id: 5, kind: "loom.io.audio-out@1"),
+    ],
+    cables: [
+        PatchCable(from: (1, "phase"), to: (2, "phase")),
+        PatchCable(from: (2, "out"), to: (4, "in")),
+        PatchCable(from: (3, "out"), to: (4, "cutoff")),
+        PatchCable(from: (4, "lowpass"), to: (5, "left")),
+    ],
+)
+```
+
+## See also
+
+- [Constant (pitch)](loom.pitch.constant.md)
+- [Constant (level)](loom.level.constant.md)

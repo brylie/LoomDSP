@@ -52,3 +52,40 @@ Adds four signals, each with its own level and mute. Two mixers in a row make a 
 - Toggle: **Mute 4** (`mute4`)
 
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->
+
+## When to use it
+
+Use Mixer to combine up to four signals with dedicated volume controls and click-free mutes. Muting an input fades the signal down smoothly over 5 milliseconds to prevent pops. Stereo signals are mixed independently on left and right channels.
+
+## Example patch
+
+Mixes three oscillator waveforms into a composite voice.
+
+```ron
+Patch(
+    version: 1,
+    name: "Four Channel Mix",
+    modules: [
+        PatchModule(id: 1, kind: "loom.phase.generator@1"),
+        PatchModule(id: 2, kind: "loom.osc.saw@1"),
+        PatchModule(id: 3, kind: "loom.osc.pulse@1"),
+        PatchModule(id: 4, kind: "loom.osc.triangle@1"),
+        PatchModule(id: 5, kind: "loom.mix.mixer@1", params: {"level1": 0.7, "level2": 0.5, "level3": 0.6, "level4": 0}),
+        PatchModule(id: 6, kind: "loom.io.audio-out@1"),
+    ],
+    cables: [
+        PatchCable(from: (1, "phase"), to: (2, "phase")),
+        PatchCable(from: (1, "phase"), to: (3, "phase")),
+        PatchCable(from: (1, "phase"), to: (4, "phase")),
+        PatchCable(from: (2, "out"), to: (5, "in1")),
+        PatchCable(from: (3, "out"), to: (5, "in2")),
+        PatchCable(from: (4, "out"), to: (5, "in3")),
+        PatchCable(from: (5, "out"), to: (6, "left")),
+    ],
+)
+```
+
+## See also
+
+- [Crossfade](loom.mix.crossfade.md)
+- [Stereo cables](../learn/stereo-cables.md)

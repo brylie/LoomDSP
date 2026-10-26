@@ -51,7 +51,7 @@ The index lists every module by category, with its name, ID, and description, an
 - [x] Text below the marker survives regeneration, and a second run writes nothing (`regenerating_keeps_notes`).
 - [x] A page without the marker and a page of an unknown module are kept and reported (`unmarked_and_unknown_pages_are_kept`).
 - [x] A test fails, with the command to run, when a committed page is stale (`committed_pages_are_current`).
-- [ ] Every built-in module has hand-written notes with an example patch (FR-LIB-11). Follow-up work, one module at a time.
+- [x] Every built-in module has hand-written notes with an example patch (FR-LIB-11).
 
 ## Out of scope
 
@@ -62,4 +62,4 @@ The index lists every module by category, with its name, ID, and description, an
 
 ## Open points
 
-- Should the generated part link example patches in `examples/patches/` that use the module? It would need the command to know where the examples are.
+None. In review of [#393](https://github.com/brylie/LoomDSP/issues/393), example patches were agreed to live in hand-written notes below the marker line as minimal inline RON snippets, keeping the generated part strictly descriptor-derived (Rule 1). Notes link to full patches in `examples/patches/` when available.

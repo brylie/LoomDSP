@@ -39,3 +39,38 @@ Shows its input over time. Passes the input through unchanged.
 - Knob: **Level** (`level`)
 
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->
+
+## When to use it
+
+Use Scope to view waveforms and modulation signals in the time domain. It helps verify oscillator shapes, envelope contours, and modulation depths. The input passes through unchanged.
+
+## Example patch
+
+Displays an LFO triangle wave before it modulates a filter cutoff.
+
+```ron
+Patch(
+    version: 1,
+    name: "Scope Waveform",
+    modules: [
+        PatchModule(id: 1, kind: "loom.mod.lfo@1", params: {"shape": 1}),
+        PatchModule(id: 2, kind: "loom.display.scope@1"),
+        PatchModule(id: 3, kind: "loom.phase.generator@1"),
+        PatchModule(id: 4, kind: "loom.osc.saw@1"),
+        PatchModule(id: 5, kind: "loom.filter.svf@1"),
+        PatchModule(id: 6, kind: "loom.io.audio-out@1"),
+    ],
+    cables: [
+        PatchCable(from: (1, "out"), to: (2, "in")),
+        PatchCable(from: (2, "out"), to: (5, "cutoff")),
+        PatchCable(from: (3, "phase"), to: (4, "phase")),
+        PatchCable(from: (4, "out"), to: (5, "in")),
+        PatchCable(from: (5, "lowpass"), to: (6, "left")),
+    ],
+)
+```
+
+## See also
+
+- [Modulation without cables](../learn/modulation-without-cables.md)
+- [Level Meter](loom.display.meter.md)

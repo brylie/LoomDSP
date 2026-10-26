@@ -35,3 +35,36 @@ None.
 - Button: **On** (`on`) (toggle), **Hold** (`hold`) (momentary), chosen by **Mode** (`mode`)
 
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->
+
+## When to use it
+
+Use Button to generate manual gate signals directly from the graphical user interface. In Toggle mode, clicking changes the gate state between on and off. In Momentary mode, the gate remains high only while the button is pressed.
+
+## Example patch
+
+Controls an audio mute or envelope gate with a toggle button.
+
+```ron
+Patch(
+    version: 1,
+    name: "Manual Gate Button",
+    modules: [
+        PatchModule(id: 1, kind: "loom.ui.button@1", params: {"mode": 0, "on": 1}),
+        PatchModule(id: 2, kind: "loom.phase.generator@1"),
+        PatchModule(id: 3, kind: "loom.osc.sine@1"),
+        PatchModule(id: 4, kind: "loom.level.amp@1"),
+        PatchModule(id: 5, kind: "loom.io.audio-out@1"),
+    ],
+    cables: [
+        PatchCable(from: (1, "gate"), to: (4, "level")),
+        PatchCable(from: (2, "phase"), to: (3, "phase")),
+        PatchCable(from: (3, "out"), to: (4, "in")),
+        PatchCable(from: (4, "out"), to: (5, "left")),
+    ],
+)
+```
+
+## See also
+
+- [Triggers and gates](../learn/triggers-and-gates.md)
+- [Memory](loom.logic.memory.md)

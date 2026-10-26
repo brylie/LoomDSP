@@ -37,3 +37,32 @@ A gentle first-order filter, 6 dB per octave. The cutoff input adds pitch: +0.1 
 - Knob: **Cutoff** (`cutoff`)
 
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->
+
+## When to use it
+
+Use One-pole for gentle 6 dB per octave filtering, subtle tone shaping, or smoothing modulation signals. It offers simultaneous lowpass and highpass outputs with no resonant peak. The cutoff input tracks pitch at 0.1 per octave.
+
+## Example patch
+
+Smooths white noise through a lowpass filter.
+
+```ron
+Patch(
+    version: 1,
+    name: "Filtered Noise",
+    modules: [
+        PatchModule(id: 1, kind: "loom.osc.noise@1"),
+        PatchModule(id: 2, kind: "loom.filter.onepole@1", params: {"cutoff": 800}),
+        PatchModule(id: 3, kind: "loom.io.audio-out@1"),
+    ],
+    cables: [
+        PatchCable(from: (1, "out"), to: (2, "in")),
+        PatchCable(from: (2, "lowpass"), to: (3, "left")),
+    ],
+)
+```
+
+## See also
+
+- [Pitch at 0.1 per octave](../learn/pitch.md)
+- [SVF](loom.filter.svf.md)

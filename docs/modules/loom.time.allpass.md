@@ -38,3 +38,34 @@ Delay-line all-pass filter. Passes all frequencies at equal steady-state level w
 - Knob: **Gain** (`gain`)
 
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->
+
+## When to use it
+
+Use All-Pass to alter phase relationships without changing frequency balance. It forms the core building block of reverb diffusers, phasers, and dispersion filters. Cascading multiple all-pass filters diffuses transient sounds into dense reverb tails.
+
+## Example patch
+
+Smears the phase of a pulse tone through an all-pass filter.
+
+```ron
+Patch(
+    version: 1,
+    name: "Allpass Diffuser",
+    modules: [
+        PatchModule(id: 1, kind: "loom.phase.generator@1"),
+        PatchModule(id: 2, kind: "loom.osc.pulse@1", params: {"width": 0.1}),
+        PatchModule(id: 3, kind: "loom.time.allpass@1", params: {"time": 0.02, "gain": 0.6}),
+        PatchModule(id: 4, kind: "loom.io.audio-out@1"),
+    ],
+    cables: [
+        PatchCable(from: (1, "phase"), to: (2, "phase")),
+        PatchCable(from: (2, "out"), to: (3, "in")),
+        PatchCable(from: (3, "out"), to: (4, "left")),
+    ],
+)
+```
+
+## See also
+
+- [Delays and interpolation](../learn/delays-and-interpolation.md)
+- [Delay](loom.time.delay.md)

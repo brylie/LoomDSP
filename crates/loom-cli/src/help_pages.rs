@@ -537,4 +537,45 @@ mod tests {
         assert_eq!(notes_of("no marker"), None);
         assert_eq!(notes_of(&format!("a\n{MARKER}\nb\n")).as_deref(), Some("b\n"));
     }
+
+    /// Extracts a RON snippet enclosed in ```ron ... ``` from markdown notes.
+    fn extract_ron_snippet(notes: &str) -> Option<String> {
+        let start_tag = "```ron\n";
+        let start = notes.find(start_tag)?;
+        let content_start = start + start_tag.len();
+        let end = notes[content_start..].find("```")?;
+        Some(notes[content_start..content_start + end].to_string())
+    }
+
+    /// Every built-in module has an example patch in its help page (FR-LIB-11).
+    /// The patch must parse, contain the module, and compile cleanly into a schedule.
+    #[test]
+    fn example_patches_in_pages_are_valid() {
+        let registry = loom_modules::registry();
+        let dir = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/modules"));
+        for d in registry.iter() {
+            let path = dir.join(file_name(d));
+            let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+            let notes = notes_of(&text).unwrap_or_else(|| panic!("{} has no marker line", path.display()));
+            let ron_snippet = extract_ron_snippet(&notes)
+                .unwrap_or_else(|| panic!("{} has no ```ron example patch in its notes", path.display()));
+            let patch = loom_patch::Patch::from_ron(&ron_snippet)
+                .unwrap_or_else(|e| panic!("{} example patch failed to parse: {e}", path.display()));
+            let expected_prefix = format!("{}@", d.id);
+            let has_module = patch
+                .modules
+                .iter()
+                .any(|m| m.kind.starts_with(&expected_prefix) || m.kind == d.id);
+            assert!(
+                has_module,
+                "{} example patch does not contain module {}",
+                path.display(),
+                d.id
+            );
+            let mut parts = loom_core::create_engine(registry.clone(), loom_core::EngineConfig::default());
+            patch
+                .load_into(&mut parts.controller)
+                .unwrap_or_else(|e| panic!("{} example patch failed to load into controller: {e}", path.display()));
+        }
+    }
 }
