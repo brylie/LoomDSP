@@ -942,4 +942,33 @@ mod tests {
         let started = System.start(output, parts.engine);
         assert!(started.is_ok());
     }
+
+    /// When outputs.default is None, add_device promotes the first device to default.
+    #[test]
+    fn fake_add_device_sets_default_when_none() {
+        let fake = fake::Fake {
+            outputs: std::cell::RefCell::new(Outputs {
+                default: None,
+                devices: Vec::new(),
+            }),
+            ..fake::Fake::new(&[], &[])
+        };
+        assert!(fake.outputs.borrow().default.is_none());
+        fake.add_device(fake::device("USB Audio"));
+        assert_eq!(fake.outputs.borrow().default.as_deref(), Some("USB Audio"));
+    }
+
+    /// NoMidi delegates outputs and open to System.
+    #[test]
+    fn no_midi_delegates_to_system() {
+        let host = NoMidi;
+        let _ = host.outputs();
+        let options = AudioOptions {
+            device: Some("nonexistent device that will fail to open".into()),
+            exact: true,
+            sample_rate: None,
+            buffer_size: None,
+        };
+        let _ = host.open(&options);
+    }
 }

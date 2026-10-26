@@ -477,11 +477,13 @@ impl App {
                     return;
                 }
             };
-            self.rig.lost_audio = None;
             if let Err(e) = self.restart_audio(output) {
                 self.status = e;
                 return;
             }
+            self.rig.lost_audio = None;
+        } else {
+            self.rig.lost_audio = None;
         }
         match change {
             Change::Device(_) => self.rig.flags.device = None,
@@ -2257,5 +2259,70 @@ mod tests {
         let mut app = start(args(&dir), &fake);
         let _ = app.subscription();
         let _ = app.update(crate::Message::AudioPoll);
+    }
+
+    /// check_audio returns early when no_audio or fake_audio is active.
+    #[test]
+    fn check_audio_returns_early_when_audio_disabled() {
+        let dir = folder("check-audio-disabled");
+        let fake = two_devices();
+        let mut app = start(args(&dir), &fake);
+        app.no_audio = true;
+        app.check_audio(Instant::now());
+        app.no_audio = false;
+        app.fake_audio = true;
+        app.check_audio(Instant::now());
+    }
+
+    /// handle_audio_loss guards against redundant rebuilds and inactive audio.
+    #[test]
+    fn handle_audio_loss_guards_and_named_fallback() {
+        let dir = folder("handle-audio-loss-guards");
+        write(&dir, "(audio: (device: Named(\"Fake A\")))");
+        let fake = two_devices();
+        let mut app = start(args(&dir), &fake);
+
+        // When audio is running on a named device, loss puts it in lost_audio
+        app.handle_audio_loss("initial");
+        assert!(app.rig.lost_audio.is_some());
+
+        // Second call while lost_audio is Some returns early without duplicate handling (Rule 3)
+        app.handle_audio_loss("duplicate");
+        assert!(app.rig.lost_audio.is_some());
+
+        // When audio was never playing and not lost, return early
+        app.rig.lost_audio = None;
+        app.rig.playing = None;
+        assert!(app._audio.is_none());
+        app.handle_audio_loss("ignored");
+        assert!(app.rig.lost_audio.is_none());
+
+        // When _audio is present but playing is None, falls back to saved device name
+        let output = loom_host_desktop::AudioOutput::clock(48_000, 256);
+        let parts = loom_core::create_engine(loom_modules::registry(), loom_core::EngineConfig::default());
+        let running = output.start(parts.engine).unwrap();
+        app._audio = Some(running);
+        let mut saved = app.rig.store.saved().clone();
+        saved.audio.device = DeviceChoice::Named("Saved Device".into());
+        app.rig.save(saved);
+        app.handle_audio_loss("unplugged");
+        assert_eq!(app.rig.lost_audio.as_ref().unwrap().device, "Saved Device");
+
+        // When _audio is present, playing is None, and saved is SystemDefault, falls back to "audio device"
+        let output2 = loom_host_desktop::AudioOutput::clock(48_000, 256);
+        let parts2 = loom_core::create_engine(loom_modules::registry(), loom_core::EngineConfig::default());
+        app._audio = Some(output2.start(parts2.engine).unwrap());
+        app.rig.lost_audio = None;
+        let mut saved2 = app.rig.store.saved().clone();
+        saved2.audio.device = DeviceChoice::SystemDefault;
+        app.rig.save(saved2);
+        fake.outputs.borrow_mut().default = None;
+        app.handle_audio_loss("unplugged");
+        assert_eq!(app.rig.lost_audio.as_ref().unwrap().device, "audio device");
+
+        // When check_audio runs sooner than 1s after attempt, it waits without retrying
+        let recent = Instant::now() + Duration::from_millis(100);
+        app.check_audio(recent);
+        assert_eq!(app.rig.lost_audio.as_ref().unwrap().attempts, 0);
     }
 }

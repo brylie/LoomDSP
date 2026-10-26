@@ -104,6 +104,11 @@ impl<'a> Setup<'a> {
         }
     }
 
+    fn preferences(mut self, text: &'a str) -> Self {
+        self.preferences = Some(text);
+        self
+    }
+
     fn start(self) -> Run {
         let dir = folder(self.name);
         let patch = match self.patch {
@@ -784,4 +789,77 @@ fn lost_system_default_with_no_devices_stops_after_ten_attempts() {
         run.app.status,
         "Audio: could not reopen \"Fake A\": no audio output device found. Choose a device in Preferences."
     );
+}
+
+/// When SystemDefault is lost and a replacement device appears later, check_audio reconnects.
+#[test]
+fn lost_system_default_reconnects_when_device_appears() {
+    let mut run = Setup::new("lost-default-reconnect", PatchFrom::Example("sine.ron")).start();
+
+    // Remove Fake A and Fake B so no devices remain
+    run.host.remove_device("Fake A");
+    run.host.remove_device("Fake B");
+    run.app.check_audio(Instant::now());
+
+    assert!(run.app._audio.is_none());
+    assert!(run.app.rig.lost_audio.is_some());
+
+    // Add a new device; it becomes the default
+    run.host.add_device(fake::device("USB DAC"));
+
+    let now = Instant::now() + Duration::from_secs(2);
+    run.app.check_audio(now);
+
+    assert!(run.app._audio.is_some());
+    assert!(run.app.rig.lost_audio.is_none());
+    assert_eq!(
+        run.app.status,
+        "Audio: \"Fake A\" was lost. Now playing on \"USB DAC\"."
+    );
+}
+
+/// When SystemDefault retry encounters a broken device open, attempts increment with error.
+#[test]
+fn lost_system_default_records_open_error() {
+    let mut run = Setup::new("lost-default-broken", PatchFrom::Example("sine.ron")).start();
+
+    run.host.remove_device("Fake A");
+    run.host.remove_device("Fake B");
+    run.app.check_audio(Instant::now());
+
+    assert!(run.app._audio.is_none());
+    assert!(run.app.rig.lost_audio.is_some());
+
+    // Add a broken device
+    run.host.broken.borrow_mut().push("Broken DAC".into());
+    run.host.add_device(fake::device("Broken DAC"));
+
+    let now = Instant::now() + Duration::from_secs(2);
+    run.app.check_audio(now);
+
+    assert!(run.app._audio.is_none());
+    let lost = run.app.rig.lost_audio.as_ref().unwrap();
+    assert_eq!(lost.attempts, 1);
+    assert_eq!(lost.last_error.as_deref(), Some("the device is busy"));
+}
+
+/// Changing device in preferences while lost keeps lost_audio if the replacement fails to start.
+#[test]
+fn change_audio_keeps_lost_audio_when_restart_fails() {
+    let mut run = Setup::new("lost-keep-record", PatchFrom::Example("sine.ron"))
+        .preferences("(audio: (device: Named(\"Fake A\")))")
+        .start();
+    run.host.emit_lost("Fake A");
+    run.app.check_audio(Instant::now());
+    assert!(run.app.rig.lost_audio.is_some());
+
+    run.host.wont_start.borrow_mut().push("Fake B".into());
+    run.app
+        .preferences(Prefs::Audio(Change::Device(DeviceChoice::Named("Fake B".into()))));
+
+    assert!(
+        run.app.rig.lost_audio.is_some(),
+        "lost_audio must be preserved when restart fails"
+    );
+    assert!(run.app.status.contains("the stream did not start"));
 }
