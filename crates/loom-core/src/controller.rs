@@ -175,6 +175,8 @@ impl Controller {
     }
 
     /// Adds a module by kind (`"id@version"` or `"id"`). Returns its new ID.
+    /// Fails with [`LoomError::ModuleIdOutOfRange`] once the next free ID
+    /// would pass [`ModuleId::MAX`].
     pub fn add_module(&mut self, kind: &str) -> Result<ModuleId, LoomError> {
         let descriptor = self.registry.resolve(kind)?;
         let id = ModuleId(self.next_id);
@@ -183,6 +185,9 @@ impl Controller {
     }
 
     /// Adds a module with a specific ID, for example when loading a patch.
+    /// Fails with [`LoomError::ModuleIdOutOfRange`] for an ID above
+    /// [`ModuleId::MAX`], and with [`LoomError::DuplicateModuleId`] for one
+    /// already in use.
     pub fn add_module_with_id(&mut self, id: ModuleId, kind: &str) -> Result<(), LoomError> {
         let descriptor = self.registry.resolve(kind)?;
         self.add_descriptor(id, descriptor)
