@@ -1379,7 +1379,7 @@ impl App {
                 app.status = format!("error: {e}");
                 return;
             }
-            app.touched.insert((module, index));
+            app.edits.touch(module, index);
             app.commit();
         });
         self.refresh_values();
@@ -3482,7 +3482,7 @@ mod tests {
         let on = params.iter().find(|p| p.label != "Mode").unwrap();
         assert_eq!(control(on), inspector::ParamControl::Slider);
 
-        let undo = app.history.undo_step().map(|s| s.name().to_string());
+        let undo = app.edits.history.undo_step().map(|s| s.name().to_string());
         let _ = app.update(Message::Choice {
             module: button.0,
             index: mode.index,
@@ -3491,7 +3491,11 @@ mod tests {
         assert_eq!(app.controller.graph().node(button).unwrap().params[mode.index], 1.0);
         let mode = rows(&app, button).into_iter().find(|p| p.label == "Mode").unwrap();
         assert_eq!(mode.value, "Momentary");
-        assert_ne!(app.history.undo_step().map(|s| s.name().to_string()), undo, "one step");
+        assert_ne!(
+            app.edits.history.undo_step().map(|s| s.name().to_string()),
+            undo,
+            "one step"
+        );
         let _ = app.update(Message::Undo);
         assert_eq!(app.controller.graph().node(button).unwrap().params[mode.index], 0.0);
 
@@ -3535,7 +3539,7 @@ mod tests {
         assert_eq!(row.range.unwrap().selected, Some(0));
         assert_eq!(app.controller.graph().node(mul).unwrap().params[0], 0.1, "clamped");
         assert_eq!(
-            app.history.undo_step().map(|s| s.name().to_string()).as_deref(),
+            app.edits.history.undo_step().map(|s| s.name().to_string()).as_deref(),
             Some("change Multiply Gain range")
         );
         // The tile knob and its keyboard steps span -0.1 to 0.1.
