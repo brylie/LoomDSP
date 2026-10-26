@@ -26,7 +26,7 @@ Brings any signal into the phase range, 0 to 1. Wrap goes round the edge; fold t
 
 | Parameter | Range | Default | Description |
 |---|---|---|---|
-| **Mode** (`mode`) | 0 to 1, whole numbers | 0 | Wrap goes round the edge. Fold turns back at the edges. |
+| **Mode** (`mode`) | 0 to 1, whole numbers, choices Wrap, Fold | 0 | Wrap goes round the edge. Fold turns back at the edges. |
 
 ## Panel
 

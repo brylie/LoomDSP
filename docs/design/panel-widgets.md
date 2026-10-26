@@ -152,7 +152,7 @@ Toggle and radio buttons are Implemented. The select list joins them. All three 
 
 ### Choice names
 
-A whole-number parameter can name its values, such as "6 dB", "12 dB", "18 dB", "24 dB" for a filter slope. Radio buttons and select lists show these names. A parameter without names shows its number and unit, such as "4 voices". Choice names live in the `ParamSpec`, so the inspector shows them too ([#160](https://github.com/brylie/LoomDSP/issues/160)). Today `WidgetKind::Radio` carries its own option labels. Those labels move to the parameter, and the radio widget reads them from there. *Why:* two places for the same names can disagree, and a radio button switched for a select list must show the same words. This is the "stepped" mapping of FR-PANEL-04 ([#99](https://github.com/brylie/LoomDSP/issues/99)).
+A whole-number parameter can name its values, such as "6 dB", "12 dB", "18 dB", "24 dB" for a filter slope. Radio buttons and select lists show these names. A parameter without names shows its number and unit, such as "4 voices". Choice names live in the `ParamSpec`, so the inspector shows them too ([#160](https://github.com/brylie/LoomDSP/issues/160)). `WidgetKind::Radio` carries no labels of its own: the radio widget reads them from the parameter. *Why:* two places for the same names can disagree, and a radio button switched for a select list must show the same words. This is the "stepped" mapping of FR-PANEL-04 ([#99](https://github.com/brylie/LoomDSP/issues/99)).
 
 ### Select list
 

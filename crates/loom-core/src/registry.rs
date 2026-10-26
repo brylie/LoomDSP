@@ -238,6 +238,16 @@ mod tests {
         }
     }
 
+    /// A level display value for test descriptors.
+    const fn display(name: &'static str) -> crate::DisplaySpec {
+        crate::DisplaySpec {
+            name,
+            label: name,
+            description: "A test display value.",
+            kind: crate::DisplayKind::Level,
+        }
+    }
+
     #[test]
     fn parses_kinds() {
         assert_eq!(
@@ -363,6 +373,96 @@ mod tests {
         assert_eq!(notes, ["test.quiet: input `in` has no description"]);
     }
 
+    /// A display value with no label or description loads, with a note,
+    /// as a port or parameter does.
+    #[test]
+    fn notes_undocumented_display_values() {
+        static DARK: ModuleDescriptor = ModuleDescriptor {
+            id: "test.dark",
+            version: 1,
+            name: "Dark",
+            category: "Test",
+            description: "",
+            inputs: &[],
+            outputs: &[],
+            params: &[],
+            role: ModuleRole::Dsp(|_| unreachable!("never created")),
+            panel: crate::Panel::EMPTY,
+            displays: &[crate::DisplaySpec {
+                name: "busy",
+                label: " ",
+                description: "",
+                kind: crate::DisplayKind::Trigger,
+            }],
+        };
+        let mut registry = Registry::new();
+        registry.register(&DARK).unwrap();
+        let notes: Vec<String> = registry.notes().iter().map(ToString::to_string).collect();
+        assert_eq!(
+            notes,
+            [
+                "test.dark: display value `busy` has no label",
+                "test.dark: display value `busy` has no description"
+            ]
+        );
+    }
+
+    /// Choice names go on whole-number parameters only, one per value, and
+    /// none empty. The error names the parameter.
+    #[test]
+    fn refuses_bad_choice_names() {
+        macro_rules! with_param {
+            ($param:expr) => {{
+                static DESCRIPTOR: ModuleDescriptor = ModuleDescriptor {
+                    id: "test.choices",
+                    version: 1,
+                    name: "Choices",
+                    category: "Test",
+                    description: "",
+                    inputs: &[],
+                    outputs: &[],
+                    params: &[$param],
+                    role: ModuleRole::Dsp(|_| unreachable!("never created")),
+                    panel: crate::Panel::EMPTY,
+                    displays: &[],
+                };
+                Registry::new()
+                    .register(&DESCRIPTOR)
+                    .map_err(|error| error.to_string())
+            }};
+        }
+        assert_eq!(
+            with_param!(
+                param("mode", 0.0, 1.0, 0.0, "")
+                    .integer()
+                    .choices(&["Toggle", "Momentary"])
+            ),
+            Ok(())
+        );
+        let refused = [
+            (
+                with_param!(
+                    param("mode", 0.0, 2.0, 0.0, "")
+                        .integer()
+                        .choices(&["Toggle", "Momentary"])
+                ),
+                "parameter `mode`: 2 choice names for 3 values",
+            ),
+            (
+                with_param!(param("mode", 0.0, 1.0, 0.0, "").integer().choices(&["Toggle", " "])),
+                "parameter `mode`: a choice name is empty",
+            ),
+            (
+                with_param!(param("mix", 0.0, 1.0, 0.0, "").choices(&["Dry", "Wet"])),
+                "parameter `mix`: choice names need a whole-number parameter",
+            ),
+        ];
+        for (result, expected) in refused {
+            let error = result.unwrap_err();
+            assert!(error.contains(expected), "{error}");
+        }
+    }
+
     /// A DSP module with the given parameters, for registry checks.
     macro_rules! with_params {
         ($($param:expr),*) => {{
@@ -410,12 +510,12 @@ mod tests {
                 params: &[
                     param("level", 0.0, 1.0, 0.5, ""),
                     param("on", 0.0, 1.0, 0.0, "").integer(),
-                    param("slope", 0.0, 3.0, 0.0, "").integer(),
+                    param("slope", 0.0, 3.0, 0.0, "").integer().choices(&["6", "12", "18", "24"]),
                     param("mode", 0.0, 1.0, 0.0, "").integer(),
                 ],
                 role: ModuleRole::Dsp(|_| unreachable!("never created")),
                 panel: crate::Panel::new($width, $height, &[$($widget),*]),
-                displays: &["busy"],
+                displays: &[display("busy")],
             };
             Registry::new().register(&DESCRIPTOR).map_err(|error| error.to_string())
         }};
@@ -429,7 +529,7 @@ mod tests {
             [
                 Widget::knob(0, 0, "level"),
                 Widget::toggle(3, 0, "on"),
-                Widget::radio(6, 0, "slope", &["6", "12", "18", "24"]),
+                Widget::radio(6, 0, "slope"),
                 Widget::light(0, 3, "busy"),
                 Widget::meter(9, 0, "out")
             ]
@@ -446,8 +546,12 @@ mod tests {
             ),
             (with_panel!(3, 2, [Widget::toggle(0, 0, "level")]), "a toggle needs"),
             (
-                with_panel!(3, 4, [Widget::radio(0, 0, "slope", &["6", "12", "24"])]),
-                "radio buttons need",
+                with_panel!(3, 4, [Widget::radio(0, 0, "on")]),
+                "radio buttons need a whole-number parameter with choice names",
+            ),
+            (
+                with_panel!(3, 4, [Widget::radio(0, 0, "slope")]),
+                "`slope` (Radio): outside the panel",
             ),
             (
                 with_panel!(3, 2, [Widget::light(0, 0, "idle")]),
@@ -502,7 +606,7 @@ mod tests {
             params: &[],
             role: ModuleRole::Dsp(|_| unreachable!("never created")),
             panel: crate::Panel::EMPTY,
-            displays: &["a", "b", "c", "d", "e"],
+            displays: &[display("a"), display("b"), display("c"), display("d"), display("e")],
         };
         let error = Registry::new().register(&DESCRIPTOR).unwrap_err();
         assert!(error.to_string().contains("more than 4 display values"), "{error}");
@@ -607,7 +711,7 @@ mod tests {
             params: &[],
             role: ModuleRole::UnitDelay,
             panel: crate::Panel::EMPTY,
-            displays: &["level"],
+            displays: &[display("level")],
         };
         let error = Registry::new().register(&DELAY_WITH_DISPLAYS).unwrap_err();
         assert!(

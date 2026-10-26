@@ -27,7 +27,7 @@ Takes the input's value on a trigger and holds it. With noise on the input, it m
 
 | Parameter | Range | Default | Description |
 |---|---|---|---|
-| **Mode** (`mode`) | 0 to 1, whole numbers | 0 | Sample: take the value on the rising edge. Track: follow the input while the trigger is high. |
+| **Mode** (`mode`) | 0 to 1, whole numbers, choices Sample, Track | 0 | Sample: take the value on the rising edge. Track: follow the input while the trigger is high. |
 
 ## Panel
 

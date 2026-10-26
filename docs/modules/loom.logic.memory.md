@@ -27,13 +27,13 @@ Remembers a gate. Set and reset, toggle, or data (a D latch) mode. Reset wins a 
 
 | Parameter | Range | Default | Description |
 |---|---|---|---|
-| **Mode** (`mode`) | 0 to 2, whole numbers | 0 | Set and reset, Toggle, or Data. Changing it keeps the state. |
+| **Mode** (`mode`) | 0 to 2, whole numbers, choices Set and reset, Toggle, Data | 0 | Set and reset, Toggle, or Data. Changing it keeps the state. |
 
 ## Panel
 
 6 by 4 grid units.
 
 - Radio buttons: **Mode** (`mode`) (Set and reset, Toggle, Data)
-- Light: `state`
+- Light: **State** (`state`): Lit while the remembered gate is high.
 
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->

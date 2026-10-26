@@ -101,6 +101,8 @@ pub(crate) enum Command {
         id: u32,
         /// How many display values it publishes.
         displays: u8,
+        /// Bit `i` set when display value `i` is a trigger.
+        triggers: u8,
     },
     RemoveModule {
         slot: usize,
@@ -297,12 +299,13 @@ impl Engine {
                     module,
                     id,
                     displays,
+                    triggers,
                 } => {
                     if let Some(old) = self.slots[slot].replace(module) {
                         self.discard(Garbage::Module(old));
                     }
                     self.display_counts[slot] = displays;
-                    self.displays.claim(slot, id);
+                    self.displays.claim(slot, id, triggers);
                 }
                 Command::RemoveModule { slot } => {
                     if let Some(old) = self.slots[slot].take() {

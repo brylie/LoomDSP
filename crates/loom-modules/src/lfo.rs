@@ -66,7 +66,8 @@ pub static LFO: ModuleDescriptor = ModuleDescriptor {
             unit: "",
             options: ParamOptions::DEFAULT,
         }
-        .integer(),
+        .integer()
+        .choices(&["Free", "Synced"]),
         ParamSpec {
             name: "rate",
             label: "Rate",
@@ -100,15 +101,16 @@ pub static LFO: ModuleDescriptor = ModuleDescriptor {
             unit: "",
             options: ParamOptions::DEFAULT,
         }
-        .integer(),
+        .integer()
+        .choices(&["Sine", "Triangle", "Ramp up", "Ramp down", "Square"]),
     ],
     role: ModuleRole::Dsp(|config| Box::new(Lfo::new(config))),
     panel: Panel::new(
         9,
         6,
         &[
-            Widget::radio(0, 0, "sync", &["Free", "Synced"]),
-            Widget::radio(3, 0, "shape", &["Sine", "Triangle", "Ramp up", "Ramp down", "Square"]),
+            Widget::radio(0, 0, "sync"),
+            Widget::radio(3, 0, "shape"),
             Widget::knob(6, 0, "rate"),
             Widget::knob(6, 3, "cycles"),
         ],

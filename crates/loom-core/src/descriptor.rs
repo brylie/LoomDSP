@@ -205,6 +205,10 @@ pub struct ParamOptions {
     /// the control's 0 to 1 position, and the modulation added on top is not
     /// smoothed. Spec: `docs/design/modulation.md`, rule 7.
     pub smooth_seconds: f32,
+    /// Names of the values of a whole-number parameter, from `min` up in
+    /// steps of 1, or empty. Set with [`ParamSpec::choices`].
+    /// Spec: `docs/design/panels.md`, Choice names.
+    pub choices: &'static [&'static str],
 }
 
 impl ParamOptions {
@@ -213,6 +217,7 @@ impl ParamOptions {
         integer: false,
         mapping: ParamMapping::Linear,
         smooth_seconds: 0.0,
+        choices: &[],
     };
 }
 
@@ -259,6 +264,49 @@ impl ParamSpec {
     pub const fn smooth(mut self, seconds: f32) -> Self {
         self.options.smooth_seconds = seconds;
         self
+    }
+
+    /// Names each value of a whole-number parameter, from `min` up: one name
+    /// per value, so `max - min + 1` names. The registry refuses names on a
+    /// parameter that is not whole-number, a count that does not match, and
+    /// an empty name. Spec: `docs/design/panels.md`, Choice names.
+    pub const fn choices(mut self, names: &'static [&'static str]) -> Self {
+        self.options.choices = names;
+        self
+    }
+
+    /// The name of `value`, if this parameter names its values. The value
+    /// is clamped and rounded first, as by [`ParamSpec::clamp`].
+    pub fn choice_name(&self, value: f32) -> Option<&'static str> {
+        let index = self.clamp(value) - self.min;
+        if self.options.choices.is_empty() || !index.is_finite() || index < 0.0 {
+            return None;
+        }
+        self.options.choices.get(index as usize).copied()
+    }
+
+    /// Checks the choice names: only on a whole-number parameter, one per
+    /// value, and none empty. The registry runs this check.
+    pub fn check_choices(&self) -> Result<(), String> {
+        let names = self.options.choices;
+        if names.is_empty() {
+            return Ok(());
+        }
+        let problem = |text: &str| Err(format!("parameter `{}`: {text}", self.name));
+        if !self.options.integer {
+            return problem("choice names need a whole-number parameter");
+        }
+        let values = self.max - self.min + 1.0;
+        if values != names.len() as f32 {
+            return problem(&format!(
+                "{} choice names for {values} values; give one name per value",
+                names.len()
+            ));
+        }
+        if names.iter().any(|name| is_blank(name)) {
+            return problem("a choice name is empty");
+        }
+        Ok(())
     }
 
     /// Clamps a value into range, rounding whole-number parameters.
@@ -362,10 +410,53 @@ pub struct ModuleDescriptor {
     pub role: ModuleRole,
     /// What the module's tile shows between its port columns (ADR-0013).
     pub panel: Panel,
-    /// Names of the values the module publishes for displays, at most
+    /// The values the module publishes for displays, at most
     /// [`MAX_DISPLAYS`]. It writes them in
     /// [`Module::displays`](crate::Module::displays).
-    pub displays: &'static [&'static str],
+    pub displays: &'static [DisplaySpec],
+}
+
+/// One value a module publishes for the lights on its panel (ADR-0013).
+///
+/// Write it as a struct literal, so every field is named and a missing one
+/// is a compile error, as for [`PortSpec`]:
+///
+/// ```
+/// use loom_core::{DisplayKind, DisplaySpec};
+///
+/// const GATE: DisplaySpec = DisplaySpec {
+///     name: "gate",
+///     label: "Gate",
+///     description: "Lit while a key is held.",
+///     kind: DisplayKind::Level,
+/// };
+/// ```
+///
+/// The name is the stable ID that panels and [`Module::displays`](crate::Module::displays)
+/// use. The label is the light's caption, and the description its hover
+/// text. Spec: `docs/design/port-and-parameter-text.md`, Display values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DisplaySpec {
+    /// Stable name that panel widgets bind to.
+    pub name: &'static str,
+    /// Short display name, for example "Gate". The caption of its light.
+    pub label: &'static str,
+    /// What the value shows, in one short sentence that fits a tooltip.
+    pub description: &'static str,
+    /// How the engine stores it and the UI reads it.
+    pub kind: DisplayKind,
+}
+
+/// How a display value travels from the engine to a light.
+/// Spec: `docs/design/panels.md`, Lights for one-sample triggers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DisplayKind {
+    /// The latest value: each block replaces the last one.
+    Level,
+    /// A trigger: the module writes 1.0 if a trigger arrived in the block,
+    /// else 0.0. The display table keeps a 1.0 until the UI reads it, so a
+    /// one-sample trigger between two frames still lights the light.
+    Trigger,
 }
 
 /// Most display values one module can publish.
@@ -429,11 +520,13 @@ impl Widget {
         }
     }
 
-    /// Radio buttons for a whole-number parameter with one value per option.
-    /// The first option is the minimum value.
-    pub const fn radio(x: u8, y: u8, param: &'static str, options: &'static [&'static str]) -> Self {
+    /// Radio buttons for a whole-number parameter with choice names
+    /// ([`ParamSpec::choices`]), one button per name. The first is the
+    /// minimum value. The names come from the parameter, so a panel cannot
+    /// show other words than the inspector.
+    pub const fn radio(x: u8, y: u8, param: &'static str) -> Self {
         Self {
-            kind: WidgetKind::Radio { options },
+            kind: WidgetKind::Radio,
             x,
             y,
             bind: param,
@@ -476,17 +569,6 @@ impl Widget {
         }
     }
 
-    /// Width and height in grid units.
-    pub const fn size(&self) -> (u8, u8) {
-        match self.kind {
-            WidgetKind::Knob => (3, 3),
-            WidgetKind::Meter => (3, 6),
-            WidgetKind::Toggle | WidgetKind::Light => (3, 2),
-            WidgetKind::Button { .. } => (6, 3),
-            WidgetKind::Radio { options } => (3, options.len() as u8 + 1),
-        }
-    }
-
     /// True for widgets bound to a parameter.
     pub const fn is_control(&self) -> bool {
         !matches!(self.kind, WidgetKind::Light | WidgetKind::Meter)
@@ -501,11 +583,9 @@ pub enum WidgetKind {
     Knob,
     /// Off or on, for a whole-number parameter from 0 to 1.
     Toggle,
-    /// One button per option, for a whole-number parameter.
-    Radio {
-        /// Option labels, from the minimum value up.
-        options: &'static [&'static str],
-    },
+    /// One button per choice name, for a whole-number parameter that names
+    /// its values. The names come from the parameter.
+    Radio,
     /// A display value as brightness, clamped to 0 to 1.
     Light,
     /// The level of one of the module's outputs, from a port probe: an RMS
@@ -605,9 +685,26 @@ impl ModuleDescriptor {
         self.params.iter().position(|p| p.name == name)
     }
 
+    /// Width and height of `widget` in grid units. Radio buttons are one row
+    /// per choice name of their parameter, plus one for the label.
+    pub fn widget_size(&self, widget: &Widget) -> (u8, u8) {
+        match widget.kind {
+            WidgetKind::Knob => (3, 3),
+            WidgetKind::Meter => (3, 6),
+            WidgetKind::Toggle | WidgetKind::Light => (3, 2),
+            WidgetKind::Button { .. } => (6, 3),
+            WidgetKind::Radio => {
+                let choices = self
+                    .param_index(widget.bind)
+                    .map_or(0, |index| self.params[index].options.choices.len());
+                (3, u8::try_from(choices + 1).unwrap_or(u8::MAX))
+            }
+        }
+    }
+
     /// Index of a display value by name.
     pub fn display_index(&self, name: &str) -> Option<usize> {
-        self.displays.iter().position(|&d| d == name)
+        self.displays.iter().position(|d| d.name == name)
     }
 
     /// Parameters to set to 0 when `name` changes from `previous` to `next`.
@@ -634,12 +731,15 @@ impl ModuleDescriptor {
         })
     }
 
-    /// Checks the display values and the panel: every widget binds to
+    /// Checks the display values, the choice names, and the panel: every widget binds to
     /// something this module has, fits its binding, lies inside the panel,
     /// and overlaps no other widget. The registry runs this check.
     pub fn check_panel(&self) -> Result<(), String> {
         if self.displays.len() > MAX_DISPLAYS {
             return Err(format!("more than {MAX_DISPLAYS} display values"));
+        }
+        for param in self.params {
+            param.check_choices()?;
         }
         let panel = &self.panel;
         for (i, widget) in panel.widgets.iter().enumerate() {
@@ -663,16 +763,13 @@ impl ModuleDescriptor {
                     None
                 };
                 let param = &self.params[index];
-                let values = param.max - param.min + 1.0;
                 let integer = param.options.integer;
                 match widget.kind {
                     WidgetKind::Toggle if !(integer && param.min == 0.0 && param.max == 1.0) => {
                         return Err(name("a toggle needs a whole-number parameter from 0 to 1"));
                     }
-                    WidgetKind::Radio { options } if !(integer && values == options.len() as f32) => {
-                        return Err(name(
-                            "radio buttons need a whole-number parameter with one value per option",
-                        ));
+                    WidgetKind::Radio if !integer || param.options.choices.is_empty() => {
+                        return Err(name("radio buttons need a whole-number parameter with choice names"));
                     }
                     WidgetKind::Button { .. } if !(integer && param.min == 0.0 && param.max == 1.0) => {
                         return Err(name("a button needs a whole-number parameter from 0 to 1"));
@@ -691,14 +788,14 @@ impl ModuleDescriptor {
             } else if self.display_index(widget.bind).is_none() {
                 return Err(name("no such display value"));
             }
-            let (w, h) = widget.size();
+            let (w, h) = self.widget_size(widget);
             if u16::from(widget.x) + u16::from(w) > u16::from(panel.width)
                 || u16::from(widget.y) + u16::from(h) > u16::from(panel.height)
             {
                 return Err(name("outside the panel"));
             }
             for other in &panel.widgets[..i] {
-                let (ow, oh) = other.size();
+                let (ow, oh) = self.widget_size(other);
                 let (x, y, w, h) = (u16::from(widget.x), u16::from(widget.y), u16::from(w), u16::from(h));
                 let (ox, oy, ow, oh) = (u16::from(other.x), u16::from(other.y), u16::from(ow), u16::from(oh));
                 let apart = x >= ox + ow || ox >= x + w || y >= oy + oh || oy >= y + h;
@@ -710,8 +807,9 @@ impl ModuleDescriptor {
         Ok(())
     }
 
-    /// The first port or parameter with an empty (or blank) label or
-    /// description, in the order inputs, outputs, parameters.
+    /// The first port, parameter, or display value with an empty (or blank)
+    /// label or description, in the order inputs, outputs, parameters,
+    /// display values.
     pub const fn first_undocumented(&self) -> Option<Undocumented> {
         let mut index = 0;
         while let Some(text) = self.text(index) {
@@ -723,8 +821,9 @@ impl ModuleDescriptor {
         None
     }
 
-    /// Every port and parameter with an empty (or blank) label or
-    /// description, in the order inputs, outputs, parameters.
+    /// Every port, parameter, and display value with an empty (or blank)
+    /// label or description, in the order inputs, outputs, parameters,
+    /// display values.
     pub fn undocumented(&self) -> Vec<Undocumented> {
         (0..)
             .map_while(|index| self.text(index))
@@ -734,7 +833,7 @@ impl ModuleDescriptor {
     }
 
     /// Text field number `index`, counting the label and then the
-    /// description of each input, output, and parameter. One list for both
+    /// description of each input, output, parameter, and display value. One list for both
     /// checks above, so they cannot disagree.
     const fn text(&self, index: usize) -> Option<Text> {
         let (port, field) = (index / 2, index % 2);
@@ -747,6 +846,9 @@ impl ModuleDescriptor {
         } else if port < self.inputs.len() + self.outputs.len() + self.params.len() {
             let spec = &self.params[port - self.inputs.len() - self.outputs.len()];
             (SpecKind::Parameter, spec.name, spec.label, spec.description)
+        } else if port < self.inputs.len() + self.outputs.len() + self.params.len() + self.displays.len() {
+            let spec = &self.displays[port - self.inputs.len() - self.outputs.len() - self.params.len()];
+            (SpecKind::Display, spec.name, spec.label, spec.description)
         } else {
             return None;
         };
@@ -772,14 +874,14 @@ impl ModuleDescriptor {
     }
 }
 
-/// A port or parameter with an empty label or description.
+/// A port, parameter, or display value with an empty label or description.
 ///
 /// Every built-in module is checked at compile time with
 /// [`assert_documented`]. The `loom-test` harness fails on one, and the
 /// registry loads the module but keeps a note ([`Registry::notes`](crate::Registry::notes)).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Undocumented {
-    /// Whether it is an input, an output, or a parameter.
+    /// Whether it is an input, an output, a parameter, or a display value.
     pub kind: SpecKind,
     /// Its stable name.
     pub name: &'static str,
@@ -787,7 +889,7 @@ pub struct Undocumented {
     pub missing: MissingText,
 }
 
-/// Whether a spec is an input, an output, or a parameter.
+/// Whether a spec is an input, an output, a parameter, or a display value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpecKind {
     /// An input port.
@@ -796,20 +898,23 @@ pub enum SpecKind {
     Output,
     /// A parameter.
     Parameter,
+    /// A display value, for a light.
+    Display,
 }
 
 impl SpecKind {
-    /// "input", "output", or "parameter".
+    /// "input", "output", "parameter", or "display value".
     pub const fn as_str(self) -> &'static str {
         match self {
             SpecKind::Input => "input",
             SpecKind::Output => "output",
             SpecKind::Parameter => "parameter",
+            SpecKind::Display => "display value",
         }
     }
 }
 
-/// Which text of a port or parameter is empty.
+/// Which text of a port, parameter, or display value is empty.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MissingText {
     /// The `label` field.
@@ -840,7 +945,7 @@ impl std::fmt::Display for Undocumented {
     }
 }
 
-/// One text field of a port or parameter, for the checks.
+/// One text field of a port, parameter, or display value, for the checks.
 struct Text {
     undocumented: Undocumented,
     value: &'static str,
@@ -850,8 +955,8 @@ const fn is_blank(text: &str) -> bool {
     text.trim_ascii().is_empty()
 }
 
-/// Panics if any port or parameter of `modules` has an empty label or
-/// description. Call it in a `const` item, so a missing text is a compile
+/// Panics if any port, parameter, or display value of `modules` has an
+/// empty label or description. Call it in a `const` item, so a missing text is a compile
 /// error:
 ///
 /// ```
@@ -873,7 +978,7 @@ pub const fn assert_documented(modules: &[&ModuleDescriptor]) {
                 .push(missing.name)
                 .push("` has no ")
                 .push(missing.missing.as_str())
-                .push(". Every port and parameter needs a short label and a one-sentence description.");
+                .push(". Every port, parameter, and display value needs a short label and a one-sentence description.");
             panic!("{}", message.as_str(module.id));
         }
         i += 1;
@@ -975,6 +1080,22 @@ mod tests {
         assert_eq!(SEED.denormalize(SEED.normalize(65_000.0)), 65_000.0);
         let step = 1.0 / (SEED.max - SEED.min);
         assert_eq!(SEED.denormalize(SEED.normalize(100.0) + step), 101.0);
+    }
+
+    /// A named value reads its name, after clamping and rounding. A
+    /// parameter without names has none.
+    #[test]
+    fn choice_names_follow_the_value() {
+        let slope = param("slope", 1.0, 4.0, 1.0, "")
+            .integer()
+            .choices(&["6 dB", "12 dB", "18 dB", "24 dB"]);
+        assert_eq!(slope.choice_name(1.0), Some("6 dB"));
+        assert_eq!(slope.choice_name(3.6), Some("24 dB"));
+        assert_eq!(slope.choice_name(-5.0), Some("6 dB"));
+        assert_eq!(slope.choice_name(f32::NAN), Some("6 dB"), "NaN is the default");
+        assert_eq!(GAIN.choice_name(1.0), None);
+        assert_eq!(slope.check_choices(), Ok(()));
+        assert_eq!(GAIN.check_choices(), Ok(()));
     }
 
     #[test]
@@ -1081,7 +1202,9 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "test.undocumented: input `in` has no description. Every port and parameter needs")]
+    #[should_panic(
+        expected = "test.undocumented: input `in` has no description. Every port, parameter, and display value needs"
+    )]
     fn assert_documented_names_the_first_missing_text() {
         assert_documented(&[&DOCUMENTED, &UNDOCUMENTED]);
     }

@@ -33,6 +33,6 @@ None.
 
 3 by 2 grid units.
 
-- Light: `gate`
+- Light: **Gate** (`gate`): Lit while a key is held.
 
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->

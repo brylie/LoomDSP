@@ -52,7 +52,8 @@ pub static SAMPLE_HOLD: ModuleDescriptor = ModuleDescriptor {
         unit: "",
         options: ParamOptions::DEFAULT,
     }
-    .integer()],
+    .integer()
+    .choices(&["Sample", "Track"])],
     role: ModuleRole::Dsp(|_| {
         Box::new(SampleHold {
             track: false,
@@ -60,7 +61,7 @@ pub static SAMPLE_HOLD: ModuleDescriptor = ModuleDescriptor {
             held: 0.0,
         })
     }),
-    panel: Panel::new(3, 3, &[Widget::radio(0, 0, "mode", &["Sample", "Track"])]),
+    panel: Panel::new(3, 3, &[Widget::radio(0, 0, "mode")]),
     displays: &[],
 };
 

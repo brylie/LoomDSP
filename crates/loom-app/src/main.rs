@@ -294,6 +294,13 @@ enum Message {
         index: usize,
         value: f32,
     },
+    /// A choice name was picked in the inspector: value `min + choice` of
+    /// the parameter, as one undo step (panels.md, Choice names).
+    Choice {
+        module: u32,
+        index: usize,
+        choice: usize,
+    },
     /// An inspector slider was let go.
     SliderReleased,
     /// Open or close the **Add modulation** list under a parameter.
@@ -1784,6 +1791,18 @@ impl App {
                     .map(|spec| spec.clamp(value));
                 if let Some(value) = value {
                     self.turn_param(module, index, value);
+                }
+            }
+            Message::Choice { module, index, choice } => {
+                let value = self
+                    .controller
+                    .graph()
+                    .node(ModuleId(module))
+                    .and_then(|n| n.descriptor.params.get(index))
+                    .map(|spec| spec.clamp(spec.min + choice as f32));
+                if let Some(value) = value {
+                    self.turn_param(module, index, value);
+                    self.close_slider_gesture();
                 }
             }
             Message::SliderReleased => self.close_slider_gesture(),
@@ -3377,6 +3396,100 @@ mod tests {
         let _ = app.update(Message::Lights(watch.read()));
         let level = tile_widget(&app, env, light).position;
         assert!(level > 0.5, "the gate is held: {level}");
+    }
+
+    /// Button's mode shows its choice names, "Toggle" and "Momentary", as
+    /// radio buttons, and a parameter without names keeps its slider. No
+    /// module is special-cased: the names come from the descriptor
+    /// (panels.md, Choice names). A pick is one undo step.
+    #[test]
+    fn the_inspector_names_the_choices_of_a_whole_number_parameter() {
+        let mut app = app();
+        let button = app.controller.add_module("loom.ui.button").unwrap();
+        let lfo = app.controller.add_module("loom.mod.lfo").unwrap();
+        app.commit();
+        let rows = |app: &App, module: ModuleId| {
+            let inspector::Inspector::Module(rows) = app.ui_snapshot().inspector else {
+                panic!("one module is selected");
+            };
+            assert_eq!(rows.id, module.0);
+            rows.params
+        };
+        let control = |row: &inspector::ParamRow| match &row.mode {
+            inspector::ParamMode::Edit { control, .. } => control.clone(),
+            inspector::ParamMode::Learn { .. } => panic!("not in learn mode"),
+        };
+        let _ = app.update(Message::SelectModule(button.0));
+        let params = rows(&app, button);
+        let mode = params.iter().find(|p| p.label == "Mode").unwrap();
+        assert_eq!(
+            control(mode),
+            inspector::ParamControl::Radio {
+                choices: vec!["Toggle", "Momentary"],
+                selected: 0
+            }
+        );
+        assert_eq!(mode.value, "Toggle", "the value is the name, never the bare number");
+        let on = params.iter().find(|p| p.label != "Mode").unwrap();
+        assert_eq!(control(on), inspector::ParamControl::Slider);
+
+        let undo = app.history.undo_step().map(|s| s.name().to_string());
+        let _ = app.update(Message::Choice {
+            module: button.0,
+            index: mode.index,
+            choice: 1,
+        });
+        assert_eq!(app.controller.graph().node(button).unwrap().params[mode.index], 1.0);
+        let mode = rows(&app, button).into_iter().find(|p| p.label == "Mode").unwrap();
+        assert_eq!(mode.value, "Momentary");
+        assert_ne!(app.history.undo_step().map(|s| s.name().to_string()), undo, "one step");
+        let _ = app.update(Message::Undo);
+        assert_eq!(app.controller.graph().node(button).unwrap().params[mode.index], 0.0);
+
+        // More than four names: a pick list.
+        let _ = app.update(Message::SelectModule(lfo.0));
+        let shape = rows(&app, lfo).into_iter().find(|p| p.label == "Shape").unwrap();
+        let inspector::ParamControl::PickList { choices, selected } = control(&shape) else {
+            panic!("five shapes are a pick list: {shape:?}");
+        };
+        assert_eq!(choices.len(), 5);
+        assert_eq!(selected, 0);
+    }
+
+    /// A one-sample trigger lights Clock Divide's trigger light, though the
+    /// output went low again long before the light is read. The light fades
+    /// out in 120 ms, and a second read without a trigger is dark
+    /// (panels.md, Lights for one-sample triggers).
+    #[test]
+    fn a_one_sample_trigger_lights_the_divide_light() {
+        let mut app = app();
+        let gate = app.controller.add_module("loom.math.constant").unwrap();
+        app.controller.set_param_named(gate, "value", 1.0).unwrap();
+        let divide = app.controller.add_module("loom.logic.divide").unwrap();
+        app.controller.set_param_named(divide, "n", 1.0).unwrap();
+        app.controller.connect_named(gate, "out", divide, "trigger").unwrap();
+        app.commit();
+        let d = app.controller.graph().node(divide).unwrap().descriptor;
+        let light = d.panel.widgets.iter().position(|w| w.bind == "fired").unwrap();
+        let _ = app.update(Message::Canvas(CanvasEvent::VisibleDisplays(vec![divide.0])));
+        let watch = app.watched_lights().expect("the trigger light is on screen");
+
+        // The constant's rise is one trigger in the first frame, then 4 799
+        // frames of 0.
+        app.process(4_800);
+        let start = Instant::now();
+        let mut fades = vec![lights::Fade::default(); watch.lights.len()];
+        let _ = app.update(Message::Lights(watch.shown(&mut fades, start)));
+        assert_eq!(tile_widget(&app, divide, light).position, 1.0, "the trigger lit it");
+
+        app.process(4_800);
+        let later = start + lights::FADE;
+        let _ = app.update(Message::Lights(watch.shown(&mut fades, later)));
+        assert_eq!(
+            tile_widget(&app, divide, light).position,
+            0.0,
+            "faded, and no new trigger"
+        );
     }
 
     /// A meter on screen follows the engine through the app's `Meters`

@@ -127,3 +127,56 @@ fn a_level_meter_on_the_filter_output_shows_the_drone() {
         }
     }
 }
+
+/// A Clock Divide and a Phase Trigger fed by a MIDI Note gate, with the
+/// divide firing on every trigger. The gate's rise is a one-sample trigger
+/// out of both, and its fall is one more out of the Phase Trigger.
+fn trigger_lights() -> (EngineParts, ModuleId, ModuleId) {
+    let mut parts = loom_core::create_engine(
+        loom_modules::registry(),
+        loom_core::EngineConfig::with_sample_rate(SAMPLE_RATE),
+    );
+    let c = &mut parts.controller;
+    let note = c.add_module("loom.midi.note").unwrap();
+    let divide = c.add_module("loom.logic.divide").unwrap();
+    let phase = c.add_module("loom.phase.trigger").unwrap();
+    c.set_param_named(divide, "n", 1.0).unwrap();
+    c.connect_named(note, "gate", divide, "trigger").unwrap();
+    c.connect_named(note, "gate", phase, "phase").unwrap();
+    c.commit().unwrap();
+    (parts, divide, phase)
+}
+
+/// The reads of a trace that saw the light lit, as seconds.
+fn lit(trace: &Trace) -> Vec<f32> {
+    trace
+        .iter()
+        .filter(|&&(_, value)| value == 1.0)
+        .map(|&(frame, _)| frame as f32 / SAMPLE_RATE)
+        .collect()
+}
+
+/// A one-sample trigger lights a trigger light at the next read, at every
+/// block size, though the latest value is 0 by then (panels.md, Lights for
+/// one-sample triggers). Each trigger is seen by exactly one read.
+#[test]
+fn one_sample_triggers_light_trigger_lights() {
+    for block in BLOCKS {
+        let (mut parts, divide, _) = trigger_lights();
+        let fired = watch(&mut parts, FRAMES, block, &note(), divide, "fired");
+        let seen = lit(&fired);
+        assert_eq!(seen.len(), 1, "block {block}: {seen:?}");
+        assert!(
+            seen[0] > NOTE_ON && seen[0] <= NOTE_ON + 512.0 / SAMPLE_RATE + 1e-6,
+            "block {block}: {seen:?}"
+        );
+
+        let (mut parts, _, phase) = trigger_lights();
+        let fired = watch(&mut parts, FRAMES, block, &note(), phase, "fired");
+        // The first frame reads phase 0, which counts as a wrap. Then the
+        // gate's rise and fall.
+        let seen = lit(&fired);
+        assert_eq!(seen.len(), 3, "block {block}: {seen:?}");
+        assert!(seen[1] > NOTE_ON && seen[2] > NOTE_OFF, "block {block}: {seen:?}");
+    }
+}

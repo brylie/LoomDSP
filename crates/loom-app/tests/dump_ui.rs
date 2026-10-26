@@ -70,7 +70,7 @@ fn frames_run_the_engine_first() {
         serde_json::Value::Null,
         "the engine has not run"
     );
-    assert_eq!(widget(&still, 2, "level")["position"], 0.0);
+    assert_eq!(widget(&still, 2, "Level")["position"], 0.0);
     assert_eq!(widget(&still, 4, "Out")["position"], 0.0);
 
     let ran = json_of(&dump_of(&patch, &["--frames", "4800"]));
@@ -80,7 +80,7 @@ fn frames_run_the_engine_first() {
         live > knob["position"].as_f64().unwrap(),
         "a positive source raises the cutoff: {knob}"
     );
-    let level = widget(&ran, 2, "level")["position"].as_f64().unwrap();
+    let level = widget(&ran, 2, "Level")["position"].as_f64().unwrap();
     assert!(level > 0.5, "the gate is held: {level}");
     // A steady 0.6 is -4.4 dB, which a meter from -60 dB to 0 dB shows at
     // about 0.926.

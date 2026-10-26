@@ -7,8 +7,9 @@
 use assert_no_alloc::AllocDisabler;
 use assert_no_alloc::assert_no_alloc;
 use loom_core::{
-    Channels, EngineConfig, EngineParts, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec,
-    Polarity, PortDefault, PortIo, PortSpec, ProcessContext, Registry, SignalType, Widget, create_engine,
+    Channels, DisplayKind, DisplaySpec, EngineConfig, EngineParts, Module, ModuleDescriptor, ModuleRole, Panel,
+    ParamOptions, ParamSpec, Polarity, PortDefault, PortIo, PortSpec, ProcessContext, Registry, SignalType, Widget,
+    create_engine,
 };
 use std::sync::Arc;
 
@@ -17,7 +18,8 @@ use std::sync::Arc;
 #[global_allocator]
 static ALLOCATOR: AllocDisabler = AllocDisabler;
 
-/// `test.lamp`: outputs its level, and publishes it and its call count.
+/// `test.lamp`: outputs its level, and publishes it, its call count, and a
+/// trigger that fires in its first call only.
 static LAMP: ModuleDescriptor = ModuleDescriptor {
     id: "test.lamp",
     version: 1,
@@ -46,7 +48,26 @@ static LAMP: ModuleDescriptor = ModuleDescriptor {
     }],
     role: ModuleRole::Dsp(|_| Box::new(Lamp { level: 0.0, calls: 0 })),
     panel: Panel::new(3, 2, &[Widget::light(0, 0, "level")]),
-    displays: &["level", "calls"],
+    displays: &[
+        DisplaySpec {
+            name: "level",
+            label: "Level",
+            description: "The level parameter.",
+            kind: DisplayKind::Level,
+        },
+        DisplaySpec {
+            name: "calls",
+            label: "Calls",
+            description: "How many blocks the lamp has run.",
+            kind: DisplayKind::Level,
+        },
+        DisplaySpec {
+            name: "first",
+            label: "First",
+            description: "Fires in the first block only.",
+            kind: DisplayKind::Trigger,
+        },
+    ],
 };
 
 struct Lamp {
@@ -67,6 +88,7 @@ impl Module for Lamp {
     fn displays(&self, values: &mut [f32]) {
         values[0] = self.level;
         values[1] = self.calls as f32;
+        values[2] = if self.calls == 1 { 1.0 } else { 0.0 };
     }
 }
 
@@ -103,9 +125,27 @@ fn values_reach_the_controller_after_the_block() {
     assert_eq!(parts.controller.display(lamp, 1), Some(2.0));
 
     // No such value, no such module.
-    assert_eq!(parts.controller.display(lamp, 2), None);
+    assert_eq!(parts.controller.display(lamp, 3), None);
     let missing = loom_core::ModuleId(99);
     assert_eq!(parts.controller.display(missing, 0), None);
+}
+
+/// A trigger written in the first block only is still there after later
+/// blocks wrote 0, until it is read once (panels.md, Lights for one-sample
+/// triggers).
+#[test]
+fn a_trigger_stays_until_it_is_read() {
+    let mut parts = engine(4);
+    let lamp = parts.controller.add_module("test.lamp").unwrap();
+    parts.controller.commit().unwrap();
+    // Ten blocks: the trigger fired in the first one.
+    process(&mut parts, 640);
+    assert_eq!(parts.controller.display(lamp, 1), Some(10.0));
+    assert_eq!(parts.controller.display(lamp, 2), Some(1.0));
+    // Read once: taken.
+    assert_eq!(parts.controller.display(lamp, 2), Some(0.0));
+    process(&mut parts, 640);
+    assert_eq!(parts.controller.display(lamp, 2), Some(0.0));
 }
 
 #[test]

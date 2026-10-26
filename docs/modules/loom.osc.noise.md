@@ -25,7 +25,7 @@ None.
 | Parameter | Range | Default | Description |
 |---|---|---|---|
 | **Seed** (`seed`) | 1 to 65535, whole numbers | 1 | Picks the noise pattern. The same seed gives the same noise. |
-| **Colour** (`colour`) | 0 to 2, whole numbers | 0 | White falls flat across the spectrum, pink falls 3 dB per octave, and brown falls 6 dB per octave. |
+| **Colour** (`colour`) | 0 to 2, whole numbers, choices White, Pink, Brown | 0 | White falls flat across the spectrum, pink falls 3 dB per octave, and brown falls 6 dB per octave. |
 
 ## Panel
 

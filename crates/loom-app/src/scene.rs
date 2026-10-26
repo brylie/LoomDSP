@@ -6,7 +6,8 @@ use loom_canvas::{
     WidgetView, WidgetViewKind,
 };
 use loom_core::{
-    Controller, InputRef, ModuleDescriptor, ModuleId, OutputRef, ParamSpec, PortSpec, SignalType, WidgetKind,
+    Controller, DisplayKind, InputRef, ModuleDescriptor, ModuleId, OutputRef, ParamSpec, PortSpec, SignalType,
+    WidgetKind,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -50,10 +51,10 @@ fn port_view(spec: &PortSpec) -> PortView {
     }
 }
 
-/// The canvas view of a module's panel (ADR-0013). Controls and meters
-/// show their parameter or output label; lights show their display value
-/// name, because display values have no label yet (panels.md, Labels and
-/// hover text).
+/// The canvas view of a module's panel (ADR-0013). Controls show their
+/// parameter's label, meters their output's, and lights their display
+/// value's, each with its description as hover text
+/// (port-and-parameter-text.md, Display values).
 fn panel_view(d: &ModuleDescriptor) -> PanelView {
     let widgets = d
         .panel
@@ -72,8 +73,13 @@ fn panel_view(d: &ModuleDescriptor) -> PanelView {
                 }
                 WidgetKind::Toggle => WidgetViewKind::Toggle,
                 WidgetKind::Meter => WidgetViewKind::Meter,
-                WidgetKind::Radio { options } => WidgetViewKind::Radio {
-                    options: options.iter().map(|o| o.to_string()).collect(),
+                // The names come from the parameter (panels.md, Choice names).
+                WidgetKind::Radio => WidgetViewKind::Radio {
+                    options: d
+                        .params
+                        .iter()
+                        .find(|p| p.name == w.bind)
+                        .map_or_else(Vec::new, |p| p.options.choices.iter().map(|o| o.to_string()).collect()),
                 },
                 WidgetKind::Button { .. } => WidgetViewKind::Button,
                 // Light, and any kind this app does not draw yet.
@@ -85,10 +91,17 @@ fn panel_view(d: &ModuleDescriptor) -> PanelView {
                     (p.label, HoverText::new(p.label, p.description, p.name))
                 })
             } else if w.kind == WidgetKind::Meter {
+                // A meter's text is its output's: two texts for one signal
+                // could disagree.
                 let output = d.outputs.iter().find(|p| p.name == w.bind);
-                (output.map_or(w.bind, |p| p.label), HoverText::default())
+                output.map_or((w.bind, HoverText::default()), |p| {
+                    (p.label, HoverText::new(p.label, p.description, p.name))
+                })
             } else {
-                (w.bind, HoverText::default())
+                let display = d.displays.iter().find(|v| v.name == w.bind);
+                display.map_or((w.bind, HoverText::default()), |v| {
+                    (v.label, HoverText::new(v.label, v.description, v.name))
+                })
             };
             WidgetView {
                 kind,
@@ -207,12 +220,35 @@ pub fn update_panel_values_dragging(
                     WidgetValue {
                         position,
                         peak,
+                        text: display_text(d, w, position),
                         ..WidgetValue::default()
                     }
                 }
             };
             values.set(id.0, index, value);
         }
+    }
+}
+
+/// The value line of a light's or meter's hover text: the label and the
+/// value. A light shows its brightness as a number, or "lit" and "dark" for
+/// a trigger. A meter shows its RMS level in dB.
+fn display_text(d: &ModuleDescriptor, w: &loom_core::Widget, position: f32) -> String {
+    if w.kind == WidgetKind::Meter {
+        let label = d.outputs.iter().find(|p| p.name == w.bind).map_or(w.bind, |p| p.label);
+        return if position > 0.0 {
+            format!("{label}: {:.1} dB", crate::live::position_db(position))
+        } else {
+            format!("{label}: below -60 dB")
+        };
+    }
+    let Some(display) = d.displays.iter().find(|v| v.name == w.bind) else {
+        return String::new();
+    };
+    match display.kind {
+        DisplayKind::Level => format!("{}: {position:.2}", display.label),
+        DisplayKind::Trigger if position > 0.0 => format!("{}: lit", display.label),
+        DisplayKind::Trigger => format!("{}: dark", display.label),
     }
 }
 
@@ -500,9 +536,7 @@ mod tests {
         assert_eq!(control_value(WidgetKind::Toggle, &on, 1.0), 1.0);
         assert_eq!(control_position(WidgetKind::Toggle, &on, 1.0), 1.0);
         let slope = param("slope", 1.0, 4.0, 1.0, "").integer();
-        let radio = WidgetKind::Radio {
-            options: &["6", "12", "18", "24"],
-        };
+        let radio = WidgetKind::Radio;
         assert_eq!(control_value(radio, &slope, 2.0), 3.0);
         assert_eq!(control_position(radio, &slope, 3.0), 2.0);
         assert_eq!(control_value(radio, &slope, 9.0), 4.0);
@@ -522,15 +556,63 @@ mod tests {
         assert_eq!(reset.hover.name, None, "`reset` reads the same as \"Reset\"");
     }
 
+    /// port-and-parameter-text.md, Display values: a light's caption is its
+    /// display value's label, and its hover text the description. A meter
+    /// takes both from the output it shows.
     #[test]
-    fn meters_show_output_labels_and_lights_show_names() {
-        let meter = &panel_view(&loom_modules::display::METER).widgets[0];
+    fn meters_and_lights_show_labels_and_descriptions() {
+        let meter_module = &loom_modules::display::METER;
+        let meter = &panel_view(meter_module).widgets[0];
         assert_eq!(meter.label, "Out");
-        assert_eq!(meter.hover, HoverText::default());
+        assert_eq!(meter.hover.description, meter_module.outputs[0].description);
         let light = &panel_view(&loom_modules::env::ADSR).widgets[4];
         assert_eq!(light.kind, WidgetViewKind::Light);
-        assert_eq!(light.label, "level");
-        assert_eq!(light.hover, HoverText::default());
+        assert_eq!(light.label, "Level");
+        assert_eq!(
+            light.hover,
+            HoverText::new("Level", loom_modules::env::ADSR.displays[0].description, "level")
+        );
+        assert_eq!(light.hover.name, None, "`level` reads the same as \"Level\"");
+        let gate = &panel_view(&loom_modules::midi::NOTE_IN)
+            .widgets
+            .last()
+            .cloned()
+            .unwrap();
+        assert_eq!(gate.label, "Gate");
+        assert_eq!(gate.hover.description, "Lit while a key is held.");
+        let fired = &panel_view(&loom_modules::logic::DIVIDE).widgets[2];
+        assert_eq!(fired.label, "Fired");
+    }
+
+    /// The value line of a light's or meter's hover text.
+    #[test]
+    fn lights_and_meters_say_their_value() {
+        let adsr = &loom_modules::env::ADSR;
+        assert_eq!(display_text(adsr, &adsr.panel.widgets[4], 0.5), "Level: 0.50");
+        let divide = &loom_modules::logic::DIVIDE;
+        assert_eq!(display_text(divide, &divide.panel.widgets[2], 0.4), "Fired: lit");
+        assert_eq!(display_text(divide, &divide.panel.widgets[2], 0.0), "Fired: dark");
+        let meter = &loom_modules::display::METER;
+        assert_eq!(display_text(meter, &meter.panel.widgets[0], 0.8), "Out: -12.0 dB");
+        assert_eq!(display_text(meter, &meter.panel.widgets[0], 0.0), "Out: below -60 dB");
+        // A control has no value line here: its text is the parameter value.
+        assert_eq!(display_text(divide, &divide.panel.widgets[0], 0.5), "");
+    }
+
+    /// A radio widget reads its names from the parameter (panels.md, Choice
+    /// names), so it shows the same words as the inspector.
+    #[test]
+    fn radio_buttons_show_the_parameter_choice_names() {
+        let lfo = &loom_modules::lfo::LFO;
+        let view = panel_view(lfo);
+        let WidgetViewKind::Radio { options } = &view.widgets[1].kind else {
+            panic!("the shape is a radio");
+        };
+        let shape = &lfo.params[lfo.param_index("shape").unwrap()];
+        assert_eq!(
+            options,
+            &shape.options.choices.iter().map(|o| o.to_string()).collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -540,7 +622,7 @@ mod tests {
             assert_eq!(view.widgets.len(), d.panel.widgets.len(), "{}", d.id);
             for (w, v) in d.panel.widgets.iter().zip(&view.widgets) {
                 // Sizes must agree, or hit-testing would miss the drawing.
-                assert_eq!(w.size(), v.size(), "{}.{}", d.id, w.bind);
+                assert_eq!(d.widget_size(w), v.size(), "{}.{}", d.id, w.bind);
             }
         }
     }

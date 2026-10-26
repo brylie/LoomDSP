@@ -307,6 +307,11 @@ fn normalise(peak: f32) -> f32 {
     ((20.0 * peak.log10() - FLOOR_DB) / -FLOOR_DB).clamp(0.0, 1.0)
 }
 
+/// Level to dB, the inverse of [`normalise`]: 0 is -60 dB, 1 is 0 dB.
+pub fn position_db(level: f32) -> f32 {
+    FLOOR_DB + level.clamp(0.0, 1.0) * -FLOOR_DB
+}
+
 /// Rises at once, falls at [`RELEASE_PER_SECOND`].
 fn decay(level: f32, target: f32, dt: f32) -> f32 {
     let fallen = level - RELEASE_PER_SECOND * dt;

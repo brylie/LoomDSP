@@ -6,15 +6,23 @@
 //! 30 frames a second even when nothing moves. This watcher reads the
 //! engine's display table on its own thread and sends a message only when a
 //! light's brightness changes by at least one of 256 levels.
+//!
+//! A trigger light holds its flash: a read of 1.0 lights it at full, and it
+//! fades to dark over [`FADE`]. The watcher is the only reader of trigger
+//! values, because a read takes them (`docs/design/panels.md`, Lights for
+//! one-sample triggers). It sends while a light fades, then nothing.
 
 use iced::futures::Stream;
 use iced::futures::channel::mpsc;
-use loom_core::{DisplayReader, DisplaySource};
+use loom_core::{DisplayKind, DisplayReader, DisplaySource};
 use std::hash::{Hash, Hasher};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// How often the watcher reads the display table: about 30 times a second.
 pub const INTERVAL: Duration = Duration::from_millis(33);
+
+/// How long a trigger light takes to fade from full to dark.
+pub const FADE: Duration = Duration::from_millis(120);
 
 /// A light, by module ID and widget index.
 pub type Light = (u32, usize);
@@ -39,12 +47,57 @@ impl Hash for Watch {
 }
 
 impl Watch {
-    /// Reads every light once.
+    /// Reads every light once, as stored. A trigger light reads 1.0 if it
+    /// fired since the last read, with no fade.
     pub fn read(&self) -> Vec<(Light, f32)> {
         self.lights
             .iter()
             .map(|(light, s)| (*light, self.reader.read(*s)))
             .collect()
+    }
+
+    /// Reads every light once, as drawn at `now`: a trigger light fades
+    /// after its last flash, with `fades` keeping when each one fired.
+    pub fn shown(&self, fades: &mut [Fade], now: Instant) -> Vec<(Light, f32)> {
+        self.lights
+            .iter()
+            .zip(fades)
+            .map(|((light, s), fade)| {
+                let value = self.reader.read(*s);
+                let shown = match s.kind() {
+                    DisplayKind::Trigger => fade.brightness(value, now),
+                    DisplayKind::Level => value,
+                };
+                (*light, shown)
+            })
+            .collect()
+    }
+}
+
+/// When a trigger light last flashed, so it can fade over [`FADE`].
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Fade {
+    lit_at: Option<Instant>,
+}
+
+impl Fade {
+    /// Brightness at `now`, after a read of `reading`. A reading above 0
+    /// starts a new flash at full. Otherwise the last flash fades
+    /// linearly, and is dark from [`FADE`] after it.
+    pub fn brightness(&mut self, reading: f32, now: Instant) -> f32 {
+        if reading > 0.0 {
+            self.lit_at = Some(now);
+        }
+        let Some(lit_at) = self.lit_at else {
+            return 0.0;
+        };
+        let left = 1.0 - now.saturating_duration_since(lit_at).as_secs_f32() / FADE.as_secs_f32();
+        if left <= 0.0 {
+            self.lit_at = None;
+            0.0
+        } else {
+            left
+        }
     }
 }
 
@@ -67,8 +120,9 @@ pub fn stream(watch: &Watch) -> impl Stream<Item = Vec<(Light, f32)>> + use<> {
     let watch = watch.clone();
     std::thread::spawn(move || {
         let mut last = vec![None; watch.lights.len()];
+        let mut fades = vec![Fade::default(); watch.lights.len()];
         while !tx.is_closed() {
-            let snapshot = watch.read();
+            let snapshot = watch.shown(&mut fades, Instant::now());
             let readings: Vec<f32> = snapshot.iter().map(|&(_, r)| r).collect();
             if let Some(levels) = changed(&last, &readings) {
                 match tx.try_send(snapshot) {
@@ -98,5 +152,42 @@ mod tests {
         assert_eq!(changed(&first, &[0.5, 1.0]), Some(vec![Some(128), Some(255)]));
         // Out of range values are clamped, as the light draws them.
         assert_eq!(changed(&first, &[-3.0, 7.0]), None);
+    }
+
+    /// A flash starts at full and is dark 120 ms later. A new flash starts
+    /// over at full.
+    #[test]
+    fn a_trigger_light_fades_in_120_ms() {
+        let start = Instant::now();
+        let at = |ms: u64| start + Duration::from_millis(ms);
+        let mut fade = Fade::default();
+        assert_eq!(fade.brightness(0.0, at(0)), 0.0, "dark before any trigger");
+        assert_eq!(fade.brightness(1.0, at(10)), 1.0);
+        assert!((fade.brightness(0.0, at(70)) - 0.5).abs() < 1e-3);
+        assert_eq!(fade.brightness(0.0, at(130)), 0.0, "dark 120 ms after the flash");
+        assert_eq!(fade.brightness(0.0, at(1_000)), 0.0);
+        assert_eq!(fade.brightness(1.0, at(1_010)), 1.0, "a new trigger flashes again");
+    }
+
+    /// The watcher sends while a trigger light fades, and nothing once it
+    /// is dark: an idle patch draws no frames (panels.md, Redraw).
+    #[test]
+    fn a_faded_light_asks_for_no_more_frames() {
+        let start = Instant::now();
+        let mut fade = Fade::default();
+        let mut last = vec![Some(0)];
+        let mut sent = Vec::new();
+        for tick in 0..30u32 {
+            let now = start + INTERVAL * tick;
+            // One trigger, read at the first tick.
+            let reading = if tick == 0 { 1.0 } else { 0.0 };
+            if let Some(levels) = changed(&last, &[fade.brightness(reading, now)]) {
+                sent.push(tick);
+                last = levels;
+            }
+        }
+        // Full, three steps of the fade, then dark: 120 ms at 33 ms a tick.
+        assert_eq!(sent, [0, 1, 2, 3, 4]);
+        assert_eq!(last, vec![Some(0)]);
     }
 }

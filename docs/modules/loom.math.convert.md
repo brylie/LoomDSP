@@ -26,7 +26,7 @@ Converts between decibels and level, and between pitch and frequency in Hz.
 
 | Parameter | Range | Default | Description |
 |---|---|---|---|
-| **Mode** (`mode`) | 0 to 3, whole numbers | 0 | Which conversion to do: dB to level, level to dB, pitch to Hz, or Hz to pitch. |
+| **Mode** (`mode`) | 0 to 3, whole numbers, choices dB to level, Level to dB, Pitch to Hz, Hz to pitch | 0 | Which conversion to do: dB to level, level to dB, pitch to Hz, or Hz to pitch. |
 
 ## Panel
 

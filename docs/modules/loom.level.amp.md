@@ -28,7 +28,7 @@ Scales a signal by a control signal, with a linear or exponential response.
 | Parameter | Range | Default | Description |
 |---|---|---|---|
 | **Gain** (`gain`) | 0 to 2 | 1 | A fixed amount the output is multiplied by. |
-| **Response** (`response`) | 0 to 1, whole numbers | 0 | How the level maps to loudness: linear, or exponential over 60 dB. |
+| **Response** (`response`) | 0 to 1, whole numbers, choices Linear, Exponential | 0 | How the level maps to loudness: linear, or exponential over 60 dB. |
 
 ## Panel
 

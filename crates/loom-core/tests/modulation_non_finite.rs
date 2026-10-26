@@ -90,7 +90,20 @@ static WATCH: ModuleDescriptor = ModuleDescriptor {
     ],
     role: ModuleRole::Dsp(|_| Box::new(Watch { seen: 0, bad: 0 })),
     panel: Panel::EMPTY,
-    displays: &["seen", "bad"],
+    displays: &[
+        loom_core::DisplaySpec {
+            name: "seen",
+            label: "Seen",
+            description: "Blocks the module has run.",
+            kind: loom_core::DisplayKind::Level,
+        },
+        loom_core::DisplaySpec {
+            name: "bad",
+            label: "Bad",
+            description: "Values that were not finite.",
+            kind: loom_core::DisplayKind::Level,
+        },
+    ],
 };
 
 /// The counts of [`WATCH`].

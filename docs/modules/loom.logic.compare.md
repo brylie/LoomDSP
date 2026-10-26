@@ -27,7 +27,7 @@ Makes a gate from two signals: high while A is above B, or while A is below B. H
 
 | Parameter | Range | Default | Description |
 |---|---|---|---|
-| **Mode** (`mode`) | 0 to 1, whole numbers | 0 | Above: high while A is above B. Below: high while A is below B. |
+| **Mode** (`mode`) | 0 to 1, whole numbers, choices Above, Below | 0 | Above: high while A is above B. Below: high while A is below B. |
 | **Hysteresis** (`hysteresis`) | 0 to 1 | 0 | A dead band around B. Once the gate is high, A must go this far past B the other way to end it. |
 
 ## Panel

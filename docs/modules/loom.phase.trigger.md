@@ -26,4 +26,10 @@ Fires a trigger each time the phase wraps, forward or backward.
 
 None.
 
+## Panel
+
+3 by 2 grid units.
+
+- Light: **Fired** (`fired`): Flashes each time the phase wraps.
+
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->

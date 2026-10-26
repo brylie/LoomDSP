@@ -23,7 +23,7 @@ A page has two parts:
 
 | Part | Holds | Who writes it |
 |---|---|---|
-| Generated, from the top to the marker line | Name, description, ID, version, category; inputs with signal type and what they read unconnected; outputs with signal type and polarity; parameters with range, unit, whole-number and logarithmic marks, and default; the panel's widgets. | The command. Never edit it by hand. |
+| Generated, from the top to the marker line | Name, description, ID, version, category; inputs with signal type and what they read unconnected; outputs with signal type and polarity; parameters with range, unit, whole-number and logarithmic marks, choice names, and default; the panel's widgets, with each light's label and description. | The command. Never edit it by hand. |
 | Notes, below the marker line | Longer explanation, an example patch, links to explainers in `docs/learn/`. | People. |
 
 The marker line is:
@@ -56,7 +56,7 @@ The index lists every module by category, with its name, ID, and description, an
 ## Out of scope
 
 - Showing help pages inside the app. The module browser shows the one-sentence description ([module browser](module-browser.md)).
-- Text for display values: comes with `DisplaySpec` ([port and parameter text](port-and-parameter-text.md#display-values)). Until then, lights are listed by name.
+- Text for display values is listed with each light, from its `DisplaySpec` ([port and parameter text](port-and-parameter-text.md#display-values)).
 - Translation (NFR-UX-04).
 - HTML output or a documentation website.
 

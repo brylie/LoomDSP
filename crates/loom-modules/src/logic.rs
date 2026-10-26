@@ -6,8 +6,8 @@
 
 use loom_core::signal::{EdgeDetector, gate_is_high, trigger};
 use loom_core::{
-    Channels, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, Polarity, PortDefault, PortIo,
-    PortSpec, ProcessContext, SignalType, Widget,
+    Channels, DisplayKind, DisplaySpec, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, Polarity,
+    PortDefault, PortIo, PortSpec, ProcessContext, SignalType, TriggerFlag, Widget,
 };
 
 /// `loom.logic.divide`: fires on every Nth incoming trigger.
@@ -76,8 +76,21 @@ pub static DIVIDE: ModuleDescriptor = ModuleDescriptor {
         .integer(),
     ],
     role: ModuleRole::Dsp(|_| Box::new(Divide::new())),
-    panel: Panel::new(6, 3, &[Widget::knob(0, 0, "n"), Widget::knob(3, 0, "offset")]),
-    displays: &[],
+    panel: Panel::new(
+        6,
+        5,
+        &[
+            Widget::knob(0, 0, "n"),
+            Widget::knob(3, 0, "offset"),
+            Widget::light(0, 3, "fired"),
+        ],
+    ),
+    displays: &[DisplaySpec {
+        name: "fired",
+        label: "Fired",
+        description: "Flashes each time the output fires.",
+        kind: DisplayKind::Trigger,
+    }],
 };
 
 struct Divide {
@@ -88,6 +101,8 @@ struct Divide {
     count: u64,
     trigger_in: EdgeDetector,
     reset_in: EdgeDetector,
+    /// Whether the output fired since the light last read it.
+    fired: TriggerFlag,
 }
 
 impl Divide {
@@ -98,6 +113,7 @@ impl Divide {
             count: 0,
             trigger_in: EdgeDetector::new(),
             reset_in: EdgeDetector::new(),
+            fired: TriggerFlag::default(),
         }
     }
 
@@ -125,8 +141,13 @@ impl Module for Divide {
                 self.count = 0;
             }
             let fired = self.trigger_in.rising(t) && self.count_trigger(n, offset);
+            self.fired.record(fired);
             *out = trigger(fired);
         }
+    }
+
+    fn displays(&self, values: &mut [f32]) {
+        values[0] = self.fired.take();
     }
 
     fn set_param(&mut self, index: usize, value: f32) {
@@ -143,6 +164,7 @@ impl Module for Divide {
         self.count = 0;
         self.trigger_in.reset();
         self.reset_in.reset();
+        self.fired.clear();
     }
 }
 
@@ -193,7 +215,8 @@ pub static COMPARE: ModuleDescriptor = ModuleDescriptor {
             unit: "",
             options: ParamOptions::DEFAULT,
         }
-        .integer(),
+        .integer()
+        .choices(&["Above", "Below"]),
         ParamSpec {
             name: "hysteresis",
             label: "Hysteresis",
@@ -212,14 +235,7 @@ pub static COMPARE: ModuleDescriptor = ModuleDescriptor {
             high: false,
         })
     }),
-    panel: Panel::new(
-        6,
-        4,
-        &[
-            Widget::radio(0, 0, "mode", &["Above", "Below"]),
-            Widget::knob(3, 0, "hysteresis"),
-        ],
-    ),
+    panel: Panel::new(6, 4, &[Widget::radio(0, 0, "mode"), Widget::knob(3, 0, "hysteresis")]),
     displays: &[],
 };
 
@@ -307,7 +323,8 @@ pub static LOGIC: ModuleDescriptor = ModuleDescriptor {
             unit: "",
             options: ParamOptions::DEFAULT,
         }
-        .integer(),
+        .integer()
+        .choices(&["And", "Or", "Xor"]),
         ParamSpec {
             name: "invert",
             label: "Invert",
@@ -321,14 +338,7 @@ pub static LOGIC: ModuleDescriptor = ModuleDescriptor {
         .integer(),
     ],
     role: ModuleRole::Dsp(|_| Box::new(Logic { op: 0, invert: false })),
-    panel: Panel::new(
-        6,
-        4,
-        &[
-            Widget::radio(0, 0, "op", &["And", "Or", "Xor"]),
-            Widget::toggle(3, 0, "invert"),
-        ],
-    ),
+    panel: Panel::new(6, 4, &[Widget::radio(0, 0, "op"), Widget::toggle(3, 0, "invert")]),
     displays: &[],
 };
 
@@ -423,17 +433,16 @@ pub static MEMORY: ModuleDescriptor = ModuleDescriptor {
         unit: "",
         options: ParamOptions::DEFAULT,
     }
-    .integer()],
+    .integer()
+    .choices(&["Set and reset", "Toggle", "Data"])],
     role: ModuleRole::Dsp(|_| Box::new(Memory::default())),
-    panel: Panel::new(
-        6,
-        4,
-        &[
-            Widget::radio(0, 0, "mode", &["Set and reset", "Toggle", "Data"]),
-            Widget::light(3, 0, "state"),
-        ],
-    ),
-    displays: &["state"],
+    panel: Panel::new(6, 4, &[Widget::radio(0, 0, "mode"), Widget::light(3, 0, "state")]),
+    displays: &[DisplaySpec {
+        name: "state",
+        label: "State",
+        description: "Lit while the remembered gate is high.",
+        kind: DisplayKind::Level,
+    }],
 };
 
 /// State for `loom.logic.memory`: the mode, the remembered gate, and one edge

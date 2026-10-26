@@ -32,9 +32,10 @@ Fires on every Nth trigger. Offset fires earlier in the count. Reset starts the 
 
 ## Panel
 
-6 by 3 grid units.
+6 by 5 grid units.
 
 - Knob: **Division** (`n`)
 - Knob: **Offset** (`offset`)
+- Light: **Fired** (`fired`): Flashes each time the output fires.
 
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->

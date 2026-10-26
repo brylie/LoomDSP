@@ -29,7 +29,7 @@ Combines up to four gates with And, Or, or Xor. Only inputs with a cable count. 
 
 | Parameter | Range | Default | Description |
 |---|---|---|---|
-| **Operation** (`op`) | 0 to 2, whole numbers | 0 | And: all connected inputs are high. Or: any is high. Xor: an odd number are high. |
+| **Operation** (`op`) | 0 to 2, whole numbers, choices And, Or, Xor | 0 | And: all connected inputs are high. Or: any is high. Xor: an odd number are high. |
 | **Invert** (`invert`) | 0 to 1, whole numbers | 0 | Flips the result. |
 
 ## Panel

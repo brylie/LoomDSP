@@ -3,11 +3,11 @@
 Every port and parameter carries a short label and a one-sentence description, so users can learn what a control does where they use it.
 
 - **Kind:** living specification.
-- **Status:** Implemented for ports and parameters. Display values: Agreed ([#118](https://github.com/brylie/LoomDSP/issues/118)), not built.
+- **Status:** Implemented, for ports, parameters, and display values ([#118](https://github.com/brylie/LoomDSP/issues/118)).
 - **Decision behind it:** [ADR-0016](../adr/0016-ports-and-parameters-carry-their-own-text.md)
 - **Use case and requirements:** FR-LIB-11, FR-SDK-01, NFR-UX-04
 - **Issues:** #115 (fields and checks), #43 (help pages), [#118](https://github.com/brylie/LoomDSP/issues/118) (display values)
-- **Code:** `PortSpec`, `ParamSpec`, `ParamOptions`, `assert_documented`, and `ModuleDescriptor::undocumented` in `loom-core/src/descriptor.rs`; `Registry::notes` in `loom-core/src/registry.rs`; `Harness::allow_undocumented` in `loom-test`.
+- **Code:** `PortSpec`, `ParamSpec`, `ParamOptions`, `DisplaySpec`, `assert_documented`, and `ModuleDescriptor::undocumented` in `loom-core/src/descriptor.rs`; `Registry::notes` in `loom-core/src/registry.rs`; `Harness::allow_undocumented` in `loom-test`.
 
 ## Goal
 
@@ -62,26 +62,26 @@ params: &[
 
 ## Display values
 
-**Status:** Agreed ([#118](https://github.com/brylie/LoomDSP/issues/118)).
+**Status:** Implemented ([#118](https://github.com/brylie/LoomDSP/issues/118)). Code: `DisplaySpec` in `loom-core/src/descriptor.rs`, `panel_view` and `display_text` in `loom-app/src/scene.rs`, `hover_content` in `loom-canvas/src/widget.rs`.
 
 A module's display values (the lights and step positions of [panels](panels.md#display-values-69)) get the same treatment.
 
 - A `ModuleDescriptor` lists them as `displays: &[DisplaySpec]`. `DisplaySpec { name, label, description, kind }` is a struct literal with every field required, like `PortSpec`. `name` is the stable ID (used by panels and `Module::displays`), `label` is the caption, `description` is one sentence, and `kind` is `Level` or `Trigger` ([panels](panels.md#lights-for-one-sample-triggers)). At most 4 per module, as now.
 - **The same three checks** as ports and parameters: `assert_documented`, the `loom-test` harness, and `Registry::notes`. The same label and description rules (rules 4 and 5) apply. The label of a light is its caption, so "Level" for ADSR's `level` becomes "Envelope Level" if that reads better.
 - **Light captions show the label,** not the name.
-- **Lights show hover text:** the label in bold, then the description, then the current value as text ("Gate: high"). *Why:* a light with no explanation is a mystery on a front panel.
-- **Meters get hover text from the output they show.** A meter is bound to an output port, which already has a label and a description, so it shows those, plus the level in dB. It gets no `DisplaySpec` of its own. *Why:* two texts for one signal could disagree.
+- **Lights show hover text:** the label in bold, then the description, then the current value as text: the label and the value, such as "Gate: 1.00". A `Level` value shows as a number with two decimals. A `Trigger` value shows "lit" while its light is lit, else "dark". *Why:* a light with no explanation is a mystery on a front panel. *Why a number, not words such as "high":* a display value has no unit yet, so the UI cannot tell a gate from a level. Words can come with display value units (see the open question in [#118](https://github.com/brylie/LoomDSP/issues/118)).
+- **Meters get hover text from the output they show.** A meter is bound to an output port, which already has a label and a description, so it shows those, plus the RMS level in dB ("Out: -12.0 dB", or "below -60 dB"). It gets no `DisplaySpec` of its own. *Why:* two texts for one signal could disagree.
 - This changes the descriptor API and every module with display values (ADSR, MIDI Note, Memory, and the test descriptors). Early alpha allows it: update them all in the same pull request.
 
 ### Acceptance criteria: display values
 
-- [ ] `DisplaySpec` has required `label` and `description` fields, and the crate does not compile if one is empty.
-- [ ] The harness and the registry check them as for ports and parameters.
-- [ ] A light's caption is its label, and hovering it shows the description and the value. A test beside `tiles_show_labels_not_names` in `crates/loom-app/src/scene.rs` checks the labels.
-- [ ] A meter's hover text is its output's label, description, and level.
+- [x] `DisplaySpec` has required `label` and `description` fields, and the crate does not compile if one is empty.
+- [x] The harness and the registry check them as for ports and parameters.
+- [x] A light's caption is its label, and hovering it shows the description and the value. A test beside `tiles_show_labels_not_names` in `crates/loom-app/src/scene.rs` checks the labels.
+- [x] A meter's hover text is its output's label, description, and level.
 
 ## Out of scope
 
 - Showing labels on tiles and in the inspector, and descriptions on hover: [Labels and hover text](panels.md#labels-and-hover-text) in panels.md (Implemented).
 - Generating help pages: [module help pages](help-pages.md) (#43).
-- Text for panel widgets. (Display values are below.)
+- Text for panel widgets. (Display values are above.)

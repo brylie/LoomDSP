@@ -39,6 +39,6 @@ Envelope from 0 to 1, triggered by a gate. Linear attack, exponential decay and 
 - Knob: **Decay** (`decay`)
 - Knob: **Sustain** (`sustain`)
 - Knob: **Release** (`release`)
-- Light: `level`
+- Light: **Level** (`level`): The envelope's level, from dark at 0 to full at 1.
 
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->

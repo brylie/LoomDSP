@@ -37,11 +37,11 @@ mod width;
 pub use compile::{CompileReport, FeedbackLoop};
 pub use controller::{Controller, EngineParts, MidiSender, create_engine};
 pub use descriptor::{
-    ButtonMode, Channels, MAX_DISPLAYS, MissingText, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamMapping,
-    ParamOptions, ParamSpec, Polarity, PortDefault, PortSpec, SpecKind, Undocumented, Widget, WidgetKind,
-    assert_documented,
+    ButtonMode, Channels, DisplayKind, DisplaySpec, MAX_DISPLAYS, MissingText, ModuleConfig, ModuleDescriptor,
+    ModuleRole, Panel, ParamMapping, ParamOptions, ParamSpec, Polarity, PortDefault, PortSpec, SpecKind, Undocumented,
+    Widget, WidgetKind, assert_documented,
 };
-pub use display::{DisplayReader, DisplaySource};
+pub use display::{DisplayReader, DisplaySource, TriggerFlag};
 pub use engine::{Engine, EngineConfig, EngineStats};
 pub use error::LoomError;
 pub use graph::{Assignment, AssignmentId, Graph, InputRef, ModuleId, Node, OutputRef};

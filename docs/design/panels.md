@@ -199,18 +199,18 @@ A one-step gesture on a cable or an output places a scope or a level meter next 
 |---|---|---|---|
 | Knob | 3 × 3 | Any parameter | A dial with its label below. Uses the parameter's mapping (`ParamSpec::normalize`). |
 | Toggle | 3 × 2 | A whole-number parameter from 0 to 1 | Off or on, with its label below. |
-| Radio buttons | 3 × (options + 1) | A whole-number parameter with exactly one value per option | One row per option, top option = minimum value. Label above. |
+| Radio buttons | 3 × (choices + 1) | A whole-number parameter with [choice names](#choice-names) | One row per choice name, top = minimum value. Label above. |
 | Button | 6 × 3 | A whole-number parameter from 0 to 1, and a different whole-number `mode` parameter from 0 to 1 | A large button. Its fill shows the bound parameter. Gestures are under [Interaction](#interaction-68). |
 | Light | 3 × 2 | A display value | Brightness is the value clamped to 0 to 1. Label below. |
 
-- **The registry refuses a panel that does not fit its module:** a binding to a parameter or display value the module does not have, a toggle, radio, or button on a parameter that does not match it, a button whose mode is missing, out of range, or the same parameter, a widget outside the panel, or two widgets that overlap. *Why:* a third-party module gets the same checks as a built-in one, at registration, not as a broken tile later.
-- **Built-in panels:** a knob for every parameter except the noise seed, MIDI Note's channel and bend range, and Button's `mode`, which stay in the inspector. Button's `on` is the button, not a knob. MIDI Note has a light for its gate, and ADSR a light for its level. Toggle and radio buttons are built and tested, but no P1 module uses them yet.
+- **The registry refuses a panel that does not fit its module:** a binding to a parameter or display value the module does not have, a toggle, radio, or button on a parameter that does not match it (radio buttons need choice names), a button whose mode is missing, out of range, or the same parameter, a widget outside the panel, or two widgets that overlap. *Why:* a third-party module gets the same checks as a built-in one, at registration, not as a broken tile later.
+- **Built-in panels:** a knob for every parameter except the noise seed, MIDI Note's channel and bend range, and Button's `mode`, which stay in the inspector. Button's `on` is the button, not a knob. MIDI Note has a light for its gate, and ADSR a light for its level. Clock Divide and Phase Trigger have a [trigger light](#lights-for-one-sample-triggers) on their output.
 
 ### Display values ([#69](https://github.com/brylie/LoomDSP/issues/69))
 
 **Status:** Implemented. Code: `loom-core/src/display.rs`, `Module::displays`, `Controller::display`.
 
-- A descriptor lists its display values by name, at most 4. A module writes them in `Module::displays`, which the engine calls once after each block for every module that has any.
+- A descriptor lists its display values as `DisplaySpec`s ([text](port-and-parameter-text.md#display-values)), at most 4. A module writes them in `Module::displays`, which the engine calls once after each block for every module that has any.
 - They travel in a **latest-value table**: 4 atomic floats per module slot, allocated once when the engine is created. The engine stores, the UI loads whenever it draws. Nothing waits, nothing allocates, and the table can never fill up. *Why not the meter queue:* only the latest value matters for a light or a step position, as [telemetry.md](telemetry.md) notes for this kind of data.
 - When a module is added to a slot, its values are set to 0 first, so a new module never shows the values of the one that was there before.
 - The UI reads them by module ID and index through the `Controller`.
@@ -363,9 +363,10 @@ A user zooms in on Clock Divide. The knob says "Division", not `n`. They rest th
 | Port label on a tile | name | label, cut with "…" to fit its column as now |
 | Caption of a knob, toggle, button, or radio group | parameter name | parameter label, cut with "…" to fit the widget |
 | Caption of a meter | output name | output label |
-| Caption of a light | display value name | display value name (display values have no label yet) |
+| Caption of a light | display value name | display value label ([#118](https://github.com/brylie/LoomDSP/issues/118)) |
 | Inspector parameter row | name | label |
 | Hover text on a port or control | full name, only when the label is cut | label and description, always |
+| Hover text on a light or meter | none | label, description, and value ([#118](https://github.com/brylie/LoomDSP/issues/118)) |
 
 - **Names stay out of sight, except in hover text.** The hover text shows the stable name below the description, dimmed, when it differs from the label other than in letter case. So `n` shows under "Division", but `cutoff` does not repeat under "Cutoff". *Why:* names are what patch files and `loom modules` use, so a user who edits a RON file can find the port. Everywhere else, the label is the better text.
 - **Captions are cut, never wrapped.** A label that does not fit is cut with "…", and the hover text shows it in full. Widths are estimated per character, with narrow letters counting less, so "Division" fits under a knob, while "Resonance" is cut. *Why:* the grid layout of tiles does not change with text length, and estimating keeps text layout out of every frame.
@@ -379,7 +380,7 @@ A user zooms in on Clock Divide. The knob says "Division", not `n`. They rest th
 - **Size and place.** Fixed screen size, 12 px text, at most 260 px wide, whatever the zoom. On a canvas narrower than that, the box narrows to fit and the text wraps. It sits above the port or control, or below it when there is no room above, and always inside the canvas. *Why fixed size:* at middle zoom tile text is hidden because it is too small to read; the hover text is exactly what the user needs there, so it must stay readable.
 - **A port's label hovers like the port.** Resting the pointer on a port's label, or on the bar that stands for it, shows the port's hover text. Pressing a label still selects or drags the tile, as before. *Why:* a cut label is what makes the user want the full text, so the label is where they point ([#92](https://github.com/brylie/LoomDSP/issues/92)).
 - **At every zoom where the port or control can be hovered.** At middle zoom, labels are hidden, but hovering a port still shows its hover text.
-- **Lights, meters, and empty panel areas have no hover text.** Meters are displays, like lights. Display values have no description yet. A tile can therefore mix labelled captions, such as "Attack", with a light that shows its display value name, such as `level`. *Why accept it:* giving display values labels is a separate change, and the mix is small.
+- **Empty panel areas have no hover text.** Lights and meters have hover text since [#118](https://github.com/brylie/LoomDSP/issues/118): see [display values](port-and-parameter-text.md#display-values). They are not focused by Tab, because they are not controls.
 - **It replaces the full-label overlay** from [Tile layout](#tile-layout-68): a cut label shows in full as the first line of the hover text.
 
 ### Inspector
@@ -409,7 +410,7 @@ A user zooms in on Clock Divide. The knob says "Division", not `n`. They rest th
 ### Out of scope
 
 - Translation (NFR-UX-04). Text is looked up by module ID and name when it comes.
-- Labels and descriptions for display values and panel widgets, so lights keep showing names.
+- Labels and descriptions for panel widgets. (Display values have them since [#118](https://github.com/brylie/LoomDSP/issues/118).)
 - [Help pages](help-pages.md) (#43), and module descriptions in the module picker.
 - Touch: long-press for hover text.
 - A shorter delay for the next hover text once one has shown. Consider it if reading a column of ports feels slow in use.
@@ -438,11 +439,11 @@ What P1 builds. The rest of this spec is P2.
 
 ## P1 additions
 
-**Status:** Agreed. Each subsection names its issue. These close the gaps that building the P1 panels found.
+**Status:** Agreed. Each subsection names its issue. These close the gaps that building the P1 panels found. Choice names, display value text, and lights for one-sample triggers are Implemented.
 
 ### Choice names
 
-([#160](https://github.com/brylie/LoomDSP/issues/160).) A whole-number parameter can name its values.
+([#160](https://github.com/brylie/LoomDSP/issues/160).) **Implemented.** Code: `ParamSpec::choices` and `ParamSpec::check_choices` in `loom-core/src/descriptor.rs`, `ParamControl` in `loom-app/src/inspector.rs`. A whole-number parameter can name its values.
 
 - `ParamOptions` gets `.choices(&[...])`: one name per value, from `min` to `max` in steps of 1, so `max - min + 1` names. Names are short Title Case words or numbers with a unit ("Toggle", "Momentary", "24 dB"), at most 16 characters. The registry refuses names on a parameter that is not whole-number, a count that does not match, and an empty name, with an error that names the parameter.
 - **The inspector** shows a parameter with names as radio buttons when there are 4 or fewer, otherwise as a pick list (the [radio or select rule](panel-widgets.md#radio-buttons-or-a-select-list) with the inspector's width). It never shows the slider with a bare number. A parameter without names keeps the slider.
@@ -453,13 +454,13 @@ What P1 builds. The rest of this spec is P2.
 
 ### Display value text
 
-([#118](https://github.com/brylie/LoomDSP/issues/118).) Display values get the same text as ports and parameters, in [port and parameter text](port-and-parameter-text.md#display-values).
+([#118](https://github.com/brylie/LoomDSP/issues/118).) **Implemented.** Display values get the same text as ports and parameters, in [port and parameter text](port-and-parameter-text.md#display-values).
 
 ### Lights for one-sample triggers
 
-([#114](https://github.com/brylie/LoomDSP/issues/114).) A one-sample trigger is almost never the latest value, so a light that reads the latest value stays dark. The fix has two parts, so cables keep their one-sample triggers.
+([#114](https://github.com/brylie/LoomDSP/issues/114).) **Implemented.** Code: `DisplayKind`, the latch in `loom-core/src/display.rs`, `TriggerFlag` for modules, and `Fade` in `loom-app/src/lights.rs`. A one-sample trigger is almost never the latest value, so a light that reads the latest value stays dark. The fix has two parts, so cables keep their one-sample triggers.
 
-- **A display value has a kind:** `Level` (today) or `Trigger`. A module writes a `Trigger` value as 1.0 if any trigger arrived in the block it just ran, else 0.0.
+- **A display value has a kind:** `Level` (today) or `Trigger`. A module writes a `Trigger` value as 1.0 if any trigger arrived in the block it just ran, else 0.0. `TriggerFlag` does this: set it in `process` and take it in `displays`. *Why a flag:* in a feedback loop `process` runs once per frame but `displays` once per block, so clearing in `process` would lose triggers.
 - **The table latches it.** For a `Trigger` value, the engine stores with `max` instead of replacing: a 1.0 stays until the UI reads it. The UI reads a `Trigger` cell with `swap(0)`. *Why:* many blocks pass between two drawn frames. The latch makes the light show "fired since the last read", which is the truth the player cares about. Nothing waits and nothing allocates (ADR-0013).
 - **The light holds on screen.** A read of 1.0 lights the light at full, and it fades to dark over 120 ms of UI time. *Why:* a trigger at 4 per second must be a visible flash, not a one-frame flicker.
 - **Redraw.** A fading light asks for frames for 120 ms after the last trigger, then none. An idle patch draws nothing.
@@ -549,8 +550,8 @@ What P1 builds. The rest of this spec is P2.
 
 ### Acceptance criteria: P1 additions
 
-- [ ] Choice names: the registry refuses a wrong count, an empty name, and names on a continuous parameter. The inspector shows "Toggle" and "Momentary" for Button's `mode` and a slider for a parameter without names. No module hard-codes names in its panel.
-- [ ] A one-sample trigger into a Clock Divide or Phase Trigger output light lights it, and it fades in 120 ms. No frames are drawn after the fade.
+- [x] Choice names: the registry refuses a wrong count, an empty name, and names on a continuous parameter. The inspector shows "Toggle" and "Momentary" for Button's `mode` and a slider for a parameter without names. No module hard-codes names in its panel.
+- [x] A one-sample trigger into a Clock Divide or Phase Trigger output light lights it, and it fades in 120 ms. No frames are drawn after the fade.
 - [ ] A transport-following input shows the clock mark with no cable, loses it when a cable is connected, and has it back when the cable is removed.
 - [ ] A 95% callback spike turns the load amber or red for its tick. After 10 seconds the max falls.
 - [ ] By keys alone: Tab to a module, Enter into its panel, change a knob, Escape out twice. Space on a focused toggle acts on the toggle, not on Run. Arrow keys move the selected module by one grid unit.

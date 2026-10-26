@@ -249,7 +249,8 @@ pub static CROSSFADE: ModuleDescriptor = ModuleDescriptor {
             unit: "",
             options: ParamOptions::DEFAULT,
         }
-        .integer(),
+        .integer()
+        .choices(&["Equal power", "Linear"]),
     ],
     role: ModuleRole::Dsp(|config| {
         Box::new(Crossfade {
@@ -257,14 +258,7 @@ pub static CROSSFADE: ModuleDescriptor = ModuleDescriptor {
             linear: false,
         })
     }),
-    panel: Panel::new(
-        3,
-        6,
-        &[
-            Widget::knob(0, 0, "mix"),
-            Widget::radio(0, 3, "law", &["Equal power", "Linear"]),
-        ],
-    ),
+    panel: Panel::new(3, 6, &[Widget::knob(0, 0, "mix"), Widget::radio(0, 3, "law")]),
     displays: &[],
 };
 

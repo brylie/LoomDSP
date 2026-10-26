@@ -7,7 +7,9 @@
 
 use crate::modulation::{self, PolarityChoice};
 use crate::{App, DIM, HELP, Message, param, remove_button};
-use iced::widget::{button, column, container, pick_list, row, scrollable, slider, space, text, toggler, tooltip};
+use iced::widget::{
+    button, column, container, pick_list, radio, row, scrollable, slider, space, text, toggler, tooltip,
+};
 use iced::{Element, Length};
 use loom_core::{AssignmentId, ModuleId, OutputRef};
 use serde::Serialize;
@@ -66,17 +68,61 @@ pub enum ParamMode {
     /// MIDI learn mode: the row arms its parameter, and shows `detail` in
     /// place of the value (`docs/design/midi-learn.md`).
     Learn { armed: bool, detail: String },
-    /// A slider, the assignments on the parameter, and **Add modulation**.
+    /// A slider, or the choice names, then the assignments on the
+    /// parameter, and **Add modulation**.
     Edit {
         /// Slider position from 0 to 1.
         position: f32,
         /// Slider step, as a position.
         step: f32,
+        /// What edits the value: a slider, or its choice names.
+        control: ParamControl,
         /// One per assignment, in engine order.
         assignments: Vec<AssignmentRow>,
         /// The **Add modulation** list, while it is open.
         adding: Option<Vec<SourceRow>>,
     },
+}
+
+/// What edits a parameter in the inspector (panels.md, Choice names).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ParamControl {
+    /// A slider, for a parameter without choice names.
+    Slider,
+    /// Radio buttons, one per choice name, for 4 names or fewer.
+    Radio {
+        choices: Vec<&'static str>,
+        /// Index of the current value's name.
+        selected: usize,
+    },
+    /// A pick list, for more than 4 names.
+    PickList {
+        choices: Vec<&'static str>,
+        /// Index of the current value's name.
+        selected: usize,
+    },
+}
+
+/// Most choice names the inspector shows as radio buttons. More get a pick
+/// list, so a long list does not push the other rows down.
+pub const MAX_RADIO_CHOICES: usize = 4;
+
+impl ParamControl {
+    /// The control for `spec`, showing `value`.
+    pub fn of(spec: &loom_core::ParamSpec, value: f32) -> Self {
+        let choices = spec.options.choices;
+        if choices.is_empty() {
+            return Self::Slider;
+        }
+        let selected = (spec.clamp(value) - spec.min).max(0.0) as usize;
+        let choices = choices.to_vec();
+        if choices.len() <= MAX_RADIO_CHOICES {
+            Self::Radio { choices, selected }
+        } else {
+            Self::PickList { choices, selected }
+        }
+    }
 }
 
 /// One modulation assignment on a parameter.
@@ -169,6 +215,7 @@ impl App {
                     ParamMode::Edit {
                         position: spec.normalize(value),
                         step: param::slider_step(spec),
+                        control: ParamControl::of(spec, value),
                         assignments: self.assignment_rows(id, index),
                         adding: (self.adding == Some((id, index))).then(|| self.sources(id, index)),
                     }
@@ -314,6 +361,7 @@ fn module_view<'a>(m: ModuleRows) -> Element<'a, Message> {
             ParamMode::Edit {
                 position,
                 step,
+                control,
                 assignments,
                 adding,
             } => {
@@ -331,13 +379,7 @@ fn module_view<'a>(m: ModuleRows) -> Element<'a, Message> {
                         space::horizontal(),
                         text(p.value).size(12).color(DIM),
                     ],
-                    slider(0.0..=1.0, position, move |position| Message::Param {
-                        module: id,
-                        index,
-                        position,
-                    })
-                    .on_release(Message::SliderReleased)
-                    .step(step),
+                    value_control(id, index, control, position, step),
                 ]
                 .spacing(2);
                 if let Some(control) = p.mapping {
@@ -359,6 +401,62 @@ fn module_view<'a>(m: ModuleRows) -> Element<'a, Message> {
         items = items.push(drives_view(m.drives));
     }
     items.into()
+}
+
+/// The slider of a parameter, or its choice names as radio buttons or a
+/// pick list. A pick is one undo step, as a click on a radio tile is.
+fn value_control<'a>(
+    module: u32,
+    index: usize,
+    control: ParamControl,
+    position: f32,
+    step: f32,
+) -> Element<'a, Message> {
+    // A choice is the parameter's minimum plus its index. The model gives
+    // the index; the message turns it into a value.
+    let pick = move |choice: usize| Message::Choice { module, index, choice };
+    match control {
+        ParamControl::Slider => slider(0.0..=1.0, position, move |position| Message::Param {
+            module,
+            index,
+            position,
+        })
+        .on_release(Message::SliderReleased)
+        .step(step)
+        .into(),
+        ParamControl::Radio { choices, selected } => {
+            let mut list = column![].spacing(3);
+            for (i, name) in choices.into_iter().enumerate() {
+                list = list.push(radio(name, i, Some(selected), pick).size(12).text_size(12));
+            }
+            list.into()
+        }
+        ParamControl::PickList { choices, selected } => {
+            let options: Vec<Choice> = choices
+                .iter()
+                .enumerate()
+                .map(|(i, &name)| Choice { index: i, name })
+                .collect();
+            let current = options.get(selected).copied();
+            pick_list(options, current, move |c: Choice| pick(c.index))
+                .text_size(12)
+                .width(Length::Fill)
+                .into()
+        }
+    }
+}
+
+/// One entry of a parameter's pick list: its index and its name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Choice {
+    index: usize,
+    name: &'static str,
+}
+
+impl std::fmt::Display for Choice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.name)
+    }
 }
 
 /// Under a parameter's slider: one row per assignment, then **Add

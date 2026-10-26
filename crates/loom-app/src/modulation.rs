@@ -454,9 +454,7 @@ mod tests {
             mark(WidgetKind::Toggle, &on_off, 0.0, &[on(1.0, Unipolar)]),
             ModulationMark::Dot
         );
-        let radio = WidgetKind::Radio {
-            options: &["a", "b", "c"],
-        };
+        let radio = WidgetKind::Radio;
         assert_eq!(
             mark(radio, &param(0.0, 2.0).integer(), 1.0, &[on(0.5, Bipolar)]),
             ModulationMark::Dot

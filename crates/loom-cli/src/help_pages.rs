@@ -315,6 +315,10 @@ fn range(p: &ParamSpec) -> String {
     if p.options.mapping == ParamMapping::Logarithmic {
         text.push_str(", logarithmic");
     }
+    if !p.options.choices.is_empty() {
+        text.push_str(", choices ");
+        text.push_str(&cell(&p.options.choices.join(", ")));
+    }
     text
 }
 
@@ -349,9 +353,22 @@ fn widget(d: &ModuleDescriptor, w: &Widget) -> String {
     match w.kind {
         WidgetKind::Knob => format!("Knob: {}", param(w.bind)),
         WidgetKind::Toggle => format!("Toggle: {}", param(w.bind)),
-        WidgetKind::Radio { options } => format!("Radio buttons: {} ({})", param(w.bind), cell(&options.join(", "))),
+        WidgetKind::Radio => {
+            let choices = d
+                .params
+                .iter()
+                .find(|p| p.name == w.bind)
+                .map_or(&[][..], |p| p.options.choices);
+            format!("Radio buttons: {} ({})", param(w.bind), cell(&choices.join(", ")))
+        }
         WidgetKind::Button { .. } => format!("Button: {}", param(w.bind)),
-        WidgetKind::Light => format!("Light: `{}`", w.bind),
+        WidgetKind::Light => {
+            let light = d.displays.iter().find(|v| v.name == w.bind).map_or_else(
+                || format!("`{}`", w.bind),
+                |v| format!("{}: {}", name(v.label, v.name), cell(v.description)),
+            );
+            format!("Light: {light}")
+        }
         WidgetKind::Meter => {
             let output = d
                 .outputs

@@ -28,10 +28,10 @@ A slow wave. Free mode runs at a rate in Hz; synced mode follows a phase, by def
 
 | Parameter | Range | Default | Description |
 |---|---|---|---|
-| **Sync** (`sync`) | 0 to 1, whole numbers | 0 | Free: run at the rate. Synced: follow the phase input. |
+| **Sync** (`sync`) | 0 to 1, whole numbers, choices Free, Synced | 0 | Free: run at the rate. Synced: follow the phase input. |
 | **Rate** (`rate`) | 0.01 to 50 Hz, logarithmic | 1 Hz | How many waves per second in free mode. |
 | **Cycles** (`cycles`) | 1 to 16, whole numbers | 1 | How many waves fit in one cycle of the phase input in synced mode. |
-| **Shape** (`shape`) | 0 to 4, whole numbers | 0 | The wave: sine, triangle, ramp up, ramp down, or square. |
+| **Shape** (`shape`) | 0 to 4, whole numbers, choices Sine, Triangle, Ramp up, Ramp down, Square | 0 | The wave: sine, triangle, ramp up, ramp down, or square. |
 
 ## Panel
 

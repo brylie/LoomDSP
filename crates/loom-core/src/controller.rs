@@ -213,6 +213,12 @@ impl Controller {
                     module,
                     id: id.0,
                     displays: descriptor.displays.len() as u8,
+                    triggers: descriptor
+                        .displays
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, d)| d.kind == crate::descriptor::DisplayKind::Trigger)
+                        .fold(0, |mask, (i, _)| mask | (1 << i)),
                 };
                 if let Err(rtrb::PushError::Full(_)) = self.commands.push(insert) {
                     self.free_slots.push(slot);
@@ -703,7 +709,7 @@ impl Controller {
     /// Display value `index` of a module, as of the last block the engine
     /// ran, for a light on its panel (ADR-0013). `None` if the module does
     /// not exist or has no such value. A module the engine has not run yet
-    /// reads 0.
+    /// reads 0. Reading a trigger value clears it (see [`DisplayReader::read`]).
     pub fn display(&self, module: ModuleId, index: usize) -> Option<f32> {
         self.display_source(module, index)
             .map(|source| self.display_reader().read(source))
@@ -725,7 +731,8 @@ impl Controller {
     pub fn display_source(&self, module: ModuleId, index: usize) -> Option<DisplaySource> {
         let node = self.graph.nodes.get(&module)?;
         let slot = node.slot?;
-        (index < node.descriptor.displays.len()).then(|| DisplaySource::new(slot, module.0, index))
+        let spec = node.descriptor.displays.get(index)?;
+        Some(DisplaySource::new(slot, module.0, index, spec.kind))
     }
 
     /// A handle that reads display values from any thread.

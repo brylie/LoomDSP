@@ -14,8 +14,12 @@ pub fn slider_step(spec: &ParamSpec) -> f32 {
     }
 }
 
-/// Value with a sensible number of digits and its unit.
+/// Value with a sensible number of digits and its unit, or its choice name
+/// when the parameter names its values (panels.md, Choice names).
 pub fn format(spec: &ParamSpec, value: f32) -> String {
+    if let Some(name) = spec.choice_name(value) {
+        return name.to_string();
+    }
     let digits = match value.abs() {
         _ if spec.options.integer => 0,
         v if v >= 1000.0 => 0,
@@ -64,6 +68,19 @@ mod tests {
         // The noise seed spans 1 to 65,535. One slider step is one seed.
         let seed = param("seed", 1.0, 65_535.0, 1.0, "").integer();
         assert!((slider_step(&seed) - 1.0 / 65_534.0).abs() < 1e-9);
+    }
+
+    /// A parameter that names its values shows the name, never the number.
+    #[test]
+    fn named_values_show_their_names() {
+        let mode = param("mode", 0.0, 1.0, 0.0, "")
+            .integer()
+            .choices(&["Toggle", "Momentary"]);
+        assert_eq!(format(&mode, 0.0), "Toggle");
+        assert_eq!(format(&mode, 1.0), "Momentary");
+        // Clamped and rounded first, as the engine does.
+        assert_eq!(format(&mode, 0.7), "Momentary");
+        assert_eq!(format(&mode, 5.0), "Momentary");
     }
 
     #[test]

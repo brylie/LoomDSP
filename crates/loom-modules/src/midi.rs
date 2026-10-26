@@ -2,8 +2,8 @@
 
 use loom_core::signal::pitch;
 use loom_core::{
-    Channels, MidiMessage, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, Polarity, PortDefault,
-    PortIo, PortSpec, ProcessContext, SignalType, Widget,
+    Channels, DisplayKind, DisplaySpec, MidiMessage, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions,
+    ParamSpec, Polarity, PortDefault, PortIo, PortSpec, ProcessContext, SignalType, Widget,
 };
 
 /// `loom.midi.note`: monophonic MIDI note input with last-note priority.
@@ -69,7 +69,12 @@ pub static NOTE_IN: ModuleDescriptor = ModuleDescriptor {
     ],
     role: ModuleRole::Dsp(|_| Box::new(NoteIn::default())),
     panel: Panel::new(3, 2, &[Widget::light(0, 0, "gate")]),
-    displays: &["gate"],
+    displays: &[DisplaySpec {
+        name: "gate",
+        label: "Gate",
+        description: "Lit while a key is held.",
+        kind: DisplayKind::Level,
+    }],
 };
 
 const MAX_HELD: usize = 16;

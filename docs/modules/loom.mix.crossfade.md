@@ -28,7 +28,7 @@ Blends two signals. Equal power keeps the loudness of audio steady; linear is ex
 | Parameter | Range | Default | Description |
 |---|---|---|---|
 | **Mix** (`mix`) | 0 to 1 | 0.5 | 0 is all A and 1 is all B. |
-| **Law** (`law`) | 0 to 1, whole numbers | 0 | How the two signals share the mix: equal power, or linear. |
+| **Law** (`law`) | 0 to 1, whole numbers, choices Equal power, Linear | 0 | How the two signals share the mix: equal power, or linear. |
 
 ## Panel
 

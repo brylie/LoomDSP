@@ -6,8 +6,8 @@
 
 use loom_core::signal::{EdgeDetector, WrapDetector, pitch, trigger};
 use loom_core::{
-    Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, Polarity,
-    PortDefault, PortIo, PortSpec, ProcessContext, SignalType, Widget,
+    Channels, DisplayKind, DisplaySpec, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions,
+    ParamSpec, Polarity, PortDefault, PortIo, PortSpec, ProcessContext, SignalType, TriggerFlag, Widget,
 };
 
 /// `loom.phase.generator`: a ramp from 0 to 1 at the frequency set by pitch.
@@ -178,26 +178,41 @@ pub static PHASE_TRIGGER: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::Dsp(|_| {
         Box::new(PhaseTrigger {
             wrap: WrapDetector::new(),
+            fired: TriggerFlag::default(),
         })
     }),
-    panel: Panel::EMPTY,
-    displays: &[],
+    panel: Panel::new(3, 2, &[Widget::light(0, 0, "fired")]),
+    displays: &[DisplaySpec {
+        name: "fired",
+        label: "Fired",
+        description: "Flashes each time the phase wraps.",
+        kind: DisplayKind::Trigger,
+    }],
 };
 
 struct PhaseTrigger {
     wrap: WrapDetector,
+    /// Whether the output fired since the light last read it.
+    fired: TriggerFlag,
 }
 
 impl Module for PhaseTrigger {
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let ([phase], [out]) = io.split::<1, 1>();
         for (out, &p) in out.iter_mut().zip(phase) {
-            *out = trigger(self.wrap.wrapped(p));
+            let fired = self.wrap.wrapped(p);
+            self.fired.record(fired);
+            *out = trigger(fired);
         }
+    }
+
+    fn displays(&self, values: &mut [f32]) {
+        values[0] = self.fired.take();
     }
 
     fn reset(&mut self) {
         self.wrap.reset();
+        self.fired.clear();
     }
 }
 
@@ -236,9 +251,10 @@ pub static WRAP: ModuleDescriptor = ModuleDescriptor {
         unit: "",
         options: ParamOptions::DEFAULT,
     }
-    .integer()],
+    .integer()
+    .choices(&["Wrap", "Fold"])],
     role: ModuleRole::Dsp(|_| Box::new(Wrap { fold: false })),
-    panel: Panel::new(3, 3, &[Widget::radio(0, 0, "mode", &["Wrap", "Fold"])]),
+    panel: Panel::new(3, 3, &[Widget::radio(0, 0, "mode")]),
     displays: &[],
 };
 
@@ -440,6 +456,7 @@ mod tests {
     fn phase_trigger(input: &[f32]) -> Vec<f32> {
         let mut module = PhaseTrigger {
             wrap: WrapDetector::new(),
+            fired: TriggerFlag::default(),
         };
         let mut out = vec![0.0; input.len()];
         run(&mut module, 48_000.0, &[input], &[true], &mut [&mut out], &[]);
