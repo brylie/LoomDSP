@@ -353,6 +353,16 @@ enum Message {
     },
 }
 
+/// "opened <path>", followed by the load notes when there are any, so a note
+/// about what loaded differently stays in view.
+fn opened_status(path: &std::path::Path, notes: &[String]) -> String {
+    if notes.is_empty() {
+        format!("opened {}", path.display())
+    } else {
+        format!("opened {}: {}", path.display(), notes.join("; "))
+    }
+}
+
 struct App {
     controller: Controller,
     positions: BTreeMap<u32, Point>,
@@ -362,6 +372,9 @@ struct App {
     values: PanelValues,
     /// Last brightness of each light, by module and widget.
     lights: BTreeMap<lights::Light, f32>,
+    /// What the last loaded patch loaded differently from its file, such
+    /// as a saved control range that was not kept (control-ranges.md).
+    load_notes: Vec<String>,
     /// Latest level of each meter probe.
     meter_levels: std::collections::HashMap<ProbeId, live::Level>,
     /// Modules whose lights or meters are on screen, as the canvas reports.
@@ -756,6 +769,7 @@ impl App {
             notes,
         } = session;
         let mut status = notes.join("; ");
+        let load_notes = notes;
 
         // Every MIDI input plays the patch, and the "Hold note" button works
         // alongside them, so a keyboard is never hidden behind another port.
@@ -794,6 +808,7 @@ impl App {
             scene,
             values,
             lights: BTreeMap::new(),
+            load_notes,
             meter_levels: std::collections::HashMap::new(),
             visible_displays: Vec::new(),
             selection: BTreeSet::new(),
@@ -1057,13 +1072,14 @@ impl App {
         let Some(path) = files::pick_open(self.file.as_deref()) else {
             return;
         };
-        if self.replace(Source::File(&path)) {
-            // A note about what loaded differently stays in view.
-            self.status = if self.status.is_empty() {
-                format!("opened {}", path.display())
-            } else {
-                format!("opened {}: {}", path.display(), self.status)
-            };
+        self.open_path(&path);
+    }
+
+    /// Opens the patch at `path` in place of this one, and says so in the
+    /// status bar, with any notes about what loaded differently.
+    fn open_path(&mut self, path: &std::path::Path) {
+        if self.replace(Source::File(path)) {
+            self.status = opened_status(path, &self.load_notes);
         }
     }
 
@@ -3535,6 +3551,39 @@ mod tests {
             (5.0, Some(loom_core::ParamRange::new(-5.0, 5.0)))
         );
         assert!(app.status.contains("-0.1 to 0.1"), "{}", app.status);
+    }
+
+    /// Opening a patch that loads as saved says only "opened <path>". One
+    /// with a load note says the note after it.
+    #[test]
+    fn opening_a_patch_names_only_its_load_notes() {
+        let mut app = app();
+        let clean = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches/subtractive.ron");
+        app.open_path(&clean);
+        assert_eq!(app.status, format!("opened {}", clean.display()));
+
+        let dir = std::env::temp_dir().join(format!("loom-app-open-note-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let noted = dir.join("noted.ron");
+        std::fs::write(
+            &noted,
+            r#"Patch(version: 1, modules: [(id: 1, kind: "loom.math.mul@1", params: {"gain": 5.0}, ranges: {"gain": (-0.1, 0.1)})])"#,
+        )
+        .unwrap();
+        app.open_path(&noted);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            app.status.starts_with(&format!("opened {}: module 1", noted.display())),
+            "{}",
+            app.status
+        );
+
+        app.open_path(&clean);
+        assert_eq!(
+            app.status,
+            format!("opened {}", clean.display()),
+            "the old note is gone"
+        );
     }
 
     /// control-ranges.md: Multiply's gain shows a **Range** selector. A

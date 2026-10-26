@@ -235,6 +235,15 @@ impl ModuleView {
     }
 
     /// A widget's rectangle in world coordinates.
+    /// The light or meter under a world point, by widget index. `Scene::hit`
+    /// gives these to the tile, so a press on one still moves the tile; this
+    /// finds them for hover text (port-and-parameter-text.md, Display values).
+    pub fn display_at(&self, point: Point) -> Option<usize> {
+        (0..self.panel.widgets.len())
+            .find(|&i| !self.panel.widgets[i].is_control() && self.widget_bounds(i).is_some_and(|b| b.contains(point)))
+    }
+
+    /// The world bounds of panel widget `index`.
     pub fn widget_bounds(&self, index: usize) -> Option<Rectangle> {
         let widget = self.panel.widgets.get(index)?;
         let origin = self.panel_origin();

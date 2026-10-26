@@ -1198,15 +1198,24 @@ impl<Message> PatchCanvas<'_, Message> {
             // press starts a cable from it, so the hover text must name it
             // too.
             Some(Hit::Port(port)) => Some(HoverTarget::Port(port)),
-            Some(Hit::Widget { module, widget }) if self.has_hover_text(module, widget) => {
+            Some(Hit::Widget { module, widget }) if self.is_control(module, widget) => {
                 Some(HoverTarget::Control(module, widget))
             }
-            // A port's label, or the bar standing in for it, hovers like
-            // the port (panels.md, Hover text).
-            Some(Hit::Module(_)) => state
+            // A light or meter belongs to the tile for presses, so the hit
+            // is the module. Its hover text still shows. A port's label, or
+            // the bar standing in for it, hovers like the port (panels.md,
+            // Hover text).
+            Some(Hit::Module(id)) => state
                 .cursor
-                .and_then(|world| tile_text::port_label_at(self.scene, world))
-                .map(HoverTarget::Port)
+                .and_then(|world| {
+                    let display = self
+                        .scene
+                        .module(id)
+                        .and_then(|m| m.display_at(world))
+                        .filter(|&widget| self.has_hover_text(id, widget))
+                        .map(|widget| HoverTarget::Control(id, widget));
+                    display.or_else(|| tile_text::port_label_at(self.scene, world).map(HoverTarget::Port))
+                })
                 .or(focused),
             _ => focused,
         }
@@ -2620,6 +2629,13 @@ mod tests {
         m.panel = panel();
         let plain = m.clone();
         m.panel.widgets[1].hover = HoverText::new("Gate", "Lit while a key is held.", "gate");
+        let mut meter = module(2, 600.0);
+        meter.panel = PanelView {
+            width: 3,
+            height: 6,
+            widgets: vec![widget(WidgetViewKind::Meter, 0)],
+        };
+        meter.panel.widgets[0].hover = HoverText::new("Out", "The signal.", "out");
         let mut values = PanelValues::new();
         values.set(
             1,
@@ -2630,14 +2646,29 @@ mod tests {
                 ..WidgetValue::default()
             },
         );
-        let scene = Scene::new(vec![m], Vec::new());
+        let scene = Scene::new(vec![m, meter], Vec::new());
         let none = BTreeSet::new();
         let canvas = PatchCanvas::new(&scene, &none, |e| e).values(&values);
-        let on_light = State {
-            hover: Some(Hit::Widget { module: 1, widget: 1 }),
-            ..State::default()
+        // The pointer rests on the middle of a display widget. The hit is
+        // the tile, so a press there still moves it.
+        let resting_on = |scene: &Scene, module: u32, widget: usize| {
+            let point = scene.module(module).unwrap().widget_bounds(widget).unwrap().center();
+            let hit = scene.hit(point, 8.0);
+            assert_eq!(hit, Hit::Module(module), "a display belongs to the tile");
+            State {
+                hover: Some(hit),
+                cursor: Some(point),
+                ..State::default()
+            }
         };
-        assert_eq!(canvas.hover_target(&on_light), Some(HoverTarget::Control(1, 1)));
+        assert_eq!(
+            canvas.hover_target(&resting_on(&scene, 1, 1)),
+            Some(HoverTarget::Control(1, 1))
+        );
+        assert_eq!(
+            canvas.hover_target(&resting_on(&scene, 2, 0)),
+            Some(HoverTarget::Control(2, 0))
+        );
         let (_, hover, value, _) = canvas.hover_content(HoverTarget::Control(1, 1)).unwrap();
         assert_eq!(hover.description, "Lit while a key is held.");
         assert_eq!(value, Some("Gate: 1.00"));
@@ -2645,9 +2676,10 @@ mod tests {
         let (_, _, value, _) = canvas.hover_content(HoverTarget::Control(1, 0)).unwrap();
         assert_eq!(value, None);
 
+        // A light with no description shows none.
         let scene = Scene::new(vec![plain], Vec::new());
         let canvas = PatchCanvas::new(&scene, &none, |e| e);
-        assert_eq!(canvas.hover_target(&on_light), None);
+        assert_eq!(canvas.hover_target(&resting_on(&scene, 1, 1)), None);
     }
 
     #[test]
