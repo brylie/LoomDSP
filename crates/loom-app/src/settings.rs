@@ -16,6 +16,7 @@ use loom_host_desktop::{AudioOutput, MidiInputInfo, Outputs, Recorder, STOP_LIMI
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 /// A message for the Preferences window.
 #[derive(Debug, Clone)]
@@ -88,9 +89,29 @@ pub struct Rig {
     /// The last input id given out. Ids go round, so a closed input's id is
     /// not given to the next one at once, and its late events are dropped.
     pub last_input: u16,
+    /// A lost audio output being watched for recovery (device-changes.md, Audio device loss).
+    pub lost_audio: Option<LostAudio>,
     /// Every mode change sent to the engine, for tests.
     #[cfg(test)]
     pub sent: Vec<OutputSafety>,
+}
+
+/// What was playing when an audio device was lost, and reconnection attempts
+/// (device-changes.md, Audio device loss).
+#[derive(Debug, Clone)]
+pub struct LostAudio {
+    /// The device name that was lost.
+    pub device: String,
+    /// Whether the device was chosen as SystemDefault.
+    pub was_system_default: bool,
+    /// Number of consecutive reopen attempts that failed (0..10).
+    pub attempts: u32,
+    /// When the last poll / reopen attempt occurred.
+    pub last_attempt: std::time::Instant,
+    /// The error message if the last reopen attempt failed.
+    pub last_error: Option<String>,
+    /// The message to keep in the status bar while audio is lost.
+    pub message: String,
 }
 
 /// The device lists the window shows.
@@ -125,6 +146,7 @@ impl Rig {
             panic_learn: None,
             seen_midi: Vec::new(),
             last_input: 0,
+            lost_audio: None,
             #[cfg(test)]
             sent: Vec::new(),
         }
@@ -455,6 +477,7 @@ impl App {
                     return;
                 }
             };
+            self.rig.lost_audio = None;
             if let Err(e) = self.restart_audio(output) {
                 self.status = e;
                 return;
@@ -647,12 +670,14 @@ impl App {
                 self.audio_name = label;
                 self.rig.playing = Some(playing);
                 self.midi = self.rig.midi_in.clone();
+                self.audio_callbacks_seen = 0;
+                self.audio_callbacks_advanced = Instant::now();
             }
-            Err(e) => {
+            Err((engine, e)) => {
                 self.audio_name = format!("no audio ({e})");
                 self.rig.playing = None;
                 self.midi = None;
-                self.keep_engine_idle();
+                self.idle_engine = Some(engine);
                 return Err(e);
             }
         }
@@ -664,6 +689,217 @@ impl App {
             self.status = error;
         }
         Ok(())
+    }
+
+    /// Stops audio immediately without fading out. Used when the audio device
+    /// was lost or disconnected (device-changes.md, Audio device loss).
+    pub(crate) fn stop_audio_immediate(&mut self) {
+        if let Some(audio) = self._audio.take() {
+            audio.stop_immediate();
+        }
+        self.audio_stats = None;
+        self.rig.playing = None;
+    }
+
+    /// Handles loss of the active audio output (device-changes.md, Audio device loss).
+    pub(crate) fn handle_audio_loss(&mut self, _reason: &str) {
+        // Rule 3: The engine is never rebuilt twice for one loss. A second error
+        // from the same dead stream is ignored.
+        if self._audio.is_none() && self.rig.lost_audio.is_some() {
+            return;
+        }
+        if self._audio.is_none() && self.rig.playing.is_none() {
+            return;
+        }
+        let was_system_default = matches!(self.rig.wanted().device, devices::Pick::SystemDefault);
+        let old_name = self
+            .rig
+            .playing
+            .as_ref()
+            .map(|p| p.device.clone())
+            .or_else(|| match &self.rig.store.saved().audio.device {
+                DeviceChoice::Named(n) => Some(n.clone()),
+                DeviceChoice::SystemDefault => None,
+            })
+            .unwrap_or_else(|| "audio device".into());
+
+        self.stop_audio_immediate();
+        self.midi = None;
+        self.keep_engine_idle();
+
+        if was_system_default {
+            // System default: at once, open the current system default
+            let mut switched = false;
+            if let Ok(outputs) = self.rig.host.outputs()
+                && let Some(new_default) = outputs.default
+            {
+                let options = loom_host_desktop::AudioOptions {
+                    device: Some(new_default.clone()),
+                    exact: true,
+                    sample_rate: None,
+                    buffer_size: None,
+                };
+                if let Ok(output) = self.rig.host.open(&options)
+                    && self.restart_audio(output).is_ok()
+                {
+                    self.status = format!("Audio: \"{old_name}\" was lost. Now playing on \"{new_default}\".");
+                    self.rig.lost_audio = None;
+                    switched = true;
+                }
+            }
+            if !switched {
+                let message = format!("Audio: \"{old_name}\" was lost.");
+                self.status = message.clone();
+                self.rig.lost_audio = Some(LostAudio {
+                    device: old_name,
+                    was_system_default: true,
+                    attempts: 0,
+                    last_attempt: Instant::now(),
+                    last_error: None,
+                    message,
+                });
+            }
+        } else {
+            // Named device: plays nothing, keeps engine idle
+            let message =
+                format!("Audio: \"{old_name}\" was lost. Plug it in again, or choose another device in Preferences.");
+            self.status = message.clone();
+            self.rig.lost_audio = Some(LostAudio {
+                device: old_name,
+                was_system_default: false,
+                attempts: 0,
+                last_attempt: Instant::now(),
+                last_error: None,
+                message,
+            });
+        }
+    }
+
+    /// Checks for audio device loss, silent stalls, and device reconnection
+    /// (device-changes.md, Audio device loss).
+    pub(crate) fn poll_audio(&mut self) {
+        self.check_audio(Instant::now());
+    }
+
+    /// Checks for audio device loss, silent stalls, and device reconnection at `now`.
+    pub(crate) fn check_audio(&mut self, now: Instant) {
+        if self.no_audio || self.fake_audio {
+            return;
+        }
+
+        // 1. If audio is running, check for loss (dead stream, stall > 1s, missing device)
+        if self._audio.is_some() {
+            if let Some(stats) = &self.audio_stats {
+                let snap = stats.snapshot();
+                if snap.is_dead {
+                    self.handle_audio_loss("the audio device reported an error");
+                    return;
+                }
+                if snap.callbacks > self.audio_callbacks_seen {
+                    self.audio_callbacks_seen = snap.callbacks;
+                    self.audio_callbacks_advanced = now;
+                } else if now.saturating_duration_since(self.audio_callbacks_advanced) > Duration::from_secs(1) {
+                    let mut rate_changed = false;
+                    let current = self.rig.playing.as_ref().map(|p| (p.device.clone(), p.rate));
+                    if let Some((device_name, current_rate)) = current
+                        && let Ok(outputs) = self.rig.host.outputs()
+                        && let Some(info) = outputs.devices.iter().find(|d| d.name == device_name)
+                        && info.default_rate != current_rate
+                    {
+                        let new_rate = info.default_rate;
+                        let mut choice = self.rig.store.saved().audio.clone();
+                        choice.sample_rate = crate::preferences::RateChoice::Hz(new_rate);
+                        if let Ok(output) = devices::open_choice(&*self.rig.host, &choice)
+                            && self.restart_audio(output).is_ok()
+                        {
+                            self.status = format!("Audio: \"{device_name}\" sample rate changed to {new_rate} Hz.");
+                            rate_changed = true;
+                        }
+                    }
+                    if !rate_changed {
+                        self.handle_audio_loss("the device stopped calling back");
+                        return;
+                    }
+                }
+            }
+            let playing_name = self.rig.playing.as_ref().map(|p| p.device.clone());
+            if let Some(device_name) = playing_name
+                && let Ok(outputs) = self.rig.host.outputs()
+                && !outputs.devices.iter().any(|d| d.name == device_name)
+            {
+                self.handle_audio_loss(&format!("\"{device_name}\" was unplugged"));
+                return;
+            }
+        }
+
+        // 2. If audio was lost, watch and attempt recovery
+        let Some(mut lost) = self.rig.lost_audio.take() else {
+            return;
+        };
+
+        if lost.was_system_default {
+            if let Ok(outputs) = self.rig.host.outputs()
+                && let Some(new_default) = outputs.default
+            {
+                let options = loom_host_desktop::AudioOptions {
+                    device: Some(new_default.clone()),
+                    exact: true,
+                    sample_rate: None,
+                    buffer_size: None,
+                };
+                if let Ok(output) = self.rig.host.open(&options)
+                    && self.restart_audio(output).is_ok()
+                {
+                    self.status = format!("Audio: \"{}\" was lost. Now playing on \"{new_default}\".", lost.device);
+                    self.rig.lost_audio = None;
+                    return;
+                }
+            }
+            self.rig.lost_audio = Some(lost);
+        } else {
+            // Named device: repeats once a second for up to 10 tries
+            if now.saturating_duration_since(lost.last_attempt) >= Duration::from_secs(1) {
+                lost.last_attempt = now;
+                if lost.attempts < 10
+                    && let Ok(outputs) = self.rig.host.outputs()
+                    && outputs.devices.iter().any(|d| d.name == lost.device)
+                {
+                    let saved = self.rig.store.saved().audio.clone();
+                    match devices::open_choice(&*self.rig.host, &saved) {
+                        Ok(output) => match self.restart_audio(output) {
+                            Ok(()) => {
+                                self.status = format!("Audio: \"{}\" is back.", lost.device);
+                                self.rig.lost_audio = None;
+                                return;
+                            }
+                            Err(e) => {
+                                lost.attempts += 1;
+                                lost.last_error = Some(e);
+                            }
+                        },
+                        Err(e) => {
+                            lost.attempts += 1;
+                            lost.last_error = Some(e);
+                        }
+                    }
+                    if lost.attempts >= 10 {
+                        let raw = lost.last_error.as_deref().unwrap_or("could not start stream");
+                        let prefix = format!("Could not use \"{}\": ", lost.device);
+                        let reason = raw
+                            .strip_prefix(&prefix)
+                            .and_then(|s| s.strip_suffix(". Audio is off."))
+                            .unwrap_or(raw);
+                        let message = format!(
+                            "Audio: could not reopen \"{}\": {reason}. Choose a device in Preferences.",
+                            lost.device
+                        );
+                        self.status = message.clone();
+                        lost.message = message;
+                    }
+                }
+            }
+            self.rig.lost_audio = Some(lost);
+        }
     }
 
     /// Stops audio without a click: the engine fades out, and the stream
@@ -1255,8 +1491,8 @@ mod tests {
     #[test]
     fn a_device_that_fails_to_open_leaves_the_old_one_playing() {
         let dir = folder("broken-device");
-        let mut fake = Fake::new(&[fake::device("Fake A"), fake::device("Fake B")], &[]);
-        fake.broken.push("Fake B".into());
+        let fake = Fake::new(&[fake::device("Fake A"), fake::device("Fake B")], &[]);
+        fake.broken.borrow_mut().push("Fake B".into());
         let fake = Rc::new(fake);
         let mut app = start(args(&dir), &fake);
         let generation = app.generation;
@@ -1274,8 +1510,8 @@ mod tests {
     #[test]
     fn a_device_that_fails_to_start_hands_back_to_the_old_one() {
         let dir = folder("wont-start");
-        let mut fake = Fake::new(&[fake::device("Fake A"), fake::device("Fake B")], &["Keys"]);
-        fake.wont_start.push("Fake B".into());
+        let fake = Fake::new(&[fake::device("Fake A"), fake::device("Fake B")], &["Keys"]);
+        fake.wont_start.borrow_mut().push("Fake B".into());
         let fake = Rc::new(fake);
         let mut app = start(args(&dir), &fake);
         let constant = loom_modules::registry().resolve("loom.math.constant").unwrap();
@@ -1299,10 +1535,10 @@ mod tests {
     #[test]
     fn when_neither_device_starts_audio_is_off_and_nothing_is_saved() {
         let dir = folder("neither-starts");
-        let mut fake = Fake::new(&[fake::device("Fake A"), fake::device("Fake B")], &[]);
+        let fake = Fake::new(&[fake::device("Fake A"), fake::device("Fake B")], &[]);
         // Fake A started at boot, which does not go through the host's
         // start; it refuses only when it is started again.
-        fake.wont_start.extend(["Fake A".into(), "Fake B".into()]);
+        fake.wont_start.borrow_mut().extend(["Fake A".into(), "Fake B".into()]);
         let fake = Rc::new(fake);
         let mut app = start(args(&dir), &fake);
         assert!(app._audio.is_some());

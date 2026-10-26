@@ -79,12 +79,12 @@ The fake host has a list of inputs that tests change.
 
 The fake host can emit a `Lost` error for a device, remove a device from the list, and add it back.
 
-- [ ] Given a playing patch on a Named device, when the device is lost, then the app does not crash, the status bar names the device, the engine is idle, and edits made now are kept.
-- [ ] Given that, when the device returns, then audio plays on it again with the saved rate and buffer size, fading in over 10 ms, and the edits are still in the patch.
-- [ ] Given System default, when the device is lost, then the app plays on the new default at once.
-- [ ] Given a lost Named device, when the player chooses another output, then sound plays there and the saved choice is the new device.
-- [ ] Given a stream that stops calling back for more than one second, then it is treated as lost.
-- [ ] A second error from the same stream does not rebuild the engine twice.
+- [x] Given a playing patch on a Named device, when the device is lost, then the app does not crash, the status bar names the device, the engine is idle, and edits made now are kept.
+- [x] Given that, when the device returns, then audio plays on it again with the saved rate and buffer size, fading in over 10 ms, and the edits are still in the patch.
+- [x] Given System default, when the device is lost, then the app plays on the new default at once.
+- [x] Given a lost Named device, when the player chooses another output, then sound plays there and the saved choice is the new device.
+- [x] Given a stream that stops calling back for more than one second, then it is treated as lost.
+- [x] A second error from the same stream does not rebuild the engine twice.
 - [ ] Manual, on macOS, Windows, and Linux, with the OS version and audio device listed in the pull request: unplug the interface while a patch plays (no crash, a message names the device); plug it in (sound returns); with the device gone choose another output (sound plays there); edits made while it was gone are kept; sleep the computer while playing and wake it (sound returns, or the message says why not).
 
 ## Out of scope

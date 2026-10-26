@@ -65,6 +65,7 @@ struct Run {
     app: App,
     tape: Tape,
     dir: PathBuf,
+    host: Rc<Fake>,
 }
 
 /// How a run starts.
@@ -118,11 +119,11 @@ impl<'a> Setup<'a> {
             std::fs::write(&preferences, text).unwrap();
         }
         let tape = Tape::new();
-        let host = Fake {
+        let host = Rc::new(Fake {
             tape: Some(tape.clone()),
-            wont_start: self.wont_start.iter().map(|s| s.to_string()).collect(),
+            wont_start: std::cell::RefCell::new(self.wont_start.iter().map(|s| s.to_string()).collect()),
             ..Fake::new(&self.devices, &[])
-        };
+        });
         let args = Args {
             patch: Some(patch),
             no_audio: false,
@@ -135,9 +136,13 @@ impl<'a> Setup<'a> {
             },
             ..tests::app_args()
         };
-        let app = App::boot_with(args, &mut recovery::Dialogs, Rc::new(fake::Shared(Rc::new(host))));
+        let app = App::boot_with(args, &mut recovery::Dialogs, Rc::new(fake::Shared(host.clone())));
         assert!(tape.is_playing(), "the patch plays: {}", app.status);
-        Run { app, tape, dir }
+        if let Some(stats) = &app.audio_stats {
+            let dev = app.rig.playing.as_ref().map(|p| p.device.clone()).unwrap_or_default();
+            host.active_stats.borrow_mut().push((dev, stats.clone()));
+        }
+        Run { app, tape, dir, host }
     }
 }
 
@@ -473,4 +478,218 @@ fn a_failed_device_change_keeps_the_recording() {
     drop(run.app.rig.recorder.take());
     let audio = loom_test::analysis::read_wav(&run.dir.join("run.wav")).unwrap();
     assert_eq!(audio.channels[0], run.left(), "both streams are in the file");
+}
+
+/// When a Named audio device is unplugged or lost, the app survives,
+/// status identifies the lost device, the engine stays idle, edits
+/// made while lost are kept, and when the device returns it reconnects
+/// and plays again.
+#[test]
+fn a_lost_named_device_survives_takes_edits_and_reconnects_when_back() {
+    let mut run = Setup {
+        preferences: Some("Preferences(version: 1, audio: (device: Named(\"Fake B\")))"),
+        ..Setup::new("lost-named", PatchFrom::Example("sine.ron"))
+    }
+    .start();
+
+    assert!(run.app._audio.is_some());
+    assert_eq!(run.app.rig.playing.as_ref().unwrap().device, "Fake B");
+
+    // 1. Unplug Fake B
+    run.host.remove_device("Fake B");
+    run.app.check_audio(Instant::now());
+
+    assert!(run.app._audio.is_none(), "stream stopped immediately");
+    assert!(run.app.idle_engine.is_some(), "engine preserved on idle");
+    assert_eq!(
+        run.app.status,
+        "Audio: \"Fake B\" was lost. Plug it in again, or choose another device in Preferences."
+    );
+
+    // 2. Edits made while lost are kept and status bar continues to display the lost device message
+    let initial_modules = run.app.controller.graph().len();
+    let constant = loom_modules::registry().resolve("loom.math.constant").unwrap();
+    run.app.add_module(constant, iced::Point::new(50.0, 50.0));
+    assert_eq!(run.app.controller.graph().len(), initial_modules + 1);
+    assert_eq!(
+        run.app.status,
+        "Audio: \"Fake B\" was lost. Plug it in again, or choose another device in Preferences."
+    );
+
+    // 3. Device returns after 1 second
+    run.host.add_device(fake::device("Fake B"));
+    let now = Instant::now() + Duration::from_secs(1);
+    run.app.check_audio(now);
+
+    assert!(run.app._audio.is_some(), "reconnected to Fake B");
+    assert_eq!(run.app.rig.playing.as_ref().unwrap().device, "Fake B");
+    assert_eq!(run.app.status, "Audio: \"Fake B\" is back.");
+
+    // The newly added module is present and engine plays
+    run.play(0.1);
+    assert!(run.tape.is_playing());
+    assert_eq!(run.tape.stream_starts().len(), 2);
+    let second_start = run.tape.stream_starts()[1];
+    assert_eq!(run.tape.left()[second_start], 0.0, "fades in from 0");
+}
+
+/// When the system default device is lost, the app immediately switches to
+/// the new system default without a modal dialog.
+#[test]
+fn a_lost_system_default_switches_to_the_new_default_immediately() {
+    let mut run = Setup::new("lost-default", PatchFrom::Example("sine.ron")).start();
+
+    assert!(run.app._audio.is_some());
+    assert_eq!(run.app.rig.playing.as_ref().unwrap().device, "Fake A");
+
+    // Remove Fake A, leaving Fake B as new default
+    run.host.remove_device("Fake A");
+    run.app.check_audio(Instant::now());
+
+    assert!(run.app._audio.is_some(), "switched to new default");
+    assert_eq!(run.app.rig.playing.as_ref().unwrap().device, "Fake B");
+    assert_eq!(run.app.status, "Audio: \"Fake A\" was lost. Now playing on \"Fake B\".");
+}
+
+/// Choosing another device in Preferences while a Named device is lost
+/// switches to the chosen device and saves the preference.
+#[test]
+fn choosing_another_device_in_preferences_while_lost_switches_and_saves() {
+    let mut run = Setup {
+        preferences: Some("Preferences(version: 1, audio: (device: Named(\"Fake B\")))"),
+        ..Setup::new("lost-choose-other", PatchFrom::Example("sine.ron"))
+    }
+    .start();
+
+    // Lose Fake B
+    run.host.remove_device("Fake B");
+    run.app.check_audio(Instant::now());
+    assert!(run.app._audio.is_none());
+    assert!(run.app.rig.lost_audio.is_some());
+
+    // Switch to Fake A in Preferences
+    run.app.preferences(Prefs::Open);
+    run.app
+        .preferences(Prefs::Audio(Change::Device(DeviceChoice::Named("Fake A".into()))));
+
+    assert!(run.app._audio.is_some(), "now playing on Fake A");
+    assert_eq!(run.app.rig.playing.as_ref().unwrap().device, "Fake A");
+    assert!(run.app.rig.lost_audio.is_none(), "lost audio state cleared");
+    assert_eq!(
+        run.app.rig.store.saved().audio.device,
+        DeviceChoice::Named("Fake A".into())
+    );
+}
+
+/// A silent stall (> 1s without audio callbacks) is treated as a device loss.
+#[test]
+fn a_silent_stall_is_treated_as_audio_device_loss() {
+    let mut run = Setup {
+        preferences: Some("Preferences(version: 1, audio: (device: Named(\"Fake B\")))"),
+        ..Setup::new("silent-stall", PatchFrom::Example("sine.ron"))
+    }
+    .start();
+
+    assert!(run.app._audio.is_some());
+
+    // Advance time by 2 seconds with no callbacks advancing
+    let later = Instant::now() + Duration::from_secs(2);
+    run.app.check_audio(later);
+
+    assert!(run.app._audio.is_none(), "stall stopped audio stream");
+    assert!(run.app.idle_engine.is_some(), "engine preserved on idle");
+    assert_eq!(
+        run.app.status,
+        "Audio: \"Fake B\" was lost. Plug it in again, or choose another device in Preferences."
+    );
+}
+
+/// When a device's sample rate changes externally, a stall detects the new rate
+/// and rebuilds the engine at the new sample rate.
+#[test]
+fn external_sample_rate_change_rebuilds_engine_at_new_rate() {
+    let mut run = Setup {
+        preferences: Some("Preferences(version: 1, audio: (device: Named(\"Fake B\")))"),
+        ..Setup::new("external-rate", PatchFrom::Example("sine.ron"))
+    }
+    .start();
+
+    assert_eq!(run.app.rig.playing.as_ref().unwrap().rate, 48_000);
+
+    // Update Fake B's rate in host devices
+    let mut outputs = run.host.outputs.borrow_mut();
+    let dev = outputs.devices.iter_mut().find(|d| d.name == "Fake B").unwrap();
+    dev.default_rate = 96_000;
+    dev.rates = vec![(44_100, 96_000)];
+    drop(outputs);
+
+    // Callbacks stop, advance by 2 seconds
+    let later = Instant::now() + Duration::from_secs(2);
+    run.app.check_audio(later);
+
+    assert!(run.app._audio.is_some(), "audio continues playing");
+    assert_eq!(run.app.rig.playing.as_ref().unwrap().rate, 96_000);
+    assert_eq!(run.app.status, "Audio: \"Fake B\" sample rate changed to 96000 Hz.");
+}
+
+/// A dead stream error does not cause a second rebuild for the same loss (Rule 3).
+#[test]
+fn a_dead_stream_error_does_not_rebuild_twice() {
+    let mut run = Setup {
+        preferences: Some("Preferences(version: 1, audio: (device: Named(\"Fake B\")))"),
+        ..Setup::new("dead-stream-once", PatchFrom::Example("sine.ron"))
+    }
+    .start();
+
+    // Mark stream dead via host
+    run.host.emit_lost("Fake B");
+    run.app.check_audio(Instant::now());
+
+    assert!(run.app._audio.is_none());
+    assert!(run.app.idle_engine.is_some());
+    let gen_after_first = run.app.generation;
+
+    // Check again immediately with same stats
+    run.app.check_audio(Instant::now());
+    assert_eq!(run.app.generation, gen_after_first, "generation not changed again");
+}
+
+/// If reopening a lost device fails 10 times consecutively, the app stops retrying
+/// and displays a clear error in the status bar.
+#[test]
+fn ten_consecutive_failed_reopens_stops_retrying() {
+    let mut run = Setup {
+        preferences: Some("Preferences(version: 1, audio: (device: Named(\"Fake B\")))"),
+        ..Setup::new("ten-retries", PatchFrom::Example("sine.ron"))
+    }
+    .start();
+
+    // Lose Fake B
+    run.host.remove_device("Fake B");
+    run.app.check_audio(Instant::now());
+    assert!(run.app._audio.is_none());
+
+    // Fake B comes back, but fails to start
+    run.host.add_device(fake::device("Fake B"));
+    run.host.wont_start.borrow_mut().push("Fake B".into());
+
+    let mut now = Instant::now();
+    for _ in 1..=10 {
+        now += Duration::from_secs(1);
+        run.app.check_audio(now);
+    }
+
+    assert_eq!(
+        run.app.status,
+        "Audio: could not reopen \"Fake B\": the stream did not start. Choose a device in Preferences."
+    );
+    assert!(run.app._audio.is_none());
+
+    // Subsequent checks do not retry
+    now += Duration::from_secs(1);
+    run.app.check_audio(now);
+    assert_eq!(
+        run.app.status,
+        "Audio: could not reopen \"Fake B\": the stream did not start. Choose a device in Preferences."
+    );
 }

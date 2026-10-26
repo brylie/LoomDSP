@@ -238,6 +238,8 @@ enum Message {
     Panic,
     /// Look for MIDI inputs plugged in or out (`docs/design/device-changes.md`).
     MidiPoll,
+    /// Look for audio device loss, silent stalls, and reconnects (`docs/design/device-changes.md`).
+    AudioPoll,
     /// File commands (`docs/design/files.md`).
     New,
     Open,
@@ -432,6 +434,8 @@ struct App {
     /// What belongs to the machine: preferences, devices, MIDI inputs.
     rig: settings::Rig,
     audio_stats: Option<Arc<CallbackStats>>,
+    audio_callbacks_seen: u64,
+    audio_callbacks_advanced: Instant,
     audio_name: String,
     /// Note input shared by every MIDI port and the "Hold note" button.
     midi: Option<SharedMidi>,
@@ -797,7 +801,7 @@ impl App {
                     }
                     Err(e) => {
                         rig.playing = None;
-                        (None, None, format!("no audio ({e})"), None)
+                        (None, None, format!("no audio ({})", e.error), Some(e.engine))
                     }
                 }
             }
@@ -843,6 +847,8 @@ impl App {
                 },
             ),
             audio_stats: audio.as_ref().map(|a| a.stats().clone()),
+            audio_callbacks_seen: 0,
+            audio_callbacks_advanced: Instant::now(),
             _audio: audio,
             idle_engine,
             monitor: monitor::Monitor::new(telemetry, generation),
@@ -1148,6 +1154,13 @@ impl App {
         } else {
             Subscription::none()
         };
+        // Audio device loss, silent stalls, and device reconnection are watched
+        // by polling four times a second (device-changes.md, Audio device loss).
+        let audio_poll = if !self.no_audio && !self.fake_audio {
+            iced::time::every(Duration::from_millis(250)).map(|_| Message::AudioPoll)
+        } else {
+            Subscription::none()
+        };
         let report = match &self.reporter {
             Some(reporter) => Subscription::run_with(reporter.clone(), bench::stream).map(|()| Message::BenchDone),
             None => Subscription::none(),
@@ -1163,6 +1176,7 @@ impl App {
                 report,
                 autosave,
                 midi_poll,
+                audio_poll,
             ]
             .into_iter()
             .chain(control),
@@ -1570,6 +1584,10 @@ impl App {
     }
 
     fn report(&mut self) {
+        if let Some(lost) = &self.rig.lost_audio {
+            self.status = lost.message.clone();
+            return;
+        }
         let report = self.controller.last_report();
         let inserted = report.inserted_delays().count();
         self.status = match report.loops.len() {
@@ -2044,9 +2062,11 @@ impl App {
             Message::LiveFrame => scene::update_live_values(&mut self.values, &self.controller),
             Message::Autosave => self.autosave(Instant::now()),
             Message::Tick => {
+                self.poll_audio();
                 self.controller.collect_garbage();
                 self.update_dropouts(Instant::now());
             }
+            Message::AudioPoll => self.poll_audio(),
             Message::Meters(levels) => {
                 // A reading may arrive after its probe was removed.
                 let live: std::collections::HashSet<ProbeId> = self.live.probes().collect();

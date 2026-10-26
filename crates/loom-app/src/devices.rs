@@ -86,9 +86,18 @@ pub trait Host {
     /// Chooses an output, without starting it.
     fn open(&self, options: &AudioOptions) -> Result<AudioOutput, String>;
     /// Starts an output with an engine. A device can still refuse here,
-    /// after it opened.
-    fn start(&self, output: AudioOutput, engine: loom_core::Engine) -> Result<RunningAudio, String> {
-        output.start(engine).map_err(|e| e.to_string())
+    /// after it opened. On refusal, returns the [`loom_core::Engine`] so it
+    /// can be kept idle and retried, along with the error reason.
+    #[allow(clippy::result_large_err)]
+    fn start(
+        &self,
+        output: AudioOutput,
+        engine: loom_core::Engine,
+    ) -> Result<RunningAudio, (loom_core::Engine, String)> {
+        match output.start(engine) {
+            Ok(running) => Ok(running),
+            Err(e) => Err((e.engine, e.error.to_string())),
+        }
     }
     /// The MIDI inputs now: names made unique by order, and port
     /// identities (`docs/design/device-changes.md`).
@@ -441,6 +450,7 @@ pub mod fake {
     use loom_host_desktop::MidiInputState;
     use std::cell::RefCell;
     use std::rc::Rc;
+    use std::sync::Arc;
 
     /// What happened, in order.
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -452,11 +462,13 @@ pub mod fake {
 
     #[derive(Default)]
     pub struct Fake {
-        pub outputs: Outputs,
+        pub outputs: RefCell<Outputs>,
         /// Devices that fail to open.
-        pub broken: Vec<String>,
+        pub broken: RefCell<Vec<String>>,
         /// Devices that open, then fail to start.
-        pub wont_start: Vec<String>,
+        pub wont_start: RefCell<Vec<String>>,
+        /// The active running streams' callback stats, so tests can emit lost errors.
+        pub active_stats: RefCell<Vec<(String, Arc<loom_host_desktop::CallbackStats>)>>,
         /// The MIDI inputs plugged in now, as (name, port identity). A
         /// test plugs and unplugs them with [`Fake::plug`] and
         /// [`Fake::unplug`].
@@ -505,12 +517,41 @@ pub mod fake {
         /// Devices by name, the first the system default, and MIDI inputs.
         pub fn new(devices: &[OutputInfo], midi: &[&str]) -> Self {
             Self {
-                outputs: Outputs {
+                outputs: RefCell::new(Outputs {
                     default: devices.first().map(|d| d.name.clone()),
                     devices: devices.to_vec(),
-                },
+                }),
                 midi: RefCell::new(midi.iter().map(|s| (s.to_string(), format!("id-{s}"))).collect()),
                 ..Self::default()
+            }
+        }
+
+        /// Dynamically removes a device from the output list.
+        pub fn remove_device(&self, name: &str) {
+            let mut outputs = self.outputs.borrow_mut();
+            outputs.devices.retain(|d| d.name != name);
+            if outputs.default.as_deref() == Some(name) {
+                outputs.default = outputs.devices.first().map(|d| d.name.clone());
+            }
+        }
+
+        /// Dynamically adds a device to the output list.
+        pub fn add_device(&self, info: OutputInfo) {
+            let mut outputs = self.outputs.borrow_mut();
+            if !outputs.devices.iter().any(|d| d.name == info.name) {
+                outputs.devices.push(info);
+            }
+            if outputs.default.is_none() {
+                outputs.default = outputs.devices.first().map(|d| d.name.clone());
+            }
+        }
+
+        /// Emits a device loss error for the running output on `name`.
+        pub fn emit_lost(&self, name: &str) {
+            for (dev_name, stats) in self.active_stats.borrow().iter() {
+                if dev_name == name {
+                    stats.mark_dead();
+                }
             }
         }
 
@@ -601,7 +642,13 @@ pub mod fake {
             System.open(options)
         }
 
-        fn start(&self, output: AudioOutput, engine: loom_core::Engine) -> Result<RunningAudio, String> {
+        #[allow(clippy::result_large_err)]
+        #[allow(clippy::result_large_err)]
+        fn start(
+            &self,
+            output: AudioOutput,
+            engine: loom_core::Engine,
+        ) -> Result<RunningAudio, (loom_core::Engine, String)> {
             System.start(output, engine)
         }
 
@@ -619,23 +666,23 @@ pub mod fake {
 
     impl Host for Shared {
         fn outputs(&self) -> Result<Outputs, String> {
-            Ok(self.0.outputs.clone())
+            Ok(self.0.outputs.borrow().clone())
         }
 
         fn open(&self, options: &AudioOptions) -> Result<AudioOutput, String> {
             let fake = &self.0;
+            let outputs = fake.outputs.borrow();
             let name = options
                 .device
                 .clone()
-                .or(fake.outputs.default.clone())
+                .or_else(|| outputs.default.clone())
                 .ok_or("no device")?;
-            let info = fake
-                .outputs
+            let info = outputs
                 .devices
                 .iter()
                 .find(|d| d.name == name)
                 .ok_or_else(|| format!("no audio output device found matching `{name}`"))?;
-            if fake.broken.contains(&name) {
+            if fake.broken.borrow().contains(&name) {
                 return Err("the device is busy".to_string());
             }
             let rate = options.sample_rate.unwrap_or(info.default_rate);
@@ -652,13 +699,23 @@ pub mod fake {
             .named(name))
         }
 
-        fn start(&self, output: AudioOutput, engine: loom_core::Engine) -> Result<RunningAudio, String> {
-            if self.0.wont_start.iter().any(|name| name == output.name()) {
-                return Err("the stream did not start".to_string());
+        #[allow(clippy::result_large_err)]
+        fn start(
+            &self,
+            output: AudioOutput,
+            engine: loom_core::Engine,
+        ) -> Result<RunningAudio, (loom_core::Engine, String)> {
+            if self.0.wont_start.borrow().iter().any(|name| name == output.name()) {
+                return Err((engine, "the stream did not start".to_string()));
             }
             let stalls = self.0.stalls.iter().any(|name| name == output.name());
             let block = output.buffer_size().unwrap_or(256) as usize;
-            let running = output.start(engine).map_err(|e| e.to_string())?;
+            let name = output.name().to_string();
+            let running = match output.start(engine) {
+                Ok(r) => r,
+                Err(e) => return Err((e.engine, e.error.to_string())),
+            };
+            self.0.active_stats.borrow_mut().push((name, running.stats().clone()));
             if stalls {
                 self.0.stall_tape.step(block * STALL_AFTER);
             }
