@@ -1184,5 +1184,8 @@ mod tests {
         assert_eq!(BUTTONS.control_param(toggle, &[1.0, 0.0, 0.0]), Some(0));
         assert!(BUTTONS.params[2].is_transient());
         assert!(!BUTTONS.params[1].is_transient());
+        // Built at run time too, not only in statics.
+        assert!(parameter("x").transient().is_transient());
+        assert_eq!(Widget::button(0, 0, "on", "hold", "mode"), *button);
     }
 }

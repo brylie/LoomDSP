@@ -291,6 +291,23 @@ mod tests {
         assert!(!later(0x00FF_FFFF, 1));
     }
 
+    /// The last note on reads back through a reader, with its serial.
+    #[test]
+    fn last_note_on_round_trips() {
+        let table = Arc::new(MidiFeedback::new());
+        let reader = MidiReader::new(table.clone());
+        assert_eq!(reader.last_note_on(), None);
+        table.record_note(9, 36, 5);
+        assert_eq!(
+            reader.last_note_on(),
+            Some(NoteOnSeen {
+                channel: 9,
+                note: 36,
+                serial: 5
+            })
+        );
+    }
+
     #[test]
     fn last_control_change_round_trips() {
         let table = MidiFeedback::new();

@@ -3398,6 +3398,9 @@ mod tests {
         let cables = app.controller.graph().cables().count();
         app.holding = true;
         let _ = app.update(Message::Panic);
+        // The MIDI poll runs while the app has an engine, and finds nothing.
+        let _ = app.subscription();
+        let _ = app.update(Message::MidiPoll);
         assert!(app.status.starts_with("Panic"), "{}", app.status);
         assert!(!app.holding, "Hold note lets go");
         let gain = app

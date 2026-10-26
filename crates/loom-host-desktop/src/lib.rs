@@ -226,19 +226,41 @@ pub fn unique_names(names: &[String]) -> Vec<String> {
         .collect()
 }
 
+/// The inputs as listed: system names, in system order, made unique, each
+/// with its port identity. `ids` has one entry per name.
+pub fn input_infos(names: Vec<String>, ids: Vec<String>) -> Vec<MidiInputInfo> {
+    unique_names(&names)
+        .into_iter()
+        .zip(ids)
+        .map(|(name, id)| MidiInputInfo { name, id })
+        .collect()
+}
+
+/// Where the input listed as `name` is among `names`, the system names in
+/// system order. An error names the input when it is not there.
+pub fn find_input(names: &[String], name: &str) -> Result<usize, HostError> {
+    unique_names(names)
+        .iter()
+        .position(|n| n == name)
+        .ok_or_else(|| HostError::NoMidiPort(Some(name.to_string())))
+}
+
+/// The system names of a client's ports, in order.
+fn port_names(client: &midir::MidiInput, ports: &[midir::MidiInputPort]) -> Vec<String> {
+    ports
+        .iter()
+        .map(|port| client.port_name(port).unwrap_or_else(|_| "<unnamed port>".into()))
+        .collect()
+}
+
 /// The MIDI inputs now, with unique names and port identities.
 pub fn midi_inputs() -> Result<Vec<MidiInputInfo>, HostError> {
-    let input = midir::MidiInput::new("LoomDSP").map_err(|e| HostError::Midi(e.to_string()))?;
-    let ports = input.ports();
-    let names: Vec<String> = ports
-        .iter()
-        .map(|port| input.port_name(port).unwrap_or_else(|_| "<unnamed port>".into()))
-        .collect();
-    Ok(unique_names(&names)
-        .into_iter()
-        .zip(&ports)
-        .map(|(name, port)| MidiInputInfo { name, id: port.id() })
-        .collect())
+    let client = midi_input()?;
+    let ports = client.ports();
+    Ok(input_infos(
+        port_names(&client, &ports),
+        ports.iter().map(|p| p.id()).collect(),
+    ))
 }
 
 /// Connects the MIDI input listed as `name` by [`midi_inputs`], with its
@@ -250,15 +272,7 @@ pub fn connect_midi_input(
 ) -> Result<MidiConnection, HostError> {
     let client = midi_input()?;
     let ports = client.ports();
-    let names: Vec<String> = ports
-        .iter()
-        .map(|port| client.port_name(port).unwrap_or_else(|_| "<unnamed port>".into()))
-        .collect();
-    let index = unique_names(&names)
-        .iter()
-        .position(|n| n == name)
-        .ok_or_else(|| HostError::NoMidiPort(Some(name.to_string())))?;
-    let port = ports[index].clone();
+    let port = ports[find_input(&port_names(&client, &ports), name)?].clone();
     let mut connection = open_port_as(client, &port, midi, input)?;
     connection.port_name = name.to_string();
     Ok(connection)
@@ -1156,6 +1170,19 @@ mod tests {
     fn same_names_are_numbered_by_order() {
         let names = ["Pad", "Keys", "Pad", "Pad"].map(String::from);
         assert_eq!(unique_names(&names), ["Pad", "Keys", "Pad (2)", "Pad (3)"]);
+        assert_eq!(find_input(&names, "Pad (2)").unwrap(), 2);
+        assert_eq!(find_input(&names, "Keys").unwrap(), 1);
+        let missing = find_input(&names, "Drums").unwrap_err();
+        assert!(missing.to_string().contains("Drums"), "{missing}");
+        let ids = ["a", "b", "c", "d"].map(String::from).to_vec();
+        let infos = input_infos(names.to_vec(), ids);
+        assert_eq!(
+            infos[2],
+            MidiInputInfo {
+                name: "Pad (2)".into(),
+                id: "c".into()
+            }
+        );
     }
 
     /// An input's events carry its id, and so do the note offs it sends

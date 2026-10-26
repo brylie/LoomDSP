@@ -1532,6 +1532,83 @@ mod tests {
         assert_eq!(app.open_midi_inputs(), ["Pad", "Pad (2)"]);
     }
 
+    /// An input that fails to open is reported, at start, when it is
+    /// plugged in, and when it is turned on, and the others still play. A
+    /// poll that finds nothing new says nothing, and a list that cannot be
+    /// read changes nothing.
+    #[test]
+    fn inputs_that_fail_are_reported_and_the_others_play() {
+        let dir = folder("broken-midi");
+        let fake = Rc::new(Fake::new(&[fake::device("Fake A")], &["Keys", "Busy"]));
+        fake.broken_midi.borrow_mut().push("Busy".into());
+        fake.broken_midi.borrow_mut().push("Late".into());
+        let mut app = start(args(&dir), &fake);
+        assert_eq!(app.open_midi_inputs(), ["Keys"]);
+        assert!(app.status.contains("Busy: the port is busy"), "{}", app.status);
+
+        app.status.clear();
+        app.poll_midi();
+        assert!(app.status.is_empty(), "nothing changed: {}", app.status);
+        fake.plug("Late");
+        app.poll_midi();
+        assert!(app.status.contains("could not open \"Late\""), "{}", app.status);
+        assert_eq!(app.open_midi_inputs(), ["Keys"]);
+
+        app.preferences(Message::Midi("Busy".into(), true));
+        assert!(app.status.starts_with("MIDI: Busy"), "{}", app.status);
+        assert_eq!(app.open_midi_inputs(), ["Keys"]);
+
+        fake.midi_list_fails.set(true);
+        fake.unplug("Keys");
+        app.poll_midi();
+        assert_eq!(app.open_midi_inputs(), ["Keys"], "an unreadable list closes nothing");
+    }
+
+    /// When the MIDI inputs cannot be listed at start, the status says so.
+    #[test]
+    fn an_unreadable_input_list_at_start_is_reported() {
+        let dir = folder("no-midi-service");
+        let fake = Rc::new(Fake::new(&[fake::device("Fake A")], &["Keys"]));
+        fake.midi_list_fails.set(true);
+        let app = start(args(&dir), &fake);
+        assert!(app.rig.ports.is_empty());
+        assert!(app.status.contains("the MIDI service is not running"), "{}", app.status);
+    }
+
+    /// The Panic section of the window: Learn shows it is waiting and turns
+    /// into Cancel, a second press cancels, and nothing arrived means no
+    /// trigger. The window draws in each state.
+    #[test]
+    fn the_panic_section_learns_and_cancels() {
+        let dir = folder("panic-window");
+        let fake = Rc::new(Fake::new(&[fake::device("Fake A")], &["Pad"]));
+        let mut app = start(args(&dir), &fake);
+        app.preferences(Message::Open);
+        assert!(app.preferences_view().is_some());
+        assert_eq!(app.panic_line(), "None");
+        app.preferences(Message::PanicLearn);
+        assert!(app.preferences_view().is_some());
+        let _ = app.update(crate::Message::Midi);
+        assert_eq!(app.panic_line(), "Waiting for MIDI...", "no MIDI came yet");
+        app.preferences(Message::PanicLearn);
+        assert!(app.status.contains("cancelled"), "{}", app.status);
+        assert_eq!(app.panic_line(), "None");
+
+        // A note on is learned too.
+        app.preferences(Message::PanicLearn);
+        fake.play("Pad", &[0x99, 36, 100]);
+        assert!(
+            (0..400).any(|_| {
+                std::thread::sleep(Duration::from_millis(5));
+                app.controller.last_note_on().is_some()
+            }),
+            "the note reached the engine"
+        );
+        let _ = app.update(crate::Message::Midi);
+        assert_eq!(app.panic_line(), "Channel 10, note 36");
+        assert!(app.preferences_view().is_some());
+    }
+
     /// The same check through real MIDI inputs: two virtual controllers,
     /// opened by `midir` (audio-qa.md, Virtual MIDI controllers). It needs the operating
     /// system's MIDI service, so it is ignored by default: run it with

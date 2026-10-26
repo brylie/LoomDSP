@@ -79,24 +79,6 @@ impl MidiPort for SystemPort {
     }
 }
 
-impl MidiPort for MidiConnection {
-    fn name(&self) -> &str {
-        self.port_name()
-    }
-
-    fn port_id(&self) -> &str {
-        MidiConnection::port_id(self)
-    }
-
-    fn input(&self) -> MidiInputId {
-        MidiInputId(0)
-    }
-
-    fn close(self: Box<Self>) {
-        MidiConnection::close(*self);
-    }
-}
-
 /// Where the app finds audio outputs and MIDI inputs.
 pub trait Host {
     /// The output devices and what each offers.
@@ -481,6 +463,10 @@ pub mod fake {
         pub midi: RefCell<Vec<(String, String)>>,
         /// Counts identities, so a port plugged in again gets a new one.
         pub next_id: std::cell::Cell<u32>,
+        /// MIDI inputs, by listed name, that fail to open.
+        pub broken_midi: RefCell<Vec<String>>,
+        /// True while listing the MIDI inputs fails.
+        pub midi_list_fails: std::cell::Cell<bool>,
         pub log: RefCell<Vec<Event>>,
         /// The open MIDI inputs, so a test can play notes on them.
         pub ports: RefCell<Vec<(String, Rc<RefCell<MidiInputState>>)>>,
@@ -686,14 +672,10 @@ pub mod fake {
                     .into_iter()
                     .filter(|i| i.name.contains(only))
                     .collect()),
+                None if self.0.midi_list_fails.get() => Err("the MIDI service is not running".to_string()),
                 None => {
-                    let midi = self.0.midi.borrow();
-                    let names: Vec<String> = midi.iter().map(|(name, _)| name.clone()).collect();
-                    Ok(loom_host_desktop::unique_names(&names)
-                        .into_iter()
-                        .zip(midi.iter())
-                        .map(|(name, (_, id))| MidiInputInfo { name, id: id.clone() })
-                        .collect())
+                    let (names, ids) = self.0.midi.borrow().iter().cloned().unzip();
+                    Ok(loom_host_desktop::input_infos(names, ids))
                 }
             }
         }
@@ -702,6 +684,9 @@ pub mod fake {
             if let Some(only) = &self.0.real_midi {
                 assert!(name.contains(only), "a test opens only its own MIDI ports");
                 return System.open_midi(name, midi, input);
+            }
+            if self.0.broken_midi.borrow().iter().any(|broken| broken == name) {
+                return Err(format!("{name}: the port is busy"));
             }
             let Some(info) = self.midi_list()?.into_iter().find(|i| i.name == name) else {
                 return Err(format!("no MIDI input port found matching `{name}`"));

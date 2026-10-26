@@ -230,6 +230,20 @@ fn panic_is_the_same_at_every_block_size() {
     }
 }
 
+/// A panic while the output fades out before a stop does not bring the
+/// sound back: the engine stays silent.
+#[test]
+fn panic_after_a_fade_out_stays_silent() {
+    let mut parts = tone(OutputSafety::Off);
+    let at = 10_000;
+    let out = render_around(&mut parts, at + 4 * fade(), 128, at, |parts| {
+        parts.controller.fade_out().unwrap();
+        parts.controller.panic().unwrap();
+    });
+    assert!(out[at + fade()..].iter().all(|&x| x == 0.0));
+    assert!(parts.engine.is_silent());
+}
+
 /// A second panic during the fade is ignored: the silence is not longer.
 #[test]
 fn a_second_panic_during_the_fade_is_ignored() {
