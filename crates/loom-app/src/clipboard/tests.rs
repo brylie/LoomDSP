@@ -327,3 +327,20 @@ fn a_paste_that_fills_the_command_queue_is_taken_back_and_frees_its_slots() {
         "the commit hands the failed paste's slots back"
     );
 }
+
+/// A copied module keeps its control range and its value, even a value
+/// outside the default range (control-ranges.md).
+#[test]
+fn copy_and_paste_keep_control_ranges() {
+    let mut c = parts().controller;
+    let mul = c.add_module("loom.math.mul").unwrap();
+    c.set_range(mul, 0, ParamRange::new(-5.0, 5.0)).unwrap();
+    c.set_param(mul, 0, 4.0).unwrap();
+    let mut positions = spread(&c);
+    let text = Group::from_selection(c.graph(), &positions, &ids(&[mul]), false).to_text();
+    assert!(text.contains(r#"ranges: {"gain": (-5.0, 5.0)}"#), "{text}");
+    let group = Group::from_text(&text, c.registry()).unwrap();
+    let new = group.add(&mut c, &mut positions, Point::new(1200.0, 600.0)).unwrap();
+    let node = c.graph().node(ModuleId(new[0])).unwrap();
+    assert_eq!((node.params[0], node.range(0)), (4.0, Some(ParamRange::new(-5.0, 5.0))));
+}

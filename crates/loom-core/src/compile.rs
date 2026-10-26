@@ -1286,6 +1286,24 @@ mod tests {
         schedule
     }
 
+    /// A range change keeps the glide going from the value it had reached,
+    /// at that value's place in the new range (control-ranges.md).
+    #[test]
+    fn a_range_change_keeps_the_gliding_value() {
+        let old = schedule_with_fills(&[1 << 32], |_| 1.0);
+        let mut old = old;
+        // Part way: position 0.4 of 0 to 1 is the value 0.4.
+        old.fills[0].smooth.as_mut().unwrap().reset(0.4);
+        let mut new = schedule_with_fills(&[1 << 32], |_| 1.0);
+        new.fills[0].spec.min = -1.0;
+        new.fills[0].spec.max = 1.0;
+        new.take_smooth_state_from(&old, |_, _| None);
+        let smooth = new.fills[0].smooth.unwrap();
+        // 0.4 in -1 to 1 is position 0.7. The target is the base, 0.75.
+        assert!((smooth.current() - 0.7).abs() < 1e-6, "{}", smooth.current());
+        assert!((smooth.target() - 0.875).abs() < 1e-6, "{}", smooth.target());
+    }
+
     #[test]
     fn smooth_state_carries_over_by_key_across_many_shuffled_fills() {
         const N: u64 = 2_000;

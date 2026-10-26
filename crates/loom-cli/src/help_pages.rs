@@ -315,6 +315,10 @@ fn range(p: &ParamSpec) -> String {
     if p.options.mapping == ParamMapping::Logarithmic {
         text.push_str(", logarithmic");
     }
+    if let Some(default) = p.default_range() {
+        let names: Vec<String> = p.options.ranges.iter().map(ToString::to_string).collect();
+        text.push_str(&format!(", control ranges {} (default {default})", names.join(", ")));
+    }
     if !p.options.choices.is_empty() {
         text.push_str(", choices ");
         text.push_str(&cell(&p.options.choices.join(", ")));

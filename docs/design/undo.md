@@ -77,6 +77,8 @@ The exact wording can change while building. Each step must have a name.
 | One drag that removes a cable and adds another (moving a cable end to another input) | Both changes, as one step. |
 | Change a parameter by a knob, slider, or radio control, on a tile or in the inspector | One gesture. A single click or key press on a control is a gesture of its own. Holding an arrow key down, so that it repeats, is one gesture from key down to key up, however many times it repeats. A gesture that ends at its starting value is not a step. |
 | Double-click a control to reset it to its default | The reset, as one step. |
+| Pick a parameter's control range in the inspector ([control ranges](control-ranges.md)) | The new range, and the value it clamped, together. |
+| Pick a choice name in the inspector ([choice names](panels.md#choice-names)) | The pick, as one step. |
 | Add or remove a modulation assignment | The add or the remove. |
 | Change an assignment's depth, polarity, or on/off | One gesture, like a parameter change. |
 | Map a MIDI control by learning | The new mapping, **and** the parameter value the control change set, together. If the mapping replaced another mapping on the same parameter or the same control, undo brings the old one back. |

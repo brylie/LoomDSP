@@ -719,7 +719,7 @@ impl Controller {
                 range: range.to_string(),
             });
         }
-        let previous = std::mem::replace(&mut node.ranges[index], Some(range));
+        let previous = node.ranges[index].replace(range);
         let value = node.params[index];
         let clamped = value.clamp(range.min, range.max);
         if clamped != value

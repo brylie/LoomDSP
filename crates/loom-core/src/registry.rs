@@ -407,6 +407,78 @@ mod tests {
         );
     }
 
+    /// control-ranges.md: the registry refuses a range outside the
+    /// parameter, a range with `min >= max`, a default range not in the
+    /// list, a default value outside the default range, and ranges on a
+    /// logarithmic or whole-number parameter.
+    #[test]
+    fn refuses_bad_ranges() {
+        use crate::ParamRange as R;
+        macro_rules! with_param {
+            ($param:expr) => {{
+                static DESCRIPTOR: ModuleDescriptor = ModuleDescriptor {
+                    id: "test.ranges",
+                    version: 1,
+                    name: "Ranges",
+                    category: "Test",
+                    description: "",
+                    inputs: &[],
+                    outputs: &[],
+                    params: &[$param],
+                    role: ModuleRole::Dsp(|_| unreachable!("never created")),
+                    panel: crate::Panel::EMPTY,
+                    displays: &[],
+                };
+                Registry::new()
+                    .register(&DESCRIPTOR)
+                    .map_err(|error| error.to_string())
+            }};
+        }
+        const LIST: &[R] = &[R::new(-1.0, 1.0), R::new(-10.0, 10.0)];
+        assert_eq!(
+            with_param!(param("gain", -10.0, 10.0, 1.0, "").ranges(LIST, R::new(-1.0, 1.0))),
+            Ok(())
+        );
+        let refused = [
+            (
+                with_param!(param("gain", -5.0, 5.0, 1.0, "").ranges(LIST, R::new(-1.0, 1.0))),
+                "range -10 to 10 is outside",
+            ),
+            (
+                with_param!(param("gain", -10.0, 10.0, 1.0, "").ranges(&[R::new(1.0, 1.0)], R::new(1.0, 1.0))),
+                "not below its maximum",
+            ),
+            (
+                with_param!(param("gain", -10.0, 10.0, 1.0, "").ranges(LIST, R::new(0.0, 1.0))),
+                "the default range is not in the list",
+            ),
+            (
+                with_param!(param("gain", -10.0, 10.0, 5.0, "").ranges(LIST, R::new(-1.0, 1.0))),
+                "the default value 5 is outside the default range -1 to 1",
+            ),
+            (
+                with_param!(
+                    param("cutoff", 1.0, 10.0, 1.0, "")
+                        .logarithmic()
+                        .ranges(&[R::new(1.0, 10.0)], R::new(1.0, 10.0))
+                ),
+                "only linear parameters",
+            ),
+            (
+                with_param!(
+                    param("steps", -10.0, 10.0, 1.0, "")
+                        .integer()
+                        .ranges(LIST, R::new(-1.0, 1.0))
+                ),
+                "only linear parameters",
+            ),
+        ];
+        for (result, expected) in refused {
+            let error = result.unwrap_err();
+            assert!(error.contains(expected), "{error}");
+        }
+    }
+
     /// Choice names go on whole-number parameters only, one per value, and
     /// none empty. The error names the parameter.
     #[test]

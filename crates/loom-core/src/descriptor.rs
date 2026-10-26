@@ -241,7 +241,7 @@ impl ParamRange {
 }
 
 impl std::fmt::Display for ParamRange {
-    /// "-0.1 to 0.1": plain numbers, which need no translation (rule 9).
+    /// "-0.1 to 0.1": plain numbers, which need no translation (rule 10).
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // -0 reads as 0 to people.
         let number = |v: f32| if v == 0.0 { 0.0 } else { v };

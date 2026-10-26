@@ -3505,6 +3505,74 @@ mod tests {
         assert_eq!(selected, 0);
     }
 
+    /// control-ranges.md: Multiply's gain shows a **Range** selector. A
+    /// smaller range clamps the value, as one undo step, and the tile knob
+    /// then spans the selected range. Undo brings back range and value.
+    #[test]
+    fn the_inspector_selects_a_control_range() {
+        let mut app = app();
+        let mul = app.controller.add_module("loom.math.mul").unwrap();
+        app.controller.set_param(mul, 0, 0.5).unwrap();
+        app.commit();
+        let _ = app.update(Message::SelectModule(mul.0));
+        let gain_row = |app: &App| {
+            let inspector::Inspector::Module(rows) = app.ui_snapshot().inspector else {
+                panic!("one module is selected");
+            };
+            rows.params.into_iter().find(|p| p.label == "Gain").unwrap()
+        };
+        let range = gain_row(&app).range.expect("a Range selector");
+        assert_eq!(range.choices.len(), 7);
+        assert_eq!(range.choices[0], "-0.1 to 0.1");
+        assert_eq!(range.choices[range.selected.unwrap()], "-1 to 1");
+
+        let _ = app.update(Message::Range {
+            module: mul.0,
+            index: 0,
+            range: 0,
+        });
+        let row = gain_row(&app);
+        assert_eq!(row.range.unwrap().selected, Some(0));
+        assert_eq!(app.controller.graph().node(mul).unwrap().params[0], 0.1, "clamped");
+        assert_eq!(
+            app.history.undo_step().map(|s| s.name().to_string()).as_deref(),
+            Some("change Multiply Gain range")
+        );
+        // The tile knob and its keyboard steps span -0.1 to 0.1.
+        let widget = app
+            .controller
+            .graph()
+            .node(mul)
+            .unwrap()
+            .descriptor
+            .panel
+            .widgets
+            .iter()
+            .position(|w| w.bind == "gain")
+            .unwrap();
+        let (_, _, spec) = scene::control_param(&app.controller, mul.0, widget).unwrap();
+        assert_eq!((spec.min, spec.max), (-0.1, 0.1));
+        assert!(
+            (spec.denormalize(0.51) - spec.denormalize(0.5) - 0.002).abs() < 1e-6,
+            "1% of the range"
+        );
+
+        let _ = app.update(Message::Undo);
+        let node = app.controller.graph().node(mul).unwrap();
+        assert_eq!(
+            (node.params[0], node.range(0)),
+            (0.5, Some(loom_core::ParamRange::new(-1.0, 1.0)))
+        );
+        // A parameter without ranges has no selector.
+        let lfo = app.controller.add_module("loom.mod.lfo").unwrap();
+        app.commit();
+        let _ = app.update(Message::SelectModule(lfo.0));
+        let inspector::Inspector::Module(rows) = app.ui_snapshot().inspector else {
+            panic!("one module is selected");
+        };
+        assert!(rows.params.iter().all(|p| p.range.is_none()));
+    }
+
     /// A one-sample trigger lights Clock Divide's trigger light, though the
     /// output went low again long before the light is read. The light fades
     /// out in 120 ms, and a second read without a trigger is dark

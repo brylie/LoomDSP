@@ -27,7 +27,7 @@ Adds two signals and an offset.
 
 | Parameter | Range | Default | Description |
 |---|---|---|---|
-| **Offset** (`offset`) | -10 to 10 | 0 | A fixed amount added to the sum. |
+| **Offset** (`offset`) | -10 to 10, control ranges -0.1 to 0.1, -1 to 1, 0 to 1, -5 to 5, 0 to 5, -10 to 10, 0 to 10 (default -1 to 1) | 0 | A fixed amount added to the sum. |
 
 ## Panel
 

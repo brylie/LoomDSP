@@ -3,12 +3,12 @@
 A choice of ranges for wide controls, such as Multiply's gain, so a player can make a knob fine and safe for the job it does in a patch.
 
 - **Kind:** living specification.
-- **Status:** Agreed ([#122](https://github.com/brylie/LoomDSP/issues/122)). Not built.
+- **Status:** Implemented ([#122](https://github.com/brylie/LoomDSP/issues/122)), except the manual check below.
 - **Decision behind it:** none yet. It extends [parameter mapping](modulation.md#parameter-mapping) (Agreed) and does not change a decision.
 - **Use case and requirements:** FR-MOD-09 (proposed here), FR-MOD-03, FR-MOD-08, FR-SIG-03.
 - **Background:** [Why feedback FM turns to noise](../learn/feedback-fm.md): exponential pitch, the one-sample loop, and aliasing at high depth.
 - **Issues:** [#121](https://github.com/brylie/LoomDSP/issues/121) (the problem that started this), [#122](https://github.com/brylie/LoomDSP/issues/122) (this spec).
-- **Code:** not built.
+- **Code:** `ParamRange`, `ParamSpec::ranges`, `in_range`, `load_range`, and `check_ranges` in `loom-core/src/descriptor.rs`; `Node::spec` in `graph.rs`; `Controller::set_range`; the ranged specs in `ParamFill` and `MidiMapOp` (`compile.rs`); `WIDE_RANGES` in `loom-modules/src/math.rs`; `ranges` in `loom-patch`; the **Range** selector in `loom-app/src/inspector.rs`.
 
 ## Goal
 
@@ -48,24 +48,25 @@ PatchModule(id: 5, kind: "loom.math.mul@1", params: {"gain": 0.08}, ranges: {"ga
 1. **A range limits the control, not the signal.** The selected range clamps the parameter value only. A signal arriving on a cable is never clamped by it. *Why:* cables are polymorphic and unclipped (ADR-0007, FR-SIG-03). Protection against hot signals belongs to the modules that need it and to the final output ([#121](https://github.com/brylie/LoomDSP/issues/121)), not to a knob setting.
 2. **Ranges are declared by the module author.** `ParamOptions`, in each `ParamSpec`, gets an optional list of ranges and a default choice. Every range lies inside the parameter's `min` and `max`, which stay the outer limits the engine enforces. *Why:* the author knows which spans make sense. A fixed list keeps the inspector simple and keeps patches portable.
 3. **Only linear, not whole-number parameters can offer ranges.** The registry refuses others. *Why:* a logarithmic range needs a minimum above 0, and whole-number parameters already step one value at a time. Neither need has come up yet.
-4. **The selected range replaces `min` and `max` in the mapping.** `normalize` and `denormalize` take the selected range, so the inspector, the tile knob, and later the engine's modulation all agree. *Why:* rule 3 of [Modulation](modulation.md#rules): every user of a control maps through the same functions. Modulation depth then means "a share of the selected range" (FR-MOD-08), which is the point: depth 0.1 on a -0.1 to 0.1 gain is a small, musical move.
+4. **The selected range replaces `min` and `max` in the mapping.** `normalize` and `denormalize` take the selected range (`ParamSpec::in_range`), so the inspector, the tile knob, MIDI control changes, and the engine's modulation all agree. A mapped MIDI control sweeps the selected range, as the knob does. *Why:* rule 3 of [Modulation](modulation.md#rules): every user of a control maps through the same functions. Modulation depth then means "a share of the selected range" (FR-MOD-08), which is the point: depth 0.1 on a -0.1 to 0.1 gain is a small, musical move.
 5. **Modulated values clamp to the selected range** (FR-MOD-03). *Why:* the player chose that range to be safe. Modulation must not leave it.
 6. **Switching to a smaller range clamps the value into it. Switching to a wider range keeps the value.** *Why:* the knob always shows the real value, as the modulation arc does. A player who picks a smaller range is asking for safety, so the value moves into it. A wider range never moves the value, so switching up is never a jump in sound. Rescaling the value to keep the knob position (the other option) would make -0.1 to 0.1 to -10 to 10 a 100 times jump in one click.
-7. **Ranges never change a saved value on load.** This covers every value the loader accepts today: finite and inside the parameter's outer `min` and `max`. Other values are handled as now, by `ParamSpec::clamp` (out of range is clamped, NaN becomes the default). Ranges add no new change. A module saved without a range for a parameter gets the default range if its value fits. Otherwise it gets the smallest range in the list that holds the value. A saved range that is not in the list, or that does not hold the saved value (for example gain 5 saved with -0.1 to 0.1), is treated the same way: the smallest range in the list that holds the value is selected, and the loader reports it. *Why:* patches made before ranges existed, or with a later build, must sound exactly as saved.
+7. **Ranges never change a saved value on load.** "Smallest" means the first range in the list that holds the value: the list goes from the smallest up, and for equal spans a bipolar range comes before a unipolar one, so gain 5 gets -5 to 5, as the acceptance criteria say. If no listed range holds the value, the module gets the parameter's full range. Only ranges other than the default are saved. This covers every value the loader accepts today: finite and inside the parameter's outer `min` and `max`. Other values are handled as now, by `ParamSpec::clamp` (out of range is clamped, NaN becomes the default). Ranges add no new change. A module saved without a range for a parameter gets the default range if its value fits. Otherwise it gets the smallest range in the list that holds the value. A saved range that is not in the list, or that does not hold the saved value (for example gain 5 saved with -0.1 to 0.1), is treated the same way: the smallest range in the list that holds the value is selected, and the loader reports it. *Why:* patches made before ranges existed, or with a later build, must sound exactly as saved.
 8. **The range goes to the audio thread only as prepared data.** It lives in the graph and the patch. Once built, and before modulation exists, the controller clamps values to it before sending them, and the engine keeps clamping to the outer `min` and `max`. When modulation is built, the engine needs the selected bounds for rules 4 and 5, because it maps and clamps modulated values per sample. The compiler then puts each modulated parameter's bounds into the schedule, as it does for other prepared data, so the audio thread only reads them. *Why:* the engine must enforce the range that modulation uses, and preparing it on the control thread keeps the audio thread free of allocation and locks.
-9. **Range names come from their bounds.** The inspector shows "-0.1 to 0.1", never a word like "fine". *Why:* plain numbers need no translation and say exactly what the knob does.
+9. **A range change keeps a modulated glide going.** The engine's base smoother runs in the control's 0 to 1 position. When the range changes, the glide continues from the value it had reached, placed in the new range, toward the new base. *Why:* resetting would jump the sound, and carrying the old position over would pass through values that were never set. (Decided while building, as asked in [#122](https://github.com/brylie/LoomDSP/issues/122).)
+10. **Range names come from their bounds.** The inspector shows "-0.1 to 0.1", never a word like "fine". *Why:* plain numbers need no translation and say exactly what the knob does.
 
 ## Acceptance criteria
 
-- [ ] The registry refuses a range outside the parameter's `min` and `max`, a range with `min >= max`, a default range not in the list, a default value outside the default range, and ranges on a logarithmic or whole-number parameter.
-- [ ] Add `offset`, Multiply `gain`, and Constant `value` offer the seven ranges in the table, with the default range from Open points (-1 to 1).
-- [ ] `normalize` and `denormalize` with a selected range map its bounds to positions 0 and 1, and clamp out-of-range values and NaN as they do today.
-- [ ] Selecting a smaller range clamps the value into it. Selecting a wider range leaves the value unchanged.
-- [ ] The tile knob and the inspector slider span the selected range. Keyboard steps are 1% and 0.1% of it.
-- [ ] A patch saves and reloads the selected ranges.
-- [ ] Every example patch loads with the same values as before. A value outside the default range (for example a gain of 5) loads with the smallest range that holds it.
-- [ ] A saved range that does not hold the saved value (gain 5 with -0.1 to 0.1) loads with the value unchanged, the smallest range that holds it (-5 to 5), and a report.
-- [ ] Two instances of one module keep separate ranges.
+- [x] The registry refuses a range outside the parameter's `min` and `max`, a range with `min >= max`, a default range not in the list, a default value outside the default range, and ranges on a logarithmic or whole-number parameter.
+- [x] Add `offset`, Multiply `gain`, and Constant `value` offer the seven ranges in the table, with the default range from Open points (-1 to 1).
+- [x] `normalize` and `denormalize` with a selected range map its bounds to positions 0 and 1, and clamp out-of-range values and NaN as they do today.
+- [x] Selecting a smaller range clamps the value into it. Selecting a wider range leaves the value unchanged.
+- [x] The tile knob and the inspector slider span the selected range. Keyboard steps are 1% and 0.1% of it.
+- [x] A patch saves and reloads the selected ranges.
+- [x] Every example patch loads with the same values as before. A value outside the default range (for example a gain of 5) loads with the smallest range that holds it.
+- [x] A saved range that does not hold the saved value (gain 5 with -0.1 to 0.1) loads with the value unchanged, the smallest range that holds it (-5 to 5), and a report. The report is a note that `loom` prints and the app shows in its status bar.
+- [x] Two instances of one module keep separate ranges.
 - [ ] Manual: in `fm-feedback.ron`, with Multiply's range at -0.1 to 0.1, a full knob turn moves from a pure tone to a bright one without the harsh noise from #121.
 
 ## Out of scope
