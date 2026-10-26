@@ -42,24 +42,26 @@ Use Convert to translate between musical representations: decibels and linear ga
 
 ## Example patch
 
-Converts pitch into Hertz to drive parameters requiring frequency units.
+Converts a decibel value into linear gain for an amplifier.
 
 ```ron
 Patch(
     version: 1,
-    name: "Pitch to Hz",
+    name: "dB to level",
     modules: [
-        PatchModule(id: 1, kind: "loom.pitch.constant@1", params: {"semitones": 12}),
-        PatchModule(id: 2, kind: "loom.math.convert@1", params: {"mode": 2}),
+        PatchModule(id: 1, kind: "loom.math.constant@1", params: {"value": -6}),
+        PatchModule(id: 2, kind: "loom.math.convert@1", params: {"mode": 0}),
         PatchModule(id: 3, kind: "loom.phase.generator@1"),
         PatchModule(id: 4, kind: "loom.osc.sine@1"),
-        PatchModule(id: 5, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 5, kind: "loom.level.amp@1"),
+        PatchModule(id: 6, kind: "loom.io.audio-out@1"),
     ],
     cables: [
         PatchCable(from: (1, "out"), to: (2, "in")),
-        PatchCable(from: (1, "out"), to: (3, "pitch")),
         PatchCable(from: (3, "phase"), to: (4, "phase")),
-        PatchCable(from: (4, "out"), to: (5, "left")),
+        PatchCable(from: (4, "out"), to: (5, "in")),
+        PatchCable(from: (2, "out"), to: (5, "level")),
+        PatchCable(from: (5, "out"), to: (6, "left")),
     ],
 )
 ```

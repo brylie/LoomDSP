@@ -123,7 +123,7 @@ fn notes_of(page: &str) -> Option<String> {
     let mut start = 0;
     for line in page.split_inclusive('\n') {
         start += line.len();
-        if line.trim_end_matches('\n') == MARKER {
+        if line.trim_end_matches(['\r', '\n']) == MARKER {
             return Some(page[start..].to_string());
         }
     }
@@ -434,6 +434,10 @@ mod tests {
     #[test]
     fn the_marker_counts_only_as_a_whole_line() {
         assert_eq!(notes_of(&format!("# A\n{MARKER}\nnotes\n")).as_deref(), Some("notes\n"));
+        assert_eq!(
+            notes_of(&format!("# A\r\n{MARKER}\r\nnotes\r\n")).as_deref(),
+            Some("notes\r\n")
+        );
         assert_eq!(notes_of(&format!("# A\n{MARKER}")).as_deref(), Some(""));
         assert_eq!(
             notes_of(&format!("Keep the line `{MARKER}` when you edit.\nmine\n")),
@@ -540,11 +544,12 @@ mod tests {
 
     /// Extracts a RON snippet enclosed in ```ron ... ``` from markdown notes.
     fn extract_ron_snippet(notes: &str) -> Option<String> {
+        let normalized = notes.replace("\r\n", "\n");
         let start_tag = "```ron\n";
-        let start = notes.find(start_tag)?;
+        let start = normalized.find(start_tag)?;
         let content_start = start + start_tag.len();
-        let end = notes[content_start..].find("```")?;
-        Some(notes[content_start..content_start + end].to_string())
+        let end = normalized[content_start..].find("```")?;
+        Some(normalized[content_start..content_start + end].to_string())
     }
 
     /// Every built-in module has an example patch in its help page (FR-LIB-11).
@@ -555,7 +560,9 @@ mod tests {
         let dir = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/modules"));
         for d in registry.iter() {
             let path = dir.join(file_name(d));
-            let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+            let text = read_normalized(&path)
+                .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
+                .unwrap_or_else(|| panic!("{} is missing", path.display()));
             let notes = notes_of(&text).unwrap_or_else(|| panic!("{} has no marker line", path.display()));
             let ron_snippet = extract_ron_snippet(&notes)
                 .unwrap_or_else(|| panic!("{} has no ```ron example patch in its notes", path.display()));

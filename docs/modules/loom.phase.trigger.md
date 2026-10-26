@@ -36,7 +36,7 @@ None.
 
 ## When to use it
 
-Use Phase Trigger to convert phase resets into single-sample trigger impulses. Each time the input phase wraps from 1 back to 0, an output trigger is emitted. This is ideal for syncing clocks, step sequencers, and sample-and-hold circuits.
+Use Phase Trigger to convert phase wraps into single-sample trigger impulses. Each time the input phase wraps, forward (1 to 0) or backward (0 to 1), an output trigger is emitted. This is ideal for syncing clocks, step sequencers, and sample-and-hold circuits.
 
 ## Example patch
 
