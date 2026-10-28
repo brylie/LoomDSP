@@ -271,13 +271,15 @@ Both follow `loom.filter.svf`: an `in` port, a `cutoff` input in pitch units add
 | Source | Output |
 |---|---|
 | Controller | The value of controller number `controller`, from 0 to 1 (`value / 127`) |
-| Pitch bend | The 14-bit bend, from −1 to 1, with the centre (8192) at 0 |
+| Pitch bend | The 14-bit bend, from −1 to 1, with the centre (8192) at 0. Below the centre it is divided by 8192 and above by 8191, so both ends are reached exactly |
 | Aftertouch | Channel pressure, from 0 to 1 |
 
 - The output port is declared bipolar, as the widest case ([port ranges](port-ranges.md)). *Why:* a port's polarity is part of its static descriptor.
 - **Bend is not scaled to semitones here.** The MIDI Note module already applies its bend range to pitch. This module gives the raw wheel.
 - A value change takes effect at the event's sample offset; smoothing then runs from that sample, so the output is the same at any block size. Before any message arrives the output is 0 (bend centred).
 - `channel` works as on MIDI Note: 0 listens to all 16, 1 to 16 to one.
+- **Smoothing** is a one-pole glide that gets about 99% of the way to a new value in `smoothing` seconds, the same law as parameter smoothing. 0 jumps at once. The knob is linear, not logarithmic, because a logarithmic range cannot start at 0.
+- The module keeps the last value of all 128 controller numbers, so turning `controller` shows that controller's last value at once.
 - Per-note expression is [MT-IO-05](../product/module-catalogue.md), P2.
 
 ## Acceptance criteria
@@ -292,7 +294,7 @@ Every module also needs the checklist items in rule 6 above. The module-specific
 - [ ] A synced LFO with nothing connected wraps with the bar phase at block sizes 1, 77, and 512. A free LFO ignores a cable on `phase`.
 - [x] Envelope AD mode measures the attack and decay times, retriggers in attack and in decay without a click, and matches at all three block sizes.
 - [x] The one-pole outputs are 3 dB down at their cutoff. The ladder is about 12, 18, and 24 dB per octave steeper above the cutoff for each `slope`. At resonance 1, the 24 dB slope self-oscillates at the cutoff and the 18 dB slope at about 1.7 times it. The 18 dB check uses cutoffs below about 0.29 times the sample rate, because above that 1.7 times the cutoff is past Nyquist and the oscillation cannot appear. The 12 dB slope does not self-oscillate (its peak is about 4 dB above its own DC gain with feedback, not above unity). It stays finite at any input, and a `slope` change while playing is click-free and does not burst into oscillation.
-- [ ] Controller input lands CC, bend, and aftertouch events on the sample of their offset at block sizes 1, 77, and 512.
+- [x] Controller input lands CC, bend, and aftertouch events on the sample of their offset at block sizes 1, 77, and 512.
 
 ## Out of scope
 

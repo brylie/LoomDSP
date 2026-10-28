@@ -60,6 +60,7 @@ pub static ALL: &[&ModuleDescriptor] = &[
     &io::UNIT_DELAY,
     &io::AUDIO_OUT,
     &midi::NOTE_IN,
+    &midi::CONTROLLER_IN,
     &display::METER,
     &display::SCOPE,
     &logic::DIVIDE,
@@ -175,6 +176,7 @@ mod tests {
                     ("loom.mod.lfo", "shape"),
                     ("loom.env.envelope", "mode"),
                     ("loom.filter.ladder", "slope"),
+                    ("loom.midi.controller", "source"),
                 ];
                 if non_knob.contains(&(descriptor.id, param.name)) {
                     assert!(
@@ -227,6 +229,13 @@ mod tests {
         use loom_core::ParamMapping;
         for descriptor in super::ALL {
             for param in descriptor.params {
+                // The controller's smoothing starts at 0 (none), and a
+                // logarithmic range needs a minimum above 0 (p1-modules.md,
+                // Controller input).
+                if (descriptor.id, param.name) == ("loom.midi.controller", "smoothing") {
+                    assert_eq!(param.options.mapping, ParamMapping::Linear);
+                    continue;
+                }
                 let expected = if matches!(param.unit, "Hz" | "s") {
                     ParamMapping::Logarithmic
                 } else {

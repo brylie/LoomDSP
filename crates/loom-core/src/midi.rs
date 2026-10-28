@@ -94,6 +94,13 @@ pub enum MidiMessage {
         /// Value, 0 to 127.
         value: u8,
     },
+    /// Channel pressure (aftertouch for the whole channel).
+    ChannelPressure {
+        /// Channel, 0 to 15.
+        channel: u8,
+        /// Pressure, 0 to 127.
+        value: u8,
+    },
     /// Pitch bend, -8192 to 8191.
     PitchBend {
         /// Channel, 0 to 15.
@@ -140,6 +147,18 @@ impl MidiEvent {
         Self::from_bytes(frame, &[0xB0 | (channel & 0x0F), controller & 0x7F, value & 0x7F])
     }
 
+    /// A pitch bend event. `value` is from -8192 to 8191, with 0 at the
+    /// centre.
+    pub fn pitch_bend(frame: u32, channel: u8, value: i16) -> Self {
+        let raw = (i32::from(value).clamp(-8192, 8191) + 8192) as u16;
+        Self::from_bytes(frame, &[0xE0 | (channel & 0x0F), (raw & 0x7F) as u8, (raw >> 7) as u8])
+    }
+
+    /// A channel pressure (aftertouch) event.
+    pub fn channel_pressure(frame: u32, channel: u8, value: u8) -> Self {
+        Self::from_bytes(frame, &[0xD0 | (channel & 0x0F), value & 0x7F])
+    }
+
     /// Decodes the event.
     pub fn message(&self) -> MidiMessage {
         if self.len < 2 {
@@ -161,6 +180,7 @@ impl MidiEvent {
                 controller: a,
                 value: b,
             },
+            0xD0 => MidiMessage::ChannelPressure { channel, value: a },
             0xE0 if self.len == 3 => MidiMessage::PitchBend {
                 channel,
                 value: ((i16::from(b) << 7) | i16::from(a)) - 8192,
@@ -192,5 +212,22 @@ mod tests {
             MidiEvent::from_bytes(0, &[0xE0, 0x00, 0x40]).message(),
             MidiMessage::PitchBend { channel: 0, value: 0 }
         );
+    }
+
+    /// The pitch bend and channel pressure helpers round-trip through
+    /// `message`.
+    #[test]
+    fn decodes_bend_and_pressure() {
+        for value in [-8192, -1, 0, 1, 8191] {
+            assert_eq!(
+                MidiEvent::pitch_bend(0, 3, value).message(),
+                MidiMessage::PitchBend { channel: 3, value }
+            );
+        }
+        assert_eq!(
+            MidiEvent::channel_pressure(0, 2, 90).message(),
+            MidiMessage::ChannelPressure { channel: 2, value: 90 }
+        );
+        assert_eq!(MidiEvent::from_bytes(0, &[0xD0]).message(), MidiMessage::Other);
     }
 }

@@ -300,7 +300,7 @@ These depend on how notes travel on cables (OQ-16).
 | MT-IO-01 | Audio output | Sends a signal to an interface channel or host output. | | P0 | FR-LIB-07 | Built (`loom.io.audio-out`) |
 | MT-IO-02 | Audio input | Brings audio from an interface channel or host input into the patch. | | P1 | FR-LIB-07 | Specified (`loom.io.audio-in`, [audio input](../design/audio-input.md)) |
 | MT-IO-03 | Note input | Turns incoming notes into gate, pitch, and velocity signals, per voice. | | P0 | FR-LIB-07 | Built in part (`loom.midi.note`: one voice; per-voice output comes with polyphony in P2) |
-| MT-IO-04 | Controller input | Outputs a chosen MIDI controller, pitch bend, or aftertouch as a signal. | Smoothing | P1 | FR-LIB-07 | Specified (`loom.midi.controller`, [P1 modules](../design/p1-modules.md#controller-input-mt-io-04)) |
+| MT-IO-04 | Controller input | Outputs a chosen MIDI controller, pitch bend, or aftertouch as a signal. | Smoothing | P1 | FR-LIB-07 | Built (`loom.midi.controller`, [P1 modules](../design/p1-modules.md#controller-input-mt-io-04)) |
 | MT-IO-05 | Expression input | Outputs per-note pressure, timbre, and slide as signals. | | P2 | FR-VOICE-04 | Planned |
 | MT-IO-06 | Note output | Builds outgoing notes from gate, pitch, and velocity signals. | | P2 | FR-MIDI-04 | Planned |
 | MT-IO-07 | Controller output | Sends a signal out as a MIDI controller value. | | P2 | FR-MIDI-04 | Planned |

@@ -253,6 +253,38 @@ fn note_in() {
         .check(reference!("note_in"));
 }
 
+/// Reference render for `loom.midi.controller`: controller 1 moves and
+/// is smoothed, and a message for another controller changes nothing.
+#[test]
+fn controller_in() {
+    Harness::new(&midi::CONTROLLER_IN)
+        .seconds(0.1)
+        .midi([
+            MidiEvent::control_change(100, 0, 1, 127),
+            MidiEvent::control_change(1_000, 0, 2, 10),
+            MidiEvent::control_change(2_000, 0, 1, 40),
+            MidiEvent::control_change(3_500, 0, 1, 90),
+        ])
+        .param("smoothing", 0.01)
+        .check(reference!("controller_in"));
+}
+
+/// Reference render for `loom.midi.controller` following the pitch bend,
+/// with no smoothing.
+#[test]
+fn controller_in_bend() {
+    Harness::new(&midi::CONTROLLER_IN)
+        .seconds(0.05)
+        .midi([
+            MidiEvent::pitch_bend(500, 0, 8191),
+            MidiEvent::pitch_bend(1_200, 0, -2048),
+            MidiEvent::pitch_bend(2_000, 0, 0),
+        ])
+        .param("source", 1.0)
+        .param("smoothing", 0.0)
+        .check(reference!("controller_in_bend"));
+}
+
 #[test]
 fn meter() {
     // A pass-through: the reference is its input, a 220 Hz sine at half level.
@@ -419,6 +451,7 @@ fn every_dsp_module_has_a_reference_test() {
         &math::CONVERT,
         &level::AMP,
         &midi::NOTE_IN,
+        &midi::CONTROLLER_IN,
         &display::METER,
         &display::SCOPE,
         &logic::DIVIDE,
