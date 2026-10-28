@@ -144,8 +144,7 @@ pub fn world_bounds(scene: &Scene, part: Part) -> Result<iced::Rectangle, String
             .and_then(|m| m.widget_bounds(widget))
             .ok_or_else(not_drawn),
         Part::Badge(port) => scene
-            .module(port.module)
-            .and_then(|m| m.badge_bounds(port.index))
+            .badge_bounds(port.module, port.index)
             .ok_or_else(|| "the output shows no badge: it drives no assignment".to_string()),
         Part::Port(port) => {
             let centre = scene.port_position(port).ok_or_else(not_drawn)?;

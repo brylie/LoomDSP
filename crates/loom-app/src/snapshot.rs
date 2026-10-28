@@ -351,7 +351,7 @@ impl App {
                                 .cloned(),
                             centre: m.output_position(index).into(),
                             badge: p.badge,
-                            badge_bounds: m.badge_bounds(index).map(Rect::from),
+                            badge_bounds: self.scene.badge_bounds(m.id, index).map(Rect::from),
                         })
                         .collect(),
                     widgets: m

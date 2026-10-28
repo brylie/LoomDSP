@@ -5,7 +5,7 @@
 //! messages, and the application changes its model and the scene.
 
 use iced::{Color, Point, Rectangle, Vector};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Size of the snap grid, in world units.
@@ -30,6 +30,11 @@ pub const PORT_HIT_RADIUS: f32 = 9.0;
 pub const BADGE_HEIGHT: f32 = 9.0;
 /// Size of the number on a badge, in world units.
 pub const BADGE_TEXT_SIZE: f32 = 7.0;
+/// How close another tile may come to a badge's usual place before the
+/// badge moves inside its own tile (`docs/design/modulation.md`, Seeing
+/// assignments). One grid unit: more than a port sticks out, plus the end
+/// of the cable that runs into it.
+const BADGE_CLEARANCE: f32 = GRID;
 
 /// How a port marker is drawn. Shape is a second cue next to colour, so
 /// signal types do not rely on colour alone (NFR-UX-03).
@@ -280,16 +285,24 @@ impl ModuleView {
         )
     }
 
-    /// The assignment count badge of an output, if it shows one: a small
-    /// pill above and to the right of the port. It covers neither the port
-    /// nor its cable, which leaves the port to the right.
-    pub fn badge_bounds(&self, index: usize) -> Option<Rectangle> {
+    /// Where the assignment count badge of an output goes, if it shows
+    /// one: a small pill above the port. Outside, it starts just right of
+    /// the port, past the tile's edge. Inside, it ends just left of the
+    /// port, within the tile. Either way it covers neither the port nor its
+    /// cable, which leaves the port to the right. [`Scene::badge_bounds`]
+    /// picks the side.
+    fn badge_place(&self, index: usize, inside: bool) -> Option<Rectangle> {
         let count = self.outputs.get(index).map(|p| p.badge).filter(|&n| n > 0)?;
         let digits = count.to_string().len() as f32;
         let width = (digits * BADGE_TEXT_SIZE * 0.6 + 5.0).max(BADGE_HEIGHT);
         let port = self.output_position(index);
+        let x = if inside {
+            port.x - PORT_RADIUS - 1.0 - width
+        } else {
+            port.x + PORT_RADIUS + 1.0
+        };
         Some(Rectangle::new(
-            Point::new(port.x + PORT_RADIUS + 1.0, port.y - 5.0 - BADGE_HEIGHT),
+            Point::new(x, port.y - 5.0 - BADGE_HEIGHT),
             iced::Size::new(width, BADGE_HEIGHT),
         ))
     }
@@ -346,6 +359,10 @@ pub struct Scene {
     index: HashMap<u32, usize>,
     cables: Vec<CableView>,
     modulations: Vec<ModulationView>,
+    /// Badges moved inside their tile, because another tile is close to
+    /// their usual place. Found when modules are added or moved, not on
+    /// every frame.
+    badges_inside: HashSet<(u32, usize)>,
     generation: u64,
 }
 
@@ -366,13 +383,47 @@ impl Scene {
     /// Cables that refer to unknown modules or ports are skipped when drawn.
     pub fn new(modules: Vec<ModuleView>, cables: Vec<CableView>) -> Self {
         let index = modules.iter().enumerate().map(|(i, m)| (m.id, i)).collect();
-        Self {
+        let mut scene = Self {
             modules,
             index,
             cables,
             modulations: Vec::new(),
+            badges_inside: HashSet::new(),
             generation: next_generation(),
+        };
+        scene.place_badges();
+        scene
+    }
+
+    /// Decides which badges go inside their tile (`docs/design/modulation.md`,
+    /// Seeing assignments): those whose usual place, outside the tile's
+    /// right edge, comes within [`BADGE_CLEARANCE`] of another tile. That
+    /// covers the other tile's ports, which stick out of its edge, and the
+    /// cables that run into them (#249).
+    fn place_badges(&mut self) {
+        self.badges_inside.clear();
+        for module in &self.modules {
+            for index in 0..module.outputs.len() {
+                let Some(badge) = module.badge_place(index, false) else {
+                    continue;
+                };
+                let crowded = self
+                    .modules
+                    .iter()
+                    .any(|other| other.id != module.id && other.bounds().expand(BADGE_CLEARANCE).intersects(&badge));
+                if crowded {
+                    self.badges_inside.insert((module.id, index));
+                }
+            }
         }
+    }
+
+    /// The assignment count badge of output `index` on `module`, if it
+    /// shows one. Above the port, outside the tile's right edge, or inside
+    /// the tile when another tile is close to that place.
+    pub fn badge_bounds(&self, module: u32, index: usize) -> Option<Rectangle> {
+        let inside = self.badges_inside.contains(&(module, index));
+        self.module(module)?.badge_place(index, inside)
     }
 
     /// Changes whenever the scene changes. Unique across all scenes.
@@ -433,6 +484,7 @@ impl Scene {
                 self.modules[i].position += delta;
             }
         }
+        self.place_badges();
         self.generation = next_generation();
     }
 
@@ -468,7 +520,7 @@ impl Scene {
         // click on one never starts a cable.
         for module in self.modules.iter().rev() {
             for index in 0..module.outputs.len() {
-                if module.badge_bounds(index).is_some_and(|b| b.contains(point)) {
+                if self.badge_bounds(module.id, index).is_some_and(|b| b.contains(point)) {
                     return Hit::Badge(PortRef {
                         module: module.id,
                         output: true,
@@ -917,27 +969,80 @@ mod tests {
         assert_eq!(snap(Point::new(13.0, -7.0)), Point::new(12.0, -12.0));
     }
 
+    /// A tile with two outputs, the second driving 12 assignments.
+    fn badged(id: u32, position: Point) -> ModuleView {
+        let mut m = ModuleView {
+            id,
+            title: String::new(),
+            accent: Color::BLACK,
+            position,
+            inputs: vec![port("in")],
+            outputs: vec![port("a"), port("b")],
+            panel: PanelView::default(),
+        };
+        m.outputs[1].badge = 12;
+        m
+    }
+
     /// A badge sits above and right of its port: clear of the marker and of
     /// the cable, which leaves the port to the right at the port's height.
     #[test]
     fn a_badge_clears_its_port_and_cable() {
-        let mut m = ModuleView {
-            id: 1,
-            title: String::new(),
-            accent: Color::BLACK,
-            position: Point::ORIGIN,
-            inputs: vec![],
-            outputs: vec![port("a"), port("b")],
-            panel: PanelView::default(),
-        };
-        assert_eq!(m.badge_bounds(0), None);
-        m.outputs[1].badge = 12;
-        let badge = m.badge_bounds(1).unwrap();
+        let scene = Scene::new(vec![badged(1, Point::ORIGIN)], Vec::new());
+        let m = scene.module(1).unwrap();
+        assert_eq!(scene.badge_bounds(1, 0), None);
+        let badge = scene.badge_bounds(1, 1).unwrap();
         let port = m.output_position(1);
         assert!(badge.x > port.x + PORT_RADIUS);
         assert!(badge.y + badge.height < port.y);
         // Wider than tall for two digits, and clear of the port above.
         assert!(badge.width > badge.height);
         assert!(badge.y > m.output_position(0).y);
+    }
+
+    /// #249: with another tile close to its right, a badge moves inside
+    /// its own tile, so it covers none of the other tile's ports or the
+    /// cables into them. It still clears its own port and cable. Moving the
+    /// other tile away puts it back outside.
+    #[test]
+    fn a_badge_moves_inside_its_tile_when_another_tile_is_close() {
+        let left = badged(1, Point::ORIGIN);
+        let edge = left.bounds().x + left.bounds().width;
+        let right = badged(2, Point::new(edge + GRID, 0.0));
+        let mut scene = Scene::new(vec![left, right], Vec::new());
+
+        let tile = scene.module(1).unwrap().bounds();
+        let badge = scene.badge_bounds(1, 1).unwrap();
+        let port = scene.module(1).unwrap().output_position(1);
+        assert!(badge.x >= tile.x && badge.x + badge.width < port.x - PORT_RADIUS, "{badge:?}");
+        assert!(badge.y + badge.height < port.y);
+        let neighbour = scene.module(2).unwrap();
+        for index in 0..neighbour.inputs.len() {
+            let input = neighbour.input_position(index);
+            let reach = Rectangle::new(
+                Point::new(input.x - GRID, input.y - PORT_RADIUS),
+                iced::Size::new(GRID + PORT_RADIUS, 2.0 * PORT_RADIUS),
+            );
+            assert!(!badge.intersects(&reach), "badge {badge:?} covers input {index}");
+        }
+        assert!(!badge.intersects(&neighbour.bounds()));
+        // The click target moves with it.
+        assert_eq!(
+            scene.hit(badge.center(), PORT_HIT_RADIUS),
+            Hit::Badge(PortRef {
+                module: 1,
+                output: true,
+                index: 1
+            })
+        );
+        // The rightmost tile has nothing beside it, so its badge stays out.
+        let far = scene.badge_bounds(2, 1).unwrap();
+        assert!(far.x > scene.module(2).unwrap().output_position(1).x);
+
+        // Four grid units apart, as the auto layout leaves columns, the
+        // badge goes back outside.
+        scene.move_modules(&[2], Vector::new(3.0 * GRID, 0.0));
+        let badge = scene.badge_bounds(1, 1).unwrap();
+        assert!(badge.x > port.x + PORT_RADIUS, "{badge:?}");
     }
 }

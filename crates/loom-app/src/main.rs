@@ -4189,7 +4189,7 @@ mod tests {
 
         let output = &tile(env).outputs[0];
         let badge = output.badge_bounds.expect("the envelope drives one assignment");
-        let drawn = view.badge_bounds(0).unwrap();
+        let drawn = app.scene.badge_bounds(env.0, 0).unwrap();
         assert_eq!(badge, drawn.into());
         let port = PortRef {
             module: env.0,

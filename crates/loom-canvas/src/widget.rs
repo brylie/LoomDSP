@@ -1254,10 +1254,7 @@ impl<Message> PatchCanvas<'_, Message> {
     /// it draws nothing, so it must not take Escape or pick an arc drag.
     fn pin(&self, state: &State) -> Option<PortRef> {
         state.pinned.filter(|p| {
-            self.scene
-                .module(p.module)
-                .and_then(|m| m.badge_bounds(p.index))
-                .is_some()
+            self.scene.badge_bounds(p.module, p.index).is_some()
         })
     }
 
@@ -2097,7 +2094,7 @@ impl<Message> PatchCanvas<'_, Message> {
     fn build_modulation_lines(&self, state: &State, overlay: &mut Overlay) {
         let p = &self.palette;
         if let Some(port) = self.pin(state)
-            && let Some(badge) = self.scene.module(port.module).and_then(|m| m.badge_bounds(port.index))
+            && let Some(badge) = self.scene.badge_bounds(port.module, port.index)
         {
             let ring = badge.expand(1.5);
             overlay
@@ -2241,11 +2238,13 @@ impl<Message> PatchCanvas<'_, Message> {
             });
         }
 
-        // Badge numbers sit outside their tile, so they are checked against
-        // their own bounds, not the tile's, and clip to the canvas. Too small
-        // to read, the pill alone shows.
+        // Badge numbers usually sit outside their tile, so they are checked
+        // against their own bounds, not the tile's, and clip to the canvas.
+        // They show exactly when port labels do (#249): with its own
+        // threshold, a badge could show as an empty pill beside labels.
+        // Zoomed out further, the pill alone shows.
         let badge_px = quantise(BADGE_TEXT_SIZE * zoom);
-        if badge_px < LABEL_MIN_PX * 0.8 {
+        if !show_labels {
             return;
         }
         for module in self.scene.modules() {
@@ -2256,7 +2255,7 @@ impl<Message> PatchCanvas<'_, Message> {
                 continue;
             }
             for (index, port) in module.outputs.iter().enumerate() {
-                if let Some(rect) = module.badge_bounds(index).filter(|r| r.intersects(&visible)) {
+                if let Some(rect) = self.scene.badge_bounds(module.id, index).filter(|r| r.intersects(&visible)) {
                     let label = port.badge.to_string();
                     renderer.fill_text(
                         text(&label, badge_px, rect.width * zoom, text::Alignment::Center),
@@ -2279,10 +2278,16 @@ impl<Message> PatchCanvas<'_, Message> {
             HoverTarget::Port(port) => {
                 let view = self.scene.port(port)?;
                 let at = self.scene.port_position(port)?;
-                let anchor = Rectangle::new(
+                let marker = Rectangle::new(
                     Point::new(at.x - PORT_RADIUS, at.y - PORT_RADIUS),
                     Size::new(2.0 * PORT_RADIUS, 2.0 * PORT_RADIUS),
                 );
+                // An output's hover text goes above its badge too, so it
+                // does not cover the count (#249).
+                let anchor = match port.output.then(|| self.scene.badge_bounds(port.module, port.index)).flatten() {
+                    Some(badge) => marker.union(&badge),
+                    None => marker,
+                };
                 Some((&view.label, &view.hover, None, anchor))
             }
             HoverTarget::Control(id, widget) => {
@@ -3589,6 +3594,27 @@ mod tests {
         (scene, values)
     }
 
+    /// #249: an output's hover text is placed above its badge as well as
+    /// its port, so the box never covers the count. An input's stays on
+    /// its port.
+    #[test]
+    fn output_hover_text_goes_above_its_badge() {
+        let (scene, _) = modulated_scene();
+        let none = BTreeSet::new();
+        let canvas = PatchCanvas::new(&scene, &none, |e| e);
+        let out = PortRef {
+            module: 1,
+            output: true,
+            index: 0,
+        };
+        let badge = scene.badge_bounds(1, 0).unwrap();
+        let (_, _, _, anchor) = canvas.hover_content(HoverTarget::Port(out)).unwrap();
+        assert!(anchor.y <= badge.y && anchor.x + anchor.width >= badge.x + badge.width, "{anchor:?}");
+        let input = PortRef { output: false, ..out };
+        let (_, _, _, anchor) = canvas.hover_content(HoverTarget::Port(input)).unwrap();
+        assert!(anchor.width <= 2.0 * PORT_RADIUS + 1e-3, "{anchor:?}");
+    }
+
     fn escape() -> Event {
         let key = keyboard::Key::Named(keyboard::key::Named::Escape);
         Event::Keyboard(keyboard::Event::KeyPressed {
@@ -3667,7 +3693,7 @@ mod tests {
         let none = BTreeSet::new();
         let canvas = PatchCanvas::new(&scene, &none, |e| e).values(&values);
         let lines = |state: &State| canvas.overlay(state).cables.len();
-        let badge = scene.module(1).unwrap().badge_bounds(0).unwrap().center();
+        let badge = scene.badge_bounds(1, 0).unwrap().center();
         assert_eq!(scene.hit(badge, PORT_HIT_RADIUS), Hit::Badge(OUT));
         let knob = scene.module(2).unwrap().widget_bounds(0).unwrap().center();
         let port = scene.port_position(OUT).unwrap();

@@ -227,7 +227,7 @@ impl Geometry {
             // Assignment count badges sit with the markers, over the
             // cables. Their numbers are text.
             for index in 0..module.outputs.len() {
-                if let Some(rect) = module.badge_bounds(index) {
+                if let Some(rect) = scene.badge_bounds(module.id, index) {
                     markers.push(Shape::new(
                         rect,
                         rect.height * 0.5,

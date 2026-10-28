@@ -505,7 +505,7 @@ fn find_point(controller: &Controller, scene: &Scene, target: &Named) -> Result<
 /// The output to pin. It must have a badge, so at least one assignment.
 fn find_pin(controller: &Controller, scene: &Scene, target: &Named) -> Result<PortRef, String> {
     let port = find_port(controller, target)?;
-    let badge = scene.module(port.module).and_then(|m| m.badge_bounds(port.index));
+    let badge = scene.badge_bounds(port.module, port.index);
     if !port.output || badge.is_none() {
         return Err(format!(
             "module {} has no output `{}` with assignments, so no badge to pin",
