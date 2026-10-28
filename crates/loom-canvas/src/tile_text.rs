@@ -321,7 +321,11 @@ mod tests {
                 item.content
             );
             let text = item.bounds();
-            assert!(text.x + text.width <= rect.x + rect.width, "{} stays in its widget", item.content);
+            assert!(
+                text.x + text.width <= rect.x + rect.width,
+                "{} stays in its widget",
+                item.content
+            );
         }
         assert_eq!(options[0].content, "Pink");
         assert!(options[1].content.ends_with('…'), "{}", options[1].content);

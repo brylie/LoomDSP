@@ -1253,9 +1253,9 @@ impl<Message> PatchCanvas<'_, Message> {
     /// lost its last assignment, or whose module is gone, counts as none:
     /// it draws nothing, so it must not take Escape or pick an arc drag.
     fn pin(&self, state: &State) -> Option<PortRef> {
-        state.pinned.filter(|p| {
-            self.scene.badge_bounds(p.module, p.index).is_some()
-        })
+        state
+            .pinned
+            .filter(|p| self.scene.badge_bounds(p.module, p.index).is_some())
     }
 
     /// The cursor for the pointer resting over the canvas with no gesture.
@@ -2255,7 +2255,11 @@ impl<Message> PatchCanvas<'_, Message> {
                 continue;
             }
             for (index, port) in module.outputs.iter().enumerate() {
-                if let Some(rect) = self.scene.badge_bounds(module.id, index).filter(|r| r.intersects(&visible)) {
+                if let Some(rect) = self
+                    .scene
+                    .badge_bounds(module.id, index)
+                    .filter(|r| r.intersects(&visible))
+                {
                     let label = port.badge.to_string();
                     renderer.fill_text(
                         text(&label, badge_px, rect.width * zoom, text::Alignment::Center),
@@ -2284,7 +2288,11 @@ impl<Message> PatchCanvas<'_, Message> {
                 );
                 // An output's hover text goes above its badge too, so it
                 // does not cover the count (#249).
-                let anchor = match port.output.then(|| self.scene.badge_bounds(port.module, port.index)).flatten() {
+                let anchor = match port
+                    .output
+                    .then(|| self.scene.badge_bounds(port.module, port.index))
+                    .flatten()
+                {
                     Some(badge) => marker.union(&badge),
                     None => marker,
                 };
@@ -3609,7 +3617,10 @@ mod tests {
         };
         let badge = scene.badge_bounds(1, 0).unwrap();
         let (_, _, _, anchor) = canvas.hover_content(HoverTarget::Port(out)).unwrap();
-        assert!(anchor.y <= badge.y && anchor.x + anchor.width >= badge.x + badge.width, "{anchor:?}");
+        assert!(
+            anchor.y <= badge.y && anchor.x + anchor.width >= badge.x + badge.width,
+            "{anchor:?}"
+        );
         let input = PortRef { output: false, ..out };
         let (_, _, _, anchor) = canvas.hover_content(HoverTarget::Port(input)).unwrap();
         assert!(anchor.width <= 2.0 * PORT_RADIUS + 1e-3, "{anchor:?}");

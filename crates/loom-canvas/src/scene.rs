@@ -1014,7 +1014,10 @@ mod tests {
         let tile = scene.module(1).unwrap().bounds();
         let badge = scene.badge_bounds(1, 1).unwrap();
         let port = scene.module(1).unwrap().output_position(1);
-        assert!(badge.x >= tile.x && badge.x + badge.width < port.x - PORT_RADIUS, "{badge:?}");
+        assert!(
+            badge.x >= tile.x && badge.x + badge.width < port.x - PORT_RADIUS,
+            "{badge:?}"
+        );
         assert!(badge.y + badge.height < port.y);
         let neighbour = scene.module(2).unwrap();
         for index in 0..neighbour.inputs.len() {
