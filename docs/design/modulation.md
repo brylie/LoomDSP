@@ -24,7 +24,7 @@ How any output modulates any parameter without a cable, and how users make, see,
 
 ## Behaviour
 
-The editing and display work ships in three slices, so each one can be built and tried on its own. Slices 1 and 2 are Agreed. Slice 3 is Draft.
+The editing and display work ships in three slices, so each one can be built and tried on its own. All three slices are Agreed.
 
 | Slice | What it adds | Status | Issues |
 |---|---|---|---|

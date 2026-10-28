@@ -248,7 +248,7 @@ Specified in [panels.md](panels.md#scope-module), built in [#60](https://github.
 
 ### XY scope
 
-**Status:** Agreed for P1 ([#280](https://github.com/brylie/LoomDSP/issues/280)). This is the only widget in this document that is ready to build; the rest stays Draft.
+**Status:** Agreed for P2 ([#280](https://github.com/brylie/LoomDSP/issues/280)). This is the only widget in this document that is ready to build; the rest stays Draft.
 
 One signal against another: the first moves the trace left and right, the second up and down. A circle means two sines a quarter cycle apart. A line means the two signals are the same. A stereo signal shows how wide it is.
 
