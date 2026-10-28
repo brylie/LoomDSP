@@ -22,6 +22,25 @@ use loom_core::{MidiControl, MidiEvent, OutputRef, OutputSafety, ProbeKind, Time
 #[global_allocator]
 static ALLOCATOR: AllocDisabler = AllocDisabler;
 
+/// `copy_state_from` runs on the audio thread when a module turns stereo,
+/// so it must not allocate or free (stereo spec, rule 26). Checked for every
+/// built-in DSP module, between two instances that have both run.
+#[test]
+fn copying_state_never_allocates() {
+    let config = loom_core::ModuleConfig {
+        sample_rate: 48_000.0,
+        max_block: 512,
+    };
+    for descriptor in loom_modules::ALL {
+        let loom_core::ModuleRole::Dsp(factory) = descriptor.role else {
+            continue;
+        };
+        let running = factory(&config);
+        let mut copy = factory(&config);
+        assert_no_alloc(|| copy.copy_state_from(&*running));
+    }
+}
+
 #[test]
 fn audio_thread_never_allocates() {
     for patch in [

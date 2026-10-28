@@ -167,7 +167,7 @@ impl DisplayReader {
 /// engine calls `process` once per frame but `displays` once per block, so
 /// clearing the flag in `process` would lose triggers. `displays` takes
 /// `&self`, so the flag is a `Cell`. It never changes the audio.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct TriggerFlag(std::cell::Cell<bool>);
 
 impl TriggerFlag {

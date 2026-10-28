@@ -3,7 +3,7 @@
 How the engine decides which cables carry stereo, and what modules do with it, so a stereo chain is one row of modules instead of two.
 
 - **Kind:** living specification.
-- **Status:** Agreed, not built yet ([#23](https://github.com/brylie/LoomDSP/issues/23)). Rules 25 to 27 (copy 1 takes copy 0's state) were added from the research in [#203](https://github.com/brylie/LoomDSP/issues/203), with [ADR-0022](../adr/0022-copies-take-state-from-the-running-instance.md).
+- **Status:** Agreed, not built yet ([#23](https://github.com/brylie/LoomDSP/issues/23)). Rules 25 to 27 (copy 1 takes copy 0's state) were added from the research in [#203](https://github.com/brylie/LoomDSP/issues/203), with [ADR-0022](../adr/0022-copies-take-state-from-the-running-instance.md). Their module side, `Module::copy_state_from` on every built-in module, is built ([#229](https://github.com/brylie/LoomDSP/issues/229)); the engine calls it with #23. Rule 27's channel mix waits for `ProcessContext` to know the channel (#23): Noise re-derives from its seed alone until then.
 - **Decision behind it:** [ADR-0020](../adr/0020-inferred-channel-count.md), refining [ADR-0007](../adr/0007-polymorphic-signal-model.md). [ADR-0022](../adr/0022-copies-take-state-from-the-running-instance.md) for the state of copy 1.
 - **Use case and requirements:** FR-SIG-07, FR-SIG-01, FR-SIG-03, FR-CANVAS-12, NFR-RT-01
 - **Background:** [Stereo cables](../learn/stereo-cables.md): why copies, how each signal type downmixes, why a downmix can cancel. [Hot patching](../learn/hot-patching.md): why a cold copy 1 clicks.
@@ -158,7 +158,7 @@ How the canvas shows a stereo cable is FR-CANVAS-12 (P2). See Open points.
 - [ ] Given a stereo cable into a port, when the player hovers it, then the hover text says "Stereo". (Manual check.)
 - [ ] Given a descriptor with `Downmix` on an output, or a module with a `Stereo` port and a `PerChannel` input, then the registry rejects it.
 - [ ] (Rules 25 to 27.) Given a running SVF that turns stereo, with the same signal on both sides, then its right output is bit-identical to its left from the first frame after the swap, and the `no_alloc` tests pass.
-- [ ] (Rules 25 and 26.) Given each built-in module with state, except seeded modules covered by rule 27, when the harness runs it for N frames, copies its state into a new instance, and runs both on, then both outputs are bit-identical from frame N.
+- [x] (Rules 25 and 26.) Given each built-in module with state, except seeded modules covered by rule 27, when the harness runs it for N frames, copies its state into a new instance, and runs both on, then both outputs are bit-identical from frame N. (`Harness::check_copy_state`, `loom-modules/tests/copy_state.rs`; no allocation in `no_alloc.rs`. The engine does not call it yet: #23.)
 - [ ] (Rule 27.) Given a seeded module that turns stereo, then its left and right outputs differ after the swap, and are the same on every run.
 
 ## Out of scope

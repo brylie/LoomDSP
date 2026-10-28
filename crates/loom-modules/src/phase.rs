@@ -73,6 +73,7 @@ pub static PHASE: ModuleDescriptor = ModuleDescriptor {
     displays: &[],
 };
 
+#[derive(Clone)]
 struct Phase {
     phase: f64,
     sample_rate: f64,
@@ -114,6 +115,11 @@ fn increment(hz: f32, sample_rate: f64) -> f64 {
 }
 
 impl Module for Phase {
+    /// Takes the running state of another instance (ADR-0022).
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let tune = io.param(0);
         let octave = io.param(1);
@@ -190,6 +196,7 @@ pub static PHASE_TRIGGER: ModuleDescriptor = ModuleDescriptor {
     }],
 };
 
+#[derive(Clone)]
 struct PhaseTrigger {
     wrap: WrapDetector,
     /// Whether the output fired since the light last read it.
@@ -197,6 +204,11 @@ struct PhaseTrigger {
 }
 
 impl Module for PhaseTrigger {
+    /// Takes the running state of another instance (ADR-0022).
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let ([phase], [out]) = io.split::<1, 1>();
         for (out, &p) in out.iter_mut().zip(phase) {
@@ -372,6 +384,7 @@ pub static SCALE: ModuleDescriptor = ModuleDescriptor {
     displays: &[],
 };
 
+#[derive(Clone)]
 struct PhaseScale {
     multiply: i64,
     divide: i64,
@@ -396,6 +409,11 @@ impl PhaseScale {
 }
 
 impl Module for PhaseScale {
+    /// Takes the running state of another instance (ADR-0022).
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let (multiply_mod, divide_mod) = (io.param(0), io.param(1));
         let ([phase, reset], [out]) = io.split::<2, 1>();

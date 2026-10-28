@@ -85,6 +85,7 @@ pub static SAW: ModuleDescriptor = ModuleDescriptor {
 };
 
 /// State for `loom.osc.saw`.
+#[derive(Clone)]
 struct Saw {
     previous: f32,
 }
@@ -105,6 +106,11 @@ fn poly_blep(t: f32, dt: f32) -> f32 {
 }
 
 impl Module for Saw {
+    /// Takes the running state of another instance (ADR-0022).
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let ([phase], [out]) = io.split::<1, 1>();
         for (out, &p) in out.iter_mut().zip(phase) {
@@ -175,6 +181,7 @@ pub static PULSE: ModuleDescriptor = ModuleDescriptor {
 };
 
 /// State for `loom.osc.pulse`.
+#[derive(Clone)]
 struct Pulse {
     previous: f32,
     previous_fall: f32,
@@ -182,6 +189,11 @@ struct Pulse {
 }
 
 impl Module for Pulse {
+    /// Takes the running state of another instance (ADR-0022).
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let modulated = io.param(0);
         let ([phase], [out]) = io.split::<1, 1>();
@@ -271,6 +283,7 @@ pub static TRIANGLE: ModuleDescriptor = ModuleDescriptor {
 };
 
 /// State for `loom.osc.triangle`.
+#[derive(Clone)]
 struct Triangle {
     previous: f32,
 }
@@ -292,6 +305,11 @@ fn poly_blamp(t: f32, dt: f32) -> f32 {
 }
 
 impl Module for Triangle {
+    /// Takes the running state of another instance (ADR-0022).
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let ([phase], [out]) = io.split::<1, 1>();
         for (out, &p) in out.iter_mut().zip(phase) {
@@ -474,6 +492,25 @@ impl Noise {
 }
 
 impl Module for Noise {
+    /// Takes the settings and the brown filter memory of another instance,
+    /// then starts the random streams again from the seed, as `reset` does
+    /// (stereo spec, rule 27). A copied generator would play the other
+    /// side's numbers. The seed is not mixed with a channel yet:
+    /// `ProcessContext` has no channel until stereo copies are built (#23).
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        let Some(other) = other.as_any().downcast_ref::<Self>() else {
+            return false;
+        };
+        self.seed = other.seed;
+        self.active = other.active;
+        self.colour = other.colour;
+        self.leak = other.leak;
+        self.brown_gain = other.brown_gain;
+        self.restart(self.active);
+        self.brown = other.brown;
+        true
+    }
+
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let (seed, colour_mod) = (io.param(0), io.param(1));
         let ([], [out]) = io.split::<0, 1>();

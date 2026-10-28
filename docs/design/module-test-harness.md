@@ -70,6 +70,8 @@ Every render fails if a port or parameter has an empty label or description, and
 | `.check_reference(path)` | Renders in blocks of 512 and compares with the reference file. |
 | `.check(path)` | Both checks. This is what most tests call. |
 | `.check_reset_snaps_smoothing()` | Renders a new instance, and a second one that held its values for 1 s on silent inputs before `reset()`. Fails unless both are bit-identical from the first frame: `reset()` must snap smoothing to its targets and clear the state `process` changes ([live patching](live-patching.md), rule 7). `crates/loom-modules/tests/reset.rs` runs it on every built-in DSP module, with every parameter away from its default. |
+| `.check_copy_state(at)` | Runs a new instance for `at` frames, copies its state into a second new instance with `Module::copy_state_from`, runs both to the end, and fails unless they are bit-identical from frame `at` ([stereo](stereo.md), rules 25 and 26). A module with no state passes without copying. `crates/loom-modules/tests/copy_state.rs` runs it on every built-in DSP module, with busy inputs, held notes, and every parameter away from its default. |
+| `.check_copy_state_repeatable(at)` | For a seeded module, which re-derives its random state when it copies (rule 27): two copies taken at frame `at` play the same, and the copy returns `true`. |
 | `.check_non_finite_recovery()` | For each input in turn, and for each of NaN, infinity, and minus infinity, puts that value on the input for 8 frames from frame 1000, as a connected cable. Renders in blocks of 1 frame (as a feedback loop calls the module) and of 512. Fails unless every output is finite again 10 ms after the bad frames (480 frames at 48 kHz, scaled with the sample rate), up to the end of the render. Every other frame and input reads what the render reads without the check. |
 
 `reference!("name")` gives `tests/reference/name.wav` inside the crate that calls it.
@@ -128,6 +130,7 @@ Golden-audio tests for whole patches, the other half of NFR-OSS-05 ([#93](https:
 - [x] `check_non_finite_recovery` fails for a module that keeps a NaN in its state, naming the module, input, value, output, and frame, and passes for a module without state. It fails when the render is too short to show recovery.
 - [x] Every built-in DSP module in `loom_modules::ALL` passes `check_non_finite_recovery`.
 - [x] Every built-in DSP module in `loom_modules::ALL` passes `check_reset_snaps_smoothing`.
+- [x] Every built-in DSP module in `loom_modules::ALL` passes `check_copy_state`, except seeded ones, which pass `check_copy_state_repeatable`. Copying allocates nothing (`no_alloc.rs`).
 
 ## Out of scope
 

@@ -93,6 +93,7 @@ pub static DIVIDE: ModuleDescriptor = ModuleDescriptor {
     }],
 };
 
+#[derive(Clone)]
 struct Divide {
     n: u64,
     offset: u64,
@@ -126,6 +127,11 @@ impl Divide {
 }
 
 impl Module for Divide {
+    /// Takes the running state of another instance (ADR-0022).
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let n = io.param(0);
         let offset = io.param(1);
@@ -241,6 +247,7 @@ pub static COMPARE: ModuleDescriptor = ModuleDescriptor {
 
 /// State for `loom.logic.compare`: the mode, the dead band, and whether the
 /// gate is high now (the hysteresis needs it).
+#[derive(Clone)]
 struct Compare {
     below: bool,
     hysteresis: f32,
@@ -248,6 +255,11 @@ struct Compare {
 }
 
 impl Module for Compare {
+    /// Takes the running state of another instance (ADR-0022).
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let (mode_mod, hysteresis_mod) = (io.param(0), io.param(1));
         let ([a, b], [gate]) = io.split::<2, 1>();
@@ -447,7 +459,7 @@ pub static MEMORY: ModuleDescriptor = ModuleDescriptor {
 
 /// State for `loom.logic.memory`: the mode, the remembered gate, and one edge
 /// detector for each input.
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct Memory {
     mode: u8,
     out: bool,
@@ -456,6 +468,11 @@ struct Memory {
 }
 
 impl Module for Memory {
+    /// Takes the running state of another instance (ADR-0022).
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let mode_mod = io.param(0);
         let ([a, b], [out]) = io.split::<2, 1>();

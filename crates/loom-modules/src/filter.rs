@@ -104,6 +104,7 @@ pub static SVF: ModuleDescriptor = ModuleDescriptor {
     displays: &[],
 };
 
+#[derive(Clone)]
 struct Svf {
     sample_rate: f32,
     cutoff: Smoothed,
@@ -132,6 +133,11 @@ impl Svf {
 }
 
 impl Module for Svf {
+    /// Takes the running state of another instance (ADR-0022).
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let cutoff_param = io.param(0);
         let resonance_param = io.param(1);
@@ -267,6 +273,7 @@ pub static ONEPOLE: ModuleDescriptor = ModuleDescriptor {
 };
 
 /// State for `loom.filter.onepole`: the smoothed cutoff and the integrator.
+#[derive(Clone)]
 struct OnePole {
     sample_rate: f32,
     /// The cutoff in pitch units, smoothed over 10 ms.
@@ -292,6 +299,11 @@ impl OnePole {
 }
 
 impl Module for OnePole {
+    /// Takes the running state of another instance (ADR-0022).
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let cutoff_param = io.param(0);
         let ([input, cutoff_mod], [lp, hp]) = io.split::<2, 2>();

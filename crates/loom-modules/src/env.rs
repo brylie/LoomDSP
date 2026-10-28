@@ -104,6 +104,7 @@ enum Stage {
     Release,
 }
 
+#[derive(Clone)]
 struct Adsr {
     sample_rate: f32,
     stage: Stage,
@@ -137,6 +138,11 @@ impl Adsr {
 }
 
 impl Module for Adsr {
+    /// Takes the running state of another instance (ADR-0022).
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let attack = io.param(0);
         let decay = io.param(1);
