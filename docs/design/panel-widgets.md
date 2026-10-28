@@ -40,7 +40,7 @@ Widgets are grouped by the **kind of value** they show or edit, not by the modul
 | | Readout | A display value | No | P2 |
 | | Meter | An output, or a display value | Output only | P1, display value in P2 |
 | Signals | Scope | An output | No ([#62](https://github.com/brylie/LoomDSP/issues/62)) | P1 |
-| | XY scope | Two outputs | No | P1 or P2 |
+| | XY scope | Two outputs | No | P2 ([#280](https://github.com/brylie/LoomDSP/issues/280)) |
 | | Spectrum | An output | No ([#109](https://github.com/brylie/LoomDSP/issues/109)) | P2 |
 | Shapes and data | Curve | Curve data, or a shape the module computes from its parameters | No (planned as "graph") | P2 |
 | | Step grid | Pattern data. Drawn as rows, a ring, or keys | No | P2 |

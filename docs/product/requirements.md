@@ -37,7 +37,7 @@ See ADR-0007 for the full signal model.
 | FR-GRAPH-02 | Graph changes are applied at a buffer boundary, with no audible dropout. | Must | P0 | Edits during performance must be safe. |
 | FR-GRAPH-03 | The graph may contain cycles. Each cycle must pass through at least one single-sample delay. The engine inserts one automatically if the user does not, and shows where. | Must | P1 | Feedback is essential for FM, physical models, and filters. See ADR-0002. |
 | FR-GRAPH-04 | Feedback loops are sample-accurate (one-sample delay), not one-buffer. | Must | P1 | Buffer-size feedback changes the sound when the buffer size changes. |
-| FR-GRAPH-05 | New or removed connections fade over a short time (for example 5 ms) to avoid clicks. | Should | P1 | Hard switches create clicks on stage. |
+| FR-GRAPH-05 | New or removed connections fade over a short time (for example 5 ms) to avoid clicks. | Should | P2 | Hard switches create clicks on stage. |
 | FR-GRAPH-06 | The engine can render offline, faster than real time, to a file or buffer. | Must | P0 | Needed for tests, sound parity checks, and bouncing. |
 | FR-GRAPH-07 | The engine supports sample rates from 44.1 kHz to 192 kHz and any host buffer size. | Must | P0 | Plugins and audio interfaces vary. |
 | FR-GRAPH-08 | Modules can report their latency. The engine sums path latency and reports total latency to the host. | Should | Later | Hosts need it for delay compensation. |
