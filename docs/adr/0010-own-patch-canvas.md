@@ -1,7 +1,7 @@
 # ADR-0010: Our own patch canvas, built as an Iced widget
 
-- **Status:** Proposed
-- **Date:** 2026-10-13
+- **Status:** Accepted
+- **Date:** 2026-10-28
 - **Related requirements:** FR-CANVAS-*, FR-VIS-*, FR-LIB-18, NFR-PERF-04, NFR-UX-03
 - **Related decisions:** ADR-0005 (Rust end to end), ADR-0009 (Iced for the UI), ADR-0011 (everything is a module), ADR-0013 (modules carry their own panel)
 
@@ -29,7 +29,7 @@ A generic node editor gives us none of this control. Its renderer sets our perfo
 3. **Our own canvas as an Iced widget.** Iced keeps windowing, text, theming, and ordinary widgets (inspector, browser, panels). We write the canvas: layout, hit-testing, interaction, and rendering.
 4. **Our own canvas on raw wgpu, outside Iced.** Full control, but we would rebuild text, input, and accessibility, and run two UI systems side by side.
 
-## Decision (proposed)
+## Decision
 
 Option 3: write the patch canvas ourselves, as an Iced widget in a new crate (`loom-canvas`).
 

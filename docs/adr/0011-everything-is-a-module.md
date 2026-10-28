@@ -1,7 +1,7 @@
 # ADR-0011: Everything is a module
 
-- **Status:** Proposed
-- **Date:** 2026-10-13
+- **Status:** Accepted
+- **Date:** 2026-10-28
 - **Related requirements:** FR-LIB-12 to FR-LIB-23, FR-SIG-*, FR-FILE-*
 - **Related decisions:** ADR-0007 (signal model), ADR-0008 (patch format), ADR-0010 (own canvas)
 
@@ -11,7 +11,7 @@ Bitwig Studio's Grid shows how much freedom comes from patching small modules. B
 
 LoomDSP is not a DAW. It is a flexible interface for building **living musical systems**: patches that play, evolve, and arrange themselves through modulation, randomness, texture, sequencing, looping, and logic, with common and novel audio and note effects.
 
-## Decision (proposed)
+## Decision
 
 Every feature of LoomDSP is a module in the graph. There are no separate subsystems for modulation, note processing, sequencing, looping, or arrangement.
 

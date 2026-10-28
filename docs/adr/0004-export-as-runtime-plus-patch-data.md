@@ -1,6 +1,6 @@
 # ADR-0004: Export plugins as a prebuilt runtime plus patch data
 
-- **Status:** Deferred (2026-10-13). Plugin and standalone export are not scheduled. They will be revisited after living systems (P3) are proven. The reasoning below still stands for when they are.
+- **Status:** Deferred
 - **Date:** 2026-10-13
 - **Related requirements:** FR-NATIVE-01, 02, 05, 08, 09, FR-FILE-06, NFR-SEC-01, FR-WAM-01 (optional)
 

@@ -1,7 +1,7 @@
 # ADR-0014: Modulation without cables
 
-- **Status:** Accepted (2026-10-17)
-- **Date:** 2026-10-15
+- **Status:** Accepted
+- **Date:** 2026-10-17
 - **Related requirements:** FR-MOD-01 to FR-MOD-08, FR-LIB-12, FR-ENCAP-03
 - **Related decisions:** ADR-0002 (graph execution), ADR-0007 (signal model), ADR-0011 (everything is a module), ADR-0013 (modules carry their own panel)
 - **Specification:** [Modulation](../design/modulation.md)

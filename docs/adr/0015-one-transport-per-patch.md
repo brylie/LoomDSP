@@ -1,7 +1,7 @@
 # ADR-0015: One transport per patch, read by modules without cables
 
-- **Status:** Proposed
-- **Date:** 2026-10-15
+- **Status:** Accepted
+- **Date:** 2026-10-28
 - **Related requirements:** FR-LIB-07, FR-LIB-16, FR-LIB-20, FR-LIB-22, FR-LIB-25 to FR-LIB-27, FR-MIDI-07, FR-NATIVE-*
 - **Related decisions:** ADR-0002 (graph execution), ADR-0007 (signal model), ADR-0011 (everything is a module), ADR-0012 (arrangement from phase-driven primitives)
 - **Specification:** [Clock and transport](../design/clock.md)
@@ -21,7 +21,7 @@ If every synced module needs a cable from a clock module, a large patch gains do
 3. **A clock module as the source, as in VCV Rack.** A clock module on the canvas has run and reset on its panel and as inputs. Very direct, and it fits direct manipulation (ADR-0013). But on its own it still needs a cable to every synced module, and it has no rule for following a plugin host.
 4. **One transport per patch, owned by the engine, with defaults and a Transport module.** The engine keeps the one transport. Modules read it through default inputs when nothing is patched. The transport's controls live on one Transport module, as in option 3, and Transport and Clock modules expose it as cables for anyone who wants to patch time.
 
-## Decision (proposed)
+## Decision
 
 Option 4: the engine's single transport, controlled from a module as in VCV Rack.
 

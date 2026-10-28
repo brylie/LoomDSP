@@ -1,7 +1,7 @@
 # ADR-0025: One design language, and panels derived from the declaration
 
-- **Status:** Proposed
-- **Date:** 2026-10-21
+- **Status:** Accepted
+- **Date:** 2026-10-28
 - **Related requirements:** FR-PANEL-01, FR-PANEL-03, FR-PANEL-06, FR-PANEL-07, FR-PANEL-09, FR-ENCAP-03, FR-SDK-01, NFR-UX-01, NFR-UX-02
 - **Related decisions:** ADR-0013 (modules carry their own panel), ADR-0016 (ports and parameters carry their own text), ADR-0017 (primitives, traits, and abstractions), ADR-0024 (widgets follow the kind of value)
 - **Specification:** [Panels, Default panels](../design/panels.md#default-panels), [Panels, Exposed controls](../design/panels.md#exposed-controls-in-a-sub-patch), [Panel widgets](../design/panel-widgets.md)
@@ -25,7 +25,7 @@ ADR-0013 says panels are data, and that a module "picks from the widget set". AD
 3. **Shared widgets, a panel derived from the declaration, and overrides when wanted.** A module declares its parameters, display values, and data slots. The panel follows from them by fixed rules: a continuous parameter becomes a knob, a two-state one a toggle, a short named list radio buttons, and so on. An author can give a parameter a hint (use a fader, keep it in the inspector) or write the whole panel. Every path ends in the same widgets.
 4. **Derived panels only.** Simple and fully consistent. But a front panel built for performance needs a layout chosen by a person, not by rules.
 
-## Decision (proposed)
+## Decision
 
 Option 3. **Every panel is built only from the shared widget set, and by default it is derived from what the module declares.**
 

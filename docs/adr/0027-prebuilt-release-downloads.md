@@ -1,7 +1,7 @@
 # ADR-0027: Prebuilt release downloads from a tagged GitHub Actions build
 
-- **Status:** Proposed
-- **Date:** 2026-10-25
+- **Status:** Accepted
+- **Date:** 2026-10-28
 - **Related requirements:** NFR-PORT-01, NFR-OSS-03
 - **Specification:** [Release downloads](../design/releases.md)
 

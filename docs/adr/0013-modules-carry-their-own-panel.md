@@ -1,7 +1,7 @@
 # ADR-0013: Modules carry their own panel
 
-- **Status:** Proposed
-- **Date:** 2026-10-15
+- **Status:** Accepted
+- **Date:** 2026-10-28
 - **Related requirements:** FR-PANEL-*, FR-CANVAS-10, FR-LIB-18, FR-VIS-01, FR-VIS-02, FR-ENCAP-03, NFR-PERF-04, NFR-UX-01
 - **Related decisions:** ADR-0001 (lock-free boundary), ADR-0010 (own canvas), ADR-0011 (everything is a module)
 - **Specification:** [Panels](../design/panels.md)
@@ -26,7 +26,7 @@ PR #58 also tried scopes as views docked below the canvas. They worked, but they
 3. **Each module draws its own UI with its own code,** like VCV Rack widgets. Total freedom. But the drawing code would have to be rewritten for the web and plugin targets, it shares nothing with front panels, and third-party code would run in the UI's draw loop.
 4. **One panel model at every level.** A module's tile shows its panel: controls and displays, declared as data and edited in place. A sub-patch's tile shows the sub-patch's front panel. A patch's front panel is the performance view. All three use the same widgets, the same layout format, and the same editor.
 
-## Decision (proposed)
+## Decision
 
 Option 4. **Every module carries a panel, and every panel is built the same way.**
 

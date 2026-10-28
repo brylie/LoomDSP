@@ -161,8 +161,8 @@ LoomDSP is a grid for building living musical systems: patches that play, evolve
 | FR-PANEL-03 | Widgets bind to exposed parameters. One parameter can have several widgets. | Must | P2 | Flexible layout. |
 | FR-PANEL-04 | Widgets support value mappings: linear, logarithmic frequency, decibels, stepped/enumerated. | Must | P2 | Controls must feel right. A linear cutoff knob is unusable. |
 | FR-PANEL-05 | Panel editor with grid snapping, alignment, grouping, and resizing. | Must | P2 | Panels must look tidy without pixel-pushing. |
-| FR-PANEL-06 | Themes: colours, fonts, and widget styles. Light and dark defaults. | Should | P2 | Stage visibility and branding for exports. |
-| FR-PANEL-07 | Vector rendering that scales cleanly on high-DPI screens. Custom images (SVG, PNG) as backgrounds or widget skins. | Should | P2 | Professional look. |
+| FR-PANEL-06 | Global themes: colours, fonts, and contrast, the same for every panel. Light and dark defaults. No per-module or per-patch widget styles (ADR-0025). | Should | P2 | Stage visibility. |
+| FR-PANEL-07 | Vector rendering that scales cleanly on high-DPI screens. No custom images as backgrounds or widget skins (ADR-0025). | Should | P2 | Professional look. |
 | FR-PANEL-08 | A sub-patch panel can be embedded in its parent panel. | Should | P2 | Panels compose the same way patches do. |
 | FR-PANEL-09 | One panel model: module tiles, sub-patch tiles, and patch front panels use the same widgets, the same layout format, and the same panel editor. | Must | P2 | Users learn one vocabulary. Abstraction feels the same at every level (ADR-0013). |
 | FR-PANEL-10 | A sub-patch's front panel is what its tile shows in the parent patch. | Must | P2 | A finished sub-patch looks and works like a built-in module. |

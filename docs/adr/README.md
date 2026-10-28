@@ -29,6 +29,8 @@ Why freeze accepted ADRs: an ADR is a record of why things are the way they are.
 - **Superseded by ADR-NNNN**: replaced.
 - **Rejected**: considered and declined (kept for the record).
 
+The status line holds one of these values and nothing else. The date line is the day the ADR got its current status: the day it was accepted, or deferred, superseded, or rejected. Why: a reader, or a script, can then read both at a glance, and the reasons stay in the ADR's own sections.
+
 ## Index
 
 | ADR | Title | Status |
@@ -36,28 +38,28 @@ Why freeze accepted ADRs: an ADR is a record of why things are the way they are.
 | [0000](0000-template.md) | Template | n/a |
 | [0001](0001-lock-free-control-audio-boundary.md) | Lock-free boundary between control and audio threads | Accepted |
 | [0002](0002-graph-execution-and-feedback.md) | Graph execution model and sample-accurate feedback | Accepted |
-| [0003](0003-single-worklet-web-runtime.md) | One WASM instance per patch in a single AudioWorklet | Deferred (web target) |
-| [0004](0004-export-as-runtime-plus-patch-data.md) | Export plugins as a prebuilt runtime plus patch data | Proposed |
+| [0003](0003-single-worklet-web-runtime.md) | One WASM instance per patch in a single AudioWorklet | Deferred |
+| [0004](0004-export-as-runtime-plus-patch-data.md) | Export plugins as a prebuilt runtime plus patch data | Deferred |
 | [0005](0005-rust-end-to-end.md) | Rust end to end | Accepted |
 | [0006](0006-dependency-and-licence-policy.md) | Dependency and licence policy | Accepted |
-| [0007](0007-polymorphic-signal-model.md) | Polymorphic signal model | Proposed |
+| [0007](0007-polymorphic-signal-model.md) | Polymorphic signal model | Accepted |
 | [0008](0008-patch-format-ron.md) | Patch format in RON | Accepted |
-| [0009](0009-ui-stack-iced.md) | UI stack: Iced (canvas decided in ADR-0010) | Accepted in part |
-| [0010](0010-own-patch-canvas.md) | Our own patch canvas, built as an Iced widget | Proposed |
-| [0011](0011-everything-is-a-module.md) | Everything is a module | Proposed |
-| [0012](0012-arrangement-from-phase-driven-primitives.md) | Arrangement from phase-driven primitives | Proposed |
-| [0013](0013-modules-carry-their-own-panel.md) | Modules carry their own panel | Proposed |
+| [0009](0009-ui-stack-iced.md) | UI stack: Iced (canvas decided in ADR-0010) | Accepted |
+| [0010](0010-own-patch-canvas.md) | Our own patch canvas, built as an Iced widget | Accepted |
+| [0011](0011-everything-is-a-module.md) | Everything is a module | Accepted |
+| [0012](0012-arrangement-from-phase-driven-primitives.md) | Arrangement from phase-driven primitives | Accepted |
+| [0013](0013-modules-carry-their-own-panel.md) | Modules carry their own panel | Accepted |
 | [0014](0014-modulation-without-cables.md) | Modulation without cables | Accepted |
-| [0015](0015-one-transport-per-patch.md) | One transport per patch, read by modules without cables | Proposed |
-| [0016](0016-ports-and-parameters-carry-their-own-text.md) | Ports and parameters carry a label and a description | Proposed |
-| [0017](0017-primitives-traits-and-abstractions.md) | A module library of primitives, traits, and open abstractions | Proposed |
-| [0018](0018-clean-room-module-development.md) | Clean-room module development | Proposed |
+| [0015](0015-one-transport-per-patch.md) | One transport per patch, read by modules without cables | Accepted |
+| [0016](0016-ports-and-parameters-carry-their-own-text.md) | Ports and parameters carry a label and a description | Accepted |
+| [0017](0017-primitives-traits-and-abstractions.md) | A module library of primitives, traits, and open abstractions | Accepted |
+| [0018](0018-clean-room-module-development.md) | Clean-room module development | Accepted |
 | [0019](0019-output-safety-stage.md) | A safety stage on the final output | Accepted |
-| [0020](0020-inferred-channel-count.md) | Channel count inferred per cable, with per-channel copies | Proposed |
-| [0021](0021-plain-data-view-models-and-keyed-identity.md) | Plain-data view models and keyed widget identity | Proposed |
+| [0020](0020-inferred-channel-count.md) | Channel count inferred per cable, with per-channel copies | Accepted |
+| [0021](0021-plain-data-view-models-and-keyed-identity.md) | Plain-data view models and keyed widget identity | Accepted |
 | [0022](0022-copies-take-state-from-the-running-instance.md) | A new channel copy takes its state from the running instance | Accepted |
 | [0023](0023-patch-licences-spdx-and-creative-commons.md) | Patch licences as SPDX expressions, chosen through Creative Commons questions | Accepted |
 | [0024](0024-widgets-follow-the-kind-of-value.md) | Widgets follow the kind of value, and structured data has shared kinds | Accepted |
-| [0025](0025-one-design-language-and-derived-panels.md) | One design language, and panels derived from the declaration | Proposed |
-| [0026](0026-browser-demo-feasibility.md) | A browser demo waits for a spike; pre-rendered audio examples come first | Proposed |
-| [0027](0027-prebuilt-release-downloads.md) | Prebuilt release downloads from a tagged GitHub Actions build | Proposed |
+| [0025](0025-one-design-language-and-derived-panels.md) | One design language, and panels derived from the declaration | Accepted |
+| [0026](0026-browser-demo-feasibility.md) | A browser demo waits for a spike; pre-rendered audio examples come first | Accepted |
+| [0027](0027-prebuilt-release-downloads.md) | Prebuilt release downloads from a tagged GitHub Actions build | Accepted |
