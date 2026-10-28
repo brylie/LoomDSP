@@ -496,8 +496,9 @@ mod tests {
     /// the ranges of the spec (p1-modules.md, Acceptance criteria).
     #[test]
     fn controller_events_land_on_their_sample() {
-        // (source, events, (frame, expected value) checks)
-        let cases: [(f32, Vec<MidiEvent>, Vec<(usize, f32)>); 3] = [
+        /// A source, its events, and (frame, expected value) checks.
+        type Case = (f32, Vec<MidiEvent>, Vec<(usize, f32)>);
+        let cases: [Case; 3] = [
             (
                 0.0,
                 vec![
@@ -506,7 +507,15 @@ mod tests {
                     MidiEvent::control_change(450, 0, 1, 0),
                     MidiEvent::control_change(600, 3, 1, 64),
                 ],
-                vec![(0, 0.0), (99, 0.0), (100, 1.0), (300, 1.0), (449, 1.0), (450, 0.0), (600, 64.0 / 127.0)],
+                vec![
+                    (0, 0.0),
+                    (99, 0.0),
+                    (100, 1.0),
+                    (300, 1.0),
+                    (449, 1.0),
+                    (450, 0.0),
+                    (600, 64.0 / 127.0),
+                ],
             ),
             (
                 1.0,
@@ -516,7 +525,15 @@ mod tests {
                     MidiEvent::pitch_bend(513, 0, 0),
                     MidiEvent::pitch_bend(700, 0, -4096),
                 ],
-                vec![(0, 0.0), (76, 0.0), (77, 1.0), (199, 1.0), (200, -1.0), (513, 0.0), (700, -0.5)],
+                vec![
+                    (0, 0.0),
+                    (76, 0.0),
+                    (77, 1.0),
+                    (199, 1.0),
+                    (200, -1.0),
+                    (513, 0.0),
+                    (700, -0.5),
+                ],
             ),
             (
                 2.0,

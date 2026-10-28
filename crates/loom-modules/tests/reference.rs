@@ -118,10 +118,7 @@ fn ladder() {
 fn ladder_18() {
     Harness::new(&filter::LADDER)
         .seconds(0.3)
-        .input(
-            "in",
-            Signal::from_fn(|frame| if frame < 100 { 0.3 } else { 0.0 }),
-        )
+        .input("in", Signal::from_fn(|frame| if frame < 100 { 0.3 } else { 0.0 }))
         .param("cutoff", 300.0)
         .param("resonance", 1.0)
         .param("slope", 1.0)

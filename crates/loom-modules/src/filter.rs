@@ -837,7 +837,14 @@ mod tests {
     fn ladder_run(filter: &mut dyn Module, input: &[f32]) -> Vec<f32> {
         let cutoff_mod = vec![0.0; input.len()];
         let mut out = vec![0.0; input.len()];
-        run(filter, RATE, &[input, &cutoff_mod], &[true, false], &mut [&mut out], &[]);
+        run(
+            filter,
+            RATE,
+            &[input, &cutoff_mod],
+            &[true, false],
+            &mut [&mut out],
+            &[],
+        );
         out
     }
 
@@ -1042,7 +1049,10 @@ mod tests {
                 .into_iter()
                 .fold(0.0, f32::max);
             let step = max_step(&out[block / 2..]);
-            assert!(step <= steady * 1.1, "resonance {resonance}: step {step}, steady {steady}");
+            assert!(
+                step <= steady * 1.1,
+                "resonance {resonance}: step {step}, steady {steady}"
+            );
             let peak = out.iter().fold(0.0f32, |m, v| m.max(v.abs()));
             assert!(peak < 1.5, "resonance {resonance}: peak {peak}");
         }
