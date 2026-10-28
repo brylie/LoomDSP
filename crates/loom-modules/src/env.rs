@@ -103,7 +103,7 @@ pub static ENVELOPE: ModuleDescriptor = ModuleDescriptor {
     ],
     role: ModuleRole::Dsp(|config| Box::new(Envelope::new(config))),
     panel: Panel::new(
-        9,
+        12,
         8,
         &[
             Widget::knob(0, 0, "attack"),

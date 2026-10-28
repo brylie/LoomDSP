@@ -432,13 +432,13 @@ pub static LADDER: ModuleDescriptor = ModuleDescriptor {
     ],
     role: ModuleRole::Dsp(|config| Box::new(Ladder::new(config))),
     panel: Panel::new(
-        9,
+        12,
         6,
         &[
             Widget::radio(0, 0, "slope"),
-            Widget::knob(3, 0, "cutoff"),
-            Widget::knob(6, 0, "resonance"),
-            Widget::knob(3, 3, "drive"),
+            Widget::knob(6, 0, "cutoff"),
+            Widget::knob(9, 0, "resonance"),
+            Widget::knob(6, 3, "drive"),
         ],
     ),
     displays: &[],
