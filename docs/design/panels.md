@@ -298,7 +298,7 @@ The canvas already hides port labels and titles below a size on screen. Panels u
 - [x] Lights add no frames while their brightness stays the same: the light watcher sends nothing until a shown level changes, and runs only while lights are on screen.
 - [ ] Manual, on the reference laptop: knobs, the toggle, and lights look right at close and middle zoom, and a cut port label shows in full on hover.
 
-The whole app still redraws twice a second for the stats bar's audio numbers. "No redraw when idle" for the whole app stays a P1 criterion below.
+The whole app redraws only when something visible changes ([#90](https://github.com/brylie/LoomDSP/issues/90)): see [Audio load and dropouts](#audio-load-and-dropouts-in-the-stats-bar) for the stats bar.
 
 ## Level meters and audio load (P1)
 
@@ -329,6 +329,7 @@ The whole app still redraws twice a second for the stats bar's audio numbers. "N
 - An overload notice from the device that comes before the stream's first callback is not a dropout. No audio was rendered yet, so none was lost. macOS sends one as a stream starts with a very small buffer (32 frames), while the device switches to it. *Why:* counting it turned the count red each time a performer chose a small buffer, for a glitch that never happened. A count that cries wolf gets ignored. (Found on BlackHole 2ch, 2026-10-24, [#26](https://github.com/brylie/LoomDSP/issues/26).)
 - Load is shown normally below 70%, in amber from 70%, and in red from 90%. The colour follows the highest load since the last tick, and the "max" is the highest in the last 10 seconds ([P1 additions](#audio-load-colour)).
 - The dropout count is red for 10 seconds after it grows.
+- **Redraw.** A thread reads the audio stats four times a second and wakes the UI only when the bar would change: the load or its maximum to the shown 1%, the dropout count, the end of the red time, or the telemetry drops. The load number changes at most twice a second. *Why:* in Iced every message redraws the window, so a timer that refreshed the bar drew two frames a second in an idle patch ([#90](https://github.com/brylie/LoomDSP/issues/90)).
 - *Why:* a performer needs a warning before a problem is audible (FR-PERF-04), and must notice when one just happened. A count that stayed red forever would soon be ignored.
 
 ### Acceptance criteria: level meters and audio load
@@ -426,7 +427,7 @@ What P1 builds. The rest of this spec is P2.
 - [ ] A scope module fed by a 440 Hz oscillator shows a stable trace.
 - [x] "Add scope" on a cable places a connected scope module next to it. Undo removes it.
 - [ ] Cable opacity never depends on the signal. A test checks that the cable geometry is the same with and without telemetry.
-- [ ] With no displays on screen and no input, the app does not redraw. Check: the frame counter stays still for 10 seconds.
+- [x] With no displays on screen and no input, the app does not redraw. Check: `--measure-idle --bench-seconds 10` on `subtractive.ron` prints `frames=` with the same count from the second line on, with a device, with `--fake-audio`, and with `--no-audio` ([#90](https://github.com/brylie/LoomDSP/issues/90)).
 - [ ] Zoomed far out, controls and displays are not drawn.
 - [ ] Reference laptop, full window: 60 fps with four scopes on screen. Record CPU and GPU in the benchmark doc.
 
