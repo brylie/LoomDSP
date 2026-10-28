@@ -150,6 +150,9 @@ struct Envelope {
     /// a 10 s stage at a high sample rate still ends on time.
     progress: f64,
     gate_was_high: bool,
+    /// Whether the current decay falls to 0 (AD) rather than to the
+    /// sustain level, so a mode change mid-decay can restart it.
+    decay_ad: bool,
     /// The knob values. Modulated values live only for one frame, so these
     /// keep the base and removing an assignment returns to it.
     attack: f32,
@@ -170,6 +173,7 @@ impl Envelope {
             start: 0.0,
             progress: 0.0,
             gate_was_high: false,
+            decay_ad: false,
             attack: 0.01,
             decay: 0.2,
             sustain: 0.7,
@@ -238,6 +242,14 @@ impl Module for Envelope {
             // AD has no sustain. A switch to AD while holding falls to 0.
             if ad && self.stage == Stage::Sustain {
                 self.enter(Stage::Decay);
+                self.decay_ad = true;
+            }
+            // A mode change mid-decay moves the decay's end. Restart the
+            // stage from the current level, so the output does not jump.
+            // With the gate already low, ADSR goes on to the release.
+            if self.stage == Stage::Decay && self.decay_ad != ad {
+                self.enter(if ad || high { Stage::Decay } else { Stage::Release });
+                self.decay_ad = ad;
             }
 
             match self.stage {
@@ -248,6 +260,7 @@ impl Module for Envelope {
                     if x >= 1.0 {
                         self.level = 1.0;
                         self.enter(Stage::Decay);
+                        self.decay_ad = ad;
                     }
                 }
                 Stage::Decay => {
@@ -443,6 +456,46 @@ mod tests {
         let out = play(env.as_mut(), &[1.0; 20]);
         assert!((out[0] - 0.54).abs() < 1e-6, "{}", out[0]);
         assert_eq!(out[9], 0.0);
+    }
+
+    /// Switching the mode partway through a decay restarts it from the
+    /// current level, so the output does not jump (#411 review). With the
+    /// gate high, ADSR falls on to the sustain level; with it low, ADSR
+    /// releases to 0.
+    #[test]
+    fn switching_mode_mid_decay_does_not_jump() {
+        for (gate, after) in [(1.0, 0.5), (0.0, 0.0)] {
+            let mut env = make(&[
+                ("mode", 1.0),
+                ("attack", 0.01),
+                ("decay", 0.02),
+                ("sustain", 0.5),
+                ("release", 0.02),
+            ]);
+            let mut gates = [gate; 15];
+            gates[0] = 1.0;
+            let before = play(env.as_mut(), &gates);
+            env.set_param(4, 0.0);
+            let out = play(env.as_mut(), &[gate; 100]);
+            let last = before[14];
+            assert!(last > 0.5 && last < 1.0, "mid-decay, got {last}");
+            assert!((out[0] - last).abs() < 0.06, "jump from {last} to {}", out[0]);
+            let steps = out.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0, f32::max);
+            assert!(steps < 0.06, "largest step {steps}");
+            assert_eq!(out[99], after, "gate {gate}");
+        }
+        // From ADSR to AD mid-decay, the fall goes on to 0 without a jump.
+        let mut env = make(&[("attack", 0.01), ("decay", 0.02), ("sustain", 0.5)]);
+        let before = play(env.as_mut(), &[1.0; 15]);
+        env.set_param(4, 1.0);
+        let out = play(env.as_mut(), &[1.0; 100]);
+        assert!(
+            (out[0] - before[14]).abs() < 0.06,
+            "jump from {} to {}",
+            before[14],
+            out[0]
+        );
+        assert_eq!(out[99], 0.0);
     }
 
     /// The `level` display value is the output's last sample after the
