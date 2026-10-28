@@ -3,7 +3,7 @@
 How musical time reaches every module: the patch transport, inputs that follow it without cables, and the modules that put time on cables and divide it.
 
 - **Kind:** living specification.
-- **Status:** Sections have their own status. **Implemented** for the engine slice ([#72](https://github.com/brylie/LoomDSP/issues/72)): the transport fields, signals derived from the transport, default inputs, rules 1 to 6 (except saving run state, which needs the Transport module), and engine and API. Also **Implemented**: the Clock Divide ([#48](https://github.com/brylie/LoomDSP/issues/48)) and Phase Trigger modules. The Transport ([#73](https://github.com/brylie/LoomDSP/issues/73)) and Clock ([#74](https://github.com/brylie/LoomDSP/issues/74)) modules, and rules 10 and 11, are **Agreed**. Phase Scale ([#31](https://github.com/brylie/LoomDSP/issues/31)) is **Implemented**; its `phase` input defaults to the bar phase. The Button's hold moves to a transient parameter (see Button details). The clock mark on ports is Agreed in [panels](panels.md#clock-mark-on-transport-inputs). The rest is Draft.
+- **Status:** Sections have their own status. **Implemented** for the engine slice ([#72](https://github.com/brylie/LoomDSP/issues/72)): the transport fields, signals derived from the transport, default inputs, rules 1 to 6 (except saving run state, which needs the Transport module), and engine and API. Also **Implemented**: the Clock ([#74](https://github.com/brylie/LoomDSP/issues/74)), Clock Divide ([#48](https://github.com/brylie/LoomDSP/issues/48)), and Phase Trigger modules. The Transport module ([#73](https://github.com/brylie/LoomDSP/issues/73)) and rules 10 and 11 are **Agreed**. Phase Scale ([#31](https://github.com/brylie/LoomDSP/issues/31)) is **Implemented**; its `phase` input defaults to the bar phase. The Button's hold moves to a transient parameter (see Button details). The clock mark on ports is Implemented ([panels](panels.md#clock-mark-on-transport-inputs)). The rest is Draft.
 - **Decision behind it:** [ADR-0015](../adr/0015-one-transport-per-patch.md) (one transport per patch). Builds on [ADR-0007](../adr/0007-polymorphic-signal-model.md) (phase and gate signals) and [ADR-0012](../adr/0012-arrangement-from-phase-driven-primitives.md) (arrangement from phase).
 - **Requirements:** FR-LIB-07, FR-LIB-16, FR-LIB-22, FR-LIB-25 to FR-LIB-27, FR-MIDI-07.
 - **Background:** [Phase and cycles](../learn/phase-and-cycles.md) explains phase signals and how the end of a cycle is found. [Triggers and gates](../learn/triggers-and-gates.md) explains why a trigger is one sample.
@@ -53,7 +53,7 @@ A **Button** module (FR-LIB-12) gives a performance control for this. Its panel 
 
 ## Signals derived from the transport
 
-**Status:** Implemented. The rate phase row belongs to the Clock module ([#74](https://github.com/brylie/LoomDSP/issues/74)) and is Agreed.
+**Status:** Implemented. The rate phase row is the Clock module's phase ([#74](https://github.com/brylie/LoomDSP/issues/74)), through `TransportInfo::phase_at`.
 
 | Signal | Value |
 |---|---|
@@ -68,7 +68,7 @@ Phases are computed in `f64` and converted to `f32` last. A phase that rounds to
 
 ## Default inputs
 
-**Status:** Implemented, except the clock mark, which is Agreed and not built ([#103](https://github.com/brylie/LoomDSP/issues/103)).
+**Status:** Implemented, including the clock mark ([#103](https://github.com/brylie/LoomDSP/issues/103)).
 
 A module can declare a **default** for any input. The default is used while nothing is connected.
 
@@ -88,7 +88,7 @@ Examples: the LFO's phase input in sync mode defaults to bar phase, with a rate 
 
 ## Modules
 
-**Status:** Clock Divide ([#48](https://github.com/brylie/LoomDSP/issues/48)), Phase Trigger, Button ([#75](https://github.com/brylie/LoomDSP/issues/75)), and Phase Scale ([#31](https://github.com/brylie/LoomDSP/issues/31)) are Implemented; see their details below the table. Transport and Clock are Agreed, with details below.
+**Status:** Clock ([#74](https://github.com/brylie/LoomDSP/issues/74)), Clock Divide ([#48](https://github.com/brylie/LoomDSP/issues/48)), Phase Trigger, Button ([#75](https://github.com/brylie/LoomDSP/issues/75)), and Phase Scale ([#31](https://github.com/brylie/LoomDSP/issues/31)) are Implemented; see their details below the table. Transport is Agreed.
 
 | Module | Inputs | Outputs | Parameters | Behaviour |
 |---|---|---|---|---|
@@ -106,6 +106,20 @@ Examples: the LFO's phase input in sync mode defaults to bar phase, with a rate 
 *Why Phase Trigger:* it is how to multiply a clock. Phase Scale multiplies a phase, and Phase Trigger turns the result into triggers, for example to drive a Clock Divide or an envelope. A trigger-based multiplier, as in many VCV Rack modules, would have to measure the time between input triggers and guess when the next one comes. It would stumble on the first trigger and whenever the tempo changes. A multiplied phase is computed from the input, so it never guesses and stays locked. This follows Bitwig Grid, where timing is built from phase signals.
 
 Trigger outputs are high for one sample, and trigger inputs count rising edges ([ADR-0007](../adr/0007-polymorphic-signal-model.md#triggers)).
+
+### Clock details
+
+**Status:** Implemented ([#74](https://github.com/brylie/LoomDSP/issues/74)). Code: `loom.clock.clock` in `loom-modules/src/clock.rs`, and `TransportInfo::phase_at` in `loom-core`. These details were settled while building the module.
+
+- **Parameters.** `rate` is a choice of 24, in this order from 0: 4 bars, 2 bars, 1 bar, 1/2, 1/4, 1/8, 1/16, 1/32, each as straight, then dotted, then triplet ("4 bars", "4 bars dotted", "4 bars triplet", "2 bars", and so on). The default is 1/4 (12). `width` (label "Gate width") is 1 to 99 percent, default 50, not smoothed. Both have a knob on the panel, with a trigger light `fired` below, as on Clock Divide. *Why one choice, not a length and a feel:* the table lists two parameters, and one knob reaches every rate.
+- **Lengths in beats.** A bar rate is a number of bars, so it follows the time signature: 1 bar in 7/8 is 3.5 beats. A note rate is a fraction of a whole note and does not: 1/4 is one beat in any metre. Dotted is 3/2 of straight, triplet 2/3.
+- **Phase** is `TransportInfo::phase_at(i, rate_in_beats)`: the rate phase above, counted from position 0. *Why from position 0:* every rate meets bar 1, and a 1-bar Clock gives the bar phase bit for bit.
+- **Trigger** uses `WrapDetector` on the phase, so a Phase Trigger on the Clock's phase fires on the same frames. It fires only while the transport runs. When the transport is stopped, when the position jumps (a reset or a time signature change, rule 10), or when the rate changes, the detector starts afresh: the next playing frame fires only when its phase is exactly 0. So:
+  - a reset fires once on bar 1, whether it came while playing or while stopped (then it fires on the first frame after the start);
+  - starting again where a stop left off, in the middle of a cycle, fires nothing;
+  - a jump or a rate change that lands in the middle of a cycle fires nothing, even when the phase moves by more than half a cycle. *Why:* rule 8, and a knob turn must not fire a stray beat.
+- **Gate** is high while the phase is below the gate width. It follows the phase, so it holds while the transport is stopped.
+- **No phase input.** Clock always reads the transport. To follow a bent or scaled phase, patch it into Phase Trigger or Phase Scale ([#110](https://github.com/brylie/LoomDSP/issues/110)).
 
 ### Clock Divide details
 
@@ -241,7 +255,7 @@ The Transport module's parameters (tempo, time signature, run) are saved like an
 
 ### Acceptance criteria: modules and UI (Draft)
 
-- [ ] Clock at 1/4 in 4/4 fires four triggers per bar, in line with the bar phase wrap, at block sizes 1, 32, and 1024.
+- [x] Clock at 1/4 in 4/4 fires four triggers per bar, in line with the bar phase wrap, at block sizes 1, 32, and 1024.
 - [x] Clock Divide with N = 2, offset 0, fires on triggers 2, 4, 6. Offset 1 fires on 1, 3, 5. Reset starts the count again.
 - [ ] Phase Scale with divide 2 wraps once per two input wraps, aligned with the input's bar. Multiply 3, divide 2 wraps three times per two input wraps.
 - [x] Phase Trigger fires one sample on each wrap of its input phase, forward or backward, and on the first frame only when the phase is exactly 0. The output is the same for any block size.

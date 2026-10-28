@@ -191,7 +191,18 @@ impl TransportInfo {
 
     /// Bar phase at frame `frame` of this call, from 0 up to 1.
     pub fn bar_phase_at(&self, frame: usize) -> f32 {
-        phase(self.position_at(frame) / self.beats_per_bar)
+        self.phase_at(frame, self.beats_per_bar)
+    }
+
+    /// Phase of a cycle `beats` beats long at frame `frame` of this call,
+    /// from 0 up to 1. Cycles are counted from position 0, so every rate
+    /// stays aligned with bar 1. This is the rate phase of `docs/design/clock.md`.
+    ///
+    /// It divides the position by `beats` in `f64` and converts last, as the
+    /// bar phase does, so a cycle of exactly one bar gives the bar phase bit
+    /// for bit.
+    pub fn phase_at(&self, frame: usize, beats: f64) -> f32 {
+        phase(self.position_at(frame) / beats)
     }
 
     /// The transport for a call that starts `frames` frames later. Only a
@@ -373,6 +384,23 @@ mod tests {
         assert!(!info.later(1).jumped());
         transport.end_block();
         assert!(!transport.info(5_100).jumped());
+    }
+
+    /// A rate phase counts cycles from position 0, and a one-bar cycle is
+    /// the bar phase bit for bit.
+    #[test]
+    fn rate_phase_counts_from_bar_one() {
+        let settings = TransportSettings {
+            time_signature: TimeSignature::new(7, 8),
+            ..TransportSettings::default()
+        };
+        let info = TransportInfo::new(SAMPLE_RATE, settings, 5.25);
+        assert_eq!(info.phase_at(0, 1.0), 0.25);
+        assert_eq!(info.phase_at(0, 2.0), 0.625);
+        for frame in [0, 1, 77, 10_000] {
+            assert_eq!(info.phase_at(frame, 3.5), info.bar_phase_at(frame));
+            assert_eq!(info.phase_at(frame, 1.0), info.beat_phase_at(frame));
+        }
     }
 
     #[test]

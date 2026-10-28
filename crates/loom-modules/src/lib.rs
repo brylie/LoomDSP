@@ -12,6 +12,7 @@
 use loom_core::{LoomError, ModuleDescriptor, Registry};
 use std::sync::Arc;
 
+pub mod clock;
 pub mod display;
 pub mod env;
 pub mod filter;
@@ -61,6 +62,7 @@ pub static ALL: &[&ModuleDescriptor] = &[
     &midi::NOTE_IN,
     &display::METER,
     &display::SCOPE,
+    &clock::CLOCK,
     &logic::DIVIDE,
     &logic::COMPARE,
     &logic::LOGIC,
@@ -200,7 +202,7 @@ mod tests {
                 "loom.env.adsr" => &["level"],
                 "loom.logic.memory" => &["state"],
                 // Trigger lights (panels.md, Lights for one-sample triggers).
-                "loom.logic.divide" | "loom.phase.trigger" => &["fired"],
+                "loom.logic.divide" | "loom.phase.trigger" | "loom.clock.clock" => &["fired"],
                 _ => &[],
             };
             assert_eq!(lights, expected, "{}", descriptor.id);
