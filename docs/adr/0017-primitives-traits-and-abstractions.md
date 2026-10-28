@@ -1,6 +1,6 @@
 # ADR-0017: A module library of primitives, traits, and open abstractions
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-28)
 - **Date:** 2026-10-17
 - **Related requirements:** FR-LIB-12 to FR-LIB-15, FR-LIB-24, FR-ENCAP-08 to FR-ENCAP-10, FR-PANEL-11, FR-SDK-07, FR-SDK-08
 - **Related decisions:** ADR-0011 (everything is a module), ADR-0012 (arrangement from phase-driven primitives), ADR-0013 (modules carry their own panel), ADR-0014 (modulation without cables)
@@ -24,7 +24,7 @@ ADR-0012 already chose this path for arrangement: small phase-driven primitives,
 2. **A few large modules with many modes.** One "sampler" that does everything, one "synth" with switchable sections. Fewer modules, but each one is a closed box with a long parameter list, and the modes cannot be combined in new ways.
 3. **Primitives, traits, and open abstractions with swappable slots.** Small modules do one job each. Options that many modules share are defined once as traits. Familiar devices ship as open abstractions made from primitives, and the parts of an abstraction can be swapped through role-typed slots.
 
-## Decision (proposed)
+## Decision
 
 Option 3. The module library has three layers.
 

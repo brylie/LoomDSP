@@ -1,6 +1,6 @@
 # ADR-0012: Arrangement from phase-driven primitives
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-28)
 - **Date:** 2026-10-15
 - **Related requirements:** FR-LIB-20 to FR-LIB-22, FR-LIB-24
 - **Related decisions:** ADR-0002 (feedback), ADR-0007 (signals), ADR-0011 (everything is a module)
@@ -24,7 +24,7 @@ We also want users to work close to their musical ideas. Pure primitives (as in 
 2. **A "Group" module with built-in next-action modes** (round robin, random, sequential). Quick to use, but every new rule needs a new mode, and the logic cannot be patched or changed.
 3. **Phase-driven primitives, with groups and parts shipped as open abstractions made from them.** One mental model at every level, the same signal rules as everything else, no special cases in the engine.
 
-## Decision (proposed)
+## Decision
 
 Option 3.
 

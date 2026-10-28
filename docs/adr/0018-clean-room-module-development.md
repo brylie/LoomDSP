@@ -1,6 +1,6 @@
 # ADR-0018: Clean-room module development
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-28)
 - **Date:** 2026-10-17
 - **Related requirements:** NFR-OSS-01, NFR-OSS-06, NFR-OSS-07, FR-LIB-11, FR-SDK-03
 - **Related decisions:** ADR-0006 (dependency and licence policy), ADR-0017 (primitives, traits, and abstractions)
@@ -25,7 +25,7 @@ We want LoomDSP's modules to be our own, so that the project and every exported 
 2. **Ask for attribution when we borrow.** Allows more reuse. But it adds licence bookkeeping to every module, and it does not stop closely paraphrased text or cloned designs.
 3. **Clean-room development.** We learn *that* a kind of module exists and *what it is for* from public descriptions. We design and build it from first principles, published theory, and our own tests, without reading other projects' code or copying their text or designs.
 
-## Decision (proposed)
+## Decision
 
 Option 3. **LoomDSP's modules, their help text, and their panels are designed and written from first principles.**
 

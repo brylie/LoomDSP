@@ -1,6 +1,6 @@
 # ADR-0016: Ports and parameters carry a label and a description
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-28)
 - **Date:** 2026-10-16
 - **Related requirements:** FR-LIB-11, FR-SDK-01, NFR-UX-04
 - **Related decisions:** ADR-0008 (patch format), ADR-0013 (modules carry their own panel)
