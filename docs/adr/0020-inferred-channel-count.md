@@ -1,7 +1,7 @@
 # ADR-0020: Channel count inferred per cable, with per-channel copies
 
-- **Status:** Accepted (2026-10-28)
-- **Date:** 2026-10-19
+- **Status:** Accepted
+- **Date:** 2026-10-28
 - **Related requirements:** FR-SIG-07, FR-SIG-01, FR-SIG-03, FR-SIG-08, FR-CANVAS-12, NFR-RT-01, NFR-PERF-03
 - **Specification:** [Stereo cables](../design/stereo.md)
 - **Background:** [Stereo cables explainer](../learn/stereo-cables.md)

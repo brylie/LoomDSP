@@ -1,7 +1,7 @@
 # ADR-0025: One design language, and panels derived from the declaration
 
-- **Status:** Accepted (2026-10-28)
-- **Date:** 2026-10-21
+- **Status:** Accepted
+- **Date:** 2026-10-28
 - **Related requirements:** FR-PANEL-01, FR-PANEL-03, FR-PANEL-06, FR-PANEL-07, FR-PANEL-09, FR-ENCAP-03, FR-SDK-01, NFR-UX-01, NFR-UX-02
 - **Related decisions:** ADR-0013 (modules carry their own panel), ADR-0016 (ports and parameters carry their own text), ADR-0017 (primitives, traits, and abstractions), ADR-0024 (widgets follow the kind of value)
 - **Specification:** [Panels, Default panels](../design/panels.md#default-panels), [Panels, Exposed controls](../design/panels.md#exposed-controls-in-a-sub-patch), [Panel widgets](../design/panel-widgets.md)

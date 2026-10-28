@@ -1,7 +1,7 @@
 # ADR-0017: A module library of primitives, traits, and open abstractions
 
-- **Status:** Accepted (2026-10-28)
-- **Date:** 2026-10-17
+- **Status:** Accepted
+- **Date:** 2026-10-28
 - **Related requirements:** FR-LIB-12 to FR-LIB-15, FR-LIB-24, FR-ENCAP-08 to FR-ENCAP-10, FR-PANEL-11, FR-SDK-07, FR-SDK-08
 - **Related decisions:** ADR-0011 (everything is a module), ADR-0012 (arrangement from phase-driven primitives), ADR-0013 (modules carry their own panel), ADR-0014 (modulation without cables)
 - **Plan:** [Module catalogue](../product/module-catalogue.md). A design specification for roles and slots is written before P2 work on them starts.

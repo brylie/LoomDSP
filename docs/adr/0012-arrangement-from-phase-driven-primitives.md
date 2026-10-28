@@ -1,7 +1,7 @@
 # ADR-0012: Arrangement from phase-driven primitives
 
-- **Status:** Accepted (2026-10-28)
-- **Date:** 2026-10-15
+- **Status:** Accepted
+- **Date:** 2026-10-28
 - **Related requirements:** FR-LIB-20 to FR-LIB-22, FR-LIB-24
 - **Related decisions:** ADR-0002 (feedback), ADR-0007 (signals), ADR-0011 (everything is a module)
 - **Specification:** [Arrangement](../design/arrangement.md)

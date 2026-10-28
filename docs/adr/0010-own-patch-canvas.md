@@ -1,7 +1,7 @@
 # ADR-0010: Our own patch canvas, built as an Iced widget
 
-- **Status:** Accepted (2026-10-28)
-- **Date:** 2026-10-13
+- **Status:** Accepted
+- **Date:** 2026-10-28
 - **Related requirements:** FR-CANVAS-*, FR-VIS-*, FR-LIB-18, NFR-PERF-04, NFR-UX-03
 - **Related decisions:** ADR-0005 (Rust end to end), ADR-0009 (Iced for the UI), ADR-0011 (everything is a module), ADR-0013 (modules carry their own panel)
 

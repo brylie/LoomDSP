@@ -1,7 +1,7 @@
 # ADR-0021: Plain-data view models and keyed widget identity
 
-- **Status:** Accepted (2026-10-28)
-- **Date:** 2026-10-19
+- **Status:** Accepted
+- **Date:** 2026-10-28
 - **Issue:** #224
 - **Related requirements:** NFR-UX-02 (a plain model of what a panel shows is a natural source for screen-reader text)
 - **Background:** [UI view models and widget identity](../research/2026-10-ui-view-models-and-identity.md) (research snapshot)

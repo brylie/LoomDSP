@@ -1,7 +1,7 @@
 # ADR-0007: Polymorphic signal model
 
-- **Status:** Accepted (2026-10-28)
-- **Date:** 2026-10-13
+- **Status:** Accepted
+- **Date:** 2026-10-28
 - **Related requirements:** FR-SIG-01 to 08, FR-MOD-01
 - **Explainers:** [Triggers and gates](../learn/triggers-and-gates.md), [Pitch at 0.1 per octave](../learn/pitch.md)
 

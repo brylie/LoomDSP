@@ -1,7 +1,7 @@
 # ADR-0015: One transport per patch, read by modules without cables
 
-- **Status:** Accepted (2026-10-28)
-- **Date:** 2026-10-15
+- **Status:** Accepted
+- **Date:** 2026-10-28
 - **Related requirements:** FR-LIB-07, FR-LIB-16, FR-LIB-20, FR-LIB-22, FR-LIB-25 to FR-LIB-27, FR-MIDI-07, FR-NATIVE-*
 - **Related decisions:** ADR-0002 (graph execution), ADR-0007 (signal model), ADR-0011 (everything is a module), ADR-0012 (arrangement from phase-driven primitives)
 - **Specification:** [Clock and transport](../design/clock.md)

@@ -1,7 +1,7 @@
 # ADR-0018: Clean-room module development
 
-- **Status:** Accepted (2026-10-28)
-- **Date:** 2026-10-17
+- **Status:** Accepted
+- **Date:** 2026-10-28
 - **Related requirements:** NFR-OSS-01, NFR-OSS-06, NFR-OSS-07, FR-LIB-11, FR-SDK-03
 - **Related decisions:** ADR-0006 (dependency and licence policy), ADR-0017 (primitives, traits, and abstractions)
 - **Plan:** [Module catalogue](../product/module-catalogue.md)

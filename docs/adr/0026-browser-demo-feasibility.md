@@ -1,7 +1,7 @@
 # ADR-0026: A browser demo waits for a spike; pre-rendered audio examples come first
 
-- **Status:** Accepted (2026-10-28)
-- **Date:** 2026-10-25
+- **Status:** Accepted
+- **Date:** 2026-10-28
 - **Related requirements:** FR-APP-02, FR-APP-05, NFR-PORT-01, NFR-PORT-02, NFR-WEB-01 to 04
 - **Specification:** none yet. A spike would produce one.
 

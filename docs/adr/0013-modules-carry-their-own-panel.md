@@ -1,7 +1,7 @@
 # ADR-0013: Modules carry their own panel
 
-- **Status:** Accepted (2026-10-28)
-- **Date:** 2026-10-15
+- **Status:** Accepted
+- **Date:** 2026-10-28
 - **Related requirements:** FR-PANEL-*, FR-CANVAS-10, FR-LIB-18, FR-VIS-01, FR-VIS-02, FR-ENCAP-03, NFR-PERF-04, NFR-UX-01
 - **Related decisions:** ADR-0001 (lock-free boundary), ADR-0010 (own canvas), ADR-0011 (everything is a module)
 - **Specification:** [Panels](../design/panels.md)

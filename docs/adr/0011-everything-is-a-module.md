@@ -1,7 +1,7 @@
 # ADR-0011: Everything is a module
 
-- **Status:** Accepted (2026-10-28)
-- **Date:** 2026-10-13
+- **Status:** Accepted
+- **Date:** 2026-10-28
 - **Related requirements:** FR-LIB-12 to FR-LIB-23, FR-SIG-*, FR-FILE-*
 - **Related decisions:** ADR-0007 (signal model), ADR-0008 (patch format), ADR-0010 (own canvas)
 
