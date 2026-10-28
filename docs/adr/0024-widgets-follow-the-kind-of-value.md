@@ -1,7 +1,7 @@
 # ADR-0024: Widgets follow the kind of value, and structured data has shared kinds
 
-- **Status:** Accepted (2026-10-28)
-- **Date:** 2026-10-21
+- **Status:** Accepted
+- **Date:** 2026-10-28
 - **Related requirements:** FR-PANEL-02, FR-PANEL-04, FR-LIB-12, FR-LIB-17, FR-LIB-18, FR-LIB-19, FR-MOD-04, NFR-UX-01, NFR-UX-02
 - **Related decisions:** ADR-0001 (lock-free boundary), ADR-0013 (modules carry their own panel), ADR-0014 (modulation without cables), ADR-0017 (primitives, traits, and abstractions), ADR-0018 (clean room)
 - **Specification:** [Panel widgets](../design/panel-widgets.md)

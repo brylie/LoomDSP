@@ -113,6 +113,15 @@ entry = "mise exec -- typos --force-exclude"
 language = "system"
 types = ["text"]
 
+[[repos.hooks]]
+id = "adr-status"
+name = "ADR status lines"
+# Checks the changed ADRs against their index rows; `mise run adr-status`
+# (and CI) checks them all.
+entry = "sh scripts/check-adr-status.sh"
+language = "system"
+files = "^docs/adr/[0-9]{4}-.*\\.md$"
+
 # ---------------------------------------------------------------------------
 # Slower checks before push.
 # ---------------------------------------------------------------------------

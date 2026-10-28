@@ -351,12 +351,22 @@ jobs:
       - uses: jdx/mise-action@v5
       - run: mise run typos
 
+  adr-status:
+    name: ADR status
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@v5
+      - run: mise run adr-status
+
   # One check to mark as "required" in the main branch ruleset, instead of
   # listing every job. Fails if any job above failed or was cancelled.
   ci-success:
     name: CI success
     if: always()
-    needs: [fmt, clippy, test, coverage, loopback, docs, msrv, wasm, deny, advisories, typos]
+    needs: [fmt, clippy, test, coverage, loopback, docs, msrv, wasm, deny, advisories, typos, adr-status]
     runs-on: ubuntu-latest
     steps:
       - name: Check all jobs passed

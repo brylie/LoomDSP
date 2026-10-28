@@ -1,7 +1,7 @@
 # ADR-0023: Patch licences as SPDX expressions, chosen through Creative Commons questions
 
-- **Status:** Accepted (2026-10-28)
-- **Date:** 2026-10-20
+- **Status:** Accepted
+- **Date:** 2026-10-28
 - **Related requirements:** FR-FILE-10, FR-NATIVE-09, FR-SHARE-01, FR-SHARE-04
 - **Specification:** [Patch metadata](../design/patch-metadata.md)
 
