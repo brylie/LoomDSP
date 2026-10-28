@@ -145,5 +145,5 @@ The browsers themselves (layout, where the user's patches are found, the library
 2. **Where patch info lives.** Leaning: the inspector shows it when no module is selected, under the patch name. A separate window is the alternative.
 3. **Tag characters.** Leaning: letters in any script (as rule 5). Plain ASCII is simpler to type and compare, but would shut out tags in Finnish, Japanese, and other languages.
 4. **The "add me as author" offer.** Leaning: once per patch, at the first Save after opening it. The alternative is never asking and adding a menu command instead.
-5. **The example patches' own licence.** Decided in ADR-0023 (leaning `CC0-1.0`).
+5. **The example patches' own licence.** Decided in ADR-0023: `CC0-1.0`.
 6. **Validating SPDX.** Leaning: the `spdx` crate (Apache-2.0, accepted under ADR-0006), which knows the official list and parses expressions.

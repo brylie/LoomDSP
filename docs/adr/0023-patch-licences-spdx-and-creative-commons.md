@@ -1,6 +1,6 @@
 # ADR-0023: Patch licences as SPDX expressions, chosen through Creative Commons questions
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-28)
 - **Date:** 2026-10-20
 - **Related requirements:** FR-FILE-10, FR-NATIVE-09, FR-SHARE-01, FR-SHARE-04
 - **Specification:** [Patch metadata](../design/patch-metadata.md)
@@ -38,3 +38,7 @@ The example patches shipped with LoomDSP use `CC0-1.0`, so anyone can copy them 
 - **Export.** A NoDerivatives (ND) licence forbids sharing changed versions. Whether exporting a patch into a plugin counts as a change, and what an export does with NonCommercial (NC) licences, is decided with export (FR-NATIVE-09). The export must at least show the patch licence next to the runtime's Apache-2.0 licence.
 - **Embedded assets** (samples, wavetables) may carry their own licences. That is decided with the self-contained patch file (FR-SHARE-01).
 - The example patches in `examples/patches/` get `license: "CC0-1.0"` when the field exists.
+
+## Prior art
+
+Patch-sharing sites already offer Creative Commons licences when a patch is uploaded (PatchStorage, for example). Creative Commons and SPDX are both standards, so a LoomDSP patch keeps the same terms, written the same way, when it is shared on such a site. This is one reason to accept Creative Commons for patches, although a patch is partly software.
