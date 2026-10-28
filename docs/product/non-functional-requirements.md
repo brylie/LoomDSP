@@ -88,6 +88,7 @@ These apply only if the optional, deferred web target goes ahead.
 | NFR-UX-03 | Colour is never the only way to show signal type. Ports also have shape or label differences. | Should | Colour vision deficiency is common. |
 | NFR-UX-04 | UI text is translatable. English is the source language. | Could | Wider community reach. |
 | NFR-UX-05 | Error messages say what happened and what the user can do next, in plain language. | Must | Learners are a key audience. |
+| NFR-UX-06 | The desktop app exposes its toolbar, inspector, module browser, and canvas controls to the platform accessibility API, with names, values, and states, so a screen reader and keyboard users can work it. | Should | Blind and low-vision musicians, and people who cannot use a mouse. Waits for AccessKit support in Iced (ADR-0028). |
 
 ## Maintainability and openness (`OSS`)
 
