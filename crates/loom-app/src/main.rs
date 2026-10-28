@@ -5,6 +5,7 @@
 //! canvas against the performance gates in NFR-PERF-04.
 
 mod alerts;
+mod audio_watch;
 #[cfg(test)]
 mod autosave_tests;
 mod bench;
@@ -265,7 +266,10 @@ enum Message {
     },
     Animate(bool),
     Frame(Instant),
+    /// A slow tick while a recording runs, to notice a write error.
     Tick,
+    /// The audio watcher saw a change to show, or stalled callbacks.
+    Audio(audio_watch::Event),
     /// A frame while live modulated values are on screen.
     LiveFrame,
     /// New brightness for lights on screen.
@@ -388,6 +392,27 @@ fn transport_running(controller: &Controller) -> Option<bool> {
     Some(controller.display(id, index)? >= 0.5)
 }
 
+impl Message {
+    /// True for the frequent messages that never change the patch: live
+    /// readings, timers, and frames. Every other message may, so autosave
+    /// looks again after it. Telling them apart lets the autosave timer
+    /// stop in an idle app (#90).
+    fn keeps_patch(&self) -> bool {
+        matches!(
+            self,
+            Self::Audio(audio_watch::Event::Stats { .. })
+                | Self::Tick
+                | Self::Meters(_)
+                | Self::Lights(_)
+                | Self::Autosave
+                | Self::Frame(_)
+                | Self::LiveFrame
+                | Self::MidiPoll
+                | Self::BenchDone
+        )
+    }
+}
+
 /// `opened <path>`, followed by the load notes when there are any, so a note
 /// about what loaded differently stays in view.
 fn opened_status(path: &std::path::Path, notes: &[String]) -> String {
@@ -475,6 +500,10 @@ struct App {
     audio_stats: Option<Arc<CallbackStats>>,
     audio_callbacks_seen: u64,
     audio_callbacks_advanced: Instant,
+    /// True when the recovery copy matches the patch and no job is under
+    /// way, so the autosave timer can stop. Any message that may change
+    /// the patch clears it.
+    autosave_settled: bool,
     audio_name: String,
     /// Note input shared by every MIDI port and the "Hold note" button.
     midi: Option<SharedMidi>,
@@ -749,6 +778,7 @@ impl App {
         if let Some(line) = lines.into_iter().last() {
             self.status = line;
         }
+        self.autosave_settled = session.settled();
     }
 
     /// Builds an engine and loads a patch into it. On failure nothing else
@@ -911,6 +941,7 @@ impl App {
             audio_stats: audio.as_ref().map(|a| a.stats().clone()),
             audio_callbacks_seen: 0,
             audio_callbacks_advanced: Instant::now(),
+            autosave_settled: false,
             _audio: audio,
             idle_engine,
             monitor: monitor::Monitor::new(telemetry, generation),
@@ -1205,10 +1236,25 @@ impl App {
         let main = if self.measuring {
             // Redraw every frame, so the counter measures real render cost.
             iced::window::frames().map(Message::Frame)
-        } else {
-            // Otherwise the window redraws only when something changes. A
-            // slow tick keeps the audio numbers fresh.
+        } else if self.rig.recorder.is_some() {
+            // Otherwise the window redraws only when something changes
+            // (#90). A recording, a QA tool, ticks to notice a write error.
             iced::time::every(Duration::from_millis(500)).map(|_| Message::Tick)
+        } else {
+            Subscription::none()
+        };
+        // The audio numbers and stalled callbacks are read on a thread,
+        // which wakes the UI only when the stats bar changes (#90).
+        let audio_watch = match &self.audio_stats {
+            Some(stats) => Subscription::run_with(
+                audio_watch::Watch {
+                    stats: stats.clone(),
+                    engine: self.controller.stats().clone(),
+                },
+                audio_watch::stream,
+            )
+            .map(Message::Audio),
+            None => Subscription::none(),
         };
         // Live modulated values move every block, so a patch with an
         // assignment that is on follows them every frame.
@@ -1233,20 +1279,36 @@ impl App {
                 self.control_waiting()
                     .then(|| iced::window::frames().map(Message::ControlFrame)),
             );
+        // The autosave timer runs only while a copy may be due: once the
+        // copy matches the patch, an idle app ticks no more (#90).
         let autosave = match &self.recovery {
-            Some(_) => iced::time::every(recovery::TICK).map(|_| Message::Autosave),
-            None => Subscription::none(),
+            Some(_) if !self.autosave_settled => iced::time::every(recovery::TICK).map(|_| Message::Autosave),
+            _ => Subscription::none(),
         };
         // MIDI inputs plugged in and out are found by polling four times a
         // second: the systems offer no portable callback (device-changes.md).
+        // With a real host the list is read on a thread, which wakes the
+        // UI only when it changes. A test host is polled from the UI.
         let midi_poll = if self.rig.midi_in.is_some() && !self.rig.flags.no_midi {
-            iced::time::every(Duration::from_millis(250)).map(|_| Message::MidiPoll)
+            match self.rig.host.midi_lister() {
+                Some(list) => Subscription::run_with(
+                    devices::MidiWatch {
+                        list,
+                        seen: self.rig.seen_midi.clone(),
+                        generation: self.generation,
+                    },
+                    devices::midi_stream,
+                )
+                .map(|()| Message::MidiPoll),
+                None => iced::time::every(devices::MIDI_POLL).map(|_| Message::MidiPoll),
+            }
         } else {
             Subscription::none()
         };
-        // Audio device loss, silent stalls, and device reconnection are watched
-        // by polling four times a second (device-changes.md, Audio device loss).
-        let audio_poll = if !self.no_audio && !self.fake_audio {
+        // While audio plays, the audio watcher reports stalled callbacks.
+        // Once a device is lost, reconnection is tried by polling four
+        // times a second (device-changes.md, Audio device loss).
+        let audio_poll = if !self.no_audio && !self.fake_audio && self._audio.is_none() {
             iced::time::every(Duration::from_millis(250)).map(|_| Message::AudioPoll)
         } else {
             Subscription::none()
@@ -1258,6 +1320,7 @@ impl App {
         Subscription::batch(
             [
                 main,
+                audio_watch,
                 live,
                 self.light_watch(),
                 telemetry,
@@ -1336,8 +1399,10 @@ impl App {
     fn drain_idle_engine(&mut self) {
         if let Some(engine) = self.idle_engine.as_mut() {
             engine.apply_pending();
-            self.controller.collect_garbage();
         }
+        // What the engine handed back is freed here, after any message,
+        // rather than on a timer that would wake an idle app (#90).
+        self.controller.collect_garbage();
     }
 
     /// Runs the engine for `frames` frames on silent buffers, as an audio
@@ -1838,6 +1903,10 @@ impl App {
     fn update(&mut self, message: Message) -> Task<Message> {
         // A mode change the engine's full queue refused goes again now.
         self.send_pending_safety();
+        if !message.keeps_patch() {
+            // It may have changed the patch: autosave looks again.
+            self.autosave_settled = false;
+        }
         let was_open = self.browser.is_some();
         let task = match message {
             Message::Browser(message) => self.browser_message(message),
@@ -2160,6 +2229,19 @@ impl App {
                 self.update_dropouts(Instant::now());
             }
             Message::AudioPoll => self.poll_audio(),
+            Message::Audio(audio_watch::Event::Stats { dropouts, at }) => {
+                // The view reads the load itself when it draws.
+                self.dropouts.update(dropouts, at);
+            }
+            Message::Audio(audio_watch::Event::Stalled { callbacks, advanced }) => {
+                // Time the stall from when the watcher last saw a callback,
+                // as a poll on this thread would have.
+                if callbacks >= self.audio_callbacks_seen {
+                    self.audio_callbacks_seen = callbacks;
+                    self.audio_callbacks_advanced = self.audio_callbacks_advanced.max(advanced);
+                }
+                self.poll_audio();
+            }
             Message::Meters(levels) => {
                 // A reading may arrive after its probe was removed.
                 let live: std::collections::HashSet<ProbeId> = self.live.probes().collect();

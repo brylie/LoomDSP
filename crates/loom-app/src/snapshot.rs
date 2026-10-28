@@ -73,8 +73,14 @@ pub struct Stats {
 impl Stats {
     /// The load as the bar shows it: `load 3% (max 12%)`.
     pub fn load_text(&self) -> String {
-        format!("load {:.0}% (max {:.0}%)", self.load * 100.0, self.max_load * 100.0)
+        load_text(self.load, self.max_load)
     }
+}
+
+/// The load as the bar shows it, from the latest load and the highest, as
+/// shares of the time budget: `load 3% (max 12%)`.
+pub fn load_text(load: f64, max_load: f64) -> String {
+    format!("load {:.0}% (max {:.0}%)", load * 100.0, max_load * 100.0)
 }
 
 /// A point in world units.
