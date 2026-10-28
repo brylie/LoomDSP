@@ -73,6 +73,12 @@ jobs:
       # Debug build on purpose: the no-allocation test (NFR-RT-06) is only
       # active with debug assertions.
       - run: mise run test
+        env:
+          # macOS and Windows runners have a GPU adapter (Metal, DX12), so the
+          # canvas smoke test in crates/loom-app/tests/screenshot.rs must draw
+          # there and compile canvas.wgsl for that backend. Ubuntu has none,
+          # so the test skips there (#5).
+          LOOM_REQUIRE_GPU: ${{ runner.os != 'Linux' && '1' || '' }}
       - name: Benchmarks compile
         run: cargo bench -p loom-modules --no-run
 
