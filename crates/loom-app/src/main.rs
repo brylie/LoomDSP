@@ -13,6 +13,8 @@ mod clipboard;
 mod control;
 mod devices;
 mod edits;
+#[cfg(test)]
+mod example_tests;
 mod files;
 mod inspector;
 mod layout;
@@ -397,8 +399,13 @@ struct App {
     /// "Untitled": a restored copy whose file changed.
     shown_name: Option<String>,
     /// Where Save As starts when there is no current file: next to a
-    /// restored copy's changed or missing file.
+    /// restored copy's changed or missing file, or the file name of the
+    /// example a copy came from.
     save_hint: Option<PathBuf>,
+    /// The bundled examples folder, found once at start. A patch opened
+    /// from it is an untitled copy (`docs/design/files.md`, Defaults for
+    /// the dialogs). Tests set a temporary one.
+    examples: Option<PathBuf>,
     /// The patch as it was last opened or saved, to tell unsaved work
     /// apart. `None` when nothing on disk holds this patch (a restored copy).
     saved_content: Option<Patch>,
@@ -616,6 +623,17 @@ impl App {
             Self::session(config, args.test_modules, Source::Empty).expect("an empty patch always loads")
         });
         let mut app = Self::assemble(output, sample_rate, session, 1, &args, rig, true);
+        // Tests have no bundled folder unless they set one: the checkout's
+        // examples must open as plain files there.
+        #[cfg(test)]
+        {
+            app.examples = files::fake::examples();
+        }
+        #[cfg(not(test))]
+        {
+            app.examples = files::bundled_examples();
+        }
+        app.copy_if_example();
         // The compile report gives way to anything that needs reading.
         let mut keep = !status.is_empty();
         if keep {
@@ -826,6 +844,7 @@ impl App {
             stamp,
             shown_name: None,
             save_hint: None,
+            examples: None,
             saved_content: None,
             recovery: None,
             generation,
@@ -902,6 +921,35 @@ impl App {
         app
     }
 
+    /// Makes a patch opened from the bundled examples folder an untitled
+    /// copy (`docs/design/files.md`, Defaults for the dialogs): no current
+    /// file, "<name> (example)" in the title, and a Save that asks for a
+    /// place, suggesting the example's file name. The copy is clean until
+    /// edited, so closing it asks nothing.
+    fn copy_if_example(&mut self) {
+        let Some(path) = self.file.as_deref() else {
+            return;
+        };
+        if !files::is_example(path, self.examples.as_deref()) {
+            return;
+        }
+        let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned());
+        let stem = stem.as_deref().unwrap_or("Untitled");
+        // A bare file name: the dialog starts in the Documents folder.
+        self.save_hint = Some(PathBuf::from(format!("{stem}.{}", files::EXTENSION)));
+        self.shown_name = Some(format!("{stem} (example)"));
+        self.file = None;
+        self.stamp = None;
+    }
+
+    /// The name of the patch as the title shows it, without the mark.
+    fn patch_name(&self) -> String {
+        match (&self.file, &self.shown_name) {
+            (None, Some(name)) => name.clone(),
+            _ => files::display_name(self.file.as_deref()),
+        }
+    }
+
     /// True when the patch differs from the file (`docs/design/files.md`).
     fn unsaved(&self) -> bool {
         !self.edits.history.is_saved()
@@ -971,7 +1019,7 @@ impl App {
         if !self.unsaved() {
             return true;
         }
-        match files::confirm_discard(&files::display_name(self.file.as_deref())) {
+        match files::confirm_discard(&self.patch_name()) {
             files::Choice::Save => self.save(),
             files::Choice::DontSave => true,
             files::Choice::Cancel => false,
@@ -1053,6 +1101,8 @@ impl App {
         fresh.pointer = self.pointer.clone();
         // The session goes on; only its patch changed.
         fresh.recovery = self.recovery.take();
+        fresh.examples = self.examples.take();
+        fresh.copy_if_example();
         // Commands waiting to be drawn still get their answer, except a
         // `sample`, which would measure a module of the new patch.
         fresh.control_pending = control::end_samples(std::mem::take(&mut self.control_pending));
@@ -1101,10 +1151,7 @@ impl App {
     }
 
     fn title(&self) -> String {
-        match (&self.file, &self.shown_name) {
-            (None, Some(name)) => files::titled(name, self.unsaved()),
-            _ => files::window_title(self.file.as_deref(), self.unsaved()),
-        }
+        files::titled(&self.patch_name(), self.unsaved())
     }
 
     fn theme(&self) -> Theme {
@@ -2499,7 +2546,7 @@ impl App {
             text(format!(
                 "{}{}",
                 if self.unsaved() { "* " } else { "" },
-                files::display_name(self.file.as_deref())
+                self.patch_name()
             ))
             .size(15),
             button(text("New").size(13)).on_press(Message::New),
@@ -2715,7 +2762,7 @@ mod tests {
     use super::*;
     use iced::Rectangle;
 
-    fn app() -> App {
+    pub(crate) fn app() -> App {
         App::new(app_args())
     }
 

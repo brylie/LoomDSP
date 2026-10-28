@@ -2209,6 +2209,20 @@ mod tests {
         assert!(!sample["frames"].as_array().unwrap().is_empty());
     }
 
+    /// The `open` command on a file in the bundled examples folder gives an
+    /// untitled copy, as File > Open does (`docs/design/files.md`).
+    #[test]
+    fn the_open_command_opens_an_example_as_a_copy() {
+        let mut app = App::new(crate::tests::app_args());
+        let examples = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches");
+        app.examples = Some(examples.clone());
+        let path = examples.join("subtractive.ron");
+        let line = serde_json::json!({ "cmd": "open", "path": path }).to_string();
+        run(&mut app, &line).unwrap();
+        assert_eq!(app.file, None);
+        assert_eq!(app.ui_snapshot().title, "subtractive (example) - LoomDSP");
+    }
+
     /// `panic` and `press` with `button: "panic"` run panic, also with no
     /// audio device (panic.md, rule 4).
     #[test]
