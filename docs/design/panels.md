@@ -362,6 +362,7 @@ A user zooms in on Clock Divide. The knob says "Division", not `n`. They rest th
 |---|---|---|
 | Port label on a tile | name | label, cut with "…" to fit its column as now |
 | Caption of a knob, toggle, button, or radio group | parameter name | parameter label, cut with "…" to fit the widget |
+| Option of a radio group | choice name | choice name, cut with "…" to fit the widget ([#394](https://github.com/brylie/LoomDSP/issues/394)) |
 | Caption of a meter | output name | output label |
 | Caption of a light | display value name | display value label ([#118](https://github.com/brylie/LoomDSP/issues/118)) |
 | Inspector parameter row | name | label |
@@ -369,7 +370,7 @@ A user zooms in on Clock Divide. The knob says "Division", not `n`. They rest th
 | Hover text on a light or meter | none | label, description, and value ([#118](https://github.com/brylie/LoomDSP/issues/118)) |
 
 - **Names stay out of sight, except in hover text.** The hover text shows the stable name below the description, dimmed, when it differs from the label other than in letter case. So `n` shows under "Division", but `cutoff` does not repeat under "Cutoff". *Why:* names are what patch files and `loom modules` use, so a user who edits a RON file can find the port. Everywhere else, the label is the better text.
-- **Captions are cut, never wrapped.** A label that does not fit is cut with "…", and the hover text shows it in full. Widths are estimated per character, with narrow letters counting less, so "Division" fits under a knob, while "Resonance" is cut. *Why:* the grid layout of tiles does not change with text length, and estimating keeps text layout out of every frame.
+- **Captions and radio options are cut, never wrapped.** A label that does not fit is cut with "…", and the hover text shows it in full. A cut radio option shows in full in the inspector. Widths are estimated per character, with narrow letters counting less, so "Division" fits under a knob, while "Resonance" is cut. *Why:* the grid layout of tiles does not change with text length, and estimating keeps text layout out of every frame.
 
 ### Hover text
 

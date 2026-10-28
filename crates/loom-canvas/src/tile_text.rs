@@ -147,15 +147,20 @@ pub fn for_each<'a>(module: &'a ModuleView, mut f: impl FnMut(TextItem<'a>)) {
             width: rect.width,
         });
         if let WidgetViewKind::Radio { options } = &widget.kind {
+            // Option text runs from just right of its button to the
+            // widget's right edge. It is cut with "…" like a caption, never
+            // wrapped (#394): a word split over two lines is hard to read,
+            // and the second line runs into the next option.
+            let option_width = rect.width - 12.0;
             for (i, option) in options.iter().enumerate() {
                 let centre = radio_centre(rect, i);
                 f(TextItem {
                     kind: TextKind::Option(index, i),
-                    content: Cow::Borrowed(option),
+                    content: fit_label(option, option_width, LABEL_SIZE),
                     anchor: Point::new(centre.x + 6.0, centre.y),
                     align: Align::Left,
                     size: LABEL_SIZE,
-                    width: rect.width - 12.0,
+                    width: option_width,
                 });
             }
         }
@@ -283,6 +288,44 @@ mod tests {
                 item.content
             );
         }
+    }
+
+    /// #394: a long option on a narrow radio is cut with "…" to fit its
+    /// widget, as captions are, so it never wraps onto a second line.
+    /// Options that fit are left as they are.
+    #[test]
+    fn long_radio_options_are_cut_to_fit() {
+        let mut module = module();
+        module.panel = PanelView {
+            width: 3,
+            height: 4,
+            widgets: vec![widget(
+                WidgetViewKind::Radio {
+                    options: vec!["Pink".into(), "Exponential".into(), "Brown".into()],
+                },
+                0,
+                0,
+                "Colour",
+            )],
+        };
+        let rect = module.widget_bounds(0).unwrap();
+        let options: Vec<_> = items(&module)
+            .into_iter()
+            .filter(|item| matches!(item.kind, TextKind::Option(..)))
+            .collect();
+        assert_eq!(options.len(), 3);
+        for item in &options {
+            assert!(
+                text_width(&item.content, item.size) <= item.width,
+                "{} fits on one line",
+                item.content
+            );
+            let text = item.bounds();
+            assert!(text.x + text.width <= rect.x + rect.width, "{} stays in its widget", item.content);
+        }
+        assert_eq!(options[0].content, "Pink");
+        assert!(options[1].content.ends_with('…'), "{}", options[1].content);
+        assert!("Exponential".starts_with(options[1].content.trim_end_matches('…')));
     }
 
     #[test]
