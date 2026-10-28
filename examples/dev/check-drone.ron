@@ -8,6 +8,8 @@ Patch(
         PatchModule(id: 2, kind: "loom.osc.sine@1"),
         PatchModule(id: 3, kind: "loom.math.mul@1", params: {"gain": 0.2}),
         PatchModule(id: 4, kind: "loom.io.audio-out@1"),
+        // The patch transport: 120 BPM, 4/4, running.
+        PatchModule(id: 5, kind: "loom.clock.transport@1"),
     ],
     cables: [
         PatchCable(from: (1, "phase"), to: (2, "phase")),

@@ -327,7 +327,11 @@ fn a_broken_copy_is_kept() {
     };
     assert!(error.starts_with("Could not restore the unsaved changes: "), "{error}");
     assert!(error.contains("The copy is kept at "), "{error}");
-    assert_eq!(app.controller.graph().nodes().count(), 0, "starts empty");
+    assert_eq!(
+        app.controller.graph().nodes().count(),
+        1,
+        "starts empty, but for its Transport"
+    );
     assert_eq!(fs::read_to_string(crashed.join("patch.ron")).unwrap(), "not a patch");
 }
 

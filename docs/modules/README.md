@@ -9,6 +9,7 @@ One page for each built-in module, made from its descriptor. After you change a 
 | Module | ID | Description |
 |---|---|---|
 | [Clock](loom.clock.clock.md) | `loom.clock.clock` | A phase, trigger, and gate at a musical rate, locked to the transport's bar 1. |
+| [Transport](loom.clock.transport.md) | `loom.clock.transport` | The patch's tempo, time signature, and play state. Every patch has exactly one. |
 
 ## Control
 

@@ -49,6 +49,18 @@ pub trait Module: Send {
     fn displays(&self, values: &mut [f32]) {
         let _ = values;
     }
+
+    /// Only for the Transport module ([`TRANSPORT_MODULE`](crate::TRANSPORT_MODULE)):
+    /// the transport changes to make before the next block. The engine
+    /// calls it before every block, on the audio thread, so the rules for
+    /// `process` apply. `grid` is true when the block starts on the
+    /// transport grid ([`TRANSPORT_GRID`](crate::TRANSPORT_GRID)): changes
+    /// found on the `run` and `reset` inputs must wait for it (rule 11).
+    /// Changes from parameters need not wait: they arrive at buffer starts.
+    fn transport_request(&mut self, grid: bool) -> crate::TransportRequest {
+        let _ = grid;
+        crate::TransportRequest::default()
+    }
 }
 
 /// Information about the current call to [`Module::process`].

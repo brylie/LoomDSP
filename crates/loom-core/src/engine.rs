@@ -17,7 +17,7 @@ use crate::module::{Module, PortIo, ProcessContext};
 use crate::panic::{PanicState, PanicTrigger, TriggerWatch};
 use crate::safety::{OutputSafety, SafetyStage};
 use crate::telemetry::{MeterReading, SCOPE_CHUNK, ScopeChunk, TelemetrySender, measure};
-use crate::transport::{TimeSignature, Transport};
+use crate::transport::{TRANSPORT_GRID, TimeSignature, Transport};
 use rtrb::{Consumer, Producer};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -378,6 +378,15 @@ impl Engine {
             if let PanicState::Fading(remaining) = self.panic {
                 n = n.min(remaining);
             }
+            // With a cable on the Transport's run or reset input, blocks end
+            // on the transport grid, so what the module reads in one step
+            // takes effect at the start of the next at any block size
+            // (clock.md, rule 11).
+            if self.schedule.transport.grid {
+                let into = (self.frame % TRANSPORT_GRID as u64) as usize;
+                n = n.min(TRANSPORT_GRID - into);
+            }
+            self.apply_transport_request();
             self.run_block(
                 position,
                 n,
@@ -398,6 +407,23 @@ impl Engine {
             }
         }
         self.stats.buffers.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Asks the Transport module, if the patch has one, for the changes to
+    /// make before the next block, and makes them (clock.md, Controls live
+    /// on the Transport module).
+    fn apply_transport_request(&mut self) {
+        let Some(slot) = self.schedule.transport.module else {
+            return;
+        };
+        let Some(module) = self.slots[slot as usize].as_mut() else {
+            return;
+        };
+        let grid = self.frame.is_multiple_of(TRANSPORT_GRID as u64);
+        let request = module.transport_request(grid);
+        if !request.is_empty() {
+            self.transport.apply(self.frame, request);
+        }
     }
 
     /// Starts a panic, unless one is running (panic.md, rule 3) or the

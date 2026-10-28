@@ -910,7 +910,7 @@ mod tests {
         assert_eq!(middle.len(), plain.bars(true, false).len() + 1);
         // Far: no mark, just the bars.
         assert_eq!(marked.bars(true, true).len(), plain.bars(true, true).len());
-        assert!(marked.bars(true, true).start >= middle.start + 1);
+        assert!(marked.bars(true, true).start > middle.start);
         // The mark sits between the port marker and the label.
         let [x, _, w, _] = ring.rect();
         assert!(x > PORT_RADIUS && x + w < 9.0 + crate::scene::CLOCK_MARK_SPACE);

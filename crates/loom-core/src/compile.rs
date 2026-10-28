@@ -181,6 +181,11 @@ pub(crate) struct TransportBuffers {
     pub bar_phase: Option<*mut f32>,
     pub beat_phase: Option<*mut f32>,
     pub playing: Option<*mut f32>,
+    /// Engine slot of the Transport module, if the patch has one.
+    pub module: Option<u32>,
+    /// True when the Transport's `run` or `reset` input has a cable: the
+    /// engine then splits blocks on the transport grid (rule 11).
+    pub grid: bool,
 }
 
 /// Identifies one shared default buffer. Value defaults are keyed by their
@@ -829,10 +834,17 @@ pub(crate) fn compile(
     let zero_ptr: *const f32 = zero.as_mut_ptr();
     let buf_ptrs: Vec<*mut f32> = buffers.iter_mut().map(|b| b.as_mut_ptr()).collect();
     let transport_buffer = |key: DefaultKey| default_buf.get(&key).map(|&buf| buf_ptrs[buf]);
+    // The Transport module, if any. The controller keeps a patch to one.
+    let transport_node = graph
+        .nodes
+        .iter()
+        .find(|(_, node)| node.descriptor.id == crate::transport::TRANSPORT_MODULE);
     let transport = TransportBuffers {
         bar_phase: transport_buffer(DefaultKey::BarPhase),
         beat_phase: transport_buffer(DefaultKey::BeatPhase),
         playing: transport_buffer(DefaultKey::Playing),
+        module: transport_node.and_then(|(_, node)| node.slot).map(|slot| slot as u32),
+        grid: transport_node.is_some_and(|(&id, _)| graph.cables.keys().any(|to| to.module == id)),
     };
 
     let resolve_input = |input: InputRef| -> (*const f32, bool) {

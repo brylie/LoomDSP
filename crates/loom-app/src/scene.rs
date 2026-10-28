@@ -220,6 +220,9 @@ pub fn update_panel_values_dragging(
                     let live = (w.kind == WidgetKind::Knob && all.iter().any(|r| r.enabled))
                         .then(|| controller.modulated(id, p))
                         .flatten();
+                    // While a cable drives the Transport's run input, the
+                    // Run toggle shows the state it sets (clock.md).
+                    let value = driven_run(controller, id, w).unwrap_or(value);
                     WidgetValue {
                         position: control_position(w.kind, spec, value),
                         peak: 0.0,
@@ -241,6 +244,24 @@ pub fn update_panel_values_dragging(
             values.set(id.0, index, value);
         }
     }
+}
+
+/// For the Transport's Run toggle while a cable drives its `run` input:
+/// 1 or 0, from the module's `running` display value. `None` otherwise.
+fn driven_run(controller: &Controller, id: ModuleId, w: &loom_core::Widget) -> Option<f32> {
+    if controller.transport_module() != Some(id) || w.bind != "run" {
+        return None;
+    }
+    let driven = controller
+        .graph()
+        .cables()
+        .any(|(_, to)| to == InputRef { module: id, port: 0 });
+    if !driven {
+        return None;
+    }
+    let d = controller.graph().node(id)?.descriptor;
+    let running = controller.display(id, d.display_index("running")?)?;
+    Some(if running >= 0.5 { 1.0 } else { 0.0 })
 }
 
 /// The value line of a light's or meter's hover text: the label and the

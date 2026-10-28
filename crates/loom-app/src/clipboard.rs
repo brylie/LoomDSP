@@ -81,13 +81,24 @@ impl Group {
     /// Takes the selected modules from the graph, with their inside cables
     /// and assignments. With `incoming`, cables and assignments from outside
     /// modules into the selection come too (duplicate). Outgoing ones and
-    /// MIDI mappings never do.
+    /// MIDI mappings never do. The Transport is left out: a patch has
+    /// exactly one, so a copy of it could never be added (clock.md).
     pub fn from_selection(
         graph: &Graph,
         positions: &BTreeMap<u32, Point>,
         selection: &BTreeSet<u32>,
         incoming: bool,
     ) -> Self {
+        let selection: BTreeSet<u32> = selection
+            .iter()
+            .copied()
+            .filter(|&id| {
+                graph
+                    .node(loom_core::ModuleId(id))
+                    .is_some_and(|node| node.descriptor.id != loom_core::TRANSPORT_MODULE)
+            })
+            .collect();
+        let selection = &selection;
         let modules: Vec<Member> = graph
             .nodes()
             .filter(|(id, _)| selection.contains(&id.0))

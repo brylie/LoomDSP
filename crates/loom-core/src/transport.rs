@@ -16,6 +16,39 @@ pub const MAX_TEMPO: f64 = 300.0;
 /// Tempo of a new engine, in beats per minute.
 pub const DEFAULT_TEMPO: f64 = 120.0;
 
+/// Module ID of the Transport module, the patch's one control surface for
+/// the transport (`docs/design/clock.md`, Controls live on the Transport
+/// module). The controller keeps a patch to one of it, and the engine asks
+/// it for transport changes ([`TransportRequest`]).
+pub const TRANSPORT_MODULE: &str = "loom.clock.transport";
+
+/// Frames in one step of the grid on which the Transport's `run` and
+/// `reset` inputs are read (rule 11). With a cable on either input, the
+/// engine splits every block at multiples of this many frames, counted from
+/// engine start, and applies what the module found at the next multiple.
+pub const TRANSPORT_GRID: usize = 32;
+
+/// Changes the Transport module asks the engine to make before the next
+/// block runs. See [`Module::transport_request`](crate::Module::transport_request).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct TransportRequest {
+    /// A new tempo, in beats per minute. Clamped by the engine.
+    pub tempo: Option<f64>,
+    /// A new time signature. An invalid one is ignored.
+    pub time_signature: Option<TimeSignature>,
+    /// Start (true) or stop (false).
+    pub running: Option<bool>,
+    /// Return to bar 1, as a jump.
+    pub reset: bool,
+}
+
+impl TransportRequest {
+    /// True when it asks for nothing.
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 /// Clamps a tempo to [`MIN_TEMPO`]..=[`MAX_TEMPO`], as a parameter is
 /// clamped. NaN becomes [`DEFAULT_TEMPO`].
 pub fn clamp_tempo(bpm: f64) -> f64 {
@@ -299,12 +332,38 @@ impl Transport {
         self.settings.tempo = tempo;
     }
 
+    /// Changes the bar length. The position does not move, but the bar
+    /// grid does, so a change is a jump (rule 10). The same time signature
+    /// again changes nothing.
     pub fn set_time_signature(&mut self, time_signature: TimeSignature) {
         debug_assert!(
             time_signature.is_valid(),
             "the Controller refuses invalid time signatures"
         );
-        self.settings.time_signature = time_signature;
+        if time_signature != self.settings.time_signature {
+            self.settings.time_signature = time_signature;
+            self.jump_pending = true;
+        }
+    }
+
+    /// Applies what the Transport module asked for, at `sample`: time
+    /// signature, tempo, running, then reset.
+    pub fn apply(&mut self, sample: u64, request: TransportRequest) {
+        if let Some(time_signature) = request.time_signature.filter(|t| t.is_valid()) {
+            self.set_time_signature(time_signature);
+        }
+        if let Some(tempo) = request.tempo {
+            let tempo = clamp_tempo(tempo);
+            if tempo != self.settings.tempo {
+                self.set_tempo(sample, tempo);
+            }
+        }
+        if let Some(running) = request.running {
+            self.set_running(sample, running);
+        }
+        if request.reset {
+            self.reset(sample);
+        }
     }
 
     /// Starts or stops at `sample`. Stopping holds the position.
@@ -401,6 +460,44 @@ mod tests {
             assert_eq!(info.phase_at(frame, 3.5), info.bar_phase_at(frame));
             assert_eq!(info.phase_at(frame, 1.0), info.beat_phase_at(frame));
         }
+    }
+
+    /// Rule 10: a new time signature is a jump; the same one again is not.
+    /// A request from the Transport module applies the same way, and clamps
+    /// its tempo.
+    #[test]
+    fn a_time_signature_change_is_a_jump() {
+        let mut transport = Transport::new(SAMPLE_RATE);
+        transport.set_time_signature(TimeSignature::FOUR_FOUR);
+        assert!(!transport.info(100).jumped());
+        let before = transport.info(100).position();
+        transport.set_time_signature(TimeSignature::new(3, 4));
+        let info = transport.info(100);
+        assert!(info.jumped());
+        assert_eq!(info.position(), before, "the position does not move");
+        transport.end_block();
+        transport.apply(
+            200,
+            TransportRequest {
+                tempo: Some(1_000.0),
+                time_signature: Some(TimeSignature::new(7, 3)),
+                running: Some(false),
+                reset: false,
+            },
+        );
+        let info = transport.info(200);
+        assert_eq!(info.tempo(), MAX_TEMPO);
+        assert_eq!(info.beats_per_bar(), 3.0, "an invalid time signature is ignored");
+        assert!(!info.playing() && !info.jumped());
+        transport.apply(
+            300,
+            TransportRequest {
+                reset: true,
+                ..TransportRequest::default()
+            },
+        );
+        assert!(transport.info(300).jumped());
+        assert_eq!(transport.info(300).position(), 0.0);
     }
 
     #[test]
