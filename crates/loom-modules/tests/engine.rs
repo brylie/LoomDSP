@@ -696,3 +696,29 @@ fn delay_and_allpass_stay_bounded_and_block_invariant_under_audio_rate_modulatio
         assert_eq!(ap, ref_allpass, "allpass block size {block} differs from 1");
     }
 }
+
+/// MIDI Note runs with no cable, because its gate light shows what it
+/// holds. So it follows every key while unplugged, and a cable added later
+/// finds no stuck gate (FR-GRAPH-09). An oscillator with no cable is
+/// skipped.
+#[test]
+fn midi_note_runs_unconnected_and_an_oscillator_does_not() {
+    let mut parts = loom_core::create_engine(loom_modules::registry(), EngineConfig::with_sample_rate(SAMPLE_RATE));
+    let note = parts.controller.add_module("loom.midi.note").unwrap();
+    let sine = parts.controller.add_module("loom.osc.sine").unwrap();
+    let report = parts.controller.commit().unwrap();
+    assert_eq!(report.skipped.iter().copied().collect::<Vec<_>>(), vec![sine]);
+
+    let gate = display_index(&parts, note, "gate");
+    let held = Note {
+        note: 60,
+        on: 10,
+        off: 10_000,
+    };
+    render(&mut parts, 128, 64, &[held]);
+    assert_eq!(
+        parts.controller.display(note, gate),
+        Some(1.0),
+        "the gate light follows the key"
+    );
+}

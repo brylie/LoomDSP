@@ -24,6 +24,11 @@
 //! 7. Work out which outputs carry stereo (ADR-0020, `width.rs`). The
 //!    report lists them. The schedule does not use them yet, so every
 //!    module still runs as one instance on one channel.
+//!
+//! Before step 3, the compiler marks the modules that can reach something
+//! the user hears or sees (FR-GRAPH-09, see [`reaches_a_root`]). The others
+//! are left out of the schedule. Their instances stay in their engine
+//! slots, so a cable that connects them again resumes their state.
 
 use crate::descriptor::{ModuleRole, ParamSpec, Polarity, PortDefault};
 use crate::graph::{AssignmentId, Graph, InputRef, ModuleId, OutputRef};
@@ -65,8 +70,11 @@ pub struct FeedbackLoop {
 /// What the compiler found.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CompileReport {
-    /// Number of modules in the schedule.
+    /// Number of modules in the graph, including skipped ones.
     pub modules: usize,
+    /// Modules left out of the schedule, because no path leads from them to
+    /// something the user hears or sees (FR-GRAPH-09). Sorted by ID.
+    pub skipped: BTreeSet<ModuleId>,
     /// Feedback loops, each run one sample at a time.
     pub loops: Vec<FeedbackLoop>,
     /// Modulated parameters with no live value, because the table set by
@@ -491,6 +499,9 @@ pub(crate) fn compile(
     let mut sccs = tarjan(&succ);
     // Tarjan emits SCCs in reverse topological order.
     sccs.reverse();
+    let probed: BTreeSet<ModuleId> = probes.values().map(|(from, _)| from.module).collect();
+    let modulated: BTreeSet<usize> = compiled.iter().map(|a| a.target_node).collect();
+    let live = reaches_a_root(&nodes, &succ, |v| probed.contains(&ids[v]) || modulated.contains(&v));
 
     // 3 and 4. Steps.
     let mut taps: Vec<TapSpec> = Vec::new();
@@ -502,6 +513,7 @@ pub(crate) fn compile(
     let widths = width::infer(graph);
     let mut report = CompileReport {
         modules: n,
+        skipped: (0..n).filter(|&v| !live[v]).map(|v| ids[v]).collect(),
         loops: Vec::new(),
         without_live_value: 0,
         per_channel: widths.per_channel,
@@ -523,8 +535,14 @@ pub(crate) fn compile(
 
     for scc in &sccs {
         let is_loop = scc.len() > 1 || self_loop[scc[0]];
+        // Every member of an SCC reaches every other, so they share one
+        // answer.
+        let is_live = live[scc[0]];
         if !is_loop {
             let v = scc[0];
+            if !is_live {
+                continue;
+            }
             match nodes[v].descriptor.role {
                 ModuleRole::Dsp(_) => steps.push(StepSpec::Module(v)),
                 ModuleRole::UnitDelay => {
@@ -536,6 +554,9 @@ pub(crate) fn compile(
             continue;
         }
 
+        // A skipped loop is still analysed, so the report shows its
+        // inserted delays on the canvas. Its taps are dropped below.
+        let taps_before = taps.len();
         let mut loop_taps = Vec::new();
         let members: BTreeSet<usize> = scc
             .iter()
@@ -759,16 +780,20 @@ pub(crate) fn compile(
             inserted_delays: inserted,
             inserted_assignment_delays: inserted_assignments,
         });
-        steps.push(StepSpec::Loop {
-            modules: ordered,
-            taps: loop_taps,
-        });
+        if is_live {
+            steps.push(StepSpec::Loop {
+                modules: ordered,
+                taps: loop_taps,
+            });
+        } else {
+            taps.truncate(taps_before);
+        }
     }
 
     // 5. One buffer per modulated parameter. Sources in assignment id order.
     let mut groups: BTreeMap<(usize, usize), Vec<usize>> = BTreeMap::new();
     for (i, assignment) in compiled.iter().enumerate() {
-        if matches!(nodes[assignment.target_node].descriptor.role, ModuleRole::Dsp(_)) {
+        if live[assignment.target_node] && matches!(nodes[assignment.target_node].descriptor.role, ModuleRole::Dsp(_)) {
             groups
                 .entry((assignment.target_node, assignment.param))
                 .or_default()
@@ -798,7 +823,7 @@ pub(crate) fn compile(
     let default_of = |input: InputRef| nodes[index_of[&input.module]].descriptor.inputs[input.port].default;
     let mut default_buf: BTreeMap<DefaultKey, usize> = BTreeMap::new();
     for (v, node) in nodes.iter().enumerate() {
-        if !matches!(node.descriptor.role, ModuleRole::Dsp(_)) {
+        if !live[v] || !matches!(node.descriptor.role, ModuleRole::Dsp(_)) {
             continue;
         }
         for port in 0..node.descriptor.inputs.len() {
@@ -1068,6 +1093,57 @@ fn compile_midi_maps(graph: &Graph, synced: &BTreeMap<MidiMappingId, u32>) -> Ve
     maps
 }
 
+/// True for each module that the user can hear or see, or that feeds one
+/// over cables and assignments (FR-GRAPH-09). `succ` lists each module's
+/// successors. The roots are:
+///
+/// - the audio output, which the user hears;
+/// - a module that `shown` names: one with a probed output, whose meter or
+///   scope the user watches (`docs/design/telemetry.md`), or one with a
+///   modulated parameter, whose knob shows a moving live dot;
+/// - a module that publishes display values or has a light or meter on its
+///   panel (`docs/design/panels.md`). It keeps running
+///   unconnected, so its lights tell the truth. MIDI Note is one, so it
+///   follows every note on and off even with no cable, and a cable added
+///   later never finds a stuck note.
+///
+/// Walks backwards from the roots, so the cost is linear in modules and
+/// edges.
+fn reaches_a_root(nodes: &[&crate::graph::Node], succ: &[Vec<usize>], shown: impl Fn(usize) -> bool) -> Vec<bool> {
+    let n = nodes.len();
+    let mut pred: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for (u, next) in succ.iter().enumerate() {
+        for &v in next {
+            pred[v].push(u);
+        }
+    }
+    let is_root = |v: usize| {
+        let descriptor = nodes[v].descriptor;
+        matches!(descriptor.role, ModuleRole::AudioOutput)
+            || shown(v)
+            || !descriptor.displays.is_empty()
+            || descriptor
+                .panel
+                .widgets
+                .iter()
+                .any(|w| matches!(w.kind, crate::WidgetKind::Light | crate::WidgetKind::Meter))
+    };
+    let mut live = vec![false; n];
+    let mut stack: Vec<usize> = (0..n).filter(|&v| is_root(v)).collect();
+    for &v in &stack {
+        live[v] = true;
+    }
+    while let Some(v) = stack.pop() {
+        for &u in &pred[v] {
+            if !live[u] {
+                live[u] = true;
+                stack.push(u);
+            }
+        }
+    }
+    live
+}
+
 /// Tarjan's strongly connected components. Returns SCCs in reverse
 /// topological order, each sorted.
 fn tarjan(succ: &[Vec<usize>]) -> Vec<Vec<usize>> {
@@ -1205,13 +1281,28 @@ mod tests {
         graph
     }
 
+    /// A probe on output 0 of each module in `modules`, so they count as
+    /// shown and are scheduled.
+    fn probes_on(modules: impl IntoIterator<Item = u32>) -> BTreeMap<ProbeId, (OutputRef, ProbeKind)> {
+        modules
+            .into_iter()
+            .map(|m| {
+                let from = OutputRef {
+                    module: ModuleId(m),
+                    port: 0,
+                };
+                (ProbeId(m), (from, ProbeKind::Meter))
+            })
+            .collect()
+    }
+
     fn input_ptr(schedule: &Schedule, op: usize, port: usize) -> *const f32 {
         schedule.input_ptrs[schedule.ops[op].inputs.0 as usize + port]
     }
 
     #[test]
     fn inputs_that_follow_the_same_default_share_one_buffer() {
-        let schedule = compile(&followers(100), &BTreeMap::new(), &BTreeMap::new(), 48_000.0, 64).0;
+        let schedule = compile(&followers(100), &probes_on(1..=100), &BTreeMap::new(), 48_000.0, 64).0;
         // 100 outputs, one bar phase buffer, one buffer holding 0.5.
         assert_eq!(schedule._buffers.len(), 102);
         let bar = schedule.transport.bar_phase.expect("bar phase is used") as *const f32;
@@ -1241,7 +1332,7 @@ mod tests {
             port: 0,
         };
         graph.cables.insert(to, from);
-        let schedule = compile(&graph, &BTreeMap::new(), &BTreeMap::new(), 48_000.0, 64).0;
+        let schedule = compile(&graph, &probes_on([1]), &BTreeMap::new(), 48_000.0, 64).0;
         // Module 2 runs first; module 1 reads module 2's output.
         let source = schedule.output_ptrs[schedule.ops[0].outputs.0 as usize] as *const f32;
         assert_eq!(input_ptr(&schedule, 1, 0), source);
@@ -1250,6 +1341,155 @@ mod tests {
         let bar = schedule.transport.bar_phase.expect("still used") as *const f32;
         assert_eq!(input_ptr(&schedule, 1, 1), bar);
         assert_eq!(input_ptr(&schedule, 0, 0), bar);
+    }
+
+    /// `test.lit`: a follower with one display value.
+    static LIT: crate::ModuleDescriptor = crate::ModuleDescriptor {
+        id: "test.lit",
+        displays: &[crate::DisplaySpec {
+            name: "lit",
+            label: "Lit",
+            description: "A test light.",
+            kind: crate::DisplayKind::Level,
+        }],
+        ..FOLLOWER
+    };
+
+    /// `test.with-param`: a follower with one parameter to modulate.
+    static WITH_PARAM: crate::ModuleDescriptor = crate::ModuleDescriptor {
+        id: "test.with-param",
+        params: &[ParamSpec {
+            name: "p",
+            label: "p",
+            description: "A test parameter.",
+            min: 0.0,
+            max: 1.0,
+            default: 0.0,
+            unit: "",
+            options: crate::descriptor::ParamOptions::DEFAULT,
+        }],
+        ..FOLLOWER
+    };
+
+    /// Adds `descriptor` to `graph` as module `id`, in slot `id`.
+    fn add(graph: &mut Graph, id: u32, descriptor: &'static crate::ModuleDescriptor) {
+        let node = crate::Node {
+            descriptor,
+            params: descriptor.default_params(),
+            slot: Some(id as usize),
+            ranges: vec![None; descriptor.params.len()],
+        };
+        graph.nodes.insert(ModuleId(id), node);
+    }
+
+    /// Plugs output 0 of `from` into input `port` of `to`.
+    fn cable(graph: &mut Graph, from: u32, to: u32, port: usize) {
+        let from = OutputRef {
+            module: ModuleId(from),
+            port: 0,
+        };
+        let to = InputRef {
+            module: ModuleId(to),
+            port,
+        };
+        graph.cables.insert(to, from);
+    }
+
+    /// The slots the schedule runs, in order, loop members included.
+    fn scheduled_slots(schedule: &Schedule) -> Vec<u32> {
+        let mut slots = Vec::new();
+        for step in &schedule.steps {
+            match *step {
+                Step::Module(op) => slots.push(schedule.ops[op as usize].slot),
+                Step::Loop { ops, .. } => {
+                    for &op in &schedule.loop_ops[ops.0 as usize..ops.1 as usize] {
+                        slots.push(schedule.ops[op as usize].slot);
+                    }
+                }
+                Step::Tap(_) => {}
+            }
+        }
+        slots
+    }
+
+    /// A chain that leads to nothing the user hears or sees is left out of
+    /// the schedule and listed in the report (FR-GRAPH-09). A module with
+    /// a probe, and everything that feeds it, runs.
+    #[test]
+    fn modules_that_reach_nothing_are_skipped() {
+        let mut graph = followers(4);
+        // 2 -> 1 is probed. 4 -> 3 leads nowhere.
+        cable(&mut graph, 2, 1, 0);
+        cable(&mut graph, 4, 3, 0);
+        let (schedule, report) = compile(&graph, &probes_on([1]), &BTreeMap::new(), 48_000.0, 64);
+        assert_eq!(scheduled_slots(&schedule), vec![1, 0]);
+        assert_eq!(report.skipped, BTreeSet::from([ModuleId(3), ModuleId(4)]));
+        assert_eq!(report.modules, 4);
+
+        let (schedule, report) = compile(&graph, &BTreeMap::new(), &BTreeMap::new(), 48_000.0, 64);
+        assert!(schedule.steps.is_empty());
+        assert_eq!(report.skipped.len(), 4);
+        // Skipped modules read no transport, so the engine fills nothing.
+        assert!(schedule.transport.bar_phase.is_none());
+    }
+
+    /// A module with display values runs with no cable, so its lights stay
+    /// true, and so does the module feeding it.
+    #[test]
+    fn a_module_with_lights_runs_unconnected() {
+        let mut graph = followers(1);
+        add(&mut graph, 2, &LIT);
+        cable(&mut graph, 1, 2, 0);
+        let (schedule, report) = compile(&graph, &BTreeMap::new(), &BTreeMap::new(), 48_000.0, 64);
+        assert_eq!(scheduled_slots(&schedule), vec![0, 2]);
+        assert!(report.skipped.is_empty());
+    }
+
+    /// A modulated parameter shows a live dot on its knob, so its module
+    /// runs, and so does the source that modulates it.
+    #[test]
+    fn a_modulated_module_runs_unconnected() {
+        let mut graph = followers(2);
+        add(&mut graph, 3, &WITH_PARAM);
+        let assignment = crate::graph::Assignment {
+            source: OutputRef {
+                module: ModuleId(1),
+                port: 0,
+            },
+            target: ModuleId(3),
+            param: 0,
+            depth: 0.5,
+            polarity: None,
+            enabled: true,
+        };
+        graph.assignments.insert(AssignmentId(1), assignment);
+        let (schedule, report) = compile(&graph, &BTreeMap::new(), &BTreeMap::new(), 48_000.0, 64);
+        assert_eq!(scheduled_slots(&schedule), vec![0, 3]);
+        assert_eq!(schedule.fills.len(), 1);
+        assert_eq!(report.skipped, BTreeSet::from([ModuleId(2)]));
+    }
+
+    /// A feedback loop that reaches nothing is still reported, with its
+    /// inserted delay, so the canvas can show it. It is not scheduled and
+    /// keeps no delay taps.
+    #[test]
+    fn a_skipped_loop_is_reported_but_not_run() {
+        let mut graph = followers(3);
+        // 1 <-> 2 is a loop with no unit delay. 3 is probed and alone.
+        cable(&mut graph, 1, 2, 0);
+        cable(&mut graph, 2, 1, 0);
+        let (schedule, report) = compile(&graph, &probes_on([3]), &BTreeMap::new(), 48_000.0, 64);
+        assert_eq!(scheduled_slots(&schedule), vec![2]);
+        assert!(schedule.taps.is_empty());
+        assert_eq!(report.loops.len(), 1);
+        assert_eq!(report.loops[0].inserted_delays.len(), 1);
+        assert_eq!(report.skipped, BTreeSet::from([ModuleId(1), ModuleId(2)]));
+
+        // Probed, the same loop runs one sample at a time with its delay.
+        let (schedule, report) = compile(&graph, &probes_on([1]), &BTreeMap::new(), 48_000.0, 64);
+        assert_eq!(scheduled_slots(&schedule), vec![0, 1]);
+        assert_eq!(schedule.taps.len(), 1);
+        assert_eq!(report.skipped, BTreeSet::from([ModuleId(3)]));
     }
 
     /// A schedule with one smoothed fill per key, stored in the given order
