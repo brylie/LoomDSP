@@ -190,9 +190,14 @@ impl Module for Svf {
         }
     }
 
+    /// Clears the filter memory and snaps the smoothing to its targets
+    /// (live patching spec, rule 7).
     fn reset(&mut self) {
         self.ic1 = 0.0;
         self.ic2 = 0.0;
+        let (cutoff, resonance) = (self.cutoff.target(), self.resonance.target());
+        self.cutoff.reset(cutoff);
+        self.resonance.reset(resonance);
     }
 }
 
@@ -327,8 +332,12 @@ impl Module for OnePole {
         }
     }
 
+    /// Clears the integrator and snaps the cutoff to its target (live
+    /// patching spec, rule 7).
     fn reset(&mut self) {
         self.state = 0.0;
+        let cutoff = self.cutoff.target();
+        self.cutoff.reset(cutoff);
     }
 }
 

@@ -69,6 +69,7 @@ Every render fails if a port or parameter has an empty label or description, and
 | `.check_block_sizes()` | Renders with block sizes 1, 77, and 512 and fails unless all three are bit-identical. |
 | `.check_reference(path)` | Renders in blocks of 512 and compares with the reference file. |
 | `.check(path)` | Both checks. This is what most tests call. |
+| `.check_reset_snaps_smoothing()` | Renders a new instance, and a second one that held its values for 1 s on silent inputs before `reset()`. Fails unless both are bit-identical from the first frame: `reset()` must snap smoothing to its targets and clear the state `process` changes ([live patching](live-patching.md), rule 7). `crates/loom-modules/tests/reset.rs` runs it on every built-in DSP module, with every parameter away from its default. |
 | `.check_non_finite_recovery()` | For each input in turn, and for each of NaN, infinity, and minus infinity, puts that value on the input for 8 frames from frame 1000, as a connected cable. Renders in blocks of 1 frame (as a feedback loop calls the module) and of 512. Fails unless every output is finite again 10 ms after the bad frames (480 frames at 48 kHz, scaled with the sample rate), up to the end of the render. Every other frame and input reads what the render reads without the check. |
 
 `reference!("name")` gives `tests/reference/name.wav` inside the crate that calls it.
@@ -103,7 +104,7 @@ Golden-audio tests for whole patches, the other half of NFR-OSS-05 ([#93](https:
 
 ## Rules
 
-1. **Each render uses a new module instance**, made by the descriptor's factory, with every parameter set to its default first and then to the test's values. *Why:* this is how the engine creates a module (`Controller::add_module`), and no render can leak state into the next.
+1. **Each render uses a new module instance**, made by the descriptor's factory, with every parameter set to its default first and then to the test's values, and then `reset()` once, so smoothing starts at those values. *Why:* this is how the engine creates a module (`Controller::add_module`), and no render can leak state into the next.
 2. **The module is created with `max_block` 512** for every render. *Why:* the largest block in the check is 512, and a module's output must not depend on `max_block`.
 3. **Unconnected inputs read their port default**, as the engine does: a fixed value, bar phase, beat phase, or playing, computed from the same transport the module sees. *Why:* a module that follows the transport must be testable without a patch.
 4. **Each block gets the transport, MIDI, and inputs for exactly its frames.** The transport for a block that starts at frame `k` is the render's transport moved on by `k` frames (`TransportInfo::later`). *Why:* the harness must split a render the way the engine does, or the block-size check would test the harness instead of the module.
@@ -126,11 +127,12 @@ Golden-audio tests for whole patches, the other half of NFR-OSS-05 ([#93](https:
 - [x] The module checklist in CONTRIBUTING.md points to the harness.
 - [x] `check_non_finite_recovery` fails for a module that keeps a NaN in its state, naming the module, input, value, output, and frame, and passes for a module without state. It fails when the render is too short to show recovery.
 - [x] Every built-in DSP module in `loom_modules::ALL` passes `check_non_finite_recovery`.
+- [x] Every built-in DSP module in `loom_modules::ALL` passes `check_reset_snaps_smoothing`.
 
 ## Out of scope
 
 - Changing parameters, tempo, or the play state during a render. Use the engine tests in `loom-modules/tests/engine.rs`, or add it here when a module needs it.
-- Testing `reset`.
+- Testing `reset` beyond `check_reset_snaps_smoothing`.
 - Plugin host tests.
 
 ## Open points

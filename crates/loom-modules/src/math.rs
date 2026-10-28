@@ -108,6 +108,12 @@ impl Module for Add {
     fn param_glide(&self, index: usize) -> Option<f32> {
         if index == 0 { self.offset.gliding() } else { None }
     }
+
+    /// Snaps the offset to its target (live patching spec, rule 7).
+    fn reset(&mut self) {
+        let target = self.offset.target();
+        self.offset.reset(target);
+    }
 }
 
 /// `loom.math.mul`: `a * b * gain`. An unconnected `b` counts as 1.
@@ -191,6 +197,12 @@ impl Module for Mul {
 
     fn param_glide(&self, index: usize) -> Option<f32> {
         if index == 0 { self.gain.gliding() } else { None }
+    }
+
+    /// Snaps the gain to its target (live patching spec, rule 7).
+    fn reset(&mut self) {
+        let target = self.gain.target();
+        self.gain.reset(target);
     }
 }
 

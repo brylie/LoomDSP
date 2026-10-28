@@ -94,9 +94,11 @@ fn a_cold_right_copy_clicks_and_a_crossfade_only_hides_it() {
     let fade = (0.005 * SAMPLE_RATE) as usize;
     println!("SVF copy 1 joining at 100 ms, same signal on both sides");
     println!("output    cutoff  res   | cold: peak  step    settle | 5 ms fade: peak  step    settle");
-    // The SVF is built with a cutoff of 1000 Hz and a resonance of 0.2, and
-    // `set_param` glides from there over 10 ms. So the 1000 Hz row shows
-    // the filter's own memory alone, and the others add the glide.
+    // The harness resets a new instance after its values are set, so copy
+    // 1 starts at its cutoff with no glide (live patching spec, rule 7).
+    // Each row shows the filter's own memory alone. Before rule 7, rows
+    // other than 1000 Hz also glided from the built-in cutoff, as ADR-0022
+    // measured.
     for (output, cutoff, resonance) in [
         ("lowpass", 200.0, 0.2),
         ("lowpass", 1_000.0, 0.2),

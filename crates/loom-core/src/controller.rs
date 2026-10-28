@@ -64,6 +64,7 @@ pub fn create_engine(registry: Arc<Registry>, config: EngineConfig) -> EnginePar
         garbage: garbage_rx,
         free_slots: (0..config.max_modules).rev().collect(),
         pending_removals: Vec::new(),
+        fresh: BTreeMap::new(),
         probes: BTreeMap::new(),
         next_probe: 1,
         next_id: 1,
@@ -102,6 +103,18 @@ impl MidiSender {
     }
 }
 
+/// A module added since the last commit, with what the engine needs to
+/// take it in.
+struct Fresh {
+    module: Box<dyn crate::Module>,
+    /// The module's ID, which owns its display values.
+    id: u32,
+    /// How many display values it publishes.
+    displays: u8,
+    /// Bit `i` set when display value `i` is a trigger.
+    triggers: u8,
+}
+
 /// Edits the graph and keeps the engine in sync.
 ///
 /// Structural edits (add, remove, connect, disconnect, add or remove a
@@ -116,6 +129,10 @@ pub struct Controller {
     garbage: Consumer<Garbage>,
     free_slots: Vec<usize>,
     pending_removals: Vec<usize>,
+    /// Modules added since the last commit, by slot. They stay here, where
+    /// their first values are set directly, until `commit` resets them and
+    /// sends them to the engine (live patching spec, rule 7).
+    fresh: BTreeMap<usize, Fresh>,
     probes: BTreeMap<ProbeId, (OutputRef, ProbeKind)>,
     next_probe: u32,
     next_id: u32,
@@ -214,10 +231,9 @@ impl Controller {
                 for (index, param) in descriptor.params.iter().enumerate() {
                     module.set_param(index, param.default);
                 }
-                // The new slot is not in the running schedule yet, so
-                // inserting it now is harmless and spreads the work out.
-                let insert = Command::InsertModule {
-                    slot,
+                // Held until the commit, so the values set before it are
+                // the module's first values, not a glide target.
+                let fresh = Fresh {
                     module,
                     id: id.0,
                     displays: descriptor.displays.len() as u8,
@@ -228,10 +244,7 @@ impl Controller {
                         .filter(|(_, d)| d.kind == crate::descriptor::DisplayKind::Trigger)
                         .fold(0, |mask, (i, _)| mask | (1 << i)),
                 };
-                if let Err(rtrb::PushError::Full(_)) = self.commands.push(insert) {
-                    self.free_slots.push(slot);
-                    return Err(LoomError::QueueFull);
-                }
+                self.fresh.insert(slot, fresh);
                 Some(slot)
             }
             ModuleRole::UnitDelay | ModuleRole::AudioOutput => None,
@@ -255,9 +268,14 @@ impl Controller {
         self.probes.retain(|_, (from, _)| from.module != id);
         self.graph.midi_mappings.retain(|_, mapping| mapping.target != id);
         if let Some(slot) = node.slot {
-            // The running schedule still uses this slot. The instance is
-            // removed after the next schedule swap (see `commit`).
-            self.pending_removals.push(slot);
+            if self.fresh.remove(&slot).is_some() {
+                // Never sent: the engine has nothing to remove.
+                self.free_slots.push(slot);
+            } else {
+                // The running schedule still uses this slot. The instance
+                // is removed after the next schedule swap (see `commit`).
+                self.pending_removals.push(slot);
+            }
         }
         self.dirty = true;
         Ok(())
@@ -610,7 +628,13 @@ impl Controller {
                     .map(|(id, mapping)| (id, mapping.control))
             })
             .collect();
-        if let Some(slot) = node.slot {
+        if let Some(fresh) = node.slot.and_then(|slot| self.fresh.get_mut(&slot)) {
+            // Not in the engine yet: no command, and no edit to order
+            // against MIDI.
+            for &(index, value) in &clamped {
+                fresh.module.set_param(index, value);
+            }
+        } else if let Some(slot) = node.slot {
             // Check first, then send, then write the graph. A full queue
             // then changes nothing the engine and the graph could disagree on.
             if self.commands.slots() < clamped.len() {
@@ -668,6 +692,12 @@ impl Controller {
         })?;
         let value = spec.clamp(value);
         node.params[index] = value;
+        if let Some(fresh) = node.slot.and_then(|slot| self.fresh.get_mut(&slot)) {
+            // Not in the engine yet: no command, and no edit to order
+            // against MIDI.
+            fresh.module.set_param(index, value);
+            return Ok(value);
+        }
         let edit = mapping.map(|(_, control)| (control, self.next_edit));
         if let Some(slot) = node.slot
             && self
@@ -753,6 +783,10 @@ impl Controller {
     /// Clears a module's internal state.
     pub fn reset_module(&mut self, module: ModuleId) -> Result<(), LoomError> {
         if let Some(slot) = self.node(module)?.slot {
+            if let Some(fresh) = self.fresh.get_mut(&slot) {
+                fresh.module.reset();
+                return Ok(());
+            }
             self.commands
                 .push(Command::ResetModule { slot })
                 .map_err(|_| LoomError::QueueFull)?;
@@ -935,9 +969,31 @@ impl Controller {
         if !self.dirty {
             return Ok(&self.last_report);
         }
-        // Make sure the swap and every removal fit before sending anything,
-        // so the engine never sees half an update.
-        if self.commands.slots() < 1 + self.pending_removals.len() {
+        // New modules go in first, after `reset()` snaps their smoothing to
+        // the values set since they were added (live patching spec, rule
+        // 7). An instance the schedule does not use yet changes nothing, so
+        // when they do not all fit with the swap, the ones that fit go now
+        // and the rest wait for the next commit. Their later edits are
+        // commands, as for any module in the engine.
+        let room = self.commands.slots().saturating_sub(1 + self.pending_removals.len());
+        let waiting = self.fresh.len().saturating_sub(room);
+        let sending: Vec<usize> = self.fresh.keys().copied().take(room).collect();
+        for slot in sending {
+            let mut fresh = self.fresh.remove(&slot).expect("listed above");
+            fresh.module.reset();
+            let insert = Command::InsertModule {
+                slot,
+                module: fresh.module,
+                id: fresh.id,
+                displays: fresh.displays,
+                triggers: fresh.triggers,
+            };
+            let pushed = self.commands.push(insert).is_ok();
+            debug_assert!(pushed, "room was checked above");
+        }
+        // Make sure the swap and every removal fit before sending them, so
+        // the engine never sees half an update.
+        if waiting > 0 || self.commands.slots() < 1 + self.pending_removals.len() {
             return Err(LoomError::QueueFull);
         }
         // What the graph holds per mapping. With a screen edit on its way,

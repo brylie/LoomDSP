@@ -169,6 +169,9 @@ fn a_failed_clamp_keeps_the_old_range() {
     let c = &mut parts.controller;
     let mul = c.add_module("loom.math.mul").unwrap();
     c.set_param(mul, 0, 0.8).unwrap();
+    // In the engine now, so its edits are commands. A new module takes its
+    // values directly until the commit (live patching spec, rule 7).
+    c.commit().unwrap();
     // Fill the queue: the engine is not running, so nothing drains it.
     while c.set_param(mul, 0, 0.8).is_ok() {}
     let error = c.set_range(mul, 0, FINE).unwrap_err();
