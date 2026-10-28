@@ -1,6 +1,8 @@
 //! Smoke test for `loom-app --screenshot` and `--screenshot-window`: they
 //! render an example patch to a PNG file and exit with status 0. Skipped
-//! where no GPU adapter is found.
+//! where no GPU adapter is found, unless `LOOM_REQUIRE_GPU=1` is set: then a
+//! missing adapter fails the test. The macOS and Windows CI jobs set it, so
+//! a skip there cannot pass for a test that drew the canvas (#5).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -56,6 +58,12 @@ fn running() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/patches/running.ron")
 }
 
+/// True when `LOOM_REQUIRE_GPU` is set to `1`: a missing GPU adapter is
+/// then a failure, not a skip.
+fn gpu_required() -> bool {
+    std::env::var("LOOM_REQUIRE_GPU").is_ok_and(|value| value == "1")
+}
+
 fn capture(patch: &Path, flag: &str, name: &str, args: &[&str]) -> Option<(u32, u32, Vec<u8>)> {
     let out = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(name);
     let _ = std::fs::remove_file(&out);
@@ -69,6 +77,7 @@ fn capture(patch: &Path, flag: &str, name: &str, args: &[&str]) -> Option<(u32, 
     let stderr = String::from_utf8_lossy(&result.stderr);
     // Must match `screenshot::NO_GPU`.
     if stderr.contains("no GPU adapter") {
+        assert!(!gpu_required(), "LOOM_REQUIRE_GPU is set, but {stderr}");
         eprintln!("skipped: {stderr}");
         return None;
     }
