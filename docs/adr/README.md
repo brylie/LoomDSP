@@ -36,13 +36,13 @@ The status line holds one of these values and nothing else. The date line is the
 | [0000](0000-template.md) | Template | n/a |
 | [0001](0001-lock-free-control-audio-boundary.md) | Lock-free boundary between control and audio threads | Accepted |
 | [0002](0002-graph-execution-and-feedback.md) | Graph execution model and sample-accurate feedback | Accepted |
-| [0003](0003-single-worklet-web-runtime.md) | One WASM instance per patch in a single AudioWorklet | Deferred (web target) |
+| [0003](0003-single-worklet-web-runtime.md) | One WASM instance per patch in a single AudioWorklet | Deferred |
 | [0004](0004-export-as-runtime-plus-patch-data.md) | Export plugins as a prebuilt runtime plus patch data | Deferred |
 | [0005](0005-rust-end-to-end.md) | Rust end to end | Accepted |
 | [0006](0006-dependency-and-licence-policy.md) | Dependency and licence policy | Accepted |
 | [0007](0007-polymorphic-signal-model.md) | Polymorphic signal model | Accepted |
 | [0008](0008-patch-format-ron.md) | Patch format in RON | Accepted |
-| [0009](0009-ui-stack-iced.md) | UI stack: Iced (canvas decided in ADR-0010) | Accepted in part |
+| [0009](0009-ui-stack-iced.md) | UI stack: Iced (canvas decided in ADR-0010) | Accepted |
 | [0010](0010-own-patch-canvas.md) | Our own patch canvas, built as an Iced widget | Accepted |
 | [0011](0011-everything-is-a-module.md) | Everything is a module | Accepted |
 | [0012](0012-arrangement-from-phase-driven-primitives.md) | Arrangement from phase-driven primitives | Accepted |

@@ -1,6 +1,6 @@
 # ADR-0002: Graph execution model and sample-accurate feedback
 
-- **Status:** Accepted. Confirmed by P0 benchmarks (see Validation).
+- **Status:** Accepted
 - **Date:** 2026-10-13
 - **Related requirements:** FR-GRAPH-03, FR-GRAPH-04, FR-ENCAP-07, NFR-PERF-01, NFR-PERF-02, NFR-PERF-08
 

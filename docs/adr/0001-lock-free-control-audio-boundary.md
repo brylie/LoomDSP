@@ -1,6 +1,6 @@
 # ADR-0001: Lock-free boundary between control and audio threads
 
-- **Status:** Accepted (implemented in P0)
+- **Status:** Accepted
 - **Date:** 2026-10-13
 - **Related requirements:** NFR-RT-01 to 07, FR-GRAPH-01, FR-GRAPH-02, NFR-WEB-01, NFR-WEB-02
 

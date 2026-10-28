@@ -1,6 +1,6 @@
 # ADR-0003: One WASM instance per patch in a single AudioWorklet
 
-- **Status:** Deferred. Applies only if the optional web target, now deferred, goes ahead.
+- **Status:** Deferred
 - **Date:** 2026-10-13
 - **Related requirements:** FR-WAM-01, FR-WAM-02, FR-APP-02, NFR-WEB-01 to 04
 
