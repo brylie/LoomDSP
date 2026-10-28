@@ -30,7 +30,7 @@ Brings any signal into the phase range, 0 to 1. Wrap goes round the edge; fold t
 
 ## Panel
 
-3 by 3 grid units.
+6 by 3 grid units.
 
 - Radio buttons: **Mode** (`mode`) (Wrap, Fold)
 

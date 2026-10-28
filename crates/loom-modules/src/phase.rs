@@ -254,7 +254,7 @@ pub static WRAP: ModuleDescriptor = ModuleDescriptor {
     .integer()
     .choices(&["Wrap", "Fold"])],
     role: ModuleRole::Dsp(|_| Box::new(Wrap { fold: false })),
-    panel: Panel::new(3, 3, &[Widget::radio(0, 0, "mode")]),
+    panel: Panel::new(6, 3, &[Widget::radio(0, 0, "mode")]),
     displays: &[],
 };
 

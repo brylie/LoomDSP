@@ -31,7 +31,7 @@ Takes the input's value on a trigger and holds it. With noise on the input, it m
 
 ## Panel
 
-3 by 3 grid units.
+6 by 3 grid units.
 
 - Radio buttons: **Mode** (`mode`) (Sample, Track)
 

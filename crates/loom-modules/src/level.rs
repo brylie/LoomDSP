@@ -79,7 +79,7 @@ pub static AMP: ModuleDescriptor = ModuleDescriptor {
         })
     }),
     // A knob is 3 by 3 and a two-way radio is 3 by 3, so the tile is 3 by 6.
-    panel: Panel::new(3, 6, &[Widget::knob(0, 0, "gain"), Widget::radio(0, 3, "response")]),
+    panel: Panel::new(6, 6, &[Widget::knob(0, 0, "gain"), Widget::radio(0, 3, "response")]),
     displays: &[],
 };
 

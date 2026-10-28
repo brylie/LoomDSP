@@ -297,11 +297,11 @@ mod tests {
     fn long_radio_options_are_cut_to_fit() {
         let mut module = module();
         module.panel = PanelView {
-            width: 3,
+            width: 6,
             height: 4,
             widgets: vec![widget(
                 WidgetViewKind::Radio {
-                    options: vec!["Pink".into(), "Exponential".into(), "Brown".into()],
+                    options: vec!["Pink".into(), "Exponential decay".into(), "Brown".into()],
                 },
                 0,
                 0,
@@ -329,7 +329,8 @@ mod tests {
         }
         assert_eq!(options[0].content, "Pink");
         assert!(options[1].content.ends_with('…'), "{}", options[1].content);
-        assert!("Exponential".starts_with(options[1].content.trim_end_matches('…')));
+        assert!("Exponential decay".starts_with(options[1].content.trim_end_matches('…')));
+        assert_eq!(options[2].content, "Brown");
     }
 
     #[test]

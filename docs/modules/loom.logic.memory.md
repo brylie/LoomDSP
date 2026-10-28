@@ -31,7 +31,7 @@ Remembers a gate. Set and reset, toggle, or data (a D latch) mode. Reset wins a 
 
 ## Panel
 
-6 by 4 grid units.
+9 by 4 grid units.
 
 - Radio buttons: **Mode** (`mode`) (Set and reset, Toggle, Data)
 - Light: **State** (`state`): Lit while the remembered gate is high.

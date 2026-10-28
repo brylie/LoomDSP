@@ -32,7 +32,7 @@ Scales a signal by a control signal, with a linear or exponential response.
 
 ## Panel
 
-3 by 6 grid units.
+6 by 6 grid units.
 
 - Knob: **Gain** (`gain`)
 - Radio buttons: **Response** (`response`) (Linear, Exponential)

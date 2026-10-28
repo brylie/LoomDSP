@@ -32,7 +32,7 @@ Makes a gate from two signals: high while A is above B, or while A is below B. H
 
 ## Panel
 
-6 by 4 grid units.
+9 by 4 grid units.
 
 - Radio buttons: **Mode** (`mode`) (Above, Below)
 - Knob: **Hysteresis** (`hysteresis`)

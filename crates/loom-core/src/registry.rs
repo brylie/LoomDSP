@@ -619,14 +619,14 @@ mod tests {
     #[test]
     fn accepts_a_panel_that_fits() {
         let result = with_panel!(
-            12,
+            15,
             6,
             [
                 Widget::knob(0, 0, "level"),
                 Widget::toggle(3, 0, "on"),
                 Widget::radio(6, 0, "slope"),
                 Widget::light(0, 3, "busy"),
-                Widget::meter(9, 0, "out")
+                Widget::meter(12, 0, "out")
             ]
         );
         assert_eq!(result, Ok(()));

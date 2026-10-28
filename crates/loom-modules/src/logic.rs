@@ -235,7 +235,7 @@ pub static COMPARE: ModuleDescriptor = ModuleDescriptor {
             high: false,
         })
     }),
-    panel: Panel::new(6, 4, &[Widget::radio(0, 0, "mode"), Widget::knob(3, 0, "hysteresis")]),
+    panel: Panel::new(9, 4, &[Widget::radio(0, 0, "mode"), Widget::knob(6, 0, "hysteresis")]),
     displays: &[],
 };
 
@@ -338,7 +338,7 @@ pub static LOGIC: ModuleDescriptor = ModuleDescriptor {
         .integer(),
     ],
     role: ModuleRole::Dsp(|_| Box::new(Logic { op: 0, invert: false })),
-    panel: Panel::new(6, 4, &[Widget::radio(0, 0, "op"), Widget::toggle(3, 0, "invert")]),
+    panel: Panel::new(9, 4, &[Widget::radio(0, 0, "op"), Widget::toggle(6, 0, "invert")]),
     displays: &[],
 };
 
@@ -436,7 +436,7 @@ pub static MEMORY: ModuleDescriptor = ModuleDescriptor {
     .integer()
     .choices(&["Set and reset", "Toggle", "Data"])],
     role: ModuleRole::Dsp(|_| Box::new(Memory::default())),
-    panel: Panel::new(6, 4, &[Widget::radio(0, 0, "mode"), Widget::light(3, 0, "state")]),
+    panel: Panel::new(9, 4, &[Widget::radio(0, 0, "mode"), Widget::light(6, 0, "state")]),
     displays: &[DisplaySpec {
         name: "state",
         label: "State",

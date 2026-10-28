@@ -136,7 +136,7 @@ impl WidgetView {
             WidgetViewKind::Meter => (3, 6),
             WidgetViewKind::Toggle | WidgetViewKind::Light => (3, 2),
             WidgetViewKind::Button => (6, 3),
-            WidgetViewKind::Radio { options } => (3, options.len() as u8 + 1),
+            WidgetViewKind::Radio { options } => (6, options.len() as u8 + 1),
         }
     }
 

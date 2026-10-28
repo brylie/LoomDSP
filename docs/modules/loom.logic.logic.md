@@ -34,7 +34,7 @@ Combines up to four gates with And, Or, or Xor. Only inputs with a cable count. 
 
 ## Panel
 
-6 by 4 grid units.
+9 by 4 grid units.
 
 - Radio buttons: **Operation** (`op`) (And, Or, Xor)
 - Toggle: **Invert** (`invert`)

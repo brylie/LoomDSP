@@ -360,7 +360,7 @@ pub static NOISE: ModuleDescriptor = ModuleDescriptor {
 .integer()
     .choices(&["White", "Pink", "Brown"])],
     role: ModuleRole::Dsp(|config: &ModuleConfig| Box::new(Noise::new(config.sample_rate))),
-    panel: Panel::new(3, 4, &[Widget::radio(0, 0, "colour")]),
+    panel: Panel::new(6, 4, &[Widget::radio(0, 0, "colour")]),
     displays: &[],
 };
 

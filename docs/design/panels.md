@@ -193,13 +193,13 @@ A one-step gesture on a cable or an output places a scope or a level meter next 
 
 - A `ModuleDescriptor` has a `panel`: its size in grid units (width and height), and a list of widgets. A module with nothing on its tile has an empty panel.
 - Each widget has a kind, a grid position inside the panel, and a binding by name: a parameter for controls, a display value for lights. *Why names:* parameter names are stable IDs (AGENTS.md rule 5), and the P2 panel editor will save bindings the same way.
-- P1 widgets. Most are 3 grid units wide. The button is wider, so a performance control can be large.
+- P1 widgets. Most are 3 grid units wide. The button is wider, so a performance control can be large. Radio buttons are wider too, so their choice names fit ([#394](https://github.com/brylie/LoomDSP/issues/394)).
 
 | Widget | Size (grid units) | Binds to | Behaviour |
 |---|---|---|---|
 | Knob | 3 × 3 | Any parameter | A dial with its label below. Uses the parameter's mapping (`ParamSpec::normalize`). |
 | Toggle | 3 × 2 | A whole-number parameter from 0 to 1 | Off or on, with its label below. |
-| Radio buttons | 3 × (choices + 1) | A whole-number parameter with [choice names](#choice-names) | One row per choice name, top = minimum value. Label above. |
+| Radio buttons | 6 × (choices + 1) | A whole-number parameter with [choice names](#choice-names) | One row per choice name, top = minimum value. Label above. |
 | Button | 6 × 3 | A whole-number parameter from 0 to 1, and a different whole-number `mode` parameter from 0 to 1 | A large button. Its fill shows the bound parameter. Gestures are under [Interaction](#interaction-68). |
 | Light | 3 × 2 | A display value | Brightness is the value clamped to 0 to 1. Label below. |
 
@@ -370,7 +370,7 @@ A user zooms in on Clock Divide. The knob says "Division", not `n`. They rest th
 | Hover text on a light or meter | none | label, description, and value ([#118](https://github.com/brylie/LoomDSP/issues/118)) |
 
 - **Names stay out of sight, except in hover text.** The hover text shows the stable name below the description, dimmed, when it differs from the label other than in letter case. So `n` shows under "Division", but `cutoff` does not repeat under "Cutoff". *Why:* names are what patch files and `loom modules` use, so a user who edits a RON file can find the port. Everywhere else, the label is the better text.
-- **Captions and radio options are cut, never wrapped.** A label that does not fit is cut with "…", and the hover text shows it in full. A cut radio option shows in full in the inspector. Widths are estimated per character, with narrow letters counting less, so "Division" fits under a knob, while "Resonance" is cut. *Why:* the grid layout of tiles does not change with text length, and estimating keeps text layout out of every frame.
+- **Captions and radio options are cut, never wrapped.** A label that does not fit is cut with "…", and the hover text shows it in full. Radio buttons are 6 units wide, so no built-in choice name is cut; a test checks this for every module. A longer name from a third-party module is cut and shows in full in the inspector. Widths are estimated per character, with narrow letters counting less, so "Division" fits under a knob, while "Resonance" is cut. *Why:* the grid layout of tiles does not change with text length, and estimating keeps text layout out of every frame.
 
 ### Hover text
 

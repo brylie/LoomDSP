@@ -258,7 +258,7 @@ pub static CROSSFADE: ModuleDescriptor = ModuleDescriptor {
             linear: false,
         })
     }),
-    panel: Panel::new(3, 6, &[Widget::knob(0, 0, "mix"), Widget::radio(0, 3, "law")]),
+    panel: Panel::new(6, 6, &[Widget::knob(0, 0, "mix"), Widget::radio(0, 3, "law")]),
     displays: &[],
 };
 

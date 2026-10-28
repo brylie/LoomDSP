@@ -61,7 +61,7 @@ pub static SAMPLE_HOLD: ModuleDescriptor = ModuleDescriptor {
             held: 0.0,
         })
     }),
-    panel: Panel::new(3, 3, &[Widget::radio(0, 0, "mode")]),
+    panel: Panel::new(6, 3, &[Widget::radio(0, 0, "mode")]),
     displays: &[],
 };
 

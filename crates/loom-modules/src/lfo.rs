@@ -106,13 +106,13 @@ pub static LFO: ModuleDescriptor = ModuleDescriptor {
     ],
     role: ModuleRole::Dsp(|config| Box::new(Lfo::new(config))),
     panel: Panel::new(
-        9,
+        15,
         6,
         &[
             Widget::radio(0, 0, "sync"),
-            Widget::radio(3, 0, "shape"),
-            Widget::knob(6, 0, "rate"),
-            Widget::knob(6, 3, "cycles"),
+            Widget::radio(6, 0, "shape"),
+            Widget::knob(12, 0, "rate"),
+            Widget::knob(12, 3, "cycles"),
         ],
     ),
     displays: &[],

@@ -507,6 +507,35 @@ mod tests {
         assert_eq!(node.params[index], 0.0);
     }
 
+    /// Every built-in radio option shows in full on its tile: radio buttons
+    /// are wide enough that no choice name is cut with "…" (#394).
+    #[test]
+    fn no_built_in_radio_option_is_cut() {
+        let registry = loom_modules::registry();
+        let mut checked = 0;
+        for d in registry.iter() {
+            if !d.panel.widgets.iter().any(|w| w.kind == WidgetKind::Radio) {
+                continue;
+            }
+            let module = ModuleView {
+                id: 0,
+                title: d.name.to_string(),
+                accent: category_colour(d.category),
+                position: Point::ORIGIN,
+                inputs: d.inputs.iter().map(port_view).collect(),
+                outputs: d.outputs.iter().map(port_view).collect(),
+                panel: panel_view(d),
+            };
+            loom_canvas::for_each_tile_text(&module, |item| {
+                if matches!(item.kind, loom_canvas::TextKind::Option(..)) {
+                    checked += 1;
+                    assert!(!item.content.ends_with('…'), "{}: {} is cut", d.id, item.content);
+                }
+            });
+        }
+        assert!(checked > 20, "only {checked} radio options found");
+    }
+
     #[test]
     fn toggles_and_radio_buttons_use_whole_values() {
         let on = param("on", 0.0, 1.0, 0.0, "").integer();

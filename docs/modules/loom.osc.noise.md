@@ -29,7 +29,7 @@ None.
 
 ## Panel
 
-3 by 4 grid units.
+6 by 4 grid units.
 
 - Radio buttons: **Colour** (`colour`) (White, Pink, Brown)
 

@@ -845,7 +845,8 @@ impl ModuleDescriptor {
     }
 
     /// Width and height of `widget` in grid units. Radio buttons are one row
-    /// per choice name of their parameter, plus one for the label.
+    /// per choice name of their parameter, plus one for the label, and wide
+    /// enough that the built-in choice names are not cut (#394).
     pub fn widget_size(&self, widget: &Widget) -> (u8, u8) {
         match widget.kind {
             WidgetKind::Knob => (3, 3),
@@ -856,7 +857,7 @@ impl ModuleDescriptor {
                 let choices = self
                     .param_index(widget.bind)
                     .map_or(0, |index| self.params[index].options.choices.len());
-                (3, u8::try_from(choices + 1).unwrap_or(u8::MAX))
+                (6, u8::try_from(choices + 1).unwrap_or(u8::MAX))
             }
         }
     }

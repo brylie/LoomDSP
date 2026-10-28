@@ -32,7 +32,7 @@ Blends two signals. Equal power keeps the loudness of audio steady; linear is ex
 
 ## Panel
 
-3 by 6 grid units.
+6 by 6 grid units.
 
 - Knob: **Mix** (`mix`)
 - Radio buttons: **Law** (`law`) (Equal power, Linear)

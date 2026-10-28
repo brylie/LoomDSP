@@ -104,18 +104,18 @@ pub static PANEL: ModuleDescriptor = ModuleDescriptor {
         })
     }),
     panel: Panel::new(
-        15,
+        18,
         8,
         &[
             Widget::knob(0, 0, "level"),
             Widget::knob(3, 0, "cutoff"),
             Widget::knob(6, 0, "steps"),
             Widget::knob(9, 0, "glide"),
-            Widget::meter(12, 0, "uni"),
+            Widget::meter(15, 0, "uni"),
             Widget::toggle(0, 3, "on"),
             Widget::radio(3, 3, "choice"),
-            Widget::light(6, 3, "lit"),
-            Widget::button(6, 5, "gate", "held", "mode"),
+            Widget::light(9, 3, "lit"),
+            Widget::button(9, 5, "gate", "held", "mode"),
         ],
     ),
     displays: &[DisplaySpec {
