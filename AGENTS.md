@@ -112,7 +112,7 @@ Why: working through another product's catalogue makes it the outline of our des
 
 ## Where documentation goes
 
-- A **decision** (with its options and reasons) goes in an ADR. Keep it to the decision. Once accepted, do not rewrite it; write a new ADR that supersedes it.
+- A **decision** (with its options and reasons) goes in an ADR. Keep it to the decision. An ADR merges into `main` only when it is Accepted or Superseded, never as Proposed: a Proposed ADR on `main` blocks the work that depends on it with nobody deciding. Once accepted, do not rewrite it; write a new ADR that supersedes it.
 - **How a feature works** (modules, ports, rules, examples) goes in a specification in `docs/design/`, linked from the ADR. Update it in the same change as the code.
 - **Who needs it and why** goes in use cases and requirements in `docs/product/`. **Tasks** go in GitHub issues.
 - **Which modules to build** goes in the [module catalogue](docs/product/module-catalogue.md): one entry per module type, with a stable `MT-` ID. A new module starts from its catalogue entry. If it has none, add the entry first.

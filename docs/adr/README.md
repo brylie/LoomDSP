@@ -14,10 +14,12 @@ A useful test: if a detail could change without changing the decision, it belong
 
 ## Editing rules
 
-- **Proposed:** edit freely while it is discussed.
+- **Proposed:** edit freely while it is discussed, on its own branch. A Proposed ADR does not merge into `main`. Decide it first: it merges as Accepted, or as Superseded by an ADR that merges with it.
 - **Accepted:** frozen. Only fix typos and broken links, or update the status line. To change the decision, write a new ADR and mark the old one "Superseded by ADR-NNNN".
 
-Why: an ADR is a record of why things are the way they are. If it is rewritten after the fact, it can no longer explain the history it was written to explain.
+Why merge only decided ADRs: a Proposed ADR on `main` looks like a decision but is not one, so work that depends on it waits with no clear owner. Several features were blocked this way. Keeping it on its branch, with its pull request open, keeps the open question visible until someone decides it.
+
+Why freeze accepted ADRs: an ADR is a record of why things are the way they are. If it is rewritten after the fact, it can no longer explain the history it was written to explain.
 
 ## Status values
 
