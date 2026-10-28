@@ -516,19 +516,20 @@ impl Scene {
     /// What is under a world point. Ports win over tiles, because they sit
     /// on the tile edges. Tiles drawn later win over earlier ones.
     pub fn hit(&self, point: Point, port_radius: f32) -> Hit {
-        // Badges sit just outside their tile, beside a port. They win, so a
-        // click on one never starts a cable.
-        for module in self.modules.iter().rev() {
-            for index in 0..module.outputs.len() {
-                if self.badge_bounds(module.id, index).is_some_and(|b| b.contains(point)) {
-                    return Hit::Badge(PortRef {
+        // Badges sit beside their own port. They win over that tile's ports,
+        // so a click on one never starts a cable. A tile moved on top of a
+        // badge keeps its ports: those win over the badge (#249).
+        let badge = self.modules.iter().rev().find_map(|module| {
+            (0..module.outputs.len()).find_map(|index| {
+                self.badge_bounds(module.id, index)
+                    .is_some_and(|b| b.contains(point))
+                    .then_some(PortRef {
                         module: module.id,
                         output: true,
                         index,
-                    });
-                }
-            }
-        }
+                    })
+            })
+        });
         let r2 = port_radius * port_radius;
         let near = |p: Point| {
             let d = point - p;
@@ -576,8 +577,11 @@ impl Scene {
                 }
             }
         }
-        if let Some((_, port)) = best {
-            return Hit::Port(port);
+        match (badge, best) {
+            (Some(badge), Some((_, port))) if port.module != badge.module => return Hit::Port(port),
+            (Some(badge), _) => return Hit::Badge(badge),
+            (None, Some((_, port))) => return Hit::Port(port),
+            (None, None) => {}
         }
         for module in self.modules.iter().rev() {
             if module.bounds().contains(point) {
@@ -1047,5 +1051,30 @@ mod tests {
         scene.move_modules(&[2], Vector::new(3.0 * GRID, 0.0));
         let badge = scene.badge_bounds(1, 1).unwrap();
         assert!(badge.x > port.x + PORT_RADIUS, "{badge:?}");
+    }
+
+    /// A tile moved on top of an inside badge keeps its input: a click
+    /// that reaches both the badge and that input hits the input, not the
+    /// badge (#249).
+    #[test]
+    fn a_neighbour_input_wins_over_a_badge_under_it() {
+        let left = badged(1, Point::ORIGIN);
+        let edge = left.bounds().x + left.bounds().width;
+        let right = badged(2, Point::new(edge + GRID, 0.0));
+        let mut scene = Scene::new(vec![left, right], Vec::new());
+        let badge = scene.badge_bounds(1, 1).unwrap().center();
+
+        // Move the neighbour so its first input sits on the badge.
+        let input = scene.module(2).unwrap().input_position(0);
+        scene.move_modules(&[2], badge - input);
+        assert!(scene.badge_bounds(1, 1).unwrap().contains(badge));
+        assert_eq!(
+            scene.hit(badge, PORT_HIT_RADIUS),
+            Hit::Port(PortRef {
+                module: 2,
+                output: false,
+                index: 0
+            })
+        );
     }
 }

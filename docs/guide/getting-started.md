@@ -65,7 +65,7 @@ If you hear nothing, check the bottom bar. It shows the audio device and sample 
 | Delete modules | Select them and press Delete or Backspace. |
 | Add a module | Press **A** with the pointer over the canvas, or double-click empty canvas. Type part of a name, ID, or category, pick with the arrow keys, and press Enter. The module appears where the pointer was. **Add module** in the toolbar does the same at the centre of the canvas. Escape closes the browser. |
 | Pan | Right-drag, or scroll with two fingers on a trackpad. |
-| Zoom | Mouse wheel, or Cmd/Ctrl and scroll on a trackpad. Cmd/Ctrl+0 goes back to 100%, keeping the point under the pointer in place. |
+| Zoom | Mouse wheel, or Cmd/Ctrl and scroll on a trackpad. With the pointer over the canvas, Cmd/Ctrl+0 goes back to 100%, keeping the point under the pointer in place. |
 | Show the whole patch | Press F or Home. |
 
 Every change is live. The engine switches to the new patch between two audio buffers, so there is no dropout while you patch.
