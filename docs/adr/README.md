@@ -27,7 +27,7 @@ Why: an ADR is a record of why things are the way they are. If it is rewritten a
 - **Superseded by ADR-NNNN**: replaced.
 - **Rejected**: considered and declined (kept for the record).
 
-The status line holds one of these values and nothing else. The date line is the day the ADR was accepted. Why: a reader, or a script, can then read both at a glance, and the reasons stay in the ADR's own sections.
+The status line holds one of these values and nothing else. The date line is the day the ADR got its current status: the day it was accepted, or deferred, superseded, or rejected. Why: a reader, or a script, can then read both at a glance, and the reasons stay in the ADR's own sections.
 
 ## Index
 
