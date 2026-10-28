@@ -2,12 +2,12 @@
 
 use iced::{Color, Point};
 use loom_canvas::{
-    CableView, HoverText, ModulationView, ModuleView, PanelValues, PanelView, PortShape, PortView, Scene, WidgetValue,
-    WidgetView, WidgetViewKind,
+    CableView, HoverText, ModulationView, ModuleView, PanelValues, PanelView, PortShape, PortView, Scene,
+    TransportSignal, WidgetValue, WidgetView, WidgetViewKind,
 };
 use loom_core::{
-    Controller, DisplayKind, InputRef, ModuleDescriptor, ModuleId, OutputRef, ParamSpec, PortSpec, SignalType,
-    WidgetKind,
+    Controller, DisplayKind, InputRef, ModuleDescriptor, ModuleId, OutputRef, ParamSpec, PortDefault, PortSpec,
+    SignalType, WidgetKind,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -48,6 +48,18 @@ fn port_view(spec: &PortSpec) -> PortView {
         colour: signal_colour(spec.signal),
         shape: signal_shape(spec.signal),
         badge: 0,
+        follows_transport: None,
+    }
+}
+
+/// The transport signal an input follows while it has no cable, if its
+/// default is one (clock.md, Default inputs).
+fn transport_default(spec: &PortSpec) -> Option<TransportSignal> {
+    match spec.default {
+        PortDefault::BarPhase => Some(TransportSignal::BarPhase),
+        PortDefault::BeatPhase => Some(TransportSignal::BeatPhase),
+        PortDefault::Playing => Some(TransportSignal::Playing),
+        PortDefault::Value(_) => None,
     }
 }
 
@@ -304,10 +316,23 @@ pub fn build(controller: &Controller, positions: &BTreeMap<u32, Point>) -> Scene
     for (_, a) in graph.assignments() {
         *badges.entry(a.source).or_default() += 1;
     }
+    // Inputs with a cable: they no longer follow their default, so they
+    // show no clock mark (panels.md, Clock mark on transport inputs).
+    let cabled: BTreeSet<InputRef> = graph.cables().map(|(_, to)| to).collect();
     let modules = graph
         .nodes()
         .map(|(id, node)| {
             let d = node.descriptor;
+            let inputs = d
+                .inputs
+                .iter()
+                .enumerate()
+                .map(|(port, spec)| PortView {
+                    follows_transport: transport_default(spec)
+                        .filter(|_| !cabled.contains(&InputRef { module: id, port })),
+                    ..port_view(spec)
+                })
+                .collect();
             let outputs = d
                 .outputs
                 .iter()
@@ -322,7 +347,7 @@ pub fn build(controller: &Controller, positions: &BTreeMap<u32, Point>) -> Scene
                 title: d.name.to_string(),
                 accent: category_colour(d.category),
                 position: positions.get(&id.0).copied().unwrap_or(Point::ORIGIN),
-                inputs: d.inputs.iter().map(port_view).collect(),
+                inputs,
                 outputs,
                 panel: panel_view(d),
             }

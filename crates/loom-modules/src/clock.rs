@@ -98,7 +98,7 @@ pub static CLOCK: ModuleDescriptor = ModuleDescriptor {
         .choices(RATE_NAMES),
         ParamSpec {
             name: "width",
-            label: "Gate width",
+            label: "Width",
             description: "How much of each cycle the gate is high.",
             min: 1.0,
             max: 99.0,

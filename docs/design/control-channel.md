@@ -137,6 +137,7 @@ The snapshot from `snapshot` and `--dump-ui` says where things are on the canvas
 | `tiles[].bounds` | The tile rectangle |
 | `tiles[].inputs[].centre`, `tiles[].outputs[].centre` | A port's centre, as `{x, y}` |
 | `tiles[].outputs[].badge_bounds` | The assignment count badge, or `null` when the output shows none |
+| `tiles[].inputs[].follows_transport` | The transport signal an input follows while it has no cable, which shows its [clock mark](panels.md#clock-mark-on-transport-inputs): `bar_phase`, `beat_phase`, or `playing`. Left out when it shows none |
 | `tiles[].widgets[].bounds` | A widget's rectangle on the panel |
 | `cables[]` | Each cable the canvas draws, by its two ends: `from` (an output) and `to` (an input), each with `module`, `index` (from the top of its side), and `point` (the port's centre) |
 

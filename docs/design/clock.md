@@ -111,7 +111,7 @@ Trigger outputs are high for one sample, and trigger inputs count rising edges (
 
 **Status:** Implemented ([#74](https://github.com/brylie/LoomDSP/issues/74)). Code: `loom.clock.clock` in `loom-modules/src/clock.rs`, and `TransportInfo::phase_at` in `loom-core`. These details were settled while building the module.
 
-- **Parameters.** `rate` is a choice of 24, in this order from 0: 4 bars, 2 bars, 1 bar, 1/2, 1/4, 1/8, 1/16, 1/32, each as straight, then dotted, then triplet ("4 bars", "4 bars dotted", "4 bars triplet", "2 bars", and so on). The default is 1/4 (12). `width` (label "Gate width") is 1 to 99 percent, default 50, not smoothed. Both have a knob on the panel, with a trigger light `fired` below, as on Clock Divide. *Why one choice, not a length and a feel:* the table lists two parameters, and one knob reaches every rate.
+- **Parameters.** `rate` is a choice of 24, in this order from 0: 4 bars, 2 bars, 1 bar, 1/2, 1/4, 1/8, 1/16, 1/32, each as straight, then dotted, then triplet ("4 bars", "4 bars dotted", "4 bars triplet", "2 bars", and so on). The default is 1/4 (12). `width` (label "Width", since "Gate width" is cut under a knob) is 1 to 99 percent, default 50, not smoothed. Both have a knob on the panel, with a trigger light `fired` below, as on Clock Divide. *Why one choice, not a length and a feel:* the table lists two parameters, and one knob reaches every rate.
 - **Lengths in beats.** A bar rate is a number of bars, so it follows the time signature: 1 bar in 7/8 is 3.5 beats. A note rate is a fraction of a whole note and does not: 1/4 is one beat in any metre. Dotted is 3/2 of straight, triplet 2/3.
 - **Phase** is `TransportInfo::phase_at(i, rate_in_beats)`: the rate phase above, counted from position 0. *Why from position 0:* every rate meets bar 1, and a 1-bar Clock gives the bar phase bit for bit.
 - **Trigger** uses `WrapDetector` on the phase, so a Phase Trigger on the Clock's phase fires on the same frames. It fires only while the transport runs. When the transport is stopped, when the position jumps (a reset or a time signature change, rule 10), or when the rate changes, the detector starts afresh: the next playing frame fires only when its phase is exactly 0. So:
@@ -262,7 +262,7 @@ The Transport module's parameters (tempo, time signature, run) are saved like an
 - [ ] Phase Scale ([#31](https://github.com/brylie/LoomDSP/issues/31)) with multiply 4 into Phase Trigger fires four triggers per input cycle. The first is on the input's wrap. The output is the same at block sizes 1, 32, and 1024.
 - [ ] A Phase Scale with nothing connected to `phase` follows bar phase. A cable overrides it; removing the cable returns to the transport.
 - [ ] An LFO in sync mode with nothing connected follows bar phase. A cable overrides it; removing the cable returns to the transport.
-- [ ] Ports that follow the transport show the clock mark.
+- [x] Ports that follow the transport show the clock mark.
 - [ ] Every patch has one Transport module. It cannot be deleted, and a second one cannot be added.
 - [ ] Run on the Transport panel toggles running. Space does the same when no panel control is focused. A focused control takes Space for itself. Stopping holds synced phases; running continues from there.
 - [x] Every Button gate sample is 0 or 1, and a toggle press flips `on`.
