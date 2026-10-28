@@ -47,7 +47,7 @@ Widgets are grouped by the **kind of value** they show or edit, not by the modul
 | | Waveform | Buffer data, with markers bound to parameters. Whole, or as the frames of a wavetable | No | P2 |
 | Static | Label | Text written in the panel | No | P2 |
 
-Names in [FR-PANEL-02](../product/requirements.md) map as follows: "slider" is the **fader**, "selector" is the **select list**, and "graph" is the **curve**. FR-PANEL-02 does not list the number, readout, XY scope, spectrum, waveform, or range. If this document is agreed, FR-PANEL-02 is updated in the same pull request.
+[FR-PANEL-02](../product/requirements.md) lists this set, with these names, since ADR-0024 was accepted. Earlier names: "slider" is now the **fader**, "selector" the **select list**, and "graph" the **curve**. Each widget is still built only once its section here is Agreed.
 
 *Why these and no more:* every widget above is used by at least three catalogue entries (see [Which modules use which widget](#which-modules-use-which-widget)), or by one entry that cannot work without it. A widget that only one module wants is a sign that the module needs a different control, not a new widget.
 

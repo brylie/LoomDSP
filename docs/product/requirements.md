@@ -157,7 +157,7 @@ LoomDSP is a grid for building living musical systems: patches that play, evolve
 | ID | Requirement | Priority | Phase | Rationale |
 |---|---|---|---|---|
 | FR-PANEL-01 | Each patch and sub-patch can have a front panel, separate from the cable view, designed with the same editor. | Must | P2 | Hides complexity. Core of performance mode. |
-| FR-PANEL-02 | Panel widgets: knob, horizontal/vertical slider, toggle, radio buttons, button, selector, XY pad, label, light, meter, scope, step grid, graph. | Must | P2 | Covers common instrument controls. |
+| FR-PANEL-02 | Panel widgets, grouped by the kind of value they edit (ADR-0024): knob, fader (horizontal or vertical), number, toggle, radio buttons, select list, button, XY pad, range, light, readout, meter, scope, XY scope, spectrum, curve, step grid, waveform, label. | Must | P2 | Covers common instrument controls. |
 | FR-PANEL-03 | Widgets bind to exposed parameters. One parameter can have several widgets. | Must | P2 | Flexible layout. |
 | FR-PANEL-04 | Widgets support value mappings: linear, logarithmic frequency, decibels, stepped/enumerated. | Must | P2 | Controls must feel right. A linear cutoff knob is unusable. |
 | FR-PANEL-05 | Panel editor with grid snapping, alignment, grouping, and resizing. | Must | P2 | Panels must look tidy without pixel-pushing. |

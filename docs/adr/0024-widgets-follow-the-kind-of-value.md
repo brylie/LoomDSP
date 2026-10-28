@@ -1,6 +1,6 @@
 # ADR-0024: Widgets follow the kind of value, and structured data has shared kinds
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-28)
 - **Date:** 2026-10-21
 - **Related requirements:** FR-PANEL-02, FR-PANEL-04, FR-LIB-12, FR-LIB-17, FR-LIB-18, FR-LIB-19, FR-MOD-04, NFR-UX-01, NFR-UX-02
 - **Related decisions:** ADR-0001 (lock-free boundary), ADR-0013 (modules carry their own panel), ADR-0014 (modulation without cables), ADR-0017 (primitives, traits, and abstractions), ADR-0018 (clean room)
@@ -20,7 +20,7 @@ Curves, patterns, and samples are also not parameters. They are module data (FR-
 2. **A drawing widget that modules fill.** One general widget where a module draws lines, shapes, and text from data it publishes. Very flexible. But every module then designs its own gestures, keyboard use, modulation display, and level of detail, which is what ADR-0013 set out to avoid, and a screen reader learns nothing from lines.
 3. **One widget family per kind of value, and shared data kinds.** Group widgets by the kind of value they show or edit: one number, one choice, two numbers, an action, module state, a signal, a shape, a pattern, a buffer. Each group has one set of gestures, one keyboard model, and one way to show modulation. Structured module data comes in a few shared kinds (curve, pattern, buffer), and each kind has exactly one editor widget.
 
-## Decision (proposed)
+## Decision
 
 Option 3. **A widget is chosen by the kind of value it edits, not by the module that uses it.**
 
