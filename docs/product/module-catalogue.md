@@ -90,7 +90,7 @@ Sampling is built from small parts, so one set of primitives covers one-shot pla
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
 | MT-FILTER-01 | State variable filter | A resonant filter with low-pass, high-pass, band-pass, and notch outputs at once. | Character | P1 | FR-LIB-03 | Built (`loom.filter.svf`: low-pass, band-pass, high-pass, and notch outputs) |
-| MT-FILTER-02 | Ladder low-pass | A resonant low-pass built from up to four stages, with a selectable slope and saturation in its feedback path. | Character, Quality | P1 | FR-LIB-03 | Specified (`loom.filter.ladder`, [P1 modules](../design/p1-modules.md)) |
+| MT-FILTER-02 | Ladder low-pass | A resonant low-pass built from up to four stages, with a selectable slope and saturation in its feedback path. | Character, Quality | P1 | FR-LIB-03 | Built (`loom.filter.ladder`, [P1 modules](../design/p1-modules.md#ladder-low-pass-loomfilterladder)) |
 | MT-FILTER-03 | One-pole filter | First-order low-pass and high-pass, for smoothing and gentle tone control. | | P1 | FR-LIB-03 | Built (`loom.filter.onepole`) |
 | MT-FILTER-04 | Slope filter | Low-pass, high-pass, or all-pass with a selectable steepness. | | P2 | FR-LIB-03 | Planned |
 | MT-FILTER-05 | Comb filter | A tuned delay with feedback that boosts or cuts a harmonic series. | | P2 | FR-LIB-15 | Planned |

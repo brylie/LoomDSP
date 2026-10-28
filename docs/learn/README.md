@@ -20,6 +20,7 @@ LoomDSP is also a way to learn modular sound design, for musicians and for the p
 | [Real-time safety](real-time-safety.md) | Why the audio thread must not allocate, lock, or wait, and how LoomDSP keeps to that. |
 | [Modulation without cables](modulation-without-cables.md) | Why depth is a share of the knob, how polarity remaps a source, the stored-value trap, and why assignments are delayed before cables. |
 | [Stopping a stream without a click](stopping-a-stream.md) | Why the engine fades out, why the host waits for silent buffers, and why a new sample rate paused a stream on macOS. |
+| [How a ladder filter sings](ladder-filter.md) | Why inverted feedback through stages makes a peak, why four stages sing at the cutoff and two never do, how a loop runs with no unit delay, and how to change the slope without a burst. |
 | [Delays and interpolation](delays-and-interpolation.md) | How a circular buffer works, why linear interpolation dulls sweeps and loops, why the all-pass needs two samples of delay, and how to tune a loop. |
 
 ## Writing one

@@ -42,6 +42,7 @@ pub static ALL: &[&ModuleDescriptor] = &[
     &osc::NOISE,
     &filter::SVF,
     &filter::ONEPOLE,
+    &filter::LADDER,
     &env::ENVELOPE,
     &math::ADD,
     &math::MUL,
@@ -173,6 +174,7 @@ mod tests {
                     ("loom.mod.lfo", "sync"),
                     ("loom.mod.lfo", "shape"),
                     ("loom.env.envelope", "mode"),
+                    ("loom.filter.ladder", "slope"),
                 ];
                 if non_knob.contains(&(descriptor.id, param.name)) {
                     assert!(

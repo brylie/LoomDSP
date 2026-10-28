@@ -27,6 +27,7 @@ One page for each built-in module, made from its descriptor. After you change a 
 
 | Module | ID | Description |
 |---|---|---|
+| [Ladder](loom.filter.ladder.md) | `loom.filter.ladder` | A resonant low-pass with a 12, 18, or 24 dB slope. High resonance thins the bass and, at 18 and 24 dB, sings on its own. The cutoff input adds pitch: +0.1 doubles the cutoff. |
 | [One-pole](loom.filter.onepole.md) | `loom.filter.onepole` | A gentle first-order filter, 6 dB per octave. The cutoff input adds pitch: +0.1 doubles the cutoff. Low cutoffs smooth control signals. |
 | [SVF](loom.filter.svf.md) | `loom.filter.svf` | State variable filter (trapezoidal integration). The cutoff input adds pitch: +0.1 doubles the cutoff. |
 

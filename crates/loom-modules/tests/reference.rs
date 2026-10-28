@@ -94,6 +94,40 @@ fn onepole() {
         .check(reference!("onepole"));
 }
 
+/// Reference render for `loom.filter.ladder` at 24 dB: a square wave with
+/// the cutoff sweeping up two octaves, high resonance, and some drive.
+#[test]
+fn ladder() {
+    Harness::new(&filter::LADDER)
+        .seconds(0.1)
+        .input(
+            "in",
+            Signal::from_fn(|frame| if (frame / 200) % 2 == 0 { 0.5 } else { -0.5 }),
+        )
+        .input("cutoff", Signal::from_fn(|frame| frame as f32 / 4_800.0 * 0.2))
+        .param("cutoff", 400.0)
+        .param("resonance", 0.8)
+        .param("drive", 0.4)
+        .check(reference!("ladder"));
+}
+
+/// Reference render for `loom.filter.ladder` at 18 dB and resonance 1: a
+/// short burst, then the filter sings on its own at about 1.7 times the
+/// cutoff.
+#[test]
+fn ladder_18() {
+    Harness::new(&filter::LADDER)
+        .seconds(0.3)
+        .input(
+            "in",
+            Signal::from_fn(|frame| if frame < 100 { 0.3 } else { 0.0 }),
+        )
+        .param("cutoff", 300.0)
+        .param("resonance", 1.0)
+        .param("slope", 1.0)
+        .check(reference!("ladder_18"));
+}
+
 /// Reference render for `loom.env.envelope` in ADSR mode, with a bent
 /// curve.
 #[test]
@@ -361,6 +395,7 @@ fn every_dsp_module_has_a_reference_test() {
         &osc::NOISE,
         &filter::SVF,
         &filter::ONEPOLE,
+        &filter::LADDER,
         &phase::WRAP,
         &math::PITCH_CONSTANT,
         &level::CONSTANT,
