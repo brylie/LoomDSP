@@ -7,7 +7,7 @@ Patch(
         PatchModule(id: 1, kind: "loom.midi.note@1"),
         PatchModule(id: 2, kind: "loom.phase.generator@1"),
         PatchModule(id: 3, kind: "loom.osc.sine@1"),
-        PatchModule(id: 4, kind: "loom.env.adsr@1"),
+        PatchModule(id: 4, kind: "loom.env.envelope@1"),
         PatchModule(id: 5, kind: "loom.math.mul@1", params: {"gain": 0.3}),
         PatchModule(id: 6, kind: "loom.io.audio-out@1"),
     ],

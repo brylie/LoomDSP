@@ -571,12 +571,12 @@ mod tests {
         let meter = &panel_view(meter_module).widgets[0];
         assert_eq!(meter.label, "Out");
         assert_eq!(meter.hover.description, meter_module.outputs[0].description);
-        let light = &panel_view(&loom_modules::env::ADSR).widgets[4];
+        let light = &panel_view(&loom_modules::env::ENVELOPE).widgets[6];
         assert_eq!(light.kind, WidgetViewKind::Light);
         assert_eq!(light.label, "Level");
         assert_eq!(
             light.hover,
-            HoverText::new("Level", loom_modules::env::ADSR.displays[0].description, "level")
+            HoverText::new("Level", loom_modules::env::ENVELOPE.displays[0].description, "level")
         );
         assert_eq!(light.hover.name, None, "`level` reads the same as \"Level\"");
         let gate = &panel_view(&loom_modules::midi::NOTE_IN)
@@ -593,8 +593,8 @@ mod tests {
     /// The value line of a light's or meter's hover text.
     #[test]
     fn lights_and_meters_say_their_value() {
-        let adsr = &loom_modules::env::ADSR;
-        assert_eq!(display_text(adsr, &adsr.panel.widgets[4], 0.5), "Level: 0.50");
+        let envelope = &loom_modules::env::ENVELOPE;
+        assert_eq!(display_text(envelope, &envelope.panel.widgets[6], 0.5), "Level: 0.50");
         let divide = &loom_modules::logic::DIVIDE;
         assert_eq!(display_text(divide, &divide.panel.widgets[2], 0.4), "Fired: lit");
         assert_eq!(display_text(divide, &divide.panel.widgets[2], 0.0), "Fired: dark");

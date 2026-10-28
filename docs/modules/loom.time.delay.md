@@ -53,7 +53,7 @@ Patch(
         PatchModule(id: 1, kind: "loom.midi.note@1"),
         PatchModule(id: 2, kind: "loom.phase.generator@1"),
         PatchModule(id: 3, kind: "loom.osc.triangle@1"),
-        PatchModule(id: 4, kind: "loom.env.adsr@1", params: {"attack": 0.01, "decay": 0.1, "sustain": 0, "release": 0.1}),
+        PatchModule(id: 4, kind: "loom.env.envelope@1", params: {"attack": 0.01, "decay": 0.1, "sustain": 0, "release": 0.1}),
         PatchModule(id: 5, kind: "loom.level.amp@1"),
         PatchModule(id: 6, kind: "loom.time.delay@1", params: {"time": 0.25}),
         PatchModule(id: 7, kind: "loom.mix.crossfade@1", params: {"mix": 0.4}),

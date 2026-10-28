@@ -1,4 +1,6 @@
-//! Envelopes (FR-LIB-04).
+//! Envelopes (FR-LIB-04, MT-ENV-01).
+//!
+//! Spec: `docs/design/p1-modules.md`, Envelope AD mode.
 
 use loom_core::signal::gate_is_high;
 use loom_core::{
@@ -6,18 +8,19 @@ use loom_core::{
     ParamSpec, Polarity, PortDefault, PortIo, PortSpec, ProcessContext, SignalType, Widget,
 };
 
-/// `loom.env.adsr`: attack, decay, sustain, release envelope.
-pub static ADSR: ModuleDescriptor = ModuleDescriptor {
-    id: "loom.env.adsr",
+/// `loom.env.envelope`: an envelope with an ADSR mode that follows a gate
+/// and an AD mode that runs once from a gate or a trigger.
+pub static ENVELOPE: ModuleDescriptor = ModuleDescriptor {
+    id: "loom.env.envelope",
     version: 1,
-    name: "ADSR",
+    name: "Envelope",
     category: "Envelope",
-    description: "Envelope from 0 to 1, triggered by a gate. Linear attack, exponential decay and release.",
+    description: "A level from 0 to 1, started by a gate. ADSR holds while the gate is high; AD runs once, so a trigger also starts it. Curve bends every stage.",
     inputs: &[PortSpec {
         name: "gate",
         label: "Gate",
         signal: SignalType::Gate,
-        description: "Going high starts the envelope. Going low releases it.",
+        description: "Going high starts the envelope. In ADSR mode, going low releases it.",
         default: PortDefault::Value(0.0),
         polarity: Polarity::Unipolar,
         channels: Channels::Downmix,
@@ -35,7 +38,7 @@ pub static ADSR: ModuleDescriptor = ModuleDescriptor {
         ParamSpec {
             name: "attack",
             label: "Attack",
-            description: "Time to rise from 0 to 1 after the gate goes high.",
+            description: "Time to rise to 1 after the gate goes high.",
             min: 0.0005,
             max: 10.0,
             default: 0.01,
@@ -46,7 +49,7 @@ pub static ADSR: ModuleDescriptor = ModuleDescriptor {
         ParamSpec {
             name: "decay",
             label: "Decay",
-            description: "Time to fall from 1 to the sustain level.",
+            description: "Time to fall from 1 to the sustain level, or to 0 in AD mode.",
             min: 0.0005,
             max: 10.0,
             default: 0.2,
@@ -57,7 +60,7 @@ pub static ADSR: ModuleDescriptor = ModuleDescriptor {
         ParamSpec {
             name: "sustain",
             label: "Sustain",
-            description: "The level held while the gate stays high.",
+            description: "The level held while the gate stays high. AD mode ignores it.",
             min: 0.0,
             max: 1.0,
             default: 0.7,
@@ -67,7 +70,7 @@ pub static ADSR: ModuleDescriptor = ModuleDescriptor {
         ParamSpec {
             name: "release",
             label: "Release",
-            description: "Time to fall to 0 after the gate goes low.",
+            description: "Time to fall to 0 after the gate goes low. AD mode ignores it.",
             min: 0.0005,
             max: 10.0,
             default: 0.3,
@@ -75,16 +78,40 @@ pub static ADSR: ModuleDescriptor = ModuleDescriptor {
             options: ParamOptions::DEFAULT,
         }
         .logarithmic(),
+        ParamSpec {
+            name: "mode",
+            label: "Mode",
+            description: "ADSR follows the gate. AD rises and falls once, whatever the gate does next.",
+            min: 0.0,
+            max: 1.0,
+            default: 0.0,
+            unit: "",
+            options: ParamOptions::DEFAULT,
+        }
+        .integer()
+        .choices(&["ADSR", "AD"]),
+        ParamSpec {
+            name: "curve",
+            label: "Curve",
+            description: "Bends every stage. 0 is straight, above 0 starts fast with a slow tail, below 0 starts slow.",
+            min: -1.0,
+            max: 1.0,
+            default: 0.0,
+            unit: "",
+            options: ParamOptions::DEFAULT,
+        },
     ],
-    role: ModuleRole::Dsp(|config| Box::new(Adsr::new(config))),
+    role: ModuleRole::Dsp(|config| Box::new(Envelope::new(config))),
     panel: Panel::new(
-        6,
+        9,
         8,
         &[
             Widget::knob(0, 0, "attack"),
             Widget::knob(3, 0, "decay"),
+            Widget::radio(6, 0, "mode"),
             Widget::knob(0, 3, "sustain"),
             Widget::knob(3, 3, "release"),
+            Widget::knob(6, 3, "curve"),
             Widget::light(0, 6, "level"),
         ],
     ),
@@ -96,90 +123,147 @@ pub static ADSR: ModuleDescriptor = ModuleDescriptor {
     }],
 };
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+/// Where the envelope is.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Stage {
+    /// At 0, waiting for a rising gate.
     Idle,
+    /// Rising from the level it started at to 1.
     Attack,
+    /// Falling from 1 to the sustain level (ADSR) or to 0 (AD).
     Decay,
+    /// Holding the sustain level while the gate is high (ADSR only).
+    Sustain,
+    /// Falling from the level it started at to 0 (ADSR only).
     Release,
 }
 
-struct Adsr {
-    sample_rate: f32,
+/// State for `loom.env.envelope`.
+struct Envelope {
+    sample_rate: f64,
     stage: Stage,
+    /// The output level.
     level: f32,
+    /// The level when the current stage started.
+    start: f32,
+    /// Progress through the current stage, from 0 to 1. Kept in `f64`, so
+    /// a 10 s stage at a high sample rate still ends on time.
+    progress: f64,
     gate_was_high: bool,
-    attack_step: f32,
-    decay_coefficient: f32,
+    /// The knob values. Modulated values live only for one frame, so these
+    /// keep the base and removing an assignment returns to it.
+    attack: f32,
+    decay: f32,
     sustain: f32,
-    release_coefficient: f32,
+    release: f32,
+    ad: bool,
+    curve: f32,
 }
 
-/// Coefficient for an exponential segment that falls by 60 dB in `seconds`.
-fn exp_coefficient(seconds: f32, sample_rate: f32) -> f32 {
-    (-(1000.0f32).ln() / (seconds * sample_rate).max(1.0)).exp()
-}
-
-impl Adsr {
+impl Envelope {
+    /// An idle envelope with the default parameters.
     fn new(config: &ModuleConfig) -> Self {
-        let sample_rate = config.sample_rate;
         Self {
-            sample_rate,
+            sample_rate: f64::from(config.sample_rate),
             stage: Stage::Idle,
             level: 0.0,
+            start: 0.0,
+            progress: 0.0,
             gate_was_high: false,
-            attack_step: 1.0 / (0.01 * sample_rate),
-            decay_coefficient: exp_coefficient(0.2, sample_rate),
+            attack: 0.01,
+            decay: 0.2,
             sustain: 0.7,
-            release_coefficient: exp_coefficient(0.3, sample_rate),
+            release: 0.3,
+            ad: false,
+            curve: 0.0,
         }
+    }
+
+    /// Starts `stage` from the current level.
+    fn enter(&mut self, stage: Stage) {
+        self.stage = stage;
+        self.start = self.level;
+        self.progress = 0.0;
+    }
+
+    /// Moves the progress on by one frame of a stage that lasts `seconds`,
+    /// and returns the new progress, at most 1.
+    fn advance(&mut self, seconds: f32) -> f32 {
+        let frames = (f64::from(seconds) * self.sample_rate).max(1.0);
+        self.progress = (self.progress + 1.0 / frames).min(1.0);
+        self.progress as f32
     }
 }
 
-impl Module for Adsr {
+/// The shaping power for `curve` from -1 to 1: `2^(3 × curve)`, from 1/8
+/// to 8.
+fn power(curve: f32) -> f32 {
+    (3.0 * curve.clamp(-1.0, 1.0)).exp2()
+}
+
+/// How far a falling stage has gone: `(1 - x)^k`, from 1 at `x` = 0 to 0
+/// at `x` = 1. A rising stage uses `1 - fall(x, k)`.
+fn fall(x: f32, k: f32) -> f32 {
+    let rest = (1.0 - x).max(0.0);
+    // Skip the `powf` for the straight line, the default.
+    if k == 1.0 { rest } else { rest.powf(k) }
+}
+
+impl Module for Envelope {
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let attack = io.param(0);
         let decay = io.param(1);
         let sustain = io.param(2);
         let release = io.param(3);
+        let mode = io.param(4);
+        let curve = io.param(5);
         let ([gate], [out]) = io.split::<1, 1>();
         for (i, (out, &g)) in out.iter_mut().zip(gate).enumerate() {
-            // Modulated values live only for this frame. The fields keep the
-            // knob's base, so removing an assignment returns to it.
-            let attack_step = attack.map_or(i, self.attack_step, |seconds| {
-                1.0 / (seconds * self.sample_rate).max(1.0)
-            });
-            let decay_coefficient = decay.map_or(i, self.decay_coefficient, |seconds| {
-                exp_coefficient(seconds, self.sample_rate)
-            });
-            let sustain = sustain.at_or(i, self.sustain);
-            let release_coefficient = release.map_or(i, self.release_coefficient, |seconds| {
-                exp_coefficient(seconds, self.sample_rate)
-            });
+            let attack = attack.at_or(i, self.attack);
+            let decay = decay.at_or(i, self.decay);
+            let sustain = sustain.at_or(i, self.sustain).clamp(0.0, 1.0);
+            let release = release.at_or(i, self.release);
+            let ad = mode.map_or(i, self.ad, |v| v >= 0.5);
+            let k = power(curve.at_or(i, self.curve));
+
             let high = gate_is_high(g);
             if high && !self.gate_was_high {
-                // Start from the current level: no click on retrigger.
-                self.stage = Stage::Attack;
-            } else if !high && self.gate_was_high {
-                self.stage = Stage::Release;
+                // Retrigger from the current level: no click. The attack
+                // still takes the full attack time.
+                self.enter(Stage::Attack);
+            } else if !high && self.gate_was_high && !ad && self.stage != Stage::Idle {
+                self.enter(Stage::Release);
             }
             self.gate_was_high = high;
+            // AD has no sustain. A switch to AD while holding falls to 0.
+            if ad && self.stage == Stage::Sustain {
+                self.enter(Stage::Decay);
+            }
 
             match self.stage {
                 Stage::Idle => self.level = 0.0,
                 Stage::Attack => {
-                    self.level += attack_step;
-                    if self.level >= 1.0 {
+                    let x = self.advance(attack);
+                    self.level = self.start + (1.0 - self.start) * (1.0 - fall(x, k));
+                    if x >= 1.0 {
                         self.level = 1.0;
-                        self.stage = Stage::Decay;
+                        self.enter(Stage::Decay);
                     }
                 }
                 Stage::Decay => {
-                    self.level = sustain + (self.level - sustain) * decay_coefficient;
+                    let x = self.advance(decay);
+                    let end = if ad { 0.0 } else { sustain };
+                    self.level = end + (self.start - end) * fall(x, k);
+                    if x >= 1.0 {
+                        self.level = end;
+                        self.stage = if ad { Stage::Idle } else { Stage::Sustain };
+                    }
                 }
+                Stage::Sustain => self.level = sustain,
                 Stage::Release => {
-                    self.level *= release_coefficient;
-                    if self.level < 1e-5 {
+                    let x = self.advance(release);
+                    self.level = self.start * fall(x, k);
+                    if x >= 1.0 {
                         self.level = 0.0;
                         self.stage = Stage::Idle;
                     }
@@ -191,10 +275,12 @@ impl Module for Adsr {
 
     fn set_param(&mut self, index: usize, value: f32) {
         match index {
-            0 => self.attack_step = 1.0 / (value * self.sample_rate).max(1.0),
-            1 => self.decay_coefficient = exp_coefficient(value, self.sample_rate),
+            0 => self.attack = value,
+            1 => self.decay = value,
             2 => self.sustain = value,
-            3 => self.release_coefficient = exp_coefficient(value, self.sample_rate),
+            3 => self.release = value,
+            4 => self.ad = value >= 0.5,
+            5 => self.curve = value,
             _ => {}
         }
     }
@@ -202,6 +288,8 @@ impl Module for Adsr {
     fn reset(&mut self) {
         self.stage = Stage::Idle;
         self.level = 0.0;
+        self.start = 0.0;
+        self.progress = 0.0;
         self.gate_was_high = false;
     }
 
@@ -215,56 +303,162 @@ mod tests {
     use super::*;
     use loom_core::testing::run;
 
-    #[test]
-    fn follows_gate() {
-        let config = ModuleConfig {
-            sample_rate: 1_000.0,
-            max_block: 2_000,
-        };
-        let ModuleRole::Dsp(create) = ADSR.role else {
+    /// Sample rate for these tests: 1 kHz, so one frame is 1 ms.
+    const RATE: f32 = 1_000.0;
+
+    /// An envelope at 1 kHz with its defaults and then `params` set.
+    fn make(params: &[(&str, f32)]) -> Box<dyn Module> {
+        let ModuleRole::Dsp(create) = ENVELOPE.role else {
             unreachable!()
         };
-        let mut env = create(&config);
-        for (i, p) in ADSR.params.iter().enumerate() {
+        let mut env = create(&ModuleConfig {
+            sample_rate: RATE,
+            max_block: 4_000,
+        });
+        for (i, p) in ENVELOPE.params.iter().enumerate() {
             env.set_param(i, p.default);
         }
+        for &(name, value) in params {
+            let index = ENVELOPE.params.iter().position(|p| p.name == name).unwrap();
+            env.set_param(index, value);
+        }
+        env.reset();
+        env
+    }
+
+    /// Runs `env` over `gate` and returns its output.
+    fn play(env: &mut dyn Module, gate: &[f32]) -> Vec<f32> {
+        let mut out = vec![0.0; gate.len()];
+        run(env, RATE, &[gate], &[true], &mut [&mut out], &[]);
+        out
+    }
+
+    #[test]
+    fn follows_gate() {
+        let mut env = make(&[]);
         let mut gate = vec![1.0; 2_000];
         gate[1_000..].fill(0.0);
-        let mut out = vec![0.0; 2_000];
-        run(env.as_mut(), 1_000.0, &[&gate], &[true], &mut [&mut out], &[]);
-        assert!((out[999] - 0.7).abs() < 0.01, "sustain level, got {}", out[999]);
-        assert!(out[1_999] < 0.01, "released, got {}", out[1_999]);
+        let out = play(env.as_mut(), &gate);
+        assert!((out[999] - 0.7).abs() < 1e-6, "sustain level, got {}", out[999]);
+        assert_eq!(out[1_999], 0.0, "released");
         assert!(out[5] > 0.0 && out[5] < 1.0, "attack ramps");
+    }
+
+    /// In ADSR mode with curve 0, every stage is a straight line that takes
+    /// its knob's time: 10 frames up, 20 down to sustain, 30 down to 0.
+    #[test]
+    fn adsr_stages_take_their_times() {
+        let mut env = make(&[("attack", 0.01), ("decay", 0.02), ("sustain", 0.5), ("release", 0.03)]);
+        let mut gate = vec![1.0; 100];
+        gate[50..].fill(0.0);
+        let out = play(env.as_mut(), &gate);
+        // Frame 0 is the first step of the attack.
+        assert!((out[0] - 0.1).abs() < 1e-6, "{}", out[0]);
+        assert!((out[4] - 0.5).abs() < 1e-6, "{}", out[4]);
+        assert_eq!(out[9], 1.0, "the attack ends after 10 frames");
+        assert!((out[19] - 0.75).abs() < 1e-6, "half way down: {}", out[19]);
+        assert_eq!(out[29], 0.5, "the decay ends after 20 frames");
+        assert_eq!(out[49], 0.5, "sustain");
+        assert!((out[64] - 0.25).abs() < 1e-6, "half way released: {}", out[64]);
+        assert_eq!(out[79], 0.0, "the release ends after 30 frames");
+    }
+
+    /// AD mode measures its attack and decay times, ignores the gate going
+    /// low, and runs from a one-frame trigger.
+    #[test]
+    fn ad_mode_runs_once_from_a_trigger() {
+        let mut env = make(&[("mode", 1.0), ("attack", 0.01), ("decay", 0.04), ("sustain", 0.8)]);
+        let mut gate = vec![0.0; 100];
+        gate[0] = 1.0;
+        let out = play(env.as_mut(), &gate);
+        assert_eq!(out[9], 1.0, "the attack ends after 10 frames");
+        assert!((out[29] - 0.5).abs() < 1e-6, "half way down: {}", out[29]);
+        assert_eq!(out[49], 0.0, "the decay ends at 0, not at sustain");
+        assert!(out[50..].iter().all(|&v| v == 0.0));
+
+        // A held gate changes nothing: the decay still falls to 0.
+        let mut env = make(&[("mode", 1.0), ("attack", 0.01), ("decay", 0.04)]);
+        let out = play(env.as_mut(), &[1.0; 100]);
+        assert_eq!(out[49], 0.0);
+        assert_eq!(out[99], 0.0);
+    }
+
+    /// A rising gate in the attack or in the decay starts a new attack from
+    /// the current level, so the output never jumps. The new attack takes
+    /// the full attack time.
+    #[test]
+    fn retrigger_starts_from_the_current_level() {
+        for mode in [0.0, 1.0] {
+            let mut env = make(&[("mode", mode), ("attack", 0.02), ("decay", 0.04), ("curve", 0.5)]);
+            let mut gate = vec![0.0; 200];
+            // In the attack at frame 10, and in the decay at frame 60.
+            gate[0..5].fill(1.0);
+            gate[10..15].fill(1.0);
+            gate[60..65].fill(1.0);
+            if mode == 0.0 {
+                // ADSR: keep the gate high so the low edges do not release.
+                gate[0..100].fill(1.0);
+                gate[9] = 0.0;
+                gate[59] = 0.0;
+            }
+            let out = play(env.as_mut(), &gate);
+            let biggest = out.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0, f32::max);
+            // A full attack of 20 frames moves at most about 1/20 per
+            // frame at the start of a fast curve (k = 2.83).
+            assert!(biggest < 0.2, "mode {mode}: step {biggest}");
+            assert_eq!(out[79], 1.0, "mode {mode}: the retriggered attack takes 20 frames");
+            assert!(out[78] < 1.0, "mode {mode}");
+        }
+    }
+
+    /// Curve 0 is a straight line. Positive curve rises fast and falls fast
+    /// at first; negative curve starts slowly.
+    #[test]
+    fn curve_bends_the_stages() {
+        let half = |curve: f32| {
+            let mut env = make(&[("mode", 1.0), ("attack", 0.01), ("decay", 0.01), ("curve", curve)]);
+            let mut gate = vec![0.0; 30];
+            gate[0] = 1.0;
+            let out = play(env.as_mut(), &gate);
+            (out[4], out[14])
+        };
+        let (rise, fall) = half(0.0);
+        assert!((rise - 0.5).abs() < 1e-6 && (fall - 0.5).abs() < 1e-6);
+        let (rise, fall) = half(1.0);
+        // k = 8: 1 - 0.5^8 and 0.5^8.
+        assert!((rise - (1.0 - 0.5f32.powi(8))).abs() < 1e-5, "{rise}");
+        assert!((fall - 0.5f32.powi(8)).abs() < 1e-5, "{fall}");
+        let (rise, fall) = half(-1.0);
+        assert!(rise < 0.2 && fall > 0.8, "{rise} {fall}");
+    }
+
+    /// Switching to AD while the ADSR holds its sustain falls to 0 over
+    /// the decay time, without a jump.
+    #[test]
+    fn switching_to_ad_while_holding_decays() {
+        let mut env = make(&[("attack", 0.01), ("decay", 0.01), ("sustain", 0.6)]);
+        let out = play(env.as_mut(), &[1.0; 50]);
+        assert_eq!(out[49], 0.6);
+        env.set_param(4, 1.0);
+        let out = play(env.as_mut(), &[1.0; 20]);
+        assert!((out[0] - 0.54).abs() < 1e-6, "{}", out[0]);
+        assert_eq!(out[9], 0.0);
     }
 
     /// The `level` display value is the output's last sample after the
     /// attack, and 0 once the release has ended (#106).
     #[test]
     fn display_follows_the_level() {
-        let config = ModuleConfig {
-            sample_rate: 1_000.0,
-            max_block: 2_000,
-        };
-        let ModuleRole::Dsp(create) = ADSR.role else {
-            unreachable!()
-        };
-        let mut env = create(&config);
-        for (i, p) in ADSR.params.iter().enumerate() {
-            env.set_param(i, p.default);
-        }
+        let mut env = make(&[]);
         let mut display = [f32::NAN];
 
         // The default attack is 10 ms, 10 frames at 1 kHz.
-        let gate = [1.0; 50];
-        let mut out = [0.0; 50];
-        run(env.as_mut(), 1_000.0, &[&gate], &[true], &mut [&mut out], &[]);
+        let out = play(env.as_mut(), &[1.0; 50]);
         env.displays(&mut display);
         assert!(out[49] > 0.0, "past the attack, got {}", out[49]);
         assert_eq!(display[0], out[49]);
 
-        let gate = [0.0; 2_000];
-        let mut out = [0.0; 2_000];
-        run(env.as_mut(), 1_000.0, &[&gate], &[true], &mut [&mut out], &[]);
+        let out = play(env.as_mut(), &[0.0; 2_000]);
         env.displays(&mut display);
         assert_eq!(out[1_999], 0.0, "released");
         assert_eq!(display[0], 0.0);

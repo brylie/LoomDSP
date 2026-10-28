@@ -13,7 +13,7 @@ Patch(
         PatchModule(id: 4, kind: "loom.osc.sine@1"),
         // Feedback amount, in pitch units.
         PatchModule(id: 5, kind: "loom.math.mul@1", params: {"gain": 0.08}),
-        PatchModule(id: 6, kind: "loom.env.adsr@1"),
+        PatchModule(id: 6, kind: "loom.env.envelope@1"),
         PatchModule(id: 7, kind: "loom.math.mul@1", params: {"gain": 0.3}),
         PatchModule(id: 8, kind: "loom.io.audio-out@1"),
     ],

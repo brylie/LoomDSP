@@ -379,10 +379,10 @@ impl Rig {
 /// `set_param` owns: after the assignment went away it kept the last
 /// modulated value, because nothing calls `set_param` again.
 #[test]
-fn adsr_returns_to_base_sustain() {
+fn envelope_returns_to_base_sustain() {
     for how in REMOVALS {
         let mut rig = Rig::new(
-            "loom.env.adsr",
+            "loom.env.envelope",
             &[("attack", 0.0005), ("decay", 0.0005), ("sustain", 0.5)],
         );
         let gate = module(&mut rig.parts.controller, "test.linear", "level", 1.0);

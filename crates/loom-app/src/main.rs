@@ -2936,7 +2936,7 @@ mod tests {
 
     /// An envelope and a filter, with the filter's cutoff knob widget.
     fn env_and_filter(app: &mut App) -> (ModuleId, ModuleId, usize, usize) {
-        let env = app.controller.add_module("loom.env.adsr").unwrap();
+        let env = app.controller.add_module("loom.env.envelope").unwrap();
         let filter = app.controller.add_module("loom.filter.svf").unwrap();
         app.commit();
         let d = app.controller.graph().node(filter).unwrap().descriptor;
@@ -3724,7 +3724,7 @@ mod tests {
         let mut app = app();
         let gate = app.controller.add_module("loom.math.constant").unwrap();
         app.controller.set_param_named(gate, "value", 1.0).unwrap();
-        let env = app.controller.add_module("loom.env.adsr").unwrap();
+        let env = app.controller.add_module("loom.env.envelope").unwrap();
         app.commit();
         let d = app.controller.graph().node(env).unwrap().descriptor;
         let light = d.panel.widgets.iter().position(|w| w.bind == "level").unwrap();
@@ -4089,7 +4089,7 @@ mod tests {
     fn removed_probes_lose_their_levels() {
         let mut app = app();
         let gate = app.controller.add_module("loom.math.constant").unwrap();
-        let env = app.controller.add_module("loom.env.adsr").unwrap();
+        let env = app.controller.add_module("loom.env.envelope").unwrap();
         app.controller.connect_named(gate, "out", env, "gate").unwrap();
         app.commit();
         for _ in 0..20 {
@@ -4148,7 +4148,7 @@ mod tests {
         else {
             panic!("not in learn mode");
         };
-        let (env_out, sine_out) = (format!("ADSR #{}: Out", env.0), format!("Sine #{}: Out", sine.0));
+        let (env_out, sine_out) = (format!("Envelope #{}: Out", env.0), format!("Sine #{}: Out", sine.0));
         let shown: Vec<_> = assignments
             .iter()
             .map(|a| (a.source.as_str(), a.depth_text.as_str(), a.enabled))

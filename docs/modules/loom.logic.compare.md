@@ -55,7 +55,7 @@ Patch(
         PatchModule(id: 1, kind: "loom.mod.lfo@1", params: {"rate": 2}),
         PatchModule(id: 2, kind: "loom.math.constant@1", params: {"value": 0.5}),
         PatchModule(id: 3, kind: "loom.logic.compare@1", params: {"mode": 0, "hysteresis": 0.05}),
-        PatchModule(id: 4, kind: "loom.env.adsr@1"),
+        PatchModule(id: 4, kind: "loom.env.envelope@1"),
         PatchModule(id: 5, kind: "loom.osc.noise@1"),
         PatchModule(id: 6, kind: "loom.level.amp@1"),
         PatchModule(id: 7, kind: "loom.io.audio-out@1"),

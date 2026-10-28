@@ -144,7 +144,7 @@ Modulation assignments already scale and offset any parameter (ADR-0014), so the
 
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
-| MT-ENV-01 | Envelope | Shapes a level from a gate or trigger: AD, AR, ADSR, and ADSR with delay and hold, with curve control and an optional loop. The character trait gives plucked and slow, lagging responses. | Timebase, Character | P1 | FR-LIB-04 | Built in part (`loom.env.adsr`). AD mode specified in [P1 modules](../design/p1-modules.md#envelope-ad-mode-mt-env-01): renamed `loom.env.envelope` |
+| MT-ENV-01 | Envelope | Shapes a level from a gate or trigger: AD, AR, ADSR, and ADSR with delay and hold, with curve control and an optional loop. The character trait gives plucked and slow, lagging responses. | Timebase, Character | P1 | FR-LIB-04 | Built in part (`loom.env.envelope`: ADSR and AD modes with curve, [P1 modules](../design/p1-modules.md#envelope-ad-mode-mt-env-01)) |
 | MT-ENV-02 | Segment envelope | An envelope drawn as any number of points, with a hold point or a loop between two points. Uses the shared curve data. | Timebase, Retrigger | P2 | FR-LIB-12 | Planned |
 | MT-ENV-03 | Function generator | A rise and a fall that can be triggered once, looped, or used to slew an input. | Timebase | P2 | New | Planned |
 | MT-ENV-04 | Envelope follower | Outputs the loudness of an audio signal as a control signal. | Sidechain | P2 | FR-LIB-12 | Planned |

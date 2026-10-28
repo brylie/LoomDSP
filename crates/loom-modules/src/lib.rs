@@ -42,7 +42,7 @@ pub static ALL: &[&ModuleDescriptor] = &[
     &osc::NOISE,
     &filter::SVF,
     &filter::ONEPOLE,
-    &env::ADSR,
+    &env::ENVELOPE,
     &math::ADD,
     &math::MUL,
     &math::SUB,
@@ -101,7 +101,7 @@ mod tests {
     #[test]
     fn panels_follow_the_spec() {
         // docs/design/panels.md, Module panels on tiles: a knob for every
-        // parameter except these, and lights on MIDI Note and ADSR. Button's
+        // parameter except these, and lights on MIDI Note and Envelope. Button's
         // `on` is the button itself. Its `mode` stays in the inspector.
         let inspector_only = [
             ("loom.osc.noise", "seed"),
@@ -172,6 +172,7 @@ mod tests {
                     ("loom.osc.noise", "colour"),
                     ("loom.mod.lfo", "sync"),
                     ("loom.mod.lfo", "shape"),
+                    ("loom.env.envelope", "mode"),
                 ];
                 if non_knob.contains(&(descriptor.id, param.name)) {
                     assert!(
@@ -197,7 +198,7 @@ mod tests {
                 .collect();
             let expected: &[&str] = match descriptor.id {
                 "loom.midi.note" => &["gate"],
-                "loom.env.adsr" => &["level"],
+                "loom.env.envelope" => &["level"],
                 "loom.logic.memory" => &["state"],
                 // Trigger lights (panels.md, Lights for one-sample triggers).
                 "loom.logic.divide" | "loom.phase.trigger" => &["fired"],

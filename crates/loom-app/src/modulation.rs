@@ -469,7 +469,7 @@ mod tests {
         let mut registry = Registry::new();
         loom_modules::register_all(&mut registry).unwrap();
         let mut controller = create_engine(Arc::new(registry), EngineConfig::default()).controller;
-        let env = controller.add_module("loom.env.adsr").unwrap();
+        let env = controller.add_module("loom.env.envelope").unwrap();
         let filter = controller.add_module("loom.filter.svf").unwrap();
         let cutoff = controller
             .graph()

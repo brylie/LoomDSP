@@ -94,16 +94,41 @@ fn onepole() {
         .check(reference!("onepole"));
 }
 
+/// Reference render for `loom.env.envelope` in ADSR mode, with a bent
+/// curve.
 #[test]
-fn adsr() {
-    Harness::new(&env::ADSR)
+fn envelope() {
+    Harness::new(&env::ENVELOPE)
         .seconds(0.2)
         .input("gate", Signal::gate(0.01, 0.12))
         .param("attack", 0.02)
         .param("decay", 0.03)
         .param("sustain", 0.5)
         .param("release", 0.05)
-        .check(reference!("adsr"));
+        .param("curve", 0.5)
+        .check(reference!("envelope"));
+}
+
+/// Reference render for `loom.env.envelope` in AD mode: three triggers, the
+/// second in the middle of the attack and the third in the middle of the
+/// decay (p1-modules.md, Envelope AD mode).
+#[test]
+fn envelope_ad() {
+    // Attack 20 ms, decay 40 ms, at 48 kHz. Triggers at 10 ms, at 20 ms (in
+    // the attack, which then runs to 40 ms), and at 60 ms (in the decay from
+    // 40 to 80 ms).
+    let triggers = [480, 960, 2_880];
+    Harness::new(&env::ENVELOPE)
+        .seconds(0.15)
+        .input(
+            "gate",
+            Signal::from_fn(move |frame| if triggers.contains(&frame) { 1.0 } else { 0.0 }),
+        )
+        .param("mode", 1.0)
+        .param("attack", 0.02)
+        .param("decay", 0.04)
+        .param("curve", -0.3)
+        .check(reference!("envelope_ad"));
 }
 
 #[test]
@@ -350,7 +375,7 @@ fn every_dsp_module_has_a_reference_test() {
         &level::SLEW,
         &phase::SCALE,
         &lfo::LFO,
-        &env::ADSR,
+        &env::ENVELOPE,
         &math::ADD,
         &math::MUL,
         &math::SUB,

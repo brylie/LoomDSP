@@ -21,9 +21,9 @@ Patch(
         // LFO: a free-running sine at 2 Hz (shape 0 is sine).
         PatchModule(id: 5, kind: "loom.mod.lfo@1", params: {"rate": 2.0, "shape": 0.0}),
         // Filter envelope. It reaches the cutoff only through an assignment.
-        PatchModule(id: 6, kind: "loom.env.adsr@1", params: {"decay": 0.4, "sustain": 0.2}),
+        PatchModule(id: 6, kind: "loom.env.envelope@1", params: {"decay": 0.4, "sustain": 0.2}),
         // Amplitude envelope and VCA.
-        PatchModule(id: 7, kind: "loom.env.adsr@1", params: {"attack": 0.005, "release": 0.4}),
+        PatchModule(id: 7, kind: "loom.env.envelope@1", params: {"attack": 0.005, "release": 0.4}),
         PatchModule(id: 8, kind: "loom.math.mul@1", params: {"gain": 0.3}),
         PatchModule(id: 9, kind: "loom.io.audio-out@1"),
     ],

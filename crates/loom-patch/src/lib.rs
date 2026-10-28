@@ -803,7 +803,7 @@ Patch(
     name: "Modulated",
     modules: [
         (id: 1, kind: "loom.math.constant@1", params: {"value": 1.0}),
-        (id: 2, kind: "loom.env.adsr@1"),
+        (id: 2, kind: "loom.env.envelope@1"),
         (id: 3, kind: "loom.filter.svf@1"),
     ],
     modulation: [

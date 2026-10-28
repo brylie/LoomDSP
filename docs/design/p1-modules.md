@@ -289,7 +289,7 @@ Every module also needs the checklist items in rule 6 above. The module-specific
 - [ ] Mixer mute fades over 5 ms. Crossfade equal power gives 0.7071 of each side at mix 0.5, linear gives 0.5. Clamp swaps crossed limits and turns NaN into a value inside the limits. Scale inverts at factor −1.
 - [ ] Sample and hold captures on the same frame at all three block sizes. Slew takes `time` seconds to rise by 1.0, and a new module starts at its input.
 - [ ] A synced LFO with nothing connected wraps with the bar phase at block sizes 1, 77, and 512. A free LFO ignores a cable on `phase`.
-- [ ] Envelope AD mode measures the attack and decay times, retriggers in attack and in decay without a click, and matches at all three block sizes.
+- [x] Envelope AD mode measures the attack and decay times, retriggers in attack and in decay without a click, and matches at all three block sizes.
 - [ ] The one-pole outputs are 3 dB down at their cutoff. The ladder is about 12, 18, and 24 dB per octave steeper above the cutoff for each `slope`. At resonance 1, the 24 dB slope self-oscillates at the cutoff and the 18 dB slope at about 1.7 times it. The 18 dB check uses cutoffs below about 0.29 times the sample rate, because above that 1.7 times the cutoff is past Nyquist and the oscillation cannot appear. The 12 dB slope does not self-oscillate (its peak is about 4 dB above its own DC gain with feedback, not above unity). It stays finite at any input, and a `slope` change while playing is click-free and does not burst into oscillation.
 - [ ] Controller input lands CC, bend, and aftertouch events on the sample of their offset at block sizes 1, 77, and 512.
 

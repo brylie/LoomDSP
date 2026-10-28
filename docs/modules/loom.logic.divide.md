@@ -55,7 +55,7 @@ Patch(
     modules: [
         PatchModule(id: 1, kind: "loom.mod.lfo@1", params: {"rate": 8, "shape": 4}),
         PatchModule(id: 2, kind: "loom.logic.divide@1", params: {"n": 4, "offset": 0}),
-        PatchModule(id: 3, kind: "loom.env.adsr@1", params: {"attack": 0.005, "decay": 0.1, "sustain": 0, "release": 0.1}),
+        PatchModule(id: 3, kind: "loom.env.envelope@1", params: {"attack": 0.005, "decay": 0.1, "sustain": 0, "release": 0.1}),
         PatchModule(id: 4, kind: "loom.osc.noise@1"),
         PatchModule(id: 5, kind: "loom.level.amp@1"),
         PatchModule(id: 6, kind: "loom.io.audio-out@1"),

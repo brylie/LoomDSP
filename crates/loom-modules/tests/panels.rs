@@ -47,7 +47,7 @@ fn midi_note_gate_light_follows_the_held_note() {
 }
 
 #[test]
-fn adsr_lights_follow_their_envelopes() {
+fn envelope_lights_follow_their_levels() {
     // (module, sustain level in the patch)
     for (envelope, sustain) in [(AMP_ENVELOPE, 0.7), (FILTER_ENVELOPE, 0.2)] {
         for block in BLOCKS {

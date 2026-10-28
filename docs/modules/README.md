@@ -21,7 +21,7 @@ One page for each built-in module, made from its descriptor. After you change a 
 
 | Module | ID | Description |
 |---|---|---|
-| [ADSR](loom.env.adsr.md) | `loom.env.adsr` | Envelope from 0 to 1, triggered by a gate. Linear attack, exponential decay and release. |
+| [Envelope](loom.env.envelope.md) | `loom.env.envelope` | A level from 0 to 1, started by a gate. ADSR holds while the gate is high; AD runs once, so a trigger also starts it. Curve bends every stage. |
 
 ## Filter
 
