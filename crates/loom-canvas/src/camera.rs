@@ -62,6 +62,15 @@ impl Camera {
         self.origin = Point::new(anchor.x - screen.x / self.zoom, anchor.y - screen.y / self.zoom);
     }
 
+    /// Sets the zoom to `zoom`, keeping the world point under `screen` in
+    /// place. Cmd/Ctrl+0 uses it to go back to 100%.
+    pub fn zoom_to(&mut self, screen: Point, zoom: f32) {
+        let anchor = self.to_world(screen);
+        // Set exactly, not by a factor, so 100% is exactly 1.0.
+        self.zoom = zoom.clamp(MIN_ZOOM, MAX_ZOOM);
+        self.origin = Point::new(anchor.x - screen.x / self.zoom, anchor.y - screen.y / self.zoom);
+    }
+
     /// Shows all of `world` inside a widget of this size, with a margin.
     /// Never zooms in past 1.0, so small patches stay at natural size.
     pub fn frame(&mut self, world: Rectangle, size: Size) {
@@ -103,6 +112,23 @@ mod tests {
         camera.zoom_at(screen, 1.5);
         assert!(close(camera.to_world(screen), before));
         assert!((camera.zoom - 1.5).abs() < 1e-6);
+    }
+
+    /// `zoom_to` sets the zoom exactly and keeps the point under the
+    /// anchor in place, from any zoom.
+    #[test]
+    fn zoom_to_sets_the_zoom_about_the_anchor() {
+        for start in [MIN_ZOOM, 0.37, 1.0, 2.9, MAX_ZOOM] {
+            let mut camera = Camera {
+                origin: Point::new(-80.0, 35.0),
+                zoom: start,
+            };
+            let screen = Point::new(250.0, 120.0);
+            let before = camera.to_world(screen);
+            camera.zoom_to(screen, 1.0);
+            assert_eq!(camera.zoom, 1.0, "from {start}");
+            assert!(close(camera.to_world(screen), before), "from {start}");
+        }
     }
 
     #[test]

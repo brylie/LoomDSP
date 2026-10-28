@@ -2674,15 +2674,23 @@ fn severity_colour(severity: alerts::Severity) -> Color {
     }
 }
 
+/// Inspector help text, shown with nothing selected. It lists every canvas
+/// gesture and shortcut (#16), so keep it in step with `PatchCanvas::handle`
+/// and the key handling in `loom-canvas/src/widget.rs`.
 const HELP: &str = "A or a double-click on empty canvas opens the module browser at the pointer; type, then Enter adds.\n\
 Drag from a port to patch a cable. Drag a connected input to move or remove its cable.\n\
-Drag tiles to move them. Shift-click or drag a box to select several.\n\
+Drag tiles to move them. Shift-click or drag a box to select several. Cmd/Ctrl+A selects all.\n\
+Delete or Backspace removes the selection.\n\
 Drag a knob up or down; Shift for fine steps; double-click resets it.\n\
-With a module selected, Tab moves between its controls and the arrow keys change them.\n\
-Right-drag or two-finger scroll to pan. Wheel or Cmd/Ctrl-scroll to zoom.\n\
+With a module selected, Tab and Shift-Tab move between its controls, the arrow keys change them, \
+and Space or Enter presses, toggles, or steps the focused control. Escape clears the focus.\n\
+Space toggles Run when no control has focus.\n\
+Right-drag or two-finger scroll to pan. Wheel or Cmd/Ctrl-scroll to zoom. Cmd/Ctrl+0 zooms to 100%.\n\
+F or Home frames the patch.\n\
 Right-click an output or a cable to add a scope or a meter fed by it.\n\
-F or Home frames the patch. Delete removes the selection.\n\
+Click a modulation badge to pin its lines; click again or press Escape to hide them.\n\
 Cmd/Ctrl+C copies, X cuts, V pastes at the pointer, and D duplicates the selection.\n\
+Cmd/Ctrl+Z undoes, and Cmd/Ctrl+Shift+Z redoes.\n\
 MIDI learn: click a control, then move a knob on your controller. Escape ends it.";
 
 /// The keys the open browser handles, whether or not a widget used them.
@@ -2709,6 +2717,32 @@ mod tests {
 
     fn app() -> App {
         App::new(app_args())
+    }
+
+    /// #16: the inspector help text names every canvas shortcut, the new
+    /// Cmd/Ctrl+0 zoom reset and the ones that were there before it.
+    #[test]
+    fn help_text_lists_every_canvas_shortcut() {
+        for shortcut in [
+            "A or a double-click",
+            "Cmd/Ctrl+A",
+            "Delete or Backspace",
+            "Tab and Shift-Tab",
+            "arrow keys",
+            "Space or Enter",
+            "Escape clears the focus",
+            "Space toggles Run",
+            "Cmd/Ctrl+0",
+            "F or Home",
+            "press Escape",
+            "Cmd/Ctrl+C",
+            "V pastes",
+            "D duplicates",
+            "Cmd/Ctrl+Z",
+            "Cmd/Ctrl+Shift+Z",
+        ] {
+            assert!(HELP.contains(shortcut), "help text lacks {shortcut:?}");
+        }
     }
 
     /// Text in the window chrome meets WCAG 1.4.3 (4.5:1) on the theme

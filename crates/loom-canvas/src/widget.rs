@@ -906,6 +906,14 @@ impl<Message> PatchCanvas<'_, Message> {
                         }
                         shell.capture_event();
                     }
+                    // Cmd/Ctrl+0 resets the zoom to 100%, about the pointer
+                    // like the wheel, so what the user points at stays put.
+                    keyboard::Key::Character("0") if modifiers.command() => {
+                        let at = screen.unwrap_or(Point::new(bounds.width / 2.0, bounds.height / 2.0));
+                        state.camera.zoom_to(at, 1.0);
+                        shell.request_redraw();
+                        shell.capture_event();
+                    }
                     keyboard::Key::Character("a") if modifiers.command() => {
                         let all = self.scene.modules().iter().map(|m| m.id).collect();
                         self.emit(shell, CanvasEvent::Select(all));
@@ -2954,6 +2962,44 @@ mod tests {
             assert!(
                 !events.iter().any(|e| matches!(e, CanvasEvent::OpenBrowser { .. })),
                 "{modifiers:?}: {events:?}"
+            );
+        }
+    }
+
+    /// #16: Cmd/Ctrl+0 over the canvas sets the zoom to 100% from any
+    /// zoom, keeping the point under the pointer in place. Without the
+    /// command modifier, 0 does nothing.
+    #[test]
+    fn command_zero_resets_the_zoom_to_100_percent() {
+        let scene = chain();
+        let none = BTreeSet::new();
+        let canvas = PatchCanvas::new(&scene, &none, |e| e);
+        let zero = |modifiers| {
+            let key = keyboard::Key::Character("0".into());
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                modified_key: key.clone(),
+                key,
+                physical_key: keyboard::key::Physical::Code(keyboard::key::Code::Digit0),
+                location: keyboard::Location::Standard,
+                modifiers,
+                text: None,
+                repeat: false,
+            })
+        };
+        let at = Point::new(300.0, 200.0);
+        for start in [crate::camera::MIN_ZOOM, 0.5, 1.0, 2.25, crate::camera::MAX_ZOOM] {
+            let mut state = State::default();
+            state.camera.zoom = start;
+            state.camera.origin = Point::new(-40.0, 60.0);
+            let before = state.camera.to_world(at);
+            drive(&canvas, &mut state, &zero(keyboard::Modifiers::default()), at);
+            assert_eq!(state.camera.zoom, start, "0 alone leaves the zoom at {start}");
+            drive(&canvas, &mut state, &zero(keyboard::Modifiers::COMMAND), at);
+            assert_eq!(state.camera.zoom, 1.0, "from {start}");
+            let after = state.camera.to_world(at);
+            assert!(
+                (after.x - before.x).abs() < 1e-3 && (after.y - before.y).abs() < 1e-3,
+                "from {start}: {before:?} moved to {after:?}"
             );
         }
     }
