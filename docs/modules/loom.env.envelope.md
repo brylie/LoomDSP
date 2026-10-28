@@ -35,7 +35,7 @@ A level from 0 to 1, started by a gate. ADSR holds while the gate is high; AD ru
 
 ## Panel
 
-9 by 8 grid units.
+12 by 8 grid units.
 
 - Knob: **Attack** (`attack`)
 - Knob: **Decay** (`decay`)
