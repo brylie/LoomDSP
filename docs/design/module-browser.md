@@ -17,7 +17,7 @@ A searchable list of module types that adds the chosen module to the canvas, whe
 
 "I know I want a filter. Let me type `filt`, press Enter, and have it appear where my pointer is, so I can cable it up straight away."
 
-Today the toolbar has a drop-down of module IDs and an Add button. It lists every ID in one long list, shows nothing about what a module does, and puts the new module wherever auto-layout finds space, often off screen. A user has to know the ID, find it, and then find the new tile.
+Before the browser, the toolbar had a drop-down of module IDs and an Add button. It listed every ID in one long list, showed nothing about what a module does, and put the new module wherever auto-layout found space, often off screen. A user had to know the ID, find it, and then find the new tile.
 
 ## Behaviour
 
