@@ -117,7 +117,7 @@ Nothing is added, no undo step is made, and the status bar says why, in these ca
 |---|---|
 | The clipboard holds no text, or text that is not a patch | **The clipboard holds no LoomDSP modules** |
 | The patch format version is newer than this build | The same message as Open gives |
-| A module type is not registered | **Cannot paste: unknown module `kind`** |
+| A module type is not registered (until [placeholders](unknown-modules.md) are built) | **Cannot paste: unknown module `kind`** |
 | A parameter, port, or module id that the text refers to does not exist | **Cannot paste:** and the reason |
 | Not enough free module slots | **Cannot paste: the patch has room for N more modules** |
 
@@ -155,7 +155,7 @@ Nothing is added, no undo step is made, and the status bar says why, in these ca
 
 ## Out of scope
 
-- **Placeholders for unknown modules** ([#18](https://github.com/brylie/LoomDSP/issues/18)). Until then, a paste with an unknown type is refused. When placeholders exist, a placeholder copies and pastes like any module, and keeps its data.
+- **Placeholders for unknown modules** ([#18](https://github.com/brylie/LoomDSP/issues/18), [spec](unknown-modules.md), Agreed, not built). Until it is built, a paste with an unknown type is refused with **Cannot paste: unknown module `kind`**. Once built, a module type that is not registered pastes as a placeholder, which copies and pastes like any module and keeps its data.
 - **Paste from the context menu or an Edit menu.** The app has neither yet. They call the same commands when they exist.
 - **Paste with incoming cables** ("paste with connections"). Only duplicate keeps them. Revisit if users ask.
 - **Copying parameter values alone**, from one module to another of the same type.
