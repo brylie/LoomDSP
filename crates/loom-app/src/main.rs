@@ -455,6 +455,9 @@ struct App {
     /// The traces of the scopes on screen (`docs/design/panels.md`, Drawing
     /// the scope trace).
     traces: loom_canvas::ScopeTraces,
+    /// Outputs carrying a signal (`docs/design/panels.md`, Signal activity
+    /// on ports).
+    carrying: BTreeSet<OutputRef>,
     /// True while the canvas draws full scope traces (close zoom), false
     /// when it draws only their level.
     full_traces: bool,
@@ -926,6 +929,7 @@ impl App {
             run_driven,
             meter_levels: std::collections::HashMap::new(),
             traces: loom_canvas::ScopeTraces::new(),
+            carrying: BTreeSet::new(),
             full_traces: true,
             visible_displays: Vec::new(),
             selection: BTreeSet::new(),
@@ -962,7 +966,7 @@ impl App {
             _audio: audio,
             idle_engine,
             monitor: monitor::Monitor::new(telemetry, sample_rate, generation),
-            live: Live::new(),
+            live: Live::showing_activity(),
             dropouts: alerts::Dropouts::default(),
             rig,
             audio_name,
@@ -1627,8 +1631,11 @@ impl App {
                 Some((probe, want))
             })
             .collect();
+        let activity = self.live.activity_probes().collect();
+        self.carrying.retain(|output| self.live.probe(*output).is_some());
         let list = monitor::WatchList {
             meters,
+            activity,
             scopes,
             full_traces: self.full_traces,
         };
@@ -2337,6 +2344,15 @@ impl App {
             }
             Message::Telemetry(update) => {
                 self.take_traces(update.traces);
+                for (probe, carrying) in update.activity {
+                    if let Some(output) = self.live.output_of(probe) {
+                        if carrying {
+                            self.carrying.insert(output);
+                        } else {
+                            self.carrying.remove(&output);
+                        }
+                    }
+                }
                 if !update.levels.is_empty() {
                     self.handle(Message::Meters(update.levels));
                 }

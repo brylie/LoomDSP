@@ -515,7 +515,7 @@ What P1 builds. The rest of this spec is P2.
 
 ### Signal activity on ports
 
-([#63](https://github.com/brylie/LoomDSP/issues/63).) Cables stay still ([Cables do not animate](#cables-do-not-animate)). Ports show whether they carry a signal.
+([#63](https://github.com/brylie/LoomDSP/issues/63).) **Partly implemented:** the measurement, the two states, the rate, and the redraw rule are built (`take_activity` in `loom-app/src/monitor.rs`), and the UI snapshot shows `carrying` on each port. The marker is not drawn yet: see Open question below. Cables stay still ([Cables do not animate](#cables-do-not-animate)). Ports show whether they carry a signal.
 
 - **Two states:** *carrying* (a filled marker in the signal colour) and *silent* (the marker as now). Input ports show the state of the output feeding them.
 - **Carrying** means the output's largest absolute value in the last tick was above 0.0001 (−80 dB). *Why:* DC offsets and constants count as signal, since a Constant of 0.5 is a live control. Exactly 0 and noise below −80 dB are silent.
@@ -524,6 +524,7 @@ What P1 builds. The rest of this spec is P2.
 - **Redraw.** The markers are drawn from a small buffer of port states, like the panel values buffer, so a change never rebuilds tiles, ports, or cables (ADR-0010). A state change draws one frame. No change, no frames.
 - Cables do not change brightness. Hover focus rules are unchanged.
 - At middle and far zoom the markers are not drawn (they are port-sized).
+- **Open question (found while building #63):** a port with a cable is already drawn as a filled marker in its signal colour, so *carrying* as written looks the same as *silent*. The look of the two states needs a decision before the canvas draws them. The Preferences switch is not built either: activity is always on.
 
 ### Drawing the scope trace
 
@@ -558,7 +559,7 @@ What P1 builds. The rest of this spec is P2.
 - [x] A transport-following input shows the clock mark with no cable, loses it when a cable is connected, and has it back when the cable is removed.
 - [ ] A 95% callback spike turns the load amber or red for its tick. After 10 seconds the max falls.
 - [ ] By keys alone: Tab to a module, Enter into its panel, change a knob, Escape out twice. Space on a focused toggle acts on the toggle, not on Run. Arrow keys move the selected module by one grid unit.
-- [ ] An output with a cable shows *carrying* within 200 ms of a signal above −80 dB, and *silent* 400 ms after it stops. A one-sample trigger lights it. Cable geometry is the same with and without activity.
+- [ ] An output with a cable shows *carrying* within 200 ms of a signal above −80 dB, and *silent* 400 ms after it stops. A one-sample trigger lights it. Cable geometry is the same with and without activity. (The state is tested, `activity_turns_on_at_once_and_off_after_two_quiet_reads`, and shows in the UI snapshot. Drawing it waits for the open question above.)
 - [x] The scope draws its trace in the tile, holds still for a periodic wave, and four scopes keep 60 fps. Checked on a development Mac (not the reference laptop): four live scopes draw at 120 fps with `--measure`, and upload only the trace buffer (`trace_uploads`, no scene or control uploads). Recording CPU and GPU on the reference laptop is left for the benchmark doc.
 - [ ] A growable tile resizes to the grid within its limits. Ports and cable ends follow. The size is saved and loads. Old patches load. One drag is one undo step.
 

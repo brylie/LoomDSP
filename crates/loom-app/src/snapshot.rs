@@ -148,6 +148,9 @@ pub struct Input {
     /// out when it shows none (panels.md, Clock mark on transport inputs).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub follows_transport: Option<&'static str>,
+    /// True while the output feeding it carries a signal (panels.md,
+    /// Signal activity on ports).
+    pub carrying: bool,
 }
 
 /// An output port on a tile.
@@ -159,6 +162,9 @@ pub struct Output {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shown: Option<String>,
     pub centre: Point,
+    /// True while it carries a signal above -80 dB (panels.md, Signal
+    /// activity on ports).
+    pub carrying: bool,
     /// The badge: assignments it drives, counting those that are off.
     pub badge: u32,
     /// Where the badge is drawn, or `None` when it shows none.
@@ -300,6 +306,14 @@ fn kind_name(kind: &WidgetViewKind) -> &'static str {
 }
 
 impl App {
+    /// True when the output feeding this input carries a signal: an input
+    /// shows its source's activity.
+    fn input_carrying(&self, module: u32, index: usize) -> bool {
+        self.controller.graph().cables().any(|(from, to)| {
+            to.module == loom_core::ModuleId(module) && to.port == index && self.carrying.contains(&from)
+        })
+    }
+
     /// Runs the idle engine for `frames` frames, then takes the live values,
     /// lights, meter levels, and scope traces it left, through the same
     /// messages the window uses. With no window to say what is on screen,
@@ -350,9 +364,23 @@ impl App {
         let mut levels = Levels::default();
         levels.update(&readings, std::time::Instant::now());
         let _ = self.update(crate::Message::Meters(levels.all().collect()));
+        // An output carries a signal if it peaked above -80 dB at the end
+        // of the run.
+        let activity = watch
+            .activity
+            .iter()
+            .map(|&probe| {
+                let peak = readings
+                    .iter()
+                    .filter(|r| r.probe == probe)
+                    .fold(0.0f32, |m, r| m.max(r.peak.abs()));
+                (probe, peak > crate::monitor::ACTIVITY_THRESHOLD)
+            })
+            .collect();
         let _ = self.update(crate::Message::Telemetry(crate::monitor::Update {
             levels: Vec::new(),
             traces,
+            activity,
         }));
         let _ = self.update(crate::Message::LiveFrame);
         if let Some(watch) = self.watched_lights() {
@@ -410,6 +438,7 @@ impl App {
                                 .cloned(),
                             centre: m.input_position(index).into(),
                             follows_transport: p.follows_transport.map(|s| s.name()),
+                            carrying: self.input_carrying(m.id, index),
                         })
                         .collect(),
                     outputs: m
@@ -426,6 +455,10 @@ impl App {
                                 }))
                                 .cloned(),
                             centre: m.output_position(index).into(),
+                            carrying: self.carrying.contains(&loom_core::OutputRef {
+                                module: loom_core::ModuleId(m.id),
+                                port: index,
+                            }),
                             badge: p.badge,
                             badge_bounds: self.scene.badge_bounds(m.id, index).map(Rect::from),
                         })
