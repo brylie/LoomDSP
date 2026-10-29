@@ -218,7 +218,13 @@ struct Transport {
     /// which sends everything, so a loaded patch sets the transport.
     sent_tempo: Option<f32>,
     sent_signature: Option<TimeSignature>,
+    /// The running state last asked of the engine, by the parameter or by
+    /// the `run` input.
     sent_run: Option<bool>,
+    /// The Run parameter was set since the last request. An edit is sent
+    /// only when the input does not drive run, and a cable that goes leaves
+    /// the transport as it was until the next edit.
+    run_edited: bool,
     /// The Reset button was pressed since the last request.
     reset_pressed: bool,
     /// Whether `run` had a cable in the last call. While it has, the input
@@ -247,6 +253,7 @@ impl Transport {
             sent_tempo: None,
             sent_signature: None,
             sent_run: None,
+            run_edited: true,
             reset_pressed: false,
             run_connected: false,
             run_gate: None,
@@ -318,7 +325,10 @@ impl Module for Transport {
             TEMPO => self.tempo = value,
             NUMERATOR => self.numerator = value,
             DENOMINATOR => self.denominator = value,
-            RUN => self.run = value,
+            RUN => {
+                self.run = value;
+                self.run_edited = true;
+            }
             // A press, not a release, resets: the reset lands on time.
             RESET if value >= 0.5 => self.reset_pressed = true,
             _ => {}
@@ -330,9 +340,11 @@ impl Module for Transport {
         // A fresh Transport with a cable on run has not read the gate yet.
         // It stops the transport and lets the gate start it on the grid, so
         // a low gate never lets the position move (#413 review).
+        // The engine knows the cables of this block's schedule; `process`
+        // has not run with them yet.
+        self.run_connected = run_cable;
         if run_cable && self.sent_run.is_none() {
-            self.run_connected = true;
-            self.sent_run = Some(self.run >= 0.5);
+            self.sent_run = Some(false);
             request.running = Some(false);
         }
         if self.sent_tempo != Some(self.tempo) {
@@ -345,17 +357,19 @@ impl Module for Transport {
             request.time_signature = Some(signature);
         }
         let run = self.run >= 0.5;
-        if self.sent_run != Some(run) {
+        // While a cable drives run, it decides (Starting and stopping), so
+        // an edit then is dropped. An edit after the cable goes is compared
+        // with what the engine was last asked, so turning Run off and on
+        // again within one buffer still starts it (#413 review).
+        if std::mem::take(&mut self.run_edited) && !self.run_connected && self.sent_run != Some(run) {
             self.sent_run = Some(run);
-            // While a cable drives run, it decides (Starting and stopping).
-            if !self.run_connected {
-                request.running = Some(run);
-            }
+            request.running = Some(run);
         }
         request.reset = std::mem::take(&mut self.reset_pressed);
         // Edges on the inputs wait for the grid (rule 11).
         if grid {
             if let Some(run) = self.pending_run.take() {
+                self.sent_run = Some(run);
                 request.running = Some(run);
             }
             request.reset |= std::mem::take(&mut self.pending_reset);

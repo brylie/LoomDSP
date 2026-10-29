@@ -240,3 +240,28 @@ fn a_fresh_transport_waits_for_a_low_run_cable() {
         assert_eq!(highs(&bar), vec![start], "block {block}: bar 1 fires once");
     }
 }
+
+/// After a low cable on `run` goes, turning Run off and on again before the
+/// next block still starts the transport (#413 review).
+#[test]
+fn run_edited_off_and_on_after_the_cable_goes_starts() {
+    let (mut parts, transport) = engine(256, |c, t| {
+        let button = c.add_module("loom.ui.button").unwrap();
+        c.connect_named(button, "gate", t, "run").unwrap();
+        listen(c, (t, "playing"), (t, "bar-phase"));
+    });
+    let (playing, _) = render(&mut parts, 1024, 256, &[]);
+    assert_eq!(*playing.last().unwrap(), 0.0);
+    parts
+        .controller
+        .disconnect(InputRef {
+            module: transport,
+            port: 0,
+        })
+        .unwrap();
+    parts.controller.commit().unwrap();
+    parts.controller.set_param_named(transport, "run", 0.0).unwrap();
+    parts.controller.set_param_named(transport, "run", 1.0).unwrap();
+    let (playing, _) = render(&mut parts, 1024, 256, &[]);
+    assert_eq!(*playing.last().unwrap(), 1.0, "Run is on, so it plays");
+}
