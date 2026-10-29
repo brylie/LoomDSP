@@ -71,7 +71,7 @@ pub static AMP: ModuleDescriptor = ModuleDescriptor {
             response: 0.0,
         })
     }),
-    panel: Panel::new(3, 3, &[Widget::knob(0, 0, "gain"), Widget::knob(0, 3, "response")]),
+    panel: Panel::new(3, 6, &[Widget::knob(0, 0, "gain"), Widget::knob(0, 3, "response")]),
     displays: &[],
 };
 
@@ -96,16 +96,22 @@ struct Amp {
 
 impl Module for Amp {
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let level_modulated = io.modulated(1);
+        let gain_modulated = io.modulated(0);
+        let response_modulated = io.modulated(1);
         let ([input, level], [out]) = io.split::<2, 1>();
         for (i, ((out, &input), &level)) in out.iter_mut().zip(input).zip(level).enumerate() {
-            let level_value = if let Some(samples) = level_modulated {
+            let gain = if let Some(samples) = gain_modulated {
+                let _ = self.gain.tick();
                 samples[i]
             } else {
-                level
+                self.gain.tick()
             };
-            let gain = self.gain.tick();
-            *out = input * level_to_gain(level_value, self.response) * gain;
+            let response = if let Some(samples) = response_modulated {
+                samples[i]
+            } else {
+                self.response
+            };
+            *out = input * level_to_gain(level, response) * gain;
         }
     }
 
