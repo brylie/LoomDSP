@@ -269,7 +269,15 @@ impl Module for Envelope {
                     self.level = end + (self.start - end) * fall(x, k);
                     if x >= 1.0 {
                         self.level = end;
-                        self.stage = if ad { Stage::Idle } else { Stage::Sustain };
+                        if ad {
+                            self.stage = Stage::Idle;
+                        } else if high {
+                            self.stage = Stage::Sustain;
+                        } else {
+                            // The gate fell while the mode was AD, so no
+                            // falling edge will come: release from here.
+                            self.enter(Stage::Release);
+                        }
                     }
                 }
                 Stage::Sustain => self.level = sustain,
@@ -496,6 +504,20 @@ mod tests {
             out[0]
         );
         assert_eq!(out[99], 0.0);
+    }
+
+    /// A trigger in AD mode, then a switch to ADSR during the attack, does
+    /// not hold the sustain with the gate low: the decay ends in the
+    /// release (#411 review).
+    #[test]
+    fn switching_to_adsr_after_a_trigger_releases() {
+        let mut env = make(&[("mode", 1.0), ("attack", 0.01), ("decay", 0.01), ("release", 0.01)]);
+        let mut gates = [0.0; 5];
+        gates[0] = 1.0;
+        play(env.as_mut(), &gates);
+        env.set_param(4, 0.0);
+        let out = play(env.as_mut(), &[0.0; 100]);
+        assert_eq!(out[99], 0.0, "no stuck sustain");
     }
 
     /// The `level` display value is the output's last sample after the
