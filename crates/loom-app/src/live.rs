@@ -41,9 +41,17 @@ impl Live {
         Self::default()
     }
 
+    /// Probes as the app starts them: activity on, the default
+    /// (`docs/design/panels.md`, Signal activity on ports).
+    pub fn showing_activity() -> Self {
+        Self {
+            activity: true,
+            ..Self::default()
+        }
+    }
+
     /// Turns metering of every connected output on or off. Call
     /// [`Live::sync`] and commit after.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn set_activity(&mut self, on: bool) {
         self.activity = on;
     }
@@ -51,6 +59,18 @@ impl Live {
     /// The meter probe on an output, if it has one.
     pub fn probe(&self, output: OutputRef) -> Option<ProbeId> {
         self.meters.get(&output).copied()
+    }
+
+    /// The meter probes that show activity: those on outputs with a cable,
+    /// while activity is on.
+    pub fn activity_probes(&self) -> impl Iterator<Item = ProbeId> + '_ {
+        let on = self.activity;
+        self.meters.values().copied().filter(move |_| on)
+    }
+
+    /// The output a meter probe reads.
+    pub fn output_of(&self, probe: ProbeId) -> Option<OutputRef> {
+        self.meters.iter().find(|(_, p)| **p == probe).map(|(&o, _)| o)
     }
 
     /// The scope probe on an output, if it has one.

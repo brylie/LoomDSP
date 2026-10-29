@@ -631,7 +631,7 @@ impl App {
         self.connect_midi(false, false);
         self.monitor = crate::monitor::Monitor::new(telemetry, self.controller.config().sample_rate, self.generation);
         self.traces = loom_canvas::ScopeTraces::new();
-        self.live = crate::live::Live::new();
+        self.live = crate::live::Live::showing_activity();
         self.idle_engine = Some(engine);
         // The stopped engine's live values are gone; show the new one's.
         self.refresh_values();
@@ -656,7 +656,7 @@ impl App {
         self.connect_midi(false, false);
         self.monitor = crate::monitor::Monitor::new(telemetry, self.controller.config().sample_rate, self.generation);
         self.traces = loom_canvas::ScopeTraces::new();
-        self.live = crate::live::Live::new();
+        self.live = crate::live::Live::showing_activity();
         self.lights.clear();
         self.meter_levels.clear();
         self.sample_rate = output.sample_rate() as f32;

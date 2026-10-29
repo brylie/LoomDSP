@@ -22,11 +22,23 @@ pub const INTERVAL: Duration = Duration::from_millis(33);
 /// second, so a moving trace animates at the frame rate (NFR-PERF-04).
 pub const SCOPE_INTERVAL: Duration = Duration::from_millis(16);
 
+/// Above this peak (-80 dB) an output is carrying a signal
+/// (`docs/design/panels.md`, Signal activity on ports).
+pub const ACTIVITY_THRESHOLD: f32 = 0.0001;
+
+/// How often activity is read: 5 times a second.
+pub const ACTIVITY_INTERVAL: Duration = Duration::from_millis(200);
+
+/// Reads with nothing above the threshold before a port is silent: 400 ms.
+const SILENT_READS: u8 = 2;
+
 /// What the UI draws from telemetry, so the thread reads only that.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct WatchList {
     /// Meter probes whose levels are drawn.
     pub meters: HashSet<ProbeId>,
+    /// Meter probes whose activity (carrying or silent) is shown.
+    pub activity: HashSet<ProbeId>,
     /// Scope probes on screen, with the trace each asks for.
     pub scopes: HashMap<ProbeId, ScopeWant>,
     /// True when scopes draw full traces (close zoom), false for a flat
@@ -51,13 +63,26 @@ pub struct Update {
     /// Scope traces that changed: only what is drawn, so a still or silent
     /// signal sends none.
     pub traces: Vec<(ProbeId, loom_canvas::Trace)>,
+    /// Activity probes whose state changed: true for carrying.
+    pub activity: Vec<(ProbeId, bool)>,
 }
 
 impl Update {
     /// True when nothing changed.
     pub fn is_empty(&self) -> bool {
-        self.levels.is_empty() && self.traces.is_empty()
+        self.levels.is_empty() && self.traces.is_empty() && self.activity.is_empty()
     }
+}
+
+/// One output's activity: carrying at once, silent after
+/// [`SILENT_READS`] reads with nothing.
+#[derive(Debug, Default, Clone, Copy)]
+struct Activity {
+    /// Highest peak since the last read. A meter reading's peak covers
+    /// every frame of its block, so a one-sample trigger counts.
+    peak: f32,
+    carrying: bool,
+    quiet_reads: u8,
 }
 
 /// Telemetry turned into what the UI draws, and what it last sent, so only
@@ -69,6 +94,9 @@ pub struct Watcher {
     shown_levels: HashMap<ProbeId, (u8, u8)>,
     scopes: HashMap<ProbeId, ScopeTrace>,
     shown_traces: HashMap<ProbeId, loom_canvas::Trace>,
+    activity: HashMap<ProbeId, Activity>,
+    shown_activity: HashMap<ProbeId, bool>,
+    last_activity_read: Option<Instant>,
 }
 
 impl Watcher {
@@ -115,7 +143,51 @@ impl Watcher {
                 traces.push((*probe, trace));
             }
         }
-        Update { levels, traces }
+        let activity = self.take_activity(watch, readings, now);
+        Update {
+            levels,
+            traces,
+            activity,
+        }
+    }
+
+    /// Activity (`docs/design/panels.md`, Signal activity on ports): a port
+    /// is carrying as soon as a reading peaks above -80 dB, and silent
+    /// after two reads, 200 ms apart, with nothing.
+    fn take_activity(&mut self, watch: &WatchList, readings: &[MeterReading], now: Instant) -> Vec<(ProbeId, bool)> {
+        self.activity.retain(|probe, _| watch.activity.contains(probe));
+        self.shown_activity.retain(|probe, _| watch.activity.contains(probe));
+        for reading in readings {
+            if watch.activity.contains(&reading.probe) {
+                let a = self.activity.entry(reading.probe).or_default();
+                a.peak = a.peak.max(reading.peak.abs());
+            }
+        }
+        let due = self
+            .last_activity_read
+            .is_none_or(|last| now.duration_since(last) >= ACTIVITY_INTERVAL);
+        if due {
+            self.last_activity_read = Some(now);
+        }
+        for a in self.activity.values_mut() {
+            if a.peak > ACTIVITY_THRESHOLD {
+                a.carrying = true;
+                a.quiet_reads = 0;
+            } else if due {
+                a.quiet_reads = a.quiet_reads.saturating_add(1);
+                if a.quiet_reads >= SILENT_READS {
+                    a.carrying = false;
+                }
+            }
+            if due || a.peak > ACTIVITY_THRESHOLD {
+                a.peak = 0.0;
+            }
+        }
+        self.activity
+            .iter()
+            .filter(|(probe, a)| self.shown_activity.get(probe).copied().unwrap_or(false) != a.carrying)
+            .map(|(&probe, a)| (probe, a.carrying))
+            .collect()
     }
 
     /// Notes that the UI has `update`, so it is not sent again.
@@ -125,6 +197,9 @@ impl Watcher {
         }
         for (probe, trace) in &update.traces {
             self.shown_traces.insert(*probe, trace.clone());
+        }
+        for (probe, carrying) in &update.activity {
+            self.shown_activity.insert(*probe, *carrying);
         }
     }
 }
@@ -352,6 +427,58 @@ mod tests {
         let saw = |frame: u64| (std::f32::consts::TAU * 440.0 * frame as f32 / 48_000.0).sin();
         assert!(traces_sent(&scope_watch(ProbeId(3), true), saw, 30) > 20);
         assert_eq!(traces_sent(&scope_watch(ProbeId(3), false), saw, 30), 1);
+    }
+
+    /// panels.md, Signal activity on ports: carrying within one read of a
+    /// signal above -80 dB, a one-sample trigger counts, and silent 400 ms
+    /// after it stops. Each change is sent once.
+    #[test]
+    fn activity_turns_on_at_once_and_off_after_two_quiet_reads() {
+        let probe = ProbeId(4);
+        let watch = WatchList {
+            activity: HashSet::from([probe]),
+            ..WatchList::default()
+        };
+        let mut watcher = Watcher::default();
+        let start = Instant::now();
+        let mut changes = Vec::new();
+        // The thread drains every 33 ms. One reading at 99 ms holds a
+        // one-sample trigger: its block's peak is 1.0. Then silence.
+        for tick in 0..30u32 {
+            let ms = tick * 33;
+            let peak = if ms == 99 { 1.0 } else { 0.0 };
+            let reading = MeterReading {
+                probe,
+                frame: 0,
+                frames: 128,
+                peak,
+                rms: peak / 11.3,
+            };
+            let now = start + Duration::from_millis(u64::from(ms));
+            let update = watcher.take(&watch, &[reading], [], 48_000.0, now);
+            for &(_, carrying) in &update.activity {
+                changes.push((ms, carrying));
+            }
+            watcher.sent(&update);
+        }
+        assert_eq!(changes.len(), 2, "{changes:?}");
+        assert_eq!(changes[0], (99, true), "carrying at once");
+        let off = changes[1];
+        assert!(!off.1);
+        assert!(
+            (99 + 300..=99 + 500).contains(&off.0),
+            "silent about 400 ms later: {changes:?}"
+        );
+        // Below -80 dB is silent.
+        let mut watcher = Watcher::default();
+        let quiet = MeterReading {
+            probe,
+            frame: 0,
+            frames: 128,
+            peak: 0.000_05,
+            rms: 0.0,
+        };
+        assert!(watcher.take(&watch, &[quiet], [], 48_000.0, start).is_empty());
     }
 
     /// Readings of probes the UI does not draw as meters are not sent: an
