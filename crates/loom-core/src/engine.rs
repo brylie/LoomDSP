@@ -420,7 +420,7 @@ impl Engine {
             return;
         };
         let grid = self.frame.is_multiple_of(TRANSPORT_GRID as u64);
-        let request = module.transport_request(grid);
+        let request = module.transport_request(grid, self.schedule.transport.run_cable);
         if !request.is_empty() {
             self.transport.apply(self.frame, request);
         }

@@ -847,6 +847,9 @@ impl App {
         let scene = scene::build(&controller, &positions);
         let mut values = PanelValues::new();
         scene::update_panel_values(&mut values, &controller, &BTreeMap::new());
+        // The loaded patch may already have a cable on run, before any
+        // commit of the app's own (#413 review).
+        let run_driven = run_is_driven(&controller);
         let mut app = Self {
             controller,
             positions,
@@ -854,7 +857,7 @@ impl App {
             values,
             lights: BTreeMap::new(),
             load_notes,
-            run_driven: false,
+            run_driven,
             meter_levels: std::collections::HashMap::new(),
             visible_displays: Vec::new(),
             selection: BTreeSet::new(),
@@ -2309,8 +2312,6 @@ impl App {
         }
     }
 
-    /// Removes modules and commits. Returns false if the commit failed; the
-    /// status bar then holds the error.
     /// Space: flips the Transport's Run toggle, as a click on it does
     /// (clock.md, Controls live on the Transport module). While a cable
     /// drives `run`, the input decides, so Space changes nothing. Without a
@@ -2358,6 +2359,8 @@ impl App {
         self.run_driven = driven;
     }
 
+    /// Removes modules and commits. Returns false if the commit failed; the
+    /// status bar then holds the error.
     fn delete_modules(&mut self, ids: &[u32]) -> bool {
         for id in ids {
             if self.controller.remove_module(ModuleId(*id)).is_ok() {
@@ -4150,6 +4153,39 @@ mod tests {
         assert_eq!(app.controller.transport_module(), Some(transport));
         assert!(app.controller.graph().node(button).is_none());
         assert!(app.controller.add_module(TRANSPORT_MODULE).is_err());
+    }
+
+    /// A patch that loads with a cable on `run`: removing the cable as the
+    /// first edit still gives the Run toggle the state the input left
+    /// (#413 review).
+    #[test]
+    fn a_loaded_run_cable_hands_its_state_to_the_toggle() {
+        let dir = std::env::temp_dir().join(format!("loom-app-run-cable-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("run.ron");
+        std::fs::write(
+            &path,
+            r#"Patch(version: 1, modules: [
+                PatchModule(id: 1, kind: "loom.clock.transport@1"),
+                PatchModule(id: 2, kind: "loom.ui.button@1"),
+            ], cables: [PatchCable(from: (2, "gate"), to: (1, "run"))])"#,
+        )
+        .unwrap();
+        let mut app = App::new(Args {
+            patch: Some(path),
+            ..app_args()
+        });
+        let _ = std::fs::remove_dir_all(&dir);
+        let (transport, run) = transport_run(&app.controller).expect("the patch has a Transport");
+        app.process(2048);
+        assert_eq!(transport_running(&app.controller), Some(false));
+        let _ = app.update(Message::Canvas(CanvasEvent::Disconnect(loom_canvas::PortRef {
+            module: transport.0,
+            output: false,
+            index: 0,
+        })));
+        let param = app.controller.graph().node(transport).unwrap().params[run];
+        assert_eq!(param, 0.0, "the toggle takes the state the input left");
     }
 
     /// Phase Scale that follows the bar phase and modulates a knob at depth

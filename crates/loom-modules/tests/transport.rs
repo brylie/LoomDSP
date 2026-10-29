@@ -215,3 +215,28 @@ fn removing_the_run_cable_leaves_the_transport_as_it_was() {
     let (playing, _) = render(&mut parts, 1024, 256, &[]);
     assert!(playing.iter().all(|&x| x == 1.0), "running again");
 }
+
+/// A fresh Transport with a low cable on `run` never moves: `playing` is 0
+/// from frame 0 and no bar trigger fires, though Run is on. A high gate
+/// then starts bar 1 with its trigger, on the grid (#413 review). This is
+/// also what a rebuilt engine sees, since it makes fresh modules.
+#[test]
+fn a_fresh_transport_waits_for_a_low_run_cable() {
+    for block in [1, 77, 512] {
+        let mut button = None;
+        let (mut parts, _) = engine(block, |c, t| {
+            let b = c.add_module("loom.ui.button").unwrap();
+            c.connect_named(b, "gate", t, "run").unwrap();
+            button = Some(b);
+            listen(c, (t, "playing"), (t, "bar"));
+        });
+        let (playing, bar) = render(&mut parts, 2048, block, &[]);
+        assert!(playing.iter().all(|&x| x == 0.0), "block {block}: playing");
+        assert!(highs(&bar).is_empty(), "block {block}: bar trigger");
+        parts.controller.set_param_named(button.unwrap(), "on", 1.0).unwrap();
+        let (playing, bar) = render(&mut parts, 512, block, &[]);
+        let start = playing.iter().position(|&x| x == 1.0).expect("starts");
+        assert!(start <= TRANSPORT_GRID + block, "block {block}: starts at {start}");
+        assert_eq!(highs(&bar), vec![start], "block {block}: bar 1 fires once");
+    }
+}

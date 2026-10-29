@@ -186,6 +186,9 @@ pub(crate) struct TransportBuffers {
     /// True when the Transport's `run` or `reset` input has a cable: the
     /// engine then splits blocks on the transport grid (rule 11).
     pub grid: bool,
+    /// True when the Transport's `run` input has a cable, so a fresh
+    /// Transport waits for the gate instead of sending its Run parameter.
+    pub run_cable: bool,
 }
 
 /// Identifies one shared default buffer. Value defaults are keyed by their
@@ -845,6 +848,11 @@ pub(crate) fn compile(
         playing: transport_buffer(DefaultKey::Playing),
         module: transport_node.and_then(|(_, node)| node.slot).map(|slot| slot as u32),
         grid: transport_node.is_some_and(|(&id, _)| graph.cables.keys().any(|to| to.module == id)),
+        run_cable: transport_node.is_some_and(|(&id, node)| {
+            node.descriptor
+                .input_index("run")
+                .is_some_and(|port| graph.cables.contains_key(&InputRef { module: id, port }))
+        }),
     };
 
     let resolve_input = |input: InputRef| -> (*const f32, bool) {

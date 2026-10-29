@@ -57,8 +57,10 @@ pub trait Module: Send {
     /// transport grid ([`TRANSPORT_GRID`](crate::TRANSPORT_GRID)): changes
     /// found on the `run` and `reset` inputs must wait for it (rule 11).
     /// Changes from parameters need not wait: they arrive at buffer starts.
-    fn transport_request(&mut self, grid: bool) -> crate::TransportRequest {
-        let _ = grid;
+    /// `run_cable` is true when the `run` input has a cable, so the module
+    /// knows it before its first `process` call.
+    fn transport_request(&mut self, grid: bool, run_cable: bool) -> crate::TransportRequest {
+        let _ = (grid, run_cable);
         crate::TransportRequest::default()
     }
 }

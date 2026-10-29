@@ -325,8 +325,16 @@ impl Module for Transport {
         }
     }
 
-    fn transport_request(&mut self, grid: bool) -> TransportRequest {
+    fn transport_request(&mut self, grid: bool, run_cable: bool) -> TransportRequest {
         let mut request = TransportRequest::default();
+        // A fresh Transport with a cable on run has not read the gate yet.
+        // It stops the transport and lets the gate start it on the grid, so
+        // a low gate never lets the position move (#413 review).
+        if run_cable && self.sent_run.is_none() {
+            self.run_connected = true;
+            self.sent_run = Some(self.run >= 0.5);
+            request.running = Some(false);
+        }
         if self.sent_tempo != Some(self.tempo) {
             self.sent_tempo = Some(self.tempo);
             request.tempo = Some(f64::from(self.tempo));
@@ -394,16 +402,16 @@ mod tests {
     #[test]
     fn requests_send_changes_only() {
         let mut module = transport();
-        let first = module.transport_request(false);
+        let first = module.transport_request(false, false);
         assert_eq!(first.tempo, Some(120.0));
         assert_eq!(first.time_signature, Some(TimeSignature::FOUR_FOUR));
         assert_eq!(first.running, Some(true));
         assert!(!first.reset);
-        assert!(module.transport_request(true).is_empty());
+        assert!(module.transport_request(true, false).is_empty());
         module.set_param(TEMPO, 96.0);
         module.set_param(DENOMINATOR, 3.0);
         module.set_param(NUMERATOR, 7.0);
-        let next = module.transport_request(false);
+        let next = module.transport_request(false, false);
         assert_eq!(next.tempo, Some(96.0));
         assert_eq!(next.time_signature, Some(TimeSignature::new(7, 8)));
         assert_eq!(next.running, None);
@@ -413,11 +421,11 @@ mod tests {
     #[test]
     fn reset_press_asks_once() {
         let mut module = transport();
-        module.transport_request(false);
+        module.transport_request(false, false);
         module.set_param(RESET, 1.0);
-        assert!(module.transport_request(false).reset);
-        assert!(!module.transport_request(false).reset);
+        assert!(module.transport_request(false, false).reset);
+        assert!(!module.transport_request(false, false).reset);
         module.set_param(RESET, 0.0);
-        assert!(!module.transport_request(false).reset);
+        assert!(!module.transport_request(false, false).reset);
     }
 }
