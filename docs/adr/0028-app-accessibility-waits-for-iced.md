@@ -17,7 +17,7 @@ The goal serves two groups:
 What the stack offers, checked on 2026-10-28:
 
 - **Iced 0.14,** the version we use (ADR-0009), has no accessibility support. None of its crates depend on AccessKit, the cross-platform accessibility library for Rust UIs.
-- **AccessKit** has an adapter for winit (`accesskit_winit`), which Iced runs on, and adapters for Windows, macOS, and Linux. Its design needs only a stable ID for each element, which our keyed widget identity already gives (ADR-0021).
+- **AccessKit** has an adapter for winit (`accesskit_winit`), which Iced runs on, and adapters for Windows, macOS, and Linux. Its design needs a stable ID for each element. Our keyed widget identity (ADR-0021) is a start, but it identifies Iced state, not accessibility nodes. The specification written when this ADR is taken up must map each exposed control (toolbar, inspector, browser, tile, port, and canvas control) to a stable node, with its role, name, value, enabled state, and place in the focus order.
 - **Outside bridges** exist that build an accessibility tree beside an Iced app from their own description of the widgets. They do not read Iced's widget tree, so they can drift from what is drawn.
 
 The testing goal is already met in another way: the control channel ([control-channel.md](../design/control-channel.md)) finds controls by name, presses them through the same messages as the UI, and reads the UI snapshot. Only people who need a screen reader or the keyboard are still left out.
@@ -39,6 +39,6 @@ Revisit this ADR at each Iced upgrade, and when Iced's release notes or roadmap 
 
 - No new dependency now, and no fork to maintain.
 - Screen reader users still cannot use the desktop app. The requirement says so, so it is not forgotten.
-- New view models (ADR-0021) must carry the text a screen reader would read: a label, a value with its unit, and whether the control is enabled. The inspector model does this already.
+- New view models (ADR-0021) must carry the text a screen reader would read: a label, a value with its unit, and whether the control is enabled. The inspector's parameter rows already carry a label and a value with its unit. They have no enabled state, because a parameter control is never disabled today; one is added when that changes.
 - The canvas is one custom widget. When the time comes it must report one accessibility node per tile, port, and control, in the focus order of NFR-UX-01 ([#101](https://github.com/brylie/LoomDSP/issues/101)). Keyboard focus on the canvas (#101) is useful on its own and does not wait for this ADR.
 - Automation by name keeps using the control channel.

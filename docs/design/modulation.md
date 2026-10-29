@@ -93,7 +93,7 @@ Undo ([#12](https://github.com/brylie/LoomDSP/issues/12), [undo.md](undo.md)) is
 
 ### Slice 2: live value and lines
 
-**Status:** Agreed ([#151](https://github.com/brylie/LoomDSP/issues/151)) and built ([#172](https://github.com/brylie/LoomDSP/issues/172)), except two points agreed later and not built yet: the style of off lines and the "table full" warning ([#197](https://github.com/brylie/LoomDSP/issues/197)), and which tiles are outlined ([#407](https://github.com/brylie/LoomDSP/issues/407)).
+**Status:** Agreed ([#151](https://github.com/brylie/LoomDSP/issues/151)) and built ([#172](https://github.com/brylie/LoomDSP/issues/172)), except for two points that were agreed later and are not built yet: the style of off lines and the "table full" warning ([#197](https://github.com/brylie/LoomDSP/issues/197)), and which tiles are outlined ([#407](https://github.com/brylie/LoomDSP/issues/407)).
 
 #### Live value
 

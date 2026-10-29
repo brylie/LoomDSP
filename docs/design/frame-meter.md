@@ -40,7 +40,7 @@ The kinds of message that asked for frames, with how many frames each asked for,
 
 ### `cpu`
 
-The CPU time the whole app process used over the line's interval, user plus system, as a percent of one core, with one decimal. It is the same number Activity Monitor or `top` shows, so it can go over 100 on a machine with several cores. On the per-second lines the interval is the last second. On the final line it runs from the first line to the end, like `fps`.
+The CPU time the whole app process used over the line's interval, user plus system, as a percent of one core, with one decimal: `100 * (Δuser + Δsystem) / Δwall`, where the three differences are taken over the line's interval. It is the same number Activity Monitor or `top` shows, so it can go over 100 on a machine with several cores. On the per-second lines the interval is the last second. On the final line it runs from the first line to the end, like `fps`.
 
 ## Rules
 
