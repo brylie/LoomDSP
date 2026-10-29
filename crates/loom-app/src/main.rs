@@ -123,6 +123,11 @@ struct Args {
     /// show where the engine left them.
     #[arg(long, value_name = "N", requires = "inspect")]
     frames: Option<usize>,
+    /// With --frames: hold a note (A3, as the Hold note button plays it)
+    /// while the engine runs, so a voice patch sounds and its scopes show a
+    /// wave.
+    #[arg(long, requires = "frames")]
+    hold_note: bool,
     /// Keep autosave recovery copies in this folder instead of the
     /// per-user one (docs/design/autosave.md). For tests and scripts.
     #[arg(long, value_name = "FOLDER", conflicts_with = "no_recovery")]
@@ -274,6 +279,9 @@ enum Message {
     Lights(Vec<(lights::Light, f32)>),
     /// New levels for meter probes.
     Meters(Vec<(ProbeId, live::Level)>),
+    /// What the telemetry thread found that changed on screen: meter levels
+    /// and scope traces.
+    Telemetry(monitor::Update),
     /// Turn MIDI learn mode on or off.
     ToggleLearn,
     /// In learn mode, arm a parameter from the inspector.
@@ -375,6 +383,7 @@ impl Message {
             Self::Audio(audio_watch::Event::Stats { .. })
                 | Self::Tick
                 | Self::Meters(_)
+                | Self::Telemetry(_)
                 | Self::Lights(_)
                 | Self::Autosave
                 | Self::Frame(_)
@@ -409,6 +418,12 @@ struct App {
     load_notes: Vec<String>,
     /// Latest level of each meter probe.
     meter_levels: std::collections::HashMap<ProbeId, live::Level>,
+    /// The traces of the scopes on screen (`docs/design/panels.md`, Drawing
+    /// the scope trace).
+    traces: loom_canvas::ScopeTraces,
+    /// True while the canvas draws full scope traces (close zoom), false
+    /// when it draws only their level.
+    full_traces: bool,
     /// Modules whose lights or meters are on screen, as the canvas reports.
     visible_displays: Vec<u32>,
     selection: BTreeSet<u32>,
@@ -849,6 +864,8 @@ impl App {
             lights: BTreeMap::new(),
             load_notes,
             meter_levels: std::collections::HashMap::new(),
+            traces: loom_canvas::ScopeTraces::new(),
+            full_traces: true,
             visible_displays: Vec::new(),
             selection: BTreeSet::new(),
             name,
@@ -882,7 +899,7 @@ impl App {
             autosave_settled: false,
             _audio: audio,
             idle_engine,
-            monitor: monitor::Monitor::new(telemetry, generation),
+            monitor: monitor::Monitor::new(telemetry, sample_rate, generation),
             live: Live::new(),
             dropouts: alerts::Dropouts::default(),
             rig,
@@ -1071,6 +1088,7 @@ impl App {
             dump_ui: false,
             select: Vec::new(),
             frames: None,
+            hold_note: false,
             recovery_dir: None,
             no_recovery: true,
             test_modules: self.test_modules,
@@ -1177,7 +1195,7 @@ impl App {
         } else {
             Subscription::none()
         };
-        let telemetry = Subscription::run_with(self.monitor.clone(), monitor::stream).map(Message::Meters);
+        let telemetry = Subscription::run_with(self.monitor.clone(), monitor::stream).map(Message::Telemetry);
         let close = iced::window::close_requests().map(|_| Message::CloseRequested);
         let control = self
             .control
@@ -1455,6 +1473,8 @@ impl App {
         }
         let dragging = self.depth_drag.flatten();
         scene::update_panel_values_dragging(&mut self.values, &self.controller, &shown, dragging);
+        // A scope's window or trigger may have changed.
+        self.publish_watch();
     }
 
     /// Takes the latest dropout count for the stats bar warning. Runs on
@@ -1482,11 +1502,78 @@ impl App {
             .collect()
     }
 
+    /// Brings the meter and scope probes in line with the graph and the
+    /// displays on screen, and tells the telemetry thread what to read.
+    /// Call it before a commit.
+    fn sync_live(&mut self) {
+        let wanted = self.metered_outputs();
+        self.live.sync(&mut self.controller, &wanted);
+        let scopes: BTreeSet<OutputRef> = scene::scope_outputs(&self.controller, &self.visible_displays)
+            .into_iter()
+            .map(|scope| scope.output)
+            .collect();
+        self.live.sync_scopes(&mut self.controller, &scopes);
+        self.publish_watch();
+    }
+
+    /// Tells the telemetry thread which meters and scopes are drawn, and
+    /// how each scope triggers. Runs after probes or scope parameters
+    /// change.
+    fn publish_watch(&mut self) {
+        let meters = self
+            .metered_outputs()
+            .into_iter()
+            .filter_map(|output| self.live.probe(output))
+            .collect();
+        let rate = self.monitor.sample_rate();
+        let scopes = scene::scope_outputs(&self.controller, &self.visible_displays)
+            .into_iter()
+            .filter_map(|scope| {
+                let probe = self.live.scope_probe(scope.output)?;
+                let want = monitor::ScopeWant {
+                    window: (scope.window * rate).round().max(1.0) as usize,
+                    trigger: scope.trigger,
+                };
+                Some((probe, want))
+            })
+            .collect();
+        let list = monitor::WatchList {
+            meters,
+            scopes,
+            full_traces: self.full_traces,
+        };
+        if self.monitor.watched() != list {
+            self.monitor.watch(list);
+        }
+        // A scope that left the screen, or lost its probe, keeps no trace.
+        let shown: BTreeSet<(u32, usize)> = scene::scope_outputs(&self.controller, &self.visible_displays)
+            .into_iter()
+            .filter(|scope| self.live.scope_probe(scope.output).is_some())
+            .map(|scope| scope.widget)
+            .collect();
+        self.traces.retain(|module, widget| shown.contains(&(module, widget)));
+    }
+
+    /// Takes new scope traces from the telemetry thread and gives each to
+    /// the scopes that show its probe.
+    fn take_traces(&mut self, traces: Vec<(ProbeId, loom_canvas::Trace)>) {
+        if traces.is_empty() {
+            return;
+        }
+        let scopes = scene::scope_outputs(&self.controller, &self.visible_displays);
+        for (probe, trace) in traces {
+            for scope in &scopes {
+                if self.live.scope_probe(scope.output) == Some(probe) {
+                    self.traces.set(scope.widget.0, scope.widget.1, trace.clone());
+                }
+            }
+        }
+    }
+
     /// Adds probes for meters that came on screen and removes those that
     /// left. Only probes change, so the scene is not rebuilt.
     fn sync_probes(&mut self) {
-        let wanted = self.metered_outputs();
-        self.live.sync(&mut self.controller, &wanted);
+        self.sync_live();
         // Probe IDs are never reused, so a level of a removed probe is dead.
         let live: std::collections::HashSet<ProbeId> = self.live.probes().collect();
         self.meter_levels.retain(|probe, _| live.contains(probe));
@@ -1793,8 +1880,7 @@ impl App {
     /// status bar then holds the error.
     fn commit(&mut self) -> bool {
         // Probes follow the graph: a removed module loses its probes.
-        let wanted = self.metered_outputs();
-        self.live.sync(&mut self.controller, &wanted);
+        self.sync_live();
         let sent = match self.controller.commit() {
             Ok(_) => {
                 self.report();
@@ -2155,6 +2241,12 @@ impl App {
                     .extend(levels.into_iter().filter(|(probe, _)| live.contains(probe)));
                 self.refresh_values();
             }
+            Message::Telemetry(update) => {
+                self.take_traces(update.traces);
+                if !update.levels.is_empty() {
+                    self.handle(Message::Meters(update.levels));
+                }
+            }
             Message::Lights(readings) => {
                 self.lights.extend(readings);
                 self.refresh_values();
@@ -2350,6 +2442,10 @@ impl App {
                 self.sync_probes();
                 self.refresh_values();
             }
+            CanvasEvent::TraceDetail(full) => {
+                self.full_traces = full;
+                self.publish_watch();
+            }
             CanvasEvent::ToggleRun => {
                 let running = !self.controller.transport().running;
                 if let Err(e) = self.controller.set_running(running) {
@@ -2511,6 +2607,7 @@ impl App {
     fn view(&self) -> Element<'_, Message> {
         let mut canvas = PatchCanvas::new(&self.scene, &self.selection, Message::Canvas)
             .values(&self.values)
+            .traces(&self.traces)
             .frame_key(self.frame_key)
             .browser_key(self.browser_key)
             .interactive(self.browser.is_none() && self.probe_menu.is_none() && self.rig.window.is_none())
@@ -2874,6 +2971,7 @@ mod tests {
             dump_ui: false,
             select: Vec::new(),
             frames: None,
+            hold_note: false,
             recovery_dir: None,
             no_recovery: false,
             test_modules: false,

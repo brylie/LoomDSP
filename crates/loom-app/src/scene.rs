@@ -73,6 +73,7 @@ fn panel_view(d: &ModuleDescriptor) -> PanelView {
                 }
                 WidgetKind::Toggle => WidgetViewKind::Toggle,
                 WidgetKind::Meter => WidgetViewKind::Meter,
+                WidgetKind::Scope => WidgetViewKind::Scope,
                 // The names come from the parameter (panels.md, Choice names).
                 WidgetKind::Radio => WidgetViewKind::Radio {
                     options: d
@@ -90,12 +91,14 @@ fn panel_view(d: &ModuleDescriptor) -> PanelView {
                 param.map_or((w.bind, HoverText::default()), |p| {
                     (p.label, HoverText::new(p.label, p.description, p.name))
                 })
-            } else if w.kind == WidgetKind::Meter {
-                // A meter's text is its output's: two texts for one signal
-                // could disagree.
+            } else if w.shows_output() {
+                // A meter's or scope's text is its output's: two texts for
+                // one signal could disagree. A scope has no caption: its
+                // frame fills the widget.
                 let output = d.outputs.iter().find(|p| p.name == w.bind);
-                output.map_or((w.bind, HoverText::default()), |p| {
-                    (p.label, HoverText::new(p.label, p.description, p.name))
+                let caption = |label| if w.kind == WidgetKind::Scope { "" } else { label };
+                output.map_or((caption(w.bind), HoverText::default()), |p| {
+                    (caption(p.label), HoverText::new(p.label, p.description, p.name))
                 })
             } else {
                 let display = d.displays.iter().find(|v| v.name == w.bind);
@@ -235,6 +238,10 @@ pub fn update_panel_values_dragging(
 /// value. A light shows its brightness as a number, or "lit" and "dark" for
 /// a trigger. A meter shows its RMS level in dB.
 fn display_text(d: &ModuleDescriptor, w: &loom_core::Widget, position: f32) -> String {
+    if w.kind == WidgetKind::Scope {
+        // The trace is the value.
+        return String::new();
+    }
     if w.kind == WidgetKind::Meter {
         let label = d.outputs.iter().find(|p| p.name == w.bind).map_or(w.bind, |p| p.label);
         return if position > 0.0 {
@@ -277,6 +284,52 @@ pub fn meter_outputs(controller: &Controller, modules: &[u32]) -> Vec<((u32, usi
                 })
         })
         .collect()
+}
+
+/// A scope widget on screen and what it shows.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ScopeOutput {
+    /// Module ID and widget index.
+    pub widget: (u32, usize),
+    /// The output it shows.
+    pub output: OutputRef,
+    /// Seconds across the frame: the module's `window`, or 20 ms.
+    pub window: f32,
+    /// Where the trace starts: from the module's `auto` and `level`, or
+    /// automatic.
+    pub trigger: crate::live::Trigger,
+}
+
+/// The scopes on these modules (`docs/design/panels.md`, Scope module).
+/// The window and trigger come from the module's `window`, `auto`, and
+/// `level` parameters, when it has them.
+pub fn scope_outputs(controller: &Controller, modules: &[u32]) -> Vec<ScopeOutput> {
+    let mut scopes = Vec::new();
+    for &id in modules {
+        let Some(node) = controller.graph().node(ModuleId(id)) else {
+            continue;
+        };
+        let d = node.descriptor;
+        let param = |name: &str, default: f32| d.param_index(name).map_or(default, |i| node.params[i]);
+        for (index, w) in d.panel.widgets.iter().enumerate() {
+            if w.kind != WidgetKind::Scope {
+                continue;
+            }
+            let Some(port) = d.outputs.iter().position(|p| p.name == w.bind) else {
+                continue;
+            };
+            scopes.push(ScopeOutput {
+                widget: (id, index),
+                output: OutputRef {
+                    module: ModuleId(id),
+                    port,
+                },
+                window: param("window", 0.02),
+                trigger: crate::live::Trigger::from_params(param("auto", 1.0), param("level", 0.0)),
+            });
+        }
+    }
+    scopes
 }
 
 /// The parameter a control is bound to, limited to its selected range, if

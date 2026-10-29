@@ -657,6 +657,10 @@ mod tests {
                 "`wet` (Meter): no such output",
             ),
             (
+                with_panel!(9, 5, [Widget::scope(0, 0, "wet")]),
+                "`wet` (Scope): no such output",
+            ),
+            (
                 with_panel!(6, 3, [Widget::button(0, 0, "level", "hold", "mode")]),
                 "a button needs",
             ),

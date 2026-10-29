@@ -105,7 +105,7 @@ pub static PANEL: ModuleDescriptor = ModuleDescriptor {
     }),
     panel: Panel::new(
         18,
-        8,
+        13,
         &[
             Widget::knob(0, 0, "level"),
             Widget::knob(3, 0, "cutoff"),
@@ -116,6 +116,7 @@ pub static PANEL: ModuleDescriptor = ModuleDescriptor {
             Widget::radio(3, 3, "choice"),
             Widget::light(9, 3, "lit"),
             Widget::button(9, 5, "gate", "held", "mode"),
+            Widget::scope(0, 8, "bi"),
         ],
     ),
     displays: &[DisplaySpec {
@@ -267,6 +268,7 @@ mod tests {
         }));
         assert!(kinds.contains(&WidgetKind::Light));
         assert!(kinds.contains(&WidgetKind::Meter));
+        assert!(kinds.contains(&WidgetKind::Scope));
     }
 
     #[test]

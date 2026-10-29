@@ -216,6 +216,18 @@ mod tests {
                 &[]
             };
             assert_eq!(meters, expected, "{}", descriptor.id);
+            let scopes: Vec<&str> = panel
+                .widgets
+                .iter()
+                .filter(|w| w.kind == loom_core::WidgetKind::Scope)
+                .map(|w| w.bind)
+                .collect();
+            let expected: &[&str] = if descriptor.id == "loom.display.scope" {
+                &["out"]
+            } else {
+                &[]
+            };
+            assert_eq!(scopes, expected, "{}", descriptor.id);
         }
     }
 

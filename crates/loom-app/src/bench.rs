@@ -212,6 +212,8 @@ fn since(a: RenderCounts, b: RenderCounts) -> RenderCounts {
         scene_uploads: b.scene_uploads - a.scene_uploads,
         control_uploads: b.control_uploads - a.control_uploads,
         overlay_uploads: b.overlay_uploads - a.overlay_uploads,
+        trace_builds: b.trace_builds - a.trace_builds,
+        trace_uploads: b.trace_uploads - a.trace_uploads,
     }
 }
 
@@ -230,14 +232,15 @@ fn line(w: &Window) -> String {
     let t = &w.totals;
     format!(
         "fps={fps:.1} avg_ms={average_ms:.2} worst_ms={:.2} frames={} scene_builds={} control_builds={} \
-         scene_uploads={} control_uploads={} overlay_uploads={}",
+         scene_uploads={} control_uploads={} overlay_uploads={} trace_uploads={}",
         w.worst.as_secs_f64() * 1000.0,
         t.frames,
         t.scene_builds,
         t.control_builds,
         t.scene_uploads,
         t.control_uploads,
-        t.overlay_uploads
+        t.overlay_uploads,
+        t.trace_uploads
     )
 }
 
@@ -257,13 +260,15 @@ mod tests {
                 scene_uploads: 1,
                 control_uploads: 2,
                 overlay_uploads: 0,
+                trace_builds: 3,
+                trace_uploads: 3,
             },
             worst: Duration::from_millis(9),
         };
         assert_eq!(
             line(&w),
             "fps=120.0 avg_ms=8.33 worst_ms=9.00 frames=600 scene_builds=1 control_builds=2 \
-             scene_uploads=1 control_uploads=2 overlay_uploads=0"
+             scene_uploads=1 control_uploads=2 overlay_uploads=0 trace_uploads=3"
         );
     }
 

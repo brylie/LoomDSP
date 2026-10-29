@@ -10,6 +10,7 @@ use crate::scene::{
 };
 use crate::theme::Palette;
 use crate::tile_text::{self, Align, LABEL_SIZE, TITLE_SIZE, TextKind};
+use crate::trace::{ScopeTraces, TraceGeometry};
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::renderer;
 use iced::advanced::text::{self, Paragraph as _, Text};
@@ -175,6 +176,10 @@ pub enum CanvasEvent {
     /// The modules whose lights or meters are on screen, at a zoom where
     /// they are drawn, changed. Only these need their values read.
     VisibleDisplays(Vec<u32>),
+    /// Scopes on screen now draw their full traces (true, close up) or a
+    /// flat line for their level (false, further out). The app then reads
+    /// only what is drawn (`docs/design/panels.md`, Drawing the scope trace).
+    TraceDetail(bool),
     /// In MIDI learn mode, a control was clicked: arm it, or disarm it if it
     /// is armed. Its value does not change (`docs/design/midi-learn.md`).
     Learn {
@@ -214,6 +219,7 @@ pub struct PatchCanvas<'a, Message> {
     scene: &'a Scene,
     selection: &'a BTreeSet<u32>,
     values: Option<&'a PanelValues>,
+    traces: Option<&'a ScopeTraces>,
     palette: Palette,
     on_event: Box<dyn Fn(CanvasEvent) -> Message + 'a>,
     frame_key: u64,
@@ -352,6 +358,7 @@ impl<'a, Message> PatchCanvas<'a, Message> {
             scene,
             selection,
             values: None,
+            traces: None,
             palette: Palette::default(),
             on_event: Box::new(on_event),
             frame_key: 0,
@@ -382,6 +389,13 @@ impl<'a, Message> PatchCanvas<'a, Message> {
     /// Sets the live values of panel controls and lights.
     pub fn values(mut self, values: &'a PanelValues) -> Self {
         self.values = Some(values);
+        self
+    }
+
+    /// Sets the scope traces (`docs/design/panels.md`, Drawing the scope
+    /// trace). They have their own GPU buffer: a new trace uploads only it.
+    pub fn traces(mut self, traces: &'a ScopeTraces) -> Self {
+        self.traces = Some(traces);
         self
     }
 
@@ -537,6 +551,9 @@ struct State {
     modifiers: keyboard::Modifiers,
     geometry: RefCell<Option<Arc<Geometry>>>,
     controls: RefCell<Option<Arc<ControlGeometry>>>,
+    traces: RefCell<Option<Arc<TraceGeometry>>>,
+    /// Whether scopes were last reported as drawing full traces.
+    reported_full_traces: Option<bool>,
     animation: Option<(Instant, Camera)>,
     /// The control with keyboard focus: module ID and widget index.
     focus: Option<(u32, usize)>,
@@ -727,6 +744,25 @@ where
             }
         });
 
+        // Scope traces: full close up, a flat line at the middle zoom, and
+        // not drawn far out (panels.md, Drawing the scope trace).
+        let traces = self
+            .traces
+            .filter(|_| detail(state.camera.zoom) != Detail::Far)
+            .map(|traces| {
+                let full = detail(state.camera.zoom) == Detail::Close;
+                let key = (self.scene.generation(), traces.generation(), full);
+                let mut cache = state.traces.borrow_mut();
+                match cache.as_ref() {
+                    Some(t) if t.key == key => t.clone(),
+                    _ => {
+                        let built = Arc::new(TraceGeometry::build(self.scene, traces, full, &self.palette));
+                        *cache = Some(built.clone());
+                        built
+                    }
+                }
+            });
+
         // Text too small to draw leaves a bar in its place.
         let bars = match detail(state.camera.zoom) {
             Detail::Close => geometry.bars(false, false),
@@ -746,6 +782,7 @@ where
             CanvasPrimitive {
                 geometry,
                 controls,
+                traces,
                 overlay: self.overlay_in(state, state.camera.visible(bounds.size())),
                 bars,
                 camera: state.camera,
@@ -862,6 +899,10 @@ impl<Message> PatchCanvas<'_, Message> {
                 if state.reported_lights.as_ref() != Some(&lights) {
                     state.reported_lights = Some(lights.clone());
                     self.emit(shell, CanvasEvent::VisibleDisplays(lights));
+                }
+                let full = detail(state.camera.zoom) == Detail::Close;
+                if state.reported_full_traces.replace(full) != Some(full) {
+                    self.emit(shell, CanvasEvent::TraceDetail(full));
                 }
             }
             Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {

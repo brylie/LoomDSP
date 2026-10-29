@@ -259,6 +259,77 @@ fn fs_arc(v: ArcOut) -> @location(0) vec4<f32> {
 }
 
 // ---------------------------------------------------------------------------
+// Scope traces: one capsule per piece between two points, clipped to the
+// scope's frame. The quad covers only the piece and its edge.
+
+struct TraceIn {
+    // Start and end points in world units.
+    @location(0) ends: vec4<f32>,
+    @location(1) colour: vec4<f32>,
+    // The frame: x, y, width, height in world units.
+    @location(2) clip: vec4<f32>,
+    // width (world), minimum width (physical px), unused, unused.
+    @location(3) params: vec4<f32>,
+};
+
+struct TraceOut {
+    @builtin(position) position: vec4<f32>,
+    // Along and across the piece from its start, in physical pixels.
+    @location(0) local: vec2<f32>,
+    // Length and half width in physical pixels.
+    @location(1) size: vec2<f32>,
+    @location(2) colour: vec4<f32>,
+    // World position, to clip against the frame.
+    @location(3) world: vec2<f32>,
+    @location(4) clip: vec4<f32>,
+};
+
+@vertex
+fn vs_trace(@builtin(vertex_index) vi: u32, piece: TraceIn) -> TraceOut {
+    let p0 = piece.ends.xy;
+    let p1 = piece.ends.zw;
+    let px = px_per_world();
+    let span = p1 - p0;
+    let length_world = length(span);
+    var dir = vec2<f32>(1.0, 0.0);
+    if (length_world > 1e-6) {
+        dir = span / length_world;
+    }
+    let normal = vec2<f32>(-dir.y, dir.x);
+    let half_width = max(piece.params.x * 0.5 * px, piece.params.y * 0.5);
+    // Half the width plus one pixel for the anti-aliased edge, in world units.
+    let pad = (half_width + 1.0) / px;
+    let along = select(-pad, length_world + pad, (vi & 1u) == 1u);
+    let across = select(-pad, pad, (vi >> 1u) == 1u);
+    let world = p0 + dir * along + normal * across;
+
+    var result: TraceOut;
+    result.position = to_clip(world);
+    result.local = vec2<f32>(along, across) * px;
+    result.size = vec2<f32>(length_world * px, half_width);
+    result.colour = piece.colour;
+    result.world = world;
+    result.clip = piece.clip;
+    return result;
+}
+
+@fragment
+fn fs_trace(v: TraceOut) -> @location(0) vec4<f32> {
+    let lo = v.clip.xy;
+    let hi = v.clip.xy + v.clip.zw;
+    if (v.world.x < lo.x || v.world.y < lo.y || v.world.x > hi.x || v.world.y > hi.y) {
+        discard;
+    }
+    let nearest = clamp(v.local.x, 0.0, v.size.x);
+    let d = length(vec2<f32>(v.local.x - nearest, v.local.y));
+    let coverage = clamp(v.size.y + 0.5 - d, 0.0, 1.0);
+    if (coverage <= 0.0) {
+        discard;
+    }
+    return premultiply(v.colour, coverage);
+}
+
+// ---------------------------------------------------------------------------
 // Background dot grid. One full-size quad with very cheap shading.
 
 struct GridOut {
