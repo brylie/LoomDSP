@@ -923,7 +923,7 @@ impl App {
 
     /// Makes a patch opened from the bundled examples folder an untitled
     /// copy (`docs/design/files.md`, Defaults for the dialogs): no current
-    /// file, "<name> (example)" in the title, and a Save that asks for a
+    /// file, `<name> (example)` in the title, and a Save that asks for a
     /// place, suggesting the example's file name. The copy is clean until
     /// edited, so closing it asks nothing.
     fn copy_if_example(&mut self) {
