@@ -20,6 +20,10 @@ use serde::Serialize;
 /// 48 kHz.
 const METER_WINDOW: usize = 4_800;
 
+/// How much of a `--frames` run the scopes keep: the last second at
+/// 48 kHz, the history a trace looks back in for a trigger.
+const SCOPE_WINDOW: usize = 48_000;
+
 /// Everything the snapshot holds.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct UiSnapshot {
@@ -187,7 +191,7 @@ pub struct Widget {
     /// `Reson…` for `Resonance`. Left out when the whole label shows.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shown: Option<String>,
-    /// knob, toggle, radio, button, light, or meter.
+    /// knob, toggle, radio, button, light, meter, or scope.
     pub kind: &'static str,
     pub bounds: Rect,
     /// Control position, light brightness, or meter RMS level.
@@ -199,6 +203,38 @@ pub struct Widget {
     pub modulation: Mark,
     /// A knob's live modulated value, as a position.
     pub live: Option<f32>,
+    /// A scope's trace: how many points it draws, and the lowest and
+    /// highest, from -1 at the bottom of the frame to 1 at the top. Left
+    /// out for other widgets, and for a scope with no trace yet.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trace: Option<TraceShown>,
+}
+
+/// What a scope's trace shows, for the snapshot.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct TraceShown {
+    /// Points drawn. 0 further out, where only the level shows.
+    pub points: usize,
+    /// The lowest point, from -1 to 1.
+    pub low: f32,
+    /// The highest point, from -1 to 1.
+    pub high: f32,
+    /// The signal's level, from 0 to 1 (-60 dB to 0 dB).
+    pub level: f32,
+}
+
+impl From<&loom_canvas::Trace> for TraceShown {
+    fn from(trace: &loom_canvas::Trace) -> Self {
+        let ys = trace.points.iter().map(|p| p[1]);
+        let (low, high) = ys.fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), y| (lo.min(y), hi.max(y)));
+        let empty = trace.points.is_empty();
+        Self {
+            points: trace.points.len(),
+            low: if empty { 0.0 } else { low },
+            high: if empty { 0.0 } else { high },
+            level: trace.level,
+        }
+    }
 }
 
 /// What a control shows of its modulation assignments.
@@ -258,38 +294,66 @@ fn kind_name(kind: &WidgetViewKind) -> &'static str {
         WidgetViewKind::Radio { .. } => "radio",
         WidgetViewKind::Light => "light",
         WidgetViewKind::Meter => "meter",
+        WidgetViewKind::Scope => "scope",
         WidgetViewKind::Button => "button",
     }
 }
 
 impl App {
     /// Runs the idle engine for `frames` frames, then takes the live values,
-    /// lights, and meter levels it left, through the same messages the
-    /// window uses. With no window to say what is on screen, every module
-    /// counts as shown.
+    /// lights, meter levels, and scope traces it left, through the same
+    /// messages the window uses. With no window to say what is on screen,
+    /// every module counts as shown.
     pub(crate) fn run_engine(&mut self, frames: usize) {
         self.visible_displays = self.controller.graph().nodes().map(|(id, _)| id.0).collect();
-        // Meters need their probes before the engine runs.
+        // Meters and scopes need their probes before the engine runs.
         self.sync_probes();
-        let window = frames.min(METER_WINDOW);
+        let window = frames.min(SCOPE_WINDOW);
         self.process(frames - window);
-        // The meters show the end of the run: earlier readings are dropped.
-        let _ = self.monitor.take_readings();
-        // The queue is read after every block, so it holds at most one
-        // reading per meter and never fills, up to its capacity in meters.
+        // The meters show the end of the run, and the scopes its last
+        // second: earlier telemetry is dropped.
+        let _ = self.monitor.take_telemetry();
+        let watch = self.monitor.watched();
+        let rate = self.monitor.sample_rate();
+        let mut scopes: std::collections::HashMap<loom_core::ProbeId, crate::live::ScopeTrace> = watch
+            .scopes
+            .keys()
+            .map(|&probe| (probe, crate::live::ScopeTrace::new(rate)))
+            .collect();
+        // The queues are read after every block, so they never fill.
         let block = self.controller.config().max_block;
         let mut readings = Vec::new();
         let mut remaining = window;
         while remaining > 0 {
             let n = remaining.min(block);
             self.process(n);
-            readings.extend(self.monitor.take_readings());
+            let (meters, chunks) = self.monitor.take_telemetry();
+            if remaining <= METER_WINDOW {
+                readings.extend(meters);
+            }
+            for chunk in &chunks {
+                if let Some(scope) = scopes.get_mut(&chunk.probe) {
+                    scope.push(chunk);
+                }
+            }
             remaining -= n;
         }
+        let traces = scopes
+            .into_iter()
+            .map(|(probe, mut scope)| {
+                let want = watch.scopes[&probe];
+                scope.update(want.window, want.trigger);
+                (probe, scope.canvas_trace(watch.full_traces))
+            })
+            .collect();
         // One update, so the levels do not fall with the time the run took.
         let mut levels = Levels::default();
         levels.update(&readings, std::time::Instant::now());
         let _ = self.update(crate::Message::Meters(levels.all().collect()));
+        let _ = self.update(crate::Message::Telemetry(crate::monitor::Update {
+            levels: Vec::new(),
+            traces,
+        }));
         let _ = self.update(crate::Message::LiveFrame);
         if let Some(watch) = self.watched_lights() {
             let _ = self.update(crate::Message::Lights(watch.read()));
@@ -383,6 +447,7 @@ impl App {
                                 text: value.text,
                                 modulation: value.modulation.into(),
                                 live: value.live,
+                                trace: self.traces.get(m.id, index).map(TraceShown::from),
                             }
                         })
                         .collect(),
@@ -450,6 +515,11 @@ pub fn headless(args: &Args) -> Result<App, String> {
         app.selection.insert(id);
     }
     if let Some(frames) = args.frames {
+        if args.hold_note
+            && let Some(midi) = &app.rig.midi_in
+        {
+            loom_host_desktop::send_midi(midi, loom_core::MidiEvent::note_on(0, 0, 57, 100));
+        }
         app.run_engine(frames);
     }
     Ok(app)

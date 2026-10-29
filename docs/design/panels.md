@@ -3,7 +3,7 @@
 How modules, sub-patches, and patches show controls and displays, and how users build them.
 
 - **Kind:** living specification. It changes as panels are built and used.
-- **Status:** Draft, except [Module panels on tiles](#module-panels-on-tiles-p1) and [Level meters and audio load](#level-meters-and-audio-load-p1), which are Implemented. [Labels and hover text](#labels-and-hover-text) is Implemented. [Scope module](#scope-module) is Implemented, except drawing the trace ([#62](https://github.com/brylie/LoomDSP/issues/62)). [Default panels](#default-panels) and [Exposed controls in a sub-patch](#exposed-controls-in-a-sub-patch) are Draft.
+- **Status:** Draft, except [Module panels on tiles](#module-panels-on-tiles-p1) and [Level meters and audio load](#level-meters-and-audio-load-p1), which are Implemented. [Labels and hover text](#labels-and-hover-text) is Implemented. [Scope module](#scope-module) is Implemented, with its trace ([#62](https://github.com/brylie/LoomDSP/issues/62)). [Default panels](#default-panels) and [Exposed controls in a sub-patch](#exposed-controls-in-a-sub-patch) are Draft.
 - **Decision behind it:** [ADR-0013](../adr/0013-modules-carry-their-own-panel.md) (modules carry their own panel), [ADR-0025](../adr/0025-one-design-language-and-derived-panels.md) (one design language, and panels derived from the declaration).
 - **Requirements:** FR-PANEL-*, FR-CANVAS-10, FR-CANVAS-11, FR-LIB-18, FR-VIS-01 to 04, FR-ENCAP-03, NFR-PERF-04, NFR-UX-01.
 - **Builds on:** [Telemetry](telemetry.md) for live data, [ADR-0010](../adr/0010-own-patch-canvas.md) for the canvas, [parameter mapping](modulation.md#parameter-mapping) for control values.
@@ -152,7 +152,7 @@ The first display module that shows a signal over time.
 | `auto` | Auto | 0 or 1 | 1 | Whole number. On: the trigger level is halfway between the lowest and highest sample, as in [telemetry](telemetry.md). |
 | `level` | Level | -1 to 1 | 0 | The trigger level while `auto` is off. |
 
-- Its panel: a knob for `window`, a toggle for `auto`, and a knob for `level`. The scope widget joins them in #62. Code: `SCOPE` in `loom-modules/src/display.rs`, `Trigger` in `loom-app/src/live.rs`, and `loom-app/src/probe_menu.rs`.
+- Its panel: a knob for `window`, a toggle for `auto`, and a knob for `level`, and below them the scope widget (9 by 5 grid units, bound to `out`, no caption), added in #62. Code: `SCOPE` in `loom-modules/src/display.rs`, `Trigger` in `loom-app/src/live.rs`, and `loom-app/src/probe_menu.rs`.
 - The parameters never change the audio. They tell the app how to draw the trace.
 - *Why an auto toggle:* most signals trigger well at their midpoint, including envelopes and pitch with an offset, which never cross 0. A fixed level is for picking one edge of a complex wave. A toggle keeps both without a knob that means two things.
 
@@ -424,7 +424,7 @@ What P1 builds. The rest of this spec is P2.
 ### Acceptance criteria
 
 - [ ] Module panels on tiles: see [their acceptance criteria](#acceptance-criteria-module-panels) above.
-- [ ] A scope module fed by a 440 Hz oscillator shows a stable trace.
+- [x] A scope module fed by a 440 Hz oscillator shows a stable trace (`ScopeTrace::offset`, `trigger_is_stable_across_frames`; the subtractive example's scope, `docs/images/readme-subtractive.png`).
 - [x] "Add scope" on a cable places a connected scope module next to it. Undo removes it.
 - [ ] Cable opacity never depends on the signal. A test checks that the cable geometry is the same with and without telemetry.
 - [x] With no displays on screen and no input, the app does not redraw. Check: `--measure-idle --bench-seconds 10` on `subtractive.ron` prints `frames=` with the same count from the second line on, with a device, with `--fake-audio`, and with `--no-audio` ([#90](https://github.com/brylie/LoomDSP/issues/90)).
@@ -527,7 +527,7 @@ What P1 builds. The rest of this spec is P2.
 
 ### Drawing the scope trace
 
-([#62](https://github.com/brylie/LoomDSP/issues/62).)
+([#62](https://github.com/brylie/LoomDSP/issues/62).) **Implemented.** Code: `WidgetKind::Scope`, `loom-canvas/src/trace.rs` (`ScopeTraces`, the `vs_trace` and `fs_trace` shaders), `ScopeTrace::canvas_trace` in `loom-app/src/live.rs`, and the telemetry thread in `loom-app/src/monitor.rs`, which builds the traces and wakes the UI only when a drawn trace changes. Building it settled one reading: the scope widget fills the panel area below the scope module's controls, and its frame is drawn with the controls, not the tile, so it also costs nothing per frame.
 
 - **Where.** The scope widget fills the panel area of the scope tile. Its frame is drawn with the tile; the trace is a line strip clipped to the frame.
 - **Data.** Each frame the app copies the points that fit the module's `window` into one small vertex buffer (at most 1024 points: more are skipped by stride, keeping the min and max of each group). It uploads that buffer and nothing else. Tiles, ports, and cables are not rebuilt (ADR-0010).
@@ -559,7 +559,7 @@ What P1 builds. The rest of this spec is P2.
 - [ ] A 95% callback spike turns the load amber or red for its tick. After 10 seconds the max falls.
 - [ ] By keys alone: Tab to a module, Enter into its panel, change a knob, Escape out twice. Space on a focused toggle acts on the toggle, not on Run. Arrow keys move the selected module by one grid unit.
 - [ ] An output with a cable shows *carrying* within 200 ms of a signal above −80 dB, and *silent* 400 ms after it stops. A one-sample trigger lights it. Cable geometry is the same with and without activity.
-- [ ] The scope draws its trace in the tile, holds still for a periodic wave, and four scopes keep 60 fps.
+- [x] The scope draws its trace in the tile, holds still for a periodic wave, and four scopes keep 60 fps. Checked on a development Mac (not the reference laptop): four live scopes draw at 120 fps with `--measure`, and upload only the trace buffer (`trace_uploads`, no scene or control uploads). Recording CPU and GPU on the reference laptop is left for the benchmark doc.
 - [ ] A growable tile resizes to the grid within its limits. Ports and cable ends follow. The size is saved and loads. Old patches load. One drag is one undo step.
 
 ## Default panels

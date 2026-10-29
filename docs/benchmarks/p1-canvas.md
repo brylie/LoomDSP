@@ -56,7 +56,7 @@ Each line is `key=value` pairs separated by spaces. The numbers come from the ca
 
 - `fps` and `avg_ms`: frames in the last second, and the average time between them. On the final line, from the first line to the end, so start-up is left out.
 - `worst_ms`: the longest gap between two frames since the start, after the first 10.
-- `frames`, `scene_builds`, `control_builds`, `scene_uploads`, `control_uploads`, `overlay_uploads`: totals since the start. A still or moving camera should build and upload the scene once. A knob turn adds control builds and uploads, never scene builds.
+- `frames`, `scene_builds`, `control_builds`, `scene_uploads`, `control_uploads`, `overlay_uploads`, `trace_uploads`: totals since the start. A still or moving camera should build and upload the scene once. A knob turn adds control builds and uploads, never scene builds. A moving scope trace adds trace uploads only.
 
 **Idle.** `--measure` and `--bench` redraw every frame, so they measure drawing cost. `--measure-idle` prints the same lines without forcing a redraw: it counts only the frames the app draws by itself. The report runs on its own thread and sends the app no messages, so it adds no frames. An idle patch prints `frames=0` after the first second (the panels spec, Redraw). Until [#90](https://github.com/brylie/LoomDSP/issues/90) it printed 4 to 7 frames a second, from the stats bar timer and the device polls:
 

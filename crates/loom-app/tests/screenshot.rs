@@ -18,7 +18,7 @@ fn subtractive() -> PathBuf {
 /// `name`: tests run in parallel, so each needs its own file.
 fn modulated(name: &str) -> PathBuf {
     let source = std::fs::read_to_string(subtractive()).expect("example patch");
-    let last_module = "PatchModule(id: 9, kind: \"loom.io.audio-out@1\"),";
+    let last_module = "PatchModule(id: 10, kind: \"loom.display.scope@1\"),";
     let source = source.replace(
         last_module,
         &format!("{last_module}\n        PatchModule(id: 11, kind: \"loom.ui.button@1\"),"),

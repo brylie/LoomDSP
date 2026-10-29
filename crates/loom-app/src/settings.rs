@@ -629,7 +629,8 @@ impl App {
         // as in `play`, so panic and held-note release still work.
         self.send_panic_trigger();
         self.connect_midi(false, false);
-        self.monitor = crate::monitor::Monitor::new(telemetry, self.generation);
+        self.monitor = crate::monitor::Monitor::new(telemetry, self.controller.config().sample_rate, self.generation);
+        self.traces = loom_canvas::ScopeTraces::new();
         self.live = crate::live::Live::new();
         self.idle_engine = Some(engine);
         // The stopped engine's live values are gone; show the new one's.
@@ -653,7 +654,8 @@ impl App {
         self.controller = controller;
         self.send_panic_trigger();
         self.connect_midi(false, false);
-        self.monitor = crate::monitor::Monitor::new(telemetry, self.generation);
+        self.monitor = crate::monitor::Monitor::new(telemetry, self.controller.config().sample_rate, self.generation);
+        self.traces = loom_canvas::ScopeTraces::new();
         self.live = crate::live::Live::new();
         self.lights.clear();
         self.meter_levels.clear();

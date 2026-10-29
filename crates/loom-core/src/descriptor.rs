@@ -648,7 +648,7 @@ pub struct Widget {
     /// Row of its top-left corner, in grid units from the panel's top.
     pub y: u8,
     /// What it shows: a parameter name for controls, a display value name
-    /// for lights, an output name for meters.
+    /// for lights, an output name for meters and scopes.
     pub bind: &'static str,
 }
 
@@ -706,6 +706,17 @@ impl Widget {
         }
     }
 
+    /// A scope on output `output`: the signal over time, from a port probe
+    /// (`docs/design/panels.md`, Drawing the scope trace).
+    pub const fn scope(x: u8, y: u8, output: &'static str) -> Self {
+        Self {
+            kind: WidgetKind::Scope,
+            x,
+            y,
+            bind: output,
+        }
+    }
+
     /// A large button for whole-number parameters from 0 to 1.
     ///
     /// `mode` names a whole-number parameter, from 0 to 1, that chooses the
@@ -738,7 +749,13 @@ impl Widget {
 
     /// True for widgets bound to a parameter.
     pub const fn is_control(&self) -> bool {
-        !matches!(self.kind, WidgetKind::Light | WidgetKind::Meter)
+        !matches!(self.kind, WidgetKind::Light | WidgetKind::Meter | WidgetKind::Scope)
+    }
+
+    /// True for widgets bound to one of the module's outputs, fed by a
+    /// port probe: meters and scopes.
+    pub const fn shows_output(&self) -> bool {
+        matches!(self.kind, WidgetKind::Meter | WidgetKind::Scope)
     }
 }
 
@@ -758,6 +775,9 @@ pub enum WidgetKind {
     /// The level of one of the module's outputs, from a port probe: an RMS
     /// bar and a peak line, -60 dB to 0 dB.
     Meter,
+    /// One of the module's outputs over time, from a port probe: a
+    /// triggered trace in a frame.
+    Scope,
     /// A large button for whole-number parameters from 0 to 1.
     ///
     /// The widget's `bind` is the toggle latch. `mode` names the parameter
@@ -863,6 +883,7 @@ impl ModuleDescriptor {
         match widget.kind {
             WidgetKind::Knob => (3, 3),
             WidgetKind::Meter => (3, 6),
+            WidgetKind::Scope => (9, 5),
             WidgetKind::Toggle | WidgetKind::Light => (3, 2),
             WidgetKind::Button { .. } => (6, 3),
             WidgetKind::Radio => {
@@ -986,7 +1007,7 @@ impl ModuleDescriptor {
                     }
                     _ => {}
                 }
-            } else if widget.kind == WidgetKind::Meter {
+            } else if widget.shows_output() {
                 if !self.outputs.iter().any(|port| port.name == widget.bind) {
                     return Err(name("no such output"));
                 }

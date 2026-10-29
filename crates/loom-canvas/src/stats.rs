@@ -29,6 +29,10 @@ pub struct RenderCounts {
     pub control_uploads: u64,
     /// Overlay data (hover, selection, cable drags) uploaded to the GPU.
     pub overlay_uploads: u64,
+    /// Scope traces built from their points.
+    pub trace_builds: u64,
+    /// Scope trace data uploaded to the GPU.
+    pub trace_uploads: u64,
 }
 
 impl RenderCounts {
@@ -51,6 +55,8 @@ impl RenderCounts {
             scene_uploads: read(Counter::SceneUploads),
             control_uploads: read(Counter::ControlUploads),
             overlay_uploads: read(Counter::OverlayUploads),
+            trace_builds: read(Counter::TraceBuilds),
+            trace_uploads: read(Counter::TraceUploads),
         }
     }
 }
@@ -63,9 +69,11 @@ pub(crate) enum Counter {
     SceneUploads,
     ControlUploads,
     OverlayUploads,
+    TraceBuilds,
+    TraceUploads,
 }
 
-const COUNTERS: usize = 6;
+const COUNTERS: usize = 8;
 
 static GLOBAL: [AtomicU64; COUNTERS] = [const { AtomicU64::new(0) }; COUNTERS];
 
