@@ -43,7 +43,7 @@ pub fn with_extension(mut path: PathBuf) -> PathBuf {
 
 /// The bundled examples folder (`docs/design/files.md`, Defaults for the
 /// dialogs): a checkout build uses its `examples/patches`; a release uses
-/// the `examples` folder next to the program, or on macOS next to
+/// `examples/patches` next to the program, or on macOS next to
 /// `LoomDSP.app`. If that folder is missing, the checkout is the fallback.
 /// `None` when neither exists. The app looks once, at start.
 pub fn bundled_examples() -> Option<PathBuf> {
@@ -56,12 +56,12 @@ pub fn bundled_examples() -> Option<PathBuf> {
 fn examples_for_executable(executable: Option<&Path>, checkout: &Path) -> Option<PathBuf> {
     let mut bundled = Vec::new();
     if let Some(dir) = executable.and_then(Path::parent) {
-        bundled.push(dir.join("examples"));
+        bundled.push(dir.join("examples/patches"));
         // LoomDSP.app/Contents/MacOS/loom-app: the folder holding the app.
         if dir.ends_with("Contents/MacOS")
             && let Some(beside_app) = dir.ancestors().nth(3)
         {
-            bundled.push(beside_app.join("examples"));
+            bundled.push(beside_app.join("examples/patches"));
         }
     }
     let executable = executable.map(|path| path.canonicalize().unwrap_or_else(|_| path.to_path_buf()));
@@ -278,7 +278,7 @@ mod tests {
     fn examples_follow_the_executable() {
         let tmp = TempDir::new("example-candidates");
         let checkout = tmp.0.join("checkout/examples/patches");
-        let bundle = tmp.0.join("bundle/examples");
+        let bundle = tmp.0.join("bundle/examples/patches");
         std::fs::create_dir_all(&checkout).unwrap();
         std::fs::create_dir_all(&bundle).unwrap();
         std::fs::write(bundle.join("example.ron"), "").unwrap();
@@ -289,7 +289,15 @@ mod tests {
         std::fs::write(cargo_examples.join("example.ron"), "").unwrap();
         std::fs::write(&release, "").unwrap();
         std::fs::write(&development, "").unwrap();
-        assert_eq!(examples_for_executable(Some(&release), &checkout), Some(bundle));
+        assert_eq!(examples_for_executable(Some(&release), &checkout), Some(bundle.clone()));
+        assert!(is_example(
+            &tmp.0.join("bundle/examples/patches/example.ron"),
+            Some(&bundle)
+        ));
+        let mac = tmp.0.join("bundle/LoomDSP.app/Contents/MacOS/loom-app");
+        std::fs::create_dir_all(mac.parent().unwrap()).unwrap();
+        std::fs::write(&mac, "").unwrap();
+        assert_eq!(examples_for_executable(Some(&mac), &checkout), Some(bundle));
         assert_eq!(
             examples_for_executable(Some(&development), &checkout),
             Some(checkout.clone())
@@ -304,7 +312,7 @@ mod tests {
         // An external Cargo target has an `examples` directory too, but it
         // holds binaries, not bundled patches.
         let external = tmp.0.join("external/target/debug/loom-app");
-        let external_examples = tmp.0.join("external/target/debug/examples");
+        let external_examples = tmp.0.join("external/target/debug/examples/patches");
         std::fs::create_dir_all(&external_examples).unwrap();
         std::fs::write(external_examples.join("some-binary"), "").unwrap();
         std::fs::write(&external, "").unwrap();
