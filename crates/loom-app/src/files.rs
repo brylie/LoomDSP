@@ -64,22 +64,29 @@ fn examples_for_executable(executable: Option<&Path>, checkout: &Path) -> Option
             bundled.push(beside_app.join("examples"));
         }
     }
-    let in_checkout = executable.is_some_and(|path| {
+    let executable = executable.map(|path| path.canonicalize().unwrap_or_else(|_| path.to_path_buf()));
+    let in_checkout = executable.as_deref().is_some_and(|path| {
         checkout
             .parent()
             .and_then(Path::parent)
             .and_then(|root| root.canonicalize().ok())
             .is_some_and(|root| path.starts_with(root))
     });
-    let mut candidates = Vec::with_capacity(bundled.len() + 1);
+    // Cargo creates target/debug/examples for example binaries. It is not
+    // the release bundle unless it actually contains patch files.
+    let bundled = bundled.into_iter().find(|dir| {
+        std::fs::read_dir(dir).is_ok_and(|entries| {
+            entries
+                .filter_map(Result::ok)
+                .any(|entry| entry.path().extension().is_some_and(|ext| ext == EXTENSION))
+        })
+    });
+    let checkout = checkout.is_dir().then(|| checkout.to_path_buf());
     if in_checkout {
-        candidates.push(checkout.to_path_buf());
+        checkout.or(bundled)
+    } else {
+        bundled.or(checkout)
     }
-    candidates.extend(bundled);
-    if !in_checkout {
-        candidates.push(checkout.to_path_buf());
-    }
-    candidates.into_iter().find(|dir| dir.is_dir())
 }
 
 /// True when `path` is a file inside the folder `examples`. Both are
@@ -274,16 +281,34 @@ mod tests {
         let bundle = tmp.0.join("bundle/examples");
         std::fs::create_dir_all(&checkout).unwrap();
         std::fs::create_dir_all(&bundle).unwrap();
+        std::fs::write(bundle.join("example.ron"), "").unwrap();
         let release = tmp.0.join("bundle/loom-app");
         let development = tmp.0.join("checkout/target/debug/loom-app");
+        let cargo_examples = tmp.0.join("checkout/target/debug/examples");
+        std::fs::create_dir_all(&cargo_examples).unwrap();
+        std::fs::write(cargo_examples.join("example.ron"), "").unwrap();
+        std::fs::write(&release, "").unwrap();
+        std::fs::write(&development, "").unwrap();
         assert_eq!(examples_for_executable(Some(&release), &checkout), Some(bundle));
-        assert_eq!(examples_for_executable(Some(&development), &checkout), Some(checkout));
+        assert_eq!(
+            examples_for_executable(Some(&development), &checkout),
+            Some(checkout.clone())
+        );
         std::fs::create_dir_all(tmp.0.join("checkout/crates/app")).unwrap();
         let from_manifest = tmp.0.join("checkout/crates/app/../../examples/patches");
         assert_eq!(
             examples_for_executable(Some(&development), &from_manifest),
             Some(from_manifest)
         );
+
+        // An external Cargo target has an `examples` directory too, but it
+        // holds binaries, not bundled patches.
+        let external = tmp.0.join("external/target/debug/loom-app");
+        let external_examples = tmp.0.join("external/target/debug/examples");
+        std::fs::create_dir_all(&external_examples).unwrap();
+        std::fs::write(external_examples.join("some-binary"), "").unwrap();
+        std::fs::write(&external, "").unwrap();
+        assert_eq!(examples_for_executable(Some(&external), &checkout), Some(checkout));
     }
 
     /// A suggested file name with no folder starts the Save dialog where an
