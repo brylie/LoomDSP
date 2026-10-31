@@ -209,6 +209,36 @@ pub fn stream(watch: &Watch) -> impl Stream<Item = Event> + use<> {
 mod tests {
     use super::*;
 
+    /// A stopped callback stream wakes the app without a UI timer, and a
+    /// new stream gets a distinct subscription identity.
+    #[test]
+    fn stream_reports_a_stopped_device() {
+        use iced::futures::StreamExt;
+        use std::collections::hash_map::DefaultHasher;
+        let watch = Watch {
+            stats: Arc::new(CallbackStats::default()),
+            engine: Arc::new(EngineStats::default()),
+        };
+        let hash = |watch: &Watch| {
+            let mut hasher = DefaultHasher::new();
+            watch.hash(&mut hasher);
+            hasher.finish()
+        };
+        assert_eq!(hash(&watch), hash(&watch.clone()));
+        assert_ne!(
+            hash(&watch),
+            hash(&Watch {
+                stats: Arc::new(CallbackStats::default()),
+                engine: watch.engine.clone(),
+            })
+        );
+        let mut updates = stream(&watch);
+        let first = iced::futures::executor::block_on(updates.next());
+        assert!(matches!(first, Some(Event::Stalled { callbacks: 0, .. })));
+        let second = iced::futures::executor::block_on(updates.next());
+        assert!(matches!(second, Some(Event::Stalled { callbacks: 0, .. })));
+    }
+
     fn stats(callbacks: u64, load: f64, overruns: u64) -> StatsSnapshot {
         StatsSnapshot {
             callbacks,

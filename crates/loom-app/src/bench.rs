@@ -384,4 +384,35 @@ mod tests {
         assert!(idle.reporter().is_some());
         assert!(!idle.redraws());
     }
+
+    /// A measured run reports a settled interval and then ends on time.
+    #[test]
+    fn measured_run_reports_and_finishes() {
+        use iced::futures::StreamExt;
+        let reporter = Reporter {
+            seconds: Some(Duration::from_millis(2_100)),
+        };
+        let started = Instant::now();
+        let mut updates = stream(&reporter);
+        assert_eq!(iced::futures::executor::block_on(updates.next()), Some(()));
+        assert!(started.elapsed() >= Duration::from_secs(2));
+    }
+
+    /// A zero wall interval has no CPU percentage; later CPU time is a
+    /// percentage of one core.
+    #[test]
+    fn cpu_percent_uses_the_report_interval() {
+        assert_eq!(
+            cpu_percent(Duration::ZERO, Duration::from_millis(1), Duration::ZERO),
+            0.0
+        );
+        assert_eq!(
+            cpu_percent(
+                Duration::from_millis(10),
+                Duration::from_millis(60),
+                Duration::from_millis(100)
+            ),
+            50.0
+        );
+    }
 }

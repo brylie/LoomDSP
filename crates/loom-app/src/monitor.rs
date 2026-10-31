@@ -340,6 +340,36 @@ pub fn stream(monitor: &Monitor) -> impl Stream<Item = Update> + use<> {
 mod tests {
     use super::*;
 
+    /// A running engine's meter reaches the subscription without an app
+    /// timer, and the update names only the watched probe.
+    #[test]
+    fn telemetry_stream_reports_a_watched_meter() {
+        use iced::futures::StreamExt;
+        use loom_core::{EngineConfig, ModuleId, ProbeKind, create_engine};
+        use loom_patch::Patch;
+        let mut parts = create_engine(loom_modules::registry(), EngineConfig::default());
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/patches/sine.ron");
+        Patch::load(path).unwrap().load_into(&mut parts.controller).unwrap();
+        let output = parts.controller.output_ref(ModuleId(3), "out").unwrap();
+        let probe = parts.controller.add_probe(output, ProbeKind::Meter).unwrap();
+        parts.controller.commit().unwrap();
+        let mut left = [0.0; 512];
+        let mut right = [0.0; 512];
+        for _ in 0..10 {
+            parts.engine.process(&mut left, &mut right);
+        }
+        let monitor = Monitor::new(parts.telemetry, 48_000.0, 1);
+        monitor.watch(WatchList {
+            meters: HashSet::from([probe]),
+            ..WatchList::default()
+        });
+        let mut updates = stream(&monitor);
+        let update = iced::futures::executor::block_on(updates.next()).unwrap();
+        assert_eq!(update.levels.len(), 1);
+        assert_eq!(update.levels[0].0, probe);
+        assert!(update.levels[0].1.peak > 0.0);
+    }
+
     #[test]
     fn only_visible_changes_are_sent() {
         let probe = ProbeId(1);

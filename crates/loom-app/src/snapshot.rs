@@ -671,4 +671,39 @@ mod tests {
         );
         assert!(stats.load_text().starts_with("load "), "{}", stats.load_text());
     }
+
+    /// A headless run carries the scope's trace into the UI snapshot.
+    #[test]
+    fn running_the_subtractive_patch_shows_scope_trace() {
+        let mut app = open("subtractive.ron");
+        app.run_engine(4_800);
+        let scope = app
+            .ui_snapshot()
+            .tiles
+            .into_iter()
+            .find(|tile| tile.title == "Scope")
+            .expect("the example has a scope");
+        let trace = scope
+            .widgets
+            .iter()
+            .find_map(|widget| widget.trace)
+            .expect("scope trace");
+        assert!(trace.points > 100);
+        assert!(trace.high > trace.low);
+    }
+
+    /// Empty and nonempty traces give bounded, ordered snapshot values.
+    #[test]
+    fn trace_snapshot_bounds() {
+        let empty = TraceShown::from(&loom_canvas::Trace {
+            points: Vec::new(),
+            level: 0.0,
+        });
+        assert_eq!((empty.points, empty.low, empty.high), (0, 0.0, 0.0));
+        let shown = TraceShown::from(&loom_canvas::Trace {
+            points: vec![[0.0, -0.5], [1.0, 0.75]],
+            level: 0.8,
+        });
+        assert_eq!((shown.points, shown.low, shown.high, shown.level), (2, -0.5, 0.75, 0.8));
+    }
 }

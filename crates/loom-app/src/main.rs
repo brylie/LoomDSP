@@ -3101,6 +3101,29 @@ mod tests {
         App::new(app_args())
     }
 
+    /// Audio watcher events update the warning peak and rolling maximum,
+    /// including the last callback time used to detect a stalled stream.
+    #[test]
+    fn audio_watcher_events_update_the_stats_model() {
+        let mut app = app();
+        let now = Instant::now();
+        let _ = app.update(Message::Audio(audio_watch::Event::Stats {
+            dropouts: 1,
+            at: now,
+            peak: 0.95,
+            max: 0.95,
+        }));
+        assert_eq!(app.load_peak, 0.95);
+        assert_eq!(app.load_max, 0.95);
+        assert_eq!(app.dropouts.count(), 1);
+        let _ = app.update(Message::Audio(audio_watch::Event::Stalled {
+            callbacks: 3,
+            advanced: now,
+        }));
+        assert_eq!(app.audio_callbacks_seen, 3);
+        assert!(app.audio_callbacks_advanced >= now);
+    }
+
     /// #16: the inspector help text names every canvas shortcut, the new
     /// Cmd/Ctrl+0 zoom reset and the ones that were there before it.
     #[test]

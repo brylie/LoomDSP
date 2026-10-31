@@ -596,6 +596,19 @@ mod tests {
         assert_eq!(trace.range, 0.5);
     }
 
+    /// A long window keeps a one-sample peak when reduced for the GPU.
+    #[test]
+    fn long_scope_window_keeps_short_peak() {
+        let mut scope = ScopeTrace::new(48_000.0);
+        scope.trace = vec![0.0; loom_canvas::MAX_TRACE_POINTS * 4];
+        scope.trace[2_003] = 1.0;
+        scope.span = scope.trace.len() as f32;
+        let trace = scope.canvas_trace(true);
+        assert!(trace.points.len() <= loom_canvas::MAX_TRACE_POINTS);
+        assert!(trace.points.iter().any(|point| point[1] == 1.0));
+        assert!(trace.points.windows(2).all(|pair| pair[0][0] <= pair[1][0]));
+    }
+
     fn reading(probe: u32, frames: u32, peak: f32, rms: f32) -> MeterReading {
         MeterReading {
             probe: ProbeId(probe),
