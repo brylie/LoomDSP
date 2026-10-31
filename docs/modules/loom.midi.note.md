@@ -53,7 +53,7 @@ Patch(
         PatchModule(id: 1, kind: "loom.midi.note@1", params: {"channel": 0, "bend-range": 2}),
         PatchModule(id: 2, kind: "loom.phase.generator@1"),
         PatchModule(id: 3, kind: "loom.osc.saw@1"),
-        PatchModule(id: 4, kind: "loom.env.adsr@1"),
+        PatchModule(id: 4, kind: "loom.env.envelope@1"),
         PatchModule(id: 5, kind: "loom.level.amp@1"),
         PatchModule(id: 6, kind: "loom.io.audio-out@1"),
     ],

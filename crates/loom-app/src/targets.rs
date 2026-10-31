@@ -165,7 +165,7 @@ mod tests {
     /// on its output, whose meter shares the name `out` with the output.
     fn patch() -> (crate::App, u32, u32) {
         let mut app = crate::App::new(crate::tests::app_args());
-        let env = app.controller.add_module("loom.env.adsr").unwrap();
+        let env = app.controller.add_module("loom.env.envelope").unwrap();
         let meter = app.controller.add_module("loom.display.meter").unwrap();
         app.controller.connect_named(env, "out", meter, "in").unwrap();
         app.commit();

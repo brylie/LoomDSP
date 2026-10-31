@@ -96,16 +96,72 @@ fn onepole() {
         .check(reference!("onepole"));
 }
 
+/// Reference render for `loom.filter.ladder` at 24 dB: a square wave with
+/// the cutoff sweeping up two octaves, high resonance, and some drive.
 #[test]
-fn adsr() {
-    Harness::new(&env::ADSR)
+fn ladder() {
+    Harness::new(&filter::LADDER)
+        .seconds(0.1)
+        .input(
+            "in",
+            Signal::from_fn(|frame| if (frame / 200) % 2 == 0 { 0.5 } else { -0.5 }),
+        )
+        .input("cutoff", Signal::from_fn(|frame| frame as f32 / 4_800.0 * 0.2))
+        .param("cutoff", 400.0)
+        .param("resonance", 0.8)
+        .param("drive", 0.4)
+        .check(reference!("ladder"));
+}
+
+/// Reference render for `loom.filter.ladder` at 18 dB and resonance 1: a
+/// short burst, then the filter sings on its own at about 1.7 times the
+/// cutoff.
+#[test]
+fn ladder_18() {
+    Harness::new(&filter::LADDER)
+        .seconds(0.3)
+        .input("in", Signal::from_fn(|frame| if frame < 100 { 0.3 } else { 0.0 }))
+        .param("cutoff", 300.0)
+        .param("resonance", 1.0)
+        .param("slope", 1.0)
+        .check(reference!("ladder_18"));
+}
+
+/// Reference render for `loom.env.envelope` in ADSR mode, with a bent
+/// curve.
+#[test]
+fn envelope() {
+    Harness::new(&env::ENVELOPE)
         .seconds(0.2)
         .input("gate", Signal::gate(0.01, 0.12))
         .param("attack", 0.02)
         .param("decay", 0.03)
         .param("sustain", 0.5)
         .param("release", 0.05)
-        .check(reference!("adsr"));
+        .param("curve", 0.5)
+        .check(reference!("envelope"));
+}
+
+/// Reference render for `loom.env.envelope` in AD mode: three triggers, the
+/// second in the middle of the attack and the third in the middle of the
+/// decay (p1-modules.md, Envelope AD mode).
+#[test]
+fn envelope_ad() {
+    // Attack 20 ms, decay 40 ms, at 48 kHz. Triggers at 10 ms, at 20 ms (in
+    // the attack, which then runs to 40 ms), and at 60 ms (in the decay from
+    // 40 to 80 ms).
+    let triggers = [480, 960, 2_880];
+    Harness::new(&env::ENVELOPE)
+        .seconds(0.15)
+        .input(
+            "gate",
+            Signal::from_fn(move |frame| if triggers.contains(&frame) { 1.0 } else { 0.0 }),
+        )
+        .param("mode", 1.0)
+        .param("attack", 0.02)
+        .param("decay", 0.04)
+        .param("curve", -0.3)
+        .check(reference!("envelope_ad"));
 }
 
 #[test]
@@ -194,6 +250,38 @@ fn note_in() {
             MidiEvent::note_off(4_000, 0, 60),
         ])
         .check(reference!("note_in"));
+}
+
+/// Reference render for `loom.midi.controller`: controller 1 moves and
+/// is smoothed, and a message for another controller changes nothing.
+#[test]
+fn controller_in() {
+    Harness::new(&midi::CONTROLLER_IN)
+        .seconds(0.1)
+        .midi([
+            MidiEvent::control_change(100, 0, 1, 127),
+            MidiEvent::control_change(1_000, 0, 2, 10),
+            MidiEvent::control_change(2_000, 0, 1, 40),
+            MidiEvent::control_change(3_500, 0, 1, 90),
+        ])
+        .param("smoothing", 0.01)
+        .check(reference!("controller_in"));
+}
+
+/// Reference render for `loom.midi.controller` following the pitch bend,
+/// with no smoothing.
+#[test]
+fn controller_in_bend() {
+    Harness::new(&midi::CONTROLLER_IN)
+        .seconds(0.05)
+        .midi([
+            MidiEvent::pitch_bend(500, 0, 8191),
+            MidiEvent::pitch_bend(1_200, 0, -2048),
+            MidiEvent::pitch_bend(2_000, 0, 0),
+        ])
+        .param("source", 1.0)
+        .param("smoothing", 0.0)
+        .check(reference!("controller_in_bend"));
 }
 
 #[test]
@@ -338,6 +426,7 @@ fn every_dsp_module_has_a_reference_test() {
         &osc::NOISE,
         &filter::SVF,
         &filter::ONEPOLE,
+        &filter::LADDER,
         &phase::WRAP,
         &math::PITCH_CONSTANT,
         &level::CONSTANT,
@@ -352,7 +441,7 @@ fn every_dsp_module_has_a_reference_test() {
         &level::SLEW,
         &phase::SCALE,
         &lfo::LFO,
-        &env::ADSR,
+        &env::ENVELOPE,
         &math::ADD,
         &math::MUL,
         &math::SUB,
@@ -361,6 +450,7 @@ fn every_dsp_module_has_a_reference_test() {
         &math::CONVERT,
         &level::AMP,
         &midi::NOTE_IN,
+        &midi::CONTROLLER_IN,
         &display::METER,
         &display::SCOPE,
         &logic::DIVIDE,

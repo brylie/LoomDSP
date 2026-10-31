@@ -73,7 +73,7 @@ Patch(
         PatchModule(id: 1, kind: "loom.clock.transport@1", params: {"tempo": 96}),
         PatchModule(id: 2, kind: "loom.ui.button@1", params: {"on": 1}),
         PatchModule(id: 3, kind: "loom.clock.clock@1", params: {"rate": 15, "width": 10}),
-        PatchModule(id: 4, kind: "loom.env.adsr@1", params: {"attack": 0.001, "decay": 0.05, "sustain": 0, "release": 0.05}),
+        PatchModule(id: 4, kind: "loom.env.envelope@1", params: {"attack": 0.001, "decay": 0.05, "sustain": 0, "release": 0.05}),
         PatchModule(id: 5, kind: "loom.osc.noise@1"),
         PatchModule(id: 6, kind: "loom.level.amp@1"),
         PatchModule(id: 7, kind: "loom.io.audio-out@1"),

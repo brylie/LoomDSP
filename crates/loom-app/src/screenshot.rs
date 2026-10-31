@@ -607,7 +607,7 @@ mod tests {
     #[test]
     fn pointer_and_center_find_lights_and_meters() {
         let mut app = crate::App::new(crate::tests::app_args());
-        let env = app.controller.add_module("loom.env.adsr").unwrap().0;
+        let env = app.controller.add_module("loom.env.envelope").unwrap().0;
         let meter = app.controller.add_module("loom.display.meter").unwrap().0;
         app.commit();
         let named = |s: String| s.parse::<Named>().unwrap();
