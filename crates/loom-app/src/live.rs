@@ -36,7 +36,8 @@ pub struct Live {
 }
 
 impl Live {
-    /// No probes until something asks for them.
+    /// No probes until something asks for them, and activity off.
+    #[cfg(test)]
     pub fn new() -> Self {
         Self::default()
     }
@@ -52,6 +53,7 @@ impl Live {
 
     /// Turns metering of every connected output on or off. Call
     /// [`Live::sync`] and commit after.
+    #[cfg(test)]
     pub fn set_activity(&mut self, on: bool) {
         self.activity = on;
     }
