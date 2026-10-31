@@ -8,10 +8,10 @@
 use crate::modulation::{self, PolarityChoice};
 use crate::{App, DIM, HELP, Message, param, remove_button};
 use iced::widget::{
-    button, column, container, pick_list, radio, row, scrollable, slider, space, text, toggler, tooltip,
+    button, column, container, mouse_area, pick_list, radio, row, scrollable, slider, space, text, toggler, tooltip,
 };
-use iced::{Element, Length};
-use loom_core::{AssignmentId, ModuleId, OutputRef};
+use iced::{Element, Length, Theme};
+use loom_core::{AssignmentId, ModuleId, OutputRef, WidgetKind};
 use serde::Serialize;
 
 /// What the inspector shows.
@@ -61,6 +61,9 @@ pub struct ParamRow {
     /// The **Range** selector, for a parameter that offers ranges.
     pub range: Option<RangeRow>,
     pub mode: ParamMode,
+    /// Whether a dragged output can target this row.
+    #[serde(skip)]
+    pub accepts_drop: bool,
 }
 
 /// The **Range** selector next to a parameter's slider
@@ -253,6 +256,13 @@ impl App {
                     mapping,
                     range,
                     mode,
+                    accepts_drop: {
+                        let bound = d.panel.widgets.iter().filter(|w| w.bind == spec.name);
+                        bound.clone().next().is_none()
+                            || bound
+                                .into_iter()
+                                .any(|w| matches!(w.kind, WidgetKind::Knob | WidgetKind::Toggle | WidgetKind::Radio))
+                    },
                 }
             })
             .collect();
@@ -337,7 +347,7 @@ impl App {
 }
 
 /// The inspector's widgets.
-pub fn view<'a>(model: Inspector) -> Element<'a, Message> {
+pub fn view<'a>(model: Inspector, drop_row: Option<(u32, usize)>, dragging: bool) -> Element<'a, Message> {
     let content: Element<'a, Message> = match model {
         Inspector::Help => column![
             text("Inspector").size(17),
@@ -348,7 +358,7 @@ pub fn view<'a>(model: Inspector) -> Element<'a, Message> {
         .into(),
         Inspector::Several(n) => text(format!("{n} modules selected")).size(13).into(),
         Inspector::Empty => text("").into(),
-        Inspector::Module(m) => module_view(m),
+        Inspector::Module(m) => module_view(m, drop_row, dragging),
     };
     container(scrollable(container(content).padding(12)))
         .width(280)
@@ -356,7 +366,7 @@ pub fn view<'a>(model: Inspector) -> Element<'a, Message> {
         .into()
 }
 
-fn module_view<'a>(m: ModuleRows) -> Element<'a, Message> {
+fn module_view<'a>(m: ModuleRows, drop_row: Option<(u32, usize)>, dragging: bool) -> Element<'a, Message> {
     let id = m.id;
     let mut items = column![
         text(m.name).size(17),
@@ -369,6 +379,7 @@ fn module_view<'a>(m: ModuleRows) -> Element<'a, Message> {
     }
     for p in m.params {
         let index = p.index;
+        let accepts_drop = p.accepts_drop;
         let unmap = Message::Unmap { module: id, index };
         let line: Element<'a, Message> = match p.mode {
             ParamMode::Learn { armed, detail } => {
@@ -426,7 +437,28 @@ fn module_view<'a>(m: ModuleRows) -> Element<'a, Message> {
                         .align_y(iced::Alignment::Center),
                     );
                 }
-                rows.push(modulation_view(id, index, assignments, adding)).into()
+                let editor: Element<'a, Message> = container(rows)
+                    .width(Length::Fill)
+                    .style(move |theme: &Theme| {
+                        let mut style = container::Style::default();
+                        if dragging && drop_row == Some((id, index)) {
+                            style.background = Some(theme.extended_palette().primary.weak.color.into());
+                            style.border.radius = 4.0.into();
+                        }
+                        style
+                    })
+                    .into();
+                let editor: Element<'a, Message> = if accepts_drop {
+                    mouse_area(editor)
+                        .on_enter(Message::DropRow(Some((id, index))))
+                        .on_exit(Message::DropRow(None))
+                        .into()
+                } else {
+                    editor
+                };
+                column![editor, modulation_view(id, index, assignments, adding)]
+                    .spacing(2)
+                    .into()
             }
         };
         items = items.push(line);

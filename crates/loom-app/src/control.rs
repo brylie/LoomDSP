@@ -2475,6 +2475,22 @@ mod tests {
         assert_eq!(count(&ui), before + 1);
     }
 
+    /// A script can target an inspector parameter by its window coordinates
+    /// and reaches the same assignment and undo path as a real pointer.
+    #[test]
+    fn a_script_drags_an_output_onto_an_inspector_row() {
+        let mut ui = pointer_ui();
+        let _ = ui.app.update(Message::SelectModule(4));
+        ui.redraw();
+        let row = ui.text("Cutoff").expect("inspector Cutoff row").center();
+        let before = ui.app.controller.graph().assignments().count();
+        let command = serde_json::json!({"cmd": "drag", "from": "7:out", "to": [row.x, row.y]}).to_string();
+        run_ui(&mut ui, &command).unwrap();
+        assert_eq!(ui.app.controller.graph().assignments().count(), before + 1);
+        run_ui(&mut ui, r#"{"cmd": "undo"}"#).unwrap();
+        assert_eq!(ui.app.controller.graph().assignments().count(), before);
+    }
+
     /// A real button let go while a script drag runs: the drag
     /// goes on undisturbed, the release is not lost, and nothing reads as
     /// held afterwards. Then a real pointer move takes over from the
