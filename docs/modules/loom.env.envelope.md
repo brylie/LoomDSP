@@ -35,15 +35,16 @@ A level from 0 to 1, started by a gate. ADSR holds while the gate is high; AD ru
 
 ## Panel
 
-12 by 8 grid units.
+15 by 10 grid units.
 
+- Select: **Mode** (`mode`)
+- Light: **Level** (`level`): The envelope's level, from dark at 0 to full at 1.
+- Shape preview: **Shape** (`out`) (read-only)
 - Knob: **Attack** (`attack`)
 - Knob: **Decay** (`decay`)
-- Radio buttons: **Mode** (`mode`) (ADSR, AD)
 - Knob: **Sustain** (`sustain`)
 - Knob: **Release** (`release`)
 - Knob: **Curve** (`curve`)
-- Light: **Level** (`level`): The envelope's level, from dark at 0 to full at 1.
 
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->
 

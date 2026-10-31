@@ -50,6 +50,8 @@ Every panel uses the same widget set.
 
 The widgets after P1, with their bindings, modulation display, keyboard use, and the catalogue entries that need them, are planned in [Panel widgets](panel-widgets.md) (Draft, [ADR-0024](../adr/0024-widgets-follow-the-kind-of-value.md)). It names the slider "fader", the selector "select list", and the graph "curve", and adds a number, a readout, an XY scope, and a waveform.
 
+The [read-only shape preview](panel-widgets.md#read-only-shape-preview) is an agreed first slice of the curve widget. Envelope, LFO, and Ladder place it above their controls. Envelope places its compact Mode selector in a settings row above the full-width shape, so the less-used choice does not narrow the result view. The preview shows a schematic result from parameters, keeps the tile's drag gesture, and has no editing handles. Built-in tiles use knobs for single ranged parameters by default; a fader needs a specific task such as comparing mixer levels.
+
 ## Bindings
 
 - **Control to parameter.** A control takes its range, unit, and mapping (linear, logarithmic, whole numbers) from the parameter's `ParamSpec`, through `ParamSpec::normalize` and `denormalize` ([parameter mapping](modulation.md#parameter-mapping), Agreed). *Why:* the slider mapping work in the inspector (logarithmic Hz, snapping integers) then applies everywhere for free.
@@ -495,7 +497,7 @@ What P1 builds. The rest of this spec is P2.
 
 ([#101](https://github.com/brylie/LoomDSP/issues/101).) Closes the gap that nothing selects a module by key. Keys have three owners, tried in this order, and the first one that has a use for the key takes it:
 
-1. **A focused panel control** (knob, toggle, radio, button).
+1. **A focused panel control** (knob, toggle, radio, select list, button).
 2. **The canvas** (selection, movement, clipboard, undo).
 3. **Global keys** (Space for Run).
 

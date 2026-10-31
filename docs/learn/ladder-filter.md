@@ -46,6 +46,8 @@ Stilson and Smith work these limits out from the poles of the loop: the loop rin
 
 At very low frequencies the stages pass the signal straight through, with no phase change. Then the inverted feedback just subtracts: the output is `1 / (1 + k)` of the input. At `k = 4` that is a fifth, about 14 dB quieter. This is part of the sound of a classic ladder, so LoomDSP does not correct it. Turn `drive` up, or follow the filter with an amplifier, to get the level back.
 
+The tile's response preview uses this same small-signal model. For `N` stages and a frequency ratio `r = frequency / cutoff`, it draws the magnitude of `1 / ((1 + jr)^N + k)`. The preview shows the slope, peak, and bass reduction together. It cannot show the exact response while drive or self-oscillation changes the signal, so it is a guide to the controls rather than a live measurement.
+
 ## 4. Why the limit is a little above 4
 
 At exactly `k = 4` the loop only keeps an oscillation going. It does not grow one from a small start. And the saturation (next section) lowers the loop gain a little at any level above 0, so the whistle would slowly die. LoomDSP sets the limit 5% higher, 4.2 at 24 dB and 8.4 at 18 dB, so resonance 1 always sings. The saturation then stops it from growing past a steady level.

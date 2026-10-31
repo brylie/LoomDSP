@@ -11,6 +11,10 @@ use loom_core::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 
+/// Segments across a result preview. About one world unit per segment on a
+/// 12-grid-unit tile keeps its line smooth at close zoom.
+const SHAPE_SEGMENTS: usize = 128;
+
 /// Port and cable colour for a signal type (ADR-0007).
 pub fn signal_colour(signal: SignalType) -> Color {
     let [r, g, b] = signal.colour();
@@ -86,8 +90,16 @@ fn panel_view(d: &ModuleDescriptor) -> PanelView {
                 WidgetKind::Toggle => WidgetViewKind::Toggle,
                 WidgetKind::Meter => WidgetViewKind::Meter,
                 WidgetKind::Scope => WidgetViewKind::Scope,
+                WidgetKind::Shape { width, .. } => WidgetViewKind::Shape { width },
                 // The names come from the parameter (panels.md, Choice names).
                 WidgetKind::Radio => WidgetViewKind::Radio {
+                    options: d
+                        .params
+                        .iter()
+                        .find(|p| p.name == w.bind)
+                        .map_or_else(Vec::new, |p| p.options.choices.iter().map(|o| o.to_string()).collect()),
+                },
+                WidgetKind::Select => WidgetViewKind::Select {
                     options: d
                         .params
                         .iter()
@@ -102,6 +114,11 @@ fn panel_view(d: &ModuleDescriptor) -> PanelView {
                 let param = d.params.iter().find(|p| p.name == w.bind);
                 param.map_or((w.bind, HoverText::default()), |p| {
                     (p.label, HoverText::new(p.label, p.description, p.name))
+                })
+            } else if let WidgetKind::Shape { label, .. } = w.kind {
+                let output = d.outputs.iter().find(|p| p.name == w.bind);
+                output.map_or((label, HoverText::default()), |p| {
+                    (label, HoverText::new(label, p.description, p.name))
                 })
             } else if w.shows_output() {
                 // A meter's or scope's text is its output's: two texts for
@@ -208,39 +225,52 @@ pub fn update_panel_values_dragging(
     for (id, node) in controller.graph().nodes() {
         let d = node.descriptor;
         for (index, w) in d.panel.widgets.iter().enumerate() {
-            let value = match d.control_param(w, &node.params) {
-                Some(p) => {
-                    // The knob spans the selected range (control-ranges.md).
-                    let spec = &node.spec(p).expect("the index is a parameter");
-                    let value = node.params[p];
-                    let all = reaches.get(&(id, p)).map_or(&[][..], Vec::as_slice);
-                    let assigned = match &dragged {
-                        Some((key, reach)) if *key == (id, p) => std::slice::from_ref(reach),
-                        _ => all,
-                    };
-                    // Only knobs show the live value, and only while an
-                    // assignment is on (modulation.md, Live value).
-                    let live = (w.kind == WidgetKind::Knob && all.iter().any(|r| r.enabled))
-                        .then(|| controller.modulated(id, p))
-                        .flatten();
-                    // While a cable drives the Transport's run input, the
-                    // Run toggle shows the state it sets (clock.md).
-                    let value = driven_run(controller, id, w).unwrap_or(value);
-                    WidgetValue {
-                        position: control_position(w.kind, spec, value),
-                        peak: 0.0,
-                        text: crate::param::format(spec, value),
-                        modulation: crate::modulation::mark(w.kind, spec, value, assigned),
-                        live,
-                    }
+            let value = if let WidgetKind::Shape { sample, .. } = w.kind {
+                WidgetValue {
+                    shape: (0..=SHAPE_SEGMENTS)
+                        .map(|i| {
+                            let y = sample(&node.params, i as f32 / SHAPE_SEGMENTS as f32);
+                            if y.is_finite() { y.clamp(0.0, 1.0) } else { 0.0 }
+                        })
+                        .collect(),
+                    ..WidgetValue::default()
                 }
-                _ => {
-                    let (position, peak) = shown.get(&(id.0, index)).copied().unwrap_or_default();
-                    WidgetValue {
-                        position,
-                        peak,
-                        text: display_text(d, w, position),
-                        ..WidgetValue::default()
+            } else {
+                match d.control_param(w, &node.params) {
+                    Some(p) => {
+                        // The knob spans the selected range (control-ranges.md).
+                        let spec = &node.spec(p).expect("the index is a parameter");
+                        let value = node.params[p];
+                        let all = reaches.get(&(id, p)).map_or(&[][..], Vec::as_slice);
+                        let assigned = match &dragged {
+                            Some((key, reach)) if *key == (id, p) => std::slice::from_ref(reach),
+                            _ => all,
+                        };
+                        // Only knobs show the live value, and only while an
+                        // assignment is on (modulation.md, Live value).
+                        let live = (w.kind == WidgetKind::Knob && all.iter().any(|r| r.enabled))
+                            .then(|| controller.modulated(id, p))
+                            .flatten();
+                        // While a cable drives the Transport's run input, the
+                        // Run toggle shows the state it sets (clock.md).
+                        let value = driven_run(controller, id, w).unwrap_or(value);
+                        WidgetValue {
+                            position: control_position(w.kind, spec, value),
+                            peak: 0.0,
+                            text: crate::param::format(spec, value),
+                            modulation: crate::modulation::mark(w.kind, spec, value, assigned),
+                            live,
+                            shape: Vec::new(),
+                        }
+                    }
+                    _ => {
+                        let (position, peak) = shown.get(&(id.0, index)).copied().unwrap_or_default();
+                        WidgetValue {
+                            position,
+                            peak,
+                            text: display_text(d, w, position),
+                            ..WidgetValue::default()
+                        }
                     }
                 }
             };
@@ -670,7 +700,11 @@ mod tests {
         let meter = &panel_view(meter_module).widgets[0];
         assert_eq!(meter.label, "Out");
         assert_eq!(meter.hover.description, meter_module.outputs[0].description);
-        let light = &panel_view(&loom_modules::env::ENVELOPE).widgets[6];
+        let light = panel_view(&loom_modules::env::ENVELOPE)
+            .widgets
+            .into_iter()
+            .find(|widget| widget.kind == WidgetViewKind::Light && widget.label == "Level")
+            .unwrap();
         assert_eq!(light.kind, WidgetViewKind::Light);
         assert_eq!(light.label, "Level");
         assert_eq!(
@@ -693,7 +727,13 @@ mod tests {
     #[test]
     fn lights_and_meters_say_their_value() {
         let envelope = &loom_modules::env::ENVELOPE;
-        assert_eq!(display_text(envelope, &envelope.panel.widgets[6], 0.5), "Level: 0.50");
+        let level = envelope
+            .panel
+            .widgets
+            .iter()
+            .find(|widget| widget.bind == "level")
+            .unwrap();
+        assert_eq!(display_text(envelope, level, 0.5), "Level: 0.50");
         let divide = &loom_modules::logic::DIVIDE;
         assert_eq!(display_text(divide, &divide.panel.widgets[2], 0.4), "Fired: lit");
         assert_eq!(display_text(divide, &divide.panel.widgets[2], 0.0), "Fired: dark");
@@ -710,7 +750,7 @@ mod tests {
     fn radio_buttons_show_the_parameter_choice_names() {
         let lfo = &loom_modules::lfo::LFO;
         let view = panel_view(lfo);
-        let WidgetViewKind::Radio { options } = &view.widgets[1].kind else {
+        let WidgetViewKind::Radio { options } = &view.widgets[2].kind else {
             panic!("the shape is a radio");
         };
         let shape = &lfo.params[lfo.param_index("shape").unwrap()];
@@ -730,5 +770,31 @@ mod tests {
                 assert_eq!(d.widget_size(w), v.size(), "{}.{}", d.id, w.bind);
             }
         }
+    }
+
+    /// A parameter edit changes the result samples in panel values without
+    /// changing the module's panel declaration or rebuilding the scene.
+    #[test]
+    fn envelope_preview_follows_parameter_edits() {
+        let mut parts = loom_core::create_engine(loom_modules::registry(), loom_core::EngineConfig::default());
+        let envelope = parts.controller.add_module("loom.env.envelope").unwrap();
+        let mut values = PanelValues::new();
+        update_panel_values(&mut values, &parts.controller, &BTreeMap::new());
+        let before = values.get(envelope.0, 2).unwrap().shape.clone();
+        let panel = panel_view(&loom_modules::env::ENVELOPE);
+        assert_eq!(panel.widgets[2].label, "Shape");
+        assert!(!panel.widgets[2].is_control());
+        assert!(matches!(panel.widgets[0].kind, WidgetViewKind::Select { .. }));
+        let still_generation = values.generation();
+        update_panel_values(&mut values, &parts.controller, &BTreeMap::new());
+        assert_eq!(
+            values.generation(),
+            still_generation,
+            "an unchanged preview needs no redraw"
+        );
+        parts.controller.set_param_named(envelope, "attack", 1.0).unwrap();
+        update_panel_values(&mut values, &parts.controller, &BTreeMap::new());
+        assert_ne!(values.get(envelope.0, 2).unwrap().shape, before);
+        assert_eq!(panel, panel_view(&loom_modules::env::ENVELOPE));
     }
 }

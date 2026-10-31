@@ -1,7 +1,7 @@
 //! The patch canvas widget: input handling and drawing.
 
 use crate::camera::Camera;
-use crate::controls::{ControlGeometry, PanelValues, focus_ring, knob_drag, knob_step, radio_option};
+use crate::controls::{ControlGeometry, PanelValues, focus_ring, knob_drag, knob_step, radio_option, select_box};
 use crate::gpu::{Cable, CanvasPrimitive, Geometry, Overlay, Shape};
 use crate::hover::{HOVER_PADDING, HOVER_TEXT_PX, HoverTarget, HoverTimer};
 use crate::scene::{
@@ -31,6 +31,10 @@ const DOUBLE_CLICK_SLOP: f32 = 4.0;
 /// How far a right press may move, in screen pixels, and still count as a
 /// click that opens the probe menu rather than a pan.
 const CLICK_SLOP: f32 = 4.0;
+/// Height of a row in the choice popup, in screen pixels.
+const SELECT_ROW_PX: f32 = 23.0;
+/// Minimum popup width in screen pixels, so names stay legible at middle zoom.
+const SELECT_WIDTH_PX: f32 = 124.0;
 
 /// Titles are drawn when they would be at least this tall on screen.
 const TITLE_MIN_PX: f32 = 6.5;
@@ -513,9 +517,9 @@ enum Interaction {
         ids: Vec<u32>,
         start: Point,
         applied: Vector,
-        /// A toggle or radio press: applied on release if the tile did not
-        /// move, so dragging these moves the tile.
-        click: Option<(u32, usize, f32)>,
+        /// A choice press: applied on release if the tile did not move,
+        /// so dragging a closed choice control moves the tile.
+        click: Option<ChoiceClick>,
     },
     Turning {
         module: u32,
@@ -549,6 +553,21 @@ enum Interaction {
     },
 }
 
+/// What a stationary click on a choice control does.
+#[derive(Debug, Clone)]
+enum ChoiceClick {
+    Set(u32, usize, f32),
+    Open(u32, usize),
+}
+
+/// The choice list that is open above the canvas.
+#[derive(Debug, Clone, Copy)]
+struct SelectPopup {
+    module: u32,
+    widget: usize,
+    highlight: usize,
+}
+
 #[derive(Default)]
 struct State {
     camera: Camera,
@@ -566,6 +585,8 @@ struct State {
     animation: Option<(Instant, Camera)>,
     /// The control with keyboard focus: module ID and widget index.
     focus: Option<(u32, usize)>,
+    /// Open select list, if any.
+    select_popup: Option<SelectPopup>,
     /// True when the focus came from Tab, so its hover text shows. A click
     /// also focuses a control, but the pointer is on it then.
     tab_focus: bool,
@@ -980,6 +1001,12 @@ impl<Message> PatchCanvas<'_, Message> {
             }
             Event::Mouse(mouse::Event::WheelScrolled { delta }) if over => {
                 let Some(screen) = screen else { return };
+                if state.select_popup.take().is_some() {
+                    state.last_click = None;
+                    shell.request_redraw();
+                    shell.capture_event();
+                    return;
+                }
                 match *delta {
                     // A mouse wheel zooms.
                     mouse::ScrollDelta::Lines { y, .. } => {
@@ -1002,8 +1029,43 @@ impl<Message> PatchCanvas<'_, Message> {
                 shell.request_redraw();
                 shell.capture_event();
             }
+            Event::Mouse(mouse::Event::ButtonPressed(_)) if !over && state.select_popup.is_some() => {
+                state.select_popup = None;
+                state.last_click = None;
+                shell.request_redraw();
+            }
             Event::Mouse(mouse::Event::ButtonPressed(button)) if over => {
                 let Some(screen) = screen else { return };
+                if let Some(popup) = state.select_popup.take() {
+                    let double = *button == mouse::Button::Left
+                        && self.scene.hit(state.camera.to_world(screen), state.hit_radius())
+                            == Hit::Widget {
+                                module: popup.module,
+                                widget: popup.widget,
+                            }
+                        && state.last_click.is_some_and(|(at, module, widget)| {
+                            module == popup.module && widget == popup.widget && Instant::now() - at < DOUBLE_CLICK
+                        });
+                    state.last_click = None;
+                    if double {
+                        self.emit(
+                            shell,
+                            CanvasEvent::ResetControl {
+                                module: popup.module,
+                                widget: popup.widget,
+                            },
+                        );
+                    } else if *button == mouse::Button::Left
+                        && let Some(rect) = self.select_popup_bounds_for(state, bounds, popup)
+                        && rect.contains(screen)
+                    {
+                        let index = ((screen.y - rect.y) / SELECT_ROW_PX).floor() as usize;
+                        self.set_control(shell, popup.module, popup.widget, index as f32);
+                    }
+                    shell.request_redraw();
+                    shell.capture_event();
+                    return;
+                }
                 // A second button must end a hold. Replacing the interaction
                 // without a release would leave a momentary gate high.
                 self.release_pointer_hold(state, shell);
@@ -1163,18 +1225,12 @@ impl<Message> PatchCanvas<'_, Message> {
                     }
                     Interaction::Moving {
                         applied,
-                        click: Some((module, widget, position)),
+                        click: Some(action),
                         ..
-                    } if applied == Vector::ZERO => {
-                        self.emit(
-                            shell,
-                            CanvasEvent::SetControl {
-                                module,
-                                widget,
-                                position,
-                            },
-                        );
-                    }
+                    } if applied == Vector::ZERO => match action {
+                        ChoiceClick::Set(module, widget, position) => self.set_control(shell, module, widget, position),
+                        ChoiceClick::Open(module, widget) => self.open_select(state, module, widget),
+                    },
                     Interaction::Holding { module, widget } => {
                         if !Self::key_holds_button(state, module, widget) {
                             self.emit(shell, CanvasEvent::ButtonReleased { module, widget });
@@ -1203,6 +1259,7 @@ impl<Message> PatchCanvas<'_, Message> {
                 }
             }
             Event::Window(window::Event::Unfocused) => {
+                state.select_popup = None;
                 // A key release never arrives if the window loses focus
                 // while Space or Enter is held. End every hold here.
                 self.release_pointer_hold(state, shell);
@@ -1240,7 +1297,7 @@ impl<Message> PatchCanvas<'_, Message> {
     /// press, the focused control comes first, until the pointer moves.
     /// Nothing during a drag.
     fn hover_target(&self, state: &State) -> Option<HoverTarget> {
-        if !matches!(state.interaction, Interaction::Idle) {
+        if state.select_popup.is_some() || !matches!(state.interaction, Interaction::Idle) {
             return None;
         }
         let focused = state.focus.filter(|_| state.tab_focus).and_then(|(module, widget)| {
@@ -1538,6 +1595,44 @@ impl<Message> PatchCanvas<'_, Message> {
         );
     }
 
+    /// Screen rectangle of the open list, kept readable at any canvas zoom.
+    fn select_popup_bounds(&self, state: &State, bounds: Rectangle) -> Option<Rectangle> {
+        let popup = state.select_popup?;
+        self.select_popup_bounds_for(state, bounds, popup)
+    }
+
+    /// Screen rectangle for a specified select popup.
+    fn select_popup_bounds_for(&self, state: &State, bounds: Rectangle, popup: SelectPopup) -> Option<Rectangle> {
+        let module = self.scene.module(popup.module)?;
+        let rect = module.widget_bounds(popup.widget)?;
+        let WidgetViewKind::Select { options } = &module.panel.widgets.get(popup.widget)?.kind else {
+            return None;
+        };
+        let box_rect = select_box(rect);
+        let anchor = state.camera.to_screen(box_rect.position());
+        let width = (box_rect.width * state.camera.zoom)
+            .max(SELECT_WIDTH_PX)
+            .min(bounds.width);
+        let height = SELECT_ROW_PX * options.len() as f32;
+        let x = anchor.x.clamp(0.0, (bounds.width - width).max(0.0));
+        let below = anchor.y + box_rect.height * state.camera.zoom + 3.0;
+        let y = if below + height <= bounds.height {
+            below
+        } else {
+            (anchor.y - height - 3.0).max(0.0)
+        };
+        Some(Rectangle::new(Point::new(x, y), Size::new(width, height)))
+    }
+
+    /// Opens a select list at its current value.
+    fn open_select(&self, state: &mut State, module: u32, widget: usize) {
+        state.select_popup = Some(SelectPopup {
+            module,
+            widget,
+            highlight: self.position(module, widget).round().max(0.0) as usize,
+        });
+    }
+
     /// Pointer down on a button. The tile stays put. Pointer up reports a
     /// release, whichever mode the app has stored.
     fn press_button(&self, state: &mut State, module: u32, widget: usize, shell: &mut Shell<'_, Message>) {
@@ -1568,6 +1663,46 @@ impl<Message> PatchCanvas<'_, Message> {
                     .is_some_and(|widget| widget.is_control())
         }) {
             state.focus = None;
+        }
+        if let Some(mut popup) = state.select_popup {
+            let options = match self.widget_kind(popup.module, popup.widget) {
+                Some(WidgetViewKind::Select { options }) => options,
+                _ => {
+                    state.select_popup = None;
+                    return false;
+                }
+            };
+            let used = match key.as_ref() {
+                keyboard::Key::Named(Named::Escape) => {
+                    state.select_popup = None;
+                    state.last_click = None;
+                    true
+                }
+                keyboard::Key::Named(Named::ArrowUp | Named::ArrowDown) => {
+                    let delta = if matches!(key.as_ref(), keyboard::Key::Named(Named::ArrowUp)) {
+                        -1
+                    } else {
+                        1
+                    };
+                    popup.highlight =
+                        (popup.highlight as isize + delta).clamp(0, options.len().saturating_sub(1) as isize) as usize;
+                    state.select_popup = Some(popup);
+                    true
+                }
+                keyboard::Key::Named(Named::Enter | Named::Space) => {
+                    if !repeat {
+                        self.set_control(shell, popup.module, popup.widget, popup.highlight as f32);
+                        state.select_popup = None;
+                    }
+                    true
+                }
+                _ => false,
+            };
+            if used {
+                shell.request_redraw();
+                shell.capture_event();
+                return true;
+            }
         }
         let used = match key.as_ref() {
             // Escape hides pinned lines before it does anything else
@@ -1639,7 +1774,7 @@ impl<Message> PatchCanvas<'_, Message> {
                                 0.0
                             }
                         }
-                        Some(WidgetViewKind::Radio { options }) => {
+                        Some(WidgetViewKind::Radio { options } | WidgetViewKind::Select { options }) => {
                             let last = options.len().saturating_sub(1) as f32;
                             (position.round() + if up { 1.0 } else { -1.0 }).clamp(0.0, last)
                         }
@@ -1672,6 +1807,7 @@ impl<Message> PatchCanvas<'_, Message> {
                             let next = (position.round() as usize + 1) % options.len().max(1);
                             self.set_control(shell, module, widget, next as f32);
                         }
+                        Some(WidgetViewKind::Select { .. }) if !repeat => self.open_select(state, module, widget),
                         _ => {}
                     }
                     true
@@ -1768,24 +1904,27 @@ impl<Message> PatchCanvas<'_, Message> {
                         );
                         return;
                     }
-                    Some(WidgetViewKind::Toggle) => Some(if position > 0.5 { 0.0 } else { 1.0 }),
+                    Some(WidgetViewKind::Toggle) => {
+                        Some(ChoiceClick::Set(module, widget, if position > 0.5 { 0.0 } else { 1.0 }))
+                    }
                     Some(WidgetViewKind::Radio { options }) => self
                         .scene
                         .module(module)
                         .and_then(|m| m.widget_bounds(widget))
                         .and_then(|rect| radio_option(rect, options.len(), world))
-                        .map(|option| option as f32),
+                        .map(|option| ChoiceClick::Set(module, widget, option as f32)),
+                    Some(WidgetViewKind::Select { .. }) => Some(ChoiceClick::Open(module, widget)),
                     _ => None,
                 };
-                // Toggles and radio buttons act on release, so a drag that
-                // starts on them still moves the tile.
+                // Choice controls act on release, so a drag that starts on
+                // them still moves the tile.
                 self.begin(
                     state,
                     Interaction::Moving {
                         ids: vec![module],
                         start: world,
                         applied: Vector::ZERO,
-                        click: click.map(|position| (module, widget, position)),
+                        click,
                     },
                     shell,
                 );
@@ -1957,6 +2096,45 @@ impl<Message> PatchCanvas<'_, Message> {
     fn overlay_in(&self, state: &State, visible: Rectangle) -> Overlay {
         let mut overlay = self.overlay(state);
         let p = &self.palette;
+        let screen = Rectangle::new(Point::ORIGIN, visible.size() * state.camera.zoom);
+        if let Some(popup) = state.select_popup
+            && let Some(rect) = self.select_popup_bounds(state, screen)
+        {
+            let world = Rectangle::new(
+                state.camera.to_world(rect.position()),
+                rect.size() * (1.0 / state.camera.zoom),
+            );
+            overlay.shapes.push(Shape::new(
+                world,
+                5.0 / state.camera.zoom,
+                p.control_body,
+                p.tile_border,
+                1.0 / state.camera.zoom,
+            ));
+            if let Some(module) = self.scene.module(popup.module)
+                && let Some(WidgetViewKind::Select { options }) =
+                    module.panel.widgets.get(popup.widget).map(|w| &w.kind)
+            {
+                for index in 0..options.len() {
+                    if index == popup.highlight {
+                        let row = Rectangle::new(
+                            Point::new(rect.x + 2.0, rect.y + SELECT_ROW_PX * index as f32 + 1.0),
+                            Size::new(rect.width - 4.0, SELECT_ROW_PX - 2.0),
+                        );
+                        overlay.shapes.push(Shape::new(
+                            Rectangle::new(
+                                state.camera.to_world(row.position()),
+                                row.size() * (1.0 / state.camera.zoom),
+                            ),
+                            3.0 / state.camera.zoom,
+                            p.control_track,
+                            Color::TRANSPARENT,
+                            0.0,
+                        ));
+                    }
+                }
+            }
+        }
         // MIDI learn mode outlines every control on screen, and the armed
         // one more strongly, so the user sees what a click will do.
         if let Some(learn) = self.learn {
@@ -2325,6 +2503,49 @@ impl<Message> PatchCanvas<'_, Message> {
                     clip,
                 );
             });
+            if show_labels {
+                for (index, widget) in module.panel.widgets.iter().enumerate() {
+                    let WidgetViewKind::Select { options } = &widget.kind else {
+                        continue;
+                    };
+                    let Some(rect) = module.widget_bounds(index) else {
+                        continue;
+                    };
+                    let box_rect = select_box(rect);
+                    let chosen = values.position(module.id, index).round().max(0.0) as usize;
+                    let choice = options.get(chosen).map_or("", String::as_str);
+                    renderer.fill_text(
+                        text(choice, label_px, (box_rect.width - 22.0) * zoom, text::Alignment::Left),
+                        to_screen(Point::new(box_rect.x + 7.0, box_rect.center_y())),
+                        self.palette.text,
+                        clip,
+                    );
+                }
+            }
+        }
+
+        if let Some(popup) = state.select_popup
+            && let Some(rect) = self.select_popup_bounds(state, Rectangle::new(Point::ORIGIN, bounds.size()))
+            && let Some(module) = self.scene.module(popup.module)
+            && let Some(WidgetViewKind::Select { options }) = module.panel.widgets.get(popup.widget).map(|w| &w.kind)
+        {
+            for (index, option) in options.iter().enumerate() {
+                let chosen = self.position(popup.module, popup.widget).round().max(0.0) as usize == index;
+                let label = if chosen {
+                    format!("✓  {option}")
+                } else {
+                    format!("    {option}")
+                };
+                renderer.fill_text(
+                    text(&label, 12.0, rect.width - 12.0, text::Alignment::Left),
+                    Point::new(
+                        bounds.x + rect.x + 7.0,
+                        bounds.y + rect.y + SELECT_ROW_PX * (index as f32 + 0.5),
+                    ),
+                    self.palette.text,
+                    bounds,
+                );
+            }
         }
 
         // Badge numbers usually sit outside their tile, so they are checked
@@ -3018,6 +3239,118 @@ mod tests {
 
     fn click(button: mouse::Button) -> Event {
         Event::Mouse(mouse::Event::ButtonPressed(button))
+    }
+
+    /// A select click opens a list and a list choice sets one value. Dragging
+    /// the closed selector still moves its tile without changing sound.
+    #[test]
+    fn select_popup_preserves_choice_and_tile_gestures() {
+        let mut view = module(1, 0.0);
+        view.panel = PanelView {
+            width: 6,
+            height: 2,
+            widgets: vec![widget(
+                WidgetViewKind::Select {
+                    options: vec!["ADSR".into(), "AD".into()],
+                },
+                0,
+            )],
+        };
+        let scene = Scene::new(vec![view], Vec::new());
+        let selected = BTreeSet::from([1]);
+        let canvas = PatchCanvas::new(&scene, &selected, |event| event);
+        let mut state = State::default();
+        let centre = scene.module(1).unwrap().widget_bounds(0).unwrap().center();
+        drive(&canvas, &mut state, &click(mouse::Button::Left), centre);
+        drive(
+            &canvas,
+            &mut state,
+            &Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+            centre,
+        );
+        assert!(state.select_popup.is_some());
+        let list = canvas
+            .select_popup_bounds(&state, Rectangle::new(Point::ORIGIN, Size::new(800.0, 600.0)))
+            .unwrap();
+        let choice = Point::new(list.x + 20.0, list.y + SELECT_ROW_PX * 1.5);
+        let picked = drive(&canvas, &mut state, &click(mouse::Button::Left), choice);
+        assert!(picked.contains(&CanvasEvent::SetControl {
+            module: 1,
+            widget: 0,
+            position: 1.0
+        }));
+        assert!(state.select_popup.is_none());
+
+        drive(&canvas, &mut state, &click(mouse::Button::Left), centre);
+        let moved = Point::new(centre.x + GRID * 2.0, centre.y);
+        let events = drive(
+            &canvas,
+            &mut state,
+            &Event::Mouse(mouse::Event::CursorMoved { position: moved }),
+            moved,
+        );
+        assert!(events.iter().any(|event| matches!(event, CanvasEvent::Move { .. })));
+        let released = drive(
+            &canvas,
+            &mut state,
+            &Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+            moved,
+        );
+        assert!(
+            !released
+                .iter()
+                .any(|event| matches!(event, CanvasEvent::SetControl { .. }))
+        );
+        assert!(state.select_popup.is_none());
+    }
+
+    /// Focused select lists open with Space, move the highlight with arrows,
+    /// and commit with Enter. Escape dismisses them without an edit.
+    #[test]
+    fn select_popup_keyboard_choices_are_explicit() {
+        let mut view = module(1, 0.0);
+        view.panel = PanelView {
+            width: 6,
+            height: 2,
+            widgets: vec![widget(
+                WidgetViewKind::Select {
+                    options: vec!["ADSR".into(), "AD".into()],
+                },
+                0,
+            )],
+        };
+        let scene = Scene::new(vec![view], Vec::new());
+        let selected = BTreeSet::from([1]);
+        let canvas = PatchCanvas::new(&scene, &selected, |event| event);
+        let mut state = State {
+            focus: Some((1, 0)),
+            ..State::default()
+        };
+        let at = scene.module(1).unwrap().widget_bounds(0).unwrap().center();
+        assert!(drive(&canvas, &mut state, &key_event(keyboard::key::Named::Space, true), at).is_empty());
+        assert!(state.select_popup.is_some());
+        assert!(
+            drive(
+                &canvas,
+                &mut state,
+                &key_event(keyboard::key::Named::ArrowDown, true),
+                at
+            )
+            .is_empty()
+        );
+        let chosen = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Enter, true), at);
+        assert_eq!(
+            chosen,
+            vec![CanvasEvent::SetControl {
+                module: 1,
+                widget: 0,
+                position: 1.0
+            }]
+        );
+        assert!(state.select_popup.is_none());
+        drive(&canvas, &mut state, &key_event(keyboard::key::Named::Space, true), at);
+        assert!(drive(&canvas, &mut state, &key_event(keyboard::key::Named::Escape, true), at).is_empty());
+        assert!(state.select_popup.is_none());
     }
 
     /// A drag in progress when a pop-up opens ends at the next redraw,

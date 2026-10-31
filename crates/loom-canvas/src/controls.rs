@@ -42,8 +42,8 @@ const RING_WIDTH: f32 = 1.0;
 /// The live value of one widget.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct WidgetValue {
-    /// Knob: position from 0 to 1. Toggle and button: 0 or 1. Radio: option
-    /// index. Light: brightness from 0 to 1. Meter: RMS level from 0 to 1.
+    /// Knob: position from 0 to 1. Toggle and button: 0 or 1. Radio and
+    /// select: option index. Light: brightness from 0 to 1. Meter: RMS level from 0 to 1.
     pub position: f32,
     /// Meter: peak level from 0 to 1. Unused by other widgets.
     pub peak: f32,
@@ -56,6 +56,8 @@ pub struct WidgetValue {
     /// a dot on the range arc (`docs/design/modulation.md`, Live value).
     /// `None` draws no dot.
     pub live: Option<f32>,
+    /// Read-only result shape, sampled left to right in the UI thread.
+    pub shape: Vec<f32>,
 }
 
 /// What a control shows of the modulation assignments on its parameter.
@@ -232,6 +234,29 @@ impl ControlGeometry {
                             shapes.push(circle(centre, 3.5, fill, palette.control_track, 1.2));
                         }
                     }
+                    WidgetViewKind::Select { .. } => {
+                        let box_rect = select_box(rect);
+                        shapes.push(Shape::new(
+                            box_rect,
+                            4.0,
+                            palette.control_body,
+                            palette.control_track,
+                            1.0,
+                        ));
+                        let arrow_x = box_rect.x + box_rect.width - 9.0;
+                        for (row, width) in [(0.0, 7.0), (1.4, 5.0), (2.8, 3.0)] {
+                            shapes.push(Shape::new(
+                                Rectangle::new(
+                                    Point::new(arrow_x + (7.0 - width) * 0.5, box_rect.center_y() - 2.0 + row),
+                                    Size::new(width, 1.4),
+                                ),
+                                0.5,
+                                palette.text_dim,
+                                Color::TRANSPARENT,
+                                0.0,
+                            ));
+                        }
+                    }
                     WidgetViewKind::Light => {
                         let b = position.clamp(0.0, 1.0);
                         let fill = mix(palette.light_off, palette.light_on, b);
@@ -282,6 +307,36 @@ impl ControlGeometry {
                             shapes.push(Shape::new(line, 0.0, palette.text, Color::TRANSPARENT, 0.0));
                         }
                     }
+                    WidgetViewKind::Shape { .. } => {
+                        // The category tint marks this as a result display;
+                        // orange remains the shared editable-value colour.
+                        let line_colour = mix(module.accent, palette.text, 0.55);
+                        let plot = Rectangle::new(
+                            Point::new(rect.x + 4.0, rect.y + 3.0),
+                            Size::new(rect.width - 8.0, rect.height - GRID - 7.0),
+                        );
+                        shapes.push(Shape::new(plot, 3.0, palette.tile, palette.tile_border, 1.0));
+                        let samples = values.get(module.id, index).map_or(&[][..], |v| v.shape.as_slice());
+                        if samples.len() > 1 {
+                            for (i, pair) in samples.windows(2).enumerate() {
+                                let x0 = plot.x + 2.0 + (plot.width - 4.0) * i as f32 / (samples.len() - 1) as f32;
+                                let x1 =
+                                    plot.x + 2.0 + (plot.width - 4.0) * (i + 1) as f32 / (samples.len() - 1) as f32;
+                                let y0 = plot.y + 2.0 + (plot.height - 4.0) * (1.0 - pair[0].clamp(0.0, 1.0));
+                                let y1 = plot.y + 2.0 + (plot.height - 4.0) * (1.0 - pair[1].clamp(0.0, 1.0));
+                                shapes.push(Shape::new(
+                                    Rectangle::new(
+                                        Point::new(x0, y0.min(y1) - 0.75),
+                                        Size::new((x1 - x0).max(1.0), (y1 - y0).abs() + 1.5),
+                                    ),
+                                    0.5,
+                                    line_colour,
+                                    Color::TRANSPARENT,
+                                    0.0,
+                                ));
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -321,7 +376,9 @@ fn modulation_dot(kind: &WidgetViewKind, rect: Rectangle, mark: ModulationMark, 
     match (kind, mark) {
         (_, ModulationMark::None) | (WidgetViewKind::Knob { .. }, ModulationMark::Range { .. }) => None,
         // Displays have no parameter, so no assignments.
-        (WidgetViewKind::Light | WidgetViewKind::Meter | WidgetViewKind::Scope, _) => None,
+        (WidgetViewKind::Light | WidgetViewKind::Meter | WidgetViewKind::Scope | WidgetViewKind::Shape { .. }, _) => {
+            None
+        }
         (_, ModulationMark::Ring) => Some(circle(
             centre,
             DOT_RADIUS,
@@ -418,6 +475,7 @@ pub(crate) fn focus_ring(kind: &WidgetViewKind, rect: Rectangle) -> (Rectangle, 
             )
         }
         WidgetViewKind::Toggle => (toggle_track(rect).expand(2.5), 8.0),
+        WidgetViewKind::Select { .. } => (select_box(rect).expand(2.0), 5.0),
         WidgetViewKind::Button => (button_body(rect).expand(2.5), 8.0),
         // The options, below the caption row.
         WidgetViewKind::Radio { .. } => (
@@ -429,8 +487,18 @@ pub(crate) fn focus_ring(kind: &WidgetViewKind, rect: Rectangle) -> (Rectangle, 
             4.0,
         ),
         // Displays never take focus.
-        WidgetViewKind::Light | WidgetViewKind::Meter | WidgetViewKind::Scope => (rect.expand(1.0), 4.0),
+        WidgetViewKind::Light | WidgetViewKind::Meter | WidgetViewKind::Scope | WidgetViewKind::Shape { .. } => {
+            (rect.expand(1.0), 4.0)
+        }
     }
+}
+
+/// The closed select box, leaving a caption row above it.
+pub(crate) fn select_box(rect: Rectangle) -> Rectangle {
+    Rectangle::new(
+        Point::new(rect.x + 2.0, rect.y + GRID + 1.0),
+        Size::new(rect.width - 4.0, GRID - 3.0),
+    )
 }
 
 /// The face of a button: the cell above its caption row.

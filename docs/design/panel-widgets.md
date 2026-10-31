@@ -3,7 +3,7 @@
 The baseline set of panel widgets that LoomDSP modules, sub-patches, and front panels share, so each kind of interaction has one common way to work.
 
 - **Kind:** living specification.
-- **Status:** Draft, except the XY scope section, which is Agreed. Nothing else here is ready to build. The widgets that exist today (knob, toggle, radio buttons, button, light, meter) are specified and Implemented in [panels.md](panels.md#module-panels-on-tiles-p1); this document only plans what comes next and the shared rules that tie them together.
+- **Status:** Draft, except the XY scope, [read-only shape preview](#read-only-shape-preview), and compact [select list](#select-list) sections, which are Agreed. The widgets that exist today (knob, toggle, radio buttons, button, light, meter) are specified and Implemented in [panels.md](panels.md#module-panels-on-tiles-p1). Other widgets in this document are not yet ready to build.
 - **Decision behind it:** [ADR-0024](../adr/0024-widgets-follow-the-kind-of-value.md) (widgets follow the kind of value, and structured data has shared kinds with one editor each). Builds on [ADR-0013](../adr/0013-modules-carry-their-own-panel.md) (modules carry their own panel).
 - **Use case and requirements:** UC2, UC3. FR-PANEL-02, FR-PANEL-03, FR-PANEL-04, FR-LIB-02, FR-LIB-12, FR-LIB-16, FR-LIB-17, FR-LIB-18, FR-LIB-19, FR-LIB-29, FR-MOD-04, FR-VIS-02, FR-VIS-03, NFR-UX-01, NFR-UX-02, NFR-UX-03.
 - **Builds on:** [panels.md](panels.md) (widgets, layout, interaction, level of detail, redraw), [modulation.md](modulation.md) (range arcs, dots, live value), [telemetry.md](telemetry.md) (probes), [port and parameter text](port-and-parameter-text.md) (labels and descriptions).
@@ -21,6 +21,20 @@ The panels spec already lists a widget set ([panels.md, Widgets](panels.md#widge
 - how it works by pointer and by keyboard, and what it tells a screen reader;
 - which catalogue entries use it.
 
+## Read-only shape preview
+
+**Status:** Agreed and implemented for Envelope, LFO, and Ladder. This is the parameter-driven display slice of the Curve widget. It does not edit curve data.
+
+- A module can declare a pure sampler on a display widget. The sampler takes its current parameter values and a horizontal position from 0 to 1, and returns a vertical position from 0 to 1. The app samples it on the control thread when panel values change. The canvas draws those values from its separate control buffer. No drawing or allocation runs on the audio thread.
+- The preview is 5 grid units high and sits above the related controls. It uses the width declared by the panel. Modules without a useful result have no preview and no reserved gap. Its bounded surface, caption, and lightened module-category tint mark it as a display; orange remains the editable-value colour. It has no handles or editing pointer, and a drag on it moves the tile.
+- Envelope places its live Level and compact Mode selector in a small row above the shape. The shape spans the full panel width, with the five parameter knobs in one row below. Mode changes the result but is used less often, so it does not take space from the visual. The shape shows one cycle. Timed stages use their durations with a minimum schematic width of 12 percent of the timed total or 30 ms, whichever is longer, so a short attack remains visible. Its hold segment is one fifth of the timed duration. AD omits hold and release. The view shows the selected bend but cannot predict the gate's release time.
+- LFO shows one cycle of the selected shape. Rate and sync change playback, not the shape of that cycle.
+- Ladder shows its small-signal low-pass response from 20 Hz to 20 kHz on a logarithmic horizontal axis and -60 to +12 dB vertically. The model uses the selected number of one-pole stages and its feedback gain, including the bass reduction at high resonance. Drive and nonlinear saturation are omitted because they depend on the input signal. The preview is not a measurement of the live audio. See [How a ladder filter sings](../learn/ladder-filter.md).
+- At middle zoom the shape remains visible without a readable caption; at far zoom the panel is hidden by the existing level-of-detail rules. No separate timer runs for these static shapes.
+- Knobs remain the default control for a single ranged parameter on built-in module tiles. A fader needs a specific task, such as comparing mixer levels or a user-arranged performance panel. The draft fader section does not change that default.
+
+The larger editor, stored-curve editing, parameter handles, and faders remain draft. They need their own agreed interaction rules before implementation.
+
 ## The baseline set
 
 Widgets are grouped by the **kind of value** they show or edit, not by the module that first needs them (ADR-0024). Within a group, every widget shares its gestures, its keyboard model, and its way of showing modulation.
@@ -32,7 +46,7 @@ Widgets are grouped by the **kind of value** they show or edit, not by the modul
 | | Number | A parameter | No | P2 |
 | One choice | Toggle | A whole-number parameter, 0 to 1 | Yes | P1 |
 | | Radio buttons | A whole-number parameter | Yes | P1 |
-| | Select list | A whole-number parameter | No (planned as "selector") | P2 |
+| | Select list | A whole-number parameter | Yes, named choices up to 12 | P2 |
 | Action | Button | A whole-number parameter, 0 to 1, and a mode parameter | Yes | P1 |
 | Two numbers | XY pad | Two parameters | No | P2 |
 | | Range | Two parameters on one axis: a low and a high | No | P2 |
@@ -42,7 +56,7 @@ Widgets are grouped by the **kind of value** they show or edit, not by the modul
 | Signals | Scope | An output | No ([#62](https://github.com/brylie/LoomDSP/issues/62)) | P1 |
 | | XY scope | Two outputs | No | P2 ([#280](https://github.com/brylie/LoomDSP/issues/280)) |
 | | Spectrum | An output | No ([#109](https://github.com/brylie/LoomDSP/issues/109)) | P2 |
-| Shapes and data | Curve | Curve data, or a shape the module computes from its parameters | No (planned as "graph") | P2 |
+| Shapes and data | Curve | Curve data, or a shape the module computes from its parameters | Read-only shape preview only | P2 |
 | | Step grid | Pattern data. Drawn as rows, a ring, or keys | No | P2 |
 | | Waveform | Buffer data, with markers bound to parameters. Whole, or as the frames of a wavetable | No | P2 |
 | Static | Label | Text written in the panel | No | P2 |
@@ -156,12 +170,14 @@ A whole-number parameter can name its values, such as "6 dB", "12 dB", "18 dB", 
 
 ### Select list
 
+**Status:** Agreed for named whole-number choices on a tile. The first use is Envelope Mode. The closed selector sits in a short settings row above its full-width result view. The list opens at a readable screen size above or below the box, stays inside the canvas, and marks the current choice. Click, keyboard, drag, reset, modulation, and MIDI learn follow the rules below. Long lists with scrolling remain draft; this first slice supports up to 12 choices.
+
 The current choice is shown as text. Clicking it shows the other choices in a list.
 
 - **Binds to:** a whole-number parameter. Its choice names, or its numbers with the unit.
 - **Closed:** a box with the current choice and a small down-pointing mark at the right end, which says "there is a list here" without colour.
 - **Click:** opens the list. The list shows every choice, the current one marked by a tick and a filled row. It opens below the box, or above when there is no room below, and always inside the canvas. Clicking a choice picks it and closes the list: one undo step. Clicking outside the list, pressing Escape, panning, or zooming closes it without a change.
-- **List size:** fixed screen size, 12 px text, like hover text, whatever the zoom. At most 12 rows are shown; a longer list scrolls, with the mouse wheel over the list. *Why fixed size:* the list is for reading and picking, so it must be readable at middle zoom. *Why the wheel scrolls here:* the open list covers the canvas, and scrolling it cannot change the sound.
+- **List size:** fixed screen size with 12 px text, whatever the zoom. This first slice accepts at most 12 choices. A longer scrolling list is a later extension. *Why fixed size:* the list is for reading and picking, so it must be readable at middle zoom.
 - **Drag on the closed box:** moves the tile, as on toggles and radio buttons (rule 1). *Why not step through the choices:* a select list is a choice control, and choice controls do not change on a drag. A performer sweeps through choices with a MIDI controller or the arrow keys instead.
 - **Double-click:** resets to the default.
 - **Modulation:** a dot, as on radio buttons. The box shows the base choice.
@@ -176,6 +192,7 @@ They bind to the same parameter, so the author or the panel editor can switch on
 
 - **Radio buttons** when there are 5 choices or fewer and the panel has room. *Why:* all choices are visible at once, and one click picks any of them. On stage, seeing the options matters.
 - **Select list** when there are more choices, when the names are long, or when the panel is small. Unison voices from 1 to 16, a function choice, a scale, or a musical division such as 1/16 or 2 bars are select lists.
+- **Envelope Mode** uses a select list despite having two choices. The result shape needs the full panel width, and the mode changes less often than the five ranged parameters.
 - **Toggle** for exactly two states that read as off and on. Two named states that are not off and on, such as "Linear" and "Equal power", use radio buttons.
 
 ## Action

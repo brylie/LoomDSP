@@ -148,6 +148,11 @@ pub enum WidgetViewKind {
         /// Option labels.
         options: Vec<String>,
     },
+    /// Compact choice box with a pop-up list.
+    Select {
+        /// Option labels.
+        options: Vec<String>,
+    },
     /// A brightness.
     Light,
     /// A level meter: an RMS bar and a peak line.
@@ -155,6 +160,11 @@ pub enum WidgetViewKind {
     /// A scope: a frame, and the trace the app sets in
     /// [`crate::ScopeTraces`].
     Scope,
+    /// Read-only result shape sampled from parameters.
+    Shape {
+        /// Width in panel grid units.
+        width: u8,
+    },
     /// A large button. Its gesture depends on the mode stored with its value.
     Button,
 }
@@ -183,9 +193,11 @@ impl WidgetView {
             WidgetViewKind::Knob { .. } => (3, 3),
             WidgetViewKind::Meter => (3, 6),
             WidgetViewKind::Scope => (9, 5),
+            WidgetViewKind::Shape { width } => (*width, 5),
             WidgetViewKind::Toggle | WidgetViewKind::Light => (3, 2),
             WidgetViewKind::Button => (6, 3),
             WidgetViewKind::Radio { options } => (6, options.len() as u8 + 1),
+            WidgetViewKind::Select { .. } => (6, 2),
         }
     }
 
@@ -194,17 +206,20 @@ impl WidgetView {
     pub fn is_control(&self) -> bool {
         !matches!(
             self.kind,
-            WidgetViewKind::Light | WidgetViewKind::Meter | WidgetViewKind::Scope
+            WidgetViewKind::Light | WidgetViewKind::Meter | WidgetViewKind::Scope | WidgetViewKind::Shape { .. }
         )
     }
 
     /// True for controls that take a dropped output as a modulation
-    /// assignment: knobs, toggles, and radio buttons (`docs/design/modulation.md`,
+    /// assignment: knobs, toggles, radio buttons, and select lists (`docs/design/modulation.md`,
     /// Making an assignment).
     pub fn accepts_modulation(&self) -> bool {
         matches!(
             self.kind,
-            WidgetViewKind::Knob { .. } | WidgetViewKind::Toggle | WidgetViewKind::Radio { .. }
+            WidgetViewKind::Knob { .. }
+                | WidgetViewKind::Toggle
+                | WidgetViewKind::Radio { .. }
+                | WidgetViewKind::Select { .. }
         )
     }
 }

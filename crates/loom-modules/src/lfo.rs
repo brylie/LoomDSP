@@ -107,16 +107,38 @@ pub static LFO: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::Dsp(|config| Box::new(Lfo::new(config))),
     panel: Panel::new(
         15,
-        6,
+        11,
         &[
-            Widget::radio(0, 0, "sync"),
-            Widget::radio(6, 0, "shape"),
-            Widget::knob(12, 0, "rate"),
-            Widget::knob(12, 3, "cycles"),
+            Widget::shape(0, 0, 15, "out", "Wave", lfo_preview),
+            Widget::radio(0, 5, "sync"),
+            Widget::radio(6, 5, "shape"),
+            Widget::knob(12, 5, "rate"),
+            Widget::knob(12, 8, "cycles"),
         ],
     ),
     displays: &[],
 };
+
+/// One cycle of the selected wave for the read-only tile preview.
+fn lfo_preview(params: &[f32], x: f32) -> f32 {
+    let shape = params.get(3).copied().unwrap_or_default().round() as u8;
+    (Lfo::wave(shape, f64::from(x.rem_euclid(1.0))) + 1.0) * 0.5
+}
+
+#[cfg(test)]
+mod preview_tests {
+    use super::lfo_preview;
+
+    /// Shape changes the preview while rate leaves a single cycle alone.
+    #[test]
+    fn shape_changes_one_cycle() {
+        let sine = [0.0, 1.0, 1.0, 0.0];
+        let square = [0.0, 1.0, 1.0, 4.0];
+        assert!((lfo_preview(&sine, 0.25) - 1.0).abs() < 1e-6);
+        assert_ne!(lfo_preview(&sine, 0.1), lfo_preview(&square, 0.1));
+        assert_eq!(lfo_preview(&sine, 0.1), lfo_preview(&[0.0, 10.0, 1.0, 0.0], 0.1));
+    }
+}
 
 #[derive(Clone)]
 struct Lfo {
