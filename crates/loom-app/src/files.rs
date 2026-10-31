@@ -64,16 +64,9 @@ fn examples_for_executable(executable: Option<&Path>, checkout: &Path) -> Option
             bundled.push(beside_app.join("examples/patches"));
         }
     }
-    let executable = executable.map(|path| path.canonicalize().unwrap_or_else(|_| path.to_path_buf()));
-    let in_checkout = executable.as_deref().is_some_and(|path| {
-        checkout
-            .parent()
-            .and_then(Path::parent)
-            .and_then(|root| root.canonicalize().ok())
-            .is_some_and(|root| path.starts_with(root))
-    });
-    // Cargo creates target/debug/examples for example binaries. It is not
-    // the release bundle unless it actually contains patch files.
+    // Cargo creates target/debug/examples for example binaries. A nearby
+    // folder is a release bundle only when it contains patch files. This
+    // also lets a bundle staged inside the checkout's dist/ take priority.
     let bundled = bundled.into_iter().find(|dir| {
         std::fs::read_dir(dir).is_ok_and(|entries| {
             entries
@@ -81,12 +74,7 @@ fn examples_for_executable(executable: Option<&Path>, checkout: &Path) -> Option
                 .any(|entry| entry.path().extension().is_some_and(|ext| ext == EXTENSION))
         })
     });
-    let checkout = checkout.is_dir().then(|| checkout.to_path_buf());
-    if in_checkout {
-        checkout.or(bundled)
-    } else {
-        bundled.or(checkout)
-    }
+    bundled.or_else(|| checkout.is_dir().then(|| checkout.to_path_buf()))
 }
 
 /// True when `path` is a file inside the folder `examples`. Both are
@@ -298,6 +286,15 @@ mod tests {
         std::fs::create_dir_all(mac.parent().unwrap()).unwrap();
         std::fs::write(&mac, "").unwrap();
         assert_eq!(examples_for_executable(Some(&mac), &checkout), Some(bundle));
+
+        // The release script stages archives in checkout/dist. The source
+        // examples still exist, but the staged app owns its nearby copy.
+        let staged = tmp.0.join("checkout/dist/LoomDSP/loom-app");
+        let staged_examples = tmp.0.join("checkout/dist/LoomDSP/examples/patches");
+        std::fs::create_dir_all(&staged_examples).unwrap();
+        std::fs::write(staged_examples.join("example.ron"), "").unwrap();
+        std::fs::write(&staged, "").unwrap();
+        assert_eq!(examples_for_executable(Some(&staged), &checkout), Some(staged_examples));
         assert_eq!(
             examples_for_executable(Some(&development), &checkout),
             Some(checkout.clone())
