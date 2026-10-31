@@ -603,6 +603,23 @@ mod tests {
         assert_eq!(ui.app.controller.graph().cables().count(), cables + 1);
     }
 
+    /// The window-wide drag line snaps to an input under the pointer, then
+    /// follows the pointer again when it leaves that input.
+    #[test]
+    fn an_output_drag_line_snaps_to_a_hovered_input() {
+        let mut ui = Ui::open("subtractive.ron");
+        let from = ui.output(8, "out");
+        let input = ui.input(9, "right");
+        ui.move_to(from);
+        ui.press();
+        ui.move_to(Point::new(input.x + 3.0, input.y + 2.0));
+        assert_eq!(ui.app.assign_drag.expect("output drag").at, Some(input));
+        let empty = Point::new(1000.0, 800.0);
+        ui.move_to(empty);
+        assert_eq!(ui.app.assign_drag.expect("output drag").at, Some(empty));
+        ui.release();
+    }
+
     /// panels.md, acceptance: a transport-following input shows the clock
     /// mark with no cable, loses it when a cable is connected, and has it
     /// back when the cable is removed. Cables are made and pulled out by

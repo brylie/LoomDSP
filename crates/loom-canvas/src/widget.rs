@@ -1099,6 +1099,7 @@ impl<Message> PatchCanvas<'_, Message> {
                 let Some(screen) = screen else { return };
                 let world = state.camera.to_world(screen);
                 state.cursor = Some(world);
+                let hover = over.then(|| self.scene.hit(world, state.hit_radius()));
                 let mut redraw = false;
                 match &mut state.interaction {
                     Interaction::Panning { last, click } => {
@@ -1158,13 +1159,16 @@ impl<Message> PatchCanvas<'_, Message> {
                     Interaction::Holding { .. } | Interaction::Idle => {}
                     Interaction::Wiring { from, pulled } => {
                         if from.output && !*pulled && !state.outside_window {
-                            self.assign_drag(
-                                *from,
-                                Some(Point::new(bounds.x + screen.x, bounds.y + screen.y)),
-                                state.camera,
-                                bounds,
-                                shell,
-                            );
+                            let at = match hover {
+                                Some(Hit::Port(target)) if target.output != from.output => self
+                                    .scene
+                                    .port_position(target)
+                                    .map(|world| state.camera.to_screen(world))
+                                    .map(|point| Point::new(bounds.x + point.x, bounds.y + point.y)),
+                                _ => None,
+                            }
+                            .unwrap_or(Point::new(bounds.x + screen.x, bounds.y + screen.y));
+                            self.assign_drag(*from, Some(at), state.camera, bounds, shell);
                         }
                         redraw = true;
                     }
@@ -1173,7 +1177,6 @@ impl<Message> PatchCanvas<'_, Message> {
                         redraw = true;
                     }
                 }
-                let hover = over.then(|| self.scene.hit(world, state.hit_radius()));
                 if hover != state.hover {
                     state.hover = hover;
                     redraw = true;

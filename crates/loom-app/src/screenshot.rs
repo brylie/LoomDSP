@@ -633,7 +633,7 @@ mod tests {
         };
         let Some(before) = render(&app) else {
             assert!(
-                std::env::var_os("LOOM_REQUIRE_GPU").is_none(),
+                !std::env::var("LOOM_REQUIRE_GPU").is_ok_and(|value| value == "1"),
                 "coverage requires a GPU adapter"
             );
             return;
