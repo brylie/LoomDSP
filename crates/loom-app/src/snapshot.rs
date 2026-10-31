@@ -133,6 +133,11 @@ pub struct Input {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shown: Option<String>,
     pub centre: Point,
+    /// The transport signal the input follows while it has no cable, which
+    /// shows the clock mark: `bar_phase`, `beat_phase`, or `playing`. Left
+    /// out when it shows none (panels.md, Clock mark on transport inputs).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub follows_transport: Option<&'static str>,
 }
 
 /// An output port on a tile.
@@ -334,6 +339,7 @@ impl App {
                                 }))
                                 .cloned(),
                             centre: m.input_position(index).into(),
+                            follows_transport: p.follows_transport.map(|s| s.name()),
                         })
                         .collect(),
                     outputs: m

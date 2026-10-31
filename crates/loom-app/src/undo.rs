@@ -15,7 +15,7 @@ use iced::Point;
 use loom_canvas::CanvasEvent;
 use loom_core::{
     Assignment, AssignmentId, ButtonMode, Controller, InputRef, LoomError, MidiControl, ModuleDescriptor, ModuleId,
-    ModuleRole, OutputRef, ParamRange, WidgetKind,
+    ModuleRole, OutputRef, ParamRange,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -128,6 +128,8 @@ pub fn is_edit(controller: &Controller, event: &CanvasEvent) -> bool {
         | CanvasEvent::Delete(_)
         | CanvasEvent::SetControl { .. }
         | CanvasEvent::ResetControl { .. } => true,
+        // Space flips the Transport's Run toggle, an edit like a click.
+        CanvasEvent::ToggleRun => controller.transport_module().is_some(),
         CanvasEvent::ButtonPressed { module, widget }
         | CanvasEvent::ButtonReleased { module, widget }
         | CanvasEvent::ButtonArrow { module, widget, .. } => !is_momentary_button(controller, module, widget),
@@ -141,12 +143,7 @@ fn is_momentary_button(controller: &Controller, module: u32, widget: usize) -> b
         let Some(panel_widget) = node.descriptor.panel.widgets.get(widget) else {
             return false;
         };
-        let WidgetKind::Button { mode, .. } = panel_widget.kind else {
-            return false;
-        };
-        node.descriptor
-            .param_index(mode)
-            .is_some_and(|i| ButtonMode::from_value(node.params[i]) == ButtonMode::Momentary)
+        node.descriptor.button_mode(panel_widget, &node.params) == Some(ButtonMode::Momentary)
     })
 }
 

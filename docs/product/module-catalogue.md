@@ -37,8 +37,8 @@ Timing is phase-driven: a ramp from 0 to 1 sets where in a cycle a module is ([P
 
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
-| MT-CLOCK-01 | Transport | The patch's one transport: run, reset, and tempo on its panel; bar phase, beat phase, play gate, and bar and beat triggers as outputs. | | P1 | FR-LIB-27 | Specified (`loom.clock.transport`) |
-| MT-CLOCK-02 | Clock | A phase, trigger, and gate at musical rates. Later: several outputs, each with its own division, multiplication, and swing. | Timebase | P1 | FR-LIB-27 | Specified (`loom.clock.clock`) |
+| MT-CLOCK-01 | Transport | The patch's one transport: run, reset, and tempo on its panel; bar phase, beat phase, play gate, and bar and beat triggers as outputs. | | P1 | FR-LIB-27 | Built (`loom.clock.transport`) |
+| MT-CLOCK-02 | Clock | A phase, trigger, and gate at musical rates. Later: several outputs, each with its own division, multiplication, and swing. | Timebase | P1 | FR-LIB-27 | Built (`loom.clock.clock`) |
 | MT-CLOCK-03 | Clock divide | Fires on every Nth incoming trigger, with an offset. | | P1 | FR-LIB-27 | Built (`loom.logic.divide`) |
 | MT-CLOCK-04 | Quantise to clock | Holds a trigger until the next clock pulse or bar line, so launches land on time. | | P3 | New | Planned |
 | MT-CLOCK-05 | Start and reset hub | Sends one start, stop, and reset to many modules, with an optional delay after a patch loads. | | P3 | New | Planned |
@@ -263,7 +263,7 @@ These depend on how notes travel on cables (OQ-16).
 
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
-| MT-VIEW-01 | Probe | Shows signals on the tile: over time (scope), one against another (XY), or as a number in chosen units. | | P1 | FR-LIB-17 | Scope mode built (`loom.display.scope`, [panels](../design/panels.md#scope-module)); trace drawing specified in [panels](../design/panels.md#drawing-the-scope-trace). XY mode specified as `loom.display.xy` ([panel widgets](../design/panel-widgets.md#xy-scope)) |
+| MT-VIEW-01 | Probe | Shows signals on the tile: over time (scope), one against another (XY), or as a number in chosen units. | | P1 | FR-LIB-17 | Scope mode built (`loom.display.scope`, [panels](../design/panels.md#scope-module)); trace drawing specified in [panels](../design/panels.md#drawing-the-scope-trace). XY mode specified as `loom.display.xy` ([panel widgets](../design/panel-widgets.md#xy-scope)), moved to P2 ([#280](https://github.com/brylie/LoomDSP/issues/280)) |
 | MT-VIEW-02 | Level meter | Shows peak and average level. | | P1 | FR-LIB-17 | Built (`loom.display.meter`) |
 | MT-VIEW-03 | Spectrum | Shows the frequency content of a signal. | | P2 | FR-LIB-17 | Planned |
 | MT-VIEW-04 | Note monitor | Shows incoming notes and controller values, for checking a setup. | | P2 | New | Planned |

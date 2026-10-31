@@ -219,7 +219,11 @@ mod tests {
     fn every_part_of_every_module_round_trips_through_its_name() {
         let mut app = crate::App::new(crate::tests::app_args());
         for descriptor in loom_modules::ALL {
-            let id = app.controller.add_module(descriptor.id).unwrap().0;
+            // A new patch has its one Transport already.
+            let id = match app.controller.add_module(descriptor.id) {
+                Err(loom_core::LoomError::SecondTransport(existing)) => existing.0,
+                added => added.unwrap().0,
+            };
             let graph = app.controller.graph();
             let mut parts = Vec::new();
             for (index, widget) in descriptor.panel.widgets.iter().enumerate() {

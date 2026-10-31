@@ -2911,7 +2911,7 @@ mod tests {
 
         assert!(!app.controller.graph().is_empty());
         assert_eq!(run(&mut app, r#"{"cmd": "new"}"#), Ok(Map::new()));
-        assert!(app.controller.graph().is_empty());
+        assert_eq!(app.controller.graph().len(), 1, "only the new patch's Transport");
         assert!(fake.is_open("Keys"), "New keeps the MIDI inputs");
     }
 

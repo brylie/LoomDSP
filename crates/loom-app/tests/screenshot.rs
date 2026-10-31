@@ -11,7 +11,7 @@ fn subtractive() -> PathBuf {
 
 /// The subtractive example with modulation, so it has badges, modulation
 /// lines, and range arcs. Cutoff has two sources, so an arc drag that
-/// picks one changes its arc. Module 10 is a button whose `on` is
+/// picks one changes its arc. Module 11 is a button whose `on` is
 /// modulated, which has no range arc. Written next to the images, as
 /// `name`: tests run in parallel, so each needs its own file.
 fn modulated(name: &str) -> PathBuf {
@@ -19,7 +19,7 @@ fn modulated(name: &str) -> PathBuf {
     let last_module = "PatchModule(id: 9, kind: \"loom.io.audio-out@1\"),";
     let source = source.replace(
         last_module,
-        &format!("{last_module}\n        PatchModule(id: 10, kind: \"loom.ui.button@1\"),"),
+        &format!("{last_module}\n        PatchModule(id: 11, kind: \"loom.ui.button@1\"),"),
     );
     let end = source.rfind(')').expect("a patch ends with `)`");
     let patch = format!(
@@ -27,7 +27,7 @@ fn modulated(name: &str) -> PathBuf {
          (source: (5, \"out\"), target: (4, \"cutoff\"), depth: 0.25),\n        \
          (source: (7, \"out\"), target: (4, \"cutoff\"), depth: -0.5),\n        \
          (source: (7, \"out\"), target: (4, \"resonance\"), depth: 0.4),\n        \
-         (source: (5, \"out\"), target: (10, \"on\"), depth: 1.0),\n    ],\n)\n",
+         (source: (5, \"out\"), target: (11, \"on\"), depth: 1.0),\n    ],\n)\n",
         &source[..end]
     );
     let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(name);
@@ -247,7 +247,7 @@ fn an_unknown_control_fails() {
 
 #[test]
 fn a_depth_drag_needs_a_knob() {
-    let error = fails(&modulated("modulated-knob.ron"), &["--depth", "10:on"]);
+    let error = fails(&modulated("modulated-knob.ron"), &["--depth", "11:on"]);
     assert!(error.contains("is not a knob"), "{error}");
 }
 

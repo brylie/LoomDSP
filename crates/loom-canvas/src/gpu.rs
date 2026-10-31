@@ -2,7 +2,7 @@
 
 use crate::camera::Camera;
 use crate::controls::ControlGeometry;
-use crate::scene::{PORT_RADIUS, PortShape, Scene};
+use crate::scene::{CLOCK_MARK_RADIUS, ModuleView, PORT_RADIUS, PortShape, Scene};
 use crate::stats::{self, Counter};
 use crate::theme::Palette;
 use crate::tile_text::{self, TextKind};
@@ -153,9 +153,17 @@ pub struct Geometry {
     pub shapes: Vec<Shape>,
     /// Number of tile shapes at the start of `shapes`.
     pub tiles: u32,
-    /// Bars standing in for text too small to draw (panels.md, Level of
-    /// detail), after the tiles: caption bars, then port label bars, then
-    /// title bars. The order lets each zoom level draw one range.
+    /// After the tiles come the shapes that only some zoom levels draw
+    /// (panels.md, Level of detail), in this order, so each level draws one
+    /// range (see [`Geometry::bars`]): clock marks, clock dots, caption bars,
+    /// port label bars, title bars.
+    ///
+    /// Shapes of the full clock marks on transport inputs: a ring and two
+    /// hands each, drawn close up.
+    pub clock_marks: u32,
+    /// Number of plain dots that stand in for clock marks at middle zoom.
+    pub clock_dots: u32,
+    /// Bars standing in for text too small to draw: caption bars.
     pub caption_bars: u32,
     /// Number of port label bars.
     pub port_bars: u32,
@@ -240,6 +248,14 @@ impl Geometry {
         }
         let tiles = shapes.len() as u32;
 
+        let (mut marks, mut dots) = (Vec::new(), Vec::new());
+        for module in scene.modules() {
+            clock_marks(module, palette, &mut marks, &mut dots);
+        }
+        let (clock_marks, clock_dots) = (marks.len() as u32, dots.len() as u32);
+        shapes.append(&mut marks);
+        shapes.append(&mut dots);
+
         let (mut captions, mut labels, mut titles) = (Vec::new(), Vec::new(), Vec::new());
         for module in scene.modules() {
             tile_text::for_each(module, |item| {
@@ -266,6 +282,8 @@ impl Geometry {
             cables,
             shapes,
             tiles,
+            clock_marks,
+            clock_dots,
             caption_bars,
             port_bars,
             title_bars,
@@ -274,22 +292,67 @@ impl Geometry {
 
     /// Index of the first port marker in `shapes`.
     pub fn markers(&self) -> u32 {
-        self.tiles + self.caption_bars + self.port_bars + self.title_bars
+        self.tiles + self.clock_marks + self.clock_dots + self.caption_bars + self.port_bars + self.title_bars
     }
 
-    /// The text bars to draw: none close up, port labels and captions at
-    /// middle zoom (`titles` false), and titles and port labels far out
-    /// (`titles` true), where controls and their captions are not drawn.
+    /// The shapes each zoom level adds to the tiles. Close up (`shown`
+    /// false): the full clock marks, and no text bars, since the text is
+    /// drawn. At middle zoom (`titles` false): clock dots, and bars for port
+    /// labels and captions. Far out (`titles` true): bars for titles and
+    /// port labels, where controls, captions, and clock marks are not drawn.
     pub fn bars(&self, shown: bool, titles: bool) -> std::ops::Range<u32> {
-        let start = self.tiles;
+        let marks = self.tiles;
+        let dots = marks + self.clock_marks;
+        let captions = dots + self.clock_dots;
+        let ports = captions + self.caption_bars;
         match (shown, titles) {
-            (false, _) => start..start,
-            (true, false) => start..start + self.caption_bars + self.port_bars,
-            (true, true) => {
-                let ports = start + self.caption_bars;
-                ports..ports + self.port_bars + self.title_bars
-            }
+            (false, _) => marks..dots,
+            (true, false) => dots..ports + self.port_bars,
+            (true, true) => ports..ports + self.port_bars + self.title_bars,
         }
+    }
+}
+
+/// Colour of a clock mark: the module's accent at reduced strength, mixed
+/// halfway towards the dim text colour, so it reads on the tile without
+/// competing with the port marker (panels.md, Clock mark on transport inputs).
+fn clock_mark_colour(accent: Color, palette: &Palette) -> Color {
+    let mix = |a: f32, b: f32| a + (b - a) * 0.5;
+    Color::from_rgba(
+        mix(accent.r, palette.text_dim.r),
+        mix(accent.g, palette.text_dim.g),
+        mix(accent.b, palette.text_dim.b),
+        0.8,
+    )
+}
+
+/// Adds the clock mark of each input of `module` that follows the
+/// transport: a ring with two short hands to `marks`, and the plain dot
+/// that stands in for it at middle zoom to `dots`.
+fn clock_marks(module: &ModuleView, palette: &Palette, marks: &mut Vec<Shape>, dots: &mut Vec<Shape>) {
+    let colour = clock_mark_colour(module.accent, palette);
+    let r = CLOCK_MARK_RADIUS;
+    for index in 0..module.inputs.len() {
+        let Some(c) = module.clock_mark_centre(index) else {
+            continue;
+        };
+        let ring = Rectangle::new(Point::new(c.x - r, c.y - r), iced::Size::new(2.0 * r, 2.0 * r));
+        marks.push(Shape::new(ring, r, Color::TRANSPARENT, colour, 1.0));
+        // Hands from the centre: a long one up, a short one to the right.
+        let hand = 0.9;
+        let up = Rectangle::new(
+            Point::new(c.x - hand * 0.5, c.y - r * 0.7),
+            iced::Size::new(hand, r * 0.7 + hand * 0.5),
+        );
+        let right = Rectangle::new(
+            Point::new(c.x - hand * 0.5, c.y - hand * 0.5),
+            iced::Size::new(r * 0.5 + hand * 0.5, hand),
+        );
+        marks.push(Shape::new(up, hand * 0.5, colour, Color::TRANSPARENT, 0.0));
+        marks.push(Shape::new(right, hand * 0.5, colour, Color::TRANSPARENT, 0.0));
+        let d = r * 0.6;
+        let dot = Rectangle::new(Point::new(c.x - d, c.y - d), iced::Size::new(2.0 * d, 2.0 * d));
+        dots.push(Shape::new(dot, d, colour, Color::TRANSPARENT, 0.0));
     }
 }
 
@@ -652,6 +715,7 @@ mod tests {
             colour: Color::WHITE,
             shape: PortShape::Round,
             badge: 0,
+            follows_transport: None,
         }
     }
 
@@ -810,5 +874,45 @@ mod tests {
         // Far: both port labels and the title. Controls are not drawn, so
         // neither is the caption's bar.
         assert_eq!(colours(geometry.bars(true, true)), vec![label, label, title]);
+    }
+
+    /// A transport input gets a clock mark (a ring and two hands) close up,
+    /// a plain dot at middle zoom, and nothing far out. Ports keep their
+    /// markers, and the text bars their ranges.
+    #[test]
+    fn a_clock_mark_shows_close_up_and_as_a_dot_at_middle_zoom() {
+        let mut followed = port();
+        followed.follows_transport = Some(crate::scene::TransportSignal::BarPhase);
+        let module = |inputs: Vec<PortView>| ModuleView {
+            id: 1,
+            title: "LFO".into(),
+            accent: Color::from_rgb8(0x5A, 0x4A, 0x82),
+            position: Point::ORIGIN,
+            inputs,
+            outputs: vec![port()],
+            panel: Default::default(),
+        };
+        let palette = Palette::default();
+        let build = |m: ModuleView| Geometry::build(&Scene::new(vec![m], Vec::new()), &palette);
+        let plain = build(module(vec![port(), port()]));
+        let marked = build(module(vec![port(), followed]));
+        assert_eq!((plain.clock_marks, plain.clock_dots), (0, 0));
+        assert_eq!((marked.clock_marks, marked.clock_dots), (3, 1));
+        assert_eq!(marked.shapes.len(), plain.shapes.len() + 4);
+        // Close up: only the mark's three shapes, a ring first.
+        let close = marked.bars(false, false);
+        assert_eq!(close.len(), 3);
+        let ring = &marked.shapes[close.start as usize];
+        assert_eq!(ring.fill(), pack(Color::TRANSPARENT).components());
+        assert!(ring.border_width() > 0.0);
+        // Middle: the dot, then the same bars as without the mark.
+        let middle = marked.bars(true, false);
+        assert_eq!(middle.len(), plain.bars(true, false).len() + 1);
+        // Far: no mark, just the bars.
+        assert_eq!(marked.bars(true, true).len(), plain.bars(true, true).len());
+        assert!(marked.bars(true, true).start > middle.start);
+        // The mark sits between the port marker and the label.
+        let [x, _, w, _] = ring.rect();
+        assert!(x > PORT_RADIUS && x + w < 9.0 + crate::scene::CLOCK_MARK_SPACE);
     }
 }

@@ -9,7 +9,7 @@
 //! its anchor, and right-aligned text ends at it.
 
 use crate::controls::{knob_centre, light_centre, radio_centre};
-use crate::scene::{GRID, HEADER, ModuleView, PortRef, ROW, WidgetViewKind, fit_label, text_width};
+use crate::scene::{CLOCK_MARK_SPACE, GRID, HEADER, ModuleView, PortRef, ROW, WidgetViewKind, fit_label, text_width};
 use iced::{Point, Rectangle, Size};
 use std::borrow::Cow;
 
@@ -108,22 +108,30 @@ pub fn for_each<'a>(module: &'a ModuleView, mut f: impl FnMut(TextItem<'a>)) {
         .chain(module.outputs.iter().enumerate().map(|(i, p)| (true, i, p)));
     for (output, index, port) in ports {
         let y = tile.y + HEADER + ROW * (index as f32 + 0.5);
+        // A clock mark goes between the marker and the label, so the label
+        // moves right and has less room (panels.md, Clock mark).
+        let mark = if !output && port.follows_transport.is_some() {
+            CLOCK_MARK_SPACE
+        } else {
+            0.0
+        };
         let (x, align) = if output {
             (tile.x + module.width() - 9.0, Align::Right)
         } else {
-            (tile.x + 9.0, Align::Left)
+            (tile.x + 9.0 + mark, Align::Left)
         };
+        let width = label_width - mark;
         f(TextItem {
             kind: TextKind::Port(PortRef {
                 module: module.id,
                 output,
                 index,
             }),
-            content: fit_label(&port.label, label_width, LABEL_SIZE),
+            content: fit_label(&port.label, width, LABEL_SIZE),
             anchor: Point::new(x, y),
             align,
             size: LABEL_SIZE,
-            width: label_width,
+            width,
         });
     }
 
@@ -202,6 +210,7 @@ mod tests {
             colour: Color::WHITE,
             shape: PortShape::Round,
             badge: 0,
+            follows_transport: None,
         }
     }
 
@@ -408,5 +417,36 @@ mod tests {
         let overlapped = Scene::new(vec![self::module(), cover], Vec::new());
         assert!(overlapped.modules()[1].bounds().contains(label.center()));
         assert_eq!(port_label_at(&overlapped, label.center()), Some(lowpass));
+    }
+
+    /// An input with a clock mark has its label moved right, clear of the
+    /// mark, and the label keeps within its column.
+    #[test]
+    fn a_clock_mark_moves_the_input_label_clear_of_it() {
+        let plain = module();
+        let mut marked = module();
+        marked.inputs[1].follows_transport = Some(crate::scene::TransportSignal::BarPhase);
+        fn label(m: &ModuleView, index: usize) -> TextItem<'_> {
+            items(m)
+                .into_iter()
+                .find(|item| {
+                    item.kind
+                        == TextKind::Port(PortRef {
+                            module: 1,
+                            output: false,
+                            index,
+                        })
+                })
+                .unwrap()
+        }
+        let (before, after) = (label(&plain, 1), label(&marked, 1));
+        assert_eq!(after.anchor.x, before.anchor.x + CLOCK_MARK_SPACE);
+        assert_eq!(after.anchor.x + after.width, before.anchor.x + before.width);
+        let mark = marked.clock_mark_centre(1).unwrap();
+        assert!(mark.x + crate::scene::CLOCK_MARK_RADIUS < after.bounds().x);
+        assert!(mark.x - crate::scene::CLOCK_MARK_RADIUS > marked.input_position(1).x + crate::scene::PORT_RADIUS);
+        // The other input has no mark and keeps its place.
+        assert_eq!(label(&marked, 0), label(&plain, 0));
+        assert_eq!(marked.clock_mark_centre(0), None);
     }
 }
