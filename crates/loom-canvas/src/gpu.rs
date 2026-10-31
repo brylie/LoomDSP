@@ -12,7 +12,6 @@ use iced::advanced::graphics::color::pack;
 use iced::wgpu;
 use iced::widget::shader::{Pipeline, Primitive, Viewport};
 use iced::{Color, Point, Rectangle};
-use std::collections::HashSet;
 
 /// Corner radius of tiles, in world units.
 const TILE_RADIUS: f32 = 5.0;
@@ -176,7 +175,6 @@ impl Geometry {
     /// Builds instances for every module, port, and cable in a scene.
     pub fn build(scene: &Scene, palette: &Palette) -> Self {
         stats::count(Counter::SceneBuilds);
-        let mut connected: HashSet<(u32, bool, usize)> = HashSet::new();
         let mut cables = Vec::with_capacity(scene.cables().len());
         for cable in scene.cables() {
             let (Some(from), Some(to)) = (
@@ -185,8 +183,6 @@ impl Geometry {
             ) else {
                 continue;
             };
-            connected.insert((cable.from.0, true, cable.from.1));
-            connected.insert((cable.to.0, false, cable.to.1));
             cables.push(Cable::new(
                 from.output_position(cable.from.1),
                 to.input_position(cable.to.1),
@@ -224,14 +220,17 @@ impl Geometry {
                         .enumerate()
                         .map(|(i, p)| (module.output_position(i), p, true, i)),
                 );
-            for (centre, port, output, index) in module_ports {
-                // Connected ports are filled; free ports are rings.
-                let fill = if connected.contains(&(module.id, output, index)) {
-                    port.colour
-                } else {
-                    palette.tile
-                };
-                markers.push(Shape::marker(centre, PORT_RADIUS, port.shape, fill, port.colour, 1.6));
+            for (centre, port, _, _) in module_ports {
+                // Activity fills connected ports from a separate buffer.
+                // The scene's marker remains an outline while silent.
+                markers.push(Shape::marker(
+                    centre,
+                    PORT_RADIUS,
+                    port.shape,
+                    palette.tile,
+                    port.colour,
+                    1.6,
+                ));
             }
             // Assignment count badges sit with the markers, over the
             // cables. Their numbers are text.

@@ -53,7 +53,6 @@ impl Live {
 
     /// Turns metering of every connected output on or off. Call
     /// [`Live::sync`] and commit after.
-    #[cfg(test)]
     pub fn set_activity(&mut self, on: bool) {
         self.activity = on;
     }

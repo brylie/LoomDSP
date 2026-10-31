@@ -10,7 +10,7 @@
 [![All Contributors](https://img.shields.io/badge/all_contributors-2-orange.svg?style=flat-square)](#contributors-)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 
-![A subtractive synth patched from primitives in the LoomDSP desktop app: MIDI note, phase, saw, filter, two envelopes, a VCA, and a scope showing the filtered wave, with the filter's parameters in the inspector](docs/images/readme-subtractive.png)
+![A subtractive synth patched from primitives in the LoomDSP desktop app: MIDI note, phase, saw, filter, two envelopes, a VCA, transport, and a scope showing the filtered wave, with the filter's parameters in the inspector](docs/images/readme-subtractive.png)
 
 Build your own instruments and effects by connecting small modules with virtual cables: oscillators, filters, envelopes, logic, and more. Hear every change as you make it. Plug in a MIDI keyboard or controller and play what you built. Then send the patch file to a friend.
 

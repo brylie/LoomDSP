@@ -220,6 +220,8 @@ pub struct PatchCanvas<'a, Message> {
     selection: &'a BTreeSet<u32>,
     values: Option<&'a PanelValues>,
     traces: Option<&'a ScopeTraces>,
+    /// Outputs that currently carry a signal; their cable inputs follow.
+    activity: Vec<(u32, usize)>,
     palette: Palette,
     on_event: Box<dyn Fn(CanvasEvent) -> Message + 'a>,
     frame_key: u64,
@@ -359,6 +361,7 @@ impl<'a, Message> PatchCanvas<'a, Message> {
             selection,
             values: None,
             traces: None,
+            activity: Vec::new(),
             palette: Palette::default(),
             on_event: Box::new(on_event),
             frame_key: 0,
@@ -396,6 +399,12 @@ impl<'a, Message> PatchCanvas<'a, Message> {
     /// trace). They have their own GPU buffer: a new trace uploads only it.
     pub fn traces(mut self, traces: &'a ScopeTraces) -> Self {
         self.traces = Some(traces);
+        self
+    }
+
+    /// Sets live port activity without changing the scene's GPU geometry.
+    pub fn activity(mut self, outputs: impl IntoIterator<Item = (u32, usize)>) -> Self {
+        self.activity = outputs.into_iter().collect();
         self
     }
 
@@ -1983,6 +1992,45 @@ impl<Message> PatchCanvas<'_, Message> {
         let mut overlay = Overlay::default();
         let p = &self.palette;
 
+        // Live port markers use the overlay buffer. A state change uploads
+        // only these shapes and never rebuilds tiles or cables (#63).
+        if detail(state.camera.zoom) == Detail::Close {
+            let mut drawn = std::collections::HashSet::new();
+            for cable in self.scene.cables() {
+                if !self.activity.contains(&cable.from) {
+                    continue;
+                }
+                for port in [
+                    PortRef {
+                        module: cable.from.0,
+                        output: true,
+                        index: cable.from.1,
+                    },
+                    PortRef {
+                        module: cable.to.0,
+                        output: false,
+                        index: cable.to.1,
+                    },
+                ] {
+                    if !drawn.insert(port) {
+                        continue;
+                    }
+                    if let (Some(centre), Some(view)) = (self.scene.port_position(port), self.scene.port(port)) {
+                        let r = PORT_RADIUS - 1.0;
+                        let rect = Rectangle::new(Point::new(centre.x - r, centre.y - r), Size::new(2.0 * r, 2.0 * r));
+                        let corner = if view.shape == crate::scene::PortShape::Round {
+                            r
+                        } else {
+                            r * 0.3
+                        };
+                        overlay
+                            .shapes
+                            .push(Shape::new(rect, corner, view.colour, Color::TRANSPARENT, 0.0));
+                    }
+                }
+            }
+        }
+
         // Cables in focus come to the front at full opacity: the cable under
         // the cursor, the cables on the port under the cursor, and the cables
         // of the module under the cursor and of selected modules. Everything
@@ -2853,6 +2901,21 @@ mod tests {
             vec![module(1, 0.0), module(2, 200.0), module(3, 400.0)],
             vec![cable(1, 2), cable(2, 3)],
         )
+    }
+
+    /// Activity fills both ends of a cable without changing cable geometry.
+    #[test]
+    fn activity_fills_connected_ports_from_overlay() {
+        let scene = chain();
+        let selection = BTreeSet::new();
+        let idle = PatchCanvas::new(&scene, &selection, |event| event);
+        let active = PatchCanvas::new(&scene, &selection, |event| event).activity([(1, 0)]);
+        let state = State::default();
+        let before = idle.overlay(&state);
+        let after = active.overlay(&state);
+        assert_eq!(after.cables.len(), before.cables.len());
+        assert_eq!(after.shapes.len(), before.shapes.len() + 2);
+        assert!(after.shapes.iter().take(2).all(|shape| shape.fill()[3] > 0.0));
     }
 
     #[test]

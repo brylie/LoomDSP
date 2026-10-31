@@ -516,6 +516,9 @@ struct App {
     /// What belongs to the machine: preferences, devices, MIDI inputs.
     rig: settings::Rig,
     audio_stats: Option<Arc<CallbackStats>>,
+    /// Audio load values from the watcher's completed tick.
+    load_peak: f64,
+    load_max: f64,
     audio_callbacks_seen: u64,
     audio_callbacks_advanced: Instant,
     /// True when the recovery copy matches the patch and no job is under
@@ -960,13 +963,19 @@ impl App {
                 },
             ),
             audio_stats: audio.as_ref().map(|a| a.stats().clone()),
+            load_peak: 0.0,
+            load_max: 0.0,
             audio_callbacks_seen: 0,
             audio_callbacks_advanced: Instant::now(),
             autosave_settled: false,
             _audio: audio,
             idle_engine,
             monitor: monitor::Monitor::new(telemetry, sample_rate, generation),
-            live: Live::showing_activity(),
+            live: {
+                let mut live = Live::showing_activity();
+                live.set_activity(rig.store.saved().show_activity);
+                live
+            },
             dropouts: alerts::Dropouts::default(),
             rig,
             audio_name,
@@ -1994,6 +2003,17 @@ impl App {
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
+        use loom_canvas::stats::FrameCause;
+        let cause = match &message {
+            Message::Tick => FrameCause::Tick,
+            Message::LiveFrame => FrameCause::Live,
+            Message::Meters(_) | Message::Telemetry(_) | Message::Lights(_) => FrameCause::Meters,
+            Message::Control(_) | Message::ControlFrame(_) | Message::Located { .. } => FrameCause::Control,
+            Message::Canvas(_) | Message::Key(_) | Message::CloseRequested => FrameCause::Input,
+            Message::Frame(_) => FrameCause::Forced,
+            _ => FrameCause::Other,
+        };
+        loom_canvas::stats::request_frame(cause);
         // A mode change the engine's full queue refused goes again now.
         self.send_pending_safety();
         if !message.keeps_patch() {
@@ -2322,8 +2342,14 @@ impl App {
                 self.update_dropouts(Instant::now());
             }
             Message::AudioPoll => self.poll_audio(),
-            Message::Audio(audio_watch::Event::Stats { dropouts, at }) => {
-                // The view reads the load itself when it draws.
+            Message::Audio(audio_watch::Event::Stats {
+                dropouts,
+                at,
+                peak,
+                max,
+            }) => {
+                self.load_peak = peak;
+                self.load_max = max;
                 self.dropouts.update(dropouts, at);
             }
             Message::Audio(audio_watch::Event::Stalled { callbacks, advanced }) => {
@@ -2760,6 +2786,7 @@ impl App {
         let mut canvas = PatchCanvas::new(&self.scene, &self.selection, Message::Canvas)
             .values(&self.values)
             .traces(&self.traces)
+            .activity(self.carrying.iter().map(|output| (output.module.0, output.port)))
             .frame_key(self.frame_key)
             .browser_key(self.browser_key)
             .interactive(self.browser.is_none() && self.probe_menu.is_none() && self.rig.window.is_none())
@@ -2920,7 +2947,7 @@ impl App {
         // The snapshot reads the same model, so the two cannot disagree.
         let stats = self.stats_model();
         let audio: Element<'_, Message> = if stats.playing {
-            let load = bar_text(stats.load_text()).color(severity_colour(alerts::load_severity(stats.load)));
+            let load = bar_text(stats.load_text()).color(severity_colour(alerts::load_severity(self.load_peak)));
             let dropouts = bar_text(format!("dropouts {}", stats.dropouts))
                 .color(severity_colour(self.dropouts.severity(Instant::now())));
             let mut items = row![bar_text(stats.label).color(DIM), load, dropouts].spacing(10);

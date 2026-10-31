@@ -66,7 +66,7 @@ pub struct Stats {
     /// The latest callback's load, as a share of its time budget (1.0 is
     /// 100%). 0 when nothing plays.
     pub load: f64,
-    /// The highest load since the stream started.
+    /// The highest tick peak in the last ten seconds.
     pub max_load: f64,
     /// Callbacks that ran late or failed since the stream started.
     pub dropouts: u64,
@@ -397,7 +397,7 @@ impl App {
         let (playing, load, max_load) = match &self.audio_stats {
             Some(stats) => {
                 let s = stats.snapshot();
-                (true, s.last_load, s.max_load)
+                (true, s.last_load, self.load_max)
             }
             None => (false, 0.0, 0.0),
         };

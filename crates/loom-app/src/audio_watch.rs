@@ -13,6 +13,7 @@ use iced::futures::Stream;
 use iced::futures::channel::mpsc;
 use loom_core::EngineStats;
 use loom_host_desktop::{CallbackStats, StatsSnapshot};
+use std::collections::VecDeque;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -38,6 +39,10 @@ pub enum Event {
         dropouts: u64,
         /// When the watcher read the count.
         at: Instant,
+        /// Peak callback load in this tick, for the warning colour.
+        peak: f64,
+        /// Highest tick peak in the last ten seconds.
+        max: f64,
     },
     /// The callbacks did not advance since the last read, or the stream
     /// reported an error. The UI checks for device loss.
@@ -55,6 +60,7 @@ pub enum Event {
 struct Shown {
     /// The load text, as the bar shows it.
     load: String,
+    severity: Severity,
     dropouts: u64,
     alarm: bool,
     telemetry_dropped: u64,
@@ -68,6 +74,9 @@ pub struct Watcher {
     dropouts: Dropouts,
     shown: Option<Shown>,
     reads: u32,
+    peaks: VecDeque<(Instant, f64)>,
+    current_peak: f64,
+    current_max: f64,
 }
 
 impl Watcher {
@@ -79,12 +88,21 @@ impl Watcher {
             dropouts: Dropouts::default(),
             shown: None,
             reads: 0,
+            peaks: VecDeque::new(),
+            current_peak: 0.0,
+            current_max: 0.0,
         }
     }
 
     /// Takes one read of the stats and returns what the UI must hear.
     /// `telemetry_dropped` is the engine's count of dropped telemetry.
+    #[cfg(test)]
     pub fn read(&mut self, stats: &StatsSnapshot, telemetry_dropped: u64, now: Instant) -> Vec<Event> {
+        self.read_peak(stats, stats.last_load, telemetry_dropped, now)
+    }
+
+    /// Reads a tick peak taken atomically from all audio callbacks.
+    pub fn read_peak(&mut self, stats: &StatsSnapshot, peak: f64, telemetry_dropped: u64, now: Instant) -> Vec<Event> {
         let mut events = Vec::new();
         if stats.is_dead || stats.callbacks == self.callbacks {
             events.push(Event::Stalled {
@@ -99,12 +117,25 @@ impl Watcher {
         let dropouts = stats.overruns + stats.stream_errors;
         self.dropouts.update(dropouts, now);
         self.reads = self.reads.wrapping_add(1);
+        if self.reads.is_multiple_of(LOAD_EVERY) {
+            self.current_peak = peak;
+            self.peaks.push_back((now, peak));
+            while self
+                .peaks
+                .front()
+                .is_some_and(|(at, _)| now.duration_since(*at) >= Duration::from_secs(10))
+            {
+                self.peaks.pop_front();
+            }
+            self.current_max = self.peaks.iter().map(|(_, value)| *value).fold(0.0, f64::max);
+        }
         let load = match &self.shown {
             Some(old) if !self.reads.is_multiple_of(LOAD_EVERY) => old.load.clone(),
-            _ => crate::snapshot::load_text(stats.last_load, stats.max_load),
+            _ => crate::snapshot::load_text(stats.last_load, self.current_max),
         };
         let shown = Shown {
             load,
+            severity: crate::alerts::load_severity(self.current_peak),
             dropouts,
             alarm: self.dropouts.severity(now) == Severity::Alarm,
             telemetry_dropped,
@@ -112,7 +143,12 @@ impl Watcher {
         // The first read only learns what the bar shows: the UI drew it
         // when it started.
         if self.shown.as_ref().is_some_and(|old| *old != shown) {
-            events.push(Event::Stats { dropouts, at: now });
+            events.push(Event::Stats {
+                dropouts,
+                at: now,
+                peak: self.current_peak,
+                max: self.current_max,
+            });
         }
         self.shown = Some(shown);
         events
@@ -149,7 +185,12 @@ pub fn stream(watch: &Watch) -> impl Stream<Item = Event> + use<> {
         while !tx.is_closed() {
             let dropped = watch.engine.dropped_meters.load(Ordering::Relaxed)
                 + watch.engine.dropped_scope.load(Ordering::Relaxed);
-            for event in watcher.read(&watch.stats.snapshot(), dropped, Instant::now()) {
+            let peak = if (watcher.reads + 1).is_multiple_of(LOAD_EVERY) {
+                watch.stats.take_peak_since_read()
+            } else {
+                0.0
+            };
+            for event in watcher.read_peak(&watch.stats.snapshot(), peak, dropped, Instant::now()) {
                 match tx.try_send(event) {
                     // The UI is busy: it reads the stats itself when it
                     // draws, and the next read sends again.
@@ -181,15 +222,13 @@ mod tests {
     /// Steady callbacks at a steady load: nothing to send, so an idle
     /// patch draws no frames (#90).
     #[test]
-    fn steady_audio_sends_nothing() {
+    fn steady_audio_sends_nothing_after_first_load_tick() {
         let start = Instant::now();
         let mut watcher = Watcher::new(start);
         for read in 1..=40u64 {
             let now = start + INTERVAL * read as u32;
-            assert!(
-                watcher.read(&stats(read * 10, 0.02, 0), 0, now).is_empty(),
-                "read {read}"
-            );
+            let events = watcher.read(&stats(read * 10, 0.02, 0), 0, now);
+            assert_eq!(events.len(), usize::from(read == 2), "read {read}");
         }
     }
 
@@ -211,11 +250,47 @@ mod tests {
         }
         assert_eq!(
             sent,
-            vec![Event::Stats {
-                dropouts: 0,
-                at: start + INTERVAL * 5
-            }]
+            vec![
+                Event::Stats {
+                    dropouts: 0,
+                    at: start + INTERVAL,
+                    peak: 0.02,
+                    max: 0.02
+                },
+                Event::Stats {
+                    dropouts: 0,
+                    at: start + INTERVAL * 5,
+                    peak: 0.05,
+                    max: 0.05
+                },
+            ]
         );
+    }
+
+    /// One callback spike colours its tick and leaves the ten-second max.
+    #[test]
+    fn callback_spike_is_visible_then_expires() {
+        let start = Instant::now();
+        let mut watcher = Watcher::new(start);
+        let low = stats(1, 0.2, 0);
+        let _ = watcher.read_peak(&low, 0.2, 0, start);
+        let spike = watcher.read_peak(&low, 0.95, 0, start + INTERVAL);
+        assert!(spike.iter().any(|event| matches!(
+            event,
+            Event::Stats {
+                peak: 0.95,
+                max: 0.95,
+                ..
+            }
+        )));
+        let mut expired = false;
+        for read in 2..44 {
+            let events = watcher.read_peak(&low, 0.2, 0, start + INTERVAL * read);
+            expired |= events
+                .iter()
+                .any(|event| matches!(event, Event::Stats { max: 0.2, .. }));
+        }
+        assert!(expired, "the max should fall after ten seconds of quiet");
     }
 
     /// A dropout is sent, and so is the end of its alarm ten seconds later.
@@ -236,13 +311,32 @@ mod tests {
         assert_eq!(
             sent,
             vec![
-                (4, Event::Stats { dropouts: 1, at: at(4) }),
+                (
+                    1,
+                    Event::Stats {
+                        dropouts: 0,
+                        at: at(1),
+                        peak: 0.02,
+                        max: 0.02
+                    }
+                ),
+                (
+                    4,
+                    Event::Stats {
+                        dropouts: 1,
+                        at: at(4),
+                        peak: 0.02,
+                        max: 0.02
+                    }
+                ),
                 // Red for ten seconds from read 4: off at read 44.
                 (
                     44,
                     Event::Stats {
                         dropouts: 1,
-                        at: at(44)
+                        at: at(44),
+                        peak: 0.02,
+                        max: 0.02,
                     }
                 ),
             ]
@@ -259,10 +353,18 @@ mod tests {
         let later = start + INTERVAL;
         assert_eq!(
             watcher.read(&stats(5, 0.02, 0), 0, later),
-            vec![Event::Stalled {
-                callbacks: 5,
-                advanced: start
-            }]
+            vec![
+                Event::Stalled {
+                    callbacks: 5,
+                    advanced: start
+                },
+                Event::Stats {
+                    dropouts: 0,
+                    at: later,
+                    peak: 0.02,
+                    max: 0.02
+                },
+            ]
         );
         let dead = StatsSnapshot {
             is_dead: true,
