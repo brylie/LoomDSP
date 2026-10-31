@@ -112,6 +112,10 @@ run = "typos"
 description = "Check that every ADR has one allowed status, matching the index (no Proposed ADRs on main)"
 run = "sh scripts/check-adr-status.sh"
 
+[tasks.worktree-targets]
+description = "Test worktree target ownership and orphan pruning"
+run = "sh scripts/test-worktree-targets.sh"
+
 [tasks.help-pages]
 description = "Regenerate the module help pages in docs/modules from the descriptors"
 # A test (`committed_pages_are_current` in loom-cli) fails while they are
@@ -122,4 +126,4 @@ run = "cargo run -p loom-cli -- modules --markdown docs/modules"
 description = "Run the checks CI runs (all but msrv and the three-OS test matrix)"
 # coverage runs every test except doc tests, so `test` is not listed again;
 # `doctest` covers the rest.
-depends = ["fmt", "clippy", "typos", "adr-status", "deny", "docs", "wasm", "coverage", "doctest"]
+depends = ["fmt", "clippy", "typos", "adr-status", "worktree-targets", "deny", "docs", "wasm", "coverage", "doctest"]

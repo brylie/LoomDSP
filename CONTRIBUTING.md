@@ -49,9 +49,16 @@ To let worktrees build at the same time, choose an existing directory on a drive
 scripts/setup-worktree-target.sh /path/to/target-root
 ```
 
-For an external drive, create the target root on that drive first and keep it mounted while Cargo runs. The command writes an ignored `.cargo/config.toml` that points to a unique, stable folder under the chosen root. Cargo uses it for normal builds and `mise` tasks. Run `cargo clean` in a worktree to remove that worktree's build output. Other worktrees continue using their existing Cargo settings until you run the command there.
+For an external drive, create the target root on that drive first and keep it mounted while Cargo runs. The command writes an ignored `.cargo/config.toml` that points to a unique, stable folder under the chosen root. It also marks that folder as managed by this repository. Cargo uses it for normal builds and `mise` tasks. Run `cargo clean` in a live worktree to remove its build output, then rerun the setup command to restore the marker before building again. Other worktrees continue using their existing Cargo settings until you run the command there.
 
-Run `scripts/setup-worktree-target.sh /path/to/target-root --all` to configure all existing worktrees at once. Each worktree that builds keeps its own output folder, so remove unused ones with `cargo clean` from that worktree.
+Run `scripts/setup-worktree-target.sh /path/to/target-root --all` to configure all existing worktrees at once. To inspect space used by active and removed worktrees, run from any worktree of this repository:
+
+```sh
+scripts/worktree-targets.sh /path/to/target-root          # list sizes and show what could be pruned
+scripts/worktree-targets.sh /path/to/target-root --prune  # delete marked targets of removed worktrees
+```
+
+The first command is a dry-run and changes nothing. The prune command checks the ownership marker and worktree status again before each deletion. It never deletes active, unmarked, or unrelated directories. Targets created before the marker was added are adopted when setup runs again in their live worktree. Old targets whose worktree is already gone show as `unknown`; review those paths manually before removing them. Do not assume a hash-shaped folder belongs to this tool.
 
 Then build and run the checks:
 
