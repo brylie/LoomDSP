@@ -409,6 +409,28 @@ impl Controller {
         Ok(removed)
     }
 
+    /// Changes an assignment's endpoints without changing its id or place
+    /// in the application order. The new graph takes effect on commit.
+    pub fn retarget_assignment(
+        &mut self,
+        id: AssignmentId,
+        source: OutputRef,
+        target: ModuleId,
+        param: usize,
+    ) -> Result<(), LoomError> {
+        self.graph.assignment(id).ok_or(LoomError::UnknownAssignment(id))?;
+        self.check_output(source)?;
+        self.check_target(target, param)?;
+        let assignment = self.graph.assignments.get_mut(&id).expect("checked assignment");
+        if (assignment.source, assignment.target, assignment.param) != (source, target, param) {
+            assignment.source = source;
+            assignment.target = target;
+            assignment.param = param;
+            self.dirty = true;
+        }
+        Ok(())
+    }
+
     /// Sets an assignment's depth, clamped to -1..1. Takes effect at the next
     /// buffer, without recompiling.
     pub fn set_assignment_depth(&mut self, id: AssignmentId, depth: f32) -> Result<f32, LoomError> {
