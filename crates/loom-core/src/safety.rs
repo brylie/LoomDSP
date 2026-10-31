@@ -117,6 +117,15 @@ impl SafetyStage {
         };
     }
 
+    /// Restarts the fade after a paused output stream resumes (rule 15).
+    /// A requested stop remains silent and must never be cancelled here.
+    pub(crate) fn restart_fade(&mut self) {
+        if !self.stopping {
+            self.fade.position = 0;
+            self.fade_in();
+        }
+    }
+
     /// Changes the mode. The output dips to silence, the mode changes, and
     /// it fades back in.
     pub(crate) fn set_mode(&mut self, mode: OutputSafety) {

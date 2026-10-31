@@ -1013,6 +1013,13 @@ impl Controller {
         self.send(Command::SetPanicTrigger(trigger))
     }
 
+    /// Replaces the input ring at the next audio buffer boundary. `None`
+    /// disconnects the input; removed rings are freed on the control thread.
+    pub fn set_audio_input(&mut self, input: Option<crate::audio_input::InputReader>) -> Result<(), LoomError> {
+        self.collect_garbage();
+        self.send(Command::SetAudioInput(input))
+    }
+
     fn send(&mut self, command: Command) -> Result<(), LoomError> {
         self.commands.push(command).map_err(|_| LoomError::QueueFull)
     }

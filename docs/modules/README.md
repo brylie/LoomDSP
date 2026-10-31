@@ -42,6 +42,7 @@ One page for each built-in module, made from its descriptor. After you change a 
 
 | Module | ID | Description |
 |---|---|---|
+| [Audio In](loom.io.audio-in.md) | `loom.io.audio-in` | Brings a pair of channels from the selected audio input into the patch. |
 | [Audio Out](loom.io.audio-out.md) | `loom.io.audio-out` | Sends a mono or stereo signal to the audio output. |
 
 ## Level

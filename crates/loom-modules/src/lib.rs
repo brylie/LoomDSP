@@ -63,6 +63,7 @@ pub static ALL: &[&ModuleDescriptor] = &[
     &mix::SPLIT,
     &io::UNIT_DELAY,
     &io::AUDIO_OUT,
+    &io::AUDIO_IN,
     &midi::NOTE_IN,
     &midi::CONTROLLER_IN,
     &display::METER,
@@ -175,6 +176,8 @@ mod tests {
                 }
                 // Choice controls that stand in for a knob on these modules.
                 let non_knob = [
+                    ("loom.io.audio-in", "pair"),
+                    ("loom.io.audio-in", "mute"),
                     ("loom.phase.wrap", "mode"),
                     ("loom.mix.crossfade", "law"),
                     ("loom.mix.mixer", "mute1"),
@@ -222,6 +225,7 @@ mod tests {
                 .collect();
             let expected: &[&str] = match descriptor.id {
                 "loom.midi.note" => &["gate"],
+                "loom.io.audio-in" => &["active"],
                 "loom.env.envelope" => &["level"],
                 "loom.logic.memory" => &["state"],
                 // Trigger lights (panels.md, Lights for one-sample triggers).

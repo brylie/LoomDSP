@@ -307,3 +307,38 @@ fn delay_and_allpass_never_allocate_while_sweeping_parameters_and_inputs() {
         });
     }
 }
+
+/// Installing, reading, and removing an input ring never allocates or frees
+/// on the audio thread, including an underrun and an overrun correction.
+#[test]
+fn audio_input_never_allocates_on_the_audio_thread() {
+    let mut parts = loom_core::create_engine(loom_modules::registry(), loom_core::EngineConfig::default());
+    let (mut writer, reader) = loom_core::audio_input::input_ring(128, 2);
+    let c = &mut parts.controller;
+    let input = c.add_module("loom.io.audio-in").unwrap();
+    let output = c.output_ref(input, "out").unwrap();
+    c.add_probe(output, ProbeKind::Meter).unwrap();
+    c.set_audio_input(Some(reader)).unwrap();
+    c.commit().unwrap();
+    for _ in 0..300 {
+        assert!(writer.push([0.25; 8]));
+    }
+    let mut left = [0.0; 128];
+    let mut right = [0.0; 128];
+    assert_no_alloc(|| parts.engine.process(&mut left, &mut right));
+    assert_no_alloc(|| parts.engine.process(&mut left, &mut right));
+    parts.controller.set_audio_input(None).unwrap();
+    assert_no_alloc(|| parts.engine.process(&mut left, &mut right));
+    parts.controller.collect_garbage();
+}
+
+/// Receiving a stream restart command never allocates on the audio thread.
+#[test]
+fn restarting_the_output_fade_never_allocates() {
+    let mut parts = loom_core::create_engine(loom_modules::registry(), loom_core::EngineConfig::default());
+    let mut restart = parts.engine.restart_fade_sender();
+    let mut left = [0.0; 128];
+    let mut right = [0.0; 128];
+    restart.request();
+    assert_no_alloc(|| parts.engine.process(&mut left, &mut right));
+}

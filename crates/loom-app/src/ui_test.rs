@@ -103,6 +103,7 @@ impl Ui {
             view: screenshot::Options::default(),
             dump_ui: false,
             select: Vec::new(),
+            show_help: false,
             frames: None,
             hold_note: false,
             recovery_dir: None,
@@ -142,7 +143,7 @@ impl Ui {
     /// is drawn. Returns every message, including those tasks produced.
     pub fn step(&mut self, events: &[Event]) -> Vec<Message> {
         let mut messages = Vec::new();
-        let browser_open = self.app.browser.is_some();
+        let browser_open = self.app.browser.is_some() && self.app.help.is_none();
         let matrix_keys = self.app.matrix.tab == crate::matrix::Tab::Matrix && self.app.matrix.focused;
         let mut clipboard = std::mem::take(&mut self.clipboard);
         self.with_ui(|ui, renderer, cursor| {
@@ -162,6 +163,9 @@ impl Ui {
                 // The open browser listens to keys whether or not a widget
                 // used them.
                 if browser_open && let Some(message) = crate::browser_key(event.clone(), status, window::Id::unique()) {
+                    messages.push(message);
+                }
+                if let Some(message) = crate::help_key(event.clone(), status, window::Id::unique()) {
                     messages.push(message);
                 }
                 // The panic key listens to every key event (panic.md).
@@ -405,6 +409,39 @@ impl Ui {
     /// the runtime reports a change in the held modifiers.
     pub fn hold(&mut self, modifiers: keyboard::Modifiers) -> Vec<Message> {
         self.step(&[Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers))])
+    }
+
+    /// The current translation of a named scrollable widget.
+    pub fn scroll_translation(&mut self, name: &'static str) -> Option<iced::Vector> {
+        struct Find {
+            id: Id,
+            translation: Option<iced::Vector>,
+        }
+        impl Operation for Find {
+            fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
+                if self.translation.is_none() {
+                    operate(self);
+                }
+            }
+            fn scrollable(
+                &mut self,
+                id: Option<&Id>,
+                _bounds: Rectangle,
+                _content_bounds: Rectangle,
+                translation: iced::Vector,
+                _state: &mut dyn iced::advanced::widget::operation::Scrollable,
+            ) {
+                if id == Some(&self.id) {
+                    self.translation = Some(translation);
+                }
+            }
+        }
+        let mut find = Find {
+            id: Id::new(name),
+            translation: None,
+        };
+        self.with_ui(|ui, renderer, _| ui.operate(renderer, &mut find));
+        find.translation
     }
 
     /// The bounds of the first text widget that reads exactly `content`,

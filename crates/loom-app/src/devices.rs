@@ -26,6 +26,12 @@ pub struct Options {
     /// this, case-insensitive. Not saved.
     #[arg(long, value_name = "NAME", conflicts_with = "no_audio")]
     pub device: Option<String>,
+    /// For this run, use the input whose name contains this text.
+    #[arg(long, value_name = "NAME", conflicts_with = "no_input")]
+    pub input: Option<String>,
+    /// For this run, do not open an audio input.
+    #[arg(long)]
+    pub no_input: bool,
     /// For this run, use this sample rate in Hz. Not saved.
     #[arg(long, value_name = "HZ", conflicts_with = "no_audio")]
     pub sample_rate: Option<u32>,
@@ -53,6 +59,37 @@ pub trait MidiPort {
     fn input(&self) -> MidiInputId;
     /// Closes the input and releases the notes held on it.
     fn close(self: Box<Self>);
+}
+
+/// A running audio input owned by the rig.
+pub trait InputPort {
+    /// The device name.
+    fn name(&self) -> &str;
+    /// Whether the stream is still delivering input.
+    fn is_live(&self) -> bool;
+    /// Stream health for a watcher thread.
+    fn status(&self) -> loom_core::audio_input::InputStatus;
+}
+
+impl InputPort for loom_host_desktop::AudioInput {
+    fn name(&self) -> &str {
+        self.name()
+    }
+    fn is_live(&self) -> bool {
+        self.is_live()
+    }
+    fn status(&self) -> loom_core::audio_input::InputStatus {
+        self.status()
+    }
+}
+
+/// Input device names and the system default.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Inputs {
+    /// The default device's name, if available.
+    pub default: Option<String>,
+    /// Full input device names.
+    pub devices: Vec<String>,
 }
 
 /// A real MIDI input and the id it was opened with.
@@ -85,6 +122,30 @@ pub trait Host {
     fn outputs(&self) -> Result<Outputs, String>;
     /// Chooses an output, without starting it.
     fn open(&self, options: &AudioOptions) -> Result<AudioOutput, String>;
+    /// Lists audio input devices.
+    fn audio_inputs(&self) -> Result<Inputs, String> {
+        Ok(Inputs::default())
+    }
+    /// An input device lister that can run on a watcher thread.
+    fn audio_input_lister(&self) -> Option<fn() -> Result<Inputs, String>> {
+        None
+    }
+    /// Reads microphone permission without opening a stream.
+    fn audio_input_permission_denied(&self) -> bool {
+        false
+    }
+    /// A permission check that can run on the input watcher thread.
+    fn audio_input_permission_checker(&self) -> Option<fn() -> bool> {
+        None
+    }
+    /// Opens an input stream and returns the engine side of its ring.
+    fn open_audio_input(
+        &self,
+        _options: &AudioOptions,
+        _output_buffer: usize,
+    ) -> Result<(Box<dyn InputPort>, loom_core::audio_input::InputReader), String> {
+        Err("no audio input device available".into())
+    }
     /// Starts an output with an engine. A device can still refuse here,
     /// after it opened. On refusal, returns the [`loom_core::Engine`] so it
     /// can be kept idle and retried, along with the error reason.
@@ -182,6 +243,37 @@ impl Host for System {
         AudioOutput::open(options).map_err(|e| e.to_string())
     }
 
+    fn audio_inputs(&self) -> Result<Inputs, String> {
+        system_audio_inputs()
+    }
+
+    fn audio_input_lister(&self) -> Option<fn() -> Result<Inputs, String>> {
+        Some(system_audio_inputs)
+    }
+
+    fn audio_input_permission_denied(&self) -> bool {
+        loom_host_desktop::microphone_access_denied()
+    }
+
+    fn audio_input_permission_checker(&self) -> Option<fn() -> bool> {
+        Some(loom_host_desktop::microphone_access_denied)
+    }
+
+    fn open_audio_input(
+        &self,
+        options: &AudioOptions,
+        output_buffer: usize,
+    ) -> Result<(Box<dyn InputPort>, loom_core::audio_input::InputReader), String> {
+        let (input, reader) =
+            loom_host_desktop::AudioInput::start(options, output_buffer).map_err(|error| match error {
+                loom_host_desktop::HostError::UnsupportedSampleRate { device, rate } => {
+                    format!("\"{device}\" does not offer {rate} Hz")
+                }
+                other => other.to_string(),
+            })?;
+        Ok((Box::new(input), reader))
+    }
+
     fn midi_list(&self) -> Result<Vec<MidiInputInfo>, String> {
         system_midi_list()
     }
@@ -195,6 +287,14 @@ impl Host for System {
     fn midi_lister(&self) -> Option<MidiLister> {
         Some(system_midi_list)
     }
+}
+
+/// Lists audio inputs on any thread.
+fn system_audio_inputs() -> Result<Inputs, String> {
+    Ok(Inputs {
+        default: loom_host_desktop::default_input_device_name(),
+        devices: loom_host_desktop::input_device_names().map_err(|e| e.to_string())?,
+    })
 }
 
 /// The system's MIDI inputs, through `midir`.
@@ -531,6 +631,18 @@ pub mod fake {
     #[derive(Default)]
     pub struct Fake {
         pub outputs: RefCell<Outputs>,
+        /// Available fake input devices.
+        pub audio_inputs: RefCell<Inputs>,
+        /// The producer held by the open fake input.
+        pub input_writer: RefCell<Option<loom_core::audio_input::InputWriter>>,
+        /// Number of input streams opened.
+        pub input_opens: std::cell::Cell<usize>,
+        /// Number of input streams closed.
+        pub input_closes: std::cell::Cell<usize>,
+        /// Simulates a refusal to open the input.
+        pub input_error: RefCell<Option<String>>,
+        /// Simulates a permission denied after the stream opened.
+        pub input_permission_denied: std::cell::Cell<bool>,
         /// Devices that fail to open.
         pub broken: RefCell<Vec<String>>,
         /// Devices that open, then fail to start.
@@ -676,6 +788,32 @@ pub mod fake {
         host: Rc<Fake>,
     }
 
+    /// A fake input stream whose writer is controlled by the test.
+    struct AudioPort {
+        host: Rc<Fake>,
+        name: String,
+        status: loom_core::audio_input::InputStatus,
+    }
+
+    impl InputPort for AudioPort {
+        fn name(&self) -> &str {
+            &self.name
+        }
+        fn is_live(&self) -> bool {
+            self.status.is_live()
+        }
+        fn status(&self) -> loom_core::audio_input::InputStatus {
+            self.status.clone()
+        }
+    }
+
+    impl Drop for AudioPort {
+        fn drop(&mut self) {
+            self.host.input_writer.borrow_mut().take();
+            self.host.input_closes.set(self.host.input_closes.get() + 1);
+        }
+    }
+
     impl MidiPort for Port {
         fn name(&self) -> &str {
             &self.name
@@ -735,6 +873,55 @@ pub mod fake {
     impl Host for Shared {
         fn outputs(&self) -> Result<Outputs, String> {
             Ok(self.0.outputs.borrow().clone())
+        }
+
+        fn audio_inputs(&self) -> Result<Inputs, String> {
+            Ok(self.0.audio_inputs.borrow().clone())
+        }
+
+        fn audio_input_permission_denied(&self) -> bool {
+            self.0.input_permission_denied.get()
+        }
+
+        fn open_audio_input(
+            &self,
+            options: &AudioOptions,
+            buffer: usize,
+        ) -> Result<(Box<dyn InputPort>, loom_core::audio_input::InputReader), String> {
+            if let Some(error) = &*self.0.input_error.borrow() {
+                return Err(error.clone());
+            }
+            let inputs = self.0.audio_inputs.borrow();
+            let name = options
+                .device
+                .as_ref()
+                .and_then(|wanted| {
+                    inputs
+                        .devices
+                        .iter()
+                        .find(|name| {
+                            if options.exact {
+                                *name == wanted
+                            } else {
+                                name.to_lowercase().contains(&wanted.to_lowercase())
+                            }
+                        })
+                        .cloned()
+                })
+                .or_else(|| options.device.is_none().then(|| inputs.default.clone()).flatten())
+                .ok_or("no audio input device available")?;
+            let (writer, reader) = loom_core::audio_input::input_ring(buffer, 2);
+            let status = writer.status();
+            *self.0.input_writer.borrow_mut() = Some(writer);
+            self.0.input_opens.set(self.0.input_opens.get() + 1);
+            Ok((
+                Box::new(AudioPort {
+                    host: self.0.clone(),
+                    name,
+                    status,
+                }),
+                reader,
+            ))
         }
 
         fn open(&self, options: &AudioOptions) -> Result<AudioOutput, String> {
@@ -935,6 +1122,7 @@ mod tests {
     fn flags_win_over_the_saved_choice() {
         let saved = AudioPrefs {
             device: DeviceChoice::Named("Fake B".into()),
+            input: crate::preferences::InputChoice::SystemDefault,
             sample_rate: RateChoice::Hz(44_100),
             buffer: BufferChoice::Frames(64),
         };

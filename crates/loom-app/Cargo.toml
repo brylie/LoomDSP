@@ -27,7 +27,7 @@ iced_wgpu.workspace = true
 png.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-iced = { workspace = true, features = ["smol"] }
+iced = { workspace = true, features = ["smol", "markdown"] }
 clap.workspace = true
 rfd.workspace = true
 ron.workspace = true

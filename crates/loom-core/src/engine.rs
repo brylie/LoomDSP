@@ -18,9 +18,24 @@ use crate::panic::{PanicState, PanicTrigger, TriggerWatch};
 use crate::safety::{OutputSafety, SafetyStage};
 use crate::telemetry::{MeterReading, SCOPE_CHUNK, ScopeChunk, TelemetrySender, measure};
 use crate::transport::{TRANSPORT_GRID, TimeSignature, Transport};
-use rtrb::{Consumer, Producer};
+use rtrb::{Consumer, Producer, RingBuffer};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+
+/// A host's bounded command channel for restarting the output fade.
+///
+/// Create this on the control thread before starting the engine. The host
+/// sends a request before resuming a paused stream; the audio thread reads
+/// it at the next buffer boundary. Repeated requests coalesce while one is
+/// pending, so a full queue is not an error.
+pub struct RestartFadeSender(Producer<()>);
+
+impl RestartFadeSender {
+    /// Requests a fresh fade on the next engine buffer.
+    pub fn request(&mut self) {
+        let _ = self.0.push(());
+    }
+}
 
 /// Engine settings, fixed for the engine's lifetime.
 #[derive(Debug, Clone, Copy)]
@@ -92,9 +107,15 @@ pub struct EngineStats {
     pub dropped_meters: AtomicU64,
     /// Scope chunks dropped because the scope queue was full.
     pub dropped_scope: AtomicU64,
+    /// Input underrun corrections.
+    pub input_underruns: AtomicU64,
+    /// Input overrun corrections.
+    pub input_overruns: AtomicU64,
 }
 
 pub(crate) enum Command {
+    /// Replaces the input ring at a buffer boundary.
+    SetAudioInput(Option<crate::audio_input::InputReader>),
     InsertModule {
         slot: usize,
         module: Box<dyn Module>,
@@ -154,6 +175,7 @@ pub(crate) enum Garbage {
     Module(#[allow(dead_code)] Box<dyn Module>),
     Schedule(#[allow(dead_code)] Box<Schedule>),
     HeldSet(#[allow(dead_code)] Box<HeldSet>),
+    Input(#[allow(dead_code)] crate::audio_input::InputReader),
 }
 
 /// Notes held per tracked MIDI input, and how many inputs hold each note
@@ -245,6 +267,8 @@ pub struct Engine {
     live: Arc<LiveTable>,
     schedule: Box<Schedule>,
     commands: Consumer<Command>,
+    /// Host restart commands, installed before an output stream starts.
+    restart_fade: Option<Consumer<()>>,
     garbage: Producer<Garbage>,
     midi_in: Consumer<MidiEvent>,
     midi: Vec<MidiEvent>,
@@ -275,6 +299,9 @@ pub struct Engine {
     panic_trigger: TriggerWatch,
     /// The notes each tracked MIDI input holds.
     input_notes: InputNotes,
+    input: Option<crate::audio_input::InputReader>,
+    input_buffer: Box<[crate::audio_input::InputFrame]>,
+    input_channels: usize,
     config: EngineConfig,
     stats: Arc<EngineStats>,
 }
@@ -296,6 +323,7 @@ impl Engine {
             live,
             schedule: Box::new(Schedule::empty()),
             commands,
+            restart_fade: None,
             garbage,
             midi_in,
             midi: Vec::with_capacity(config.midi_capacity),
@@ -310,8 +338,36 @@ impl Engine {
             panic: PanicState::Idle,
             panic_trigger: TriggerWatch::default(),
             input_notes: InputNotes::new(),
+            input: None,
+            input_buffer: vec![[0.0; crate::audio_input::MAX_INPUT_CHANNELS]; config.max_block].into_boxed_slice(),
+            input_channels: 0,
             config,
             stats,
+        }
+    }
+
+    /// Creates a restart-fade command channel before moving the engine to
+    /// an audio callback. This allocates and must run on the control thread.
+    pub fn restart_fade_sender(&mut self) -> RestartFadeSender {
+        let (sender, receiver) = RingBuffer::new(1);
+        self.restart_fade = Some(receiver);
+        RestartFadeSender(sender)
+    }
+
+    /// Applies a pending host restart without allocating on the audio thread.
+    fn apply_restart_fade(&mut self) {
+        if self
+            .restart_fade
+            .as_mut()
+            .is_some_and(|receiver| receiver.pop().is_ok())
+        {
+            if matches!(self.panic, PanicState::Fading(_)) {
+                // A paused device is silent: finish the panic reset before
+                // the resumed stream can play another sample.
+                self.panic = PanicState::Fading(0);
+            } else {
+                self.safety.restart_fade();
+            }
         }
     }
 
@@ -350,6 +406,7 @@ impl Engine {
     /// this call had not happened. Real-time safe, like `process`.
     pub fn apply_pending(&mut self) {
         self.apply_commands();
+        self.apply_restart_fade();
     }
 
     /// Renders `left.len()` frames (both slices must have the same length).
@@ -359,6 +416,7 @@ impl Engine {
     pub fn process(&mut self, left: &mut [f32], right: &mut [f32]) {
         let frames = left.len().min(right.len());
         self.apply_commands();
+        self.apply_restart_fade();
         self.collect_midi(frames);
         self.watch_panic_trigger();
         self.apply_midi_maps();
@@ -385,6 +443,20 @@ impl Engine {
             if self.schedule.transport.grid {
                 let into = (self.frame % TRANSPORT_GRID as u64) as usize;
                 n = n.min(TRANSPORT_GRID - into);
+            }
+            self.input_channels = 0;
+            if let Some(input) = &mut self.input {
+                let underruns = input.underruns();
+                let overruns = input.overruns();
+                if input.read_block(&mut self.input_buffer[..n]) {
+                    self.input_channels = input.channels();
+                }
+                self.stats
+                    .input_underruns
+                    .fetch_add(input.underruns() - underruns, Ordering::Relaxed);
+                self.stats
+                    .input_overruns
+                    .fetch_add(input.overruns() - overruns, Ordering::Relaxed);
             }
             self.apply_transport_request();
             self.run_block(
@@ -506,6 +578,12 @@ impl Engine {
     fn apply_commands(&mut self) {
         while let Ok(command) = self.commands.pop() {
             match command {
+                Command::SetAudioInput(input) => {
+                    if let Some(old) = std::mem::replace(&mut self.input, input) {
+                        self.discard(Garbage::Input(old));
+                    }
+                    self.input_channels = 0;
+                }
                 Command::InsertModule {
                     slot,
                     module,
@@ -804,6 +882,8 @@ impl Engine {
 
     fn run_block(&mut self, position: usize, frames: usize, left: &mut [f32], right: &mut [f32]) {
         let sample_rate = self.config.sample_rate;
+        let input_channels = self.input_channels;
+        let audio_input = &self.input_buffer[..frames];
         let midi = &self.midi[..];
         let slots = &mut self.slots;
         let transport = self.transport.info(self.frame);
@@ -866,6 +946,12 @@ impl Engine {
                     frames: len,
                     transport: transport.later(offset),
                     channel: op.channel,
+                    audio_input: if input_channels == 0 {
+                        &[]
+                    } else {
+                        &audio_input[offset..offset + len]
+                    },
+                    input_channels,
                 };
                 // SAFETY: the compiler gives every output its own buffer of
                 // `max_block` floats. Inputs point at other modules' outputs,

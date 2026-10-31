@@ -6,8 +6,8 @@
 //! inputs. It outlives every engine: opening a patch or changing the device
 //! builds a new engine and moves the rig over.
 
-use crate::devices::{self, Host, MidiPort, Playing, Wanted};
-use crate::preferences::{AudioPrefs, BufferChoice, DeviceChoice, Preferences, RateChoice, Store};
+use crate::devices::{self, Host, InputPort, MidiPort, Playing, Wanted};
+use crate::preferences::{AudioPrefs, BufferChoice, DeviceChoice, InputChoice, Preferences, RateChoice, Store};
 use crate::{App, undo};
 use iced::widget::{button, checkbox, column, container, opaque, pick_list, radio, row, rule, scrollable, space, text};
 use iced::{Element, Length};
@@ -17,6 +17,23 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
+
+/// Makes an input error actionable without reporting it from a callback.
+fn input_error_message(error: &str) -> String {
+    let lower = error.to_lowercase();
+    if lower.contains("denied") || lower.contains("permission") || lower.contains("not authorized") {
+        let place = if cfg!(target_os = "macos") {
+            "System Settings, Privacy and Security, Microphone"
+        } else if cfg!(target_os = "windows") {
+            "Settings, Privacy and security, Microphone"
+        } else {
+            "your system's microphone privacy settings"
+        };
+        format!("Audio input: access to the microphone was denied. Allow LoomDSP in {place}.")
+    } else {
+        format!("Audio input: {error}.")
+    }
+}
 
 /// A message for the Preferences window.
 #[derive(Debug, Clone)]
@@ -29,6 +46,8 @@ pub enum Message {
     /// Show signal activity on connected ports.
     Activity(bool),
     Audio(Change),
+    /// Choose the audio input device.
+    Input(InputChoice),
     /// Turn a MIDI input on or off.
     Midi(String, bool),
     /// Start or stop learning the panic trigger.
@@ -68,6 +87,18 @@ pub struct Rig {
     /// the first engine is attached.
     pub midi_in: Option<SharedMidi>,
     pub ports: Vec<Box<dyn MidiPort>>,
+    /// The open audio input, if the patch needs it.
+    pub input: Option<Box<dyn InputPort>>,
+    /// Shared drift warning history for the open input stream.
+    pub(crate) input_tracker: Option<std::sync::Arc<crate::input_watch::Tracker>>,
+    /// Last input open attempt, to avoid repeated device opens.
+    input_attempted: Option<Instant>,
+    /// Whether an input error has been reported in this run.
+    input_error_reported: bool,
+    /// A named input was lost while playing; wait for that device to return.
+    input_named_lost: bool,
+    /// Whether the live-input feedback warning has been shown this run.
+    pub(crate) input_warned: bool,
     /// The device playing now, when one is.
     pub playing: Option<Playing>,
     /// The window, while it is open, with the device lists read when it
@@ -119,6 +150,7 @@ pub struct LostAudio {
 /// The device lists the window shows.
 pub struct Window {
     outputs: Result<Outputs, String>,
+    inputs: Result<devices::Inputs, String>,
     midi: Result<Vec<String>, String>,
 }
 
@@ -126,6 +158,7 @@ impl Window {
     fn read(host: &dyn Host) -> Self {
         Self {
             outputs: host.outputs(),
+            inputs: host.audio_inputs(),
             midi: host.midi_inputs(),
         }
     }
@@ -140,6 +173,12 @@ impl Rig {
             safety_flag,
             midi_in: None,
             ports: Vec::new(),
+            input: None,
+            input_tracker: None,
+            input_attempted: None,
+            input_error_reported: false,
+            input_named_lost: false,
+            input_warned: false,
             playing: None,
             window: None,
             safety_pending: None,
@@ -209,10 +248,42 @@ impl Rig {
         None
     }
 
+    /// The input that would be used for this run, without opening a stream.
+    fn effective_input<'a>(&'a self, inputs: &'a devices::Inputs) -> Option<&'a str> {
+        if self.flags.no_input {
+            return None;
+        }
+        if let Some(input) = self.input.as_ref().filter(|input| input.is_live()) {
+            return Some(input.name());
+        }
+        if let Some(wanted) = &self.flags.input {
+            let wanted = wanted.to_lowercase();
+            return inputs
+                .devices
+                .iter()
+                .find(|name| name.to_lowercase().contains(&wanted))
+                .map(String::as_str);
+        }
+        match &self.store.saved().audio.input {
+            InputChoice::Off => None,
+            InputChoice::SystemDefault => inputs.default.as_deref(),
+            InputChoice::Named(name) if inputs.devices.contains(name) => Some(name),
+            InputChoice::Named(_) if self.input_named_lost => None,
+            InputChoice::Named(_) => inputs.default.as_deref(),
+        }
+    }
+
     /// The audio choice the window shows: the saved one, with the flags for
     /// this run on top.
     pub fn shown_audio(&self) -> AudioPrefs {
         let mut audio = self.store.saved().audio.clone();
+        if self.flags.no_input {
+            audio.input = InputChoice::Off;
+        } else if self.flags.input.is_some()
+            && let Some(input) = &self.input
+        {
+            audio.input = InputChoice::Named(input.name().to_string());
+        }
         if self.flags.device.is_some()
             && let Some(playing) = &self.playing
         {
@@ -286,6 +357,7 @@ impl App {
             Message::Safety(mode) => self.choose_output_safety(mode),
             Message::Activity(on) => self.choose_activity(on),
             Message::Audio(change) => self.change_audio(change),
+            Message::Input(choice) => self.choose_audio_input(choice),
             Message::Midi(name, on) => self.set_midi_input(&name, on),
             Message::PanicLearn => self.learn_panic(),
             Message::PanicClear => self.set_panic_pref(None),
@@ -451,6 +523,162 @@ impl App {
             self.rig.safety_pending = None;
             #[cfg(test)]
             self.rig.sent.push(mode);
+        }
+    }
+
+    /// Keeps the input stream in step with the patch and the current output.
+    pub(crate) fn sync_audio_input(&mut self) {
+        let needed = self._audio.is_some()
+            && !self.fake_audio
+            && !self.rig.flags.no_input
+            && (self.rig.flags.input.is_some() || !matches!(self.rig.store.saved().audio.input, InputChoice::Off))
+            && self
+                .controller
+                .graph()
+                .nodes()
+                .any(|(_, node)| node.descriptor.id == "loom.io.audio-in");
+        if !needed {
+            if self.rig.input.take().is_some() {
+                let _ = self.controller.set_audio_input(None);
+            }
+            self.input_alert = None;
+            self.rig.input_tracker = None;
+            self.rig.input_attempted = None;
+            self.rig.input_named_lost = false;
+            return;
+        }
+        if self.rig.host.audio_input_permission_denied() {
+            if self.rig.input.take().is_some() {
+                let _ = self.controller.set_audio_input(None);
+            }
+            self.rig.input_tracker = None;
+            self.input_alert = None;
+            if !self.rig.input_error_reported {
+                self.status = input_error_message("microphone permission denied");
+                self.rig.input_error_reported = true;
+            }
+            return;
+        }
+        if self.rig.input.as_ref().is_some_and(|input| input.is_live()) {
+            let live = self.controller.graph().nodes().any(|(id, node)| {
+                node.descriptor.id == "loom.io.audio-in"
+                    && node
+                        .params
+                        .get(2)
+                        .is_some_and(|&mute| self.controller.modulated(id, 2).unwrap_or(mute) < 0.5)
+                    && self.controller.display(id, 0).is_some_and(|active| active >= 0.5)
+            });
+            if live && !self.rig.input_warned {
+                self.status = "Audio input is live. Use headphones, or keep the gain low, to avoid feedback.".into();
+                self.rig.input_warned = true;
+            }
+            return;
+        }
+        if let Some(input) = self.rig.input.take() {
+            let name = input.name().to_string();
+            drop(input);
+            self.rig.input_tracker = None;
+            self.input_alert = None;
+            let _ = self.controller.set_audio_input(None);
+            self.rig.input_attempted = None;
+            self.rig.input_named_lost =
+                self.rig.flags.input.is_some() || matches!(self.rig.store.saved().audio.input, InputChoice::Named(_));
+            if !self.rig.input_error_reported {
+                self.status = format!("Audio input: \"{name}\" was lost. Trying to reopen it.");
+                self.rig.input_error_reported = true;
+            }
+        }
+        let now = Instant::now();
+        if self
+            .rig
+            .input_attempted
+            .is_some_and(|at| now.duration_since(at) < Duration::from_secs(1))
+        {
+            return;
+        }
+        // With the output's default buffer, wait for its first callback so
+        // the ring is sized for the actual device rather than max_block.
+        let buffer = self
+            .rig
+            .playing
+            .as_ref()
+            .and_then(|playing| playing.buffer)
+            .or_else(|| {
+                self.audio_stats
+                    .as_ref()
+                    .map(|stats| stats.snapshot().largest_buffer)
+                    .filter(|&frames| frames > 0)
+                    .and_then(|frames| u32::try_from(frames).ok())
+            });
+        let Some(buffer) = buffer else { return };
+        self.rig.input_attempted = Some(now);
+        let mut options = loom_host_desktop::AudioOptions {
+            sample_rate: Some(self.sample_rate as u32),
+            buffer_size: Some(buffer),
+            ..Default::default()
+        };
+        let mut fallback = None;
+        if let Some(wanted) = &self.rig.flags.input {
+            options.device = Some(wanted.clone());
+        } else if let InputChoice::Named(name) = &self.rig.store.saved().audio.input {
+            if !self
+                .rig
+                .host
+                .audio_inputs()
+                .is_ok_and(|inputs| !inputs.devices.contains(name))
+            {
+                options.device = Some(name.clone());
+                options.exact = true;
+            } else {
+                if self.rig.input_named_lost {
+                    return;
+                }
+                fallback = Some(name.clone());
+            }
+        }
+        match self.rig.host.open_audio_input(&options, buffer as usize) {
+            Ok((port, reader)) => match self.controller.set_audio_input(Some(reader)) {
+                Ok(()) => {
+                    let stats = self.controller.stats();
+                    let counts = (
+                        stats.input_underruns.load(std::sync::atomic::Ordering::Relaxed),
+                        stats.input_overruns.load(std::sync::atomic::Ordering::Relaxed),
+                    );
+                    self.rig.input_tracker = Some(std::sync::Arc::new(crate::input_watch::Tracker::new(counts)));
+                    self.rig.input = Some(port);
+                    self.rig.input_named_lost = false;
+                    if let Some(name) = fallback {
+                        self.status = format!("Audio input: \"{name}\" is not available. Using the system default.");
+                    }
+                }
+                Err(error) => self.status = format!("Audio input: {error}."),
+            },
+            Err(error) if !self.rig.input_error_reported => {
+                self.status = input_error_message(&error);
+                self.rig.input_error_reported = true;
+            }
+            Err(_) => {}
+        }
+    }
+
+    /// Changes the input without restarting the output stream.
+    fn choose_audio_input(&mut self, choice: InputChoice) {
+        self.input_alert = None;
+        self.rig.input_tracker = None;
+        self.rig.flags.input = None;
+        self.rig.flags.no_input = false;
+        let mut preferences = self.rig.store.saved().clone();
+        preferences.audio.input = choice;
+        let error = self.rig.save(preferences);
+        if self.rig.input.take().is_some() {
+            let _ = self.controller.set_audio_input(None);
+        }
+        self.rig.input_attempted = None;
+        self.rig.input_error_reported = false;
+        self.rig.input_named_lost = false;
+        self.sync_audio_input();
+        if let Some(error) = error {
+            self.status = error;
         }
     }
 
@@ -736,9 +964,13 @@ impl App {
     /// Stops audio immediately without fading out. Used when the audio device
     /// was lost or disconnected (device-changes.md, Audio device loss).
     pub(crate) fn stop_audio_immediate(&mut self) {
+        self.input_alert = None;
         if let Some(audio) = self._audio.take() {
             audio.stop_immediate();
         }
+        self.rig.input.take();
+        self.rig.input_tracker = None;
+        self.rig.input_attempted = None;
         self.audio_stats = None;
         self.load_peak = 0.0;
         self.load_max = 0.0;
@@ -823,6 +1055,7 @@ impl App {
     /// (device-changes.md, Audio device loss).
     pub(crate) fn poll_audio(&mut self) {
         self.check_audio(Instant::now());
+        self.sync_audio_input();
     }
 
     /// Checks for audio device loss, silent stalls, and device reconnection at `now`.
@@ -983,11 +1216,15 @@ impl App {
     /// stops after two more silent buffers, or at the stop limit (100 ms,
     /// longer for large buffers; output safety, rule 14). Used by Open, New, quit, and device changes.
     pub(crate) fn stop_audio(&mut self) {
+        self.input_alert = None;
         if let Some(audio) = self._audio.take() {
             // A full queue cannot fade: the limit then stops the stream.
             let _ = self.controller.fade_out();
             self.rig.last_stop = Some(audio.stop(STOP_LIMIT));
         }
+        self.rig.input.take();
+        self.rig.input_tracker = None;
+        self.rig.input_attempted = None;
         self.audio_stats = None;
         self.load_peak = 0.0;
         self.load_max = 0.0;
@@ -1319,6 +1556,65 @@ impl App {
                 }
             }
         }
+        match &window.inputs {
+            Err(error) => section = section.push(note(format!("Could not list the audio inputs: {error}"))),
+            Ok(inputs) => {
+                let choices: Vec<Item<InputChoice>> = std::iter::once(Item {
+                    value: InputChoice::SystemDefault,
+                    label: format!("System default ({})", inputs.default.as_deref().unwrap_or("none")),
+                })
+                .chain(inputs.devices.iter().map(|name| Item {
+                    value: InputChoice::Named(name.clone()),
+                    label: name.clone(),
+                }))
+                .chain(std::iter::once(Item {
+                    value: InputChoice::Off,
+                    label: "Off".into(),
+                }))
+                .collect();
+                let selected = if self.rig.flags.no_input {
+                    Item::find(&choices, &InputChoice::Off)
+                } else if self.rig.flags.input.is_some() {
+                    self.rig
+                        .effective_input(inputs)
+                        .and_then(|name| Item::find(&choices, &InputChoice::Named(name.to_string())))
+                } else {
+                    Item::find(&choices, &shown.input)
+                };
+                section = section.push(labelled(
+                    "Audio input",
+                    pick_list(choices, selected, |item: Item<InputChoice>| {
+                        crate::Message::Preferences(Message::Input(item.value))
+                    })
+                    .text_size(13)
+                    .width(Length::Fill)
+                    .into(),
+                ));
+                if self.rig.flags.input.is_some() || self.rig.flags.no_input {
+                    section = section.push(note("Set by an input flag for this run.".into()));
+                }
+                if let (Some(input), Some(output)) = (self.rig.effective_input(inputs), &self.rig.playing) {
+                    if input == output.device {
+                        section = section.push(note(
+                            "Input and output use the same device. Speakers can feed the microphone.".into(),
+                        ));
+                    }
+                    let buffer = output.buffer.or_else(|| {
+                        self.audio_stats
+                            .as_ref()
+                            .map(|stats| stats.snapshot().largest_buffer)
+                            .filter(|&frames| frames > 0)
+                            .and_then(|frames| u32::try_from(frames).ok())
+                    });
+                    if let Some(buffer) = buffer {
+                        section = section.push(note(format!(
+                            "Input latency about {}. The patch adds no delay of its own.",
+                            devices::buffer_time(buffer.saturating_mul(2), output.rate)
+                        )));
+                    }
+                }
+            }
+        }
         section.push(note(self.playing_line())).into()
     }
 
@@ -1452,6 +1748,476 @@ mod tests {
     fn change(app: &mut App, change: Change) {
         app.preferences(Message::Open);
         app.preferences(Message::Audio(change));
+    }
+
+    /// Input opens only when the patch needs it and closes with the last module.
+    #[test]
+    fn audio_input_follows_module_lifecycle() {
+        let dir = folder("audio-input-lifecycle");
+        let fake = two_devices();
+        *fake.audio_inputs.borrow_mut() = devices::Inputs {
+            default: Some("Microphone".into()),
+            devices: vec!["Microphone".into()],
+        };
+        let mut app = start(args(&dir), &fake);
+        assert_eq!(fake.input_opens.get(), 0);
+        let first = app.controller.add_module("loom.io.audio-in").unwrap();
+        assert!(app.commit());
+        assert_eq!(fake.input_opens.get(), 1);
+        let tracker = app.rig.input_tracker.as_ref().unwrap().clone();
+        let second = app.controller.add_module("loom.io.audio-in").unwrap();
+        assert!(app.commit());
+        assert_eq!(fake.input_opens.get(), 1);
+        assert!(std::sync::Arc::ptr_eq(
+            &tracker,
+            app.rig.input_tracker.as_ref().unwrap()
+        ));
+        app.controller.remove_module(first).unwrap();
+        assert!(app.commit());
+        assert_eq!(fake.input_closes.get(), 0);
+        app.controller.remove_module(second).unwrap();
+        assert!(app.commit());
+        assert_eq!(fake.input_closes.get(), 1);
+        assert!(fake.input_writer.borrow().is_none());
+        assert!(app.rig.input_tracker.is_none());
+    }
+
+    /// A refused input leaves output playing and reports a useful error once.
+    #[test]
+    fn denied_audio_input_does_not_stop_the_patch() {
+        let dir = folder("audio-input-denied");
+        let fake = two_devices();
+        *fake.input_error.borrow_mut() = Some("permission denied".into());
+        let mut app = start(args(&dir), &fake);
+        app.controller.add_module("loom.io.audio-in").unwrap();
+        assert!(app.commit());
+        assert!(app._audio.is_some());
+        assert!(app.status.contains("microphone was denied"));
+        app.status = "other status".into();
+        app.rig.input_attempted = None;
+        app.sync_audio_input();
+        assert_eq!(app.status, "other status");
+    }
+
+    /// A permission denied after opening silences input and reports the cause.
+    #[test]
+    fn permission_denied_after_input_opens_is_reported() {
+        let dir = folder("audio-input-late-denial");
+        let fake = two_devices();
+        *fake.audio_inputs.borrow_mut() = devices::Inputs {
+            default: Some("Mic".into()),
+            devices: vec!["Mic".into()],
+        };
+        let mut app = start(args(&dir), &fake);
+        app.controller.add_module("loom.io.audio-in").unwrap();
+        assert!(app.commit());
+        assert!(app.rig.input.is_some());
+        fake.input_permission_denied.set(true);
+        app.sync_audio_input();
+        assert!(app.rig.input.is_none());
+        assert!(app._audio.is_some());
+        assert!(app.status.contains("microphone was denied"));
+        app.status = "other status".into();
+        app.sync_audio_input();
+        assert_eq!(app.status, "other status");
+        assert_eq!(fake.input_closes.get(), 1);
+    }
+
+    /// Missing or denied input stays silent while the rest of the patch plays.
+    #[test]
+    fn unavailable_input_keeps_other_audio_playing() {
+        for denied in [false, true] {
+            let dir = folder(if denied {
+                "audio-input-denied-sound"
+            } else {
+                "audio-input-missing-sound"
+            });
+            let tape = loom_host_desktop::Tape::new();
+            let fake = Rc::new(Fake {
+                tape: Some(tape.clone()),
+                ..Fake::new(&[fake::device("Fake A")], &[])
+            });
+            if denied {
+                *fake.input_error.borrow_mut() = Some("permission denied".into());
+            }
+            let mut options = args(&dir);
+            options.output_safety = Some(OutputSafety::Off);
+            let mut app = start(options, &fake);
+            let input = app.controller.add_module("loom.io.audio-in").unwrap();
+            let output = app.controller.add_module("loom.io.audio-out").unwrap();
+            let constant = app.controller.add_module("loom.math.constant").unwrap();
+            let other_output = app.controller.add_module("loom.io.audio-out").unwrap();
+            app.controller.set_param_named(constant, "value", 0.2).unwrap();
+            app.controller.connect_named(input, "out", output, "in").unwrap();
+            app.controller
+                .connect_named(constant, "out", other_output, "in")
+                .unwrap();
+            assert!(app.commit());
+            assert!(app._audio.is_some());
+            assert!(app.rig.input.is_none());
+            assert!(app.status.contains(if denied {
+                "microphone was denied"
+            } else {
+                "no audio input"
+            }));
+            tape.step(1024);
+            assert_eq!(app.controller.display(input, 0), Some(0.0));
+            assert_eq!(tape.left()[1023], 0.2);
+            assert_eq!(tape.right()[1023], 0.2);
+            app.status = "other status".into();
+            app.rig.input_attempted = None;
+            app.sync_audio_input();
+            assert_eq!(app.status, "other status");
+        }
+    }
+
+    /// A failed input is replaced after the device can be opened again.
+    #[test]
+    fn failed_audio_input_reopens() {
+        let dir = folder("audio-input-reopen");
+        let fake = two_devices();
+        *fake.audio_inputs.borrow_mut() = devices::Inputs {
+            default: Some("Microphone".into()),
+            devices: vec!["Microphone".into()],
+        };
+        let mut app = start(args(&dir), &fake);
+        app.controller.add_module("loom.io.audio-in").unwrap();
+        assert!(app.commit());
+        fake.input_writer.borrow().as_ref().unwrap().status().fail();
+        let _ = app.update(crate::Message::InputAudio(crate::input_watch::Event {
+            underruns: 0,
+            overruns: 0,
+            show: false,
+            failed: true,
+            ready: false,
+        }));
+        assert_eq!(fake.input_closes.get(), 1);
+        assert_eq!(fake.input_opens.get(), 2);
+        assert!(app.rig.input.as_ref().unwrap().is_live());
+    }
+
+    /// A lost named input stays silent until that same device returns.
+    #[test]
+    fn named_audio_input_waits_for_its_return() {
+        let dir = folder("audio-input-named-loss");
+        write(&dir, "(audio: (input: Named(\"Microphone\")))");
+        let fake = two_devices();
+        *fake.audio_inputs.borrow_mut() = devices::Inputs {
+            default: Some("Microphone".into()),
+            devices: vec!["Microphone".into(), "Other".into()],
+        };
+        let mut app = start(args(&dir), &fake);
+        app.controller.add_module("loom.io.audio-in").unwrap();
+        assert!(app.commit());
+        *fake.audio_inputs.borrow_mut() = devices::Inputs {
+            default: Some("Other".into()),
+            devices: vec!["Other".into()],
+        };
+        fake.input_writer.borrow().as_ref().unwrap().status().fail();
+        app.sync_audio_input();
+        assert!(app.rig.input.is_none());
+        assert_eq!(fake.input_opens.get(), 1);
+        fake.audio_inputs.borrow_mut().devices.push("Microphone".into());
+        app.rig.input_attempted = None;
+        app.sync_audio_input();
+        assert_eq!(app.rig.input.as_ref().unwrap().name(), "Microphone");
+        assert_eq!(fake.input_opens.get(), 2);
+    }
+
+    /// A missing saved input falls back without changing the saved choice.
+    #[test]
+    fn missing_saved_input_falls_back_without_saving() {
+        let dir = folder("audio-input-fallback");
+        write(&dir, "(audio: (input: Named(\"Missing\")))");
+        let fake = two_devices();
+        *fake.audio_inputs.borrow_mut() = devices::Inputs {
+            default: Some("Microphone".into()),
+            devices: vec!["Microphone".into()],
+        };
+        let mut app = start(args(&dir), &fake);
+        app.controller.add_module("loom.io.audio-in").unwrap();
+        assert!(app.commit());
+        assert_eq!(app.rig.input.as_ref().unwrap().name(), "Microphone");
+        assert_eq!(app.rig.store.saved().audio.input, InputChoice::Named("Missing".into()));
+        assert!(app.status.contains("system default"));
+    }
+
+    /// Input flags apply for one run and do not replace the saved choice.
+    #[test]
+    fn audio_input_flags_do_not_change_saved_choice() {
+        for disabled in [false, true] {
+            let dir = folder(if disabled {
+                "audio-input-flag-off"
+            } else {
+                "audio-input-flag-name"
+            });
+            let path = write(&dir, "(audio: (input: Named(\"Saved\")))");
+            let fake = two_devices();
+            *fake.audio_inputs.borrow_mut() = devices::Inputs {
+                default: Some("Saved".into()),
+                devices: vec!["Saved".into(), "Chosen input".into()],
+            };
+            let mut options = args(&dir);
+            if disabled {
+                options.devices.no_input = true;
+            } else {
+                options.devices.input = Some("chosen".into());
+            }
+            let mut app = start(options, &fake);
+            app.controller.add_module("loom.io.audio-in").unwrap();
+            assert!(app.commit());
+            if disabled {
+                assert!(app.rig.input.is_none());
+                assert_eq!(fake.input_opens.get(), 0);
+            } else {
+                assert_eq!(app.rig.input.as_ref().unwrap().name(), "Chosen input");
+            }
+            assert_eq!(app.rig.store.saved().audio.input, InputChoice::Named("Saved".into()));
+            app.preferences(Message::Safety(OutputSafety::Off));
+            let saved = std::fs::read_to_string(path).unwrap();
+            assert!(saved.contains("Saved"));
+            assert!(!saved.contains("Chosen input"));
+        }
+    }
+
+    /// A fake input uses the same ring as a real stream and reaches the output.
+    #[test]
+    fn audio_input_plays_through_the_fake_host() {
+        let dir = folder("audio-input-tape");
+        let tape = loom_host_desktop::Tape::new();
+        let fake = Rc::new(Fake {
+            tape: Some(tape.clone()),
+            ..Fake::new(&[fake::device("Fake A")], &[])
+        });
+        *fake.audio_inputs.borrow_mut() = devices::Inputs {
+            default: Some("Microphone".into()),
+            devices: vec!["Microphone".into()],
+        };
+        let mut options = args(&dir);
+        options.output_safety = Some(OutputSafety::Off);
+        let mut app = start(options, &fake);
+        let input = app.controller.add_module("loom.io.audio-in").unwrap();
+        let output = app.controller.add_module("loom.io.audio-out").unwrap();
+        app.controller.connect_named(input, "out", output, "in").unwrap();
+        assert!(app.commit());
+        {
+            let mut writer = fake.input_writer.borrow_mut();
+            for _ in 0..256 {
+                assert!(writer.as_mut().unwrap().push([0.0; 8]));
+            }
+        }
+        tape.step(256);
+        let _ = app.update(crate::Message::InputAudio(crate::input_watch::Event {
+            underruns: 0,
+            overruns: 0,
+            show: false,
+            failed: false,
+            ready: true,
+        }));
+        assert!(!app.rig.input_warned, "silent input is not live sound");
+        for _ in 0..4 {
+            {
+                let mut writer = fake.input_writer.borrow_mut();
+                let writer = writer.as_mut().unwrap();
+                for _ in 0..256 {
+                    let mut frame = [0.0; 8];
+                    frame[0] = 0.25;
+                    frame[1] = -0.25;
+                    assert!(writer.push(frame));
+                }
+            }
+            tape.step(256);
+        }
+        assert_eq!(tape.left()[1023], 0.25);
+        assert_eq!(tape.right()[1023], -0.25);
+        let _ = app.update(crate::Message::InputAudio(crate::input_watch::Event {
+            underruns: 0,
+            overruns: 0,
+            show: false,
+            failed: false,
+            ready: true,
+        }));
+        assert!(app.status.contains("avoid feedback"));
+        app.status = "other status".into();
+        let _ = app.update(crate::Message::InputAudio(crate::input_watch::Event {
+            underruns: 0,
+            overruns: 0,
+            show: false,
+            failed: false,
+            ready: true,
+        }));
+        assert_eq!(app.status, "other status", "the warning is shown once per run");
+    }
+
+    /// A fake host supplies a recorded stereo input identically at each block size.
+    #[test]
+    fn fake_host_recorded_input_is_block_invariant() {
+        fn render(block: usize) -> [Vec<f32>; 2] {
+            let fake = two_devices();
+            *fake.audio_inputs.borrow_mut() = devices::Inputs {
+                default: Some("Microphone".into()),
+                devices: vec!["Microphone".into()],
+            };
+            let host = fake::Shared(fake.clone());
+            let (_port, reader) = host
+                .open_audio_input(&loom_host_desktop::AudioOptions::default(), 1024)
+                .unwrap();
+            {
+                let mut writer = fake.input_writer.borrow_mut();
+                for n in 0..1024 {
+                    let mut frame = [0.0; 8];
+                    frame[0] = 0.1 + (n % 11) as f32 * 0.01;
+                    frame[1] = -0.2 + (n % 7) as f32 * 0.01;
+                    assert!(writer.as_mut().unwrap().push(frame));
+                }
+            }
+            let mut parts = create_engine(loom_modules::registry(), EngineConfig::default());
+            let controller = &mut parts.controller;
+            controller.set_audio_input(Some(reader)).unwrap();
+            let input = controller.add_module("loom.io.audio-in").unwrap();
+            let split = controller.add_module("loom.mix.split").unwrap();
+            controller.set_param_named(input, "gain", 2.0).unwrap();
+            controller.connect_named(input, "out", split, "in").unwrap();
+            let probes = ["left", "right"].map(|name| {
+                let output = controller.output_ref(split, name).unwrap();
+                controller.add_probe(output, loom_core::ProbeKind::Scope).unwrap()
+            });
+            controller.commit().unwrap();
+            let mut result = [Vec::new(), Vec::new()];
+            for (start, end, mute) in [(0, 320, 0.0), (320, 640, 1.0), (640, 960, 0.0)] {
+                parts.controller.set_param_named(input, "mute", mute).unwrap();
+                let mut position = start;
+                while position < end {
+                    let count = block.min(end - position);
+                    parts.engine.process(&mut vec![0.0; count], &mut vec![0.0; count]);
+                    for chunk in parts.telemetry.scope() {
+                        let channel = probes.iter().position(|&probe| probe == chunk.probe).unwrap();
+                        result[channel].extend_from_slice(chunk.samples());
+                    }
+                    position += count;
+                }
+            }
+            result
+        }
+        let one = render(1);
+        assert_eq!(one[0].len(), 960);
+        assert_eq!(one[1].len(), 960);
+        assert_eq!(one, render(77));
+        assert_eq!(one, render(512));
+        assert_eq!(one[0][0], 0.2);
+        assert_eq!(one[1][0], -0.4);
+        assert!(one[0][639].abs() < 0.005 && one[1][639].abs() < 0.005);
+        assert!(one[0][959] > 0.0 && one[1][959] < 0.0);
+    }
+
+    /// Preferences show the run-only input and feedback warning before opening it.
+    #[test]
+    fn preferences_show_input_flag_before_the_stream_opens() {
+        let dir = folder("audio-input-flag-preferences");
+        let fake = two_devices();
+        *fake.audio_inputs.borrow_mut() = devices::Inputs {
+            default: Some("Other input".into()),
+            devices: vec!["Other input".into(), "Fake A".into()],
+        };
+        let mut options = args(&dir);
+        options.devices.input = Some("fAkE a".into());
+        let mut app = start(options, &fake);
+        assert_eq!(fake.input_opens.get(), 0);
+        app.preferences(Message::Open);
+        let mut ui = crate::ui_test::Ui::with_app(app);
+        assert_eq!(ui.app.rig.effective_input(&fake.audio_inputs.borrow()), Some("Fake A"));
+        assert!(ui.text("Set by an input flag for this run.").is_some());
+        assert!(
+            ui.text("Input and output use the same device. Speakers can feed the microphone.")
+                .is_some()
+        );
+        assert!(
+            ui.text("Input latency about 10.7 ms. The patch adds no delay of its own.")
+                .is_some()
+        );
+        assert_eq!(
+            fake.input_opens.get(),
+            0,
+            "showing preferences never opens the microphone"
+        );
+        ui.app.preferences(Message::Input(InputChoice::Off));
+        assert!(
+            ui.text("Input and output use the same device. Speakers can feed the microphone.")
+                .is_none()
+        );
+        assert!(
+            ui.text("Input latency about 10.7 ms. The patch adds no delay of its own.")
+                .is_none()
+        );
+        assert_eq!(fake.input_opens.get(), 0);
+    }
+
+    /// The system-default input can show the warning before Audio In exists.
+    #[test]
+    fn preferences_show_default_input_feedback_warning_before_use() {
+        let dir = folder("audio-input-default-preferences");
+        let fake = two_devices();
+        *fake.audio_inputs.borrow_mut() = devices::Inputs {
+            default: Some("Fake A".into()),
+            devices: vec!["Fake A".into()],
+        };
+        let mut app = start(args(&dir), &fake);
+        app.preferences(Message::Open);
+        let mut ui = crate::ui_test::Ui::with_app(app);
+        assert!(
+            ui.text("Input and output use the same device. Speakers can feed the microphone.")
+                .is_some()
+        );
+        assert_eq!(fake.input_opens.get(), 0);
+    }
+
+    /// Preferences warn when input and output use the same device.
+    #[test]
+    fn same_audio_input_and_output_show_feedback_note() {
+        let dir = folder("audio-input-same-device");
+        let fake = two_devices();
+        *fake.audio_inputs.borrow_mut() = devices::Inputs {
+            default: Some("Fake A".into()),
+            devices: vec!["Fake A".into()],
+        };
+        let mut app = start(args(&dir), &fake);
+        app.controller.add_module("loom.io.audio-in").unwrap();
+        assert!(app.commit());
+        app.preferences(Message::Open);
+        let mut ui = crate::ui_test::Ui::with_app(app);
+        assert!(
+            ui.text("Input and output use the same device. Speakers can feed the microphone.")
+                .is_some()
+        );
+        assert!(
+            ui.text("Input latency about 10.7 ms. The patch adds no delay of its own.")
+                .is_some()
+        );
+    }
+
+    /// Disabling input persists and leaves the output running.
+    #[test]
+    fn audio_input_choice_is_saved_without_restarting_output() {
+        let dir = folder("audio-input-choice");
+        let fake = two_devices();
+        *fake.audio_inputs.borrow_mut() = devices::Inputs {
+            default: Some("Microphone".into()),
+            devices: vec!["Microphone".into()],
+        };
+        let mut app = start(args(&dir), &fake);
+        let module = app.controller.add_module("loom.io.audio-in").unwrap();
+        assert!(app.commit());
+        app.preferences(Message::Input(InputChoice::Off));
+        assert_eq!(fake.input_closes.get(), 1);
+        assert_eq!(app.rig.store.saved().audio.input, InputChoice::Off);
+        assert!(app._audio.is_some());
+        app.controller.remove_module(module).unwrap();
+        assert!(app.commit());
+        assert!(
+            std::fs::read_to_string(dir.join(FILE_NAME))
+                .unwrap()
+                .contains("input: Off")
+        );
     }
 
     #[test]

@@ -230,6 +230,7 @@ pub mod fake {
     thread_local! {
         static ASKED: RefCell<Vec<Asked>> = const { RefCell::new(Vec::new()) };
         static SAVE_ANSWER: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+        static DISCARD_ANSWER: RefCell<Choice> = const { RefCell::new(Choice::Cancel) };
         static EXAMPLES: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
     }
 
@@ -250,6 +251,11 @@ pub mod fake {
         SAVE_ANSWER.with(|answer| *answer.borrow_mut() = path);
     }
 
+    /// Answers the next unsaved-changes question, then returns to Cancel.
+    pub fn answer_discard(choice: Choice) {
+        DISCARD_ANSWER.with(|answer| *answer.borrow_mut() = choice);
+    }
+
     /// The dialogs asked on this thread so far, which are then forgotten.
     pub fn asked() -> Vec<Asked> {
         ASKED.with(|asked| std::mem::take(&mut *asked.borrow_mut()))
@@ -260,10 +266,10 @@ pub mod fake {
         Some(SAVE_ANSWER.with(|answer| answer.borrow().clone()))
     }
 
-    /// Answers Cancel, so a test that reaches the question loses nothing.
+    /// Answers the configured choice, defaulting to Cancel.
     pub(super) fn confirm_discard(name: &str) -> Option<Choice> {
         ASKED.with(|asked| asked.borrow_mut().push(Asked::Discard(name.to_string())));
-        Some(Choice::Cancel)
+        Some(DISCARD_ANSWER.with(|answer| answer.replace(Choice::Cancel)))
     }
 }
 
