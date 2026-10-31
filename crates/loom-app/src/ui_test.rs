@@ -797,6 +797,37 @@ mod tests {
         assert_eq!(env_depth(&ui), start);
     }
 
+    /// Cmd/Ctrl+0 resets zoom only when the pointer is over the canvas.
+    #[test]
+    fn cmd_zero_resets_zoom_only_over_the_canvas() {
+        let mut ui = Ui::open("subtractive.ron");
+        let canvas = ui.canvas();
+        let inside = Point::new(canvas.bounds.x + 8.0, canvas.bounds.y + 8.0);
+        ui.move_to(inside);
+        ui.step(&[Event::Mouse(mouse::Event::WheelScrolled {
+            delta: mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 },
+        })]);
+        assert_ne!(ui.canvas().camera.zoom, 1.0, "the wheel zoomed in");
+
+        ui.tap(keyboard::Key::Character("0".into()), keyboard::Modifiers::COMMAND);
+        assert_eq!(ui.canvas().camera.zoom, 1.0, "Cmd+0 resets zoom over the canvas");
+
+        let mut ui = Ui::open("subtractive.ron");
+        let canvas = ui.canvas();
+        let inside = Point::new(canvas.bounds.x + 8.0, canvas.bounds.y + 8.0);
+        ui.move_to(inside);
+        ui.step(&[Event::Mouse(mouse::Event::WheelScrolled {
+            delta: mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 },
+        })]);
+        let zoomed = ui.canvas().camera;
+        assert_ne!(zoomed.zoom, 1.0, "the wheel zoomed in");
+
+        let outside = Point::new(canvas.bounds.x + canvas.bounds.width + 8.0, canvas.bounds.y + 8.0);
+        ui.move_to(outside);
+        ui.tap(keyboard::Key::Character("0".into()), keyboard::Modifiers::COMMAND);
+        assert_eq!(ui.canvas().camera, zoomed, "Cmd+0 is ignored outside the canvas");
+    }
+
     /// Opening the module browser and closing it keeps the canvas's camera.
     /// Iced keeps widget state by place in the tree, and `App::view` always
     /// wraps the window in a `stack!` so the canvas keeps its place when the
