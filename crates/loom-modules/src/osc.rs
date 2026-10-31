@@ -449,7 +449,7 @@ impl Noise {
 
     /// Starts every stream again from `seed`.
     fn restart(&mut self, seed: u32) {
-        let seed = if self.channel == 0 { seed } else { seed ^ 0x9E37_79B9 };
+        let seed = if self.channel == 0 { seed } else { seed ^ 0x85EB_CA6B };
         self.state = seed.max(1);
         self.aux = (seed ^ 0x9E37_79B9).max(1);
         for row in 0..PINK_ROWS {
@@ -856,6 +856,29 @@ mod noise_colour_tests {
         assert_ne!(left, right);
         assert_eq!(right, run_copy(1, 1));
         assert_eq!(right, run_copy(1, 512));
+    }
+
+    /// The two channels do not reuse either random stream at a shifted offset.
+    #[test]
+    fn stereo_noise_streams_do_not_overlap() {
+        let mut left = Noise::new(RATE);
+        let mut right = Noise::new(RATE);
+        left.restart(42);
+        right.channel = 1;
+        right.restart(42);
+        let streams = [left.state, left.aux, right.state, right.aux].map(|mut state| {
+            (0..128)
+                .map(|_| {
+                    Noise::next_white(&mut state);
+                    state
+                })
+                .collect::<std::collections::HashSet<_>>()
+        });
+        for i in 0..streams.len() {
+            for j in i + 1..streams.len() {
+                assert!(streams[i].is_disjoint(&streams[j]), "streams {i} and {j} overlap");
+            }
+        }
     }
 
     fn rms(samples: &[f32]) -> f64 {

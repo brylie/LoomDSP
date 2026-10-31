@@ -401,9 +401,28 @@ impl Schedule {
             }
             if j < old.taps.len() && old.taps[j].key == tap.key {
                 tap.state = old.taps[j].state;
+            } else if tap.key & RIGHT_TAP != 0
+                && let Ok(i) = old
+                    .taps
+                    .binary_search_by_key(&(tap.key & !RIGHT_TAP), |old_tap| old_tap.key)
+            {
+                // A new right channel inherits the running mono delay.
+                tap.state = old.taps[i].state;
             } else if let Some(last) = frames.checked_sub(1)
                 && tap.source != NO_SOURCE
-                && let Ok(i) = old.sources.binary_search_by_key(&tap.source, |&(key, _)| key)
+                && let Some(i) = old
+                    .sources
+                    .binary_search_by_key(&tap.source, |&(key, _)| key)
+                    .ok()
+                    .or_else(|| {
+                        (tap.source & RIGHT_TAP != 0)
+                            .then(|| {
+                                old.sources
+                                    .binary_search_by_key(&(tap.source & !RIGHT_TAP), |&(key, _)| key)
+                                    .ok()
+                            })
+                            .flatten()
+                    })
             {
                 // SAFETY: every buffer in `sources` is `max_block` floats
                 // long and owned by `old`, which is alive here. The last
@@ -1568,6 +1587,39 @@ fn tarjan(succ: &[Vec<usize>]) -> Vec<Vec<usize>> {
 
 #[cfg(test)]
 mod tests {
+    /// A new right tap first inherits its mono tap, then its mono source.
+    #[test]
+    fn new_right_taps_inherit_mono_history() {
+        use super::{RIGHT_TAP, Schedule, Tap};
+        let source = [0.25, 0.75];
+        let tap = |key, source, state| Tap {
+            key,
+            source,
+            input: std::ptr::null(),
+            output: std::ptr::null_mut(),
+            state,
+        };
+        let mut old = Schedule::empty();
+        old.taps.push(tap(3, 8, 0.5));
+        old.sources.push((8, source.as_ptr()));
+        let mut next = Schedule::empty();
+        next.taps.push(tap(3 | RIGHT_TAP, 8 | RIGHT_TAP, 0.0));
+        next.taps.push(tap(4 | RIGHT_TAP, 8 | RIGHT_TAP, 0.0));
+        next.take_tap_state_from(&old, source.len());
+        assert_eq!(next.taps[0].state, 0.5);
+        assert_eq!(next.taps[1].state, 0.75);
+
+        // A matching right tap wins over the mono tap and mono source.
+        old.taps.push(tap(3 | RIGHT_TAP, 8 | RIGHT_TAP, -0.5));
+        next.take_tap_state_from(&old, source.len());
+        assert_eq!(next.taps[0].state, -0.5);
+
+        // A previously stereo source wins over its left channel for a new tap.
+        let right_source = [-0.25, -0.75];
+        old.sources.push((8 | RIGHT_TAP, right_source.as_ptr()));
+        next.take_tap_state_from(&old, source.len());
+        assert_eq!(next.taps[1].state, -0.75);
+    }
     use super::*;
 
     /// A port for test descriptors.
