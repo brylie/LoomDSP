@@ -382,6 +382,10 @@ fn check(path: &Path) -> Result<ExitCode> {
     let report = c.last_report();
     println!("{}: \"{}\"", path.display(), patch.name);
     println!("  {} modules, {} cables", report.modules, c.graph().cables().count());
+    if !report.skipped.is_empty() {
+        let names: Vec<String> = report.skipped.iter().map(|&id| describe(c, id)).collect();
+        println!("  not processed, no path to the output: {}", names.join(", "));
+    }
     for (module, param) in patch.transient_values(c.registry()) {
         println!("  note: module {module} saves `{param}`, a live control that is never saved; the value is ignored");
     }
@@ -390,11 +394,12 @@ fn check(path: &Path) -> Result<ExitCode> {
     }
     for (i, feedback) in report.loops.iter().enumerate() {
         let names: Vec<String> = feedback.modules.iter().map(|&id| describe(c, id)).collect();
-        println!(
-            "  feedback loop {} (runs one sample at a time): {}",
-            i + 1,
-            names.join(", ")
-        );
+        let status = if feedback.modules.iter().all(|id| report.skipped.contains(id)) {
+            "not processed"
+        } else {
+            "runs one sample at a time"
+        };
+        println!("  feedback loop {} ({status}): {}", i + 1, names.join(", "));
         if feedback.inserted_delays.is_empty() && feedback.inserted_assignment_delays.is_empty() {
             println!("    broken by your 1-sample delay module(s)");
         }

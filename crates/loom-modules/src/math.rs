@@ -85,11 +85,17 @@ pub static ADD: ModuleDescriptor = ModuleDescriptor {
     displays: &[],
 };
 
+#[derive(Clone)]
 struct Add {
     offset: Smoothed,
 }
 
 impl Module for Add {
+    /// Takes the running state of another instance (ADR-0022).
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let param = io.param(0);
         let ([a, b], [out]) = io.split::<2, 1>();
@@ -107,6 +113,12 @@ impl Module for Add {
 
     fn param_glide(&self, index: usize) -> Option<f32> {
         if index == 0 { self.offset.gliding() } else { None }
+    }
+
+    /// Snaps the offset to its target (live patching spec, rule 7).
+    fn reset(&mut self) {
+        let target = self.offset.target();
+        self.offset.reset(target);
     }
 }
 
@@ -167,11 +179,17 @@ pub static MUL: ModuleDescriptor = ModuleDescriptor {
     displays: &[],
 };
 
+#[derive(Clone)]
 struct Mul {
     gain: Smoothed,
 }
 
 impl Module for Mul {
+    /// Takes the running state of another instance (ADR-0022).
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let b_connected = io.is_connected(1);
         let param = io.param(0);
@@ -191,6 +209,12 @@ impl Module for Mul {
 
     fn param_glide(&self, index: usize) -> Option<f32> {
         if index == 0 { self.gain.gliding() } else { None }
+    }
+
+    /// Snaps the gain to its target (live patching spec, rule 7).
+    fn reset(&mut self) {
+        let target = self.gain.target();
+        self.gain.reset(target);
     }
 }
 
@@ -347,11 +371,17 @@ pub static CONSTANT: ModuleDescriptor = ModuleDescriptor {
     displays: &[],
 };
 
+#[derive(Clone)]
 struct Constant {
     value: Smoothed,
 }
 
 impl Module for Constant {
+    /// Takes the running state of another instance (ADR-0022).
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let param = io.param(0);
         let ([], [out]) = io.split::<0, 1>();
@@ -500,11 +530,17 @@ pub static PITCH_CONSTANT: ModuleDescriptor = ModuleDescriptor {
     displays: &[],
 };
 
+#[derive(Clone)]
 struct PitchConstant {
     semitones: Smoothed,
 }
 
 impl Module for PitchConstant {
+    /// Takes the running state of another instance (ADR-0022).
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let param = io.param(0);
         let ([], [out]) = io.split::<0, 1>();

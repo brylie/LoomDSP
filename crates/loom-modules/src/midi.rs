@@ -79,7 +79,7 @@ pub static NOTE_IN: ModuleDescriptor = ModuleDescriptor {
 
 const MAX_HELD: usize = 16;
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct NoteIn {
     held: [u8; MAX_HELD],
     held_len: usize,
@@ -139,6 +139,11 @@ impl NoteIn {
 }
 
 impl Module for NoteIn {
+    /// Takes the running state of another instance (ADR-0022).
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+
     fn process(&mut self, ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let channel = io.param(0);
         let bend_range = io.param(1);
@@ -263,6 +268,7 @@ pub static CONTROLLER_IN: ModuleDescriptor = ModuleDescriptor {
 };
 
 /// State for `loom.midi.controller`.
+#[derive(Clone)]
 struct ControllerIn {
     sample_rate: f32,
     /// The knob values. Modulated values count for one frame only.
@@ -342,6 +348,11 @@ impl ControllerIn {
 }
 
 impl Module for ControllerIn {
+    /// Takes the running state of another instance (ADR-0022).
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+
     fn process(&mut self, ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let source = io.param(0);
         let controller = io.param(1);

@@ -6,7 +6,23 @@
 
 use crate::midi::MidiEvent;
 use crate::transport::TransportInfo;
+use std::any::Any;
 use std::marker::PhantomData;
+
+/// Gives every module an [`Any`] view of itself, so
+/// [`Module::copy_state_from`] can check the other module's type. A blanket
+/// implementation covers every type, so no module writes it.
+pub trait AsAny {
+    /// This value as [`Any`]. Call it on a `&dyn Module`, not on a
+    /// `Box<dyn Module>`: on the box it returns the box itself.
+    fn as_any(&self) -> &dyn Any;
+}
+
+impl<T: Any> AsAny for T {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
 
 /// A DSP module instance.
 ///
@@ -15,7 +31,7 @@ use std::marker::PhantomData;
 /// 1 to the configured maximum block size. Inside feedback loops it is called
 /// one frame at a time (ADR-0002), so results must not depend on how frames
 /// are grouped into calls.
-pub trait Module: Send {
+pub trait Module: Send + AsAny {
     /// Processes `io.frames()` frames.
     fn process(&mut self, ctx: &ProcessContext<'_>, io: &mut PortIo<'_>);
 
@@ -39,8 +55,30 @@ pub trait Module: Send {
         None
     }
 
-    /// Clears internal state (envelopes, filter memory, oscillator phase).
+    /// Clears internal state (envelopes, filter memory, oscillator phase)
+    /// and snaps parameter smoothing to its targets. The `Controller` calls
+    /// it once after a new module's first values are set, so the module
+    /// starts at them with no glide (live patching spec, rule 7).
     fn reset(&mut self) {}
+
+    /// Takes the running state of `other`, a module of the same type, so
+    /// this one continues exactly where `other` is: filter memory, phase,
+    /// envelope stage, parameter smoothing, and buffers. Returns `true` if
+    /// it did, and `false` when `other` is another type or the module has
+    /// no state to copy (the default). The engine calls it when a module
+    /// turns stereo, so the new right-side copy joins the running left one
+    /// (ADR-0022, stereo spec rules 25 to 27).
+    ///
+    /// It runs on the audio thread, so the rules for `process` apply: no
+    /// allocation, no locks. Copy buffers into the ones this module already
+    /// has; both were built with the same `ModuleConfig`. A module with a
+    /// random generator copies everything else and starts its generator
+    /// again from its seed, as `reset` does (rule 27). For a module whose
+    /// fields are all plain values, [`copy_state`] does the work.
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        let _ = other;
+        false
+    }
 
     /// Writes the module's display values, one per name in its
     /// descriptor's `displays`, for lights on its panel (ADR-0013). The
@@ -62,6 +100,22 @@ pub trait Module: Send {
     fn transport_request(&mut self, grid: bool, run_cable: bool) -> crate::TransportRequest {
         let _ = (grid, run_cable);
         crate::TransportRequest::default()
+    }
+}
+
+/// Copies `other` into `this` when it is a `T`, for
+/// [`Module::copy_state_from`]. Returns whether it did.
+///
+/// Use it only for a module whose `Clone::clone_from` does not allocate:
+/// one whose fields are plain values, arrays, and smoothers, with no `Vec`
+/// or `Box`. The `no_alloc` tests check every built-in module.
+pub fn copy_state<T: Module + Clone + 'static>(this: &mut T, other: &dyn Module) -> bool {
+    match other.as_any().downcast_ref::<T>() {
+        Some(other) => {
+            this.clone_from(other);
+            true
+        }
+        None => false,
     }
 }
 

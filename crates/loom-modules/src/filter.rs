@@ -104,6 +104,7 @@ pub static SVF: ModuleDescriptor = ModuleDescriptor {
     displays: &[],
 };
 
+#[derive(Clone)]
 struct Svf {
     sample_rate: f32,
     cutoff: Smoothed,
@@ -132,6 +133,11 @@ impl Svf {
 }
 
 impl Module for Svf {
+    /// Takes the running state of another instance (ADR-0022).
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let cutoff_param = io.param(0);
         let resonance_param = io.param(1);
@@ -190,9 +196,14 @@ impl Module for Svf {
         }
     }
 
+    /// Clears the filter memory and snaps the smoothing to its targets
+    /// (live patching spec, rule 7).
     fn reset(&mut self) {
         self.ic1 = 0.0;
         self.ic2 = 0.0;
+        let (cutoff, resonance) = (self.cutoff.target(), self.resonance.target());
+        self.cutoff.reset(cutoff);
+        self.resonance.reset(resonance);
     }
 }
 
@@ -262,6 +273,7 @@ pub static ONEPOLE: ModuleDescriptor = ModuleDescriptor {
 };
 
 /// State for `loom.filter.onepole`: the smoothed cutoff and the integrator.
+#[derive(Clone)]
 struct OnePole {
     sample_rate: f32,
     /// The cutoff in pitch units, smoothed over 10 ms.
@@ -287,6 +299,11 @@ impl OnePole {
 }
 
 impl Module for OnePole {
+    /// Takes the running state of another instance (ADR-0022).
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let cutoff_param = io.param(0);
         let ([input, cutoff_mod], [lp, hp]) = io.split::<2, 2>();
@@ -327,8 +344,12 @@ impl Module for OnePole {
         }
     }
 
+    /// Clears the integrator and snaps the cutoff to its target (live
+    /// patching spec, rule 7).
     fn reset(&mut self) {
         self.state = 0.0;
+        let cutoff = self.cutoff.target();
+        self.cutoff.reset(cutoff);
     }
 }
 
@@ -466,6 +487,7 @@ const LADDER_LIMIT_RAMP: f32 = (8.4 - 4.2) / 0.01;
 const LADDER_MAX_DRIVE: f32 = 8.0;
 
 /// State for `loom.filter.ladder`.
+#[derive(Clone)]
 struct Ladder {
     sample_rate: f32,
     /// The cutoff in pitch units, smoothed over 10 ms.
@@ -620,6 +642,11 @@ impl Ladder {
 }
 
 impl Module for Ladder {
+    /// Takes the running state of another instance (ADR-0022).
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let cutoff_param = io.param(0);
         let resonance_param = io.param(1);

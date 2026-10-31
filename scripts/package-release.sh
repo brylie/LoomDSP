@@ -78,6 +78,9 @@ If it does not start, run: chmod +x loom-app"
 esac
 
 cp -R examples "$stage/examples"
+# The app can be translocated away from this folder on macOS. The marker
+# identifies these patches as bundled examples when the player opens one.
+: > "$stage/examples/patches/.loomdsp-bundled-examples"
 cp LICENSE "$stage/LICENSE"
 
 cat > "$stage/README.txt" <<TEXT

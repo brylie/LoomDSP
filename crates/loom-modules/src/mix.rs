@@ -116,6 +116,7 @@ pub static MIXER: ModuleDescriptor = ModuleDescriptor {
     displays: &[],
 };
 
+#[derive(Clone)]
 struct Mixer {
     levels: [Smoothed; MIXER_INPUTS],
     /// 1 while the input is open and 0 while it is muted, so a mute fades.
@@ -145,6 +146,11 @@ impl Mixer {
 }
 
 impl Module for Mixer {
+    /// Takes the running state of another instance (ADR-0022).
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let modulated: [Param<'_>; MIXER_INPUTS] = std::array::from_fn(|n| io.param(n));
         let mute_mod: [Param<'_>; MIXER_INPUTS] = std::array::from_fn(|n| io.param(MIXER_INPUTS + n));
@@ -262,12 +268,18 @@ pub static CROSSFADE: ModuleDescriptor = ModuleDescriptor {
     displays: &[],
 };
 
+#[derive(Clone)]
 struct Crossfade {
     mix: Smoothed,
     linear: bool,
 }
 
 impl Module for Crossfade {
+    /// Takes the running state of another instance (ADR-0022).
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let (modulated, law_mod) = (io.param(0), io.param(1));
         let ([a, b], [out]) = io.split::<2, 1>();

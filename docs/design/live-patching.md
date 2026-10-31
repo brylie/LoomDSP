@@ -3,13 +3,13 @@
 What carries over when the player edits a patch while it plays, so a new cable joins the running sound with no cold start, click, or gap.
 
 - **Kind:** living specification.
-- **Status:** Rules 1 to 5 Implemented. Rule 7 Agreed ([#230](https://github.com/brylie/LoomDSP/issues/230)). Rule 6 Agreed, from the research in [#203](https://github.com/brylie/LoomDSP/issues/203), and built with stereo copies (#23).
+- **Status:** Rules 1 to 5, 7 ([#230](https://github.com/brylie/LoomDSP/issues/230)), and 8 Implemented. Rule 6 Agreed, from the research in [#203](https://github.com/brylie/LoomDSP/issues/203), and built with stereo copies (#23).
 - **Decision behind it:** [ADR-0002](../adr/0002-graph-execution-and-feedback.md) (schedules and inserted delays), [ADR-0022](../adr/0022-copies-take-state-from-the-running-instance.md) (state of channel copies).
-- **Use case and requirements:** FR-GRAPH-01, FR-GRAPH-02, FR-GRAPH-03, FR-SIG-07, NFR-RT-01, NFR-RT-05, NFR-SND-02
+- **Use case and requirements:** FR-GRAPH-01, FR-GRAPH-02, FR-GRAPH-03, FR-GRAPH-09, FR-SIG-07, NFR-RT-01, NFR-RT-05, NFR-SND-02
 - **Background:** [Hot patching](../learn/hot-patching.md): why a new path clicks, and why a crossfade does not fix it. See also [Feedback loops and the unit delay](../learn/feedback-loops.md).
 - **Prior art:** in Eurorack, every module runs all the time, and a cable only connects what is already running. VCV Rack behaves the same way. Named only to explain the expectation.
-- **Issues:** #203, #23, [#230](https://github.com/brylie/LoomDSP/issues/230)
-- **Code:** `crates/loom-core/src/compile.rs` (`Schedule::take_tap_state_from`, `Schedule::sources`, `take_smooth_state_from`), `engine.rs` (`Command::SwapSchedule`, `last_frames`). Measurements: `crates/loom-modules/tests/hot_patch.rs`.
+- **Issues:** #203, #23, [#230](https://github.com/brylie/LoomDSP/issues/230), [#22](https://github.com/brylie/LoomDSP/issues/22) (rule 8)
+- **Code:** `crates/loom-core/src/compile.rs` (`reaches_a_root`, `CompileReport::skipped`, `Schedule::take_tap_state_from`, `Schedule::sources`, `take_smooth_state_from`), `engine.rs` (`Command::SwapSchedule`, `last_frames`), `controller.rs` (new modules wait in `Controller::fresh` until the commit, rule 7). Measurements: `crates/loom-modules/tests/hot_patch.rs`.
 
 ## Goal
 
@@ -29,6 +29,7 @@ Every edit that changes the graph compiles a new schedule on the control thread.
 | Port buffers | Not needed | Every buffer is written before it is read in each block. |
 | Copy 1 of a module that turns stereo | **No: starts from reset** | Not built yet (#23). Rule 6 fixes it. |
 | A module the player adds | No, by design | A new module is new hardware: it starts from reset. |
+| A module that reaches nothing | Yes, paused | It is not run while nothing hears or shows it (rule 8). |
 
 ## Rules
 
@@ -52,7 +53,15 @@ Every edit that changes the graph compiles a new schedule on the control thread.
 
 6. **Copy 1 of a module that turns stereo takes copy 0's state.** The rules are in the [stereo spec](stereo.md), rules 13 and 25 to 27, and the decision in ADR-0022. *Why:* measured with the SVF and the same signal on both sides, a cold copy 1 is off by -2 to -24 dB and takes 1 to 20 ms to settle. A 5 ms crossfade scales that down but does not shorten it. Copied state is exact.
 
-7. **A module made with non-default values starts at those values.** `reset()` snaps all smoothing to its targets (Constant already does this). After a module is built and its first parameter values are set, and before it is sent to the engine, the `Controller` calls `reset()` once. The `loom-test` harness does the same before it renders. *Why:* a factory builds the module with built-in values, then `set_param` sets the real ones. A smoothed parameter treats that as a new target and glides. A pasted filter at 200 Hz would sweep down from 1 kHz for 10 ms, with nothing to hide it (loading a patch has the output fade-in). *Why this option, not a flag per module or a factory that takes values:* the call is made in one place, so a module author cannot forget it, and `reset()` on a module that has just been built clears nothing that matters. Modules must keep this convention: **`reset()` snaps smoothing to the current targets.** A test in the harness checks it for every registered module: a module built with defaults, given a changed value and `reset()`, matches one that held the value for a long time, from the first sample.
+7. **A module made with non-default values starts at those values.** `reset()` snaps all smoothing to its targets (Constant already does this). After a module is built and its first parameter values are set, and before it is sent to the engine, the `Controller` calls `reset()` once. So the `Controller` keeps a new module until the next commit: values set before it go straight to the module, and the commit resets it and sends it in, before the new schedule. The `loom-test` harness does the same before it renders. *Why:* a factory builds the module with built-in values, then `set_param` sets the real ones. A smoothed parameter treats that as a new target and glides. A pasted filter at 200 Hz would sweep down from 1 kHz for 10 ms, with nothing to hide it (loading a patch has the output fade-in). *Why this option, not a flag per module or a factory that takes values:* the call is made in one place, so a module author cannot forget it, and `reset()` on a module that has just been built clears nothing that matters. Modules must keep this convention: **`reset()` snaps smoothing to the current targets.** A test in the harness checks it for every registered module: a module built with defaults, given a changed value and `reset()`, matches one that held the value for a long time, from the first sample.
+
+8. **A module that reaches nothing the player hears or sees is not run, and keeps its state** (FR-GRAPH-09). The compiler leaves it out of the schedule and lists it in `CompileReport::skipped`. Its instance stays in its engine slot, so a cable that connects it again resumes it where it stopped: not reset, and not moved on by the time it was skipped. A module runs if a path of cables or modulation assignments leads from it to one of these:
+   - the audio output;
+   - a probed output, such as a meter or scope on screen ([telemetry](telemetry.md));
+   - a module with display values, or with a light or meter on its panel ([panels](panels.md)), so its lights tell the truth with no cable. MIDI Note has a gate light, so it hears every note on and off while unplugged, and a cable added later finds no stuck gate;
+   - a module with a modulated parameter, whose knob shows a moving live dot ([modulation](modulation.md)).
+
+   A feedback loop that reaches nothing is still in the compile report with its inserted delays, so the canvas shows them, but it does not run. *Why:* the requirement saves CPU in large patches, and a module nobody hears or sees changes nothing the player can tell. *Why these roots:* the specs for telemetry and panels promise that what the screen shows is live, and the specs do not say a light may freeze. *Why pause and not reset:* a player who unplugs and replugs an LFO expects it to keep its settings and phase, not start cold. *Cost:* a paused module resumes with old state. A delay line unplugged at its output and plugged in again a minute later first plays the audio it held a minute ago, where hardware would play the last seconds of its input. A module that will one day have side effects (MIDI out) must count as a root.
 
 ### Click threshold
 
@@ -66,8 +75,9 @@ The measurements compare what the engine plays with the ideal continuation: what
 - [x] Given the delay cases above, then the output is the same at block sizes 1, 64, 77, and 512 when the edit lands on the same frame (`hot_patch.rs`), and the `no_alloc` test passes while it closes loops on modules that already ran.
 - [ ] Given a running SVF that turns stereo, with the same signal on both sides, then its right output is bit-identical to its left from the first frame after the swap. (Needs #23.)
 - [ ] Given the stereo case, then the `no_alloc` tests pass, and the output is the same at block sizes 1, 77, and 512 when the edit lands on the same frame. (Needs #23.)
-- [ ] Given a module added with non-default values (the SVF at 200 Hz, Multiply with gain 3), then its output from the first frame matches a copy that held the values for a long time, at block sizes 1, 77, and 512 (rule 7). The harness check runs for every registered module.
-- [ ] Pasting a filter while the patch plays adds no glide (an app test, or a manual check listed in the pull request). Reference renders that contained the glide are updated in the same pull request.
+- [x] Given a module added with non-default values (the SVF at 200 Hz, Multiply with gain 3), then its output from the first frame matches a copy that held the values for a long time, at block sizes 1, 77, and 512 (rule 7). The harness check runs for every registered module. (`loom-modules/tests/first_values.rs`; `Harness::check_reset_snaps_smoothing` on every module in `tests/reset.rs`)
+- [x] Pasting a filter while the patch plays adds no glide (an app test, or a manual check listed in the pull request). Reference renders that contained the glide are updated in the same pull request. (`first_values.rs` adds modules to a running engine with `set_params` before the commit, the calls paste and undo make in `clipboard.rs` and `undo.rs`. A listening check in the app is in the pull request.)
+- [x] Given a chain that reaches nothing, then it is not processed, and a cable that connects it again resumes its state (rule 8). Lights, probes, and modulated parameters keep their modules running, and an unreachable loop is reported but not run. (`loom-core/tests/reach.rs`, `compile.rs` tests, `engine.rs` in `loom-modules`)
 - [ ] Listening check, rule 5: in the app, with a sustained sound, close a feedback loop into a Multiply's B input, and add a second cable to a running loop. No click is heard. (Manual check.)
 - [ ] Listening check, rule 6: with a resonant filter and a sustained sound, patch a stereo source into the chain. No click is heard. (Manual check, with #23.)
 

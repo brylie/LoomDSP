@@ -161,6 +161,7 @@ fn rate_index(value: f32) -> usize {
 ///
 /// The phase needs no state: it comes from the transport. The state is for
 /// the trigger, which must know the previous frame.
+#[derive(Clone)]
 struct Clock {
     rate: usize,
     width: f32,
@@ -184,6 +185,11 @@ impl Clock {
 }
 
 impl Module for Clock {
+    /// Takes the running state of another instance (ADR-0022).
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+
     fn process(&mut self, ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let transport = ctx.transport();
         let playing = transport.playing();
