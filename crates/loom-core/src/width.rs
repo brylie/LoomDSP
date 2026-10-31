@@ -113,7 +113,7 @@ pub(crate) fn infer(graph: &Graph) -> Widths {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::descriptor::{Panel, Polarity, PortDefault, PortSpec};
+    use crate::descriptor::{Panel, PortDefault, PortSpec};
     use crate::signal::SignalType;
 
     const fn port(name: &'static str, signal: SignalType, channels: Channels) -> PortSpec {
@@ -123,7 +123,7 @@ mod tests {
             signal,
             description: "A test port.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Bipolar,
+            range: crate::PortRange::Signal,
             channels,
         }
     }
@@ -217,6 +217,7 @@ mod tests {
             id,
             crate::Node {
                 descriptor,
+                unknown: None,
                 params: Vec::new(),
                 slot: matches!(descriptor.role, ModuleRole::Dsp(_)).then_some(id.0 as usize),
                 ranges: Vec::new(),

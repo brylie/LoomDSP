@@ -691,12 +691,12 @@ fn port(app: &App, text: &str, output: bool) -> Result<PortRef, String> {
         .graph()
         .node(ModuleId(module))
         .ok_or_else(|| format!("no module {module}"))?;
-    let ports = if output {
-        node.descriptor.outputs
+    let count = if output {
+        node.output_count()
     } else {
-        node.descriptor.inputs
+        node.input_count()
     };
-    let index = ports.iter().position(|p| p.name == name).ok_or_else(|| {
+    let index = (0..count).find(|&index| if output { node.output_name(index) } else { node.input_name(index) } == Some(name)).ok_or_else(|| {
         let kind = if output { "output" } else { "input" };
         format!("module {module} ({}) has no {kind} `{name}`", node.descriptor.name)
     })?;
@@ -1007,9 +1007,17 @@ impl App {
             }),
             Command::Connect { from, to, .. } => port(self, &from, true)
                 .and_then(|from| Ok((from, port(self, &to, false)?)))
-                .map(|(from, to)| {
+                .and_then(|(from, to)| {
+                    if [from.module, to.module].iter().any(|&id| {
+                        self.controller
+                            .graph()
+                            .node(ModuleId(id))
+                            .is_some_and(|node| node.unknown.is_some())
+                    }) {
+                        return Err("Cannot connect to an unknown module".into());
+                    }
                     send(self, Message::Canvas(CanvasEvent::Connect { from, to }));
-                    Map::new()
+                    Ok(Map::new())
                 }),
             Command::Probe { from, kind, .. } => self.probe_command(&from, &kind, &mut send),
             Command::Disconnect { to, .. } => port(self, &to, false).map(|to| {

@@ -204,7 +204,48 @@ impl Geometry {
         let mut markers = Vec::with_capacity(ports);
         for module in scene.modules() {
             let bounds = module.bounds();
-            shapes.push(Shape::new(bounds, TILE_RADIUS, palette.tile, palette.tile_border, 1.0));
+            shapes.push(Shape::new(
+                bounds,
+                TILE_RADIUS,
+                palette.tile,
+                if module.unknown {
+                    Color::TRANSPARENT
+                } else {
+                    palette.tile_border
+                },
+                1.0,
+            ));
+            if module.unknown {
+                let dash: f32 = 6.0;
+                let mut x = 0.0;
+                while x < bounds.width {
+                    let width = dash.min(bounds.width - x);
+                    for y in [bounds.y, bounds.y + bounds.height - 1.0] {
+                        shapes.push(Shape::new(
+                            Rectangle::new(Point::new(bounds.x + x, y), iced::Size::new(width, 1.0)),
+                            0.0,
+                            palette.text_dim,
+                            Color::TRANSPARENT,
+                            0.0,
+                        ));
+                    }
+                    x += dash * 2.0;
+                }
+                let mut y = 0.0;
+                while y < bounds.height {
+                    let height = dash.min(bounds.height - y);
+                    for x in [bounds.x, bounds.x + bounds.width - 1.0] {
+                        shapes.push(Shape::new(
+                            Rectangle::new(Point::new(x, bounds.y + y), iced::Size::new(1.0, height)),
+                            0.0,
+                            palette.text_dim,
+                            Color::TRANSPARENT,
+                            0.0,
+                        ));
+                    }
+                    y += dash * 2.0;
+                }
+            }
             // Header: a rounded strip, then a square strip over its lower
             // half so only the top corners are round.
             let header = Rectangle::new(module.position, iced::Size::new(module.width(), crate::scene::HEADER));
@@ -273,7 +314,9 @@ impl Geometry {
                 let (list, colour) = match item.kind {
                     TextKind::Title => (&mut titles, palette.title_bar),
                     TextKind::Port(_) => (&mut labels, palette.text_bar),
-                    TextKind::Caption(_) | TextKind::Option(..) => (&mut captions, palette.text_bar),
+                    TextKind::Caption(_) | TextKind::Option(..) | TextKind::Unknown => {
+                        (&mut captions, palette.text_bar)
+                    }
                 };
                 list.push(Shape::new(bar, bar.height * 0.5, colour, Color::TRANSPARENT, 0.0));
             });
@@ -872,6 +915,8 @@ mod tests {
     #[test]
     fn builds_one_instance_per_item() {
         let module = |id, x| ModuleView {
+            size: None,
+            unknown: false,
             id,
             title: String::new(),
             accent: Color::BLACK,
@@ -919,6 +964,8 @@ mod tests {
     #[test]
     fn a_badge_is_one_shape_with_the_markers() {
         let plain = ModuleView {
+            size: None,
+            unknown: false,
             id: 1,
             title: String::new(),
             accent: Color::BLACK,
@@ -938,6 +985,8 @@ mod tests {
     #[test]
     fn each_zoom_draws_the_bars_for_the_text_it_hides() {
         let module = ModuleView {
+            size: None,
+            unknown: false,
             id: 1,
             title: "Saw".into(),
             accent: Color::BLACK,
@@ -987,6 +1036,8 @@ mod tests {
         let mut followed = port();
         followed.follows_transport = Some(crate::scene::TransportSignal::BarPhase);
         let module = |inputs: Vec<PortView>| ModuleView {
+            size: None,
+            unknown: false,
             id: 1,
             title: "LFO".into(),
             accent: Color::from_rgb8(0x5A, 0x4A, 0x82),

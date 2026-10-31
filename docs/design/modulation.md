@@ -166,7 +166,7 @@ Details settled for the build:
 - **Filter.** A text field matches the module or parameter name. A check box **Selected module only** shows rows whose source or target is the selected module. Filters hide rows; they never change assignments.
 - **Add.** The **Add** button opens two pick lists (source output, target parameter) with the same rules as a drop: the target can be a knob, toggle, or radio parameter; the depth is the default depth; a duplicate adds nothing and the status bar says so.
 - **Remove.** The **×** button of [Removing an item](panels.md#removing-an-item), or Delete on the selected row.
-- **Keyboard.** Up and Down move between rows; Left and Right between cells and scroll the chosen column into view; Enter edits the cell (toggle, open the choice, or type); Escape leaves a cell being edited, and takes the key before pinned lines; Tab leaves the table.
+- **Keyboard.** Up and Down move between visible rows and scroll the selected row into view by the smallest distance needed. Left and Right move between cells and scroll the chosen column into view by the smallest distance needed without losing the row. Sorting and filtering constrain navigation to the displayed rows and keep the selected cell in view when it remains visible. Enter edits the cell (toggle, open the choice, or type); Escape leaves a cell being edited, and takes the key before pinned lines; Tab leaves the table. Selection and scrolling are session-only and do not add undo steps.
 - **Selection.** Selecting a row selects the target module on the canvas and shows the assignment's line (as if pinned) without pinning it. Selecting a module on the canvas does not move the selected row.
 - **Edits** go through the controller and undo like the inspector's: a depth drag is one step ([Undo](#undo)).
 - **Changing a source or target** keeps the assignment's id, place in engine order, depth, polarity, and on/off state. It is one undo step. The new endpoint must exist and may not duplicate another assignment; otherwise the row stays unchanged and the status bar explains why.
@@ -346,7 +346,7 @@ A **Macro** module (FR-LIB-12) has one knob on its panel and one output equal to
 - [x] Editing on, depth, or polarity, and removing a row, are undo steps like the inspector's; undo restores a removed row in place (test).
 - [x] Selecting a row selects its target module and shows its line without pinning (test).
 - [ ] Assignments inside a sub-patch are not listed (test).
-- [x] With the matrix open and nothing changing, the app draws no frames (manual check, `--measure-idle --no-audio --no-midi`: 0 fps after opening commands).
+- [x] With the matrix open and nothing changing, the app draws no frames (manual check, `--measure-idle --no-audio --no-midi`: 0 fps after opening commands; repeated for #434 with the frame count unchanged at 21 for the last five reports).
 
 The nested sub-patch test is deferred until sub-patch navigation exists. The matrix reads only the current graph.
 

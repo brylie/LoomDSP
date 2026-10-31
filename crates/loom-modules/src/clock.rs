@@ -9,7 +9,7 @@
 
 use loom_core::signal::{WrapDetector, trigger};
 use loom_core::{
-    Channels, DisplayKind, DisplaySpec, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, Polarity,
+    Channels, DisplayKind, DisplaySpec, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec,
     PortDefault, PortIo, PortSpec, ProcessContext, SignalType, TriggerFlag, Widget,
 };
 
@@ -61,7 +61,7 @@ pub static CLOCK: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Phase,
             description: "Rises from 0 to 1 once per cycle of the rate, counted from bar 1.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Unipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::PerChannel,
         },
         PortSpec {
@@ -70,7 +70,7 @@ pub static CLOCK: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Gate,
             description: "Fires once at the start of each cycle while the transport runs.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Unipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::PerChannel,
         },
         PortSpec {
@@ -79,7 +79,7 @@ pub static CLOCK: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Gate,
             description: "High for the first part of each cycle, as long as the gate width says.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Unipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::PerChannel,
         },
     ],

@@ -191,6 +191,8 @@ mod tests {
 
     fn scope_scene() -> Scene {
         let module = ModuleView {
+            size: None,
+            unknown: false,
             id: 7,
             title: "Scope".into(),
             accent: Color::BLACK,

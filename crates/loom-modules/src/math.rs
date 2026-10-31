@@ -4,7 +4,7 @@
 //! multiply and divide), so a module is useful with only one cable.
 
 use loom_core::{
-    Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamRange, ParamSpec, Polarity,
+    Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamRange, ParamSpec,
     PortDefault, PortIo, PortSpec, ProcessContext, SignalType, Widget,
 };
 use loom_rt::Smoothed;
@@ -42,7 +42,7 @@ pub static ADD: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Modulation,
             description: "The first signal to add.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Bipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::Downmix,
         },
         PortSpec {
@@ -51,7 +51,7 @@ pub static ADD: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Modulation,
             description: "The second signal to add.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Bipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::Downmix,
         },
     ],
@@ -61,7 +61,7 @@ pub static ADD: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Modulation,
         description: "A plus B plus the offset.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Bipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
     params: &[ParamSpec {
@@ -136,7 +136,7 @@ pub static MUL: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Audio,
             description: "The signal to scale.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Bipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::PerChannel,
         },
         PortSpec {
@@ -145,7 +145,7 @@ pub static MUL: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Modulation,
             description: "Scales A. Reads 1 while no cable is connected.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Bipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::Downmix,
         },
     ],
@@ -155,7 +155,7 @@ pub static MUL: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Audio,
         description: "A times B times the gain.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Bipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
     params: &[ParamSpec {
@@ -232,7 +232,7 @@ pub static SUB: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Modulation,
             description: "The signal to subtract from.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Bipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::Downmix,
         },
         PortSpec {
@@ -241,7 +241,7 @@ pub static SUB: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Modulation,
             description: "The signal to subtract.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Bipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::Downmix,
         },
     ],
@@ -251,7 +251,7 @@ pub static SUB: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Modulation,
         description: "A minus B.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Bipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
     params: &[],
@@ -291,7 +291,7 @@ pub static DIV: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Modulation,
             description: "The signal to divide.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Bipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::Downmix,
         },
         PortSpec {
@@ -300,7 +300,7 @@ pub static DIV: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Modulation,
             description: "The divisor. Reads 1 while no cable is connected.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Bipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::Downmix,
         },
     ],
@@ -310,7 +310,7 @@ pub static DIV: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Modulation,
         description: "A divided by B, or 0 while B is within 1e-9 of zero.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Bipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
     params: &[],
@@ -347,7 +347,7 @@ pub static CONSTANT: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Modulation,
         description: "The value set by the parameter.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Bipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
     params: &[ParamSpec {
@@ -430,7 +430,7 @@ pub static CONVERT: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Modulation,
         description: "The value to convert.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Bipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
     outputs: &[PortSpec {
@@ -439,7 +439,7 @@ pub static CONVERT: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Modulation,
         description: "The converted value.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Bipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
     params: &[ParamSpec {
@@ -507,7 +507,7 @@ pub static PITCH_CONSTANT: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Pitch,
         description: "The pitch, at 0.1 per octave.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Bipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
     params: &[ParamSpec {

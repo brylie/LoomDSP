@@ -2,8 +2,8 @@
 //! (FR-LIB-17, ADR-0013).
 
 use loom_core::{
-    Channels, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, Polarity, PortDefault, PortIo,
-    PortSpec, ProcessContext, SignalType, Widget,
+    Channels, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, PortDefault, PortIo, PortSpec,
+    ProcessContext, SignalType, Widget,
 };
 
 /// `loom.display.meter`: a mono level meter. Passes its input through, so it
@@ -21,7 +21,7 @@ pub static METER: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Audio,
         description: "The signal to measure.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Bipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
     outputs: &[PortSpec {
@@ -30,7 +30,7 @@ pub static METER: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Audio,
         description: "The input, unchanged.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Bipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
     params: &[],
@@ -67,7 +67,7 @@ pub static SCOPE: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Audio,
         description: "The signal to show.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Bipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
     outputs: &[PortSpec {
@@ -76,7 +76,7 @@ pub static SCOPE: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Audio,
         description: "The input, unchanged.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Bipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
     params: &[

@@ -3,7 +3,7 @@
 
 use loom_core::{
     Channels, EngineConfig, EngineParts, InputRef, Module, ModuleDescriptor, ModuleId, ModuleRole, OutputRef,
-    OutputSafety, Panel, Polarity, PortDefault, PortIo, PortSpec, ProcessContext, Registry, SignalType, create_engine,
+    OutputSafety, Panel, PortDefault, PortIo, PortSpec, ProcessContext, Registry, SignalType, create_engine,
 };
 use std::sync::Arc;
 
@@ -18,7 +18,7 @@ const fn port(name: &'static str) -> PortSpec {
         signal: SignalType::Audio,
         description: "A test port.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Bipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }
 }
@@ -144,6 +144,47 @@ fn run(parts: &mut EngineParts, buffers: usize) -> Vec<f32> {
         parts.engine.process(&mut left, &mut right);
     }
     right
+}
+
+/// A placeholder passes no signal, even with named ports and a live input.
+#[test]
+fn unknown_module_outputs_silence_at_each_block_size() {
+    for frames in [1, 77, 512] {
+        let mut parts = engine();
+        let source = parts.controller.add_module("test.counter").unwrap();
+        let unknown = ModuleId(100);
+        parts
+            .controller
+            .add_unknown_with_id(
+                unknown,
+                loom_core::UnknownModule {
+                    kind: "example.missing@1".into(),
+                    label: None,
+                    params: Default::default(),
+                    ranges: Default::default(),
+                    inputs: vec!["signal".into()],
+                    outputs: vec!["result".into()],
+                    parameters: vec![],
+                },
+            )
+            .unwrap();
+        let output = parts.controller.add_module("test.out").unwrap();
+        parts
+            .controller
+            .connect_named(source, "out", unknown, "signal")
+            .unwrap();
+        parts
+            .controller
+            .connect_named(unknown, "result", output, "left")
+            .unwrap();
+        parts.controller.commit().unwrap();
+        let mut left = vec![1.0; frames];
+        let mut right = vec![1.0; frames];
+        for _ in 0..(1024 / frames + 2) {
+            parts.engine.process(&mut left, &mut right);
+            assert!(left.iter().chain(&right).all(|&sample| sample == 0.0));
+        }
+    }
 }
 
 /// The counter values `first..first + BLOCK`, as the output carries them.

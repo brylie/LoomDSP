@@ -103,7 +103,7 @@ fn edge_cases_load_safely() {
         (one_module(&format!("id: 4294967295, {sine}")), false),
         (one_module(&format!("id: 4294967296, {sine}")), false),
         (one_module(&format!("id: 1, {sine}, params: {{\"level\": 1.0}}")), false),
-        (one_module("id: 1, kind: \"loom.osc.sine\""), true),
+        (one_module("id: 1, kind: \"loom.osc.sine\""), false),
         (one_module("id: 1, kind: \"@1\""), false),
         (one_module("id: 1, kind: \"loom.osc.sine@99999999999\""), false),
         (one_module("id: 1, kind: \"loom.osc.sine@0\""), true),

@@ -7,8 +7,8 @@
 //! Catmull-Rom (cubic Hermite) fractional-delay reader.
 
 use loom_core::{
-    Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, Polarity,
-    PortDefault, PortIo, PortSpec, ProcessContext, SignalType, Widget,
+    Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, PortDefault, PortIo,
+    PortSpec, ProcessContext, SignalType, Widget,
 };
 use loom_rt::Smoothed;
 
@@ -26,7 +26,7 @@ pub static DELAY: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Audio,
             description: "The signal to delay.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Bipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::PerChannel,
         },
         PortSpec {
@@ -35,7 +35,7 @@ pub static DELAY: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Modulation,
             description: "Adds to the delay time, in seconds.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Bipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::Downmix,
         },
     ],
@@ -45,7 +45,7 @@ pub static DELAY: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Audio,
         description: "The delayed signal.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Bipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
     params: &[ParamSpec {
@@ -79,7 +79,7 @@ pub static ALLPASS: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Audio,
             description: "The signal to pass through the filter.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Bipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::PerChannel,
         },
         PortSpec {
@@ -88,7 +88,7 @@ pub static ALLPASS: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Modulation,
             description: "Adds to the delay time, in seconds.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Bipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::Downmix,
         },
     ],
@@ -98,7 +98,7 @@ pub static ALLPASS: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Audio,
         description: "The all-pass filtered signal.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Bipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
     params: &[

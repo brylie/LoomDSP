@@ -220,6 +220,40 @@ impl Controller {
         self.add_descriptor(id, descriptor)
     }
 
+    /// Adds an inert placeholder with owned metadata for a missing module.
+    ///
+    /// It is intended for patch loading; interactive connection rules are
+    /// enforced by the editor. Inputs are limited to the engine's 64-bit
+    /// cable mask, as for registered descriptors.
+    pub fn add_unknown_with_id(&mut self, id: ModuleId, unknown: crate::UnknownModule) -> Result<(), LoomError> {
+        if unknown.inputs.len() > 64 {
+            return Err(LoomError::InvalidDescriptor {
+                id: unknown.kind.clone(),
+                reason: "more than 64 inputs".into(),
+            });
+        }
+        self.add_descriptor(id, &crate::graph::UNKNOWN_DESCRIPTOR)?;
+        self.graph.nodes.get_mut(&id).expect("inserted placeholder").unknown = Some(unknown);
+        Ok(())
+    }
+
+    /// Adds a placeholder with the next available module ID.
+    pub fn add_unknown(&mut self, unknown: crate::UnknownModule) -> Result<ModuleId, LoomError> {
+        let id = ModuleId(self.next_id);
+        self.add_unknown_with_id(id, unknown)?;
+        Ok(id)
+    }
+
+    /// Sets a placeholder's saved label without changing its audio graph.
+    /// Returns false if the module is absent or is not a placeholder.
+    pub fn set_unknown_label(&mut self, id: ModuleId, label: Option<String>) -> bool {
+        let Some(unknown) = self.graph.nodes.get_mut(&id).and_then(|node| node.unknown.as_mut()) else {
+            return false;
+        };
+        unknown.label = label;
+        true
+    }
+
     fn add_descriptor(&mut self, id: ModuleId, descriptor: &'static ModuleDescriptor) -> Result<(), LoomError> {
         if self.graph.nodes.contains_key(&id) {
             return Err(LoomError::DuplicateModuleId(id));
@@ -624,8 +658,12 @@ impl Controller {
     pub fn output_ref(&self, module: ModuleId, name: &str) -> Result<OutputRef, LoomError> {
         let node = self.node(module)?;
         let port = node
-            .descriptor
-            .output_index(name)
+            .unknown
+            .as_ref()
+            .map_or_else(
+                || node.descriptor.output_index(name),
+                |unknown| unknown.outputs.iter().position(|port| port == name),
+            )
             .ok_or_else(|| LoomError::NoSuchPort {
                 module,
                 direction: "output",
@@ -637,11 +675,18 @@ impl Controller {
     /// Resolves an input port by name.
     pub fn input_ref(&self, module: ModuleId, name: &str) -> Result<InputRef, LoomError> {
         let node = self.node(module)?;
-        let port = node.descriptor.input_index(name).ok_or_else(|| LoomError::NoSuchPort {
-            module,
-            direction: "input",
-            port: name.to_string(),
-        })?;
+        let port = node
+            .unknown
+            .as_ref()
+            .map_or_else(
+                || node.descriptor.input_index(name),
+                |unknown| unknown.inputs.iter().position(|port| port == name),
+            )
+            .ok_or_else(|| LoomError::NoSuchPort {
+                module,
+                direction: "input",
+                port: name.to_string(),
+            })?;
         Ok(InputRef { module, port })
     }
 
@@ -1097,7 +1142,7 @@ impl Controller {
 
     fn check_output(&self, output: OutputRef) -> Result<(), LoomError> {
         let node = self.node(output.module)?;
-        if output.port >= node.descriptor.outputs.len() {
+        if output.port >= node.output_count() {
             return Err(LoomError::NoSuchPort {
                 module: output.module,
                 direction: "output",
@@ -1108,9 +1153,13 @@ impl Controller {
     }
 
     fn param_index(&self, module: ModuleId, name: &str) -> Result<usize, LoomError> {
-        self.node(module)?
-            .descriptor
-            .param_index(name)
+        let node = self.node(module)?;
+        node.unknown
+            .as_ref()
+            .map_or_else(
+                || node.descriptor.param_index(name),
+                |unknown| unknown.parameters.iter().position(|param| param == name),
+            )
             .ok_or_else(|| LoomError::NoSuchParam {
                 module,
                 param: name.to_string(),
@@ -1122,6 +1171,9 @@ impl Controller {
     /// (transient-params.md).
     fn check_target(&self, module: ModuleId, index: usize) -> Result<(), LoomError> {
         self.check_param(module, index)?;
+        if self.node(module)?.unknown.is_some() {
+            return Ok(());
+        }
         let spec = &self.node(module)?.descriptor.params[index];
         if spec.is_transient() {
             return Err(LoomError::TransientParam {
@@ -1134,7 +1186,11 @@ impl Controller {
 
     fn check_param(&self, module: ModuleId, index: usize) -> Result<(), LoomError> {
         let node = self.node(module)?;
-        if index >= node.descriptor.params.len() {
+        let count = node
+            .unknown
+            .as_ref()
+            .map_or(node.descriptor.params.len(), |unknown| unknown.parameters.len());
+        if index >= count {
             return Err(LoomError::NoSuchParam {
                 module,
                 param: index.to_string(),
@@ -1145,7 +1201,7 @@ impl Controller {
 
     fn check_input(&self, input: InputRef) -> Result<(), LoomError> {
         let node = self.node(input.module)?;
-        if input.port >= node.descriptor.inputs.len() {
+        if input.port >= node.input_count() {
             return Err(LoomError::NoSuchPort {
                 module: input.module,
                 direction: "input",

@@ -113,7 +113,7 @@ The snapshot's `pointer` field is `null` without the control channel and in `--d
 | `buttons` | Mouse buttons held down: `left`, `right`, `middle` |
 | `hover` | What is under the pointer on the canvas, or `null`: `{"kind": K, "target": T}` with `kind` one of `output`, `input`, `badge`, `control`, `display`, `tile`, and `target` a name `locate` takes that finds it again (`"5:out"`, `"5:badge:out"`, `"4:cutoff"`, `"4:input:cutoff"`, `"4"`). A light or a meter is hit as part of its tile. A cable is `{"kind": "cable", "from": "3:out", "to": "4:in"}` |
 | `pinned` | The output whose badge is pinned (`"5:out"`), or `null` |
-| `drag` | The drag in progress, or `null`: `{"kind": K}` with `kind` one of `pan`, `move` (with `modules`), `knob`, `button`, `depth` (each with `target`), `wire` (with `from` and `pulled`), `select` |
+| `drag` | The drag in progress, or `null`: `{"kind": K}` with `kind` one of `pan`, `move` (with `modules`), `resize` (with `module`), `knob`, `button`, `depth` (each with `target`), `wire` (with `from` and `pulled`), `select` |
 
 Example, from `examples/dev/check-pin-badge.jsonl`:
 

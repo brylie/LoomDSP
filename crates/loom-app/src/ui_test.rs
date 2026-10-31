@@ -228,7 +228,7 @@ impl Ui {
     }
 
     /// Builds the view, runs `f` on it, and keeps its cache.
-    fn with_ui(
+    pub(crate) fn with_ui(
         &mut self,
         f: impl FnOnce(&mut UserInterface<'_, Message, iced::Theme, iced::Renderer>, &mut iced::Renderer, mouse::Cursor),
     ) {
@@ -242,6 +242,12 @@ impl Ui {
     /// to frame the patch and to report which lights are visible.
     pub fn redraw(&mut self) -> Vec<Message> {
         self.step(&[Event::Window(window::Event::RedrawRequested(Instant::now()))])
+    }
+
+    /// Sends one message and runs its widget operations as the runtime does.
+    pub(crate) fn send(&mut self, message: Message) {
+        let task = self.app.update(message);
+        self.run(task, &mut VecDeque::new(), &mut Vec::new());
     }
 
     /// Moves the pointer to a window point.
@@ -346,14 +352,13 @@ impl Ui {
             .graph()
             .node(ModuleId(module))
             .expect("module in the patch");
-        let ports = if output {
-            node.descriptor.outputs
+        let count = if output {
+            node.output_count()
         } else {
-            node.descriptor.inputs
+            node.input_count()
         };
-        let index = ports
-            .iter()
-            .position(|p| p.name == name)
+        let index = (0..count)
+            .find(|&index| if output { node.output_name(index) } else { node.input_name(index) } == Some(name))
             .unwrap_or_else(|| panic!("module {module} has no port `{name}`"));
         let world = self
             .app
@@ -804,6 +809,299 @@ mod tests {
         let _ = ui.app.update(Message::SelectModule(id.0));
         ui.redraw();
         id
+    }
+
+    /// Dragging the grip previews without rebuilding and commits one undo step.
+    #[test]
+    fn resizing_scope_with_pointer_and_keyboard() {
+        let mut ui = Ui::open("modulation.ron");
+        let scope = select_new(&mut ui, "loom.display.scope");
+        let target = ui.app.controller.add_module("loom.math.mul").unwrap();
+        ui.app.controller.connect_named(scope, "out", target, "a").unwrap();
+        ui.app.commit();
+        ui.app.positions.insert(scope.0, Point::new(300.0, 100.0));
+        ui.app.refresh();
+        ui.app.edits.history.clear();
+        ui.redraw();
+        let tile = ui.app.scene.module(scope.0).unwrap();
+        let bounds = tile.bounds();
+        let original = (tile.width(), tile.height());
+        let output_before = tile.output_position(0);
+        let generation = ui.app.scene.generation();
+        let canvas = ui.canvas();
+        let from = canvas.to_window(Point::new(
+            bounds.x + bounds.width - 3.0,
+            bounds.y + bounds.height - 3.0,
+        ));
+        let to = canvas.to_window(Point::new(
+            bounds.x + bounds.width + 2.0 * loom_canvas::GRID - 3.0,
+            bounds.y + bounds.height + 3.0 * loom_canvas::GRID - 3.0,
+        ));
+        ui.move_to(from);
+        ui.press();
+        ui.move_to(to);
+        assert_eq!(
+            ui.app.scene.generation(),
+            generation,
+            "preview does not rebuild the scene"
+        );
+        ui.release();
+        let resized = ui.app.scene.module(scope.0).unwrap();
+        assert_eq!(
+            (resized.width(), resized.height()),
+            (
+                original.0 + 2.0 * loom_canvas::GRID,
+                original.1 + 3.0 * loom_canvas::GRID
+            )
+        );
+        assert_ne!(ui.app.scene.generation(), generation);
+        let output_after = resized.output_position(0);
+        assert!(output_after.x > output_before.x && output_after.y > output_before.y);
+        assert!(
+            matches!(ui.app.scene.hit(output_after, 4.0), loom_canvas::Hit::Port(port) if port.module == scope.0 && port.output)
+        );
+        assert_eq!(
+            ui.app.scene.port_position(loom_canvas::PortRef {
+                module: scope.0,
+                index: 0,
+                output: true
+            }),
+            Some(output_after)
+        );
+        let saved = ui.app.current_patch().to_ron().unwrap();
+        let loaded = loom_patch::Patch::from_ron(&saved).unwrap();
+        assert_eq!(
+            loaded.modules.iter().find(|module| module.id == scope.0).unwrap().size,
+            ui.app.sizes.get(&scope.0).copied()
+        );
+        ui.app.undo();
+        let undone = ui.app.scene.module(scope.0).unwrap();
+        assert_eq!((undone.width(), undone.height()), original);
+        assert!(ui.app.edits.history.undo_step().is_none());
+        ui.app.redo();
+        assert_eq!(
+            ui.app.scene.module(scope.0).unwrap().width(),
+            original.0 + 2.0 * loom_canvas::GRID
+        );
+        ui.tap(
+            keyboard::Key::Named(keyboard::key::Named::ArrowRight),
+            keyboard::Modifiers::ALT,
+        );
+        assert_eq!(
+            ui.app.scene.module(scope.0).unwrap().width(),
+            original.0 + 3.0 * loom_canvas::GRID
+        );
+        ui.app.undo();
+        assert_eq!(
+            ui.app.scene.module(scope.0).unwrap().width(),
+            original.0 + 2.0 * loom_canvas::GRID
+        );
+    }
+
+    /// The inspector applies a placeholder label as one reversible patch edit.
+    #[test]
+    fn placeholder_label_is_editable_and_undoable() {
+        let mut ui = Ui::open("subtractive.ron");
+        let missing = ui
+            .app
+            .controller
+            .add_unknown(loom_core::UnknownModule {
+                kind: "future.effect@1".into(),
+                label: None,
+                params: Default::default(),
+                ranges: Default::default(),
+                inputs: vec![],
+                outputs: vec![],
+                parameters: vec![],
+            })
+            .unwrap();
+        ui.app.commit();
+        ui.app.edits.history.clear();
+        let label = inspector_row(&mut ui, missing.0, "Label");
+        ui.move_to(Point::new(label.x + 25.0, label.y + 28.0));
+        ui.press();
+        ui.release();
+        ui.typewrite("My effect");
+        assert_eq!(
+            ui.app
+                .current_patch()
+                .modules
+                .iter()
+                .find(|m| m.id == missing.0)
+                .unwrap()
+                .label,
+            None
+        );
+        assert!(ui.app.edits.history.undo_step().is_none());
+        ui.tap(
+            keyboard::Key::Named(keyboard::key::Named::Enter),
+            keyboard::Modifiers::default(),
+        );
+        assert_eq!(
+            ui.app
+                .current_patch()
+                .modules
+                .iter()
+                .find(|m| m.id == missing.0)
+                .unwrap()
+                .label
+                .as_deref(),
+            Some("My effect")
+        );
+        let copied = ui.app.copy().unwrap();
+        assert!(copied.contains("My effect"));
+        ui.app.undo();
+        assert_eq!(
+            ui.app
+                .current_patch()
+                .modules
+                .iter()
+                .find(|m| m.id == missing.0)
+                .unwrap()
+                .label,
+            None
+        );
+        assert!(ui.app.edits.history.undo_step().is_none());
+        ui.app.redo();
+        assert_eq!(
+            ui.app
+                .current_patch()
+                .modules
+                .iter()
+                .find(|m| m.id == missing.0)
+                .unwrap()
+                .label
+                .as_deref(),
+            Some("My effect")
+        );
+        ui.redraw();
+        let label = ui.text("Label").unwrap().center();
+        ui.move_to(Point::new(label.x + 25.0, label.y + 28.0));
+        ui.press();
+        ui.release();
+        ui.tap(
+            keyboard::Key::Named(keyboard::key::Named::End),
+            keyboard::Modifiers::default(),
+        );
+        for _ in 0..9 {
+            ui.tap(
+                keyboard::Key::Named(keyboard::key::Named::Backspace),
+                keyboard::Modifiers::default(),
+            );
+        }
+        ui.tap(
+            keyboard::Key::Named(keyboard::key::Named::Enter),
+            keyboard::Modifiers::default(),
+        );
+        assert_eq!(
+            ui.app
+                .current_patch()
+                .modules
+                .iter()
+                .find(|m| m.id == missing.0)
+                .unwrap()
+                .label,
+            None
+        );
+        ui.app.undo();
+        assert_eq!(
+            ui.app
+                .current_patch()
+                .modules
+                .iter()
+                .find(|m| m.id == missing.0)
+                .unwrap()
+                .label
+                .as_deref(),
+            Some("My effect")
+        );
+    }
+
+    /// Opening and saving placeholders preserves absent and fractional positions.
+    #[test]
+    fn unknown_positions_round_trip_until_moved() {
+        let path = std::env::temp_dir().join(format!("loom-unknown-positions-{}.ron", std::process::id()));
+        std::fs::write(
+            &path,
+            r#"Patch(version: 1, name: "Missing", modules: [
+            (id: 1, kind: "future.one@1"),
+            (id: 2, kind: "future.two@1", position: Some((17.25, 45.5))),
+            (id: 3, kind: "loom.clock.transport@1")
+        ])"#,
+        )
+        .unwrap();
+        let mut ui = Ui::open(path.to_str().unwrap());
+        let patch = ui.app.current_patch();
+        assert_eq!(patch.modules.iter().find(|m| m.id == 1).unwrap().position, None);
+        assert_eq!(
+            patch.modules.iter().find(|m| m.id == 2).unwrap().position,
+            Some((17.25, 45.5))
+        );
+        ui.app.canvas_event(loom_canvas::CanvasEvent::Move {
+            ids: vec![1],
+            delta: iced::Vector::new(12.0, 0.0),
+        });
+        assert!(
+            ui.app
+                .current_patch()
+                .modules
+                .iter()
+                .find(|m| m.id == 1)
+                .unwrap()
+                .position
+                .is_some()
+        );
+        ui.app.undo();
+        assert_eq!(
+            ui.app
+                .current_patch()
+                .modules
+                .iter()
+                .find(|m| m.id == 1)
+                .unwrap()
+                .position,
+            None
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// Real cable drags onto and from a placeholder are refused without an undo step.
+    #[test]
+    fn dragging_cables_to_unknown_ports_is_refused() {
+        let path = std::env::temp_dir().join(format!("loom-unknown-drag-{}.ron", std::process::id()));
+        std::fs::write(
+            &path,
+            r#"Patch(version: 1, name: "Missing", modules: [
+            (id: 1, kind: "future.effect@1", position: Some((480.0, 100.0))),
+            (id: 2, kind: "loom.phase.generator@1", position: Some((100.0, 100.0))),
+            (id: 3, kind: "loom.clock.transport@1", position: Some((100.0, 300.0)))
+        ], cables: [(from: (2, "phase"), to: (1, "in"))],
+        modulation: [(source: (1, "out"), target: (2, "tune"), depth: 0.5)])"#,
+        )
+        .unwrap();
+        let mut ui = Ui::open(path.to_str().unwrap());
+        ui.app
+            .controller
+            .disconnect(loom_core::InputRef {
+                module: ModuleId(1),
+                port: 0,
+            })
+            .unwrap();
+        ui.app.commit();
+        ui.app.edits.history.clear();
+        ui.redraw();
+        let from = ui.output(2, "phase");
+        let to = ui.input(1, "in");
+        ui.drag(from, to, 8);
+        assert_eq!(ui.app.status, "Cannot connect to an unknown module");
+        assert_eq!(ui.app.controller.graph().cables().count(), 0);
+        let from = ui.output(1, "out");
+        let to = ui.input(2, "pitch");
+        ui.drag(from, to, 8);
+        assert_eq!(ui.app.status, "Cannot connect to an unknown module");
+        assert_eq!(ui.app.controller.graph().cables().count(), 0);
+        assert!(ui.app.edits.history.undo_step().is_none());
+        let _ = std::fs::remove_file(path);
     }
 
     /// panels.md, Choice names: the inspector shows Button's mode by name,

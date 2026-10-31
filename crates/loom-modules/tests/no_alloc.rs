@@ -22,6 +22,38 @@ use loom_core::{MidiControl, MidiEvent, OutputRef, OutputSafety, ProbeKind, Time
 #[global_allocator]
 static ALLOCATOR: AllocDisabler = AllocDisabler;
 
+/// Unknown-module processing and schedule swaps never allocate on the audio thread.
+#[test]
+fn unknown_module_never_allocates() {
+    let mut parts = load("subtractive.ron");
+    let id = parts
+        .controller
+        .add_unknown(loom_core::UnknownModule {
+            kind: "future.effect@1".into(),
+            label: None,
+            params: Default::default(),
+            ranges: Default::default(),
+            inputs: vec!["in".into()],
+            outputs: vec!["out".into()],
+            parameters: vec![],
+        })
+        .unwrap();
+    parts
+        .controller
+        .connect_named(loom_core::ModuleId(8), "out", id, "in")
+        .unwrap();
+    parts
+        .controller
+        .connect_named(id, "out", loom_core::ModuleId(9), "left")
+        .unwrap();
+    parts.controller.commit().unwrap();
+    let mut left = [0.0; 512];
+    let mut right = [0.0; 512];
+    for _ in 0..4 {
+        assert_no_alloc(|| parts.engine.process(&mut left, &mut right));
+    }
+}
+
 /// `copy_state_from` runs on the audio thread when a module turns stereo,
 /// so it must not allocate or free (stereo spec, rule 26). Checked for every
 /// built-in DSP module, between two instances that have both run.

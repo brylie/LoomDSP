@@ -3,8 +3,8 @@
 //! Spec: `docs/design/p1-modules.md`, LFO.
 
 use loom_core::{
-    Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, Polarity,
-    PortDefault, PortIo, PortSpec, ProcessContext, SignalType, Widget,
+    Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, PortDefault, PortIo,
+    PortSpec, ProcessContext, SignalType, Widget,
 };
 use loom_rt::Smoothed;
 use std::f64::consts::TAU;
@@ -23,7 +23,7 @@ pub static LFO: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Phase,
         description: "In synced mode, the phase to follow. Follows the bar phase while no cable is connected. Free mode ignores it.",
         default: PortDefault::BarPhase,
-        polarity: Polarity::Unipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::Downmix,
     }],
     outputs: &[
@@ -33,7 +33,7 @@ pub static LFO: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Modulation,
             description: "The wave, from -1 to 1.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Bipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::PerChannel,
         },
         PortSpec {
@@ -42,7 +42,7 @@ pub static LFO: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Modulation,
             description: "The same wave a quarter cycle ahead. With Out on an XY scope, a sine draws a circle.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Bipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::PerChannel,
         },
         PortSpec {
@@ -51,7 +51,7 @@ pub static LFO: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Phase,
             description: "The phase, from 0 to 1, that the wave is using.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Unipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::PerChannel,
         },
     ],

@@ -656,6 +656,10 @@ pub enum DragState {
     Move {
         modules: Vec<u32>,
     },
+    /// A growable tile's resize handle.
+    Resize {
+        module: u32,
+    },
     Knob {
         target: String,
     },
@@ -767,6 +771,7 @@ impl App {
             Some(match drag {
                 PointerDrag::Pan => DragState::Pan,
                 PointerDrag::Move(modules) => DragState::Move { modules },
+                PointerDrag::Resize(module) => DragState::Resize { module },
                 PointerDrag::Knob(m, w) => DragState::Knob { target: widget(m, w)? },
                 PointerDrag::Button(m, w) => DragState::Button { target: widget(m, w)? },
                 PointerDrag::Wire { from, pulled } => DragState::Wire {

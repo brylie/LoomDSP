@@ -8,7 +8,8 @@
 use crate::modulation::{self, PolarityChoice};
 use crate::{App, DIM, HELP, Message, param, remove_button};
 use iced::widget::{
-    button, column, container, mouse_area, pick_list, radio, row, scrollable, slider, space, text, toggler, tooltip,
+    button, column, container, mouse_area, pick_list, radio, row, scrollable, slider, space, text, text_input, toggler,
+    tooltip,
 };
 use iced::{Element, Length, Theme};
 use loom_core::{AssignmentId, ModuleId, OutputRef, WidgetKind};
@@ -24,8 +25,35 @@ pub enum Inspector {
     Several(usize),
     /// One module selected.
     Module(ModuleRows),
+    /// A missing module and its preserved, read-only data.
+    Unknown(UnknownRows),
     /// The selected module is gone. Nothing is shown.
     Empty,
+}
+
+/// The inspector's view of a placeholder.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct UnknownRows {
+    /// Module ID for removing a MIDI mapping.
+    pub id: u32,
+    /// Original module kind and version.
+    pub kind: String,
+    /// The saved label or its unapplied inspector draft.
+    pub label: String,
+    /// Saved parameter values.
+    pub params: Vec<(String, f32)>,
+    /// Existing modulation and MIDI links.
+    pub links: Vec<UnknownLink>,
+}
+
+/// A preserved link and the action that removes it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum UnknownLink {
+    /// Modulation assignment touching the placeholder.
+    Assignment { id: u32, text: String },
+    /// MIDI mapping to a placeholder parameter.
+    Midi { index: usize, text: String },
 }
 
 /// The inspector for one module.
@@ -36,12 +64,25 @@ pub struct ModuleRows {
     /// The module's kind and ID, under its name.
     pub kind: String,
     pub description: &'static str,
+    /// Input and output descriptions with their nominal ranges.
+    pub ports: Vec<PortRow>,
     /// One row per parameter, in descriptor order. Empty shows "No
     /// parameters."
     pub params: Vec<ParamRow>,
     /// **Drives**: one group per output that drives at least one
     /// assignment. Empty shows no **Drives** section.
     pub drives: Vec<DrivesGroup>,
+}
+
+/// One port shown in the inspector.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PortRow {
+    /// Whether the port is an input or an output.
+    pub direction: &'static str,
+    /// Human-readable port label.
+    pub label: &'static str,
+    /// Port description and nominal range.
+    pub description: String,
 }
 
 /// One parameter.
@@ -204,6 +245,48 @@ impl App {
         let Some(node) = graph.node(ModuleId(id)) else {
             return Inspector::Empty;
         };
+        if let Some(unknown) = &node.unknown {
+            let mut links = Vec::new();
+            for (assignment_id, assignment) in graph.assignments() {
+                if assignment.source.module.0 == id || assignment.target.0 == id {
+                    links.push(UnknownLink::Assignment {
+                        id: assignment_id.0,
+                        text: format!(
+                            "{} → {}",
+                            modulation::source_name(graph, assignment.source),
+                            modulation::target_name(graph, assignment.target, assignment.param)
+                        ),
+                    });
+                }
+            }
+            for (_, mapping) in graph.midi_mappings() {
+                if mapping.target.0 == id {
+                    links.push(UnknownLink::Midi {
+                        index: mapping.param,
+                        text: format!(
+                            "{} → {}",
+                            mapping.control,
+                            modulation::target_name(graph, mapping.target, mapping.param)
+                        ),
+                    });
+                }
+            }
+            return Inspector::Unknown(UnknownRows {
+                id,
+                kind: unknown.kind.clone(),
+                label: self
+                    .unknown_label_draft
+                    .as_ref()
+                    .filter(|(module, _)| *module == id)
+                    .map_or_else(|| unknown.label.clone().unwrap_or_default(), |(_, label)| label.clone()),
+                params: unknown
+                    .params
+                    .iter()
+                    .map(|(name, value)| (name.clone(), *value))
+                    .collect(),
+                links,
+            });
+        }
         let d = node.descriptor;
         let params = d
             .params
@@ -271,6 +354,20 @@ impl App {
             name: d.name,
             kind: format!("{} #{id}", d.kind()),
             description: d.description,
+            ports: d
+                .inputs
+                .iter()
+                .map(|p| ("Input", p))
+                .chain(d.outputs.iter().map(|p| ("Output", p)))
+                .map(|(direction, p)| {
+                    let (min, max) = p.nominal_range();
+                    PortRow {
+                        direction,
+                        label: p.label,
+                        description: format!("{} Usually {min} to {max}.", p.description),
+                    }
+                })
+                .collect(),
             params,
             drives: self.drives(id),
         })
@@ -358,6 +455,38 @@ pub fn view<'a>(model: Inspector, drop_row: Option<(u32, usize)>, dragging: bool
         .into(),
         Inspector::Several(n) => text(format!("{n} modules selected")).size(13).into(),
         Inspector::Empty => text("").into(),
+        Inspector::Unknown(m) => {
+            let id = m.id;
+            let mut rows = column![
+                text(m.kind).size(17),
+                text("This version of LoomDSP does not have this module. It makes no sound. Its settings are kept and saved.").size(12),
+                text("Label").size(12),
+                row![
+                    text_input("Label", &m.label)
+                        .on_input(move |value| Message::UnknownLabelDraft { module: id, value })
+                        .on_submit(Message::UnknownLabelApply { module: id }),
+                    button("Apply").on_press(Message::UnknownLabelApply { module: id }),
+                ].spacing(6),
+            ].spacing(6);
+            for (name, value) in m.params {
+                rows = rows.push(text(format!("{name}: {value}")).size(12));
+            }
+            for link in m.links {
+                let (label, message) = match link {
+                    UnknownLink::Assignment { id, text } => (text, Message::Unassign(AssignmentId(id))),
+                    UnknownLink::Midi { index, text } => (text, Message::Unmap { module: m.id, index }),
+                };
+                rows = rows.push(
+                    row![
+                        text(label).size(11),
+                        space::horizontal(),
+                        remove_button("Remove link", message)
+                    ]
+                    .align_y(iced::Alignment::Center),
+                );
+            }
+            rows.into()
+        }
         Inspector::Module(m) => module_view(m, drop_row, dragging),
     };
     container(scrollable(container(content).padding(12)))
@@ -465,6 +594,13 @@ fn module_view<'a>(m: ModuleRows, drop_row: Option<(u32, usize)>, dragging: bool
     }
     if !m.drives.is_empty() {
         items = items.push(drives_view(m.drives));
+    }
+    for port in m.ports {
+        items = items.push(
+            text(format!("{}: {}. {}", port.direction, port.label, port.description))
+                .size(11)
+                .color(DIM),
+        );
     }
     items.into()
 }

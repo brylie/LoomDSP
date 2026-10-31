@@ -9,7 +9,7 @@
 //! its anchor, and right-aligned text ends at it.
 
 use crate::controls::{knob_centre, light_centre, radio_centre};
-use crate::scene::{CLOCK_MARK_SPACE, GRID, HEADER, ModuleView, PortRef, ROW, WidgetViewKind, fit_label, text_width};
+use crate::scene::{CLOCK_MARK_SPACE, GRID, HEADER, ModuleView, PortRef, WidgetViewKind, fit_label, text_width};
 use iced::{Point, Rectangle, Size};
 use std::borrow::Cow;
 
@@ -34,6 +34,8 @@ pub enum Align {
 pub enum TextKind {
     /// The module title, in the header.
     Title,
+    /// A placeholder's text marker.
+    Unknown,
     /// A port's label.
     Port(PortRef),
     /// The caption of a panel widget, by index.
@@ -99,6 +101,20 @@ pub fn for_each<'a>(module: &'a ModuleView, mut f: impl FnMut(TextItem<'a>)) {
         width: module.width() - 2.0 * pad,
     });
 
+    if module.unknown {
+        f(TextItem {
+            kind: TextKind::Unknown,
+            content: Cow::Borrowed("? Unknown module"),
+            anchor: Point::new(
+                tile.x + tile.width * 0.5,
+                tile.y + HEADER + (tile.height - HEADER) * 0.5,
+            ),
+            align: Align::Center,
+            size: LABEL_SIZE,
+            width: tile.width * 0.5,
+        });
+    }
+
     let label_width = module.label_width();
     let ports = module
         .inputs
@@ -107,7 +123,11 @@ pub fn for_each<'a>(module: &'a ModuleView, mut f: impl FnMut(TextItem<'a>)) {
         .map(|(i, p)| (false, i, p))
         .chain(module.outputs.iter().enumerate().map(|(i, p)| (true, i, p)));
     for (output, index, port) in ports {
-        let y = tile.y + HEADER + ROW * (index as f32 + 0.5);
+        let y = if output {
+            module.output_position(index).y
+        } else {
+            module.input_position(index).y
+        };
         // A clock mark goes between the marker and the label, so the label
         // moves right and has less room (panels.md, Clock mark).
         let mark = if !output && port.follows_transport.is_some() {
@@ -228,6 +248,8 @@ mod tests {
 
     fn module() -> ModuleView {
         ModuleView {
+            size: None,
+            unknown: false,
             id: 1,
             title: "Filter".into(),
             accent: Color::BLACK,
@@ -260,6 +282,25 @@ mod tests {
         let mut items = Vec::new();
         for_each(module, |item| items.push(item));
         items
+    }
+
+    /// Port labels and their hover bounds follow the markers on resized tiles.
+    #[test]
+    fn resized_port_labels_follow_port_positions() {
+        let mut module = module();
+        module.size = Some((40, 30));
+        for item in items(&module) {
+            if let TextKind::Port(port) = item.kind {
+                let point = if port.output {
+                    module.output_position(port.index)
+                } else {
+                    module.input_position(port.index)
+                };
+                assert_eq!(item.anchor.y, point.y);
+                let scene = Scene::new(vec![module.clone()], Vec::new());
+                assert_eq!(port_label_at(&scene, item.bounds().center()), Some(port));
+            }
+        }
     }
 
     #[test]

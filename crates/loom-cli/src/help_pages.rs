@@ -231,7 +231,7 @@ pub fn page(d: &ModuleDescriptor) -> String {
     } else {
         out.push_str("| Port | Signal | Polarity | Description |\n|---|---|---|---|\n");
         for p in d.outputs {
-            let polarity = match p.polarity {
+            let polarity = match p.polarity() {
                 Polarity::Unipolar => "unipolar",
                 Polarity::Bipolar => "bipolar",
             };

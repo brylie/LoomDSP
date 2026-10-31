@@ -335,8 +335,8 @@ fn a_broken_copy_is_kept() {
     assert_eq!(fs::read_to_string(crashed.join("patch.ron")).unwrap(), "not a patch");
 }
 
-/// A copy that reads but does not load into the engine (here, an
-/// unknown module) is a failed restore: the error shows and the copy stays,
+/// A copy that reads but does not load into the engine (here, an unknown
+/// parameter on a known module) is a failed restore: the error shows and the copy stays,
 /// also after autosave has run.
 #[test]
 fn a_copy_that_does_not_load_is_kept() {
@@ -344,7 +344,7 @@ fn a_copy_that_does_not_load_is_kept() {
     let mut app = setup.boot(Some(setup.file()), &mut Answer::new(Choice::NotNow));
     let crashed = edit_and_keep(&mut app);
     drop(app);
-    let unknown = r#"Patch(version: 1, name: "x", modules: [PatchModule(id: 1, kind: "loom.no.such-module@1")])"#;
+    let unknown = r#"Patch(version: 1, name: "x", modules: [PatchModule(id: 1, kind: "loom.osc.sine@1", params: {"missing": 1.0})])"#;
     fs::write(crashed.join("patch.ron"), unknown).unwrap();
     assert!(Patch::from_ron(unknown).is_ok(), "the copy reads");
 
@@ -363,6 +363,30 @@ fn a_copy_that_does_not_load_is_kept() {
         std::thread::sleep(Duration::from_millis(5));
     }
     assert_eq!(fs::read_to_string(crashed.join("patch.ron")).unwrap(), unknown, "kept");
+}
+
+/// A restored patch names its unknown module once in the status bar.
+#[test]
+fn restore_reports_unknown_modules() {
+    let setup = Setup::new("unknown-module");
+    let mut app = setup.boot(Some(setup.file()), &mut Answer::new(Choice::NotNow));
+    let crashed = edit_and_keep(&mut app);
+    drop(app);
+    fs::write(
+        crashed.join("patch.ron"),
+        r#"Patch(version: 1, name: "x", modules: [PatchModule(id: 1, kind: "future.effect@1")])"#,
+    )
+    .unwrap();
+    let mut answer = Answer::new(Choice::Restore);
+    let mut app = setup.boot(None, &mut answer);
+    assert!(answer.errors.is_empty());
+    assert!(app.status.contains("future.effect@1"), "{}", app.status);
+    let message = app.status.clone();
+    let _ = app.update(Message::Canvas(loom_canvas::CanvasEvent::Move {
+        ids: vec![1],
+        delta: iced::Vector::new(12.0, 0.0),
+    }));
+    assert_eq!(app.status, message);
 }
 
 /// Save As after restoring a copy whose file changed starts next to that

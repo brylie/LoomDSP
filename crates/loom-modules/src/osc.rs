@@ -4,8 +4,8 @@
 //! to drive them, or any other signal to bend the wave shape.
 
 use loom_core::{
-    Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, Polarity,
-    PortDefault, PortIo, PortSpec, ProcessContext, SignalType, Widget,
+    Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, PortDefault, PortIo,
+    PortSpec, ProcessContext, SignalType, Widget,
 };
 use loom_rt::Smoothed;
 use std::f32::consts::TAU;
@@ -23,7 +23,7 @@ pub static SINE: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Phase,
         description: "Position in the wave, from 0 to 1. One ramp is one cycle.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Unipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::Downmix,
     }],
     outputs: &[PortSpec {
@@ -32,7 +32,7 @@ pub static SINE: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Audio,
         description: "Sine wave from -1 to 1.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Bipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
     params: &[],
@@ -66,7 +66,7 @@ pub static SAW: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Phase,
         description: "Position in the wave, from 0 to 1. One ramp is one cycle.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Unipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::Downmix,
     }],
     outputs: &[PortSpec {
@@ -75,7 +75,7 @@ pub static SAW: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Audio,
         description: "Saw wave from -1 to 1.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Bipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
     params: &[],
@@ -146,7 +146,7 @@ pub static PULSE: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Phase,
         description: "Position in the wave, from 0 to 1. One ramp is one cycle.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Unipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::Downmix,
     }],
     outputs: &[PortSpec {
@@ -155,7 +155,7 @@ pub static PULSE: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Audio,
         description: "Pulse wave from -1 to 1.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Bipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
     params: &[ParamSpec {
@@ -264,7 +264,7 @@ pub static TRIANGLE: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Phase,
         description: "Position in the wave, from 0 to 1. One ramp is one cycle.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Unipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::Downmix,
     }],
     outputs: &[PortSpec {
@@ -273,7 +273,7 @@ pub static TRIANGLE: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Audio,
         description: "Triangle wave from -1 to 1.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Bipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
     params: &[],
@@ -351,7 +351,7 @@ pub static NOISE: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Audio,
         description: "Noise with the same loudness in every colour. White stays within -1 to 1; pink and brown can peak a little above.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Bipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
     params: &[ParamSpec {

@@ -13,7 +13,7 @@
 
 use loom_core::signal::{EdgeDetector, WrapDetector, gate_is_high, trigger};
 use loom_core::{
-    Channels, DisplayKind, DisplaySpec, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, Polarity,
+    Channels, DisplayKind, DisplaySpec, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec,
     PortDefault, PortIo, PortSpec, ProcessContext, SignalType, TRANSPORT_MODULE, TimeSignature, TransportRequest,
     TriggerFlag, Widget,
 };
@@ -37,7 +37,7 @@ pub static TRANSPORT: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Gate,
             description: "High runs, low stops. While connected, it decides over the Run toggle.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Unipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::Downmix,
         },
         PortSpec {
@@ -46,7 +46,7 @@ pub static TRANSPORT: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Gate,
             description: "A rising edge returns to bar 1.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Unipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::Downmix,
         },
     ],
@@ -57,7 +57,7 @@ pub static TRANSPORT: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Phase,
             description: "Rises from 0 to 1 once per bar.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Unipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::PerChannel,
         },
         PortSpec {
@@ -66,7 +66,7 @@ pub static TRANSPORT: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Phase,
             description: "Rises from 0 to 1 once per quarter-note beat.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Unipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::PerChannel,
         },
         PortSpec {
@@ -75,7 +75,7 @@ pub static TRANSPORT: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Gate,
             description: "High while the transport runs.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Unipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::PerChannel,
         },
         PortSpec {
@@ -84,7 +84,7 @@ pub static TRANSPORT: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Gate,
             description: "Fires at the start of each bar while the transport runs.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Unipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::PerChannel,
         },
         PortSpec {
@@ -93,7 +93,7 @@ pub static TRANSPORT: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Gate,
             description: "Fires at the start of each beat while the transport runs.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Unipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::PerChannel,
         },
         PortSpec {
@@ -102,7 +102,7 @@ pub static TRANSPORT: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Gate,
             description: "Fires when the position jumps: a reset or a new time signature.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Unipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::PerChannel,
         },
     ],

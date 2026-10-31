@@ -26,18 +26,24 @@ pub const LIMIT: usize = 200;
 #[derive(Clone)]
 pub struct ModuleState {
     descriptor: &'static ModuleDescriptor,
+    /// Owned data for an unavailable module.
+    unknown: Option<loom_core::UnknownModule>,
     params: Vec<f32>,
     /// The selected control range of each parameter (control-ranges.md).
     ranges: Vec<Option<ParamRange>>,
     position: Option<Point>,
+    /// Optional tile dimensions in grid units.
+    size: Option<(u8, u8)>,
 }
 
 impl PartialEq for ModuleState {
     fn eq(&self, other: &Self) -> bool {
         std::ptr::eq(self.descriptor, other.descriptor)
+            && self.unknown == other.unknown
             && self.params == other.params
             && self.ranges == other.ranges
             && self.position == other.position
+            && self.size == other.size
     }
 }
 
@@ -55,6 +61,15 @@ pub struct Snapshot {
 impl Snapshot {
     /// Reads the patch.
     pub fn take(controller: &Controller, positions: &BTreeMap<u32, Point>) -> Self {
+        Self::take_with_sizes(controller, positions, &BTreeMap::new())
+    }
+
+    /// Reads the patch and its saved tile dimensions.
+    pub fn take_with_sizes(
+        controller: &Controller,
+        positions: &BTreeMap<u32, Point>,
+        sizes: &BTreeMap<u32, (u8, u8)>,
+    ) -> Self {
         let graph = controller.graph();
         Self {
             modules: graph
@@ -64,12 +79,14 @@ impl Snapshot {
                         id.0,
                         ModuleState {
                             descriptor: node.descriptor,
+                            unknown: node.unknown.clone(),
                             // A transient value is a live gesture, not an
                             // edit, so undo sees it at its default
                             // (transient-params.md).
                             params: node.descriptor.saved_values(&node.params),
                             ranges: (0..node.params.len()).map(|index| node.range(index)).collect(),
                             position: positions.get(&id.0).copied(),
+                            size: sizes.get(&id.0).copied(),
                         },
                     )
                 })
@@ -121,6 +138,7 @@ impl Step {
 pub fn is_edit(controller: &Controller, event: &CanvasEvent) -> bool {
     match *event {
         CanvasEvent::Move { .. }
+        | CanvasEvent::Resize { .. }
         | CanvasEvent::Connect { .. }
         | CanvasEvent::Disconnect(_)
         | CanvasEvent::Assign { .. }
@@ -270,6 +288,24 @@ fn name(step: &Step) -> String {
         }
         .to_string();
     }
+    if let Some((_, Some(module))) = step.modules.values().find(|(old, new)| {
+        old.as_ref()
+            .zip(new.as_ref())
+            .is_some_and(|(old, new)| old.size != new.size)
+    }) {
+        return format!("resize {}", module.descriptor.name);
+    }
+    if step.modules.values().any(|(old, new)| {
+        old.as_ref()
+            .and_then(|module| module.unknown.as_ref())
+            .map(|unknown| &unknown.label)
+            != new
+                .as_ref()
+                .and_then(|module| module.unknown.as_ref())
+                .map(|unknown| &unknown.label)
+    }) {
+        return "label unknown module".to_string();
+    }
     // A new range, with or without the value it clamped.
     for (old, new) in step.modules.values() {
         if let (Some(old), Some(new)) = (old, new)
@@ -319,7 +355,7 @@ pub fn check(step: &Step, forward: bool, controller: &Controller) -> Result<(), 
     for (old, new) in step.modules.values() {
         let (have, want) = if forward { (old, new) } else { (new, old) };
         if let (None, Some(state)) = (have, want) {
-            if controller.registry().resolve(&state.descriptor.kind()).is_err() {
+            if state.unknown.is_none() && controller.registry().resolve(&state.descriptor.kind()).is_err() {
                 return Err(format!("{} is no longer available", state.descriptor.name));
             }
             if matches!(state.descriptor.role, ModuleRole::Dsp(_)) {
@@ -340,6 +376,17 @@ pub fn apply(
     forward: bool,
     controller: &mut Controller,
     positions: &mut BTreeMap<u32, Point>,
+) -> Result<(), LoomError> {
+    apply_with_sizes(step, forward, controller, positions, &mut BTreeMap::new())
+}
+
+/// Applies a step, including the tile sizes captured in it.
+pub fn apply_with_sizes(
+    step: &Step,
+    forward: bool,
+    controller: &mut Controller,
+    positions: &mut BTreeMap<u32, Point>,
+    sizes: &mut BTreeMap<u32, (u8, u8)>,
 ) -> Result<(), LoomError> {
     fn sides<T>(pair: &Pair<T>, forward: bool) -> (&Option<T>, &Option<T>) {
         if forward {
@@ -372,13 +419,20 @@ pub fn apply(
         if let (Some(_), None) = sides(pair, forward) {
             controller.remove_module(ModuleId(id))?;
             positions.remove(&id);
+            sizes.remove(&id);
         }
     }
     for (&id, pair) in &step.modules {
         let (have, want) = sides(pair, forward);
         let Some(state) = want else { continue };
         if have.is_none() {
-            controller.add_module_with_id(ModuleId(id), &state.descriptor.kind())?;
+            if let Some(unknown) = &state.unknown {
+                controller.add_unknown_with_id(ModuleId(id), unknown.clone())?;
+            } else {
+                controller.add_module_with_id(ModuleId(id), &state.descriptor.kind())?;
+            }
+        } else if let Some(unknown) = &state.unknown {
+            controller.set_unknown_label(ModuleId(id), unknown.label.clone());
         }
         // Ranges before values, so a range never clamps a value the step
         // sets.
@@ -412,6 +466,10 @@ pub fn apply(
         match state.position {
             Some(position) => positions.insert(id, position),
             None => positions.remove(&id),
+        };
+        match state.size {
+            Some(size) => sizes.insert(id, size),
+            None => sizes.remove(&id),
         };
     }
     for (&input, pair) in &step.cables {

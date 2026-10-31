@@ -257,13 +257,83 @@ fn paste_refuses_text_it_cannot_add_whole() {
     assert_eq!(refuse("Patch(version: 1)"), NOTHING_TO_PASTE);
     assert!(refuse("Patch(version: 99, modules: [(id: 1, kind: \"loom.osc.sine\")])").contains("newer"));
     let unknown = refuse("Patch(version: 1, modules: [(id: 1, kind: \"loom.none.such\")])");
-    assert_eq!(unknown, "Cannot paste: unknown module `loom.none.such`");
+    assert!(
+        unknown.contains("invalid") && unknown.contains("loom.none.such"),
+        "{unknown}"
+    );
     let param = refuse("Patch(version: 1, modules: [(id: 1, kind: \"loom.osc.sine\", params: {\"nope\": 1.0})])");
     assert!(param.contains("no parameter `nope`"), "{param}");
     let missing = refuse(
         "Patch(version: 1, modules: [(id: 1, kind: \"loom.osc.sine\")], cables: [(from: (2, \"out\"), to: (1, \"phase\"))])",
     );
     assert!(missing.contains("no module has id 2"), "{missing}");
+}
+
+/// A placeholder keeps its saved values and ports even when its cables are not copied.
+#[test]
+fn copy_and_paste_unknown_module_keeps_unconnected_ports() {
+    let mut c = parts().controller;
+    let id = ModuleId(71);
+    let unknown = loom_core::UnknownModule {
+        kind: "future.effect@4".into(),
+        label: Some("Missing".into()),
+        params: BTreeMap::from([("gain".into(), 0.7)]),
+        ranges: BTreeMap::from([("gain".into(), (0.0, 2.0))]),
+        inputs: vec!["audio".into(), "gate".into()],
+        outputs: vec!["out".into(), "aux".into()],
+        parameters: vec!["gain".into()],
+    };
+    c.add_unknown_with_id(id, unknown.clone()).unwrap();
+    let mut positions = spread(&c);
+    let text = Group::from_selection(c.graph(), &positions, &ids(&[id]), false).to_text();
+    assert!(Patch::from_ron(&text).is_ok(), "clipboard remains patch text");
+    let group = Group::from_text(&text, c.registry()).unwrap();
+    let new = group.add(&mut c, &mut positions, Point::new(1200.0, 600.0)).unwrap();
+    assert_eq!(
+        c.graph().node(ModuleId(new[0])).unwrap().unknown.as_ref(),
+        Some(&unknown)
+    );
+}
+
+/// Copied links keep their named endpoints when unused ports precede them.
+#[test]
+fn copy_unknown_module_remaps_named_links() {
+    let mut c = parts().controller;
+    let unknown = ModuleId(71);
+    c.add_unknown_with_id(
+        unknown,
+        loom_core::UnknownModule {
+            kind: "future.effect@1".into(),
+            label: None,
+            params: BTreeMap::new(),
+            ranges: BTreeMap::new(),
+            inputs: vec!["unused".into(), "in".into()],
+            outputs: vec!["unused".into(), "out".into()],
+            parameters: vec!["unused".into(), "amount".into()],
+        },
+    )
+    .unwrap();
+    let phase = c.add_module("loom.phase.generator").unwrap();
+    c.connect_named(phase, "phase", unknown, "in").unwrap();
+    c.add_assignment_named(unknown, "out", phase, "tune", 0.5).unwrap();
+    c.add_assignment_named(phase, "phase", unknown, "amount", 0.25).unwrap();
+    let mut positions = spread(&c);
+    let text = Group::from_selection(c.graph(), &positions, &ids(&[unknown, phase]), false).to_text();
+    let group = Group::from_text(&text, c.registry()).unwrap();
+    let added = group.add(&mut c, &mut positions, Point::new(1200.0, 600.0)).unwrap();
+    let new_unknown = ModuleId(added[0]);
+    let new_phase = ModuleId(added[1]);
+    assert_eq!(
+        c.graph().source_of(c.input_ref(new_unknown, "in").unwrap()),
+        Some(c.output_ref(new_phase, "phase").unwrap())
+    );
+    assert!(c.graph().assignments().any(|(_, assignment)| assignment.source
+        == c.output_ref(new_unknown, "out").unwrap()
+        && assignment.target == new_phase));
+    assert!(c.graph().assignments().any(|(_, assignment)| assignment.source
+        == c.output_ref(new_phase, "phase").unwrap()
+        && assignment.target == new_unknown
+        && assignment.param == 1));
 }
 
 #[test]

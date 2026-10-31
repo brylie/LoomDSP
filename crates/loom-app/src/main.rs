@@ -363,6 +363,15 @@ enum Message {
     },
     /// The remove button on an assignment row.
     Unassign(AssignmentId),
+    /// Edit a placeholder label without changing the patch yet.
+    UnknownLabelDraft {
+        module: u32,
+        value: String,
+    },
+    /// Apply the placeholder label as one undo step.
+    UnknownLabelApply {
+        module: u32,
+    },
     /// A change in the session-only modulation matrix.
     Matrix(MatrixEvent),
     /// A key handled by the focused matrix even if a widget used it.
@@ -426,6 +435,7 @@ impl Message {
                 | Self::LiveFrame
                 | Self::MidiPoll
                 | Self::BenchDone
+                | Self::UnknownLabelDraft { .. }
         )
     }
 }
@@ -454,6 +464,12 @@ struct App {
     /// A full command queue left fresh modules staged for a later commit.
     retry_commit: bool,
     positions: BTreeMap<u32, Point>,
+    /// Original placeholder positions and their initial displayed positions.
+    unknown_positions: BTreeMap<u32, (Option<(f32, f32)>, Point)>,
+    /// Unapplied inspector label text for a placeholder.
+    unknown_label_draft: Option<(u32, String)>,
+    /// Saved tile dimensions in grid units, keyed by module ID.
+    sizes: BTreeMap<u32, (u8, u8)>,
     scene: Scene,
     /// The output drag drawn over the entire window.
     assign_drag: Option<AssignDrag>,
@@ -626,6 +642,10 @@ struct Session {
     midi: loom_core::MidiSender,
     telemetry: loom_core::Telemetry,
     positions: BTreeMap<u32, Point>,
+    /// Original and displayed placeholder positions for lossless saving.
+    unknown_positions: BTreeMap<u32, (Option<(f32, f32)>, Point)>,
+    /// Tile dimensions carried with the patch between sessions.
+    sizes: BTreeMap<u32, (u8, u8)>,
     name: String,
     file: Option<PathBuf>,
     stamp: Option<recovery::Stamp>,
@@ -725,8 +745,8 @@ impl App {
             ..EngineConfig::with_sample_rate(sample_rate)
         };
         let session = Self::session(config, args.test_modules, source).unwrap_or_else(|e| {
-            // A copy that reads but does not load (an unknown module) is a
-            // failed restore too: the orphan is kept, not adopted.
+            // A copy that reads but does not load is a failed restore too:
+            // the orphan is kept, not adopted.
             match recovered.take() {
                 Some((_, orphan, _)) => restore_error(&e, orphan, &mut notes),
                 None => status = e,
@@ -795,6 +815,12 @@ impl App {
             ),
             _ => format!("Restored unsaved changes from {when}."),
         };
+        for note in &self.load_notes {
+            if note.contains("not in this version:") {
+                self.status.push(' ');
+                self.status.push_str(note);
+            }
+        }
         if let Some(session) = &mut self.recovery {
             session.adopt(orphan);
         }
@@ -807,6 +833,12 @@ impl App {
         let mut patch = Patch::from_graph(&self.name, self.controller.graph());
         for m in &mut patch.modules {
             m.position = self.positions.get(&m.id).map(|p| (p.x.round(), p.y.round()));
+            if let Some((original, initial)) = self.unknown_positions.get(&m.id)
+                && self.positions.get(&m.id) == Some(initial)
+            {
+                m.position = *original;
+            }
+            m.size = self.sizes.get(&m.id).copied();
         }
         patch
     }
@@ -841,12 +873,24 @@ impl App {
             telemetry,
         } = create_engine(registry(test_modules), config);
         let mut positions = BTreeMap::new();
+        let mut sizes = BTreeMap::new();
+        let mut original_unknown_positions = BTreeMap::new();
         let mut notes = Vec::new();
         let mut load = |patch: &Patch, controller: &mut Controller| -> Result<String, String> {
             notes = patch.load_into(controller).map_err(|e| e.to_string())?;
             for m in &patch.modules {
+                if controller
+                    .graph()
+                    .node(ModuleId(m.id))
+                    .is_some_and(|node| node.unknown.is_some())
+                {
+                    original_unknown_positions.insert(m.id, m.position);
+                }
                 if let Some((x, y)) = m.position {
                     positions.insert(m.id, Point::new(x, y));
+                }
+                if let Some(size) = m.size {
+                    sizes.insert(m.id, size);
                 }
             }
             Ok(patch.name.clone())
@@ -874,6 +918,10 @@ impl App {
             controller.commit().map_err(|e| e.to_string())?;
         }
         layout::auto_layout(&controller, &mut positions);
+        let unknown_positions = original_unknown_positions
+            .into_iter()
+            .filter_map(|(id, original)| positions.get(&id).copied().map(|initial| (id, (original, initial))))
+            .collect();
         for note in &notes {
             eprintln!("loom-app: {note}");
         }
@@ -883,6 +931,8 @@ impl App {
             midi,
             telemetry,
             positions,
+            unknown_positions,
+            sizes,
             name,
             file,
             stamp,
@@ -909,6 +959,8 @@ impl App {
             midi: sender,
             telemetry,
             positions,
+            unknown_positions,
+            sizes,
             name,
             file,
             stamp,
@@ -944,7 +996,7 @@ impl App {
             Err(e) => (None, None, format!("no audio ({e})"), Some(engine)),
         };
 
-        let scene = scene::build(&controller, &positions);
+        let scene = scene::build(&controller, &positions, &sizes);
         let mut values = PanelValues::new();
         scene::update_panel_values(&mut values, &controller, &BTreeMap::new());
         // The loaded patch may already have a cable on run, before any
@@ -954,6 +1006,9 @@ impl App {
             controller,
             retry_commit: false,
             positions,
+            unknown_positions,
+            unknown_label_draft: None,
+            sizes,
             scene,
             assign_drag: None,
             drop_row: None,
@@ -1502,7 +1557,7 @@ impl App {
     /// Rebuilds the scene after the graph changed.
     fn refresh(&mut self) {
         layout::auto_layout(&self.controller, &mut self.positions);
-        self.scene = scene::build(&self.controller, &self.positions);
+        self.scene = scene::build(&self.controller, &self.positions, &self.sizes);
         self.refresh_values();
         self.refresh_learn();
         self.matrix.reconcile(self.controller.graph());
@@ -1923,9 +1978,9 @@ impl App {
     /// if one is already open, so a gesture's first call is the one that
     /// counts.
     fn begin_edit(&mut self) {
-        let (controller, positions) = (&self.controller, &self.positions);
+        let (controller, positions, sizes) = (&self.controller, &self.positions, &self.sizes);
         self.edits.begin(controller.has_uncommitted_changes(), || {
-            undo::Snapshot::take(controller, positions)
+            undo::Snapshot::take_with_sizes(controller, positions, sizes)
         });
     }
 
@@ -1933,18 +1988,19 @@ impl App {
     fn record(&mut self) {
         // A command's name is for this step only, also when no step is made.
         let step_name = self.step_name.take();
-        let (controller, positions) = (&self.controller, &self.positions);
-        self.edits
-            .record(step_name, || undo::Snapshot::take(controller, positions));
+        let (controller, positions, sizes) = (&self.controller, &self.positions, &self.sizes);
+        self.edits.record(step_name, || {
+            undo::Snapshot::take_with_sizes(controller, positions, sizes)
+        });
     }
 
     /// Closes the open gesture, of either kind, and records it.
     fn end_gesture(&mut self) {
         let step_name = self.step_name.take();
-        let (controller, positions) = (&self.controller, &self.positions);
+        let (controller, positions, sizes) = (&self.controller, &self.positions, &self.sizes);
         self.edits
             .end_gesture(controller.has_uncommitted_changes(), step_name, || {
-                undo::Snapshot::take(controller, positions)
+                undo::Snapshot::take_with_sizes(controller, positions, sizes)
             });
     }
 
@@ -1991,6 +2047,7 @@ impl App {
 
     /// Undoes (`forward` false) or redoes the next step.
     fn step(&mut self, forward: bool) {
+        self.unknown_label_draft = None;
         let step = if forward {
             self.edits.history.redo_step()
         } else {
@@ -2004,7 +2061,13 @@ impl App {
         }
         // An armed parameter is a mode, not an edit: undo disarms it first.
         self.armed = None;
-        let applied = undo::apply(&step, forward, &mut self.controller, &mut self.positions);
+        let applied = undo::apply_with_sizes(
+            &step,
+            forward,
+            &mut self.controller,
+            &mut self.positions,
+            &mut self.sizes,
+        );
         match applied {
             Ok(()) => {
                 if forward {
@@ -2101,6 +2164,15 @@ impl App {
                 self.matrix_event(event);
                 iced::widget::operation::focus("matrix-depth")
             }
+            Message::Matrix(event)
+                if matches!(
+                    event,
+                    MatrixEvent::Sort(_) | MatrixEvent::Filter(_) | MatrixEvent::SelectedOnly(_)
+                ) =>
+            {
+                self.matrix_event(event);
+                matrix::reveal_selected()
+            }
             Message::MatrixKey(key) => {
                 let open_depth = matches!(
                     key,
@@ -2112,13 +2184,7 @@ impl App {
                     && self.matrix.cell == MatrixColumn::Depth;
                 self.matrix_key(key);
                 let scroll = if self.matrix.tab == RightTab::Matrix && self.matrix.focused {
-                    iced::widget::operation::scroll_to(
-                        "matrix-table",
-                        iced::widget::scrollable::AbsoluteOffset {
-                            x: Some(matrix::column_offset(self.matrix.cell)),
-                            y: None,
-                        },
-                    )
+                    matrix::reveal_selected()
                 } else {
                     Task::none()
                 };
@@ -2291,6 +2357,17 @@ impl App {
             }
             Message::AddProbe { probe, output, world } => self.add_probe(probe, output, world),
             Message::Canvas(event) => self.canvas_event(event),
+            Message::UnknownLabelDraft { module, value } => self.unknown_label_draft = Some((module, value)),
+            Message::UnknownLabelApply { module } => {
+                if let Some((_, value)) = self.unknown_label_draft.take().filter(|(id, _)| *id == module) {
+                    let label = (!value.is_empty()).then_some(value);
+                    self.edit(|app| {
+                        if app.controller.set_unknown_label(ModuleId(module), label) {
+                            app.refresh();
+                        }
+                    });
+                }
+            }
             Message::DropRow(row) => {
                 self.drop_row = if self.assign_drag.is_some() && !self.learning {
                     row
@@ -2583,6 +2660,24 @@ impl App {
             self.matrix.add = None;
             return;
         }
+        let is_unknown = |id: u32| {
+            self.controller
+                .graph()
+                .node(ModuleId(id))
+                .is_some_and(|node| node.unknown.is_some())
+        };
+        let forbidden = match &event {
+            CanvasEvent::Connect { from, to } => is_unknown(from.module) || is_unknown(to.module),
+            CanvasEvent::Assign { from, module, .. } => is_unknown(from.module) || is_unknown(*module),
+            CanvasEvent::AssignDrop { from, .. } => is_unknown(from.module),
+            _ => false,
+        };
+        if forbidden {
+            self.status = "Cannot connect to an unknown module".into();
+            self.assign_drag = None;
+            self.drop_row = None;
+            return;
+        }
         let edits = undo::is_edit(&self.controller, &event);
         if edits {
             self.close_slider_gesture();
@@ -2653,6 +2748,26 @@ impl App {
                     }
                 }
                 self.scene.move_modules(&ids, delta);
+            }
+            CanvasEvent::Resize { module, size } => {
+                if let Some(tile) = self.scene.module(module).filter(|tile| tile.is_growable()) {
+                    let min = tile.minimum_size();
+                    let min_w = (min.width / loom_canvas::GRID).ceil() as u8;
+                    let min_h = (min.height / loom_canvas::GRID).ceil() as u8;
+                    let size = (size.0.clamp(min_w, min_w.max(64)), size.1.clamp(min_h, min_h.max(64)));
+                    let current = (
+                        (tile.width() / loom_canvas::GRID) as u8,
+                        (tile.height() / loom_canvas::GRID) as u8,
+                    );
+                    if size != current {
+                        if size == (min_w, min_h) {
+                            self.sizes.remove(&module);
+                        } else {
+                            self.sizes.insert(module, size);
+                        }
+                        self.refresh();
+                    }
+                }
             }
             CanvasEvent::Connect { from, to } => {
                 let output = OutputRef {
@@ -2851,7 +2966,8 @@ impl App {
     /// is selected.
     fn selected_group(&mut self, verb: &str, incoming: bool) -> Option<clipboard::Group> {
         let group =
-            clipboard::Group::from_selection(self.controller.graph(), &self.positions, &self.selection, incoming);
+            clipboard::Group::from_selection(self.controller.graph(), &self.positions, &self.selection, incoming)
+                .with_sizes(&self.sizes);
         if group.is_empty() {
             self.status = format!("Nothing selected to {verb}");
             return None;
@@ -2930,6 +3046,7 @@ impl App {
         self.step_name = Some(format!("{verb} {}", group.describe()));
         self.edit(|app| match group.add(&mut app.controller, &mut app.positions, origin) {
             Ok(ids) => {
+                group.apply_sizes(&ids, &mut app.sizes);
                 app.selection = ids.into_iter().collect();
                 if app.commit() {
                     app.status = format!("{done} {}", group.describe());
@@ -4075,6 +4192,71 @@ mod tests {
         app.edits.history.undo_step().map(|s| s.name().to_string())
     }
 
+    /// Tile dimensions are restored by undo and redo.
+    #[test]
+    fn tile_dimensions_undo_and_redo() {
+        let mut app = app();
+        let id = app.controller.add_module("loom.display.scope").unwrap();
+        app.commit();
+        app.edits.history.clear();
+        app.edit(|app| {
+            app.sizes.insert(id.0, (24, 16));
+            app.refresh();
+        });
+        assert_eq!(app.sizes.get(&id.0), Some(&(24, 16)));
+        app.undo();
+        assert!(!app.sizes.contains_key(&id.0));
+        app.redo();
+        assert_eq!(app.sizes.get(&id.0), Some(&(24, 16)));
+    }
+
+    /// Resize commands respect the panel minimum, maximum, and growable widgets.
+    #[test]
+    fn resize_respects_limits_and_ignores_fixed_panels() {
+        let mut app = app();
+        let scope = app.controller.add_module("loom.display.scope").unwrap();
+        let fixed = app.controller.add_module("loom.math.constant").unwrap();
+        app.commit();
+        let min = app.scene.module(scope.0).unwrap().minimum_size();
+        app.canvas_event(CanvasEvent::Resize {
+            module: scope.0,
+            size: (255, 255),
+        });
+        let tile = app.scene.module(scope.0).unwrap();
+        assert_eq!(
+            (tile.width(), tile.height()),
+            (64.0 * loom_canvas::GRID, 64.0 * loom_canvas::GRID)
+        );
+        app.canvas_event(CanvasEvent::Resize {
+            module: scope.0,
+            size: (0, 0),
+        });
+        assert_eq!(app.scene.module(scope.0).unwrap().bounds().size(), min);
+        let generation = app.scene.generation();
+        app.canvas_event(CanvasEvent::Resize {
+            module: fixed.0,
+            size: (64, 64),
+        });
+        assert_eq!(app.scene.generation(), generation);
+        assert!(!app.sizes.contains_key(&fixed.0));
+    }
+
+    /// Copy and paste carry a saved tile size to the new module ID.
+    #[test]
+    fn copy_and_paste_keep_tile_size() {
+        let mut app = app();
+        let id = app.controller.add_module("loom.display.scope").unwrap();
+        app.positions.insert(id.0, Point::ORIGIN);
+        app.sizes.insert(id.0, (24, 16));
+        app.selection = BTreeSet::from([id.0]);
+        app.commit();
+        let text = app.copy().unwrap();
+        app.paste(Point::new(100.0, 100.0), Some(text));
+        let pasted = *app.selection.iter().next().unwrap();
+        assert_ne!(pasted, id.0);
+        assert_eq!(app.sizes.get(&pasted), Some(&(24, 16)));
+    }
+
     #[test]
     fn copy_with_nothing_selected_writes_nothing() {
         let mut app = app();
@@ -4159,7 +4341,7 @@ mod tests {
             Point::ORIGIN,
             Some("Patch(version: 1, modules: [(id: 1, kind: \"loom.none.such\")])".to_string()),
         );
-        assert_eq!(app.status, "Cannot paste: unknown module `loom.none.such`");
+        assert!(app.status.contains("invalid") && app.status.contains("loom.none.such"));
         assert_eq!(app.controller.graph().nodes().count(), before);
         assert!(app.edits.history.undo_step().is_none());
     }
@@ -4397,6 +4579,165 @@ mod tests {
         let _ = app.update(Message::Lights(watch.shown(&mut fades, Instant::now())));
         let level = tile_widget(&app, env, light).position;
         assert!(level > 0.5, "the gate is held: {level}");
+    }
+
+    /// Saved tile dimensions survive session loading and patch creation.
+    #[test]
+    fn session_keeps_saved_tile_dimensions() {
+        let mut patch = Patch::new("Sized");
+        patch.modules.push(loom_patch::PatchModule {
+            id: 7,
+            kind: "loom.display.scope@1".into(),
+            label: None,
+            params: Default::default(),
+            position: None,
+            size: Some((24, 16)),
+            ranges: Default::default(),
+        });
+        let session = App::session(EngineConfig::default(), false, Source::Recovered(Box::new(patch))).unwrap();
+        assert_eq!(session.sizes.get(&7), Some(&(24, 16)));
+        let scene = scene::build(&session.controller, &session.positions, &session.sizes);
+        let tile = scene.module(7).unwrap();
+        assert_eq!(
+            (tile.width(), tile.height()),
+            (24.0 * loom_canvas::GRID, 16.0 * loom_canvas::GRID)
+        );
+        let mut app = app();
+        let id = app.controller.add_module("loom.display.scope").unwrap();
+        app.sizes.insert(id.0, (24, 16));
+        let saved = app.current_patch();
+        assert_eq!(
+            saved.modules.iter().find(|m| m.id == id.0).unwrap().size,
+            Some((24, 16))
+        );
+    }
+
+    /// Unknown tiles remain read-only and survive delete followed by undo.
+    #[test]
+    fn unknown_module_rejects_new_connections_and_undo_restores_it() {
+        let mut app = app();
+        let phase = app.controller.add_module("loom.phase.generator").unwrap();
+        let missing = ModuleId(100);
+        app.controller
+            .add_unknown_with_id(
+                missing,
+                loom_core::UnknownModule {
+                    kind: "future.effect@1".into(),
+                    label: Some("Missing".into()),
+                    params: BTreeMap::from([("amount".into(), 0.5)]),
+                    ranges: BTreeMap::new(),
+                    inputs: vec!["in".into()],
+                    outputs: vec!["out".into()],
+                    parameters: vec!["amount".into()],
+                },
+            )
+            .unwrap();
+        app.controller.connect_named(phase, "phase", missing, "in").unwrap();
+        let assignment = app
+            .controller
+            .add_assignment_named(phase, "phase", missing, "amount", 0.5)
+            .unwrap();
+        app.controller
+            .map_midi_named(
+                loom_core::MidiControl {
+                    channel: 0,
+                    controller: 74,
+                },
+                missing,
+                "amount",
+            )
+            .unwrap();
+        app.commit();
+        app.edits.history.clear();
+        app.selection = BTreeSet::from([missing.0]);
+        let inspector::Inspector::Unknown(rows) = app.ui_snapshot().inspector else {
+            panic!("unknown inspector");
+        };
+        assert_eq!(rows.params, vec![("amount".into(), 0.5)]);
+        assert_eq!(rows.links.len(), 2);
+        let cables = app.controller.graph().cables().count();
+        app.canvas_event(CanvasEvent::Connect {
+            from: loom_canvas::PortRef {
+                module: missing.0,
+                index: 0,
+                output: true,
+            },
+            to: loom_canvas::PortRef {
+                module: phase.0,
+                index: 0,
+                output: false,
+            },
+        });
+        assert_eq!(app.status, "Cannot connect to an unknown module");
+        assert_eq!(app.controller.graph().cables().count(), cables);
+        assert!(app.edits.history.undo_step().is_none());
+        app.canvas_event(CanvasEvent::Delete(vec![missing.0]));
+        assert!(app.controller.graph().node(missing).is_none());
+        app.undo();
+        let restored = app.controller.graph().node(missing).unwrap().unknown.clone().unwrap();
+        assert_eq!(restored.params.get("amount"), Some(&0.5));
+        assert_eq!(app.controller.graph().cables().count(), cables);
+        app.selection = BTreeSet::from([missing.0]);
+        app.edits.history.clear();
+        let copied = app.copy().unwrap();
+        app.paste(Point::new(400.0, 200.0), Some(copied));
+        let pasted = ModuleId(*app.selection.iter().next().unwrap());
+        assert_ne!(pasted, missing);
+        assert_eq!(
+            app.controller.graph().node(pasted).unwrap().unknown.as_ref().unwrap(),
+            &restored
+        );
+        app.undo();
+        assert!(app.controller.graph().node(pasted).is_none());
+        app.redo();
+        assert!(app.controller.graph().node(pasted).unwrap().unknown.is_some());
+        app.selection = BTreeSet::from([missing.0]);
+        app.duplicate();
+        let duplicate = ModuleId(*app.selection.iter().next().unwrap());
+        assert_ne!(duplicate, missing);
+        assert!(app.controller.graph().node(duplicate).unwrap().unknown.is_some());
+        app.undo();
+        assert!(app.controller.graph().node(duplicate).is_none());
+        let _ = app.update(Message::Unassign(assignment));
+        let _ = app.update(Message::Unmap {
+            module: missing.0,
+            index: 0,
+        });
+        assert!(app.controller.graph().assignment(assignment).is_none());
+        assert!(app.controller.graph().midi_mapping_of(missing, 0).is_none());
+        assert_eq!(
+            app.controller
+                .graph()
+                .node(missing)
+                .unwrap()
+                .unknown
+                .as_ref()
+                .unwrap()
+                .outputs,
+            ["out"]
+        );
+    }
+
+    /// The inspector reports the nominal range alongside each port description.
+    #[test]
+    fn inspector_shows_nominal_port_ranges() {
+        let mut app = app();
+        let env = app.controller.add_module("loom.env.envelope").unwrap();
+        app.commit();
+        let _ = app.update(Message::SelectModule(env.0));
+        let inspector::Inspector::Module(rows) = app.ui_snapshot().inspector else {
+            panic!("one module is selected");
+        };
+        assert!(
+            rows.ports
+                .iter()
+                .any(|p| p.direction == "Output" && p.label == "Out" && p.description.contains("Usually 0 to 1."))
+        );
+        assert!(
+            rows.ports
+                .iter()
+                .any(|p| p.direction == "Input" && p.label == "Gate" && p.description.contains("Usually 0 to 1."))
+        );
     }
 
     /// Button's mode shows its choice names, "Toggle" and "Momentary", as

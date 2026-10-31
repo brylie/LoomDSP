@@ -5,7 +5,7 @@
 use loom_core::signal::gate_is_high;
 use loom_core::{
     Channels, DisplayKind, DisplaySpec, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions,
-    ParamSpec, Polarity, PortDefault, PortIo, PortSpec, ProcessContext, SignalType, Widget,
+    ParamSpec, PortDefault, PortIo, PortSpec, ProcessContext, SignalType, Widget,
 };
 
 /// `loom.env.envelope`: an envelope with an ADSR mode that follows a gate
@@ -22,7 +22,7 @@ pub static ENVELOPE: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Gate,
         description: "Going high starts the envelope. In ADSR mode, going low releases it.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Unipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::Downmix,
     }],
     outputs: &[PortSpec {
@@ -31,7 +31,7 @@ pub static ENVELOPE: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Modulation,
         description: "The envelope level, from 0 to 1.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Unipolar,
+        range: loom_core::PortRange::Span(0.0, 1.0),
         channels: Channels::PerChannel,
     }],
     params: &[
