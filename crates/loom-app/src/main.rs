@@ -518,6 +518,10 @@ struct App {
     /// Undo and redo (`docs/design/undo.md`): the history, and the edit
     /// or gesture being recorded.
     edits: edits::Edits,
+    /// An arrow key was released and its undo group may still grow.
+    arrow_group_pending: bool,
+    /// A toolbar or inspector action closed that group before its canvas timer.
+    arrow_group_closed: bool,
     /// The parameter whose **Add modulation** list is open.
     adding: Option<(u32, usize)>,
     /// During an arc drag: the assignment it changes, once picked, or
@@ -946,6 +950,8 @@ impl App {
             armed: None,
             learn_view: LearnView::default(),
             edits: edits::Edits::default(),
+            arrow_group_pending: false,
+            arrow_group_closed: false,
             adding: None,
             depth_drag: None,
             live_value_overflow_reported: false,
@@ -1526,6 +1532,7 @@ impl App {
     /// Sets a parameter as a knob turn does. A slider sends no start, so its
     /// first change opens the gesture and letting go closes it.
     fn turn_param(&mut self, module: u32, index: usize, value: f32) {
+        self.close_pending_arrow_group();
         self.edits.start_slider_gesture();
         self.begin_edit();
         self.set_param(module, index, value);
@@ -1744,9 +1751,19 @@ impl App {
         }
     }
 
-    /// Closes a gesture that began on an inspector slider.
+    /// Closes an inspector slider or a released arrow group before another action.
     fn close_slider_gesture(&mut self) {
         if self.edits.slider_gesture_open() {
+            self.end_gesture();
+        }
+        self.close_pending_arrow_group();
+    }
+
+    /// Records a released arrow edit before an action outside the canvas.
+    fn close_pending_arrow_group(&mut self) {
+        if self.arrow_group_pending {
+            self.arrow_group_pending = false;
+            self.arrow_group_closed = true;
             self.end_gesture();
         }
     }
@@ -2065,6 +2082,7 @@ impl App {
             Message::Depth { id, depth } => {
                 // Like a parameter slider: the first change opens the
                 // gesture, and letting go closes it, so one drag is one step.
+                self.close_pending_arrow_group();
                 self.edits.start_slider_gesture();
                 self.begin_edit();
                 if let Err(e) = self.controller.set_assignment_depth(id, depth) {
@@ -2275,6 +2293,23 @@ impl App {
                     self.refresh_values();
                 }
                 self.end_gesture();
+            }
+            CanvasEvent::ArrowGroupPending => self.arrow_group_pending = true,
+            CanvasEvent::ArrowGroupResumed => {
+                self.arrow_group_pending = false;
+                if self.arrow_group_closed {
+                    self.close_slider_gesture();
+                    self.edits.start_gesture();
+                    self.begin_edit();
+                    self.arrow_group_closed = false;
+                }
+            }
+            CanvasEvent::ArrowGroupEnd => {
+                self.arrow_group_pending = false;
+                if !self.arrow_group_closed {
+                    self.end_gesture();
+                }
+                self.arrow_group_closed = false;
             }
             CanvasEvent::Select(ids) => self.selection = ids.into_iter().collect(),
             CanvasEvent::Move { ids, delta } => {
@@ -4538,6 +4573,113 @@ mod tests {
         for &value in values {
             let _ = app.update(Message::ParamValue { module, index, value });
         }
+    }
+
+    /// Undo and inspector edits close a released arrow step before the canvas
+    /// timer does, and its late end cannot close the next inspector gesture.
+    #[test]
+    fn pending_arrow_group_yields_to_undo_and_inspector() {
+        let (mut app, module, cutoff) = app_with_filter();
+        let widget = app
+            .controller
+            .graph()
+            .node(ModuleId(module))
+            .unwrap()
+            .descriptor
+            .panel
+            .widgets
+            .iter()
+            .position(|w| w.bind == "cutoff")
+            .unwrap();
+        let original = app.controller.graph().node(ModuleId(module)).unwrap().params[cutoff];
+        let set = |app: &mut App, position| {
+            let _ = app.update(Message::Canvas(CanvasEvent::GestureStart));
+            let _ = app.update(Message::Canvas(CanvasEvent::SetControl {
+                module,
+                widget,
+                position,
+            }));
+            let _ = app.update(Message::Canvas(CanvasEvent::ArrowGroupPending));
+        };
+        let value = |app: &App| app.controller.graph().node(ModuleId(module)).unwrap().params[cutoff];
+
+        set(&mut app, 0.6);
+        assert!(app.edits.gesture_open());
+        let _ = app.update(Message::Undo);
+        assert_eq!(value(&app), original, "Undo must act before the 500 ms timer");
+        assert!(!app.edits.gesture_open());
+        let _ = app.update(Message::Redo);
+        assert_ne!(value(&app), original, "Redo must also act before the timer");
+        let _ = app.update(Message::Undo);
+        let _ = app.update(Message::Canvas(CanvasEvent::ArrowGroupEnd));
+        assert!(!app.edits.gesture_open());
+
+        set(&mut app, 0.7);
+        let arrow_value = value(&app);
+        slide(&mut app, module, cutoff, &[800.0, 900.0]);
+        assert!(app.edits.slider_gesture_open());
+        let _ = app.update(Message::Canvas(CanvasEvent::ArrowGroupEnd));
+        assert!(
+            app.edits.slider_gesture_open(),
+            "late arrow end must leave the slider open"
+        );
+        let _ = app.update(Message::SliderReleased);
+        let _ = app.update(Message::Undo);
+        assert_eq!(value(&app), arrow_value, "slider and arrow are separate steps");
+    }
+
+    /// A quick arrow press after Undo starts a fresh step even though the
+    /// canvas still considers it part of the previous 500 ms group.
+    #[test]
+    fn arrow_resumed_after_undo_starts_a_new_step() {
+        let (mut app, module, cutoff) = app_with_filter();
+        let widget = app
+            .controller
+            .graph()
+            .node(ModuleId(module))
+            .unwrap()
+            .descriptor
+            .panel
+            .widgets
+            .iter()
+            .position(|w| w.bind == "cutoff")
+            .unwrap();
+        let original = app.controller.graph().node(ModuleId(module)).unwrap().params[cutoff];
+        for event in [
+            CanvasEvent::GestureStart,
+            CanvasEvent::SetControl {
+                module,
+                widget,
+                position: 0.6,
+            },
+            CanvasEvent::ArrowGroupPending,
+        ] {
+            let _ = app.update(Message::Canvas(event));
+        }
+        let _ = app.update(Message::Undo);
+        assert_eq!(
+            app.controller.graph().node(ModuleId(module)).unwrap().params[cutoff],
+            original
+        );
+        for event in [
+            CanvasEvent::ArrowGroupResumed,
+            CanvasEvent::SetControl {
+                module,
+                widget,
+                position: 0.7,
+            },
+            CanvasEvent::ArrowGroupPending,
+            CanvasEvent::ArrowGroupEnd,
+        ] {
+            let _ = app.update(Message::Canvas(event));
+        }
+        assert_eq!(app.edits.history.len(), 1, "the undone step was replaced");
+        assert!(!app.edits.gesture_open());
+        let _ = app.update(Message::Undo);
+        assert_eq!(
+            app.controller.graph().node(ModuleId(module)).unwrap().params[cutoff],
+            original
+        );
     }
 
     /// An inspector slider gesture is one step, and it closes at release,

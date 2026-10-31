@@ -190,12 +190,18 @@ pub enum CanvasEvent {
     ToggleRun,
     /// A drag began: turning a knob, moving tiles, or pulling a cable. Every
     /// edit until [`CanvasEvent::GestureEnd`] is one undo step
-    /// (`docs/design/undo.md`, Gestures). A held arrow key on a focused
-    /// control is a gesture too.
+    /// (`docs/design/undo.md`, Gestures). Arrow edits end with
+    /// [`CanvasEvent::ArrowGroupEnd`] after their grouping window.
     GestureStart,
     /// The gesture ended. It is always sent after a start, also when the
     /// pointer is released outside the window or the window loses focus.
     GestureEnd,
+    /// The arrow key was released; another quick press may share its step.
+    ArrowGroupPending,
+    /// An arrow key was pressed again before the grouping deadline.
+    ArrowGroupResumed,
+    /// The arrow group ended, including when another interaction replaces it.
+    ArrowGroupEnd,
 }
 
 /// What MIDI learn mode shows on the canvas. While the canvas has one, a
@@ -462,7 +468,7 @@ impl<'a, Message> PatchCanvas<'a, Message> {
         }
         if std::mem::take(&mut state.arrow_gesture) {
             state.arrow_deadline = None;
-            self.emit(shell, CanvasEvent::GestureEnd);
+            self.emit(shell, CanvasEvent::ArrowGroupEnd);
         }
     }
 }
@@ -573,8 +579,7 @@ struct State {
     key_holds: [Option<KeyHold>; 2],
     /// Modules with lights on screen, as last reported.
     reported_lights: Option<Vec<u32>>,
-    /// True while an arrow key is down on a control: one gesture from key
-    /// down to key up, however often it repeats.
+    /// True while an arrow group is open, including its 500 ms release gap.
     arrow_gesture: bool,
     /// A released arrow keeps its gesture open for the next quick press.
     arrow_deadline: Option<Instant>,
@@ -835,7 +840,7 @@ impl<Message> PatchCanvas<'_, Message> {
                 if state.arrow_deadline.is_some_and(|due| *now >= due) {
                     state.arrow_deadline = None;
                     if std::mem::take(&mut state.arrow_gesture) {
-                        self.emit(shell, CanvasEvent::GestureEnd);
+                        self.emit(shell, CanvasEvent::ArrowGroupEnd);
                     }
                 }
                 if state
@@ -1477,6 +1482,7 @@ impl<Message> PatchCanvas<'_, Message> {
         {
             let due = Instant::now() + ARROW_GROUP;
             state.arrow_deadline = Some(due);
+            self.emit(shell, CanvasEvent::ArrowGroupPending);
             shell.request_redraw_at(due);
         }
     }
@@ -1526,7 +1532,9 @@ impl<Message> PatchCanvas<'_, Message> {
             );
             if !arrow || Instant::now() >= due {
                 state.arrow_gesture = false;
-                self.emit(shell, CanvasEvent::GestureEnd);
+                self.emit(shell, CanvasEvent::ArrowGroupEnd);
+            } else {
+                self.emit(shell, CanvasEvent::ArrowGroupResumed);
             }
         }
         // Focus is only valid on a control of the one selected module.
@@ -3519,6 +3527,140 @@ mod tests {
         })
     }
 
+    /// A key event with Shift held, for reverse focus and coarse movement.
+    fn shifted(named: keyboard::key::Named) -> Event {
+        let mut event = key_event(named, true);
+        if let Event::Keyboard(keyboard::Event::KeyPressed { modifiers, .. }) = &mut event {
+            *modifiers = keyboard::Modifiers::SHIFT;
+        }
+        event
+    }
+
+    /// Tab follows reading order across tiles and skips lights within a panel.
+    #[test]
+    fn keyboard_focus_follows_tiles_and_controls() {
+        let mut first = module(1, 300.0);
+        first.panel = panel();
+        first.position.y = 100.0;
+        let mut second = module(2, 0.0);
+        second.panel = panel();
+        let scene = Scene::new(vec![first, second], Vec::new());
+        let at = Point::new(700.0, 500.0);
+        let mut state = State::default();
+        let none = BTreeSet::new();
+        let canvas = PatchCanvas::new(&scene, &none, |e| e);
+        assert_eq!(
+            drive(&canvas, &mut state, &key_event(keyboard::key::Named::Tab, true), at),
+            vec![CanvasEvent::Select(vec![2])]
+        );
+        assert_eq!(
+            drive(&canvas, &mut state, &shifted(keyboard::key::Named::Tab), at),
+            vec![CanvasEvent::Select(vec![1])],
+            "Shift-Tab starts at the last tile"
+        );
+        let selected = BTreeSet::from([2]);
+        let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+        assert_eq!(
+            drive(&canvas, &mut state, &key_event(keyboard::key::Named::Tab, true), at),
+            vec![CanvasEvent::Select(vec![1])]
+        );
+        let first_selected = BTreeSet::from([1]);
+        let first_canvas = PatchCanvas::new(&scene, &first_selected, |e| e);
+        assert_eq!(
+            drive(&first_canvas, &mut state, &shifted(keyboard::key::Named::Tab), at),
+            vec![CanvasEvent::Select(vec![2])]
+        );
+        assert!(drive(&canvas, &mut state, &key_event(keyboard::key::Named::Enter, true), at).is_empty());
+        assert_eq!(state.focus, Some((2, 0)));
+        assert!(drive(&canvas, &mut state, &key_event(keyboard::key::Named::Tab, true), at).is_empty());
+        assert_eq!(state.focus, Some((2, 2)), "the light is skipped");
+        assert!(drive(&canvas, &mut state, &shifted(keyboard::key::Named::Tab), at).is_empty());
+        assert_eq!(state.focus, Some((2, 0)));
+        let toggle = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Space, true), at);
+        assert_eq!(
+            toggle,
+            vec![CanvasEvent::ToggleRun],
+            "a focused knob does not use Space"
+        );
+    }
+
+    /// An unfocused selected tile moves by one grid cell, or ten with Shift.
+    /// The next key closes its pending arrow group before acting.
+    #[test]
+    fn keyboard_moves_selected_tile_and_closes_group_on_next_key() {
+        let scene = Scene::new(vec![module(1, 0.0)], Vec::new());
+        let selected = BTreeSet::from([1]);
+        let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+        let mut state = State::default();
+        let at = Point::new(700.0, 500.0);
+        let first = drive(&canvas, &mut state, &arrow_up(), at);
+        assert_eq!(
+            first,
+            vec![
+                CanvasEvent::GestureStart,
+                CanvasEvent::Move {
+                    ids: vec![1],
+                    delta: Vector::new(0.0, -GRID)
+                }
+            ]
+        );
+        assert_eq!(
+            drive(
+                &canvas,
+                &mut state,
+                &key_event(keyboard::key::Named::ArrowUp, false),
+                at
+            ),
+            vec![CanvasEvent::ArrowGroupPending]
+        );
+        let next = drive(&canvas, &mut state, &shifted(keyboard::key::Named::ArrowRight), at);
+        assert_eq!(
+            next,
+            vec![
+                CanvasEvent::ArrowGroupResumed,
+                CanvasEvent::Move {
+                    ids: vec![1],
+                    delta: Vector::new(10.0 * GRID, 0.0)
+                }
+            ]
+        );
+        assert_eq!(
+            drive(
+                &canvas,
+                &mut state,
+                &key_event(keyboard::key::Named::ArrowRight, false),
+                at
+            ),
+            vec![CanvasEvent::ArrowGroupPending]
+        );
+        assert_eq!(
+            drive(&canvas, &mut state, &escape(), at),
+            vec![CanvasEvent::ArrowGroupEnd, CanvasEvent::Select(Vec::new())]
+        );
+    }
+
+    /// A pointer press replaces a pending arrow group before starting its
+    /// own interaction, so its eventual release cannot close the arrow step.
+    #[test]
+    fn pointer_press_ends_a_pending_arrow_group() {
+        let scene = Scene::new(vec![module(1, 0.0)], Vec::new());
+        let selected = BTreeSet::from([1]);
+        let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+        let mut state = State::default();
+        let at = Point::new(700.0, 500.0);
+        drive(&canvas, &mut state, &arrow_up(), at);
+        drive(
+            &canvas,
+            &mut state,
+            &key_event(keyboard::key::Named::ArrowUp, false),
+            at,
+        );
+        let press = drive(&canvas, &mut state, &click(mouse::Button::Left), at);
+        assert_eq!(press.first(), Some(&CanvasEvent::ArrowGroupEnd), "{press:?}");
+        assert!(!state.arrow_gesture);
+        assert!(state.arrow_deadline.is_none());
+    }
+
     /// Keyboard navigation selects a tile, enters its control, edits it,
     /// and leaves both focus levels without a pointer gesture (#101).
     #[test]
@@ -3556,7 +3698,10 @@ mod tests {
             &key_event(keyboard::key::Named::ArrowUp, false),
             at,
         );
-        assert_eq!(drive(&canvas, &mut state, &escape(), at), vec![CanvasEvent::GestureEnd]);
+        assert_eq!(
+            drive(&canvas, &mut state, &escape(), at),
+            vec![CanvasEvent::ArrowGroupEnd]
+        );
         assert_eq!(state.focus, None);
         assert_eq!(
             drive(&canvas, &mut state, &escape(), at),
@@ -3968,6 +4113,26 @@ mod tests {
         assert!(selected_only.shapes.is_empty());
     }
 
+    /// Turning an assignment off keeps its dashed line and direction rings,
+    /// while the line uses the disabled style (#197).
+    #[test]
+    fn disabled_assignment_keeps_a_visible_line() {
+        let (mut scene, _) = modulated_scene();
+        scene.set_modulation_enabled(1, false);
+        let none = BTreeSet::new();
+        let canvas = PatchCanvas::new(&scene, &none, |e| e);
+        let mut overlay = Overlay::default();
+        canvas.build_modulation_lines(
+            &State {
+                hover: Some(Hit::Port(OUT)),
+                ..State::default()
+            },
+            &mut overlay,
+        );
+        assert_eq!(overlay.cables.len(), 1);
+        assert_eq!(overlay.shapes.len(), 3);
+    }
+
     /// Toggling one assignment updates its line cache without changing
     /// the scene generation used for tiles and cables (#197).
     #[test]
@@ -4318,13 +4483,17 @@ mod tests {
             modifiers,
         });
         let end = drive(&canvas, &mut state, &up, knob);
-        assert!(end.is_empty(), "{end:?}");
+        assert_eq!(end, vec![CanvasEvent::ArrowGroupPending]);
         let quick = drive(&canvas, &mut state, &arrow_up(), knob);
         assert!(
             quick.iter().all(|e| !matches!(e, CanvasEvent::GestureStart)),
             "{quick:?}"
         );
-        assert!(drive(&canvas, &mut state, &up, knob).is_empty());
+        assert_eq!(quick.first(), Some(&CanvasEvent::ArrowGroupResumed));
+        assert_eq!(
+            drive(&canvas, &mut state, &up, knob),
+            vec![CanvasEvent::ArrowGroupPending]
+        );
         let due = state.arrow_deadline.expect("a release schedules the end");
         let end = drive(
             &canvas,
@@ -4332,7 +4501,7 @@ mod tests {
             &Event::Window(window::Event::RedrawRequested(due)),
             knob,
         );
-        assert!(end.contains(&CanvasEvent::GestureEnd), "{end:?}");
+        assert!(end.contains(&CanvasEvent::ArrowGroupEnd), "{end:?}");
     }
 
     /// A right press and release at `at`, with no move in between.
