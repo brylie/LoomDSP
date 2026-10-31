@@ -116,11 +116,12 @@ pub static SCOPE: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::Dsp(|_| Box::new(Meter)),
     panel: Panel::new(
         9,
-        3,
+        8,
         &[
             Widget::knob(0, 0, "window"),
             Widget::toggle(3, 0, "auto"),
             Widget::knob(6, 0, "level"),
+            Widget::scope(0, 3, "out"),
         ],
     ),
     displays: &[],

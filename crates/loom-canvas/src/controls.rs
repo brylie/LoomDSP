@@ -246,6 +246,16 @@ impl ControlGeometry {
                         };
                         shapes.push(Shape::new(button_body(rect), 6.0, fill, Color::TRANSPARENT, 0.0));
                     }
+                    WidgetViewKind::Scope => {
+                        // The frame and its centre line. The trace has its
+                        // own buffer (`trace.rs`), so a new trace never
+                        // rebuilds these.
+                        let area = crate::trace::trace_area(rect);
+                        shapes.push(Shape::new(area, 3.0, palette.background, palette.tile_border, 1.0));
+                        let centre =
+                            Rectangle::new(Point::new(area.x, area.center_y() - 0.25), Size::new(area.width, 0.5));
+                        shapes.push(Shape::new(centre, 0.0, palette.control_track, Color::TRANSPARENT, 0.0));
+                    }
                     WidgetViewKind::Meter => {
                         let track = meter_track(rect);
                         shapes.push(Shape::new(track, 2.0, palette.light_off, palette.tile_border, 1.0));
@@ -311,7 +321,7 @@ fn modulation_dot(kind: &WidgetViewKind, rect: Rectangle, mark: ModulationMark, 
     match (kind, mark) {
         (_, ModulationMark::None) | (WidgetViewKind::Knob { .. }, ModulationMark::Range { .. }) => None,
         // Displays have no parameter, so no assignments.
-        (WidgetViewKind::Light | WidgetViewKind::Meter, _) => None,
+        (WidgetViewKind::Light | WidgetViewKind::Meter | WidgetViewKind::Scope, _) => None,
         (_, ModulationMark::Ring) => Some(circle(
             centre,
             DOT_RADIUS,
@@ -419,7 +429,7 @@ pub(crate) fn focus_ring(kind: &WidgetViewKind, rect: Rectangle) -> (Rectangle, 
             4.0,
         ),
         // Displays never take focus.
-        WidgetViewKind::Light | WidgetViewKind::Meter => (rect.expand(1.0), 4.0),
+        WidgetViewKind::Light | WidgetViewKind::Meter | WidgetViewKind::Scope => (rect.expand(1.0), 4.0),
     }
 }
 
@@ -455,7 +465,7 @@ fn circle(centre: Point, radius: f32, fill: Color, border: Color, border_width: 
     Shape::new(rect, radius, fill, border, border_width)
 }
 
-fn mix(a: Color, b: Color, t: f32) -> Color {
+pub(crate) fn mix(a: Color, b: Color, t: f32) -> Color {
     Color::from_rgba(
         a.r + (b.r - a.r) * t,
         a.g + (b.g - a.g) * t,

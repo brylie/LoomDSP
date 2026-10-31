@@ -6,12 +6,12 @@ use crate::scene::{CLOCK_MARK_RADIUS, ModuleView, PORT_RADIUS, PortShape, Scene}
 use crate::stats::{self, Counter};
 use crate::theme::Palette;
 use crate::tile_text::{self, TextKind};
+use crate::trace::{Segment, TraceGeometry};
 use bytemuck::{Pod, Zeroable};
 use iced::advanced::graphics::color::pack;
 use iced::wgpu;
 use iced::widget::shader::{Pipeline, Primitive, Viewport};
 use iced::{Color, Point, Rectangle};
-use std::collections::HashSet;
 
 /// Corner radius of tiles, in world units.
 const TILE_RADIUS: f32 = 5.0;
@@ -182,7 +182,6 @@ impl Geometry {
     /// Builds instances for every module, port, and cable in a scene.
     pub fn build(scene: &Scene, palette: &Palette) -> Self {
         stats::count(Counter::SceneBuilds);
-        let mut connected: HashSet<(u32, bool, usize)> = HashSet::new();
         let mut cables = Vec::with_capacity(scene.cables().len());
         for cable in scene.cables() {
             let (Some(from), Some(to)) = (
@@ -191,8 +190,6 @@ impl Geometry {
             ) else {
                 continue;
             };
-            connected.insert((cable.from.0, true, cable.from.1));
-            connected.insert((cable.to.0, false, cable.to.1));
             cables.push(Cable::new(
                 from.output_position(cable.from.1),
                 to.input_position(cable.to.1),
@@ -230,14 +227,17 @@ impl Geometry {
                         .enumerate()
                         .map(|(i, p)| (module.output_position(i), p, true, i)),
                 );
-            for (centre, port, output, index) in module_ports {
-                // Connected ports are filled; free ports are rings.
-                let fill = if connected.contains(&(module.id, output, index)) {
-                    port.colour
-                } else {
-                    palette.tile
-                };
-                markers.push(Shape::marker(centre, PORT_RADIUS, port.shape, fill, port.colour, 1.6));
+            for (centre, port, _, _) in module_ports {
+                // Activity fills connected ports from a separate buffer.
+                // The scene's marker remains an outline while silent.
+                markers.push(Shape::marker(
+                    centre,
+                    PORT_RADIUS,
+                    port.shape,
+                    palette.tile,
+                    port.colour,
+                    1.6,
+                ));
             }
             // Assignment count badges sit with the markers, over the
             // cables. Their numbers are text.
@@ -380,6 +380,8 @@ pub struct CanvasPrimitive {
     pub(crate) geometry: std::sync::Arc<Geometry>,
     /// Panel controls. `None` when zoomed out too far to draw them.
     pub(crate) controls: Option<std::sync::Arc<ControlGeometry>>,
+    /// Scope traces. `None` when zoomed out too far to draw them.
+    pub(crate) traces: Option<std::sync::Arc<TraceGeometry>>,
     pub(crate) overlay: Overlay,
     /// The range of `geometry.shapes` that holds the text bars to draw.
     pub(crate) bars: std::ops::Range<u32>,
@@ -452,6 +454,7 @@ pub struct CanvasPipeline {
     shapes: wgpu::RenderPipeline,
     cables: wgpu::RenderPipeline,
     arcs: wgpu::RenderPipeline,
+    traces: wgpu::RenderPipeline,
     grid: wgpu::RenderPipeline,
     globals: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
@@ -461,8 +464,11 @@ pub struct CanvasPipeline {
     overlay_shapes: InstanceBuffer,
     control_arcs: InstanceBuffer,
     control_shapes: InstanceBuffer,
+    /// Scope trace pieces: the one buffer a moving scope uploads.
+    trace_segments: InstanceBuffer,
     uploaded: u64,
     controls_uploaded: (u64, u64),
+    traces_uploaded: (u64, u64, bool),
     /// The overlay last uploaded, as bytes: cables, then shapes. A frame
     /// whose overlay is the same uploads nothing.
     overlay_uploaded: (Vec<u8>, Vec<u8>),
@@ -572,6 +578,12 @@ impl Pipeline for CanvasPipeline {
                 "fs_arc",
                 &[instance_layout(std::mem::size_of::<Arc>())],
             ),
+            traces: make(
+                "loom-canvas traces",
+                "vs_trace",
+                "fs_trace",
+                &[instance_layout(std::mem::size_of::<Segment>())],
+            ),
             grid: make("loom-canvas grid", "vs_grid", "fs_grid", &[]),
             globals,
             bind_group,
@@ -581,8 +593,10 @@ impl Pipeline for CanvasPipeline {
             overlay_shapes: InstanceBuffer::new(device, "loom-canvas overlay shapes"),
             control_arcs: InstanceBuffer::new(device, "loom-canvas control arcs"),
             control_shapes: InstanceBuffer::new(device, "loom-canvas control shapes"),
+            trace_segments: InstanceBuffer::new(device, "loom-canvas trace segments"),
             uploaded: 0,
             controls_uploaded: (0, 0),
+            traces_uploaded: (0, 0, false),
             overlay_uploaded: (Vec::new(), Vec::new()),
             tiles: 0,
             markers: 0,
@@ -633,6 +647,14 @@ impl Primitive for CanvasPrimitive {
             stats::count(Counter::ControlUploads);
             pipeline.controls_uploaded = controls.key;
         }
+        // A new trace uploads its own buffer and nothing else.
+        if let Some(traces) = &self.traces
+            && pipeline.traces_uploaded != traces.key
+        {
+            pipeline.trace_segments.upload(device, queue, &traces.segments);
+            stats::count(Counter::TraceUploads);
+            pipeline.traces_uploaded = traces.key;
+        }
         // The overlay is built every frame, but often does not change: a
         // live dot moving under still modulation lines changes only the
         // controls.
@@ -659,8 +681,9 @@ impl Primitive for CanvasPrimitive {
 
         // Cables behind the tiles, so modules read as solid objects. Then
         // text bars on the tiles, then the focused cables in front, then
-        // ports over every cable end, then panel controls, then the
-        // selection, hover, and focus outlines.
+        // ports over every cable end, then panel controls, then scope
+        // traces in their frames, then the selection, hover, and focus
+        // outlines.
         let tiles = pipeline.tiles.min(pipeline.scene_shapes.len);
         let markers = pipeline.markers.min(pipeline.scene_shapes.len);
         let bars = self.bars.start.min(markers)..self.bars.end.min(markers);
@@ -668,6 +691,11 @@ impl Primitive for CanvasPrimitive {
             (pipeline.control_arcs.len, pipeline.control_shapes.len)
         } else {
             (0, 0)
+        };
+        let traces = if self.traces.is_some() {
+            pipeline.trace_segments.len
+        } else {
+            0
         };
         let layers = [
             (
@@ -692,6 +720,7 @@ impl Primitive for CanvasPrimitive {
             ),
             (&pipeline.arcs, &pipeline.control_arcs, 4, 0..arcs),
             (&pipeline.shapes, &pipeline.control_shapes, 4, 0..controls),
+            (&pipeline.traces, &pipeline.trace_segments, 4, 0..traces),
             (
                 &pipeline.shapes,
                 &pipeline.overlay_shapes,
@@ -781,6 +810,7 @@ mod tests {
         assert_eq!(std::mem::size_of::<Shape>(), 64);
         assert_eq!(std::mem::size_of::<Cable>(), 64);
         assert_eq!(std::mem::size_of::<Arc>(), 64);
+        assert_eq!(std::mem::size_of::<Segment>(), 64);
         assert_eq!(std::mem::size_of::<Globals>(), 32);
     }
 

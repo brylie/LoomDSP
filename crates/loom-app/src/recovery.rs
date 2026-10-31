@@ -644,6 +644,12 @@ impl Schedule {
         }
     }
 
+    /// True when the folder holds what the last tick asked for and no job
+    /// is under way: nothing is due until the target changes.
+    pub fn settled(&self) -> bool {
+        self.sending.is_none() && !self.write_now && !self.unknown && self.seen.as_ref() == Some(&self.on_disk)
+    }
+
     /// Writes at the next tick, without waiting for quiet.
     pub fn write_now(&mut self) {
         self.write_now = true;
@@ -729,6 +735,12 @@ impl Session {
             self.schedule.sent(id, target);
         }
         status
+    }
+
+    /// True when the copy matches the last target and nothing is under way,
+    /// so ticks can stop until the patch changes ([`Schedule::settled`]).
+    pub fn settled(&self) -> bool {
+        self.schedule.settled()
     }
 
     /// Clean exit: the writer finishes its job in progress and deletes the

@@ -152,6 +152,9 @@ pub enum WidgetViewKind {
     Light,
     /// A level meter: an RMS bar and a peak line.
     Meter,
+    /// A scope: a frame, and the trace the app sets in
+    /// [`crate::ScopeTraces`].
+    Scope,
     /// A large button. Its gesture depends on the mode stored with its value.
     Button,
 }
@@ -179,15 +182,20 @@ impl WidgetView {
         match &self.kind {
             WidgetViewKind::Knob { .. } => (3, 3),
             WidgetViewKind::Meter => (3, 6),
+            WidgetViewKind::Scope => (9, 5),
             WidgetViewKind::Toggle | WidgetViewKind::Light => (3, 2),
             WidgetViewKind::Button => (6, 3),
             WidgetViewKind::Radio { options } => (6, options.len() as u8 + 1),
         }
     }
 
-    /// True for widgets the user operates (all but lights and meters).
+    /// True for widgets the user operates (all but lights, meters, and
+    /// scopes).
     pub fn is_control(&self) -> bool {
-        !matches!(self.kind, WidgetViewKind::Light | WidgetViewKind::Meter)
+        !matches!(
+            self.kind,
+            WidgetViewKind::Light | WidgetViewKind::Meter | WidgetViewKind::Scope
+        )
     }
 
     /// True for controls that take a dropped output as a modulation

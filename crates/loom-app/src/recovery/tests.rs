@@ -77,6 +77,35 @@ fn writes_after_two_quiet_seconds() {
     assert_eq!(s.tick(t0 + QUIET, p.clone()), Some(Action::Write(patch("a"))));
 }
 
+/// The schedule is settled, so the app's autosave timer can stop, only
+/// while the folder holds the target and no job is under way (#90).
+#[test]
+fn settled_only_when_nothing_is_due() {
+    let mut s = Schedule::default();
+    let t0 = Instant::now();
+    assert!(!s.settled(), "no tick yet");
+    // No unsaved changes, and nothing on disk: nothing to do.
+    assert_eq!(s.tick(t0, None), None);
+    assert!(s.settled());
+    // A change is due once it has been quiet, then under way, then done.
+    let p = Some(patch("a"));
+    assert_eq!(s.tick(t0, p.clone()), None);
+    assert!(!s.settled(), "waiting for quiet");
+    assert!(s.tick(t0 + QUIET, p.clone()).is_some());
+    s.sent(1, p.clone());
+    assert!(!s.settled(), "the job is under way");
+    s.done(1, true, t0 + QUIET);
+    assert_eq!(s.tick(t0 + QUIET + TICK, p.clone()), None);
+    assert!(s.settled());
+    // A failed job leaves the folder unknown until a job succeeds.
+    let q = Some(patch("b"));
+    assert!(s.tick(t0 + QUIET * 3, q.clone()).is_none());
+    assert!(s.tick(t0 + QUIET * 5, q.clone()).is_some());
+    s.sent(2, q.clone());
+    s.done(2, false, t0 + QUIET * 5);
+    assert!(!s.settled(), "after a failure");
+}
+
 /// Changes every 500 ms never give 2 s of quiet, but a copy is written no
 /// later than 10 s after the first.
 #[test]

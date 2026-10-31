@@ -3,7 +3,7 @@
 How modules, sub-patches, and patches show controls and displays, and how users build them.
 
 - **Kind:** living specification. It changes as panels are built and used.
-- **Status:** Draft, except [Module panels on tiles](#module-panels-on-tiles-p1) and [Level meters and audio load](#level-meters-and-audio-load-p1), which are Implemented. [Labels and hover text](#labels-and-hover-text) is Implemented. [Scope module](#scope-module) is Implemented, except drawing the trace ([#62](https://github.com/brylie/LoomDSP/issues/62)). [Default panels](#default-panels) and [Exposed controls in a sub-patch](#exposed-controls-in-a-sub-patch) are Draft.
+- **Status:** Draft, except [Module panels on tiles](#module-panels-on-tiles-p1) and [Level meters and audio load](#level-meters-and-audio-load-p1), which are Implemented. [Labels and hover text](#labels-and-hover-text) is Implemented. [Scope module](#scope-module) is Implemented, with its trace ([#62](https://github.com/brylie/LoomDSP/issues/62)). [Default panels](#default-panels) and [Exposed controls in a sub-patch](#exposed-controls-in-a-sub-patch) are Draft.
 - **Decision behind it:** [ADR-0013](../adr/0013-modules-carry-their-own-panel.md) (modules carry their own panel), [ADR-0025](../adr/0025-one-design-language-and-derived-panels.md) (one design language, and panels derived from the declaration).
 - **Requirements:** FR-PANEL-*, FR-CANVAS-10, FR-CANVAS-11, FR-LIB-18, FR-VIS-01 to 04, FR-ENCAP-03, NFR-PERF-04, NFR-UX-01.
 - **Builds on:** [Telemetry](telemetry.md) for live data, [ADR-0010](../adr/0010-own-patch-canvas.md) for the canvas, [parameter mapping](modulation.md#parameter-mapping) for control values.
@@ -152,7 +152,7 @@ The first display module that shows a signal over time.
 | `auto` | Auto | 0 or 1 | 1 | Whole number. On: the trigger level is halfway between the lowest and highest sample, as in [telemetry](telemetry.md). |
 | `level` | Level | -1 to 1 | 0 | The trigger level while `auto` is off. |
 
-- Its panel: a knob for `window`, a toggle for `auto`, and a knob for `level`. The scope widget joins them in #62. Code: `SCOPE` in `loom-modules/src/display.rs`, `Trigger` in `loom-app/src/live.rs`, and `loom-app/src/probe_menu.rs`.
+- Its panel: a knob for `window`, a toggle for `auto`, and a knob for `level`, and below them the scope widget (9 by 5 grid units, bound to `out`, no caption), added in #62. Code: `SCOPE` in `loom-modules/src/display.rs`, `Trigger` in `loom-app/src/live.rs`, and `loom-app/src/probe_menu.rs`.
 - The parameters never change the audio. They tell the app how to draw the trace.
 - *Why an auto toggle:* most signals trigger well at their midpoint, including envelopes and pitch with an offset, which never cross 0. A fixed level is for picking one edge of a complex wave. A toggle keeps both without a knob that means two things.
 
@@ -298,7 +298,7 @@ The canvas already hides port labels and titles below a size on screen. Panels u
 - [x] Lights add no frames while their brightness stays the same: the light watcher sends nothing until a shown level changes, and runs only while lights are on screen.
 - [ ] Manual, on the reference laptop: knobs, the toggle, and lights look right at close and middle zoom, and a cut port label shows in full on hover.
 
-The whole app still redraws twice a second for the stats bar's audio numbers. "No redraw when idle" for the whole app stays a P1 criterion below.
+The whole app redraws only when something visible changes ([#90](https://github.com/brylie/LoomDSP/issues/90)): see [Audio load and dropouts](#audio-load-and-dropouts-in-the-stats-bar) for the stats bar.
 
 ## Level meters and audio load (P1)
 
@@ -329,6 +329,7 @@ The whole app still redraws twice a second for the stats bar's audio numbers. "N
 - An overload notice from the device that comes before the stream's first callback is not a dropout. No audio was rendered yet, so none was lost. macOS sends one as a stream starts with a very small buffer (32 frames), while the device switches to it. *Why:* counting it turned the count red each time a performer chose a small buffer, for a glitch that never happened. A count that cries wolf gets ignored. (Found on BlackHole 2ch, 2026-10-24, [#26](https://github.com/brylie/LoomDSP/issues/26).)
 - Load is shown normally below 70%, in amber from 70%, and in red from 90%. The colour follows the highest load since the last tick, and the "max" is the highest in the last 10 seconds ([P1 additions](#audio-load-colour)).
 - The dropout count is red for 10 seconds after it grows.
+- **Redraw.** A thread reads the audio stats four times a second and wakes the UI only when the bar would change: the load or its maximum to the shown 1%, the dropout count, the end of the red time, or the telemetry drops. The load number changes at most twice a second. *Why:* in Iced every message redraws the window, so a timer that refreshed the bar drew two frames a second in an idle patch ([#90](https://github.com/brylie/LoomDSP/issues/90)).
 - *Why:* a performer needs a warning before a problem is audible (FR-PERF-04), and must notice when one just happened. A count that stayed red forever would soon be ignored.
 
 ### Acceptance criteria: level meters and audio load
@@ -423,10 +424,10 @@ What P1 builds. The rest of this spec is P2.
 ### Acceptance criteria
 
 - [ ] Module panels on tiles: see [their acceptance criteria](#acceptance-criteria-module-panels) above.
-- [ ] A scope module fed by a 440 Hz oscillator shows a stable trace.
+- [x] A scope module fed by a 440 Hz oscillator shows a stable trace (`ScopeTrace::offset`, `trigger_is_stable_across_frames`; the subtractive example's scope, `docs/images/readme-subtractive.png`).
 - [x] "Add scope" on a cable places a connected scope module next to it. Undo removes it.
 - [ ] Cable opacity never depends on the signal. A test checks that the cable geometry is the same with and without telemetry.
-- [ ] With no displays on screen and no input, the app does not redraw. Check: the frame counter stays still for 10 seconds.
+- [x] With no displays on screen and no input, the app does not redraw. An empty patch with `--no-audio --measure-idle --bench-seconds 3` showed `fps=0.0` after startup and an unchanged cumulative frame count from the second line on ([#90](https://github.com/brylie/LoomDSP/issues/90)). A patch with visible transport lights or scopes redraws as those displays change.
 - [ ] Zoomed far out, controls and displays are not drawn.
 - [ ] Reference laptop, full window: 60 fps with four scopes on screen. Record CPU and GPU in the benchmark doc.
 
@@ -514,9 +515,9 @@ What P1 builds. The rest of this spec is P2.
 
 ### Signal activity on ports
 
-([#63](https://github.com/brylie/LoomDSP/issues/63).) Cables stay still ([Cables do not animate](#cables-do-not-animate)). Ports show whether they carry a signal.
+([#63](https://github.com/brylie/LoomDSP/issues/63).) **Implemented:** `take_activity` in `loom-app/src/monitor.rs` measures the state, the canvas draws the marker from its overlay buffer, and the UI snapshot shows `carrying` on each port. Cables stay still ([Cables do not animate](#cables-do-not-animate)). Ports show whether they carry a signal.
 
-- **Two states:** *carrying* (a filled marker in the signal colour) and *silent* (the marker as now). Input ports show the state of the output feeding them.
+- **Two states:** *carrying* (a filled marker in the signal colour) and *silent* (an outlined marker). Input ports show the state of the output feeding them. Earlier connected ports were filled even while silent, so the outlined state makes activity visible.
 - **Carrying** means the output's largest absolute value in the last tick was above 0.0001 (−80 dB). *Why:* DC offsets and constants count as signal, since a Constant of 0.5 is a live control. Exactly 0 and noise below −80 dB are silent.
 - **Where it is measured.** With the activity display on (Preferences, default on), `Live::sync` keeps a `Meter` probe on every output that has a cable ([telemetry](telemetry.md#in-the-desktop-app)). The telemetry thread already keeps the peak since the last drain. No new engine path is needed. One-sample triggers count, because the peak covers every frame of every block. When the display is off, no probes are added. *Why reuse meters:* the cost is already measured, and the code is built and waiting (`Live`).
 - **Rate.** The UI reads the peaks 5 times a second. A port becomes *carrying* at once, and *silent* after 2 reads (400 ms) with nothing. *Why:* gates and slow envelopes would flicker otherwise.
@@ -526,7 +527,7 @@ What P1 builds. The rest of this spec is P2.
 
 ### Drawing the scope trace
 
-([#62](https://github.com/brylie/LoomDSP/issues/62).)
+([#62](https://github.com/brylie/LoomDSP/issues/62).) **Implemented.** Code: `WidgetKind::Scope`, `loom-canvas/src/trace.rs` (`ScopeTraces`, the `vs_trace` and `fs_trace` shaders), `ScopeTrace::canvas_trace` in `loom-app/src/live.rs`, and the telemetry thread in `loom-app/src/monitor.rs`, which builds the traces and wakes the UI only when a drawn trace changes. Building it settled one reading: the scope widget fills the panel area below the scope module's controls, and its frame is drawn with the controls, not the tile, so it also costs nothing per frame.
 
 - **Where.** The scope widget fills the panel area of the scope tile. Its frame is drawn with the tile; the trace is a line strip clipped to the frame.
 - **Data.** Each frame the app copies the points that fit the module's `window` into one small vertex buffer (at most 1024 points: more are skipped by stride, keeping the min and max of each group). It uploads that buffer and nothing else. Tiles, ports, and cables are not rebuilt (ADR-0010).
@@ -555,10 +556,10 @@ What P1 builds. The rest of this spec is P2.
 - [x] Choice names: the registry refuses a wrong count, an empty name, and names on a continuous parameter. The inspector shows "Toggle" and "Momentary" for Button's `mode` and a slider for a parameter without names. No module hard-codes names in its panel.
 - [x] A one-sample trigger into a Clock Divide or Phase Trigger output light lights it, and it fades in 120 ms. No frames are drawn after the fade.
 - [x] A transport-following input shows the clock mark with no cable, loses it when a cable is connected, and has it back when the cable is removed.
-- [ ] A 95% callback spike turns the load amber or red for its tick. After 10 seconds the max falls.
+- [x] A 95% callback spike turns the load amber or red for its tick. After 10 seconds the max falls. Covered by callback and watcher tests.
 - [x] By keys alone: Tab to a module, Enter into its panel, change a knob, Escape out twice. Space on a focused toggle acts on the toggle, not on Run. Arrow keys move the selected module by one grid unit.
-- [ ] An output with a cable shows *carrying* within 200 ms of a signal above −80 dB, and *silent* 400 ms after it stops. A one-sample trigger lights it. Cable geometry is the same with and without activity.
-- [ ] The scope draws its trace in the tile, holds still for a periodic wave, and four scopes keep 60 fps.
+- [x] An output with a cable shows *carrying* within 200 ms of a signal above −80 dB, and *silent* 400 ms after it stops. A one-sample trigger lights it. Cable geometry is the same with and without activity. Covered by activity and overlay tests; the state also appears in the UI snapshot.
+- [x] The scope draws its trace in the tile, holds still for a periodic wave, and four scopes keep 60 fps. Checked on a development Mac (not the reference laptop): four live scopes draw at 71.8 fps with `--measure`, with one initial scene upload and five trace uploads during the five-second run. Recording CPU and GPU on the reference laptop is left for the benchmark doc.
 - [ ] A growable tile resizes to the grid within its limits. Ports and cable ends follow. The size is saved and loads. Old patches load. One drag is one undo step.
 
 ## Default panels

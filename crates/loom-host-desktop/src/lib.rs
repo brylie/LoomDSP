@@ -998,6 +998,8 @@ pub struct CallbackStats {
     start_overloads: AtomicU64,
     /// Highest load seen, in parts per thousand.
     max_load_permille: AtomicU64,
+    /// Highest load since the watcher last took a reading.
+    peak_since_read_permille: AtomicU64,
     /// Load of the latest callback, in parts per thousand.
     last_load_permille: AtomicU64,
     smallest_buffer: AtomicU64,
@@ -1078,6 +1080,7 @@ impl CallbackStats {
         self.frames.fetch_add(frames as u64, Ordering::Relaxed);
         self.last_load_permille.store(permille, Ordering::Relaxed);
         self.max_load_permille.fetch_max(permille, Ordering::Relaxed);
+        self.peak_since_read_permille.fetch_max(permille, Ordering::Relaxed);
         if count_overrun && load > 1.0 {
             self.overruns.fetch_add(1, Ordering::Relaxed);
         }
@@ -1087,6 +1090,11 @@ impl CallbackStats {
         if smallest == 0 || frames < smallest {
             self.smallest_buffer.store(frames, Ordering::Relaxed);
         }
+    }
+
+    /// Takes the peak across every callback since the previous read.
+    pub fn take_peak_since_read(&self) -> f64 {
+        self.peak_since_read_permille.swap(0, Ordering::Relaxed) as f64 / 1000.0
     }
 
     /// Reads all counters.
@@ -1550,6 +1558,21 @@ mod tests {
         stats.stream_error(cpal::ErrorKind::Xrun);
         let s = stats.snapshot();
         assert_eq!((s.start_overloads, s.stream_errors), (1, 2));
+    }
+
+    /// A short high-load callback survives until the watcher takes its peak.
+    #[test]
+    fn callback_peak_covers_every_callback_since_read() {
+        let stats = CallbackStats::default();
+        for _ in 0..1_000 {
+            stats.record(32, 0.2, false);
+        }
+        stats.record(32, 0.95, false);
+        for _ in 0..1_000 {
+            stats.record(32, 0.2, false);
+        }
+        assert_eq!(stats.take_peak_since_read(), 0.95);
+        assert_eq!(stats.take_peak_since_read(), 0.0);
     }
 
     #[test]

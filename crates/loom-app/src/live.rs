@@ -4,13 +4,13 @@
 //! screen ([`Live::sync`], called before every commit). [`Levels`] turns the
 //! meter readings into falling levels on the telemetry thread (see
 //! `monitor.rs`). [`ScopeTrace`] turns the samples of a scope probe into a
-//! stable, triggered trace with a fitting vertical range; the scope module
-//! does not draw it yet (#62). See `docs/design/telemetry.md` and `docs/design/panels.md`.
+//! stable, triggered trace with a fitting vertical range, and the points the
+//! canvas draws in the scope's tile (#62). See `docs/design/telemetry.md`
+//! and `docs/design/panels.md`.
 
-// Parts wait for the scope module: only tests call them.
-#![cfg_attr(not(test), allow(dead_code))]
-
-use loom_core::{Controller, MeterReading, OutputRef, ProbeId, ProbeKind, ScopeChunk, Telemetry};
+#[cfg(test)]
+use loom_core::Telemetry;
+use loom_core::{Controller, MeterReading, OutputRef, ProbeId, ProbeKind, ScopeChunk};
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::time::Instant;
 
@@ -31,12 +31,24 @@ const RANGES: [f32; 10] = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0]
 pub struct Live {
     activity: bool,
     meters: BTreeMap<OutputRef, ProbeId>,
+    /// Scope probes, for the scopes on screen.
+    scopes: BTreeMap<OutputRef, ProbeId>,
 }
 
 impl Live {
-    /// No probes until something asks for them.
+    /// No probes until something asks for them, and activity off.
+    #[cfg(test)]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Probes as the app starts them: activity on, the default
+    /// (`docs/design/panels.md`, Signal activity on ports).
+    pub fn showing_activity() -> Self {
+        Self {
+            activity: true,
+            ..Self::default()
+        }
     }
 
     /// Turns metering of every connected output on or off. Call
@@ -50,14 +62,39 @@ impl Live {
         self.meters.get(&output).copied()
     }
 
-    /// The probes this `Live` still owns.
+    /// The meter probes that show activity: those on outputs with a cable,
+    /// while activity is on.
+    pub fn activity_probes(&self) -> impl Iterator<Item = ProbeId> + '_ {
+        let on = self.activity;
+        self.meters.values().copied().filter(move |_| on)
+    }
+
+    /// The output a meter probe reads.
+    pub fn output_of(&self, probe: ProbeId) -> Option<OutputRef> {
+        self.meters.iter().find(|(_, p)| **p == probe).map(|(&o, _)| o)
+    }
+
+    /// The scope probe on an output, if it has one.
+    pub fn scope_probe(&self, output: OutputRef) -> Option<ProbeId> {
+        self.scopes.get(&output).copied()
+    }
+
+    /// The probes this `Live` still owns: meters, then scopes.
     pub fn probes(&self) -> impl Iterator<Item = ProbeId> + '_ {
-        self.meters.values().copied()
+        self.meters.values().chain(self.scopes.values()).copied()
     }
 
     /// True if any probe is active, so telemetry may arrive.
+    #[cfg(test)]
     pub fn has_probes(&self) -> bool {
-        !self.meters.is_empty()
+        !self.meters.is_empty() || !self.scopes.is_empty()
+    }
+
+    /// Brings the scope probes in line with the graph and with `wanted`,
+    /// the outputs of scopes on screen. Call it before
+    /// [`Controller::commit`], as [`Live::sync`].
+    pub fn sync_scopes(&mut self, controller: &mut Controller, wanted: &BTreeSet<OutputRef>) {
+        keep_probes(&mut self.scopes, controller, wanted, ProbeKind::Scope);
     }
 
     /// Brings the probes in line with the graph and with `wanted`, the
@@ -71,25 +108,35 @@ impl Live {
         if self.activity {
             wanted.extend(controller.graph().cables().map(|(from, _)| from));
         }
-        let stale: Vec<OutputRef> = self
-            .meters
-            .iter()
-            .filter(|(output, probe)| !wanted.contains(output) || controller.probe(**probe).is_none())
-            .map(|(&output, _)| output)
-            .collect();
-        for output in stale {
-            if let Some(probe) = self.meters.remove(&output) {
-                // Already gone if its module was removed.
-                let _ = controller.remove_probe(probe);
-            }
+        keep_probes(&mut self.meters, controller, &wanted, ProbeKind::Meter);
+    }
+}
+
+/// Removes the probes in `probes` that are not wanted or whose module is
+/// gone, and adds one of `kind` for each wanted output that has none.
+fn keep_probes(
+    probes: &mut BTreeMap<OutputRef, ProbeId>,
+    controller: &mut Controller,
+    wanted: &BTreeSet<OutputRef>,
+    kind: ProbeKind,
+) {
+    let stale: Vec<OutputRef> = probes
+        .iter()
+        .filter(|(output, probe)| !wanted.contains(output) || controller.probe(**probe).is_none())
+        .map(|(&output, _)| output)
+        .collect();
+    for output in stale {
+        if let Some(probe) = probes.remove(&output) {
+            // Already gone if its module was removed.
+            let _ = controller.remove_probe(probe);
         }
-        for output in wanted {
-            if self.meters.contains_key(&output) || controller.graph().node(output.module).is_none() {
-                continue;
-            }
-            if let Ok(probe) = controller.add_probe(output, ProbeKind::Meter) {
-                self.meters.insert(output, probe);
-            }
+    }
+    for &output in wanted {
+        if probes.contains_key(&output) || controller.graph().node(output.module).is_none() {
+            continue;
+        }
+        if let Ok(probe) = controller.add_probe(output, kind) {
+            probes.insert(output, probe);
         }
     }
 }
@@ -126,6 +173,7 @@ pub struct Levels {
 
 impl Levels {
     /// The level of a probe, if any reading has arrived for it.
+    #[cfg(test)]
     pub fn get(&self, probe: ProbeId) -> Option<Level> {
         self.meters.get(&probe).map(|m| m.level)
     }
@@ -135,18 +183,18 @@ impl Levels {
         self.meters.iter().map(|(&p, m)| (p, m.level))
     }
 
-    /// Takes all waiting telemetry and updates the levels. Levels fall with
-    /// the time since the last call, so the call rate does not change them.
-    /// A probe that has been silent at level 0 for two seconds is forgotten.
+    /// Takes all waiting telemetry and updates the levels, for tests. The
+    /// telemetry thread drains the queues itself (`monitor.rs`).
+    #[cfg(test)]
     pub fn drain(&mut self, telemetry: &mut Telemetry, now: Instant) {
         let readings: Vec<MeterReading> = telemetry.meters().collect();
-        // No scope displays yet. Empty the queue anyway, so a stray chunk
-        // can never fill it.
         telemetry.scope().for_each(drop);
         self.update(&readings, now);
     }
 
-    /// Takes meter readings and updates the levels, as [`Levels::drain`].
+    /// Takes meter readings and updates the levels. Levels fall with the
+    /// time since the last call, so the call rate does not change them. A
+    /// probe that has been silent at level 0 for two seconds is forgotten.
     pub fn update(&mut self, readings: &[MeterReading], now: Instant) {
         for reading in readings {
             let meter = self.meters.entry(reading.probe).or_default();
@@ -297,10 +345,59 @@ impl ScopeTrace {
         let peak = self.trace.iter().fold(0.0f32, |m, x| m.max(x.abs()));
         self.range = pick_range(self.range, peak);
     }
+
+    /// What the canvas draws of the last [`ScopeTrace::update`]
+    /// (`docs/design/panels.md`, Drawing the scope trace). With `full`
+    /// (close zoom), the points across the frame, shifted left by
+    /// [`ScopeTrace::offset`] so a periodic wave holds still. Otherwise
+    /// (middle zoom) only the level, for a flat line, in 256 steps so a
+    /// level that looks the same is the same.
+    ///
+    /// More than [`loom_canvas::MAX_TRACE_POINTS`] samples are reduced by
+    /// groups, keeping the lowest and highest sample of each in time order,
+    /// so a one-sample trigger always shows (ADR-0007).
+    pub fn canvas_trace(&self, full: bool) -> loom_canvas::Trace {
+        let peak = self.trace.iter().fold(0.0f32, |m, x| m.max(x.abs()));
+        let level = (normalise(peak) * 255.0).round() / 255.0;
+        if !full {
+            return loom_canvas::Trace {
+                points: Vec::new(),
+                level,
+            };
+        }
+        let point = |i: usize| {
+            let x = (i as f32 - self.offset) / self.span;
+            [x, (self.trace[i] / self.range).clamp(-1.0, 1.0)]
+        };
+        let n = self.trace.len();
+        let max = loom_canvas::MAX_TRACE_POINTS;
+        let points = if n <= max {
+            (0..n).map(point).collect()
+        } else {
+            let group = n.div_ceil(max / 2);
+            let mut points = Vec::with_capacity(max);
+            for start in (0..n).step_by(group) {
+                let end = (start + group).min(n);
+                let (low, high) = (start..end).fold((start, start), |(lo, hi), i| {
+                    let v = self.trace[i];
+                    (
+                        if v < self.trace[lo] { i } else { lo },
+                        if v > self.trace[hi] { i } else { hi },
+                    )
+                });
+                points.push(point(low.min(high)));
+                if low != high {
+                    points.push(point(low.max(high)));
+                }
+            }
+            points
+        };
+        loom_canvas::Trace { points, level }
+    }
 }
 
 /// Peak to level: -60 dB and below is 0, 0 dB (1.0, or 10 V) and above is 1.
-fn normalise(peak: f32) -> f32 {
+pub(crate) fn normalise(peak: f32) -> f32 {
     if peak <= 0.0 {
         return 0.0;
     }
@@ -497,6 +594,19 @@ mod tests {
         assert!(!trace.triggered);
         assert_eq!(trace.trace.len(), 101);
         assert_eq!(trace.range, 0.5);
+    }
+
+    /// A long window keeps a one-sample peak when reduced for the GPU.
+    #[test]
+    fn long_scope_window_keeps_short_peak() {
+        let mut scope = ScopeTrace::new(48_000.0);
+        scope.trace = vec![0.0; loom_canvas::MAX_TRACE_POINTS * 4];
+        scope.trace[2_003] = 1.0;
+        scope.span = scope.trace.len() as f32;
+        let trace = scope.canvas_trace(true);
+        assert!(trace.points.len() <= loom_canvas::MAX_TRACE_POINTS);
+        assert!(trace.points.iter().any(|point| point[1] == 1.0));
+        assert!(trace.points.windows(2).all(|pair| pair[0][0] <= pair[1][0]));
     }
 
     fn reading(probe: u32, frames: u32, peak: f32, rms: f32) -> MeterReading {
