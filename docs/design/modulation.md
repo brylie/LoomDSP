@@ -3,7 +3,7 @@
 How any output modulates any parameter without a cable, and how users make, see, and edit those assignments.
 
 - **Kind:** living specification.
-- **Status:** Editing and display [slice 1](#slice-1-make-see-and-edit) (make, see, and edit) and its [undo rules](#undo) are Agreed ([#70](https://github.com/brylie/LoomDSP/issues/70), [#20](https://github.com/brylie/LoomDSP/issues/20)). [Slice 2](#slice-2-live-value-and-lines) (live value, lines, arc drag) is Agreed and built ([#151](https://github.com/brylie/LoomDSP/issues/151), [#172](https://github.com/brylie/LoomDSP/issues/172)). The [inspector drop](#inspector-drop) is Agreed and not built yet ([#188](https://github.com/brylie/LoomDSP/issues/188)). [Slice 3](#slice-3-the-modulation-matrix) (the matrix) is Agreed and not built yet ([#71](https://github.com/brylie/LoomDSP/issues/71)). The [engine rules](#rules), [engine and API](#engine-and-api), and [engine acceptance criteria](#acceptance-criteria-engine) are Agreed and built ([#19](https://github.com/brylie/LoomDSP/issues/19)). [Parameter mapping](#parameter-mapping) is Agreed.
+- **Status:** Editing and display [slice 1](#slice-1-make-see-and-edit) (make, see, and edit) and its [undo rules](#undo) are Agreed ([#70](https://github.com/brylie/LoomDSP/issues/70), [#20](https://github.com/brylie/LoomDSP/issues/20)). [Slice 2](#slice-2-live-value-and-lines) (live value, lines, arc drag) is Agreed and built ([#151](https://github.com/brylie/LoomDSP/issues/151), [#172](https://github.com/brylie/LoomDSP/issues/172)). The [inspector drop](#inspector-drop) is Agreed and not built yet ([#188](https://github.com/brylie/LoomDSP/issues/188)). [Slice 3](#slice-3-the-modulation-matrix) (the matrix) is Agreed and built ([#71](https://github.com/brylie/LoomDSP/issues/71)); its nested sub-patch test waits for sub-patches. The [engine rules](#rules), [engine and API](#engine-and-api), and [engine acceptance criteria](#acceptance-criteria-engine) are Agreed and built ([#19](https://github.com/brylie/LoomDSP/issues/19)). [Parameter mapping](#parameter-mapping) is Agreed.
 - **Decision behind it:** [ADR-0014](../adr/0014-modulation-without-cables.md) (modulation without cables). Builds on [ADR-0013](../adr/0013-modules-carry-their-own-panel.md) (panels) and [ADR-0007](../adr/0007-polymorphic-signal-model.md) (signals).
 - **Background:** [Modulation without cables](../learn/modulation-without-cables.md): why depth is a share of the knob, how polarity remaps a source, the stored-value trap, and why assignments are delayed before cables. See also [Pitch at 0.1 per octave](../learn/pitch.md).
 - **Requirements:** FR-MOD-01 to FR-MOD-08, FR-LIB-12.
@@ -30,7 +30,7 @@ The editing and display work ships in three slices, so each one can be built and
 |---|---|---|---|
 | 1. Make, see, and edit | Drag an output onto a tile control, add from the inspector, edit in the inspector, see what each output drives in the inspector, a range arc on tile knobs, a badge on the source | **Agreed** | [#70](https://github.com/brylie/LoomDSP/issues/70) (making and editing), [#20](https://github.com/brylie/LoomDSP/issues/20) (arcs and dots) |
 | 2. Live value and lines | The live value dot, lines on hover and pinned from the badge, dragging an arc to change depth | **Agreed** | [#172](https://github.com/brylie/LoomDSP/issues/172), decided in [#151](https://github.com/brylie/LoomDSP/issues/151) |
-| 3. Matrix | The modulation matrix, with the keyboard path | **Agreed** | [#71](https://github.com/brylie/LoomDSP/issues/71) |
+| 3. Matrix | The modulation matrix, with the keyboard path | **Agreed and built** | [#71](https://github.com/brylie/LoomDSP/issues/71) |
 
 *Why slices:* slice 1 needs no engine change and no new kind of canvas drawing. Its range arcs, modulation dots (on toggles, radio buttons, and knobs whose arc has zero length or whose assignments are all off), and count badges use the arcs, round markers, and labels the canvas already draws. The live dot needs the engine to publish modulated values, and the matrix is a new panel. Neither should hold back the first way to make a patch with modulation.
 
@@ -154,21 +154,22 @@ Dropping an output on a parameter row in the inspector makes an assignment, the 
 
 ### Slice 3: the modulation matrix
 
-**Status:** Agreed ([#71](https://github.com/brylie/LoomDSP/issues/71)). Not built.
+**Status:** Agreed and built ([#71](https://github.com/brylie/LoomDSP/issues/71)). The nested sub-patch test waits for sub-patches.
 
 A panel beside the inspector. Columns: on, source (module and output), target (module and parameter), depth, polarity. Sort and filter by module, or show only the selected module. Every cell can be edited by keyboard (NFR-UX-01). **Add**, then pick a source and a target, creates an assignment. Delete removes the selected row.
 
 Details settled for the build:
 
 - **Where.** A tab in the right-hand column next to **Inspector**. The window shows one of them at a time. It remembers the last tab for the session only. *Why:* the window is already full; a tab costs no space.
-- **Rows.** One per assignment, in the order the engine applies them (rule 12), grouped by target when sorted by target. Columns: **On** (check box), **Source** ("Module name #id · Output label"), **Target** ("Module name #id · Parameter label"), the same form as the inspector, so two modules with one name stay apart, **Depth** (a number from −100 to 100 percent, typed or dragged), **Polarity** (a choice: the same choices as the inspector).
+- **Rows.** One per assignment, in the order the engine applies them (rule 12), grouped by target when sorted by target. Columns: **On** (check box), **Source** ("Module name #id: Output label"), **Target** ("Module name #id: Parameter label"), the same form as the inspector, so two modules with one name stay apart, **Depth** (a number from −100 to 100 percent, typed or dragged), **Polarity** (a choice: the same choices as the inspector). The table scrolls horizontally inside the right-hand column.
 - **Sort.** Click a column title to sort by it; click again to reverse. The default is the engine's order.
 - **Filter.** A text field matches the module or parameter name. A check box **Selected module only** shows rows whose source or target is the selected module. Filters hide rows; they never change assignments.
 - **Add.** The **Add** button opens two pick lists (source output, target parameter) with the same rules as a drop: the target can be a knob, toggle, or radio parameter; the depth is the default depth; a duplicate adds nothing and the status bar says so.
 - **Remove.** The **×** button of [Removing an item](panels.md#removing-an-item), or Delete on the selected row.
-- **Keyboard.** Up and Down move between rows; Left and Right between cells; Enter edits the cell (toggle, open the choice, or type); Escape leaves a cell being edited, and takes the key before pinned lines; Tab leaves the table.
+- **Keyboard.** Up and Down move between rows; Left and Right between cells and scroll the chosen column into view; Enter edits the cell (toggle, open the choice, or type); Escape leaves a cell being edited, and takes the key before pinned lines; Tab leaves the table.
 - **Selection.** Selecting a row selects the target module on the canvas and shows the assignment's line (as if pinned) without pinning it. Selecting a module on the canvas does not move the selected row.
 - **Edits** go through the controller and undo like the inspector's: a depth drag is one step ([Undo](#undo)).
+- **Changing a source or target** keeps the assignment's id, place in engine order, depth, polarity, and on/off state. It is one undo step. The new endpoint must exist and may not duplicate another assignment; otherwise the row stays unchanged and the status bar explains why.
 - **Rows follow the graph.** A row for a deleted module disappears; undo brings it back in place.
 - **Level.** Only the current patch level is listed (below).
 - **Redraw.** The panel redraws only when assignments, filters, or the selection change. Live values are not shown here.
@@ -337,15 +338,17 @@ A **Macro** module (FR-LIB-12) has one knob on its panel and one output equal to
 
 ### Acceptance criteria: slice 3
 
-**Status:** Agreed. [#71](https://github.com/brylie/LoomDSP/issues/71).
+**Status:** Agreed and built. [#71](https://github.com/brylie/LoomDSP/issues/71).
 
-- [ ] The matrix lists every assignment in the current patch level, and every cell can be edited by keyboard (a test drives it with keys alone).
-- [ ] Sorting by each column, the text filter, and **Selected module only** show the right rows and change no assignment (test).
-- [ ] **Add** makes an assignment with the default depth; a duplicate adds nothing and the status bar says so (test).
-- [ ] Editing on, depth, or polarity, and removing a row, are undo steps like the inspector's; undo restores a removed row in place (test).
-- [ ] Selecting a row selects its target module and shows its line without pinning (test).
+- [x] The matrix lists every assignment in the current patch level, and every cell can be edited by keyboard (a test drives it with keys alone).
+- [x] Sorting by each column, the text filter, and **Selected module only** show the right rows and change no assignment (test).
+- [x] **Add** makes an assignment with the default depth; a duplicate adds nothing and the status bar says so (test).
+- [x] Editing on, depth, or polarity, and removing a row, are undo steps like the inspector's; undo restores a removed row in place (test).
+- [x] Selecting a row selects its target module and shows its line without pinning (test).
 - [ ] Assignments inside a sub-patch are not listed (test).
-- [ ] With the matrix open and nothing changing, the app draws no frames (manual check, `--measure-idle`).
+- [x] With the matrix open and nothing changing, the app draws no frames (manual check, `--measure-idle --no-audio --no-midi`: 0 fps after opening commands).
+
+The nested sub-patch test is deferred until sub-patch navigation exists. The matrix reads only the current graph.
 
 ### Acceptance criteria: undo
 

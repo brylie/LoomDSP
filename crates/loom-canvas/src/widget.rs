@@ -221,6 +221,10 @@ pub struct PatchCanvas<'a, Message> {
     animate: bool,
     interactive: bool,
     learn: Option<&'a LearnView>,
+    /// The row selected in the modulation matrix, without changing the pin.
+    matrix_line: Option<crate::scene::ModulationView>,
+    /// Lets Escape hide a badge pin while the matrix owns keyboard focus.
+    matrix_escape: bool,
     still: Option<Still>,
 }
 
@@ -359,6 +363,8 @@ impl<'a, Message> PatchCanvas<'a, Message> {
             animate: false,
             interactive: true,
             learn: None,
+            matrix_line: None,
+            matrix_escape: false,
             still: None,
         }
     }
@@ -376,6 +382,19 @@ impl<'a, Message> PatchCanvas<'a, Message> {
     /// Turns on MIDI learn mode, with what it shows.
     pub fn learn(mut self, learn: Option<&'a LearnView>) -> Self {
         self.learn = learn;
+        self
+    }
+
+    /// Shows one matrix-selected assignment line without pinning its source.
+    pub fn matrix_line(mut self, line: Option<crate::scene::ModulationView>) -> Self {
+        self.matrix_line = line;
+        self
+    }
+
+    /// Lets a focused matrix pass Escape to a pinned badge after its cell
+    /// editor has closed.
+    pub fn matrix_escape(mut self, enabled: bool) -> Self {
+        self.matrix_escape = enabled;
         self
     }
 
@@ -473,6 +492,7 @@ struct LinesKey {
     pinned: Option<PortRef>,
     hover: Option<Hit>,
     selection: Vec<u32>,
+    matrix_line: Option<crate::scene::ModulationView>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -805,6 +825,22 @@ impl<Message> PatchCanvas<'_, Message> {
     ) {
         let over = cursor.is_over(bounds);
         let screen = relative(cursor, bounds);
+
+        if self.matrix_escape
+            && matches!(
+                event,
+                Event::Keyboard(keyboard::Event::KeyPressed {
+                    key: keyboard::Key::Named(keyboard::key::Named::Escape),
+                    ..
+                })
+            )
+            && self.pin(state).is_some()
+        {
+            state.pinned = None;
+            shell.capture_event();
+            shell.request_redraw();
+            return;
+        }
 
         if !self.interactive {
             // Modifiers still count, so Shift held while the pop-up closes
@@ -2078,6 +2114,7 @@ impl<Message> PatchCanvas<'_, Message> {
             pinned: self.pin(state),
             hover: state.hover,
             selection: self.selection.iter().copied().collect(),
+            matrix_line: self.matrix_line.clone(),
         };
         let mut cache = state.lines.borrow_mut();
         if cache.as_ref().is_none_or(|(k, _)| *k != key) {
@@ -2118,9 +2155,19 @@ impl<Message> PatchCanvas<'_, Message> {
         let module_in_focus = |id: u32| self.selection.contains(&id) || hovered == Some(id);
         let mut outlined: Vec<u32> = Vec::new();
         for m in self.scene.modulations() {
+            if let Some(selected) = &self.matrix_line
+                && m != selected
+            {
+                continue;
+            }
             let by_source = sources.contains(&m.from);
             let by_control = control.is_some_and(|(module, widget)| m.to == module && m.widget == Some(widget));
-            if !(by_source || by_control || module_in_focus(m.from.0) || module_in_focus(m.to)) {
+            if !(self.matrix_line.as_ref() == Some(m)
+                || by_source
+                || by_control
+                || module_in_focus(m.from.0)
+                || module_in_focus(m.to))
+            {
                 continue;
             }
             let from = PortRef {
@@ -3878,6 +3925,40 @@ mod tests {
         assert_eq!(canvas.overlay(&state).cables.len(), first);
         assert_eq!(state.lines.borrow().as_ref().map(|(k, _)| k.clone()), key);
         assert_eq!(first, 1, "the selected source's line");
+    }
+
+    /// A matrix-selected row draws its line with no hover, canvas selection,
+    /// or badge pin, and leaves the pin state alone.
+    #[test]
+    fn matrix_row_shows_one_line_without_pinning() {
+        let (scene, values) = modulated_scene();
+        let none = BTreeSet::new();
+        let plain = PatchCanvas::new(&scene, &none, |e| e).values(&values);
+        assert!(plain.overlay(&State::default()).cables.is_empty());
+        let line = scene.modulations()[0].clone();
+        let canvas = PatchCanvas::new(&scene, &none, |e| e)
+            .values(&values)
+            .matrix_line(Some(line));
+        let state = State::default();
+        assert_eq!(canvas.overlay(&state).cables.len(), 1);
+        assert_eq!(state.pinned, None);
+    }
+
+    /// Escape can clear a canvas pin while matrix keyboard focus owns the key.
+    #[test]
+    fn matrix_escape_clears_canvas_pin() {
+        let (scene, values) = modulated_scene();
+        let none = BTreeSet::new();
+        let canvas = PatchCanvas::new(&scene, &none, |e| e)
+            .values(&values)
+            .interactive(false)
+            .matrix_escape(true);
+        let mut state = State {
+            pinned: Some(OUT),
+            ..State::default()
+        };
+        drive(&canvas, &mut state, &escape(), Point::ORIGIN);
+        assert_eq!(state.pinned, None);
     }
 
     /// A knob whose arc has zero length shows the dot, and its ring still

@@ -12,6 +12,7 @@
 
 use crate::inspector::Inspector;
 use crate::live::Levels;
+use crate::matrix::MatrixModel;
 use crate::{App, Args};
 use loom_canvas::{ModulationMark, ModuleView, PORT_HIT_RADIUS, PortRef, TextKind, WidgetViewKind};
 use serde::Serialize;
@@ -41,6 +42,8 @@ pub struct UiSnapshot {
     /// One per cable the canvas draws.
     pub cables: Vec<Cable>,
     pub inspector: Inspector,
+    /// The active right-hand tab and visible modulation matrix rows.
+    pub matrix: MatrixModel,
     /// The stats bar's audio numbers.
     pub stats: Stats,
     /// The pointer and what it is on, as the canvas last drew it. `None`
@@ -413,6 +416,7 @@ impl App {
             tiles,
             cables,
             inspector: self.inspector_model(),
+            matrix: self.matrix.model(self.controller.graph(), &self.selection),
             stats: self.stats_model(),
             pointer: self.pointer_state(),
         }
