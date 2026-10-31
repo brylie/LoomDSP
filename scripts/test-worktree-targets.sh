@@ -18,6 +18,16 @@ key=$(printf '%s' "$worktree" | git hash-object --stdin | cut -c 1-16)
 target="$targets/$key"
 "$scripts_dir/setup-worktree-target.sh" "$targets" "$worktree" >/dev/null
 [ -f "$target/.loomdsp-worktree-target" ]
+
+# A symlink to the same managed directory must still be rejected by setup.
+mv "$target" "$scratch/real target"
+ln -s "$scratch/real target" "$target"
+if "$scripts_dir/setup-worktree-target.sh" "$targets" "$worktree" >/dev/null 2>&1; then
+    echo 'setup accepted a symlinked target' >&2
+    exit 1
+fi
+rm "$target"
+mv "$scratch/real target" "$target"
 grep -Fxq "$worktree" "$target/.loomdsp-worktree-target"
 
 # A generated config can safely adopt its own old unmarked target.
@@ -48,7 +58,13 @@ grep -Fq "$targets/symlink target" "$scratch/live.txt"
 [ -f "$targets/unmarked legacy/build" ]
 [ -f "$scratch/unrelated/build" ]
 
-git worktree remove --force "$worktree"
+moved_worktree="$scratch/moved worktree with spaces"
+git worktree move "$worktree" "$moved_worktree"
+"$scripts_dir/worktree-targets.sh" "$targets" --prune > "$scratch/moved-prune.txt"
+grep -Fq "active	" "$scratch/moved-prune.txt"
+[ -d "$target" ]
+
+git worktree remove --force "$moved_worktree"
 "$scripts_dir/worktree-targets.sh" "$targets" > "$scratch/dry-run.txt"
 grep -Fq "orphan	" "$scratch/dry-run.txt"
 grep -Fq "would prune	$target" "$scratch/dry-run.txt"

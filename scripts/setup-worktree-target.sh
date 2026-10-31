@@ -66,7 +66,7 @@ escaped_target=$(printf '%s' "$target" | sed 's/\\/\\\\/g; s/"/\\"/g')
 marker="$target/.loomdsp-worktree-target"
 expected_marker=$(printf 'LoomDSP worktree target v1\n%s\n%s' "$root" "$common")
 
-if [ -L "$target" ] || [ -e "$target" ] && [ ! -d "$target" ]; then
+if [ -L "$target" ] || { [ -e "$target" ] && [ ! -d "$target" ]; }; then
     echo "Target is not a plain directory: $target" >&2
     exit 1
 fi

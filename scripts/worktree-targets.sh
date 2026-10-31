@@ -14,16 +14,34 @@ target_root=$(cd "$1" && pwd -P)
 common=$(git rev-parse --path-format=absolute --git-common-dir)
 common=$(cd "$common" && pwd -P)
 
-# A registered worktree or a path still on disk is treated as live.
+# A registered worktree, a path still on disk, or a moved worktree whose
+# Cargo config still uses this target is treated as live.
 is_live() {
     candidate=$1
+    candidate_target=$2
     if [ -e "$candidate" ] || [ -L "$candidate" ]; then
         return 0
     fi
-    git worktree list --porcelain | awk -v wanted="$candidate" '
-        /^worktree / { sub(/^worktree /, ""); if ($0 == wanted) found = 1 }
-        END { exit !found }
-    '
+    if ! registered=$(git worktree list --porcelain); then
+        return 0
+    fi
+    [ -n "$registered" ] || return 0
+    escaped_target=$(printf '%s' "$candidate_target" | sed 's/\\/\\\\/g; s/"/\\"/g')
+    printf '%s\n' "$registered" | awk '/^worktree / { sub(/^worktree /, ""); print }' | (
+        while IFS= read -r path; do
+            if [ "$path" = "$candidate" ]; then
+                exit 0
+            fi
+            config="$path/.cargo/config.toml"
+            if [ -e "$config" ] && [ ! -r "$config" ]; then
+                exit 0
+            fi
+            if [ -f "$config" ] && grep -Fxq "target-dir = \"$escaped_target\"" "$config"; then
+                exit 0
+            fi
+        done
+        exit 1
+    )
 }
 
 owned_target() {
@@ -44,14 +62,14 @@ owned_target() {
 find "$target_root" -mindepth 1 -maxdepth 1 -print | while IFS= read -r entry; do
     size=$(du -sh "$entry" 2>/dev/null | awk '{ print $1 }')
     if owned_target "$entry"; then
-        if is_live "$worktree"; then
+        if is_live "$worktree" "$entry"; then
             printf 'active\t%s\t%s\t%s\n' "$size" "$entry" "$worktree"
         else
             printf 'orphan\t%s\t%s\t%s\n' "$size" "$entry" "$worktree"
             if [ "${2:-}" = --prune ]; then
                 # Recheck immediately before deletion. Never follow a target
                 # directory symlink or remove a target still in use.
-                if owned_target "$entry" && ! is_live "$worktree"; then
+                if owned_target "$entry" && ! is_live "$worktree" "$entry"; then
                     rm -rf "$entry"
                     printf 'pruned\t%s\n' "$entry"
                 fi
