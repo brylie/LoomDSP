@@ -105,7 +105,7 @@ If you used the ZIP, type `cd LoomDSP-main` instead.
 
 The first build takes a few minutes. Later starts are instant.
 
-**On a Mac and want an app icon you can double-click?** Run `scripts/bundle-macos.sh`. It builds `target/release/LoomDSP.app`, which you can drag into your Applications folder. It is not signed, so it works on the Mac that built it.
+**On a Mac and want an app icon you can double-click?** Run `scripts/bundle-macos.sh`. It prints the path to `LoomDSP.app`, which you can drag into your Applications folder. It is not signed, so it works on the Mac that built it.
 
 More things to try:
 

@@ -12,11 +12,12 @@
 #
 # Usage:
 #   scripts/bundle-macos.sh
-#   open target/release/LoomDSP.app --args "$PWD/examples/patches/fm-feedback.ron"
+#   app=$(scripts/bundle-macos.sh)
+#   open "$app" --args "$PWD/examples/patches/fm-feedback.ron"
 #
 # `open` starts the app in `/`, so give it absolute paths. You can also run
 # the binary inside the bundle directly, with relative paths:
-#   target/release/LoomDSP.app/Contents/MacOS/loom-app examples/patches/fm-feedback.ron
+#   "$app/Contents/MacOS/loom-app" examples/patches/fm-feedback.ron
 set -eu
 
 cd "$(dirname "$0")/.."
@@ -35,7 +36,11 @@ if [ -z "${LOOM_SKIP_BUILD:-}" ]; then
     fi
 fi
 
-target="${CARGO_TARGET_DIR:-target}"
+target=$(cargo metadata --format-version 1 --no-deps | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')
+if [ -z "$target" ]; then
+    echo "bundle-macos.sh: could not find Cargo target directory" >&2
+    exit 1
+fi
 if [ -n "$triple" ]; then
     target="$target/$triple"
 fi
