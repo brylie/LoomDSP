@@ -43,6 +43,7 @@ Each release carries these files, with `VERSION` as the tag without the `v`.
 | `SHA256SUMS.txt` | One SHA-256 line per file above |
 
 `README.txt` is short and plain. It says how to open the app on that system (see "First launch") and links to the [getting-started guide](../guide/getting-started.md).
+The packaged `examples/patches` folder has a `.loomdsp-bundled-examples` marker. It lets the app recognize an example opened from the download folder when macOS runs a translocated copy of the app.
 
 The release notes are generated from the merged pull requests, followed by a fixed note that early alpha builds are unsigned and can break old patches.
 

@@ -10,6 +10,10 @@ use std::path::{Path, PathBuf};
 /// The file extension of a patch.
 pub const EXTENSION: &str = "ron";
 
+/// A marker put in release patch folders so examples are still recognized
+/// when macOS runs the app from a translocated copy.
+const BUNDLED_MARKER: &str = ".loomdsp-bundled-examples";
+
 /// What the user chose when asked about unsaved changes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Choice {
@@ -77,14 +81,22 @@ fn examples_for_executable(executable: Option<&Path>, checkout: &Path) -> Option
     bundled.or_else(|| checkout.is_dir().then(|| checkout.to_path_buf()))
 }
 
-/// True when `path` is a file inside the folder `examples`. Both are
-/// resolved first, so `..`, links, and spelling do not matter, and a folder
-/// that is only named `examples` is not the bundled one.
+/// True when `path` is in the known examples folder or a marked release
+/// patch folder. The marker works when macOS translocates the app away from
+/// its download folder. A folder only named `examples` does not count.
 pub fn is_example(path: &Path, examples: Option<&Path>) -> bool {
-    let Some(Ok(examples)) = examples.map(Path::canonicalize) else {
+    let Ok(path) = path.canonicalize() else {
         return false;
     };
-    path.canonicalize().is_ok_and(|path| path.starts_with(examples))
+    if examples
+        .and_then(|dir| dir.canonicalize().ok())
+        .is_some_and(|dir| path.starts_with(dir))
+    {
+        return true;
+    }
+    path.ancestors()
+        .skip(1)
+        .any(|dir| dir.ends_with("examples/patches") && dir.join(BUNDLED_MARKER).is_file())
 }
 
 /// Where a dialog starts: the folder of the current file, otherwise the
@@ -344,6 +356,26 @@ mod tests {
         assert!(!is_example(&examples.join("missing.ron"), Some(&examples)));
         let dev = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/dev/test-widgets.ron");
         assert!(!is_example(&dev, Some(&examples)));
+    }
+
+    /// A release marker identifies examples even when the running app
+    /// cannot locate the download folder, as on a translocated Mac launch.
+    #[test]
+    fn a_marked_release_folder_is_an_example_without_a_known_folder() {
+        let tmp = TempDir::new("marked-examples");
+        let patches = tmp.0.join("examples/patches");
+        std::fs::create_dir_all(&patches).unwrap();
+        let patch = patches.join("example.ron");
+        std::fs::write(&patch, "").unwrap();
+        assert!(!is_example(&patch, None));
+        std::fs::write(patches.join(BUNDLED_MARKER), "").unwrap();
+        assert!(is_example(&patch, None));
+
+        let own = tmp.0.join("music/examples/patches");
+        std::fs::create_dir_all(&own).unwrap();
+        let own_patch = own.join("own.ron");
+        std::fs::write(&own_patch, "").unwrap();
+        assert!(!is_example(&own_patch, None));
     }
 
     #[test]

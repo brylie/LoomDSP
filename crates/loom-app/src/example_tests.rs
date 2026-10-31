@@ -84,6 +84,25 @@ fn an_example_opens_as_a_clean_untitled_copy() {
     assert_eq!(fake::asked(), Vec::new(), "and asks nothing");
 }
 
+/// An example opened from a release folder is still a copy when macOS runs
+/// the app from a translocated location and cannot find that folder.
+#[test]
+fn a_marked_release_example_is_a_copy_without_a_known_folder() {
+    let tmp = TempDir::new("translocated-example");
+    let patches = tmp.0.join("examples/patches");
+    fs::create_dir_all(&patches).unwrap();
+    fs::write(patches.join(".loomdsp-bundled-examples"), "").unwrap();
+    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches/subtractive.ron");
+    let example = patches.join("subtractive.ron");
+    fs::copy(source, &example).unwrap();
+    fake::use_examples(None);
+
+    let app = app_with(example);
+    assert_eq!(app.file, None);
+    assert_eq!(app.ui_snapshot().title, "subtractive (example) - LoomDSP");
+    assert!(!app.unsaved());
+}
+
 /// Save on an example copy asks for a place, suggesting the example's
 /// file name in the Documents folder, and never writes the example. The
 /// place chosen becomes the current file. No `*.saved.ron` file appears.
