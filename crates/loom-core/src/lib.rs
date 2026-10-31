@@ -48,7 +48,7 @@ pub use error::LoomError;
 pub use graph::{Assignment, AssignmentId, Graph, InputRef, ModuleId, Node, OutputRef};
 pub use midi::{MAX_MIDI_INPUTS, MidiEvent, MidiInputId, MidiMessage};
 pub use midi_map::{ControlChangeSeen, MidiControl, MidiMapping, MidiMappingId, MidiReader, NoteOnSeen, control_value};
-pub use module::{Module, Param, PortIo, ProcessContext, testing};
+pub use module::{AsAny, Module, Param, PortIo, ProcessContext, copy_state, testing};
 pub use panic::PanicTrigger;
 pub use registry::{ModuleKind, Registry, RegistryNote};
 pub use safety::OutputSafety;

@@ -8,8 +8,8 @@ How a user opens, saves, and closes patch files in the desktop app, and how the 
 - **Use case and requirements:** FR-FILE-01, FR-APP-01.
 - **Background:** none.
 - **Prior art:** every desktop editor has these commands. We use only the common conventions: shortcuts, a dot or star for unsaved work, and a three-button question.
-- **Issues:** [#14](https://github.com/brylie/LoomDSP/issues/14), [#182](https://github.com/brylie/LoomDSP/issues/182) (examples open as copies: Agreed, not built). Follow-ups this spec absorbs: the lights watcher and telemetry monitor must follow a new engine; `*.saved.ron` files next to examples; Open clears the undo history ([undo](undo.md#commands)).
-- **Code:** `crates/loom-app/src/files.rs` (dialogs, title, extension), and `App::session`, `App::replace`, `App::save`, and `App::can_discard` in `main.rs`. `History::mark_saved` and `is_saved` in `undo.rs`. `Patch::save` in `loom-patch` writes through a temporary file. The lights, telemetry, and MIDI watchers take an engine generation in their subscription identity.
+- **Issues:** [#14](https://github.com/brylie/LoomDSP/issues/14), [#182](https://github.com/brylie/LoomDSP/issues/182) (examples open as copies: Implemented). Follow-ups this spec absorbs: the lights watcher and telemetry monitor must follow a new engine; `*.saved.ron` files next to examples; Open clears the undo history ([undo](undo.md#commands)).
+- **Code:** `crates/loom-app/src/files.rs` (dialogs, title, extension, `bundled_examples`, `is_example`), and `App::session`, `App::replace`, `App::save`, `App::can_discard`, and `App::copy_if_example` in `main.rs`; tests in `example_tests.rs`. `History::mark_saved` and `is_saved` in `undo.rs`. `Patch::save` in `loom-patch` writes through a temporary file. The lights, telemetry, and MIDI watchers take an engine generation in their subscription identity.
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
      built. See README.md in this folder. -->
@@ -119,9 +119,9 @@ A failed save keeps the unsaved mark. A save writes to a temporary file in the s
 - [ ] Given a file that does not parse, when opened, then the message appears and the current patch is unchanged.
 - [ ] Given a read-only target, when saved, then the message appears and the mark stays.
 - [ ] After Open, undo is disabled, and the lights and meters show the new patch (manual check).
-- [ ] Saving does not leave a `*.saved.ron` file next to examples.
-- [ ] Opening a file inside the bundled examples folder gives an untitled patch with its content, and Save asks for a place. The example file is unchanged (test with a temporary examples folder). Closing the window after opening one asks nothing.
-- [ ] Opening a file in some other folder that happens to be named `examples` is not a copy, and Save writes it in place (test).
+- [x] Saving does not leave a `*.saved.ron` file next to examples. (`example_tests.rs`)
+- [x] Opening a file inside the bundled examples folder gives an untitled patch with its content, and Save asks for a place. The example file is unchanged (test with a temporary examples folder). Closing the window after opening one asks nothing. (`example_tests.rs`; the control channel's `open` in `control.rs`)
+- [x] Opening a file in some other folder that happens to be named `examples` is not a copy, and Save writes it in place (test). (`example_tests.rs`)
 - [ ] `cargo deny check` passes with the dialog crate on macOS, Windows, and Linux (CI).
 
 ## Out of scope

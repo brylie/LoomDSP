@@ -67,6 +67,7 @@ pub static SAMPLE_HOLD: ModuleDescriptor = ModuleDescriptor {
 
 /// State for `loom.rand.sample-hold`: `track` is the mode, `edge` finds the
 /// trigger edges, and `held` is the value on the output.
+#[derive(Clone)]
 struct SampleHold {
     track: bool,
     edge: EdgeDetector,
@@ -74,6 +75,11 @@ struct SampleHold {
 }
 
 impl Module for SampleHold {
+    /// Takes the running state of another instance (ADR-0022).
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let mode_mod = io.param(0);
         let ([input, trigger], [out]) = io.split::<2, 1>();

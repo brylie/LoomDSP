@@ -43,7 +43,8 @@ pub use reference::{UPDATE_VAR, check_channels};
 pub use signal::Signal;
 
 use loom_core::{
-    MidiEvent, ModuleConfig, ModuleDescriptor, ModuleRole, PortDefault, TransportInfo, TransportSettings, testing,
+    MidiEvent, Module, ModuleConfig, ModuleDescriptor, ModuleRole, PortDefault, TransportInfo, TransportSettings,
+    testing,
 };
 use std::path::Path;
 
@@ -74,6 +75,10 @@ pub const RECOVERY_SECONDS: f64 = 0.010;
 
 /// Default sample rate, in Hz.
 pub const DEFAULT_SAMPLE_RATE: f32 = 48_000.0;
+
+/// How long [`Harness::check_reset_snaps_smoothing`] holds the values
+/// before `reset()`: much longer than any smoothing time.
+pub const SETTLE_SECONDS: f64 = 1.0;
 
 /// Path of the reference file `name` in the calling crate:
 /// `tests/reference/<name>.wav`.
@@ -266,29 +271,89 @@ impl Harness {
         (inputs, connected)
     }
 
-    /// Runs a new instance of the module over `inputs` in blocks of `block`
-    /// frames.
-    #[track_caller]
-    fn run(&self, block: usize, inputs: &[Vec<f32>], connected: &[bool]) -> Render {
-        let descriptor = self.descriptor;
-        let frames = self.frame_count();
-        let ModuleRole::Dsp(create) = descriptor.role else {
+    /// A new instance with the harness's parameter values, set up as the
+    /// `Controller` sets one up: built, given its defaults and then its
+    /// values, and `reset()` once, so its smoothing starts at the values
+    /// (live patching spec, rule 7).
+    fn build(&self) -> Box<dyn Module> {
+        let ModuleRole::Dsp(create) = self.descriptor.role else {
             unreachable!("checked in Harness::new")
         };
-
-        // A new instance, set up as `Controller::add_module` sets it up.
         let mut module = create(&ModuleConfig {
             sample_rate: self.sample_rate,
             max_block: MAX_BLOCK,
         });
-        for (index, param) in descriptor.params.iter().enumerate() {
+        for (index, param) in self.descriptor.params.iter().enumerate() {
             module.set_param(index, param.default);
         }
         for &(index, value) in &self.params {
             module.set_param(index, value);
         }
+        module.reset();
+        module
+    }
 
+    /// Checks that `reset()` snaps smoothing to the values set before it
+    /// (live patching spec, rule 7). It renders a new instance, built as
+    /// [`Harness::render`] builds one, and a second instance that held its
+    /// values for [`SETTLE_SECONDS`] on silent, unconnected inputs before
+    /// its `reset()`. It panics unless both renders are bit-identical from
+    /// the first frame. A module fails when `reset()` leaves a parameter
+    /// gliding, or when it keeps state that `reset()` should clear.
+    #[track_caller]
+    pub fn check_reset_snaps_smoothing(&self) {
+        let (inputs, connected) = self.input_buffers();
+        let fresh = self.run_module(self.build(), MAX_BLOCK, &inputs, &connected);
+
+        let mut held = self.build();
+        let settle = (SETTLE_SECONDS * f64::from(self.sample_rate)) as usize;
+        let silent = vec![vec![0.0; MAX_BLOCK]; self.descriptor.inputs.len()];
+        let unconnected = vec![false; self.descriptor.inputs.len()];
+        let mut outputs = vec![vec![0.0; MAX_BLOCK]; self.descriptor.outputs.len()];
         let transport = TransportInfo::new(self.sample_rate, self.transport, 0.0);
+        let mut start = 0;
+        while start < settle {
+            let len = MAX_BLOCK.min(settle - start);
+            let block_inputs: Vec<&[f32]> = silent.iter().map(|input| &input[..len]).collect();
+            let mut block_outputs: Vec<&mut [f32]> = outputs.iter_mut().map(|output| &mut output[..len]).collect();
+            testing::run_with_transport(
+                held.as_mut(),
+                self.sample_rate,
+                transport.later(start),
+                &block_inputs,
+                &unconnected,
+                &mut block_outputs,
+                &[],
+            );
+            start += len;
+        }
+        held.reset();
+        let held = self.run_module(held, MAX_BLOCK, &inputs, &connected);
+
+        for (port, (a, b)) in fresh.outputs.iter().zip(&held.outputs).enumerate() {
+            if let Some(frame) = a.iter().zip(b).position(|(a, b)| a.to_bits() != b.to_bits()) {
+                panic!(
+                    "{}: output `{}` at frame {frame} is {} on a new instance, but {} on one that held its values \
+                     before `reset()`. `reset()` must snap smoothing to its targets and clear the state that \
+                     `process` changes (docs/design/live-patching.md, rule 7).",
+                    self.descriptor.id, self.descriptor.outputs[port].name, a[frame], b[frame],
+                );
+            }
+        }
+    }
+
+    /// Runs a new instance of the module over `inputs` in blocks of `block`
+    /// frames.
+    #[track_caller]
+    fn run(&self, block: usize, inputs: &[Vec<f32>], connected: &[bool]) -> Render {
+        self.run_module(self.build(), block, inputs, connected)
+    }
+
+    /// Runs `module` over `inputs` in blocks of `block` frames.
+    #[track_caller]
+    fn run_module(&self, mut module: Box<dyn Module>, block: usize, inputs: &[Vec<f32>], connected: &[bool]) -> Render {
+        let descriptor = self.descriptor;
+        let frames = self.frame_count();
         for event in &self.midi {
             assert!(
                 (event.frame as usize) < frames,
@@ -297,10 +362,31 @@ impl Harness {
                 event.frame
             );
         }
-
         let mut outputs = vec![vec![0.0; frames]; descriptor.outputs.len()];
+        self.run_span(module.as_mut(), block, inputs, connected, 0..frames, &mut outputs);
+        Render {
+            descriptor,
+            sample_rate: self.sample_rate,
+            outputs,
+        }
+    }
+
+    /// Runs `module` over the frames in `span` of the render, in blocks of
+    /// `block` frames, with the inputs, MIDI, and transport of those frames.
+    /// Writes the same frames of `outputs`.
+    fn run_span(
+        &self,
+        module: &mut dyn Module,
+        block: usize,
+        inputs: &[Vec<f32>],
+        connected: &[bool],
+        span: std::ops::Range<usize>,
+        outputs: &mut [Vec<f32>],
+    ) {
+        let transport = TransportInfo::new(self.sample_rate, self.transport, 0.0);
+        let frames = span.end;
         let mut block_midi = Vec::with_capacity(self.midi.len());
-        let mut start = 0;
+        let mut start = span.start;
         while start < frames {
             let len = block.min(frames - start);
             let end = start + len;
@@ -317,7 +403,7 @@ impl Harness {
             let block_inputs: Vec<&[f32]> = inputs.iter().map(|input| &input[start..end]).collect();
             let mut block_outputs: Vec<&mut [f32]> = outputs.iter_mut().map(|output| &mut output[start..end]).collect();
             testing::run_with_transport(
-                module.as_mut(),
+                module,
                 self.sample_rate,
                 transport.later(start),
                 &block_inputs,
@@ -327,12 +413,74 @@ impl Harness {
             );
             start = end;
         }
+    }
 
-        Render {
-            descriptor,
-            sample_rate: self.sample_rate,
-            outputs,
+    /// Runs a new instance for the first `at` frames, then a second new
+    /// instance takes its state with [`Module::copy_state_from`], and both
+    /// run on to the end. Returns whether the copy took the state, and the
+    /// two outputs from frame `at`: the running instance's first.
+    fn copied_at(&self, at: usize) -> (bool, Vec<Vec<f32>>, Vec<Vec<f32>>) {
+        let frames = self.frame_count();
+        assert!(
+            at < frames,
+            "{}: the copy at frame {at} is past the end of the render ({frames} frames)",
+            self.descriptor.id
+        );
+        let (inputs, connected) = self.input_buffers();
+        let outputs = || vec![vec![0.0; frames]; self.descriptor.outputs.len()];
+        let mut running = self.build();
+        let mut first = outputs();
+        self.run_span(running.as_mut(), MAX_BLOCK, &inputs, &connected, 0..at, &mut first);
+        let mut copy = self.build();
+        let copied = copy.copy_state_from(&*running);
+        let mut second = outputs();
+        self.run_span(running.as_mut(), MAX_BLOCK, &inputs, &connected, at..frames, &mut first);
+        self.run_span(copy.as_mut(), MAX_BLOCK, &inputs, &connected, at..frames, &mut second);
+        let from = |outputs: Vec<Vec<f32>>| outputs.into_iter().map(|o| o[at..].to_vec()).collect();
+        (copied, from(first), from(second))
+    }
+
+    /// Checks [`Module::copy_state_from`] (ADR-0022, stereo spec rules 25
+    /// and 26). It runs a new instance for `at` frames, copies its state
+    /// into a second new instance, runs both on to the end of the render,
+    /// and panics unless their outputs are bit-identical from frame `at`.
+    /// Returns whether the module copied its state. A module with no state
+    /// passes without copying; a module with state that does not copy it
+    /// fails. Not for seeded modules: see
+    /// [`Harness::check_copy_state_repeatable`].
+    #[track_caller]
+    pub fn check_copy_state(&self, at: usize) -> bool {
+        let (copied, running, copy) = self.copied_at(at);
+        for (port, (a, b)) in running.iter().zip(&copy).enumerate() {
+            if let Some(frame) = a.iter().zip(b).position(|(a, b)| a.to_bits() != b.to_bits()) {
+                panic!(
+                    "{}: output `{}` at frame {} is {} on the running instance, but {} on the copy that took its \
+                     state (`copy_state_from` returned {copied}). A module with state must copy all of it \
+                     (docs/design/stereo.md, rules 25 and 26).",
+                    self.descriptor.id,
+                    self.descriptor.outputs[port].name,
+                    at + frame,
+                    a[frame],
+                    b[frame],
+                );
+            }
         }
+        copied
+    }
+
+    /// The check for a seeded module (stereo spec, rule 27), which must not
+    /// copy its random state: copying at frame `at` twice gives two copies
+    /// with bit-identical outputs, and `copy_state_from` returns `true`.
+    #[track_caller]
+    pub fn check_copy_state_repeatable(&self, at: usize) {
+        let (copied, _, first) = self.copied_at(at);
+        let (_, _, second) = self.copied_at(at);
+        assert!(copied, "{}: `copy_state_from` returned false", self.descriptor.id);
+        assert!(
+            first == second,
+            "{}: two copies taken at frame {at} play different outputs",
+            self.descriptor.id
+        );
     }
 
     /// Renders with each of [`BLOCK_SIZES`] and panics unless the outputs

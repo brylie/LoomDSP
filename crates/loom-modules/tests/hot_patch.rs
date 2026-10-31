@@ -94,9 +94,11 @@ fn a_cold_right_copy_clicks_and_a_crossfade_only_hides_it() {
     let fade = (0.005 * SAMPLE_RATE) as usize;
     println!("SVF copy 1 joining at 100 ms, same signal on both sides");
     println!("output    cutoff  res   | cold: peak  step    settle | 5 ms fade: peak  step    settle");
-    // The SVF is built with a cutoff of 1000 Hz and a resonance of 0.2, and
-    // `set_param` glides from there over 10 ms. So the 1000 Hz row shows
-    // the filter's own memory alone, and the others add the glide.
+    // The harness resets a new instance after its values are set, so copy
+    // 1 starts at its cutoff with no glide (live patching spec, rule 7).
+    // Each row shows the filter's own memory alone. Before rule 7, rows
+    // other than 1000 Hz also glided from the built-in cutoff, as ADR-0022
+    // measured.
     for (output, cutoff, resonance) in [
         ("lowpass", 200.0, 0.2),
         ("lowpass", 1_000.0, 0.2),
@@ -144,21 +146,15 @@ fn a_cold_highpass_copy_steps_in_one_sample() {
 #[test]
 fn a_right_copy_with_copied_state_matches_the_left_exactly() {
     // The state-copy option. The SVF's state is its two integrators and its
-    // parameter smoothing. Taking copy 0's state at the join is the same as
-    // copy 1 having run all along, so it is bit-identical to copy 0. The
-    // harness has no way to copy a module's state, so this checks the claim
-    // the option rests on: a second instance fed the same input from the
-    // start gives the same output, bit for bit (hard rule 3).
-    let frames = 9_600;
-    let render = || {
-        Harness::new(&SVF)
-            .frames(frames)
-            .param("cutoff", 500.0)
-            .param("resonance", 0.9)
-            .input("in", Signal::from_fn(music))
-            .render()
-    };
-    assert_eq!(render().output("lowpass"), render().output("lowpass"));
+    // parameter smoothing. Taking copy 0's state at the join with
+    // `copy_state_from` makes copy 1 bit-identical to copy 0 from the join
+    // on (ADR-0022, stereo spec rules 25 and 26).
+    let harness = Harness::new(&SVF)
+        .frames(9_600)
+        .param("cutoff", 500.0)
+        .param("resonance", 0.9)
+        .input("in", Signal::from_fn(music));
+    assert!(harness.check_copy_state(4_800), "the SVF copies its state");
 }
 
 // --- Cases 2 and 3: unit delays the compiler inserts ---------------------

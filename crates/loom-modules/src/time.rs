@@ -140,6 +140,19 @@ struct DelayBuffer {
 }
 
 impl DelayBuffer {
+    /// Copies `other` into this buffer, with no allocation. False when the
+    /// two have different lengths, which only happens when they were built
+    /// with a different `ModuleConfig`.
+    fn copy_from(&mut self, other: &Self) -> bool {
+        if self.samples.len() != other.samples.len() {
+            return false;
+        }
+        self.samples.copy_from_slice(&other.samples);
+        self.write = other.write;
+        self.max_samples = other.max_samples;
+        true
+    }
+
     /// Allocates a zeroed buffer for `max_seconds` at `sample_rate`, plus four
     /// guard samples for the 4-point cubic stencil.
     fn new(max_seconds: f32, sample_rate: f32) -> Self {
@@ -270,6 +283,21 @@ impl Delay {
 }
 
 impl Module for Delay {
+    /// Takes the running state of another instance, buffer included
+    /// (ADR-0022). The buffer is copied into this one's, so nothing is
+    /// allocated.
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        let Some(other) = other.as_any().downcast_ref::<Self>() else {
+            return false;
+        };
+        if !self.buffer.copy_from(&other.buffer) {
+            return false;
+        }
+        self.sample_rate = other.sample_rate;
+        self.time = other.time;
+        true
+    }
+
     /// Processes a block of audio through the interpolated delay line.
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let spec = &DELAY.params[0];
@@ -334,6 +362,22 @@ impl Allpass {
 }
 
 impl Module for Allpass {
+    /// Takes the running state of another instance, buffer included
+    /// (ADR-0022). The buffer is copied into this one's, so nothing is
+    /// allocated.
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        let Some(other) = other.as_any().downcast_ref::<Self>() else {
+            return false;
+        };
+        if !self.buffer.copy_from(&other.buffer) {
+            return false;
+        }
+        self.sample_rate = other.sample_rate;
+        self.time = other.time;
+        self.gain = other.gain;
+        true
+    }
+
     /// Processes a block of audio through the Schroeder delay-line all-pass filter.
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let time_spec = &ALLPASS.params[0];

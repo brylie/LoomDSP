@@ -83,6 +83,7 @@ pub static AMP: ModuleDescriptor = ModuleDescriptor {
     displays: &[],
 };
 
+#[derive(Clone)]
 struct Amp {
     gain: Smoothed,
     exponential: bool,
@@ -105,6 +106,11 @@ impl Amp {
 }
 
 impl Module for Amp {
+    /// Takes the running state of another instance (ADR-0022).
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let level_connected = io.is_connected(1);
         let modulated = io.param(0);
@@ -170,12 +176,18 @@ pub static CONSTANT: ModuleDescriptor = ModuleDescriptor {
     displays: &[],
 };
 
+#[derive(Clone)]
 struct ConstantLevel {
     /// The level in dB. Smoothed in dB, so a turn sounds even.
     db: Smoothed,
 }
 
 impl Module for ConstantLevel {
+    /// Takes the running state of another instance (ADR-0022).
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let modulated = io.param(0);
         let ([], [out]) = io.split::<0, 1>();
@@ -280,12 +292,18 @@ fn limit(x: f32, low: f32, high: f32) -> f32 {
     x.max(floor).min(ceiling)
 }
 
+#[derive(Clone)]
 struct Clamp {
     low: Smoothed,
     high: Smoothed,
 }
 
 impl Module for Clamp {
+    /// Takes the running state of another instance (ADR-0022).
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let (low_mod, high_mod) = (io.param(0), io.param(1));
         let ([input], [out]) = io.split::<1, 1>();
@@ -379,12 +397,18 @@ pub static SCALE: ModuleDescriptor = ModuleDescriptor {
     displays: &[],
 };
 
+#[derive(Clone)]
 struct Scale {
     factor: Smoothed,
     offset: Smoothed,
 }
 
 impl Module for Scale {
+    /// Takes the running state of another instance (ADR-0022).
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let (factor_mod, offset_mod) = (io.param(0), io.param(1));
         let ([input], [out]) = io.split::<1, 1>();
@@ -488,6 +512,7 @@ pub static SLEW: ModuleDescriptor = ModuleDescriptor {
 /// sample, and an `f32` at 64 or more cannot add a step that small (its
 /// spacing there is 7.6e-6), so a slewed Hz value would freeze. The output
 /// is cast to `f32` only when it is written.
+#[derive(Clone)]
 struct Slew {
     sample_rate: f32,
     rise: f32,
@@ -498,6 +523,11 @@ struct Slew {
 }
 
 impl Module for Slew {
+    /// Takes the running state of another instance (ADR-0022).
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let (rise_mod, fall_mod) = (io.param(0), io.param(1));
         let ([input], [out]) = io.split::<1, 1>();
