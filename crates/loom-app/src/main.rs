@@ -22,6 +22,7 @@ mod layout;
 mod learn;
 mod lights;
 mod live;
+mod matrix;
 mod modulation;
 mod monitor;
 mod panic;
@@ -53,6 +54,7 @@ use loom_core::{
 };
 use loom_host_desktop::{AudioOutput, CallbackStats, RunningAudio, SharedMidi};
 use loom_patch::Patch;
+use matrix::{Column as MatrixColumn, Event as MatrixEvent, Tab as RightTab};
 use modulation::PolarityChoice;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -361,6 +363,10 @@ enum Message {
     },
     /// The remove button on an assignment row.
     Unassign(AssignmentId),
+    /// A change in the session-only modulation matrix.
+    Matrix(MatrixEvent),
+    /// A key handled by the focused matrix even if a widget used it.
+    MatrixKey(iced::keyboard::Event),
     /// A line under **Drives** selects its target module.
     SelectModule(u32),
     /// A message for the Preferences window (`docs/design/preferences.md`).
@@ -589,6 +595,8 @@ struct App {
     arrow_group_closed: bool,
     /// The parameter whose **Add modulation** list is open.
     adding: Option<(u32, usize)>,
+    /// Session-only matrix tab, filters, selection, and pending edit.
+    matrix: matrix::State,
     /// During an arc drag: the assignment it changes, once picked, or
     /// `Some(None)` when none fits and the drag does nothing.
     depth_drag: Option<Option<AssignmentId>>,
@@ -1031,6 +1039,7 @@ impl App {
             arrow_group_pending: false,
             arrow_group_closed: false,
             adding: None,
+            matrix: matrix::State::default(),
             depth_drag: None,
             live_value_overflow_reported: false,
             still: None,
@@ -1226,6 +1235,7 @@ impl App {
         let rig = std::mem::replace(&mut self.rig, settings::Rig::empty());
         let mut fresh = Self::assemble(output, sample_rate, session, self.generation + 1, &args, rig, true);
         fresh.animating = self.animating;
+        fresh.matrix.tab = self.matrix.tab;
         fresh.reporter = self.reporter.take();
         fresh.control = std::mem::take(&mut self.control);
         // The script's pointer stays where it was, over the new patch.
@@ -1406,12 +1416,23 @@ impl App {
             Subscription::run_with(watch, learn::stream).map(|_| Message::Midi)
         });
         let keys = Some(iced::keyboard::listen().map(Message::Key));
+        // The matrix owns arrows and Escape even when a child widget uses
+        // the key. Its handler ignores them outside table focus.
+        let matrix_keys = (self.matrix.tab == RightTab::Matrix && self.matrix.focused)
+            .then(|| iced::event::listen_with(matrix::key_listener));
         // The search field takes Escape for itself, so the browser listens
         // to keys whether or not a widget used them.
         let browser = self.browser.is_some().then(|| iced::event::listen_with(browser_key));
         // The panic key works whatever has focus (panic.md).
         let panic = Some(iced::event::listen_with(panic::key));
-        Subscription::batch(watch.into_iter().chain(keys).chain(browser).chain(panic))
+        Subscription::batch(
+            watch
+                .into_iter()
+                .chain(keys)
+                .chain(matrix_keys)
+                .chain(browser)
+                .chain(panic),
+        )
     }
 
     /// Watches the lights on screen, and sends a message only when one
@@ -1484,6 +1505,7 @@ impl App {
         self.scene = scene::build(&self.controller, &self.positions);
         self.refresh_values();
         self.refresh_learn();
+        self.matrix.reconcile(self.controller.graph());
     }
 
     /// Rebuilds what learn mode shows, after mappings or the armed
@@ -2075,6 +2097,43 @@ impl App {
                 })
             }
             Message::Control(call) => self.control(call),
+            Message::Matrix(event) if matches!(event, MatrixEvent::Edit(_, MatrixColumn::Depth)) => {
+                self.matrix_event(event);
+                iced::widget::operation::focus("matrix-depth")
+            }
+            Message::MatrixKey(key) => {
+                let open_depth = matches!(
+                    key,
+                    iced::keyboard::Event::KeyPressed {
+                        key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter),
+                        ..
+                    }
+                ) && self.matrix.edit.is_none()
+                    && self.matrix.cell == MatrixColumn::Depth;
+                self.matrix_key(key);
+                let scroll = if self.matrix.tab == RightTab::Matrix && self.matrix.focused {
+                    iced::widget::operation::scroll_to(
+                        "matrix-table",
+                        iced::widget::scrollable::AbsoluteOffset {
+                            x: Some(matrix::column_offset(self.matrix.cell)),
+                            y: None,
+                        },
+                    )
+                } else {
+                    Task::none()
+                };
+                if open_depth
+                    && self
+                        .matrix
+                        .edit
+                        .as_ref()
+                        .is_some_and(|e| e.column == MatrixColumn::Depth)
+                {
+                    Task::batch([scroll, iced::widget::operation::focus("matrix-depth")])
+                } else {
+                    scroll
+                }
+            }
             Message::ControlFrame(now) => self.control_frame(now),
             Message::Located {
                 call,
@@ -2199,6 +2258,8 @@ impl App {
         match message {
             // `update` runs these: they return tasks.
             Message::Browser(_) | Message::Control(_) | Message::ControlFrame(_) | Message::Located { .. } => {}
+            Message::Matrix(event) => self.matrix_event(event),
+            Message::MatrixKey(key) => self.matrix_key(key),
             Message::Preferences(message) => self.preferences(message),
             Message::Key(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) if self.rig.window.is_some() => {
                 // The window takes Escape and its own shortcut, and keeps
@@ -2212,6 +2273,10 @@ impl App {
                 }
             }
             Message::Key(_) if self.browser.is_some() || self.rig.window.is_some() => {}
+            Message::Key(iced::keyboard::Event::KeyPressed { modifiers, .. })
+                if self.matrix.tab == RightTab::Matrix && self.matrix.focused && !modifiers.command() => {}
+            Message::Key(iced::keyboard::Event::KeyReleased { .. })
+                if self.matrix.tab == RightTab::Matrix && self.matrix.focused => {}
             Message::Key(iced::keyboard::Event::KeyPressed { key, .. }) if self.probe_menu.is_some() => {
                 // The menu takes Escape and keeps other keys from the canvas.
                 if key == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) {
@@ -2512,6 +2577,12 @@ impl App {
     }
 
     fn canvas_event(&mut self, event: CanvasEvent) {
+        if event == CanvasEvent::PointerDown {
+            self.matrix.focused = false;
+            self.matrix.edit = None;
+            self.matrix.add = None;
+            return;
+        }
         let edits = undo::is_edit(&self.controller, &event);
         if edits {
             self.close_slider_gesture();
@@ -2523,6 +2594,7 @@ impl App {
 
     fn apply_canvas_event(&mut self, event: CanvasEvent) {
         match event {
+            CanvasEvent::PointerDown => {}
             CanvasEvent::AssignDrag { from, start, at, zoom } => {
                 self.assign_drag = Some(AssignDrag { from, start, at, zoom });
             }
@@ -2883,6 +2955,14 @@ impl App {
             .frame_key(self.frame_key)
             .browser_key(self.browser_key)
             .interactive(self.browser.is_none() && self.probe_menu.is_none() && self.rig.window.is_none())
+            .matrix_line(self.matrix_line())
+            .matrix_keyboard(self.matrix.tab == RightTab::Matrix && self.matrix.focused)
+            .matrix_escape(
+                self.matrix.tab == RightTab::Matrix
+                    && self.matrix.focused
+                    && self.matrix.edit.is_none()
+                    && self.matrix.add.is_none(),
+            )
             .animate(self.animating)
             .learn(self.learning.then_some(&self.learn_view));
         if let Some(still) = self.still {
@@ -2892,7 +2972,7 @@ impl App {
         let body = row![
             container(canvas).width(Length::Fill).height(Length::Fill),
             rule::vertical(1),
-            self.inspector(),
+            self.right_panel(),
         ];
 
         let main = column![
@@ -2929,12 +3009,16 @@ impl App {
         // The control channel's pointer events go in here, as a real
         // pointer's would (control-channel.md, Pointer commands).
         let browser_open = self.browser.is_some();
+        let matrix_keys = self.matrix.tab == RightTab::Matrix && self.matrix.focused;
         pointer::Injector::new(layers, self, move |key, status| {
             // As the subscriptions do: `keyboard::listen` passes on what no
             // widget took, and the open browser hears every key.
             let mut messages = Vec::new();
             if status == iced::event::Status::Ignored {
                 messages.push(Message::Key(key.clone()));
+            }
+            if matrix_keys && let Some(message) = matrix::key_message(key.clone(), status) {
+                messages.push(message);
             }
             if let Some(message) = panic::key(iced::Event::Keyboard(key.clone()), status, iced::window::Id::unique()) {
                 messages.push(message);
@@ -3036,6 +3120,24 @@ impl App {
             self.drop_row,
             self.assign_drag.is_some() && !self.learning,
         )
+    }
+
+    /// Inspector and matrix share the same width in the right-hand column.
+    fn right_panel(&self) -> Element<'_, Message> {
+        let tabs = row![
+            button("Inspector").on_press(Message::Matrix(MatrixEvent::Tab(RightTab::Inspector))),
+            button("Matrix").on_press(Message::Matrix(MatrixEvent::Tab(RightTab::Matrix))),
+        ]
+        .spacing(4);
+        let panel = match self.matrix.tab {
+            RightTab::Inspector => self.inspector(),
+            RightTab::Matrix => matrix::view(
+                self.matrix.model(self.controller.graph(), &self.selection),
+                &self.matrix,
+                self.controller.graph(),
+            ),
+        };
+        column![tabs, panel].width(280).height(Length::Fill).into()
     }
 
     fn stats_bar(&self) -> Element<'_, Message> {

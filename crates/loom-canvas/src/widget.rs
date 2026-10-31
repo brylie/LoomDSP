@@ -51,6 +51,8 @@ const CABLE_OPACITY: f32 = 0.4;
 /// A gesture on the canvas. The application applies it to its model.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CanvasEvent {
+    /// The pointer pressed on the canvas while matrix keys had focus.
+    PointerDown,
     /// Replace the selection.
     Select(Vec<u32>),
     /// Move modules by a world offset (always whole grid steps).
@@ -253,6 +255,12 @@ pub struct PatchCanvas<'a, Message> {
     animate: bool,
     interactive: bool,
     learn: Option<&'a LearnView>,
+    /// The row selected in the modulation matrix, without changing the pin.
+    matrix_line: Option<crate::scene::ModulationView>,
+    /// Lets Escape hide a badge pin while the matrix owns keyboard focus.
+    matrix_escape: bool,
+    /// Leaves unmodified keys to the focused matrix while keeping pointer input active.
+    matrix_keyboard: bool,
     still: Option<Still>,
     window_drag_line: bool,
 }
@@ -394,6 +402,9 @@ impl<'a, Message> PatchCanvas<'a, Message> {
             animate: false,
             interactive: true,
             learn: None,
+            matrix_line: None,
+            matrix_escape: false,
+            matrix_keyboard: false,
             still: None,
             window_drag_line: false,
         }
@@ -412,6 +423,25 @@ impl<'a, Message> PatchCanvas<'a, Message> {
     /// Turns on MIDI learn mode, with what it shows.
     pub fn learn(mut self, learn: Option<&'a LearnView>) -> Self {
         self.learn = learn;
+        self
+    }
+
+    /// Shows one matrix-selected assignment line without pinning its source.
+    pub fn matrix_line(mut self, line: Option<crate::scene::ModulationView>) -> Self {
+        self.matrix_line = line;
+        self
+    }
+
+    /// Lets a focused matrix pass Escape to a pinned badge after its cell
+    /// editor has closed.
+    pub fn matrix_escape(mut self, enabled: bool) -> Self {
+        self.matrix_escape = enabled;
+        self
+    }
+
+    /// Leaves unmodified keyboard input to the matrix without blocking the pointer.
+    pub fn matrix_keyboard(mut self, enabled: bool) -> Self {
+        self.matrix_keyboard = enabled;
         self
     }
 
@@ -562,6 +592,7 @@ struct LinesKey {
     pinned: Option<PortRef>,
     hover: Option<Hit>,
     selection: Vec<u32>,
+    matrix_line: Option<crate::scene::ModulationView>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -940,6 +971,35 @@ impl<Message> PatchCanvas<'_, Message> {
         let over = cursor.is_over(bounds);
         let screen = relative(cursor, bounds);
 
+        if self.matrix_escape
+            && matches!(
+                event,
+                Event::Keyboard(keyboard::Event::KeyPressed {
+                    key: keyboard::Key::Named(keyboard::key::Named::Escape),
+                    ..
+                })
+            )
+            && self.pin(state).is_some()
+        {
+            state.pinned = None;
+            shell.capture_event();
+            shell.request_redraw();
+            return;
+        }
+
+        if self.matrix_keyboard
+            && matches!(
+                event,
+                Event::Keyboard(keyboard::Event::KeyPressed { modifiers, .. }) if !modifiers.command()
+            )
+        {
+            self.release_every_key_hold(state, shell);
+            if std::mem::take(&mut state.arrow_gesture) {
+                self.emit(shell, CanvasEvent::GestureEnd);
+            }
+            return;
+        }
+
         if !self.interactive {
             // Modifiers still count, so Shift held while the pop-up closes
             // is known on the next click.
@@ -1153,6 +1213,9 @@ impl<Message> PatchCanvas<'_, Message> {
                     shell.request_redraw();
                     shell.capture_event();
                     return;
+                }
+                if self.matrix_keyboard {
+                    self.emit(shell, CanvasEvent::PointerDown);
                 }
                 // A second button must end a hold. Replacing the interaction
                 // without a release would leave a momentary gate high.
@@ -1812,14 +1875,9 @@ impl<Message> PatchCanvas<'_, Message> {
         }) {
             state.focus = None;
         }
-        if let Some(mut popup) = state.select_popup {
-            let options = match self.widget_kind(popup.module, popup.widget) {
-                Some(WidgetViewKind::Select { options }) => options,
-                _ => {
-                    state.select_popup = None;
-                    return false;
-                }
-            };
+        if let Some(mut popup) = state.select_popup
+            && let Some(WidgetViewKind::Select { options }) = self.widget_kind(popup.module, popup.widget)
+        {
             let used = match key.as_ref() {
                 keyboard::Key::Named(Named::Escape) => {
                     state.select_popup = None;
@@ -1851,6 +1909,8 @@ impl<Message> PatchCanvas<'_, Message> {
                 shell.capture_event();
                 return true;
             }
+        } else {
+            state.select_popup = None;
         }
         let used = match key.as_ref() {
             // Escape hides pinned lines before it does anything else
@@ -2542,6 +2602,7 @@ impl<Message> PatchCanvas<'_, Message> {
             pinned: self.pin(state),
             hover: state.hover,
             selection: self.selection.iter().copied().collect(),
+            matrix_line: self.matrix_line.clone(),
         };
         let mut cache = state.lines.borrow_mut();
         if cache.as_ref().is_none_or(|(k, _)| *k != key) {
@@ -2585,7 +2646,12 @@ impl<Message> PatchCanvas<'_, Message> {
         for m in self.scene.modulations() {
             let by_source = sources.contains(&m.from);
             let by_control = control.is_some_and(|(module, widget)| m.to == module && m.widget == Some(widget));
-            if !(by_source || by_control || module_in_focus(m.from.0) || module_in_focus(m.to)) {
+            if !(self.matrix_line.as_ref() == Some(m)
+                || by_source
+                || by_control
+                || module_in_focus(m.from.0)
+                || module_in_focus(m.to))
+            {
                 continue;
             }
             let from = PortRef {
@@ -3557,6 +3623,28 @@ mod tests {
         }));
         assert!(state.select_popup.is_none());
 
+        // Scrolling dismisses the open list without changing the canvas zoom.
+        drive(&canvas, &mut state, &click(mouse::Button::Left), centre);
+        drive(
+            &canvas,
+            &mut state,
+            &Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+            centre,
+        );
+        assert!(state.select_popup.is_some());
+        let zoom = state.camera.zoom;
+        let events = drive(
+            &canvas,
+            &mut state,
+            &Event::Mouse(mouse::Event::WheelScrolled {
+                delta: mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 },
+            }),
+            centre,
+        );
+        assert!(events.is_empty());
+        assert!(state.select_popup.is_none());
+        assert_eq!(state.camera.zoom, zoom);
+
         drive(&canvas, &mut state, &click(mouse::Button::Left), centre);
         let moved = Point::new(centre.x + GRID * 2.0, centre.y);
         let events = drive(
@@ -3627,6 +3715,28 @@ mod tests {
         drive(&canvas, &mut state, &key_event(keyboard::key::Named::Space, true), at);
         assert!(drive(&canvas, &mut state, &key_event(keyboard::key::Named::Escape, true), at).is_empty());
         assert!(state.select_popup.is_none());
+    }
+
+    /// A removed select cannot swallow the next key meant for the canvas.
+    #[test]
+    fn stale_select_popup_passes_escape_to_normal_key_handling() {
+        let scene = chain();
+        let selected = BTreeSet::from([1]);
+        let canvas = PatchCanvas::new(&scene, &selected, |event| event);
+        let at = scene.module(1).unwrap().bounds().center();
+        for module in [1, 999] {
+            let mut state = State {
+                select_popup: Some(SelectPopup {
+                    module,
+                    widget: 999,
+                    highlight: 0,
+                }),
+                ..State::default()
+            };
+            let events = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Escape, true), at);
+            assert_eq!(events, vec![CanvasEvent::Select(Vec::new())]);
+            assert!(state.select_popup.is_none());
+        }
     }
 
     /// A drag in progress when a pop-up opens ends at the next redraw,
@@ -4879,6 +4989,92 @@ mod tests {
         assert_eq!(canvas.overlay(&state).cables.len(), first);
         assert_eq!(state.lines.borrow().as_ref().map(|(k, _)| k.clone()), key);
         assert_eq!(first, 1, "the selected source's line");
+    }
+
+    /// A matrix-selected row draws its line with no hover, canvas selection,
+    /// or badge pin, and leaves the pin state alone.
+    #[test]
+    fn matrix_row_shows_one_line_without_pinning() {
+        let (scene, values) = modulated_scene();
+        let none = BTreeSet::new();
+        let plain = PatchCanvas::new(&scene, &none, |e| e).values(&values);
+        assert!(plain.overlay(&State::default()).cables.is_empty());
+        let line = scene.modulations()[0].clone();
+        let canvas = PatchCanvas::new(&scene, &none, |e| e)
+            .values(&values)
+            .matrix_line(Some(line));
+        let state = State::default();
+        assert_eq!(canvas.overlay(&state).cables.len(), 1);
+        assert_eq!(state.pinned, None);
+    }
+
+    /// A matrix line adds to lines shown by a pinned or hovered output.
+    #[test]
+    fn matrix_line_preserves_pinned_and_hovered_lines() {
+        let (original, values) = modulated_scene();
+        let mut source = module(3, 600.0);
+        source.outputs[0].badge = 1;
+        let modules = original.modules();
+        let selected = original.modulations()[0].clone();
+        let pin = PortRef {
+            module: 3,
+            output: true,
+            index: 0,
+        };
+        let scene =
+            Scene::new(vec![modules[0].clone(), modules[1].clone(), source], Vec::new()).with_modulations(vec![
+                selected.clone(),
+                crate::scene::ModulationView {
+                    id: 2,
+                    from: (3, 0),
+                    to: 2,
+                    widget: Some(0),
+                    enabled: true,
+                },
+            ]);
+        let none = BTreeSet::new();
+        let canvas = PatchCanvas::new(&scene, &none, |e| e)
+            .values(&values)
+            .matrix_line(Some(selected));
+        let mut state = State {
+            pinned: Some(pin),
+            ..State::default()
+        };
+        assert_eq!(canvas.overlay(&state).cables.len(), 2);
+        state.pinned = None;
+        state.hover = Some(Hit::Port(pin));
+        assert_eq!(canvas.overlay(&state).cables.len(), 2);
+    }
+
+    /// Escape can clear a canvas pin while matrix keyboard focus owns the key.
+    #[test]
+    fn matrix_escape_clears_canvas_pin() {
+        let (scene, values) = modulated_scene();
+        let none = BTreeSet::new();
+        let canvas = PatchCanvas::new(&scene, &none, |e| e)
+            .values(&values)
+            .matrix_keyboard(true)
+            .matrix_escape(true);
+        let mut state = State {
+            pinned: Some(OUT),
+            ..State::default()
+        };
+        drive(&canvas, &mut state, &escape(), Point::ORIGIN);
+        assert_eq!(state.pinned, None);
+    }
+
+    /// Matrix keyboard focus leaves canvas clicks active but owns ordinary keys.
+    #[test]
+    fn matrix_keyboard_focus_keeps_canvas_pointer_active() {
+        let scene = chain();
+        let selected = BTreeSet::from([1]);
+        let tile = scene.module(2).unwrap().bounds().center();
+        let canvas = PatchCanvas::new(&scene, &selected, |e| e).matrix_keyboard(true);
+        let mut state = State::default();
+
+        assert!(drive(&canvas, &mut state, &key_event(keyboard::key::Named::Space, true), tile).is_empty());
+        let events = drive(&canvas, &mut state, &click(mouse::Button::Left), tile);
+        assert!(events.contains(&CanvasEvent::Select(vec![2])), "{events:?}");
     }
 
     /// A knob whose arc has zero length shows the dot, and its ring still

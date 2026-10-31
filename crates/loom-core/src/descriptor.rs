@@ -1633,4 +1633,62 @@ mod tests {
         assert!(parameter("x").transient().is_transient());
         assert_eq!(Widget::button(0, 0, "on", "hold", "mode"), *button);
     }
+
+    /// A named mode can share a panel with a full-width result shape. The
+    /// registry rejects invalid choice and shape declarations before drawing.
+    #[test]
+    fn select_and_shape_panel_bindings_are_checked() {
+        fn sample(_: &[f32], x: f32) -> f32 {
+            x
+        }
+        static OUTPUT: [PortSpec; 1] = [PortSpec {
+            name: "out",
+            label: "Out",
+            signal: SignalType::Audio,
+            description: "The shaped signal.",
+            default: PortDefault::Value(0.0),
+            polarity: Polarity::Bipolar,
+            channels: Channels::PerChannel,
+        }];
+        static PARAMS: [ParamSpec; 1] = [param("mode", 0.0, 1.0, 0.0, "").integer().choices(&["First", "Second"])];
+        static NO_CHOICES: [ParamSpec; 1] = [param("mode", 0.0, 1.0, 0.0, "").integer()];
+        static VALID: [Widget; 2] = [
+            Widget::shape(0, 0, 6, "out", "Result", sample),
+            Widget::select(0, 5, "mode"),
+        ];
+        static BAD_SHAPE: [Widget; 1] = [Widget::shape(0, 0, 0, "out", "Result", sample)];
+
+        let descriptor = |widgets, params| ModuleDescriptor {
+            id: "test.choice_shape",
+            version: 1,
+            name: "Choice and shape",
+            category: "Test",
+            description: "A panel validation test.",
+            inputs: &[],
+            outputs: &OUTPUT,
+            params,
+            role: ModuleRole::Dsp(|_| unreachable!("never created")),
+            panel: Panel::new(6, 7, widgets),
+            displays: &[],
+        };
+        let valid = descriptor(&VALID, &PARAMS);
+        assert!(valid.check_panel().is_ok());
+        assert_eq!(valid.widget_size(&VALID[0]), (6, 5));
+        assert_eq!(valid.widget_size(&VALID[1]), (6, 2));
+        assert_eq!(Widget::select(0, 5, "mode"), VALID[1]);
+        assert_eq!(Widget::shape(0, 0, 6, "out", "Result", sample), VALID[0]);
+
+        assert!(
+            descriptor(&VALID, &NO_CHOICES)
+                .check_panel()
+                .unwrap_err()
+                .contains("select list")
+        );
+        assert!(
+            descriptor(&BAD_SHAPE, &PARAMS)
+                .check_panel()
+                .unwrap_err()
+                .contains("shape needs")
+        );
+    }
 }

@@ -143,6 +143,7 @@ impl Ui {
     pub fn step(&mut self, events: &[Event]) -> Vec<Message> {
         let mut messages = Vec::new();
         let browser_open = self.app.browser.is_some();
+        let matrix_keys = self.app.matrix.tab == crate::matrix::Tab::Matrix && self.app.matrix.focused;
         let mut clipboard = std::mem::take(&mut self.clipboard);
         self.with_ui(|ui, renderer, cursor| {
             let (_, statuses) = ui.update(events, cursor, renderer, &mut clipboard, &mut messages);
@@ -151,6 +152,12 @@ impl Ui {
                 // captured.
                 if let (Event::Keyboard(key), event::Status::Ignored) = (event, status) {
                     messages.push(Message::Key(key.clone()));
+                }
+                if matrix_keys
+                    && let Event::Keyboard(key) = event
+                    && let Some(message) = crate::matrix::key_message(key.clone(), status)
+                {
+                    messages.push(message);
                 }
                 // The open browser listens to keys whether or not a widget
                 // used them.
