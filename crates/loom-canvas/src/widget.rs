@@ -1902,6 +1902,7 @@ impl<Message> PatchCanvas<'_, Message> {
                     }
                     true
                 }
+                keyboard::Key::Named(Named::ArrowLeft | Named::ArrowRight | Named::Tab) => true,
                 _ => false,
             };
             if used {
@@ -2910,7 +2911,7 @@ impl<Message> PatchCanvas<'_, Message> {
                         font,
                         align_x: text::Alignment::Left,
                         align_y: alignment::Vertical::Center,
-                        shaping: text::Shaping::Basic,
+                        shaping: text::Shaping::Advanced,
                         wrapping: text::Wrapping::None,
                     },
                     Point::new(at.x + 7.0, at.y + SELECT_ROW_PX * (index as f32 + 0.5)),
@@ -3668,8 +3669,9 @@ mod tests {
         assert!(state.select_popup.is_none());
     }
 
-    /// Focused select lists open with Space, move the highlight with arrows,
-    /// and commit with Enter. Escape dismisses them without an edit.
+    /// Focused select lists open with Space, move the highlight with vertical
+    /// arrows, and commit with Enter. Other navigation cannot edit or move
+    /// focus behind the list. Escape dismisses it without an edit.
     #[test]
     fn select_popup_keyboard_choices_are_explicit() {
         let mut view = module(1, 0.0);
@@ -3702,6 +3704,15 @@ mod tests {
             )
             .is_empty()
         );
+        for key in [
+            keyboard::key::Named::ArrowLeft,
+            keyboard::key::Named::ArrowRight,
+            keyboard::key::Named::Tab,
+        ] {
+            assert!(drive(&canvas, &mut state, &key_event(key, true), at).is_empty());
+            assert_eq!(state.focus, Some((1, 0)));
+            assert_eq!(state.select_popup.map(|popup| popup.highlight), Some(1));
+        }
         let chosen = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Enter, true), at);
         assert_eq!(
             chosen,
