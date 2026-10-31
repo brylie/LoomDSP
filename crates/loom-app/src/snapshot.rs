@@ -301,9 +301,11 @@ fn kind_name(kind: &WidgetViewKind) -> &'static str {
         WidgetViewKind::Knob { .. } => "knob",
         WidgetViewKind::Toggle => "toggle",
         WidgetViewKind::Radio { .. } => "radio",
+        WidgetViewKind::Select { .. } => "select",
         WidgetViewKind::Light => "light",
         WidgetViewKind::Meter => "meter",
         WidgetViewKind::Scope => "scope",
+        WidgetViewKind::Shape { .. } => "shape",
         WidgetViewKind::Button => "button",
     }
 }

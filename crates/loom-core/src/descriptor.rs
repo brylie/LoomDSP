@@ -686,6 +686,16 @@ impl Widget {
         }
     }
 
+    /// A compact choice list for a whole-number parameter with named values.
+    pub const fn select(x: u8, y: u8, param: &'static str) -> Self {
+        Self {
+            kind: WidgetKind::Select,
+            x,
+            y,
+            bind: param,
+        }
+    }
+
     /// A light for display value `display`.
     pub const fn light(x: u8, y: u8, display: &'static str) -> Self {
         Self {
@@ -711,6 +721,25 @@ impl Widget {
     pub const fn scope(x: u8, y: u8, output: &'static str) -> Self {
         Self {
             kind: WidgetKind::Scope,
+            x,
+            y,
+            bind: output,
+        }
+    }
+
+    /// A read-only result shape above its controls. `sample` maps the module's
+    /// parameter values and a horizontal position in 0..1 to a vertical
+    /// position in 0..1. It runs on the UI thread, never in audio processing.
+    pub const fn shape(
+        x: u8,
+        y: u8,
+        width: u8,
+        output: &'static str,
+        label: &'static str,
+        sample: fn(&[f32], f32) -> f32,
+    ) -> Self {
+        Self {
+            kind: WidgetKind::Shape { width, label, sample },
             x,
             y,
             bind: output,
@@ -749,7 +778,10 @@ impl Widget {
 
     /// True for widgets bound to a parameter.
     pub const fn is_control(&self) -> bool {
-        !matches!(self.kind, WidgetKind::Light | WidgetKind::Meter | WidgetKind::Scope)
+        !matches!(
+            self.kind,
+            WidgetKind::Light | WidgetKind::Meter | WidgetKind::Scope | WidgetKind::Shape { .. }
+        )
     }
 
     /// True for widgets bound to one of the module's outputs, fed by a
@@ -760,7 +792,7 @@ impl Widget {
 }
 
 /// The kinds of widget a panel can hold. More come with later phases.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 pub enum WidgetKind {
     /// A dial for any parameter.
@@ -770,6 +802,8 @@ pub enum WidgetKind {
     /// One button per choice name, for a whole-number parameter that names
     /// its values. The names come from the parameter.
     Radio,
+    /// A compact box that opens a list of named choices.
+    Select,
     /// A display value as brightness, clamped to 0 to 1.
     Light,
     /// The level of one of the module's outputs, from a port probe: an RMS
@@ -778,6 +812,15 @@ pub enum WidgetKind {
     /// One of the module's outputs over time, from a port probe: a
     /// triggered trace in a frame.
     Scope,
+    /// Read-only shape sampled from the module's parameters on the UI thread.
+    Shape {
+        /// Width in panel grid units.
+        width: u8,
+        /// Caption shown beneath the read-only result.
+        label: &'static str,
+        /// Pure sampler: parameter values, horizontal position, vertical position.
+        sample: fn(&[f32], f32) -> f32,
+    },
     /// A large button for whole-number parameters from 0 to 1.
     ///
     /// The widget's `bind` is the toggle latch. `mode` names the parameter
@@ -792,6 +835,34 @@ pub enum WidgetKind {
         hold: &'static str,
     },
 }
+
+impl PartialEq for WidgetKind {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Knob, Self::Knob)
+            | (Self::Toggle, Self::Toggle)
+            | (Self::Radio, Self::Radio)
+            | (Self::Select, Self::Select)
+            | (Self::Light, Self::Light)
+            | (Self::Meter, Self::Meter)
+            | (Self::Scope, Self::Scope) => true,
+            // Kinds compare their visible form. Function addresses are not
+            // stable identities for a shape sampler across codegen units.
+            (
+                Self::Shape {
+                    width: a, label: al, ..
+                },
+                Self::Shape {
+                    width: b, label: bl, ..
+                },
+            ) => a == b && al == bl,
+            (Self::Button { mode: am, hold: ah }, Self::Button { mode: bm, hold: bh }) => am == bm && ah == bh,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for WidgetKind {}
 
 /// How a [`WidgetKind::Button`] answers a gesture.
 ///
@@ -884,7 +955,9 @@ impl ModuleDescriptor {
             WidgetKind::Knob => (3, 3),
             WidgetKind::Meter => (3, 6),
             WidgetKind::Scope => (9, 5),
+            WidgetKind::Shape { width, .. } => (width, 5),
             WidgetKind::Toggle | WidgetKind::Light => (3, 2),
+            WidgetKind::Select => (6, 2),
             WidgetKind::Button { .. } => (6, 3),
             WidgetKind::Radio => {
                 let choices = self
@@ -1002,14 +1075,24 @@ impl ModuleDescriptor {
                     WidgetKind::Radio if !integer || param.options.choices.is_empty() => {
                         return Err(name("radio buttons need a whole-number parameter with choice names"));
                     }
+                    WidgetKind::Select
+                        if !integer || param.options.choices.is_empty() || param.options.choices.len() > 12 =>
+                    {
+                        return Err(name("a select list needs 1 to 12 named whole-number choices"));
+                    }
                     WidgetKind::Button { .. } if !(integer && param.min == 0.0 && param.max == 1.0) => {
                         return Err(name("a button needs a whole-number parameter from 0 to 1"));
                     }
                     _ => {}
                 }
-            } else if widget.shows_output() {
+            } else if widget.shows_output() || matches!(widget.kind, WidgetKind::Shape { .. }) {
                 if !self.outputs.iter().any(|port| port.name == widget.bind) {
                     return Err(name("no such output"));
+                }
+                if let WidgetKind::Shape { width, label, .. } = widget.kind
+                    && (width == 0 || label.trim().is_empty())
+                {
+                    return Err(name("a shape needs a width and a caption"));
                 }
             } else if self.display_index(widget.bind).is_none() {
                 return Err(name("no such display value"));
@@ -1549,5 +1632,63 @@ mod tests {
         // Built at run time too, not only in statics.
         assert!(parameter("x").transient().is_transient());
         assert_eq!(Widget::button(0, 0, "on", "hold", "mode"), *button);
+    }
+
+    /// A named mode can share a panel with a full-width result shape. The
+    /// registry rejects invalid choice and shape declarations before drawing.
+    #[test]
+    fn select_and_shape_panel_bindings_are_checked() {
+        fn sample(_: &[f32], x: f32) -> f32 {
+            x
+        }
+        static OUTPUT: [PortSpec; 1] = [PortSpec {
+            name: "out",
+            label: "Out",
+            signal: SignalType::Audio,
+            description: "The shaped signal.",
+            default: PortDefault::Value(0.0),
+            polarity: Polarity::Bipolar,
+            channels: Channels::PerChannel,
+        }];
+        static PARAMS: [ParamSpec; 1] = [param("mode", 0.0, 1.0, 0.0, "").integer().choices(&["First", "Second"])];
+        static NO_CHOICES: [ParamSpec; 1] = [param("mode", 0.0, 1.0, 0.0, "").integer()];
+        static VALID: [Widget; 2] = [
+            Widget::shape(0, 0, 6, "out", "Result", sample),
+            Widget::select(0, 5, "mode"),
+        ];
+        static BAD_SHAPE: [Widget; 1] = [Widget::shape(0, 0, 0, "out", "Result", sample)];
+
+        let descriptor = |widgets, params| ModuleDescriptor {
+            id: "test.choice_shape",
+            version: 1,
+            name: "Choice and shape",
+            category: "Test",
+            description: "A panel validation test.",
+            inputs: &[],
+            outputs: &OUTPUT,
+            params,
+            role: ModuleRole::Dsp(|_| unreachable!("never created")),
+            panel: Panel::new(6, 7, widgets),
+            displays: &[],
+        };
+        let valid = descriptor(&VALID, &PARAMS);
+        assert!(valid.check_panel().is_ok());
+        assert_eq!(valid.widget_size(&VALID[0]), (6, 5));
+        assert_eq!(valid.widget_size(&VALID[1]), (6, 2));
+        assert_eq!(Widget::select(0, 5, "mode"), VALID[1]);
+        assert_eq!(Widget::shape(0, 0, 6, "out", "Result", sample), VALID[0]);
+
+        assert!(
+            descriptor(&VALID, &NO_CHOICES)
+                .check_panel()
+                .unwrap_err()
+                .contains("select list")
+        );
+        assert!(
+            descriptor(&BAD_SHAPE, &PARAMS)
+                .check_panel()
+                .unwrap_err()
+                .contains("shape needs")
+        );
     }
 }

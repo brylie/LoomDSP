@@ -35,8 +35,9 @@ A slow wave. Free mode runs at a rate in Hz; synced mode follows a phase, by def
 
 ## Panel
 
-15 by 6 grid units.
+15 by 11 grid units.
 
+- Shape preview: **Wave** (`out`) (read-only)
 - Radio buttons: **Sync** (`sync`) (Free, Synced)
 - Radio buttons: **Shape** (`shape`) (Sine, Triangle, Ramp up, Ramp down, Square)
 - Knob: **Rate** (`rate`)

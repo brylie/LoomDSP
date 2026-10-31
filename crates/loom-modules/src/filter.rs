@@ -454,16 +454,52 @@ pub static LADDER: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::Dsp(|config| Box::new(Ladder::new(config))),
     panel: Panel::new(
         12,
-        6,
+        11,
         &[
-            Widget::radio(0, 0, "slope"),
-            Widget::knob(6, 0, "cutoff"),
-            Widget::knob(9, 0, "resonance"),
-            Widget::knob(6, 3, "drive"),
+            Widget::shape(0, 0, 12, "out", "Response", ladder_preview),
+            Widget::radio(0, 5, "slope"),
+            Widget::knob(6, 5, "cutoff"),
+            Widget::knob(9, 5, "resonance"),
+            Widget::knob(6, 8, "drive"),
         ],
     ),
     displays: &[],
 };
+
+/// The ladder's small-signal response for the tile. The horizontal axis is
+/// logarithmic frequency from 20 Hz to 20 kHz. The closed-loop transfer is
+/// `1 / ((1 + j f/fc)^N + k)` (docs/learn/ladder-filter.md). Drive and
+/// nonlinear saturation depend on the input, so this remains schematic.
+fn ladder_preview(params: &[f32], x: f32) -> f32 {
+    let &[cutoff, resonance, _, slope] = params else {
+        return 0.0;
+    };
+    let frequency = 20.0 * 1000.0_f32.powf(x.clamp(0.0, 1.0));
+    let ratio = frequency / cutoff.max(20.0);
+    let stage = slope.round().clamp(0.0, 2.0) as usize;
+    let mut real = 1.0;
+    let mut imaginary = 0.0;
+    for _ in 0..stage + 2 {
+        (real, imaginary) = (real - imaginary * ratio, imaginary + real * ratio);
+    }
+    let feedback = resonance.clamp(0.0, 1.0) * LADDER_K_MAX[stage];
+    let magnitude = 1.0 / ((real + feedback).powi(2) + imaginary.powi(2)).sqrt();
+    ((20.0 * magnitude.log10() + 60.0) / 72.0).clamp(0.0, 1.0)
+}
+
+#[cfg(test)]
+mod preview_tests {
+    use super::ladder_preview;
+
+    /// Cutoff moves the schematic edge and slope changes the high end.
+    #[test]
+    fn cutoff_and_slope_change_shape() {
+        let low = [200.0, 0.0, 0.0, 0.0];
+        let high = [2_000.0, 0.0, 0.0, 0.0];
+        assert!(ladder_preview(&high, 0.6) > ladder_preview(&low, 0.6));
+        assert!(ladder_preview(&low, 0.5) > ladder_preview(&[200.0, 0.0, 0.0, 2.0], 0.5));
+    }
+}
 
 /// The number of one-pole stages the ladder always runs.
 const LADDER_STAGES: usize = 4;

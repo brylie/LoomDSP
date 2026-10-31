@@ -162,7 +162,7 @@ mod tests {
                     );
                     continue;
                 }
-                // Radios and toggles that stand in for a knob on these modules.
+                // Choice controls that stand in for a knob on these modules.
                 let non_knob = [
                     ("loom.phase.wrap", "mode"),
                     ("loom.mix.crossfade", "law"),
@@ -187,7 +187,11 @@ mod tests {
                     assert!(
                         matches!(
                             widget.map(|w| w.kind),
-                            Some(loom_core::WidgetKind::Radio | loom_core::WidgetKind::Toggle)
+                            Some(
+                                loom_core::WidgetKind::Radio
+                                    | loom_core::WidgetKind::Toggle
+                                    | loom_core::WidgetKind::Select
+                            )
                         ),
                         "{}.{}",
                         descriptor.id,

@@ -13,6 +13,26 @@ mod common;
 use common::*;
 use loom_core::{EngineParts, ModuleId, ProbeId, ProbeKind};
 
+/// Built-in tiles use knobs for single continuous values. A read-only shape
+/// or a named choice does not change that input grammar.
+#[test]
+fn continuous_panel_controls_are_knobs() {
+    for descriptor in loom_modules::ALL {
+        for widget in descriptor.panel.widgets.iter().filter(|widget| widget.is_control()) {
+            let param = &descriptor.params[descriptor.param_index(widget.bind).unwrap()];
+            if !param.options.integer {
+                assert_eq!(
+                    widget.kind,
+                    loom_core::WidgetKind::Knob,
+                    "{}.{}",
+                    descriptor.id,
+                    widget.bind
+                );
+            }
+        }
+    }
+}
+
 /// Module IDs in `examples/patches/subtractive.ron`.
 const MIDI_NOTE: ModuleId = ModuleId(1);
 const FILTER: ModuleId = ModuleId(4);

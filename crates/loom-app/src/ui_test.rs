@@ -683,6 +683,27 @@ mod tests {
         assert_eq!(after.scene_builds, before.scene_builds, "{before:?} -> {after:?}");
     }
 
+    /// The Mode list opens and draws over the tile in the real view. Arrow
+    /// keys change its highlight, and Enter commits the chosen mode.
+    #[test]
+    fn envelope_mode_popup_draws_and_accepts_keyboard_choice() {
+        let mut ui = Ui::open("subtractive.ron");
+        let mode = ui.control(5, "mode");
+        ui.move_to(mode);
+        ui.press();
+        ui.release();
+
+        let key = |name| keyboard::Key::Named(name);
+        ui.tap(key(keyboard::key::Named::ArrowDown), keyboard::Modifiers::default());
+        let current = ui.app.controller.graph().node(ModuleId(5)).expect("filter envelope");
+        let index = current.descriptor.param_index("mode").expect("Mode parameter");
+        assert_eq!(current.params[index], 0.0, "arrows highlight without committing");
+        ui.tap(key(keyboard::key::Named::Enter), keyboard::Modifiers::default());
+
+        let node = ui.app.controller.graph().node(ModuleId(5)).expect("filter envelope");
+        assert_eq!(node.params[index], 1.0);
+    }
+
     /// Ctrl+Z (Cmd+Z on macOS) reaches the app through the canvas and
     /// undoes the cable the drag made.
     #[test]

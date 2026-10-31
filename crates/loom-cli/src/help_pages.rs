@@ -368,6 +368,7 @@ fn widget(d: &ModuleDescriptor, w: &Widget) -> String {
                 .map_or(&[][..], |p| p.options.choices);
             format!("Radio buttons: {} ({})", param(w.bind), cell(&choices.join(", ")))
         }
+        WidgetKind::Select => format!("Select: {}", param(w.bind)),
         WidgetKind::Button { mode: "", hold } => format!("Button: {} (momentary)", param(hold)),
         WidgetKind::Button { mode, hold } => format!(
             "Button: {} (toggle), {} (momentary), chosen by {}",
@@ -398,6 +399,7 @@ fn widget(d: &ModuleDescriptor, w: &Widget) -> String {
                 .map_or_else(|| format!("`{}`", w.bind), port_name);
             format!("Scope: {output}")
         }
+        WidgetKind::Shape { label, .. } => format!("Shape preview: {} (read-only)", name(label, w.bind)),
         _ => format!("Widget: `{}`", w.bind),
     }
 }

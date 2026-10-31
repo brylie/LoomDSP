@@ -103,16 +103,17 @@ pub static ENVELOPE: ModuleDescriptor = ModuleDescriptor {
     ],
     role: ModuleRole::Dsp(|config| Box::new(Envelope::new(config))),
     panel: Panel::new(
-        12,
-        8,
+        15,
+        10,
         &[
-            Widget::knob(0, 0, "attack"),
-            Widget::knob(3, 0, "decay"),
-            Widget::radio(6, 0, "mode"),
-            Widget::knob(0, 3, "sustain"),
-            Widget::knob(3, 3, "release"),
-            Widget::knob(6, 3, "curve"),
-            Widget::light(0, 6, "level"),
+            Widget::select(0, 0, "mode"),
+            Widget::light(12, 0, "level"),
+            Widget::shape(0, 2, 15, "out", "Shape", envelope_preview),
+            Widget::knob(0, 7, "attack"),
+            Widget::knob(3, 7, "decay"),
+            Widget::knob(6, 7, "sustain"),
+            Widget::knob(9, 7, "release"),
+            Widget::knob(12, 7, "curve"),
         ],
     ),
     displays: &[DisplaySpec {
@@ -122,6 +123,61 @@ pub static ENVELOPE: ModuleDescriptor = ModuleDescriptor {
         kind: DisplayKind::Level,
     }],
 };
+
+/// The envelope's schematic result for the tile preview. Each timed stage
+/// has a minimum schematic width so a short attack remains visible at tile size.
+fn envelope_preview(params: &[f32], x: f32) -> f32 {
+    if x <= 0.0 || x >= 1.0 {
+        return 0.0;
+    }
+    let &[attack, decay, sustain, release, mode, curve] = params else {
+        return 0.0;
+    };
+    let ad = mode >= 0.5;
+    let timed_total = attack + decay + release;
+    let hold = if ad { 0.0 } else { timed_total * 0.2 };
+    let durations = if ad {
+        [attack, decay, 0.0, 0.0]
+    } else {
+        [attack, decay, hold, release]
+    };
+    let minimum = (timed_total * 0.12).max(0.03);
+    let weights = durations.map(|time| if time > 0.0 { time.max(minimum) } else { 0.0 });
+    let total: f32 = weights.iter().sum();
+    let mut at = x.clamp(0.0, 1.0) * total;
+    let bend = power(curve);
+    if at <= weights[0] {
+        return 1.0 - fall(at / weights[0], bend);
+    }
+    at -= weights[0];
+    let target = if ad { 0.0 } else { sustain };
+    if at <= weights[1] {
+        return target + (1.0 - target) * fall(at / weights[1], bend);
+    }
+    at -= weights[1];
+    if at <= weights[2] {
+        return target;
+    }
+    at -= weights[2];
+    target * fall(at / weights[3].max(f32::EPSILON), bend)
+}
+
+#[cfg(test)]
+mod preview_tests {
+    use super::envelope_preview;
+
+    /// The preview follows mode and sustain without changing the engine.
+    #[test]
+    fn mode_and_sustain_shape() {
+        let adsr = [0.1, 0.1, 0.6, 0.1, 0.0, 0.0];
+        let ad = [0.1, 0.1, 0.6, 0.1, 1.0, 0.0];
+        assert_eq!(envelope_preview(&adsr, 0.0), 0.0);
+        assert_eq!(envelope_preview(&adsr, 1.0), 0.0);
+        assert!((envelope_preview(&adsr, 0.7) - 0.6).abs() < 0.01);
+        assert_eq!(envelope_preview(&ad, 1.0), 0.0);
+        assert_ne!(envelope_preview(&adsr, 0.5), envelope_preview(&ad, 0.5));
+    }
+}
 
 /// Where the envelope is.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
