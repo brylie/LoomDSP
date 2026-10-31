@@ -2052,7 +2052,10 @@ impl App {
                 }
             }
             Message::Key(_) if self.browser.is_some() || self.rig.window.is_some() => {}
-            Message::Key(_) if self.matrix.tab == RightTab::Matrix && self.matrix.focused => {}
+            Message::Key(iced::keyboard::Event::KeyPressed { modifiers, .. })
+                if self.matrix.tab == RightTab::Matrix && self.matrix.focused && !modifiers.command() => {}
+            Message::Key(iced::keyboard::Event::KeyReleased { .. })
+                if self.matrix.tab == RightTab::Matrix && self.matrix.focused => {}
             Message::Key(iced::keyboard::Event::KeyPressed { key, .. }) if self.probe_menu.is_some() => {
                 // The menu takes Escape and keeps other keys from the canvas.
                 if key == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) {
@@ -2633,13 +2636,9 @@ impl App {
             .values(&self.values)
             .frame_key(self.frame_key)
             .browser_key(self.browser_key)
-            .interactive(
-                self.browser.is_none()
-                    && self.probe_menu.is_none()
-                    && self.rig.window.is_none()
-                    && !(self.matrix.tab == RightTab::Matrix && self.matrix.focused),
-            )
+            .interactive(self.browser.is_none() && self.probe_menu.is_none() && self.rig.window.is_none())
             .matrix_line(self.matrix_line())
+            .matrix_keyboard(self.matrix.tab == RightTab::Matrix && self.matrix.focused)
             .matrix_escape(
                 self.matrix.tab == RightTab::Matrix
                     && self.matrix.focused

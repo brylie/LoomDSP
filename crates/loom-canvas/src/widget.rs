@@ -225,6 +225,8 @@ pub struct PatchCanvas<'a, Message> {
     matrix_line: Option<crate::scene::ModulationView>,
     /// Lets Escape hide a badge pin while the matrix owns keyboard focus.
     matrix_escape: bool,
+    /// Leaves unmodified keys to the focused matrix while keeping pointer input active.
+    matrix_keyboard: bool,
     still: Option<Still>,
 }
 
@@ -365,6 +367,7 @@ impl<'a, Message> PatchCanvas<'a, Message> {
             learn: None,
             matrix_line: None,
             matrix_escape: false,
+            matrix_keyboard: false,
             still: None,
         }
     }
@@ -395,6 +398,12 @@ impl<'a, Message> PatchCanvas<'a, Message> {
     /// editor has closed.
     pub fn matrix_escape(mut self, enabled: bool) -> Self {
         self.matrix_escape = enabled;
+        self
+    }
+
+    /// Leaves unmodified keyboard input to the matrix without blocking the pointer.
+    pub fn matrix_keyboard(mut self, enabled: bool) -> Self {
+        self.matrix_keyboard = enabled;
         self
     }
 
@@ -839,6 +848,19 @@ impl<Message> PatchCanvas<'_, Message> {
             state.pinned = None;
             shell.capture_event();
             shell.request_redraw();
+            return;
+        }
+
+        if self.matrix_keyboard
+            && matches!(
+                event,
+                Event::Keyboard(keyboard::Event::KeyPressed { modifiers, .. }) if !modifiers.command()
+            )
+        {
+            self.release_every_key_hold(state, shell);
+            if std::mem::take(&mut state.arrow_gesture) {
+                self.emit(shell, CanvasEvent::GestureEnd);
+            }
             return;
         }
 
@@ -3951,7 +3973,7 @@ mod tests {
         let none = BTreeSet::new();
         let canvas = PatchCanvas::new(&scene, &none, |e| e)
             .values(&values)
-            .interactive(false)
+            .matrix_keyboard(true)
             .matrix_escape(true);
         let mut state = State {
             pinned: Some(OUT),
@@ -3959,6 +3981,20 @@ mod tests {
         };
         drive(&canvas, &mut state, &escape(), Point::ORIGIN);
         assert_eq!(state.pinned, None);
+    }
+
+    /// Matrix keyboard focus leaves canvas clicks active but owns ordinary keys.
+    #[test]
+    fn matrix_keyboard_focus_keeps_canvas_pointer_active() {
+        let scene = chain();
+        let selected = BTreeSet::from([1]);
+        let tile = scene.module(2).unwrap().bounds().center();
+        let canvas = PatchCanvas::new(&scene, &selected, |e| e).matrix_keyboard(true);
+        let mut state = State::default();
+
+        assert!(drive(&canvas, &mut state, &key_event(keyboard::key::Named::Space, true), tile).is_empty());
+        let events = drive(&canvas, &mut state, &click(mouse::Button::Left), tile);
+        assert!(events.contains(&CanvasEvent::Select(vec![2])), "{events:?}");
     }
 
     /// A knob whose arc has zero length shows the dot, and its ring still

@@ -1001,6 +1001,32 @@ mod tests {
         assert!(!ui.app.matrix.focused);
     }
 
+    /// Matrix focus leaves command shortcuts available after an edit.
+    #[test]
+    fn command_shortcuts_undo_and_redo_while_matrix_is_focused() {
+        let mut ui = Ui::open("modulation.ron");
+        ui.app.matrix_event(Event::Tab(Tab::Matrix));
+        let id = AssignmentId(1);
+        let original = ui.app.controller.graph().assignment(id).expect("assignment").enabled;
+        ui.app.matrix_event(Event::Enabled(id, !original));
+        assert!(ui.app.matrix.focused);
+
+        ui.tap(keyboard::Key::Character("z".into()), keyboard::Modifiers::COMMAND);
+        assert_eq!(
+            ui.app.controller.graph().assignment(id).expect("assignment").enabled,
+            original
+        );
+
+        ui.tap(
+            keyboard::Key::Character("z".into()),
+            keyboard::Modifiers::COMMAND | keyboard::Modifiers::SHIFT,
+        );
+        assert_eq!(
+            ui.app.controller.graph().assignment(id).expect("assignment").enabled,
+            !original
+        );
+    }
+
     /// The keyboard can toggle On, choose a new source and polarity, and
     /// create a fresh row through the two Add choices.
     #[test]
