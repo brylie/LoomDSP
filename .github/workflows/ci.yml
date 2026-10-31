@@ -98,7 +98,9 @@ jobs:
           # numbers match the diff.
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: jdx/mise-action@v5
-      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      # Mesa's software Vulkan adapter lets headless screenshot tests exercise
+      # the canvas shader and GPU buffers on the coverage runner.
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev mesa-vulkan-drivers
       - uses: Swatinem/rust-cache@v2
       # Runs the tests once with nextest (its `ci` profile writes a JUnit
       # report for Codecov), writes target/lcov.info and
@@ -106,6 +108,8 @@ jobs:
       # are not run here; the Test job runs them.
       - name: Tests with line coverage
         run: mise run coverage
+        env:
+          LOOM_REQUIRE_GPU: "1"
       - name: Coverage summary
         if: ${{ !cancelled() && hashFiles('target/lcov.info') != '' }}
         run: |

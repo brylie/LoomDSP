@@ -602,6 +602,63 @@ pub(crate) fn write_png(path: &Path, size: Size<u32>, rgba: &[u8]) -> Result<(),
 mod tests {
     use super::*;
 
+    /// A headless window draw exercises the second GPU primitive and shows
+    /// the dragged cable in the inspector, outside the canvas's clip.
+    #[test]
+    fn a_window_drag_draws_over_the_inspector() {
+        let mut args = crate::tests::app_args();
+        args.patch =
+            Some(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches/subtractive.ron"));
+        let mut app = crate::snapshot::headless(&args).expect("example patch");
+        let render = |app: &crate::App| {
+            let mut renderer = iced::futures::executor::block_on(<iced::Renderer as Headless>::new(
+                Font::DEFAULT,
+                Pixels(16.0),
+                Some("wgpu"),
+            ))?;
+            let theme = app.theme();
+            let mut ui = UserInterface::build(app.view(), crate::WINDOW, Cache::default(), &mut renderer);
+            let style = Style {
+                text_color: theme.palette().text,
+            };
+            ui.draw(&mut renderer, &theme, &style, mouse::Cursor::Unavailable);
+            let pixels = Headless::screenshot(
+                &mut renderer,
+                physical_size(crate::WINDOW, 1.0).expect("window size"),
+                1.0,
+                theme.palette().background,
+            );
+            drop(ui);
+            Some(pixels)
+        };
+        let Some(before) = render(&app) else {
+            assert!(
+                std::env::var_os("LOOM_REQUIRE_GPU").is_none(),
+                "coverage requires a GPU adapter"
+            );
+            return;
+        };
+        let from = loom_canvas::PortRef {
+            module: 7,
+            index: 0,
+            output: true,
+        };
+        assert!(app.scene.port(from).is_some());
+        app.assign_drag = Some(crate::AssignDrag {
+            from,
+            start: Point::new(900.0, 400.0),
+            at: Some(Point::new(1250.0, 150.0)),
+            zoom: 1.0,
+        });
+        let after = render(&app).expect("the renderer used above");
+        let width = crate::WINDOW.width as usize;
+        let changed = (120..220)
+            .flat_map(|y| (1180..1250).map(move |x| (y * width + x) * 4))
+            .filter(|&pixel| before[pixel..pixel + 4] != after[pixel..pixel + 4])
+            .count();
+        assert!(changed > 10, "the cable did not cross the inspector");
+    }
+
     /// `--pointer` and `--center` find a light by its display value, and a
     /// meter whose name its output also has by `display:` (#254).
     #[test]
