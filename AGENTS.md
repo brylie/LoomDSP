@@ -74,7 +74,7 @@ The longer version, with diagrams, is [docs/dev/architecture.md](docs/dev/archit
 
 Before finishing a change, add `///` doc comments to new structs, functions, and tests, then run `prek run --all-files` (fmt, clippy, typos, file checks) and `mise run check` (the checks CI runs, including tests with the 80% line coverage minimum). The tools come from `mise.toml`; in a new worktree, run `mise trust` and `mise install` first. Without the trust step mise refuses to read `mise.toml`, so `mise run check` and every hook that uses mise fail. CONTRIBUTING.md lists each check and the coverage and code quality gates. Never bypass the hooks with `--no-verify`; fix the cause instead.
 
-For independent builds on the external drive, run `scripts/setup-external-target.sh` once in each worktree. It writes a local Cargo config that takes precedence over the shared global target directory and gives that worktree a stable folder under `/Volumes/External/LoomDSP/targets`. Keep that folder for incremental builds. Do not set `CARGO_TARGET_DIR` or pass `--target-dir` for individual commands: each new folder can use 5 GB or more. Use `cargo clean` from the worktree to clear its external target when needed.
+For independent builds, run `scripts/setup-worktree-target.sh TARGET_ROOT` once in each worktree, with an existing directory on a drive with enough free space. It writes a local Cargo config that takes precedence over a shared global target directory and gives that worktree a stable folder under `TARGET_ROOT`. Keep that folder for incremental builds. Do not set `CARGO_TARGET_DIR` or pass `--target-dir` for individual commands: each new folder can use 5 GB or more. Use `cargo clean` from the worktree to clear its target when needed.
 
 ## Hard rules
 
