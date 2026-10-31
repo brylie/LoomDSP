@@ -26,6 +26,8 @@ pub enum Message {
     /// Read the device lists again.
     Refresh,
     Safety(OutputSafety),
+    /// Show signal activity on connected ports.
+    Activity(bool),
     Audio(Change),
     /// Turn a MIDI input on or off.
     Midi(String, bool),
@@ -282,6 +284,7 @@ impl App {
                 }
             }
             Message::Safety(mode) => self.choose_output_safety(mode),
+            Message::Activity(on) => self.choose_activity(on),
             Message::Audio(change) => self.change_audio(change),
             Message::Midi(name, on) => self.set_midi_input(&name, on),
             Message::PanicLearn => self.learn_panic(),
@@ -420,6 +423,24 @@ impl App {
         if self._audio.is_some() {
             self.rig.safety_pending = Some(mode);
             self.send_pending_safety();
+        }
+    }
+
+    /// Saves the port activity choice and updates the probes in this engine.
+    fn choose_activity(&mut self, on: bool) {
+        if self.rig.store.saved().show_activity == on {
+            return;
+        }
+        let mut preferences = self.rig.store.saved().clone();
+        preferences.show_activity = on;
+        if let Some(error) = self.rig.save(preferences) {
+            self.status = error;
+        }
+        self.live.set_activity(on);
+        self.carrying.clear();
+        self.sync_live();
+        if let Err(error) = self.controller.commit() {
+            self.status = format!("error: {error}");
         }
     }
 
@@ -629,8 +650,10 @@ impl App {
         // as in `play`, so panic and held-note release still work.
         self.send_panic_trigger();
         self.connect_midi(false, false);
-        self.monitor = crate::monitor::Monitor::new(telemetry, self.generation);
-        self.live = crate::live::Live::new();
+        self.monitor = crate::monitor::Monitor::new(telemetry, self.controller.config().sample_rate, self.generation);
+        self.traces = loom_canvas::ScopeTraces::new();
+        self.live = crate::live::Live::showing_activity();
+        self.live.set_activity(self.rig.store.saved().show_activity);
         self.idle_engine = Some(engine);
         // The stopped engine's live values are gone; show the new one's.
         self.refresh_values();
@@ -653,8 +676,10 @@ impl App {
         self.controller = controller;
         self.send_panic_trigger();
         self.connect_midi(false, false);
-        self.monitor = crate::monitor::Monitor::new(telemetry, self.generation);
-        self.live = crate::live::Live::new();
+        self.monitor = crate::monitor::Monitor::new(telemetry, self.controller.config().sample_rate, self.generation);
+        self.traces = loom_canvas::ScopeTraces::new();
+        self.live = crate::live::Live::showing_activity();
+        self.live.set_activity(self.rig.store.saved().show_activity);
         self.lights.clear();
         self.meter_levels.clear();
         self.sample_rate = output.sample_rate() as f32;
@@ -668,6 +693,8 @@ impl App {
             Ok(audio) => {
                 record_error = refused.map(|e| self.rig.end_recording(&e));
                 self.audio_stats = Some(audio.stats().clone());
+                self.load_peak = 0.0;
+                self.load_max = 0.0;
                 self._audio = Some(audio);
                 self.audio_name = label;
                 self.rig.playing = Some(playing);
@@ -713,6 +740,8 @@ impl App {
             audio.stop_immediate();
         }
         self.audio_stats = None;
+        self.load_peak = 0.0;
+        self.load_max = 0.0;
         self.rig.playing = None;
     }
 
@@ -960,6 +989,8 @@ impl App {
             self.rig.last_stop = Some(audio.stop(STOP_LIMIT));
         }
         self.audio_stats = None;
+        self.load_peak = 0.0;
+        self.load_max = 0.0;
         self.rig.playing = None;
     }
 
@@ -1167,6 +1198,10 @@ impl App {
             scrollable(
                 column![
                     safety,
+                    rule::horizontal(1),
+                    checkbox(self.rig.store.saved().show_activity)
+                        .label("Show signal activity on ports")
+                        .on_toggle(|on| crate::Message::Preferences(Message::Activity(on))),
                     rule::horizontal(1),
                     heading("Audio output"),
                     audio,
@@ -2086,6 +2121,22 @@ mod tests {
         let app = start(flagged, &fake);
         assert_eq!(app.controller.config().output_safety, OutputSafety::LowLatency);
         assert!(app.rig.safety_flag);
+    }
+
+    /// The activity choice saves and follows newly built engines.
+    #[test]
+    fn activity_preference_survives_engine_change() {
+        let dir = folder("activity");
+        let path = write(&dir, "(show_activity: false)");
+        let mut app = start(args(&dir), &two_devices());
+        assert!(!app.rig.store.saved().show_activity);
+        app.preferences(Message::Activity(true));
+        assert!(app.rig.store.saved().show_activity);
+        assert!(crate::preferences::load(&path).preferences.show_activity);
+        app.preferences(Message::Activity(false));
+        assert!(!crate::preferences::load(&path).preferences.show_activity);
+        app.keep_engine_idle();
+        assert!(!app.rig.store.saved().show_activity);
     }
 
     #[test]

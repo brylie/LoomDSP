@@ -109,6 +109,65 @@ pub trait Host {
     /// Opens the MIDI input with this name from [`Host::midi_list`]. Its
     /// events carry `input`.
     fn open_midi(&self, name: &str, midi: SharedMidi, input: MidiInputId) -> Result<Box<dyn MidiPort>, String>;
+    /// A function that lists the MIDI inputs as [`Host::midi_list`] does,
+    /// from any thread. The app then watches the list on a thread of its
+    /// own, and wakes the UI only when it changes (#90). `None`, the
+    /// default, has the UI poll [`Host::midi_list`] itself.
+    fn midi_lister(&self) -> Option<MidiLister> {
+        None
+    }
+}
+
+/// Lists the MIDI inputs from any thread. See [`Host::midi_lister`].
+pub type MidiLister = fn() -> Result<Vec<MidiInputInfo>, String>;
+
+/// How often the MIDI input list is read: four times a second
+/// (`docs/design/device-changes.md`).
+pub const MIDI_POLL: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// The MIDI input list to watch on a thread, and the list the UI last saw.
+#[derive(Clone)]
+pub struct MidiWatch {
+    /// Reads the list.
+    pub list: MidiLister,
+    /// What the UI last saw. The thread sends nothing until the list
+    /// differs from it.
+    pub seen: Vec<MidiInputInfo>,
+    /// The engine generation: a new engine restarts the watch with the
+    /// list the UI saw then.
+    pub generation: u64,
+}
+
+impl std::hash::Hash for MidiWatch {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        "loom-app MIDI watch".hash(state);
+        self.generation.hash(state);
+    }
+}
+
+/// Reads the MIDI input list every [`MIDI_POLL`] on a thread, and yields
+/// once each time it changes. The UI then runs its usual poll. A failed
+/// read is not a change: the UI's poll skips those too.
+pub fn midi_stream(watch: &MidiWatch) -> iced::futures::channel::mpsc::Receiver<()> {
+    let (mut tx, rx) = iced::futures::channel::mpsc::channel(1);
+    let (list, mut seen) = (watch.list, watch.seen.clone());
+    std::thread::spawn(move || {
+        while !tx.is_closed() {
+            if let Ok(now) = list()
+                && now != seen
+            {
+                match tx.try_send(()) {
+                    Ok(()) => seen = now,
+                    // The UI has not taken the last one: it reads the
+                    // list itself when it does.
+                    Err(e) if e.is_full() => seen = now,
+                    Err(_) => return,
+                }
+            }
+            std::thread::sleep(MIDI_POLL);
+        }
+    });
+    rx
 }
 
 /// The real devices, through `cpal` and `midir`.
@@ -124,7 +183,7 @@ impl Host for System {
     }
 
     fn midi_list(&self) -> Result<Vec<MidiInputInfo>, String> {
-        loom_host_desktop::midi_inputs().map_err(|e| e.to_string())
+        system_midi_list()
     }
 
     fn open_midi(&self, name: &str, midi: SharedMidi, input: MidiInputId) -> Result<Box<dyn MidiPort>, String> {
@@ -132,6 +191,15 @@ impl Host for System {
             .map(|connection| Box::new(SystemPort { connection, input }) as Box<dyn MidiPort>)
             .map_err(|e| e.to_string())
     }
+
+    fn midi_lister(&self) -> Option<MidiLister> {
+        Some(system_midi_list)
+    }
+}
+
+/// The system's MIDI inputs, through `midir`.
+fn system_midi_list() -> Result<Vec<MidiInputInfo>, String> {
+    loom_host_desktop::midi_inputs().map_err(|e| e.to_string())
 }
 
 /// The rates a menu offers, when a device's range includes them (Rule D4).
@@ -970,5 +1038,43 @@ mod tests {
             buffer_size: None,
         };
         let _ = host.open(&options);
+    }
+
+    /// The list the MIDI watch thread reads: one input, or two once the
+    /// test plugs one in.
+    static PLUGGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+    fn watched_list() -> Result<Vec<MidiInputInfo>, String> {
+        let input = |name: &str| MidiInputInfo {
+            name: name.into(),
+            id: name.into(),
+        };
+        let mut list = vec![input("Pad")];
+        if PLUGGED.load(std::sync::atomic::Ordering::Relaxed) {
+            list.push(input("Keys"));
+        }
+        Ok(list)
+    }
+
+    /// The MIDI watch wakes the UI once when the list changes, and not
+    /// while it stays as the UI saw it (#90). A real host offers a lister;
+    /// the fake does not, so tests poll from the UI as before.
+    #[test]
+    fn the_midi_watch_wakes_the_ui_only_on_a_change() {
+        use iced::futures::StreamExt;
+        assert!(System.midi_lister().is_some());
+        assert!(fake::NoMidi.midi_lister().is_none());
+        let watch = MidiWatch {
+            list: watched_list,
+            seen: watched_list().unwrap(),
+            generation: 0,
+        };
+        let mut rx = midi_stream(&watch);
+        std::thread::sleep(MIDI_POLL * 3);
+        assert!(rx.try_recv().is_err(), "no change, so nothing was sent");
+        PLUGGED.store(true, std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(iced::futures::executor::block_on(rx.next()), Some(()));
+        std::thread::sleep(MIDI_POLL * 3);
+        assert!(rx.try_recv().is_err(), "sent once per change");
     }
 }

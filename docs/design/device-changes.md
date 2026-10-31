@@ -17,7 +17,7 @@ What the app does when a MIDI controller is plugged in or removed, and when the 
 
 ### Behaviour
 
-- **The app watches the list of MIDI inputs** four times a second, on a thread that is not the audio thread (the system offers no portable callback, so the app polls). The Preferences window shows the same list and updates when it changes, so MIDI needs no Refresh button.
+- **The app watches the list of MIDI inputs** four times a second, on a thread that is not the audio thread (the system offers no portable callback, so the app polls). The thread wakes the UI only when the list changes, so an idle app draws no frames ([#90](https://github.com/brylie/LoomDSP/issues/90)). The Preferences window shows the same list and updates when it changes, so MIDI needs no Refresh button.
 - **A new input** that is not in `midi.off` is opened at once. The status bar says `MIDI: "Keys" connected.` An input in `midi.off` stays closed.
 - **A removed input** is closed. Every note it was holding is released, in the engine, with a note off for each. The status bar says `MIDI: "Keys" disconnected.` The app keeps running.
 - **An input that comes back** is opened as a new connection. Its notes are not doubled, because the old connection was closed when it was removed and a connection never outlives its device.
@@ -49,7 +49,7 @@ The fake host has a list of inputs that tests change.
 
 ### Behaviour
 
-**Noticing.** The app notices loss in three ways: the stream reports an error (device removed or not available); the callback stops for more than one second while the stream is believed to be running (a device that fails silently, or the computer waking from sleep); or the host reports that the output device list no longer contains the playing device. Any of them starts the same path. The audio thread is not involved: the stream error handler marks an atomic flag that the app polls every 250 ms.
+**Noticing.** The app notices loss in three ways: the stream reports an error (device removed or not available); the callback stops for more than one second while the stream is believed to be running (a device that fails silently, or the computer waking from sleep); or the host reports that the output device list no longer contains the playing device. Any of them starts the same path. The audio thread is not involved: the stream error handler marks an atomic flag that the app polls every 250 ms. While audio plays, a watcher thread reads the flag and the callback count, and wakes the UI only when the callbacks stop or the flag is set. Once a device is lost, the UI polls every 250 ms to reconnect. *Why a thread:* every message to the UI draws a frame, and an idle app must draw none ([#90](https://github.com/brylie/LoomDSP/issues/90)).
 
 **What happens next**, by what the player chose in Preferences:
 

@@ -10,7 +10,7 @@
 
 use iced::futures::Stream;
 use iced::futures::channel::mpsc;
-use loom_canvas::stats::{self, RenderCounts};
+use loom_canvas::stats::{self, FrameCauses, RenderCounts};
 use std::collections::VecDeque;
 use std::hash::{Hash, Hasher};
 use std::time::{Duration, Instant};
@@ -153,11 +153,13 @@ pub fn stream(reporter: &Reporter) -> impl Stream<Item = ()> + use<> {
     std::thread::spawn(move || {
         let start = Instant::now();
         let first = RenderCounts::process();
+        let first_causes = FrameCauses::process();
+        let first_cpu = process_cpu();
         let end = seconds.map(|s| start + s);
         // The final line starts from the first line, so start-up work is
         // left out of its averages.
-        let mut settled: Option<(Instant, RenderCounts)> = None;
-        let mut last = (start, first);
+        let mut settled: Option<(Instant, RenderCounts, Duration)> = None;
+        let mut last = (start, first, first_cpu);
         let mut next = start + Duration::from_secs(1);
         loop {
             let wake = end.map_or(next, |end| next.min(end));
@@ -167,15 +169,23 @@ pub fn stream(reporter: &Reporter) -> impl Stream<Item = ()> + use<> {
             }
             let now = Instant::now();
             let counts = RenderCounts::process();
+            let causes = FrameCauses::process().since(first_causes);
+            let cpu = process_cpu();
             if end.is_some_and(|end| now >= end) {
-                let (from, at) = settled.unwrap_or((start, first));
-                println!("final {}", line(&Window::new(first, at, counts, now - from)));
+                let (from, at, cpu_from) = settled.unwrap_or((start, first, first_cpu));
+                let mut window = Window::new(first, at, counts, now - from);
+                window.causes = causes;
+                window.cpu = cpu_percent(cpu_from, cpu, now - from);
+                println!("final {}", line(&window));
                 let _ = tx.try_send(());
                 return;
             }
-            println!("{}", line(&Window::new(first, last.1, counts, now - last.0)));
-            settled.get_or_insert((now, counts));
-            last = (now, counts);
+            let mut window = Window::new(first, last.1, counts, now - last.0);
+            window.causes = causes;
+            window.cpu = cpu_percent(last.2, cpu, now - last.0);
+            println!("{}", line(&window));
+            settled.get_or_insert((now, counts, cpu));
+            last = (now, counts, cpu);
             next += Duration::from_secs(1);
         }
     });
@@ -189,6 +199,8 @@ struct Window {
     elapsed: Duration,
     totals: RenderCounts,
     worst: Duration,
+    causes: FrameCauses,
+    cpu: f64,
 }
 
 impl Window {
@@ -200,6 +212,8 @@ impl Window {
             elapsed,
             totals: since(start, now),
             worst: stats::longest_frame_gap(),
+            causes: FrameCauses::default(),
+            cpu: 0.0,
         }
     }
 }
@@ -212,6 +226,8 @@ fn since(a: RenderCounts, b: RenderCounts) -> RenderCounts {
         scene_uploads: b.scene_uploads - a.scene_uploads,
         control_uploads: b.control_uploads - a.control_uploads,
         overlay_uploads: b.overlay_uploads - a.overlay_uploads,
+        trace_builds: b.trace_builds - a.trace_builds,
+        trace_uploads: b.trace_uploads - a.trace_uploads,
     }
 }
 
@@ -230,15 +246,79 @@ fn line(w: &Window) -> String {
     let t = &w.totals;
     format!(
         "fps={fps:.1} avg_ms={average_ms:.2} worst_ms={:.2} frames={} scene_builds={} control_builds={} \
-         scene_uploads={} control_uploads={} overlay_uploads={}",
+         scene_uploads={} control_uploads={} overlay_uploads={} trace_uploads={} \
+         causes=tick:{},live:{},meters:{},control:{},input:{},redraw:{},forced:{},other:{} cpu={:.1}",
         w.worst.as_secs_f64() * 1000.0,
         t.frames,
         t.scene_builds,
         t.control_builds,
         t.scene_uploads,
         t.control_uploads,
-        t.overlay_uploads
+        t.overlay_uploads,
+        t.trace_uploads,
+        w.causes.0[0],
+        w.causes.0[1],
+        w.causes.0[2],
+        w.causes.0[3],
+        w.causes.0[4],
+        w.causes.0[5],
+        w.causes.0[6],
+        w.causes.0[7],
+        w.cpu
     )
+}
+
+/// Whole-process CPU use as a percent of one core over the report interval.
+fn cpu_percent(from: Duration, to: Duration, wall: Duration) -> f64 {
+    if wall.is_zero() {
+        return 0.0;
+    }
+    100.0 * to.saturating_sub(from).as_secs_f64() / wall.as_secs_f64()
+}
+
+/// Total user and system CPU time used by the app process.
+#[cfg(unix)]
+fn process_cpu() -> Duration {
+    let mut usage = std::mem::MaybeUninit::<libc::rusage>::uninit();
+    // SAFETY: `getrusage` writes a complete rusage on success, and the
+    // pointer refers to live, properly aligned storage.
+    if unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) } != 0 {
+        return Duration::ZERO;
+    }
+    // SAFETY: getrusage succeeded and initialized the whole structure.
+    let usage = unsafe { usage.assume_init() };
+    let micros = |tv: libc::timeval| {
+        (tv.tv_sec as u64)
+            .saturating_mul(1_000_000)
+            .saturating_add(tv.tv_usec as u64)
+    };
+    Duration::from_micros(micros(usage.ru_utime).saturating_add(micros(usage.ru_stime)))
+}
+
+/// Total user and system CPU time used by the app process on Windows.
+#[cfg(windows)]
+fn process_cpu() -> Duration {
+    use windows_sys::Win32::Foundation::FILETIME;
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, GetProcessTimes};
+    let mut created = FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+    let mut exited = created;
+    let mut kernel = created;
+    let mut user = created;
+    // SAFETY: all four output pointers refer to writable FILETIME values.
+    if unsafe { GetProcessTimes(GetCurrentProcess(), &mut created, &mut exited, &mut kernel, &mut user) } == 0 {
+        return Duration::ZERO;
+    }
+    let ticks = |v: FILETIME| (u64::from(v.dwHighDateTime) << 32) | u64::from(v.dwLowDateTime);
+    Duration::from_nanos((ticks(user).saturating_add(ticks(kernel))).saturating_mul(100))
+}
+
+/// Unsupported desktop platforms have no process CPU timer yet.
+#[cfg(not(any(unix, windows)))]
+fn process_cpu() -> Duration {
+    Duration::ZERO
 }
 
 #[cfg(test)]
@@ -257,13 +337,18 @@ mod tests {
                 scene_uploads: 1,
                 control_uploads: 2,
                 overlay_uploads: 0,
+                trace_builds: 3,
+                trace_uploads: 3,
             },
             worst: Duration::from_millis(9),
+            causes: FrameCauses([2, 70, 1, 0, 3, 0, 44, 0]),
+            cpu: 4.1,
         };
         assert_eq!(
             line(&w),
             "fps=120.0 avg_ms=8.33 worst_ms=9.00 frames=600 scene_builds=1 control_builds=2 \
-             scene_uploads=1 control_uploads=2 overlay_uploads=0"
+             scene_uploads=1 control_uploads=2 overlay_uploads=0 trace_uploads=3 \
+             causes=tick:2,live:70,meters:1,control:0,input:3,redraw:0,forced:44,other:0 cpu=4.1"
         );
     }
 
@@ -274,6 +359,8 @@ mod tests {
             elapsed: Duration::from_secs(1),
             totals: RenderCounts::default(),
             worst: Duration::ZERO,
+            causes: FrameCauses::default(),
+            cpu: 0.0,
         };
         assert!(line(&w).starts_with("fps=0.0 avg_ms=0.00 worst_ms=0.00 frames=0 "));
     }
@@ -296,5 +383,36 @@ mod tests {
         };
         assert!(idle.reporter().is_some());
         assert!(!idle.redraws());
+    }
+
+    /// A measured run reports a settled interval and then ends on time.
+    #[test]
+    fn measured_run_reports_and_finishes() {
+        use iced::futures::StreamExt;
+        let reporter = Reporter {
+            seconds: Some(Duration::from_millis(2_100)),
+        };
+        let started = Instant::now();
+        let mut updates = stream(&reporter);
+        assert_eq!(iced::futures::executor::block_on(updates.next()), Some(()));
+        assert!(started.elapsed() >= Duration::from_secs(2));
+    }
+
+    /// A zero wall interval has no CPU percentage; later CPU time is a
+    /// percentage of one core.
+    #[test]
+    fn cpu_percent_uses_the_report_interval() {
+        assert_eq!(
+            cpu_percent(Duration::ZERO, Duration::from_millis(1), Duration::ZERO),
+            0.0
+        );
+        assert_eq!(
+            cpu_percent(
+                Duration::from_millis(10),
+                Duration::from_millis(60),
+                Duration::from_millis(100)
+            ),
+            50.0
+        );
     }
 }

@@ -17,6 +17,9 @@ Patch(
         PatchModule(id: 9, kind: "loom.io.audio-out@1"),
         // The patch transport: 120 BPM, 4/4, running.
         PatchModule(id: 10, kind: "loom.clock.transport@1"),
+        // A scope on the filter's output: the saw runs all the time, so it
+        // shows a wave even with no note held.
+        PatchModule(id: 11, kind: "loom.display.scope@1", params: {"window": 0.005}),
     ],
     cables: [
         PatchCable(from: (1, "pitch"), to: (2, "pitch")),
@@ -29,5 +32,6 @@ Patch(
         PatchCable(from: (4, "lowpass"), to: (8, "a")),
         PatchCable(from: (7, "out"), to: (8, "b")),
         PatchCable(from: (8, "out"), to: (9, "left")),
+        PatchCable(from: (4, "lowpass"), to: (11, "in")),
     ],
 )

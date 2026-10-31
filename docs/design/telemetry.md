@@ -88,5 +88,5 @@ The XY scope ([panel widgets](panel-widgets.md#xy-scope)) draws one signal again
 
 ## Open points
 
-- The app draws meters (the level meter module and meter widgets) but not scopes yet (FR-VIS-02). Planned, in the [panels specification](panels.md): a scope module that reads its probe through these queues, drawn by the canvas inside its tile, and an activity display without constant motion (FR-VIS-01). Meters must not brighten cables: pulsing cables are tiring and hide the hover focus in large patches.
+- The app draws meters (the level meter module and meter widgets), scopes (FR-VIS-02, [panels](panels.md#drawing-the-scope-trace)), and steady signal activity on ports (FR-VIS-01, [panels](panels.md#signal-activity-on-ports)). The telemetry thread keeps a `ScopeTrace` per scope on screen and drains every 16 ms while one is shown. Meters must not brighten cables: pulsing cables are tiring and hide the hover focus in large patches.
 - Probes on one port are independent. Two views of the same port send the data twice.
