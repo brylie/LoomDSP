@@ -43,6 +43,16 @@ If you use git worktrees, each new worktree is a new folder, and mise asks to tr
 mise settings add trusted_config_paths ~/path/to/your/worktrees
 ```
 
+To let worktrees build at the same time without filling the internal drive, connect the external drive and run this once in each worktree:
+
+```sh
+scripts/setup-external-target.sh
+```
+
+The command writes an ignored `.cargo/config.toml` that points to a unique, stable folder under `/Volumes/External/LoomDSP/targets`. Cargo uses it for normal builds and `mise` tasks. The drive must stay mounted while Cargo runs. Run `cargo clean` in a worktree to remove that worktree's build output. Other worktrees continue using their existing Cargo settings until you run the command there.
+
+Run `scripts/setup-external-target.sh --all` to configure all existing worktrees at once. Each worktree that builds will keep its own output folder on the external drive, so remove unused ones with `cargo clean` from that worktree.
+
 Then build and run the checks:
 
 ```sh
