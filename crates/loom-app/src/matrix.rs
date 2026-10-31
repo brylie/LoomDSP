@@ -802,17 +802,17 @@ impl App {
     }
 }
 
-/// Lets a text editor consume Enter while the table sees navigation keys.
+/// Lets a focused editor keep captured keys except Escape and Tab.
 pub(crate) fn key_message(key: keyboard::Event, status: iced::event::Status) -> Option<Message> {
-    if status == iced::event::Status::Captured
-        && matches!(
-            key,
-            keyboard::Event::KeyPressed {
-                key: keyboard::Key::Named(keyboard::key::Named::Enter),
-                ..
-            }
-        )
-    {
+    use keyboard::key::Named;
+    let leaves_focus = matches!(
+        &key,
+        keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(Named::Escape | Named::Tab),
+            ..
+        }
+    );
+    if status == iced::event::Status::Captured && !leaves_focus {
         None
     } else {
         Some(Message::MatrixKey(key))
@@ -1025,6 +1025,49 @@ mod tests {
             ui.app.controller.graph().assignment(id).expect("assignment").enabled,
             !original
         );
+    }
+
+    /// Captured editor keys stay with the widget except Escape and Tab.
+    #[test]
+    fn captured_filter_keys_do_not_reach_matrix() {
+        let pressed = |named| {
+            let key = keyboard::Key::Named(named);
+            keyboard::Event::KeyPressed {
+                modified_key: key.clone(),
+                key,
+                physical_key: keyboard::key::Physical::Unidentified(keyboard::key::NativeCode::Unidentified),
+                location: keyboard::Location::Standard,
+                modifiers: keyboard::Modifiers::default(),
+                text: None,
+                repeat: false,
+            }
+        };
+        for named in [Named::Delete, Named::ArrowUp, Named::ArrowDown, Named::Enter] {
+            assert!(key_message(pressed(named), iced::event::Status::Captured).is_none());
+        }
+        for named in [Named::Escape, Named::Tab] {
+            assert!(key_message(pressed(named), iced::event::Status::Captured).is_some());
+        }
+        assert!(key_message(pressed(Named::Delete), iced::event::Status::Ignored).is_some());
+    }
+
+    /// A canvas click returns keyboard control to the canvas before Delete.
+    #[test]
+    fn canvas_click_then_delete_removes_the_module_not_a_matrix_row() {
+        let mut ui = Ui::open("modulation.ron");
+        ui.app.matrix_event(Event::Tab(Tab::Matrix));
+        ui.app.matrix_event(Event::Select(AssignmentId(1), Column::On));
+        let tile = ui.app.scene.module(2).expect("phase tile").bounds();
+        let at = ui.canvas().to_window(iced::Point::new(tile.center().x, tile.y + 10.0));
+        ui.move_to(at);
+        ui.press();
+        ui.release();
+        assert!(!ui.app.matrix.focused);
+        assert!(ui.app.selection.contains(&2));
+
+        ui.tap(keyboard::Key::Named(Named::Delete), keyboard::Modifiers::default());
+        assert!(ui.app.controller.graph().node(ModuleId(2)).is_none());
+        assert_eq!(ui.app.controller.graph().assignments().count(), 2);
     }
 
     /// The keyboard can toggle On, choose a new source and polarity, and

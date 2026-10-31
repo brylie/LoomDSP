@@ -2312,6 +2312,12 @@ impl App {
     }
 
     fn canvas_event(&mut self, event: CanvasEvent) {
+        if event == CanvasEvent::PointerDown {
+            self.matrix.focused = false;
+            self.matrix.edit = None;
+            self.matrix.add = None;
+            return;
+        }
         let edits = undo::is_edit(&self.controller, &event);
         if edits {
             self.close_slider_gesture();
@@ -2323,6 +2329,7 @@ impl App {
 
     fn apply_canvas_event(&mut self, event: CanvasEvent) {
         match event {
+            CanvasEvent::PointerDown => {}
             CanvasEvent::GestureStart => {
                 self.close_slider_gesture();
                 self.edits.start_gesture();

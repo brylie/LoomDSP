@@ -44,6 +44,8 @@ const CABLE_OPACITY: f32 = 0.4;
 /// A gesture on the canvas. The application applies it to its model.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CanvasEvent {
+    /// The pointer pressed on the canvas while matrix keys had focus.
+    PointerDown,
     /// Replace the selection.
     Select(Vec<u32>),
     /// Move modules by a world offset (always whole grid steps).
@@ -1012,6 +1014,9 @@ impl<Message> PatchCanvas<'_, Message> {
             }
             Event::Mouse(mouse::Event::ButtonPressed(button)) if over => {
                 let Some(screen) = screen else { return };
+                if self.matrix_keyboard {
+                    self.emit(shell, CanvasEvent::PointerDown);
+                }
                 // A second button must end a hold. Replacing the interaction
                 // without a release would leave a momentary gate high.
                 self.release_pointer_hold(state, shell);
@@ -2177,11 +2182,6 @@ impl<Message> PatchCanvas<'_, Message> {
         let module_in_focus = |id: u32| self.selection.contains(&id) || hovered == Some(id);
         let mut outlined: Vec<u32> = Vec::new();
         for m in self.scene.modulations() {
-            if let Some(selected) = &self.matrix_line
-                && m != selected
-            {
-                continue;
-            }
             let by_source = sources.contains(&m.from);
             let by_control = control.is_some_and(|(module, widget)| m.to == module && m.widget == Some(widget));
             if !(self.matrix_line.as_ref() == Some(m)
@@ -3964,6 +3964,42 @@ mod tests {
         let state = State::default();
         assert_eq!(canvas.overlay(&state).cables.len(), 1);
         assert_eq!(state.pinned, None);
+    }
+
+    /// A matrix line adds to lines shown by a pinned or hovered output.
+    #[test]
+    fn matrix_line_preserves_pinned_and_hovered_lines() {
+        let (original, values) = modulated_scene();
+        let mut source = module(3, 600.0);
+        source.outputs[0].badge = 1;
+        let modules = original.modules();
+        let selected = original.modulations()[0].clone();
+        let pin = PortRef {
+            module: 3,
+            output: true,
+            index: 0,
+        };
+        let scene =
+            Scene::new(vec![modules[0].clone(), modules[1].clone(), source], Vec::new()).with_modulations(vec![
+                selected.clone(),
+                crate::scene::ModulationView {
+                    from: (3, 0),
+                    to: 2,
+                    widget: Some(0),
+                },
+            ]);
+        let none = BTreeSet::new();
+        let canvas = PatchCanvas::new(&scene, &none, |e| e)
+            .values(&values)
+            .matrix_line(Some(selected));
+        let mut state = State {
+            pinned: Some(pin),
+            ..State::default()
+        };
+        assert_eq!(canvas.overlay(&state).cables.len(), 2);
+        state.pinned = None;
+        state.hover = Some(Hit::Port(pin));
+        assert_eq!(canvas.overlay(&state).cables.len(), 2);
     }
 
     /// Escape can clear a canvas pin while matrix keyboard focus owns the key.
