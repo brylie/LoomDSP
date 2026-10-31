@@ -39,7 +39,7 @@ The whole thing takes about 20 ms.
 | Key | **Cmd+.** on macOS, **Ctrl+.** on Windows and Linux. It works whatever has focus, including a text field, and during a drag. *Why:* a panic key must always work. |
 | Button | **Panic** in the toolbar, next to **Hold note**. A press runs it. |
 | MIDI | A trigger set in Preferences (below). |
-| Control channel | `{"cmd": "panic"}`, and `press` with `button: "panic"`. |
+| Control channel | `{"cmd": "panic"}`, and `toolbar` with `button: "panic"`. |
 
 ### MIDI trigger
 

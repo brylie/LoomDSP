@@ -477,6 +477,7 @@ impl App {
         let descriptor = self.controller.graph().node(a.target)?.descriptor;
         let name = descriptor.params.get(a.param)?.name;
         Some(loom_canvas::ModulationView {
+            id: id.0,
             from: (a.source.module.0, a.source.port),
             to: a.target.0,
             widget: descriptor
@@ -484,6 +485,7 @@ impl App {
                 .widgets
                 .iter()
                 .position(|w| w.is_control() && w.bind == name),
+            enabled: a.enabled,
         })
     }
 

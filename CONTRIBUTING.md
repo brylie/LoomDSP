@@ -43,6 +43,16 @@ If you use git worktrees, each new worktree is a new folder, and mise asks to tr
 mise settings add trusted_config_paths ~/path/to/your/worktrees
 ```
 
+To let worktrees build at the same time, choose an existing directory on a drive with enough free space and run this once in each worktree:
+
+```sh
+scripts/setup-worktree-target.sh /path/to/target-root
+```
+
+For an external drive, create the target root on that drive first and keep it mounted while Cargo runs. The command writes an ignored `.cargo/config.toml` that points to a unique, stable folder under the chosen root. Cargo uses it for normal builds and `mise` tasks. Run `cargo clean` in a worktree to remove that worktree's build output. Other worktrees continue using their existing Cargo settings until you run the command there.
+
+Run `scripts/setup-worktree-target.sh /path/to/target-root --all` to configure all existing worktrees at once. Each worktree that builds keeps its own output folder, so remove unused ones with `cargo clean` from that worktree.
+
 Then build and run the checks:
 
 ```sh

@@ -132,6 +132,13 @@ impl Cable {
         self
     }
 
+    /// Draws a disabled modulation line at half the normal modulation width.
+    pub fn half_width(mut self) -> Self {
+        self.params[0] *= 0.5;
+        self.params[2] *= 0.5;
+        self
+    }
+
     /// Draws the cable at full opacity, in front of the tiles.
     pub fn focused(mut self) -> Self {
         self.params[3] = 1.0;
@@ -732,10 +739,76 @@ impl Primitive for CanvasPrimitive {
     }
 }
 
+/// The window-wide output drag. Its pipeline has separate buffers from the
+/// patch canvas, so preparing two primitives cannot overwrite either one.
+#[derive(Debug, Clone, Copy)]
+pub struct DragPrimitive {
+    pub cable: Cable,
+    pub zoom: f32,
+}
+
+/// Separate GPU state for the window-wide drag, using the canvas shader.
+pub struct DragPipeline(CanvasPipeline);
+
+impl Pipeline for DragPipeline {
+    fn new(device: &wgpu::Device, queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self {
+        Self(CanvasPipeline::new(device, queue, format))
+    }
+}
+
+impl Primitive for DragPrimitive {
+    type Pipeline = DragPipeline;
+
+    fn prepare(
+        &self,
+        pipeline: &mut DragPipeline,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        bounds: &Rectangle,
+        viewport: &Viewport,
+    ) {
+        let state = &mut pipeline.0;
+        let globals = Globals {
+            origin: [0.0, 0.0],
+            size: [bounds.width.max(1.0), bounds.height.max(1.0)],
+            zoom: self.zoom,
+            scale: viewport.scale_factor(),
+            cable_dim: 1.0,
+            pad: 0.0,
+        };
+        queue.write_buffer(&state.globals, 0, bytemuck::bytes_of(&globals));
+        let bytes = bytemuck::bytes_of(&self.cable);
+        if state.overlay_uploaded.0 != bytes {
+            state.overlay_cables.upload(device, queue, &[self.cable]);
+            state.overlay_uploaded.0 = bytes.to_vec();
+        }
+    }
+
+    fn draw(&self, pipeline: &DragPipeline, pass: &mut wgpu::RenderPass<'_>) -> bool {
+        let state = &pipeline.0;
+        pass.set_bind_group(0, &state.bind_group, &[]);
+        pass.set_pipeline(&state.cables);
+        pass.set_vertex_buffer(0, state.overlay_cables.slice());
+        pass.draw(0..CABLE_VERTICES, 0..1);
+        true
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::scene::{CableView, ModuleView, PortView};
+
+    /// Disabled modulation keeps its dash pattern and halves both width
+    /// limits, so it stays thinner at close and far zoom (#197).
+    #[test]
+    fn disabled_modulation_line_is_half_width() {
+        let normal = Cable::new(Point::ORIGIN, Point::new(100.0, 0.0), Color::WHITE, Color::WHITE, true).thin();
+        let off = normal.half_width();
+        assert_eq!(off.params[0], normal.params[0] * 0.5);
+        assert_eq!(off.params[2], normal.params[2] * 0.5);
+        assert_eq!(off.params[1], normal.params[1]);
+    }
 
     fn port() -> PortView {
         PortView {

@@ -11,6 +11,7 @@
 
 mod camera;
 mod controls;
+mod drag_line;
 mod gpu;
 mod hover;
 mod scene;
@@ -22,6 +23,7 @@ mod widget;
 
 pub use camera::{Camera, MAX_ZOOM, MIN_ZOOM};
 pub use controls::{ModulationMark, PanelValues, WidgetValue, knob_range_ring};
+pub use drag_line::DragLine;
 pub use scene::{
     CLOCK_MARK_RADIUS, CableView, GRID, HEADER, Hit, HoverText, LABEL_COLUMNS, ModulationView, ModuleView,
     PORT_HIT_RADIUS, PanelView, PortRef, PortShape, PortView, ROW, Scene, TILE_WIDTH, TransportSignal, WidgetView,

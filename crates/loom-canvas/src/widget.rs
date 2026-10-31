@@ -31,6 +31,8 @@ const DOUBLE_CLICK_SLOP: f32 = 4.0;
 /// How far a right press may move, in screen pixels, and still count as a
 /// click that opens the probe menu rather than a pan.
 const CLICK_SLOP: f32 = 4.0;
+/// Arrow presses within this time share one undo gesture (panels.md).
+const ARROW_GROUP: Duration = Duration::from_millis(500);
 
 /// Titles are drawn when they would be at least this tall on screen.
 const TITLE_MIN_PX: f32 = 6.5;
@@ -91,6 +93,19 @@ pub enum CanvasEvent {
         /// Index in the module's panel widgets.
         widget: usize,
     },
+    /// An output is being dragged at window coordinates. `None` means the
+    /// pointer left the window, so a later release cannot make an assignment.
+    AssignDrag {
+        from: PortRef,
+        start: Point,
+        at: Option<Point>,
+        zoom: f32,
+    },
+    /// An output was released away from a canvas target. The app may assign
+    /// it to the inspector row under the pointer.
+    AssignDrop { from: PortRef, at: Option<Point> },
+    /// The output drag ended without an inspector drop.
+    AssignCancel,
     /// Delete modules.
     Delete(Vec<u32>),
     /// Set a control on a module's panel. `position` is the knob position
@@ -190,18 +205,23 @@ pub enum CanvasEvent {
         /// Index in the module's panel widgets.
         widget: usize,
     },
-    /// Space was pressed and no panel control is focused. The app toggles
-    /// transport Run. Enter does not send this, and neither does Space while
-    /// a control is focused.
+    /// Space was pressed without a control that uses it (including a focused
+    /// knob). The app toggles transport Run. Enter does not send this.
     ToggleRun,
     /// A drag began: turning a knob, moving tiles, or pulling a cable. Every
     /// edit until [`CanvasEvent::GestureEnd`] is one undo step
-    /// (`docs/design/undo.md`, Gestures). A held arrow key on a focused
-    /// control is a gesture too.
+    /// (`docs/design/undo.md`, Gestures). Arrow edits end with
+    /// [`CanvasEvent::ArrowGroupEnd`] after their grouping window.
     GestureStart,
     /// The gesture ended. It is always sent after a start, also when the
     /// pointer is released outside the window or the window loses focus.
     GestureEnd,
+    /// The arrow key was released; another quick press may share its step.
+    ArrowGroupPending,
+    /// An arrow key was pressed again before the grouping deadline.
+    ArrowGroupResumed,
+    /// The arrow group ended, including when another interaction replaces it.
+    ArrowGroupEnd,
 }
 
 /// What MIDI learn mode shows on the canvas. While the canvas has one, a
@@ -238,6 +258,7 @@ pub struct PatchCanvas<'a, Message> {
     /// Leaves unmodified keys to the focused matrix while keeping pointer input active.
     matrix_keyboard: bool,
     still: Option<Still>,
+    window_drag_line: bool,
 }
 
 /// How a still image of the canvas starts: its camera, the control with
@@ -381,6 +402,7 @@ impl<'a, Message> PatchCanvas<'a, Message> {
             matrix_escape: false,
             matrix_keyboard: false,
             still: None,
+            window_drag_line: false,
         }
     }
 
@@ -422,6 +444,12 @@ impl<'a, Message> PatchCanvas<'a, Message> {
     /// Sets the live values of panel controls and lights.
     pub fn values(mut self, values: &'a PanelValues) -> Self {
         self.values = Some(values);
+        self
+    }
+
+    /// The app draws output drags in its window layer, including the canvas.
+    pub fn window_drag_line(mut self, enabled: bool) -> Self {
+        self.window_drag_line = enabled;
         self
     }
 
@@ -488,6 +516,29 @@ impl<'a, Message> PatchCanvas<'a, Message> {
                 .is_some_and(WidgetView::accepts_modulation)
     }
 
+    /// Reports an output drag in window coordinates for the inspector layer.
+    fn assign_drag(
+        &self,
+        from: PortRef,
+        at: Option<Point>,
+        camera: Camera,
+        bounds: Rectangle,
+        shell: &mut Shell<'_, Message>,
+    ) {
+        if let Some(world) = self.scene.port_position(from) {
+            let screen = camera.to_screen(world);
+            self.emit(
+                shell,
+                CanvasEvent::AssignDrag {
+                    from,
+                    start: Point::new(bounds.x + screen.x, bounds.y + screen.y),
+                    at,
+                    zoom: camera.zoom,
+                },
+            );
+        }
+    }
+
     fn emit(&self, shell: &mut Shell<'_, Message>, event: CanvasEvent) {
         shell.publish((self.on_event)(event));
     }
@@ -504,6 +555,15 @@ impl<'a, Message> PatchCanvas<'a, Message> {
     fn end_gestures(&self, state: &mut State, shell: &mut Shell<'_, Message>) {
         if matches!(
             state.interaction,
+            Interaction::Wiring {
+                from: PortRef { output: true, .. },
+                pulled: false
+            }
+        ) {
+            self.emit(shell, CanvasEvent::AssignCancel);
+        }
+        if matches!(
+            state.interaction,
             Interaction::Moving { .. }
                 | Interaction::Turning { .. }
                 | Interaction::Wiring { .. }
@@ -513,7 +573,8 @@ impl<'a, Message> PatchCanvas<'a, Message> {
             self.emit(shell, CanvasEvent::GestureEnd);
         }
         if std::mem::take(&mut state.arrow_gesture) {
-            self.emit(shell, CanvasEvent::GestureEnd);
+            state.arrow_deadline = None;
+            self.emit(shell, CanvasEvent::ArrowGroupEnd);
         }
     }
 }
@@ -523,6 +584,7 @@ impl<'a, Message> PatchCanvas<'a, Message> {
 #[derive(Debug, Clone, PartialEq)]
 struct LinesKey {
     scene: u64,
+    overlay: u64,
     pinned: Option<PortRef>,
     hover: Option<Hit>,
     selection: Vec<u32>,
@@ -585,6 +647,9 @@ struct State {
     camera: Camera,
     framed_key: Option<u64>,
     interaction: Interaction,
+    /// A release after CursorLeft cannot target the inspector until the
+    /// window reports CursorEntered again.
+    outside_window: bool,
     hover: Option<Hit>,
     /// Cursor in world coordinates, while over the canvas or dragging.
     cursor: Option<Point>,
@@ -627,9 +692,10 @@ struct State {
     key_holds: [Option<KeyHold>; 2],
     /// Modules with lights on screen, as last reported.
     reported_lights: Option<Vec<u32>>,
-    /// True while an arrow key is down on a control: one gesture from key
-    /// down to key up, however often it repeats.
+    /// True while an arrow group is open, including its 500 ms release gap.
     arrow_gesture: bool,
+    /// A released arrow keeps its gesture open for the next quick press.
+    arrow_deadline: Option<Instant>,
 }
 
 impl State {
@@ -932,7 +998,28 @@ impl<Message> PatchCanvas<'_, Message> {
         }
 
         match event {
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: keyboard::Key::Named(keyboard::key::Named::Escape),
+                ..
+            }) if matches!(state.interaction, Interaction::Wiring { .. }) => {
+                self.end_gestures(state, shell);
+                shell.request_redraw();
+                shell.capture_event();
+            }
             Event::Window(window::Event::RedrawRequested(now)) => {
+                let new_frame = state.framed_key != Some(self.frame_key);
+                if state.framed_key.is_some_and(|key| key != self.frame_key) {
+                    // The app has replaced the patch and its gesture history.
+                    // Do not deliver the previous patch's delayed arrow end.
+                    state.arrow_deadline = None;
+                    state.arrow_gesture = false;
+                }
+                if state.arrow_deadline.is_some_and(|due| *now >= due) {
+                    state.arrow_deadline = None;
+                    if std::mem::take(&mut state.arrow_gesture) {
+                        self.emit(shell, CanvasEvent::ArrowGroupEnd);
+                    }
+                }
                 if state
                     .browser_key
                     .replace(self.browser_key)
@@ -941,7 +1028,7 @@ impl<Message> PatchCanvas<'_, Message> {
                     let centre = Point::new(bounds.width / 2.0, bounds.height / 2.0);
                     self.open_browser(state.camera.to_world(centre), centre, bounds, shell);
                 }
-                if state.framed_key != Some(self.frame_key) && bounds.width > 0.0 {
+                if new_frame && bounds.width > 0.0 {
                     if let Some(world) = self.scene.bounds() {
                         state.camera.frame(world, bounds.size());
                     }
@@ -1098,6 +1185,7 @@ impl<Message> PatchCanvas<'_, Message> {
                 let Some(screen) = screen else { return };
                 let world = state.camera.to_world(screen);
                 state.cursor = Some(world);
+                let hover = over.then(|| self.scene.hit(world, state.hit_radius()));
                 let mut redraw = false;
                 match &mut state.interaction {
                     Interaction::Panning { last, click } => {
@@ -1155,13 +1243,26 @@ impl<Message> PatchCanvas<'_, Message> {
                         }
                     }
                     Interaction::Holding { .. } | Interaction::Idle => {}
-                    Interaction::Wiring { .. } => redraw = true,
+                    Interaction::Wiring { from, pulled } => {
+                        if from.output && !*pulled && !state.outside_window {
+                            let at = match hover {
+                                Some(Hit::Port(target)) if target.output != from.output => self
+                                    .scene
+                                    .port_position(target)
+                                    .map(|world| state.camera.to_screen(world))
+                                    .map(|point| Point::new(bounds.x + point.x, bounds.y + point.y)),
+                                _ => None,
+                            }
+                            .unwrap_or(Point::new(bounds.x + screen.x, bounds.y + screen.y));
+                            self.assign_drag(*from, Some(at), state.camera, bounds, shell);
+                        }
+                        redraw = true;
+                    }
                     Interaction::Selecting { current, .. } => {
                         *current = world;
                         redraw = true;
                     }
                 }
-                let hover = over.then(|| self.scene.hit(world, state.hit_radius()));
                 if hover != state.hover {
                     state.hover = hover;
                     redraw = true;
@@ -1194,7 +1295,8 @@ impl<Message> PatchCanvas<'_, Message> {
                 let world = screen.map(|s| state.camera.to_world(s));
                 match interaction {
                     Interaction::Wiring { from, pulled } => {
-                        match world.map(|w| self.scene.hit(w, state.hit_radius())) {
+                        let mut handled = false;
+                        match world.filter(|_| over).map(|w| self.scene.hit(w, state.hit_radius())) {
                             Some(Hit::Port(to)) => {
                                 let pair = if from.output { (from, to) } else { (to, from) };
                                 if pair.0.output && !pair.1.output {
@@ -1205,14 +1307,31 @@ impl<Message> PatchCanvas<'_, Message> {
                                             to: pair.1,
                                         },
                                     );
+                                    handled = true;
                                 }
                             }
                             Some(Hit::Widget { module, widget })
                                 if !pulled && self.takes_assignment(from, module, widget) =>
                             {
                                 self.emit(shell, CanvasEvent::Assign { from, module, widget });
+                                handled = true;
                             }
                             _ => {}
+                        }
+                        if from.output && !pulled {
+                            if handled
+                                || screen.is_some_and(|p| bounds.contains(Point::new(bounds.x + p.x, bounds.y + p.y)))
+                            {
+                                self.emit(shell, CanvasEvent::AssignCancel);
+                            } else {
+                                self.emit(
+                                    shell,
+                                    CanvasEvent::AssignDrop {
+                                        from,
+                                        at: if state.outside_window { None } else { cursor.position() },
+                                    },
+                                );
+                            }
                         }
                     }
                     Interaction::Selecting { start, current, base } => {
@@ -1260,9 +1379,23 @@ impl<Message> PatchCanvas<'_, Message> {
                 shell.request_redraw();
             }
             Event::Mouse(mouse::Event::CursorLeft) => {
+                state.outside_window = true;
+                if let Interaction::Wiring { from, pulled: false } = state.interaction
+                    && from.output
+                {
+                    self.assign_drag(from, None, state.camera, bounds, shell);
+                }
                 self.release_pointer_hold(state, shell);
                 if state.hover.take().is_some() {
                     shell.request_redraw();
+                }
+            }
+            Event::Mouse(mouse::Event::CursorEntered) => {
+                state.outside_window = false;
+                if let Interaction::Wiring { from, pulled: false } = state.interaction
+                    && from.output
+                {
+                    self.assign_drag(from, cursor.position(), state.camera, bounds, shell);
                 }
             }
             Event::Window(window::Event::Unfocused) => {
@@ -1577,8 +1710,10 @@ impl<Message> PatchCanvas<'_, Message> {
                 )
             )
         {
-            state.arrow_gesture = false;
-            self.emit(shell, CanvasEvent::GestureEnd);
+            let due = Instant::now() + ARROW_GROUP;
+            state.arrow_deadline = Some(due);
+            self.emit(shell, CanvasEvent::ArrowGroupPending);
+            shell.request_redraw_at(due);
         }
     }
 
@@ -1616,10 +1751,22 @@ impl<Message> PatchCanvas<'_, Message> {
         key: &keyboard::Key,
         modifiers: keyboard::Modifiers,
         repeat: bool,
-        over: bool,
+        _over: bool,
         shell: &mut Shell<'_, Message>,
     ) -> bool {
         use keyboard::key::Named;
+        if let Some(due) = state.arrow_deadline.take() {
+            let arrow = matches!(
+                key.as_ref(),
+                keyboard::Key::Named(Named::ArrowUp | Named::ArrowRight | Named::ArrowDown | Named::ArrowLeft)
+            );
+            if !arrow || Instant::now() >= due {
+                state.arrow_gesture = false;
+                self.emit(shell, CanvasEvent::ArrowGroupEnd);
+            } else {
+                self.emit(shell, CanvasEvent::ArrowGroupResumed);
+            }
+        }
         // Focus is only valid on a control of the one selected module.
         let selected = (self.selection.len() == 1).then(|| *self.selection.iter().next().unwrap_or(&0));
         if state.focus.is_some_and(|(m, w)| {
@@ -1639,19 +1786,53 @@ impl<Message> PatchCanvas<'_, Message> {
                 state.pinned = None;
                 true
             }
-            keyboard::Key::Named(Named::Tab) if over || state.focus.is_some() => {
-                let Some(module) = selected.and_then(|id| self.scene.module(id)) else {
+            keyboard::Key::Named(Named::Tab) => {
+                let mut order: Vec<_> = self.scene.modules().iter().collect();
+                order.sort_by(|a, b| {
+                    a.position
+                        .y
+                        .total_cmp(&b.position.y)
+                        .then_with(|| a.position.x.total_cmp(&b.position.x))
+                        .then_with(|| a.id.cmp(&b.id))
+                });
+                if order.is_empty() {
                     return false;
-                };
-                let current = state.focus.map(|(_, w)| w);
-                match next_focus(&module.panel, current, modifiers.shift()) {
-                    Some(widget) => {
-                        state.focus = Some((module.id, widget));
+                }
+                let back = modifiers.shift();
+                if let Some((module, widget)) = state.focus {
+                    let controls: Vec<_> = self
+                        .scene
+                        .module(module)
+                        .into_iter()
+                        .flat_map(|m| m.panel.widgets.iter().enumerate())
+                        .filter(|(_, w)| w.is_control())
+                        .map(|(i, _)| i)
+                        .collect();
+                    let next = controls.iter().position(|&i| i == widget).and_then(|at| {
+                        if back {
+                            at.checked_sub(1)
+                        } else {
+                            (at + 1 < controls.len()).then_some(at + 1)
+                        }
+                    });
+                    if let Some(next) = next {
+                        state.focus = Some((module, controls[next]));
                         state.tab_focus = true;
                         state.focus_first = true;
+                        shell.request_redraw();
+                        shell.capture_event();
+                        return true;
                     }
-                    None => return false,
                 }
+                let at = selected.and_then(|id| order.iter().position(|m| m.id == id));
+                let next = match at {
+                    Some(at) if back => at.checked_sub(1).unwrap_or(order.len() - 1),
+                    Some(at) => (at + 1) % order.len(),
+                    None if back => order.len() - 1,
+                    None => 0,
+                };
+                state.focus = None;
+                self.emit(shell, CanvasEvent::Select(vec![order[next].id]));
                 true
             }
             keyboard::Key::Named(Named::Escape) if state.focus.is_some() => {
@@ -1659,6 +1840,21 @@ impl<Message> PatchCanvas<'_, Message> {
                 // In MIDI learn mode, Escape also ends the mode, so the app
                 // must see it too.
                 self.learn.is_none()
+            }
+            keyboard::Key::Named(Named::Escape) if !self.selection.is_empty() && self.learn.is_none() => {
+                self.emit(shell, CanvasEvent::Select(Vec::new()));
+                true
+            }
+            keyboard::Key::Named(Named::Enter) if state.focus.is_none() => {
+                let Some(module) = selected.and_then(|id| self.scene.module(id)) else {
+                    return false;
+                };
+                let Some(widget) = next_focus(&module.panel, None, false) else {
+                    return false;
+                };
+                state.focus = Some((module.id, widget));
+                state.tab_focus = true;
+                true
             }
             // In MIDI learn mode the keyboard arms the focused control, like
             // a click, and never changes a value (midi-learn.md).
@@ -1679,7 +1875,31 @@ impl<Message> PatchCanvas<'_, Message> {
                 named @ (Named::ArrowUp | Named::ArrowRight | Named::ArrowDown | Named::ArrowLeft),
             ) => {
                 let Some((module, widget)) = state.focus else {
-                    return false;
+                    if self.selection.is_empty() {
+                        return false;
+                    }
+                    let step = if modifiers.shift() { 10.0 } else { 1.0 } * GRID;
+                    let delta = match named {
+                        Named::ArrowUp => Vector::new(0.0, -step),
+                        Named::ArrowRight => Vector::new(step, 0.0),
+                        Named::ArrowDown => Vector::new(0.0, step),
+                        Named::ArrowLeft => Vector::new(-step, 0.0),
+                        _ => unreachable!(),
+                    };
+                    if !state.arrow_gesture {
+                        state.arrow_gesture = true;
+                        self.emit(shell, CanvasEvent::GestureStart);
+                    }
+                    self.emit(
+                        shell,
+                        CanvasEvent::Move {
+                            ids: self.selection.iter().copied().collect(),
+                            delta,
+                        },
+                    );
+                    shell.request_redraw();
+                    shell.capture_event();
+                    return true;
                 };
                 let up = matches!(named, Named::ArrowUp | Named::ArrowRight);
                 if matches!(self.widget_kind(module, widget), Some(WidgetViewKind::Button)) {
@@ -1735,9 +1955,12 @@ impl<Message> PatchCanvas<'_, Message> {
                             let next = (position.round() as usize + 1) % options.len().max(1);
                             self.set_control(shell, module, widget, next as f32);
                         }
+                        Some(WidgetViewKind::Knob { .. }) if matches!(named, Named::Space) && !repeat => {
+                            self.emit(shell, CanvasEvent::ToggleRun);
+                        }
                         _ => {}
                     }
-                    true
+                    !matches!(self.widget_kind(module, widget), Some(WidgetViewKind::Knob { .. }) if matches!(named, Named::Enter))
                 } else if matches!(named, Named::Space) {
                     // Space with nothing focused is the Run shortcut. A
                     // repeat is swallowed so holding the key does not toggle
@@ -1887,6 +2110,16 @@ impl<Message> PatchCanvas<'_, Message> {
                 }
             }
             Hit::Port(port) => {
+                if port.output {
+                    state.outside_window = false;
+                    self.assign_drag(
+                        port,
+                        Some(Point::new(bounds.x + screen.x, bounds.y + screen.y)),
+                        state.camera,
+                        bounds,
+                        shell,
+                    );
+                }
                 self.begin(
                     state,
                     Interaction::Wiring {
@@ -2186,8 +2419,9 @@ impl<Message> PatchCanvas<'_, Message> {
                         .shapes
                         .push(Shape::new(ring, radius, Color::TRANSPARENT, p.hover, 1.5));
                 }
-                if let (Some(start), Some(port), Some(cursor)) =
-                    (self.scene.port_position(*from), self.scene.port(*from), state.cursor)
+                if !(self.window_drag_line && from.output && !pulled)
+                    && let (Some(start), Some(port), Some(cursor)) =
+                        (self.scene.port_position(*from), self.scene.port(*from), state.cursor)
                 {
                     // Snap the loose end onto a port under the cursor.
                     let end = match state.hover {
@@ -2222,11 +2456,12 @@ impl<Message> PatchCanvas<'_, Message> {
     /// Modulation lines in focus (modulation.md, Lines): thin dashed lines
     /// from a source port to its targets, for the pinned output, the output
     /// or badge under the pointer, the control under the pointer, and the
-    /// modules in focus as for cables. The tiles that a pinned or pointed
-    /// at source drives are outlined. A pinned badge gets a ring.
+    /// modules in focus as for cables. Pointed and pinned sources get a
+    /// double outline; their targets get a single one. A pinned badge gets a ring.
     fn modulation_lines(&self, state: &State, overlay: &mut Overlay) {
         let key = LinesKey {
             scene: self.scene.generation(),
+            overlay: self.scene.overlay_generation(),
             pinned: self.pin(state),
             hover: state.hover,
             selection: self.selection.iter().copied().collect(),
@@ -2269,7 +2504,8 @@ impl<Message> PatchCanvas<'_, Message> {
         };
         let hovered = Self::hovered_module(state);
         let module_in_focus = |id: u32| self.selection.contains(&id) || hovered == Some(id);
-        let mut outlined: Vec<u32> = Vec::new();
+        let mut targets: Vec<u32> = Vec::new();
+        let mut sources_outlined: Vec<u32> = Vec::new();
         for m in self.scene.modulations() {
             let by_source = sources.contains(&m.from);
             let by_control = control.is_some_and(|(module, widget)| m.to == module && m.widget == Some(widget));
@@ -2289,16 +2525,29 @@ impl<Message> PatchCanvas<'_, Message> {
             let (Some(start), Some(end)) = (self.scene.port_position(from), self.scene.modulation_end(m)) else {
                 continue;
             };
-            overlay.cables.push(
-                Cable::new(start, end, p.modulation, p.modulation, true)
-                    .thin()
-                    .focused(),
-            );
-            if (by_source || by_control) && !outlined.contains(&m.to) {
-                outlined.push(m.to);
+            let colour = if m.enabled {
+                p.modulation
+            } else {
+                Color {
+                    a: p.modulation.a * 0.4,
+                    ..p.modulation
+                }
+            };
+            let mut line = Cable::new(start, end, colour, colour, true).thin().focused();
+            if !m.enabled {
+                line = line.half_width();
+            }
+            overlay.cables.push(line);
+            if by_source || by_control {
+                if !targets.contains(&m.to) {
+                    targets.push(m.to);
+                }
+                if !sources_outlined.contains(&m.from.0) {
+                    sources_outlined.push(m.from.0);
+                }
             }
         }
-        for id in outlined {
+        for id in targets.into_iter().filter(|id| !sources_outlined.contains(id)) {
             if let Some(module) = self.scene.module(id) {
                 overlay.shapes.push(Shape::new(
                     module.bounds().expand(3.0),
@@ -2307,6 +2556,19 @@ impl<Message> PatchCanvas<'_, Message> {
                     p.modulation,
                     1.2,
                 ));
+            }
+        }
+        for id in sources_outlined {
+            if let Some(module) = self.scene.module(id) {
+                for distance in [3.0, 6.0] {
+                    overlay.shapes.push(Shape::new(
+                        module.bounds().expand(distance),
+                        7.0 + distance - 3.0,
+                        Color::TRANSPARENT,
+                        p.modulation,
+                        1.2,
+                    ));
+                }
             }
         }
     }
@@ -3566,6 +3828,188 @@ mod tests {
         })
     }
 
+    /// A key event with Shift held, for reverse focus and coarse movement.
+    fn shifted(named: keyboard::key::Named) -> Event {
+        let mut event = key_event(named, true);
+        if let Event::Keyboard(keyboard::Event::KeyPressed { modifiers, .. }) = &mut event {
+            *modifiers = keyboard::Modifiers::SHIFT;
+        }
+        event
+    }
+
+    /// Tab follows reading order across tiles and skips lights within a panel.
+    #[test]
+    fn keyboard_focus_follows_tiles_and_controls() {
+        let mut first = module(1, 300.0);
+        first.panel = panel();
+        first.position.y = 100.0;
+        let mut second = module(2, 0.0);
+        second.panel = panel();
+        let scene = Scene::new(vec![first, second], Vec::new());
+        let at = Point::new(700.0, 500.0);
+        let mut state = State::default();
+        let none = BTreeSet::new();
+        let canvas = PatchCanvas::new(&scene, &none, |e| e);
+        assert_eq!(
+            drive(&canvas, &mut state, &key_event(keyboard::key::Named::Tab, true), at),
+            vec![CanvasEvent::Select(vec![2])]
+        );
+        assert_eq!(
+            drive(&canvas, &mut state, &shifted(keyboard::key::Named::Tab), at),
+            vec![CanvasEvent::Select(vec![1])],
+            "Shift-Tab starts at the last tile"
+        );
+        let selected = BTreeSet::from([2]);
+        let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+        assert_eq!(
+            drive(&canvas, &mut state, &key_event(keyboard::key::Named::Tab, true), at),
+            vec![CanvasEvent::Select(vec![1])]
+        );
+        let first_selected = BTreeSet::from([1]);
+        let first_canvas = PatchCanvas::new(&scene, &first_selected, |e| e);
+        assert_eq!(
+            drive(&first_canvas, &mut state, &shifted(keyboard::key::Named::Tab), at),
+            vec![CanvasEvent::Select(vec![2])]
+        );
+        assert!(drive(&canvas, &mut state, &key_event(keyboard::key::Named::Enter, true), at).is_empty());
+        assert_eq!(state.focus, Some((2, 0)));
+        assert!(drive(&canvas, &mut state, &key_event(keyboard::key::Named::Tab, true), at).is_empty());
+        assert_eq!(state.focus, Some((2, 2)), "the light is skipped");
+        assert!(drive(&canvas, &mut state, &shifted(keyboard::key::Named::Tab), at).is_empty());
+        assert_eq!(state.focus, Some((2, 0)));
+        let toggle = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Space, true), at);
+        assert_eq!(
+            toggle,
+            vec![CanvasEvent::ToggleRun],
+            "a focused knob does not use Space"
+        );
+    }
+
+    /// An unfocused selected tile moves by one grid cell, or ten with Shift.
+    /// The next key closes its pending arrow group before acting.
+    #[test]
+    fn keyboard_moves_selected_tile_and_closes_group_on_next_key() {
+        let scene = Scene::new(vec![module(1, 0.0)], Vec::new());
+        let selected = BTreeSet::from([1]);
+        let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+        let mut state = State::default();
+        let at = Point::new(700.0, 500.0);
+        let first = drive(&canvas, &mut state, &arrow_up(), at);
+        assert_eq!(
+            first,
+            vec![
+                CanvasEvent::GestureStart,
+                CanvasEvent::Move {
+                    ids: vec![1],
+                    delta: Vector::new(0.0, -GRID)
+                }
+            ]
+        );
+        assert_eq!(
+            drive(
+                &canvas,
+                &mut state,
+                &key_event(keyboard::key::Named::ArrowUp, false),
+                at
+            ),
+            vec![CanvasEvent::ArrowGroupPending]
+        );
+        let next = drive(&canvas, &mut state, &shifted(keyboard::key::Named::ArrowRight), at);
+        assert_eq!(
+            next,
+            vec![
+                CanvasEvent::ArrowGroupResumed,
+                CanvasEvent::Move {
+                    ids: vec![1],
+                    delta: Vector::new(10.0 * GRID, 0.0)
+                }
+            ]
+        );
+        assert_eq!(
+            drive(
+                &canvas,
+                &mut state,
+                &key_event(keyboard::key::Named::ArrowRight, false),
+                at
+            ),
+            vec![CanvasEvent::ArrowGroupPending]
+        );
+        assert_eq!(
+            drive(&canvas, &mut state, &escape(), at),
+            vec![CanvasEvent::ArrowGroupEnd, CanvasEvent::Select(Vec::new())]
+        );
+    }
+
+    /// A pointer press replaces a pending arrow group before starting its
+    /// own interaction, so its eventual release cannot close the arrow step.
+    #[test]
+    fn pointer_press_ends_a_pending_arrow_group() {
+        let scene = Scene::new(vec![module(1, 0.0)], Vec::new());
+        let selected = BTreeSet::from([1]);
+        let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+        let mut state = State::default();
+        let at = Point::new(700.0, 500.0);
+        drive(&canvas, &mut state, &arrow_up(), at);
+        drive(
+            &canvas,
+            &mut state,
+            &key_event(keyboard::key::Named::ArrowUp, false),
+            at,
+        );
+        let press = drive(&canvas, &mut state, &click(mouse::Button::Left), at);
+        assert_eq!(press.first(), Some(&CanvasEvent::ArrowGroupEnd), "{press:?}");
+        assert!(!state.arrow_gesture);
+        assert!(state.arrow_deadline.is_none());
+    }
+
+    /// Keyboard navigation selects a tile, enters its control, edits it,
+    /// and leaves both focus levels without a pointer gesture (#101).
+    #[test]
+    fn keys_reach_and_leave_a_panel_control() {
+        let mut first = module(1, 0.0);
+        first.panel = panel();
+        let scene = Scene::new(vec![first], Vec::new());
+        let none = BTreeSet::new();
+        let mut state = State::default();
+        let at = Point::new(700.0, 500.0);
+        let canvas = PatchCanvas::new(&scene, &none, |e| e);
+        assert_eq!(
+            drive(&canvas, &mut state, &key_event(keyboard::key::Named::Tab, true), at),
+            vec![CanvasEvent::Select(vec![1])]
+        );
+        let selected = BTreeSet::from([1]);
+        let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+        assert!(drive(&canvas, &mut state, &key_event(keyboard::key::Named::Enter, true), at).is_empty());
+        assert_eq!(state.focus, Some((1, 0)));
+        let changed = drive(&canvas, &mut state, &arrow_up(), at);
+        assert!(
+            changed.iter().any(|e| matches!(
+                e,
+                CanvasEvent::SetControl {
+                    module: 1,
+                    widget: 0,
+                    ..
+                }
+            )),
+            "{changed:?}"
+        );
+        drive(
+            &canvas,
+            &mut state,
+            &key_event(keyboard::key::Named::ArrowUp, false),
+            at,
+        );
+        assert_eq!(
+            drive(&canvas, &mut state, &escape(), at),
+            vec![CanvasEvent::ArrowGroupEnd]
+        );
+        assert_eq!(state.focus, None);
+        assert_eq!(
+            drive(&canvas, &mut state, &escape(), at),
+            vec![CanvasEvent::Select(Vec::new())]
+        );
+    }
+
     /// In MIDI learn mode a click arms a knob or a button and takes the
     /// keyboard focus. It never turns the knob or presses the button.
     #[test]
@@ -3649,6 +4093,21 @@ mod tests {
         );
         assert_eq!(state.focus, None);
 
+        let mut next_messages = Vec::new();
+        let mut next_shell = Shell::new(&mut next_messages);
+        canvas.handle(
+            &mut state,
+            &escape,
+            bounds,
+            mouse::Cursor::Available(at),
+            &mut next_shell,
+        );
+        assert_eq!(
+            next_shell.event_status(),
+            iced::event::Status::Ignored,
+            "learn mode must receive Escape even with a selected tile"
+        );
+
         // With nothing focused, Space is still the Run shortcut.
         let events = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Space, true), at);
         assert_eq!(events, vec![CanvasEvent::ToggleRun]);
@@ -3731,6 +4190,7 @@ mod tests {
                     module: 2,
                     widget: 0
                 },
+                CanvasEvent::AssignCancel,
                 CanvasEvent::GestureEnd
             ]
         );
@@ -3741,7 +4201,7 @@ mod tests {
             widget: 2
         }));
         let (events, on_light) = drop_on(&canvas, &scene, 1);
-        assert_eq!(events, vec![CanvasEvent::GestureEnd]);
+        assert_eq!(events, vec![CanvasEvent::AssignCancel, CanvasEvent::GestureEnd]);
         assert_eq!(
             on_knob,
             on_light + 1,
@@ -3758,7 +4218,7 @@ mod tests {
         let learn = LearnView::default();
         let canvas = learning(&scene, &none, &learn);
         let (events, _) = drop_on(&canvas, &scene, 0);
-        assert_eq!(events, vec![CanvasEvent::GestureEnd]);
+        assert_eq!(events, vec![CanvasEvent::AssignCancel, CanvasEvent::GestureEnd]);
     }
 
     /// The assign scene with one assignment from the source output to the
@@ -3771,9 +4231,11 @@ mod tests {
             ..module(2, 300.0)
         };
         let scene = Scene::new(vec![source, target], Vec::new()).with_modulations(vec![crate::scene::ModulationView {
+            id: 1,
             from: (1, 0),
             to: 2,
             widget: Some(0),
+            enabled: true,
         }]);
         let mut values = PanelValues::new();
         values.set(
@@ -3942,6 +4404,65 @@ mod tests {
         assert_eq!(state.pinned, None);
     }
 
+    /// A pointed source has two rings and its target one; selection alone
+    /// still draws lines without outlines (#407).
+    #[test]
+    fn modulation_outlines_show_direction_only_for_pointing() {
+        let (scene, _) = modulated_scene();
+        let none = BTreeSet::new();
+        let canvas = PatchCanvas::new(&scene, &none, |e| e);
+        let mut pointed = Overlay::default();
+        canvas.build_modulation_lines(
+            &State {
+                hover: Some(Hit::Port(OUT)),
+                ..State::default()
+            },
+            &mut pointed,
+        );
+        assert_eq!(pointed.cables.len(), 1);
+        assert_eq!(pointed.shapes.len(), 3, "two source rings and one target ring");
+
+        let selected = BTreeSet::from([1]);
+        let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+        let mut selected_only = Overlay::default();
+        canvas.build_modulation_lines(&State::default(), &mut selected_only);
+        assert_eq!(selected_only.cables.len(), 1);
+        assert!(selected_only.shapes.is_empty());
+    }
+
+    /// Turning an assignment off keeps its dashed line and direction rings,
+    /// while the line uses the disabled style (#197).
+    #[test]
+    fn disabled_assignment_keeps_a_visible_line() {
+        let (mut scene, _) = modulated_scene();
+        scene.set_modulation_enabled(1, false);
+        let none = BTreeSet::new();
+        let canvas = PatchCanvas::new(&scene, &none, |e| e);
+        let mut overlay = Overlay::default();
+        canvas.build_modulation_lines(
+            &State {
+                hover: Some(Hit::Port(OUT)),
+                ..State::default()
+            },
+            &mut overlay,
+        );
+        assert_eq!(overlay.cables.len(), 1);
+        assert_eq!(overlay.shapes.len(), 3);
+    }
+
+    /// Toggling one assignment updates its line cache without changing
+    /// the scene generation used for tiles and cables (#197).
+    #[test]
+    fn assignment_state_updates_only_modulation_overlay() {
+        let (mut scene, _) = modulated_scene();
+        let geometry = scene.generation();
+        let lines = scene.overlay_generation();
+        scene.set_modulation_enabled(1, false);
+        assert_eq!(scene.generation(), geometry);
+        assert_ne!(scene.overlay_generation(), lines);
+        assert!(!scene.modulations()[0].enabled);
+    }
+
     /// A drag on the ring around a modulated knob changes depth, up to
     /// raise it, as one gesture, and carries the pinned output. A drag on
     /// the knob body still turns it.
@@ -4021,21 +4542,50 @@ mod tests {
         assert_eq!(shell.event_status(), iced::event::Status::Ignored);
     }
 
-    /// A new patch (a new frame key) drops the pin: module IDs repeat
-    /// between patches, so it could land on an unrelated output.
+    /// A new patch drops the pin and old arrow timer. Module IDs repeat
+    /// between patches, and the new app has a fresh undo history.
     #[test]
-    fn a_new_patch_clears_the_pin() {
+    fn a_new_patch_clears_old_canvas_state() {
         let (scene, values) = modulated_scene();
         let none = BTreeSet::new();
         let canvas = PatchCanvas::new(&scene, &none, |e| e).values(&values).frame_key(2);
         let mut state = State {
             pinned: Some(OUT),
             framed_key: Some(1),
+            arrow_gesture: true,
+            arrow_deadline: Some(Instant::now() - Duration::from_millis(1)),
             ..State::default()
         };
         let redraw = Event::Window(window::Event::RedrawRequested(Instant::now()));
-        drive(&canvas, &mut state, &redraw, Point::ORIGIN);
+        let events = drive(&canvas, &mut state, &redraw, Point::ORIGIN);
+        assert!(!events.contains(&CanvasEvent::ArrowGroupEnd), "{events:?}");
+        assert!(!state.arrow_gesture);
+        assert!(state.arrow_deadline.is_none());
         assert_eq!(state.pinned, None);
+    }
+
+    /// The first frame has no old patch key, so it keeps a key gesture that
+    /// began before that redraw.
+    #[test]
+    fn first_frame_keeps_a_current_arrow_group() {
+        let scene = Scene::new(vec![module(1, 0.0)], Vec::new());
+        let none = BTreeSet::new();
+        let canvas = PatchCanvas::new(&scene, &none, |e| e).frame_key(2);
+        let now = Instant::now();
+        let mut state = State {
+            arrow_gesture: true,
+            arrow_deadline: Some(now + Duration::from_millis(100)),
+            ..State::default()
+        };
+        let events = drive(
+            &canvas,
+            &mut state,
+            &Event::Window(window::Event::RedrawRequested(now)),
+            Point::ORIGIN,
+        );
+        assert!(!events.contains(&CanvasEvent::ArrowGroupEnd), "{events:?}");
+        assert!(state.arrow_gesture);
+        assert!(state.arrow_deadline.is_some());
     }
 
     /// The lines are built once for a given pin, pointer, and selection,
@@ -4087,9 +4637,11 @@ mod tests {
             Scene::new(vec![modules[0].clone(), modules[1].clone(), source], Vec::new()).with_modulations(vec![
                 selected.clone(),
                 crate::scene::ModulationView {
+                    id: 2,
                     from: (3, 0),
                     to: 2,
                     widget: Some(0),
+                    enabled: true,
                 },
             ]);
         let none = BTreeSet::new();
@@ -4363,7 +4915,25 @@ mod tests {
             modifiers,
         });
         let end = drive(&canvas, &mut state, &up, knob);
-        assert_eq!(end, vec![CanvasEvent::GestureEnd]);
+        assert_eq!(end, vec![CanvasEvent::ArrowGroupPending]);
+        let quick = drive(&canvas, &mut state, &arrow_up(), knob);
+        assert!(
+            quick.iter().all(|e| !matches!(e, CanvasEvent::GestureStart)),
+            "{quick:?}"
+        );
+        assert_eq!(quick.first(), Some(&CanvasEvent::ArrowGroupResumed));
+        assert_eq!(
+            drive(&canvas, &mut state, &up, knob),
+            vec![CanvasEvent::ArrowGroupPending]
+        );
+        let due = state.arrow_deadline.expect("a release schedules the end");
+        let end = drive(
+            &canvas,
+            &mut state,
+            &Event::Window(window::Event::RedrawRequested(due)),
+            knob,
+        );
+        assert!(end.contains(&CanvasEvent::ArrowGroupEnd), "{end:?}");
     }
 
     /// A right press and release at `at`, with no move in between.

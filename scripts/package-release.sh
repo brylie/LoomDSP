@@ -31,7 +31,11 @@ triple="${3:-}"
 cd "$(dirname "$0")/.."
 
 version="${VERSION:-$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)}"
-target="${CARGO_TARGET_DIR:-target}"
+target=$(cargo metadata --format-version 1 --no-deps | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')
+if [ -z "$target" ]; then
+    echo "package-release.sh: could not find Cargo target directory" >&2
+    exit 1
+fi
 if [ -n "$triple" ]; then
     target="$target/$triple"
 fi
