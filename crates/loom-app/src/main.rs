@@ -46,7 +46,7 @@ use clap::Parser;
 use iced::widget::{button, column, container, mouse_area, row, rule, space, stack, text, toggler, tooltip};
 use iced::{Color, Element, Length, Point, Size, Subscription, Task, Theme};
 use live::Live;
-use loom_canvas::{CanvasEvent, LearnView, PanelValues, PatchCanvas, Scene};
+use loom_canvas::{CanvasEvent, DragLine, LearnView, PanelValues, PatchCanvas, Scene};
 use loom_core::{
     AssignmentId, Controller, EngineConfig, EngineParts, InputRef, LoomError, MidiEvent, ModuleDescriptor, ModuleId,
     OutputRef, OutputSafety, ProbeId, TRANSPORT_MODULE, create_engine,
@@ -219,6 +219,8 @@ const WINDOW: Size = Size::new(1440.0, 900.0);
 #[derive(Debug, Clone)]
 enum Message {
     Canvas(CanvasEvent),
+    /// The eligible inspector parameter currently under an output drag.
+    DropRow(Option<(u32, usize)>),
     Param {
         module: u32,
         index: usize,
@@ -432,12 +434,25 @@ fn opened_status(path: &std::path::Path, notes: &[String]) -> String {
     }
 }
 
+/// An output drag drawn across the window with the canvas's zoom.
+#[derive(Clone, Copy)]
+struct AssignDrag {
+    from: loom_canvas::PortRef,
+    start: Point,
+    at: Option<Point>,
+    zoom: f32,
+}
+
 struct App {
     controller: Controller,
     /// A full command queue left fresh modules staged for a later commit.
     retry_commit: bool,
     positions: BTreeMap<u32, Point>,
     scene: Scene,
+    /// The output drag drawn over the entire window.
+    assign_drag: Option<AssignDrag>,
+    /// The eligible inspector row under the pointer.
+    drop_row: Option<(u32, usize)>,
     /// Live values of panel controls and lights, apart from the scene so a
     /// knob turn does not rebuild tiles or cables.
     values: PanelValues,
@@ -932,6 +947,8 @@ impl App {
             retry_commit: false,
             positions,
             scene,
+            assign_drag: None,
+            drop_row: None,
             values,
             lights: BTreeMap::new(),
             load_notes,
@@ -2209,6 +2226,13 @@ impl App {
             }
             Message::AddProbe { probe, output, world } => self.add_probe(probe, output, world),
             Message::Canvas(event) => self.canvas_event(event),
+            Message::DropRow(row) => {
+                self.drop_row = if self.assign_drag.is_some() && !self.learning {
+                    row
+                } else {
+                    None
+                };
+            }
             Message::Param {
                 module,
                 index,
@@ -2499,6 +2523,28 @@ impl App {
 
     fn apply_canvas_event(&mut self, event: CanvasEvent) {
         match event {
+            CanvasEvent::AssignDrag { from, start, at, zoom } => {
+                self.assign_drag = Some(AssignDrag { from, start, at, zoom });
+            }
+            CanvasEvent::AssignDrop { from, at } => {
+                if at.is_some()
+                    && self.assign_drag.is_some_and(|drag| drag.from == from)
+                    && !self.learning
+                    && let Some((module, index)) = self.drop_row
+                {
+                    let source = OutputRef {
+                        module: ModuleId(from.module),
+                        port: from.index,
+                    };
+                    self.assign(source, ModuleId(module), index);
+                }
+                self.assign_drag = None;
+                self.drop_row = None;
+            }
+            CanvasEvent::AssignCancel => {
+                self.assign_drag = None;
+                self.drop_row = None;
+            }
             CanvasEvent::GestureStart => {
                 self.close_slider_gesture();
                 self.edits.start_gesture();
@@ -2831,6 +2877,7 @@ impl App {
     fn view(&self) -> Element<'_, Message> {
         let mut canvas = PatchCanvas::new(&self.scene, &self.selection, Message::Canvas)
             .values(&self.values)
+            .window_drag_line(self.assign_drag.is_some())
             .traces(&self.traces)
             .activity(self.carrying.iter().map(|output| (output.module.0, output.port)))
             .frame_key(self.frame_key)
@@ -2859,6 +2906,12 @@ impl App {
         // (its camera) in the same place in the widget tree. Tested by
         // `ui_test::tests::the_camera_survives_opening_the_browser`.
         let mut layers = stack![main];
+        if let Some(drag) = self.assign_drag
+            && let Some(at) = drag.at
+            && let Some(port) = self.scene.port(drag.from)
+        {
+            layers = layers.push(DragLine::new(drag.start, at, port.colour, drag.zoom));
+        }
         if let Some(open) = &self.browser {
             let outside = mouse_area(space().width(Length::Fill).height(Length::Fill))
                 .on_press(Message::Browser(browser::Message::Close));
@@ -2978,7 +3031,11 @@ impl App {
     }
 
     fn inspector(&self) -> Element<'_, Message> {
-        inspector::view(self.inspector_model())
+        inspector::view(
+            self.inspector_model(),
+            self.drop_row,
+            self.assign_drag.is_some() && !self.learning,
+        )
     }
 
     fn stats_bar(&self) -> Element<'_, Message> {

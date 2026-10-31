@@ -124,6 +124,7 @@ pub fn is_edit(controller: &Controller, event: &CanvasEvent) -> bool {
         | CanvasEvent::Connect { .. }
         | CanvasEvent::Disconnect(_)
         | CanvasEvent::Assign { .. }
+        | CanvasEvent::AssignDrop { .. }
         | CanvasEvent::DragDepth { .. }
         | CanvasEvent::Delete(_)
         | CanvasEvent::SetControl { .. }

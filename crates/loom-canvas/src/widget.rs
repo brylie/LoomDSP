@@ -91,6 +91,19 @@ pub enum CanvasEvent {
         /// Index in the module's panel widgets.
         widget: usize,
     },
+    /// An output is being dragged at window coordinates. `None` means the
+    /// pointer left the window, so a later release cannot make an assignment.
+    AssignDrag {
+        from: PortRef,
+        start: Point,
+        at: Option<Point>,
+        zoom: f32,
+    },
+    /// An output was released away from a canvas target. The app may assign
+    /// it to the inspector row under the pointer.
+    AssignDrop { from: PortRef, at: Option<Point> },
+    /// The output drag ended without an inspector drop.
+    AssignCancel,
     /// Delete modules.
     Delete(Vec<u32>),
     /// Set a control on a module's panel. `position` is the knob position
@@ -237,6 +250,7 @@ pub struct PatchCanvas<'a, Message> {
     interactive: bool,
     learn: Option<&'a LearnView>,
     still: Option<Still>,
+    window_drag_line: bool,
 }
 
 /// How a still image of the canvas starts: its camera, the control with
@@ -377,6 +391,7 @@ impl<'a, Message> PatchCanvas<'a, Message> {
             interactive: true,
             learn: None,
             still: None,
+            window_drag_line: false,
         }
     }
 
@@ -399,6 +414,12 @@ impl<'a, Message> PatchCanvas<'a, Message> {
     /// Sets the live values of panel controls and lights.
     pub fn values(mut self, values: &'a PanelValues) -> Self {
         self.values = Some(values);
+        self
+    }
+
+    /// The app draws output drags in its window layer, including the canvas.
+    pub fn window_drag_line(mut self, enabled: bool) -> Self {
+        self.window_drag_line = enabled;
         self
     }
 
@@ -465,6 +486,29 @@ impl<'a, Message> PatchCanvas<'a, Message> {
                 .is_some_and(WidgetView::accepts_modulation)
     }
 
+    /// Reports an output drag in window coordinates for the inspector layer.
+    fn assign_drag(
+        &self,
+        from: PortRef,
+        at: Option<Point>,
+        camera: Camera,
+        bounds: Rectangle,
+        shell: &mut Shell<'_, Message>,
+    ) {
+        if let Some(world) = self.scene.port_position(from) {
+            let screen = camera.to_screen(world);
+            self.emit(
+                shell,
+                CanvasEvent::AssignDrag {
+                    from,
+                    start: Point::new(bounds.x + screen.x, bounds.y + screen.y),
+                    at,
+                    zoom: camera.zoom,
+                },
+            );
+        }
+    }
+
     fn emit(&self, shell: &mut Shell<'_, Message>, event: CanvasEvent) {
         shell.publish((self.on_event)(event));
     }
@@ -479,6 +523,15 @@ impl<'a, Message> PatchCanvas<'a, Message> {
     /// gesture of a held arrow key. Used when the interaction is replaced or
     /// cut off, so a start always has an end.
     fn end_gestures(&self, state: &mut State, shell: &mut Shell<'_, Message>) {
+        if matches!(
+            state.interaction,
+            Interaction::Wiring {
+                from: PortRef { output: true, .. },
+                pulled: false
+            }
+        ) {
+            self.emit(shell, CanvasEvent::AssignCancel);
+        }
         if matches!(
             state.interaction,
             Interaction::Moving { .. }
@@ -563,6 +616,9 @@ struct State {
     camera: Camera,
     framed_key: Option<u64>,
     interaction: Interaction,
+    /// A release after CursorLeft cannot target the inspector until the
+    /// window reports CursorEntered again.
+    outside_window: bool,
     hover: Option<Hit>,
     /// Cursor in world coordinates, while over the canvas or dragging.
     cursor: Option<Point>,
@@ -882,6 +938,14 @@ impl<Message> PatchCanvas<'_, Message> {
         }
 
         match event {
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: keyboard::Key::Named(keyboard::key::Named::Escape),
+                ..
+            }) if matches!(state.interaction, Interaction::Wiring { .. }) => {
+                self.end_gestures(state, shell);
+                shell.request_redraw();
+                shell.capture_event();
+            }
             Event::Window(window::Event::RedrawRequested(now)) => {
                 let new_frame = state.framed_key != Some(self.frame_key);
                 if state.framed_key.is_some_and(|key| key != self.frame_key) {
@@ -1058,6 +1122,7 @@ impl<Message> PatchCanvas<'_, Message> {
                 let Some(screen) = screen else { return };
                 let world = state.camera.to_world(screen);
                 state.cursor = Some(world);
+                let hover = over.then(|| self.scene.hit(world, state.hit_radius()));
                 let mut redraw = false;
                 match &mut state.interaction {
                     Interaction::Panning { last, click } => {
@@ -1115,13 +1180,26 @@ impl<Message> PatchCanvas<'_, Message> {
                         }
                     }
                     Interaction::Holding { .. } | Interaction::Idle => {}
-                    Interaction::Wiring { .. } => redraw = true,
+                    Interaction::Wiring { from, pulled } => {
+                        if from.output && !*pulled && !state.outside_window {
+                            let at = match hover {
+                                Some(Hit::Port(target)) if target.output != from.output => self
+                                    .scene
+                                    .port_position(target)
+                                    .map(|world| state.camera.to_screen(world))
+                                    .map(|point| Point::new(bounds.x + point.x, bounds.y + point.y)),
+                                _ => None,
+                            }
+                            .unwrap_or(Point::new(bounds.x + screen.x, bounds.y + screen.y));
+                            self.assign_drag(*from, Some(at), state.camera, bounds, shell);
+                        }
+                        redraw = true;
+                    }
                     Interaction::Selecting { current, .. } => {
                         *current = world;
                         redraw = true;
                     }
                 }
-                let hover = over.then(|| self.scene.hit(world, state.hit_radius()));
                 if hover != state.hover {
                     state.hover = hover;
                     redraw = true;
@@ -1154,7 +1232,8 @@ impl<Message> PatchCanvas<'_, Message> {
                 let world = screen.map(|s| state.camera.to_world(s));
                 match interaction {
                     Interaction::Wiring { from, pulled } => {
-                        match world.map(|w| self.scene.hit(w, state.hit_radius())) {
+                        let mut handled = false;
+                        match world.filter(|_| over).map(|w| self.scene.hit(w, state.hit_radius())) {
                             Some(Hit::Port(to)) => {
                                 let pair = if from.output { (from, to) } else { (to, from) };
                                 if pair.0.output && !pair.1.output {
@@ -1165,14 +1244,31 @@ impl<Message> PatchCanvas<'_, Message> {
                                             to: pair.1,
                                         },
                                     );
+                                    handled = true;
                                 }
                             }
                             Some(Hit::Widget { module, widget })
                                 if !pulled && self.takes_assignment(from, module, widget) =>
                             {
                                 self.emit(shell, CanvasEvent::Assign { from, module, widget });
+                                handled = true;
                             }
                             _ => {}
+                        }
+                        if from.output && !pulled {
+                            if handled
+                                || screen.is_some_and(|p| bounds.contains(Point::new(bounds.x + p.x, bounds.y + p.y)))
+                            {
+                                self.emit(shell, CanvasEvent::AssignCancel);
+                            } else {
+                                self.emit(
+                                    shell,
+                                    CanvasEvent::AssignDrop {
+                                        from,
+                                        at: if state.outside_window { None } else { cursor.position() },
+                                    },
+                                );
+                            }
                         }
                     }
                     Interaction::Selecting { start, current, base } => {
@@ -1220,9 +1316,23 @@ impl<Message> PatchCanvas<'_, Message> {
                 shell.request_redraw();
             }
             Event::Mouse(mouse::Event::CursorLeft) => {
+                state.outside_window = true;
+                if let Interaction::Wiring { from, pulled: false } = state.interaction
+                    && from.output
+                {
+                    self.assign_drag(from, None, state.camera, bounds, shell);
+                }
                 self.release_pointer_hold(state, shell);
                 if state.hover.take().is_some() {
                     shell.request_redraw();
+                }
+            }
+            Event::Mouse(mouse::Event::CursorEntered) => {
+                state.outside_window = false;
+                if let Interaction::Wiring { from, pulled: false } = state.interaction
+                    && from.output
+                {
+                    self.assign_drag(from, cursor.position(), state.camera, bounds, shell);
                 }
             }
             Event::Window(window::Event::Unfocused) => {
@@ -1937,6 +2047,16 @@ impl<Message> PatchCanvas<'_, Message> {
                 }
             }
             Hit::Port(port) => {
+                if port.output {
+                    state.outside_window = false;
+                    self.assign_drag(
+                        port,
+                        Some(Point::new(bounds.x + screen.x, bounds.y + screen.y)),
+                        state.camera,
+                        bounds,
+                        shell,
+                    );
+                }
                 self.begin(
                     state,
                     Interaction::Wiring {
@@ -2236,8 +2356,9 @@ impl<Message> PatchCanvas<'_, Message> {
                         .shapes
                         .push(Shape::new(ring, radius, Color::TRANSPARENT, p.hover, 1.5));
                 }
-                if let (Some(start), Some(port), Some(cursor)) =
-                    (self.scene.port_position(*from), self.scene.port(*from), state.cursor)
+                if !(self.window_drag_line && from.output && !pulled)
+                    && let (Some(start), Some(port), Some(cursor)) =
+                        (self.scene.port_position(*from), self.scene.port(*from), state.cursor)
                 {
                     // Snap the loose end onto a port under the cursor.
                     let end = match state.hover {
@@ -4000,6 +4121,7 @@ mod tests {
                     module: 2,
                     widget: 0
                 },
+                CanvasEvent::AssignCancel,
                 CanvasEvent::GestureEnd
             ]
         );
@@ -4010,7 +4132,7 @@ mod tests {
             widget: 2
         }));
         let (events, on_light) = drop_on(&canvas, &scene, 1);
-        assert_eq!(events, vec![CanvasEvent::GestureEnd]);
+        assert_eq!(events, vec![CanvasEvent::AssignCancel, CanvasEvent::GestureEnd]);
         assert_eq!(
             on_knob,
             on_light + 1,
@@ -4027,7 +4149,7 @@ mod tests {
         let learn = LearnView::default();
         let canvas = learning(&scene, &none, &learn);
         let (events, _) = drop_on(&canvas, &scene, 0);
-        assert_eq!(events, vec![CanvasEvent::GestureEnd]);
+        assert_eq!(events, vec![CanvasEvent::AssignCancel, CanvasEvent::GestureEnd]);
     }
 
     /// The assign scene with one assignment from the source output to the

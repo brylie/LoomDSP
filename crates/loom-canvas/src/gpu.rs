@@ -739,6 +739,61 @@ impl Primitive for CanvasPrimitive {
     }
 }
 
+/// The window-wide output drag. Its pipeline has separate buffers from the
+/// patch canvas, so preparing two primitives cannot overwrite either one.
+#[derive(Debug, Clone, Copy)]
+pub struct DragPrimitive {
+    pub cable: Cable,
+    pub zoom: f32,
+}
+
+/// Separate GPU state for the window-wide drag, using the canvas shader.
+pub struct DragPipeline(CanvasPipeline);
+
+impl Pipeline for DragPipeline {
+    fn new(device: &wgpu::Device, queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self {
+        Self(CanvasPipeline::new(device, queue, format))
+    }
+}
+
+impl Primitive for DragPrimitive {
+    type Pipeline = DragPipeline;
+
+    fn prepare(
+        &self,
+        pipeline: &mut DragPipeline,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        bounds: &Rectangle,
+        viewport: &Viewport,
+    ) {
+        let state = &mut pipeline.0;
+        let globals = Globals {
+            origin: [0.0, 0.0],
+            size: [bounds.width.max(1.0), bounds.height.max(1.0)],
+            zoom: self.zoom,
+            scale: viewport.scale_factor(),
+            cable_dim: 1.0,
+            pad: 0.0,
+        };
+        queue.write_buffer(&state.globals, 0, bytemuck::bytes_of(&globals));
+        let bytes = bytemuck::bytes_of(&self.cable);
+        if state.overlay_uploaded.0 != bytes {
+            state.overlay_cables.upload(device, queue, &[self.cable]);
+            state.overlay_uploaded.0 = bytes.to_vec();
+        }
+    }
+
+    fn draw(&self, pipeline: &DragPipeline, pass: &mut wgpu::RenderPass<'_>) -> bool {
+        let state = &pipeline.0;
+        pass.set_bind_group(0, &state.bind_group, &[]);
+        pass.set_pipeline(&state.cables);
+        pass.set_vertex_buffer(0, state.overlay_cables.slice());
+        pass.draw(0..CABLE_VERTICES, 0..1);
+        true
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
