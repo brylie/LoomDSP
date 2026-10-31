@@ -43,7 +43,7 @@ Patch(
     name: "Inverted Envelope",
     modules: [
         PatchModule(id: 1, kind: "loom.math.constant@1", params: {"value": 1}),
-        PatchModule(id: 2, kind: "loom.env.adsr@1", params: {"attack": 0.05, "decay": 0.2, "sustain": 0.3, "release": 0.3}),
+        PatchModule(id: 2, kind: "loom.env.envelope@1", params: {"attack": 0.05, "decay": 0.2, "sustain": 0.3, "release": 0.3}),
         PatchModule(id: 3, kind: "loom.math.sub@1"),
         PatchModule(id: 4, kind: "loom.phase.generator@1"),
         PatchModule(id: 5, kind: "loom.osc.saw@1"),

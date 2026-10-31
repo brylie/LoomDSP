@@ -28,12 +28,13 @@ One page for each built-in module, made from its descriptor. After you change a 
 
 | Module | ID | Description |
 |---|---|---|
-| [ADSR](loom.env.adsr.md) | `loom.env.adsr` | Envelope from 0 to 1, triggered by a gate. Linear attack, exponential decay and release. |
+| [Envelope](loom.env.envelope.md) | `loom.env.envelope` | A level from 0 to 1, started by a gate. ADSR holds while the gate is high; AD runs once, so a trigger also starts it. Curve bends every stage. |
 
 ## Filter
 
 | Module | ID | Description |
 |---|---|---|
+| [Ladder](loom.filter.ladder.md) | `loom.filter.ladder` | A resonant low-pass with a 12, 18, or 24 dB slope. High resonance thins the bass and, at 18 and 24 dB, sings on its own. The cutoff input adds pitch: +0.1 doubles the cutoff. |
 | [One-pole](loom.filter.onepole.md) | `loom.filter.onepole` | A gentle first-order filter, 6 dB per octave. The cutoff input adds pitch: +0.1 doubles the cutoff. Low cutoffs smooth control signals. |
 | [SVF](loom.filter.svf.md) | `loom.filter.svf` | State variable filter (trapezoidal integration). The cutoff input adds pitch: +0.1 doubles the cutoff. |
 
@@ -66,6 +67,7 @@ One page for each built-in module, made from its descriptor. After you change a 
 
 | Module | ID | Description |
 |---|---|---|
+| [MIDI Controller](loom.midi.controller.md) | `loom.midi.controller` | Turns a MIDI controller, the pitch bend, or channel aftertouch into a signal. Controllers and aftertouch go from 0 to 1, bend from -1 to 1. |
 | [MIDI Note](loom.midi.note.md) | `loom.midi.note` | Monophonic note input (last-note priority). Pitch includes pitch bend. |
 
 ## Math
