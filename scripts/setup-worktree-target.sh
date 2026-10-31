@@ -13,15 +13,36 @@ fi
 target_root=$(cd "$1" && pwd -P)
 
 if [ "${2:-}" = --all ]; then
-    git worktree list --porcelain | sed -n 's/^worktree //p' | while IFS= read -r worktree_dir; do
-        "$0" "$target_root" "$worktree_dir"
-    done
+    git worktree list --porcelain | awk '
+        BEGIN { RS = ""; FS = "\n" }
+        {
+            for (i = 1; i <= NF; i++) {
+                if ($i == "bare" || $i ~ /^prunable( |$)/) next
+            }
+            path = $1
+            sub(/^worktree /, "", path)
+            print path
+        }
+    ' | (
+        failed=0
+        while IFS= read -r worktree_dir; do
+            "$0" "$target_root" "$worktree_dir" || failed=$((failed + 1))
+        done
+        if [ "$failed" -gt 0 ]; then
+            echo "$failed worktree(s) could not be configured" >&2
+            exit 1
+        fi
+    )
     exit 0
 fi
 
 root=$(git -C "${2:-.}" rev-parse --show-toplevel)
 
 config="$root/.cargo/config.toml"
+if [ -e "$root/.cargo/config" ] || [ -L "$root/.cargo/config" ]; then
+    echo "Legacy Cargo config at $root/.cargo/config would override $config" >&2
+    exit 1
+fi
 if [ -e "$config" ]; then
     if ! grep -Fq 'Regenerate with scripts/setup-worktree-target.sh.' "$config" &&
         ! grep -Fq 'Regenerate with scripts/setup-external-target.sh.' "$config"; then
