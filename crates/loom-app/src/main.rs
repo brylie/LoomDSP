@@ -5,6 +5,7 @@
 //! canvas against the performance gates in NFR-PERF-04.
 
 mod alerts;
+mod audio_watch;
 #[cfg(test)]
 mod autosave_tests;
 mod bench;
@@ -126,6 +127,11 @@ struct Args {
     /// show where the engine left them.
     #[arg(long, value_name = "N", requires = "inspect")]
     frames: Option<usize>,
+    /// With --frames: hold a note (A3, as the Hold note button plays it)
+    /// while the engine runs, so a voice patch sounds and its scopes show a
+    /// wave.
+    #[arg(long, requires = "frames")]
+    hold_note: bool,
     /// Keep autosave recovery copies in this folder instead of the
     /// per-user one (docs/design/autosave.md). For tests and scripts.
     #[arg(long, value_name = "FOLDER", conflicts_with = "no_recovery")]
@@ -267,13 +273,19 @@ enum Message {
     },
     Animate(bool),
     Frame(Instant),
+    /// A slow tick while a recording runs, to notice a write error.
     Tick,
+    /// The audio watcher saw a change to show, or stalled callbacks.
+    Audio(audio_watch::Event),
     /// A frame while live modulated values are on screen.
     LiveFrame,
     /// New brightness for lights on screen.
     Lights(Vec<(lights::Light, f32)>),
     /// New levels for meter probes.
     Meters(Vec<(ProbeId, live::Level)>),
+    /// What the telemetry thread found that changed on screen: meter levels
+    /// and scope traces.
+    Telemetry(monitor::Update),
     /// Turn MIDI learn mode on or off.
     ToggleLearn,
     /// In learn mode, arm a parameter from the inspector.
@@ -394,6 +406,28 @@ fn transport_running(controller: &Controller) -> Option<bool> {
     Some(controller.display(id, index)? >= 0.5)
 }
 
+impl Message {
+    /// True for the frequent messages that never change the patch: live
+    /// readings, timers, and frames. Every other message may, so autosave
+    /// looks again after it. Telling them apart lets the autosave timer
+    /// stop in an idle app (#90).
+    fn keeps_patch(&self) -> bool {
+        matches!(
+            self,
+            Self::Audio(audio_watch::Event::Stats { .. })
+                | Self::Tick
+                | Self::Meters(_)
+                | Self::Telemetry(_)
+                | Self::Lights(_)
+                | Self::Autosave
+                | Self::Frame(_)
+                | Self::LiveFrame
+                | Self::MidiPoll
+                | Self::BenchDone
+        )
+    }
+}
+
 /// `opened <path>`, followed by the load notes when there are any, so a note
 /// about what loaded differently stays in view.
 fn opened_status(path: &std::path::Path, notes: &[String]) -> String {
@@ -424,6 +458,15 @@ struct App {
     run_driven: bool,
     /// Latest level of each meter probe.
     meter_levels: std::collections::HashMap<ProbeId, live::Level>,
+    /// The traces of the scopes on screen (`docs/design/panels.md`, Drawing
+    /// the scope trace).
+    traces: loom_canvas::ScopeTraces,
+    /// Outputs carrying a signal (`docs/design/panels.md`, Signal activity
+    /// on ports).
+    carrying: BTreeSet<OutputRef>,
+    /// True while the canvas draws full scope traces (close zoom), false
+    /// when it draws only their level.
+    full_traces: bool,
     /// Modules whose lights or meters are on screen, as the canvas reports.
     visible_displays: Vec<u32>,
     selection: BTreeSet<u32>,
@@ -479,8 +522,15 @@ struct App {
     /// What belongs to the machine: preferences, devices, MIDI inputs.
     rig: settings::Rig,
     audio_stats: Option<Arc<CallbackStats>>,
+    /// Audio load values from the watcher's completed tick.
+    load_peak: f64,
+    load_max: f64,
     audio_callbacks_seen: u64,
     audio_callbacks_advanced: Instant,
+    /// True when the recovery copy matches the patch and no job is under
+    /// way, so the autosave timer can stop. Any message that may change
+    /// the patch clears it.
+    autosave_settled: bool,
     audio_name: String,
     /// Note input shared by every MIDI port and the "Hold note" button.
     midi: Option<SharedMidi>,
@@ -757,6 +807,7 @@ impl App {
         if let Some(line) = lines.into_iter().last() {
             self.status = line;
         }
+        self.autosave_settled = session.settled();
     }
 
     /// Builds an engine and loads a patch into it. On failure nothing else
@@ -888,6 +939,9 @@ impl App {
             load_notes,
             run_driven,
             meter_levels: std::collections::HashMap::new(),
+            traces: loom_canvas::ScopeTraces::new(),
+            carrying: BTreeSet::new(),
+            full_traces: true,
             visible_displays: Vec::new(),
             selection: BTreeSet::new(),
             name,
@@ -917,12 +971,19 @@ impl App {
                 },
             ),
             audio_stats: audio.as_ref().map(|a| a.stats().clone()),
+            load_peak: 0.0,
+            load_max: 0.0,
             audio_callbacks_seen: 0,
             audio_callbacks_advanced: Instant::now(),
+            autosave_settled: false,
             _audio: audio,
             idle_engine,
-            monitor: monitor::Monitor::new(telemetry, generation),
-            live: Live::new(),
+            monitor: monitor::Monitor::new(telemetry, sample_rate, generation),
+            live: {
+                let mut live = Live::showing_activity();
+                live.set_activity(rig.store.saved().show_activity);
+                live
+            },
             dropouts: alerts::Dropouts::default(),
             rig,
             audio_name,
@@ -1140,6 +1201,7 @@ impl App {
             dump_ui: false,
             select: Vec::new(),
             frames: None,
+            hold_note: false,
             recovery_dir: None,
             no_recovery: true,
             test_modules: self.test_modules,
@@ -1215,14 +1277,25 @@ impl App {
         let main = if self.measuring {
             // Redraw every frame, so the counter measures real render cost.
             iced::window::frames().map(Message::Frame)
-        } else if self.matrix.tab == RightTab::Matrix && self._audio.is_none() && !self.retry_commit {
-            // The matrix has no live values. With no stream and no queued
-            // commit, its idle view has no audio numbers to refresh.
-            Subscription::none()
-        } else {
-            // Otherwise the window redraws only when something changes. A
-            // slow tick keeps the audio numbers fresh.
+        } else if self.rig.recorder.is_some() {
+            // Otherwise the window redraws only when something changes
+            // (#90). A recording, a QA tool, ticks to notice a write error.
             iced::time::every(Duration::from_millis(500)).map(|_| Message::Tick)
+        } else {
+            Subscription::none()
+        };
+        // The audio numbers and stalled callbacks are read on a thread,
+        // which wakes the UI only when the stats bar changes (#90).
+        let audio_watch = match &self.audio_stats {
+            Some(stats) => Subscription::run_with(
+                audio_watch::Watch {
+                    stats: stats.clone(),
+                    engine: self.controller.stats().clone(),
+                },
+                audio_watch::stream,
+            )
+            .map(Message::Audio),
+            None => Subscription::none(),
         };
         // Live modulated values move every block, so a patch with an
         // assignment that is on follows them every frame.
@@ -1235,7 +1308,7 @@ impl App {
         } else {
             Subscription::none()
         };
-        let telemetry = Subscription::run_with(self.monitor.clone(), monitor::stream).map(Message::Meters);
+        let telemetry = Subscription::run_with(self.monitor.clone(), monitor::stream).map(Message::Telemetry);
         let close = iced::window::close_requests().map(|_| Message::CloseRequested);
         let control = self
             .control
@@ -1247,20 +1320,36 @@ impl App {
                 self.control_waiting()
                     .then(|| iced::window::frames().map(Message::ControlFrame)),
             );
+        // The autosave timer runs only while a copy may be due: once the
+        // copy matches the patch, an idle app ticks no more (#90).
         let autosave = match &self.recovery {
-            Some(_) => iced::time::every(recovery::TICK).map(|_| Message::Autosave),
-            None => Subscription::none(),
+            Some(_) if !self.autosave_settled => iced::time::every(recovery::TICK).map(|_| Message::Autosave),
+            _ => Subscription::none(),
         };
         // MIDI inputs plugged in and out are found by polling four times a
         // second: the systems offer no portable callback (device-changes.md).
+        // With a real host the list is read on a thread, which wakes the
+        // UI only when it changes. A test host is polled from the UI.
         let midi_poll = if self.rig.midi_in.is_some() && !self.rig.flags.no_midi {
-            iced::time::every(Duration::from_millis(250)).map(|_| Message::MidiPoll)
+            match self.rig.host.midi_lister() {
+                Some(list) => Subscription::run_with(
+                    devices::MidiWatch {
+                        list,
+                        seen: self.rig.seen_midi.clone(),
+                        generation: self.generation,
+                    },
+                    devices::midi_stream,
+                )
+                .map(|()| Message::MidiPoll),
+                None => iced::time::every(devices::MIDI_POLL).map(|_| Message::MidiPoll),
+            }
         } else {
             Subscription::none()
         };
-        // Audio device loss, silent stalls, and device reconnection are watched
-        // by polling four times a second (device-changes.md, Audio device loss).
-        let audio_poll = if !self.no_audio && !self.fake_audio {
+        // While audio plays, the audio watcher reports stalled callbacks.
+        // Once a device is lost, reconnection is tried by polling four
+        // times a second (device-changes.md, Audio device loss).
+        let audio_poll = if !self.no_audio && !self.fake_audio && self._audio.is_none() {
             iced::time::every(Duration::from_millis(250)).map(|_| Message::AudioPoll)
         } else {
             Subscription::none()
@@ -1272,6 +1361,7 @@ impl App {
         Subscription::batch(
             [
                 main,
+                audio_watch,
                 live,
                 self.light_watch(),
                 telemetry,
@@ -1361,8 +1451,10 @@ impl App {
     fn drain_idle_engine(&mut self) {
         if let Some(engine) = self.idle_engine.as_mut() {
             engine.apply_pending();
-            self.controller.collect_garbage();
         }
+        // What the engine handed back is freed here, after any message,
+        // rather than on a timer that would wake an idle app (#90).
+        self.controller.collect_garbage();
     }
 
     /// Runs the engine for `frames` frames on silent buffers, as an audio
@@ -1506,6 +1598,8 @@ impl App {
         }
         let dragging = self.depth_drag.flatten();
         scene::update_panel_values_dragging(&mut self.values, &self.controller, &shown, dragging);
+        // A scope's window or trigger may have changed.
+        self.publish_watch();
     }
 
     /// Takes the latest dropout count for the stats bar warning. Runs on
@@ -1533,11 +1627,81 @@ impl App {
             .collect()
     }
 
+    /// Brings the meter and scope probes in line with the graph and the
+    /// displays on screen, and tells the telemetry thread what to read.
+    /// Call it before a commit.
+    fn sync_live(&mut self) {
+        let wanted = self.metered_outputs();
+        self.live.sync(&mut self.controller, &wanted);
+        let scopes: BTreeSet<OutputRef> = scene::scope_outputs(&self.controller, &self.visible_displays)
+            .into_iter()
+            .map(|scope| scope.output)
+            .collect();
+        self.live.sync_scopes(&mut self.controller, &scopes);
+        self.publish_watch();
+    }
+
+    /// Tells the telemetry thread which meters and scopes are drawn, and
+    /// how each scope triggers. Runs after probes or scope parameters
+    /// change.
+    fn publish_watch(&mut self) {
+        let meters = self
+            .metered_outputs()
+            .into_iter()
+            .filter_map(|output| self.live.probe(output))
+            .collect();
+        let rate = self.monitor.sample_rate();
+        let scopes = scene::scope_outputs(&self.controller, &self.visible_displays)
+            .into_iter()
+            .filter_map(|scope| {
+                let probe = self.live.scope_probe(scope.output)?;
+                let want = monitor::ScopeWant {
+                    window: (scope.window * rate).round().max(1.0) as usize,
+                    trigger: scope.trigger,
+                };
+                Some((probe, want))
+            })
+            .collect();
+        let activity = self.live.activity_probes().collect();
+        self.carrying.retain(|output| self.live.probe(*output).is_some());
+        let list = monitor::WatchList {
+            meters,
+            activity,
+            scopes,
+            full_traces: self.full_traces,
+        };
+        if self.monitor.watched() != list {
+            self.monitor.watch(list);
+        }
+        // A scope that left the screen, or lost its probe, keeps no trace.
+        let shown: BTreeSet<(u32, usize)> = scene::scope_outputs(&self.controller, &self.visible_displays)
+            .into_iter()
+            .filter(|scope| self.live.scope_probe(scope.output).is_some())
+            .map(|scope| scope.widget)
+            .collect();
+        self.traces.retain(|module, widget| shown.contains(&(module, widget)));
+    }
+
+    /// Takes new scope traces from the telemetry thread and gives each to
+    /// the scopes that show its probe.
+    fn take_traces(&mut self, traces: Vec<(ProbeId, loom_canvas::Trace)>) {
+        if traces.is_empty() {
+            return;
+        }
+        let scopes = scene::scope_outputs(&self.controller, &self.visible_displays);
+        for (probe, trace) in traces {
+            for scope in &scopes {
+                if self.live.scope_probe(scope.output) == Some(probe) {
+                    self.traces.set(scope.widget.0, scope.widget.1, trace.clone());
+                }
+            }
+        }
+    }
+
     /// Adds probes for meters that came on screen and removes those that
     /// left. Only probes change, so the scene is not rebuilt.
     fn sync_probes(&mut self) {
-        let wanted = self.metered_outputs();
-        self.live.sync(&mut self.controller, &wanted);
+        self.sync_live();
         // Probe IDs are never reused, so a level of a removed probe is dead.
         let live: std::collections::HashSet<ProbeId> = self.live.probes().collect();
         self.meter_levels.retain(|probe, _| live.contains(probe));
@@ -1839,8 +2003,7 @@ impl App {
     fn commit(&mut self) -> bool {
         self.keep_run_state();
         // Probes follow the graph: a removed module loses its probes.
-        let wanted = self.metered_outputs();
-        self.live.sync(&mut self.controller, &wanted);
+        self.sync_live();
         let sent = match self.controller.commit() {
             Ok(_) => {
                 self.retry_commit = false;
@@ -1862,8 +2025,23 @@ impl App {
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
+        use loom_canvas::stats::FrameCause;
+        let cause = match &message {
+            Message::Tick => FrameCause::Tick,
+            Message::LiveFrame => FrameCause::Live,
+            Message::Meters(_) | Message::Telemetry(_) | Message::Lights(_) => FrameCause::Meters,
+            Message::Control(_) | Message::ControlFrame(_) | Message::Located { .. } => FrameCause::Control,
+            Message::Canvas(_) | Message::Key(_) | Message::CloseRequested => FrameCause::Input,
+            Message::Frame(_) => FrameCause::Forced,
+            _ => FrameCause::Other,
+        };
+        loom_canvas::stats::request_frame(cause);
         // A mode change the engine's full queue refused goes again now.
         self.send_pending_safety();
+        if !message.keeps_patch() {
+            // It may have changed the patch: autosave looks again.
+            self.autosave_settled = false;
+        }
         let was_open = self.browser.is_some();
         let task = match message {
             Message::Browser(message) => self.browser_message(message),
@@ -2229,12 +2407,46 @@ impl App {
                 self.update_dropouts(Instant::now());
             }
             Message::AudioPoll => self.poll_audio(),
+            Message::Audio(audio_watch::Event::Stats {
+                dropouts,
+                at,
+                peak,
+                max,
+            }) => {
+                self.load_peak = peak;
+                self.load_max = max;
+                self.dropouts.update(dropouts, at);
+            }
+            Message::Audio(audio_watch::Event::Stalled { callbacks, advanced }) => {
+                // Time the stall from when the watcher last saw a callback,
+                // as a poll on this thread would have.
+                if callbacks >= self.audio_callbacks_seen {
+                    self.audio_callbacks_seen = callbacks;
+                    self.audio_callbacks_advanced = self.audio_callbacks_advanced.max(advanced);
+                }
+                self.poll_audio();
+            }
             Message::Meters(levels) => {
                 // A reading may arrive after its probe was removed.
                 let live: std::collections::HashSet<ProbeId> = self.live.probes().collect();
                 self.meter_levels
                     .extend(levels.into_iter().filter(|(probe, _)| live.contains(probe)));
                 self.refresh_values();
+            }
+            Message::Telemetry(update) => {
+                self.take_traces(update.traces);
+                for (probe, carrying) in update.activity {
+                    if let Some(output) = self.live.output_of(probe) {
+                        if carrying {
+                            self.carrying.insert(output);
+                        } else {
+                            self.carrying.remove(&output);
+                        }
+                    }
+                }
+                if !update.levels.is_empty() {
+                    self.handle(Message::Meters(update.levels));
+                }
             }
             Message::Lights(readings) => {
                 self.lights.extend(readings);
@@ -2437,6 +2649,10 @@ impl App {
                 self.visible_displays = ids;
                 self.sync_probes();
                 self.refresh_values();
+            }
+            CanvasEvent::TraceDetail(full) => {
+                self.full_traces = full;
+                self.publish_watch();
             }
             CanvasEvent::ToggleRun => self.toggle_run(),
             CanvasEvent::Delete(ids) => {
@@ -2641,6 +2857,8 @@ impl App {
     fn view(&self) -> Element<'_, Message> {
         let mut canvas = PatchCanvas::new(&self.scene, &self.selection, Message::Canvas)
             .values(&self.values)
+            .traces(&self.traces)
+            .activity(self.carrying.iter().map(|output| (output.module.0, output.port)))
             .frame_key(self.frame_key)
             .browser_key(self.browser_key)
             .interactive(self.browser.is_none() && self.probe_menu.is_none() && self.rig.window.is_none())
@@ -2831,7 +3049,7 @@ impl App {
         // The snapshot reads the same model, so the two cannot disagree.
         let stats = self.stats_model();
         let audio: Element<'_, Message> = if stats.playing {
-            let load = bar_text(stats.load_text()).color(severity_colour(alerts::load_severity(stats.load)));
+            let load = bar_text(stats.load_text()).color(severity_colour(alerts::load_severity(self.load_peak)));
             let dropouts = bar_text(format!("dropouts {}", stats.dropouts))
                 .color(severity_colour(self.dropouts.severity(Instant::now())));
             let mut items = row![bar_text(stats.label).color(DIM), load, dropouts].spacing(10);
@@ -2985,6 +3203,29 @@ mod tests {
         App::new(app_args())
     }
 
+    /// Audio watcher events update the warning peak and rolling maximum,
+    /// including the last callback time used to detect a stalled stream.
+    #[test]
+    fn audio_watcher_events_update_the_stats_model() {
+        let mut app = app();
+        let now = Instant::now();
+        let _ = app.update(Message::Audio(audio_watch::Event::Stats {
+            dropouts: 1,
+            at: now,
+            peak: 0.95,
+            max: 0.95,
+        }));
+        assert_eq!(app.load_peak, 0.95);
+        assert_eq!(app.load_max, 0.95);
+        assert_eq!(app.dropouts.count(), 1);
+        let _ = app.update(Message::Audio(audio_watch::Event::Stalled {
+            callbacks: 3,
+            advanced: now,
+        }));
+        assert_eq!(app.audio_callbacks_seen, 3);
+        assert!(app.audio_callbacks_advanced >= now);
+    }
+
     /// #16: the inspector help text names every canvas shortcut, the new
     /// Cmd/Ctrl+0 zoom reset and the ones that were there before it.
     #[test]
@@ -3058,6 +3299,7 @@ mod tests {
             dump_ui: false,
             select: Vec::new(),
             frames: None,
+            hold_note: false,
             recovery_dir: None,
             no_recovery: false,
             test_modules: false,

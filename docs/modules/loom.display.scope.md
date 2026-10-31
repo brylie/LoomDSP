@@ -32,11 +32,12 @@ Shows its input over time. Passes the input through unchanged.
 
 ## Panel
 
-9 by 3 grid units.
+9 by 8 grid units.
 
 - Knob: **Window** (`window`)
 - Toggle: **Auto** (`auto`)
 - Knob: **Level** (`level`)
+- Scope: **Out** (`out`)
 
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->
 

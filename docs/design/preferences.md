@@ -51,6 +51,7 @@ RON, like patches (ADR-0008):
 (
     version: 1,
     output_safety: "low-latency",
+    show_activity: true,
 )
 ```
 
@@ -58,10 +59,13 @@ RON, like patches (ADR-0008):
 |---|---|---|
 | `version` | `1` | `1` |
 | `output_safety` | `"low-latency"`, `"clean"`, `"off"` | `"low-latency"` |
+| `show_activity` | `true`, `false` | `true` |
 
 Values use the same spelling as the `--output-safety` flag. *Why:* one name for each mode in the docs, the flag, and the file, so a player who edits the file by hand does not have to learn a second spelling.
 
 A missing field takes its default. *Why:* a file written by this version stays valid when a later version adds fields, and a hand-written file can hold only the field the player cares about.
+
+The **Show signal activity on ports** checkbox saves `show_activity`. Changing it updates the running engine's probes without rebuilding the engine. Future engines use the saved choice. See [Signal activity on ports](panels.md#signal-activity-on-ports).
 
 ### Reading the file
 

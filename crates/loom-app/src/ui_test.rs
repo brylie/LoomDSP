@@ -104,6 +104,7 @@ impl Ui {
             dump_ui: false,
             select: Vec::new(),
             frames: None,
+            hold_note: false,
             recovery_dir: None,
             no_recovery: false,
             test_modules: false,

@@ -19,14 +19,28 @@ pub const FILE_NAME: &str = "preferences.ron";
 const VERSION: u32 = 1;
 
 /// Every setting the file holds.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Preferences {
     pub output_safety: OutputSafety,
+    /// Show signal activity on connected ports (panels.md, Signal activity).
+    pub show_activity: bool,
     pub audio: AudioPrefs,
     pub midi: MidiPrefs,
     /// The MIDI message that runs panic (panic.md, MIDI trigger). It
     /// belongs to the rig, so it is saved here and never in a patch.
     pub panic: Option<PanicPref>,
+}
+
+impl Default for Preferences {
+    fn default() -> Self {
+        Self {
+            output_safety: OutputSafety::default(),
+            show_activity: true,
+            audio: AudioPrefs::default(),
+            midi: MidiPrefs::default(),
+            panic: None,
+        }
+    }
 }
 
 /// The panic trigger as the file writes it: `Cc(channel, controller)` or
@@ -180,6 +194,9 @@ fn parse(text: &str) -> Result<(Preferences, Vec<String>), String> {
                 );
                 preferences.output_safety = name.parse().unwrap_or_default();
             }
+            "show_activity" => {
+                preferences.show_activity = field(&mut notes, "show_activity", &raw, &true, |_| true);
+            }
             "audio" => preferences.audio = audio(&mut notes, &raw),
             "panic" => {
                 preferences.panic = field(&mut notes, "panic", &raw, &None, |p: &Option<PanicPref>| {
@@ -318,6 +335,7 @@ impl<'de> Deserialize<'de> for Fields {
 struct FileOut<'a> {
     version: u32,
     output_safety: &'static str,
+    show_activity: bool,
     audio: AudioOut<'a>,
     midi: &'a MidiPrefs,
     panic: Option<PanicPref>,
@@ -336,6 +354,7 @@ pub fn to_text(preferences: &Preferences) -> String {
     let file = FileOut {
         version: VERSION,
         output_safety: preferences.output_safety.name(),
+        show_activity: preferences.show_activity,
         audio: AudioOut {
             device: &preferences.audio.device,
             sample_rate: preferences.audio.sample_rate,
@@ -494,6 +513,7 @@ mod tests {
     fn a_full_file_reads_back() {
         let preferences = Preferences {
             output_safety: OutputSafety::Clean,
+            show_activity: false,
             audio: AudioPrefs {
                 device: DeviceChoice::Named("MOTU M4".into()),
                 sample_rate: RateChoice::Hz(96_000),
@@ -510,6 +530,7 @@ mod tests {
             r#"(
     version: 1,
     output_safety: "clean",
+    show_activity: false,
     audio: (
         device: Named("MOTU M4"),
         sample_rate: Hz(96000),
@@ -531,6 +552,7 @@ mod tests {
     fn missing_fields_take_their_defaults() {
         let (preferences, notes) = parse("(output_safety: \"off\")").unwrap();
         assert_eq!(preferences.output_safety, OutputSafety::Off);
+        assert!(preferences.show_activity);
         assert_eq!(preferences.audio, AudioPrefs::default());
         assert!(notes.is_empty());
         let (preferences, _) = parse("(audio: (device: Named(\"Fake B\")))").unwrap();
