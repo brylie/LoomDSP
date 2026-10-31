@@ -103,6 +103,13 @@ pub fn param_name(controller: &Controller, (module, param): Param) -> String {
         .graph()
         .node(ModuleId(module))
         .and_then(|node| {
+            if let Some(unknown) = &node.unknown {
+                return Some(format!(
+                    "{} #{module} {}",
+                    unknown.label.as_deref().unwrap_or(&unknown.kind),
+                    unknown.parameters.get(param)?
+                ));
+            }
             let spec = node.descriptor.params.get(param)?;
             Some(format!("{} #{module} {}", node.descriptor.name, spec.label))
         })

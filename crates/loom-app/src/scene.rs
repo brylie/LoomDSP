@@ -46,9 +46,14 @@ pub fn category_colour(category: &str) -> Color {
 }
 
 fn port_view(spec: &PortSpec) -> PortView {
+    let (min, max) = spec.nominal_range();
     PortView {
         label: spec.label.to_string(),
-        hover: HoverText::new(spec.label, spec.description, spec.name),
+        hover: HoverText::new(
+            spec.label,
+            &format!("{} Usually {min} to {max}.", spec.description),
+            spec.name,
+        ),
         colour: signal_colour(spec.signal),
         shape: signal_shape(spec.signal),
         badge: 0,
@@ -411,7 +416,7 @@ pub fn control_param(controller: &Controller, module: u32, widget: usize) -> Opt
 
 /// Builds the scene for the controller's graph. Modules without a position
 /// are placed at the origin; call [`crate::layout::auto_layout`] first.
-pub fn build(controller: &Controller, positions: &BTreeMap<u32, Point>) -> Scene {
+pub fn build(controller: &Controller, positions: &BTreeMap<u32, Point>, sizes: &BTreeMap<u32, (u8, u8)>) -> Scene {
     let graph = controller.graph();
     let delayed: BTreeSet<InputRef> = controller.last_report().inserted_delays().map(|(_, to)| *to).collect();
 
@@ -427,7 +432,7 @@ pub fn build(controller: &Controller, positions: &BTreeMap<u32, Point>) -> Scene
         .nodes()
         .map(|(id, node)| {
             let d = node.descriptor;
-            let inputs = d
+            let mut inputs: Vec<PortView> = d
                 .inputs
                 .iter()
                 .enumerate()
@@ -437,7 +442,7 @@ pub fn build(controller: &Controller, positions: &BTreeMap<u32, Point>) -> Scene
                     ..port_view(spec)
                 })
                 .collect();
-            let outputs = d
+            let mut outputs: Vec<PortView> = d
                 .outputs
                 .iter()
                 .enumerate()
@@ -446,14 +451,47 @@ pub fn build(controller: &Controller, positions: &BTreeMap<u32, Point>) -> Scene
                     ..port_view(spec)
                 })
                 .collect();
+            if let Some(unknown) = &node.unknown {
+                let port = |name: &str| PortView {
+                    label: name.to_string(),
+                    hover: HoverText::new(name, "Not known to this version of LoomDSP", name),
+                    colour: signal_colour(SignalType::Modulation),
+                    shape: PortShape::Round,
+                    badge: 0,
+                    follows_transport: None,
+                };
+                inputs = unknown.inputs.iter().map(|name| port(name)).collect();
+                outputs = unknown
+                    .outputs
+                    .iter()
+                    .enumerate()
+                    .map(|(i, name)| PortView {
+                        badge: badges.get(&OutputRef { module: id, port: i }).copied().unwrap_or(0),
+                        ..port(name)
+                    })
+                    .collect();
+            }
             ModuleView {
+                size: sizes.get(&id.0).copied(),
+                unknown: node.unknown.is_some(),
                 id: id.0,
-                title: d.name.to_string(),
+                title: node.unknown.as_ref().map_or_else(
+                    || d.name.to_string(),
+                    |unknown| unknown.label.clone().unwrap_or_else(|| unknown.kind.clone()),
+                ),
                 accent: category_colour(d.category),
                 position: positions.get(&id.0).copied().unwrap_or(Point::ORIGIN),
                 inputs,
                 outputs,
-                panel: panel_view(d),
+                panel: if node.unknown.is_some() {
+                    PanelView {
+                        width: 10,
+                        height: 4,
+                        widgets: Vec::new(),
+                    }
+                } else {
+                    panel_view(d)
+                },
             }
         })
         .collect();
@@ -461,13 +499,23 @@ pub fn build(controller: &Controller, positions: &BTreeMap<u32, Point>) -> Scene
     let cables = graph
         .cables()
         .filter_map(|(from, to)| {
-            let source = graph.node(from.module)?.descriptor.outputs.get(from.port)?;
-            let target = graph.node(to.module)?.descriptor.inputs.get(to.port)?;
+            let source = graph.node(from.module)?;
+            let target = graph.node(to.module)?;
+            let from_signal = source
+                .descriptor
+                .outputs
+                .get(from.port)
+                .map_or(SignalType::Modulation, |port| port.signal);
+            let to_signal = target
+                .descriptor
+                .inputs
+                .get(to.port)
+                .map_or(SignalType::Modulation, |port| port.signal);
             Some(CableView {
                 from: (from.module.0, from.port),
                 to: (to.module.0, to.port),
-                colour_from: signal_colour(source.signal),
-                colour_to: signal_colour(target.signal),
+                colour_from: signal_colour(from_signal),
+                colour_to: signal_colour(to_signal),
                 delayed: delayed.contains(&to),
             })
         })
@@ -649,6 +697,8 @@ mod tests {
                 continue;
             }
             let module = ModuleView {
+                size: None,
+                unknown: false,
                 id: 0,
                 title: d.name.to_string(),
                 accent: category_colour(d.category),
@@ -691,6 +741,7 @@ mod tests {
         let reset = port_view(&divide.inputs[1]);
         assert_eq!(reset.label, "Reset");
         assert_eq!(reset.hover.name, None, "`reset` reads the same as \"Reset\"");
+        assert!(reset.hover.description.contains("Usually 0 to 1."));
     }
 
     /// port-and-parameter-text.md, Display values: a light's caption is its

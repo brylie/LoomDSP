@@ -51,7 +51,10 @@ const fn output(name: &'static str, polarity: Polarity) -> PortSpec {
         signal: SignalType::Modulation,
         description: "The parameter `level`, or its modulated value.",
         default: PortDefault::Value(0.0),
-        polarity,
+        range: match polarity {
+            Polarity::Unipolar => loom_core::PortRange::Span(0.0, 1.0),
+            Polarity::Bipolar => loom_core::PortRange::Signal,
+        },
         channels: Channels::PerChannel,
     }
 }
@@ -198,7 +201,7 @@ macro_rules! mirror_module {
                 signal: SignalType::Modulation,
                 description: "The parameter, or its modulated value.",
                 default: PortDefault::Value(0.0),
-                polarity: Polarity::Bipolar,
+                range: loom_core::PortRange::Signal,
                 channels: Channels::PerChannel,
             }],
             params: &[$param],
@@ -278,7 +281,7 @@ mod tests {
         assert!(params.iter().any(|p| p.options.mapping == ParamMapping::Logarithmic));
         assert!(params.iter().any(|p| p.options.integer));
         assert!(params.iter().any(|p| p.options.smooth_seconds > 0.0));
-        let polarities: Vec<Polarity> = PANEL.outputs.iter().map(|p| p.polarity).collect();
+        let polarities: Vec<Polarity> = PANEL.outputs.iter().map(|p| p.polarity()).collect();
         assert_eq!(polarities, [Polarity::Unipolar, Polarity::Bipolar]);
     }
 

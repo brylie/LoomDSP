@@ -40,7 +40,7 @@ impl Polarity {
 /// is a compile error:
 ///
 /// ```
-/// use loom_core::{Channels, Polarity, PortDefault, PortSpec, SignalType};
+/// use loom_core::{Channels, PortRange, PortDefault, PortSpec, SignalType};
 ///
 /// const RESET: PortSpec = PortSpec {
 ///     name: "reset",
@@ -48,7 +48,7 @@ impl Polarity {
 ///     signal: SignalType::Gate,
 ///     description: "Starts the count again.",
 ///     default: PortDefault::Value(0.0),
-///     polarity: Polarity::Unipolar,
+///     range: PortRange::Signal,
 ///     channels: Channels::Downmix,
 /// };
 /// ```
@@ -70,15 +70,22 @@ pub struct PortSpec {
     /// What an input reads while no cable is connected. Ignored on outputs;
     /// write `PortDefault::Value(0.0)` there.
     pub default: PortDefault,
-    /// How an output moves a modulated control. Every port must name one.
-    /// The usual choice: gates, phases, and envelopes are unipolar; audio,
-    /// pitch, and LFOs are bipolar. Ignored on inputs; write the polarity of
-    /// the signal the input expects there.
-    pub polarity: Polarity,
+    /// Nominal values sent by an output or expected by an input. This is a
+    /// hint, never a limit on the signal carried by a cable.
+    pub range: PortRange,
     /// What the port does with stereo (ADR-0020). Every port must name one.
     /// The usual choice: audio inputs are `PerChannel`, other inputs are
     /// `Downmix`, and outputs are `PerChannel`.
     pub channels: Channels,
+}
+
+/// A port's nominal signal range. See `docs/design/port-ranges.md`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PortRange {
+    /// Use the signal type's usual range.
+    Signal,
+    /// Use an explicit finite, increasing span.
+    Span(f32, f32),
 }
 
 /// What a port does with stereo (ADR-0020).
@@ -103,15 +110,36 @@ pub enum Channels {
 }
 
 impl PortSpec {
+    /// Returns the nominal range without clipping the signal.
+    pub const fn nominal_range(&self) -> (f32, f32) {
+        match self.range {
+            PortRange::Span(min, max) => (min, max),
+            PortRange::Signal => match self.signal {
+                SignalType::Audio | SignalType::Modulation => (-1.0, 1.0),
+                SignalType::Pitch => (-0.5, 0.5),
+                SignalType::Phase | SignalType::Gate => (0.0, 1.0),
+            },
+        }
+    }
+
+    /// Derives the modulation polarity from the nominal range.
+    pub const fn polarity(&self) -> Polarity {
+        if self.nominal_range().0 >= 0.0 {
+            Polarity::Unipolar
+        } else {
+            Polarity::Bipolar
+        }
+    }
+
     /// Sets what the input reads while no cable is connected.
     pub const fn with_default(mut self, default: PortDefault) -> Self {
         self.default = default;
         self
     }
 
-    /// Sets the polarity an output declares for modulation.
-    pub const fn with_polarity(mut self, polarity: Polarity) -> Self {
-        self.polarity = polarity;
+    /// Sets the nominal range of the port.
+    pub const fn with_range(mut self, range: PortRange) -> Self {
+        self.range = range;
         self
     }
 
@@ -1509,7 +1537,7 @@ mod tests {
             signal: SignalType::Audio,
             description: "",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Bipolar,
+            range: crate::PortRange::Signal,
             channels: Channels::PerChannel,
         }],
         outputs: &[PortSpec {
@@ -1518,7 +1546,7 @@ mod tests {
             signal: SignalType::Audio,
             description: "The input.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Bipolar,
+            range: crate::PortRange::Signal,
             channels: Channels::PerChannel,
         }],
         params: &[ParamSpec {
@@ -1647,7 +1675,7 @@ mod tests {
             signal: SignalType::Audio,
             description: "The shaped signal.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Bipolar,
+            range: PortRange::Signal,
             channels: Channels::PerChannel,
         }];
         static PARAMS: [ParamSpec; 1] = [param("mode", 0.0, 1.0, 0.0, "").integer().choices(&["First", "Second"])];

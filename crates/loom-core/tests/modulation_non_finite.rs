@@ -20,7 +20,7 @@ const OUT: PortSpec = PortSpec {
     signal: SignalType::Modulation,
     description: "A test output.",
     default: PortDefault::Value(0.0),
-    polarity: Polarity::Bipolar,
+    range: loom_core::PortRange::Signal,
     channels: Channels::PerChannel,
 };
 

@@ -3,14 +3,14 @@
 Each port says what range of values it usually carries, so the app can tell the player what a cable holds, warn about likely mistakes, and suggest a fix, without ever changing a module on its own.
 
 - **Kind:** living specification.
-- **Status:** Tier 1 is Agreed ([#144](https://github.com/brylie/LoomDSP/issues/144)). Tiers 2 and 3 are Draft proposals. Do not build them yet.
+- **Status:** Tier 1 is implemented ([#145](https://github.com/brylie/LoomDSP/issues/145)). Tiers 2 and 3 are Draft proposals. Do not build them yet.
 - **Decision behind it:** no ADR of its own. It builds on [ADR-0007](../adr/0007-polymorphic-signal-model.md), which already says signal types are metadata for colour, default ranges, and module behaviour. Tier 1 does not need a new ADR: it is a small change to `PortSpec`, and modulation is still Draft.
 - **Use case and requirements:** FR-SIG-09, FR-VIS-05, FR-MOD-10 (all proposed here). Related: FR-SIG-02, FR-SIG-03, FR-MOD-08, FR-MOD-09.
 - **Background:** none yet. An explainer on interval arithmetic, and why its results are too wide, would help (see Open points).
 - **Prior art:** Eurorack and VCV Rack publish typical voltage ranges as conventions, for example 0 to 10 V for envelopes and about ±5 V for audio. Module panels often print their output range. In both, a module does not change its settings when you patch it; the player adjusts by ear and by eye.
 - **Related specs:** [Control ranges](control-ranges.md) (Draft), [Modulation](modulation.md) rule 4 (Draft), [Port and parameter text](port-and-parameter-text.md) (Implemented), [Telemetry](telemetry.md) (Implemented).
 - **Issues:** [#122](https://github.com/brylie/LoomDSP/issues/122) (control ranges, where this idea came up), [#144](https://github.com/brylie/LoomDSP/issues/144) (range replaces polarity).
-- **Code:** not built. Until Tier 1 is built, `PortSpec` has a separate `polarity` field (added by [#133](https://github.com/brylie/LoomDSP/pull/133)). Building Tier 1 replaces it with `range`.
+- **Code:** Tier 1 is in `PortSpec` and the registry in `crates/loom-core`, with port text in `crates/loom-app`.
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
      built. See README.md in this folder. -->
@@ -37,7 +37,7 @@ During the control ranges discussion ([#122](https://github.com/brylie/LoomDSP/i
 
 ### Tier 1: ports declare a nominal range
 
-**Agreed** ([#144](https://github.com/brylie/LoomDSP/issues/144)).
+**Implemented** ([#145](https://github.com/brylie/LoomDSP/issues/145)).
 
 - `PortSpec` gets a `range` field. Most ports write `PortRange::Signal`, which means the convention of the port's signal type:
 
@@ -165,12 +165,12 @@ The width matters for warnings. A warning that a gate *never* goes high is safe,
 
 ### Tier 1
 
-- [ ] Every built-in port declares a range. Its derived polarity equals the `polarity` it declares today. Envelope `out` and MIDI `velocity` declare `Span(0.0, 1.0)`, even though velocity is a Modulation signal, whose convention is -1 to 1. The rest use their signal type's convention unless their help page says otherwise.
-- [ ] The registry refuses a span that is not finite or has `min >= max`.
-- [ ] Polarity derived from the range gives unipolar for envelopes, gates, and phases, and bipolar for LFOs, audio, and pitch, as each does today.
-- [ ] `loom-modules/tests/modulation.rs` passes unchanged.
-- [ ] Port hover text shows the nominal range.
-- [ ] Output of every reference render is bit-identical before and after ranges are added.
+- [x] Every built-in port declares a range. Its derived polarity equals the `polarity` it declared before this change. Envelope `out` and MIDI `velocity` declare `Span(0.0, 1.0)`, even though velocity is a Modulation signal, whose convention is -1 to 1. The rest use their signal type's convention unless their help page says otherwise.
+- [x] The registry refuses a span that is not finite or has `min >= max`.
+- [x] Polarity derived from the range gives unipolar for envelopes, gates, and phases, and bipolar for LFOs, audio, and pitch, as before.
+- [x] The existing modulation tests pass; new tests also cover silent unknown sources.
+- [x] Port hover text shows the nominal range.
+- [x] Output of every reference render is bit-identical before and after ranges are added.
 
 ### Tier 2
 

@@ -257,6 +257,78 @@ fn polarity_override_remaps_a_bipolar_source() {
     assert_eq!(run(Some(Polarity::Unipolar)), 0.5);
 }
 
+/// A missing source remains inert even when its assignment forces unipolar.
+#[test]
+fn unknown_source_never_moves_a_modulated_parameter() {
+    let mut parts = engine();
+    let source = ModuleId(100);
+    parts
+        .controller
+        .add_unknown_with_id(
+            source,
+            loom_core::UnknownModule {
+                kind: "missing.source@1".into(),
+                label: None,
+                params: Default::default(),
+                ranges: Default::default(),
+                inputs: vec![],
+                outputs: vec!["out".into()],
+                parameters: vec![],
+            },
+        )
+        .unwrap();
+    let sink = parts.controller.add_module("test.linear").unwrap();
+    let id = parts
+        .controller
+        .add_assignment_named(source, "out", sink, "level", 1.0)
+        .unwrap();
+    parts
+        .controller
+        .set_assignment_polarity(id, Some(Polarity::Unipolar))
+        .unwrap();
+    listen(&mut parts.controller, sink, "out");
+    parts.controller.commit().unwrap();
+    assert!(render(&mut parts, 512, 77).iter().all(|&sample| sample == 0.0));
+    parts.controller.set_assignment_depth(id, 0.5).unwrap();
+    assert!(render(&mut parts, 512, 1).iter().all(|&sample| sample == 0.0));
+}
+
+/// Links into a placeholder still participate in feedback detection.
+#[test]
+fn unknown_target_keeps_the_feedback_edge() {
+    let mut parts = engine();
+    let missing = ModuleId(100);
+    parts
+        .controller
+        .add_unknown_with_id(
+            missing,
+            loom_core::UnknownModule {
+                kind: "missing.source@1".into(),
+                label: None,
+                params: Default::default(),
+                ranges: Default::default(),
+                inputs: vec![],
+                outputs: vec!["out".into()],
+                parameters: vec!["depth".into()],
+            },
+        )
+        .unwrap();
+    let sink = parts.controller.add_module("test.linear").unwrap();
+    parts
+        .controller
+        .add_assignment_named(missing, "out", sink, "level", 1.0)
+        .unwrap();
+    parts
+        .controller
+        .add_assignment_named(sink, "out", missing, "depth", 1.0)
+        .unwrap();
+    listen(&mut parts.controller, sink, "out");
+    parts.controller.commit().unwrap();
+    assert_eq!(parts.controller.last_report().loops.len(), 1);
+    assert_eq!(parts.controller.last_report().inserted_assignment_delays().count(), 1);
+    assert!(render(&mut parts, 512, 77).iter().all(|&sample| sample == 0.0));
+}
+
 #[test]
 fn depth_and_enabled_apply_at_the_next_buffer() {
     let mut parts = engine();

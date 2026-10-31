@@ -939,7 +939,7 @@ fn fill_param(fill: &mut ParamFill, assignments: &[AssignmentRuntime], offset: u
         let mut contributed = false;
         for source in &fill.sources {
             let assignment = &assignments[source.state as usize];
-            if !assignment.enabled || assignment.depth == 0.0 {
+            if !assignment.enabled || assignment.depth == 0.0 || assignment.silent_source {
                 continue;
             }
             // SAFETY: `source.buffer` is an output or delay tap of `max_block`

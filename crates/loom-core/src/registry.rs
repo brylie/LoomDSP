@@ -78,6 +78,11 @@ impl Registry {
         if descriptor.inputs.len() > 64 {
             return Err(invalid("more than 64 inputs"));
         }
+        if descriptor.inputs.iter().chain(descriptor.outputs).any(|port| {
+            matches!(port.range, crate::PortRange::Span(min, max) if !min.is_finite() || !max.is_finite() || min >= max)
+        }) {
+            return Err(invalid("a port range must have finite, increasing bounds"));
+        }
         if descriptor
             .inputs
             .iter()
@@ -222,12 +227,7 @@ mod tests {
             signal,
             description: "A test port.",
             default: crate::PortDefault::Value(0.0),
-            polarity: match signal {
-                crate::SignalType::Gate | crate::SignalType::Phase => crate::Polarity::Unipolar,
-                crate::SignalType::Audio | crate::SignalType::Pitch | crate::SignalType::Modulation => {
-                    crate::Polarity::Bipolar
-                }
-            },
+            range: crate::PortRange::Signal,
             channels: crate::Channels::PerChannel,
         }
     }
@@ -309,6 +309,57 @@ mod tests {
         }};
     }
 
+    /// Port spans must be finite and strictly increasing on both sides.
+    #[test]
+    fn rejects_invalid_port_ranges() {
+        use crate::{PortRange, SignalType};
+        for result in [
+            with_ports!(
+                &[port("in", SignalType::Audio).with_range(PortRange::Span(f32::NAN, 1.0))],
+                &[]
+            ),
+            with_ports!(
+                &[],
+                &[port("out", SignalType::Audio).with_range(PortRange::Span(0.0, f32::INFINITY))]
+            ),
+            with_ports!(
+                &[port("in", SignalType::Audio).with_range(PortRange::Span(1.0, 1.0))],
+                &[]
+            ),
+            with_ports!(
+                &[],
+                &[port("out", SignalType::Audio).with_range(PortRange::Span(1.0, -1.0))]
+            ),
+        ] {
+            assert!(result.unwrap_err().to_string().contains("port range"));
+        }
+        with_ports!(
+            &[],
+            &[port("out", SignalType::Audio).with_range(PortRange::Span(0.0, 5.0))]
+        )
+        .unwrap();
+    }
+
+    /// Signal conventions and explicit spans derive the modulation polarity.
+    #[test]
+    fn nominal_ranges_derive_polarity() {
+        use crate::{Polarity, PortRange, SignalType};
+        for (signal, range, polarity) in [
+            (SignalType::Audio, (-1.0, 1.0), Polarity::Bipolar),
+            (SignalType::Modulation, (-1.0, 1.0), Polarity::Bipolar),
+            (SignalType::Pitch, (-0.5, 0.5), Polarity::Bipolar),
+            (SignalType::Phase, (0.0, 1.0), Polarity::Unipolar),
+            (SignalType::Gate, (0.0, 1.0), Polarity::Unipolar),
+        ] {
+            let p = port("out", signal);
+            assert_eq!(p.nominal_range(), range);
+            assert_eq!(p.polarity(), polarity);
+        }
+        let p = port("out", SignalType::Modulation).with_range(PortRange::Span(0.0, 5.0));
+        assert_eq!(p.nominal_range(), (0.0, 5.0));
+        assert_eq!(p.polarity(), Polarity::Unipolar);
+    }
+
     #[test]
     fn refuses_downmix_outputs() {
         let error = with_ports!(
@@ -365,7 +416,7 @@ mod tests {
                 description: "",
                 default: PortDefault::Value(0.0),
 
-                polarity: crate::Polarity::Bipolar,
+                range: crate::PortRange::Signal,
                 channels: crate::Channels::PerChannel,
             }],
             outputs: &[port("out", crate::SignalType::Audio)],

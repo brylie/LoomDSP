@@ -261,6 +261,10 @@ pub struct ModuleView {
     pub accent: Color,
     /// Top-left corner in world coordinates.
     pub position: Point,
+    /// Optional tile dimensions in grid units for growable panels.
+    pub size: Option<(u8, u8)>,
+    /// Whether this tile represents a module missing from this build.
+    pub unknown: bool,
     /// Inputs, drawn on the left edge from the top.
     pub inputs: Vec<PortView>,
     /// Outputs, drawn on the right edge from the top.
@@ -270,13 +274,33 @@ pub struct ModuleView {
 }
 
 impl ModuleView {
-    fn size(&self) -> iced::Size {
+    /// Whether the panel contains a display that can grow.
+    pub fn is_growable(&self) -> bool {
+        self.panel
+            .widgets
+            .iter()
+            .any(|w| matches!(w.kind, WidgetViewKind::Scope | WidgetViewKind::Meter))
+    }
+
+    /// The panel's minimum tile size in world units.
+    pub fn minimum_size(&self) -> iced::Size {
         tile_size(
             self.inputs.len(),
             self.outputs.len(),
             self.panel.width,
             self.panel.height,
         )
+    }
+
+    fn size(&self) -> iced::Size {
+        let minimum = self.minimum_size();
+        match self.size.filter(|_| self.is_growable()) {
+            Some((w, h)) => iced::Size::new(
+                (f32::from(w) * GRID).clamp(minimum.width, minimum.width.max(64.0 * GRID)),
+                (f32::from(h) * GRID).clamp(minimum.height, minimum.height.max(64.0 * GRID)),
+            ),
+            None => minimum,
+        }
     }
 
     /// Tile width: the panel between two port label columns, and at least
@@ -299,7 +323,7 @@ impl ModuleView {
     /// Top-left corner of the panel. A narrow panel is centred between the
     /// port columns.
     pub fn panel_origin(&self) -> Point {
-        let room = self.width() - f32::from(2 * LABEL_COLUMNS) * GRID;
+        let room = self.minimum_size().width - f32::from(2 * LABEL_COLUMNS) * GRID;
         let spare = (room - f32::from(self.panel.width) * GRID).max(0.0);
         Point::new(
             self.position.x + f32::from(LABEL_COLUMNS) * GRID + spare * 0.5,
@@ -321,12 +345,17 @@ impl ModuleView {
         let widget = self.panel.widgets.get(index)?;
         let origin = self.panel_origin();
         let (w, h) = widget.size();
+        let extra = if matches!(widget.kind, WidgetViewKind::Scope | WidgetViewKind::Meter) {
+            self.size() - self.minimum_size()
+        } else {
+            iced::Size::ZERO
+        };
         Some(Rectangle::new(
             Point::new(
                 origin.x + f32::from(widget.x) * GRID,
                 origin.y + f32::from(widget.y) * GRID,
             ),
-            iced::Size::new(f32::from(w) * GRID, f32::from(h) * GRID),
+            iced::Size::new(f32::from(w) * GRID + extra.width, f32::from(h) * GRID + extra.height),
         ))
     }
 
@@ -342,7 +371,13 @@ impl ModuleView {
 
     /// Centre of an input port.
     pub fn input_position(&self, index: usize) -> Point {
-        Point::new(self.position.x, self.position.y + HEADER + ROW * (index as f32 + 0.5))
+        Point::new(self.position.x, self.port_y(index, self.inputs.len()))
+    }
+
+    /// Spreads ports over the extra height while preserving the default layout.
+    fn port_y(&self, index: usize, count: usize) -> f32 {
+        let extra = self.height() - self.minimum_size().height;
+        self.position.y + HEADER + ROW * (index as f32 + 0.5) + extra * (index as f32 + 0.5) / count.max(1) as f32
     }
 
     /// Centre of the clock mark of input `index`, if it shows one: between
@@ -355,10 +390,7 @@ impl ModuleView {
 
     /// Centre of an output port.
     pub fn output_position(&self, index: usize) -> Point {
-        Point::new(
-            self.position.x + self.width(),
-            self.position.y + HEADER + ROW * (index as f32 + 0.5),
-        )
+        Point::new(self.position.x + self.width(), self.port_y(index, self.outputs.len()))
     }
 
     /// Where the assignment count badge of an output goes, if it shows
@@ -888,6 +920,8 @@ mod tests {
 
     fn module(id: u32, x: f32, y: f32) -> ModuleView {
         ModuleView {
+            size: None,
+            unknown: false,
             id,
             title: format!("m{id}"),
             accent: Color::BLACK,
@@ -906,6 +940,45 @@ mod tests {
             label: "k".into(),
             hover: HoverText::default(),
         }
+    }
+
+    /// A saved size grows displays, ports, and hit bounds while controls stay put.
+    #[test]
+    fn growable_tiles_use_saved_dimensions() {
+        let mut m = module(1, 0.0, 0.0);
+        m.panel = PanelView {
+            width: 12,
+            height: 6,
+            widgets: vec![
+                knob(0, 0),
+                WidgetView {
+                    kind: WidgetViewKind::Scope,
+                    x: 3,
+                    y: 0,
+                    label: String::new(),
+                    hover: HoverText::default(),
+                },
+            ],
+        };
+        let initial = m.bounds();
+        let knob = m.widget_bounds(0).unwrap();
+        let scope = m.widget_bounds(1).unwrap();
+        let first_port = m.input_position(0);
+        let output = m.output_position(0);
+        m.size = Some((40, 30));
+        let bounds = m.bounds();
+        assert_eq!(bounds.size(), iced::Size::new(40.0 * GRID, 30.0 * GRID));
+        assert_eq!(m.widget_bounds(0).unwrap(), knob);
+        let enlarged = m.widget_bounds(1).unwrap();
+        assert_eq!(enlarged.width - scope.width, bounds.width - initial.width);
+        assert_eq!(enlarged.height - scope.height, bounds.height - initial.height);
+        assert!(m.input_position(0).y > first_port.y);
+        assert!(m.output_position(0).x > output.x);
+        let scene = Scene::new(vec![m], Vec::new());
+        assert!(scene.module(1).unwrap().bounds().contains(Point::new(
+            bounds.x + bounds.width - 1.0,
+            bounds.y + bounds.height - 1.0
+        )));
     }
 
     #[test]
@@ -1075,6 +1148,8 @@ mod tests {
     /// A tile with two outputs, the second driving 12 assignments.
     fn badged(id: u32, position: Point) -> ModuleView {
         let mut m = ModuleView {
+            size: None,
+            unknown: false,
             id,
             title: String::new(),
             accent: Color::BLACK,

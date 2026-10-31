@@ -3,8 +3,8 @@
 //! Spec: `docs/design/p1-modules.md`, Mixing and shaping.
 
 use loom_core::{
-    Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, Param, ParamOptions, ParamSpec, Polarity,
-    PortDefault, PortIo, PortSpec, ProcessContext, SignalType, Widget,
+    Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, Param, ParamOptions, ParamSpec, PortDefault,
+    PortIo, PortSpec, ProcessContext, SignalType, Widget,
 };
 use loom_rt::Smoothed;
 use std::f32::consts::FRAC_PI_2;
@@ -17,7 +17,7 @@ const fn mixer_input(name: &'static str, label: &'static str) -> PortSpec {
         signal: SignalType::Audio,
         description: "A signal to mix. Each side of a stereo cable is mixed on its own.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Bipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }
 }
@@ -84,7 +84,7 @@ pub static MIXER: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Audio,
         description: "The sum of the inputs, each times its level, muted inputs silent.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Bipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
     params: &[
@@ -211,7 +211,7 @@ pub static CROSSFADE: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Audio,
             description: "The signal heard when the mix is 0.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Bipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::PerChannel,
         },
         PortSpec {
@@ -220,7 +220,7 @@ pub static CROSSFADE: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Audio,
             description: "The signal heard when the mix is 1.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Bipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::PerChannel,
         },
     ],
@@ -230,7 +230,7 @@ pub static CROSSFADE: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Audio,
         description: "A blend of A and B.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Bipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
     params: &[

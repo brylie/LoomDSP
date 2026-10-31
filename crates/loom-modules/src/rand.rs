@@ -2,8 +2,8 @@
 
 use loom_core::signal::{EdgeDetector, gate_is_high};
 use loom_core::{
-    Channels, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, Polarity, PortDefault, PortIo,
-    PortSpec, ProcessContext, SignalType, Widget,
+    Channels, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, PortDefault, PortIo, PortSpec,
+    ProcessContext, SignalType, Widget,
 };
 
 /// `loom.rand.sample-hold` (MT-RAND-02): takes a value and holds it.
@@ -20,7 +20,7 @@ pub static SAMPLE_HOLD: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Modulation,
             description: "The signal to sample.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Bipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::PerChannel,
         },
         PortSpec {
@@ -29,7 +29,7 @@ pub static SAMPLE_HOLD: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Gate,
             description: "A rising edge takes a new value (Sample), or lets the input through while high (Track).",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Unipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::Downmix,
         },
     ],
@@ -39,7 +39,7 @@ pub static SAMPLE_HOLD: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Modulation,
         description: "The held value. It starts at 0.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Bipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
     params: &[ParamSpec {

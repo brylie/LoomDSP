@@ -6,7 +6,7 @@
 
 use loom_core::signal::{EdgeDetector, gate_is_high, trigger};
 use loom_core::{
-    Channels, DisplayKind, DisplaySpec, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, Polarity,
+    Channels, DisplayKind, DisplaySpec, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec,
     PortDefault, PortIo, PortSpec, ProcessContext, SignalType, TriggerFlag, Widget,
 };
 
@@ -29,7 +29,7 @@ pub static DIVIDE: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Gate,
             description: "The triggers to count.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Unipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::Downmix,
         },
         PortSpec {
@@ -38,7 +38,7 @@ pub static DIVIDE: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Gate,
             description: "Starts the count again.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Unipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::Downmix,
         },
     ],
@@ -48,7 +48,7 @@ pub static DIVIDE: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Gate,
         description: "Fires on every Nth trigger.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Unipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
     params: &[
@@ -188,7 +188,7 @@ pub static COMPARE: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Modulation,
             description: "The signal to test.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Bipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::Downmix,
         },
         PortSpec {
@@ -197,7 +197,7 @@ pub static COMPARE: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Modulation,
             description: "The threshold A is compared with.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Bipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::Downmix,
         },
     ],
@@ -207,7 +207,7 @@ pub static COMPARE: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Gate,
         description: "High while the comparison holds. Equal values count as low.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Unipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
     params: &[
@@ -297,7 +297,7 @@ const fn logic_input(name: &'static str, label: &'static str) -> PortSpec {
         signal: SignalType::Gate,
         description: "A gate to combine. An input with no cable is ignored, not counted as low.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Unipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::Downmix,
     }
 }
@@ -321,7 +321,7 @@ pub static LOGIC: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Gate,
         description: "The result: exactly 0 or 1.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Unipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
     params: &[
@@ -413,7 +413,7 @@ pub static MEMORY: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Gate,
             description: "In Set and reset, a rising edge turns the output on. In Toggle, a rising edge flips it. In Data, this is the level to remember.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Unipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::Downmix,
         },
         PortSpec {
@@ -422,7 +422,7 @@ pub static MEMORY: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Gate,
             description: "A rising edge turns the output off (Set and reset, Toggle), or is the clock that remembers A (Data).",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Unipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::Downmix,
         },
     ],
@@ -432,7 +432,7 @@ pub static MEMORY: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Gate,
         description: "The remembered gate. It starts low.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Unipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
     params: &[ParamSpec {

@@ -8,7 +8,7 @@ use assert_no_alloc::AllocDisabler;
 use assert_no_alloc::assert_no_alloc;
 use loom_core::{
     Channels, DisplayKind, DisplaySpec, EngineConfig, EngineParts, Module, ModuleDescriptor, ModuleRole, Panel,
-    ParamOptions, ParamSpec, Polarity, PortDefault, PortIo, PortSpec, ProcessContext, Registry, SignalType, Widget,
+    ParamOptions, ParamSpec, PortDefault, PortIo, PortSpec, ProcessContext, Registry, SignalType, Widget,
     create_engine,
 };
 use std::sync::Arc;
@@ -33,7 +33,7 @@ static LAMP: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Modulation,
         description: "The level.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Bipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
     params: &[ParamSpec {

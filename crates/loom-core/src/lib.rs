@@ -39,13 +39,13 @@ pub use compile::{CompileReport, FeedbackLoop};
 pub use controller::{Controller, EngineParts, MidiSender, create_engine};
 pub use descriptor::{
     ButtonMode, Channels, DisplayKind, DisplaySpec, MAX_DISPLAYS, MissingText, ModuleConfig, ModuleDescriptor,
-    ModuleRole, Panel, ParamMapping, ParamOptions, ParamRange, ParamSpec, Polarity, PortDefault, PortSpec, SpecKind,
-    Undocumented, Widget, WidgetKind, assert_documented,
+    ModuleRole, Panel, ParamMapping, ParamOptions, ParamRange, ParamSpec, Polarity, PortDefault, PortRange, PortSpec,
+    SpecKind, Undocumented, Widget, WidgetKind, assert_documented,
 };
 pub use display::{DisplayReader, DisplaySource, TriggerFlag};
 pub use engine::{Engine, EngineConfig, EngineStats};
 pub use error::LoomError;
-pub use graph::{Assignment, AssignmentId, Graph, InputRef, ModuleId, Node, OutputRef};
+pub use graph::{Assignment, AssignmentId, Graph, InputRef, ModuleId, Node, OutputRef, UnknownModule};
 pub use midi::{MAX_MIDI_INPUTS, MidiEvent, MidiInputId, MidiMessage};
 pub use midi_map::{ControlChangeSeen, MidiControl, MidiMapping, MidiMappingId, MidiReader, NoteOnSeen, control_value};
 pub use module::{AsAny, Module, Param, PortIo, ProcessContext, copy_state, testing};

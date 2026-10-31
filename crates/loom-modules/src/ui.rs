@@ -6,8 +6,8 @@
 //! details, and `docs/design/transient-params.md`.
 
 use loom_core::{
-    ButtonMode, Channels, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, Polarity, PortDefault,
-    PortIo, PortSpec, ProcessContext, SignalType, Widget,
+    ButtonMode, Channels, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, PortDefault, PortIo,
+    PortSpec, ProcessContext, SignalType, Widget,
 };
 
 /// `loom.ui.button`: a gate from a large button.
@@ -29,7 +29,7 @@ pub static BUTTON: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Gate,
         description: "High while the button is on.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Unipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
     params: &[

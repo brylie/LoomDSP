@@ -580,6 +580,8 @@ mod tests {
         };
         Scene::new(
             vec![ModuleView {
+                size: None,
+                unknown: false,
                 id: 1,
                 title: String::new(),
                 accent: Color::BLACK,
@@ -827,6 +829,8 @@ mod tests {
     fn the_peak_line_is_never_below_the_bar() {
         let meter = Scene::new(
             vec![ModuleView {
+                size: None,
+                unknown: false,
                 id: 1,
                 title: String::new(),
                 accent: Color::BLACK,

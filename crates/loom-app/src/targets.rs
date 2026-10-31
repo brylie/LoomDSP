@@ -58,10 +58,8 @@ pub fn find(graph: &Graph, module: u32, name: &str) -> Result<Part, String> {
             .ok_or_else(|| format!("module {module} ({}) has no light or meter `{name}`", descriptor.name));
     }
     if let Some(name) = name.strip_prefix(BADGE_PREFIX) {
-        return descriptor
-            .outputs
-            .iter()
-            .position(|p| p.name == name)
+        return (0..node.output_count())
+            .find(|&index| node.output_name(index) == Some(name))
             .map(|index| {
                 Part::Badge(PortRef {
                     module,
@@ -72,10 +70,13 @@ pub fn find(graph: &Graph, module: u32, name: &str) -> Result<Part, String> {
             .ok_or_else(|| format!("module {module} ({}) has no output `{name}`", descriptor.name));
     }
     let port = |name: &str, output: bool| {
-        let ports = if output { descriptor.outputs } else { descriptor.inputs };
-        ports
-            .iter()
-            .position(|p| p.name == name)
+        let count = if output {
+            node.output_count()
+        } else {
+            node.input_count()
+        };
+        (0..count)
+            .find(|&index| if output { node.output_name(index) } else { node.input_name(index) } == Some(name))
             .map(|index| Part::Port(PortRef { module, output, index }))
     };
     for (prefix, output) in [(INPUT_PREFIX, false), (OUTPUT_PREFIX, true)] {
@@ -112,13 +113,15 @@ pub fn name(graph: &Graph, part: Part) -> Option<String> {
             graph.node(ModuleId(module))?.descriptor.panel.widgets.get(widget)?.bind,
         ),
         Part::Port(port) | Part::Badge(port) => {
-            let descriptor = graph.node(ModuleId(port.module))?.descriptor;
-            let ports = if port.output {
-                descriptor.outputs
-            } else {
-                descriptor.inputs
-            };
-            (port.module, ports.get(port.index)?.name)
+            let node = graph.node(ModuleId(port.module))?;
+            (
+                port.module,
+                if port.output {
+                    node.output_name(port.index)?
+                } else {
+                    node.input_name(port.index)?
+                },
+            )
         }
     };
     let prefix = match part {

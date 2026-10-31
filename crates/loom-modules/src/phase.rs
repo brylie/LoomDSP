@@ -7,7 +7,7 @@
 use loom_core::signal::{EdgeDetector, WrapDetector, pitch, trigger};
 use loom_core::{
     Channels, DisplayKind, DisplaySpec, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions,
-    ParamSpec, Polarity, PortDefault, PortIo, PortSpec, ProcessContext, SignalType, TriggerFlag, Widget,
+    ParamSpec, PortDefault, PortIo, PortSpec, ProcessContext, SignalType, TriggerFlag, Widget,
 };
 
 /// `loom.phase.generator`: a ramp from 0 to 1 at the frequency set by pitch.
@@ -24,7 +24,7 @@ pub static PHASE: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Pitch,
             description: "Sets the frequency. 0 is middle C, and +0.1 is one octave up.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Bipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::Downmix,
         },
         PortSpec {
@@ -33,7 +33,7 @@ pub static PHASE: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Gate,
             description: "A rising edge sets the phase back to 0.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Unipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::Downmix,
         },
     ],
@@ -43,7 +43,7 @@ pub static PHASE: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Phase,
         description: "A ramp from 0 up to 1, once per cycle.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Unipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
     params: &[
@@ -168,7 +168,7 @@ pub static PHASE_TRIGGER: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Phase,
         description: "The phase to watch. Each wrap fires a trigger.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Unipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::Downmix,
     }],
     outputs: &[PortSpec {
@@ -177,7 +177,7 @@ pub static PHASE_TRIGGER: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Gate,
         description: "Fires once each time the phase wraps.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Unipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
     params: &[],
@@ -241,7 +241,7 @@ pub static WRAP: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Modulation,
         description: "The signal to bring into the phase range.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Bipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
     outputs: &[PortSpec {
@@ -250,7 +250,7 @@ pub static WRAP: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Phase,
         description: "A phase from 0 to 1.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Unipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
     params: &[ParamSpec {
@@ -333,7 +333,7 @@ pub static SCALE: ModuleDescriptor = ModuleDescriptor {
             // An unpatched Phase Scale follows the bar, so it works as a
             // clock multiplier with no cables. A flat 0 would never wrap.
             default: PortDefault::BarPhase,
-            polarity: Polarity::Unipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::Downmix,
         },
         PortSpec {
@@ -342,7 +342,7 @@ pub static SCALE: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Gate,
             description: "A rising edge starts counting the input's wraps again from zero.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Unipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::Downmix,
         },
     ],
@@ -352,7 +352,7 @@ pub static SCALE: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Phase,
         description: "The scaled phase, from 0 to 1.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Unipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
     params: &[

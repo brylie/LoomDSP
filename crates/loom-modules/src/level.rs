@@ -3,8 +3,8 @@
 //! An amplifier makes a signal quieter or louder and never flips its sign.
 
 use loom_core::{
-    Channels, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, Polarity, PortDefault, PortIo,
-    PortSpec, ProcessContext, SignalType, Widget,
+    Channels, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, PortDefault, PortIo, PortSpec,
+    ProcessContext, SignalType, Widget,
 };
 use loom_rt::Smoothed;
 
@@ -25,7 +25,7 @@ pub static AMP: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Audio,
             description: "The signal to scale.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Bipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::PerChannel,
         },
         PortSpec {
@@ -34,7 +34,7 @@ pub static AMP: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Modulation,
             description: "How loud the output is. Values below 0 count as 0. Reads 1 while no cable is connected.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Unipolar,
+            range: loom_core::PortRange::Span(0.0, 1.0),
             channels: Channels::Downmix,
         },
     ],
@@ -44,7 +44,7 @@ pub static AMP: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Audio,
         description: "The input times the level, after the response curve, times the gain.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Bipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
     params: &[
@@ -153,7 +153,7 @@ pub static CONSTANT: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Modulation,
         description: "The level as a factor: 10 to the power of dB over 20.",
         default: PortDefault::Value(1.0),
-        polarity: Polarity::Unipolar,
+        range: loom_core::PortRange::Span(0.0, 1.0),
         channels: Channels::PerChannel,
     }],
     params: &[ParamSpec {
@@ -226,7 +226,7 @@ pub static CLAMP: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Modulation,
         description: "The signal to limit.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Bipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
     outputs: &[PortSpec {
@@ -235,7 +235,7 @@ pub static CLAMP: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Modulation,
         description: "The input, held between the two limits.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Bipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
     params: &[
@@ -351,7 +351,7 @@ pub static SCALE: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Modulation,
         description: "The signal to scale.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Bipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
     outputs: &[PortSpec {
@@ -360,7 +360,7 @@ pub static SCALE: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Modulation,
         description: "The input times the factor, plus the offset.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Bipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
     params: &[
@@ -456,7 +456,7 @@ pub static SLEW: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Modulation,
         description: "The signal to slow down.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Bipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
     outputs: &[PortSpec {
@@ -465,7 +465,7 @@ pub static SLEW: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Modulation,
         description: "The input, moving toward it at a limited speed.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Bipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
     params: &[

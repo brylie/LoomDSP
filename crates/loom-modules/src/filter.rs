@@ -2,8 +2,8 @@
 
 use loom_core::signal::pitch;
 use loom_core::{
-    Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, Polarity,
-    PortDefault, PortIo, PortSpec, ProcessContext, SignalType, Widget,
+    Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, PortDefault, PortIo,
+    PortSpec, ProcessContext, SignalType, Widget,
 };
 use loom_rt::Smoothed;
 use std::f32::consts::PI;
@@ -23,7 +23,7 @@ pub static SVF: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Audio,
             description: "The audio to filter.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Bipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::PerChannel,
         },
         PortSpec {
@@ -32,7 +32,7 @@ pub static SVF: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Pitch,
             description: "Moves the cutoff as pitch: +0.1 doubles it.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Bipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::Downmix,
         },
     ],
@@ -43,7 +43,7 @@ pub static SVF: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Audio,
             description: "Keeps the frequencies below the cutoff.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Bipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::PerChannel,
         },
         PortSpec {
@@ -52,7 +52,7 @@ pub static SVF: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Audio,
             description: "Keeps the frequencies near the cutoff.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Bipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::PerChannel,
         },
         PortSpec {
@@ -61,7 +61,7 @@ pub static SVF: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Audio,
             description: "Keeps the frequencies above the cutoff.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Bipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::PerChannel,
         },
         PortSpec {
@@ -70,7 +70,7 @@ pub static SVF: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Audio,
             description: "Cuts a narrow band around the cutoff and passes the rest.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Bipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::PerChannel,
         },
     ],
@@ -222,7 +222,7 @@ pub static ONEPOLE: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Audio,
             description: "The signal to filter.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Bipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::PerChannel,
         },
         PortSpec {
@@ -231,7 +231,7 @@ pub static ONEPOLE: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Pitch,
             description: "Moves the cutoff as pitch: +0.1 doubles it.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Bipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::Downmix,
         },
     ],
@@ -242,7 +242,7 @@ pub static ONEPOLE: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Audio,
             description: "Keeps the frequencies below the cutoff.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Bipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::PerChannel,
         },
         PortSpec {
@@ -251,7 +251,7 @@ pub static ONEPOLE: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Audio,
             description: "Keeps the frequencies above the cutoff.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Bipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::PerChannel,
         },
     ],
@@ -381,7 +381,7 @@ pub static LADDER: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Audio,
             description: "The audio to filter.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Bipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::PerChannel,
         },
         PortSpec {
@@ -390,7 +390,7 @@ pub static LADDER: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Pitch,
             description: "Moves the cutoff as pitch: +0.1 doubles it.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Bipolar,
+            range: loom_core::PortRange::Signal,
             channels: Channels::Downmix,
         },
     ],
@@ -400,7 +400,7 @@ pub static LADDER: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Audio,
         description: "Keeps the frequencies below the cutoff.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Bipolar,
+        range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
     params: &[

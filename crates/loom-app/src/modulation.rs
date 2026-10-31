@@ -34,7 +34,14 @@ pub fn exists(graph: &Graph, source: OutputRef, target: ModuleId, param: usize) 
 /// "module name #id", as the inspector names a module.
 pub fn module_name(graph: &Graph, module: ModuleId) -> String {
     match graph.node(module) {
-        Some(node) => format!("{} #{}", node.descriptor.name, module.0),
+        Some(node) => format!(
+            "{} #{}",
+            node.unknown.as_ref().map_or(node.descriptor.name, |unknown| unknown
+                .label
+                .as_deref()
+                .unwrap_or(&unknown.kind)),
+            module.0
+        ),
         None => format!("#{}", module.0),
     }
 }
@@ -43,8 +50,13 @@ pub fn module_name(graph: &Graph, module: ModuleId) -> String {
 pub fn source_name(graph: &Graph, source: OutputRef) -> String {
     let label = graph
         .node(source.module)
-        .and_then(|n| n.descriptor.outputs.get(source.port))
-        .map_or("?", |p| p.label);
+        .and_then(|n| {
+            n.unknown.as_ref().map_or_else(
+                || n.descriptor.outputs.get(source.port).map(|p| p.label),
+                |unknown| unknown.outputs.get(source.port).map(String::as_str),
+            )
+        })
+        .unwrap_or("?");
     format!("{}: {label}", module_name(graph, source.module))
 }
 
@@ -52,8 +64,13 @@ pub fn source_name(graph: &Graph, source: OutputRef) -> String {
 pub fn target_name(graph: &Graph, target: ModuleId, param: usize) -> String {
     let label = graph
         .node(target)
-        .and_then(|n| n.descriptor.params.get(param))
-        .map_or("?", |p| p.label);
+        .and_then(|n| {
+            n.unknown.as_ref().map_or_else(
+                || n.descriptor.params.get(param).map(|p| p.label),
+                |unknown| unknown.parameters.get(param).map(String::as_str),
+            )
+        })
+        .unwrap_or("?");
     format!("{}: {label}", module_name(graph, target))
 }
 
@@ -150,7 +167,7 @@ pub fn source_polarity(graph: &Graph, source: OutputRef) -> Polarity {
     graph
         .node(source.module)
         .and_then(|n| n.descriptor.outputs.get(source.port))
-        .map_or(Polarity::Bipolar, |p| p.polarity)
+        .map_or(Polarity::Bipolar, |p| p.polarity())
 }
 
 /// One assignment as the range arc sees it.
@@ -178,12 +195,13 @@ pub fn reaches(graph: &Graph) -> BTreeMap<(ModuleId, usize), Vec<Reach>> {
 
 /// One assignment as the range arc sees it, if its source exists.
 pub fn reach(graph: &Graph, a: &Assignment) -> Option<Reach> {
-    let source = graph
-        .node(a.source.module)
-        .and_then(|n| n.descriptor.outputs.get(a.source.port))?;
+    let source = graph.node(a.source.module)?;
+    if a.source.port >= source.output_count() {
+        return None;
+    }
     Some(Reach {
         depth: a.depth,
-        polarity: a.polarity.unwrap_or(source.polarity),
+        polarity: a.polarity.unwrap_or_else(|| source_polarity(graph, a.source)),
         enabled: a.enabled,
     })
 }

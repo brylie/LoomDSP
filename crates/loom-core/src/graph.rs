@@ -5,6 +5,66 @@ use crate::midi_map::{MidiControl, MidiMapping, MidiMappingId};
 use std::collections::BTreeMap;
 use std::fmt;
 
+/// Patch data for a module this build cannot identify.
+///
+/// Port and parameter names are owned on the control thread. The audio
+/// thread sees only the compiled buffers and a silent module instance.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnknownModule {
+    /// Original versioned module kind.
+    pub kind: String,
+    /// Original optional user label.
+    pub label: Option<String>,
+    /// Original parameter values, preserved even when they are defaults.
+    pub params: BTreeMap<String, f32>,
+    /// Original selected ranges, preserved without interpretation.
+    pub ranges: BTreeMap<String, (f32, f32)>,
+    /// Inputs named by cables, in first-seen order.
+    pub inputs: Vec<String>,
+    /// Outputs named by cables or assignments, in first-seen order.
+    pub outputs: Vec<String>,
+    /// Parameter names referenced by values, assignments, or MIDI mappings.
+    pub parameters: Vec<String>,
+}
+
+impl UnknownModule {
+    /// The shared execution descriptor for a placeholder.
+    pub fn descriptor() -> &'static ModuleDescriptor {
+        &UNKNOWN_DESCRIPTOR
+    }
+}
+
+/// Silent engine instance shared by all unknown module kinds.
+struct UnknownDsp;
+
+impl crate::Module for UnknownDsp {
+    fn process(&mut self, _ctx: &crate::ProcessContext<'_>, io: &mut crate::PortIo<'_>) {
+        for index in 0..io.output_count() {
+            io.output(index).fill(0.0);
+        }
+    }
+}
+
+/// Creates the stateless audio-thread half of a placeholder.
+fn unknown_factory(_: &crate::ModuleConfig) -> Box<dyn crate::Module> {
+    Box::new(UnknownDsp)
+}
+
+/// The shared execution descriptor; original names live in [`UnknownModule`].
+pub(crate) static UNKNOWN_DESCRIPTOR: ModuleDescriptor = ModuleDescriptor {
+    id: "loom.internal.unknown",
+    version: 1,
+    name: "Unknown module",
+    category: "Unknown",
+    description: "This version does not have this module.",
+    inputs: &[],
+    outputs: &[],
+    params: &[],
+    role: ModuleRole::Dsp(unknown_factory),
+    panel: crate::Panel::EMPTY,
+    displays: &[],
+};
+
 /// Stable identifier of a module in a patch. Saved in patch files.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ModuleId(pub u32);
@@ -75,6 +135,8 @@ pub struct Assignment {
 pub struct Node {
     /// The module type.
     pub descriptor: &'static ModuleDescriptor,
+    /// Original data for an unknown module, if this node is a placeholder.
+    pub unknown: Option<UnknownModule>,
     /// Current parameter values, one per [`ModuleDescriptor::params`].
     pub params: Vec<f32>,
     /// Engine slot holding the instance. `None` for engine-handled roles.
@@ -89,10 +151,49 @@ impl Node {
     pub(crate) fn new(descriptor: &'static ModuleDescriptor, slot: Option<usize>) -> Self {
         Self {
             descriptor,
+            unknown: None,
             params: descriptor.default_params(),
             slot,
             ranges: descriptor.params.iter().map(ParamSpec::default_range).collect(),
         }
+    }
+
+    /// Number of named input ports, including placeholder ports.
+    pub fn input_count(&self) -> usize {
+        self.unknown
+            .as_ref()
+            .map_or(self.descriptor.inputs.len(), |unknown| unknown.inputs.len())
+    }
+
+    /// Number of named output ports, including placeholder ports.
+    pub fn output_count(&self) -> usize {
+        self.unknown
+            .as_ref()
+            .map_or(self.descriptor.outputs.len(), |unknown| unknown.outputs.len())
+    }
+
+    /// The saved name of an input, including a placeholder input.
+    pub fn input_name(&self, index: usize) -> Option<&str> {
+        self.unknown.as_ref().map_or_else(
+            || self.descriptor.inputs.get(index).map(|p| p.name),
+            |unknown| unknown.inputs.get(index).map(String::as_str),
+        )
+    }
+
+    /// The saved name of an output, including a placeholder output.
+    pub fn output_name(&self, index: usize) -> Option<&str> {
+        self.unknown.as_ref().map_or_else(
+            || self.descriptor.outputs.get(index).map(|p| p.name),
+            |unknown| unknown.outputs.get(index).map(String::as_str),
+        )
+    }
+
+    /// The saved name of a parameter, including a placeholder parameter.
+    pub fn parameter_name(&self, index: usize) -> Option<&str> {
+        self.unknown.as_ref().map_or_else(
+            || self.descriptor.params.get(index).map(|p| p.name),
+            |unknown| unknown.parameters.get(index).map(String::as_str),
+        )
     }
 
     /// The selected control range of parameter `index`, if it offers ranges.

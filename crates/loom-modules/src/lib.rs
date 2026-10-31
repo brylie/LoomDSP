@@ -99,6 +99,15 @@ pub fn registry() -> Arc<Registry> {
 
 #[cfg(test)]
 mod tests {
+    /// Unipolar modulation outputs declare their range explicitly.
+    #[test]
+    fn envelope_and_velocity_are_unipolar() {
+        for port in [&super::env::ENVELOPE.outputs[0], &super::midi::NOTE_IN.outputs[2]] {
+            assert_eq!(port.range, loom_core::PortRange::Span(0.0, 1.0));
+            assert_eq!(port.polarity(), loom_core::Polarity::Unipolar);
+        }
+    }
+
     #[test]
     fn all_modules_register() {
         assert_eq!(super::registry().len(), super::ALL.len());

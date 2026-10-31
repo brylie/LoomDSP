@@ -2,8 +2,8 @@
 
 use loom_core::{
     Channels, ControlChangeSeen, EngineConfig, EngineParts, MidiControl, MidiEvent, MidiMessage, Module, ModuleConfig,
-    ModuleDescriptor, ModuleId, ModuleRole, Panel, ParamOptions, ParamSpec, Polarity, PortDefault, PortIo, PortSpec,
-    ProbeKind, ProcessContext, SignalType, control_value, create_engine,
+    ModuleDescriptor, ModuleId, ModuleRole, Panel, ParamOptions, ParamSpec, PortDefault, PortIo, PortSpec, ProbeKind,
+    ProcessContext, SignalType, control_value, create_engine,
 };
 use loom_modules::register_all;
 use std::sync::Arc;
@@ -49,7 +49,7 @@ const fn output(name: &'static str) -> PortSpec {
         signal: SignalType::Modulation,
         description: "A test output.",
         default: PortDefault::Value(0.0),
-        polarity: Polarity::Unipolar,
+        range: loom_core::PortRange::Span(0.0, 1.0),
         channels: Channels::PerChannel,
     }
 }

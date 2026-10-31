@@ -15,7 +15,11 @@ const GAP: f32 = 2.0 * GRID;
 /// Size of a module's tile in world units.
 fn size_of(node: &Node) -> iced::Size {
     let d = node.descriptor;
-    tile_size(d.inputs.len(), d.outputs.len(), d.panel.width, d.panel.height)
+    if node.unknown.is_some() {
+        tile_size(node.input_count(), node.output_count(), 10, 4)
+    } else {
+        tile_size(d.inputs.len(), d.outputs.len(), d.panel.width, d.panel.height)
+    }
 }
 
 /// Left edge of each column: every column is as wide as its widest tile,

@@ -157,6 +157,8 @@ pub(crate) struct AssignmentRuntime {
     pub enabled: bool,
     pub polarity: Option<Polarity>,
     pub source_polarity: Polarity,
+    /// A missing source must remain inert even under a polarity override.
+    pub silent_source: bool,
 }
 
 pub(crate) struct Tap {
@@ -410,6 +412,8 @@ struct CompiledAssignment {
     enabled: bool,
     polarity: Option<Polarity>,
     source_polarity: Polarity,
+    /// The source is an unknown placeholder.
+    silent_source: bool,
 }
 
 struct SourceSpec {
@@ -445,7 +449,7 @@ pub(crate) fn compile(
     let out_buf: Vec<Vec<usize>> = nodes
         .iter()
         .map(|node| {
-            (0..node.descriptor.outputs.len())
+            (0..node.output_count())
                 .map(|_| {
                     buffer_count += 1;
                     buffer_count - 1
@@ -466,7 +470,12 @@ pub(crate) fn compile(
         };
         let outputs = nodes[source_node].descriptor.outputs;
         let params = nodes[target_node].descriptor.params;
-        if assignment.source.port >= outputs.len() || assignment.param >= params.len() {
+        let target = nodes[target_node];
+        let param_count = target
+            .unknown
+            .as_ref()
+            .map_or(params.len(), |unknown| unknown.parameters.len());
+        if assignment.source.port >= nodes[source_node].output_count() || assignment.param >= param_count {
             continue;
         }
         compiled.push(CompiledAssignment {
@@ -477,7 +486,10 @@ pub(crate) fn compile(
             depth: assignment.depth,
             enabled: assignment.enabled,
             polarity: assignment.polarity,
-            source_polarity: outputs[assignment.source.port].polarity,
+            source_polarity: outputs
+                .get(assignment.source.port)
+                .map_or(Polarity::Bipolar, |port| port.polarity()),
+            silent_source: nodes[source_node].unknown.is_some(),
         });
     }
 
@@ -803,7 +815,10 @@ pub(crate) fn compile(
     // 5. One buffer per modulated parameter. Sources in assignment id order.
     let mut groups: BTreeMap<(usize, usize), Vec<usize>> = BTreeMap::new();
     for (i, assignment) in compiled.iter().enumerate() {
-        if live[assignment.target_node] && matches!(nodes[assignment.target_node].descriptor.role, ModuleRole::Dsp(_)) {
+        if live[assignment.target_node]
+            && nodes[assignment.target_node].unknown.is_none()
+            && matches!(nodes[assignment.target_node].descriptor.role, ModuleRole::Dsp(_))
+        {
             groups
                 .entry((assignment.target_node, assignment.param))
                 .or_default()
@@ -830,13 +845,19 @@ pub(crate) fn compile(
 
     // 6. One buffer per distinct default that an unconnected input reads.
     // Only DSP modules read their inputs through pointers.
-    let default_of = |input: InputRef| nodes[index_of[&input.module]].descriptor.inputs[input.port].default;
+    let default_of = |input: InputRef| {
+        nodes[index_of[&input.module]]
+            .descriptor
+            .inputs
+            .get(input.port)
+            .map_or(PortDefault::Value(0.0), |port| port.default)
+    };
     let mut default_buf: BTreeMap<DefaultKey, usize> = BTreeMap::new();
     for (v, node) in nodes.iter().enumerate() {
         if !live[v] || !matches!(node.descriptor.role, ModuleRole::Dsp(_)) {
             continue;
         }
-        for port in 0..node.descriptor.inputs.len() {
+        for port in 0..node.input_count() {
             let input = InputRef { module: ids[v], port };
             if graph.cables.contains_key(&input) {
                 continue;
@@ -908,7 +929,7 @@ pub(crate) fn compile(
         let node = nodes[v];
         let in_start = input_ptrs.len() as u32;
         let mut connected = 0u64;
-        for port in 0..node.descriptor.inputs.len() {
+        for port in 0..node.input_count() {
             let (ptr, is_connected) = resolve_input(InputRef { module: ids[v], port });
             input_ptrs.push(ptr);
             if is_connected {
@@ -1084,6 +1105,7 @@ pub(crate) fn compile(
                 enabled: assignment.enabled,
                 polarity: assignment.polarity,
                 source_polarity: assignment.source_polarity,
+                silent_source: assignment.silent_source,
             })
             .collect(),
         param_ptrs,
@@ -1243,12 +1265,7 @@ mod tests {
             signal,
             description: "A test port.",
             default: crate::PortDefault::Value(0.0),
-            polarity: match signal {
-                crate::SignalType::Gate | crate::SignalType::Phase => crate::Polarity::Unipolar,
-                crate::SignalType::Audio | crate::SignalType::Pitch | crate::SignalType::Modulation => {
-                    crate::Polarity::Bipolar
-                }
-            },
+            range: crate::PortRange::Signal,
             channels: crate::Channels::PerChannel,
         }
     }
@@ -1294,6 +1311,7 @@ mod tests {
                 ModuleId(i + 1),
                 crate::Node {
                     descriptor: &FOLLOWER,
+                    unknown: None,
                     params: Vec::new(),
                     slot: Some(i as usize),
                     ranges: Vec::new(),
@@ -1397,6 +1415,7 @@ mod tests {
     fn add(graph: &mut Graph, id: u32, descriptor: &'static crate::ModuleDescriptor) {
         let node = crate::Node {
             descriptor,
+            unknown: None,
             params: descriptor.default_params(),
             slot: Some(id as usize),
             ranges: vec![None; descriptor.params.len()],

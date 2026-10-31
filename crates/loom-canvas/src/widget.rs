@@ -62,6 +62,13 @@ pub enum CanvasEvent {
         /// Offset in world units.
         delta: Vector,
     },
+    /// Set a growable tile's dimensions in grid units.
+    Resize {
+        /// Module to resize.
+        module: u32,
+        /// Width and height in grid units.
+        size: (u8, u8),
+    },
     /// Connect an output to an input (replacing any cable into that input).
     Connect {
         /// The output.
@@ -342,6 +349,8 @@ pub enum PointerDrag {
     Pan,
     /// Tiles are moved.
     Move(Vec<u32>),
+    /// A growable tile is being resized.
+    Resize(u32),
     /// A knob is turned: module ID and widget index.
     Knob(u32, usize),
     /// A button is held: module ID and widget index.
@@ -366,6 +375,7 @@ impl PointerDrag {
             Interaction::Idle => return None,
             Interaction::Panning { .. } => Self::Pan,
             Interaction::Moving { ids, .. } => Self::Move(ids.clone()),
+            Interaction::Resizing { module, .. } => Self::Resize(*module),
             Interaction::Turning { module, widget, .. } => Self::Knob(*module, *widget),
             Interaction::Holding { module, widget } => Self::Button(*module, *widget),
             Interaction::Wiring { from, pulled } => Self::Wire {
@@ -569,6 +579,7 @@ impl<'a, Message> PatchCanvas<'a, Message> {
         if matches!(
             state.interaction,
             Interaction::Moving { .. }
+                | Interaction::Resizing { .. }
                 | Interaction::Turning { .. }
                 | Interaction::Wiring { .. }
                 | Interaction::Depth { .. }
@@ -613,6 +624,14 @@ enum Interaction {
         /// A choice press: applied on release if the tile did not move,
         /// so dragging a closed choice control moves the tile.
         click: Option<ChoiceClick>,
+    },
+    /// A resize preview, committed only when the pointer is released.
+    Resizing {
+        module: u32,
+        start: Point,
+        original: Size,
+        current: Size,
+        minimum: Size,
     },
     Turning {
         module: u32,
@@ -820,6 +839,7 @@ where
         let state = tree.state.downcast_ref::<State>();
         match state.interaction {
             Interaction::Panning { .. } | Interaction::Moving { .. } => mouse::Interaction::Grabbing,
+            Interaction::Resizing { .. } => mouse::Interaction::ResizingDiagonallyDown,
             Interaction::Turning { .. } | Interaction::Depth { .. } => mouse::Interaction::ResizingVertically,
             Interaction::Holding { .. } => mouse::Interaction::Pointer,
             Interaction::Wiring { .. } => mouse::Interaction::Crosshair,
@@ -1272,6 +1292,26 @@ impl<Message> PatchCanvas<'_, Message> {
                             self.emit(shell, CanvasEvent::Move { ids, delta });
                         }
                     }
+                    Interaction::Resizing {
+                        start,
+                        original,
+                        current,
+                        minimum,
+                        ..
+                    } => {
+                        let delta = world - *start;
+                        let snap = |value: f32, min: f32| {
+                            (value / GRID).round().clamp(min / GRID, (64.0_f32).max(min / GRID)) * GRID
+                        };
+                        let next = Size::new(
+                            snap(original.width + delta.x, minimum.width),
+                            snap(original.height + delta.y, minimum.height),
+                        );
+                        if *current != next {
+                            *current = next;
+                            redraw = true;
+                        }
+                    }
                     Interaction::Turning {
                         module,
                         widget,
@@ -1351,12 +1391,29 @@ impl<Message> PatchCanvas<'_, Message> {
                 let gesture = matches!(
                     interaction,
                     Interaction::Moving { .. }
+                        | Interaction::Resizing { .. }
                         | Interaction::Turning { .. }
                         | Interaction::Wiring { .. }
                         | Interaction::Depth { .. }
                 );
                 let world = screen.map(|s| state.camera.to_world(s));
                 match interaction {
+                    Interaction::Resizing {
+                        module,
+                        original,
+                        current,
+                        ..
+                    } => {
+                        if current != original {
+                            self.emit(
+                                shell,
+                                CanvasEvent::Resize {
+                                    module,
+                                    size: ((current.width / GRID) as u8, (current.height / GRID) as u8),
+                                },
+                            );
+                        }
+                    }
                     Interaction::Wiring { from, pulled } => {
                         let mut handled = false;
                         match world.filter(|_| over).map(|w| self.scene.hit(w, state.hit_radius())) {
@@ -1567,6 +1624,9 @@ impl<Message> PatchCanvas<'_, Message> {
     /// so it is checked first, as `press` does: there a press drags depth,
     /// and the cursor says so (modulation.md, Arc drag).
     fn hover_interaction(&self, state: &State) -> mouse::Interaction {
+        if state.cursor.is_some_and(|point| self.resize_at(point).is_some()) {
+            return mouse::Interaction::ResizingDiagonallyDown;
+        }
         let on_ring = state
             .hover
             .zip(state.cursor)
@@ -1583,6 +1643,24 @@ impl<Message> PatchCanvas<'_, Message> {
             Some(Hit::Module(_)) => mouse::Interaction::Grab,
             _ => mouse::Interaction::default(),
         }
+    }
+
+    /// Finds the topmost growable tile whose bottom-right grip is under the pointer.
+    fn resize_at(&self, point: Point) -> Option<&crate::scene::ModuleView> {
+        self.scene
+            .modules()
+            .iter()
+            .rev()
+            .find(|tile| tile.bounds().contains(point))
+            .filter(|tile| {
+                let bounds = tile.bounds();
+                tile.is_growable()
+                    && Rectangle::new(
+                        Point::new(bounds.x + bounds.width - GRID, bounds.y + bounds.height - GRID),
+                        Size::new(GRID, GRID),
+                    )
+                    .contains(point)
+            })
     }
 
     /// The modulated knob whose ring a press at `world` would grab to drag
@@ -2008,6 +2086,29 @@ impl<Message> PatchCanvas<'_, Message> {
             keyboard::Key::Named(
                 named @ (Named::ArrowUp | Named::ArrowRight | Named::ArrowDown | Named::ArrowLeft),
             ) => {
+                if modifiers.alt() && !modifiers.shift() && self.selection.len() == 1 {
+                    let id = *self.selection.iter().next().expect("one selected module");
+                    if let Some(tile) = self.scene.module(id).filter(|tile| tile.is_growable()) {
+                        let width = (tile.width() / GRID) as u8;
+                        let height = (tile.height() / GRID) as u8;
+                        let size = match named {
+                            Named::ArrowUp => (width, height.saturating_sub(1)),
+                            Named::ArrowDown => (width, height.saturating_add(1)),
+                            Named::ArrowLeft => (width.saturating_sub(1), height),
+                            Named::ArrowRight => (width.saturating_add(1), height),
+                            _ => unreachable!(),
+                        };
+                        if !state.arrow_gesture {
+                            state.arrow_gesture = true;
+                            self.emit(shell, CanvasEvent::GestureStart);
+                        }
+                        self.emit(shell, CanvasEvent::Resize { module: id, size });
+                        shell.request_redraw();
+                        shell.capture_event();
+                        return true;
+                    }
+                    return false;
+                }
                 let Some((module, widget)) = state.focus else {
                     if self.selection.is_empty() {
                         return false;
@@ -2118,6 +2219,22 @@ impl<Message> PatchCanvas<'_, Message> {
     }
 
     fn press(&self, state: &mut State, world: Point, screen: Point, bounds: Rectangle, shell: &mut Shell<'_, Message>) {
+        if let Some(tile) = self.resize_at(world) {
+            self.select_for_edit(tile.id, shell);
+            state.focus = None;
+            self.begin(
+                state,
+                Interaction::Resizing {
+                    module: tile.id,
+                    start: world,
+                    original: tile.bounds().size(),
+                    current: tile.bounds().size(),
+                    minimum: tile.minimum_size(),
+                },
+                shell,
+            );
+            return;
+        }
         let shift = state.modifiers.shift();
         let hit = self.scene.hit(world, state.hit_radius());
         state.tab_focus = false;
@@ -2426,6 +2543,20 @@ impl<Message> PatchCanvas<'_, Message> {
         let mut overlay = Overlay::default();
         let p = &self.palette;
 
+        for tile in self.scene.modules().iter().filter(|tile| tile.is_growable()) {
+            let bounds = tile.bounds();
+            let grip = Rectangle::new(
+                Point::new(
+                    bounds.x + bounds.width - GRID * 0.65,
+                    bounds.y + bounds.height - GRID * 0.65,
+                ),
+                Size::new(GRID * 0.4, GRID * 0.4),
+            );
+            overlay
+                .shapes
+                .push(Shape::new(grip, 1.0, p.focus, Color::TRANSPARENT, 0.0));
+        }
+
         // Live port markers use the overlay buffer. A state change uploads
         // only these shapes and never rebuilds tiles or cables (#63).
         if detail(state.camera.zoom) == Detail::Close {
@@ -2585,6 +2716,17 @@ impl<Message> PatchCanvas<'_, Message> {
                 overlay
                     .shapes
                     .push(Shape::new(rect, 2.0, p.marquee, p.selection, 1.0 / state.camera.zoom));
+            }
+            Interaction::Resizing { module, current, .. } => {
+                if let Some(tile) = self.scene.module(*module) {
+                    overlay.shapes.push(Shape::new(
+                        Rectangle::new(tile.position, *current),
+                        2.0,
+                        Color::TRANSPARENT,
+                        p.selection,
+                        1.0 / state.camera.zoom,
+                    ));
+                }
             }
             _ => {}
         }
@@ -3162,6 +3304,8 @@ mod tests {
             follows_transport: None,
         };
         ModuleView {
+            size: None,
+            unknown: false,
             id,
             title: String::new(),
             accent: Color::BLACK,

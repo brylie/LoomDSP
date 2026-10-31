@@ -82,12 +82,30 @@ pub struct PatchModule {
     /// Position on the canvas, for the editor.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<(f32, f32)>,
+    /// Optional tile width and height in grid units (panels spec, #61).
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "serialize_tile_size",
+        deserialize_with = "deserialize_tile_size"
+    )]
+    pub size: Option<(u8, u8)>,
     /// Selected control ranges by parameter name, as `(min, max)`
     /// (`docs/design/control-ranges.md`). Only ranges other than the
     /// default are saved. A missing one gets the default range if the
     /// value fits, else the smallest range that holds it.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub ranges: BTreeMap<String, (f32, f32)>,
+}
+
+/// Writes a present tile size as a plain tuple in the patch format.
+fn serialize_tile_size<S: serde::Serializer>(size: &Option<(u8, u8)>, serializer: S) -> Result<S::Ok, S::Error> {
+    size.expect("absent sizes are skipped").serialize(serializer)
+}
+
+/// Reads a plain tile-size tuple, leaving a missing field to its default.
+fn deserialize_tile_size<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<(u8, u8)>, D::Error> {
+    <(u8, u8)>::deserialize(deserializer).map(Some)
 }
 
 /// A cable in a patch file: `(module id, port name)` to `(module id, port name)`.
@@ -366,6 +384,63 @@ impl Patch {
         Ok(self)
     }
 
+    /// Builds the owned data for a missing module from names in this patch.
+    /// A registered kind at the exact version returns `None`.
+    pub fn unknown_module(
+        &self,
+        module: &PatchModule,
+        registry: &Registry,
+    ) -> Result<Option<loom_core::UnknownModule>, PatchError> {
+        if !module.kind.contains('@') {
+            return Err(LoomError::InvalidKind(module.kind.clone()).into());
+        }
+        let kind = loom_core::ModuleKind::parse(&module.kind)?;
+        if registry
+            .get(&kind.id)
+            .is_some_and(|descriptor| descriptor.version == kind.version)
+        {
+            return Ok(None);
+        }
+        let mut inputs = Vec::new();
+        let mut outputs = Vec::new();
+        let mut parameters: Vec<String> = module.params.keys().cloned().collect();
+        let push = |items: &mut Vec<String>, name: &str| {
+            if !items.iter().any(|existing| existing == name) {
+                items.push(name.to_string());
+            }
+        };
+        for cable in &self.cables {
+            if cable.to.0 == module.id {
+                push(&mut inputs, &cable.to.1);
+            }
+            if cable.from.0 == module.id {
+                push(&mut outputs, &cable.from.1);
+            }
+        }
+        for assignment in &self.modulation {
+            if assignment.source.0 == module.id {
+                push(&mut outputs, &assignment.source.1);
+            }
+            if assignment.target.0 == module.id {
+                push(&mut parameters, &assignment.target.1);
+            }
+        }
+        for mapping in &self.midi {
+            if mapping.target.0 == module.id {
+                push(&mut parameters, &mapping.target.1);
+            }
+        }
+        Ok(Some(loom_core::UnknownModule {
+            kind: module.kind.clone(),
+            label: module.label.clone(),
+            params: module.params.clone(),
+            ranges: module.ranges.clone(),
+            inputs,
+            outputs,
+            parameters,
+        }))
+    }
+
     /// Adds every module and cable to a controller and commits.
     ///
     /// The controller should be empty. Module IDs from the file are kept.
@@ -378,14 +453,16 @@ impl Patch {
     /// with a note, when the registry has the Transport module.
     pub fn load_into(&self, controller: &mut Controller) -> Result<Vec<String>, PatchError> {
         let mut notes = Vec::new();
+        let mut unknown_kinds = Vec::new();
         let transports: Vec<u32> = self
             .modules
             .iter()
             .filter(|m| {
-                controller
-                    .registry()
-                    .resolve(&m.kind)
-                    .is_ok_and(|d| d.id == TRANSPORT_MODULE)
+                loom_core::ModuleKind::parse(&m.kind).ok().is_some_and(|kind| {
+                    controller.registry().get(&kind.id).is_some_and(|descriptor| {
+                        descriptor.id == TRANSPORT_MODULE && descriptor.version == kind.version
+                    })
+                })
             })
             .map(|m| m.id)
             .collect();
@@ -394,6 +471,11 @@ impl Patch {
         }
         for module in &self.modules {
             let id = ModuleId(module.id);
+            if let Some(unknown) = self.unknown_module(module, controller.registry())? {
+                controller.add_unknown_with_id(id, unknown)?;
+                unknown_kinds.push(module.kind.clone());
+                continue;
+            }
             controller.add_module_with_id(id, &module.kind)?;
             notes.extend(Self::load_ranges(module, controller)?);
             let descriptor = controller.graph().node(id).map(|node| node.descriptor);
@@ -417,6 +499,32 @@ impl Patch {
                         other => PatchError::Engine(other),
                     })?;
             }
+        }
+        if !unknown_kinds.is_empty() {
+            let mut distinct = Vec::new();
+            for kind in &unknown_kinds {
+                if !distinct.contains(&kind) {
+                    distinct.push(kind);
+                }
+            }
+            let names = distinct
+                .iter()
+                .take(3)
+                .map(|kind| format!("`{kind}`"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let more = distinct.len().saturating_sub(3);
+            let extra = if more > 0 {
+                format!(" and {more} more")
+            } else {
+                String::new()
+            };
+            let noun = if unknown_kinds.len() == 1 {
+                "module is"
+            } else {
+                "modules are"
+            };
+            notes.push(format!("{} {noun} not in this version: {names}{extra}. They make no sound. Their settings are kept when you save. Open the patch in a newer LoomDSP to play them.", unknown_kinds.len()));
         }
         if transports.is_empty() && controller.registry().resolve(TRANSPORT_MODULE).is_ok() {
             let id = controller.add_module(TRANSPORT_MODULE)?;
@@ -521,7 +629,11 @@ impl Patch {
     pub fn transient_values(&self, registry: &Registry) -> Vec<(u32, String)> {
         self.modules
             .iter()
-            .filter_map(|module| Some((module, registry.resolve(&module.kind).ok()?)))
+            .filter_map(|module| {
+                let kind = loom_core::ModuleKind::parse(&module.kind).ok()?;
+                let descriptor = registry.get(&kind.id)?;
+                (kind.version == descriptor.version).then_some((module, descriptor))
+            })
             .flat_map(|(module, descriptor)| {
                 module
                     .params
@@ -561,6 +673,18 @@ impl Patch {
     pub fn from_graph(name: impl Into<String>, graph: &Graph) -> Self {
         let mut patch = Patch::new(name);
         for (id, node) in graph.nodes() {
+            if let Some(unknown) = &node.unknown {
+                patch.modules.push(PatchModule {
+                    id: id.0,
+                    kind: unknown.kind.clone(),
+                    label: unknown.label.clone(),
+                    params: unknown.params.clone(),
+                    position: None,
+                    size: None,
+                    ranges: unknown.ranges.clone(),
+                });
+                continue;
+            }
             let params = node
                 .descriptor
                 .params
@@ -577,6 +701,7 @@ impl Patch {
                 label: None,
                 params,
                 position: None,
+                size: None,
                 ranges: ranges_to_save(node),
             });
         }
@@ -627,22 +752,36 @@ pub fn ranges_to_save(node: &loom_core::Node) -> BTreeMap<String, (f32, f32)> {
 fn port_name(graph: &Graph, output: OutputRef) -> String {
     graph
         .node(output.module)
-        .map(|n| n.descriptor.outputs[output.port].name.to_string())
+        .map(|n| {
+            n.unknown.as_ref().map_or_else(
+                || n.descriptor.outputs[output.port].name.to_string(),
+                |unknown| unknown.outputs[output.port].clone(),
+            )
+        })
         .unwrap_or_default()
 }
 
 fn input_name(graph: &Graph, input: InputRef) -> String {
     graph
         .node(input.module)
-        .map(|n| n.descriptor.inputs[input.port].name.to_string())
+        .map(|n| {
+            n.unknown.as_ref().map_or_else(
+                || n.descriptor.inputs[input.port].name.to_string(),
+                |unknown| unknown.inputs[input.port].clone(),
+            )
+        })
         .unwrap_or_default()
 }
 
 fn param_name(graph: &Graph, module: ModuleId, index: usize) -> String {
     graph
         .node(module)
-        .and_then(|n| n.descriptor.params.get(index))
-        .map(|param| param.name.to_string())
+        .and_then(|n| {
+            n.unknown.as_ref().map_or_else(
+                || n.descriptor.params.get(index).map(|param| param.name.to_string()),
+                |unknown| unknown.parameters.get(index).cloned(),
+            )
+        })
         .unwrap_or_default()
 }
 
@@ -863,6 +1002,74 @@ Patch(
         let on = node.descriptor.param_index("on").unwrap();
         assert_eq!(node.params[hold], 0.0);
         assert_eq!(node.params[on], 1.0);
+    }
+
+    /// Tile size is optional in old patches and survives RON serialization.
+    #[test]
+    fn tile_size_round_trips_and_old_patches_load() {
+        let mut patch = Patch::from_ron(SIMPLE).unwrap();
+        assert!(patch.modules.iter().all(|m| m.size.is_none()));
+        patch.modules[0].size = Some((24, 16));
+        let text = patch.to_ron().unwrap();
+        assert!(text.contains("size: (24, 16)"));
+        let parsed = Patch::from_ron(&text).unwrap();
+        assert_eq!(parsed.modules.iter().find(|m| m.id == 3).unwrap().size, Some((24, 16)));
+    }
+
+    /// Unknown module data, ports, assignments, and MIDI mappings survive a graph round trip.
+    #[test]
+    fn unknown_module_preserves_named_links_and_settings() {
+        let text = r#"Patch(
+            version: 1, name: "Missing",
+            modules: [
+                (id: 1, kind: "future.effect@3", label: Some("Future"), params: {"amount": 0.3}, ranges: {"amount": (0.0, 2.0)}),
+                (id: 2, kind: "loom.phase.generator@1"),
+                (id: 3, kind: "loom.clock.transport@1"),
+            ],
+            cables: [(from: (2, "phase"), to: (1, "input"))],
+            modulation: [
+                (source: (1, "output"), target: (2, "tune"), depth: 0.5),
+                (source: (2, "phase"), target: (1, "other"), depth: 0.25),
+            ],
+            midi: [(target: (1, "amount"), channel: 0, controller: 74)],
+        )"#;
+        let patch = Patch::from_ron(text).unwrap();
+        let mut parts = create_engine(loom_modules::registry(), EngineConfig::default());
+        let notes = patch.load_into(&mut parts.controller).unwrap();
+        assert!(notes.iter().any(|note| note.contains("future.effect@3")));
+        let node = parts.controller.graph().node(ModuleId(1)).unwrap();
+        let unknown = node.unknown.as_ref().unwrap();
+        assert_eq!(unknown.inputs, ["input"]);
+        assert_eq!(unknown.outputs, ["output"]);
+        let saved = Patch::from_graph("Missing", parts.controller.graph());
+        let mut expected = patch;
+        expected.canonicalise();
+        assert_eq!(saved, expected);
+    }
+
+    /// Unknown versions become placeholders, but malformed kinds still fail.
+    #[test]
+    fn unknown_version_and_malformed_kind() {
+        let patch = Patch::from_ron(&SIMPLE.replace("loom.osc.sine@1", "loom.osc.sine@2")).unwrap();
+        let mut parts = create_engine(loom_modules::registry(), EngineConfig::default());
+        patch.load_into(&mut parts.controller).unwrap();
+        assert_eq!(
+            parts
+                .controller
+                .graph()
+                .node(ModuleId(3))
+                .unwrap()
+                .unknown
+                .as_ref()
+                .unwrap()
+                .kind,
+            "loom.osc.sine@2"
+        );
+        for kind in ["loom.osc.sine", "@2", "unknown@bad"] {
+            let patch = Patch::from_ron(&SIMPLE.replace("loom.osc.sine@1", kind)).unwrap();
+            let mut parts = create_engine(loom_modules::registry(), EngineConfig::default());
+            assert!(patch.load_into(&mut parts.controller).is_err(), "{kind}");
+        }
     }
 
     #[test]

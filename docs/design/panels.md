@@ -544,6 +544,8 @@ What P1 builds. The rest of this spec is P2.
 
 ([#61](https://github.com/brylie/LoomDSP/issues/61).)
 
+**Status:** Implemented.
+
 - **The handle.** A small grip at the bottom-right corner of a tile that has a **growable** widget (a scope, a meter, an XY scope, later a spectrum or curve). Other tiles have no handle. Dragging it changes the tile's size and snaps to the grid. The cursor shows a resize cursor over it.
 - **Minimum and maximum.** The minimum is the size the panel declares (the tile cannot be smaller than its layout). The maximum is 64 by 64 grid units.
 - **What grows.** Only growable widgets. They take all extra width and height. Other widgets keep their size and position, top left.
@@ -562,7 +564,7 @@ What P1 builds. The rest of this spec is P2.
 - [x] By keys alone: Tab to a module, Enter into its panel, change a knob, Escape out twice. Space on a focused toggle acts on the toggle, not on Run. Arrow keys move the selected module by one grid unit.
 - [x] An output with a cable shows *carrying* within 200 ms of a signal above −80 dB, and *silent* 400 ms after it stops. A one-sample trigger lights it. Cable geometry is the same with and without activity. Covered by activity and overlay tests; the state also appears in the UI snapshot.
 - [x] The scope draws its trace in the tile, holds still for a periodic wave, and four scopes keep 60 fps. Checked on a development Mac (not the reference laptop): four live scopes draw at 71.8 fps with `--measure`, with one initial scene upload and five trace uploads during the five-second run. Recording CPU and GPU on the reference laptop is left for the benchmark doc.
-- [ ] A growable tile resizes to the grid within its limits. Ports and cable ends follow. The size is saved and loads. Old patches load. One drag is one undo step.
+- [x] A growable tile resizes to the grid within its limits. Ports and cable ends follow. The size is saved and loads. Old patches load. One drag is one undo step. Covered by canvas geometry, patch, and headless UI tests.
 
 ## Default panels
 

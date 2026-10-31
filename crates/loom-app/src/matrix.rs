@@ -9,6 +9,93 @@ use loom_core::{AssignmentId, Graph, ModuleId, OutputRef, WidgetKind};
 use serde::Serialize;
 use std::fmt;
 
+/// Finds the selected cell and reveals it with the smallest scroll.
+struct RevealRow {
+    viewport: Option<(iced::Rectangle, iced::Vector)>,
+    row: Option<iced::Rectangle>,
+    cell: Option<iced::Rectangle>,
+}
+
+impl<T: 'static> iced::advanced::widget::Operation<T> for RevealRow {
+    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn iced::advanced::widget::Operation<T>)) {
+        operate(self);
+    }
+
+    fn scrollable(
+        &mut self,
+        id: Option<&iced::advanced::widget::Id>,
+        bounds: iced::Rectangle,
+        _content_bounds: iced::Rectangle,
+        translation: iced::Vector,
+        _state: &mut dyn iced::advanced::widget::operation::Scrollable,
+    ) {
+        if id == Some(&iced::advanced::widget::Id::new("matrix-table")) {
+            self.viewport = Some((bounds, translation));
+        }
+    }
+
+    fn container(&mut self, id: Option<&iced::advanced::widget::Id>, bounds: iced::Rectangle) {
+        if id == Some(&iced::advanced::widget::Id::new("matrix-selected-row")) {
+            self.row = Some(bounds);
+        } else if id == Some(&iced::advanced::widget::Id::new("matrix-selected-cell")) {
+            self.cell = Some(bounds);
+        }
+    }
+
+    fn finish(&self) -> iced::advanced::widget::operation::Outcome<T> {
+        use iced::advanced::widget::operation::{Outcome, scrollable};
+        let Some((viewport, translation)) = self.viewport else {
+            return Outcome::None;
+        };
+        let y = self.row.map(|row| {
+            let top = row.y - translation.y;
+            let bottom = top + row.height;
+            if top < viewport.y {
+                (translation.y + top - viewport.y).max(0.0)
+            } else if bottom > viewport.y + viewport.height {
+                translation.y + bottom - (viewport.y + viewport.height)
+            } else {
+                translation.y
+            }
+        });
+        let x = self.cell.map(|cell| {
+            let left = cell.x - translation.x;
+            let right = left + cell.width;
+            if left < viewport.x {
+                (translation.x + left - viewport.x).max(0.0)
+            } else if right > viewport.x + viewport.width {
+                translation.x + right - (viewport.x + viewport.width)
+            } else {
+                translation.x
+            }
+        });
+        Outcome::Chain(Box::new(scrollable::scroll_to(
+            iced::advanced::widget::Id::new("matrix-table"),
+            scrollable::AbsoluteOffset { x, y },
+        )))
+    }
+}
+
+/// Reveals the selected matrix row and column after the view is laid out.
+pub(crate) fn reveal_selected() -> iced::Task<Message> {
+    iced::advanced::widget::operate(RevealRow {
+        viewport: None,
+        row: None,
+        cell: None,
+    })
+}
+
+/// Marks the active cell so its actual bounds can guide scrolling.
+fn matrix_cell<'a>(content: impl Into<Element<'a, Message>>, width: f32, selected: bool) -> Element<'a, Message> {
+    let cell = container(content).width(width);
+    if selected {
+        cell.id("matrix-selected-cell")
+    } else {
+        cell
+    }
+    .into()
+}
+
 /// The right-hand panel visible this session.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -422,20 +509,21 @@ pub fn view<'a>(model: MatrixModel, state: &State, graph: &Graph) -> Element<'a,
             )
             .on_press(Message::Matrix(Event::Select(id, state.cell)))
             .width(20),
-            container(on).width(40),
-            container(source).width(125),
-            container(target).width(125),
-            container(depth).width(95),
-            container(polarity).width(140),
+            matrix_cell(on, 40.0, selected && state.cell == Column::On),
+            matrix_cell(source, 125.0, selected && state.cell == Column::Source),
+            matrix_cell(target, 125.0, selected && state.cell == Column::Target),
+            matrix_cell(depth, 95.0, selected && state.cell == Column::Depth),
+            matrix_cell(polarity, 140.0, selected && state.cell == Column::Polarity),
             remove_button("Remove modulation", Message::Matrix(Event::Remove(id))),
         ]
         .spacing(3)
         .align_y(iced::Alignment::Center);
-        table = table.push(container(line).padding(3).style(if selected {
+        let line = container(line).padding(3).style(if selected {
             container::rounded_box
         } else {
             container::transparent
-        }));
+        });
+        table = table.push(if selected { line.id("matrix-selected-row") } else { line });
     }
     content = content.push(
         scrollable(table)
@@ -448,16 +536,6 @@ pub fn view<'a>(model: MatrixModel, state: &State, graph: &Graph) -> Element<'a,
             .height(Length::Fill),
     );
     container(content.padding(8)).width(280).height(Length::Fill).into()
-}
-
-/// Horizontal offset that keeps the keyboard-selected column in view.
-pub(crate) const fn column_offset(column: Column) -> f32 {
-    match column {
-        Column::On | Column::Source => 0.0,
-        Column::Target => 150.0,
-        Column::Depth => 290.0,
-        Column::Polarity => 420.0,
-    }
 }
 
 /// Parses a signed percentage and rejects anything outside the edit range.
@@ -838,6 +916,133 @@ mod tests {
     use super::*;
     use crate::ui_test::Ui;
     use iced::{Point, keyboard::key::Named};
+
+    /// Keyboard navigation keeps every row within the actual table viewport.
+    #[test]
+    fn keyboard_reveals_rows_in_an_overflowing_table() {
+        use iced::advanced::widget::{Id, Operation, operation::Scrollable};
+        let mut ui = Ui::open("modulation.ron");
+        let assignment = *ui
+            .app
+            .controller
+            .graph()
+            .assignment(AssignmentId(1))
+            .expect("assignment");
+        for index in 0..30 {
+            ui.app
+                .controller
+                .add_assignment(
+                    assignment.source,
+                    assignment.target,
+                    assignment.param,
+                    -0.9 + index as f32 * 0.03,
+                )
+                .unwrap();
+        }
+        ui.app.matrix_event(Event::Tab(Tab::Matrix));
+        /// Captures the table viewport and the selected row from the view.
+        struct Bounds(
+            Option<(iced::Rectangle, iced::Vector)>,
+            Option<iced::Rectangle>,
+            Option<iced::Rectangle>,
+        );
+        impl Operation for Bounds {
+            fn traverse(&mut self, f: &mut dyn FnMut(&mut dyn Operation)) {
+                f(self);
+            }
+            fn container(&mut self, id: Option<&Id>, bounds: iced::Rectangle) {
+                if id == Some(&Id::new("matrix-selected-row")) {
+                    self.1 = Some(bounds);
+                } else if id == Some(&Id::new("matrix-selected-cell")) {
+                    self.2 = Some(bounds);
+                }
+            }
+            fn scrollable(
+                &mut self,
+                id: Option<&Id>,
+                bounds: iced::Rectangle,
+                _: iced::Rectangle,
+                translation: iced::Vector,
+                _: &mut dyn Scrollable,
+            ) {
+                if id == Some(&Id::new("matrix-table")) {
+                    self.0 = Some((bounds, translation));
+                }
+            }
+        }
+        let before: Vec<_> = ui
+            .app
+            .controller
+            .graph()
+            .assignments()
+            .map(|(id, a)| (id, *a))
+            .collect();
+        let check = |ui: &mut Ui| {
+            let mut bounds = Bounds(None, None, None);
+            ui.with_ui(|view, renderer, _| view.operate(renderer, &mut bounds));
+            let (viewport, translation) = bounds.0.expect("viewport");
+            let row = bounds.1.expect("selected row");
+            assert!(row.y - translation.y >= viewport.y - 1.0);
+            assert!(row.y + row.height - translation.y <= viewport.y + viewport.height + 1.0);
+            let cell = bounds.2.expect("selected cell");
+            assert!(cell.x - translation.x >= viewport.x - 1.0);
+            assert!(cell.x + cell.width - translation.x <= viewport.x + viewport.width + 1.0);
+            assert_eq!(
+                ui.app.ui_snapshot().matrix.selected,
+                ui.app.matrix.selected.map(|id| id.0)
+            );
+            translation
+        };
+        for _ in 0..32 {
+            ui.tap(keyboard::Key::Named(Named::ArrowDown), keyboard::Modifiers::default());
+            check(&mut ui);
+        }
+        assert_eq!(ui.app.matrix.selected, Some(AssignmentId(32)));
+        let first_x = check(&mut ui).x;
+        ui.tap(keyboard::Key::Named(Named::ArrowRight), keyboard::Modifiers::default());
+        assert_eq!(check(&mut ui).x, first_x, "an already visible cell does not scroll");
+        for _ in 0..3 {
+            ui.tap(keyboard::Key::Named(Named::ArrowRight), keyboard::Modifiers::default());
+        }
+        let x = check(&mut ui).x;
+        assert!(x > 0.0);
+        for _ in 0..31 {
+            ui.tap(keyboard::Key::Named(Named::ArrowUp), keyboard::Modifiers::default());
+            assert_eq!(check(&mut ui).x, x);
+        }
+        assert_eq!(ui.app.matrix.selected, Some(AssignmentId(1)));
+        ui.send(Message::Matrix(Event::Sort(Column::Depth)));
+        check(&mut ui);
+        ui.send(Message::Matrix(Event::Sort(Column::Depth)));
+        check(&mut ui);
+        ui.send(Message::Matrix(Event::Filter("LFO".into())));
+        check(&mut ui);
+        ui.send(Message::Matrix(Event::SelectedOnly(true)));
+        check(&mut ui);
+        for _ in 0..31 {
+            ui.tap(keyboard::Key::Named(Named::ArrowDown), keyboard::Modifiers::default());
+            let selected = ui.app.matrix.selected.expect("visible selection");
+            assert!(
+                ui.app
+                    .matrix
+                    .model(ui.app.controller.graph(), &ui.app.selection)
+                    .rows
+                    .iter()
+                    .any(|row| row.id == selected.0)
+            );
+            check(&mut ui);
+        }
+        assert_eq!(
+            before,
+            ui.app
+                .controller
+                .graph()
+                .assignments()
+                .map(|(id, a)| (id, *a))
+                .collect::<Vec<_>>()
+        );
+        assert!(ui.app.edits.history.undo_step().is_none());
+    }
 
     /// Visible rows follow engine order, sorting, text, and module filters
     /// without changing the graph or adding an undo step.

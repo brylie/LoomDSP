@@ -215,7 +215,12 @@ fn load_engine(path: &Path, config: EngineConfig) -> Result<(Patch, EngineParts)
     // What loaded differently from the file, such as a saved control range
     // that was not kept (control-ranges.md, rule 7). The patch still plays.
     for note in patch.load_into(&mut parts.controller)? {
-        eprintln!("note: {note}");
+        let level = if note.contains("not in this version:") {
+            "warning"
+        } else {
+            "note"
+        };
+        eprintln!("{level}: {note}");
     }
     Ok((patch, parts))
 }
@@ -379,6 +384,14 @@ fn describe(controller: &Controller, id: ModuleId) -> String {
 fn check(path: &Path) -> Result<ExitCode> {
     let (patch, parts) = load_engine(path, EngineConfig::default())?;
     let c = &parts.controller;
+    let unknown: Vec<_> = c
+        .graph()
+        .nodes()
+        .filter_map(|(id, node)| node.unknown.as_ref().map(|unknown| (id, unknown.kind.as_str())))
+        .collect();
+    for (id, kind) in &unknown {
+        println!("  unknown module {id}: {kind}");
+    }
     let report = c.last_report();
     println!("{}: \"{}\"", path.display(), patch.name);
     println!("  {} modules, {} cables", report.modules, c.graph().cables().count());
@@ -416,12 +429,9 @@ fn check(path: &Path) -> Result<ExitCode> {
             let graph = c.graph();
             let out_name = graph
                 .node(from.module)
-                .map(|n| n.descriptor.outputs[from.port].name)
+                .and_then(|n| n.output_name(from.port))
                 .unwrap_or("?");
-            let in_name = graph
-                .node(to.module)
-                .map(|n| n.descriptor.inputs[to.port].name)
-                .unwrap_or("?");
+            let in_name = graph.node(to.module).and_then(|n| n.input_name(to.port)).unwrap_or("?");
             println!(
                 "    inserted a 1-sample delay: {} `{out_name}` -> {} `{in_name}`",
                 describe(c, from.module),
@@ -430,7 +440,11 @@ fn check(path: &Path) -> Result<ExitCode> {
         }
     }
     write_notes(&mut std::io::stdout().lock(), c.registry())?;
-    Ok(ExitCode::SUCCESS)
+    Ok(if unknown.is_empty() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    })
 }
 
 fn render(
@@ -983,7 +997,7 @@ mod tests {
     /// Registry notes print under `module notes:`; none prints nothing.
     #[test]
     fn notes_print_only_when_present() {
-        use loom_core::{Channels, ModuleDescriptor, ModuleRole, Panel, Polarity, PortDefault, PortSpec, SignalType};
+        use loom_core::{Channels, ModuleDescriptor, ModuleRole, Panel, PortDefault, PortSpec, SignalType};
         static QUIET: ModuleDescriptor = ModuleDescriptor {
             id: "test.quiet",
             version: 1,
@@ -996,7 +1010,7 @@ mod tests {
                 signal: SignalType::Audio,
                 description: "",
                 default: PortDefault::Value(0.0),
-                polarity: Polarity::Bipolar,
+                range: loom_core::PortRange::Signal,
                 channels: Channels::PerChannel,
             }],
             outputs: &[PortSpec {
@@ -1005,7 +1019,7 @@ mod tests {
                 signal: SignalType::Audio,
                 description: "Output.",
                 default: PortDefault::Value(0.0),
-                polarity: Polarity::Bipolar,
+                range: loom_core::PortRange::Signal,
                 channels: Channels::PerChannel,
             }],
             params: &[],

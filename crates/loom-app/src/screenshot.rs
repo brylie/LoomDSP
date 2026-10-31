@@ -243,6 +243,7 @@ fn shown(
     options: &Options,
     controller: &mut Controller,
     positions: &BTreeMap<u32, Point>,
+    sizes: &BTreeMap<u32, (u8, u8)>,
     size: Size,
 ) -> Result<(Scene, Shown), String> {
     // A wire from a connected input picks up its cable, as in the app: the
@@ -252,7 +253,7 @@ fn shown(
         None => None,
     };
     let controller = &*controller;
-    let scene = crate::scene::build(controller, positions);
+    let scene = crate::scene::build(controller, positions, sizes);
 
     let focus = options
         .focus
@@ -312,7 +313,13 @@ pub fn run(args: &crate::Args, path: &Path) -> Result<(), String> {
     let mut session = crate::App::session(config, args.test_modules, args.source())?;
     let options = &args.view;
     let logical = options.size.map_or(CANVAS, ImageSize::logical);
-    let (scene, shown) = shown(options, &mut session.controller, &session.positions, logical)?;
+    let (scene, shown) = shown(
+        options,
+        &mut session.controller,
+        &session.positions,
+        &session.sizes,
+        logical,
+    )?;
     let mut values = PanelValues::new();
     crate::scene::update_panel_values_dragging(&mut values, &session.controller, &BTreeMap::new(), shown.dragging);
     let physical = physical_size(logical, options.scale)?;
@@ -342,7 +349,13 @@ pub fn run_window(args: &crate::Args, path: &Path) -> Result<(), String> {
     let mut ui = UserInterface::build(app.view(), logical, Cache::default(), &mut renderer);
     let canvas = canvas_view(&mut ui, &mut renderer).ok_or("the window has no patch canvas")?;
     drop(ui);
-    let (scene, shown) = shown(options, &mut app.controller, &app.positions, canvas.bounds.size())?;
+    let (scene, shown) = shown(
+        options,
+        &mut app.controller,
+        &app.positions,
+        &app.sizes,
+        canvas.bounds.size(),
+    )?;
     app.scene = scene;
     app.depth_drag = Some(shown.dragging);
     app.refresh_values();
