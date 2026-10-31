@@ -191,6 +191,16 @@ impl Controller {
         self.dirty
     }
 
+    /// The patch's Transport module ([`TRANSPORT_MODULE`](crate::TRANSPORT_MODULE)),
+    /// if it has one.
+    pub fn transport_module(&self) -> Option<ModuleId> {
+        self.graph
+            .nodes
+            .iter()
+            .find(|(_, node)| node.descriptor.id == crate::transport::TRANSPORT_MODULE)
+            .map(|(&id, _)| id)
+    }
+
     /// Adds a module by kind (`"id@version"` or `"id"`). Returns its new ID.
     /// Fails with [`LoomError::ModuleIdOutOfRange`] once the next free ID
     /// would pass [`ModuleId::MAX`].
@@ -216,6 +226,12 @@ impl Controller {
         }
         if id > ModuleId::MAX {
             return Err(LoomError::ModuleIdOutOfRange(id));
+        }
+        // A patch has exactly one Transport (clock.md).
+        if descriptor.id == crate::transport::TRANSPORT_MODULE
+            && let Some(existing) = self.transport_module()
+        {
+            return Err(LoomError::SecondTransport(existing));
         }
         self.collect_garbage();
         let slot = match descriptor.role {
@@ -257,7 +273,12 @@ impl Controller {
 
     /// Removes a module, every cable touching it, every modulation assignment
     /// it is part of, and every probe on it.
+    ///
+    /// Refuses the Transport module: every patch has one (clock.md).
     pub fn remove_module(&mut self, id: ModuleId) -> Result<(), LoomError> {
+        if self.transport_module() == Some(id) {
+            return Err(LoomError::TransportCannotBeRemoved(id));
+        }
         let node = self.graph.nodes.remove(&id).ok_or(LoomError::UnknownModule(id))?;
         self.graph
             .cables

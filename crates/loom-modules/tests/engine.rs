@@ -722,3 +722,93 @@ fn midi_note_runs_unconnected_and_an_oscillator_does_not() {
         "the gate light follows the key"
     );
 }
+
+/// An engine running `max_block`-frame buffers with a Clock at 1/4 on the
+/// left output and a Phase Trigger on the bar phase on the right. The LFO in
+/// synced mode passes the bar phase on, since its phase input follows the
+/// transport. The fade-in has played and the transport has been reset, so
+/// the next frame is bar 1.
+fn clock_against_bar(block: usize) -> EngineParts {
+    let config = EngineConfig {
+        max_block: block,
+        output_safety: loom_core::OutputSafety::Off,
+        ..EngineConfig::with_sample_rate(48_000.0)
+    };
+    let mut parts = loom_core::create_engine(loom_modules::registry(), config);
+    let c = &mut parts.controller;
+    let clock = c.add_module("loom.clock.clock").unwrap();
+    let lfo = c.add_module("loom.mod.lfo").unwrap();
+    c.set_param_named(lfo, "sync", 1.0).unwrap();
+    let bar = c.add_module("loom.phase.trigger").unwrap();
+    let out = c.add_module("loom.io.audio-out").unwrap();
+    c.connect_named(clock, "trigger", out, "left").unwrap();
+    c.connect_named(lfo, "phase", bar, "phase").unwrap();
+    c.connect_named(bar, "trigger", out, "right").unwrap();
+    c.commit().unwrap();
+    // Play past the fade-in, which runs even with the safety stage off.
+    render(&mut parts, 1_024, block, &[]);
+    parts.controller.reset_transport().unwrap();
+    parts
+}
+
+/// Frames where `signal` is high.
+fn highs(signal: &[f32]) -> Vec<usize> {
+    signal
+        .iter()
+        .enumerate()
+        .filter(|&(_, &x)| x > 0.5)
+        .map(|(i, _)| i)
+        .collect()
+}
+
+/// docs/design/clock.md, acceptance: Clock at 1/4 in 4/4 fires four
+/// triggers per bar, in line with the bar phase wrap, at block sizes 1, 32,
+/// and 1024.
+#[test]
+fn clock_quarter_notes_fire_four_per_bar_on_the_bar_line() {
+    // Two bars at 120 BPM and 48 kHz, and one frame of the third.
+    const BAR: usize = 96_000;
+    let frames = 2 * BAR + 1;
+    let reference = render(&mut clock_against_bar(1_024), frames, 1_024, &[]);
+    let (clock, bar) = &reference;
+    // Bar 1 fires on the reset; every beat after it fires too.
+    let expected: Vec<usize> = (0..=8).map(|beat| beat * BAR / 4).collect();
+    assert_eq!(highs(clock), expected);
+    // The bar phase wraps at bars 2 and 3 (the reset to 0 is not a wrap),
+    // and the Clock fires on the same frames.
+    let bar_lines = highs(bar);
+    assert_eq!(bar_lines, [BAR, 2 * BAR]);
+    assert!(bar_lines.iter().all(|frame| clock[*frame] == 1.0));
+    for block in [1, 32] {
+        let other = render(&mut clock_against_bar(block), frames, block, &[]);
+        assert_eq!(other, reference, "block size {block}");
+    }
+}
+
+/// The Clock gives the same output at block sizes 1, 32, and 1024 through
+/// a stop, a start, a tempo change, and a reset.
+#[test]
+fn clock_through_transport_changes_does_not_depend_on_block_size() {
+    let run = |block: usize| {
+        let mut parts = clock_against_bar(block);
+        render_with(&mut parts, 80 * 1_024, block, &[], |frame, parts| {
+            let controller = &mut parts.controller;
+            match frame {
+                10_240 => controller.set_running(false).unwrap(),
+                20_480 => controller.set_running(true).unwrap(),
+                30_720 => {
+                    controller.set_tempo(97.0).unwrap();
+                }
+                40_960 => controller.reset_transport().unwrap(),
+                _ => {}
+            }
+        })
+    };
+    let reference = run(1_024);
+    // The reset at frame 40 960 fires bar 1 once, at once.
+    assert_eq!(reference.0[40_960], 1.0);
+    assert_eq!(reference.0[40_959], 0.0);
+    for block in [1, 32] {
+        assert_eq!(run(block), reference, "block size {block}");
+    }
+}

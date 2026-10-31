@@ -174,12 +174,13 @@ fn transport_signals_do_not_depend_on_block_size() {
     assert!(bar[4096..=6144].iter().all(|&x| x == held), "stopped phase holds");
     assert!(bar[6145] > held, "running continues");
 
-    // Reset returns to bar 1, and every module sees one jump.
+    // Reset returns to bar 1, and every module sees one jump. A new time
+    // signature is a jump too (rule 10), seen once, at the next buffer.
     assert_eq!(bar[8192], 0.0);
     assert_eq!(beat[8192], 0.0);
     for jumps in [jumped, loop_jumped] {
         let at: Vec<usize> = (0..jumps.len()).filter(|&i| jumps[i] != 0.0).collect();
-        assert_eq!(at, vec![8192]);
+        assert_eq!(at, vec![8192, 10_240]);
     }
 }
 

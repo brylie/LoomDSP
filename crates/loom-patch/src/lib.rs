@@ -31,6 +31,7 @@
 
 use loom_core::{
     Controller, Graph, InputRef, LoomError, MidiControl, ModuleId, OutputRef, ParamRange, Polarity, Registry,
+    TRANSPORT_MODULE,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -226,6 +227,15 @@ pub enum PatchError {
         /// The shared parameter or control.
         what: String,
     },
+    /// The patch has more than one Transport module. A patch has exactly
+    /// one (`docs/design/clock.md`).
+    #[error("modules {first} and {second} are both a Transport, and a patch has only one")]
+    TwoTransports {
+        /// The first Transport's module ID.
+        first: u32,
+        /// The second Transport's module ID.
+        second: u32,
+    },
     /// A parameter name does not exist on a module.
     #[error("module {module}: unknown parameter `{param}`")]
     UnknownParam {
@@ -362,8 +372,26 @@ impl Patch {
     /// Returns notes about what loaded differently from the file: a saved
     /// control range that the parameter does not offer, or that does not
     /// hold the saved value. Values never change (control-ranges.md, rule 7).
+    ///
+    /// Every patch has exactly one Transport (`docs/design/clock.md`). Two
+    /// fail with an error that names both. A patch without one gets one,
+    /// with a note, when the registry has the Transport module.
     pub fn load_into(&self, controller: &mut Controller) -> Result<Vec<String>, PatchError> {
         let mut notes = Vec::new();
+        let transports: Vec<u32> = self
+            .modules
+            .iter()
+            .filter(|m| {
+                controller
+                    .registry()
+                    .resolve(&m.kind)
+                    .is_ok_and(|d| d.id == TRANSPORT_MODULE)
+            })
+            .map(|m| m.id)
+            .collect();
+        if let [first, second, ..] = transports[..] {
+            return Err(PatchError::TwoTransports { first, second });
+        }
         for module in &self.modules {
             let id = ModuleId(module.id);
             controller.add_module_with_id(id, &module.kind)?;
@@ -389,6 +417,13 @@ impl Patch {
                         other => PatchError::Engine(other),
                     })?;
             }
+        }
+        if transports.is_empty() && controller.registry().resolve(TRANSPORT_MODULE).is_ok() {
+            let id = controller.add_module(TRANSPORT_MODULE)?;
+            notes.push(format!(
+                "the patch had no Transport, so one was added as module {} (120 BPM, 4/4, running)",
+                id.0
+            ));
         }
         for cable in &self.cables {
             controller.connect_named(ModuleId(cable.from.0), &cable.from.1, ModuleId(cable.to.0), &cable.to.1)?;
@@ -626,6 +661,7 @@ Patch(
         (id: 1, kind: "loom.midi.note@1"),
         (id: 2, kind: "loom.phase.generator@1", params: {"tune": 12.0}),
         (id: 4, kind: "loom.io.audio-out@1"),
+        (id: 5, kind: "loom.clock.transport@1"),
     ],
     cables: [
         (from: (2, "phase"), to: (3, "phase")),
@@ -635,12 +671,69 @@ Patch(
 )
 "#;
 
-    /// Loads `text` into a new engine. Returns the controller and the notes.
+    /// Loads `text` into a new engine. Returns the controller and the notes,
+    /// without the note that a Transport was added.
     fn load_text(text: &str) -> (Controller, Vec<String>) {
         let patch = Patch::from_ron(text).unwrap();
         let mut parts = create_engine(loom_modules::registry(), EngineConfig::default());
-        let notes = patch.load_into(&mut parts.controller).unwrap();
+        let mut notes = patch.load_into(&mut parts.controller).unwrap();
+        notes.retain(|note| !note.contains("no Transport"));
         (parts.controller, notes)
+    }
+
+    /// clock.md: a patch without a Transport gets one on load, with a note.
+    /// One with two fails with an error that names both. The settings of
+    /// the one it has, and its run state, survive a save and a load; its
+    /// transient `reset` is never saved.
+    #[test]
+    fn every_patch_loads_with_exactly_one_transport() {
+        let patch = Patch::from_ron(r#"Patch(version: 1, modules: [(id: 3, kind: "loom.math.mul@1")])"#).unwrap();
+        let mut parts = create_engine(loom_modules::registry(), EngineConfig::default());
+        let notes = patch.load_into(&mut parts.controller).unwrap();
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert!(
+            notes[0].contains("no Transport") && notes[0].contains("module 4"),
+            "{notes:?}"
+        );
+        assert_eq!(parts.controller.transport_module(), Some(ModuleId(4)));
+
+        let two = Patch::from_ron(
+            r#"Patch(version: 1, modules: [
+                (id: 2, kind: "loom.clock.transport@1"),
+                (id: 7, kind: "loom.clock.transport@1"),
+            ])"#,
+        )
+        .unwrap();
+        let mut parts = create_engine(loom_modules::registry(), EngineConfig::default());
+        let error = two.load_into(&mut parts.controller).unwrap_err();
+        assert!(matches!(error, PatchError::TwoTransports { first: 2, second: 7 }));
+        let message = error.to_string();
+        assert!(message.contains('2') && message.contains('7'), "{message}");
+
+        let (mut c, notes) = load_text(SIMPLE);
+        assert!(notes.is_empty());
+        let transport = ModuleId(5);
+        c.set_param_named(transport, "tempo", 96.0).unwrap();
+        c.set_param_named(transport, "numerator", 7.0).unwrap();
+        c.set_param_named(transport, "denominator", 3.0).unwrap();
+        c.set_param_named(transport, "run", 0.0).unwrap();
+        c.set_param_named(transport, "reset", 1.0).unwrap();
+        let text = Patch::from_graph("saved", c.graph()).to_ron().unwrap();
+        assert!(!text.contains("reset"), "{text}");
+        let (reloaded, notes) = load_text(&text);
+        assert!(notes.is_empty());
+        let node = reloaded.graph().node(transport).unwrap();
+        let value = |name: &str| node.params[node.descriptor.param_index(name).unwrap()];
+        assert_eq!(
+            (
+                value("tempo"),
+                value("numerator"),
+                value("denominator"),
+                value("run"),
+                value("reset")
+            ),
+            (96.0, 7.0, 3.0, 0.0, 0.0)
+        );
     }
 
     /// Value and selected range of Multiply #1's gain.
@@ -805,6 +898,7 @@ Patch(
         (id: 1, kind: "loom.math.constant@1", params: {"value": 1.0}),
         (id: 2, kind: "loom.env.adsr@1"),
         (id: 3, kind: "loom.filter.svf@1"),
+        (id: 4, kind: "loom.clock.transport@1"),
     ],
     modulation: [
         (source: (2, "out"), target: (3, "resonance"), depth: 0.4, polarity: Unipolar, enabled: false),
@@ -922,6 +1016,7 @@ Patch(
     name: "Mapped",
     modules: [
         (id: 1, kind: "loom.filter.svf@1"),
+        (id: 2, kind: "loom.clock.transport@1"),
     ],
     midi: [
         (target: (1, "resonance"), channel: 0, controller: 71),

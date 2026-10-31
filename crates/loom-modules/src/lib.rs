@@ -12,6 +12,7 @@
 use loom_core::{LoomError, ModuleDescriptor, Registry};
 use std::sync::Arc;
 
+pub mod clock;
 pub mod display;
 pub mod env;
 pub mod filter;
@@ -26,6 +27,7 @@ pub mod osc;
 pub mod phase;
 pub mod rand;
 pub mod time;
+pub mod transport;
 pub mod ui;
 
 /// Every built-in module.
@@ -61,6 +63,8 @@ pub static ALL: &[&ModuleDescriptor] = &[
     &midi::NOTE_IN,
     &display::METER,
     &display::SCOPE,
+    &clock::CLOCK,
+    &transport::TRANSPORT,
     &logic::DIVIDE,
     &logic::COMPARE,
     &logic::LOGIC,
@@ -172,6 +176,7 @@ mod tests {
                     ("loom.osc.noise", "colour"),
                     ("loom.mod.lfo", "sync"),
                     ("loom.mod.lfo", "shape"),
+                    ("loom.clock.transport", "run"),
                 ];
                 if non_knob.contains(&(descriptor.id, param.name)) {
                     assert!(
@@ -200,7 +205,8 @@ mod tests {
                 "loom.env.adsr" => &["level"],
                 "loom.logic.memory" => &["state"],
                 // Trigger lights (panels.md, Lights for one-sample triggers).
-                "loom.logic.divide" | "loom.phase.trigger" => &["fired"],
+                "loom.logic.divide" | "loom.phase.trigger" | "loom.clock.clock" => &["fired"],
+                "loom.clock.transport" => &["beat"],
                 _ => &[],
             };
             assert_eq!(lights, expected, "{}", descriptor.id);

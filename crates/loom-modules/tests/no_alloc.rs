@@ -134,6 +134,39 @@ fn audio_thread_never_allocates() {
                 11 => parts.controller.set_time_signature(TimeSignature::new(7, 8)).unwrap(),
                 _ => {}
             }
+            // The Transport module's parameters and inputs ask the engine
+            // for changes on the audio thread, and a cable on `run` splits
+            // blocks on the transport grid (clock.md, rule 11).
+            if let Some(transport) = parts.controller.transport_module() {
+                match i % 29 {
+                    2 => drop(
+                        parts
+                            .controller
+                            .set_param_named(transport, "tempo", 90.0 + i as f32 % 50.0),
+                    ),
+                    6 => drop(
+                        parts
+                            .controller
+                            .set_param_named(transport, "numerator", (1 + i % 7) as f32),
+                    ),
+                    9 => drop(parts.controller.set_param_named(transport, "reset", (i % 2) as f32)),
+                    12 => {
+                        let lfo = parts.controller.add_module("loom.mod.lfo").unwrap();
+                        parts.controller.set_param_named(lfo, "shape", 4.0).unwrap();
+                        parts.controller.set_param_named(lfo, "rate", 40.0).unwrap();
+                        parts.controller.connect_named(lfo, "out", transport, "run").unwrap();
+                        parts.controller.connect_named(lfo, "out", transport, "reset").unwrap();
+                    }
+                    20 => {
+                        // The run cable goes, so blocks stop splitting.
+                        let lfo = parts.controller.graph().cables().find(|(_, to)| to.module == transport);
+                        if let Some((from, _)) = lfo {
+                            parts.controller.remove_module(from.module).unwrap();
+                        }
+                    }
+                    _ => {}
+                }
+            }
             // So are safety mode changes (ADR-0019), whose fade spans buffers.
             if i % 19 == 0 {
                 let mode = [OutputSafety::Clean, OutputSafety::Off, OutputSafety::LowLatency][i / 19 % 3];

@@ -54,5 +54,7 @@ pub use registry::{ModuleKind, Registry, RegistryNote};
 pub use safety::OutputSafety;
 pub use signal::SignalType;
 pub use telemetry::{MeterReading, ProbeId, ProbeKind, SCOPE_CHUNK, ScopeChunk, Telemetry};
-pub use transport::{TimeSignature, TransportInfo, TransportSettings};
+pub use transport::{
+    TRANSPORT_GRID, TRANSPORT_MODULE, TimeSignature, TransportInfo, TransportRequest, TransportSettings,
+};
 pub use width::Width;
