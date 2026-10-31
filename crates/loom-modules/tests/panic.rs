@@ -28,8 +28,7 @@ fn engine(mode: OutputSafety) -> EngineParts {
 fn play(parts: &mut EngineParts, source: ModuleId, port: &str) {
     let c = &mut parts.controller;
     let out = c.add_module("loom.io.audio-out").unwrap();
-    c.connect_named(source, port, out, "left").unwrap();
-    c.connect_named(source, port, out, "right").unwrap();
+    c.connect_named(source, port, out, "in").unwrap();
     c.commit().unwrap();
 }
 

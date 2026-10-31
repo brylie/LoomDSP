@@ -317,6 +317,99 @@ impl Module for Crossfade {
     }
 }
 
+/// A port on the stereo channel tools.
+const fn stereo_port(
+    name: &'static str,
+    label: &'static str,
+    description: &'static str,
+    channels: Channels,
+) -> PortSpec {
+    PortSpec {
+        name,
+        label,
+        description,
+        signal: SignalType::Audio,
+        default: PortDefault::Value(0.0),
+        range: loom_core::PortRange::Signal,
+        channels,
+    }
+}
+
+/// `loom.mix.join`: combines two mono signals into one stereo cable.
+pub static JOIN: ModuleDescriptor = ModuleDescriptor {
+    id: "loom.mix.join",
+    version: 1,
+    name: "Join",
+    category: "Mix",
+    description: "Combines two signals into a stereo cable.",
+    inputs: &[
+        stereo_port("left", "Left", "The signal for the left side.", Channels::Downmix),
+        stereo_port("right", "Right", "The signal for the right side.", Channels::Downmix),
+    ],
+    outputs: &[stereo_port(
+        "out",
+        "Out",
+        "The combined stereo signal.",
+        Channels::Stereo,
+    )],
+    params: &[],
+    role: ModuleRole::Dsp(|_| Box::new(Join)),
+    panel: Panel::EMPTY,
+    displays: &[],
+};
+
+/// A stateless stereo joiner.
+#[derive(Clone)]
+struct Join;
+
+impl Module for Join {
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+
+    fn process(&mut self, _: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        let [left, _] = io.stereo_input(0);
+        let [right, _] = io.stereo_input(1);
+        let [out_left, out_right] = io.stereo_output(0);
+        out_left.copy_from_slice(left);
+        out_right.copy_from_slice(right);
+    }
+}
+
+/// `loom.mix.split`: separates the sides of a stereo cable.
+pub static SPLIT: ModuleDescriptor = ModuleDescriptor {
+    id: "loom.mix.split",
+    version: 1,
+    name: "Split",
+    category: "Mix",
+    description: "Separates a stereo cable into its two sides.",
+    inputs: &[stereo_port("in", "In", "The stereo signal to split.", Channels::Stereo)],
+    outputs: &[
+        stereo_port("left", "Left", "The left side of the signal.", Channels::PerChannel),
+        stereo_port("right", "Right", "The right side of the signal.", Channels::PerChannel),
+    ],
+    params: &[],
+    role: ModuleRole::Dsp(|_| Box::new(Split)),
+    panel: Panel::EMPTY,
+    displays: &[],
+};
+
+/// A stateless stereo splitter.
+#[derive(Clone)]
+struct Split;
+
+impl Module for Split {
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+
+    fn process(&mut self, _: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        let [left, right] = io.stereo_input(0);
+        io.output(0).copy_from_slice(left);
+        io.output(1).copy_from_slice(right);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -404,6 +404,8 @@ const BROWN_LEAK_HZ: f32 = 10.0;
 /// integral of white noise, so it cannot drift away.
 struct Noise {
     state: u32,
+    /// Channel whose seed is used for the current random streams.
+    channel: usize,
     /// The knob's base seed. Only `set_param` writes it.
     seed: u32,
     /// The seed `state` was last started from: the modulated seed while an
@@ -427,6 +429,7 @@ impl Noise {
         let leak = (-std::f32::consts::TAU * BROWN_LEAK_HZ / sample_rate).exp();
         let mut noise = Self {
             state: 1,
+            channel: 0,
             seed: 1,
             active: 1,
             colour: 0,
@@ -446,8 +449,9 @@ impl Noise {
 
     /// Starts every stream again from `seed`.
     fn restart(&mut self, seed: u32) {
-        self.state = seed;
-        self.aux = seed ^ 0x9E37_79B9;
+        let seed = if self.channel == 0 { seed } else { seed ^ 0x9E37_79B9 };
+        self.state = seed.max(1);
+        self.aux = (seed ^ 0x9E37_79B9).max(1);
         for row in 0..PINK_ROWS {
             self.rows[row] = Self::next_white(&mut self.aux);
         }
@@ -495,13 +499,13 @@ impl Module for Noise {
     /// Takes the settings and the brown filter memory of another instance,
     /// then starts the random streams again from the seed, as `reset` does
     /// (stereo spec, rule 27). A copied generator would play the other
-    /// side's numbers. The seed is not mixed with a channel yet:
-    /// `ProcessContext` has no channel until stereo copies are built (#23).
+    /// side's numbers. The first call on the right mixes in its channel.
     fn copy_state_from(&mut self, other: &dyn Module) -> bool {
         let Some(other) = other.as_any().downcast_ref::<Self>() else {
             return false;
         };
         self.seed = other.seed;
+        self.channel = other.channel;
         self.active = other.active;
         self.colour = other.colour;
         self.leak = other.leak;
@@ -511,7 +515,13 @@ impl Module for Noise {
         true
     }
 
-    fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+    fn process(&mut self, ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        if self.channel != ctx.channel() {
+            self.channel = ctx.channel();
+            let brown = self.brown;
+            self.restart(self.active);
+            self.brown = brown;
+        }
         let (seed, colour_mod) = (io.param(0), io.param(1));
         let ([], [out]) = io.split::<0, 1>();
         for (i, out) in out.iter_mut().enumerate() {
@@ -815,6 +825,37 @@ mod noise_colour_tests {
             run(noise.as_mut(), RATE, &[], &[], &mut [chunk], &[]);
         }
         out
+    }
+
+    /// A copied noise stream mixes in the right channel and stays deterministic.
+    #[test]
+    fn copied_noise_uses_the_channel_in_its_seed() {
+        fn run_copy(channel: usize, block: usize) -> Vec<f32> {
+            let mut left = Noise::new(RATE);
+            let mut output = [0.0; 64];
+            run(&mut left, RATE, &[], &[], &mut [&mut output], &[]);
+            let mut copy = Noise::new(RATE);
+            assert!(copy.copy_state_from(&left));
+            let mut result = vec![0.0; 512];
+            for chunk in result.chunks_mut(block) {
+                loom_core::testing::run_with_transport_and_channel(
+                    &mut copy,
+                    RATE,
+                    loom_core::TransportInfo::default(),
+                    &[],
+                    &[],
+                    &mut [chunk],
+                    &[],
+                    channel,
+                );
+            }
+            result
+        }
+        let left = run_copy(0, 77);
+        let right = run_copy(1, 77);
+        assert_ne!(left, right);
+        assert_eq!(right, run_copy(1, 1));
+        assert_eq!(right, run_copy(1, 512));
     }
 
     fn rms(samples: &[f32]) -> f64 {

@@ -132,8 +132,12 @@ impl Registry {
             ModuleRole::UnitDelay if descriptor.inputs.len() != 1 || descriptor.outputs.len() != 1 => {
                 return Err(invalid("a unit delay needs exactly one input and one output"));
             }
-            ModuleRole::AudioOutput if descriptor.inputs.len() != 2 || !descriptor.outputs.is_empty() => {
-                return Err(invalid("an audio output needs two inputs and no outputs"));
+            ModuleRole::AudioOutput
+                if descriptor.inputs.len() != 1
+                    || descriptor.inputs[0].channels != Channels::Stereo
+                    || !descriptor.outputs.is_empty() =>
+            {
+                return Err(invalid("an audio output needs one stereo input and no outputs"));
             }
             _ => {}
         }
@@ -801,17 +805,17 @@ mod tests {
             name: "Output Default",
             category: "Test",
             description: "",
-            inputs: &[
-                port("left", crate::SignalType::Audio),
-                port("right", crate::SignalType::Audio).with_default(PortDefault::Playing),
-            ],
+            inputs: &[crate::PortSpec {
+                channels: Channels::Stereo,
+                ..port("in", crate::SignalType::Audio).with_default(PortDefault::Playing)
+            }],
             outputs: &[],
             params: &[],
             role: ModuleRole::AudioOutput,
             panel: crate::Panel::EMPTY,
             displays: &[],
         };
-        for (descriptor, port_name) in [(&DELAY_VALUE, "in"), (&OUTPUT_TRANSPORT, "right")] {
+        for (descriptor, port_name) in [(&DELAY_VALUE, "in"), (&OUTPUT_TRANSPORT, "in")] {
             let text = Registry::new().register(descriptor).unwrap_err().to_string();
             assert!(text.contains(descriptor.id), "{text}");
             assert!(text.contains(&format!("\"{port_name}\"")), "{text}");
@@ -848,10 +852,10 @@ mod tests {
             name: "Output With Params",
             category: "Test",
             description: "",
-            inputs: &[
-                port("left", crate::SignalType::Audio),
-                port("right", crate::SignalType::Audio),
-            ],
+            inputs: &[crate::PortSpec {
+                channels: Channels::Stereo,
+                ..port("in", crate::SignalType::Audio)
+            }],
             outputs: &[],
             params: &[param("level", 0.0, 1.0, 0.5, "")],
             role: ModuleRole::AudioOutput,

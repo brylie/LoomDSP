@@ -1662,10 +1662,10 @@ impl App {
     /// Rebuilds the control, light, and meter values. Only changed values
     /// change what the canvas uploads.
     fn refresh_values(&mut self) {
-        let mut shown: BTreeMap<lights::Light, (f32, f32)> = self
+        let mut shown: scene::ShownValues = self
             .lights
             .iter()
-            .map(|(&light, &level)| (light, (level, 0.0)))
+            .map(|(&light, &level)| (light, (level, 0.0, None)))
             .collect();
         let modules: Vec<u32> = self.controller.graph().nodes().map(|(id, _)| id.0).collect();
         for (widget, output) in scene::meter_outputs(&self.controller, &modules) {
@@ -1675,7 +1675,7 @@ impl App {
                 .and_then(|probe| self.meter_levels.get(&probe))
                 .copied()
                 .unwrap_or_default();
-            shown.insert(widget, (level.rms, level.peak));
+            shown.insert(widget, (level.rms, level.peak, level.right));
         }
         let dragging = self.depth_drag.flatten();
         scene::update_panel_values_dragging(&mut self.values, &self.controller, &shown, dragging);
@@ -5176,7 +5176,11 @@ mod tests {
             app.sync_probes();
             app.process(64);
             let probe = app.live.probes().next().expect("a probe on the cable");
-            let level = live::Level { rms: 0.5, peak: 0.6 };
+            let level = live::Level {
+                rms: 0.5,
+                peak: 0.6,
+                right: None,
+            };
             let _ = app.update(Message::Meters(vec![(probe, level)]));
             assert_eq!(app.meter_levels.len(), 1);
 

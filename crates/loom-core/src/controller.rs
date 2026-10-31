@@ -15,6 +15,7 @@ use crate::registry::Registry;
 use crate::safety::OutputSafety;
 use crate::telemetry::{ProbeId, ProbeKind, Telemetry, TelemetrySender};
 use crate::transport::{TimeSignature, TransportSettings, clamp_tempo};
+use crate::width;
 use rtrb::{Consumer, Producer, RingBuffer};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -332,6 +333,7 @@ impl Controller {
                 self.pending_removals.push(slot);
             }
         }
+        self.pending_removals.extend(node.copy_slot);
         self.dirty = true;
         Ok(())
     }
@@ -1057,6 +1059,25 @@ impl Controller {
         if !self.dirty {
             return Ok(&self.last_report);
         }
+        // Right copies (ADR-0020, stereo spec rule 13). A module that starts
+        // to run per channel needs a copy before the swap; one that stops
+        // has its copy removed after it, like a removed module.
+        let per_channel = width::infer(&self.graph).per_channel;
+        let mut starting = Vec::new();
+        let mut stopping = Vec::new();
+        for (&id, node) in &self.graph.nodes {
+            if !matches!(node.descriptor.role, ModuleRole::Dsp(_)) {
+                continue;
+            }
+            match (per_channel.contains(&id), node.copy_slot) {
+                (true, None) => starting.push(id),
+                (false, Some(slot)) => stopping.push((id, slot)),
+                _ => {}
+            }
+        }
+        if self.free_slots.len() < starting.len() {
+            return Err(LoomError::TooManyModules(self.config.max_modules));
+        }
         // New modules go in first, after `reset()` snaps their smoothing to
         // the values set since they were added (live patching spec, rule
         // 7). An instance the schedule does not use yet changes nothing, so
@@ -1079,10 +1100,39 @@ impl Controller {
             let pushed = self.commands.push(insert).is_ok();
             debug_assert!(pushed, "room was checked above");
         }
-        // Make sure the swap and every removal fit before sending them, so
-        // the engine never sees half an update.
-        if waiting > 0 || self.commands.slots() < 1 + self.pending_removals.len() {
+        if waiting > 0 || self.commands.slots() < starting.len() + 1 + self.pending_removals.len() + stopping.len() {
             return Err(LoomError::QueueFull);
+        }
+        for id in starting {
+            let slot = self.free_slots.pop().expect("checked above");
+            let node = self.graph.nodes.get_mut(&id).expect("listed above");
+            let ModuleRole::Dsp(factory) = node.descriptor.role else {
+                unreachable!("only DSP modules are listed");
+            };
+            // A new instance starts from reset, with the module's current
+            // parameters. It has no display values: lights read copy 0.
+            let mut module = factory(&ModuleConfig {
+                sample_rate: self.config.sample_rate,
+                max_block: self.config.max_block,
+            });
+            for (index, &value) in node.params.iter().enumerate() {
+                module.set_param(index, value);
+            }
+            module.reset();
+            let insert = Command::InsertModule {
+                slot,
+                module,
+                id: id.0,
+                displays: 0,
+                triggers: 0,
+            };
+            let pushed = self.commands.push(insert).is_ok();
+            debug_assert!(pushed, "capacity was checked above");
+            node.copy_slot = Some(slot);
+        }
+        for (id, slot) in stopping {
+            self.graph.nodes.get_mut(&id).expect("listed above").copy_slot = None;
+            self.pending_removals.push(slot);
         }
         // What the graph holds per mapping. With a screen edit on its way,
         // every control change so far is older than the graph's value.
@@ -1107,10 +1157,20 @@ impl Controller {
         );
         // Live value cells, kept from the last compile where the parameter
         // is still modulated.
-        let keys: Vec<u64> = schedule.fills.iter().map(|fill| fill.key).collect();
+        // A right copy's fills get none: the knob shows copy 0.
+        let keys: Vec<u64> = schedule
+            .fills
+            .iter()
+            .filter(|fill| !fill.is_right_copy())
+            .map(|fill| fill.key)
+            .collect();
         let (released, missing) = self.live_cells.assign(&keys);
         for fill in &mut schedule.fills {
-            fill.live = self.live_cells.cell(fill.key).unwrap_or(NO_CELL);
+            fill.live = if fill.is_right_copy() {
+                NO_CELL
+            } else {
+                self.live_cells.cell(fill.key).unwrap_or(NO_CELL)
+            };
         }
         schedule.live_release = released;
         report.without_live_value = missing;

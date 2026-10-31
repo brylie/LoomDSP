@@ -3,13 +3,13 @@
 How the engine decides which cables carry stereo, and what modules do with it, so a stereo chain is one row of modules instead of two.
 
 - **Kind:** living specification.
-- **Status:** Agreed, not built yet ([#23](https://github.com/brylie/LoomDSP/issues/23)). Rules 25 to 27 (copy 1 takes copy 0's state) were added from the research in [#203](https://github.com/brylie/LoomDSP/issues/203), with [ADR-0022](../adr/0022-copies-take-state-from-the-running-instance.md). Their module side, `Module::copy_state_from` on every built-in module, is built ([#229](https://github.com/brylie/LoomDSP/issues/229)); the engine calls it with #23. Rule 27's channel mix waits for `ProcessContext` to know the channel (#23): Noise re-derives from its seed alone until then.
+- **Status:** Agreed and implemented ([#23](https://github.com/brylie/LoomDSP/issues/23)). Rules 25 to 27 (copy 1 takes copy 0's state) were added from the research in [#203](https://github.com/brylie/LoomDSP/issues/203), with [ADR-0022](../adr/0022-copies-take-state-from-the-running-instance.md). Their module side, `Module::copy_state_from` on every built-in module, is built ([#229](https://github.com/brylie/LoomDSP/issues/229)); the engine calls it with #23. `ProcessContext` supplies the channel, and Noise mixes it into the seed when a right copy starts.
 - **Decision behind it:** [ADR-0020](../adr/0020-inferred-channel-count.md), refining [ADR-0007](../adr/0007-polymorphic-signal-model.md). [ADR-0022](../adr/0022-copies-take-state-from-the-running-instance.md) for the state of copy 1.
 - **Use case and requirements:** FR-SIG-07, FR-SIG-01, FR-SIG-03, FR-CANVAS-12, NFR-RT-01
 - **Background:** [Stereo cables](../learn/stereo-cables.md): why copies, how each signal type downmixes, why a downmix can cancel. [Hot patching](../learn/hot-patching.md): why a cold copy 1 clicks.
 - **Prior art:** Eurorack patches stereo as two cables and dual modules. VCV Rack carries several channels on one cable and lets each module decide what to do with them. Bitwig Grid works in stereo by default. Named only to explain the trade-offs; the rules below are our own.
 - **Issues:** #23, #203 (new paths without a cold start)
-- **Code:** not built yet. It will touch `crates/loom-core/src/descriptor.rs`, `compile.rs`, `module.rs`, and `engine.rs`.
+- **Code:** `crates/loom-core/src/descriptor.rs`, `compile.rs`, `module.rs`, and `engine.rs`; Join and Split in `crates/loom-modules/src/mix.rs`.
 
 ## Goal
 
@@ -40,7 +40,7 @@ How the canvas shows a stereo cable is FR-CANVAS-12 (P2). See Open points.
 
 ### Declaring stereo behaviour
 
-3. **Every port declares its channel behaviour** in a new required `PortSpec` field, `channels: Channels`, written in the struct literal like `polarity`:
+3. **Every port declares its channel behaviour** in a new required `PortSpec` field, `channels: Channels`, written in the struct literal like `range`:
 
    | Value | On an input | On an output |
    |---|---|---|
@@ -48,7 +48,7 @@ How the canvas shows a stereo cable is FR-CANVAS-12 (P2). See Open points.
    | `Channels::Downmix` | Stereo arriving here does not make the module run per channel. | Not allowed. |
    | `Channels::Stereo` | The module reads both channels itself. | The module always writes two channels. |
 
-   *Why required:* like polarity, it is a choice the author should make on purpose. A default hidden in a builder would make every control input either too costly or wrong.
+   *Why required:* like the range, it is a choice the author should make on purpose. A default hidden in a builder would make every control input either too costly or wrong.
 
 4. **The usual choice by signal type:** audio inputs are `PerChannel`. Modulation, pitch, phase, and gate inputs are `Downmix`. Outputs are `PerChannel`. An author may choose otherwise, for example a stereo-aware amplifier whose gain input should also run per channel. Generators such as oscillators and noise keep `PerChannel` outputs, so they stay mono. A generator declares a `Stereo` output only when its two sides differ by design, such as spread unison or noise that differs on each side. *Why:* audio is what players want in stereo. Control signals are almost always mono, and FR-SIG-07 says not to pay twice for them.
 
@@ -138,28 +138,32 @@ How the canvas shows a stereo cable is FR-CANVAS-12 (P2). See Open points.
 
 ## Acceptance criteria
 
-- [ ] Given a patch with no `Stereo` output anywhere, when it compiles, then its schedule has the same number of module operations, buffers, and instances as on the main branch before this change, and the engine benchmark shows no regression beyond noise.
-- [ ] Given a stereo test source into a filter into Audio Out, when the patch runs, then the filter runs as two copies, and each side matches a mono filter fed that side alone.
-- [ ] Given a stereo cable into an audio, modulation, or pitch `Downmix` input of a module that runs as one, then the input reads exactly `(left + right) / 2`.
-- [ ] Given a stereo cable into a gate `Downmix` input, with left 1.0 and right 0.0, then the input reads 1.0 (high).
-- [ ] Given a stereo cable into a phase `Downmix` input, with left 0.9 and right 0.1, then the input reads 0.0. With left 0.25 and right 0.75, it reads 0.0, every run.
-- [ ] Given a mono cable into a `Stereo` input, then both channels read the same buffer, and no downmix or copy buffer is added.
-- [ ] Given a feedback loop that no stereo cable enters, then every cable in it stays mono.
-- [ ] Given a feedback loop whose modules pass audio on through `PerChannel` inputs, and one stereo cable into a `PerChannel` input in the loop, then every module in the loop runs as two copies, every cable in it is stereo, and it compiles.
-- [ ] Given the same mono loop, and a stereo cable only into a `Downmix` input in the loop (such as a filter cutoff), then the loop stays mono, and that input reads the downmix of rule 11.
-- [ ] Given a long chain built so that stereo reaches modules in the reverse of the order they are stored, then inference visits each module and cable at most once.
-- [ ] Given a stereo chain, when the stereo cable is removed and the patch recompiles, then copy 1 of each module is freed on the control thread, copy 0 keeps its state, and the `no_alloc` tests pass.
-- [ ] Given a copied module, when it is run through the module test harness, then its output is identical at block sizes 1, 77, and 512.
-- [ ] Given a copied seeded module, then its left and right outputs differ, and both are the same on every run.
-- [ ] Given each example patch, updated to Audio Out's `in` port, when it loads, then it gives bit-identical output to the patch before this change.
-- [ ] Given a mono cable into Audio Out, then both sides of the device output carry it.
-- [ ] Given two mono signals through Join and then Split, then each Split output is bit-identical to the signal that went in on that side.
-- [ ] Given a probe on a stereo output, then the meter reports each channel, and the scope shows `(left + right) / 2`.
-- [ ] Given a stereo cable into a port, when the player hovers it, then the hover text says "Stereo". (Manual check.)
-- [ ] Given a descriptor with `Downmix` on an output, or a module with a `Stereo` port and a `PerChannel` input, then the registry rejects it.
-- [ ] (Rules 25 to 27.) Given a running SVF that turns stereo, with the same signal on both sides, then its right output is bit-identical to its left from the first frame after the swap, and the `no_alloc` tests pass.
-- [x] (Rules 25 and 26.) Given each built-in module with state, except seeded modules covered by rule 27, when the harness runs it for N frames, copies its state into a new instance, and runs both on, then both outputs are bit-identical from frame N. (`Harness::check_copy_state`, `loom-modules/tests/copy_state.rs`; no allocation in `no_alloc.rs`. The engine does not call it yet: #23.)
-- [ ] (Rule 27.) Given a seeded module that turns stereo, then its left and right outputs differ after the swap, and are the same on every run.
+- [x] Given a patch with no `Stereo` output anywhere, when it compiles, then its schedule has the same number of module operations, buffers, and instances as on the main branch before this change, and the engine benchmark shows no regression beyond noise.
+- [x] Given a stereo test source into a filter into Audio Out, when the patch runs, then the filter runs as two copies, and each side matches a mono filter fed that side alone.
+- [x] Given a stereo cable into an audio, modulation, or pitch `Downmix` input of a module that runs as one, then the input reads exactly `(left + right) / 2`.
+- [x] Given a stereo cable into a gate `Downmix` input, with left 1.0 and right 0.0, then the input reads 1.0 (high).
+- [x] Given a stereo cable into a phase `Downmix` input, with left 0.9 and right 0.1, then the input reads 0.0. With left 0.25 and right 0.75, it reads 0.0, every run.
+- [x] Given a mono cable into a `Stereo` input, then both channels read the same buffer, and no downmix or copy buffer is added.
+- [x] Given a feedback loop that no stereo cable enters, then every cable in it stays mono.
+- [x] Given a feedback loop whose modules pass audio on through `PerChannel` inputs, and one stereo cable into a `PerChannel` input in the loop, then every module in the loop runs as two copies, every cable in it is stereo, and it compiles.
+- [x] Given the same mono loop, and a stereo cable only into a `Downmix` input in the loop (such as a filter cutoff), then the loop stays mono, and that input reads the downmix of rule 11.
+- [x] Given a long chain built so that stereo reaches modules in the reverse of the order they are stored, then inference visits each module and cable at most once.
+- [x] Given a stereo chain, when the stereo cable is removed and the patch recompiles, then copy 1 of each module is freed on the control thread, copy 0 keeps its state, and the `no_alloc` tests pass.
+- [x] Given a copied module, when it is run through the module test harness, then its output is identical at block sizes 1, 77, and 512.
+- [x] Given a copied seeded module, then its left and right outputs differ, and both are the same on every run.
+- [x] Given each example patch, updated to Audio Out's `in` port, when it loads, then it gives bit-identical output to the patch before this change.
+- [x] Given a mono cable into Audio Out, then both sides of the device output carry it.
+- [x] Given two mono signals through Join and then Split, then each Split output is bit-identical to the signal that went in on that side.
+- [x] Given a probe on a stereo output, then the meter reports each channel, and the scope shows `(left + right) / 2`.
+- [x] Given a stereo cable into a port, when the player hovers it, then the hover text says "Stereo". (Manual check.)
+- [x] Given a descriptor with `Downmix` on an output, or a module with a `Stereo` port and a `PerChannel` input, then the registry rejects it.
+- [x] (Rules 25 to 27.) Given a running SVF that turns stereo, with the same signal on both sides, then its right output is bit-identical to its left from the first frame after the swap, and the `no_alloc` tests pass.
+- [x] (Rules 25 and 26.) Given each built-in module with state, except seeded modules covered by rule 27, when the harness runs it for N frames, copies its state into a new instance, and runs both on, then both outputs are bit-identical from frame N. (`Harness::check_copy_state`, `loom-modules/tests/copy_state.rs`; no allocation in `no_alloc.rs`. The engine calls it at the schedule swap.)
+- [x] (Rule 27.) Given a seeded module that turns stereo, then its left and right outputs differ after the swap, and are the same on every run.
+
+### Verification notes
+
+The compiler, engine, module, no-allocation and UI tests cover the cases above. On 2026-11-01, a rendered stereo cable into Audio Out showed “Stereo” in the input hover text. All six example patches were rendered on the same machine with the pre-change commit `fe663f9` and with this implementation, at 48 kHz for one second with note 60; each pair of 32-bit float WAV files was byte-identical. The mono timing comparison is in [the benchmark report](../benchmarks/2026-11-01-stereo-mono.md).
 
 ## Out of scope
 

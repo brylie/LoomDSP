@@ -28,8 +28,10 @@ fn engine(block: usize, build: impl FnOnce(&mut loom_core::Controller, ModuleId)
 /// the right.
 fn listen(c: &mut loom_core::Controller, left: (ModuleId, &str), right: (ModuleId, &str)) {
     let out = c.add_module("loom.io.audio-out").unwrap();
-    c.connect_named(left.0, left.1, out, "left").unwrap();
-    c.connect_named(right.0, right.1, out, "right").unwrap();
+    let join = c.add_module("loom.mix.join").unwrap();
+    c.connect_named(left.0, left.1, join, "left").unwrap();
+    c.connect_named(right.0, right.1, join, "right").unwrap();
+    c.connect_named(join, "out", out, "in").unwrap();
 }
 
 /// Frames where `signal` is high.

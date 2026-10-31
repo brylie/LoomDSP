@@ -68,6 +68,8 @@ pub struct MeterReading {
     pub peak: f32,
     /// Root mean square of the samples.
     pub rms: f32,
+    /// Peak and RMS of the right channel, when the port is stereo.
+    pub right: Option<(f32, f32)>,
 }
 
 /// Consecutive samples from one probed port.

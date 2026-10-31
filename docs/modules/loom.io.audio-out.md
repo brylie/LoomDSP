@@ -2,7 +2,7 @@
 
 <!-- Generated from the module's descriptor by `loom modules --markdown`. Edit the descriptor, not this part. -->
 
-Sends audio out. A cable on only one side plays on both sides.
+Sends a mono or stereo signal to the audio output.
 
 | | |
 |---|---|
@@ -14,8 +14,7 @@ Sends audio out. A cable on only one side plays on both sides.
 
 | Port | Signal | Unconnected | Description |
 |---|---|---|---|
-| **Left** (`left`) | audio | 0 | The left channel. Plays on both sides if Right has no cable. |
-| **Right** (`right`) | audio | 0 | The right channel. Plays on both sides if Left has no cable. |
+| **In** (`in`) | audio, stereo | 0 | The signal to play. A mono cable plays on both sides. |
 
 ## Outputs
 
@@ -29,7 +28,7 @@ None.
 
 ## When to use it
 
-Use Audio Out as the terminal sink for audio leaving your patch. It connects directly to your sound card, audio interface, or file renderer. Connecting only one channel automatically duplicates it to both sides.
+Use Audio Out as the terminal sink for audio leaving your patch. It connects directly to your sound card, audio interface, or file renderer. A mono cable plays on both sides. A stereo cable keeps its two channels.
 
 ## Example patch
 
@@ -46,7 +45,7 @@ Patch(
     ],
     cables: [
         PatchCable(from: (1, "phase"), to: (2, "phase")),
-        PatchCable(from: (2, "out"), to: (3, "left")),
+        PatchCable(from: (2, "out"), to: (3, "in")),
     ],
 )
 ```

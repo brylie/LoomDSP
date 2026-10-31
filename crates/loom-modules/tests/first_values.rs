@@ -48,7 +48,7 @@ fn added_while_playing(kind: &str, param: &str, value: f32, port: &str, output: 
     let running = parts.controller.add_module("loom.osc.sine").unwrap();
     let speaker = parts.controller.add_module("loom.io.audio-out").unwrap();
     let out = parts.controller.output_ref(running, "out").unwrap();
-    let left = parts.controller.input_ref(speaker, "left").unwrap();
+    let left = parts.controller.input_ref(speaker, "in").unwrap();
     parts.controller.connect(out, left).unwrap();
     parts.controller.commit().unwrap();
     run(&mut parts, 4_800, block);

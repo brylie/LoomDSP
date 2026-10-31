@@ -434,6 +434,8 @@ fn every_dsp_module_has_a_reference_test() {
         &level::SCALE,
         &mix::MIXER,
         &mix::CROSSFADE,
+        &mix::JOIN,
+        &mix::SPLIT,
         &logic::COMPARE,
         &logic::LOGIC,
         &logic::MEMORY,
@@ -709,4 +711,23 @@ fn transport() {
             ..TransportSettings::default()
         })
         .check(reference!("transport"));
+}
+
+/// Reference render for the left channel of Join.
+#[test]
+fn join() {
+    Harness::new(&mix::JOIN)
+        .seconds(0.02)
+        .input("left", Signal::from_fn(|frame| (frame as f32 * 0.01).sin()))
+        .input("right", Signal::from_fn(|frame| (frame as f32 * 0.02).sin()))
+        .check(reference!("join"));
+}
+
+/// Reference render for Split with a mono input.
+#[test]
+fn split() {
+    Harness::new(&mix::SPLIT)
+        .seconds(0.02)
+        .input("in", Signal::from_fn(|frame| (frame as f32 * 0.01).sin()))
+        .check(reference!("split"));
 }

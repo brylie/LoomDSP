@@ -42,7 +42,7 @@ One page for each built-in module, made from its descriptor. After you change a 
 
 | Module | ID | Description |
 |---|---|---|
-| [Audio Out](loom.io.audio-out.md) | `loom.io.audio-out` | Sends audio out. A cable on only one side plays on both sides. |
+| [Audio Out](loom.io.audio-out.md) | `loom.io.audio-out` | Sends a mono or stereo signal to the audio output. |
 
 ## Level
 
@@ -86,7 +86,9 @@ One page for each built-in module, made from its descriptor. After you change a 
 | Module | ID | Description |
 |---|---|---|
 | [Crossfade](loom.mix.crossfade.md) | `loom.mix.crossfade` | Blends two signals. Equal power keeps the loudness of audio steady; linear is exact for control signals. |
+| [Join](loom.mix.join.md) | `loom.mix.join` | Combines two signals into a stereo cable. |
 | [Mixer](loom.mix.mixer.md) | `loom.mix.mixer` | Adds four signals, each with its own level and mute. Two mixers in a row make a bigger mix. |
+| [Split](loom.mix.split.md) | `loom.mix.split` | Separates a stereo cable into its two sides. |
 
 ## Modulation
 

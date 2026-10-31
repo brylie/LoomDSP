@@ -83,12 +83,12 @@ fn undo_of_a_connect_brings_back_the_cable_it_replaced() {
     let a = c.add_module("loom.osc.sine").unwrap();
     let b = c.add_module("loom.osc.saw").unwrap();
     let out = c.add_module("loom.io.audio-out").unwrap();
-    c.connect_named(a, "out", out, "left").unwrap();
+    c.connect_named(a, "out", out, "in").unwrap();
     let mut positions = BTreeMap::new();
     let step = record(&mut c, &mut positions, |c| {
-        c.connect_named(b, "out", out, "left").unwrap();
+        c.connect_named(b, "out", out, "in").unwrap();
     });
-    let input = c.input_ref(out, "left").unwrap();
+    let input = c.input_ref(out, "in").unwrap();
     assert_eq!(c.graph().source_of(input), Some(c.output_ref(b, "out").unwrap()));
     undo(&step, &mut c, &mut positions);
     assert_eq!(c.graph().source_of(input), Some(c.output_ref(a, "out").unwrap()));
@@ -101,12 +101,14 @@ fn removing_a_cable_and_adding_another_is_one_step() {
     let mut c = parts().controller;
     let a = c.add_module("loom.osc.sine").unwrap();
     let out = c.add_module("loom.io.audio-out").unwrap();
-    c.connect_named(a, "out", out, "left").unwrap();
+    let join = c.add_module("loom.mix.join").unwrap();
+    c.connect_named(join, "out", out, "in").unwrap();
+    c.connect_named(a, "out", join, "left").unwrap();
     let mut positions = BTreeMap::new();
     let step = record(&mut c, &mut positions, |c| {
-        let left = c.input_ref(out, "left").unwrap();
+        let left = c.input_ref(join, "left").unwrap();
         c.disconnect(left).unwrap();
-        c.connect_named(a, "out", out, "right").unwrap();
+        c.connect_named(a, "out", join, "right").unwrap();
     });
     assert_eq!(step.name(), "move cable");
 }
@@ -208,7 +210,7 @@ fn modulated_patch(c: &mut Controller) -> Vec<ModuleId> {
     let out = c.add_module("loom.io.audio-out").unwrap();
     c.connect_named(phase, "phase", carrier, "phase").unwrap();
     c.connect_named(carrier, "out", vca, "a").unwrap();
-    c.connect_named(vca, "out", out, "left").unwrap();
+    c.connect_named(vca, "out", out, "in").unwrap();
     c.connect_named(lfo_phase, "phase", lfo_a, "phase").unwrap();
     c.connect_named(lfo_phase, "phase", lfo_b, "phase").unwrap();
     c.add_assignment_named(lfo_a, "out", vca, "gain", 0.3).unwrap();

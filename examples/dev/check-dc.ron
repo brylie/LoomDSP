@@ -10,7 +10,6 @@ Patch(
         PatchModule(id: 3, kind: "loom.clock.transport@1"),
     ],
     cables: [
-        PatchCable(from: (1, "out"), to: (2, "left")),
-        PatchCable(from: (1, "out"), to: (2, "right")),
+        PatchCable(from: (1, "out"), to: (2, "in")),
     ],
 )

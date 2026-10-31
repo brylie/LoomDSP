@@ -62,7 +62,7 @@ fn capture(parts: &mut EngineParts, module: ModuleId, frames: usize, block: usiz
 
 fn listen(controller: &mut Controller, module: ModuleId, port: &str) {
     let audio = controller.add_module("loom.io.audio-out").unwrap();
-    controller.connect_named(module, port, audio, "left").unwrap();
+    controller.connect_named(module, port, audio, "in").unwrap();
 }
 
 fn module(controller: &mut Controller, kind: &str, param: &str, value: f32) -> ModuleId {
@@ -417,8 +417,10 @@ impl Rig {
     fn listen(&mut self, left: &str, right: &str) {
         let audio = self.parts.controller.add_module("loom.io.audio-out").unwrap();
         let controller = &mut self.parts.controller;
-        controller.connect_named(self.sink, left, audio, "left").unwrap();
-        controller.connect_named(self.sink, right, audio, "right").unwrap();
+        let join = controller.add_module("loom.mix.join").unwrap();
+        controller.connect_named(self.sink, left, join, "left").unwrap();
+        controller.connect_named(self.sink, right, join, "right").unwrap();
+        controller.connect_named(join, "out", audio, "in").unwrap();
         controller.commit().unwrap();
     }
 

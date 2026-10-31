@@ -129,6 +129,9 @@ pub struct ProcessContext<'a> {
     pub(crate) midi_base: usize,
     pub(crate) frames: usize,
     pub(crate) transport: TransportInfo,
+    /// 0 for a module that runs as one, or for its left copy; 1 for its
+    /// right copy (ADR-0020).
+    pub(crate) channel: u8,
 }
 
 impl<'a> ProcessContext<'a> {
@@ -141,7 +144,24 @@ impl<'a> ProcessContext<'a> {
             midi_base: 0,
             frames,
             transport: TransportInfo::default(),
+            channel: 0,
         }
+    }
+
+    /// Sets which channel this call runs, for testing modules in isolation.
+    /// Values above 1 count as 1.
+    pub fn with_channel(mut self, channel: usize) -> Self {
+        self.channel = u8::from(channel > 0);
+        self
+    }
+
+    /// Which copy of the module this call runs: 0 for a module that runs as
+    /// one, or for its left copy, and 1 for its right copy. The engine runs
+    /// a module as two copies when stereo reaches one of its `PerChannel`
+    /// inputs (ADR-0020). A module with a seed must mix this into the seed,
+    /// so its two copies do not give the same values (stereo spec, rule 15).
+    pub fn channel(&self) -> usize {
+        usize::from(self.channel)
     }
 
     /// Replaces the transport, for testing modules in isolation.
@@ -168,6 +188,15 @@ impl<'a> ProcessContext<'a> {
     }
 }
 
+/// The right-hand buffer of a `Stereo` port. The left-hand buffer is the
+/// port's usual pointer.
+#[derive(Clone, Copy)]
+pub(crate) struct RightPtr {
+    pub port: u16,
+    pub output: bool,
+    pub ptr: *mut f32,
+}
+
 /// Access to a module's input and output buffers for one call.
 ///
 /// Inputs are read-only. An unconnected input reads its port's default
@@ -180,6 +209,9 @@ pub struct PortIo<'a> {
     /// Modulated parameters for this call: parameter index and the start of
     /// its per-sample buffer. Empty when nothing on this module is modulated.
     params: &'a [(u16, *const f32)],
+    /// Right-hand buffers of `Stereo` ports. A `Stereo` input missing here
+    /// reads its left buffer on both sides.
+    right: &'a [RightPtr],
     connected: u64,
     offset: usize,
     frames: usize,
@@ -192,11 +224,14 @@ impl<'a> PortIo<'a> {
     /// Every pointer must be valid for reads (inputs) or writes (outputs) of
     /// `offset + frames` floats for `'a`. No output may alias any input or
     /// any other output. Each parameter pointer, if any, must be readable for
-    /// the same range.
+    /// the same range. Each right-hand pointer must be readable (inputs) or
+    /// writable (outputs) for the same range, and a right-hand output must
+    /// not alias any other buffer.
     pub(crate) unsafe fn new(
         inputs: &'a [*const f32],
         outputs: &'a [*mut f32],
         params: &'a [(u16, *const f32)],
+        right: &'a [RightPtr],
         connected: u64,
         offset: usize,
         frames: usize,
@@ -205,6 +240,7 @@ impl<'a> PortIo<'a> {
             inputs,
             outputs,
             params,
+            right,
             connected,
             offset,
             frames,
@@ -317,6 +353,57 @@ impl<'a> PortIo<'a> {
     pub fn output(&mut self, index: usize) -> &mut [f32] {
         // SAFETY: guaranteed by the contract of `PortIo::new`.
         unsafe { std::slice::from_raw_parts_mut(self.outputs[index].add(self.offset), self.frames) }
+    }
+
+    fn right_of(&self, index: usize, output: bool) -> Option<*mut f32> {
+        let port = u16::try_from(index).ok()?;
+        self.right
+            .iter()
+            .find(|right| right.port == port && right.output == output)
+            .map(|right| right.ptr)
+    }
+
+    /// Both channels of a `Stereo` input, left then right. A mono cable or
+    /// an unconnected input gives the same samples on both sides. On any
+    /// other input this is the input twice.
+    ///
+    /// The slices do not borrow `self`, so they can be held while writing
+    /// outputs.
+    #[inline]
+    pub fn stereo_input(&self, index: usize) -> [&'a [f32]; 2] {
+        let (offset, frames) = (self.offset, self.frames);
+        // SAFETY: guaranteed by the contract of `PortIo::new`. Inputs are
+        // read-only for `'a` and never alias an output.
+        let left = unsafe { std::slice::from_raw_parts(self.inputs[index].add(offset), frames) };
+        let right = match self.right_of(index, false) {
+            // SAFETY: as above.
+            Some(ptr) => unsafe { std::slice::from_raw_parts(ptr.add(offset), frames) },
+            None => left,
+        };
+        [left, right]
+    }
+
+    /// Both channels of a `Stereo` output, left then right.
+    ///
+    /// # Panics
+    ///
+    /// Panics if output `index` is not declared `Stereo`. This is a
+    /// programming error that tests catch, not a runtime condition.
+    #[inline]
+    pub fn stereo_output(&mut self, index: usize) -> [&mut [f32]; 2] {
+        let right = self
+            .right_of(index, true)
+            .expect("stereo_output needs an output declared Channels::Stereo");
+        let (offset, frames) = (self.offset, self.frames);
+        // SAFETY: guaranteed by the contract of `PortIo::new`. The right
+        // buffer is distinct from every other buffer, so the two slices do
+        // not overlap, and both borrows are tied to `&mut self`.
+        unsafe {
+            [
+                std::slice::from_raw_parts_mut(self.outputs[index].add(offset), frames),
+                std::slice::from_raw_parts_mut(right.add(offset), frames),
+            ]
+        }
     }
 }
 
@@ -435,6 +522,21 @@ pub mod testing {
         outputs: &mut [&mut [f32]],
         midi: &[MidiEvent],
     ) {
+        run_with_transport_and_channel(module, sample_rate, transport, inputs, connected, outputs, midi, 0);
+    }
+
+    /// Like [`run_with_transport`], with the channel supplied to the module.
+    #[allow(clippy::too_many_arguments)]
+    pub fn run_with_transport_and_channel(
+        module: &mut dyn Module,
+        sample_rate: f32,
+        transport: TransportInfo,
+        inputs: &[&[f32]],
+        connected: &[bool],
+        outputs: &mut [&mut [f32]],
+        midi: &[MidiEvent],
+        channel: usize,
+    ) {
         let frames = outputs
             .first()
             .map(|o| o.len())
@@ -444,15 +546,30 @@ pub mod testing {
         assert!(outputs.iter().all(|o| o.len() == frames));
         let input_ptrs: Vec<*const f32> = inputs.iter().map(|i| i.as_ptr()).collect();
         let output_ptrs: Vec<*mut f32> = outputs.iter_mut().map(|o| o.as_mut_ptr()).collect();
+        // The isolation harness exposes the left output to its caller. Give
+        // each output a separate right buffer so stereo modules can run too.
+        let mut right_buffers = vec![vec![0.0; frames]; outputs.len()];
+        let right_ptrs: Vec<RightPtr> = right_buffers
+            .iter_mut()
+            .enumerate()
+            .map(|(port, buffer)| RightPtr {
+                port: u16::try_from(port).expect("port index fits in u16"),
+                output: true,
+                ptr: buffer.as_mut_ptr(),
+            })
+            .collect();
         let mask = connected
             .iter()
             .enumerate()
             .fold(0u64, |mask, (i, &c)| if c { mask | (1 << i) } else { mask });
-        let ctx = ProcessContext::new(sample_rate, frames, midi).with_transport(transport);
+        let ctx = ProcessContext::new(sample_rate, frames, midi)
+            .with_transport(transport)
+            .with_channel(channel);
         // SAFETY: the pointers come from distinct slices of length `frames`
         // that outlive this call; `&mut [&mut [f32]]` guarantees outputs are
-        // unique and cannot alias the shared input slices.
-        let mut io = unsafe { PortIo::new(&input_ptrs, &output_ptrs, &[], mask, 0, frames) };
+        // unique and cannot alias the shared input slices. The separate
+        // right buffers are also distinct and outlive the call.
+        let mut io = unsafe { PortIo::new(&input_ptrs, &output_ptrs, &[], &right_ptrs, mask, 0, frames) };
         module.process(&ctx, &mut io);
     }
 }
@@ -471,7 +588,7 @@ mod tests {
         let params = [(1u16, modulated.as_ptr())];
         // SAFETY: each buffer holds `offset + frames` = 4 floats and outlives
         // `io`; the one output does not alias the parameter buffer.
-        let mut io = unsafe { PortIo::new(&[], &outputs, &params, 0, 1, 3) };
+        let mut io = unsafe { PortIo::new(&[], &outputs, &params, &[], 0, 1, 3) };
         let (plain, swept) = (io.param(0), io.param(1));
         assert!(!plain.is_modulated());
         assert!(swept.is_modulated());

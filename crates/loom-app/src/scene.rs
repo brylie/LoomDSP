@@ -15,6 +15,9 @@ use std::collections::{BTreeMap, BTreeSet};
 /// 12-grid-unit tile keeps its line smooth at close zoom.
 const SHAPE_SEGMENTS: usize = 128;
 
+/// Light and meter values by module and widget, including the right meter side.
+pub type ShownValues = BTreeMap<(u32, usize), (f32, f32, Option<(f32, f32)>)>;
+
 /// Port and cable colour for a signal type (ADR-0007).
 pub fn signal_colour(signal: SignalType) -> Color {
     let [r, g, b] = signal.colour();
@@ -45,15 +48,19 @@ pub fn category_colour(category: &str) -> Color {
     }
 }
 
-fn port_view(spec: &PortSpec) -> PortView {
+fn port_view(spec: &PortSpec, stereo: bool) -> PortView {
     let (min, max) = spec.nominal_range();
+    let mut hover = HoverText::new(
+        spec.label,
+        &format!("{} Usually {min} to {max}.", spec.description),
+        spec.name,
+    );
+    if stereo {
+        hover.description.push_str(" Stereo.");
+    }
     PortView {
         label: spec.label.to_string(),
-        hover: HoverText::new(
-            spec.label,
-            &format!("{} Usually {min} to {max}.", spec.description),
-            spec.name,
-        ),
+        hover,
         colour: signal_colour(spec.signal),
         shape: signal_shape(spec.signal),
         badge: 0,
@@ -177,11 +184,7 @@ pub fn control_value(kind: WidgetKind, spec: &ParamSpec, position: f32) -> f32 {
 /// modulation marks for controls, and `shown` (position and peak, by module
 /// and widget) for lights and meters. Values that did not change keep the generation, so the
 /// canvas uploads nothing new.
-pub fn update_panel_values(
-    values: &mut PanelValues,
-    controller: &Controller,
-    shown: &BTreeMap<(u32, usize), (f32, f32)>,
-) {
+pub fn update_panel_values(values: &mut PanelValues, controller: &Controller, shown: &ShownValues) {
     update_panel_values_dragging(values, controller, shown, None);
 }
 
@@ -218,7 +221,7 @@ pub fn update_live_values(values: &mut PanelValues, controller: &Controller) {
 pub fn update_panel_values_dragging(
     values: &mut PanelValues,
     controller: &Controller,
-    shown: &BTreeMap<(u32, usize), (f32, f32)>,
+    shown: &ShownValues,
     dragging: Option<loom_core::AssignmentId>,
 ) {
     let reaches = crate::modulation::reaches(controller.graph());
@@ -262,6 +265,7 @@ pub fn update_panel_values_dragging(
                         WidgetValue {
                             position: control_position(w.kind, spec, value),
                             peak: 0.0,
+                            right: None,
                             text: crate::param::format(spec, value),
                             modulation: crate::modulation::mark(w.kind, spec, value, assigned),
                             live,
@@ -269,10 +273,11 @@ pub fn update_panel_values_dragging(
                         }
                     }
                     _ => {
-                        let (position, peak) = shown.get(&(id.0, index)).copied().unwrap_or_default();
+                        let (position, peak, right) = shown.get(&(id.0, index)).copied().unwrap_or_default();
                         WidgetValue {
                             position,
                             peak,
+                            right,
                             text: display_text(d, w, position),
                             ..WidgetValue::default()
                         }
@@ -439,7 +444,12 @@ pub fn build(controller: &Controller, positions: &BTreeMap<u32, Point>, sizes: &
                 .map(|(port, spec)| PortView {
                     follows_transport: transport_default(spec)
                         .filter(|_| !cabled.contains(&InputRef { module: id, port })),
-                    ..port_view(spec)
+                    ..port_view(
+                        spec,
+                        graph
+                            .source_of(InputRef { module: id, port })
+                            .is_some_and(|source| controller.last_report().width(source) == loom_core::Width::Stereo),
+                    )
                 })
                 .collect();
             let mut outputs: Vec<PortView> = d
@@ -448,7 +458,10 @@ pub fn build(controller: &Controller, positions: &BTreeMap<u32, Point>, sizes: &
                 .enumerate()
                 .map(|(port, spec)| PortView {
                     badge: badges.get(&OutputRef { module: id, port }).copied().unwrap_or(0),
-                    ..port_view(spec)
+                    ..port_view(
+                        spec,
+                        controller.last_report().width(OutputRef { module: id, port }) == loom_core::Width::Stereo,
+                    )
                 })
                 .collect();
             if let Some(unknown) = &node.unknown {
@@ -543,6 +556,40 @@ pub fn build(controller: &Controller, positions: &BTreeMap<u32, Point>, sizes: &
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Stereo cable widths appear on both ports and clear after disconnection.
+    #[test]
+    fn stereo_cable_hover_follows_the_compile_report() {
+        let mut parts = loom_core::create_engine(loom_modules::registry(), loom_core::EngineConfig::default());
+        let c = &mut parts.controller;
+        let join = c.add_module("loom.mix.join").unwrap();
+        let out = c.add_module("loom.io.audio-out").unwrap();
+        c.connect_named(join, "out", out, "in").unwrap();
+        c.commit().unwrap();
+        let scene = build(c, &BTreeMap::new(), &BTreeMap::new());
+        assert!(
+            scene.module(join.0).unwrap().outputs[0]
+                .hover
+                .description
+                .contains("Stereo")
+        );
+        assert!(
+            scene.module(out.0).unwrap().inputs[0]
+                .hover
+                .description
+                .contains("Stereo")
+        );
+        let input = c.input_ref(out, "in").unwrap();
+        c.disconnect(input).unwrap();
+        c.commit().unwrap();
+        let scene = build(c, &BTreeMap::new(), &BTreeMap::new());
+        assert!(
+            !scene.module(out.0).unwrap().inputs[0]
+                .hover
+                .description
+                .contains("Stereo")
+        );
+    }
 
     /// A parameter for test descriptors.
     const fn param(name: &'static str, min: f32, max: f32, default: f32, unit: &'static str) -> loom_core::ParamSpec {
@@ -703,8 +750,8 @@ mod tests {
                 title: d.name.to_string(),
                 accent: category_colour(d.category),
                 position: Point::ORIGIN,
-                inputs: d.inputs.iter().map(port_view).collect(),
-                outputs: d.outputs.iter().map(port_view).collect(),
+                inputs: d.inputs.iter().map(|spec| port_view(spec, false)).collect(),
+                outputs: d.outputs.iter().map(|spec| port_view(spec, false)).collect(),
                 panel: panel_view(d),
             };
             loom_canvas::for_each_tile_text(&module, |item| {
@@ -738,7 +785,7 @@ mod tests {
         assert_eq!(knob.label, "Division");
         assert_eq!(knob.hover.description, "Fires on every Nth trigger.");
         assert_eq!(knob.hover.name.as_deref(), Some("n"));
-        let reset = port_view(&divide.inputs[1]);
+        let reset = port_view(&divide.inputs[1], false);
         assert_eq!(reset.label, "Reset");
         assert_eq!(reset.hover.name, None, "`reset` reads the same as \"Reset\"");
         assert!(reset.hover.description.contains("Usually 0 to 1."));

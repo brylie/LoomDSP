@@ -39,7 +39,7 @@ fn chain(n: usize, feedback: bool, kind: &str) -> EngineParts {
         c.connect_named(previous.0, previous.1, first.unwrap(), "b").unwrap();
     }
     let out = c.add_module("loom.io.audio-out").unwrap();
-    c.connect_named(previous.0, previous.1, out, "left").unwrap();
+    c.connect_named(previous.0, previous.1, out, "in").unwrap();
     let report = c.commit().unwrap();
     assert_eq!(report.loops.len(), usize::from(feedback));
     parts
@@ -93,7 +93,7 @@ fn svf_chain(n: usize, feedback: bool) -> EngineParts {
         c.connect_named(previous, last_port, mix, "b").unwrap();
     }
     let out = c.add_module("loom.io.audio-out").unwrap();
-    c.connect_named(previous, last_port, out, "left").unwrap();
+    c.connect_named(previous, last_port, out, "in").unwrap();
     c.commit().unwrap();
     parts
 }
@@ -147,8 +147,10 @@ fn modulated_svf(cutoff: Cutoff) -> EngineParts {
     let lfo = c.add_module("loom.osc.sine").unwrap();
     c.connect_named(phase, "phase", lfo, "phase").unwrap();
     let out = c.add_module("loom.io.audio-out").unwrap();
-    c.connect_named(svf, "lowpass", out, "left").unwrap();
-    c.connect_named(lfo, "out", out, "right").unwrap();
+    let join = c.add_module("loom.mix.join").unwrap();
+    c.connect_named(join, "out", out, "in").unwrap();
+    c.connect_named(svf, "lowpass", join, "left").unwrap();
+    c.connect_named(lfo, "out", join, "right").unwrap();
     match cutoff {
         Cutoff::Still => {}
         Cutoff::Cable => {
@@ -173,7 +175,7 @@ fn assigned_svf(n: usize) -> EngineParts {
     c.set_param_named(svf, "cutoff", 800.0).unwrap();
     c.connect_named(noise, "out", svf, "in").unwrap();
     let out = c.add_module("loom.io.audio-out").unwrap();
-    c.connect_named(svf, "lowpass", out, "left").unwrap();
+    c.connect_named(svf, "lowpass", out, "in").unwrap();
     for i in 0..16 {
         let source = c.add_module("loom.math.constant").unwrap();
         c.set_param_named(source, "value", 0.5).unwrap();

@@ -88,7 +88,10 @@ static OUT: ModuleDescriptor = ModuleDescriptor {
     name: "Out",
     category: "Test",
     description: "The engine output.",
-    inputs: &[port("left"), port("right")],
+    inputs: &[PortSpec {
+        channels: Channels::Stereo,
+        ..port("in")
+    }],
     outputs: &[],
     params: &[],
     role: ModuleRole::AudioOutput,
@@ -173,10 +176,7 @@ fn unknown_module_outputs_silence_at_each_block_size() {
             .controller
             .connect_named(source, "out", unknown, "signal")
             .unwrap();
-        parts
-            .controller
-            .connect_named(unknown, "result", output, "left")
-            .unwrap();
+        parts.controller.connect_named(unknown, "result", output, "in").unwrap();
         parts.controller.commit().unwrap();
         let mut left = vec![1.0; frames];
         let mut right = vec![1.0; frames];
@@ -211,9 +211,9 @@ fn an_unreachable_chain_is_not_processed() {
     // Mono into the left side plays on both: the right shows the heard one.
     assert_eq!(run(&mut parts, 10), counted(9 * BLOCK as u32));
 
-    parts.controller.connect(out(pass), input(speaker, 1)).unwrap();
+    parts.controller.connect(out(pass), input(speaker, 0)).unwrap();
     let report = parts.controller.commit().unwrap();
-    assert!(report.skipped.is_empty());
+    assert_eq!(report.skipped.iter().copied().collect::<Vec<_>>(), vec![heard]);
     assert_eq!(run(&mut parts, 1), counted(0));
 }
 
@@ -224,21 +224,19 @@ fn an_unreachable_chain_is_not_processed() {
 fn reconnecting_resumes_the_state() {
     let mut parts = engine();
     let c = &mut parts.controller;
-    let heard = c.add_module("test.counter").unwrap();
     let counter = c.add_module("test.counter").unwrap();
     let speaker = c.add_module("test.out").unwrap();
-    c.connect(out(heard), input(speaker, 0)).unwrap();
-    c.connect(out(counter), input(speaker, 1)).unwrap();
+    c.connect(out(counter), input(speaker, 0)).unwrap();
     c.commit().unwrap();
     // Ten buffers play past the 10 ms fade-in of the output stage.
     assert_eq!(run(&mut parts, 10), counted(9 * BLOCK as u32));
 
-    parts.controller.disconnect(input(speaker, 1)).unwrap();
+    parts.controller.disconnect(input(speaker, 0)).unwrap();
     let report = parts.controller.commit().unwrap();
     assert_eq!(report.skipped.iter().copied().collect::<Vec<_>>(), vec![counter]);
     run(&mut parts, 20);
 
-    parts.controller.connect(out(counter), input(speaker, 1)).unwrap();
+    parts.controller.connect(out(counter), input(speaker, 0)).unwrap();
     parts.controller.commit().unwrap();
     assert_eq!(run(&mut parts, 1), counted(10 * BLOCK as u32));
 }
@@ -254,17 +252,17 @@ fn skipped_unit_delay_keeps_its_held_sample() {
     let delay = c.add_module("test.delay1").unwrap();
     let speaker = c.add_module("test.out").unwrap();
     c.connect(out(counter), input(delay, 0)).unwrap();
-    c.connect(out(delay), input(speaker, 1)).unwrap();
+    c.connect(out(delay), input(speaker, 0)).unwrap();
     c.commit().unwrap();
     run(&mut parts, 10);
 
-    parts.controller.disconnect(input(speaker, 1)).unwrap();
+    parts.controller.disconnect(input(speaker, 0)).unwrap();
     let report = parts.controller.commit().unwrap();
     assert!(report.skipped.contains(&counter));
     assert!(report.skipped.contains(&delay));
     run(&mut parts, 20);
 
-    parts.controller.connect(out(delay), input(speaker, 1)).unwrap();
+    parts.controller.connect(out(delay), input(speaker, 0)).unwrap();
     parts.controller.commit().unwrap();
     let resumed = run(&mut parts, 1);
     assert_eq!(resumed[0], 639.0 * SCALE);

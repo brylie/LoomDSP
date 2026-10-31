@@ -207,6 +207,8 @@ pub struct Widget {
     pub position: f32,
     /// A meter's peak level. 0 for other widgets.
     pub peak: f32,
+    /// RMS and peak for a stereo meter's right channel.
+    pub right: Option<(f32, f32)>,
     /// The value as text, for controls.
     pub text: String,
     pub modulation: Mark,
@@ -482,6 +484,7 @@ impl App {
                                 bounds: m.widget_bounds(index).expect("a widget of this panel").into(),
                                 position: value.position,
                                 peak: value.peak,
+                                right: value.right,
                                 text: value.text,
                                 modulation: value.modulation.into(),
                                 live: value.live,

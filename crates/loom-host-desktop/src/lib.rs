@@ -1538,7 +1538,7 @@ mod tests {
         let constant = c.add_module("loom.math.constant").unwrap();
         c.set_param_named(constant, "value", 0.5).unwrap();
         let out = c.add_module("loom.io.audio-out").unwrap();
-        c.connect_named(constant, "out", out, "left").unwrap();
+        c.connect_named(constant, "out", out, "in").unwrap();
         c.commit().unwrap();
         parts
     }
@@ -1681,7 +1681,7 @@ mod tests {
         let constant = c.add_module("loom.math.constant").unwrap();
         c.set_param_named(constant, "value", 0.5).unwrap();
         let out = c.add_module("loom.io.audio-out").unwrap();
-        c.connect_named(constant, "out", out, "left").unwrap();
+        c.connect_named(constant, "out", out, "in").unwrap();
         c.commit().unwrap();
         let audio = AudioOutput::stepped(44_100, 4096, &tape).start(parts.engine).unwrap();
         tape.step(4096);
@@ -1745,7 +1745,7 @@ mod tests {
         let c = &mut parts.controller;
         let note = c.add_module("loom.midi.note").unwrap();
         let out = c.add_module("loom.io.audio-out").unwrap();
-        c.connect_named(note, "gate", out, "left").unwrap();
+        c.connect_named(note, "gate", out, "in").unwrap();
         c.commit().unwrap();
         let mut state = MidiInputState::new(share_midi(parts.midi));
         let gate = |engine: &mut Engine| {
@@ -1912,7 +1912,7 @@ mod virtual_midi_tests {
         let c = &mut parts.controller;
         let note = c.add_module("loom.midi.note").unwrap();
         let out = c.add_module("loom.io.audio-out").unwrap();
-        c.connect_named(note, "gate", out, "left").unwrap();
+        c.connect_named(note, "gate", out, "in").unwrap();
         c.commit().unwrap();
         let mut gate = || {
             let (mut left, mut right) = (vec![0.0; 256], vec![0.0; 256]);
