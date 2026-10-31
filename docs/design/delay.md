@@ -117,7 +117,7 @@ Both modules share one circular buffer and one 4-point Catmull-Rom (cubic Hermit
 When you patch `loom.time.delay` in a feedback loop with cables, the compiler runs the loop one sample at a time and requires a one-sample delay (`loom.time.delay1`) in the cycle (ADR-0002). If you do not place one, the compiler inserts one automatically.
 
 Suppose you build a Karplus-Strong plucked string (`examples/patches/plucked-string.ron`):
-1. A short noise burst from `loom.osc.noise` shaped by `loom.env.adsr` excites `loom.math.add`.
+1. A short noise burst from `loom.osc.noise` shaped by `loom.env.envelope` excites `loom.math.add`.
 2. The sum feeds `loom.time.delay`, then a low-pass filter (`loom.filter.svf`) to soften each echo, a `loom.math.mul` with `gain` just below `1.0` (for example `0.985`), and `loom.time.delay1` back into `loom.math.add`.
 
 The total delay around the loop is the sum of three parts:

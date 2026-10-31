@@ -90,7 +90,7 @@ Sampling is built from small parts, so one set of primitives covers one-shot pla
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
 | MT-FILTER-01 | State variable filter | A resonant filter with low-pass, high-pass, band-pass, and notch outputs at once. | Character | P1 | FR-LIB-03 | Built (`loom.filter.svf`: low-pass, band-pass, high-pass, and notch outputs) |
-| MT-FILTER-02 | Ladder low-pass | A resonant low-pass built from up to four stages, with a selectable slope and saturation in its feedback path. | Character, Quality | P1 | FR-LIB-03 | Specified (`loom.filter.ladder`, [P1 modules](../design/p1-modules.md)) |
+| MT-FILTER-02 | Ladder low-pass | A resonant low-pass built from up to four stages, with a selectable slope and saturation in its feedback path. | Character, Quality | P1 | FR-LIB-03 | Built (`loom.filter.ladder`, [P1 modules](../design/p1-modules.md#ladder-low-pass-loomfilterladder)) |
 | MT-FILTER-03 | One-pole filter | First-order low-pass and high-pass, for smoothing and gentle tone control. | | P1 | FR-LIB-03 | Built (`loom.filter.onepole`) |
 | MT-FILTER-04 | Slope filter | Low-pass, high-pass, or all-pass with a selectable steepness. | | P2 | FR-LIB-03 | Planned |
 | MT-FILTER-05 | Comb filter | A tuned delay with feedback that boosts or cuts a harmonic series. | | P2 | FR-LIB-15 | Planned |
@@ -144,7 +144,7 @@ Modulation assignments already scale and offset any parameter (ADR-0014), so the
 
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
-| MT-ENV-01 | Envelope | Shapes a level from a gate or trigger: AD, AR, ADSR, and ADSR with delay and hold, with curve control and an optional loop. The character trait gives plucked and slow, lagging responses. | Timebase, Character | P1 | FR-LIB-04 | Built in part (`loom.env.adsr`). AD mode specified in [P1 modules](../design/p1-modules.md#envelope-ad-mode-mt-env-01): renamed `loom.env.envelope` |
+| MT-ENV-01 | Envelope | Shapes a level from a gate or trigger: AD, AR, ADSR, and ADSR with delay and hold, with curve control and an optional loop. The character trait gives plucked and slow, lagging responses. | Timebase, Character | P1 | FR-LIB-04 | Built in part (`loom.env.envelope`: ADSR and AD modes with curve, [P1 modules](../design/p1-modules.md#envelope-ad-mode-mt-env-01)) |
 | MT-ENV-02 | Segment envelope | An envelope drawn as any number of points, with a hold point or a loop between two points. Uses the shared curve data. | Timebase, Retrigger | P2 | FR-LIB-12 | Planned |
 | MT-ENV-03 | Function generator | A rise and a fall that can be triggered once, looped, or used to slew an input. | Timebase | P2 | New | Planned |
 | MT-ENV-04 | Envelope follower | Outputs the loudness of an audio signal as a control signal. | Sidechain | P2 | FR-LIB-12 | Planned |
@@ -300,7 +300,7 @@ These depend on how notes travel on cables (OQ-16).
 | MT-IO-01 | Audio output | Sends a signal to an interface channel or host output. | | P0 | FR-LIB-07 | Built (`loom.io.audio-out`) |
 | MT-IO-02 | Audio input | Brings audio from an interface channel or host input into the patch. | | P1 | FR-LIB-07 | Specified (`loom.io.audio-in`, [audio input](../design/audio-input.md)) |
 | MT-IO-03 | Note input | Turns incoming notes into gate, pitch, and velocity signals, per voice. | | P0 | FR-LIB-07 | Built in part (`loom.midi.note`: one voice; per-voice output comes with polyphony in P2) |
-| MT-IO-04 | Controller input | Outputs a chosen MIDI controller, pitch bend, or aftertouch as a signal. | Smoothing | P1 | FR-LIB-07 | Specified (`loom.midi.controller`, [P1 modules](../design/p1-modules.md#controller-input-mt-io-04)) |
+| MT-IO-04 | Controller input | Outputs a chosen MIDI controller, pitch bend, or aftertouch as a signal. | Smoothing | P1 | FR-LIB-07 | Built (`loom.midi.controller`, [P1 modules](../design/p1-modules.md#controller-input-mt-io-04)) |
 | MT-IO-05 | Expression input | Outputs per-note pressure, timbre, and slide as signals. | | P2 | FR-VOICE-04 | Planned |
 | MT-IO-06 | Note output | Builds outgoing notes from gate, pitch, and velocity signals. | | P2 | FR-MIDI-04 | Planned |
 | MT-IO-07 | Controller output | Sends a signal out as a MIDI controller value. | | P2 | FR-MIDI-04 | Planned |

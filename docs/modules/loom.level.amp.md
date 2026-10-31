@@ -72,4 +72,4 @@ Patch(
 ## See also
 
 - [Multiply](loom.math.mul.md)
-- [ADSR](loom.env.adsr.md)
+- [Envelope](loom.env.envelope.md)

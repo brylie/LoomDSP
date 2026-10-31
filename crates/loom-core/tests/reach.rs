@@ -96,11 +96,26 @@ static OUT: ModuleDescriptor = ModuleDescriptor {
     displays: &[],
 };
 
+/// A one-sample delay whose held value survives an unreachable schedule.
+static DELAY: ModuleDescriptor = ModuleDescriptor {
+    id: "test.delay1",
+    version: 1,
+    name: "Delay 1",
+    category: "Test",
+    description: "Holds one sample.",
+    inputs: &[port("in")],
+    outputs: &[port("out")],
+    params: &[],
+    role: ModuleRole::UnitDelay,
+    panel: Panel::EMPTY,
+    displays: &[],
+};
+
 /// An engine with the test modules and no output safety, so the output
 /// holds the exact values the modules wrote.
 fn engine() -> EngineParts {
     let mut registry = Registry::new();
-    for descriptor in [&COUNTER, &PASS, &OUT] {
+    for descriptor in [&COUNTER, &PASS, &OUT, &DELAY] {
         registry.register(descriptor).unwrap();
     }
     let config = EngineConfig {
@@ -185,4 +200,32 @@ fn reconnecting_resumes_the_state() {
     parts.controller.connect(out(counter), input(speaker, 1)).unwrap();
     parts.controller.commit().unwrap();
     assert_eq!(run(&mut parts, 1), counted(10 * BLOCK as u32));
+}
+
+/// Disconnecting a unit delay preserves its held sample, even when its
+/// source is skipped too. Reconnection emits that sample before capturing
+/// a new one.
+#[test]
+fn skipped_unit_delay_keeps_its_held_sample() {
+    let mut parts = engine();
+    let c = &mut parts.controller;
+    let counter = c.add_module("test.counter").unwrap();
+    let delay = c.add_module("test.delay1").unwrap();
+    let speaker = c.add_module("test.out").unwrap();
+    c.connect(out(counter), input(delay, 0)).unwrap();
+    c.connect(out(delay), input(speaker, 1)).unwrap();
+    c.commit().unwrap();
+    run(&mut parts, 10);
+
+    parts.controller.disconnect(input(speaker, 1)).unwrap();
+    let report = parts.controller.commit().unwrap();
+    assert!(report.skipped.contains(&counter));
+    assert!(report.skipped.contains(&delay));
+    run(&mut parts, 20);
+
+    parts.controller.connect(out(delay), input(speaker, 1)).unwrap();
+    parts.controller.commit().unwrap();
+    let resumed = run(&mut parts, 1);
+    assert_eq!(resumed[0], 639.0 * SCALE);
+    assert_eq!(resumed[1], 640.0 * SCALE);
 }

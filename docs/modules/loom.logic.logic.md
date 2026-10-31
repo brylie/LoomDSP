@@ -57,7 +57,7 @@ Patch(
         PatchModule(id: 1, kind: "loom.ui.button@1", params: {"mode": 0, "on": 1}),
         PatchModule(id: 2, kind: "loom.midi.note@1"),
         PatchModule(id: 3, kind: "loom.logic.logic@1", params: {"op": 0, "invert": 0}),
-        PatchModule(id: 4, kind: "loom.env.adsr@1"),
+        PatchModule(id: 4, kind: "loom.env.envelope@1"),
         PatchModule(id: 5, kind: "loom.phase.generator@1"),
         PatchModule(id: 6, kind: "loom.osc.sine@1"),
         PatchModule(id: 7, kind: "loom.level.amp@1"),

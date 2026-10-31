@@ -2086,7 +2086,7 @@ mod tests {
         let mut app = App::new(crate::tests::app_args());
         let gate = app.controller.add_module("loom.math.constant").unwrap();
         app.controller.set_param_named(gate, "value", 1.0).unwrap();
-        let env = app.controller.add_module("loom.env.adsr").unwrap();
+        let env = app.controller.add_module("loom.env.envelope").unwrap();
         app.controller.set_param_named(env, "decay", 0.3).unwrap();
         app.controller.set_param_named(env, "sustain", 0.2).unwrap();
         app.controller.connect_named(gate, "out", env, "gate").unwrap();
@@ -2744,7 +2744,7 @@ mod tests {
     #[test]
     fn locate_finds_lights_and_meters() {
         let mut ui = crate::ui_test::Ui::open("subtractive.ron");
-        let env = ui.app.controller.add_module("loom.env.adsr").unwrap().0;
+        let env = ui.app.controller.add_module("loom.env.envelope").unwrap().0;
         let meter = ui.app.controller.add_module("loom.display.meter").unwrap().0;
         ui.app.commit();
         ui.redraw();

@@ -209,6 +209,7 @@ const RESET_IN: usize = 1;
 /// Requests are made only for changes, so a cable removed from `run` leaves
 /// the transport as it was, and the controller's own transport calls still
 /// work in between.
+#[derive(Clone)]
 struct Transport {
     tempo: f32,
     numerator: f32,
@@ -276,6 +277,11 @@ impl Transport {
 }
 
 impl Module for Transport {
+    /// Takes the running state of another instance (ADR-0022).
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+
     fn process(&mut self, ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let transport = ctx.transport();
         let playing = transport.playing();

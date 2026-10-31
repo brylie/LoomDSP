@@ -47,8 +47,8 @@ use iced::{Color, Element, Length, Point, Size, Subscription, Task, Theme};
 use live::Live;
 use loom_canvas::{CanvasEvent, LearnView, PanelValues, PatchCanvas, Scene};
 use loom_core::{
-    AssignmentId, Controller, EngineConfig, EngineParts, InputRef, MidiEvent, ModuleDescriptor, ModuleId, OutputRef,
-    OutputSafety, ProbeId, TRANSPORT_MODULE, create_engine,
+    AssignmentId, Controller, EngineConfig, EngineParts, InputRef, LoomError, MidiEvent, ModuleDescriptor, ModuleId,
+    OutputRef, OutputSafety, ProbeId, TRANSPORT_MODULE, create_engine,
 };
 use loom_host_desktop::{AudioOutput, CallbackStats, RunningAudio, SharedMidi};
 use loom_patch::Patch;
@@ -400,6 +400,8 @@ fn opened_status(path: &std::path::Path, notes: &[String]) -> String {
 
 struct App {
     controller: Controller,
+    /// A full command queue left fresh modules staged for a later commit.
+    retry_commit: bool,
     positions: BTreeMap<u32, Point>,
     scene: Scene,
     /// Live values of panel controls and lights, apart from the scene so a
@@ -870,6 +872,7 @@ impl App {
         let run_driven = run_is_driven(&controller);
         let mut app = Self {
             controller,
+            retry_commit: false,
             positions,
             scene,
             values,
@@ -1814,11 +1817,13 @@ impl App {
         self.live.sync(&mut self.controller, &wanted);
         let sent = match self.controller.commit() {
             Ok(_) => {
+                self.retry_commit = false;
                 self.report();
                 self.edits.committed(true);
                 true
             }
             Err(e) => {
+                self.retry_commit = matches!(&e, LoomError::QueueFull);
                 self.status = format!("error: {e}");
                 // The controller stays dirty, so the next commit retries the
                 // change; until then the history cannot be trusted.
@@ -1859,6 +1864,13 @@ impl App {
             }
         };
         self.drain_idle_engine();
+        // The audio callback, or the idle engine above, makes room for the
+        // staged modules. Tick messages keep this retry moving even without
+        // another edit from the player.
+        if self.retry_commit {
+            self.commit();
+            self.drain_idle_engine();
+        }
         if self.quit {
             // Stop audio now, with a fade so it does not click, so a
             // recording is closed before the process ends, and leave no
@@ -2839,6 +2851,30 @@ mod tests {
     use super::*;
     use iced::Rectangle;
 
+    /// A full queue stages fresh modules until the idle engine drains it;
+    /// the next update commits them without another edit from the player.
+    #[test]
+    fn a_full_queue_retries_staged_modules() {
+        let mut app = app();
+        let config = EngineConfig {
+            command_capacity: 4,
+            ..EngineConfig::default()
+        };
+        let parts = create_engine(registry(true), config);
+        app.controller = parts.controller;
+        app.idle_engine = Some(parts.engine);
+        app._audio = None;
+        for _ in 0..4 {
+            app.controller.add_module("loom.osc.sine").unwrap();
+        }
+        assert!(!app.commit());
+        assert!(app.retry_commit);
+        let _ = app.update(Message::Tick);
+        assert!(!app.retry_commit);
+        assert!(!app.controller.has_uncommitted_changes());
+        assert_eq!(app.controller.last_report().modules, 4);
+    }
+
     pub(crate) fn app() -> App {
         App::new(app_args())
     }
@@ -3060,7 +3096,7 @@ mod tests {
 
     /// An envelope and a filter, with the filter's cutoff knob widget.
     fn env_and_filter(app: &mut App) -> (ModuleId, ModuleId, usize, usize) {
-        let env = app.controller.add_module("loom.env.adsr").unwrap();
+        let env = app.controller.add_module("loom.env.envelope").unwrap();
         let filter = app.controller.add_module("loom.filter.svf").unwrap();
         app.commit();
         let d = app.controller.graph().node(filter).unwrap().descriptor;
@@ -3851,7 +3887,7 @@ mod tests {
         let mut app = app();
         let gate = app.controller.add_module("loom.math.constant").unwrap();
         app.controller.set_param_named(gate, "value", 1.0).unwrap();
-        let env = app.controller.add_module("loom.env.adsr").unwrap();
+        let env = app.controller.add_module("loom.env.envelope").unwrap();
         app.commit();
         let d = app.controller.graph().node(env).unwrap().descriptor;
         let light = d.panel.widgets.iter().position(|w| w.bind == "level").unwrap();
@@ -4300,7 +4336,7 @@ mod tests {
     fn removed_probes_lose_their_levels() {
         let mut app = app();
         let gate = app.controller.add_module("loom.math.constant").unwrap();
-        let env = app.controller.add_module("loom.env.adsr").unwrap();
+        let env = app.controller.add_module("loom.env.envelope").unwrap();
         app.controller.connect_named(gate, "out", env, "gate").unwrap();
         app.commit();
         for _ in 0..20 {
@@ -4359,7 +4395,7 @@ mod tests {
         else {
             panic!("not in learn mode");
         };
-        let (env_out, sine_out) = (format!("ADSR #{}: Out", env.0), format!("Sine #{}: Out", sine.0));
+        let (env_out, sine_out) = (format!("Envelope #{}: Out", env.0), format!("Sine #{}: Out", sine.0));
         let shown: Vec<_> = assignments
             .iter()
             .map(|a| (a.source.as_str(), a.depth_text.as_str(), a.enabled))

@@ -42,20 +42,42 @@ pub fn with_extension(mut path: PathBuf) -> PathBuf {
 }
 
 /// The bundled examples folder (`docs/design/files.md`, Defaults for the
-/// dialogs): `examples/patches` of the checkout the app was built in, when
-/// it is there, else the `examples` folder of the release bundle. That one
-/// is next to the program, or on macOS next to `LoomDSP.app`. `None` when
-/// there is neither. The app looks once, at start.
+/// dialogs): a checkout build uses its `examples/patches`; a release uses
+/// the `examples` folder next to the program, or on macOS next to
+/// `LoomDSP.app`. If that folder is missing, the checkout is the fallback.
+/// `None` when neither exists. The app looks once, at start.
 pub fn bundled_examples() -> Option<PathBuf> {
-    let mut candidates = vec![Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches")];
-    if let Some(dir) = std::env::current_exe().ok().as_deref().and_then(Path::parent) {
-        candidates.push(dir.join("examples"));
+    let checkout = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches");
+    examples_for_executable(std::env::current_exe().ok().as_deref(), &checkout)
+}
+
+/// Finds the examples that belong to this executable. A checkout build uses
+/// its source tree; a bundled executable uses the folder beside the app.
+fn examples_for_executable(executable: Option<&Path>, checkout: &Path) -> Option<PathBuf> {
+    let mut bundled = Vec::new();
+    if let Some(dir) = executable.and_then(Path::parent) {
+        bundled.push(dir.join("examples"));
         // LoomDSP.app/Contents/MacOS/loom-app: the folder holding the app.
         if dir.ends_with("Contents/MacOS")
             && let Some(beside_app) = dir.ancestors().nth(3)
         {
-            candidates.push(beside_app.join("examples"));
+            bundled.push(beside_app.join("examples"));
         }
+    }
+    let in_checkout = executable.is_some_and(|path| {
+        checkout
+            .parent()
+            .and_then(Path::parent)
+            .and_then(|root| root.canonicalize().ok())
+            .is_some_and(|root| path.starts_with(root))
+    });
+    let mut candidates = Vec::with_capacity(bundled.len() + 1);
+    if in_checkout {
+        candidates.push(checkout.to_path_buf());
+    }
+    candidates.extend(bundled);
+    if !in_checkout {
+        candidates.push(checkout.to_path_buf());
     }
     candidates.into_iter().find(|dir| dir.is_dir())
 }
@@ -241,6 +263,28 @@ pub mod fake {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::recovery::tests::TempDir;
+
+    /// A release bundle takes its own examples even while the checkout's
+    /// examples exist, and a checkout build still takes the source folder.
+    #[test]
+    fn examples_follow_the_executable() {
+        let tmp = TempDir::new("example-candidates");
+        let checkout = tmp.0.join("checkout/examples/patches");
+        let bundle = tmp.0.join("bundle/examples");
+        std::fs::create_dir_all(&checkout).unwrap();
+        std::fs::create_dir_all(&bundle).unwrap();
+        let release = tmp.0.join("bundle/loom-app");
+        let development = tmp.0.join("checkout/target/debug/loom-app");
+        assert_eq!(examples_for_executable(Some(&release), &checkout), Some(bundle));
+        assert_eq!(examples_for_executable(Some(&development), &checkout), Some(checkout));
+        std::fs::create_dir_all(tmp.0.join("checkout/crates/app")).unwrap();
+        let from_manifest = tmp.0.join("checkout/crates/app/../../examples/patches");
+        assert_eq!(
+            examples_for_executable(Some(&development), &from_manifest),
+            Some(from_manifest)
+        );
+    }
 
     /// A suggested file name with no folder starts the Save dialog where an
     /// untitled patch starts it: in the Documents folder.

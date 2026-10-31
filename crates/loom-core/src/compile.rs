@@ -549,6 +549,11 @@ pub(crate) fn compile(
         if !is_loop {
             let v = scc[0];
             if !is_live {
+                // Keep the held sample even while the delay is idle. It is
+                // copied into a later schedule if the cable reconnects.
+                if matches!(nodes[v].descriptor.role, ModuleRole::UnitDelay) {
+                    taps.push(user_tap(v));
+                }
                 continue;
             }
             match nodes[v].descriptor.role {
@@ -563,8 +568,7 @@ pub(crate) fn compile(
         }
 
         // A skipped loop is still analysed, so the report shows its
-        // inserted delays on the canvas. Its taps are dropped below.
-        let taps_before = taps.len();
+        // inserted delays on the canvas. Keep its taps for state transfer.
         let mut loop_taps = Vec::new();
         let members: BTreeSet<usize> = scc
             .iter()
@@ -793,8 +797,6 @@ pub(crate) fn compile(
                 modules: ordered,
                 taps: loop_taps,
             });
-        } else {
-            taps.truncate(taps_before);
         }
     }
 
@@ -1490,8 +1492,8 @@ mod tests {
     }
 
     /// A feedback loop that reaches nothing is still reported, with its
-    /// inserted delay, so the canvas can show it. It is not scheduled and
-    /// keeps no delay taps.
+    /// inserted delay, so the canvas can show it. Its tap keeps the held
+    /// sample while the loop is not scheduled.
     #[test]
     fn a_skipped_loop_is_reported_but_not_run() {
         let mut graph = followers(3);
@@ -1500,7 +1502,7 @@ mod tests {
         cable(&mut graph, 2, 1, 0);
         let (schedule, report) = compile(&graph, &probes_on([3]), &BTreeMap::new(), 48_000.0, 64);
         assert_eq!(scheduled_slots(&schedule), vec![2]);
-        assert!(schedule.taps.is_empty());
+        assert_eq!(schedule.taps.len(), 1);
         assert_eq!(report.loops.len(), 1);
         assert_eq!(report.loops[0].inserted_delays.len(), 1);
         assert_eq!(report.skipped, BTreeSet::from([ModuleId(1), ModuleId(2)]));
@@ -1510,6 +1512,17 @@ mod tests {
         assert_eq!(scheduled_slots(&schedule), vec![0, 1]);
         assert_eq!(schedule.taps.len(), 1);
         assert_eq!(report.skipped, BTreeSet::from([ModuleId(3)]));
+
+        // A live loop's held sample survives a skipped schedule and is
+        // still there when the loop becomes live again.
+        let mut live = schedule;
+        live.taps[0].state = 0.75;
+        let (mut skipped, _) = compile(&graph, &probes_on([3]), &BTreeMap::new(), 48_000.0, 64);
+        skipped.take_tap_state_from(&live, 64);
+        assert_eq!(skipped.taps[0].state, 0.75);
+        let (mut reconnected, _) = compile(&graph, &probes_on([1]), &BTreeMap::new(), 48_000.0, 64);
+        reconnected.take_tap_state_from(&skipped, 64);
+        assert_eq!(reconnected.taps[0].state, 0.75);
     }
 
     /// A schedule with one smoothed fill per key, stored in the given order

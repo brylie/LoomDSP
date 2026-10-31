@@ -39,7 +39,7 @@ fn held_note(mode: OutputSafety) -> (EngineParts, ModuleId) {
     let mut parts = engine(mode);
     let c = &mut parts.controller;
     let note = c.add_module("loom.midi.note").unwrap();
-    let adsr = c.add_module("loom.env.adsr").unwrap();
+    let adsr = c.add_module("loom.env.envelope").unwrap();
     let phase = c.add_module("loom.phase.generator").unwrap();
     let sine = c.add_module("loom.osc.sine").unwrap();
     let vca = c.add_module("loom.math.mul").unwrap();
@@ -137,7 +137,7 @@ fn a_ringing_delay_is_cleared() {
     let mut parts = engine(OutputSafety::Off);
     let c = &mut parts.controller;
     let note = c.add_module("loom.midi.note").unwrap();
-    let adsr = c.add_module("loom.env.adsr").unwrap();
+    let adsr = c.add_module("loom.env.envelope").unwrap();
     let add = c.add_module("loom.math.add").unwrap();
     let delay = c.add_module("loom.time.delay").unwrap();
     let feedback = c.add_module("loom.math.mul").unwrap();

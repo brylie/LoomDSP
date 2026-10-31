@@ -93,7 +93,10 @@ fn seeded_modules_copy_repeatably() {
 fn a_noise_copy_does_not_repeat_the_running_numbers() {
     let harness = Harness::new(&loom_modules::osc::NOISE).frames(FRAMES);
     let result = catch_unwind(AssertUnwindSafe(|| harness.check_copy_state(AT)));
-    assert!(result.is_err(), "the copy played the running instance's numbers");
+    let message = result.expect_err("the copy played the running instance's numbers");
+    let message = message.downcast_ref::<String>().expect("the harness reports a String");
+    assert!(message.contains("output `out` at frame"), "{message}");
+    assert!(message.contains("`copy_state_from` returned true"), "{message}");
 }
 
 /// A copy takes state only from its own type.

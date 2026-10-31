@@ -41,7 +41,7 @@
 "256"
 "loom.display.meter@1"
 "loom.display.scope@1"
-"loom.env.adsr@1"
+"loom.env.envelope@1"
 "loom.filter.onepole@1"
 "loom.filter.svf@1"
 "loom.io.audio-out@1"

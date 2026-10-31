@@ -44,7 +44,8 @@ pub static ALL: &[&ModuleDescriptor] = &[
     &osc::NOISE,
     &filter::SVF,
     &filter::ONEPOLE,
-    &env::ADSR,
+    &filter::LADDER,
+    &env::ENVELOPE,
     &math::ADD,
     &math::MUL,
     &math::SUB,
@@ -61,6 +62,7 @@ pub static ALL: &[&ModuleDescriptor] = &[
     &io::UNIT_DELAY,
     &io::AUDIO_OUT,
     &midi::NOTE_IN,
+    &midi::CONTROLLER_IN,
     &display::METER,
     &display::SCOPE,
     &clock::CLOCK,
@@ -105,7 +107,7 @@ mod tests {
     #[test]
     fn panels_follow_the_spec() {
         // docs/design/panels.md, Module panels on tiles: a knob for every
-        // parameter except these, and lights on MIDI Note and ADSR. Button's
+        // parameter except these, and lights on MIDI Note and Envelope. Button's
         // `on` is the button itself. Its `mode` stays in the inspector.
         let inspector_only = [
             ("loom.osc.noise", "seed"),
@@ -176,6 +178,9 @@ mod tests {
                     ("loom.osc.noise", "colour"),
                     ("loom.mod.lfo", "sync"),
                     ("loom.mod.lfo", "shape"),
+                    ("loom.env.envelope", "mode"),
+                    ("loom.filter.ladder", "slope"),
+                    ("loom.midi.controller", "source"),
                     ("loom.clock.transport", "run"),
                 ];
                 if non_knob.contains(&(descriptor.id, param.name)) {
@@ -202,7 +207,7 @@ mod tests {
                 .collect();
             let expected: &[&str] = match descriptor.id {
                 "loom.midi.note" => &["gate"],
-                "loom.env.adsr" => &["level"],
+                "loom.env.envelope" => &["level"],
                 "loom.logic.memory" => &["state"],
                 // Trigger lights (panels.md, Lights for one-sample triggers).
                 "loom.logic.divide" | "loom.phase.trigger" | "loom.clock.clock" => &["fired"],
@@ -230,6 +235,13 @@ mod tests {
         use loom_core::ParamMapping;
         for descriptor in super::ALL {
             for param in descriptor.params {
+                // The controller's smoothing starts at 0 (none), and a
+                // logarithmic range needs a minimum above 0 (p1-modules.md,
+                // Controller input).
+                if (descriptor.id, param.name) == ("loom.midi.controller", "smoothing") {
+                    assert_eq!(param.options.mapping, ParamMapping::Linear);
+                    continue;
+                }
                 let expected = if matches!(param.unit, "Hz" | "s") {
                     ParamMapping::Logarithmic
                 } else {

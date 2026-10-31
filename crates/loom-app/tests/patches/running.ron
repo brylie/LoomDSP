@@ -7,7 +7,7 @@ Patch(
     name: "Running",
     modules: [
         PatchModule(id: 1, kind: "loom.math.constant@1", params: {"value": 0.6}),
-        PatchModule(id: 2, kind: "loom.env.adsr@1"),
+        PatchModule(id: 2, kind: "loom.env.envelope@1"),
         PatchModule(id: 3, kind: "loom.filter.svf@1"),
         PatchModule(id: 4, kind: "loom.display.meter@1"),
     ],

@@ -94,7 +94,7 @@ Patch(
     name: "",
     modules: [
         (id: 4, kind: "loom.filter.svf@1", params: {"cutoff": 800.0}, position: (240.0, 96.0)),
-        (id: 7, kind: "loom.env.adsr@1", position: (240.0, 0.0)),
+        (id: 7, kind: "loom.env.envelope@1", position: (240.0, 0.0)),
     ],
     cables: [],
     modulation: [
