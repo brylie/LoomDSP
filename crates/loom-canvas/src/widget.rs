@@ -837,6 +837,13 @@ impl<Message> PatchCanvas<'_, Message> {
 
         match event {
             Event::Window(window::Event::RedrawRequested(now)) => {
+                let new_frame = state.framed_key != Some(self.frame_key);
+                if state.framed_key.is_some_and(|key| key != self.frame_key) {
+                    // The app has replaced the patch and its gesture history.
+                    // Do not deliver the previous patch's delayed arrow end.
+                    state.arrow_deadline = None;
+                    state.arrow_gesture = false;
+                }
                 if state.arrow_deadline.is_some_and(|due| *now >= due) {
                     state.arrow_deadline = None;
                     if std::mem::take(&mut state.arrow_gesture) {
@@ -851,7 +858,7 @@ impl<Message> PatchCanvas<'_, Message> {
                     let centre = Point::new(bounds.width / 2.0, bounds.height / 2.0);
                     self.open_browser(state.camera.to_world(centre), centre, bounds, shell);
                 }
-                if state.framed_key != Some(self.frame_key) && bounds.width > 0.0 {
+                if new_frame && bounds.width > 0.0 {
                     if let Some(world) = self.scene.bounds() {
                         state.camera.frame(world, bounds.size());
                     }
@@ -1611,7 +1618,7 @@ impl<Message> PatchCanvas<'_, Message> {
                 // must see it too.
                 self.learn.is_none()
             }
-            keyboard::Key::Named(Named::Escape) if !self.selection.is_empty() => {
+            keyboard::Key::Named(Named::Escape) if !self.selection.is_empty() && self.learn.is_none() => {
                 self.emit(shell, CanvasEvent::Select(Vec::new()));
                 true
             }
@@ -3792,6 +3799,21 @@ mod tests {
         );
         assert_eq!(state.focus, None);
 
+        let mut next_messages = Vec::new();
+        let mut next_shell = Shell::new(&mut next_messages);
+        canvas.handle(
+            &mut state,
+            &escape,
+            bounds,
+            mouse::Cursor::Available(at),
+            &mut next_shell,
+        );
+        assert_eq!(
+            next_shell.event_status(),
+            iced::event::Status::Ignored,
+            "learn mode must receive Escape even with a selected tile"
+        );
+
         // With nothing focused, Space is still the Run shortcut.
         let events = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Space, true), at);
         assert_eq!(events, vec![CanvasEvent::ToggleRun]);
@@ -4225,21 +4247,50 @@ mod tests {
         assert_eq!(shell.event_status(), iced::event::Status::Ignored);
     }
 
-    /// A new patch (a new frame key) drops the pin: module IDs repeat
-    /// between patches, so it could land on an unrelated output.
+    /// A new patch drops the pin and old arrow timer. Module IDs repeat
+    /// between patches, and the new app has a fresh undo history.
     #[test]
-    fn a_new_patch_clears_the_pin() {
+    fn a_new_patch_clears_old_canvas_state() {
         let (scene, values) = modulated_scene();
         let none = BTreeSet::new();
         let canvas = PatchCanvas::new(&scene, &none, |e| e).values(&values).frame_key(2);
         let mut state = State {
             pinned: Some(OUT),
             framed_key: Some(1),
+            arrow_gesture: true,
+            arrow_deadline: Some(Instant::now() - Duration::from_millis(1)),
             ..State::default()
         };
         let redraw = Event::Window(window::Event::RedrawRequested(Instant::now()));
-        drive(&canvas, &mut state, &redraw, Point::ORIGIN);
+        let events = drive(&canvas, &mut state, &redraw, Point::ORIGIN);
+        assert!(!events.contains(&CanvasEvent::ArrowGroupEnd), "{events:?}");
+        assert!(!state.arrow_gesture);
+        assert!(state.arrow_deadline.is_none());
         assert_eq!(state.pinned, None);
+    }
+
+    /// The first frame has no old patch key, so it keeps a key gesture that
+    /// began before that redraw.
+    #[test]
+    fn first_frame_keeps_a_current_arrow_group() {
+        let scene = Scene::new(vec![module(1, 0.0)], Vec::new());
+        let none = BTreeSet::new();
+        let canvas = PatchCanvas::new(&scene, &none, |e| e).frame_key(2);
+        let now = Instant::now();
+        let mut state = State {
+            arrow_gesture: true,
+            arrow_deadline: Some(now + Duration::from_millis(100)),
+            ..State::default()
+        };
+        let events = drive(
+            &canvas,
+            &mut state,
+            &Event::Window(window::Event::RedrawRequested(now)),
+            Point::ORIGIN,
+        );
+        assert!(!events.contains(&CanvasEvent::ArrowGroupEnd), "{events:?}");
+        assert!(state.arrow_gesture);
+        assert!(state.arrow_deadline.is_some());
     }
 
     /// The lines are built once for a given pin, pointer, and selection,
