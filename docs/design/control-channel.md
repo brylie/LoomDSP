@@ -74,7 +74,7 @@ Any client that can write lines to a Unix socket works, such as `nc -U /tmp/loom
 
 ### Pointer commands
 
-**Status:** Agreed ([#251](https://github.com/brylie/LoomDSP/issues/251)), and built. The points below the table came up while building it, and were agreed in [#392](https://github.com/brylie/LoomDSP/issues/392). The split of `press` into `press` and `toolbar` is not built yet.
+**Status:** Agreed ([#251](https://github.com/brylie/LoomDSP/issues/251)), and built. The points below the table came up while building it, and were agreed in [#392](https://github.com/brylie/LoomDSP/issues/392).
 
 Commands for the checks that need a hand today: hover lines, pinning a badge and pressing Escape, the drop highlight, and a range arc drag. A target is the same text as `locate` takes, or window coordinates `x` and `y` in logical pixels.
 

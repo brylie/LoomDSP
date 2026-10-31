@@ -415,6 +415,8 @@ pub struct CableView {
 /// (`docs/design/modulation.md`, Lines).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModulationView {
+    /// Assignment ID, used to update its line without rebuilding tile geometry.
+    pub id: u32,
     /// Source module and output index.
     pub from: (u32, usize),
     /// Target module.
@@ -422,6 +424,8 @@ pub struct ModulationView {
     /// The control on the target's panel bound to the parameter, if it has
     /// one. Without one, the line ends at the target's title.
     pub widget: Option<usize>,
+    /// Whether the assignment currently affects its target.
+    pub enabled: bool,
 }
 
 /// Everything the canvas draws.
@@ -440,6 +444,7 @@ pub struct Scene {
     /// every frame.
     badges_inside: HashSet<(u32, usize)>,
     generation: u64,
+    overlay_generation: u64,
 }
 
 static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
@@ -466,6 +471,7 @@ impl Scene {
             modulations: Vec::new(),
             badges_inside: HashSet::new(),
             generation: next_generation(),
+            overlay_generation: next_generation(),
         };
         scene.place_badges();
         scene
@@ -507,6 +513,11 @@ impl Scene {
         self.generation
     }
 
+    /// Changes when modulation line styling changes without tile geometry.
+    pub fn overlay_generation(&self) -> u64 {
+        self.overlay_generation
+    }
+
     /// All modules, in drawing order.
     pub fn modules(&self) -> &[ModuleView] {
         &self.modules
@@ -521,7 +532,18 @@ impl Scene {
     pub fn with_modulations(mut self, modulations: Vec<ModulationView>) -> Self {
         self.modulations = modulations;
         self.generation = next_generation();
+        self.overlay_generation = next_generation();
         self
+    }
+
+    /// Changes one assignment's line state without rebuilding tiles or cables.
+    pub fn set_modulation_enabled(&mut self, id: u32, enabled: bool) {
+        if let Some(view) = self.modulations.iter_mut().find(|m| m.id == id)
+            && view.enabled != enabled
+        {
+            view.enabled = enabled;
+            self.overlay_generation = next_generation();
+        }
     }
 
     /// All modulation assignments.

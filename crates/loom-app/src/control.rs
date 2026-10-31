@@ -108,9 +108,11 @@ pub enum Command {
         #[serde(default)]
         modifiers: Vec<String>,
     },
-    /// A toolbar button by name, or a mouse button down (Pointer
-    /// commands): a `button` that names a toolbar button with no `target`,
-    /// `x`, or `y` is the toolbar's.
+    /// Clicks a toolbar button by its fixed command name.
+    Toolbar {
+        button: String,
+    },
+    /// A mouse button down (Pointer commands).
     Press {
         button: Option<String>,
         target: Option<String>,
@@ -596,10 +598,6 @@ pub enum AfterSearch {
     Screenshot { path: PathBuf, margin: f32 },
 }
 
-/// The mouse buttons by name. A `press` with one of these, or with no
-/// button, is a pointer command.
-const MOUSE_BUTTONS: [&str; 3] = ["left", "right", "middle"];
-
 /// The most moves a `drag` takes.
 const MAX_DRAG_STEPS: u32 = 1000;
 
@@ -802,7 +800,7 @@ fn refuse_dialog_keys(key: &keyboard::Key, modifiers: keyboard::Modifiers) -> Re
     }
 }
 
-/// The toolbar buttons `press` clicks, by stable name. Labels are not
+/// The toolbar buttons `toolbar` clicks, by stable name. Labels are not
 /// used: they change while the app runs ("Hold note" becomes "Release
 /// note") and may be reworded.
 const BUTTONS: [&str; 5] = ["learn", "hold", "panic", "undo", "redo"];
@@ -1094,24 +1092,10 @@ impl App {
                 };
                 return (then, Task::batch(tasks));
             }
-            Command::Press {
-                button: Some(button),
-                target: None,
-                x: None,
-                y: None,
-                modifiers,
-            } if !MOUSE_BUTTONS.contains(&button.as_str()) => {
-                if !modifiers.is_empty() {
-                    return (
-                        Then::Now(Err("a toolbar button takes no `modifiers`".to_string())),
-                        Task::none(),
-                    );
-                }
-                press_message(self, &button).map(|message| {
-                    send(self, message);
-                    Map::new()
-                })
-            }
+            Command::Toolbar { button } => press_message(self, &button).map(|message| {
+                send(self, message);
+                Map::new()
+            }),
             Command::Press {
                 button,
                 target,
@@ -1972,7 +1956,7 @@ mod tests {
                 .unwrap_err()
                 .contains("press `learn` first")
         );
-        assert_eq!(run(&mut app, r#"{"cmd": "press", "button": "learn"}"#), ok);
+        assert_eq!(run(&mut app, r#"{"cmd": "toolbar", "button": "learn"}"#), ok);
         assert!(app.learning);
         assert_eq!(run(&mut app, r#"{"cmd": "select", "modules": [4]}"#), ok);
         assert_eq!(run(&mut app, r#"{"cmd": "arm", "target": "4:cutoff"}"#), ok);
@@ -1984,9 +1968,9 @@ mod tests {
         // lose the mapping.
         assert_eq!(run(&mut app, r#"{"cmd": "cc", "controller": 21, "value": 64}"#), ok);
         assert!(app.armed.is_none(), "the armed parameter learned the control");
-        assert_eq!(run(&mut app, r#"{"cmd": "press", "button": "learn"}"#), ok);
+        assert_eq!(run(&mut app, r#"{"cmd": "toolbar", "button": "learn"}"#), ok);
         assert!(!app.learning);
-        assert_eq!(run(&mut app, r#"{"cmd": "press", "button": "hold"}"#), ok);
+        assert_eq!(run(&mut app, r#"{"cmd": "toolbar", "button": "hold"}"#), ok);
         assert!(app.holding);
 
         let row = &run(&mut app, r#"{"cmd": "snapshot"}"#).unwrap()["snapshot"]["inspector"]["module"]["params"][0];
@@ -2223,7 +2207,7 @@ mod tests {
         assert_eq!(app.ui_snapshot().title, "subtractive (example) - LoomDSP");
     }
 
-    /// `panic` and `press` with `button: "panic"` run panic, also with no
+    /// `panic` and `toolbar` with `button: "panic"` run panic, also with no
     /// audio device (panic.md, rule 4).
     #[test]
     fn the_panic_command_and_button_run_panic() {
@@ -2232,19 +2216,19 @@ mod tests {
         assert_eq!(run(&mut app, r#"{"cmd": "panic"}"#), ok);
         assert!(app.status.starts_with("Panic"), "{}", app.status);
         app.status.clear();
-        assert_eq!(run(&mut app, r#"{"cmd": "press", "button": "panic"}"#), ok);
+        assert_eq!(run(&mut app, r#"{"cmd": "toolbar", "button": "panic"}"#), ok);
         assert!(app.status.starts_with("Panic"), "{}", app.status);
     }
 
-    /// `press` refuses what a click could not do: dialogs (rule 9),
+    /// `toolbar` refuses what a click could not do: dialogs (rule 9),
     /// disabled buttons, and unknown names.
     #[test]
-    fn press_refuses_dialogs_disabled_buttons_and_unknown_names() {
+    fn toolbar_refuses_dialogs_disabled_buttons_and_unknown_names() {
         // No audio: Hold note is disabled. Nothing done yet: nor are Undo
         // and Redo.
         let mut app = App::new(crate::tests::app_args());
         for name in ["new", "open", "save", "save-as"] {
-            let error = run(&mut app, &format!(r#"{{"cmd": "press", "button": "{name}"}}"#)).unwrap_err();
+            let error = run(&mut app, &format!(r#"{{"cmd": "toolbar", "button": "{name}"}}"#)).unwrap_err();
             assert!(error.contains("opens a dialog"), "{name}: {error}");
         }
         for (name, reason) in [
@@ -2252,12 +2236,12 @@ mod tests {
             ("undo", "nothing to undo"),
             ("redo", "nothing to redo"),
         ] {
-            let error = run(&mut app, &format!(r#"{{"cmd": "press", "button": "{name}"}}"#)).unwrap_err();
+            let error = run(&mut app, &format!(r#"{{"cmd": "toolbar", "button": "{name}"}}"#)).unwrap_err();
             assert!(error.contains(reason), "{name}: {error}");
         }
-        let error = run(&mut app, r#"{"cmd": "press", "button": "MIDI learn"}"#).unwrap_err();
+        let error = run(&mut app, r#"{"cmd": "toolbar", "button": "MIDI learn"}"#).unwrap_err();
         assert!(error.contains("buttons: learn, hold, panic, undo, redo"), "{error}");
-        let error = run(&mut app, r#"{"cmd": "press", "button": "add"}"#).unwrap_err();
+        let error = run(&mut app, r#"{"cmd": "toolbar", "button": "add"}"#).unwrap_err();
         assert!(error.contains("`add` command"), "{error}");
     }
 
@@ -2475,6 +2459,22 @@ mod tests {
         assert_eq!(count(&ui), before + 1);
     }
 
+    /// A script can target an inspector parameter by its window coordinates
+    /// and reaches the same assignment and undo path as a real pointer.
+    #[test]
+    fn a_script_drags_an_output_onto_an_inspector_row() {
+        let mut ui = pointer_ui();
+        let _ = ui.app.update(Message::SelectModule(4));
+        ui.redraw();
+        let row = ui.text("Cutoff").expect("inspector Cutoff row").center();
+        let before = ui.app.controller.graph().assignments().count();
+        let command = serde_json::json!({"cmd": "drag", "from": "7:out", "to": [row.x, row.y]}).to_string();
+        run_ui(&mut ui, &command).unwrap();
+        assert_eq!(ui.app.controller.graph().assignments().count(), before + 1);
+        run_ui(&mut ui, r#"{"cmd": "undo"}"#).unwrap();
+        assert_eq!(ui.app.controller.graph().assignments().count(), before);
+    }
+
     /// A real button let go while a script drag runs: the drag
     /// goes on undisturbed, the release is not lost, and nothing reads as
     /// held afterwards. Then a real pointer move takes over from the
@@ -2652,10 +2652,7 @@ mod tests {
                 r#"{"cmd": "scroll", "target": "4", "dy": 1, "modifiers": ["hyper"]}"#,
                 "unknown modifier",
             ),
-            (
-                r#"{"cmd": "press", "button": "learn", "modifiers": ["shift"]}"#,
-                "no `modifiers`",
-            ),
+            (r#"{"cmd": "press", "button": "learn"}"#, "unknown mouse button"),
             (r#"{"cmd": "key", "key": "hyper"}"#, "unknown key"),
         ] {
             let error = run_ui(&mut ui, line).unwrap_err();

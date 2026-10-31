@@ -476,13 +476,15 @@ pub fn build(controller: &Controller, positions: &BTreeMap<u32, Point>) -> Scene
     // One line per assignment, to the control bound to its parameter.
     let modulations = graph
         .assignments()
-        .filter_map(|(_, a)| {
+        .filter_map(|(id, a)| {
             let d = graph.node(a.target)?.descriptor;
             let name = d.params.get(a.param)?.name;
             Some(ModulationView {
+                id: id.0,
                 from: (a.source.module.0, a.source.port),
                 to: a.target.0,
                 widget: d.panel.widgets.iter().position(|w| w.is_control() && w.bind == name),
+                enabled: a.enabled,
             })
         })
         .collect();

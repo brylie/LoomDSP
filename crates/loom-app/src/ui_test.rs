@@ -425,6 +425,153 @@ mod tests {
     use loom_canvas::CanvasEvent;
     use loom_core::{InputRef, OutputRef};
 
+    /// Selects one module and finds a parameter label in its inspector.
+    fn inspector_row(ui: &mut Ui, module: u32, label: &str) -> Point {
+        let _ = ui.app.update(Message::SelectModule(module));
+        ui.redraw();
+        ui.text(label).expect("inspector parameter row").center()
+    }
+
+    /// A drag into the inspector uses the normal assignment defaults and
+    /// records one undo step; the same output cannot add a duplicate.
+    #[test]
+    fn an_output_dropped_on_an_inspector_row_assigns_once() {
+        let mut ui = Ui::open("subtractive.ron");
+        let row = inspector_row(&mut ui, 4, "Cutoff");
+        let from = ui.output(7, "out");
+        let before = ui.app.controller.graph().assignments().count();
+        ui.drag(from, row, 12);
+        let assignments: Vec<_> = ui.app.controller.graph().assignments().map(|(_, a)| *a).collect();
+        assert_eq!(assignments.len(), before + 1);
+        let added = assignments.last().expect("new assignment");
+        assert_eq!(added.depth, 0.25);
+        assert_eq!(added.polarity, None);
+        assert_eq!(
+            added.source,
+            OutputRef {
+                module: ModuleId(7),
+                port: 0
+            }
+        );
+        assert!(added.enabled);
+        ui.drag(from, row, 12);
+        assert_eq!(ui.app.controller.graph().assignments().count(), before + 1);
+        assert!(ui.app.status.contains("already modulates"));
+        let _ = ui.app.update(Message::Undo);
+        assert_eq!(ui.app.controller.graph().assignments().count(), before);
+    }
+
+    /// Moving between parameter rows changes the one highlighted target.
+    #[test]
+    fn only_the_inspector_row_under_an_output_drag_is_highlighted() {
+        let mut ui = Ui::open("subtractive.ron");
+        let cutoff = inspector_row(&mut ui, 4, "Cutoff");
+        let resonance = ui.text("Resonance").expect("Resonance row").center();
+        let from = ui.output(7, "out");
+        ui.move_to(from);
+        ui.press();
+        ui.move_to(cutoff);
+        assert_eq!(ui.app.assign_drag.expect("window drag").zoom, ui.canvas().camera.zoom);
+        assert_eq!(ui.app.drop_row, Some((4, 0)));
+        ui.move_to(resonance);
+        assert_eq!(ui.app.drop_row, Some((4, 1)));
+        ui.release();
+    }
+
+    /// A whole-number toggle starts at one step of depth, as on its tile.
+    #[test]
+    fn an_output_dropped_on_a_toggle_row_uses_one_step() {
+        let mut ui = Ui::open("subtractive.ron");
+        let row = inspector_row(&mut ui, 10, "Run");
+        let from = ui.output(7, "out");
+        ui.drag(from, row, 12);
+        let (_, assignment) = ui.app.controller.graph().assignments().last().expect("assignment");
+        assert_eq!(assignment.target, ModuleId(10));
+        assert_eq!(assignment.depth, 1.0);
+    }
+
+    /// The Button's latch is button-only on the tile, so its inspector row
+    /// does not highlight or take an output drop.
+    #[test]
+    fn a_button_only_parameter_row_rejects_a_drop() {
+        let mut ui = Ui::open("subtractive.ron");
+        let button = select_new(&mut ui, "loom.ui.button");
+        let row = inspector_row(&mut ui, button.0, "On");
+        let from = ui.output(7, "out");
+        let before = ui.app.controller.graph().assignments().count();
+        ui.move_to(from);
+        ui.press();
+        ui.move_to(row);
+        assert_eq!(ui.app.drop_row, None);
+        ui.release();
+        assert_eq!(ui.app.controller.graph().assignments().count(), before);
+    }
+
+    /// A normal parameter with no tile widget still accepts a row drop.
+    #[test]
+    fn an_inspector_only_parameter_accepts_a_drop() {
+        let mut ui = Ui::open("subtractive.ron");
+        let button = select_new(&mut ui, "loom.ui.button");
+        let row = inspector_row(&mut ui, button.0, "Mode");
+        let from = ui.output(7, "out");
+        let before = ui.app.controller.graph().assignments().count();
+        ui.drag(from, row, 12);
+        assert_eq!(ui.app.controller.graph().assignments().count(), before + 1);
+        let (_, assignment) = ui.app.controller.graph().assignments().last().expect("assignment");
+        assert_eq!(assignment.target, button);
+    }
+
+    /// Escape and focus loss clear the drag before any release can assign.
+    #[test]
+    fn escape_and_focus_loss_cancel_an_inspector_drop() {
+        for focus_loss in [false, true] {
+            let mut ui = Ui::open("subtractive.ron");
+            let row = inspector_row(&mut ui, 4, "Cutoff");
+            let from = ui.output(7, "out");
+            let before = ui.app.controller.graph().assignments().count();
+            ui.move_to(from);
+            ui.press();
+            ui.move_to(row);
+            if focus_loss {
+                ui.step(&[Event::Window(window::Event::Unfocused)]);
+            } else {
+                ui.tap(
+                    keyboard::Key::Named(keyboard::key::Named::Escape),
+                    keyboard::Modifiers::default(),
+                );
+            }
+            ui.release();
+            assert_eq!(ui.app.controller.graph().assignments().count(), before);
+            assert!(ui.app.assign_drag.is_none());
+        }
+    }
+
+    /// Empty canvas, an outside-window release, and MIDI learn all discard
+    /// the output without making an assignment.
+    #[test]
+    fn empty_outside_and_learn_mode_make_no_inspector_assignment() {
+        let mut ui = Ui::open("subtractive.ron");
+        let row = inspector_row(&mut ui, 4, "Cutoff");
+        let from = ui.output(7, "out");
+        let before = ui.app.controller.graph().assignments().count();
+        let canvas = ui.canvas();
+        ui.drag(from, Point::new(canvas.bounds.x + 4.0, canvas.bounds.y + 4.0), 8);
+        assert_eq!(ui.app.controller.graph().assignments().count(), before);
+        ui.move_to(from);
+        ui.press();
+        ui.move_to(row);
+        ui.cursor = mouse::Cursor::Unavailable;
+        ui.step(&[Event::Mouse(mouse::Event::CursorLeft)]);
+        ui.move_to(Point::new(WINDOW.width + 20.0, WINDOW.height + 20.0));
+        assert!(ui.app.assign_drag.is_some_and(|drag| drag.at.is_none()));
+        ui.release();
+        assert_eq!(ui.app.controller.graph().assignments().count(), before);
+        let _ = ui.app.update(Message::ToggleLearn);
+        ui.drag(from, row, 8);
+        assert_eq!(ui.app.controller.graph().assignments().count(), before);
+        assert_eq!(ui.app.drop_row, None);
+    }
+
     fn connected(ui: &Ui, from: (u32, usize), to: (u32, usize)) -> bool {
         let output = OutputRef {
             module: ModuleId(from.0),
@@ -454,6 +601,23 @@ mod tests {
             "the drag made a cable from VCA out to right"
         );
         assert_eq!(ui.app.controller.graph().cables().count(), cables + 1);
+    }
+
+    /// The window-wide drag line snaps to an input under the pointer, then
+    /// follows the pointer again when it leaves that input.
+    #[test]
+    fn an_output_drag_line_snaps_to_a_hovered_input() {
+        let mut ui = Ui::open("subtractive.ron");
+        let from = ui.output(8, "out");
+        let input = ui.input(9, "right");
+        ui.move_to(from);
+        ui.press();
+        ui.move_to(Point::new(input.x + 3.0, input.y + 2.0));
+        assert_eq!(ui.app.assign_drag.expect("output drag").at, Some(input));
+        let empty = Point::new(1000.0, 800.0);
+        ui.move_to(empty);
+        assert_eq!(ui.app.assign_drag.expect("output drag").at, Some(empty));
+        ui.release();
     }
 
     /// panels.md, acceptance: a transport-following input shows the clock
@@ -510,6 +674,27 @@ mod tests {
         assert_ne!(cutoff(&ui), before_value, "the drag turned the knob");
         assert!(after.control_builds > before.control_builds, "{before:?} -> {after:?}");
         assert_eq!(after.scene_builds, before.scene_builds, "{before:?} -> {after:?}");
+    }
+
+    /// The Mode list opens and draws over the tile in the real view. Arrow
+    /// keys change its highlight, and Enter commits the chosen mode.
+    #[test]
+    fn envelope_mode_popup_draws_and_accepts_keyboard_choice() {
+        let mut ui = Ui::open("subtractive.ron");
+        let mode = ui.control(5, "mode");
+        ui.move_to(mode);
+        ui.press();
+        ui.release();
+
+        let key = |name| keyboard::Key::Named(name);
+        ui.tap(key(keyboard::key::Named::ArrowDown), keyboard::Modifiers::default());
+        let current = ui.app.controller.graph().node(ModuleId(5)).expect("filter envelope");
+        let index = current.descriptor.param_index("mode").expect("Mode parameter");
+        assert_eq!(current.params[index], 0.0, "arrows highlight without committing");
+        ui.tap(key(keyboard::key::Named::Enter), keyboard::Modifiers::default());
+
+        let node = ui.app.controller.graph().node(ModuleId(5)).expect("filter envelope");
+        assert_eq!(node.params[index], 1.0);
     }
 
     /// Ctrl+Z (Cmd+Z on macOS) reaches the app through the canvas and
