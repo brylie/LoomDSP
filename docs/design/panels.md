@@ -427,7 +427,7 @@ What P1 builds. The rest of this spec is P2.
 - [x] A scope module fed by a 440 Hz oscillator shows a stable trace (`ScopeTrace::offset`, `trigger_is_stable_across_frames`; the subtractive example's scope, `docs/images/readme-subtractive.png`).
 - [x] "Add scope" on a cable places a connected scope module next to it. Undo removes it.
 - [ ] Cable opacity never depends on the signal. A test checks that the cable geometry is the same with and without telemetry.
-- [x] With no displays on screen and no input, the app does not redraw. Check: `--measure-idle --bench-seconds 10` on `subtractive.ron` prints `frames=` with the same count from the second line on, with a device, with `--fake-audio`, and with `--no-audio` ([#90](https://github.com/brylie/LoomDSP/issues/90)).
+- [x] With no displays on screen and no input, the app does not redraw. An empty patch with `--no-audio --measure-idle --bench-seconds 3` showed `fps=0.0` after startup and an unchanged cumulative frame count from the second line on ([#90](https://github.com/brylie/LoomDSP/issues/90)). A patch with visible transport lights or scopes redraws as those displays change.
 - [ ] Zoomed far out, controls and displays are not drawn.
 - [ ] Reference laptop, full window: 60 fps with four scopes on screen. Record CPU and GPU in the benchmark doc.
 
