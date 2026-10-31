@@ -4,6 +4,13 @@
 
 One page for each built-in module, made from its descriptor. After you change a descriptor, run `mise run help-pages` and commit the pages. Longer notes and example patches go below the marker line at the end of a page. See the [help pages specification](../design/help-pages.md).
 
+## Clock
+
+| Module | ID | Description |
+|---|---|---|
+| [Clock](loom.clock.clock.md) | `loom.clock.clock` | A phase, trigger, and gate at a musical rate, locked to the transport's bar 1. |
+| [Transport](loom.clock.transport.md) | `loom.clock.transport` | The patch's tempo, time signature, and play state. Every patch has exactly one. |
+
 ## Control
 
 | Module | ID | Description |

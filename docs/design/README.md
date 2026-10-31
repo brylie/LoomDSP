@@ -57,10 +57,10 @@ Copy [template.md](template.md). Keep it to one feature. Link the ADR, requireme
 | [Arrangement](arrangement.md) | [ADR-0012](../adr/0012-arrangement-from-phase-driven-primitives.md) | Draft, P3 |
 | [Telemetry](telemetry.md) | [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md) | Implemented, P1 |
 | [Panels](panels.md) | [ADR-0013](../adr/0013-modules-carry-their-own-panel.md), [ADR-0025](../adr/0025-one-design-language-and-derived-panels.md) | Module panels on tiles, level meters, and audio load Implemented (P1); labels and hover text Implemented; P1 additions (choice names, trigger lights, clock mark, load colour, keyboard, activity, scope trace, resizable tiles) Agreed; rest Draft |
-| [Panel widgets](panel-widgets.md) | [ADR-0024](../adr/0024-widgets-follow-the-kind-of-value.md) | XY scope Agreed (P1); rest Draft, P2 |
+| [Panel widgets](panel-widgets.md) | [ADR-0024](../adr/0024-widgets-follow-the-kind-of-value.md) | XY scope Agreed (P2); rest Draft, P2 |
 | [Stereo cables](stereo.md) | [ADR-0020](../adr/0020-inferred-channel-count.md), [ADR-0022](../adr/0022-copies-take-state-from-the-running-instance.md) | Agreed, P1 |
 | [Changing a running patch](live-patching.md) | [ADR-0002](../adr/0002-graph-execution-and-feedback.md), [ADR-0022](../adr/0022-copies-take-state-from-the-running-instance.md) | Rules 1 to 5 Implemented; rule 6 Agreed, P1 |
-| [Modulation](modulation.md) | [ADR-0014](../adr/0014-modulation-without-cables.md) | Engine and parameter mapping Agreed (P1); editing slice 1 Agreed; slices 2 and 3 Draft |
+| [Modulation](modulation.md) | [ADR-0014](../adr/0014-modulation-without-cables.md) | Engine, parameter mapping, and editing slices 1 to 3 Agreed (P1); slice 2 built |
 | [Undo and redo](undo.md) | None (builds on [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md)) | Implemented, P1 |
 | [Control ranges](control-ranges.md) | None (extends parameter mapping) | Agreed, P1 |
 | [Port ranges](port-ranges.md) | None (builds on [ADR-0007](../adr/0007-polymorphic-signal-model.md)) | Tier 1 Agreed, Tiers 2 and 3 Draft, P1 and P2 |
@@ -73,7 +73,7 @@ Copy [template.md](template.md). Keep it to one feature. Link the ADR, requireme
 | [Module browser](module-browser.md) | None (builds on [ADR-0010](../adr/0010-own-patch-canvas.md)) | Implemented, P1 |
 | [Automatic placement](auto-placement.md) | None (builds on [ADR-0010](../adr/0010-own-patch-canvas.md)) | Implemented, P1 |
 | [Copy, paste, and duplicate](clipboard.md) | None (builds on [ADR-0008](../adr/0008-patch-format-ron.md)) | Implemented, P1 |
-| [Output safety](output-safety.md) | [ADR-0019](../adr/0019-output-safety-stage.md) | Implemented, P1; rule 14 (fade-out) Agreed |
+| [Output safety](output-safety.md) | [ADR-0019](../adr/0019-output-safety-stage.md) | Implemented, P1; rule 15 (fade in on restart) Agreed |
 | [Autosave and crash recovery](autosave.md) | None (builds on [ADR-0008](../adr/0008-patch-format-ron.md) and [files](files.md)) | Implemented, P1 |
 | [App preferences](preferences.md) | None (builds on [ADR-0019](../adr/0019-output-safety-stage.md)) | Implemented, P1 |
 | [Patch metadata](patch-metadata.md) | [ADR-0023](../adr/0023-patch-licences-spdx-and-creative-commons.md) | Draft, P2 and P4 |
@@ -86,3 +86,5 @@ Copy [template.md](template.md). Keep it to one feature. Link the ADR, requireme
 | [Transient parameters](transient-params.md) | None (builds on [ADR-0008](../adr/0008-patch-format-ron.md)) | Agreed, P1 |
 | [Audio QA harness](audio-qa.md) | None (builds on [ADR-0019](../adr/0019-output-safety-stage.md)) | Implemented, developer tooling |
 | [Release downloads](releases.md) | [ADR-0027](../adr/0027-prebuilt-release-downloads.md) | Agreed, P1 |
+| [Unknown modules](unknown-modules.md) | None (builds on [ADR-0008](../adr/0008-patch-format-ron.md)) | Agreed, P1 |
+| [Frame meter](frame-meter.md) | None (extends the [P1 canvas benchmarks](../benchmarks/p1-canvas.md)) | Agreed, developer tooling |

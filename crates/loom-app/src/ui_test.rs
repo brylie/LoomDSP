@@ -456,6 +456,42 @@ mod tests {
         assert_eq!(ui.app.controller.graph().cables().count(), cables + 1);
     }
 
+    /// panels.md, acceptance: a transport-following input shows the clock
+    /// mark with no cable, loses it when a cable is connected, and has it
+    /// back when the cable is removed. Cables are made and pulled out by
+    /// pointer, through the canvas.
+    #[test]
+    fn a_clock_mark_shows_only_while_the_input_follows_the_transport() {
+        let mut ui = Ui::open("modulation.ron");
+        // The LFO's phase input defaults to the bar phase; its other ports,
+        // and the filter's inputs, follow nothing.
+        let mark = |ui: &Ui| {
+            let snapshot = ui.app.ui_snapshot();
+            let lfo = snapshot.tiles.iter().find(|t| t.id == 5).expect("the LFO");
+            lfo.inputs[0].follows_transport
+        };
+        let canvas_mark = |ui: &Ui| ui.app.scene.module(5).and_then(|m| m.clock_mark_centre(0));
+        assert_eq!(mark(&ui), Some("bar_phase"));
+        assert!(canvas_mark(&ui).is_some());
+        let filter = ui.app.ui_snapshot();
+        let filter = filter.tiles.iter().find(|t| t.id == 4).expect("the filter");
+        assert!(filter.inputs.iter().all(|p| p.follows_transport.is_none()));
+
+        let from = ui.output(2, "phase");
+        let to = ui.input(5, "phase");
+        ui.drag(from, to, 12);
+        assert!(connected(&ui, (2, 0), (5, 0)), "the drag made a cable");
+        assert_eq!(mark(&ui), None);
+        assert_eq!(canvas_mark(&ui), None);
+
+        // Pull the cable out of the input and drop it on empty canvas.
+        let away = Point::new(to.x - 60.0, to.y - 80.0);
+        ui.drag(to, away, 12);
+        assert!(!connected(&ui, (2, 0), (5, 0)), "the cable is gone");
+        assert_eq!(mark(&ui), Some("bar_phase"));
+        assert!(canvas_mark(&ui).is_some());
+    }
+
     /// Turning a knob on a tile builds the panel controls again, but never
     /// the tiles, ports, and cables (ADR-0010). The counters are this
     /// thread's, so other tests running at the same time do not count.

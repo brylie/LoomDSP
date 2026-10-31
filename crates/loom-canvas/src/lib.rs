@@ -23,8 +23,9 @@ mod widget;
 pub use camera::{Camera, MAX_ZOOM, MIN_ZOOM};
 pub use controls::{ModulationMark, PanelValues, WidgetValue, knob_range_ring};
 pub use scene::{
-    CableView, GRID, HEADER, Hit, HoverText, LABEL_COLUMNS, ModulationView, ModuleView, PORT_HIT_RADIUS, PanelView,
-    PortRef, PortShape, PortView, ROW, Scene, TILE_WIDTH, WidgetView, WidgetViewKind, fit_label, snap, tile_size,
+    CLOCK_MARK_RADIUS, CableView, GRID, HEADER, Hit, HoverText, LABEL_COLUMNS, ModulationView, ModuleView,
+    PORT_HIT_RADIUS, PanelView, PortRef, PortShape, PortView, ROW, Scene, TILE_WIDTH, TransportSignal, WidgetView,
+    WidgetViewKind, fit_label, snap, tile_size,
 };
 pub use theme::{MIN_TEXT_CONTRAST, Palette, contrast_ratio};
 pub use tile_text::{Align, TextItem, TextKind, for_each as for_each_tile_text};

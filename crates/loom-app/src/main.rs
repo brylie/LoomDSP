@@ -47,7 +47,7 @@ use live::Live;
 use loom_canvas::{CanvasEvent, LearnView, PanelValues, PatchCanvas, Scene};
 use loom_core::{
     AssignmentId, Controller, EngineConfig, EngineParts, InputRef, MidiEvent, ModuleDescriptor, ModuleId, OutputRef,
-    OutputSafety, ProbeId, create_engine,
+    OutputSafety, ProbeId, TRANSPORT_MODULE, create_engine,
 };
 use loom_host_desktop::{AudioOutput, CallbackStats, RunningAudio, SharedMidi};
 use loom_patch::Patch;
@@ -394,6 +394,32 @@ impl Message {
     }
 }
 
+/// The Transport module and the index of its `run` parameter, if the patch
+/// has one.
+fn transport_run(controller: &Controller) -> Option<(ModuleId, usize)> {
+    let id = controller.transport_module()?;
+    let index = controller.graph().node(id)?.descriptor.param_index("run")?;
+    Some((id, index))
+}
+
+/// True when a cable drives the Transport's `run` input.
+fn run_is_driven(controller: &Controller) -> bool {
+    controller.transport_module().is_some_and(|module| {
+        controller
+            .graph()
+            .cables()
+            .any(|(_, to)| to == InputRef { module, port: 0 })
+    })
+}
+
+/// Whether the engine's transport runs, as the Transport module last said
+/// (its `running` display value). `None` without a Transport.
+fn transport_running(controller: &Controller) -> Option<bool> {
+    let id = controller.transport_module()?;
+    let index = controller.graph().node(id)?.descriptor.display_index("running")?;
+    Some(controller.display(id, index)? >= 0.5)
+}
+
 /// `opened <path>`, followed by the load notes when there are any, so a note
 /// about what loaded differently stays in view.
 fn opened_status(path: &std::path::Path, notes: &[String]) -> String {
@@ -416,6 +442,10 @@ struct App {
     /// What the last loaded patch loaded differently from its file, such
     /// as a saved control range that was not kept (control-ranges.md).
     load_notes: Vec<String>,
+    /// True when the last commit had a cable on the Transport's `run`
+    /// input. When the cable goes, the Run toggle takes the state the input
+    /// left (clock.md, Starting and stopping).
+    run_driven: bool,
     /// Latest level of each meter probe.
     meter_levels: std::collections::HashMap<ProbeId, live::Level>,
     /// The traces of the scopes on screen (`docs/design/panels.md`, Drawing
@@ -785,6 +815,12 @@ impl App {
             Source::Recovered(patch) => (load(&patch, &mut controller)?, None, None),
             Source::Empty => ("Untitled".to_string(), None, None),
         };
+        // Every patch has one Transport (clock.md). A loaded file gets one
+        // in `load_into`; a new or generated patch gets it here.
+        if controller.transport_module().is_none() && controller.registry().resolve(TRANSPORT_MODULE).is_ok() {
+            controller.add_module(TRANSPORT_MODULE).map_err(|e| e.to_string())?;
+            controller.commit().map_err(|e| e.to_string())?;
+        }
         layout::auto_layout(&controller, &mut positions);
         for note in &notes {
             eprintln!("loom-app: {note}");
@@ -859,6 +895,9 @@ impl App {
         let scene = scene::build(&controller, &positions);
         let mut values = PanelValues::new();
         scene::update_panel_values(&mut values, &controller, &BTreeMap::new());
+        // The loaded patch may already have a cable on run, before any
+        // commit of the app's own (#413 review).
+        let run_driven = run_is_driven(&controller);
         let mut app = Self {
             controller,
             positions,
@@ -866,6 +905,7 @@ impl App {
             values,
             lights: BTreeMap::new(),
             load_notes,
+            run_driven,
             meter_levels: std::collections::HashMap::new(),
             traces: loom_canvas::ScopeTraces::new(),
             carrying: BTreeSet::new(),
@@ -1639,15 +1679,9 @@ impl App {
     fn apply_button(&mut self, module: u32, widget: usize, change: impl Fn(loom_core::ButtonMode, f32) -> Option<f32>) {
         let edit = self.controller.graph().node(ModuleId(module)).and_then(|node| {
             let panel_widget = node.descriptor.panel.widgets.get(widget)?;
-            let loom_core::WidgetKind::Button { mode, .. } = panel_widget.kind else {
-                return None;
-            };
-            let mode_index = node.descriptor.param_index(mode)?;
+            let mode = node.descriptor.button_mode(panel_widget, &node.params)?;
             let target = node.descriptor.control_param(panel_widget, &node.params)?;
-            let next = change(
-                loom_core::ButtonMode::from_value(node.params[mode_index]),
-                node.params[target],
-            )?;
+            let next = change(mode, node.params[target])?;
             Some((target, next))
         });
         if let Some((index, value)) = edit {
@@ -1886,6 +1920,7 @@ impl App {
     /// Sends the graph to the engine. Returns false if that failed; the
     /// status bar then holds the error.
     fn commit(&mut self) -> bool {
+        self.keep_run_state();
         // Probes follow the graph: a removed module loses its probes.
         self.sync_live();
         let sent = match self.controller.commit() {
@@ -2462,18 +2497,60 @@ impl App {
                 self.full_traces = full;
                 self.publish_watch();
             }
-            CanvasEvent::ToggleRun => {
-                let running = !self.controller.transport().running;
-                if let Err(e) = self.controller.set_running(running) {
-                    self.status = format!("error: {e}");
-                }
-            }
+            CanvasEvent::ToggleRun => self.toggle_run(),
             CanvasEvent::Delete(ids) => {
                 self.delete_modules(&ids);
             }
             // The app reads the clipboard first, in `update`.
             CanvasEvent::Paste { .. } => {}
         }
+    }
+
+    /// Space: flips the Transport's Run toggle, as a click on it does
+    /// (clock.md, Controls live on the Transport module). While a cable
+    /// drives `run`, the input decides, so Space changes nothing. Without a
+    /// Transport, it starts or stops the engine's transport directly.
+    fn toggle_run(&mut self) {
+        let Some((transport, index)) = transport_run(&self.controller) else {
+            let running = !self.controller.transport().running;
+            if let Err(e) = self.controller.set_running(running) {
+                self.status = format!("error: {e}");
+            }
+            return;
+        };
+        if run_is_driven(&self.controller) {
+            self.status = "Run follows the cable on the Transport's run input".to_string();
+            return;
+        }
+        let on = self
+            .controller
+            .graph()
+            .node(transport)
+            .is_some_and(|n| n.params[index] >= 0.5);
+        self.set_param(transport.0, index, if on { 0.0 } else { 1.0 });
+    }
+
+    /// Before a commit: when the cable on the Transport's `run` input is
+    /// gone, the transport stays as the input left it, and the Run toggle
+    /// takes that state, so it shows the truth and works again.
+    fn keep_run_state(&mut self) {
+        let driven = run_is_driven(&self.controller);
+        if self.run_driven
+            && !driven
+            && let Some((transport, index)) = transport_run(&self.controller)
+            && let Some(running) = transport_running(&self.controller)
+        {
+            let value = if running { 1.0 } else { 0.0 };
+            if self
+                .controller
+                .graph()
+                .node(transport)
+                .is_some_and(|n| n.params[index] != value)
+            {
+                self.set_param(transport.0, index, value);
+            }
+        }
+        self.run_driven = driven;
     }
 
     /// Removes modules and commits. Returns false if the commit failed; the
@@ -3200,7 +3277,8 @@ mod tests {
             test_modules: true,
             ..app_args()
         });
-        assert_eq!(app.controller.graph().nodes().count(), 2, "{}", app.status);
+        // The two test modules and the patch's Transport.
+        assert_eq!(app.controller.graph().nodes().count(), 3, "{}", app.status);
         assert_eq!(app.controller.graph().assignments().count(), 7);
         assert!(app.modules.iter().any(|d| d.id == "test.panel"));
 
@@ -3264,7 +3342,9 @@ mod tests {
         let source = OutputRef { module: env, port: 0 };
         let graph = app.controller.graph();
         let sources = modulation::sources(graph);
-        assert_eq!(sources.first(), Some(&source));
+        // The new patch's Transport comes first; the envelope is next.
+        let transport = app.controller.transport_module();
+        assert_eq!(sources.iter().find(|s| Some(s.module) != transport), Some(&source));
         let mut sorted = sources.clone();
         sorted.sort();
         assert_eq!(sources, sorted, "module order, then port order");
@@ -4226,6 +4306,84 @@ mod tests {
     }
 
     /// The transport moves only while it runs. Its position shows through a
+    /// clock.md, Starting and stopping: a cable on the Transport's `run`
+    /// input decides, and the Run toggle shows what it sets. Space changes
+    /// nothing then. When the cable goes, the transport stays as it was, the
+    /// toggle takes that state, and Space works again. A second Transport
+    /// cannot be added, and the one there cannot be deleted.
+    #[test]
+    fn the_run_toggle_follows_a_cable_on_run() {
+        let mut app = app();
+        let (transport, run) = transport_run(&app.controller).expect("a new patch has a Transport");
+        let run_param = |app: &App| app.controller.graph().node(transport).unwrap().params[run];
+        // A Button's gate is low until pressed: it stops the transport.
+        let button = app.controller.add_module("loom.ui.button").unwrap();
+        app.controller.connect_named(button, "gate", transport, "run").unwrap();
+        app.commit();
+        app.process(2048);
+        app.refresh_values();
+        assert_eq!(transport_running(&app.controller), Some(false));
+        assert_eq!(
+            tile_widget(&app, transport, 0).position,
+            0.0,
+            "the toggle shows the input"
+        );
+        assert_eq!(run_param(&app), 1.0, "Run itself is unchanged");
+        let _ = app.update(Message::Canvas(CanvasEvent::ToggleRun));
+        assert_eq!(run_param(&app), 1.0, "Space leaves a driven Run alone");
+
+        let _ = app.update(Message::Canvas(CanvasEvent::Disconnect(loom_canvas::PortRef {
+            module: transport.0,
+            output: false,
+            index: 0,
+        })));
+        assert_eq!(run_param(&app), 0.0, "the toggle takes the state the input left");
+        app.process(1024);
+        assert_eq!(transport_running(&app.controller), Some(false), "still stopped");
+        let _ = app.update(Message::Canvas(CanvasEvent::ToggleRun));
+        app.process(1024);
+        assert_eq!(transport_running(&app.controller), Some(true), "Space works again");
+
+        // Delete leaves the Transport, and a second one is refused.
+        let _ = app.update(Message::Canvas(CanvasEvent::Delete(vec![transport.0, button.0])));
+        assert_eq!(app.controller.transport_module(), Some(transport));
+        assert!(app.controller.graph().node(button).is_none());
+        assert!(app.controller.add_module(TRANSPORT_MODULE).is_err());
+    }
+
+    /// A patch that loads with a cable on `run`: removing the cable as the
+    /// first edit still gives the Run toggle the state the input left
+    /// (#413 review).
+    #[test]
+    fn a_loaded_run_cable_hands_its_state_to_the_toggle() {
+        let dir = std::env::temp_dir().join(format!("loom-app-run-cable-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("run.ron");
+        std::fs::write(
+            &path,
+            r#"Patch(version: 1, modules: [
+                PatchModule(id: 1, kind: "loom.clock.transport@1"),
+                PatchModule(id: 2, kind: "loom.ui.button@1"),
+            ], cables: [PatchCable(from: (2, "gate"), to: (1, "run"))])"#,
+        )
+        .unwrap();
+        let mut app = App::new(Args {
+            patch: Some(path),
+            ..app_args()
+        });
+        let _ = std::fs::remove_dir_all(&dir);
+        let (transport, run) = transport_run(&app.controller).expect("the patch has a Transport");
+        app.process(2048);
+        assert_eq!(transport_running(&app.controller), Some(false));
+        let _ = app.update(Message::Canvas(CanvasEvent::Disconnect(loom_canvas::PortRef {
+            module: transport.0,
+            output: false,
+            index: 0,
+        })));
+        let param = app.controller.graph().node(transport).unwrap().params[run];
+        assert_eq!(param, 0.0, "the toggle takes the state the input left");
+    }
+
     /// Phase Scale that follows the bar phase and modulates a knob at depth
     /// 1: the live dot sits the bar phase above the knob (#222). The
     /// controller reports whether the transport runs, not its position.
@@ -4255,12 +4413,18 @@ mod tests {
         let base = tile_widget(&app, filter, widget).position;
         assert!(base < 0.9, "the knob at {base} leaves no room above it for the phase");
         assert!(settings.running, "a new patch starts running");
+        // Space flips the Transport's Run toggle.
+        let run_on = |app: &App| {
+            let (id, index) = transport_run(&app.controller).expect("a new patch has a Transport");
+            app.controller.graph().node(id).unwrap().params[index] >= 0.5
+        };
+        assert!(run_on(&app));
         let _ = app.update(Message::Canvas(CanvasEvent::ToggleRun));
-        assert!(!app.controller.transport().running);
+        assert!(!run_on(&app));
         assert!(bar_phase(&mut app, 4_800).abs() < 1e-6, "stopped at bar 1");
 
         let _ = app.update(Message::Canvas(CanvasEvent::ToggleRun));
-        assert!(app.controller.transport().running);
+        assert!(run_on(&app));
         let first = bar_phase(&mut app, 4_800);
         assert!((first - expected(4_800)).abs() < 1e-4, "{first} vs {}", expected(4_800));
         let second = bar_phase(&mut app, 4_800);

@@ -13,6 +13,8 @@ Patch(
     modules: [
         PatchModule(id: 1, kind: "test.panel@1", params: {"level": 1.0, "on": 1.0}),
         PatchModule(id: 2, kind: "test.panel@1", params: {"level": 0.25, "cutoff": 200.0, "steps": 3.0}),
+        // The patch transport: 120 BPM, 4/4, running.
+        PatchModule(id: 3, kind: "loom.clock.transport@1"),
     ],
     modulation: [
         // Knobs: a range arc on a linear, a logarithmic, and a whole-number one.

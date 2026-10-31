@@ -735,6 +735,18 @@ impl Widget {
         }
     }
 
+    /// A button that is always momentary: `param` is high while it is held.
+    /// It has no mode parameter (its `mode` is empty) and writes `param`
+    /// only, which should be transient. The Transport's Reset uses it.
+    pub const fn momentary(x: u8, y: u8, param: &'static str) -> Self {
+        Self {
+            kind: WidgetKind::Button { mode: "", hold: param },
+            x,
+            y,
+            bind: param,
+        }
+    }
+
     /// True for widgets bound to a parameter.
     pub const fn is_control(&self) -> bool {
         !matches!(self.kind, WidgetKind::Light | WidgetKind::Meter | WidgetKind::Scope)
@@ -911,13 +923,26 @@ impl ModuleDescriptor {
         if !widget.is_control() {
             return None;
         }
-        if let WidgetKind::Button { mode, hold } = widget.kind {
-            let mode = params.get(self.param_index(mode)?).copied()?;
-            if ButtonMode::from_value(mode) == ButtonMode::Momentary {
-                return self.param_index(hold);
-            }
+        if let WidgetKind::Button { hold, .. } = widget.kind
+            && self.button_mode(widget, params)? == ButtonMode::Momentary
+        {
+            return self.param_index(hold);
         }
         self.param_index(widget.bind)
+    }
+
+    /// How a button widget answers a gesture, from its mode parameter. A
+    /// button with no mode parameter ([`Widget::momentary`]) is always
+    /// momentary. `None` for another widget or a missing name.
+    pub fn button_mode(&self, widget: &Widget, params: &[f32]) -> Option<ButtonMode> {
+        let WidgetKind::Button { mode, .. } = widget.kind else {
+            return None;
+        };
+        if mode.is_empty() {
+            return Some(ButtonMode::Momentary);
+        }
+        let value = params.get(self.param_index(mode)?).copied()?;
+        Some(ButtonMode::from_value(value))
     }
 
     /// Checks the display values, the choice names, the ranges, and the panel: every widget binds to
@@ -941,7 +966,14 @@ impl ModuleDescriptor {
                 // Copied before `param` is borrowed: a button names a second
                 // parameter, and the two borrows cannot overlap.
                 let gate = |p: &ParamSpec| p.options.integer && p.min == 0.0 && p.max == 1.0;
-                if let WidgetKind::Button { mode, hold } = widget.kind {
+                if let WidgetKind::Button { mode, hold } = widget.kind
+                    && mode.is_empty()
+                {
+                    // Always momentary: one parameter, the hold.
+                    if hold != widget.bind {
+                        return Err(name("a button without a mode must hold its own parameter"));
+                    }
+                } else if let WidgetKind::Button { mode, hold } = widget.kind {
                     if mode == widget.bind || mode == hold {
                         return Err(name("mode must be a different parameter"));
                     }

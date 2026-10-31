@@ -35,6 +35,47 @@ pub const BADGE_TEXT_SIZE: f32 = 7.0;
 /// assignments). One grid unit: more than a port sticks out, plus the end
 /// of the cable that runs into it.
 const BADGE_CLEARANCE: f32 = GRID;
+/// Radius of the clock mark on an input that follows the transport.
+pub const CLOCK_MARK_RADIUS: f32 = 3.5;
+/// How far right of the tile edge the clock mark's centre is. The port
+/// marker ends at [`PORT_RADIUS`], so the mark sits between it and the label.
+const CLOCK_MARK_X: f32 = 11.0;
+/// How far an input label moves right to make room for its clock mark.
+pub const CLOCK_MARK_SPACE: f32 = 8.0;
+
+/// The transport signal an unconnected input follows (`docs/design/clock.md`,
+/// Default inputs). Mirrors `loom_core::PortDefault`, so the canvas does not
+/// depend on the engine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransportSignal {
+    /// The bar phase.
+    BarPhase,
+    /// The beat phase.
+    BeatPhase,
+    /// The play gate.
+    Playing,
+}
+
+impl TransportSignal {
+    /// The line the port's hover text adds, so the three signals, which share
+    /// one mark, can be told apart (panels.md, Clock mark on transport inputs).
+    pub fn hover_line(self) -> &'static str {
+        match self {
+            Self::BarPhase => "Follows the bar phase while nothing is connected.",
+            Self::BeatPhase => "Follows the beat phase while nothing is connected.",
+            Self::Playing => "Follows the transport's play gate while nothing is connected.",
+        }
+    }
+
+    /// A short stable name, for the UI snapshot.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::BarPhase => "bar_phase",
+            Self::BeatPhase => "beat_phase",
+            Self::Playing => "playing",
+        }
+    }
+}
 
 /// How a port marker is drawn. Shape is a second cue next to colour, so
 /// signal types do not rely on colour alone (NFR-UX-03).
@@ -84,6 +125,10 @@ pub struct PortView {
     /// those that are off. 0 shows no badge (`docs/design/modulation.md`,
     /// Seeing assignments).
     pub badge: u32,
+    /// On an input with no cable: the transport signal it follows, if its
+    /// default is one. `Some` shows the clock mark (panels.md, Clock mark on
+    /// transport inputs). The app sets it from the descriptor and the cables.
+    pub follows_transport: Option<TransportSignal>,
 }
 
 /// What a widget on a panel is. Mirrors `loom_core::WidgetKind`, so the
@@ -283,6 +328,14 @@ impl ModuleView {
     /// Centre of an input port.
     pub fn input_position(&self, index: usize) -> Point {
         Point::new(self.position.x, self.position.y + HEADER + ROW * (index as f32 + 0.5))
+    }
+
+    /// Centre of the clock mark of input `index`, if it shows one: between
+    /// the port marker and the label.
+    pub fn clock_mark_centre(&self, index: usize) -> Option<Point> {
+        self.inputs.get(index)?.follows_transport?;
+        let port = self.input_position(index);
+        Some(Point::new(port.x + CLOCK_MARK_X, port.y))
     }
 
     /// Centre of an output port.
@@ -792,6 +845,7 @@ mod tests {
             colour: Color::WHITE,
             shape: PortShape::Round,
             badge: 0,
+            follows_transport: None,
         }
     }
 

@@ -368,6 +368,7 @@ fn widget(d: &ModuleDescriptor, w: &Widget) -> String {
                 .map_or(&[][..], |p| p.options.choices);
             format!("Radio buttons: {} ({})", param(w.bind), cell(&choices.join(", ")))
         }
+        WidgetKind::Button { mode: "", hold } => format!("Button: {} (momentary)", param(hold)),
         WidgetKind::Button { mode, hold } => format!(
             "Button: {} (toggle), {} (momentary), chosen by {}",
             param(w.bind),

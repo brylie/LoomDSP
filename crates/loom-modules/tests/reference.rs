@@ -5,8 +5,10 @@
 //! update the files with `LOOM_UPDATE_REFERENCES=1 cargo test -p loom-modules`,
 //! listen to them, and commit them.
 
-use loom_core::{MidiEvent, ModuleRole};
-use loom_modules::{ALL, display, env, filter, level, lfo, logic, math, midi, mix, osc, phase, rand, time, ui};
+use loom_core::{MidiEvent, ModuleRole, TransportSettings};
+use loom_modules::{
+    ALL, clock, display, env, filter, level, lfo, logic, math, midi, mix, osc, phase, rand, time, transport, ui,
+};
 use loom_test::{Harness, Signal, reference};
 
 #[test]
@@ -365,6 +367,8 @@ fn every_dsp_module_has_a_reference_test() {
         &ui::BUTTON,
         &time::DELAY,
         &time::ALLPASS,
+        &clock::CLOCK,
+        &transport::TRANSPORT,
     ]
     .map(|descriptor| descriptor.id);
     for descriptor in ALL {
@@ -585,4 +589,34 @@ fn lfo_synced() {
         .param("cycles", 2.0)
         .param("shape", 4.0)
         .check(reference!("lfo_synced"));
+}
+
+/// Reference render for `loom.clock.clock`: dotted 1/16 at 300 BPM from bar
+/// 1, with a gate width of 25 percent.
+#[test]
+fn clock() {
+    Harness::new(&clock::CLOCK)
+        .seconds(0.25)
+        .transport(TransportSettings {
+            tempo: 300.0,
+            ..TransportSettings::default()
+        })
+        .param("rate", 19.0)
+        .param("width", 25.0)
+        .check(reference!("clock"));
+}
+
+/// Reference render for `loom.clock.transport`: its signals at 300 BPM in
+/// 3/4 from bar 1. Without the engine nothing reads its requests, so the
+/// render shows the outputs alone.
+#[test]
+fn transport() {
+    Harness::new(&transport::TRANSPORT)
+        .seconds(0.5)
+        .transport(TransportSettings {
+            tempo: 300.0,
+            time_signature: loom_core::TimeSignature::new(3, 4),
+            ..TransportSettings::default()
+        })
+        .check(reference!("transport"));
 }

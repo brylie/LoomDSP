@@ -117,7 +117,7 @@ Nothing is added, no undo step is made, and the status bar says why, in these ca
 |---|---|
 | The clipboard holds no text, or text that is not a patch | **The clipboard holds no LoomDSP modules** |
 | The patch format version is newer than this build | The same message as Open gives |
-| A module type is not registered | **Cannot paste: unknown module `kind`** |
+| A module type is not registered (until [placeholders](unknown-modules.md) are built) | **Cannot paste: unknown module `kind`** |
 | A parameter, port, or module id that the text refers to does not exist | **Cannot paste:** and the reason |
 | Not enough free module slots | **Cannot paste: the patch has room for N more modules** |
 
@@ -129,7 +129,7 @@ Nothing is added, no undo step is made, and the status bar says why, in these ca
 2. **New modules get new ids.** Each pasted or duplicated module gets the next free id from the controller, in the order of the old ids. Cables and assignments are remapped from old to new ids. *Why:* ids are never given out twice in a session ([undo](undo.md#rules), rule 5), and the old ids may be in use.
 3. **Assignment order is kept.** Assignments are added in the order the clipboard text lists them, or, for duplicate, the order of the originals. *Why:* assignments on one parameter are summed in id order, which decides the last bits of the output. A duplicate must sound the same as the original (determinism).
 4. **One commit.** All the new modules, cables, and assignments are added, then committed once. *Why:* the engine swaps one schedule, and the user hears the whole group start at once ([undo](undo.md#rules), rule 8).
-5. **Check before adding.** Before anything is added, the app checks that every module type is registered, that there are enough free module slots, and that every name in the text exists. *Why:* see [When a paste cannot be done](#when-a-paste-cannot-be-done).
+5. **Check before adding.** Before anything is added, the app checks that every module type is registered (until [placeholders](unknown-modules.md) are built; then an unregistered type pastes as a placeholder), that there are enough free module slots, and that every name in the text exists. *Why:* see [When a paste cannot be done](#when-a-paste-cannot-be-done).
 6. **A patch keeps exactly one transport.** The Transport module ([clock](clock.md)) is never added by a paste or duplicate. Copy still writes it to the clipboard, so its cables and assignments have an end. On paste, cables and assignments from the copied transport connect to the patch's own transport, and the copied tempo and time signature are ignored. Duplicate skips a selected transport and treats it as outside the selection. If only the transport is selected, duplicate does nothing and the status bar says why. *Why:* a patch has exactly one transport, and a group copied with Select All should keep its clock cables in the other patch. This rule applies once the Transport module exists.
 7. **The keys do not reach the canvas while a text field is being edited.** In the module browser's search field and in other text fields, Ctrl/Cmd+C, X, V, and D act on the text. *Why:* the same rule as undo ([undo](undo.md#commands)). The text field has its own clipboard.
 8. **The keys do not clash with panel focus.** Panel focus uses Tab, the arrows, Space, Enter, and Escape without modifiers ([panels](panels.md#interaction-68)). Copy, cut, paste, and duplicate use Ctrl or Cmd, so they work the same with or without a focused control. *Why:* [#101](https://github.com/brylie/LoomDSP/issues/101) orders the keys; these keys need no place in that order.
@@ -148,14 +148,14 @@ Nothing is added, no undo step is made, and the status bar says why, in these ca
 - [x] Cut copies, then deletes, as one undo step.
 - [x] Paste of a whole patch file adds its modules and cables and ignores its MIDI mappings.
 - [x] Paste of hand-edited text with a changed parameter value uses the new value.
-- [x] Paste of text that is not a patch, of an unknown module type, of an unknown parameter, or of too many modules adds nothing, adds no undo step, and says why in the status bar.
+- [x] Paste of text that is not a patch, of an unknown module type (until placeholders are built), of an unknown parameter, or of too many modules adds nothing, adds no undo step, and says why in the status bar.
 - [ ] Ctrl/Cmd+C, X, V, and D act on the text, not the patch, while the module browser's search field is open. (manual)
 - [ ] Copy, paste, and duplicate work while a panel control has focus. (manual)
 - [x] Paste and duplicate do not allocate or lock on the audio thread (`tests/no_alloc.rs` still passes).
 
 ## Out of scope
 
-- **Placeholders for unknown modules** ([#18](https://github.com/brylie/LoomDSP/issues/18)). Until then, a paste with an unknown type is refused. When placeholders exist, a placeholder copies and pastes like any module, and keeps its data.
+- **Placeholders for unknown modules** ([#18](https://github.com/brylie/LoomDSP/issues/18), [spec](unknown-modules.md), Agreed, not built). Until it is built, a paste with an unknown type is refused with **Cannot paste: unknown module `kind`**. Once built, a module type that is not registered pastes as a placeholder, which copies and pastes like any module and keeps its data.
 - **Paste from the context menu or an Edit menu.** The app has neither yet. They call the same commands when they exist.
 - **Paste with incoming cables** ("paste with connections"). Only duplicate keeps them. Revisit if users ask.
 - **Copying parameter values alone**, from one module to another of the same type.

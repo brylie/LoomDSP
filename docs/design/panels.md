@@ -471,13 +471,14 @@ What P1 builds. The rest of this spec is P2.
 
 ### Clock mark on transport inputs
 
-([#103](https://github.com/brylie/LoomDSP/issues/103).)
+([#103](https://github.com/brylie/LoomDSP/issues/103).) **Implemented.** Code: `TransportSignal`, `PortView::follows_transport`, and `ModuleView::clock_mark_centre` in `loom-canvas/src/scene.rs`, the shapes in `loom-canvas/src/gpu.rs`, and `transport_default` in `loom-app/src/scene.rs`.
 
 - An input that has no cable and a default of bar phase, beat phase, or playing shows a **clock mark**: a small ring with two short hands, drawn between the port marker and its label, in the module's accent colour at reduced strength. It is the same mark for all three; the hover text tells them apart ("Follows the bar phase while nothing is connected").
 - It is hidden when a cable is connected, and returns when the cable is removed.
 - It shows at the zoom where port labels show, and as a plain dot at the middle zoom. It is not drawn at far zoom.
 - `PortView` gets `follows_transport: Option<TransportSignal>`, set by the app from the descriptor's `PortDefault` and the cable state. The mark is part of the scene's GPU data, which changes only when cables change (ADR-0010).
 - It is in the UI snapshot as a port field, so the control channel can find it.
+- Settled while building it: the mark is a ring 7 world units across with a hand up and a shorter hand to the right. Its centre is 11 units from the tile edge, and the label moves 8 units right to make room, so a label moves when a cable is connected or removed. The colour is the accent mixed halfway towards the dim text colour, at 80 percent opacity. *Why:* the accents are muted for headers, and at reduced strength alone the mark did not read on the tile. The hover text adds the line after the description. The mark shows whatever the module's mode, for example on the LFO in free mode, because the default is part of the static descriptor (clock.md, Default inputs).
 
 ### Audio load colour
 
@@ -555,7 +556,7 @@ What P1 builds. The rest of this spec is P2.
 
 - [x] Choice names: the registry refuses a wrong count, an empty name, and names on a continuous parameter. The inspector shows "Toggle" and "Momentary" for Button's `mode` and a slider for a parameter without names. No module hard-codes names in its panel.
 - [x] A one-sample trigger into a Clock Divide or Phase Trigger output light lights it, and it fades in 120 ms. No frames are drawn after the fade.
-- [ ] A transport-following input shows the clock mark with no cable, loses it when a cable is connected, and has it back when the cable is removed.
+- [x] A transport-following input shows the clock mark with no cable, loses it when a cable is connected, and has it back when the cable is removed.
 - [ ] A 95% callback spike turns the load amber or red for its tick. After 10 seconds the max falls.
 - [ ] By keys alone: Tab to a module, Enter into its panel, change a knob, Escape out twice. Space on a focused toggle acts on the toggle, not on Run. Arrow keys move the selected module by one grid unit.
 - [ ] An output with a cable shows *carrying* within 200 ms of a signal above −80 dB, and *silent* 400 ms after it stops. A one-sample trigger lights it. Cable geometry is the same with and without activity. (The state is tested, `activity_turns_on_at_once_and_off_after_two_quiet_reads`, and shows in the UI snapshot. Drawing it waits for the open question above.)

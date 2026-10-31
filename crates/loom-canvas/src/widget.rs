@@ -2360,8 +2360,17 @@ impl<Message> PatchCanvas<'_, Message> {
     where
         Renderer: text::Renderer<Font = Font>,
     {
-        let Some((label, hover, value, world)) = state.hover_text.shown().and_then(|t| self.hover_content(t)) else {
+        let Some(target) = state.hover_text.shown() else {
             return;
+        };
+        let Some((label, hover, value, world)) = self.hover_content(target) else {
+            return;
+        };
+        // A port with a clock mark says which transport signal it follows
+        // (panels.md, Clock mark on transport inputs).
+        let follows = match target {
+            HoverTarget::Port(port) => self.scene.port(port).and_then(|p| p.follows_transport),
+            HoverTarget::Control(..) => None,
         };
         let font = renderer.default_font();
         let inner = crate::hover::text_width(bounds.width);
@@ -2398,6 +2407,9 @@ impl<Message> PatchCanvas<'_, Message> {
         let mut lines = vec![line(label, HOVER_TEXT_PX, self.palette.text, title)];
         if !hover.description.is_empty() {
             lines.push(line(&hover.description, HOVER_TEXT_PX, self.palette.text_dim, font));
+        }
+        if let Some(signal) = follows {
+            lines.push(line(signal.hover_line(), HOVER_TEXT_PX, self.palette.text, font));
         }
         if let Some(value) = value {
             lines.push(line(value, HOVER_TEXT_PX, self.palette.text, font));
@@ -2535,6 +2547,7 @@ mod tests {
             colour: Color::WHITE,
             shape: PortShape::Round,
             badge: 0,
+            follows_transport: None,
         };
         ModuleView {
             id,

@@ -1530,7 +1530,8 @@ mod tests {
         );
         // The undo history still applies to the new engine.
         app.undo();
-        assert_eq!(app.controller.graph().len(), 2);
+        // Two constants and the patch's Transport.
+        assert_eq!(app.controller.graph().len(), 3);
 
         // Picking it again does nothing.
         let generation = app.generation;

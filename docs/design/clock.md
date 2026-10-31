@@ -3,7 +3,7 @@
 How musical time reaches every module: the patch transport, inputs that follow it without cables, and the modules that put time on cables and divide it.
 
 - **Kind:** living specification.
-- **Status:** Sections have their own status. **Implemented** for the engine slice ([#72](https://github.com/brylie/LoomDSP/issues/72)): the transport fields, signals derived from the transport, default inputs, rules 1 to 6 (except saving run state, which needs the Transport module), and engine and API. Also **Implemented**: the Clock Divide ([#48](https://github.com/brylie/LoomDSP/issues/48)) and Phase Trigger modules. The Transport ([#73](https://github.com/brylie/LoomDSP/issues/73)) and Clock ([#74](https://github.com/brylie/LoomDSP/issues/74)) modules, and rules 10 and 11, are **Agreed**. Phase Scale ([#31](https://github.com/brylie/LoomDSP/issues/31)) is **Implemented**; its `phase` input defaults to the bar phase. The Button's hold moves to a transient parameter (see Button details). The clock mark on ports is Agreed in [panels](panels.md#clock-mark-on-transport-inputs). The rest is Draft.
+- **Status:** Sections have their own status. **Implemented** for the engine slice ([#72](https://github.com/brylie/LoomDSP/issues/72)): the transport fields, signals derived from the transport, default inputs, rules 1 to 6, and engine and API. Also **Implemented**: the Transport ([#73](https://github.com/brylie/LoomDSP/issues/73)), Clock ([#74](https://github.com/brylie/LoomDSP/issues/74)), Clock Divide ([#48](https://github.com/brylie/LoomDSP/issues/48)), and Phase Trigger modules, and rules 10 and 11. Phase Scale ([#31](https://github.com/brylie/LoomDSP/issues/31)) is **Implemented**; its `phase` input defaults to the bar phase. The Button's hold moves to a transient parameter (see Button details). The clock mark on ports is Implemented ([panels](panels.md#clock-mark-on-transport-inputs)). The rest is Draft.
 - **Decision behind it:** [ADR-0015](../adr/0015-one-transport-per-patch.md) (one transport per patch). Builds on [ADR-0007](../adr/0007-polymorphic-signal-model.md) (phase and gate signals) and [ADR-0012](../adr/0012-arrangement-from-phase-driven-primitives.md) (arrangement from phase).
 - **Requirements:** FR-LIB-07, FR-LIB-16, FR-LIB-22, FR-LIB-25 to FR-LIB-27, FR-MIDI-07.
 - **Background:** [Phase and cycles](../learn/phase-and-cycles.md) explains phase signals and how the end of a cycle is found. [Triggers and gates](../learn/triggers-and-gates.md) explains why a trigger is one sample.
@@ -16,7 +16,7 @@ How musical time reaches every module: the patch transport, inputs that follow i
 
 ## The transport
 
-**Status:** the fields table is Implemented. "Controls live on the Transport module" and "Starting and stopping" are Agreed ([#73](https://github.com/brylie/LoomDSP/issues/73)).
+**Status:** Implemented ([#73](https://github.com/brylie/LoomDSP/issues/73)). See Transport details for what was settled while building it.
 
 The engine keeps one transport per patch.
 
@@ -53,7 +53,7 @@ A **Button** module (FR-LIB-12) gives a performance control for this. Its panel 
 
 ## Signals derived from the transport
 
-**Status:** Implemented. The rate phase row belongs to the Clock module ([#74](https://github.com/brylie/LoomDSP/issues/74)) and is Agreed.
+**Status:** Implemented. The rate phase row is the Clock module's phase ([#74](https://github.com/brylie/LoomDSP/issues/74)), through `TransportInfo::phase_at`.
 
 | Signal | Value |
 |---|---|
@@ -68,7 +68,7 @@ Phases are computed in `f64` and converted to `f32` last. A phase that rounds to
 
 ## Default inputs
 
-**Status:** Implemented, except the clock mark, which is Agreed and not built ([#103](https://github.com/brylie/LoomDSP/issues/103)).
+**Status:** Implemented, including the clock mark ([#103](https://github.com/brylie/LoomDSP/issues/103)).
 
 A module can declare a **default** for any input. The default is used while nothing is connected.
 
@@ -88,7 +88,7 @@ Examples: the LFO's phase input in sync mode defaults to bar phase, with a rate 
 
 ## Modules
 
-**Status:** Clock Divide ([#48](https://github.com/brylie/LoomDSP/issues/48)), Phase Trigger, Button ([#75](https://github.com/brylie/LoomDSP/issues/75)), and Phase Scale ([#31](https://github.com/brylie/LoomDSP/issues/31)) are Implemented; see their details below the table. Transport and Clock are Agreed, with details below.
+**Status:** Clock ([#74](https://github.com/brylie/LoomDSP/issues/74)), Clock Divide ([#48](https://github.com/brylie/LoomDSP/issues/48)), Phase Trigger, Button ([#75](https://github.com/brylie/LoomDSP/issues/75)), Phase Scale ([#31](https://github.com/brylie/LoomDSP/issues/31)), and Transport ([#73](https://github.com/brylie/LoomDSP/issues/73)) are Implemented; see their details below the table.
 
 | Module | Inputs | Outputs | Parameters | Behaviour |
 |---|---|---|---|---|
@@ -106,6 +106,34 @@ Examples: the LFO's phase input in sync mode defaults to bar phase, with a rate 
 *Why Phase Trigger:* it is how to multiply a clock. Phase Scale multiplies a phase, and Phase Trigger turns the result into triggers, for example to drive a Clock Divide or an envelope. A trigger-based multiplier, as in many VCV Rack modules, would have to measure the time between input triggers and guess when the next one comes. It would stumble on the first trigger and whenever the tempo changes. A multiplied phase is computed from the input, so it never guesses and stays locked. This follows Bitwig Grid, where timing is built from phase signals.
 
 Trigger outputs are high for one sample, and trigger inputs count rising edges ([ADR-0007](../adr/0007-polymorphic-signal-model.md#triggers)).
+
+### Transport details
+
+**Status:** Implemented ([#73](https://github.com/brylie/LoomDSP/issues/73)). Code: `loom.clock.transport` in `loom-modules/src/transport.rs`; `TRANSPORT_MODULE`, `TRANSPORT_GRID`, and `TransportRequest` in `loom-core/src/transport.rs`; `Module::transport_request`; the singleton rules in `Controller` and `Patch::load_into`. These details were settled while building the module.
+
+- **Names.** Inputs `run` (gate) and `reset` (gate, rising edges). Outputs `bar-phase` (label "Bar"), `beat-phase` ("Beat"), `playing`, `bar` ("On bar"), `beat` ("On beat"), and `jump`. *Why the short labels:* "Bar phase" is cut on the tile, and the signal colour already says phase. Parameters `tempo` (20 to 300 BPM, default 120, not smoothed), `numerator` (label "Beats", 1 to 32, default 4), `denominator` (label "Note", a choice: 0 "1", 1 "2", 2 "4", 3 "8", 4 "16"; default 2, so 4/4), `run` (0 or 1, default 1), and `reset` (0 or 1, transient). *Why a choice for the denominator:* only powers of two up to 16 are valid, and a choice cannot hold another value.
+- **Panel.** 15 by 5 grid units: the Run toggle, a Beat light, the Reset button below them, and knobs for tempo, beats, and note. Reset is a button with no mode parameter, `Widget::momentary`: it is always momentary, and holds its own parameter. *Why a new widget form:* the Button module's widget needs a mode parameter, and a reset that could latch would never fire again. Display values: `running` (1 while the transport runs) and `beat` (a trigger light).
+- **How it drives the engine.** Before each block, the engine asks the module for a `TransportRequest` and applies it: time signature, tempo, running, then reset. The module asks only for changes, so a new module asks for all of its settings once (a loaded patch sets the transport), and later only what moved. *Why changes only:* a cable removed from `run` must leave the transport as it was, and `Controller::set_tempo` and its siblings still work for a patch without a Transport.
+- **Parameters apply at the next buffer,** as any parameter does. Edges on the inputs wait for the grid: a block on the grid ([`TRANSPORT_GRID`], 32 frames) applies them (rule 11). Only base values count: an assignment on a Transport parameter does nothing yet.
+- **Reset** fires on the press (0 to 1), not on release. A rising edge on the `reset` input does the same, on the grid.
+- **Run.** While `run` has a cable, its level decides: the first frame after connecting, and each change after it, are applied on the grid. Changes to the Run parameter are not sent then. A new Transport module (a loaded patch, or an engine rebuilt for another device) with a cable on `run` stops the transport before its first block, and the gate then starts it on the grid. *Why:* the module has not read the gate yet, and running until the first grid step would move the position and fire bar 1 with the gate low. The engine tells the module about the cable through `Module::transport_request`. The Run toggle shows the `running` display value while the cable is there. When the cable goes, the app sets Run to the state the input left, so the toggle shows the truth and the next click starts or stops. Space flips Run (an undo step, like a click), and does nothing while a cable drives it.
+- **Bar and beat triggers** use `WrapDetector` on the bar and beat phases, as the Clock does: they fire only while playing, and a stop or a jump starts the rule afresh, so a reset fires bar 1 once and a jump fires no skipped bars (rule 8). In normal playback they fire on the same frames as a Phase Trigger on the phase outputs. **Jump** fires on the first frame of a call that `jumped`, running or stopped.
+- **One per patch.** `Controller::add_module` refuses a second (`SecondTransport`), and `remove_module` refuses the one there is (`TransportCannotBeRemoved`). `Patch::load_into` fails on two, naming both, and adds one to a patch that has none, with a load note. A new or generated patch in the app gets one. Copy, cut, and duplicate leave it out, and Delete skips it. All example patches have one.
+- **A panic** keeps the transport and the module's settings; it clears only the edge detectors and the light.
+
+### Clock details
+
+**Status:** Implemented ([#74](https://github.com/brylie/LoomDSP/issues/74)). Code: `loom.clock.clock` in `loom-modules/src/clock.rs`, and `TransportInfo::phase_at` in `loom-core`. These details were settled while building the module.
+
+- **Parameters.** `rate` is a choice of 24, in this order from 0: 4 bars, 2 bars, 1 bar, 1/2, 1/4, 1/8, 1/16, 1/32, each as straight, then dotted, then triplet ("4 bars", "4 bars dotted", "4 bars triplet", "2 bars", and so on). The default is 1/4 (12). `width` (label "Width", since "Gate width" is cut under a knob) is 1 to 99 percent, default 50, not smoothed. Both have a knob on the panel, with a trigger light `fired` below, as on Clock Divide. *Why one choice, not a length and a feel:* the table lists two parameters, and one knob reaches every rate.
+- **Lengths in beats.** A bar rate is a number of bars, so it follows the time signature: 1 bar in 7/8 is 3.5 beats. A note rate is a fraction of a whole note and does not: 1/4 is one beat in any metre. Dotted is 3/2 of straight, triplet 2/3.
+- **Phase** is `TransportInfo::phase_at(i, rate_in_beats)`: the rate phase above, counted from position 0. *Why from position 0:* every rate meets bar 1, and a 1-bar Clock gives the bar phase bit for bit.
+- **Trigger** uses `WrapDetector` on the phase, so a Phase Trigger on the Clock's phase fires on the same frames. It fires only while the transport runs. When the transport is stopped, when the position jumps (a reset or a time signature change, rule 10), or when the rate changes, the detector starts afresh: the next playing frame fires only when its phase is exactly 0. So:
+  - a reset fires once on bar 1, whether it came while playing or while stopped (then it fires on the first frame after the start);
+  - starting again where a stop left off, in the middle of a cycle, fires nothing;
+  - a jump or a rate change that lands in the middle of a cycle fires nothing, even when the phase moves by more than half a cycle. *Why:* rule 8, and a knob turn must not fire a stray beat.
+- **Gate** is high while the phase is below the gate width. It follows the phase, so it holds while the transport is stopped.
+- **No phase input.** Clock always reads the transport. To follow a bent or scaled phase, patch it into Phase Trigger or Phase Scale ([#110](https://github.com/brylie/LoomDSP/issues/110)).
 
 ### Clock Divide details
 
@@ -151,7 +179,7 @@ These details were settled while building the module.
 
 ## Rules
 
-**Status:** rules 1 to 6 are Implemented in the engine; saving run state in the patch waits for the Transport module ([#73](https://github.com/brylie/LoomDSP/issues/73)). Rules 7 to 9 are Draft. Rules 10 and 11 are Agreed.
+**Status:** rules 1 to 6, 10, and 11 are Implemented; run state is saved as the Transport's `run` parameter ([#73](https://github.com/brylie/LoomDSP/issues/73)). Rule 8 holds for the jumps P1 has (a reset and a time signature change). Rules 7 to 9 are Draft.
 
 1. **One transport, owned by the engine.** Modules read it; only the transport source changes it. *Why:* every synced module must agree on where the bar starts.
 2. **Position is double precision.** Phases are converted to `f32` only at the end. *Why:* in `f32`, position loses sample accuracy after a few minutes. An hour-long set must stay in step.
@@ -168,7 +196,7 @@ These details were settled while building the module.
 
 ## Engine and API
 
-**Status:** Implemented ([#72](https://github.com/brylie/LoomDSP/issues/72)), except the patch format, which belongs to [#73](https://github.com/brylie/LoomDSP/issues/73).
+**Status:** Implemented ([#72](https://github.com/brylie/LoomDSP/issues/72), and the patch format with [#73](https://github.com/brylie/LoomDSP/issues/73)).
 
 ### Transport state
 
@@ -186,7 +214,7 @@ These details were settled while building the module.
 
 ### Jumps
 
-- In P1, the only jump is a reset. Starting, stopping, and tempo changes are not jumps.
+- In P1, the jumps are a reset and a time signature change (rule 10). Starting, stopping, and tempo changes are not jumps.
 - A reset sets the position to 0. It counts as a jump at the first frame of the next buffer, whether the transport is running or stopped. A stopped transport stays stopped, and starts from bar 1 later.
 
 ### `ProcessContext`
@@ -220,7 +248,7 @@ Every call to `Module::process` gets the transport:
 
 ### Patch format
 
-The Transport module's parameters (tempo, time signature, run) are saved like any module's ([#73](https://github.com/brylie/LoomDSP/issues/73)). Until then, a patch file does not store the transport.
+The Transport module's parameters (tempo, time signature, run) are saved like any module's ([#73](https://github.com/brylie/LoomDSP/issues/73)). `reset` is transient and never saved.
 
 ## P1 slice
 
@@ -241,25 +269,25 @@ The Transport module's parameters (tempo, time signature, run) are saved like an
 
 ### Acceptance criteria: modules and UI (Draft)
 
-- [ ] Clock at 1/4 in 4/4 fires four triggers per bar, in line with the bar phase wrap, at block sizes 1, 32, and 1024.
+- [x] Clock at 1/4 in 4/4 fires four triggers per bar, in line with the bar phase wrap, at block sizes 1, 32, and 1024.
 - [x] Clock Divide with N = 2, offset 0, fires on triggers 2, 4, 6. Offset 1 fires on 1, 3, 5. Reset starts the count again.
 - [ ] Phase Scale with divide 2 wraps once per two input wraps, aligned with the input's bar. Multiply 3, divide 2 wraps three times per two input wraps.
 - [x] Phase Trigger fires one sample on each wrap of its input phase, forward or backward, and on the first frame only when the phase is exactly 0. The output is the same for any block size.
 - [ ] Phase Scale ([#31](https://github.com/brylie/LoomDSP/issues/31)) with multiply 4 into Phase Trigger fires four triggers per input cycle. The first is on the input's wrap. The output is the same at block sizes 1, 32, and 1024.
 - [ ] A Phase Scale with nothing connected to `phase` follows bar phase. A cable overrides it; removing the cable returns to the transport.
 - [ ] An LFO in sync mode with nothing connected follows bar phase. A cable overrides it; removing the cable returns to the transport.
-- [ ] Ports that follow the transport show the clock mark.
-- [ ] Every patch has one Transport module. It cannot be deleted, and a second one cannot be added.
-- [ ] Run on the Transport panel toggles running. Space does the same when no panel control is focused. A focused control takes Space for itself. Stopping holds synced phases; running continues from there.
+- [x] Ports that follow the transport show the clock mark.
+- [x] Every patch has one Transport module. It cannot be deleted, and a second one cannot be added.
+- [x] Run on the Transport panel toggles running. Space does the same when no panel control is focused. A focused control takes Space for itself. Stopping holds synced phases; running continues from there.
 - [x] Every Button gate sample is 0 or 1, and a toggle press flips `on`.
 - [ ] The gate is `on` in Toggle mode and `hold` in Momentary mode. A momentary press sets `hold` to 1, and release sets it to 0, including when the pointer has left the button, when another mouse button is pressed, or when the window loses focus. Switching `mode` changes neither `on` nor `hold`. A patch saved while a momentary button is held loads with the gate low (needs [transient parameters](transient-params.md)).
-- [ ] Reset returns to bar 1 and fires the jump trigger.
-- [ ] A toggle Button patched into run starts and stops the transport. While connected, the Run toggle follows the input.
-- [ ] Run state, tempo, and time signature survive save and load. `reset` is not saved.
-- [ ] A patch without a Transport gets one on load, with a report. A patch with two fails with an error that names both. A second cannot be added, and the only one cannot be deleted.
-- [ ] With a cable on `run` or `reset`, bar phase, beat phase, and playing are bit-identical at block sizes 1, 32, and 1024, and an edge takes effect 1 to 32 frames later (rule 11).
-- [ ] A time signature change while playing sets `jumped` for one call, fires `jump` once, and fires no skipped bar triggers (rule 10), at block sizes 1, 32, and 1024.
-- [ ] Removing a cable from `run` leaves the transport as it was, and the toggle works again.
+- [x] Reset returns to bar 1 and fires the jump trigger.
+- [x] A toggle Button patched into run starts and stops the transport. While connected, the Run toggle follows the input.
+- [x] Run state, tempo, and time signature survive save and load. `reset` is not saved.
+- [x] A patch without a Transport gets one on load, with a report. A patch with two fails with an error that names both. A second cannot be added, and the only one cannot be deleted.
+- [x] With a cable on `run` or `reset`, bar phase, beat phase, and playing are bit-identical at block sizes 1, 32, and 1024, and an edge takes effect 1 to 32 frames later (rule 11).
+- [x] A time signature change while playing sets `jumped` for one call, fires `jump` once, and fires no skipped bar triggers (rule 10), at block sizes 1, 32, and 1024.
+- [x] Removing a cable from `run` leaves the transport as it was, and the toggle works again.
 
 ### Out of scope for P1
 

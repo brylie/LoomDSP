@@ -146,6 +146,11 @@ pub struct Input {
     /// True while the output feeding it carries a signal (panels.md,
     /// Signal activity on ports).
     pub carrying: bool,
+    /// The transport signal the input follows while it has no cable, which
+    /// shows the clock mark: `bar_phase`, `beat_phase`, or `playing`. Left
+    /// out when it shows none (panels.md, Clock mark on transport inputs).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub follows_transport: Option<&'static str>,
 }
 
 /// An output port on a tile.
@@ -433,6 +438,7 @@ impl App {
                                 .cloned(),
                             centre: m.input_position(index).into(),
                             carrying: self.input_carrying(m.id, index),
+                            follows_transport: p.follows_transport.map(|s| s.name()),
                         })
                         .collect(),
                     outputs: m

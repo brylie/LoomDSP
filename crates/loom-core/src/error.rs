@@ -34,6 +34,12 @@ pub enum LoomError {
     /// A module ID is already used.
     #[error("module id {0} is already in use")]
     DuplicateModuleId(ModuleId),
+    /// A second Transport module. A patch has exactly one (clock.md).
+    #[error("the patch already has a Transport (module {0}), and a patch has only one")]
+    SecondTransport(ModuleId),
+    /// The Transport module cannot be removed: a patch has exactly one.
+    #[error("the Transport (module {0}) cannot be removed, because every patch has one")]
+    TransportCannotBeRemoved(ModuleId),
     /// A module ID is out of range. The largest `u32` is kept to mean "no
     /// module" (#44).
     #[error("module id {0} is too large (the largest is {max})", max = ModuleId::MAX.0)]

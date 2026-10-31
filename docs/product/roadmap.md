@@ -22,7 +22,7 @@ Why this order:
 5. **Scope is kept tight on purpose.** Generative live performance and plugin export pull in different directions: plugins bring host integration, parameter automation, many formats, and per-platform builds and signing. Doing both at once risks doing neither well. So plugin and standalone export, and the web target, are deferred ("Later"). We decide after P3 whether to take them on.
 6. The engine core stays portable and WASM-compatible (NFR-PORT-01, NFR-PORT-02), and ADR-0004 records how export would work, so the option stays open at low cost.
 
-**Module types per phase.** The [module catalogue](module-catalogue.md) gives every planned module type a stable ID (such as `MT-FILTER-02`) and a phase. Each phase below builds the catalogue entries marked with that phase. A type's phase follows the use case it unblocks: the subtractive tutorial in P1, panels and live play in P2, self-arranging sets in P3, and the rest in P4.
+**Module types per phase.** The [module catalogue](module-catalogue.md) gives every planned module type a stable ID (such as `MT-FILTER-02`) and a phase. Each phase below builds the catalogue entries marked with that phase. A type's phase follows the use case it unblocks: the subtractive synth in P1, panels and live play in P2, self-arranging sets in P3, and the rest in P4.
 
 ---
 
@@ -78,10 +78,10 @@ Issues for this phase are in the [P1 milestone](https://github.com/brylie/LoomDS
 - [ ] Module panels on tiles and the scope module (ADR-0013) ([#6](https://github.com/brylie/LoomDSP/issues/6) to [#10](https://github.com/brylie/LoomDSP/issues/10)).
 - [ ] Module browser, undo/redo, copy and paste, open and save ([#11](https://github.com/brylie/LoomDSP/issues/11) to [#15](https://github.com/brylie/LoomDSP/issues/15)).
 - [ ] Modulation on parameters, MIDI learn, panic, device selection and hot-plugging ([#19](https://github.com/brylie/LoomDSP/issues/19) to [#29](https://github.com/brylie/LoomDSP/issues/29)).
-- [ ] Phase 1 module library, test harness, help pages, and the tutorial ([#30](https://github.com/brylie/LoomDSP/issues/30) to [#45](https://github.com/brylie/LoomDSP/issues/45)).
+- [ ] Phase 1 module library, test harness, and help pages ([#30](https://github.com/brylie/LoomDSP/issues/30) to [#44](https://github.com/brylie/LoomDSP/issues/44)). The tutorial moved to P2 ([#45](https://github.com/brylie/LoomDSP/issues/45)).
 
 Exit criteria:
-- [ ] Tutorial: build a subtractive synth from primitives in under 20 minutes (tested with 3 people who did not write the tutorial).
+- [ ] A subtractive synth can be built from primitives in the app, with the module browser, inspector, and cables, and played from MIDI. (The written tutorial, tested with newcomers, is a P2 exit criterion: it is written once the foundation has settled, so it is written once.)
 - [ ] Play that synth with a MIDI keyboard and map 4 knobs with MIDI learn.
 - [x] An FM feedback patch sounds the same at buffer sizes 32 and 1024. (Already true in the P0 engine; covered by tests.)
 - [ ] Unplugging and replugging the MIDI controller during playback works without a restart.
@@ -110,6 +110,7 @@ Exit criteria:
 - [ ] An 8-voice polysynth built from primitives, with a 6-knob panel, runs within the CPU budget.
 - [ ] A 30-minute test set with 4 patches, preset changes, and external MIDI clock runs with zero dropouts.
 - [ ] One-hour live soak test with edits during playback: zero dropouts, no memory growth.
+- [ ] Tutorial: build a subtractive synth from primitives in under 20 minutes (tested with 3 people who did not write the tutorial) ([#45](https://github.com/brylie/LoomDSP/issues/45)). Written last in this phase, when sub-patches, polyphony, and panels have settled.
 - [ ] First real live performance with LoomDSP.
 
 ## P3. Living systems
