@@ -132,6 +132,13 @@ impl Cable {
         self
     }
 
+    /// Draws a disabled modulation line at half the normal modulation width.
+    pub fn half_width(mut self) -> Self {
+        self.params[0] *= 0.5;
+        self.params[2] *= 0.5;
+        self
+    }
+
     /// Draws the cable at full opacity, in front of the tiles.
     pub fn focused(mut self) -> Self {
         self.params[3] = 1.0;
@@ -736,6 +743,17 @@ impl Primitive for CanvasPrimitive {
 mod tests {
     use super::*;
     use crate::scene::{CableView, ModuleView, PortView};
+
+    /// Disabled modulation keeps its dash pattern and halves both width
+    /// limits, so it stays thinner at close and far zoom (#197).
+    #[test]
+    fn disabled_modulation_line_is_half_width() {
+        let normal = Cable::new(Point::ORIGIN, Point::new(100.0, 0.0), Color::WHITE, Color::WHITE, true).thin();
+        let off = normal.half_width();
+        assert_eq!(off.params[0], normal.params[0] * 0.5);
+        assert_eq!(off.params[2], normal.params[2] * 0.5);
+        assert_eq!(off.params[1], normal.params[1]);
+    }
 
     fn port() -> PortView {
         PortView {

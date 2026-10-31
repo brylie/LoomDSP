@@ -48,10 +48,10 @@ The file holds what the app sent to the output, stream after stream. It does not
 A QA script on the control channel can then check a patch switch in the real app:
 
 ```text
-{"cmd":"press","button":"hold"}
+{"cmd":"toolbar","button":"hold"}
 {"cmd":"wait","ms":1000}
 {"cmd":"open","path":"examples/patches/fm-feedback.ron"}
-{"cmd":"press","button":"hold"}
+{"cmd":"toolbar","button":"hold"}
 {"cmd":"wait","ms":1000}
 {"cmd":"open","path":"examples/patches/sine.ron"}
 {"cmd":"wait","ms":500}

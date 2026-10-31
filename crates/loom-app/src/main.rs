@@ -568,11 +568,17 @@ struct App {
     /// Undo and redo (`docs/design/undo.md`): the history, and the edit
     /// or gesture being recorded.
     edits: edits::Edits,
+    /// An arrow key was released and its undo group may still grow.
+    arrow_group_pending: bool,
+    /// A toolbar or inspector action closed that group before its canvas timer.
+    arrow_group_closed: bool,
     /// The parameter whose **Add modulation** list is open.
     adding: Option<(u32, usize)>,
     /// During an arc drag: the assignment it changes, once picked, or
     /// `Some(None)` when none fits and the drag does nothing.
     depth_drag: Option<Option<AssignmentId>>,
+    /// Whether the current patch has already reported a full live-value table.
+    live_value_overflow_reported: bool,
     /// How the canvas starts, for a still image of the window
     /// (`--screenshot-window`). `None` in the app.
     still: Option<loom_canvas::Still>,
@@ -1005,8 +1011,11 @@ impl App {
             armed: None,
             learn_view: LearnView::default(),
             edits: edits::Edits::default(),
+            arrow_group_pending: false,
+            arrow_group_closed: false,
             adding: None,
             depth_drag: None,
+            live_value_overflow_reported: false,
             still: None,
             step_name: None,
         };
@@ -1691,6 +1700,7 @@ impl App {
     /// Sets a parameter as a knob turn does. A slider sends no start, so its
     /// first change opens the gesture and letting go closes it.
     fn turn_param(&mut self, module: u32, index: usize, value: f32) {
+        self.close_pending_arrow_group();
         self.edits.start_slider_gesture();
         self.begin_edit();
         self.set_param(module, index, value);
@@ -1850,17 +1860,23 @@ impl App {
                 if inserted == 1 { "delay" } else { "delays" },
             ),
         };
-        // One warning per compile, not one per parameter.
+        // Warn only on entry into the overflow state, including after a
+        // patch has returned below the table limit.
         if report.without_live_value > 0 {
-            self.status.push_str(&format!(
-                "; {} modulated {} show no live value (table full)",
-                report.without_live_value,
-                if report.without_live_value == 1 {
-                    "knob"
-                } else {
-                    "knobs"
-                }
-            ));
+            if !self.live_value_overflow_reported {
+                self.status.push_str(&format!(
+                    "; {} modulated {} show no live value (table full)",
+                    report.without_live_value,
+                    if report.without_live_value == 1 {
+                        "knob"
+                    } else {
+                        "knobs"
+                    }
+                ));
+                self.live_value_overflow_reported = true;
+            }
+        } else {
+            self.live_value_overflow_reported = false;
         }
     }
 
@@ -1903,9 +1919,19 @@ impl App {
         }
     }
 
-    /// Closes a gesture that began on an inspector slider.
+    /// Closes an inspector slider or a released arrow group before another action.
     fn close_slider_gesture(&mut self) {
         if self.edits.slider_gesture_open() {
+            self.end_gesture();
+        }
+        self.close_pending_arrow_group();
+    }
+
+    /// Records a released arrow edit before an action outside the canvas.
+    fn close_pending_arrow_group(&mut self) {
+        if self.arrow_group_pending {
+            self.arrow_group_pending = false;
+            self.arrow_group_closed = true;
             self.end_gesture();
         }
     }
@@ -2238,6 +2264,7 @@ impl App {
             Message::Depth { id, depth } => {
                 // Like a parameter slider: the first change opens the
                 // gesture, and letting go closes it, so one drag is one step.
+                self.close_pending_arrow_group();
                 self.edits.start_slider_gesture();
                 self.begin_edit();
                 if let Err(e) = self.controller.set_assignment_depth(id, depth) {
@@ -2259,6 +2286,8 @@ impl App {
                 self.edit(|app| {
                     if let Err(e) = app.controller.set_assignment_enabled(id, enabled) {
                         app.status = format!("error: {e}");
+                    } else {
+                        app.scene.set_modulation_enabled(id.0, enabled);
                     }
                     app.refresh_values();
                 });
@@ -2480,6 +2509,23 @@ impl App {
                     self.refresh_values();
                 }
                 self.end_gesture();
+            }
+            CanvasEvent::ArrowGroupPending => self.arrow_group_pending = true,
+            CanvasEvent::ArrowGroupResumed => {
+                self.arrow_group_pending = false;
+                if self.arrow_group_closed {
+                    self.close_slider_gesture();
+                    self.edits.start_gesture();
+                    self.begin_edit();
+                    self.arrow_group_closed = false;
+                }
+            }
+            CanvasEvent::ArrowGroupEnd => {
+                self.arrow_group_pending = false;
+                if !self.arrow_group_closed {
+                    self.end_gesture();
+                }
+                self.arrow_group_closed = false;
             }
             CanvasEvent::Select(ids) => self.selection = ids.into_iter().collect(),
             CanvasEvent::Move { ids, delta } => {
@@ -3040,9 +3086,10 @@ Drag from a port to patch a cable. Drag a connected input to move or remove its 
 Drag tiles to move them. Shift-click or drag a box to select several. Cmd/Ctrl+A selects all.\n\
 Delete or Backspace removes the selection.\n\
 Drag a knob up or down; Shift for fine steps; double-click resets it.\n\
-With a module selected, Tab and Shift-Tab move between its controls, the arrow keys change them, \
-and Space or Enter presses, toggles, or steps the focused control. Escape clears the focus.\n\
-Space toggles Run when no control has focus.\n\
+Tab and Shift-Tab select modules in reading order. Enter focuses the selected module's first control.\n\
+With a control focused, Tab moves between controls and arrow keys change values. Space or Enter acts on a toggle, radio, or button.\n\
+Escape clears control focus, then the selection. With a module selected and no control focused, arrow keys move it.\n\
+Space toggles Run when no control uses it, including a focused knob.\n\
 Right-drag or two-finger scroll to pan. Wheel or Cmd/Ctrl-scroll to zoom. Cmd/Ctrl+0 zooms to 100%.\n\
 F or Home frames the patch.\n\
 Right-click an output or a cable to add a scope or a meter fed by it.\n\
@@ -3101,6 +3148,45 @@ mod tests {
         App::new(app_args())
     }
 
+    /// A full live-value table warns on entry into overflow and after a
+    /// return below the limit, without repeating on unrelated compiles.
+    #[test]
+    fn live_value_overflow_warning_is_latched_per_patch() {
+        let mut app = app();
+        let parts = create_engine(registry(true), EngineConfig::default());
+        app.controller = parts.controller;
+        app.idle_engine = Some(parts.engine);
+        app._audio = None;
+        let source = app.controller.add_module("loom.math.constant").unwrap();
+        let mut last = None;
+        for _ in 0..257 {
+            let target = app.controller.add_module("loom.math.add").unwrap();
+            let offset = app
+                .controller
+                .graph()
+                .node(target)
+                .unwrap()
+                .descriptor
+                .param_index("offset")
+                .unwrap();
+            let assignment = app.controller.add_assignment(out(source), target, offset, 0.5).unwrap();
+            last = Some((target, offset, assignment));
+        }
+        let (last_target, last_offset, last_id) = last.unwrap();
+        assert!(app.commit());
+        assert!(app.status.contains("table full"), "{}", app.status);
+        assert!(app.commit());
+        assert!(!app.status.contains("table full"), "{}", app.status);
+        app.controller.remove_assignment(last_id).unwrap();
+        assert!(app.commit());
+        assert!(!app.status.contains("table full"), "{}", app.status);
+        app.controller
+            .add_assignment(out(source), last_target, last_offset, 0.5)
+            .unwrap();
+        assert!(app.commit());
+        assert!(app.status.contains("table full"), "{}", app.status);
+    }
+
     /// Audio watcher events update the warning peak and rolling maximum,
     /// including the last callback time used to detect a stalled stream.
     #[test]
@@ -3135,7 +3221,7 @@ mod tests {
             "Tab and Shift-Tab",
             "arrow keys",
             "Space or Enter",
-            "Escape clears the focus",
+            "Escape clears control focus",
             "Space toggles Run",
             "Cmd/Ctrl+0",
             "F or Home",
@@ -4733,6 +4819,113 @@ mod tests {
         for &value in values {
             let _ = app.update(Message::ParamValue { module, index, value });
         }
+    }
+
+    /// Undo and inspector edits close a released arrow step before the canvas
+    /// timer does, and its late end cannot close the next inspector gesture.
+    #[test]
+    fn pending_arrow_group_yields_to_undo_and_inspector() {
+        let (mut app, module, cutoff) = app_with_filter();
+        let widget = app
+            .controller
+            .graph()
+            .node(ModuleId(module))
+            .unwrap()
+            .descriptor
+            .panel
+            .widgets
+            .iter()
+            .position(|w| w.bind == "cutoff")
+            .unwrap();
+        let original = app.controller.graph().node(ModuleId(module)).unwrap().params[cutoff];
+        let set = |app: &mut App, position| {
+            let _ = app.update(Message::Canvas(CanvasEvent::GestureStart));
+            let _ = app.update(Message::Canvas(CanvasEvent::SetControl {
+                module,
+                widget,
+                position,
+            }));
+            let _ = app.update(Message::Canvas(CanvasEvent::ArrowGroupPending));
+        };
+        let value = |app: &App| app.controller.graph().node(ModuleId(module)).unwrap().params[cutoff];
+
+        set(&mut app, 0.6);
+        assert!(app.edits.gesture_open());
+        let _ = app.update(Message::Undo);
+        assert_eq!(value(&app), original, "Undo must act before the 500 ms timer");
+        assert!(!app.edits.gesture_open());
+        let _ = app.update(Message::Redo);
+        assert_ne!(value(&app), original, "Redo must also act before the timer");
+        let _ = app.update(Message::Undo);
+        let _ = app.update(Message::Canvas(CanvasEvent::ArrowGroupEnd));
+        assert!(!app.edits.gesture_open());
+
+        set(&mut app, 0.7);
+        let arrow_value = value(&app);
+        slide(&mut app, module, cutoff, &[800.0, 900.0]);
+        assert!(app.edits.slider_gesture_open());
+        let _ = app.update(Message::Canvas(CanvasEvent::ArrowGroupEnd));
+        assert!(
+            app.edits.slider_gesture_open(),
+            "late arrow end must leave the slider open"
+        );
+        let _ = app.update(Message::SliderReleased);
+        let _ = app.update(Message::Undo);
+        assert_eq!(value(&app), arrow_value, "slider and arrow are separate steps");
+    }
+
+    /// A quick arrow press after Undo starts a fresh step even though the
+    /// canvas still considers it part of the previous 500 ms group.
+    #[test]
+    fn arrow_resumed_after_undo_starts_a_new_step() {
+        let (mut app, module, cutoff) = app_with_filter();
+        let widget = app
+            .controller
+            .graph()
+            .node(ModuleId(module))
+            .unwrap()
+            .descriptor
+            .panel
+            .widgets
+            .iter()
+            .position(|w| w.bind == "cutoff")
+            .unwrap();
+        let original = app.controller.graph().node(ModuleId(module)).unwrap().params[cutoff];
+        for event in [
+            CanvasEvent::GestureStart,
+            CanvasEvent::SetControl {
+                module,
+                widget,
+                position: 0.6,
+            },
+            CanvasEvent::ArrowGroupPending,
+        ] {
+            let _ = app.update(Message::Canvas(event));
+        }
+        let _ = app.update(Message::Undo);
+        assert_eq!(
+            app.controller.graph().node(ModuleId(module)).unwrap().params[cutoff],
+            original
+        );
+        for event in [
+            CanvasEvent::ArrowGroupResumed,
+            CanvasEvent::SetControl {
+                module,
+                widget,
+                position: 0.7,
+            },
+            CanvasEvent::ArrowGroupPending,
+            CanvasEvent::ArrowGroupEnd,
+        ] {
+            let _ = app.update(Message::Canvas(event));
+        }
+        assert_eq!(app.edits.history.len(), 1, "the undone step was replaced");
+        assert!(!app.edits.gesture_open());
+        let _ = app.update(Message::Undo);
+        assert_eq!(
+            app.controller.graph().node(ModuleId(module)).unwrap().params[cutoff],
+            original
+        );
     }
 
     /// An inspector slider gesture is one step, and it closes at release,
