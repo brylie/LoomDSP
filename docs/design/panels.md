@@ -556,7 +556,7 @@ What P1 builds. The rest of this spec is P2.
 - [x] A one-sample trigger into a Clock Divide or Phase Trigger output light lights it, and it fades in 120 ms. No frames are drawn after the fade.
 - [x] A transport-following input shows the clock mark with no cable, loses it when a cable is connected, and has it back when the cable is removed.
 - [ ] A 95% callback spike turns the load amber or red for its tick. After 10 seconds the max falls.
-- [ ] By keys alone: Tab to a module, Enter into its panel, change a knob, Escape out twice. Space on a focused toggle acts on the toggle, not on Run. Arrow keys move the selected module by one grid unit.
+- [x] By keys alone: Tab to a module, Enter into its panel, change a knob, Escape out twice. Space on a focused toggle acts on the toggle, not on Run. Arrow keys move the selected module by one grid unit.
 - [ ] An output with a cable shows *carrying* within 200 ms of a signal above −80 dB, and *silent* 400 ms after it stops. A one-sample trigger lights it. Cable geometry is the same with and without activity.
 - [ ] The scope draws its trace in the tile, holds still for a periodic wave, and four scopes keep 60 fps.
 - [ ] A growable tile resizes to the grid within its limits. Ports and cable ends follow. The size is saved and loads. Old patches load. One drag is one undo step.

@@ -523,6 +523,8 @@ struct App {
     /// During an arc drag: the assignment it changes, once picked, or
     /// `Some(None)` when none fits and the drag does nothing.
     depth_drag: Option<Option<AssignmentId>>,
+    /// Whether the current patch has already reported a full live-value table.
+    live_value_overflow_reported: bool,
     /// How the canvas starts, for a still image of the window
     /// (`--screenshot-window`). `None` in the app.
     still: Option<loom_canvas::Still>,
@@ -946,6 +948,7 @@ impl App {
             edits: edits::Edits::default(),
             adding: None,
             depth_drag: None,
+            live_value_overflow_reported: false,
             still: None,
             step_name: None,
         };
@@ -1682,17 +1685,23 @@ impl App {
                 if inserted == 1 { "delay" } else { "delays" },
             ),
         };
-        // One warning per compile, not one per parameter.
+        // Warn only on entry into the overflow state, including after a
+        // patch has returned below the table limit.
         if report.without_live_value > 0 {
-            self.status.push_str(&format!(
-                "; {} modulated {} show no live value (table full)",
-                report.without_live_value,
-                if report.without_live_value == 1 {
-                    "knob"
-                } else {
-                    "knobs"
-                }
-            ));
+            if !self.live_value_overflow_reported {
+                self.status.push_str(&format!(
+                    "; {} modulated {} show no live value (table full)",
+                    report.without_live_value,
+                    if report.without_live_value == 1 {
+                        "knob"
+                    } else {
+                        "knobs"
+                    }
+                ));
+                self.live_value_overflow_reported = true;
+            }
+        } else {
+            self.live_value_overflow_reported = false;
         }
     }
 
@@ -2077,6 +2086,8 @@ impl App {
                 self.edit(|app| {
                     if let Err(e) = app.controller.set_assignment_enabled(id, enabled) {
                         app.status = format!("error: {e}");
+                    } else {
+                        app.scene.set_modulation_enabled(id.0, enabled);
                     }
                     app.refresh_values();
                 });
@@ -2818,9 +2829,10 @@ Drag from a port to patch a cable. Drag a connected input to move or remove its 
 Drag tiles to move them. Shift-click or drag a box to select several. Cmd/Ctrl+A selects all.\n\
 Delete or Backspace removes the selection.\n\
 Drag a knob up or down; Shift for fine steps; double-click resets it.\n\
-With a module selected, Tab and Shift-Tab move between its controls, the arrow keys change them, \
-and Space or Enter presses, toggles, or steps the focused control. Escape clears the focus.\n\
-Space toggles Run when no control has focus.\n\
+Tab and Shift-Tab select modules in reading order. Enter focuses the selected module's first control.\n\
+With a control focused, Tab moves between controls and arrow keys change values. Space or Enter acts on a toggle, radio, or button.\n\
+Escape clears control focus, then the selection. With a module selected and no control focused, arrow keys move it.\n\
+Space toggles Run when no control uses it, including a focused knob.\n\
 Right-drag or two-finger scroll to pan. Wheel or Cmd/Ctrl-scroll to zoom. Cmd/Ctrl+0 zooms to 100%.\n\
 F or Home frames the patch.\n\
 Right-click an output or a cable to add a scope or a meter fed by it.\n\
@@ -2879,6 +2891,45 @@ mod tests {
         App::new(app_args())
     }
 
+    /// A full live-value table warns on entry into overflow and after a
+    /// return below the limit, without repeating on unrelated compiles.
+    #[test]
+    fn live_value_overflow_warning_is_latched_per_patch() {
+        let mut app = app();
+        let parts = create_engine(registry(true), EngineConfig::default());
+        app.controller = parts.controller;
+        app.idle_engine = Some(parts.engine);
+        app._audio = None;
+        let source = app.controller.add_module("loom.math.constant").unwrap();
+        let mut last = None;
+        for _ in 0..257 {
+            let target = app.controller.add_module("loom.math.add").unwrap();
+            let offset = app
+                .controller
+                .graph()
+                .node(target)
+                .unwrap()
+                .descriptor
+                .param_index("offset")
+                .unwrap();
+            let assignment = app.controller.add_assignment(out(source), target, offset, 0.5).unwrap();
+            last = Some((target, offset, assignment));
+        }
+        let (last_target, last_offset, last_id) = last.unwrap();
+        assert!(app.commit());
+        assert!(app.status.contains("table full"), "{}", app.status);
+        assert!(app.commit());
+        assert!(!app.status.contains("table full"), "{}", app.status);
+        app.controller.remove_assignment(last_id).unwrap();
+        assert!(app.commit());
+        assert!(!app.status.contains("table full"), "{}", app.status);
+        app.controller
+            .add_assignment(out(source), last_target, last_offset, 0.5)
+            .unwrap();
+        assert!(app.commit());
+        assert!(app.status.contains("table full"), "{}", app.status);
+    }
+
     /// #16: the inspector help text names every canvas shortcut, the new
     /// Cmd/Ctrl+0 zoom reset and the ones that were there before it.
     #[test]
@@ -2890,7 +2941,7 @@ mod tests {
             "Tab and Shift-Tab",
             "arrow keys",
             "Space or Enter",
-            "Escape clears the focus",
+            "Escape clears control focus",
             "Space toggles Run",
             "Cmd/Ctrl+0",
             "F or Home",

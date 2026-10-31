@@ -93,7 +93,7 @@ Undo ([#12](https://github.com/brylie/LoomDSP/issues/12), [undo.md](undo.md)) is
 
 ### Slice 2: live value and lines
 
-**Status:** Agreed ([#151](https://github.com/brylie/LoomDSP/issues/151)) and built ([#172](https://github.com/brylie/LoomDSP/issues/172)), except for two points that were agreed later and are not built yet: the style of off lines and the "table full" warning ([#197](https://github.com/brylie/LoomDSP/issues/197)), and which tiles are outlined ([#407](https://github.com/brylie/LoomDSP/issues/407)).
+**Status:** Agreed ([#151](https://github.com/brylie/LoomDSP/issues/151)) and built ([#172](https://github.com/brylie/LoomDSP/issues/172), [#197](https://github.com/brylie/LoomDSP/issues/197), [#407](https://github.com/brylie/LoomDSP/issues/407)).
 
 #### Live value
 
@@ -315,7 +315,7 @@ A **Macro** module (FR-LIB-12) has one knob on its panel and one output equal to
 - [x] A patch with more modulated parameters than table cells sounds the same, shows no dot on the extra knobs, and reports one warning.
 - [x] After a recompile moves a cell to another parameter, the old knob never shows the new parameter's value.
 - [x] Hovering an output port, its badge, or a modulated control draws the lines. Clicking the badge pins them until it is clicked again, another badge is clicked, or Escape is pressed.
-- [ ] Hovering or pinning a source outlines each target tile once and the source tile twice (a double ring). Hovering a modulated control does the same for its sources and its own tile. Selecting a module draws its lines and outlines nothing (canvas test, [#407](https://github.com/brylie/LoomDSP/issues/407)).
+- [x] Hovering or pinning a source outlines each target tile once and the source tile twice (a double ring). Hovering a modulated control does the same for its sources and its own tile. Selecting a module draws its lines and outlines nothing (canvas test, [#407](https://github.com/brylie/LoomDSP/issues/407)).
 - [x] Dragging the arc changes the pinned source's assignment, then the selected module's, then the only enabled one. With several and none in focus, it changes nothing and the status bar says why.
 - [x] An arc drag works on a knob whose arc has zero length.
 - [x] One arc drag is one undo step.

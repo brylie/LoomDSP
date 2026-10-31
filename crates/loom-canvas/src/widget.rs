@@ -30,6 +30,8 @@ const DOUBLE_CLICK_SLOP: f32 = 4.0;
 /// How far a right press may move, in screen pixels, and still count as a
 /// click that opens the probe menu rather than a pan.
 const CLICK_SLOP: f32 = 4.0;
+/// Arrow presses within this time share one undo gesture (panels.md).
+const ARROW_GROUP: Duration = Duration::from_millis(500);
 
 /// Titles are drawn when they would be at least this tall on screen.
 const TITLE_MIN_PX: f32 = 6.5;
@@ -183,9 +185,8 @@ pub enum CanvasEvent {
         /// Index in the module's panel widgets.
         widget: usize,
     },
-    /// Space was pressed and no panel control is focused. The app toggles
-    /// transport Run. Enter does not send this, and neither does Space while
-    /// a control is focused.
+    /// Space was pressed without a control that uses it (including a focused
+    /// knob). The app toggles transport Run. Enter does not send this.
     ToggleRun,
     /// A drag began: turning a knob, moving tiles, or pulling a cable. Every
     /// edit until [`CanvasEvent::GestureEnd`] is one undo step
@@ -460,6 +461,7 @@ impl<'a, Message> PatchCanvas<'a, Message> {
             self.emit(shell, CanvasEvent::GestureEnd);
         }
         if std::mem::take(&mut state.arrow_gesture) {
+            state.arrow_deadline = None;
             self.emit(shell, CanvasEvent::GestureEnd);
         }
     }
@@ -470,6 +472,7 @@ impl<'a, Message> PatchCanvas<'a, Message> {
 #[derive(Debug, Clone, PartialEq)]
 struct LinesKey {
     scene: u64,
+    overlay: u64,
     pinned: Option<PortRef>,
     hover: Option<Hit>,
     selection: Vec<u32>,
@@ -573,6 +576,8 @@ struct State {
     /// True while an arrow key is down on a control: one gesture from key
     /// down to key up, however often it repeats.
     arrow_gesture: bool,
+    /// A released arrow keeps its gesture open for the next quick press.
+    arrow_deadline: Option<Instant>,
 }
 
 impl State {
@@ -827,6 +832,12 @@ impl<Message> PatchCanvas<'_, Message> {
 
         match event {
             Event::Window(window::Event::RedrawRequested(now)) => {
+                if state.arrow_deadline.is_some_and(|due| *now >= due) {
+                    state.arrow_deadline = None;
+                    if std::mem::take(&mut state.arrow_gesture) {
+                        self.emit(shell, CanvasEvent::GestureEnd);
+                    }
+                }
                 if state
                     .browser_key
                     .replace(self.browser_key)
@@ -1464,8 +1475,9 @@ impl<Message> PatchCanvas<'_, Message> {
                 )
             )
         {
-            state.arrow_gesture = false;
-            self.emit(shell, CanvasEvent::GestureEnd);
+            let due = Instant::now() + ARROW_GROUP;
+            state.arrow_deadline = Some(due);
+            shell.request_redraw_at(due);
         }
     }
 
@@ -1503,10 +1515,20 @@ impl<Message> PatchCanvas<'_, Message> {
         key: &keyboard::Key,
         modifiers: keyboard::Modifiers,
         repeat: bool,
-        over: bool,
+        _over: bool,
         shell: &mut Shell<'_, Message>,
     ) -> bool {
         use keyboard::key::Named;
+        if let Some(due) = state.arrow_deadline.take() {
+            let arrow = matches!(
+                key.as_ref(),
+                keyboard::Key::Named(Named::ArrowUp | Named::ArrowRight | Named::ArrowDown | Named::ArrowLeft)
+            );
+            if !arrow || Instant::now() >= due {
+                state.arrow_gesture = false;
+                self.emit(shell, CanvasEvent::GestureEnd);
+            }
+        }
         // Focus is only valid on a control of the one selected module.
         let selected = (self.selection.len() == 1).then(|| *self.selection.iter().next().unwrap_or(&0));
         if state.focus.is_some_and(|(m, w)| {
@@ -1526,19 +1548,53 @@ impl<Message> PatchCanvas<'_, Message> {
                 state.pinned = None;
                 true
             }
-            keyboard::Key::Named(Named::Tab) if over || state.focus.is_some() => {
-                let Some(module) = selected.and_then(|id| self.scene.module(id)) else {
+            keyboard::Key::Named(Named::Tab) => {
+                let mut order: Vec<_> = self.scene.modules().iter().collect();
+                order.sort_by(|a, b| {
+                    a.position
+                        .y
+                        .total_cmp(&b.position.y)
+                        .then_with(|| a.position.x.total_cmp(&b.position.x))
+                        .then_with(|| a.id.cmp(&b.id))
+                });
+                if order.is_empty() {
                     return false;
-                };
-                let current = state.focus.map(|(_, w)| w);
-                match next_focus(&module.panel, current, modifiers.shift()) {
-                    Some(widget) => {
-                        state.focus = Some((module.id, widget));
+                }
+                let back = modifiers.shift();
+                if let Some((module, widget)) = state.focus {
+                    let controls: Vec<_> = self
+                        .scene
+                        .module(module)
+                        .into_iter()
+                        .flat_map(|m| m.panel.widgets.iter().enumerate())
+                        .filter(|(_, w)| w.is_control())
+                        .map(|(i, _)| i)
+                        .collect();
+                    let next = controls.iter().position(|&i| i == widget).and_then(|at| {
+                        if back {
+                            at.checked_sub(1)
+                        } else {
+                            (at + 1 < controls.len()).then_some(at + 1)
+                        }
+                    });
+                    if let Some(next) = next {
+                        state.focus = Some((module, controls[next]));
                         state.tab_focus = true;
                         state.focus_first = true;
+                        shell.request_redraw();
+                        shell.capture_event();
+                        return true;
                     }
-                    None => return false,
                 }
+                let at = selected.and_then(|id| order.iter().position(|m| m.id == id));
+                let next = match at {
+                    Some(at) if back => at.checked_sub(1).unwrap_or(order.len() - 1),
+                    Some(at) => (at + 1) % order.len(),
+                    None if back => order.len() - 1,
+                    None => 0,
+                };
+                state.focus = None;
+                self.emit(shell, CanvasEvent::Select(vec![order[next].id]));
                 true
             }
             keyboard::Key::Named(Named::Escape) if state.focus.is_some() => {
@@ -1546,6 +1602,21 @@ impl<Message> PatchCanvas<'_, Message> {
                 // In MIDI learn mode, Escape also ends the mode, so the app
                 // must see it too.
                 self.learn.is_none()
+            }
+            keyboard::Key::Named(Named::Escape) if !self.selection.is_empty() => {
+                self.emit(shell, CanvasEvent::Select(Vec::new()));
+                true
+            }
+            keyboard::Key::Named(Named::Enter) if state.focus.is_none() => {
+                let Some(module) = selected.and_then(|id| self.scene.module(id)) else {
+                    return false;
+                };
+                let Some(widget) = next_focus(&module.panel, None, false) else {
+                    return false;
+                };
+                state.focus = Some((module.id, widget));
+                state.tab_focus = true;
+                true
             }
             // In MIDI learn mode the keyboard arms the focused control, like
             // a click, and never changes a value (midi-learn.md).
@@ -1566,7 +1637,31 @@ impl<Message> PatchCanvas<'_, Message> {
                 named @ (Named::ArrowUp | Named::ArrowRight | Named::ArrowDown | Named::ArrowLeft),
             ) => {
                 let Some((module, widget)) = state.focus else {
-                    return false;
+                    if self.selection.is_empty() {
+                        return false;
+                    }
+                    let step = if modifiers.shift() { 10.0 } else { 1.0 } * GRID;
+                    let delta = match named {
+                        Named::ArrowUp => Vector::new(0.0, -step),
+                        Named::ArrowRight => Vector::new(step, 0.0),
+                        Named::ArrowDown => Vector::new(0.0, step),
+                        Named::ArrowLeft => Vector::new(-step, 0.0),
+                        _ => unreachable!(),
+                    };
+                    if !state.arrow_gesture {
+                        state.arrow_gesture = true;
+                        self.emit(shell, CanvasEvent::GestureStart);
+                    }
+                    self.emit(
+                        shell,
+                        CanvasEvent::Move {
+                            ids: self.selection.iter().copied().collect(),
+                            delta,
+                        },
+                    );
+                    shell.request_redraw();
+                    shell.capture_event();
+                    return true;
                 };
                 let up = matches!(named, Named::ArrowUp | Named::ArrowRight);
                 if matches!(self.widget_kind(module, widget), Some(WidgetViewKind::Button)) {
@@ -1622,9 +1717,12 @@ impl<Message> PatchCanvas<'_, Message> {
                             let next = (position.round() as usize + 1) % options.len().max(1);
                             self.set_control(shell, module, widget, next as f32);
                         }
+                        Some(WidgetViewKind::Knob { .. }) if matches!(named, Named::Space) && !repeat => {
+                            self.emit(shell, CanvasEvent::ToggleRun);
+                        }
                         _ => {}
                     }
-                    true
+                    !matches!(self.widget_kind(module, widget), Some(WidgetViewKind::Knob { .. }) if matches!(named, Named::Enter))
                 } else if matches!(named, Named::Space) {
                     // Space with nothing focused is the Run shortcut. A
                     // repeat is swallowed so holding the key does not toggle
@@ -2070,11 +2168,12 @@ impl<Message> PatchCanvas<'_, Message> {
     /// Modulation lines in focus (modulation.md, Lines): thin dashed lines
     /// from a source port to its targets, for the pinned output, the output
     /// or badge under the pointer, the control under the pointer, and the
-    /// modules in focus as for cables. The tiles that a pinned or pointed
-    /// at source drives are outlined. A pinned badge gets a ring.
+    /// modules in focus as for cables. Pointed and pinned sources get a
+    /// double outline; their targets get a single one. A pinned badge gets a ring.
     fn modulation_lines(&self, state: &State, overlay: &mut Overlay) {
         let key = LinesKey {
             scene: self.scene.generation(),
+            overlay: self.scene.overlay_generation(),
             pinned: self.pin(state),
             hover: state.hover,
             selection: self.selection.iter().copied().collect(),
@@ -2116,7 +2215,8 @@ impl<Message> PatchCanvas<'_, Message> {
         };
         let hovered = Self::hovered_module(state);
         let module_in_focus = |id: u32| self.selection.contains(&id) || hovered == Some(id);
-        let mut outlined: Vec<u32> = Vec::new();
+        let mut targets: Vec<u32> = Vec::new();
+        let mut sources_outlined: Vec<u32> = Vec::new();
         for m in self.scene.modulations() {
             let by_source = sources.contains(&m.from);
             let by_control = control.is_some_and(|(module, widget)| m.to == module && m.widget == Some(widget));
@@ -2131,16 +2231,29 @@ impl<Message> PatchCanvas<'_, Message> {
             let (Some(start), Some(end)) = (self.scene.port_position(from), self.scene.modulation_end(m)) else {
                 continue;
             };
-            overlay.cables.push(
-                Cable::new(start, end, p.modulation, p.modulation, true)
-                    .thin()
-                    .focused(),
-            );
-            if (by_source || by_control) && !outlined.contains(&m.to) {
-                outlined.push(m.to);
+            let colour = if m.enabled {
+                p.modulation
+            } else {
+                Color {
+                    a: p.modulation.a * 0.4,
+                    ..p.modulation
+                }
+            };
+            let mut line = Cable::new(start, end, colour, colour, true).thin().focused();
+            if !m.enabled {
+                line = line.half_width();
+            }
+            overlay.cables.push(line);
+            if by_source || by_control {
+                if !targets.contains(&m.to) {
+                    targets.push(m.to);
+                }
+                if !sources_outlined.contains(&m.from.0) {
+                    sources_outlined.push(m.from.0);
+                }
             }
         }
-        for id in outlined {
+        for id in targets.into_iter().filter(|id| !sources_outlined.contains(id)) {
             if let Some(module) = self.scene.module(id) {
                 overlay.shapes.push(Shape::new(
                     module.bounds().expand(3.0),
@@ -2149,6 +2262,19 @@ impl<Message> PatchCanvas<'_, Message> {
                     p.modulation,
                     1.2,
                 ));
+            }
+        }
+        for id in sources_outlined {
+            if let Some(module) = self.scene.module(id) {
+                for distance in [3.0, 6.0] {
+                    overlay.shapes.push(Shape::new(
+                        module.bounds().expand(distance),
+                        7.0 + distance - 3.0,
+                        Color::TRANSPARENT,
+                        p.modulation,
+                        1.2,
+                    ));
+                }
             }
         }
     }
@@ -3393,6 +3519,51 @@ mod tests {
         })
     }
 
+    /// Keyboard navigation selects a tile, enters its control, edits it,
+    /// and leaves both focus levels without a pointer gesture (#101).
+    #[test]
+    fn keys_reach_and_leave_a_panel_control() {
+        let mut first = module(1, 0.0);
+        first.panel = panel();
+        let scene = Scene::new(vec![first], Vec::new());
+        let none = BTreeSet::new();
+        let mut state = State::default();
+        let at = Point::new(700.0, 500.0);
+        let canvas = PatchCanvas::new(&scene, &none, |e| e);
+        assert_eq!(
+            drive(&canvas, &mut state, &key_event(keyboard::key::Named::Tab, true), at),
+            vec![CanvasEvent::Select(vec![1])]
+        );
+        let selected = BTreeSet::from([1]);
+        let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+        assert!(drive(&canvas, &mut state, &key_event(keyboard::key::Named::Enter, true), at).is_empty());
+        assert_eq!(state.focus, Some((1, 0)));
+        let changed = drive(&canvas, &mut state, &arrow_up(), at);
+        assert!(
+            changed.iter().any(|e| matches!(
+                e,
+                CanvasEvent::SetControl {
+                    module: 1,
+                    widget: 0,
+                    ..
+                }
+            )),
+            "{changed:?}"
+        );
+        drive(
+            &canvas,
+            &mut state,
+            &key_event(keyboard::key::Named::ArrowUp, false),
+            at,
+        );
+        assert_eq!(drive(&canvas, &mut state, &escape(), at), vec![CanvasEvent::GestureEnd]);
+        assert_eq!(state.focus, None);
+        assert_eq!(
+            drive(&canvas, &mut state, &escape(), at),
+            vec![CanvasEvent::Select(Vec::new())]
+        );
+    }
+
     /// In MIDI learn mode a click arms a knob or a button and takes the
     /// keyboard focus. It never turns the knob or presses the button.
     #[test]
@@ -3598,9 +3769,11 @@ mod tests {
             ..module(2, 300.0)
         };
         let scene = Scene::new(vec![source, target], Vec::new()).with_modulations(vec![crate::scene::ModulationView {
+            id: 1,
             from: (1, 0),
             to: 2,
             widget: Some(0),
+            enabled: true,
         }]);
         let mut values = PanelValues::new();
         values.set(
@@ -3767,6 +3940,45 @@ mod tests {
         drive(&canvas, &mut state, &click(mouse::Button::Left), badge);
         drive(&canvas, &mut state, &click(mouse::Button::Left), badge);
         assert_eq!(state.pinned, None);
+    }
+
+    /// A pointed source has two rings and its target one; selection alone
+    /// still draws lines without outlines (#407).
+    #[test]
+    fn modulation_outlines_show_direction_only_for_pointing() {
+        let (scene, _) = modulated_scene();
+        let none = BTreeSet::new();
+        let canvas = PatchCanvas::new(&scene, &none, |e| e);
+        let mut pointed = Overlay::default();
+        canvas.build_modulation_lines(
+            &State {
+                hover: Some(Hit::Port(OUT)),
+                ..State::default()
+            },
+            &mut pointed,
+        );
+        assert_eq!(pointed.cables.len(), 1);
+        assert_eq!(pointed.shapes.len(), 3, "two source rings and one target ring");
+
+        let selected = BTreeSet::from([1]);
+        let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+        let mut selected_only = Overlay::default();
+        canvas.build_modulation_lines(&State::default(), &mut selected_only);
+        assert_eq!(selected_only.cables.len(), 1);
+        assert!(selected_only.shapes.is_empty());
+    }
+
+    /// Toggling one assignment updates its line cache without changing
+    /// the scene generation used for tiles and cables (#197).
+    #[test]
+    fn assignment_state_updates_only_modulation_overlay() {
+        let (mut scene, _) = modulated_scene();
+        let geometry = scene.generation();
+        let lines = scene.overlay_generation();
+        scene.set_modulation_enabled(1, false);
+        assert_eq!(scene.generation(), geometry);
+        assert_ne!(scene.overlay_generation(), lines);
+        assert!(!scene.modulations()[0].enabled);
     }
 
     /// A drag on the ring around a modulated knob changes depth, up to
@@ -4106,7 +4318,21 @@ mod tests {
             modifiers,
         });
         let end = drive(&canvas, &mut state, &up, knob);
-        assert_eq!(end, vec![CanvasEvent::GestureEnd]);
+        assert!(end.is_empty(), "{end:?}");
+        let quick = drive(&canvas, &mut state, &arrow_up(), knob);
+        assert!(
+            quick.iter().all(|e| !matches!(e, CanvasEvent::GestureStart)),
+            "{quick:?}"
+        );
+        assert!(drive(&canvas, &mut state, &up, knob).is_empty());
+        let due = state.arrow_deadline.expect("a release schedules the end");
+        let end = drive(
+            &canvas,
+            &mut state,
+            &Event::Window(window::Event::RedrawRequested(due)),
+            knob,
+        );
+        assert!(end.contains(&CanvasEvent::GestureEnd), "{end:?}");
     }
 
     /// A right press and release at `at`, with no move in between.
