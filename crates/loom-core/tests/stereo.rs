@@ -189,6 +189,44 @@ fn a_stereo_loop_with_an_inserted_delay_keeps_each_side_apart() {
     check_stereo_loop(false);
 }
 
+/// A mono feedback delay keeps its held sample when the loop becomes stereo.
+#[test]
+fn feedback_delays_keep_the_mono_state_when_the_loop_becomes_stereo() {
+    for (explicit_delay, block) in [false, true]
+        .into_iter()
+        .flat_map(|explicit| BLOCKS.map(|block| (explicit, block)))
+    {
+        let mut parts = engine(512);
+        let mono = add(&mut parts, "test.mono-ramp");
+        let pair = add(&mut parts, "test.pair");
+        let sum = add(&mut parts, "test.add");
+        let split = add(&mut parts, "test.split");
+        parts.controller.set_param_named(pair, "left", 0.25).unwrap();
+        parts.controller.set_param_named(pair, "right", 0.25).unwrap();
+        connect(&mut parts, mono, "out", sum, "a");
+        if explicit_delay {
+            let delay = add(&mut parts, "test.delay1");
+            connect(&mut parts, sum, "out", delay, "in");
+            connect(&mut parts, delay, "out", sum, "b");
+        } else {
+            connect(&mut parts, sum, "out", sum, "b");
+        }
+        connect(&mut parts, sum, "out", split, "in");
+        let mut capture = Capture::new(&mut parts, &[(split, "left"), (split, "right")]);
+        parts.controller.commit().unwrap();
+        capture.render(&mut parts, 128, block);
+        assert_ne!(capture.get(0)[127], 0.0);
+        connect(&mut parts, pair, "out", sum, "a");
+        parts.controller.commit().unwrap();
+        capture.render(&mut parts, 64, block);
+        assert_eq!(
+            &capture.get(0)[128..],
+            &capture.get(1)[128..],
+            "explicit delay: {explicit_delay}, block: {block}"
+        );
+    }
+}
+
 /// Stereo entering only a downmix input leaves the feedback loop mono.
 #[test]
 fn downmixed_stereo_input_in_a_mono_feedback_loop() {

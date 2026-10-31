@@ -278,7 +278,7 @@ pub fn update_panel_values_dragging(
                             position,
                             peak,
                             right,
-                            text: display_text(d, w, position),
+                            text: display_text(d, w, position, right),
                             ..WidgetValue::default()
                         }
                     }
@@ -310,17 +310,23 @@ fn driven_run(controller: &Controller, id: ModuleId, w: &loom_core::Widget) -> O
 /// The value line of a light's or meter's hover text: the label and the
 /// value. A light shows its brightness as a number, or "lit" and "dark" for
 /// a trigger. A meter shows its RMS level in dB.
-fn display_text(d: &ModuleDescriptor, w: &loom_core::Widget, position: f32) -> String {
+fn display_text(d: &ModuleDescriptor, w: &loom_core::Widget, position: f32, right: Option<(f32, f32)>) -> String {
     if w.kind == WidgetKind::Scope {
         // The trace is the value.
         return String::new();
     }
     if w.kind == WidgetKind::Meter {
         let label = d.outputs.iter().find(|p| p.name == w.bind).map_or(w.bind, |p| p.label);
-        return if position > 0.0 {
-            format!("{label}: {:.1} dB", crate::live::position_db(position))
-        } else {
-            format!("{label}: below -60 dB")
+        let level = |position| {
+            if position > 0.0 {
+                format!("{:.1} dB", crate::live::position_db(position))
+            } else {
+                "below -60 dB".to_string()
+            }
+        };
+        return match right {
+            Some((rms, _)) => format!("{label}: L {}, R {}", level(position), level(rms)),
+            None => format!("{label}: {}", level(position)),
         };
     }
     let Some(display) = d.displays.iter().find(|v| v.name == w.bind) else {
@@ -833,15 +839,26 @@ mod tests {
             .iter()
             .find(|widget| widget.bind == "level")
             .unwrap();
-        assert_eq!(display_text(envelope, level, 0.5), "Level: 0.50");
+        assert_eq!(display_text(envelope, level, 0.5, None), "Level: 0.50");
         let divide = &loom_modules::logic::DIVIDE;
-        assert_eq!(display_text(divide, &divide.panel.widgets[2], 0.4), "Fired: lit");
-        assert_eq!(display_text(divide, &divide.panel.widgets[2], 0.0), "Fired: dark");
+        assert_eq!(display_text(divide, &divide.panel.widgets[2], 0.4, None), "Fired: lit");
+        assert_eq!(display_text(divide, &divide.panel.widgets[2], 0.0, None), "Fired: dark");
         let meter = &loom_modules::display::METER;
-        assert_eq!(display_text(meter, &meter.panel.widgets[0], 0.8), "Out: -12.0 dB");
-        assert_eq!(display_text(meter, &meter.panel.widgets[0], 0.0), "Out: below -60 dB");
+        assert_eq!(display_text(meter, &meter.panel.widgets[0], 0.8, None), "Out: -12.0 dB");
+        assert_eq!(
+            display_text(meter, &meter.panel.widgets[0], 0.0, None),
+            "Out: below -60 dB"
+        );
+        assert_eq!(
+            display_text(meter, &meter.panel.widgets[0], 0.0, Some((0.8, 0.9))),
+            "Out: L below -60 dB, R -12.0 dB"
+        );
+        assert_eq!(
+            display_text(meter, &meter.panel.widgets[0], 0.8, Some((0.0, 0.0))),
+            "Out: L -12.0 dB, R below -60 dB"
+        );
         // A control has no value line here: its text is the parameter value.
-        assert_eq!(display_text(divide, &divide.panel.widgets[0], 0.5), "");
+        assert_eq!(display_text(divide, &divide.panel.widgets[0], 0.5, None), "");
     }
 
     /// A radio widget reads its names from the parameter (panels.md, Choice
