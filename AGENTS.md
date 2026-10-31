@@ -36,7 +36,7 @@ cargo run --release -p loom-cli -- render examples/patches/subtractive.ron -o /t
 cargo run --release -p loom-app -- examples/patches/fm-feedback.ron   # desktop app
 cargo run --release -p loom-app -- --generate 300 --bench            # canvas frame-rate test
 cargo run --release -p loom-app -- examples/patches/fm-feedback.ron --measure --bench-seconds 10   # frame rate as text, camera still, then exit
-cargo run --release -p loom-app -- examples/patches/subtractive.ron --measure-idle --bench-seconds 10   # frames the idle app draws, with rebuild counts
+cargo run --release -p loom-app -- examples/patches/subtractive.ron --measure-idle --bench-seconds 10   # frames, rebuild counts, causes, and process CPU percent
 cargo run --release -p loom-app -- examples/patches/subtractive.ron --fake-audio --record /tmp/app.wav   # engine runs with no device; output saved until quit, across Open and New
 cargo run --release -p loom-cli -- analyze /tmp/app.wav --from 0.5 --max-peak 0.8913 --max-dc 0.001   # peak, clipping, largest step, DC; exit 1 if a check fails (--json for scripts)
 cargo run --release -p loom-cli -- midi-port "Loom Pad"   # virtual MIDI controller (macOS, Linux); type `on 60`, `off 60`, `wait 500`; start it before the app

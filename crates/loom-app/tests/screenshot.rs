@@ -1,6 +1,8 @@
 //! Smoke test for `loom-app --screenshot` and `--screenshot-window`: they
 //! render an example patch to a PNG file and exit with status 0. Skipped
-//! where no GPU adapter is found.
+//! where no GPU adapter is found, unless `LOOM_REQUIRE_GPU=1` is set: then a
+//! missing adapter fails the test. The macOS and Windows CI jobs set it, so
+//! a skip there cannot pass for a test that drew the canvas (#5).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -11,15 +13,15 @@ fn subtractive() -> PathBuf {
 
 /// The subtractive example with modulation, so it has badges, modulation
 /// lines, and range arcs. Cutoff has two sources, so an arc drag that
-/// picks one changes its arc. Module 11 is a button whose `on` is
+/// picks one changes its arc. Module 12 is a button whose `on` is
 /// modulated, which has no range arc. Written next to the images, as
 /// `name`: tests run in parallel, so each needs its own file.
 fn modulated(name: &str) -> PathBuf {
     let source = std::fs::read_to_string(subtractive()).expect("example patch");
-    let last_module = "PatchModule(id: 9, kind: \"loom.io.audio-out@1\"),";
+    let last_module = "PatchModule(id: 11, kind: \"loom.display.scope@1\", params: {\"window\": 0.005}),";
     let source = source.replace(
         last_module,
-        &format!("{last_module}\n        PatchModule(id: 11, kind: \"loom.ui.button@1\"),"),
+        &format!("{last_module}\n        PatchModule(id: 12, kind: \"loom.ui.button@1\"),"),
     );
     let end = source.rfind(')').expect("a patch ends with `)`");
     let patch = format!(
@@ -27,7 +29,7 @@ fn modulated(name: &str) -> PathBuf {
          (source: (5, \"out\"), target: (4, \"cutoff\"), depth: 0.25),\n        \
          (source: (7, \"out\"), target: (4, \"cutoff\"), depth: -0.5),\n        \
          (source: (7, \"out\"), target: (4, \"resonance\"), depth: 0.4),\n        \
-         (source: (5, \"out\"), target: (11, \"on\"), depth: 1.0),\n    ],\n)\n",
+         (source: (5, \"out\"), target: (12, \"on\"), depth: 1.0),\n    ],\n)\n",
         &source[..end]
     );
     let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(name);
@@ -56,6 +58,12 @@ fn running() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/patches/running.ron")
 }
 
+/// True when `LOOM_REQUIRE_GPU` is set to `1`: a missing GPU adapter is
+/// then a failure, not a skip.
+fn gpu_required() -> bool {
+    std::env::var("LOOM_REQUIRE_GPU").is_ok_and(|value| value == "1")
+}
+
 fn capture(patch: &Path, flag: &str, name: &str, args: &[&str]) -> Option<(u32, u32, Vec<u8>)> {
     let out = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(name);
     let _ = std::fs::remove_file(&out);
@@ -69,6 +77,7 @@ fn capture(patch: &Path, flag: &str, name: &str, args: &[&str]) -> Option<(u32, 
     let stderr = String::from_utf8_lossy(&result.stderr);
     // Must match `screenshot::NO_GPU`.
     if stderr.contains("no GPU adapter") {
+        assert!(!gpu_required(), "LOOM_REQUIRE_GPU is set, but {stderr}");
         eprintln!("skipped: {stderr}");
         return None;
     }
@@ -247,7 +256,7 @@ fn an_unknown_control_fails() {
 
 #[test]
 fn a_depth_drag_needs_a_knob() {
-    let error = fails(&modulated("modulated-knob.ron"), &["--depth", "11:on"]);
+    let error = fails(&modulated("modulated-knob.ron"), &["--depth", "12:on"]);
     assert!(error.contains("is not a knob"), "{error}");
 }
 

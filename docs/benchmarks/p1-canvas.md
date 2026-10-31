@@ -28,7 +28,7 @@ One custom wgpu primitive draws the whole canvas, in this order:
 5. Ports, then outlines for selection and hover, and the selection box.
 6. Text, through Iced, on top.
 
-Tile, port, and cable data is built on the CPU and uploaded only when the scene changes. Panning and zooming change one 32-byte uniform buffer. Without the **Measure** toggle, the window redraws only on input and a twice-a-second stats refresh.
+Tile, port, and cable data is built on the CPU and uploaded only when the scene changes. Panning and zooming change one 32-byte uniform buffer. Without the **Measure** toggle, the window redraws only when visible state changes.
 
 ## How to measure (reference laptop)
 
@@ -56,9 +56,11 @@ Each line is `key=value` pairs separated by spaces. The numbers come from the ca
 
 - `fps` and `avg_ms`: frames in the last second, and the average time between them. On the final line, from the first line to the end, so start-up is left out.
 - `worst_ms`: the longest gap between two frames since the start, after the first 10.
-- `frames`, `scene_builds`, `control_builds`, `scene_uploads`, `control_uploads`, `overlay_uploads`: totals since the start. A still or moving camera should build and upload the scene once. A knob turn adds control builds and uploads, never scene builds.
+- `frames`, `scene_builds`, `control_builds`, `scene_uploads`, `control_uploads`, `overlay_uploads`, `trace_uploads`: totals since the start. A still or moving camera should build and upload the scene once. A knob turn adds control builds and uploads, never scene builds. A moving scope trace adds trace uploads only.
 
-**Idle.** `--measure` and `--bench` redraw every frame, so they measure drawing cost. `--measure-idle` prints the same lines without forcing a redraw: it counts only the frames the app draws by itself. The report runs on its own thread and sends the app no messages, so it adds no frames. An idle patch should print `frames=0` (the panels spec, Redraw). Today it prints about 2 frames a second, from the stats bar refresh ([#90](https://github.com/brylie/LoomDSP/issues/90)):
+**Idle.** `--measure` and `--bench` redraw every frame, so they measure drawing cost. `--measure-idle` prints the same lines without forcing a redraw: it counts only the frames the app draws by itself. The report runs on its own thread and sends the app no messages, so it adds no frames. An idle patch prints `frames=0` after the first second (the panels spec, Redraw). Until [#90](https://github.com/brylie/LoomDSP/issues/90) it printed 4 to 7 frames a second, from the stats bar timer and the device polls:
+
+Each line also prints `causes=tick:N,live:N,meters:N,control:N,input:N,redraw:N,forced:N,other:N` as totals since the report began. A frame can count under several causes. `cpu=N.N` is the whole process's user plus system CPU time during that line's interval, as a percentage of one core. The final line covers the full measured interval. See [frame meter](../design/frame-meter.md).
 
 ```sh
 cargo run --release -p loom-app -- examples/patches/subtractive.ron --measure-idle --bench-seconds 10
