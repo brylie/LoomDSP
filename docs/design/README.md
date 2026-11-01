@@ -88,3 +88,5 @@ Copy [template.md](template.md). Keep it to one feature. Link the ADR, requireme
 | [Release downloads](releases.md) | [ADR-0027](../adr/0027-prebuilt-release-downloads.md) | Agreed, P1 |
 | [Unknown modules](unknown-modules.md) | None (builds on [ADR-0008](../adr/0008-patch-format-ron.md)) | Agreed, P1 |
 | [Frame meter](frame-meter.md) | None (extends the [P1 canvas benchmarks](../benchmarks/p1-canvas.md)) | Agreed, developer tooling |
+| [Sub-patches](sub-patches.md) | [ADR-0029](../adr/0029-sub-patches-stored-as-definitions-and-flattened.md), [ADR-0017](../adr/0017-primitives-traits-and-abstractions.md) | Agreed, P2 |
+| [Module data](module-data.md) | [ADR-0030](../adr/0030-module-data-in-typed-slots.md), [ADR-0024](../adr/0024-widgets-follow-the-kind-of-value.md) | Agreed; buffer data P1, rest P2 |

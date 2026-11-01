@@ -439,7 +439,7 @@ This is a plan. Each widget gets its own acceptance criteria when its section be
 - Building any widget. This document only plans them.
 - Themes, skins, and custom images (FR-PANEL-06, FR-PANEL-07).
 - The panel editor ([#76](https://github.com/brylie/LoomDSP/issues/76)). It places these widgets; it does not change how they work.
-- The format of module data in the patch file, and how it reaches the engine. That is [#50](https://github.com/brylie/LoomDSP/issues/50) (OQ-17). This document only names the three data kinds and their limits.
+- The format of module data in the patch file, and how it reaches the engine. That is the [module data](module-data.md) specification ([ADR-0030](../adr/0030-module-data-in-typed-slots.md)). This document only names the three data kinds and their limits.
 - Touch gestures.
 
 ## Open points
@@ -457,4 +457,3 @@ This is a plan. Each widget gets its own acceptance criteria when its section be
 - **Tunings with more than 64 notes per octave.** A pattern lane holds 64 cells, enough for 53 equal divisions of the octave. Larger tunings, such as 72 divisions, would need a longer lane. Leaning: wait until someone asks.
 - **Polar views.** A polar view on the XY scope, where the angle shows the balance between the two sides and the distance shows level, could show a stereo field more plainly than the mid and side view. A polar XY pad (angle and distance) suits the spatialiser (MT-FX-10). Leaning: decide when the spatialiser is designed, since each view has only one clear user today.
 - **Slow history.** A display value drawn over seconds or bars, for a random walk, a slew, or an envelope follower ([#97](https://github.com/brylie/LoomDSP/issues/97)). Leaning: a long time window on the scope, fed by display values instead of audio samples, so it costs little.
-- **Wavetables and FR-LIB-02.** FR-LIB-02 lists a wavetable reader in P1, but buffer data is planned for P2 ([#288](https://github.com/brylie/LoomDSP/issues/288)). Either move the wavetable reader to P2 in FR-LIB-02, or bring buffer data forward. Decide in #278.
