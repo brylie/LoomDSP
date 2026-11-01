@@ -194,6 +194,15 @@ pub enum CanvasEvent {
         /// inside it.
         area: Rectangle,
     },
+    /// A tile was right-clicked without moving.
+    TileMenu {
+        /// The module under the pointer.
+        module: u32,
+        /// Menu position in window coordinates.
+        at: Point,
+        /// Canvas area for positioning the menu.
+        area: Rectangle,
+    },
     /// Ctrl+V or Cmd+V: paste the clipboard (`docs/design/clipboard.md`).
     /// `world` is the pointer when it is over the canvas, and the centre of
     /// the view when it is not, in world units, not yet snapped.
@@ -2465,6 +2474,17 @@ impl<Message> PatchCanvas<'_, Message> {
                 ),
                 None => return,
             },
+            Hit::Module(module) => {
+                self.emit(
+                    shell,
+                    CanvasEvent::TileMenu {
+                        module,
+                        at: Point::new(bounds.x + screen.x, bounds.y + screen.y),
+                        area: bounds,
+                    },
+                );
+                return;
+            }
             _ => return,
         };
         self.emit(
@@ -5610,7 +5630,7 @@ mod tests {
         assert!(matches!(right.as_slice(), [CanvasEvent::ProbeMenu { .. }]), "{right:?}");
     }
 
-    /// A tile, an input, empty canvas, and a middle click open no menu.
+    /// A tile opens its menu; an input, empty canvas, and middle click do not.
     #[test]
     fn right_click_elsewhere_opens_no_menu() {
         let scene = chain();
@@ -5624,7 +5644,11 @@ mod tests {
             })
             .unwrap();
         let tile = scene.module(1).unwrap().bounds().center();
-        for at in [input, tile, Point::new(300.0, 500.0)] {
+        assert!(matches!(
+            right_click(&canvas, &mut State::default(), tile).as_slice(),
+            [CanvasEvent::TileMenu { module: 1, .. }]
+        ));
+        for at in [input, Point::new(300.0, 500.0)] {
             let events = right_click(&canvas, &mut State::default(), at);
             assert!(events.is_empty(), "{at:?}: {events:?}");
         }

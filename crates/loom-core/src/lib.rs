@@ -16,6 +16,7 @@
 
 #![warn(missing_docs)]
 
+pub mod audio_input;
 mod compile;
 mod controller;
 mod descriptor;
@@ -43,7 +44,7 @@ pub use descriptor::{
     SpecKind, Undocumented, Widget, WidgetKind, assert_documented,
 };
 pub use display::{DisplayReader, DisplaySource, TriggerFlag};
-pub use engine::{Engine, EngineConfig, EngineStats};
+pub use engine::{Engine, EngineConfig, EngineStats, RestartFadeSender};
 pub use error::LoomError;
 pub use graph::{Assignment, AssignmentId, Graph, InputRef, ModuleId, Node, OutputRef, UnknownModule};
 pub use midi::{MAX_MIDI_INPUTS, MidiEvent, MidiInputId, MidiMessage};

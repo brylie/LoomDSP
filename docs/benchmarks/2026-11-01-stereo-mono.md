@@ -9,3 +9,5 @@ On 2026-11-01, the mono add-chain benchmark ran on the same macOS arm64 machine 
 | 50 | 19.538 µs | 19.496 µs |
 
 These measurements show no material change for these mono chains. They do not measure every patch or device. The baseline's two Audio Out ports were both connected; the new Audio Out duplicates its mono input. Run the benchmark with `cargo bench -p loom-modules --bench engine -- feedback/add/chain`.
+
+After adding the stream-restart command queue, the one-module chain measured 2.231 µs without the queue and 2.252 µs with it installed (50 samples, two seconds of warmup, five seconds of measurement). The comparison did not detect a statistically significant change. This checks the extra host path as well as the plain engine.

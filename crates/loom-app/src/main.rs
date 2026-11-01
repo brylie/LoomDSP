@@ -17,6 +17,8 @@ mod edits;
 #[cfg(test)]
 mod example_tests;
 mod files;
+mod help;
+mod input_watch;
 mod inspector;
 mod layout;
 mod learn;
@@ -122,6 +124,9 @@ struct Args {
     /// inspector shows it. Repeat to select several.
     #[arg(long, value_name = "MODULE", requires = "inspect")]
     select: Vec<u32>,
+    /// With --dump-ui or --screenshot-window, open help for the selected tile.
+    #[arg(long, requires_all = ["inspect", "select"])]
+    show_help: bool,
     /// With --dump-ui or --screenshot-window: first run the engine for N
     /// frames at 48 kHz on silent input, so live values, lights, and meters
     /// show where the engine left them.
@@ -230,6 +235,18 @@ enum Message {
     },
     /// The toolbar asks for the module browser at the centre of the canvas.
     OpenBrowser,
+    /// Open help for the browser highlight or selected tile.
+    ShowHelp,
+    /// Open help for a specific tile.
+    ShowModuleHelp(u32),
+    /// Close module help.
+    CloseHelp,
+    /// Open the current help example as a patch.
+    HelpExample,
+    /// A link in bundled help was selected.
+    HelpLink(String),
+    /// Close the tile menu.
+    CloseTileMenu,
     /// A message for the open module browser.
     Browser(browser::Message),
     /// A message for the open probe menu.
@@ -252,6 +269,8 @@ enum Message {
     MidiPoll,
     /// Look for audio device loss, silent stalls, and reconnects (`docs/design/device-changes.md`).
     AudioPoll,
+    /// Audio input counters or stream health changed.
+    InputAudio(input_watch::Event),
     /// File commands (`docs/design/files.md`).
     New,
     Open,
@@ -426,6 +445,7 @@ impl Message {
         matches!(
             self,
             Self::Audio(audio_watch::Event::Stats { .. })
+                | Self::InputAudio(_)
                 | Self::Tick
                 | Self::Meters(_)
                 | Self::Telemetry(_)
@@ -550,6 +570,8 @@ struct App {
     live: Live,
     /// When the dropout count last grew, for the stats bar warning.
     dropouts: alerts::Dropouts,
+    /// Input drift warnings while recently active.
+    input_alert: Option<(u64, u64)>,
     /// What belongs to the machine: preferences, devices, MIDI inputs.
     rig: settings::Rig,
     audio_stats: Option<Arc<CallbackStats>>,
@@ -571,6 +593,10 @@ struct App {
     modules: Vec<&'static ModuleDescriptor>,
     /// The module browser, while it is open.
     browser: Option<browser::Browser>,
+    /// Open module help.
+    help: Option<help::Help>,
+    /// Right-clicked tile and its menu position.
+    tile_menu: Option<(u32, Point)>,
     /// Changed by the toolbar button; the canvas then opens the browser at
     /// its centre.
     browser_key: u64,
@@ -1063,6 +1089,7 @@ impl App {
                 live
             },
             dropouts: alerts::Dropouts::default(),
+            input_alert: None,
             rig,
             audio_name,
             midi,
@@ -1075,6 +1102,8 @@ impl App {
                 loom_modules::registry().iter().collect()
             },
             browser: None,
+            help: None,
+            tile_menu: None,
             browser_key: 0,
             probe_menu: None,
             frame_key: 0,
@@ -1102,6 +1131,7 @@ impl App {
         };
         // A stream that failed to start took the engine with it.
         app.keep_engine_idle();
+        app.sync_audio_input();
         app.send_panic_trigger();
         if let Some(error) = app.connect_midi(first_midi, connect_midi) {
             app.status = error;
@@ -1281,6 +1311,7 @@ impl App {
             view: screenshot::Options::default(),
             dump_ui: false,
             select: Vec::new(),
+            show_help: false,
             frames: None,
             hold_note: false,
             recovery_dir: None,
@@ -1378,6 +1409,43 @@ impl App {
             .map(Message::Audio),
             None => Subscription::none(),
         };
+        let input_watch = self.rig.input.as_ref().map(|input| {
+            let stats = self.controller.stats().clone();
+            let tracker = self
+                .rig
+                .input_tracker
+                .as_ref()
+                .expect("open input has drift tracker")
+                .clone();
+            Subscription::run_with(
+                input_watch::Watch {
+                    status: input.status(),
+                    stats,
+                    tracker,
+                    device: input.name().to_string(),
+                    system_default: self.rig.flags.input.is_none()
+                        && matches!(
+                            self.rig.store.saved().audio.input,
+                            preferences::InputChoice::SystemDefault
+                        ),
+                    list: self.rig.host.audio_input_lister(),
+                    permission_denied: self.rig.host.audio_input_permission_checker(),
+                    active: self
+                        .controller
+                        .graph()
+                        .nodes()
+                        .filter_map(|(id, node)| {
+                            (node.descriptor.id == "loom.io.audio-in")
+                                .then(|| self.controller.display_source(id, 0))
+                                .flatten()
+                        })
+                        .collect(),
+                    displays: self.controller.display_reader(),
+                },
+                input_watch::stream,
+            )
+            .map(Message::InputAudio)
+        });
         // Live modulated values move every block, so a patch with an
         // assignment that is on follows them every frame.
         // Without audio the engine does not run, so nothing moves.
@@ -1430,7 +1498,17 @@ impl App {
         // While audio plays, the audio watcher reports stalled callbacks.
         // Once a device is lost, reconnection is tried by polling four
         // times a second (device-changes.md, Audio device loss).
-        let audio_poll = if !self.no_audio && !self.fake_audio && self._audio.is_none() {
+        let waiting_for_input = self.rig.input.is_none()
+            && self._audio.is_some()
+            && !self.rig.flags.no_input
+            && (self.rig.flags.input.is_some()
+                || !matches!(self.rig.store.saved().audio.input, preferences::InputChoice::Off))
+            && self
+                .controller
+                .graph()
+                .nodes()
+                .any(|(_, node)| node.descriptor.id == "loom.io.audio-in");
+        let audio_poll = if !self.no_audio && !self.fake_audio && (self._audio.is_none() || waiting_for_input) {
             iced::time::every(Duration::from_millis(250)).map(|_| Message::AudioPoll)
         } else {
             Subscription::none()
@@ -1454,7 +1532,8 @@ impl App {
                 audio_poll,
             ]
             .into_iter()
-            .chain(control),
+            .chain(control)
+            .chain(input_watch),
         )
     }
 
@@ -1477,7 +1556,8 @@ impl App {
             .then(|| iced::event::listen_with(matrix::key_listener));
         // The search field takes Escape for itself, so the browser listens
         // to keys whether or not a widget used them.
-        let browser = self.browser.is_some().then(|| iced::event::listen_with(browser_key));
+        let browser = (self.browser.is_some() && self.help.is_none()).then(|| iced::event::listen_with(browser_key));
+        let help_keys = Some(iced::event::listen_with(help_key));
         // The panic key works whatever has focus (panic.md).
         let panic = Some(iced::event::listen_with(panic::key));
         Subscription::batch(
@@ -1486,6 +1566,7 @@ impl App {
                 .chain(keys)
                 .chain(matrix_keys)
                 .chain(browser)
+                .chain(help_keys)
                 .chain(panic),
         )
     }
@@ -1833,6 +1914,7 @@ impl App {
             self.status = format!("error: {e}");
         }
         self.edits.touch(module, index);
+        self.sync_audio_input();
         self.refresh_values();
     }
 
@@ -2126,6 +2208,7 @@ impl App {
                 false
             }
         };
+        self.sync_audio_input();
         self.refresh();
         sent
     }
@@ -2149,6 +2232,7 @@ impl App {
             self.autosave_settled = false;
         }
         let was_open = self.browser.is_some();
+        let was_help_open = self.help.is_some();
         let task = match message {
             Message::Browser(message) => self.browser_message(message),
             Message::Canvas(CanvasEvent::Paste { world }) => {
@@ -2232,7 +2316,7 @@ impl App {
                 session.finish();
             }
             Task::batch([task, iced::exit()])
-        } else if !was_open && self.browser.is_some() {
+        } else if self.browser.is_some() && (!was_open || (was_help_open && self.help.is_none())) {
             Task::batch([task, browser::Browser::focus()])
         } else {
             task
@@ -2324,6 +2408,60 @@ impl App {
         match message {
             // `update` runs these: they return tasks.
             Message::Browser(_) | Message::Control(_) | Message::ControlFrame(_) | Message::Located { .. } => {}
+            Message::ShowHelp => {
+                if self.help.is_none() && self.rig.window.is_none() {
+                    let descriptor = self
+                        .browser
+                        .as_ref()
+                        .and_then(browser::Browser::highlighted)
+                        .or_else(|| {
+                            (self.browser.is_none() && self.selection.len() == 1)
+                                .then(|| {
+                                    self.selection
+                                        .iter()
+                                        .next()
+                                        .and_then(|id| self.controller.graph().node(ModuleId(*id)))
+                                        .map(|node| node.descriptor)
+                                })
+                                .flatten()
+                        });
+                    self.help = descriptor.map(help::Help::new);
+                }
+            }
+            Message::ShowModuleHelp(id) => {
+                self.tile_menu = None;
+                self.help = self
+                    .controller
+                    .graph()
+                    .node(ModuleId(id))
+                    .map(|node| help::Help::new(node.descriptor));
+            }
+            Message::CloseHelp => self.help = None,
+            Message::HelpExample => {
+                let example = self.help.as_ref().and_then(|help| help.model.example.clone());
+                if let Some(example) = example {
+                    match Patch::from_ron(&example) {
+                        Ok(patch) if self.can_discard() => {
+                            self.replace(Source::Recovered(Box::new(patch)));
+                        }
+                        Ok(_) => {}
+                        Err(error) => self.status = format!("Could not open example: {error}"),
+                    }
+                }
+            }
+            Message::HelpLink(link) => {
+                let descriptor = link
+                    .strip_suffix(".md")
+                    .and_then(|id| self.modules.iter().find(|d| d.id == id))
+                    .copied();
+                if let Some(descriptor) = descriptor {
+                    self.help = Some(help::Help::new(descriptor));
+                } else {
+                    self.status = format!("Linked document is not bundled: {link}");
+                }
+            }
+            Message::CloseTileMenu => self.tile_menu = None,
+            Message::Key(_) if self.help.is_some() => {}
             Message::Matrix(event) => self.matrix_event(event),
             Message::MatrixKey(key) => self.matrix_key(key),
             Message::Preferences(message) => self.preferences(message),
@@ -2350,6 +2488,12 @@ impl App {
                 }
             }
             Message::Key(_) if self.probe_menu.is_some() => {}
+            Message::Key(iced::keyboard::Event::KeyPressed { key, .. }) if self.tile_menu.is_some() => {
+                if key == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) {
+                    self.tile_menu = None;
+                }
+            }
+            Message::Key(_) if self.tile_menu.is_some() => {}
             Message::ProbeMenu(message) => {
                 if let (Some(menu), probe_menu::Message::Pick(probe)) = (self.probe_menu.take(), message) {
                     self.add_probe(probe, menu.output, menu.world);
@@ -2530,13 +2674,24 @@ impl App {
                 self.controller.collect_garbage();
                 self.update_dropouts(now);
             }
-            Message::LiveFrame => scene::update_live_values(&mut self.values, &self.controller),
+            Message::LiveFrame => {
+                scene::update_live_values(&mut self.values, &self.controller);
+                if !self.rig.input_warned && self.rig.input.is_some() {
+                    self.sync_audio_input();
+                }
+            }
             Message::Autosave => self.autosave(Instant::now()),
             Message::Tick => {
                 self.controller.collect_garbage();
                 self.update_dropouts(Instant::now());
             }
             Message::AudioPoll => self.poll_audio(),
+            Message::InputAudio(event) => {
+                self.input_alert = event.show.then_some((event.underruns, event.overruns));
+                if event.failed || event.ready {
+                    self.sync_audio_input();
+                }
+            }
             Message::Audio(audio_watch::Event::Stats {
                 dropouts,
                 at,
@@ -2580,6 +2735,7 @@ impl App {
             }
             Message::Lights(readings) => {
                 self.lights.extend(readings);
+                self.sync_audio_input();
                 self.refresh_values();
             }
             Message::ToggleLearn => {
@@ -2611,7 +2767,10 @@ impl App {
                     Err(e) => app.status = format!("error: {e}"),
                 });
             }
-            Message::Midi => self.midi_arrived(),
+            Message::Midi => {
+                self.midi_arrived();
+                self.sync_audio_input();
+            }
             Message::Pasted {
                 world,
                 text,
@@ -2848,6 +3007,15 @@ impl App {
                 self.close_slider_gesture();
                 self.probe_menu = Some(probe_menu::ProbeMenu::open(output, world, at, area));
             }
+            CanvasEvent::TileMenu { module, at, area } => {
+                self.tile_menu = Some((
+                    module,
+                    Point::new(
+                        at.x.min(area.x + area.width - 140.0).max(area.x),
+                        at.y.min(area.y + area.height - 36.0).max(area.y),
+                    ),
+                ));
+            }
             CanvasEvent::OpenBrowser { world, at, area } => {
                 self.close_slider_gesture();
                 self.browser = Some(browser::Browser::open(self.modules.clone(), world, at, area));
@@ -3071,7 +3239,13 @@ impl App {
             .activity(self.carrying.iter().map(|output| (output.module.0, output.port)))
             .frame_key(self.frame_key)
             .browser_key(self.browser_key)
-            .interactive(self.browser.is_none() && self.probe_menu.is_none() && self.rig.window.is_none())
+            .interactive(
+                self.browser.is_none()
+                    && self.probe_menu.is_none()
+                    && self.tile_menu.is_none()
+                    && self.help.is_none()
+                    && self.rig.window.is_none(),
+            )
             .matrix_line(self.matrix_line())
             .matrix_keyboard(self.matrix.tab == RightTab::Matrix && self.matrix.focused)
             .matrix_escape(
@@ -3120,12 +3294,26 @@ impl App {
                 .on_right_press(Message::ProbeMenu(probe_menu::Message::Close));
             layers = layers.push(outside).push(menu.view().map(Message::ProbeMenu));
         }
+        if let Some((module, at)) = self.tile_menu {
+            let outside = mouse_area(space().width(Length::Fill).height(Length::Fill))
+                .on_press(Message::CloseTileMenu)
+                .on_right_press(Message::CloseTileMenu);
+            let menu = container(button("Help").on_press(Message::ShowModuleHelp(module)).width(140))
+                .padding(4)
+                .style(container::rounded_box);
+            layers = layers
+                .push(outside)
+                .push(iced::widget::pin(iced::widget::opaque(menu)).position(at));
+        }
+        if let Some(help) = &self.help {
+            layers = layers.push(iced::widget::opaque(help.view(self.theme())));
+        }
         if let Some(window) = self.preferences_view() {
             layers = layers.push(window);
         }
         // The control channel's pointer events go in here, as a real
         // pointer's would (control-channel.md, Pointer commands).
-        let browser_open = self.browser.is_some();
+        let browser_open = self.browser.is_some() && self.help.is_none();
         let matrix_keys = self.matrix.tab == RightTab::Matrix && self.matrix.focused;
         pointer::Injector::new(layers, self, move |key, status| {
             // As the subscriptions do: `keyboard::listen` passes on what no
@@ -3138,6 +3326,9 @@ impl App {
                 messages.push(message);
             }
             if let Some(message) = panic::key(iced::Event::Keyboard(key.clone()), status, iced::window::Id::unique()) {
+                messages.push(message);
+            }
+            if let Some(message) = help_key(iced::Event::Keyboard(key.clone()), status, iced::window::Id::unique()) {
                 messages.push(message);
             }
             if browser_open
@@ -3273,6 +3464,12 @@ impl App {
             let dropouts = bar_text(format!("dropouts {}", stats.dropouts))
                 .color(severity_colour(self.dropouts.severity(Instant::now())));
             let mut items = row![bar_text(stats.label).color(DIM), load, dropouts].spacing(10);
+            if let Some((underruns, overruns)) = stats.input_alert {
+                items = items.push(
+                    bar_text(format!("input underruns {underruns}, overruns {overruns}"))
+                        .color(severity_colour(alerts::Severity::Warning)),
+                );
+            }
             if stats.telemetry_dropped > 0 {
                 items = items.push(bar_text(format!("telemetry dropped {}", stats.telemetry_dropped)).color(DIM));
             }
@@ -3373,6 +3570,22 @@ Click a modulation badge to pin its lines; click again or press Escape to hide t
 Cmd/Ctrl+C copies, X cuts, V pastes at the pointer, and D duplicates the selection.\n\
 Cmd/Ctrl+Z undoes, and Cmd/Ctrl+Shift+Z redoes.\n\
 MIDI learn: click a control, then move a knob on your controller. Escape ends it.";
+
+/// F1 and Escape reach help even while a text field has focus.
+fn help_key(event: iced::Event, _status: iced::event::Status, _window: iced::window::Id) -> Option<Message> {
+    use iced::keyboard::{Event, Key, key::Named};
+    match event {
+        iced::Event::Keyboard(Event::KeyPressed {
+            key: Key::Named(Named::F1),
+            ..
+        }) => Some(Message::ShowHelp),
+        iced::Event::Keyboard(Event::KeyPressed {
+            key: Key::Named(Named::Escape),
+            ..
+        }) => Some(Message::CloseHelp),
+        _ => None,
+    }
+}
 
 /// The keys the open browser handles, whether or not a widget used them.
 fn browser_key(event: iced::Event, _status: iced::event::Status, _window: iced::window::Id) -> Option<Message> {
@@ -3558,6 +3771,7 @@ mod tests {
             view: screenshot::Options::default(),
             dump_ui: false,
             select: Vec::new(),
+            show_help: false,
             frames: None,
             hold_note: false,
             recovery_dir: None,

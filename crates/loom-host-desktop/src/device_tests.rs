@@ -57,13 +57,22 @@ fn callbacks(options: &AudioOptions) -> Option<u64> {
 
 /// Plays `examples/dev/check-dc.ron` (a Constant of 0.5, output safety
 /// Off) into the loopback device named by `LOOM_LOOPBACK` with buffers
-/// of [`LOOPBACK_BUFFER`] frames at [`LOOPBACK_RATE`], captures the loopback's input side, and stops
+/// of [`LOOPBACK_BUFFER`] frames at `rate`, captures the loopback's input side, and stops
 /// the stream with `stop` after a fade-out request. `stop` returns true if
 /// the stream stopped on the engine's silence, false if it was cut at the
 /// limit; the answer is printed, so a failed check says which it was.
 /// Returns the captured left channel and the sample rate, or `None` when
 /// `LOOM_LOOPBACK` is not set.
-fn capture_a_stop(stop: impl FnOnce(RunningAudio) -> bool) -> Option<(Vec<f32>, u32)> {
+fn capture_a_stop(rate: u32, stop: impl FnOnce(RunningAudio) -> bool) -> Option<(Vec<f32>, u32)> {
+    capture_a_stop_with_input_rate(rate, rate, stop).map(|(samples, rate, _, _)| (samples, rate))
+}
+
+/// Captures a stream while allowing the input and output to request different rates.
+fn capture_a_stop_with_input_rate(
+    rate: u32,
+    input_rate: u32,
+    stop: impl FnOnce(RunningAudio) -> bool,
+) -> Option<(Vec<f32>, u32, StatsSnapshot, CaptureReport)> {
     // Two tests playing into one loopback at once would hear each
     // other, so one capture runs at a time. A failed test poisons the
     // lock; the next one still runs.
@@ -73,15 +82,18 @@ fn capture_a_stop(stop: impl FnOnce(RunningAudio) -> bool) -> Option<(Vec<f32>, 
     let options = AudioOptions {
         device: Some(loopback),
         exact: false,
-        sample_rate: Some(LOOPBACK_RATE),
+        sample_rate: Some(rate),
         buffer_size: Some(LOOPBACK_BUFFER),
     };
-    let output = or_skip(AudioOutput::open(&options))?;
+    let mut output = or_skip(AudioOutput::open(&options))?;
     let rate = output.sample_rate();
     let dir = record::TestDir::new(&format!("capture-{:?}", std::thread::current().id()));
     let path = dir.0.join("capture.wav");
+    let rendered_path = dir.0.join("rendered.wav");
+    let recorder = Recorder::start(&rendered_path, rate).expect("create engine recording");
+    output.record(&recorder).expect("record at the output rate");
     let input = AudioOptions {
-        sample_rate: Some(rate),
+        sample_rate: Some(input_rate),
         buffer_size: None,
         ..options
     };
@@ -117,18 +129,38 @@ fn capture_a_stop(stop: impl FnOnce(RunningAudio) -> bool) -> Option<(Vec<f32>, 
     // Long enough for the device to play out what it was handed.
     std::thread::sleep(Duration::from_millis(400));
     let report = capture.stop().unwrap();
+    assert_eq!(recorder.dropped(), 0, "engine recording kept every frame");
+    assert!(recorder.close().is_none(), "engine recording closed cleanly");
     // A dropout with no error on either side happened in the device
     // (for example the PipeWire graph), not in LoomDSP's callbacks.
     let s = stats.snapshot();
     eprintln!(
-        "output: {} callbacks, {} overruns, {} stream errors, {} start overloads; capture: {} frames, {} stream errors",
-        s.callbacks, s.overruns, s.stream_errors, s.start_overloads, report.frames, report.stream_errors
+        "output: {} callbacks, {} overruns, {} stream errors, {} start overloads, rate switched {}, {} start restarts; capture: {} frames, {} stream errors",
+        s.callbacks,
+        s.overruns,
+        s.stream_errors,
+        s.start_overloads,
+        s.start_rate_switched,
+        s.start_restarts,
+        report.frames,
+        report.stream_errors
     );
     assert_eq!(report.dropped, 0, "no frame was dropped");
 
+    let mut rendered = hound::WavReader::open(&rendered_path).unwrap();
+    let rendered: Vec<f32> = rendered.samples::<f32>().step_by(2).map(Result::unwrap).collect();
+    let rendered_level = rendered.iter().fold(0.0f32, |maximum, value| maximum.max(value.abs()));
+    let rendered_step = start_step(&rendered, rendered_level);
+    eprintln!("engine start: level {rendered_level}, largest step {rendered_step}");
+    assert!(rendered_level > 0.01, "the engine rendered sound");
+    assert!(
+        rendered_step <= fade_step(rendered_level, rate),
+        "the engine rendered its fade-in"
+    );
+
     let mut reader = hound::WavReader::open(&path).unwrap();
     let left = reader.samples::<f32>().step_by(2).map(Result::unwrap).collect();
-    Some((left, rate))
+    Some((left, rate, s, report))
 }
 
 /// The level the capture holds, and the largest step of the stop: from
@@ -223,6 +255,294 @@ fn fade_step(level: f32, rate: u32) -> f32 {
     2.0 * level / (loom_core::safety::FADE_SECONDS * rate as f32)
 }
 
+/// Measures the largest step from capture start through the first full level.
+fn start_step(samples: &[f32], level: f32) -> f32 {
+    let held = samples.iter().position(|sample| sample.abs() >= level).unwrap_or(0);
+    largest_step(samples, 0, held).1
+}
+
+/// A missing fade at stream start must be visible even when the stop fades.
+#[test]
+fn start_step_detects_a_missing_fade() {
+    let mut faded = vec![0.0; 100];
+    faded.extend((0..=480).map(|i| 0.5 * i as f32 / 480.0));
+    assert!(start_step(&faded, 0.5) <= fade_step(0.5, 48_000));
+    assert_eq!(start_step(&[0.0, 0.5, 0.5], 0.5), 0.5);
+}
+
+/// Checks that the loopback receives both fades at both rates.
+#[test]
+#[ignore = "needs a loopback audio device"]
+fn a_start_with_large_buffers_fades_in_on_the_device() {
+    for _ in 0..STOPS {
+        // Switching each time also exercises the rate-change path.
+        for requested_rate in [48_000, 96_000] {
+            let Some((samples, rate)) = capture_a_stop(requested_rate, |audio| audio.stop(STOP_LIMIT)) else {
+                return;
+            };
+            assert_eq!(rate, requested_rate, "loopback must use the requested rate");
+            let (level, stop_step) = level_and_step(&samples);
+            let step = start_step(&samples, level);
+            let limit = fade_step(level, rate);
+            assert!(
+                step <= limit,
+                "start step {step} exceeds {limit} at {rate} Hz (level {level})"
+            );
+            assert!(
+                stop_step <= limit,
+                "stop step {stop_step} exceeds {limit} at {rate} Hz (level {level})"
+            );
+        }
+    }
+}
+
+/// A captured rate-switch restart must actually occur and fade in on the device.
+#[test]
+#[ignore = "needs a loopback device and a late rate-switch notice"]
+fn a_rate_switch_restart_reaches_the_loopback() {
+    // The capture starts at 48 kHz, before the output requests 96 kHz, so
+    // opening the capture cannot silently perform the switch first.
+    let Some((samples, rate, stats, capture)) =
+        capture_a_stop_with_input_rate(96_000, 48_000, |audio| audio.stop(STOP_LIMIT))
+    else {
+        return;
+    };
+    assert_eq!(rate, 96_000);
+    assert!(stats.start_rate_switched, "no output rate switch was observed");
+    assert!(stats.start_restarts > 0, "no late notice restarted the output stream");
+    assert_eq!(capture.stream_errors, 0, "capture failed during the rate switch");
+    let (level, stop_step) = level_and_step(&samples);
+    // The input was requested at 48 kHz. Use its larger fade step if the
+    // backend resamples it while the output is at 96 kHz.
+    let limit = fade_step(level, 48_000);
+    assert!(start_step(&samples, level) <= limit, "the captured start faded in");
+    assert!(stop_step <= limit, "the captured stop faded out");
+}
+
+/// A deliberately paused real stream fades when the host resumes it.
+#[test]
+#[ignore = "needs a loopback audio device"]
+fn a_manually_resumed_stream_fades_on_the_loopback() {
+    let Some(device_name) = env_or_skip("LOOM_LOOPBACK", "part of a loopback device's name") else {
+        return;
+    };
+    for rate in [48_000, 96_000] {
+        let options = AudioOptions {
+            device: Some(device_name.clone()),
+            exact: false,
+            sample_rate: Some(rate),
+            buffer_size: Some(4096),
+        };
+        let Some(output) = or_skip(AudioOutput::open(&options)) else {
+            return;
+        };
+        let AudioOutput {
+            kind: Kind::Device { device, config },
+            ..
+        } = output
+        else {
+            panic!("the loopback is a device");
+        };
+        let dir = record::TestDir::new(&format!("resume-{rate}"));
+        let path = dir.0.join("capture.wav");
+        let Some(capture) = or_skip(Capture::start(&options, &path)) else {
+            return;
+        };
+        let started = Instant::now();
+        while capture.frames() == 0 {
+            assert!(started.elapsed() < Duration::from_secs(10), "capture started");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let engine_config = EngineConfig {
+            output_safety: OutputSafety::Off,
+            ..EngineConfig::with_sample_rate(rate as f32)
+        };
+        let mut parts = create_engine(loom_modules::registry(), engine_config);
+        let constant = parts.controller.add_module("loom.math.constant").unwrap();
+        let out = parts.controller.add_module("loom.io.audio-out").unwrap();
+        parts.controller.set_param_named(constant, "value", 0.5).unwrap();
+        parts.controller.connect_named(constant, "out", out, "in").unwrap();
+        parts.controller.commit().unwrap();
+        let mut restart = parts.engine.restart_fade_sender();
+        let stats = Arc::new(CallbackStats::default());
+        let raw = Box::into_raw(Box::new(Render::new(
+            parts.engine,
+            usize::from(config.channels),
+            rate,
+            stats,
+            None,
+        )));
+        let ptr = RenderPtr(raw);
+        let stream = match device.build_output_stream::<f32, _, _>(
+            config,
+            move |data, _| {
+                // SAFETY: the StreamHandle owns the render until the callback stops.
+                unsafe { ptr.render(data) }
+            },
+            |_| {},
+            None,
+        ) {
+            Ok(stream) => stream,
+            Err(error) => {
+                // SAFETY: stream creation failed, so no callback can access the render.
+                unsafe { drop(Box::from_raw(raw)) };
+                panic!("output stream: {error}");
+            }
+        };
+        let handle = StreamHandle {
+            stream: Some(stream),
+            render: raw,
+        };
+        let stream = handle.stream.as_ref().unwrap();
+        stream.play().unwrap();
+        std::thread::sleep(Duration::from_millis(800));
+        stream.pause().unwrap();
+        // Wait beyond the device and capture buffers, so the captured region
+        // beginning at this marker contains the restart rather than old audio.
+        std::thread::sleep(Duration::from_millis(500));
+        let resume_at = capture.frames() as usize;
+        restart_stream(&mut restart, || stream.play().map_err(audio_error)).unwrap();
+        std::thread::sleep(Duration::from_millis(700));
+        let end = capture.frames() as usize;
+        parts.controller.fade_out().unwrap();
+        std::thread::sleep(Duration::from_millis(500));
+        drop(handle);
+        let report = capture.stop().unwrap();
+        assert_eq!((report.dropped, report.stream_errors), (0, 0));
+        let mut reader = hound::WavReader::open(path).unwrap();
+        let left: Vec<f32> = reader.samples::<f32>().step_by(2).map(Result::unwrap).collect();
+        let resumed = &left[resume_at..end];
+        let level = resumed.iter().map(|sample| sample.abs()).fold(0.0_f32, f32::max);
+        assert!(level > 0.01, "the resumed device delivered sound");
+        let step = start_step(resumed, level);
+        eprintln!(
+            "{rate} Hz: manually resumed, level {level}, start step {step}, {} captured frames",
+            resumed.len()
+        );
+        assert!(step <= fade_step(level, rate), "the device received the restart fade");
+    }
+}
+
+/// Measures whether a real output rate change triggers a startup restart.
+#[test]
+#[ignore = "needs a loopback audio device"]
+fn rate_switch_reports_startup_restarts() {
+    let Some(device) = env_or_skip("LOOM_LOOPBACK", "part of a loopback device's name") else {
+        return;
+    };
+    for rate in [48_000, 96_000] {
+        let options = AudioOptions {
+            device: Some(device.clone()),
+            exact: false,
+            sample_rate: Some(rate),
+            buffer_size: Some(4096),
+        };
+        let Some(output) = or_skip(AudioOutput::open(&options)) else {
+            return;
+        };
+        let config = EngineConfig {
+            output_safety: OutputSafety::Off,
+            ..EngineConfig::with_sample_rate(rate as f32)
+        };
+        let mut parts = create_engine(loom_modules::registry(), config);
+        let constant = parts.controller.add_module("loom.math.constant").unwrap();
+        let out = parts.controller.add_module("loom.io.audio-out").unwrap();
+        parts.controller.set_param_named(constant, "value", 0.5).unwrap();
+        parts.controller.connect_named(constant, "out", out, "in").unwrap();
+        parts.controller.commit().unwrap();
+        let audio = output.start(parts.engine).unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        let stats = audio.stats().snapshot();
+        eprintln!(
+            "{rate} Hz: switched {}, restarts {}, callbacks {}, stream errors {}",
+            stats.start_rate_switched, stats.start_restarts, stats.callbacks, stats.stream_errors
+        );
+        if cfg!(target_os = "macos") && rate == 96_000 {
+            assert!(
+                stats.start_rate_switched,
+                "the 48 to 96 kHz transition reached the host"
+            );
+        }
+        assert!(stats.callbacks > 0);
+        parts.controller.fade_out().unwrap();
+        assert!(audio.stop(STOP_LIMIT));
+    }
+}
+
+/// The actual input stream carries loopback sound through Audio In.
+#[test]
+#[ignore = "needs a loopback audio device"]
+fn audio_input_receives_sound_from_a_loopback_device() {
+    let Some(device) = env_or_skip("LOOM_LOOPBACK", "part of a loopback device's name") else {
+        return;
+    };
+    let options = AudioOptions {
+        device: Some(device),
+        exact: false,
+        sample_rate: Some(48_000),
+        buffer_size: Some(256),
+    };
+    let Some(output) = or_skip(AudioOutput::open(&options)) else {
+        return;
+    };
+    let Some((input, reader)) = or_skip(AudioInput::start(&options, 256)) else {
+        return;
+    };
+    let config = EngineConfig {
+        output_safety: OutputSafety::Off,
+        ..EngineConfig::with_sample_rate(48_000.0)
+    };
+    let mut source = create_engine(loom_modules::registry(), config);
+    let constant = source.controller.add_module("loom.math.constant").unwrap();
+    let output_module = source.controller.add_module("loom.io.audio-out").unwrap();
+    source.controller.set_param_named(constant, "value", 0.5).unwrap();
+    source
+        .controller
+        .connect_named(constant, "out", output_module, "in")
+        .unwrap();
+    source.controller.commit().unwrap();
+    let audio = output.start(source.engine).unwrap();
+
+    let mut receiver = create_engine(loom_modules::registry(), config);
+    receiver.controller.set_audio_input(Some(reader)).unwrap();
+    let input_module = receiver.controller.add_module("loom.io.audio-in").unwrap();
+    let receiver_output = receiver.controller.add_module("loom.io.audio-out").unwrap();
+    receiver
+        .controller
+        .connect_named(input_module, "out", receiver_output, "in")
+        .unwrap();
+    receiver.controller.commit().unwrap();
+    let mut left = [0.0; 256];
+    let mut right = [0.0; 256];
+    let started = Instant::now();
+    let mut peak = [0.0_f32; 2];
+    let mut active = false;
+    while started.elapsed() < Duration::from_secs(3) {
+        receiver.engine.process(&mut left, &mut right);
+        active |= receiver.controller.display(input_module, 0) == Some(1.0);
+        for (&l, &r) in left.iter().zip(&right) {
+            peak[0] = peak[0].max(l.abs());
+            peak[1] = peak[1].max(r.abs());
+        }
+        std::thread::sleep(Duration::from_secs_f64(256.0 / 48_000.0));
+    }
+    eprintln!(
+        "input {}: {} channels, {} callbacks, peaks {peak:?}",
+        input.name(),
+        input.channels(),
+        input.status().callbacks()
+    );
+    assert!(input.is_live());
+    assert!(input.status().callbacks() > 0);
+    assert!(
+        peak[0] > 0.01 && peak[1] > 0.01,
+        "both channels received the loopback signal"
+    );
+    assert!(active, "the input activity light followed the signal");
+    source.controller.fade_out().unwrap();
+    assert!(audio.stop(STOP_LIMIT));
+}
+
 /// The sample rate of the loopback tests. With [`LOOPBACK_BUFFER`],
 /// a buffer is 85 ms long, as when Open clicked in #26. A fixed 100 ms
 /// stop limit cut the fade only when buffers were that long in time:
@@ -247,7 +567,7 @@ const STOPS: usize = 5;
 #[ignore = "needs a loopback audio device"]
 fn a_stop_with_large_buffers_fades_out_on_the_device() {
     for _ in 0..STOPS {
-        let Some((samples, rate)) = capture_a_stop(|audio| audio.stop(STOP_LIMIT)) else {
+        let Some((samples, rate)) = capture_a_stop(LOOPBACK_RATE, |audio| audio.stop(STOP_LIMIT)) else {
             return;
         };
         let (level, step) = level_and_step(&samples);
@@ -269,7 +589,7 @@ fn a_stop_with_large_buffers_fades_out_on_the_device() {
 fn a_fixed_100_ms_stop_limit_shows_as_a_cut() {
     let mut steps = Vec::new();
     for _ in 0..STOPS {
-        let Some((samples, rate)) = capture_a_stop(|audio| audio.stop_within(|_| STOP_LIMIT)) else {
+        let Some((samples, rate)) = capture_a_stop(LOOPBACK_RATE, |audio| audio.stop_within(|_| STOP_LIMIT)) else {
             return;
         };
         let (level, step) = level_and_step(&samples);

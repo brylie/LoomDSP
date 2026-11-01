@@ -498,7 +498,11 @@ pub fn view<'a>(model: Inspector, drop_row: Option<(u32, usize)>, dragging: bool
 fn module_view<'a>(m: ModuleRows, drop_row: Option<(u32, usize)>, dragging: bool) -> Element<'a, Message> {
     let id = m.id;
     let mut items = column![
-        text(m.name).size(17),
+        row![
+            text(m.name).size(17),
+            space::horizontal(),
+            button("Help").on_press(Message::ShowModuleHelp(id))
+        ],
         text(m.kind).size(11).color(DIM),
         text(m.description).size(12),
     ]

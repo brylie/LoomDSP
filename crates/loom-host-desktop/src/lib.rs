@@ -6,8 +6,8 @@
 //! without touching the engine (NFR-PORT-02, OQ-11).
 //!
 //! Phase 0 limits:
-//! - Output only for the engine (no audio input yet). [`Capture`] records an
-//!   input device to a file, to check what reached a device.
+//! - [`AudioInput`] feeds a separate input stream to the engine through a
+//!   bounded ring. [`Capture`] records an input device to a file for checks.
 //! - 32-bit float devices only. This covers CoreAudio, WASAPI shared mode,
 //!   and PipeWire/PulseAudio defaults.
 //! - MIDI ports are chosen at start, or opened and closed by name. Hot-plugging
@@ -26,6 +26,10 @@ mod capture;
 mod record;
 mod stepped;
 mod virtual_midi;
+
+mod input;
+pub use input::AudioInput;
+pub use input::microphone_access_denied;
 
 pub use capture::{Capture, CaptureReport};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -166,6 +170,13 @@ pub fn input_device_names() -> Result<Vec<String>, HostError> {
     let host = cpal::default_host();
     let devices = host.input_devices().map_err(audio_error)?;
     Ok(devices.map(|d| device_name(&d)).collect())
+}
+
+/// The system default audio input's name, when one exists.
+pub fn default_input_device_name() -> Option<String> {
+    cpal::default_host()
+        .default_input_device()
+        .map(|device| device_name(&device))
 }
 
 /// The first of `devices` whose name contains `wanted`, ignoring case, or
@@ -523,6 +534,12 @@ impl AudioOutput {
     pub fn start(mut self, engine: Engine) -> Result<RunningAudio, StartError> {
         let stats = Arc::new(CallbackStats::default());
         let sample_rate = self.sample_rate();
+        #[cfg(target_os = "macos")]
+        let (engine, mut restart_fade) = {
+            let mut engine = engine;
+            let sender = engine.restart_fade_sender();
+            (engine, sender)
+        };
         let mut render = Render::new(
             engine,
             usize::from(self.channels().max(1)),
@@ -552,6 +569,8 @@ impl AudioOutput {
                 };
                 #[cfg(target_os = "macos")]
                 let switched = settle_rate(device, &config);
+                #[cfg(target_os = "macos")]
+                stats.start_rate_switched.store(switched, Ordering::Relaxed);
                 let stream = match device.build_output_stream::<f32, _, _>(config, data_callback, error_callback, None)
                 {
                     Ok(s) => s,
@@ -580,7 +599,7 @@ impl AudioOutput {
                     });
                 }
                 #[cfg(target_os = "macos")]
-                if switched && let Err(e) = resume_after_switch(&stream, &stats) {
+                if switched && let Err(e) = resume_after_switch(&stream, &stats, &mut restart_fade) {
                     drop(stream);
                     // SAFETY: stream dropped; reclaiming Render box.
                     let render = unsafe { *Box::from_raw(render_ptr) };
@@ -662,6 +681,16 @@ fn settle_rate(device: &cpal::Device, config: &cpal::StreamConfig) -> bool {
     true
 }
 
+/// Queues the fade before the device can call back on a restarted stream.
+#[cfg(any(target_os = "macos", test))]
+fn restart_stream(
+    restart_fade: &mut loom_core::RestartFadeSender,
+    play: impl FnOnce() -> Result<(), HostError>,
+) -> Result<(), HostError> {
+    restart_fade.request();
+    play()
+}
+
 /// Starts the stream again each time it reports an error in the moments
 /// after a rate switch. A late notice of the switch pauses the stream (see
 /// [`settle_rate`]); starting it again is right, because this stream made
@@ -669,7 +698,11 @@ fn settle_rate(device: &cpal::Device, config: &cpal::StreamConfig) -> bool {
 /// Fails if the stream cannot be started again, so the caller does not
 /// get a stream that stays silent.
 #[cfg(target_os = "macos")]
-fn resume_after_switch(stream: &cpal::Stream, stats: &CallbackStats) -> Result<(), HostError> {
+fn resume_after_switch(
+    stream: &cpal::Stream,
+    stats: &CallbackStats,
+    restart_fade: &mut loom_core::RestartFadeSender,
+) -> Result<(), HostError> {
     let started = Instant::now();
     // From zero, not from the count now: the stats are this stream's own,
     // so an error already counted came after its first `play` and paused it.
@@ -678,7 +711,8 @@ fn resume_after_switch(stream: &cpal::Stream, stats: &CallbackStats) -> Result<(
         let now = stats.stream_errors.load(Ordering::Relaxed);
         if now != errors {
             errors = now;
-            stream.play().map_err(audio_error)?;
+            restart_stream(restart_fade, || stream.play().map_err(audio_error))?;
+            stats.start_restarts.fetch_add(1, Ordering::Relaxed);
             stats.clear_dead();
         }
         std::thread::sleep(Duration::from_millis(5));
@@ -996,6 +1030,10 @@ pub struct CallbackStats {
     stream_errors: AtomicU64,
     /// Overload notices before the first callback.
     start_overloads: AtomicU64,
+    /// Whether startup had to switch the device sample rate.
+    start_rate_switched: AtomicBool,
+    /// Restarts after a late rate-switch notice.
+    start_restarts: AtomicU64,
     /// Highest load seen, in parts per thousand.
     max_load_permille: AtomicU64,
     /// Highest load since the watcher last took a reading.
@@ -1027,6 +1065,10 @@ pub struct StatsSnapshot {
     /// not dropouts. macOS sends one as a stream starts with a very small
     /// buffer, while the device switches to it.
     pub start_overloads: u64,
+    /// Whether startup had to switch the device sample rate.
+    pub start_rate_switched: bool,
+    /// Restarts after a late rate-switch notice during stream startup.
+    pub start_restarts: u64,
     /// Highest load seen (1.0 = 100% of the time budget).
     pub max_load: f64,
     /// Load of the latest callback.
@@ -1105,6 +1147,8 @@ impl CallbackStats {
             overruns: self.overruns.load(Ordering::Relaxed),
             stream_errors: self.stream_errors.load(Ordering::Relaxed),
             start_overloads: self.start_overloads.load(Ordering::Relaxed),
+            start_rate_switched: self.start_rate_switched.load(Ordering::Relaxed),
+            start_restarts: self.start_restarts.load(Ordering::Relaxed),
             max_load: self.max_load_permille.load(Ordering::Relaxed) as f64 / 1000.0,
             last_load: self.last_load_permille.load(Ordering::Relaxed) as f64 / 1000.0,
             smallest_buffer: self.smallest_buffer.load(Ordering::Relaxed),
@@ -1529,9 +1573,14 @@ mod tests {
     /// A held offset into Audio Out with no safety stage, so the output
     /// stays at 0.5 until it fades: a thump if the stream stopped mid-way.
     fn held_offset() -> EngineParts {
+        held_offset_at(48_000)
+    }
+
+    /// The same held offset at a chosen device rate.
+    fn held_offset_at(rate: u32) -> EngineParts {
         let config = EngineConfig {
             output_safety: OutputSafety::Off,
-            ..EngineConfig::with_sample_rate(48_000.0)
+            ..EngineConfig::with_sample_rate(rate as f32)
         };
         let mut parts = create_engine(loom_modules::registry(), config);
         let c = &mut parts.controller;
@@ -1541,6 +1590,35 @@ mod tests {
         c.connect_named(constant, "out", out, "in").unwrap();
         c.commit().unwrap();
         parts
+    }
+
+    /// A device restart after discarding its first buffer must fade in again.
+    #[test]
+    fn a_restart_after_a_dropped_buffer_starts_silent() {
+        for rate in [48_000, 96_000] {
+            let mut parts = held_offset_at(rate);
+            let mut restart = parts.engine.restart_fade_sender();
+            let stats = Arc::new(CallbackStats::default());
+            let mut render = Render::new(parts.engine, 2, rate, stats, None);
+            let mut first = vec![0.0; 4096 * 2];
+            render.render(&mut first);
+            assert_eq!(first[0], 0.0);
+            assert_eq!(first[first.len() - 2], 0.5);
+            // Simulate a device discarding that buffer while it pauses, then
+            // accepting the first callback after the host restarts it.
+            let mut resumed = vec![0.0; 4096 * 2];
+            restart_stream(&mut restart, || {
+                render.render(&mut resumed);
+                Ok(())
+            })
+            .unwrap();
+            assert_eq!(resumed[0], 0.0, "the first resumed sample must fade in at {rate} Hz");
+            let fade_frames = rate as usize / 100;
+            for (frame, samples) in resumed.as_chunks::<2>().0.iter().enumerate() {
+                let expected = 0.5 * (frame.min(fade_frames) as f32 / fade_frames as f32);
+                assert_eq!(*samples, [expected, expected], "frame {frame} at {rate} Hz");
+            }
+        }
     }
 
     /// An overload notice before the first callback is not a stream error:

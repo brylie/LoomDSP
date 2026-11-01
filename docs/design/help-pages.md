@@ -6,7 +6,7 @@ Every built-in module has a Markdown help page, generated from its descriptor, s
 - **Status:** Agreed and Implemented, P1. The command (`loom modules --markdown DIR` and `--check`), the folder `docs/modules/`, the marker line, and the stale-page test were agreed in review of [#385](https://github.com/brylie/LoomDSP/pull/385).
 - **Decision behind it:** none of its own. Builds on [ADR-0016](../adr/0016-ports-and-parameters-carry-their-own-text.md) (ports and parameters carry their own text) and [ADR-0018](../adr/0018-clean-room-module-development.md) (our own words).
 - **Use case and requirements:** FR-LIB-11.
-- **Issues:** [#43](https://github.com/brylie/LoomDSP/issues/43).
+- **Issues:** [#43](https://github.com/brylie/LoomDSP/issues/43), [#388](https://github.com/brylie/LoomDSP/issues/388).
 - **Code:** `crates/loom-cli/src/help_pages.rs`, the `--markdown` option of `loom modules` in `crates/loom-cli/src/main.rs`. Pages: [`docs/modules/`](../modules/README.md).
 
 ## Goal
@@ -53,9 +53,25 @@ The index lists every module by category, with its name, ID, and description, an
 - [x] A test fails, with the command to run, when a committed page is stale (`committed_pages_are_current`).
 - [x] Every built-in module has hand-written notes with an example patch (FR-LIB-11).
 
-## Out of scope
+## Help in the app
 
-- Showing help pages inside the app. The module browser shows the one-sentence description ([module browser](module-browser.md)).
+**Status:** Agreed and implemented.
+
+The app shows a module's help in an overlay. F1 opens it for the highlighted module in the browser, including while the search field has focus, or for the selected tile. The inspector has a help action, and the tile menu has a help item. Escape closes the overlay. The same help view is used for all three entry points.
+
+The view builds its description, port and parameter information from the module descriptor, as the generated page does. It shows the hand-written notes below that information as Markdown. Notes and example patches are bundled at compile time, so help works without the repository or a network connection. It does not add a separate link to the GitHub page.
+
+When a module has an example, **Open example** opens it as a new patch. It uses the usual unsaved-changes prompt before replacing the current patch. A module without an example has no Open example action. The view has a plain-data model exposed through `App::ui_snapshot()` and `--dump-ui`. Use `--select ID --show-help` with `--dump-ui` or `--screenshot-window` to inspect it without a window. Links to other module pages open their bundled help; links to other documents report that they are not bundled.
+
+### Acceptance criteria
+
+- [x] F1 opens help for the highlighted browser item, even with search focused, and for the selected tile. The inspector action and tile menu open the same view. Escape closes it.
+- [x] The view shows description, ports and parameters from the descriptor and renders bundled hand-written notes as Markdown.
+- [x] Open example loads the bundled example after the usual unsaved-changes flow; it is absent when there is no example.
+- [x] UI snapshots and `--dump-ui` report the open help view and its content.
+- [x] Help and examples work without access to the repository or network.
+
+## Out of scope
 - Text for display values is listed with each light, from its `DisplaySpec` ([port and parameter text](port-and-parameter-text.md#display-values)).
 - Translation (NFR-UX-04).
 - HTML output or a documentation website.

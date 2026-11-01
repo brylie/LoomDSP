@@ -132,6 +132,8 @@ pub struct ProcessContext<'a> {
     /// 0 for a module that runs as one, or for its left copy; 1 for its
     /// right copy (ADR-0020).
     pub(crate) channel: u8,
+    pub(crate) audio_input: &'a [crate::audio_input::InputFrame],
+    pub(crate) input_channels: usize,
 }
 
 impl<'a> ProcessContext<'a> {
@@ -145,6 +147,8 @@ impl<'a> ProcessContext<'a> {
             frames,
             transport: TransportInfo::default(),
             channel: 0,
+            audio_input: &[],
+            input_channels: 0,
         }
     }
 
@@ -162,6 +166,12 @@ impl<'a> ProcessContext<'a> {
     /// so its two copies do not give the same values (stereo spec, rule 15).
     pub fn channel(&self) -> usize {
         usize::from(self.channel)
+    }
+
+    /// The input frames for this call and the number of device channels.
+    /// An absent or unavailable stream returns an empty slice and zero.
+    pub fn audio_input(&self) -> (&[crate::audio_input::InputFrame], usize) {
+        (self.audio_input, self.input_channels)
     }
 
     /// Replaces the transport, for testing modules in isolation.

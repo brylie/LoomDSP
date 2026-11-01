@@ -9,7 +9,7 @@ The normal test suite (`cargo test --workspace`) needs none of this. App and QA 
 | Variable | Used by | Set it to |
 |---|---|---|
 | `LOOM_DEVICE` | `device_tests` in `crates/loom-host-desktop`, `examples/dev/check-devices-part-2.jsonl` | Part of an output device's name, as `loom devices` lists it |
-| `LOOM_LOOPBACK` | The capture tests in `device_tests` | Part of a loopback device's name (see below) |
+| `LOOM_LOOPBACK` | The capture and audio input tests in `device_tests` | Part of a loopback device's name (see below) |
 | `LOOM_RATE`, `LOOM_BUFFER` | `examples/dev/check-devices-part-2.jsonl` | A sample rate and buffer size the device offers |
 
 A control script stops with exit status 2 when a variable it uses is not set ([control channel, Script variables](../design/control-channel.md#script-variables)). A hardware test skips instead, because a test run should pass on a machine without the device.

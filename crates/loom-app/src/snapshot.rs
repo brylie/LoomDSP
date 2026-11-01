@@ -46,6 +46,8 @@ pub struct UiSnapshot {
     /// One per cable the canvas draws.
     pub cables: Vec<Cable>,
     pub inspector: Inspector,
+    /// The open module help view, if any.
+    pub help: Option<crate::help::Model>,
     /// The active right-hand tab and visible modulation matrix rows.
     pub matrix: MatrixModel,
     /// The stats bar's audio numbers.
@@ -75,6 +77,8 @@ pub struct Stats {
     pub dropouts: u64,
     /// Meter and scope readings the engine had to drop.
     pub telemetry_dropped: u64,
+    /// Recent input underrun and overrun corrections.
+    pub input_alert: Option<(u64, u64)>,
 }
 
 impl Stats {
@@ -414,6 +418,7 @@ impl App {
             max_load,
             dropouts: self.dropouts.count(),
             telemetry_dropped,
+            input_alert: self.input_alert,
         }
     }
 
@@ -524,6 +529,7 @@ impl App {
             tiles,
             cables,
             inspector: self.inspector_model(),
+            help: self.help.as_ref().map(|help| help.model.clone()),
             matrix: self.matrix.model(self.controller.graph(), &self.selection),
             stats: self.stats_model(),
             pointer: self.pointer_state(),
@@ -554,6 +560,12 @@ pub fn headless(args: &Args) -> Result<App, String> {
             return Err(format!("no module {id} in the patch"));
         }
         app.selection.insert(id);
+    }
+    if args.show_help {
+        if app.selection.len() != 1 {
+            return Err("--show-help needs exactly one selected module".to_string());
+        }
+        app.handle(crate::Message::ShowHelp);
     }
     if let Some(frames) = args.frames {
         if args.hold_note

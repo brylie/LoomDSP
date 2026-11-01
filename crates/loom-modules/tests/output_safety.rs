@@ -272,3 +272,96 @@ fn a_fade_out_starts_from_the_gain_it_has_reached() {
     assert!(falling[0] <= dipping[half - 1] + 1.5 * 0.5 / length as f32);
     assert!(falling[half + 1..].iter().all(|&x| x == 0.0), "it does not come back");
 }
+
+/// A host restart starts a new ten-millisecond fade at every block size.
+#[test]
+fn a_restarted_stream_fades_in_again() {
+    let length = samples(FADE_SECONDS, SAMPLE_RATE);
+    let mut results = Vec::new();
+    for block in BLOCKS {
+        let mut parts = constant(OutputSafety::Off, 0.5);
+        let mut restart = parts.engine.restart_fade_sender();
+        render(&mut parts, 4096, block, &[]);
+        // Multiple notices before the next buffer coalesce into one fade.
+        restart.request();
+        restart.request();
+        let (left, right) = render(&mut parts, length + 32, block, &[]);
+        assert_eq!(left, right);
+        for (frame, &sample) in left.iter().enumerate() {
+            let gain = frame.min(length) as f32 / length as f32;
+            assert_eq!(sample, 0.5 * gain, "frame {frame}, block {block}");
+        }
+        results.push(left);
+    }
+    assert!(results.iter().all(|samples| samples == &results[0]));
+}
+
+/// A restart request cannot undo an already requested stop.
+#[test]
+fn a_restart_does_not_cancel_a_stop() {
+    let mut parts = constant(OutputSafety::Off, 0.5);
+    let mut restart = parts.engine.restart_fade_sender();
+    render(&mut parts, 4096, 128, &[]);
+    parts.controller.fade_out().unwrap();
+    restart.request();
+    let (left, right) = render(&mut parts, 1024, 128, &[]);
+    assert_eq!(left, right);
+    assert!(parts.engine.is_silent());
+    assert!(left[480..].iter().all(|&sample| sample == 0.0));
+    restart.request();
+    let (left, _) = render(&mut parts, 128, 128, &[]);
+    assert!(left.iter().all(|&sample| sample == 0.0));
+}
+
+/// Restart fades are block invariant with each safety mode enabled.
+#[test]
+fn a_restarted_stream_fades_with_every_safety_mode() {
+    for mode in MODES {
+        let mut results = Vec::new();
+        for block in BLOCKS {
+            let (mut parts, _) = noise(mode, 0.3);
+            let mut restart = parts.engine.restart_fade_sender();
+            render(&mut parts, 4096, block, &[]);
+            restart.request();
+            let (left, right) = render(&mut parts, 1024, block, &[]);
+            assert_eq!(left[0], 0.0, "{mode:?}, block {block}");
+            assert_eq!(left, right);
+            assert!(left[600..].iter().any(|sample| sample.abs() > 0.01));
+            results.push(left);
+        }
+        assert!(results.iter().all(|samples| samples == &results[0]), "{mode:?}");
+    }
+}
+
+/// A restart during a panic completes the reset before resuming sound.
+#[test]
+fn a_restart_during_panic_starts_after_the_reset() {
+    let mut parts = constant(OutputSafety::Off, 0.5);
+    let mut restart = parts.engine.restart_fade_sender();
+    render(&mut parts, 4096, 128, &[]);
+    parts.controller.panic().unwrap();
+    render(&mut parts, 64, 64, &[]);
+    restart.request();
+    let (left, right) = render(&mut parts, 1024, 128, &[]);
+    assert_eq!(left[0], 0.0);
+    assert_eq!(left, right);
+    assert_eq!(left[1023], 0.5);
+}
+
+/// A restart changes only output gain, not the running noise sequence.
+#[test]
+fn a_restart_keeps_the_running_module_state() {
+    let (mut resumed, _) = noise(OutputSafety::Off, 0.3);
+    let (mut uninterrupted, _) = noise(OutputSafety::Off, 0.3);
+    let mut restart = resumed.engine.restart_fade_sender();
+    render(&mut resumed, 4096, 128, &[]);
+    render(&mut uninterrupted, 4096, 128, &[]);
+    restart.request();
+    let (faded, _) = render(&mut resumed, 1024, 77, &[]);
+    let (plain, _) = render(&mut uninterrupted, 1024, 77, &[]);
+    let length = samples(FADE_SECONDS, SAMPLE_RATE);
+    for (frame, (&actual, &source)) in faded.iter().zip(&plain).enumerate() {
+        let gain = frame.min(length) as f32 / length as f32;
+        assert_eq!(actual, source * gain, "frame {frame}");
+    }
+}

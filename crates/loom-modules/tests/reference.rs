@@ -7,7 +7,7 @@
 
 use loom_core::{MidiEvent, ModuleRole, TransportSettings};
 use loom_modules::{
-    ALL, clock, display, env, filter, level, lfo, logic, math, midi, mix, osc, phase, rand, time, transport, ui,
+    ALL, clock, display, env, filter, io, level, lfo, logic, math, midi, mix, osc, phase, rand, time, transport, ui,
 };
 use loom_test::{Harness, Signal, reference};
 
@@ -436,6 +436,7 @@ fn every_dsp_module_has_a_reference_test() {
         &mix::CROSSFADE,
         &mix::JOIN,
         &mix::SPLIT,
+        &io::AUDIO_IN,
         &logic::COMPARE,
         &logic::LOGIC,
         &logic::MEMORY,
@@ -730,4 +731,10 @@ fn split() {
         .seconds(0.02)
         .input("in", Signal::from_fn(|frame| (frame as f32 * 0.01).sin()))
         .check(reference!("split"));
+}
+
+/// A disconnected audio input is silent.
+#[test]
+fn audio_in_silent_without_a_device() {
+    Harness::new(&io::AUDIO_IN).seconds(0.02).check(reference!("audio_in"));
 }

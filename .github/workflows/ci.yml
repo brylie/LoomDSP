@@ -222,7 +222,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@cargo-llvm-cov
       - uses: taiki-e/install-action@nextest
-      # Only the stop that must fade out, and `loom capture` itself. The
+      # The stop that must fade out, `loom capture`, and the Audio In
+      # stream and app device adapter. The
       # partner of the stop test, which checks that a fixed 100 ms stop
       # limit shows as a cut, cannot fail here: the PipeWire ALSA plugin
       # plays out what it was handed after a stream closes, so it never
@@ -231,8 +232,8 @@ jobs:
       # as in the Coverage job (`mise run coverage`).
       - name: Loopback tests, with coverage
         run: >-
-          cargo llvm-cov nextest -p loom-host-desktop -p loom-cli --run-ignored only
-          -E 'test(=device_tests::a_stop_with_large_buffers_fades_out_on_the_device) | test(=captures_a_loopback_device)'
+          cargo llvm-cov nextest -p loom-host-desktop -p loom-cli -p loom-app --run-ignored only --test-threads 1
+          -E 'test(=device_tests::a_stop_with_large_buffers_fades_out_on_the_device) | test(=captures_a_loopback_device) | test(=device_tests::audio_input_receives_sound_from_a_loopback_device) | test(=devices::tests::system_input_adapter_uses_loopback_device)'
           --no-report
         env:
           LOOM_LOOPBACK: pipewire

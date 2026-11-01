@@ -100,3 +100,22 @@ fn frames_needs_dump_ui_or_screenshot_window() {
         .expect("loom-app runs");
     assert!(!result.status.success());
 }
+
+/// `--show-help` exposes the selected module's descriptor and bundled notes.
+#[test]
+fn prints_open_module_help() {
+    let json = json_of(&dump(&["--select", "4", "--show-help"]));
+    let help = &json["help"];
+    assert_eq!(help["id"], "loom.filter.svf");
+    assert!(help["inputs"].as_array().is_some_and(|inputs| !inputs.is_empty()));
+    assert!(
+        help["notes"]
+            .as_str()
+            .is_some_and(|notes| notes.contains("## Example patch"))
+    );
+    assert!(
+        help["example"]
+            .as_str()
+            .is_some_and(|example| example.contains("Patch("))
+    );
+}

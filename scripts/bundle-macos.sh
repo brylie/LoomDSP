@@ -77,6 +77,8 @@ cat > "$app/Contents/Info.plist" <<PLIST
     <string>$version</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>LoomDSP uses audio input so patches can process live sound.</string>
 </dict>
 </plist>
 PLIST

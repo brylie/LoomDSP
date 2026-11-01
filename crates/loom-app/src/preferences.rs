@@ -61,12 +61,26 @@ impl PanicPref {
     }
 }
 
-/// The audio output (preferences.md, What is saved).
+/// Audio input and output settings (preferences.md, What is saved).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AudioPrefs {
     pub device: DeviceChoice,
+    /// The input device; independent of the output device.
+    pub input: InputChoice,
     pub sample_rate: RateChoice,
     pub buffer: BufferChoice,
+}
+
+/// Which input device feeds Audio In modules.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum InputChoice {
+    /// Use the system default input.
+    #[default]
+    SystemDefault,
+    /// Use an input by its full name.
+    Named(String),
+    /// Do not open an input stream.
+    Off,
 }
 
 /// Which output device plays the patch.
@@ -220,6 +234,7 @@ fn parse(text: &str) -> Result<(Preferences, Vec<String>), String> {
 fn audio(notes: &mut Vec<String>, raw: &RawValue) -> AudioPrefs {
     enum Part {
         Device(DeviceChoice),
+        Input(InputChoice),
         Rate(RateChoice),
         Buffer(BufferChoice),
     }
@@ -230,6 +245,13 @@ fn audio(notes: &mut Vec<String>, raw: &RawValue) -> AudioPrefs {
             "audio.device",
             raw,
             &DeviceChoice::default(),
+            |_| true,
+        ))),
+        "input" => Some(Part::Input(field(
+            notes,
+            "audio.input",
+            raw,
+            &InputChoice::default(),
             |_| true,
         ))),
         "sample_rate" => Some(Part::Rate(field(
@@ -250,6 +272,7 @@ fn audio(notes: &mut Vec<String>, raw: &RawValue) -> AudioPrefs {
     }) {
         match part {
             Part::Device(device) => audio.device = device,
+            Part::Input(input) => audio.input = input,
             Part::Rate(rate) => audio.sample_rate = rate,
             Part::Buffer(buffer) => audio.buffer = buffer,
         }
@@ -345,6 +368,7 @@ struct FileOut<'a> {
 #[serde(rename = "Audio")]
 struct AudioOut<'a> {
     device: &'a DeviceChoice,
+    input: &'a InputChoice,
     sample_rate: RateChoice,
     buffer: BufferChoice,
 }
@@ -357,6 +381,7 @@ pub fn to_text(preferences: &Preferences) -> String {
         show_activity: preferences.show_activity,
         audio: AudioOut {
             device: &preferences.audio.device,
+            input: &preferences.audio.input,
             sample_rate: preferences.audio.sample_rate,
             buffer: preferences.audio.buffer,
         },
@@ -516,6 +541,7 @@ mod tests {
             show_activity: false,
             audio: AudioPrefs {
                 device: DeviceChoice::Named("MOTU M4".into()),
+                input: InputChoice::Named("Microphone".into()),
                 sample_rate: RateChoice::Hz(96_000),
                 buffer: BufferChoice::Frames(128),
             },
@@ -533,6 +559,7 @@ mod tests {
     show_activity: false,
     audio: (
         device: Named("MOTU M4"),
+        input: Named("Microphone"),
         sample_rate: Hz(96000),
         buffer: Frames(128),
     ),
