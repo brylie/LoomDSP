@@ -36,7 +36,7 @@ fn render(parts: &mut EngineParts, frames: usize) -> Vec<f32> {
 /// Sends `port` of `module` to the left output.
 fn listen(controller: &mut Controller, module: ModuleId, port: &str) {
     let audio = controller.add_module("loom.io.audio-out").unwrap();
-    controller.connect_named(module, port, audio, "left").unwrap();
+    controller.connect_named(module, port, audio, "in").unwrap();
 }
 
 /// Adds a module with one parameter set.

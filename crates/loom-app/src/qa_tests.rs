@@ -47,8 +47,7 @@ const NOISE_GAIN_4: &str = r#"Patch(version: 1, name: "Noise gain 4", modules: [
     PatchModule(id: 3, kind: "loom.io.audio-out@1"),
 ], cables: [
     PatchCable(from: (1, "out"), to: (2, "a")),
-    PatchCable(from: (2, "out"), to: (3, "left")),
-    PatchCable(from: (2, "out"), to: (3, "right")),
+    PatchCable(from: (2, "out"), to: (3, "in")),
 ])"#;
 
 /// A Constant of 1.0 into both outputs: DC.
@@ -56,8 +55,7 @@ const CONSTANT_ONE: &str = r#"Patch(version: 1, name: "Constant", modules: [
     PatchModule(id: 1, kind: "loom.math.constant@1", params: {"value": 1.0}),
     PatchModule(id: 2, kind: "loom.io.audio-out@1"),
 ], cables: [
-    PatchCable(from: (1, "out"), to: (2, "left")),
-    PatchCable(from: (1, "out"), to: (2, "right")),
+    PatchCable(from: (1, "out"), to: (2, "in")),
 ])"#;
 
 /// One test run: an app on fake devices that play on `tape`.

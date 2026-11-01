@@ -726,7 +726,7 @@ impl Stressor {
             let out = c.add_module("loom.io.audio-out")?;
             c.set_param_named(gain, "gain", 0.0)?;
             c.connect_named(noise, "out", gain, "a")?;
-            c.connect_named(gain, "out", out, "left")?;
+            c.connect_named(gain, "out", out, "in")?;
             self.chains.push([noise, gain, out]);
         } else if choice == 1 || self.chains.len() > 32 {
             let index = self.random() as usize % self.chains.len();

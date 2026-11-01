@@ -22,8 +22,7 @@ fn engine(mode: OutputSafety, sample_rate: f32) -> EngineParts {
 fn play(parts: &mut EngineParts, source: ModuleId) {
     let c = &mut parts.controller;
     let out = c.add_module("loom.io.audio-out").unwrap();
-    c.connect_named(source, "out", out, "left").unwrap();
-    c.connect_named(source, "out", out, "right").unwrap();
+    c.connect_named(source, "out", out, "in").unwrap();
 }
 
 /// A Constant of `value` into Audio Out.

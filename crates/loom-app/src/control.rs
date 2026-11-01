@@ -2288,8 +2288,8 @@ mod tests {
         assert!(near(knob.center(), ui.control(4, "cutoff")));
         let out = locate(&ui.app, "8:out", &found).unwrap();
         assert!(near(out.center(), ui.output(8, "out")));
-        let input = locate(&ui.app, "9:right", &found).unwrap();
-        assert!(near(input.center(), ui.input(9, "right")));
+        let input = locate(&ui.app, "9:in", &found).unwrap();
+        assert!(near(input.center(), ui.input(9, "in")));
         let tile = locate(&ui.app, "4", &found).unwrap();
         assert!(tile.contains(knob.center()));
         assert!(locate(&ui.app, "4:nonsense", &found).is_err());

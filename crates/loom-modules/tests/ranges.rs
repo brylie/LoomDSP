@@ -81,7 +81,7 @@ fn modulation_stays_inside_the_selected_range() {
     let mul = c.add_module("loom.math.mul").unwrap();
     let out = c.add_module("loom.io.audio-out").unwrap();
     c.connect_named(one, "out", mul, "a").unwrap();
-    c.connect_named(mul, "out", out, "left").unwrap();
+    c.connect_named(mul, "out", out, "in").unwrap();
     c.set_param(mul, 0, 0.0).unwrap();
     c.set_range(mul, 0, FINE).unwrap();
     // A full-scale source at full depth: far past the top of the range.

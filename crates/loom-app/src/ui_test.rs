@@ -602,15 +602,15 @@ mod tests {
     fn dragging_from_an_output_to_an_input_makes_a_cable() {
         let mut ui = Ui::open("subtractive.ron");
         let from = ui.output(8, "out");
-        let to = ui.input(9, "right");
-        assert!(!connected(&ui, (8, 0), (9, 1)));
+        let to = ui.input(6, "b");
+        assert!(!connected(&ui, (8, 0), (6, 1)));
         let cables = ui.app.controller.graph().cables().count();
 
         ui.drag(from, to, 12);
 
         assert!(
-            connected(&ui, (8, 0), (9, 1)),
-            "the drag made a cable from VCA out to right"
+            connected(&ui, (8, 0), (6, 1)),
+            "the drag made a cable from VCA out to the second multiplier input"
         );
         assert_eq!(ui.app.controller.graph().cables().count(), cables + 1);
     }
@@ -621,7 +621,7 @@ mod tests {
     fn an_output_drag_line_snaps_to_a_hovered_input() {
         let mut ui = Ui::open("subtractive.ron");
         let from = ui.output(8, "out");
-        let input = ui.input(9, "right");
+        let input = ui.input(6, "b");
         ui.move_to(from);
         ui.press();
         ui.move_to(Point::new(input.x + 3.0, input.y + 2.0));
@@ -715,13 +715,13 @@ mod tests {
     fn undo_key_removes_a_dragged_cable() {
         let mut ui = Ui::open("subtractive.ron");
         let from = ui.output(8, "out");
-        let to = ui.input(9, "right");
+        let to = ui.input(6, "b");
         ui.drag(from, to, 12);
-        assert!(connected(&ui, (8, 0), (9, 1)));
+        assert!(connected(&ui, (8, 0), (6, 1)));
 
         ui.tap(keyboard::Key::Character("z".into()), keyboard::Modifiers::COMMAND);
 
-        assert!(!connected(&ui, (8, 0), (9, 1)), "undo removed the cable");
+        assert!(!connected(&ui, (8, 0), (6, 1)), "undo removed the cable");
     }
 
     /// A over empty canvas opens the browser. Its focus task gives the

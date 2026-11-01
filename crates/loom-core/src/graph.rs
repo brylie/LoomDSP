@@ -144,6 +144,9 @@ pub struct Node {
     /// The selected control range of each parameter, or `None` for one that
     /// offers no ranges (`docs/design/control-ranges.md`).
     pub(crate) ranges: Vec<Option<ParamRange>>,
+    /// Engine slot holding the right copy, while the module runs per
+    /// channel (ADR-0020). Set by the controller before each compile.
+    pub(crate) copy_slot: Option<usize>,
 }
 
 impl Node {
@@ -154,6 +157,7 @@ impl Node {
             unknown: None,
             params: descriptor.default_params(),
             slot,
+            copy_slot: None,
             ranges: descriptor.params.iter().map(ParamSpec::default_range).collect(),
         }
     }

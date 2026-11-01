@@ -207,6 +207,8 @@ pub struct Widget {
     pub position: f32,
     /// A meter's peak level. 0 for other widgets.
     pub peak: f32,
+    /// RMS and peak for a stereo meter's right channel.
+    pub right: Option<(f32, f32)>,
     /// The value as text, for controls.
     pub text: String,
     pub modulation: Mark,
@@ -375,10 +377,9 @@ impl App {
             .activity
             .iter()
             .map(|&probe| {
-                let peak = readings
-                    .iter()
-                    .filter(|r| r.probe == probe)
-                    .fold(0.0f32, |m, r| m.max(r.peak.abs()));
+                let peak = readings.iter().filter(|r| r.probe == probe).fold(0.0f32, |m, r| {
+                    m.max(r.peak.abs()).max(r.right.map_or(0.0, |(peak, _)| peak.abs()))
+                });
                 (probe, peak > crate::monitor::ACTIVITY_THRESHOLD)
             })
             .collect();
@@ -482,6 +483,7 @@ impl App {
                                 bounds: m.widget_bounds(index).expect("a widget of this panel").into(),
                                 position: value.position,
                                 peak: value.peak,
+                                right: value.right,
                                 text: value.text,
                                 modulation: value.modulation.into(),
                                 live: value.live,
@@ -696,6 +698,42 @@ mod tests {
             .expect("scope trace");
         assert!(trace.points > 100);
         assert!(trace.high > trace.low);
+    }
+
+    /// Headless activity and meter text include a signal only on the right.
+    #[test]
+    fn headless_snapshot_shows_right_only_stereo_activity() {
+        let mut app = crate::tests::app();
+        let source = app.controller.add_module("loom.math.constant").unwrap();
+        let join = app.controller.add_module("loom.mix.join").unwrap();
+        let meter = app.controller.add_module("loom.display.meter").unwrap();
+        let output = app.controller.add_module("loom.io.audio-out").unwrap();
+        app.controller.set_param_named(source, "value", 0.5).unwrap();
+        app.controller.connect_named(source, "out", join, "right").unwrap();
+        app.controller.connect_named(join, "out", meter, "in").unwrap();
+        app.controller.connect_named(meter, "out", output, "in").unwrap();
+        assert!(app.commit());
+        app.run_engine(4_800);
+        let snapshot = app.ui_snapshot();
+        let join_tile = snapshot.tiles.iter().find(|tile| tile.id == join.0).unwrap();
+        assert!(join_tile.outputs[0].carrying);
+        let meter_tile = snapshot.tiles.iter().find(|tile| tile.id == meter.0).unwrap();
+        assert!(meter_tile.inputs[0].carrying);
+        assert!(meter_tile.outputs[0].carrying);
+        let value = &meter_tile.widgets[0];
+        assert_eq!(value.position, 0.0);
+        assert!(value.right.unwrap().0 > 0.0);
+        assert!(value.text.starts_with("Out: L below -60 dB, R "));
+
+        app.controller.set_param_named(source, "value", 0.00005).unwrap();
+        app.run_engine(9_600);
+        let quiet = app.ui_snapshot();
+        assert!(!quiet.tiles.iter().find(|tile| tile.id == join.0).unwrap().outputs[0].carrying);
+
+        app.controller.set_param_named(source, "value", -0.5).unwrap();
+        app.run_engine(4_800);
+        let negative = app.ui_snapshot();
+        assert!(negative.tiles.iter().find(|tile| tile.id == join.0).unwrap().outputs[0].carrying);
     }
 
     /// Empty and nonempty traces give bounded, ordered snapshot values.

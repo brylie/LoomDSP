@@ -47,6 +47,8 @@ pub struct WidgetValue {
     pub position: f32,
     /// Meter: peak level from 0 to 1. Unused by other widgets.
     pub peak: f32,
+    /// Meter: right-channel RMS and peak, when the source is stereo.
+    pub right: Option<(f32, f32)>,
     /// The value as text, with its unit, shown while a knob is dragged or
     /// focused.
     pub text: String,
@@ -283,28 +285,45 @@ impl ControlGeometry {
                     }
                     WidgetViewKind::Meter => {
                         let track = meter_track(rect);
-                        shapes.push(Shape::new(track, 2.0, palette.light_off, palette.tile_border, 1.0));
-                        let rms = position.clamp(0.0, 1.0);
-                        if rms > 0.0 {
-                            let height = track.height * rms;
-                            let bar = Rectangle::new(
-                                Point::new(track.x, track.y + track.height - height),
-                                Size::new(track.width, height),
-                            );
-                            shapes.push(Shape::new(
-                                bar,
-                                2.0,
-                                meter_colour(rms, palette),
-                                Color::TRANSPARENT,
-                                0.0,
-                            ));
-                        }
-                        // The peak never shows below the RMS bar.
-                        let peak = values.peak(module.id, index).clamp(rms, 1.0);
-                        if peak > 0.0 {
-                            let y = track.y + track.height * (1.0 - peak);
-                            let line = Rectangle::new(Point::new(track.x, y - 0.75), Size::new(track.width, 1.5));
-                            shapes.push(Shape::new(line, 0.0, palette.text, Color::TRANSPARENT, 0.0));
+                        let right = values.get(module.id, index).and_then(|value| value.right);
+                        let left_track = if right.is_some() {
+                            Rectangle::new(Point::new(track.x - 2.0, track.y), Size::new(5.0, track.height))
+                        } else {
+                            track
+                        };
+                        let channels = std::iter::once((left_track, position, values.peak(module.id, index))).chain(
+                            right.map(|(rms, peak)| {
+                                (
+                                    Rectangle::new(Point::new(track.x + 5.0, track.y), Size::new(5.0, track.height)),
+                                    rms,
+                                    peak,
+                                )
+                            }),
+                        );
+                        for (track, rms, peak) in channels {
+                            shapes.push(Shape::new(track, 2.0, palette.light_off, palette.tile_border, 1.0));
+                            let rms = rms.clamp(0.0, 1.0);
+                            if rms > 0.0 {
+                                let height = track.height * rms;
+                                let bar = Rectangle::new(
+                                    Point::new(track.x, track.y + track.height - height),
+                                    Size::new(track.width, height),
+                                );
+                                shapes.push(Shape::new(
+                                    bar,
+                                    2.0,
+                                    meter_colour(rms, palette),
+                                    Color::TRANSPARENT,
+                                    0.0,
+                                ));
+                            }
+                            // The peak never shows below the RMS bar.
+                            let peak = peak.clamp(rms, 1.0);
+                            if peak > 0.0 {
+                                let y = track.y + track.height * (1.0 - peak);
+                                let line = Rectangle::new(Point::new(track.x, y - 0.75), Size::new(track.width, 1.5));
+                                shapes.push(Shape::new(line, 0.0, palette.text, Color::TRANSPARENT, 0.0));
+                            }
                         }
                     }
                     WidgetViewKind::Shape { .. } => {
@@ -871,6 +890,49 @@ mod tests {
             line[1] + line[3] * 0.5 <= bar[1] + 0.01,
             "peak line {line:?} below bar {bar:?}"
         );
+    }
+
+    /// Stereo meters draw independent bars, including a silent right side.
+    #[test]
+    fn stereo_meter_draws_two_tracks() {
+        let meter = Scene::new(
+            vec![ModuleView {
+                id: 1,
+                title: String::new(),
+                accent: Color::BLACK,
+                position: Point::ORIGIN,
+                size: None,
+                unknown: false,
+                inputs: Vec::new(),
+                outputs: Vec::new(),
+                panel: PanelView {
+                    width: 3,
+                    height: 6,
+                    widgets: vec![WidgetView {
+                        kind: WidgetViewKind::Meter,
+                        x: 0,
+                        y: 0,
+                        label: String::new(),
+                        hover: crate::scene::HoverText::default(),
+                    }],
+                },
+            }],
+            Vec::new(),
+        );
+        let mut values = PanelValues::new();
+        values.set(
+            1,
+            0,
+            WidgetValue {
+                position: 0.8,
+                peak: 0.9,
+                right: Some((0.0, 0.0)),
+                ..WidgetValue::default()
+            },
+        );
+        let shapes = ControlGeometry::build(&meter, &values, &Palette::default()).shapes;
+        assert_eq!(shapes.len(), 4, "two tracks and the left bar and peak");
+        assert!(shapes[0].rect()[0] < shapes[3].rect()[0]);
     }
 
     #[test]

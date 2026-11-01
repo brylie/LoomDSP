@@ -29,7 +29,7 @@ Patch(
         PatchCable(from: (1, "gate"), to: (7, "gate")),
         PatchCable(from: (4, "lowpass"), to: (8, "a")),
         PatchCable(from: (7, "out"), to: (8, "b")),
-        PatchCable(from: (8, "out"), to: (9, "left")),
+        PatchCable(from: (8, "out"), to: (9, "in")),
     ],
     modulation: [
         (source: (5, "out"), target: (4, "resonance"), depth: 0.4),

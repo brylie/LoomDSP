@@ -6,7 +6,7 @@
 //! `docs/learn/real-time-safety.md` explains why. Telemetry leaves
 //! through its own queues and is dropped when they are full (NFR-RT-07).
 
-use crate::compile::{AssignmentRuntime, ModuleOp, ParamFill, Schedule, Step};
+use crate::compile::{AssignmentRuntime, DownmixOp, ModuleOp, ParamFill, Schedule, Step, partner};
 use crate::descriptor::{MAX_DISPLAYS, Polarity};
 use crate::display::DisplayTable;
 use crate::graph::AssignmentId;
@@ -527,6 +527,24 @@ impl Engine {
                     self.displays.release(slot);
                 }
                 Command::SwapSchedule(mut schedule) => {
+                    // A newly created right copy takes the running left
+                    // instance's state at the swap boundary (ADR-0022).
+                    for &(left, right) in &schedule.copies {
+                        if partner(&self.schedule.copies, left as usize) == Some(right as usize) {
+                            continue;
+                        }
+                        let (left, right) = (left as usize, right as usize);
+                        let (source, target) = if left < right {
+                            let (before, after) = self.slots.split_at_mut(right);
+                            (&before[left], &mut after[0])
+                        } else {
+                            let (before, after) = self.slots.split_at_mut(left);
+                            (&after[0], &mut before[right])
+                        };
+                        if let (Some(source), Some(target)) = (source.as_ref(), target.as_mut()) {
+                            target.copy_state_from(source.as_ref());
+                        }
+                    }
                     schedule.take_tap_state_from(&self.schedule, self.last_frames);
                     // The new schedule has not run yet, so a second swap
                     // before the next block has no last values to read.
@@ -557,7 +575,14 @@ impl Engine {
                     value,
                     edit,
                 } => {
-                    set_base(&mut self.slots, &mut self.schedule.fills, slot, index, value);
+                    set_base(
+                        &mut self.slots,
+                        &mut self.schedule.fills,
+                        &self.schedule.copies,
+                        slot,
+                        index,
+                        value,
+                    );
                     if let Some((control, token)) = edit {
                         self.feedback_sequence = self.feedback_sequence.wrapping_add(1);
                         self.midi_feedback.write_edit(control, token, self.feedback_sequence);
@@ -581,8 +606,11 @@ impl Engine {
                     }
                 }
                 Command::ResetModule { slot } => {
-                    if let Some(module) = self.slots[slot].as_mut() {
-                        module.reset();
+                    // A module that runs per channel resets both copies.
+                    for slot in std::iter::once(slot).chain(partner(&self.schedule.copies, slot)) {
+                        if let Some(module) = self.slots[slot].as_mut() {
+                            module.reset();
+                        }
                     }
                 }
                 Command::SetTempo(tempo) => self.transport.set_tempo(self.frame, tempo),
@@ -632,6 +660,11 @@ impl Engine {
             // `max_block` floats long, and `frames <= max_block`. No module
             // is running, so nothing writes to them now.
             let samples = unsafe { std::slice::from_raw_parts(probe.buffer, frames) };
+            // SAFETY: the optional right buffer has the same length and
+            // lifetime as the left buffer described above.
+            let right = probe
+                .right
+                .map(|ptr| unsafe { std::slice::from_raw_parts(ptr, frames) });
             // Skip the work for a queue that is already full. The push below
             // still counts a drop if the queue fills in between.
             if probe.kind.meter() && self.telemetry.meters.is_full() {
@@ -644,6 +677,7 @@ impl Engine {
                     frames: frames as u32,
                     peak,
                     rms,
+                    right: right.map(measure),
                 };
                 if self.telemetry.meters.push(reading).is_err() {
                     self.stats.dropped_meters.fetch_add(1, Ordering::Relaxed);
@@ -661,7 +695,14 @@ impl Engine {
                         len: part.len() as u32,
                         samples: [0.0; SCOPE_CHUNK],
                     };
-                    chunk.samples[..part.len()].copy_from_slice(part);
+                    if let Some(right) = right {
+                        let start = i * SCOPE_CHUNK;
+                        for (out, (&left, &right)) in chunk.samples.iter_mut().zip(part.iter().zip(&right[start..])) {
+                            *out = (left + right) * 0.5;
+                        }
+                    } else {
+                        chunk.samples[..part.len()].copy_from_slice(part);
+                    }
                     if self.telemetry.scope.push(chunk).is_err() {
                         self.stats.dropped_scope.fetch_add(1, Ordering::Relaxed);
                     }
@@ -726,6 +767,7 @@ impl Engine {
                 set_base(
                     &mut self.slots,
                     &mut self.schedule.fills,
+                    &self.schedule.copies,
                     map.slot as usize,
                     usize::from(map.param),
                     base,
@@ -751,6 +793,7 @@ impl Engine {
                 set_base(
                     &mut self.slots,
                     &mut self.schedule.fills,
+                    &self.schedule.copies,
                     map.slot as usize,
                     usize::from(map.param),
                     base,
@@ -777,6 +820,9 @@ impl Engine {
             transport: transport_buffers,
             fills,
             assignments,
+            downmixes,
+            output_downmixes,
+            right_ptrs,
             ..
         } = &mut *self.schedule;
 
@@ -806,6 +852,9 @@ impl Engine {
         }
 
         let mut run_op = |op: &ModuleOp, offset: usize, len: usize| {
+            for downmix in &downmixes[op.downmixes.0 as usize..op.downmixes.1 as usize] {
+                run_downmix(downmix, offset, len);
+            }
             for index in op.fills.0..op.fills.1 {
                 fill_param(&mut fills[index as usize], assignments, offset, len);
             }
@@ -816,6 +865,7 @@ impl Engine {
                     midi_base: position + offset,
                     frames: len,
                     transport: transport.later(offset),
+                    channel: op.channel,
                 };
                 // SAFETY: the compiler gives every output its own buffer of
                 // `max_block` floats. Inputs point at other modules' outputs,
@@ -828,6 +878,7 @@ impl Engine {
                         &input_ptrs[op.inputs.0 as usize..op.inputs.1 as usize],
                         &output_ptrs[op.outputs.0 as usize..op.outputs.1 as usize],
                         &param_ptrs[op.params.0 as usize..op.params.1 as usize],
+                        &right_ptrs[op.right.0 as usize..op.right.1 as usize],
                         op.connected,
                         offset,
                         len,
@@ -880,6 +931,9 @@ impl Engine {
             }
         }
 
+        for downmix in &downmixes[output_downmixes.0 as usize..output_downmixes.1 as usize] {
+            run_downmix(downmix, 0, frames);
+        }
         for output in outputs.iter() {
             // SAFETY: output pointers reference schedule buffers of
             // `max_block` floats.
@@ -903,21 +957,49 @@ impl Engine {
 }
 
 /// Sets a parameter's base value: on the module, and on its fill if it is
-/// modulated, where a smoothed base glides to it.
-fn set_base(slots: &mut [Option<Box<dyn Module>>], fills: &mut [ParamFill], slot: usize, index: usize, value: f32) {
-    if let Some(module) = slots[slot].as_mut() {
-        module.set_param(index, value);
-    }
-    let slot = slot as u32;
-    let index = index as u16;
-    for fill in fills {
-        if fill.slot == slot && fill.param == index {
-            fill.base = value;
-            if let Some(smooth) = fill.smooth.as_mut() {
-                smooth.set_target(fill.spec.normalize(value));
-            }
-            break;
+/// modulated, where a smoothed base glides to it. A module that runs per
+/// channel gets the value on both copies (stereo spec, rule 14).
+fn set_base(
+    slots: &mut [Option<Box<dyn Module>>],
+    fills: &mut [ParamFill],
+    copies: &[(u32, u32)],
+    slot: usize,
+    index: usize,
+    value: f32,
+) {
+    for slot in std::iter::once(slot).chain(partner(copies, slot)) {
+        if let Some(module) = slots[slot].as_mut() {
+            module.set_param(index, value);
         }
+        let slot = slot as u32;
+        let index = index as u16;
+        for fill in fills.iter_mut() {
+            if fill.slot == slot && fill.param == index {
+                fill.base = value;
+                if let Some(smooth) = fill.smooth.as_mut() {
+                    smooth.set_target(fill.spec.normalize(value));
+                }
+                break;
+            }
+        }
+    }
+}
+
+/// Fills a downmix buffer for `len` frames at `offset` (stereo spec, rule 11).
+fn run_downmix(downmix: &DownmixOp, offset: usize, len: usize) {
+    // SAFETY: the compiler gives every downmix its own output buffer of
+    // `max_block` floats, and its inputs are other schedule buffers of the
+    // same length that nothing writes while it runs. `offset + len` stays
+    // inside `max_block`.
+    let (left, right, output) = unsafe {
+        (
+            std::slice::from_raw_parts(downmix.left.add(offset), len),
+            std::slice::from_raw_parts(downmix.right.add(offset), len),
+            std::slice::from_raw_parts_mut(downmix.output.add(offset), len),
+        )
+    };
+    for ((out, &l), &r) in output.iter_mut().zip(left).zip(right) {
+        *out = downmix.kind.apply(l, r);
     }
 }
 

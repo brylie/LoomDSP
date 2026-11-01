@@ -113,7 +113,7 @@ fn duplicate_keeps_incoming_links_and_drops_outgoing_ones() {
     let mut c = parts().controller;
     let [phase, sine, _, lfo_a, lfo_b, vca] = voice(&mut c);
     let out = c.add_module("loom.io.audio-out").unwrap();
-    c.connect_named(vca, "out", out, "left").unwrap();
+    c.connect_named(vca, "out", out, "in").unwrap();
     c.commit().unwrap();
     let mut positions = spread(&c);
     let original_cables: Vec<_> = c.graph().cables().collect();
@@ -202,8 +202,10 @@ fn a_duplicated_voice_sounds_like_one_built_by_hand() {
         let first = voice(c);
         let second = voice(c);
         let out = c.add_module("loom.io.audio-out").unwrap();
-        c.connect_named(first[5], "out", out, "left").unwrap();
-        c.connect_named(second[5], "out", out, "right").unwrap();
+        let join = c.add_module("loom.mix.join").unwrap();
+        c.connect_named(join, "out", out, "in").unwrap();
+        c.connect_named(first[5], "out", join, "left").unwrap();
+        c.connect_named(second[5], "out", join, "right").unwrap();
         c.commit().unwrap();
         let expected = render(&mut by_hand, block);
 
@@ -214,8 +216,10 @@ fn a_duplicated_voice_sounds_like_one_built_by_hand() {
         let group = Group::from_selection(c.graph(), &positions, &ids(&first), true);
         let new = group.add(c, &mut positions, Point::ORIGIN).unwrap();
         let out = c.add_module("loom.io.audio-out").unwrap();
-        c.connect_named(first[5], "out", out, "left").unwrap();
-        c.connect_named(ModuleId(new[5]), "out", out, "right").unwrap();
+        let join = c.add_module("loom.mix.join").unwrap();
+        c.connect_named(join, "out", out, "in").unwrap();
+        c.connect_named(first[5], "out", join, "left").unwrap();
+        c.connect_named(ModuleId(new[5]), "out", join, "right").unwrap();
         c.commit().unwrap();
         assert_eq!(render(&mut duplicated, block), expected, "block size {block}");
     }

@@ -21,18 +21,20 @@
 //! 6. Bind unconnected inputs to their default (ADR-0015): the zero buffer,
 //!    a constant buffer per distinct value, or one shared buffer per
 //!    transport signal that the engine fills at the start of each block.
-//! 7. Work out which outputs carry stereo (ADR-0020, `width.rs`). The
-//!    report lists them. The schedule does not use them yet, so every
-//!    module still runs as one instance on one channel.
+//! 7. Infer stereo widths (ADR-0020, `width.rs`) and allocate right-channel
+//!    buffers, module operations and delay taps. Downmix where a mono input
+//!    receives stereo.
 //!
 //! Before step 3, the compiler marks the modules that can reach something
 //! the user hears or sees (FR-GRAPH-09, see [`reaches_a_root`]). The others
 //! are left out of the schedule. Their instances stay in their engine
 //! slots, so a cable that connects them again resumes their state.
 
-use crate::descriptor::{ModuleRole, ParamSpec, Polarity, PortDefault};
+use crate::descriptor::{Channels, ModuleRole, ParamSpec, Polarity, PortDefault};
 use crate::graph::{AssignmentId, Graph, InputRef, ModuleId, OutputRef};
 use crate::midi_map::{MidiMapOp, MidiMappingId};
+use crate::module::RightPtr;
+use crate::signal::SignalType;
 use crate::telemetry::{ProbeId, ProbeKind};
 use crate::width::{self, Width};
 use loom_rt::Smoothed;
@@ -54,6 +56,15 @@ fn output_key(output: OutputRef) -> u64 {
 /// Marks a tap inserted on a modulation assignment. Bit 62 keeps these clear
 /// of cable taps, whose keys use the module id shifted by 16 under `AUTO_TAP`.
 const ASSIGN_TAP: u64 = AUTO_TAP | (1 << 62);
+
+/// Marks the right-channel tap of a stereo delay. Bit 61 is clear of user
+/// keys (module IDs), cable taps (module id shifted by 16), and assignment
+/// taps (assignment IDs).
+const RIGHT_TAP: u64 = 1 << 61;
+
+/// Marks the fill of a module's right copy. Bit 31 sits between the module
+/// id (bits 32 and up) and the parameter index (16 bits).
+const RIGHT_FILL: u64 = 1 << 31;
 
 /// A feedback loop found by the compiler.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -123,6 +134,60 @@ pub(crate) struct ModuleOp {
     pub fills: (u32, u32),
     /// Range into [`Schedule::param_ptrs`], one entry per modulated parameter.
     pub params: (u32, u32),
+    /// Range into [`Schedule::downmixes`], filled before the module runs.
+    pub downmixes: (u32, u32),
+    /// Range into [`Schedule::right_ptrs`], for `Stereo` ports.
+    pub right: (u32, u32),
+    /// 0 for a module that runs as one, or its left copy; 1 for its right.
+    pub channel: u8,
+}
+
+/// How a downmix makes one channel from two (stereo spec, rule 11).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DownmixKind {
+    /// `(left + right) / 2`, for audio, modulation, and pitch.
+    Mean,
+    /// `max(left, right)`, for gates: high when either side is high.
+    Max,
+    /// The mean the shorter way round the circle, for phases.
+    Phase,
+}
+
+impl DownmixKind {
+    /// The method the input's signal type picks.
+    pub fn of(signal: SignalType) -> Self {
+        match signal {
+            SignalType::Gate => Self::Max,
+            SignalType::Phase => Self::Phase,
+            SignalType::Audio | SignalType::Modulation | SignalType::Pitch => Self::Mean,
+        }
+    }
+
+    /// One sample of the downmix.
+    #[inline]
+    pub fn apply(self, left: f32, right: f32) -> f32 {
+        match self {
+            Self::Mean => (left + right) * 0.5,
+            Self::Max => left.max(right),
+            Self::Phase => {
+                // The difference the short way round, from -0.5 (included)
+                // up to 0.5 (not included). Exactly half a cycle apart, it
+                // is -0.5, so the tie always goes the same way.
+                let difference = right - left;
+                let difference = difference - (difference + 0.5).floor();
+                let mean = left + difference * 0.5;
+                mean - mean.floor()
+            }
+        }
+    }
+}
+
+/// Fills `output` from two channels just before a module runs.
+pub(crate) struct DownmixOp {
+    pub kind: DownmixKind,
+    pub left: *const f32,
+    pub right: *const f32,
+    pub output: *mut f32,
 }
 
 /// One source of a modulated parameter. `state` indexes [`Schedule::assignments`].
@@ -147,6 +212,14 @@ pub(crate) struct ParamFill {
     /// Cell in the live value table, or [`crate::live::NO_CELL`]. Set by
     /// the controller after compiling.
     pub live: u32,
+}
+
+impl ParamFill {
+    /// True for the fill of a module's right copy. Its live value is not
+    /// shown: the knob shows copy 0 (stereo spec, rule 16).
+    pub fn is_right_copy(&self) -> bool {
+        self.key & RIGHT_FILL != 0
+    }
 }
 
 /// Depth, polarity, and enabled flag. The audio thread updates these without
@@ -181,6 +254,7 @@ pub(crate) struct OutputOp {
 pub(crate) struct ProbeOp {
     pub id: ProbeId,
     pub buffer: *const f32,
+    pub right: Option<*const f32>,
     pub kind: ProbeKind,
 }
 
@@ -262,6 +336,15 @@ pub(crate) struct Schedule {
     pub fill_order: Vec<u32>,
     pub assignments: Vec<AssignmentRuntime>,
     pub param_ptrs: Vec<(u16, *const f32)>,
+    /// Downmixes, run by the module operation that owns them, or before the
+    /// outputs are summed (`output_downmixes`).
+    pub downmixes: Vec<DownmixOp>,
+    pub output_downmixes: (u32, u32),
+    pub right_ptrs: Vec<RightPtr>,
+    /// `(left slot, right slot)` of every module that runs as two copies,
+    /// sorted by left slot. A parameter change or reset on the left slot
+    /// also goes to the right one.
+    pub copies: Vec<(u32, u32)>,
     /// MIDI mappings, sorted by control.
     pub midi_maps: Vec<MidiMapOp>,
     /// Live value cells the previous schedule used and this one does not.
@@ -294,6 +377,10 @@ impl Schedule {
             fill_order: Vec::new(),
             assignments: Vec::new(),
             param_ptrs: Vec::new(),
+            downmixes: Vec::new(),
+            output_downmixes: (0, 0),
+            right_ptrs: Vec::new(),
+            copies: Vec::new(),
             midi_maps: Vec::new(),
             live_release: Vec::new(),
         }
@@ -314,9 +401,28 @@ impl Schedule {
             }
             if j < old.taps.len() && old.taps[j].key == tap.key {
                 tap.state = old.taps[j].state;
+            } else if tap.key & RIGHT_TAP != 0
+                && let Ok(i) = old
+                    .taps
+                    .binary_search_by_key(&(tap.key & !RIGHT_TAP), |old_tap| old_tap.key)
+            {
+                // A new right channel inherits the running mono delay.
+                tap.state = old.taps[i].state;
             } else if let Some(last) = frames.checked_sub(1)
                 && tap.source != NO_SOURCE
-                && let Ok(i) = old.sources.binary_search_by_key(&tap.source, |&(key, _)| key)
+                && let Some(i) = old
+                    .sources
+                    .binary_search_by_key(&tap.source, |&(key, _)| key)
+                    .ok()
+                    .or_else(|| {
+                        (tap.source & RIGHT_TAP != 0)
+                            .then(|| {
+                                old.sources
+                                    .binary_search_by_key(&(tap.source & !RIGHT_TAP), |&(key, _)| key)
+                                    .ok()
+                            })
+                            .flatten()
+                    })
             {
                 // SAFETY: every buffer in `sources` is `max_block` floats
                 // long and owned by `old`, which is alive here. The last
@@ -386,6 +492,7 @@ fn previous_spec(old: &Schedule, j: usize) -> Option<(f32, f32)> {
 struct TapSpec {
     key: u64,
     source: Option<OutputRef>,
+    channel: usize,
     input: Option<usize>,
     output: usize,
 }
@@ -429,6 +536,13 @@ struct FillSpec {
     sources: Vec<SourceSpec>,
 }
 
+struct DownmixSpec {
+    kind: DownmixKind,
+    left: usize,
+    right: usize,
+    output: usize,
+}
+
 /// Compiles the graph. `max_block` is the buffer length. `probes` are output
 /// ports to read for telemetry; probes on unknown modules or ports are
 /// skipped. `sample_rate` sets the base-value smoother for modulated parameters.
@@ -444,6 +558,13 @@ pub(crate) fn compile(
     let nodes: Vec<&crate::graph::Node> = graph.nodes.values().collect();
     let n = ids.len();
 
+    // Stereo widths (ADR-0020). A copied DSP module runs a second operation
+    // on its copy's slot, which the controller allocated.
+    let widths = width::infer(graph);
+    let is_stereo = |from: OutputRef| widths.stereo_outputs.contains(&from);
+    let copied: Vec<bool> = ids.iter().map(|id| widths.per_channel.contains(id)).collect();
+    let channels = |v: usize| if copied[v] { 2 } else { 1 };
+
     // 1. One buffer per output port.
     let mut buffer_count = 0usize;
     let out_buf: Vec<Vec<usize>> = nodes
@@ -457,7 +578,27 @@ pub(crate) fn compile(
                 .collect()
         })
         .collect();
+    // A second buffer for the right channel of every stereo output.
+    let right_buf: Vec<Vec<Option<usize>>> = (0..n)
+        .map(|v| {
+            (0..nodes[v].output_count())
+                .map(|port| {
+                    is_stereo(OutputRef { module: ids[v], port }).then(|| {
+                        buffer_count += 1;
+                        buffer_count - 1
+                    })
+                })
+                .collect()
+        })
+        .collect();
     let source_buffer = |from: OutputRef| out_buf[index_of[&from.module]][from.port];
+    // The buffer that channel `ch` of a cable from `from` carries. A mono
+    // output carries the same buffer on both channels.
+    let channel_buffer = |from: OutputRef, ch: usize| {
+        right_buf[index_of[&from.module]][from.port]
+            .filter(|_| ch == 1)
+            .unwrap_or_else(|| source_buffer(from))
+    };
 
     // Assignments the graph can actually schedule. Dangling ones are dropped.
     let mut compiled = Vec::new();
@@ -525,32 +666,42 @@ pub(crate) fn compile(
 
     // 3 and 4. Steps.
     let mut taps: Vec<TapSpec> = Vec::new();
-    let mut overrides: BTreeMap<InputRef, usize> = BTreeMap::new();
-    // Assignment id to the delay buffer the fill should read.
-    let mut delayed: BTreeMap<AssignmentId, usize> = BTreeMap::new();
+    // Input and channel to the delay buffer it reads instead of its cable.
+    // A delay on a mono cable is listed for channel 0 only.
+    let mut overrides: BTreeMap<(InputRef, usize), usize> = BTreeMap::new();
+    // Assignment id and channel to the delay buffer the fill should read.
+    let mut delayed: BTreeMap<(AssignmentId, usize), usize> = BTreeMap::new();
     let mut steps: Vec<StepSpec> = Vec::new();
     let mut output_nodes: Vec<usize> = Vec::new();
-    let widths = width::infer(graph);
     let mut report = CompileReport {
         modules: n,
         skipped: (0..n).filter(|&v| !live[v]).map(|v| ids[v]).collect(),
         loops: Vec::new(),
         without_live_value: 0,
-        per_channel: widths.per_channel,
-        stereo_outputs: widths.stereo_outputs,
+        per_channel: widths.per_channel.clone(),
+        stereo_outputs: widths.stereo_outputs.clone(),
     };
 
-    let user_tap = |v: usize| {
-        let source = graph.source_of(InputRef {
+    // One tap per channel of a unit delay. The right channel's key is
+    // marked, so each channel's state carries across swaps on its own.
+    let user_tap = |v: usize, ch: usize| TapSpec {
+        key: u64::from(ids[v].0) | if ch == 1 { RIGHT_TAP } else { 0 },
+        source: graph.source_of(InputRef {
             module: ids[v],
             port: 0,
-        });
-        TapSpec {
-            key: u64::from(ids[v].0),
-            source,
-            input: source.map(source_buffer),
-            output: out_buf[v][0],
-        }
+        }),
+        channel: ch,
+        input: graph
+            .source_of(InputRef {
+                module: ids[v],
+                port: 0,
+            })
+            .map(|from| channel_buffer(from, ch)),
+        output: if ch == 1 {
+            right_buf[v][0].expect("a copied unit delay has a stereo output")
+        } else {
+            out_buf[v][0]
+        },
     };
 
     for scc in &sccs {
@@ -564,15 +715,19 @@ pub(crate) fn compile(
                 // Keep the held sample even while the delay is idle. It is
                 // copied into a later schedule if the cable reconnects.
                 if matches!(nodes[v].descriptor.role, ModuleRole::UnitDelay) {
-                    taps.push(user_tap(v));
+                    for ch in 0..channels(v) {
+                        taps.push(user_tap(v, ch));
+                    }
                 }
                 continue;
             }
             match nodes[v].descriptor.role {
                 ModuleRole::Dsp(_) => steps.push(StepSpec::Module(v)),
                 ModuleRole::UnitDelay => {
-                    taps.push(user_tap(v));
-                    steps.push(StepSpec::Tap(taps.len() - 1));
+                    for ch in 0..channels(v) {
+                        taps.push(user_tap(v, ch));
+                        steps.push(StepSpec::Tap(taps.len() - 1));
+                    }
                 }
                 ModuleRole::AudioOutput => output_nodes.push(v),
             }
@@ -588,8 +743,10 @@ pub(crate) fn compile(
             .filter(|&v| match nodes[v].descriptor.role {
                 ModuleRole::Dsp(_) => true,
                 ModuleRole::UnitDelay => {
-                    taps.push(user_tap(v));
-                    loop_taps.push(taps.len() - 1);
+                    for ch in 0..channels(v) {
+                        taps.push(user_tap(v, ch));
+                        loop_taps.push(taps.len() - 1);
+                    }
                     false
                 }
                 // Has no outputs, so it can never be part of a cycle.
@@ -733,16 +890,19 @@ pub(crate) fn compile(
                     if done.contains(&index_of[&from.module]) || broken.contains(dep) {
                         continue;
                     }
-                    buffer_count += 1;
-                    let output = buffer_count - 1;
-                    taps.push(TapSpec {
-                        key: ASSIGN_TAP | u64::from(id.0),
-                        source: Some(*from),
-                        input: Some(source_buffer(*from)),
-                        output,
-                    });
-                    loop_taps.push(taps.len() - 1);
-                    delayed.insert(id, output);
+                    for ch in 0..if is_stereo(*from) { 2 } else { 1 } {
+                        buffer_count += 1;
+                        let output = buffer_count - 1;
+                        taps.push(TapSpec {
+                            key: ASSIGN_TAP | u64::from(id.0) | if ch == 1 { RIGHT_TAP } else { 0 },
+                            source: Some(*from),
+                            channel: ch,
+                            input: Some(channel_buffer(*from, ch)),
+                            output,
+                        });
+                        loop_taps.push(taps.len() - 1);
+                        delayed.insert((id, ch), output);
+                    }
                     broken.insert(*dep);
                     inserted_assignments.push(id);
                     *indegree.get_mut(&v).expect("member") -= 1;
@@ -778,16 +938,22 @@ pub(crate) fn compile(
                 let Dep::Cable(input) = dep else {
                     continue;
                 };
-                buffer_count += 1;
-                let output = buffer_count - 1;
-                taps.push(TapSpec {
-                    key: AUTO_TAP | (u64::from(input.module.0) << 16) | (input.port as u64 & 0xFFFF),
-                    source: Some(from),
-                    input: Some(source_buffer(from)),
-                    output,
-                });
-                loop_taps.push(taps.len() - 1);
-                overrides.insert(input, output);
+                for ch in 0..if is_stereo(from) { 2 } else { 1 } {
+                    buffer_count += 1;
+                    let output = buffer_count - 1;
+                    taps.push(TapSpec {
+                        key: AUTO_TAP
+                            | (u64::from(input.module.0) << 16)
+                            | (input.port as u64 & 0xFFFF)
+                            | if ch == 1 { RIGHT_TAP } else { 0 },
+                        source: Some(from),
+                        channel: ch,
+                        input: Some(channel_buffer(from, ch)),
+                        output,
+                    });
+                    loop_taps.push(taps.len() - 1);
+                    overrides.insert((input, ch), output);
+                }
                 broken.insert(dep);
                 inserted.push((from, input));
                 *indegree.get_mut(&v).expect("member") -= 1;
@@ -825,22 +991,89 @@ pub(crate) fn compile(
                 .push(i);
         }
     }
-    let mut fills_of: Vec<Vec<FillSpec>> = (0..n).map(|_| Vec::new()).collect();
+    // Downmixes each module fills before it runs, and those for the audio
+    // output, which run before the outputs are summed.
+    let mut downmix_specs: Vec<Vec<DownmixSpec>> = (0..n).map(|_| Vec::new()).collect();
+    let mut output_downmix_specs: Vec<DownmixSpec> = Vec::new();
+    // Fills per module and copy.
+    let mut fills_of: Vec<[Vec<FillSpec>; 2]> = (0..n).map(|_| [Vec::new(), Vec::new()]).collect();
+    // The buffer channel `ch` of an assignment's source gives, through its
+    // delay if the assignment was broken.
+    let assignment_buffer = |assignment: &CompiledAssignment, ch: usize| {
+        delayed
+            .get(&(assignment.id, ch))
+            .or_else(|| delayed.get(&(assignment.id, 0)))
+            .copied()
+            .unwrap_or_else(|| channel_buffer(assignment.source, ch))
+    };
     for ((node, param), sources) in groups {
-        buffer_count += 1;
-        let buffer = buffer_count - 1;
-        let sources = sources
-            .into_iter()
-            .map(|i| {
-                let assignment = &compiled[i];
-                let buffer = delayed
-                    .get(&assignment.id)
-                    .copied()
-                    .unwrap_or_else(|| source_buffer(assignment.source));
-                SourceSpec { assignment: i, buffer }
-            })
-            .collect();
-        fills_of[node].push(FillSpec { param, buffer, sources });
+        let copies = channels(node);
+        for (ch, fills) in fills_of[node].iter_mut().enumerate().take(copies) {
+            buffer_count += 1;
+            let buffer = buffer_count - 1;
+            let sources = sources
+                .iter()
+                .map(|&i| {
+                    let assignment = &compiled[i];
+                    let buffer = if !is_stereo(assignment.source) || copied[node] {
+                        assignment_buffer(assignment, ch)
+                    } else {
+                        // A stereo source into a module that runs as one
+                        // gives the mean, because a parameter has no signal
+                        // type (stereo spec, rule 17).
+                        buffer_count += 1;
+                        let output = buffer_count - 1;
+                        downmix_specs[node].push(DownmixSpec {
+                            kind: DownmixKind::Mean,
+                            left: assignment_buffer(assignment, 0),
+                            right: assignment_buffer(assignment, 1),
+                            output,
+                        });
+                        output
+                    };
+                    SourceSpec { assignment: i, buffer }
+                })
+                .collect();
+            fills.push(FillSpec { param, buffer, sources });
+        }
+    }
+
+    // Where stereo meets an input of a module that runs as one, a downmix
+    // fills a buffer of its own (stereo spec, rule 11). A `Stereo` input
+    // reads both channels itself instead.
+    let input_buffer = |input: InputRef, ch: usize| -> Option<usize> {
+        if let Some(&buffer) = overrides.get(&(input, ch)).or_else(|| overrides.get(&(input, 0))) {
+            return Some(buffer);
+        }
+        graph.cables.get(&input).map(|&from| channel_buffer(from, ch))
+    };
+    let mut input_downmix: BTreeMap<InputRef, usize> = BTreeMap::new();
+    for v in (0..n).filter(|&v| !copied[v]) {
+        for (port, spec) in nodes[v].descriptor.inputs.iter().enumerate() {
+            let input = InputRef { module: ids[v], port };
+            let Some(&from) = graph.cables.get(&input) else {
+                continue;
+            };
+            if !is_stereo(from) || spec.channels == Channels::Stereo {
+                continue;
+            }
+            buffer_count += 1;
+            let output = buffer_count - 1;
+            let downmix = DownmixSpec {
+                kind: DownmixKind::of(spec.signal),
+                left: input_buffer(input, 0).expect("connected"),
+                right: input_buffer(input, 1).expect("connected"),
+                output,
+            };
+            match nodes[v].descriptor.role {
+                ModuleRole::Dsp(_) => downmix_specs[v].push(downmix),
+                ModuleRole::AudioOutput => output_downmix_specs.push(downmix),
+                // A unit delay's input is `PerChannel`, so stereo there
+                // always copies it.
+                ModuleRole::UnitDelay => continue,
+            }
+            input_downmix.insert(input, output);
+        }
     }
 
     // 6. One buffer per distinct default that an unconnected input reads.
@@ -903,12 +1136,12 @@ pub(crate) fn compile(
         }),
     };
 
-    let resolve_input = |input: InputRef| -> (*const f32, bool) {
+    let resolve_input = |input: InputRef, ch: usize| -> (*const f32, bool) {
         let connected = graph.cables.contains_key(&input);
-        if let Some(&buf) = overrides.get(&input) {
+        if let Some(&buf) = input_downmix.get(&input) {
             (buf_ptrs[buf], connected)
-        } else if let Some(from) = graph.cables.get(&input) {
-            (buf_ptrs[source_buffer(*from)], connected)
+        } else if let Some(buf) = input_buffer(input, ch) {
+            (buf_ptrs[buf], connected)
         } else if let Some(key) = DefaultKey::of(default_of(input)) {
             (buf_ptrs[default_buf[&key]], false)
         } else {
@@ -921,27 +1154,82 @@ pub(crate) fn compile(
     let mut param_ptrs = Vec::new();
     let mut fills = Vec::new();
     let mut ops = Vec::new();
-    let mut op_of_node = vec![u32::MAX; n];
-    let mut make_op = |v: usize| -> u32 {
-        if op_of_node[v] != u32::MAX {
-            return op_of_node[v];
+    let mut downmixes = Vec::new();
+    let mut right_ptrs = Vec::new();
+    let mut op_of_node = vec![[u32::MAX; 2]; n];
+    let mut make_op = |v: usize, ch: usize| -> u32 {
+        if op_of_node[v][ch] != u32::MAX {
+            return op_of_node[v][ch];
         }
         let node = nodes[v];
         let in_start = input_ptrs.len() as u32;
+        let right_start = right_ptrs.len() as u32;
         let mut connected = 0u64;
         for port in 0..node.input_count() {
-            let (ptr, is_connected) = resolve_input(InputRef { module: ids[v], port });
+            let input = InputRef { module: ids[v], port };
+            let (ptr, is_connected) = resolve_input(input, ch);
             input_ptrs.push(ptr);
             if is_connected {
                 connected |= 1 << port;
             }
+            // A `Stereo` input on a stereo cable gets its right channel too.
+            // A mono cable gives the same buffer on both sides (rule 12).
+            if node
+                .descriptor
+                .inputs
+                .get(port)
+                .is_some_and(|spec| spec.channels == Channels::Stereo)
+                && graph.cables.get(&input).is_some_and(|&from| is_stereo(from))
+            {
+                let right = input_buffer(input, 1).expect("connected");
+                right_ptrs.push(RightPtr {
+                    port: port as u16,
+                    output: false,
+                    ptr: buf_ptrs[right],
+                });
+            }
         }
         let out_start = output_ptrs.len() as u32;
-        output_ptrs.extend(out_buf[v].iter().map(|&b| buf_ptrs[b]));
+        for port in 0..node.output_count() {
+            let right = right_buf[v][port];
+            let buffer = if ch == 1 {
+                right.expect("a copied module's outputs are stereo")
+            } else {
+                out_buf[v][port]
+            };
+            output_ptrs.push(buf_ptrs[buffer]);
+            if node
+                .descriptor
+                .outputs
+                .get(port)
+                .is_some_and(|spec| spec.channels == Channels::Stereo)
+            {
+                right_ptrs.push(RightPtr {
+                    port: port as u16,
+                    output: true,
+                    ptr: buf_ptrs[right.expect("a Stereo output is stereo")],
+                });
+            }
+        }
+        // Only a module that runs as one has downmixes (rules 11 and 17).
+        let downmix_start = downmixes.len() as u32;
+        for spec in downmix_specs[v].iter().filter(|_| ch == 0) {
+            downmixes.push(DownmixOp {
+                kind: spec.kind,
+                left: buf_ptrs[spec.left],
+                right: buf_ptrs[spec.right],
+                output: buf_ptrs[spec.output],
+            });
+        }
+        let slot = if ch == 1 {
+            node.copy_slot
+                .expect("the controller gives every copied DSP module a copy slot")
+        } else {
+            node.slot.expect("DSP modules have a slot")
+        } as u32;
         let fill_start = fills.len() as u32;
         let param_start = param_ptrs.len() as u32;
-        for spec in &fills_of[v] {
-            // Prepared here, on the control thread: the selected range.
+        for spec in &fills_of[v][ch] {
             let param_spec = node.spec(spec.param).expect("fills name real parameters");
             let base = node.params.get(spec.param).copied().unwrap_or(param_spec.default);
             let smooth = (param_spec.options.smooth_seconds > 0.0).then(|| {
@@ -961,8 +1249,8 @@ pub(crate) fn compile(
                 .collect();
             param_ptrs.push((spec.param as u16, buf_ptrs[spec.buffer] as *const f32));
             fills.push(ParamFill {
-                key: (u64::from(ids[v].0) << 32) | (spec.param as u64),
-                slot: node.slot.expect("DSP modules have a slot") as u32,
+                key: (u64::from(ids[v].0) << 32) | (spec.param as u64) | if ch == 1 { RIGHT_FILL } else { 0 },
+                slot,
                 param: spec.param as u16,
                 spec: param_spec,
                 base,
@@ -973,15 +1261,18 @@ pub(crate) fn compile(
             });
         }
         ops.push(ModuleOp {
-            slot: node.slot.expect("DSP modules have a slot") as u32,
+            slot,
             inputs: (in_start, input_ptrs.len() as u32),
             outputs: (out_start, output_ptrs.len() as u32),
             connected,
             fills: (fill_start, fills.len() as u32),
             params: (param_start, param_ptrs.len() as u32),
+            downmixes: (downmix_start, downmixes.len() as u32),
+            right: (right_start, right_ptrs.len() as u32),
+            channel: ch as u8,
         });
-        op_of_node[v] = (ops.len() - 1) as u32;
-        op_of_node[v]
+        op_of_node[v][ch] = (ops.len() - 1) as u32;
+        op_of_node[v][ch]
     };
 
     // Taps, sorted by key.
@@ -995,7 +1286,14 @@ pub(crate) fn compile(
         .iter()
         .map(|&i| Tap {
             key: taps[i].key,
-            source: taps[i].source.map_or(NO_SOURCE, output_key),
+            source: taps[i].source.map_or(NO_SOURCE, |source| {
+                output_key(source)
+                    | if taps[i].channel == 1 && is_stereo(source) {
+                        RIGHT_TAP
+                    } else {
+                        0
+                    }
+            }),
             input: taps[i].input.map_or(zero_ptr, |b| buf_ptrs[b] as *const f32),
             output: buf_ptrs[taps[i].output],
             state: 0.0,
@@ -1006,49 +1304,52 @@ pub(crate) fn compile(
     let mut loop_taps = Vec::new();
     let mut final_steps = Vec::with_capacity(steps.len());
     for step in steps {
-        final_steps.push(match step {
-            StepSpec::Module(v) => Step::Module(make_op(v)),
-            StepSpec::Tap(t) => Step::Tap(tap_index[t]),
+        match step {
+            // A module that runs per channel runs its left copy, then its
+            // right. They share no state, so the order does not matter.
+            StepSpec::Module(v) => {
+                for ch in 0..channels(v) {
+                    final_steps.push(Step::Module(make_op(v, ch)));
+                }
+            }
+            StepSpec::Tap(t) => final_steps.push(Step::Tap(tap_index[t])),
             StepSpec::Loop { modules, taps } => {
                 let ops_start = loop_ops.len() as u32;
                 for v in modules {
-                    let op = make_op(v);
-                    loop_ops.push(op);
+                    for ch in 0..channels(v) {
+                        loop_ops.push(make_op(v, ch));
+                    }
                 }
                 let taps_start = loop_taps.len() as u32;
                 loop_taps.extend(taps.iter().map(|&t| tap_index[t]));
-                Step::Loop {
+                final_steps.push(Step::Loop {
                     ops: (ops_start, loop_ops.len() as u32),
                     taps: (taps_start, loop_taps.len() as u32),
-                }
+                });
             }
-        });
+        }
     }
+
+    let output_downmix_start = downmixes.len() as u32;
+    downmixes.extend(output_downmix_specs.iter().map(|spec| DownmixOp {
+        kind: spec.kind,
+        left: buf_ptrs[spec.left],
+        right: buf_ptrs[spec.right],
+        output: buf_ptrs[spec.output],
+    }));
+    let output_downmixes = (output_downmix_start, downmixes.len() as u32);
 
     let outputs = output_nodes
         .iter()
         .filter_map(|&v| {
-            let left = graph.cables.get(&InputRef {
+            let from = *graph.cables.get(&InputRef {
                 module: ids[v],
                 port: 0,
-            });
-            let right = graph.cables.get(&InputRef {
-                module: ids[v],
-                port: 1,
-            });
-            let ptr = |from: &OutputRef| buf_ptrs[source_buffer(*from)] as *const f32;
-            match (left, right) {
-                (Some(l), Some(r)) => Some(OutputOp {
-                    left: ptr(l),
-                    right: ptr(r),
-                }),
-                // Mono into one side plays on both sides.
-                (Some(m), None) | (None, Some(m)) => Some(OutputOp {
-                    left: ptr(m),
-                    right: ptr(m),
-                }),
-                (None, None) => None,
-            }
+            })?;
+            Some(OutputOp {
+                left: buf_ptrs[channel_buffer(from, 0)] as *const f32,
+                right: buf_ptrs[channel_buffer(from, 1)] as *const f32,
+            })
         })
         .collect();
 
@@ -1059,6 +1360,7 @@ pub(crate) fn compile(
             Some(ProbeOp {
                 id,
                 buffer: buf_ptrs[buffer] as *const f32,
+                right: right_buf[*index_of.get(&from.module)?][from.port].map(|buffer| buf_ptrs[buffer] as *const f32),
                 kind,
             })
         })
@@ -1066,7 +1368,7 @@ pub(crate) fn compile(
 
     // `ids` is sorted and ports count up, so this is sorted by key.
     let (ids, buf_ptrs) = (&ids, &buf_ptrs);
-    let sources: Vec<(u64, *const f32)> = out_buf
+    let mut sources: Vec<(u64, *const f32)> = out_buf
         .iter()
         .enumerate()
         .flat_map(|(v, ports)| {
@@ -1076,10 +1378,28 @@ pub(crate) fn compile(
             })
         })
         .collect();
-    debug_assert!(sources.is_sorted_by_key(|&(key, _)| key));
+    for (v, ports) in right_buf.iter().enumerate() {
+        for (port, buffer) in ports.iter().enumerate() {
+            if let Some(buffer) = buffer {
+                sources.push((
+                    output_key(OutputRef { module: ids[v], port }) | RIGHT_TAP,
+                    buf_ptrs[*buffer] as *const f32,
+                ));
+            }
+        }
+    }
+    sources.sort_unstable_by_key(|&(key, _)| key);
 
     let mut fill_order: Vec<u32> = (0..fills.len() as u32).collect();
     fill_order.sort_unstable_by_key(|&i| fills[i as usize].key);
+    let mut copies: Vec<(u32, u32)> = (0..n)
+        .filter(|&v| copied[v] && matches!(nodes[v].descriptor.role, ModuleRole::Dsp(_)))
+        .map(|v| {
+            let slot = |slot: Option<usize>| slot.expect("copied DSP modules have both slots") as u32;
+            (slot(nodes[v].slot), slot(nodes[v].copy_slot))
+        })
+        .collect();
+    copies.sort_unstable();
 
     let schedule = Schedule {
         _buffers: buffers,
@@ -1109,10 +1429,22 @@ pub(crate) fn compile(
             })
             .collect(),
         param_ptrs,
+        downmixes,
+        output_downmixes,
+        right_ptrs,
+        copies,
         midi_maps: compile_midi_maps(graph, midi_synced),
         live_release: Vec::new(),
     };
     (schedule, report)
+}
+
+/// The right copy's slot of the module in `slot`, if it runs as two.
+/// `copies` is [`Schedule::copies`].
+pub(crate) fn partner(copies: &[(u32, u32)], slot: usize) -> Option<usize> {
+    let slot = u32::try_from(slot).ok()?;
+    let index = copies.binary_search_by_key(&slot, |&(left, _)| left).ok()?;
+    Some(copies[index].1 as usize)
 }
 
 /// The graph's MIDI mappings, sorted by control so the engine can find a
@@ -1255,6 +1587,39 @@ fn tarjan(succ: &[Vec<usize>]) -> Vec<Vec<usize>> {
 
 #[cfg(test)]
 mod tests {
+    /// A new right tap first inherits its mono tap, then its mono source.
+    #[test]
+    fn new_right_taps_inherit_mono_history() {
+        use super::{RIGHT_TAP, Schedule, Tap};
+        let source = [0.25, 0.75];
+        let tap = |key, source, state| Tap {
+            key,
+            source,
+            input: std::ptr::null(),
+            output: std::ptr::null_mut(),
+            state,
+        };
+        let mut old = Schedule::empty();
+        old.taps.push(tap(3, 8, 0.5));
+        old.sources.push((8, source.as_ptr()));
+        let mut next = Schedule::empty();
+        next.taps.push(tap(3 | RIGHT_TAP, 8 | RIGHT_TAP, 0.0));
+        next.taps.push(tap(4 | RIGHT_TAP, 8 | RIGHT_TAP, 0.0));
+        next.take_tap_state_from(&old, source.len());
+        assert_eq!(next.taps[0].state, 0.5);
+        assert_eq!(next.taps[1].state, 0.75);
+
+        // A matching right tap wins over the mono tap and mono source.
+        old.taps.push(tap(3 | RIGHT_TAP, 8 | RIGHT_TAP, -0.5));
+        next.take_tap_state_from(&old, source.len());
+        assert_eq!(next.taps[0].state, -0.5);
+
+        // A previously stereo source wins over its left channel for a new tap.
+        let right_source = [-0.25, -0.75];
+        old.sources.push((8 | RIGHT_TAP, right_source.as_ptr()));
+        next.take_tap_state_from(&old, source.len());
+        assert_eq!(next.taps[1].state, -0.75);
+    }
     use super::*;
 
     /// A port for test descriptors.
@@ -1315,6 +1680,7 @@ mod tests {
                     params: Vec::new(),
                     slot: Some(i as usize),
                     ranges: Vec::new(),
+                    copy_slot: None,
                 },
             );
         }
@@ -1358,6 +1724,101 @@ mod tests {
             assert_eq!(input_ptr(&schedule, op, 3), schedule._zero.as_ptr());
             assert_eq!(schedule.ops[op].connected, 0);
         }
+    }
+
+    #[test]
+    fn a_patch_without_stereo_compiles_as_before() {
+        // 1 -> 2 -> 3, and 3 feeds itself, so one delay is inserted.
+        let mut graph = followers(3);
+        let cable = |graph: &mut Graph, from: u32, to: u32| {
+            graph.cables.insert(
+                InputRef {
+                    module: ModuleId(to),
+                    port: 3,
+                },
+                OutputRef {
+                    module: ModuleId(from),
+                    port: 0,
+                },
+            );
+        };
+        cable(&mut graph, 1, 2);
+        cable(&mut graph, 2, 3);
+        cable(&mut graph, 3, 3);
+        let (schedule, report) = compile(&graph, &probes_on(1..=3), &BTreeMap::new(), 48_000.0, 64);
+        assert!(report.per_channel.is_empty());
+        assert!(report.stereo_outputs.is_empty());
+        // One operation per module, one tap for the one delay, and buffers
+        // for 3 outputs, the bar phase, the 0.5 default, and the tap.
+        assert_eq!(schedule.ops.len(), 3);
+        assert!(schedule.ops.iter().all(|op| op.channel == 0));
+        assert_eq!(schedule.taps.len(), 1);
+        assert_eq!(schedule._buffers.len(), 6);
+        assert!(schedule.downmixes.is_empty());
+        assert!(schedule.right_ptrs.is_empty());
+        assert!(schedule.copies.is_empty());
+    }
+
+    /// A mono cable into a stereo input shares one buffer without a copy.
+    #[test]
+    fn mono_cable_into_stereo_input_reuses_its_buffer() {
+        static STEREO_INPUT: crate::ModuleDescriptor = crate::ModuleDescriptor {
+            id: "test.stereo-input",
+            version: 1,
+            name: "Stereo input",
+            category: "Test",
+            description: "A stereo input for testing.",
+            inputs: &[port("in", crate::SignalType::Audio).with_channels(Channels::Stereo)],
+            outputs: &[port("out", crate::SignalType::Audio)],
+            params: &[],
+            role: ModuleRole::Dsp(|_| Box::new(Silent)),
+            panel: crate::Panel::EMPTY,
+            displays: &[],
+        };
+        let mut graph = followers(2);
+        graph.nodes.get_mut(&ModuleId(2)).unwrap().descriptor = &STEREO_INPUT;
+        graph.cables.insert(
+            InputRef {
+                module: ModuleId(2),
+                port: 0,
+            },
+            OutputRef {
+                module: ModuleId(1),
+                port: 0,
+            },
+        );
+        let (schedule, report) = compile(&graph, &probes_on([2]), &BTreeMap::new(), 48_000.0, 64);
+        assert!(report.per_channel.is_empty() && report.stereo_outputs.is_empty());
+        assert_eq!(schedule._buffers.len(), 4, "two outputs and two defaults");
+        assert!(schedule.downmixes.is_empty());
+        assert!(
+            schedule.right_ptrs.is_empty(),
+            "both sides use the ordinary input pointer"
+        );
+        assert!(schedule.copies.is_empty());
+        let source = schedule.ops.iter().find(|op| op.slot == 0).unwrap();
+        let destination = schedule.ops.iter().find(|op| op.slot == 1).unwrap();
+        assert_eq!(
+            schedule.output_ptrs[source.outputs.0 as usize] as *const f32,
+            schedule.input_ptrs[destination.inputs.0 as usize]
+        );
+    }
+
+    #[test]
+    fn downmix_kinds_follow_the_spec_cases() {
+        assert_eq!(DownmixKind::of(crate::SignalType::Audio), DownmixKind::Mean);
+        assert_eq!(DownmixKind::of(crate::SignalType::Pitch), DownmixKind::Mean);
+        assert_eq!(DownmixKind::of(crate::SignalType::Modulation), DownmixKind::Mean);
+        assert_eq!(DownmixKind::of(crate::SignalType::Gate), DownmixKind::Max);
+        assert_eq!(DownmixKind::of(crate::SignalType::Phase), DownmixKind::Phase);
+        assert_eq!(DownmixKind::Mean.apply(0.5, 0.5), 0.5);
+        assert_eq!(DownmixKind::Mean.apply(0.5, -0.5), 0.0);
+        assert_eq!(DownmixKind::Max.apply(1.0, 0.0), 1.0);
+        assert_eq!(DownmixKind::Phase.apply(0.2, 0.4), 0.3);
+        assert_eq!(DownmixKind::Phase.apply(0.25, 0.75), 0.0);
+        assert_eq!(DownmixKind::Phase.apply(0.75, 0.25), 0.5);
+        let across = DownmixKind::Phase.apply(0.9, 0.1);
+        assert_eq!(across, 0.0);
     }
 
     #[test]
@@ -1418,6 +1879,7 @@ mod tests {
             unknown: None,
             params: descriptor.default_params(),
             slot: Some(id as usize),
+            copy_slot: None,
             ranges: vec![None; descriptor.params.len()],
         };
         graph.nodes.insert(ModuleId(id), node);

@@ -246,7 +246,7 @@ fn a_new_loop_through_a_fallback_input_does_not_drop_out() {
         c.connect_named(source, "out", vca, "a").unwrap();
         c.connect_named(vca, "out", scale, "a").unwrap();
         c.connect_named(scale, "out", bias, "a").unwrap();
-        c.connect_named(vca, "out", out, "left").unwrap();
+        c.connect_named(vca, "out", out, "in").unwrap();
         let delay = explicit.then(|| {
             let delay = c.add_module("loom.time.delay1").unwrap();
             c.connect_named(bias, "out", delay, "in").unwrap();
@@ -297,7 +297,7 @@ fn a_new_loop_through_an_input_that_reads_zero_matches_a_running_delay() {
         let out = c.add_module("loom.io.audio-out").unwrap();
         c.connect_named(source, "out", mix, "a").unwrap();
         c.connect_named(mix, "out", scale, "a").unwrap();
-        c.connect_named(mix, "out", out, "left").unwrap();
+        c.connect_named(mix, "out", out, "in").unwrap();
         let delay = explicit.then(|| {
             let delay = c.add_module("loom.time.delay1").unwrap();
             c.connect_named(scale, "out", delay, "in").unwrap();
@@ -359,7 +359,7 @@ fn a_delay_that_moves_to_another_cable_does_not_click() {
         c.connect_named(front, "out", mix, "a").unwrap();
         c.connect_named(mix, "out", feedback, "a").unwrap();
         c.connect_named(feedback, "out", mix, "b").unwrap();
-        c.connect_named(mix, "out", out, "left").unwrap();
+        c.connect_named(mix, "out", out, "in").unwrap();
         c.commit().unwrap();
         (parts, mix, feedback, silent)
     };
@@ -404,7 +404,7 @@ fn an_unrelated_edit_keeps_a_running_loop_bit_identical() {
         c.connect_named(source, "out", mix, "a").unwrap();
         c.connect_named(mix, "out", feedback, "a").unwrap();
         c.connect_named(feedback, "out", mix, "b").unwrap();
-        c.connect_named(mix, "out", out, "left").unwrap();
+        c.connect_named(mix, "out", out, "in").unwrap();
         c.commit().unwrap();
         parts
     };

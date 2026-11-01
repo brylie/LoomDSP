@@ -54,7 +54,7 @@ Patch(
     ],
     cables: [
         PatchCable(from: (1, "out"), to: (2, "in")),
-        PatchCable(from: (2, "bandpass"), to: (3, "left")),
+        PatchCable(from: (2, "bandpass"), to: (3, "in")),
     ],
 )
 ```

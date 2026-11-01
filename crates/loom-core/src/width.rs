@@ -204,10 +204,7 @@ mod tests {
     static OUT: ModuleDescriptor = descriptor!(
         "test.out",
         ModuleRole::AudioOutput,
-        &[
-            port("left", SignalType::Audio, Channels::Downmix),
-            port("right", SignalType::Audio, Channels::Downmix),
-        ],
+        &[port("in", SignalType::Audio, Channels::Stereo)],
         &[]
     );
 
@@ -221,6 +218,8 @@ mod tests {
                 params: Vec::new(),
                 slot: matches!(descriptor.role, ModuleRole::Dsp(_)).then_some(id.0 as usize),
                 ranges: Vec::new(),
+                // Distinct from every left slot, for graphs that compile.
+                copy_slot: matches!(descriptor.role, ModuleRole::Dsp(_)).then_some(id.0 as usize + 100_000),
             },
         );
         id

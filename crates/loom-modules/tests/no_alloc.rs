@@ -44,7 +44,7 @@ fn unknown_module_never_allocates() {
         .unwrap();
     parts
         .controller
-        .connect_named(id, "out", loom_core::ModuleId(9), "left")
+        .connect_named(id, "out", loom_core::ModuleId(9), "in")
         .unwrap();
     parts.controller.commit().unwrap();
     let mut left = [0.0; 512];
@@ -284,7 +284,7 @@ fn delay_and_allpass_never_allocate_while_sweeping_parameters_and_inputs() {
     c.connect_named(lfo_scale, "out", delay, "time").unwrap();
     c.connect_named(delay, "out", allpass, "in").unwrap();
     c.connect_named(lfo_scale, "out", allpass, "time").unwrap();
-    c.connect_named(allpass, "out", out, "right").unwrap();
+    c.connect_named(allpass, "out", out, "in").unwrap();
     c.commit().unwrap();
 
     let mut left = vec![0.0; 1024];

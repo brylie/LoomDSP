@@ -91,7 +91,7 @@ struct Activity {
 #[derive(Default)]
 pub struct Watcher {
     levels: Levels,
-    shown_levels: HashMap<ProbeId, (u8, u8)>,
+    shown_levels: HashMap<ProbeId, MeterSteps>,
     scopes: HashMap<ProbeId, ScopeTrace>,
     shown_traces: HashMap<ProbeId, loom_canvas::Trace>,
     activity: HashMap<ProbeId, Activity>,
@@ -160,7 +160,10 @@ impl Watcher {
         for reading in readings {
             if watch.activity.contains(&reading.probe) {
                 let a = self.activity.entry(reading.probe).or_default();
-                a.peak = a.peak.max(reading.peak.abs());
+                a.peak = a
+                    .peak
+                    .max(reading.peak.abs())
+                    .max(reading.right.map_or(0.0, |(peak, _)| peak.abs()));
             }
         }
         let due = self
@@ -281,17 +284,24 @@ impl Hash for Monitor {
     }
 }
 
+/// The quantised left and optional right meter levels.
+pub type MeterSteps = (u8, u8, Option<(u8, u8)>);
+
 /// A level as drawn: 256 steps for RMS and peak.
-fn steps(level: Level) -> (u8, u8) {
+fn steps(level: Level) -> MeterSteps {
     let step = |x: f32| (x.clamp(0.0, 1.0) * 255.0).round() as u8;
-    (step(level.rms), step(level.peak))
+    (
+        step(level.rms),
+        step(level.peak),
+        level.right.map(|(rms, peak)| (step(rms), step(peak))),
+    )
 }
 
 /// The levels that differ from `shown` by at least one step.
-pub fn changed(shown: &HashMap<ProbeId, (u8, u8)>, levels: &[(ProbeId, Level)]) -> Vec<(ProbeId, Level)> {
+pub fn changed(shown: &HashMap<ProbeId, MeterSteps>, levels: &[(ProbeId, Level)]) -> Vec<(ProbeId, Level)> {
     levels
         .iter()
-        .filter(|(probe, level)| shown.get(probe).copied().unwrap_or((0, 0)) != steps(*level))
+        .filter(|(probe, level)| shown.get(probe).copied().unwrap_or((0, 0, None)) != steps(*level))
         .copied()
         .collect()
 }
@@ -377,7 +387,14 @@ mod tests {
         let silent = [(probe, Level::default())];
         // A new probe at level 0 looks the same as no meter: nothing to send.
         assert!(changed(&shown, &silent).is_empty());
-        let loud = [(probe, Level { rms: 0.5, peak: 0.8 })];
+        let loud = [(
+            probe,
+            Level {
+                rms: 0.5,
+                peak: 0.8,
+                right: None,
+            },
+        )];
         assert_eq!(changed(&shown, &loud).len(), 1);
         shown.insert(probe, steps(loud[0].1));
         // Less than one step of 256: not drawn, not sent.
@@ -386,9 +403,31 @@ mod tests {
             Level {
                 rms: 0.501,
                 peak: 0.799,
+                right: None,
             },
         )];
         assert!(changed(&shown, &close).is_empty());
+    }
+
+    /// A change on the right side wakes the UI even when the left is still.
+    #[test]
+    fn right_meter_changes_are_visible() {
+        let probe = ProbeId(1);
+        let now = Instant::now();
+        let mut levels = Levels::default();
+        let reading = MeterReading {
+            probe,
+            frame: 0,
+            frames: 64,
+            peak: 0.0,
+            rms: 0.0,
+            right: Some((0.5, 0.5)),
+        };
+        levels.update(&[reading], now);
+        let level = levels.get(probe).unwrap();
+        assert_eq!(level.peak, 0.0);
+        assert!(level.right.unwrap().1 > 0.0);
+        assert_eq!(changed(&HashMap::new(), &[(probe, level)]).len(), 1);
     }
 
     fn chunk(probe: ProbeId, frame: u64, value: impl Fn(u64) -> f32) -> ScopeChunk {
@@ -483,6 +522,7 @@ mod tests {
                 frames: 128,
                 peak,
                 rms: peak / 11.3,
+                right: None,
             };
             let now = start + Duration::from_millis(u64::from(ms));
             let update = watcher.take(&watch, &[reading], [], 48_000.0, now);
@@ -507,6 +547,7 @@ mod tests {
             frames: 128,
             peak: 0.000_05,
             rms: 0.0,
+            right: None,
         };
         assert!(watcher.take(&watch, &[quiet], [], 48_000.0, start).is_empty());
     }
@@ -522,6 +563,7 @@ mod tests {
             frames: 128,
             peak: 0.5,
             rms: 0.3,
+            right: None,
         };
         let watch = WatchList {
             meters: HashSet::from([ProbeId(1)]),

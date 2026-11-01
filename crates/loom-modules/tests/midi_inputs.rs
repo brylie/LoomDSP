@@ -20,7 +20,7 @@ fn gate() -> EngineParts {
     let c = &mut parts.controller;
     let note = c.add_module("loom.midi.note").unwrap();
     let out = c.add_module("loom.io.audio-out").unwrap();
-    c.connect_named(note, "gate", out, "left").unwrap();
+    c.connect_named(note, "gate", out, "in").unwrap();
     c.commit().unwrap();
     // Past the fade-in.
     run(&mut parts);

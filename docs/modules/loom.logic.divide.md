@@ -65,7 +65,7 @@ Patch(
         PatchCable(from: (2, "trigger"), to: (3, "gate")),
         PatchCable(from: (4, "out"), to: (5, "in")),
         PatchCable(from: (3, "out"), to: (5, "level")),
-        PatchCable(from: (5, "out"), to: (6, "left")),
+        PatchCable(from: (5, "out"), to: (6, "in")),
     ],
 )
 ```

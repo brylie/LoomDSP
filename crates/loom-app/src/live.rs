@@ -148,6 +148,8 @@ pub struct Level {
     pub rms: f32,
     /// Peak level, 0..1. Never below `rms`.
     pub peak: f32,
+    /// Normalised RMS and peak of the right channel, if stereo.
+    pub right: Option<(f32, f32)>,
 }
 
 #[derive(Default)]
@@ -159,6 +161,10 @@ struct Tracked {
     /// frame since the last drain, not as the loudest block.
     squares: f64,
     frames: u64,
+    right_peak: f32,
+    right_squares: f64,
+    right_frames: u64,
+    stereo: bool,
     level: Level,
     /// When the last reading arrived.
     heard: Option<Instant>,
@@ -201,6 +207,12 @@ impl Levels {
             meter.peak = meter.peak.max(reading.peak);
             meter.squares += f64::from(reading.rms).powi(2) * f64::from(reading.frames);
             meter.frames += u64::from(reading.frames);
+            meter.stereo = reading.right.is_some();
+            if let Some((peak, rms)) = reading.right {
+                meter.right_peak = meter.right_peak.max(peak);
+                meter.right_squares += f64::from(rms).powi(2) * f64::from(reading.frames);
+                meter.right_frames += u64::from(reading.frames);
+            }
             meter.heard = Some(now);
         }
 
@@ -214,13 +226,28 @@ impl Levels {
             };
             let rms = decay(meter.level.rms, normalise(window_rms), dt);
             let peak = decay(meter.level.peak, normalise(meter.peak), dt).max(rms);
-            meter.level = Level { rms, peak };
+            let right = meter.stereo.then(|| {
+                let previous = meter.level.right.unwrap_or_default();
+                let window = if meter.right_frames > 0 {
+                    (meter.right_squares / meter.right_frames as f64).sqrt() as f32
+                } else {
+                    0.0
+                };
+                let rms = decay(previous.0, normalise(window), dt);
+                let peak = decay(previous.1, normalise(meter.right_peak), dt).max(rms);
+                (rms, peak)
+            });
+            meter.level = Level { rms, peak, right };
             meter.peak = 0.0;
             meter.squares = 0.0;
             meter.frames = 0;
+            meter.right_peak = 0.0;
+            meter.right_squares = 0.0;
+            meter.right_frames = 0;
         }
         self.meters.retain(|_, m| {
             m.level.peak > 0.0
+                || m.level.right.is_some_and(|(_, peak)| peak > 0.0)
                 || m.heard
                     .is_some_and(|heard| now - heard < std::time::Duration::from_secs(2))
         });
@@ -616,6 +643,7 @@ mod tests {
             frames,
             peak,
             rms,
+            right: None,
         }
     }
 

@@ -99,7 +99,7 @@ fn final_output_is_clipped_and_never_non_finite() {
     let c = &mut parts.controller;
     let constant = c.add_module("loom.math.constant").unwrap();
     let out = c.add_module("loom.io.audio-out").unwrap();
-    c.connect_named(constant, "out", out, "left").unwrap();
+    c.connect_named(constant, "out", out, "in").unwrap();
     // The default control range is -1 to 1 (control-ranges.md).
     c.set_range(constant, 0, loom_core::ParamRange::new(-5.0, 5.0)).unwrap();
     c.set_param_named(constant, "value", 5.0).unwrap();
@@ -125,7 +125,7 @@ fn final_output_is_clipped_and_never_non_finite() {
     c.set_param_named(mul, "gain", 10.0).unwrap();
     c.connect_named(add, "out", mul, "a").unwrap();
     c.connect_named(mul, "out", add, "a").unwrap();
-    c.connect_named(mul, "out", out, "left").unwrap();
+    c.connect_named(mul, "out", out, "in").unwrap();
     c.commit().unwrap();
     let (left, _) = render(&mut parts, 256, 128, &[]);
     assert!(left.iter().all(|x| x.is_finite()));
@@ -421,7 +421,7 @@ fn delay_in_feedback_loop_gets_an_inserted_unit_delay_and_is_block_invariant() {
         c.connect_named(add, "out", delay, "in").unwrap();
         c.connect_named(delay, "out", mul, "a").unwrap();
         c.connect_named(mul, "out", add, "b").unwrap();
-        c.connect_named(delay, "out", out, "left").unwrap();
+        c.connect_named(delay, "out", out, "in").unwrap();
         let report = c.commit().unwrap().clone();
         assert_eq!(report.loops.len(), 1);
         assert_eq!(report.loops[0].inserted_delays.len(), 1);
@@ -478,6 +478,8 @@ fn delay_and_allpass_ports_and_left_right_engine_paths_are_independent() {
         let phase_r = c.add_module("loom.phase.generator").unwrap();
         let saw_r = c.add_module("loom.osc.saw").unwrap();
         let out = c.add_module("loom.io.audio-out").unwrap();
+        let join = c.add_module("loom.mix.join").unwrap();
+        c.connect_named(join, "out", out, "in").unwrap();
         c.set_param_named(phase_r, "tune", 7.0).unwrap();
         c.connect_named(phase_l, "phase", sine_l, "phase").unwrap();
         c.connect_named(phase_r, "phase", saw_r, "phase").unwrap();
@@ -494,13 +496,13 @@ fn delay_and_allpass_ports_and_left_right_engine_paths_are_independent() {
             c.set_param_named(ap_r, "gain", 0.0).unwrap();
             c.connect_named(sine_l, "out", delay_l, "in").unwrap();
             c.connect_named(delay_l, "out", ap_l, "in").unwrap();
-            c.connect_named(ap_l, "out", out, "left").unwrap();
+            c.connect_named(ap_l, "out", join, "left").unwrap();
             c.connect_named(saw_r, "out", delay_r, "in").unwrap();
             c.connect_named(delay_r, "out", ap_r, "in").unwrap();
-            c.connect_named(ap_r, "out", out, "right").unwrap();
+            c.connect_named(ap_r, "out", join, "right").unwrap();
         } else {
-            c.connect_named(sine_l, "out", out, "left").unwrap();
-            c.connect_named(saw_r, "out", out, "right").unwrap();
+            c.connect_named(sine_l, "out", join, "left").unwrap();
+            c.connect_named(saw_r, "out", join, "right").unwrap();
         }
         c.commit().unwrap();
         render(&mut parts, 512, 64, &[])
@@ -644,13 +646,15 @@ fn delay_and_allpass_stay_bounded_and_block_invariant_under_audio_rate_modulatio
         c.set_param_named(allpass, "time", 0.008).unwrap();
         c.set_param_named(allpass, "gain", 0.9).unwrap();
         let out = c.add_module("loom.io.audio-out").unwrap();
+        let join = c.add_module("loom.mix.join").unwrap();
+        c.connect_named(join, "out", out, "in").unwrap();
 
         c.connect_named(src, "out", delay, "in").unwrap();
         c.connect_named(mod_scale, "out", delay, "time").unwrap();
         c.connect_named(src, "out", allpass, "in").unwrap();
         c.connect_named(mod_scale, "out", allpass, "time").unwrap();
-        c.connect_named(delay, "out", out, "left").unwrap();
-        c.connect_named(allpass, "out", out, "right").unwrap();
+        c.connect_named(delay, "out", join, "left").unwrap();
+        c.connect_named(allpass, "out", join, "right").unwrap();
 
         c.add_assignment_named(mod_osc, "out", delay, "time", 0.1).unwrap();
         c.add_assignment_named(mod_osc, "out", allpass, "time", 0.1).unwrap();
@@ -741,9 +745,11 @@ fn clock_against_bar(block: usize) -> EngineParts {
     c.set_param_named(lfo, "sync", 1.0).unwrap();
     let bar = c.add_module("loom.phase.trigger").unwrap();
     let out = c.add_module("loom.io.audio-out").unwrap();
-    c.connect_named(clock, "trigger", out, "left").unwrap();
+    let join = c.add_module("loom.mix.join").unwrap();
+    c.connect_named(join, "out", out, "in").unwrap();
+    c.connect_named(clock, "trigger", join, "left").unwrap();
     c.connect_named(lfo, "phase", bar, "phase").unwrap();
-    c.connect_named(bar, "trigger", out, "right").unwrap();
+    c.connect_named(bar, "trigger", join, "right").unwrap();
     c.commit().unwrap();
     // Play past the fade-in, which runs even with the safety stage off.
     render(&mut parts, 1_024, block, &[]);

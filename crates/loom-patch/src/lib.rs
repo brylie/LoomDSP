@@ -17,7 +17,7 @@
 //!     cables: [
 //!         (from: (1, "pitch"), to: (2, "pitch")),
 //!         (from: (2, "phase"), to: (3, "phase")),
-//!         (from: (3, "out"), to: (4, "left")),
+//!         (from: (3, "out"), to: (4, "in")),
 //!     ],
 //! )
 //! ```
@@ -805,7 +805,7 @@ Patch(
     cables: [
         (from: (2, "phase"), to: (3, "phase")),
         (from: (1, "pitch"), to: (2, "pitch")),
-        (from: (3, "out"), to: (4, "left")),
+        (from: (3, "out"), to: (4, "in")),
     ],
 )
 "#;

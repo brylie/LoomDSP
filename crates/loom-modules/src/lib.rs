@@ -59,6 +59,8 @@ pub static ALL: &[&ModuleDescriptor] = &[
     &level::SCALE,
     &mix::MIXER,
     &mix::CROSSFADE,
+    &mix::JOIN,
+    &mix::SPLIT,
     &io::UNIT_DELAY,
     &io::AUDIO_OUT,
     &midi::NOTE_IN,

@@ -185,8 +185,7 @@ pub fn generate(controller: &mut Controller, n: usize) -> Result<(), LoomError> 
         c.connect_named(note, "gate", mul, "b")?;
         c.set_param_named(mul, "gain", if voice == 0 { 0.2 } else { 0.0 })?;
         if voice == 0 {
-            c.connect_named(mul, "out", out, "left")?;
-            c.connect_named(mul, "out", out, "right")?;
+            c.connect_named(mul, "out", out, "in")?;
         }
         made += 4;
         voice += 1;
@@ -350,7 +349,7 @@ mod tests {
         let out = c.add_module("loom.io.audio-out").unwrap();
         let phase = c.add_module("loom.phase.generator").unwrap();
         let saw = c.add_module("loom.osc.saw").unwrap();
-        c.connect_named(note, "gate", out, "left").unwrap();
+        c.connect_named(note, "gate", out, "in").unwrap();
         c.connect_named(note, "pitch", phase, "pitch").unwrap();
         c.connect_named(phase, "phase", saw, "phase").unwrap();
         c.commit().unwrap();
