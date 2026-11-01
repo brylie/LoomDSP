@@ -155,7 +155,7 @@ fn example_button_honors_unsaved_changes() {
     ui.release();
     assert!(ui.app.help.is_none());
     assert!(!ui.app.unsaved());
-    assert!(ui.app.file.is_none());
+    assert!(ui.app.document.file().is_none());
     assert_eq!(
         ui.app
             .controller
@@ -178,7 +178,7 @@ fn example_button_saves_the_old_patch_when_requested() {
     let destination = dir.0.join("saved.ron");
     let mut ui = Ui::open("sine.ron");
     // The test patch is an untitled copy, so saving asks for a path.
-    ui.app.file = None;
+    ui.app.document.forget_file();
     let _ = ui.app.update(Message::Canvas(CanvasEvent::Select(vec![3])));
     let _ = ui.app.update(Message::Param {
         module: 5,
@@ -198,7 +198,7 @@ fn example_button_saves_the_old_patch_when_requested() {
     let saved = loom_patch::Patch::load(&destination).expect("old patch was saved");
     let gain = saved.modules.iter().find(|module| module.id == 5).unwrap().params["gain"];
     assert_eq!(gain, value);
-    assert!(ui.app.file.is_none(), "the example is an untitled copy");
+    assert!(ui.app.document.file().is_none(), "the example is an untitled copy");
     assert!(!ui.app.unsaved());
     assert!(matches!(
         files::fake::asked().as_slice(),
@@ -232,7 +232,7 @@ fn example_uses_existing_unsaved_changes_flow() {
     let _ = clean.app.update(Message::ShowHelp);
     let _ = clean.app.update(Message::HelpExample);
     assert!(clean.app.help.is_none());
-    assert!(clean.app.file.is_none());
+    assert!(clean.app.document.file().is_none());
 }
 
 /// Clicks the middle of a window rectangle.

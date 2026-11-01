@@ -71,7 +71,7 @@ impl Setup {
 }
 
 fn folder(app: &App) -> PathBuf {
-    app.recovery.as_ref().expect("autosave is on").dir().to_path_buf()
+    app.document.recovery().expect("autosave is on").dir().to_path_buf()
 }
 
 /// Calls the autosave tick at `now` until `done` holds, so the writer's
@@ -178,7 +178,7 @@ fn a_clean_exit_deletes_the_folder() {
     let mut app = setup.boot(Some(setup.file()), &mut Answer::new(Choice::NotNow));
     let dir = folder(&app);
     let _ = app.update(Message::File(crate::FileAction::Close));
-    assert!(app.recovery.is_none());
+    assert!(!app.document.autosave_on());
     assert!(!dir.exists());
     assert!(sessions(&setup.root()).is_empty());
 }
@@ -254,7 +254,7 @@ fn restore_keeps_an_unchanged_file() {
     drop(app);
 
     let mut app = setup.boot(None, &mut Answer::new(Choice::Restore));
-    assert_eq!(app.file.as_deref(), Some(setup.file().as_path()));
+    assert_eq!(app.document.file(), Some(setup.file().as_path()));
     assert_eq!(app.title(), "* drone.ron - LoomDSP");
     assert_eq!(app.current_patch(), edited, "the edit is back");
     assert!(
@@ -286,7 +286,7 @@ fn restore_after_the_file_changed_leaves_it_alone() {
             .1
             .contains("\"drone.ron\" has changed since this copy was taken.")
     );
-    assert_eq!(app.file, None);
+    assert!(app.document.file().is_none());
     assert_eq!(app.title(), "* drone (recovered) - LoomDSP");
     assert_eq!(fs::read(&file).unwrap(), saved);
 }
@@ -305,7 +305,7 @@ fn restore_of_a_never_saved_patch_is_untitled() {
     drop(app);
 
     let app = setup.boot(None, &mut Answer::new(Choice::Restore));
-    assert_eq!(app.file, None);
+    assert!(app.document.file().is_none());
     assert_eq!(app.title(), "* Untitled - LoomDSP");
     assert!(app.controller.graph().node(filter).is_some());
 }
@@ -399,8 +399,11 @@ fn save_as_after_a_changed_restore_starts_in_the_folder() {
     drop(app);
     fs::remove_file(setup.file()).unwrap();
     let app = setup.boot(None, &mut Answer::new(Choice::Restore));
-    assert_eq!(app.file, None);
-    assert_eq!(app.save_hint, Some(setup.tmp.0.join("drone (recovered).ron")));
+    assert!(app.document.file().is_none());
+    assert_eq!(
+        app.document.save_hint(),
+        Some(setup.tmp.0.join("drone (recovered).ron").as_path())
+    );
 }
 
 /// Restore wins over a patch given on the command line, and says so.
@@ -449,7 +452,7 @@ fn unattended_runs_leave_recovery_alone() {
         let mut answer = Answer::new(Choice::Discard);
         let app = App::boot(args, &mut answer);
         assert!(answer.asked.is_empty());
-        assert!(app.recovery.is_none());
+        assert!(!app.document.autosave_on());
     }
     assert_eq!(fs::read_to_string(crashed.join("patch.ron")).unwrap(), before);
     assert_eq!(sessions(&setup.root()), [crashed]);
