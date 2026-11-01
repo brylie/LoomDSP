@@ -6,6 +6,8 @@ use iced::{Point, Rectangle, Size, Vector};
 pub const MIN_ZOOM: f32 = 0.1;
 /// Largest zoom.
 pub const MAX_ZOOM: f32 = 4.0;
+/// Space kept around a framed patch, in logical pixels.
+const FRAME_MARGIN: f32 = 40.0;
 
 /// Maps world coordinates to positions inside the canvas widget.
 ///
@@ -74,15 +76,35 @@ impl Camera {
     /// Shows all of `world` inside a widget of this size, with a margin.
     /// Never zooms in past 1.0, so small patches stay at natural size.
     pub fn frame(&mut self, world: Rectangle, size: Size) {
-        let margin = 40.0;
-        let zoom_x = (size.width - 2.0 * margin).max(1.0) / world.width.max(1.0);
-        let zoom_y = (size.height - 2.0 * margin).max(1.0) / world.height.max(1.0);
+        let zoom_x = (size.width - 2.0 * FRAME_MARGIN).max(1.0) / world.width.max(1.0);
+        let zoom_y = (size.height - 2.0 * FRAME_MARGIN).max(1.0) / world.height.max(1.0);
         self.zoom = zoom_x.min(zoom_y).clamp(MIN_ZOOM, 1.0);
         let centre = world.center();
         self.origin = Point::new(
             centre.x - size.width / (2.0 * self.zoom),
             centre.y - size.height / (2.0 * self.zoom),
         );
+    }
+
+    /// Like [`frame`](Self::frame), but never below `readable`, the zoom
+    /// where port labels and captions are drawn. A patch too big to fit
+    /// at that zoom shows its left edge, where its sources are placed, and
+    /// its top edge if it is also too tall; the user pans to the rest.
+    /// *Why:* a patch that opens with every label turned into a bar shows
+    /// a new user no words at all (panels.md, Level of detail).
+    pub fn frame_readable(&mut self, world: Rectangle, size: Size, readable: f32) {
+        self.frame(world, size);
+        if self.zoom >= readable {
+            return;
+        }
+        self.zoom = readable.clamp(MIN_ZOOM, MAX_ZOOM);
+        let left = world.x - FRAME_MARGIN / self.zoom;
+        let top = if world.height * self.zoom + 2.0 * FRAME_MARGIN <= size.height {
+            world.center_y() - size.height / (2.0 * self.zoom)
+        } else {
+            world.y - FRAME_MARGIN / self.zoom
+        };
+        self.origin = Point::new(left, top);
     }
 }
 
@@ -148,5 +170,43 @@ mod tests {
         assert!(visible.x <= world.x && visible.y <= world.y);
         assert!(visible.x + visible.width >= world.x + world.width);
         assert!(visible.y + visible.height >= world.y + world.height);
+    }
+
+    /// A patch that fits at the readable zoom is framed as before.
+    #[test]
+    fn readable_framing_fits_a_small_patch_as_before() {
+        let world = Rectangle::new(Point::new(10.0, 20.0), Size::new(600.0, 300.0));
+        let size = Size::new(1000.0, 800.0);
+        let mut fitted = Camera::default();
+        fitted.frame(world, size);
+        let mut readable = Camera::default();
+        readable.frame_readable(world, size, 0.8);
+        assert_eq!(readable, fitted);
+    }
+
+    /// A patch too wide to fit stays at the readable zoom and shows its
+    /// left edge at the margin. Its height fits, so it is centred
+    /// vertically.
+    #[test]
+    fn readable_framing_shows_the_left_edge_of_a_wide_patch() {
+        let world = Rectangle::new(Point::new(-100.0, 0.0), Size::new(3000.0, 400.0));
+        let size = Size::new(1000.0, 800.0);
+        let mut camera = Camera::default();
+        camera.frame_readable(world, size, 0.8);
+        assert_eq!(camera.zoom, 0.8);
+        let left = camera.to_screen(Point::new(world.x, world.center_y()));
+        assert!((left.x - FRAME_MARGIN).abs() < 1e-3);
+        assert!((left.y - size.height / 2.0).abs() < 1e-3);
+    }
+
+    /// A patch also too tall shows its top-left corner at the margin.
+    #[test]
+    fn readable_framing_shows_the_top_of_a_tall_patch() {
+        let world = Rectangle::new(Point::new(0.0, 50.0), Size::new(3000.0, 3000.0));
+        let size = Size::new(1000.0, 800.0);
+        let mut camera = Camera::default();
+        camera.frame_readable(world, size, 0.8);
+        let corner = camera.to_screen(Point::new(world.x, world.y));
+        assert!(close(corner, Point::new(FRAME_MARGIN, FRAME_MARGIN)));
     }
 }

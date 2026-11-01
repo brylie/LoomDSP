@@ -1356,4 +1356,36 @@ mod tests {
 
         assert_eq!(ui.canvas().camera, moved, "after the browser closed");
     }
+
+    /// The example patches open at a zoom where port labels and captions
+    /// are drawn, and F brings that zoom back after zooming out (#455).
+    /// Labels draw from 7.5 / 9 of natural size (panels.md, Level of
+    /// detail).
+    #[test]
+    fn examples_open_and_frame_with_labels_shown() {
+        let readable = 7.5 / 9.0 - 1e-4;
+        for patch in ["subtractive.ron", "modulation.ron"] {
+            let mut ui = Ui::open(patch);
+            assert!(
+                ui.canvas().camera.zoom >= readable,
+                "{patch} opens at {}",
+                ui.canvas().camera.zoom
+            );
+
+            let view = ui.canvas();
+            let centre = Point::new(view.bounds.center_x(), view.bounds.center_y());
+            ui.move_to(centre);
+            ui.step(&[Event::Mouse(iced::mouse::Event::WheelScrolled {
+                delta: iced::mouse::ScrollDelta::Lines { x: 0.0, y: -10.0 },
+            })]);
+            assert!(ui.canvas().camera.zoom < readable, "the wheel zooms out");
+
+            ui.tap(keyboard::Key::Character("f".into()), keyboard::Modifiers::default());
+            assert!(
+                ui.canvas().camera.zoom >= readable,
+                "{patch} frames at {}",
+                ui.canvas().camera.zoom
+            );
+        }
+    }
 }

@@ -42,6 +42,9 @@ const ARROW_GROUP: Duration = Duration::from_millis(500);
 const TITLE_MIN_PX: f32 = 6.5;
 /// Port labels are drawn when they would be at least this tall on screen.
 const LABEL_MIN_PX: f32 = 7.5;
+/// The smallest zoom where port labels and captions are drawn. Opening a
+/// patch and framing it (F, Home) never zoom out past it (#455).
+const READABLE_ZOOM: f32 = LABEL_MIN_PX / LABEL_SIZE;
 
 /// Opacity of cables that are not in focus. It never changes with hover or
 /// selection, so moving the pointer only changes the cables it points at,
@@ -1081,7 +1084,7 @@ impl<Message> PatchCanvas<'_, Message> {
                 }
                 if new_frame && bounds.width > 0.0 {
                     if let Some(world) = self.scene.bounds() {
-                        state.camera.frame(world, bounds.size());
+                        state.camera.frame_readable(world, bounds.size(), READABLE_ZOOM);
                     }
                     state.framed_key = Some(self.frame_key);
                     // A new frame key means a new patch: its lights have to
@@ -1149,7 +1152,7 @@ impl<Message> PatchCanvas<'_, Message> {
                     }
                     keyboard::Key::Named(Named::Home) | keyboard::Key::Character("f") => {
                         if let Some(world) = self.scene.bounds() {
-                            state.camera.frame(world, bounds.size());
+                            state.camera.frame_readable(world, bounds.size(), READABLE_ZOOM);
                             shell.request_redraw();
                         }
                         shell.capture_event();
@@ -3376,6 +3379,9 @@ mod tests {
         // Port labels hidden, titles shown.
         assert_eq!(detail(0.7), Detail::Middle);
         assert_eq!(detail(0.3), Detail::Far);
+        // Framing stops at the first zoom that still draws labels.
+        assert_eq!(detail(READABLE_ZOOM), Detail::Close);
+        assert_eq!(detail(READABLE_ZOOM * 0.9), Detail::Middle);
     }
 
     #[test]
