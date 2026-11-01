@@ -255,7 +255,7 @@ pub fn page(d: &ModuleDescriptor) -> String {
                 "| {} | {} | {} | {} |",
                 name(p.label, p.name),
                 cell(&p.range_text()),
-                cell(&p.value_text(p.default)),
+                cell(&p.default_text()),
                 cell(p.description)
             );
         }

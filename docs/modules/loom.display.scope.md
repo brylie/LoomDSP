@@ -44,7 +44,9 @@ Shows its input over time. Passes the input through unchanged.
 
 ## When to use it
 
-Use Scope to view waveforms and modulation signals in the time domain. It helps verify oscillator shapes, envelope contours, and modulation depths. The input passes through unchanged.
+Use Scope to see a signal's shape over time: an oscillator's wave, an envelope's rise and fall, or how far a modulation moves.
+
+Window sets how much time the display shows. With Auto on, the trace starts where the signal crosses halfway between its lowest and highest values, so a steady wave stands still. Turn Auto off to set that level yourself. The input passes through unchanged.
 
 ## Example patch
 

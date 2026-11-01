@@ -31,7 +31,7 @@ None.
 
 ## When to use it
 
-Use 1-Sample Delay to explicitly break feedback loops in the audio or modulation graph. In DSP graphs, recursive feedback loops require at least one sample of delay. Placing delay1 allows you to pick exactly where the loop is delayed.
+Use 1-Sample Delay to choose where a feedback loop is broken. Every loop needs at least one sample of delay; without one, LoomDSP adds it for you. Placing this module yourself decides exactly where it goes.
 
 ## Example patch
 

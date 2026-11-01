@@ -98,7 +98,7 @@ impl Help {
                     name: p.name,
                     label: p.label,
                     description: p.description,
-                    details: format!("{}. Default {}.", p.range_text(), p.value_text(p.default)),
+                    details: format!("{}. Default {}.", p.range_text(), p.default_text()),
                 })
                 .collect(),
             notes: notes.clone(),

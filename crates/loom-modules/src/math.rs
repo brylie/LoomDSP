@@ -130,7 +130,7 @@ pub static MUL: ModuleDescriptor = ModuleDescriptor {
     name: "Multiply",
     category: "Math",
     family: loom_core::Family::LogicAndMath,
-    description: "Multiplies two signals and a gain. Use it as a ring modulator. To control loudness, use Amplifier.",
+    description: "Multiplies two signals and a gain, for ring modulation. To control loudness, use Amplifier.",
     inputs: &[
         PortSpec {
             name: "a",
@@ -503,7 +503,7 @@ impl Module for Convert {
 pub static PITCH_CONSTANT: ModuleDescriptor = ModuleDescriptor {
     id: "loom.pitch.constant",
     version: 1,
-    name: "Constant (pitch)",
+    name: "Pitch Constant",
     category: "Pitch",
     family: loom_core::Family::NotesAndPitch,
     description: "Outputs a fixed pitch, set in semitones from middle C.",

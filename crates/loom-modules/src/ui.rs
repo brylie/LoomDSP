@@ -22,7 +22,7 @@ pub static BUTTON: ModuleDescriptor = ModuleDescriptor {
     name: "Button",
     category: "Control",
     family: loom_core::Family::Interface,
-    description: "Sends a gate from a large button. Toggle keeps it. Momentary is high only while held.",
+    description: "Sends a gate from a large button. Toggle keeps it on; Momentary is high only while held.",
     inputs: &[],
     outputs: &[PortSpec {
         name: "gate",

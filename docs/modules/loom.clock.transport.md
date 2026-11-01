@@ -35,7 +35,7 @@ The patch's tempo, time signature, and play state. Every patch has exactly one.
 |---|---|---|---|
 | **Tempo** (`tempo`) | 20 to 300 BPM | 120 BPM | Quarter-note beats per minute. |
 | **Beats** (`numerator`) | 1 to 32, whole numbers | 4 | The top number of the time signature: how many beats in a bar. |
-| **Note** (`denominator`) | 0 to 4, whole numbers, choices 1, 2, 4, 8, 16 | 2 | The bottom number of the time signature: the note value of one beat. |
+| **Note** (`denominator`) | 1, 2, 4, 8, or 16 | 4 | The bottom number of the time signature: the note value of one beat. |
 | **Run** (`run`) | 0 to 1, whole numbers | 1 | On runs the transport, off stops it and holds the position. |
 | **Reset** (`reset`) | 0 to 1, whole numbers, not saved | 0 | Returns to bar 1 when pressed. Never saved. |
 

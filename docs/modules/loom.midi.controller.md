@@ -25,7 +25,7 @@ None.
 
 | Parameter | Range | Default | Description |
 |---|---|---|---|
-| **Source** (`source`) | 0 to 2, whole numbers, choices Controller, Pitch bend, Aftertouch | 0 | What to follow: a controller number, the pitch bend wheel, or channel aftertouch. |
+| **Source** (`source`) | Controller, Pitch bend, or Aftertouch | Controller | What to follow: a controller number, the pitch bend wheel, or channel aftertouch. |
 | **Controller** (`controller`) | 0 to 127, whole numbers | 1 | The controller number to follow, from 0 to 127, when the source is Controller. |
 | **Channel** (`channel`) | 0 to 16, whole numbers | 0 | The MIDI channel to listen to, from 1 to 16. 0 listens to all. |
 | **Smoothing** (`smoothing`) | 0 to 0.5 s | 0.005 s | About how long the output takes to reach a new value. 0 jumps at once. |

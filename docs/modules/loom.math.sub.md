@@ -32,7 +32,7 @@ None.
 
 ## When to use it
 
-Use Subtract to compute the difference between signal A and signal B. It is useful for creating bipolar modulation from unipolar envelopes or phase cancellation effects.
+Use Subtract to take one signal away from another: find how far apart two pitches are, or remove one part of a mix by subtracting it.
 
 ## Example patch
 

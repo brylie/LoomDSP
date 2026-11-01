@@ -32,7 +32,7 @@ None.
 
 ## When to use it
 
-Use Divide to divide signal A by signal B. When signal B drops near zero (within 1e-9), the module safely outputs 0 rather than producing infinity or NaN.
+Use Divide to divide one signal by another. B reads 1 with no cable. While B is within 1e-9 of zero, the output is 0, so a division never gives infinity.
 
 ## Example patch
 

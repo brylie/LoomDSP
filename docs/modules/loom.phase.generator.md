@@ -42,7 +42,9 @@ Ramp from 0 to 1 at the pitch frequency. Drives oscillators and LFOs.
 
 ## When to use it
 
-Use Phase Generator as the master oscillator engine. It produces a normalized ramp from 0 to 1 at audio or sub-audio rates, driven by pitch (0.1 per octave). One phase generator can drive multiple oscillator wave shapers simultaneously.
+Use Phase to set the speed of an oscillator. It makes a ramp from 0 to 1 that repeats at the pitch's frequency; Sine, Saw, Pulse, and Triangle turn that ramp into a wave.
+
+One Phase can drive several of them at once, so they stay exactly in step. Tune and Octave shift the pitch, and a rising edge on Reset starts the ramp again.
 
 ## Example patch
 

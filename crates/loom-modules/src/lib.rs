@@ -282,4 +282,75 @@ mod tests {
             }
         }
     }
+
+    /// Every built-in module follows the text rules (port-and-parameter-text.md,
+    /// Module names and summaries; #458): Title Case names, summaries of at
+    /// most two sentences, and no requirement IDs, method names, or sales
+    /// words in any descriptor text.
+    #[test]
+    fn module_text_follows_the_rules() {
+        const JOINING: [&str; 7] = ["and", "or", "of", "the", "a", "to", "in"];
+        const DENIED: [&str; 9] = [
+            "polyblep",
+            "polyblamp",
+            "trapezoidal",
+            "nyquist",
+            "warm",
+            "rich",
+            "classic",
+            "pristine",
+            "ideal",
+        ];
+        let words = |text: &str| -> Vec<String> {
+            text.split(|c: char| !c.is_alphanumeric())
+                .filter(|w| !w.is_empty())
+                .map(str::to_lowercase)
+                .collect()
+        };
+        let mut problems = Vec::new();
+        for d in crate::registry().iter() {
+            for (i, word) in d.name.split([' ', '-']).enumerate() {
+                let first = word.chars().next().unwrap_or(' ');
+                let joining = i > 0 && JOINING.contains(&word);
+                if !(joining || first.is_uppercase() || first.is_ascii_digit()) {
+                    problems.push(format!("{}: `{}` is not Title Case", d.id, d.name));
+                }
+            }
+            let sentences = d
+                .description
+                .split_terminator(['.', '!', '?'])
+                .filter(|s| s.trim_start().starts_with(|c: char| c.is_uppercase()))
+                .count();
+            if sentences > 2 {
+                problems.push(format!("{}: the summary has {sentences} sentences", d.id));
+            }
+            let mut texts = vec![d.name, d.description];
+            texts.extend(d.inputs.iter().chain(d.outputs).flat_map(|p| [p.label, p.description]));
+            texts.extend(d.params.iter().flat_map(|p| [p.label, p.description]));
+            texts.extend(d.displays.iter().flat_map(|v| [v.label, v.description]));
+            for text in texts {
+                if text.contains("FR-") {
+                    problems.push(format!("{}: `{text}` names a requirement", d.id));
+                }
+                for word in words(text) {
+                    if DENIED.contains(&word.as_str()) {
+                        problems.push(format!("{}: `{text}` uses `{word}`", d.id));
+                    }
+                }
+            }
+        }
+        assert!(problems.is_empty(), "{problems:#?}");
+    }
+
+    /// A choice parameter's range and default read as its choice names.
+    #[test]
+    fn choice_ranges_read_as_names() {
+        let env = crate::registry().resolve("loom.env.envelope").unwrap();
+        let mode = env.params.iter().find(|p| p.name == "mode").unwrap();
+        assert_eq!(mode.range_text(), "ADSR or AD");
+        assert_eq!(mode.default_text(), "ADSR");
+        let lfo = crate::registry().resolve("loom.mod.lfo").unwrap();
+        let shape = lfo.params.iter().find(|p| p.name == "shape").unwrap();
+        assert!(shape.range_text().contains(", or "), "{}", shape.range_text());
+    }
 }

@@ -28,7 +28,7 @@ Makes a gate from two signals: high while A is above B, or while A is below B. H
 
 | Parameter | Range | Default | Description |
 |---|---|---|---|
-| **Mode** (`mode`) | 0 to 1, whole numbers, choices Above, Below | 0 | Above: high while A is above B. Below: high while A is below B. |
+| **Mode** (`mode`) | Above or Below | Above | Above: high while A is above B. Below: high while A is below B. |
 | **Hysteresis** (`hysteresis`) | 0 to 1 | 0 | A dead band around B. Once the gate is high, A must go this far past B the other way to end it. |
 
 ## Panel
@@ -42,7 +42,9 @@ Makes a gate from two signals: high while A is above B, or while A is below B. H
 
 ## When to use it
 
-Use Compare to turn continuous signals into gates by testing if signal A is above or below signal B. Built-in hysteresis prevents noisy signals from flickering the output gate near the threshold.
+Use Compare to turn a changing signal into a gate: high while A is above B, or while A is below B. Leave B unconnected to compare with 0.
+
+Hysteresis adds a small dead band, so a noisy signal near the threshold does not flicker the gate on and off.
 
 ## Example patch
 

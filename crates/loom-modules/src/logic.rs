@@ -22,7 +22,7 @@ pub static DIVIDE: ModuleDescriptor = ModuleDescriptor {
     name: "Clock Divide",
     category: "Logic",
     family: loom_core::Family::TimeAndRhythm,
-    description: "Fires on every Nth trigger. Offset fires earlier in the count. Reset starts the count again.",
+    description: "Fires on every Nth trigger, so a fast clock makes slower rhythms. Offset fires earlier in the count, and Reset starts the count again.",
     inputs: &[
         PortSpec {
             name: "trigger",
@@ -311,7 +311,7 @@ pub static LOGIC: ModuleDescriptor = ModuleDescriptor {
     name: "Logic",
     category: "Logic",
     family: loom_core::Family::LogicAndMath,
-    description: "Combines up to four gates with And, Or, or Xor. Only inputs with a cable count. Invert gives Nand, Nor, Xnor, and Not.",
+    description: "Combines up to four gates with And, Or, or Xor; only inputs with a cable count. Invert gives Nand, Nor, Xnor, and Not.",
     inputs: &[
         logic_input("in1", "In 1"),
         logic_input("in2", "In 2"),
@@ -409,7 +409,7 @@ pub static MEMORY: ModuleDescriptor = ModuleDescriptor {
     name: "Memory",
     category: "Logic",
     family: loom_core::Family::LogicAndMath,
-    description: "Remembers a gate. Set and reset, toggle, or data (a D latch) mode. Reset wins a tie.",
+    description: "Remembers a gate, in set and reset, toggle, or data (a D latch) mode. Reset wins a tie.",
     inputs: &[
         PortSpec {
             name: "a",

@@ -10,7 +10,7 @@ use loom_core::{
 pub static SAMPLE_HOLD: ModuleDescriptor = ModuleDescriptor {
     id: "loom.rand.sample-hold",
     version: 1,
-    name: "Sample and hold",
+    name: "Sample and Hold",
     category: "Random",
     family: loom_core::Family::Modulation,
     description: "Takes the input's value on a trigger and holds it. With noise on the input, it makes stepped random values.",

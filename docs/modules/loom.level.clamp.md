@@ -41,7 +41,9 @@ Limits a signal to the range between two limits. NaN becomes 0 first, so Clamp m
 
 ## When to use it
 
-Use Clamp to limit a modulation or audio signal to a strict range between low and high bounds. It prevents extreme modulation values from destabilizing filters or wrapping phases. Any NaN input is converted to 0 first.
+Use Clamp to keep a signal between two limits, for example to stop a modulation from pushing a parameter too far.
+
+It also makes a signal safe: a NaN becomes 0 before the limits apply. If Low is above High, the two swap.
 
 ## Example patch
 

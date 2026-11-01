@@ -2,7 +2,7 @@
 
 <!-- Generated from the module's descriptor by `loom modules --markdown`. Edit the descriptor, not this part. -->
 
-Band-limited triangle wave shaped from a phase input (polyBLAMP).
+A triangle wave with few harmonics, shaped from a phase input. Its corners are smoothed so high notes stay clean.
 
 | | |
 |---|---|
@@ -31,7 +31,9 @@ None.
 
 ## When to use it
 
-Use Triangle to produce a mellow waveform containing only odd harmonics that roll off quickly. It provides a soft, warm timbre for flutes, gentle leads, and acoustic modeling.
+Use Triangle for a soft tone with few harmonics, between a sine and a square. It suits gentle leads and flute-like sounds.
+
+It needs a phase input, usually from Phase. Its corners are smoothed, so high notes stay clean.
 
 ## Example patch
 

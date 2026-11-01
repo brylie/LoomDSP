@@ -41,7 +41,9 @@ Limits how fast a signal can rise and fall. Times are per 1.0 of change, so a gl
 
 ## When to use it
 
-Use Slew to limit the rate of change of any signal. It creates smooth portamento between pitch changes, softens sharp modulation steps, and eliminates clicks from abrupt gate transitions. Independent rise and fall times allow asymmetrical glides.
+Use Slew to slow down changes. On a pitch it makes a glide between notes. On a stepped control it smooths the steps, and on a gate it softens the edges.
+
+Rise and Fall are the times to move up or down by 1.0, so a glide takes the same time on any signal. Set them apart for a slow rise and a fast fall, or the other way round.
 
 ## Example patch
 
@@ -70,4 +72,4 @@ Patch(
 ## See also
 
 - [Pitch at 0.1 per octave](../learn/pitch.md)
-- [One-pole](loom.filter.onepole.md)
+- [One-Pole](loom.filter.onepole.md)

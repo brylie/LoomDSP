@@ -2,7 +2,7 @@
 
 <!-- Generated from the module's descriptor by `loom modules --markdown`. Edit the descriptor, not this part. -->
 
-Delay-line all-pass filter. Passes all frequencies at equal steady-state level while smearing phase, for reverbs and diffusers.
+A delay-based filter that passes every frequency at the same level but smears their timing. Chains of them build reverbs and diffusers.
 
 | | |
 |---|---|
@@ -42,7 +42,9 @@ Delay-line all-pass filter. Passes all frequencies at equal steady-state level w
 
 ## When to use it
 
-Use All-Pass to alter phase relationships without changing frequency balance. It forms the core building block of reverb diffusers, phasers, and dispersion filters. Cascading multiple all-pass filters diffuses transient sounds into dense reverb tails.
+Use All-Pass to blur the timing of a sound without changing its tone. It passes every frequency at the same level, but delays some more than others.
+
+One All-Pass is subtle. Several in a chain, with different times, spread a short sound into a dense wash, which is how many reverbs start. Gain sets how strong the effect is; at 0 it is a plain delay.
 
 ## Example patch
 

@@ -33,16 +33,16 @@ The catalogue type is built as three modules, one per unit. *Why not one module 
 | Module | Output | Parameter | Range | Default |
 |---|---|---|---|---|
 | `loom.math.constant` (exists) | The value, a plain number | `value` | Offers the [control ranges](control-ranges.md) | 0 |
-| `loom.level.constant` Constant (level) | `out`: a linear level factor | `level`, in dB | -60 to 12 dB, linear mapping in dB (the decibel mapping with -inf at the bottom, [#99](https://github.com/brylie/LoomDSP/issues/99), comes later) | 0 dB |
-| `loom.pitch.constant` Constant (pitch) | `out` (pitch signal): 0.1 per octave | `semitones` | -48 to 48 | 0 |
+| `loom.level.constant` Level Constant | `out`: a linear level factor | `level`, in dB | -60 to 12 dB, linear mapping in dB (the decibel mapping with -inf at the bottom, [#99](https://github.com/brylie/LoomDSP/issues/99), comes later) | 0 dB |
+| `loom.pitch.constant` Pitch Constant | `out` (pitch signal): 0.1 per octave | `semitones` | -48 to 48 | 0 |
 
 - Level output is `10^(dB/20)`. Pitch output is `semitones / 120`. *Why:* ADR-0007 gives the standard units of cables.
 - Both smooth over 5 ms and ignore `value` modulation rules beyond the ordinary [parameter mapping](modulation.md#parameter-mapping).
-- **Constant (level) stores its value in dB with the linear mapping,** so the knob is even in dB and the lowest setting is -60 dB (a factor of 0.001). The decibel mapping with -inf at the bottom ([#99](https://github.com/brylie/LoomDSP/issues/99)) is a later change to the knob, not to the module. *Why:* a value in dB needs no new mapping to sound right; -inf is a nicety of the control. The ranges for `loom.math.constant` come with [control ranges](control-ranges.md).
+- **Level Constant stores its value in dB with the linear mapping,** so the knob is even in dB and the lowest setting is -60 dB (a factor of 0.001). The decibel mapping with -inf at the bottom ([#99](https://github.com/brylie/LoomDSP/issues/99)) is a later change to the knob, not to the module. *Why:* a value in dB needs no new mapping to sound right; -inf is a nicety of the control. The ranges for `loom.math.constant` come with [control ranges](control-ranges.md).
 - **Ratio is dropped from MT-LEVEL-01.** Nothing says what a ratio outputs, and a ratio is `semitones / 12` through [Convert](https://github.com/brylie/LoomDSP/blob/main/crates/loom-modules/src/math.rs) when needed. The catalogue entry changes to match.
 - Existing patches that use `loom.math.constant` load and sound the same.
 
-## Phase wrap and fold (MT-PHASE-08)
+## Phase Wrap and Fold (MT-PHASE-08)
 
 One module, `loom.phase.wrap`, with a `mode`. *Why one:* both bring any number into 0 to 1, differ only in what happens past the edges, and share a tile ([merge rule](../adr/0017-primitives-traits-and-abstractions.md)).
 
@@ -163,9 +163,9 @@ What the inputs mean depends on the mode:
 - `out = in × factor + offset`. A factor of −1 inverts. Bipolar to unipolar is factor 0.5 with offset 0.5.
 - **Range to range mapping is not built in P1.** It would be a separate module (`remap`), with four range ends, if the need appears. *Why:* factor and offset cover the P1 jobs, and a tile with four range knobs is a different tile.
 
-## Sample and hold, and Slew (MT-RAND-02, MT-LEVEL-04)
+## Sample and Hold, and Slew (MT-RAND-02, MT-LEVEL-04)
 
-### Sample and hold `loom.rand.sample-hold`
+### Sample and Hold `loom.rand.sample-hold`
 
 | | |
 |---|---|
@@ -227,7 +227,7 @@ The ADSR becomes the catalogue's Envelope: `loom.env.adsr` is renamed `loom.env.
 
 Both follow `loom.filter.svf`: an `in` port, a `cutoff` input in pitch units added to the `cutoff` parameter (so the cable and a knob combine), cutoff in Hz, logarithmic, smoothed over 10 ms. The ladder spans 20 to 20000 Hz. The one-pole goes down to 1 Hz, for smoothing.
 
-### One-pole `loom.filter.onepole`
+### One-Pole `loom.filter.onepole`
 
 | | |
 |---|---|
@@ -287,11 +287,11 @@ Both follow `loom.filter.svf`: an `in` port, a `cutoff` input in pitch units add
 
 Every module also needs the checklist items in rule 6 above. The module-specific checks:
 
-- [ ] Constant (level) at 0 dB outputs 1.0 and at −6 dB outputs 0.5012; Constant (pitch) at 12 semitones outputs 0.1. Existing `loom.math.constant` patches sound the same.
-- [ ] Phase wrap and fold give the values in the rules for −0.25, 0, 0.25, 1, 1.25, and 2, and 0 for NaN and infinity.
+- [ ] Level Constant at 0 dB outputs 1.0 and at −6 dB outputs 0.5012; Pitch Constant at 12 semitones outputs 0.1. Existing `loom.math.constant` patches sound the same.
+- [ ] Phase Wrap and Fold give the values in the rules for −0.25, 0, 0.25, 1, 1.25, and 2, and 0 for NaN and infinity.
 - [ ] Compare hysteresis does not chatter on a signal with noise smaller than the band. Logic ignores unconnected inputs. Memory edges land on the same frame at block sizes 1, 77, and 512, and reset wins a tie.
 - [ ] Mixer mute fades over 5 ms. Crossfade equal power gives 0.7071 of each side at mix 0.5, linear gives 0.5. Clamp swaps crossed limits and turns NaN into a value inside the limits. Scale inverts at factor −1.
-- [ ] Sample and hold captures on the same frame at all three block sizes. Slew takes `time` seconds to rise by 1.0, and a new module starts at its input.
+- [ ] Sample and Hold captures on the same frame at all three block sizes. Slew takes `time` seconds to rise by 1.0, and a new module starts at its input.
 - [ ] A synced LFO with nothing connected wraps with the bar phase at block sizes 1, 77, and 512. A free LFO ignores a cable on `phase`.
 - [x] Envelope AD mode measures the attack and decay times, retriggers in attack and in decay without a click, and matches at all three block sizes.
 - [x] The one-pole outputs are 3 dB down at their cutoff. The ladder is about 12, 18, and 24 dB per octave steeper above the cutoff for each `slope`. At resonance 1, the 24 dB slope self-oscillates at the cutoff and the 18 dB slope at about 1.7 times it. The 18 dB check uses cutoffs below about 0.29 times the sample rate, because above that 1.7 times the cutoff is past Nyquist and the oscillation cannot appear. The 12 dB slope does not self-oscillate (its peak is about 4 dB above its own DC gain with feedback, not above unity). It stays finite at any input, and a `slope` change while playing is click-free and does not burst into oscillation.

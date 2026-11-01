@@ -2,7 +2,7 @@
 
 <!-- Generated from the module's descriptor by `loom modules --markdown`. Edit the descriptor, not this part. -->
 
-Combines up to four gates with And, Or, or Xor. Only inputs with a cable count. Invert gives Nand, Nor, Xnor, and Not.
+Combines up to four gates with And, Or, or Xor; only inputs with a cable count. Invert gives Nand, Nor, Xnor, and Not.
 
 | | |
 |---|---|
@@ -30,7 +30,7 @@ Combines up to four gates with And, Or, or Xor. Only inputs with a cable count. 
 
 | Parameter | Range | Default | Description |
 |---|---|---|---|
-| **Operation** (`op`) | 0 to 2, whole numbers, choices And, Or, Xor | 0 | And: all connected inputs are high. Or: any is high. Xor: an odd number are high. |
+| **Operation** (`op`) | And, Or, or Xor | And | And: all connected inputs are high. Or: any is high. Xor: an odd number are high. |
 | **Invert** (`invert`) | 0 to 1, whole numbers | 0 | Flips the result. |
 
 ## Panel
@@ -44,7 +44,9 @@ Combines up to four gates with And, Or, or Xor. Only inputs with a cable count. 
 
 ## When to use it
 
-Use Logic to combine up to four gate signals using Boolean operations: And, Or, or Xor. An invert toggle yields Nand, Nor, and Xnor. Unconnected inputs are ignored so patches stay clean.
+Use Logic to combine gates into one: And is high when every connected input is high, Or when any is, and Xor when an odd number are. Invert flips the result, which gives Nand, Nor, and Xnor, and Not with one input.
+
+An input with no cable is left out, not counted as low, so you can use as many inputs as you need.
 
 ## Example patch
 

@@ -144,7 +144,7 @@ impl Module for Amp {
 pub static CONSTANT: ModuleDescriptor = ModuleDescriptor {
     id: "loom.level.constant",
     version: 1,
-    name: "Constant (level)",
+    name: "Level Constant",
     category: "Level",
     family: loom_core::Family::LevelAndRouting,
     description: "Outputs a fixed level, set in decibels. 0 dB is a factor of 1.",
@@ -348,7 +348,7 @@ pub static SCALE: ModuleDescriptor = ModuleDescriptor {
     name: "Scale",
     category: "Level",
     family: loom_core::Family::LevelAndRouting,
-    description: "Multiplies a signal by a factor and adds an offset. A factor of -1 inverts. Bipolar to unipolar is factor 0.5 with offset 0.5.",
+    description: "Multiplies a signal by a factor and adds an offset. A factor of -1 inverts it; factor 0.5 with offset 0.5 turns bipolar into unipolar.",
     inputs: &[PortSpec {
         name: "in",
         label: "In",
@@ -653,7 +653,7 @@ mod shaping_tests {
         out
     }
 
-    /// Constant (level) outputs 1.0 at 0 dB and 0.5012 at -6 dB.
+    /// Level Constant outputs 1.0 at 0 dB and 0.5012 at -6 dB.
     #[test]
     fn constant_level_in_decibels() {
         for (db, expected) in [(0.0, 1.0), (-6.0, 0.5012), (12.0, 3.981), (-60.0, 0.001)] {

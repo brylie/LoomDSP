@@ -27,7 +27,7 @@ Converts between decibels and level, and between pitch and frequency in Hz.
 
 | Parameter | Range | Default | Description |
 |---|---|---|---|
-| **Mode** (`mode`) | 0 to 3, whole numbers, choices dB to level, Level to dB, Pitch to Hz, Hz to pitch | 0 | Which conversion to do: dB to level, level to dB, pitch to Hz, or Hz to pitch. |
+| **Mode** (`mode`) | dB to level, Level to dB, Pitch to Hz, or Hz to pitch | dB to level | Which conversion to do: dB to level, level to dB, pitch to Hz, or Hz to pitch. |
 
 ## Panel
 
@@ -39,7 +39,7 @@ Converts between decibels and level, and between pitch and frequency in Hz.
 
 ## When to use it
 
-Use Convert to translate between musical representations: decibels and linear gain, or pitch (0.1 per octave) and frequency in Hertz. This enables exact acoustic calculations and cross-domain modulation.
+Use Convert to move between the units LoomDSP signals use and the units people know: decibels and level, or pitch and frequency in Hz. Pitch uses 0.1 per octave with 0 at middle C.
 
 ## Example patch
 

@@ -2,7 +2,7 @@
 
 <!-- Generated from the module's descriptor by `loom modules --markdown`. Edit the descriptor, not this part. -->
 
-Interpolated delay line. The time input adds seconds to the time knob.
+Plays its input back after a set time, for echoes, chorus, and feedback. The time input adds seconds to the time knob.
 
 | | |
 |---|---|
@@ -40,7 +40,9 @@ Interpolated delay line. The time input adds seconds to the time knob.
 
 ## When to use it
 
-Use Delay to hold audio or control signals in a circular buffer and replay them later. It creates echoes, slapback, comb filters, and chorus effects. The delay time parameter modulates smoothly with cubic interpolation.
+Use Delay Line to play a signal back later: an echo, a short slapback, or with a slow LFO on the time input, a chorus.
+
+For repeating echoes, mix the output back into the input through a Mixer. The time input adds seconds to the Time knob.
 
 ## Example patch
 

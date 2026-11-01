@@ -234,7 +234,7 @@ impl Module for PhaseTrigger {
 pub static WRAP: ModuleDescriptor = ModuleDescriptor {
     id: "loom.phase.wrap",
     version: 1,
-    name: "Phase wrap and fold",
+    name: "Phase Wrap and Fold",
     category: "Phase",
     family: loom_core::Family::TimeAndRhythm,
     description: "Brings any signal into the phase range, 0 to 1. Wrap goes round the edge; fold turns back at the edges.",

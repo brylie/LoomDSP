@@ -2,7 +2,7 @@
 
 <!-- Generated from the module's descriptor by `loom modules --markdown`. Edit the descriptor, not this part. -->
 
-Remembers a gate. Set and reset, toggle, or data (a D latch) mode. Reset wins a tie.
+Remembers a gate, in set and reset, toggle, or data (a D latch) mode. Reset wins a tie.
 
 | | |
 |---|---|
@@ -28,7 +28,7 @@ Remembers a gate. Set and reset, toggle, or data (a D latch) mode. Reset wins a 
 
 | Parameter | Range | Default | Description |
 |---|---|---|---|
-| **Mode** (`mode`) | 0 to 2, whole numbers, choices Set and reset, Toggle, Data | 0 | Set and reset, Toggle, or Data. Changing it keeps the state. |
+| **Mode** (`mode`) | Set and reset, Toggle, or Data | Set and reset | Set and reset, Toggle, or Data. Changing it keeps the state. |
 
 ## Panel
 
@@ -41,7 +41,13 @@ Remembers a gate. Set and reset, toggle, or data (a D latch) mode. Reset wins a 
 
 ## When to use it
 
-Use Memory as a flip-flop or digital latch. It supports Set and reset, Toggle, and Data modes. Reset takes priority when both inputs receive simultaneous triggers.
+Use Memory to remember a gate until something changes it.
+
+- **Set and reset:** a rising edge on A turns the output on, and one on B turns it off.
+- **Toggle:** each rising edge on A flips the output, and B turns it off.
+- **Data:** a rising edge on B remembers the level on A.
+
+If both inputs rise at once, reset wins. The output starts low.
 
 ## Example patch
 

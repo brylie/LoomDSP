@@ -2,7 +2,7 @@
 
 <!-- Generated from the module's descriptor by `loom modules --markdown`. Edit the descriptor, not this part. -->
 
-A level from 0 to 1, started by a gate. ADSR holds while the gate is high; AD runs once, so a trigger also starts it. Curve bends every stage.
+A level from 0 to 1 that rises and falls when a gate starts it. ADSR holds while the gate is high; AD runs once, so a trigger also starts it.
 
 | | |
 |---|---|
@@ -31,7 +31,7 @@ A level from 0 to 1, started by a gate. ADSR holds while the gate is high; AD ru
 | **Decay** (`decay`) | 0.0005 to 10 s, logarithmic | 0.2 s | Time to fall from 1 to the sustain level, or to 0 in AD mode. |
 | **Sustain** (`sustain`) | 0 to 1 | 0.7 | The level held while the gate stays high. AD mode ignores it. |
 | **Release** (`release`) | 0.0005 to 10 s, logarithmic | 0.3 s | Time to fall to 0 after the gate goes low. AD mode ignores it. |
-| **Mode** (`mode`) | 0 to 1, whole numbers, choices ADSR, AD | 0 | ADSR follows the gate. AD rises and falls once, whatever the gate does next. |
+| **Mode** (`mode`) | ADSR or AD | ADSR | ADSR follows the gate. AD rises and falls once, whatever the gate does next. |
 | **Curve** (`curve`) | -1 to 1 | 0 | Bends every stage. 0 is straight, above 0 starts fast with a slow tail, below 0 starts slow. |
 
 ## Panel

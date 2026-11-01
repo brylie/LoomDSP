@@ -31,7 +31,9 @@ None.
 
 ## When to use it
 
-Use Sine to produce a pure fundamental tone containing no harmonic overtones. It is ideal for clean sub-bass, pure test tones, and carrier or modulator signals in frequency modulation synthesis.
+Use Sine for a pure tone with no harmonics: a deep sub bass, a test tone, or either side of frequency modulation.
+
+It needs a phase input, usually from Phase.
 
 ## Example patch
 

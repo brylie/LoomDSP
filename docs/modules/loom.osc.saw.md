@@ -2,7 +2,7 @@
 
 <!-- Generated from the module's descriptor by `loom modules --markdown`. Edit the descriptor, not this part. -->
 
-Band-limited saw wave shaped from a phase input (polyBLEP).
+A sawtooth wave, with every harmonic, shaped from a phase input. Its sharp edges are smoothed so high notes stay clean.
 
 | | |
 |---|---|
@@ -31,7 +31,9 @@ None.
 
 ## When to use it
 
-Use Saw to generate a band-limited sawtooth wave rich in all integer harmonics. It is the primary building block for subtractive synthesis, basslines, and brass sounds. It expects a phase ramp input from Phase Generator.
+Use Saw for bright sounds with every harmonic, which a filter can then shape: basses, leads, and brass-like tones.
+
+It needs a phase input, usually from Phase. Its sharp edges are smoothed, so high notes do not gain harsh extra tones.
 
 ## Example patch
 

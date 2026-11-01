@@ -40,7 +40,9 @@ None.
 
 ## When to use it
 
-Use MIDI Note to capture incoming keyboard performance. It produces pitch (calibrated at 0.1 per octave with middle C at 0.0), a gate signal, and key velocity. Built-in pitch bend range mapping simplifies expressive lead playing.
+Use MIDI Note to play a patch from a keyboard. It gives the pitch of the last key held, a gate that is high while any key is held, and the velocity of the last key.
+
+Pitch uses 0.1 per octave with 0 at middle C, and includes pitch bend. Bend Range sets how far a full bend moves it. Channel picks one MIDI channel, or 0 for all.
 
 ## Example patch
 

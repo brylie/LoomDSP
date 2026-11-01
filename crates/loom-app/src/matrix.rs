@@ -1503,7 +1503,7 @@ mod tests {
         ui.app.matrix_event(Event::Select(AssignmentId(1), Column::Polarity));
         assert_eq!(ui.app.ui_snapshot().matrix.tab, Tab::Matrix);
 
-        let source = format!("Sample and hold #{}: Out", hold.0);
+        let source = format!("Sample and Hold #{}: Out", hold.0);
         assert_eq!(source.len(), 24);
         let column = ui.app.matrix.model(ui.app.controller.graph(), &ui.app.selection);
         let right = crate::WINDOW.width;

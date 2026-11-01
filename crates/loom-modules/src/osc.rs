@@ -61,7 +61,7 @@ pub static SAW: ModuleDescriptor = ModuleDescriptor {
     name: "Saw",
     category: "Oscillator",
     family: loom_core::Family::Sources,
-    description: "Band-limited saw wave shaped from a phase input (polyBLEP).",
+    description: "A sawtooth wave, with every harmonic, shaped from a phase input. Its sharp edges are smoothed so high notes stay clean.",
     inputs: &[PortSpec {
         name: "phase",
         label: "Phase",
@@ -142,7 +142,7 @@ pub static PULSE: ModuleDescriptor = ModuleDescriptor {
     name: "Pulse",
     category: "Oscillator",
     family: loom_core::Family::Sources,
-    description: "Band-limited pulse wave shaped from a phase input (polyBLEP).",
+    description: "A pulse wave with a set width, shaped from a phase input. Its sharp edges are smoothed so high notes stay clean.",
     inputs: &[PortSpec {
         name: "phase",
         label: "Phase",
@@ -261,7 +261,7 @@ pub static TRIANGLE: ModuleDescriptor = ModuleDescriptor {
     name: "Triangle",
     category: "Oscillator",
     family: loom_core::Family::Sources,
-    description: "Band-limited triangle wave shaped from a phase input (polyBLAMP).",
+    description: "A triangle wave with few harmonics, shaped from a phase input. Its corners are smoothed so high notes stay clean.",
     inputs: &[PortSpec {
         name: "phase",
         label: "Phase",
@@ -348,7 +348,7 @@ pub static NOISE: ModuleDescriptor = ModuleDescriptor {
     name: "Noise",
     category: "Oscillator",
     family: loom_core::Family::Sources,
-    description: "White, pink, or brown noise. The seed makes renders repeatable (NFR-SND-04).",
+    description: "White, pink, or brown noise. The seed makes every render the same.",
     inputs: &[],
     outputs: &[PortSpec {
         name: "out",

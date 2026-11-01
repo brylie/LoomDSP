@@ -29,7 +29,9 @@ None.
 
 ## When to use it
 
-Use Audio Out as the terminal sink for audio leaving your patch. It connects directly to your sound card, audio interface, or file renderer. A mono cable plays on both sides. A stereo cable keeps its two channels.
+Every patch you want to hear ends in Audio Out. It sends its input to the selected audio output.
+
+A mono cable plays on both sides. A stereo cable keeps its two sides. The output stage protects your speakers before the sound leaves the app (see the output safety settings in Preferences).
 
 ## Example patch
 

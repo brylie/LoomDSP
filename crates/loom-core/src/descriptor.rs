@@ -179,6 +179,16 @@ impl PortDefault {
     }
 }
 
+/// Names joined as a sentence lists them: "A or B", "A, B, or C".
+fn list_text(names: &[&str]) -> String {
+    match names {
+        [] => String::new(),
+        [one] => (*one).to_string(),
+        [first, second] => format!("{first} or {second}"),
+        [rest @ .., last] => format!("{}, or {last}", rest.join(", ")),
+    }
+}
+
 /// A number as help text shows it: no trailing zeros, and 0 for -0, which
 /// reads as 0 to people.
 pub fn number_text(value: f32) -> String {
@@ -354,27 +364,40 @@ impl ParamSpec {
     }
 
     /// The parameter's range in words, with its unit and options, such as
-    /// "0.0005 to 10 s, logarithmic", for help text.
+    /// "0.0005 to 10 s, logarithmic", for help text. A choice parameter's
+    /// range is its choices, such as "ADSR or AD" (port-and-parameter-text.md,
+    /// Module names and summaries).
     pub fn range_text(&self) -> String {
-        let mut text = format!("{} to {}", number_text(self.min), self.value_text(self.max));
-        if self.options.integer {
-            text.push_str(", whole numbers");
-        }
-        if self.options.mapping == ParamMapping::Logarithmic {
-            text.push_str(", logarithmic");
-        }
+        let mut text = if self.options.choices.is_empty() {
+            let mut text = format!("{} to {}", number_text(self.min), self.value_text(self.max));
+            if self.options.integer {
+                text.push_str(", whole numbers");
+            }
+            if self.options.mapping == ParamMapping::Logarithmic {
+                text.push_str(", logarithmic");
+            }
+            text
+        } else {
+            list_text(self.options.choices)
+        };
         if let Some(default) = self.default_range() {
             let names: Vec<String> = self.options.ranges.iter().map(ToString::to_string).collect();
-            text.push_str(&format!(", control ranges {} (default {default})", names.join(", ")));
-        }
-        if !self.options.choices.is_empty() {
-            text.push_str(", choices ");
-            text.push_str(&self.options.choices.join(", "));
+            text.push_str(&format!(". Control ranges {} (default {default})", names.join(", ")));
         }
         if self.is_transient() {
             text.push_str(", not saved");
         }
         text
+    }
+
+    /// The default value in words: the default choice's name for a choice
+    /// parameter, otherwise the value with its unit.
+    pub fn default_text(&self) -> String {
+        let index = (self.default - self.min).round();
+        match self.options.choices.get(index as usize).filter(|_| index >= 0.0) {
+            Some(name) => (*name).to_string(),
+            None => self.value_text(self.default),
+        }
     }
 
     /// Marks the parameter as a whole number.

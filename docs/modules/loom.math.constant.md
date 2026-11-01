@@ -25,7 +25,7 @@ None.
 
 | Parameter | Range | Default | Description |
 |---|---|---|---|
-| **Value** (`value`) | -10 to 10, control ranges -0.1 to 0.1, -1 to 1, 0 to 1, -5 to 5, 0 to 5, -10 to 10, 0 to 10 (default -1 to 1) | 0 | The number the output holds. |
+| **Value** (`value`) | -10 to 10. Control ranges -0.1 to 0.1, -1 to 1, 0 to 1, -5 to 5, 0 to 5, -10 to 10, 0 to 10 (default -1 to 1) | 0 | The number the output holds. |
 
 ## Panel
 
@@ -37,7 +37,7 @@ None.
 
 ## When to use it
 
-Use Constant to output a fixed numerical voltage. It is useful for supplying manual pitch offsets, reference thresholds for comparators, or fixed modulation biases across the patch.
+Use Constant when a patch needs a fixed number: a threshold for Compare, a steady value for a module input, or a test signal. For a pitch in semitones, Pitch Constant is easier. For a gain in decibels, use Level Constant.
 
 ## Example patch
 
@@ -65,5 +65,5 @@ Patch(
 
 ## See also
 
-- [Constant (pitch)](loom.pitch.constant.md)
-- [Constant (level)](loom.level.constant.md)
+- [Pitch Constant](loom.pitch.constant.md)
+- [Level Constant](loom.level.constant.md)

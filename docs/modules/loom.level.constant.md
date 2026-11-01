@@ -1,4 +1,4 @@
-# Constant (level)
+# Level Constant
 
 <!-- Generated from the module's descriptor by `loom modules --markdown`. Edit the descriptor, not this part. -->
 
@@ -37,7 +37,9 @@ None.
 
 ## When to use it
 
-Use Constant (level) to produce a fixed decibel level as a gain factor. It is ideal for setting steady channel gains, calibration targets, or reference levels. 0 dB outputs a factor of 1.0, while -6 dB outputs approximately 0.5.
+Use Level Constant when a patch needs a fixed gain, set in decibels: a steady level for an Amplifier or a Multiply, or a reference level to compare against.
+
+0 dB outputs 1.0, and -6 dB outputs about 0.5.
 
 ## Example patch
 

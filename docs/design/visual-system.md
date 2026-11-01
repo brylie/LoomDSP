@@ -68,12 +68,12 @@ Every module belongs to one of eight families ([ADR-0029](../adr/0029-module-fam
 | Family | Colour | Echoes | Built-in modules |
 |---|---|---|---|
 | Sources | `#62222C` red | audio | Sine, Saw, Pulse, Triangle, Noise |
-| Filters and effects | `#324553` slate | | SVF, Ladder, One-pole, Delay Line, All-Pass |
-| Modulation | `#38589F` blue | modulation | Envelope, LFO, Sample and hold |
-| Time and rhythm | `#463172` violet | phase | Transport, Clock, Clock Divide, Phase, Phase Scale, Phase Trigger, Phase wrap and fold |
-| Notes and pitch | `#624222` brown | pitch | Constant (pitch) |
+| Filters and effects | `#324553` slate | | SVF, Ladder, One-Pole, Delay Line, All-Pass |
+| Modulation | `#38589F` blue | modulation | Envelope, LFO, Sample and Hold |
+| Time and rhythm | `#463172` violet | phase | Transport, Clock, Clock Divide, Phase, Phase Scale, Phase Trigger, Phase Wrap and Fold |
+| Notes and pitch | `#624222` brown | pitch | Pitch Constant |
 | Logic and math | `#716A28` olive | gate | Add, Subtract, Multiply, Divide, Constant, Convert, Compare, Logic, Memory |
-| Level and routing | `#2A7947` green | | Amplifier, Clamp, Constant (level), Scale, Slew, Mixer, Crossfade, Join, Split, 1-Sample Delay |
+| Level and routing | `#2A7947` green | | Amplifier, Clamp, Level Constant, Scale, Slew, Mixer, Crossfade, Join, Split, 1-Sample Delay |
 | Interface | `#606676` grey | | Audio In, Audio Out, MIDI Note, MIDI Controller, Level Meter, Scope, Button |
 
 - **The palette** holds these 8 colours and a lighter tint of each, 16 swatches in all. A tint is its colour mixed halfway to white and takes dark text. FR-CANVAS-07 will offer the same 16 when users colour modules and groups.

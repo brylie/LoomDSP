@@ -2,7 +2,7 @@
 
 <!-- Generated from the module's descriptor by `loom modules --markdown`. Edit the descriptor, not this part. -->
 
-Sends a gate from a large button. Toggle keeps it. Momentary is high only while held.
+Sends a gate from a large button. Toggle keeps it on; Momentary is high only while held.
 
 | | |
 |---|---|
@@ -25,7 +25,7 @@ None.
 
 | Parameter | Range | Default | Description |
 |---|---|---|---|
-| **Mode** (`mode`) | 0 to 1, whole numbers, choices Toggle, Momentary | 0 | Toggle keeps the gate. Momentary is high only while the button is held. |
+| **Mode** (`mode`) | Toggle or Momentary | Toggle | Toggle keeps the gate. Momentary is high only while the button is held. |
 | **On** (`on`) | 0 to 1, whole numbers | 0 | The gate the button keeps in Toggle mode. |
 | **Hold** (`hold`) | 0 to 1, whole numbers, not saved | 0 | High while the button is held in Momentary mode. Never saved. |
 
@@ -39,7 +39,9 @@ None.
 
 ## When to use it
 
-Use Button to generate manual gate signals directly from the graphical user interface. In Toggle mode, clicking changes the gate state between on and off. In Momentary mode, the gate remains high only while the button is pressed.
+Use Button to send a gate by hand, for example to start an envelope or reset a sequence while you play.
+
+In Toggle mode each click turns the gate on or off. In Momentary mode the gate is high only while you hold the button.
 
 ## Example patch
 

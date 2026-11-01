@@ -25,7 +25,7 @@ None.
 
 | Parameter | Range | Default | Description |
 |---|---|---|---|
-| **Pair** (`pair`) | 1 to 4, whole numbers, choices 1, 2, 3, 4 | 1 | The input channel pair to read. |
+| **Pair** (`pair`) | 1, 2, 3, or 4 | 1 | The input channel pair to read. |
 | **Gain** (`gain`) | 0 to 4 | 1 | Scales the input level. |
 | **Mute** (`mute`) | 0 to 1, whole numbers | 0 | Fades the input to silence. |
 
