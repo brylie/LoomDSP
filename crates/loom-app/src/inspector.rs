@@ -244,10 +244,11 @@ impl App {
     /// The inspector's content for the current selection.
     pub(crate) fn inspector_model(&self) -> Inspector {
         let graph = self.controller.graph();
-        let id = match self.selection.len() {
-            0 => return Inspector::Help,
-            1 => *self.selection.iter().next().expect("one module selected"),
-            n => return Inspector::Several(n),
+        let mut selected = self.selection.iter();
+        let id = match (selected.next(), selected.next()) {
+            (None, _) => return Inspector::Help,
+            (Some(&id), None) => id,
+            (Some(_), Some(_)) => return Inspector::Several(self.selection.len()),
         };
         let Some(node) = graph.node(ModuleId(id)) else {
             return Inspector::Empty;
@@ -305,7 +306,9 @@ impl App {
             .filter(|(_, (spec, _))| !spec.is_transient())
             .map(|(index, (_, &value))| {
                 // The control spans the selected range (control-ranges.md).
-                let spec = &node.spec(index).expect("one spec per value");
+                let spec = &node
+                    .spec(index)
+                    .expect("node.spec covers every parameter index of the node");
                 let range = spec.options.ranges.first().map(|_| RangeRow {
                     choices: spec.options.ranges.iter().map(ToString::to_string).collect(),
                     selected: node

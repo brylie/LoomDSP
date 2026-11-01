@@ -148,16 +148,16 @@ pub trait Host {
     }
     /// Starts an output with an engine. A device can still refuse here,
     /// after it opened. On refusal, returns the [`loom_core::Engine`] so it
-    /// can be kept idle and retried, along with the error reason.
-    #[allow(clippy::result_large_err)]
+    /// can be kept idle and retried, along with the error reason. Boxed,
+    /// because the engine is large.
     fn start(
         &self,
         output: AudioOutput,
         engine: loom_core::Engine,
-    ) -> Result<RunningAudio, (loom_core::Engine, String)> {
+    ) -> Result<RunningAudio, Box<(loom_core::Engine, String)>> {
         match output.start(engine) {
             Ok(running) => Ok(running),
-            Err(e) => Err((e.engine, e.error.to_string())),
+            Err(e) => Err(Box::new((e.engine, e.error.to_string()))),
         }
     }
     /// The MIDI inputs now: names made unique by order, and port

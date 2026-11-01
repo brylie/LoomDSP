@@ -232,13 +232,11 @@ impl Host for NoMidi {
         System.open(options)
     }
 
-    #[allow(clippy::result_large_err)]
-    #[allow(clippy::result_large_err)]
     fn start(
         &self,
         output: AudioOutput,
         engine: loom_core::Engine,
-    ) -> Result<RunningAudio, (loom_core::Engine, String)> {
+    ) -> Result<RunningAudio, Box<(loom_core::Engine, String)>> {
         System.start(output, engine)
     }
 
@@ -338,21 +336,20 @@ impl Host for Shared {
         .named(name))
     }
 
-    #[allow(clippy::result_large_err)]
     fn start(
         &self,
         output: AudioOutput,
         engine: loom_core::Engine,
-    ) -> Result<RunningAudio, (loom_core::Engine, String)> {
+    ) -> Result<RunningAudio, Box<(loom_core::Engine, String)>> {
         if self.0.wont_start.borrow().iter().any(|name| name == output.name()) {
-            return Err((engine, "the stream did not start".to_string()));
+            return Err(Box::new((engine, "the stream did not start".to_string())));
         }
         let stalls = self.0.stalls.iter().any(|name| name == output.name());
         let block = output.buffer_size().unwrap_or(256) as usize;
         let name = output.name().to_string();
         let running = match output.start(engine) {
             Ok(r) => r,
-            Err(e) => return Err((e.engine, e.error.to_string())),
+            Err(e) => return Err(Box::new((e.engine, e.error.to_string()))),
         };
         self.0.active_stats.borrow_mut().push((name, running.stats().clone()));
         if stalls {

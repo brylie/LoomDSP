@@ -124,6 +124,12 @@ impl From<StartError> for HostError {
     }
 }
 
+impl From<Box<StartError>> for HostError {
+    fn from(e: Box<StartError>) -> Self {
+        e.error
+    }
+}
+
 impl HostError {
     /// True when the error means the hardware is not on this machine: no
     /// device or port matched, or the system has none at all. Tests that
@@ -529,9 +535,9 @@ impl AudioOutput {
 
     /// Starts audio. The engine moves to the audio thread. On failure,
     /// [`StartError`] returns both the [`AudioOutput`] and the [`Engine`] so
-    /// the session can keep the engine and retry.
-    #[allow(clippy::result_large_err)]
-    pub fn start(mut self, engine: Engine) -> Result<RunningAudio, StartError> {
+    /// the session can keep the engine and retry. It is boxed: the engine is
+    /// large, and every `Result` would otherwise carry its size.
+    pub fn start(mut self, engine: Engine) -> Result<RunningAudio, Box<StartError>> {
         let stats = Arc::new(CallbackStats::default());
         let sample_rate = self.sample_rate();
         #[cfg(target_os = "macos")]
@@ -579,11 +585,11 @@ impl AudioOutput {
                         let render = unsafe { *Box::from_raw(render_ptr) };
                         let (engine, tap) = render.into_parts();
                         self.record = tap;
-                        return Err(StartError {
+                        return Err(Box::new(StartError {
                             output: self,
                             engine,
                             error: audio_error(e),
-                        });
+                        }));
                     }
                 };
                 if let Err(e) = stream.play() {
@@ -592,11 +598,11 @@ impl AudioOutput {
                     let render = unsafe { *Box::from_raw(render_ptr) };
                     let (engine, tap) = render.into_parts();
                     self.record = tap;
-                    return Err(StartError {
+                    return Err(Box::new(StartError {
                         output: self,
                         engine,
                         error: audio_error(e),
-                    });
+                    }));
                 }
                 #[cfg(target_os = "macos")]
                 if switched && let Err(e) = resume_after_switch(&stream, &stats, &mut restart_fade) {
@@ -605,11 +611,11 @@ impl AudioOutput {
                     let render = unsafe { *Box::from_raw(render_ptr) };
                     let (engine, tap) = render.into_parts();
                     self.record = tap;
-                    return Err(StartError {
+                    return Err(Box::new(StartError {
                         output: self,
                         engine,
                         error: e,
-                    });
+                    }));
                 }
                 Player::Device(StreamHandle {
                     stream: Some(stream),
@@ -618,14 +624,15 @@ impl AudioOutput {
             }
             Kind::Clock { sample_rate, block } => match Clock::start(render, sample_rate, block) {
                 Ok(clock) => Player::Clock(clock),
-                Err((render, e)) => {
+                Err(failed) => {
+                    let (render, e) = *failed;
                     let (engine, tap) = render.into_parts();
                     self.record = tap;
-                    return Err(StartError {
+                    return Err(Box::new(StartError {
                         output: self,
                         engine,
                         error: e,
-                    });
+                    }));
                 }
             },
             Kind::Stepped { block, tape, .. } => Player::Stepped(tape.attach(render, block as usize)),
@@ -846,8 +853,9 @@ struct Clock {
 }
 
 impl Clock {
-    #[allow(clippy::result_large_err)]
-    fn start(render: Render, sample_rate: u32, block: u32) -> Result<Self, (Render, HostError)> {
+    /// On failure, hands the render back with the error, boxed because the
+    /// render holds the whole engine.
+    fn start(render: Render, sample_rate: u32, block: u32) -> Result<Self, Box<(Render, HostError)>> {
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = stop.clone();
         let mut buffer = vec![0.0f32; block as usize * 2];
@@ -879,7 +887,7 @@ impl Clock {
             Err(e) => {
                 // SAFETY: thread spawn failed, so the raw pointer was never used on another thread.
                 let render = unsafe { *Box::from_raw(render_ptr) };
-                return Err((render, audio_error(e)));
+                return Err(Box::new((render, audio_error(e))));
             }
         };
         Ok(Self {

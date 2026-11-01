@@ -208,7 +208,7 @@ The first failure shows in the status bar, with no modal:
 
 The app tries again every 10 seconds while the copy is still out of date, whether or not new changes come. It does not repeat the message while writes keep failing, and says `Autosave works again.` after the first write that succeeds. *Why:* a full disk should not interrupt playing, but the player must know their safety net is gone.
 
-If the recovery folder cannot be created or locked at start, autosave is off for the session and the status bar says: `Autosave is off: <system reason>.` The app still starts. *Why:* the app must reach a playing state on stage even when its data folder is broken, as with [preferences](preferences.md#reading-the-file).
+If the recovery folder cannot be created or locked at start, or the system refuses the writer thread, autosave is off for the session and the status bar says: `Autosave is off: <system reason>.` The app still starts. *Why:* the app must reach a playing state on stage even when its data folder is broken, as with [preferences](preferences.md#reading-the-file).
 
 ### Clean exit
 
