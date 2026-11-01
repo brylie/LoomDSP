@@ -33,7 +33,7 @@ impl Controller {
                     .map(|(id, mapping)| (id, mapping.control))
             })
             .collect();
-        if let Some(fresh) = node.slot.and_then(|slot| self.fresh.get_mut(&slot)) {
+        if let Some(fresh) = node.slot.and_then(|slot| self.slots.fresh_mut(slot)) {
             // Not in the engine yet: no command, and no edit to order
             // against MIDI.
             for &(index, value) in &clamped {
@@ -46,12 +46,9 @@ impl Controller {
                 return Err(LoomError::QueueFull);
             }
             for (&(index, value), mapping) in clamped.iter().zip(&mappings) {
-                let edit = mapping.map(|(id, control)| {
-                    let token = self.next_edit;
-                    self.next_edit = self.next_edit.wrapping_add(1).max(1);
-                    self.midi_edits.insert(id, token);
-                    (control, token)
-                });
+                // The push cannot fail (checked above), so the edit is
+                // recorded before it.
+                let edit = mapping.map(|(id, control)| (control, self.midi.record_edit(id)));
                 let pushed = self
                     .commands
                     .push(Command::SetParam {
@@ -97,13 +94,13 @@ impl Controller {
         })?;
         let value = spec.clamp(value);
         node.params[index] = value;
-        if let Some(fresh) = node.slot.and_then(|slot| self.fresh.get_mut(&slot)) {
+        if let Some(fresh) = node.slot.and_then(|slot| self.slots.fresh_mut(slot)) {
             // Not in the engine yet: no command, and no edit to order
             // against MIDI.
             fresh.module.set_param(index, value);
             return Ok(value);
         }
-        let edit = mapping.map(|(_, control)| (control, self.next_edit));
+        let edit = mapping.map(|(_, control)| (control, self.midi.next_token()));
         if let Some(slot) = node.slot
             && self
                 .commands
@@ -118,8 +115,7 @@ impl Controller {
             return Err(LoomError::QueueFull);
         }
         if let Some((id, _)) = mapping {
-            self.midi_edits.insert(id, self.next_edit);
-            self.next_edit = self.next_edit.wrapping_add(1).max(1);
+            self.midi.record_edit(id);
         }
         Ok(value)
     }
@@ -188,7 +184,7 @@ impl Controller {
     /// Clears a module's internal state.
     pub fn reset_module(&mut self, module: ModuleId) -> Result<(), LoomError> {
         if let Some(slot) = self.node(module)?.slot {
-            if let Some(fresh) = self.fresh.get_mut(&slot) {
+            if let Some(fresh) = self.slots.fresh_mut(slot) {
                 fresh.module.reset();
                 return Ok(());
             }

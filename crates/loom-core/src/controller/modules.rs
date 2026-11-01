@@ -87,8 +87,8 @@ impl Controller {
         let slot = match descriptor.role {
             ModuleRole::Dsp(factory) => {
                 let slot = self
-                    .free_slots
-                    .pop()
+                    .slots
+                    .take()
                     .ok_or(LoomError::TooManyModules(self.config.max_modules))?;
                 let mut module = factory(&ModuleConfig {
                     sample_rate: self.config.sample_rate,
@@ -110,7 +110,7 @@ impl Controller {
                         .filter(|(_, d)| d.kind == crate::descriptor::DisplayKind::Trigger)
                         .fold(0, |mask, (i, _)| mask | (1 << i)),
                 };
-                self.fresh.insert(slot, fresh);
+                self.slots.hold(slot, fresh);
                 Some(slot)
             }
             ModuleRole::UnitDelay | ModuleRole::AudioOutput => None,
@@ -136,19 +136,14 @@ impl Controller {
         self.graph
             .assignments
             .retain(|_, assignment| assignment.source.module != id && assignment.target != id);
-        self.probes.retain(|_, (from, _)| from.module != id);
+        self.probes.remove_on(id);
         self.graph.midi_mappings.retain(|_, mapping| mapping.target != id);
         if let Some(slot) = node.slot {
-            if self.fresh.remove(&slot).is_some() {
-                // Never sent: the engine has nothing to remove.
-                self.free_slots.push(slot);
-            } else {
-                // The running schedule still uses this slot. The instance
-                // is removed after the next schedule swap (see `commit`).
-                self.pending_removals.push(slot);
-            }
+            self.slots.release(slot);
         }
-        self.pending_removals.extend(node.copy_slot);
+        if let Some(copy) = node.copy_slot {
+            self.slots.retire(copy);
+        }
         self.dirty = true;
         Ok(())
     }
@@ -157,6 +152,97 @@ impl Controller {
     /// checks this before it puts removed modules back. A removed module's
     /// slot counts only after the commit that follows its removal.
     pub fn free_module_slots(&self) -> usize {
-        self.free_slots.len()
+        self.slots.free_count()
     }
 }
+
+/// The engine's module slots, as the controller sees them. Each slot holds
+/// at most one module instance. A slot is free, held by a module added
+/// since the last commit, used by the running schedule, or retiring: still
+/// used by the running schedule, and freed once the next schedule swaps in.
+pub(super) struct Slots {
+    /// Free slots, taken from the end.
+    free: Vec<usize>,
+    /// Modules added since the last commit, by slot. They stay here, where
+    /// their first values are set directly, until `commit` resets them and
+    /// sends them to the engine (live patching spec, rule 7).
+    fresh: BTreeMap<usize, Fresh>,
+    /// Slots to free after the next swap, in the order they were retired.
+    retiring: Vec<usize>,
+}
+
+impl Slots {
+    /// `count` free slots, numbered from 0.
+    pub(super) fn new(count: usize) -> Self {
+        Self {
+            free: (0..count).rev().collect(),
+            fresh: BTreeMap::new(),
+            retiring: Vec::new(),
+        }
+    }
+
+    /// How many slots are free now. A retiring slot counts only after the
+    /// swap that frees it.
+    pub(super) fn free_count(&self) -> usize {
+        self.free.len()
+    }
+
+    /// Takes a free slot.
+    pub(super) fn take(&mut self) -> Option<usize> {
+        self.free.pop()
+    }
+
+    /// Holds a new module in a slot just taken, until the next commit.
+    pub(super) fn hold(&mut self, slot: usize, fresh: Fresh) {
+        self.fresh.insert(slot, fresh);
+    }
+
+    /// The module held in `slot`, if it has not been sent to the engine yet.
+    pub(super) fn fresh_mut(&mut self, slot: usize) -> Option<&mut Fresh> {
+        self.fresh.get_mut(&slot)
+    }
+
+    /// Gives back the slot of a removed module. A module never sent frees
+    /// its slot at once: the engine has nothing to remove. One in the
+    /// running schedule retires until the next swap.
+    pub(super) fn release(&mut self, slot: usize) {
+        if self.fresh.remove(&slot).is_some() {
+            self.free.push(slot);
+        } else {
+            self.retire(slot);
+        }
+    }
+
+    /// Frees `slot` after the next swap: the running schedule still uses it.
+    pub(super) fn retire(&mut self, slot: usize) {
+        self.retiring.push(slot);
+    }
+
+    /// How many new modules wait to be sent.
+    pub(super) fn waiting(&self) -> usize {
+        self.fresh.len()
+    }
+
+    /// The slots that retire at the next swap.
+    pub(super) fn retiring(&self) -> &[usize] {
+        &self.retiring
+    }
+
+    /// Takes up to `room` of the new modules, lowest slot first, to send.
+    /// The rest stay held for the next commit.
+    pub(super) fn send_fresh(&mut self, room: usize) -> Vec<(usize, Fresh)> {
+        let sending: Vec<usize> = self.fresh.keys().copied().take(room).collect();
+        sending
+            .into_iter()
+            .filter_map(|slot| self.fresh.remove(&slot).map(|fresh| (slot, fresh)))
+            .collect()
+    }
+
+    /// Frees the retiring slots, once the swap that stops using them is sent.
+    pub(super) fn free_retired(&mut self) {
+        self.free.append(&mut self.retiring);
+    }
+}
+
+#[cfg(test)]
+mod tests;

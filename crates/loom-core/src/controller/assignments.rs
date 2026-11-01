@@ -150,6 +150,7 @@ impl Controller {
     }
 }
 
+/// Clamps a modulation depth to -1..1. NaN becomes 0, which adds nothing.
 fn clamp_depth(depth: f32) -> f32 {
     if depth.is_nan() { 0.0 } else { depth.clamp(-1.0, 1.0) }
 }

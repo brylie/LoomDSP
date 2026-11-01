@@ -16,12 +16,14 @@
 //! | Display values and probes | `controller/displays.rs` |
 //! | Audio output and input | `controller/audio.rs` |
 //!
-//! *Why flat, and not `controller.midi().map(..)` views or separate owned
-//! types:* nearly every method edits the same graph and sends on the same
-//! command queue, so separate parts would share both anyway, and views would
-//! rename every call for no gain in safety (#472). Helpers that more than one
-//! group uses, such as `send` and the `check_*` functions, stay in this file,
-//! because a child module cannot see its siblings' private items.
+//! State with rules of its own is a typed part with private fields, owned
+//! by the controller: `Slots` (in `modules.rs`), `MidiSync` (`midi.rs`), and
+//! `Probes` and `LiveValues` (`displays.rs`). The methods coordinate parts
+//! and the graph, borrowing them as separate fields. The graph and the
+//! command queue stay shared, because nearly every edit uses both. Helpers
+//! that more than one group uses, such as `send` and the `check_*`
+//! functions, stay in this file, because a child module cannot see its
+//! siblings' private items. Why: ADR-0034.
 
 use crate::compile::{CompileReport, compile};
 use crate::descriptor::{ModuleConfig, ModuleDescriptor, ModuleRole, ParamRange, Polarity};
@@ -86,24 +88,15 @@ pub fn create_engine(registry: Arc<Registry>, config: EngineConfig) -> EnginePar
         graph: Graph::default(),
         commands: command_tx,
         garbage: garbage_rx,
-        free_slots: (0..config.max_modules).rev().collect(),
-        pending_removals: Vec::new(),
-        fresh: BTreeMap::new(),
-        probes: BTreeMap::new(),
-        next_probe: 1,
+        slots: Slots::new(config.max_modules),
+        midi: MidiSync::new(midi_feedback),
+        probes: Probes::new(),
+        live: LiveValues::new(displays, live, config.max_live_values),
         next_id: 1,
         next_assignment: 1,
-        next_midi_mapping: 1,
-        midi_seen: BTreeMap::new(),
-        midi_edits: BTreeMap::new(),
-        next_edit: 1,
-        midi_feedback,
         dirty: false,
         last_report: CompileReport::default(),
         transport: TransportSettings::default(),
-        displays,
-        live,
-        live_cells: LiveCells::new(config.max_live_values),
         config,
         stats,
     };
@@ -151,35 +144,20 @@ pub struct Controller {
     graph: Graph,
     commands: Producer<Command>,
     garbage: Consumer<Garbage>,
-    free_slots: Vec<usize>,
-    pending_removals: Vec<usize>,
-    /// Modules added since the last commit, by slot. They stay here, where
-    /// their first values are set directly, until `commit` resets them and
-    /// sends them to the engine (live patching spec, rule 7).
-    fresh: BTreeMap<usize, Fresh>,
-    probes: BTreeMap<ProbeId, (OutputRef, ProbeKind)>,
-    next_probe: u32,
+    /// The engine's module slots: free, held by new modules, or retiring.
+    slots: Slots,
+    /// MIDI mapping ids, and the order of screen edits and control changes.
+    midi: MidiSync,
+    /// The ports the UI watches.
+    probes: Probes,
+    /// Display values and live modulated values from the engine.
+    live: LiveValues,
     next_id: u32,
     next_assignment: u32,
-    next_midi_mapping: u32,
-    /// The last feedback sequence number applied, per MIDI mapping.
-    midi_seen: BTreeMap<MidiMappingId, u32>,
-    /// Screen edits on mapped parameters that the engine has not confirmed
-    /// yet: the token of the latest one, per mapping.
-    midi_edits: BTreeMap<MidiMappingId, u32>,
-    next_edit: u32,
-    /// What the engine's MIDI mappings did (MIDI learn, rules 2 and 3).
-    midi_feedback: Arc<MidiFeedback>,
     dirty: bool,
     last_report: CompileReport,
     /// What the engine's transport is set to, as of the last command sent.
     transport: TransportSettings,
-    /// Display values from the engine (ADR-0013).
-    displays: Arc<DisplayTable>,
-    /// Live modulated values from the engine, and which cell each modulated
-    /// parameter has (`docs/design/modulation.md`, Live value).
-    live: Arc<LiveTable>,
-    live_cells: LiveCells,
     config: EngineConfig,
     stats: Arc<EngineStats>,
 }
@@ -249,7 +227,7 @@ impl Controller {
                 _ => {}
             }
         }
-        if self.free_slots.len() < starting.len() {
+        if self.slots.free_count() < starting.len() {
             return Err(LoomError::TooManyModules(self.config.max_modules));
         }
         // New modules go in first, after `reset()` snaps their smoothing to
@@ -258,11 +236,9 @@ impl Controller {
         // when they do not all fit with the swap, the ones that fit go now
         // and the rest wait for the next commit. Their later edits are
         // commands, as for any module in the engine.
-        let room = self.commands.slots().saturating_sub(1 + self.pending_removals.len());
-        let waiting = self.fresh.len().saturating_sub(room);
-        let sending: Vec<usize> = self.fresh.keys().copied().take(room).collect();
-        for slot in sending {
-            let mut fresh = self.fresh.remove(&slot).expect("listed above");
+        let room = self.commands.slots().saturating_sub(1 + self.slots.retiring().len());
+        let waiting = self.slots.waiting().saturating_sub(room);
+        for (slot, mut fresh) in self.slots.send_fresh(room) {
             fresh.module.reset();
             let insert = Command::InsertModule {
                 slot,
@@ -274,11 +250,11 @@ impl Controller {
             let pushed = self.commands.push(insert).is_ok();
             debug_assert!(pushed, "room was checked above");
         }
-        if waiting > 0 || self.commands.slots() < starting.len() + 1 + self.pending_removals.len() + stopping.len() {
+        if waiting > 0 || self.commands.slots() < starting.len() + 1 + self.slots.retiring().len() + stopping.len() {
             return Err(LoomError::QueueFull);
         }
         for id in starting {
-            let slot = self.free_slots.pop().expect("checked above");
+            let slot = self.slots.take().expect("checked above");
             let node = self.graph.nodes.get_mut(&id).expect("listed above");
             let ModuleRole::Dsp(factory) = node.descriptor.role else {
                 unreachable!("only DSP modules are listed");
@@ -306,25 +282,14 @@ impl Controller {
         }
         for (id, slot) in stopping {
             self.graph.nodes.get_mut(&id).expect("listed above").copy_slot = None;
-            self.pending_removals.push(slot);
+            self.slots.retire(slot);
         }
         // What the graph holds per mapping. With a screen edit on its way,
         // every control change so far is older than the graph's value.
-        let synced: BTreeMap<MidiMappingId, u32> = self
-            .graph
-            .midi_mappings()
-            .filter_map(|(id, mapping)| {
-                let entry = self.midi_feedback.read(mapping.control);
-                if self.midi_edits.contains_key(&id) && entry.id == id {
-                    Some((id, entry.sequence))
-                } else {
-                    self.midi_seen.get(&id).map(|&sequence| (id, sequence))
-                }
-            })
-            .collect();
+        let synced = self.midi.synced(&self.graph);
         let (mut schedule, mut report) = compile(
             &self.graph,
-            &self.probes,
+            self.probes.as_map(),
             &synced,
             self.config.sample_rate,
             self.config.max_block,
@@ -338,12 +303,12 @@ impl Controller {
             .filter(|fill| !fill.is_right_copy())
             .map(|fill| fill.key)
             .collect();
-        let (released, missing) = self.live_cells.assign(&keys);
+        let (released, missing) = self.live.assign(&keys);
         for fill in &mut schedule.fills {
             fill.live = if fill.is_right_copy() {
                 NO_CELL
             } else {
-                self.live_cells.cell(fill.key).unwrap_or(NO_CELL)
+                self.live.cell(fill.key).unwrap_or(NO_CELL)
             };
         }
         schedule.live_release = released;
@@ -352,11 +317,12 @@ impl Controller {
         // removed slots), then remove the instances.
         let pushed = self.commands.push(Command::SwapSchedule(Box::new(schedule))).is_ok()
             && self
-                .pending_removals
+                .slots
+                .retiring()
                 .iter()
                 .all(|&slot| self.commands.push(Command::RemoveModule { slot }).is_ok());
         debug_assert!(pushed, "capacity was checked above");
-        self.free_slots.append(&mut self.pending_removals);
+        self.slots.free_retired();
         self.dirty = false;
         self.last_report = report;
         Ok(&self.last_report)
@@ -454,6 +420,10 @@ mod midi;
 mod modules;
 mod params;
 mod transport;
+
+use displays::{LiveValues, Probes};
+use midi::MidiSync;
+use modules::Slots;
 
 #[cfg(test)]
 mod tests;
