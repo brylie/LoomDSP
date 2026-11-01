@@ -211,7 +211,7 @@ The matrix shows the assignments of the current patch level only. Assignments in
 
 ## Parameter mapping
 
-**Status:** Agreed ([#66](https://github.com/brylie/LoomDSP/issues/66)).
+**Status:** Agreed ([#66](https://github.com/brylie/LoomDSP/issues/66)). The decibel mapping is Agreed, P2 ([#99](https://github.com/brylie/LoomDSP/issues/99), 2026-11-01).
 
 Every parameter maps between its value and its control's position, from 0 to 1. Rules 2 and 3 use this mapping.
 
@@ -219,11 +219,16 @@ Every parameter maps between its value and its control's position, from 0 to 1. 
 |---|---|---|
 | Linear (the default) | `min + t × (max - min)` | Most parameters. Whole-number parameters are always linear. |
 | Logarithmic | `min × (max / min)^t` | Frequencies and times. Equal steps of the control give equal ratios, so a tenth of a 20 Hz to 20 kHz knob is about one octave anywhere on it. |
+| Decibels | 0 at `t = 0`; otherwise the gain of `floor + t × (dB(max) − floor)` dB | Gains and levels. The value stays a linear gain; the control turns and reads in dB, with −∞ at the bottom. `floor` is −60 dB unless the parameter sets another. |
 
 - **The mapping is part of `ParamSpec`.** A `ParamSpec` with `ParamOptions::DEFAULT` is linear; `.logarithmic()` makes it logarithmic. Nothing is guessed from the unit. *Why:* the module author knows how the parameter should feel. A guess can be wrong, and then the arc lies.
 - **`loom-core` has the two functions:** `ParamSpec::normalize(value)` gives the position, and `ParamSpec::denormalize(position)` gives the value. The inspector, panel controls, and the engine's modulation use only these. *Why:* rule 3.
 - **Every result is valid.** `normalize` clamps the value into range and returns a position from 0 to 1. `denormalize` clamps the position to 0 to 1 and returns the value as `ParamSpec::clamp` gives it: in range, and rounded for whole numbers. NaN in either becomes the default value. *Why:* callers never need to clamp again.
 - **The registry refuses impossible mappings:** a logarithmic parameter that is a whole number, or whose minimum is 0 or less. *Why:* there is no logarithm of 0, and whole numbers must step evenly, one value per step.
+- **The decibel mapping stores a linear gain** (settled). Patches and modules see the same gain as before; only how the control turns and what it shows change. The value text is in dB ("−6.0 dB", "−∞ dB"), and a typed "-6 dB" sets the gain 0.501 ([typing a value](panel-widgets.md#typing-a-value)). *Why:* gain modules keep multiplying, saved patches keep their numbers, and `normalize` and `denormalize` stay the one path.
+- **The registry refuses impossible decibel mappings:** a minimum other than 0, a maximum of 0 or less, a whole-number parameter, or [control ranges](control-ranges.md) on it.
+- **The Mixer's `level1` to `level4` use the decibel mapping:** 0 to 2, shown as −∞ to +6.0 dB. Their default, 1, is 0 dB.
+- **Stepped values are choice names.** A whole-number parameter with choice names ([panels](panels.md#choice-names)) already gives named steps, shown as radio buttons or a select list. A module whose steps are numbers, such as filter slopes of 6, 12, 18, and 24 dB, names them and maps the index itself. *Why no new mapping:* an index with names covers every case FR-PANEL-04 asks for, and patches stay stable if the numbers are renamed.
 - **Built-in parameters in Hz or seconds are logarithmic:** the filter cutoff and the envelope's attack, decay, and release times. All others are linear.
 - **The mapping is not saved in patch files.** Patches store values, not positions. *Why:* changing a parameter's mapping later never changes how a saved patch sounds.
 
@@ -236,10 +241,12 @@ Every parameter maps between its value and its control's position, from 0 to 1. 
 - [x] The registry refuses a logarithmic whole-number parameter and a logarithmic parameter with a minimum of 0 or less.
 - [x] Every built-in parameter in Hz or seconds is logarithmic.
 - [x] The inspector uses `normalize` and `denormalize`. The app no longer guesses a mapping.
+- [ ] Decibels: `denormalize(0)` is 0; `normalize(1.0)` on a 0 to 2 level is the position of 0 dB; `denormalize(normalize(v))` returns `v` within 1e-4 dB for gains above the floor (unit tests).
+- [ ] The registry refuses a decibel mapping with a minimum above 0, on a whole number, or with control ranges (test).
+- [ ] The Mixer's levels read "0.0 dB" at their default and "−∞ dB" at 0 (test).
 
 ### Out of scope
 
-- Decibel and stepped mappings (FR-PANEL-04, P2).
 - Skewed or custom curves.
 - The engine's modulation itself ([#19](https://github.com/brylie/LoomDSP/issues/19)). It will use these functions.
 

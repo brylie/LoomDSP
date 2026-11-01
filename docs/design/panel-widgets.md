@@ -318,9 +318,29 @@ One signal against another: the first moves the trace left and right, the second
 - **Explainer:** `docs/learn/reading-an-xy-scope.md` (phase, stereo width, and why a circle means a quarter cycle), written with the widget and linked from this section and the module's help.
 - **Acceptance criteria**, following the checklist in [Acceptance criteria](#acceptance-criteria): the registry refuses an XY scope bound to anything but two outputs of its own module; a sine on `x` and a quarter-cycle-later sine on `y` draw a circle (geometry test on the point list); equal signals draw a diagonal and, with `rotate`, a vertical line; points outside `range` clamp to the edge and never wrap; two samples in a trace always come from the same block (paired-probe test); the widget is in `App::ui_snapshot`; middle zoom draws the frame and one point; a silent or still signal draws no frames; the widget is on a test module from [#208](https://github.com/brylie/LoomDSP/issues/208).
 
+### Level history
+
+How loud a signal has been over the last seconds ([#97](https://github.com/brylie/LoomDSP/issues/97)).
+
+- **Binds to:** an output, through the same meter probe as the [meter](panels.md#meter-widget).
+- **Drawing:** the RMS level from −60 to 0 dB over a time window, newest at the right, as a filled shape; the peak as a lighter line above it. Colour is not the only signal: peak and RMS differ in fill (rule 8).
+- **Data:** the telemetry thread keeps the history, one column per 1/100 of the window, and wakes the UI only when a column it would draw changes. A silent history draws no frames (rule 7).
+- **Pointer:** a display (rule 1). **Middle zoom:** the RMS shape only. **Starting size:** 9 × 3, growable.
+- **Used by** the Level Meter (below).
+
+**Level Meter options** (settled; the module is in [panels](panels.md#level-meter-module)): `view`: 0 Meter (default), 1 Meter and history. `window`: 0 1 s, 1 5 s (default), 2 30 s. Both are choices, kept in the inspector. With history, the tile grows to hold a level history beside the meter. *Why an option and not a new module:* it is the same probe and the same job; the merge rule of ADR-0017 makes it one type with a setting.
+
 ### Spectrum
 
-Proposed in [#109](https://github.com/brylie/LoomDSP/issues/109). It belongs to this group and follows its rules.
+The frequency content of a signal ([#109](https://github.com/brylie/LoomDSP/issues/109)). The module is in [P2 modules](p2-modules.md#spectrum-mt-view-03).
+
+- **Binds to:** an output, through a scope probe ([telemetry](telemetry.md)). The FFT runs on the app's telemetry thread, never the audio thread.
+- **Analysis:** 4096 points, Hann window, half overlap (about 12 Hz per bin at 48 kHz). The FFT comes from the `rustfft` crate (MIT or Apache-2.0), used in `loom-app` only, so the engine crates stay portable (AGENTS.md rule 6).
+- **Drawing:** one line, log frequency from 20 Hz to 20 kHz across, −90 to 0 dB up. Bins are reduced to one value per drawn column (the highest), so low and high frequencies read alike. After a peak, the line falls at 20 dB per second. *Why:* a raw spectrum flickers too fast to read.
+- **Tilt:** Flat, or +4.5 dB per octave around 1 kHz, so a full mix reads closer to level across the range.
+- **Hold:** an optional peak line that stays for 2 s, then falls at 20 dB per second.
+- **Data and redraw:** the thread sends the UI new columns only when the drawn line changes. A silent spectrum draws no frames (rule 7).
+- **Pointer:** a display. **Middle zoom:** the line only, no grid. **Starting size:** 9 × 5, growable.
 
 ## Shapes and data
 
@@ -470,7 +490,8 @@ Widget-specific checks:
 | XY pad | Alt-press jumps the point; a plain press does not. Each axis shows its own modulation bar. |
 | Range | The two handles cannot cross. Each has its own modulation bar and live line. |
 | Readout, meter on a display value | Text uses the display value's unit; the meter follows the display value at rule 7's rate. |
-| Spectrum | A sine shows one peak at its frequency. |
+| Level history | A tone that stops shows RMS falling to the floor over the window; a silent input sends the UI nothing. |
+| Spectrum | A 1 kHz sine peaks in the column holding 1 kHz, within one bin; hold keeps the peak for 2 s; a silent input sends the UI nothing. |
 | Curve | Click adds, double-click removes, segment drag bends, Ctrl-drag snaps; wrap and odd symmetry hold their constraint; the live modulated shape appears only while modulated. |
 | Step grid | Rows, ring, and keys layouts give the same cell for the same key presses; ring and keys are refused on value lanes; Alt-drag draws values. |
 | Waveform | The outline is built once per buffer change; markers set their parameters; frames draw the strip and the current frame. |
@@ -494,7 +515,7 @@ Settled with the maintainer on 2026-11-01 ([#278](https://github.com/brylie/Loom
 - **Select list type-ahead:** yes, for lists that scroll ([Select list](#select-list)).
 - **Keys layout:** cell names are display texts the module publishes; the root is a bar under the key ([Step grid](#step-grid)).
 - **Widget sizes:** the listed sizes are starting sizes, tuned with [#120](https://github.com/brylie/LoomDSP/issues/120).
-- **Slow history:** a long time window on the scope, fed by display values instead of audio samples ([#97](https://github.com/brylie/LoomDSP/issues/97) specifies it).
+- **Slow history of a display value:** a long time window on the scope, fed by display values instead of audio samples, specified when a module first needs it. The RMS history of a signal is the [level history](#level-history).
 
 ## Open points
 

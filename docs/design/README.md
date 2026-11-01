@@ -60,7 +60,7 @@ Copy [template.md](template.md). Keep it to one feature. Link the ADR, requireme
 | [Panel widgets](panel-widgets.md) | [ADR-0024](../adr/0024-widgets-follow-the-kind-of-value.md) | Agreed, P2; shape preview and compact select list Implemented |
 | [Stereo cables](stereo.md) | [ADR-0020](../adr/0020-inferred-channel-count.md), [ADR-0022](../adr/0022-copies-take-state-from-the-running-instance.md) | Agreed, P1 |
 | [Changing a running patch](live-patching.md) | [ADR-0002](../adr/0002-graph-execution-and-feedback.md), [ADR-0022](../adr/0022-copies-take-state-from-the-running-instance.md) | Rules 1 to 5 Implemented; rule 6 Agreed, P1; rules 9 and 10 (cable fades, staged retry) Agreed, P2 |
-| [Modulation](modulation.md) | [ADR-0014](../adr/0014-modulation-without-cables.md) | Engine, parameter mapping, and editing slices 1 to 3 Agreed (P1); slice 2 built |
+| [Modulation](modulation.md) | [ADR-0014](../adr/0014-modulation-without-cables.md) | Engine, parameter mapping, and editing slices 1 to 3 Agreed (P1); slice 2 built; decibel mapping Agreed (P2) |
 | [Undo and redo](undo.md) | None (builds on [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md)) | Implemented, P1 |
 | [Control ranges](control-ranges.md) | None (extends parameter mapping) | Agreed, P1 |
 | [Port ranges](port-ranges.md) | None (builds on [ADR-0007](../adr/0007-polymorphic-signal-model.md)) | Tier 1 Agreed, Tiers 2 and 3 Draft, P1 and P2 |
@@ -83,7 +83,7 @@ Copy [template.md](template.md). Keep it to one feature. Link the ADR, requireme
 | [Devices plugged in and out](device-changes.md) | None (builds on [preferences](preferences.md)) | Agreed, P1 |
 | [Audio input](audio-input.md) | None (builds on [ADR-0020](../adr/0020-inferred-channel-count.md)) | Agreed, P1 |
 | [P1 module ports and parameters](p1-modules.md) | None (builds on [ADR-0007](../adr/0007-polymorphic-signal-model.md)) | Agreed, P1 |
-| [P2 module ports and parameters](p2-modules.md) | None (builds on [ADR-0007](../adr/0007-polymorphic-signal-model.md)) | Random, Chance, Phase reset, Euclidean rhythm, Selector, Phase shift and reverse, Macro, Pitch quantiser, Multi-lane sequencer Agreed, P2 |
+| [P2 module ports and parameters](p2-modules.md) | None (builds on [ADR-0007](../adr/0007-polymorphic-signal-model.md)) | Random, Chance, Phase reset, Euclidean rhythm, Selector, Phase shift and reverse, Macro, Pitch quantiser, Multi-lane sequencer, Spectrum Agreed, P2 |
 | [Transient parameters](transient-params.md) | None (builds on [ADR-0008](../adr/0008-patch-format-ron.md)) | Agreed, P1 |
 | [Audio QA harness](audio-qa.md) | None (builds on [ADR-0019](../adr/0019-output-safety-stage.md)) | Implemented, developer tooling |
 | [Release downloads](releases.md) | [ADR-0027](../adr/0027-prebuilt-release-downloads.md) | Agreed, P1 |

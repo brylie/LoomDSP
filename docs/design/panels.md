@@ -415,6 +415,7 @@ The whole app redraws only when something visible changes ([#90](https://github.
 
 - **`loom.display.meter`**, category Display. One audio input `in` and one output `out` that passes `in` through, sample for sample. No parameters. Its panel is one meter bound to `out`.
 - Mono. For stereo, use two.
+- P2 adds a level history view, with `view` and `window` settings ([panel widgets, Level history](panel-widgets.md#level-history)).
 - *Why a pass-through output:* probes read outputs, and the module can sit inline in a signal path or hang off an output, without changing the sound.
 
 ### How levels reach a meter

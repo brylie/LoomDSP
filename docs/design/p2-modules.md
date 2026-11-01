@@ -3,12 +3,12 @@
 The ports, parameters, ranges, defaults, and behaviour of the P2 modules that bring no new engine rules, so each can be built from its catalogue entry without guessing.
 
 - **Kind:** living specification.
-- **Status:** Agreed for Random, Chance, Phase reset, Euclidean rhythm, Selector, Phase shift and reverse, Macro, Pitch quantiser, and Multi-lane sequencer (2026-11-01). Each section is ready to build. Other P2 modules are added here as they are agreed.
+- **Status:** Agreed for Random, Chance, Phase reset, Euclidean rhythm, Selector, Phase shift and reverse, Macro, Pitch quantiser, Multi-lane sequencer, and Spectrum (2026-11-01). Each section is ready to build. Other P2 modules are added here as they are agreed.
 - **Decision behind it:** none. It follows [ADR-0007](../adr/0007-polymorphic-signal-model.md) (signals), [ADR-0014](../adr/0014-modulation-without-cables.md) (modulation without cables), [ADR-0016](../adr/0016-ports-and-parameters-carry-their-own-text.md) (port and parameter text), and [ADR-0018](../adr/0018-clean-room-module-development.md) (clean room).
 - **Use case and requirements:** FR-LIB-01, FR-LIB-08, FR-LIB-12, FR-LIB-14, FR-LIB-19, FR-LIB-22, FR-LIB-29, FR-LIB-30, NFR-SND-04.
 - **Background:** [Phase and cycles](../learn/phase-and-cycles.md).
 - **Prior art:** none named. Every module is designed from its purpose. The Euclidean rhythm follows published theory: G. Toussaint, "The Euclidean Algorithm Generates Traditional Musical Rhythms", 2005.
-- **Issues:** [#304](https://github.com/brylie/LoomDSP/issues/304) (Random), [#305](https://github.com/brylie/LoomDSP/issues/305) (Chance), [#174](https://github.com/brylie/LoomDSP/issues/174) (Phase reset), [#306](https://github.com/brylie/LoomDSP/issues/306) (Euclidean rhythm), [#310](https://github.com/brylie/LoomDSP/issues/310) (Selector), [#111](https://github.com/brylie/LoomDSP/issues/111) (Phase shift and reverse), [#78](https://github.com/brylie/LoomDSP/issues/78) (Macro), [#308](https://github.com/brylie/LoomDSP/issues/308) (Pitch quantiser), [#307](https://github.com/brylie/LoomDSP/issues/307) (Multi-lane sequencer). Pitch modules follow [Scale and tuning](scale-and-tuning.md).
+- **Issues:** [#304](https://github.com/brylie/LoomDSP/issues/304) (Random), [#305](https://github.com/brylie/LoomDSP/issues/305) (Chance), [#174](https://github.com/brylie/LoomDSP/issues/174) (Phase reset), [#306](https://github.com/brylie/LoomDSP/issues/306) (Euclidean rhythm), [#310](https://github.com/brylie/LoomDSP/issues/310) (Selector), [#111](https://github.com/brylie/LoomDSP/issues/111) (Phase shift and reverse), [#78](https://github.com/brylie/LoomDSP/issues/78) (Macro), [#308](https://github.com/brylie/LoomDSP/issues/308) (Pitch quantiser), [#307](https://github.com/brylie/LoomDSP/issues/307) (Multi-lane sequencer), [#109](https://github.com/brylie/LoomDSP/issues/109) (Spectrum). Pitch modules follow [Scale and tuning](scale-and-tuning.md).
 - **Code:** `crates/loom-modules/src`, once built.
 
 ## Goal
@@ -207,6 +207,20 @@ Two built forms of the Phase warp type (ADR-0017): small, cheap, and needed now 
 - **Repeat** (whole number 1 to 4, default 1): a gate step is split into that many equal parts, each with a gate for `length` of its part. Ignored on pitch and value lanes.
 - **Accent** (on or off, default off): `accent<i>` is high with the same timing as a gate on lane `i`, on accented steps that play. On pitch and value lanes it uses the timing a gate would have. *Why separate outputs:* gates stay plain gates, and accent can drive a level, a filter, or a second envelope.
 
+## Spectrum (MT-VIEW-03)
+
+`loom.display.spectrum`: shows the frequency content of a signal.
+
+| | |
+|---|---|
+| Input | `in` (audio, default 0) |
+| Output | `out` (passes `in` through, sample for sample) |
+| Parameters | `tilt`: 0 Flat (default), 1 +4.5 dB per octave. `hold`: 0 Off (default), 1 On |
+| Panel | A [spectrum](panel-widgets.md#spectrum) widget bound to `out`. `tilt` and `hold` in the inspector. Growable tile. |
+
+- Mono, like the Level Meter. *Why a pass-through:* probes read outputs, and the module can sit inline or hang off an output without changing the sound, as the Level Meter and Scope do.
+- The parameters change only the drawing, never the sound (panel widgets rule 6).
+
 ## Acceptance criteria
 
 Random:
@@ -231,6 +245,10 @@ Phase reset:
 - [ ] A reset lands on the same sample at block sizes 1, 77, and 512 (test).
 - [ ] After a reset, the output rises at the input's rate from 0 and wraps when it reaches 1 (test).
 - [ ] A reset on the first frame counts (test).
+
+Spectrum:
+
+- [ ] The output equals the input, sample for sample (test). The widget checks are in [panel widgets](panel-widgets.md#acceptance-criteria).
 
 Euclidean rhythm:
 
