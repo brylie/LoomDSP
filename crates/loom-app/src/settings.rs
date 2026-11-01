@@ -18,10 +18,15 @@ use std::fmt;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+/// Whether a host error describes a microphone permission refusal.
+fn input_permission_denied(error: &str) -> bool {
+    let lower = error.to_lowercase();
+    lower.contains("denied") || lower.contains("permission") || lower.contains("not authorized")
+}
+
 /// Makes an input error actionable without reporting it from a callback.
 fn input_error_message(error: &str) -> String {
-    let lower = error.to_lowercase();
-    if lower.contains("denied") || lower.contains("permission") || lower.contains("not authorized") {
+    if input_permission_denied(error) {
         let place = if cfg!(target_os = "macos") {
             "System Settings, Privacy and Security, Microphone"
         } else if cfg!(target_os = "windows") {
@@ -95,6 +100,10 @@ pub struct Rig {
     input_attempted: Option<Instant>,
     /// Whether an input error has been reported in this run.
     input_error_reported: bool,
+    /// Whether a microphone permission error has been reported in this run.
+    input_permission_reported: bool,
+    /// The last input error, so recovery does not overwrite another message.
+    input_error_status: Option<String>,
     /// A named input was lost while playing; wait for that device to return.
     input_named_lost: bool,
     /// Whether the live-input feedback warning has been shown this run.
@@ -177,6 +186,8 @@ impl Rig {
             input_tracker: None,
             input_attempted: None,
             input_error_reported: false,
+            input_permission_reported: false,
+            input_error_status: None,
             input_named_lost: false,
             input_warned: false,
             playing: None,
@@ -553,9 +564,10 @@ impl App {
             }
             self.rig.input_tracker = None;
             self.input_alert = None;
-            if !self.rig.input_error_reported {
+            if !self.rig.input_permission_reported {
                 self.status = input_error_message("microphone permission denied");
-                self.rig.input_error_reported = true;
+                self.rig.input_error_status = Some(self.status.clone());
+                self.rig.input_permission_reported = true;
             }
             return;
         }
@@ -585,6 +597,7 @@ impl App {
                 self.rig.flags.input.is_some() || matches!(self.rig.store.saved().audio.input, InputChoice::Named(_));
             if !self.rig.input_error_reported {
                 self.status = format!("Audio input: \"{name}\" was lost. Trying to reopen it.");
+                self.rig.input_error_status = Some(self.status.clone());
                 self.rig.input_error_reported = true;
             }
         }
@@ -647,17 +660,33 @@ impl App {
                     self.rig.input_tracker = Some(std::sync::Arc::new(crate::input_watch::Tracker::new(counts)));
                     self.rig.input = Some(port);
                     self.rig.input_named_lost = false;
+                    self.rig.input_error_reported = false;
+                    let error_was_shown = self
+                        .rig
+                        .input_error_status
+                        .take()
+                        .is_some_and(|status| status == self.status);
                     if let Some(name) = fallback {
                         self.status = format!("Audio input: \"{name}\" is not available. Using the system default.");
+                    } else if error_was_shown {
+                        let name = self.rig.input.as_ref().expect("input was just installed").name();
+                        self.status = format!("Audio input: \"{name}\" is back.");
                     }
                 }
                 Err(error) => self.status = format!("Audio input: {error}."),
             },
-            Err(error) if !self.rig.input_error_reported => {
-                self.status = input_error_message(&error);
-                self.rig.input_error_reported = true;
+            Err(error) => {
+                let reported = if input_permission_denied(&error) {
+                    &mut self.rig.input_permission_reported
+                } else {
+                    &mut self.rig.input_error_reported
+                };
+                if !*reported {
+                    self.status = input_error_message(&error);
+                    self.rig.input_error_status = Some(self.status.clone());
+                    *reported = true;
+                }
             }
-            Err(_) => {}
         }
     }
 
@@ -675,6 +704,8 @@ impl App {
         }
         self.rig.input_attempted = None;
         self.rig.input_error_reported = false;
+        self.rig.input_permission_reported = false;
+        self.rig.input_error_status = None;
         self.rig.input_named_lost = false;
         self.sync_audio_input();
         if let Some(error) = error {
@@ -1896,6 +1927,48 @@ mod tests {
         assert_eq!(fake.input_closes.get(), 1);
         assert_eq!(fake.input_opens.get(), 2);
         assert!(app.rig.input.as_ref().unwrap().is_live());
+        assert_eq!(app.status, "Audio input: \"Microphone\" is back.");
+
+        // A later loss must be reported again, even after a successful reopen.
+        *fake.input_error.borrow_mut() = Some("device busy".into());
+        fake.input_writer.borrow().as_ref().unwrap().status().fail();
+        app.sync_audio_input();
+        assert!(app.rig.input.is_none());
+        assert!(app.status.contains("was lost"));
+
+        // A permission refusal is distinct from the earlier device error.
+        fake.input_permission_denied.set(true);
+        app.sync_audio_input();
+        assert!(app.status.contains("microphone was denied"));
+    }
+
+    /// Recovery preserves newer messages, and permission denial stays once per run.
+    #[test]
+    fn input_recovery_preserves_other_status_and_permission_latch() {
+        let dir = folder("audio-input-recovery-status");
+        let fake = two_devices();
+        *fake.audio_inputs.borrow_mut() = devices::Inputs {
+            default: Some("Microphone".into()),
+            devices: vec!["Microphone".into()],
+        };
+        fake.input_permission_denied.set(true);
+        let mut app = start(args(&dir), &fake);
+        app.controller.add_module("loom.io.audio-in").unwrap();
+        assert!(app.commit());
+        assert!(app.status.contains("microphone was denied"));
+        app.status = "newer message".into();
+        fake.input_permission_denied.set(false);
+        app.sync_audio_input();
+        assert!(app.rig.input.is_some());
+        assert_eq!(app.status, "newer message");
+        fake.input_permission_denied.set(true);
+        app.sync_audio_input();
+        assert!(app.rig.input.is_none());
+        assert_eq!(app.status, "newer message", "permission denial is shown once per run");
+
+        // Choosing an input makes the permission warning eligible again.
+        app.choose_audio_input(InputChoice::SystemDefault);
+        assert!(app.status.contains("microphone was denied"));
     }
 
     /// A lost named input stays silent until that same device returns.

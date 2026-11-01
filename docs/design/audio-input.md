@@ -71,7 +71,7 @@ A new **Audio input** row in the Audio section of Preferences:
 
 - Saved as `audio.input`: `SystemDefault` (default), `Named("<full name>")`, or `Off`. The same rules as the output apply: a missing Named device falls back to the system default input at start, and the fallback is not saved.
 - **The input stream is opened lazily:** only while the patch has at least one Audio In module and the input is not Off. *Why:* opening an input triggers the system's microphone permission prompt. It should appear when the player first uses the module, not when the app starts. Deleting the last module closes the stream.
-- **Device loss** follows [device changes](device-changes.md): the module goes silent, and the stream is reopened when the device returns.
+- **Device loss** follows [device changes](device-changes.md): the module goes silent, and the stream is reopened when the device returns. The status bar says the input is back if it still shows the earlier input error. A later device failure is reported again; permission denial keeps its separate once-per-run rule below.
 - **Flags:** `--input <part of name>` matches by name for the run, like `--device`. `--no-input` turns it off for the run. Neither is saved.
 
 ## Permission

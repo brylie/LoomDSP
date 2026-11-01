@@ -167,19 +167,36 @@ mod tests {
     #[test]
     fn watcher_reports_a_missing_or_changed_input_device() {
         use iced::futures::StreamExt;
+        use std::sync::atomic::AtomicUsize;
+
+        static LIST_CALLS: AtomicUsize = AtomicUsize::new(0);
         fn missing() -> Result<crate::devices::Inputs, String> {
+            LIST_CALLS.fetch_add(1, Ordering::Relaxed);
             Ok(crate::devices::Inputs {
                 default: Some("Other".into()),
                 devices: vec!["Other".into()],
             })
         }
         fn changed_default() -> Result<crate::devices::Inputs, String> {
+            LIST_CALLS.fetch_add(1, Ordering::Relaxed);
             Ok(crate::devices::Inputs {
                 default: Some("Other".into()),
                 devices: vec!["Test input".into(), "Other".into()],
             })
         }
-        for list in [missing as fn() -> _, changed_default] {
+        fn unchanged() -> Result<crate::devices::Inputs, String> {
+            LIST_CALLS.fetch_add(1, Ordering::Relaxed);
+            Ok(crate::devices::Inputs {
+                default: Some("Test input".into()),
+                devices: vec!["Test input".into(), "Other".into()],
+            })
+        }
+        for (list, system_default, should_fail) in [
+            (missing as fn() -> _, false, true),
+            (changed_default, true, true),
+            (unchanged, true, false),
+        ] {
+            LIST_CALLS.store(0, Ordering::Relaxed);
             let parts = loom_core::create_engine(loom_modules::registry(), loom_core::EngineConfig::default());
             let (writer, _reader) = loom_core::audio_input::input_ring(32, 2);
             let watch = Watch {
@@ -187,14 +204,14 @@ mod tests {
                 stats: parts.controller.stats().clone(),
                 tracker: Arc::new(Tracker::new((0, 0))),
                 device: "Test input".into(),
-                system_default: true,
+                system_default,
                 list: Some(list),
                 permission_denied: None,
                 active: Vec::new(),
                 displays: parts.controller.display_reader(),
             };
             let (send, receive) = std::sync::mpsc::channel();
-            std::thread::spawn(move || {
+            let worker = std::thread::spawn(move || {
                 let mut events = Box::pin(stream(&watch));
                 iced::futures::executor::block_on(async {
                     while let Some(event) = events.next().await {
@@ -205,11 +222,27 @@ mod tests {
                     }
                 });
             });
-            writer.callback_received();
-            receive
-                .recv_timeout(Duration::from_secs(5))
-                .expect("input loss was reported");
-            assert!(!writer.status().is_live());
+            let status = writer.status();
+            let deadline = Instant::now() + Duration::from_secs(if should_fail { 5 } else { 2 });
+            let mut failed = false;
+            while Instant::now() < deadline {
+                // Keep callbacks flowing so only the device list can fail the stream.
+                writer.callback_received();
+                if receive.recv_timeout(Duration::from_millis(50)).is_ok() {
+                    failed = true;
+                    break;
+                }
+            }
+            let remained_live = status.is_live();
+            if !failed {
+                // Stop the watcher cleanly after the control case or a timeout.
+                status.fail();
+                let _ = receive.recv_timeout(Duration::from_secs(2));
+            }
+            worker.join().unwrap();
+            assert!(LIST_CALLS.load(Ordering::Relaxed) > 0, "the device list was checked");
+            assert_eq!(failed, should_fail, "the list determines stream failure");
+            assert_eq!(remained_live, !should_fail);
         }
     }
 
