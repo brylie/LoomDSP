@@ -1601,9 +1601,11 @@ impl<Message> PatchCanvas<'_, Message> {
                         .module(id)
                         .filter(|m| world.y < m.bounds().y + HEADER)
                         .map(|_| HoverTarget::Title(id));
+                    // Text is drawn above every tile, so a port label that
+                    // shows over this tile's header hovers before the title.
                     display
-                        .or(title)
                         .or_else(|| tile_text::port_label_at(self.scene, world).map(HoverTarget::Port))
+                        .or(title)
                 })
                 .or(focused),
             _ => focused,
@@ -3602,6 +3604,41 @@ mod tests {
         assert!(hover.description.starts_with("Sources."));
         assert_eq!(value, None);
         assert_eq!(anchor.height, HEADER);
+    }
+
+    /// A port label drawn over another tile's header hovers as the port,
+    /// not as that tile's title, because text is drawn above every tile.
+    #[test]
+    fn a_port_label_over_a_header_hovers_as_the_port() {
+        let port = PortRef {
+            module: 1,
+            output: true,
+            index: 0,
+        };
+        let mut below = module(1, 0.0);
+        below.panel = panel();
+        let mut label = None;
+        tile_text::for_each(&below, |item| {
+            if item.kind == TextKind::Port(port) {
+                label = Some(item.bounds().center());
+            }
+        });
+        let label = label.expect("a port label");
+        let mut cover = module(2, 0.0);
+        cover.inputs.clear();
+        cover.outputs.clear();
+        cover.position = Point::new(label.x - 40.0, label.y - HEADER * 0.5);
+        let scene = Scene::new(vec![below, cover], Vec::new());
+        let header = scene.module(2).unwrap().bounds();
+        assert!(label.y < header.y + HEADER, "the label is in the cover's header");
+        let none = BTreeSet::new();
+        let canvas = PatchCanvas::new(&scene, &none, |e| e);
+        let state = State {
+            hover: Some(Hit::Module(2)),
+            cursor: Some(label),
+            ..State::default()
+        };
+        assert_eq!(canvas.hover_target(&state), Some(HoverTarget::Port(port)));
     }
 
     /// A light with a description hovers like a control, and its hover
