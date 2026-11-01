@@ -301,6 +301,9 @@ mod tests {
         let _ = ui.app.update(Message::Canvas(CanvasEvent::Select(vec![4])));
         ui.tap(Key::Named(Named::F1), Modifiers::default());
         let expected = ui.app.ui_snapshot().help.unwrap();
+        // Help names the module's family first (ADR-0029).
+        let line = format!("{} · {} · {}", expected.family, expected.category, expected.id);
+        assert!(!expected.family.is_empty() && ui.text(&line).is_some(), "{line}");
         ui.tap(Key::Named(Named::Escape), Modifiers::default());
         let at = ui.text("Help").expect("inspector help action").center();
         ui.move_to(at);
@@ -553,5 +556,7 @@ mod tests {
         assert!(ui.text(first.description).is_some());
         let second = ui.app.browser.as_ref().unwrap().results()[1];
         assert!(ui.text(second.id).is_none(), "no ID on other rows");
+        // Each row shows its family (ADR-0029).
+        assert!(ui.text(first.family.label()).is_some(), "the row's family");
     }
 }
