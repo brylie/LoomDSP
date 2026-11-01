@@ -9,7 +9,7 @@ How a user copies modules with their cables and modulation, pastes them into the
 - **Background:** none.
 - **Prior art:** every editor has copy, paste, and duplicate. The only conventions we use are the common shortcuts, and "paste lands at the pointer".
 - **Issues:** [#13](https://github.com/brylie/LoomDSP/issues/13).
-- **Code:** `crates/loom-app/src/clipboard.rs` (`Group`; tests in `clipboard/tests.rs`), the commands in `main.rs`, and `CanvasEvent::Paste` in `loom-canvas`.
+- **Code:** `crates/loom-app/src/clipboard.rs` (`Group`; tests in `clipboard/tests.rs`), the commands in `editing.rs`, and `CanvasEvent::Paste` in `loom-canvas`.
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
      built. See README.md in this folder. -->

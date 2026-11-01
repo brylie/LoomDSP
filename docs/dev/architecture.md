@@ -134,7 +134,7 @@ Every Iced message goes through one entry point, `App::update` in `crates/loom-a
 
 A workflow's messages go to a named handler that returns the `Task` it needs: `matrix_message` and `matrix_key_message` (`matrix.rs`), `browser_message`, `control` for the control channel, and `file_action` for `Message::File(FileAction)`, which the toolbar, the shortcuts, and the window's close request all send. The rest go to `App::handle`. There is no event bus and no second application state.
 
-The app's state is moving into owned parts, one domain at a time (#466), in the pattern of [ADR-0034](../adr/0034-controller-flat-api-typed-parts.md): each part keeps its fields private, has its own small API and nested `Message`, and `App` coordinates the parts with the controller, undo, and the status bar.
+The app's state is split into owned parts (#466), in the pattern of [ADR-0034](../adr/0034-controller-flat-api-typed-parts.md): each part keeps its fields private, has its own small API and nested `Message`, and `App` coordinates the parts with the controller, undo, and the status bar.
 
 | Part | Owns | Messages |
 |---|---|---|
@@ -143,6 +143,18 @@ The app's state is moving into owned parts, one domain at a time (#466), in the 
 | `gestures::Gestures` (`gestures.rs`) | Modulation gestures in progress: the open **Add modulation** list, an output dragged onto an inspector row and the row under it, an arc drag's picked assignment, and a placeholder label being typed | Inspector and canvas messages, such as `AddModulation`, `DropRow`, and `UnknownLabelDraft`; the finished edit goes through undo in `App` |
 | `stream::Stream` (`stream.rs`) | The stream that plays the engine, or the idle engine when none does, its callback counters, load, and stall check, the device label, the sample rate, how this run plays (`Playback`: a device, `--fake-audio`, or `--no-audio`), and the output safety mode | Audio watcher and preferences messages; building engines and choosing devices stay in `App` and `settings::Rig` |
 | `alerts::Alerts` (`alerts.rs`) | The status line, the stats bar's dropout and input drift warnings, and problems reported once: a full live-value table, and a recording that stopped early | None of its own: every workflow writes the status line through `say` and `append` |
+
+`App` itself keeps only what coordinates the parts. `main.rs` holds the `App` struct, `Message`, `update`, `handle`, and the live-value and probe sync that run after each change. The rest of `impl App` is split by workflow, one block per file, and each block works through the parts' methods:
+
+| File | What it coordinates |
+|---|---|
+| `boot.rs` | Building the app at start, and a new engine and session for each patch |
+| `file_commands.rs` | Save, Save As, New, Open, and replacing the patch |
+| `editing.rs` | Undo steps, commits to the engine, and the clipboard commands |
+| `controls.rs` | Turning controls, ranges, buttons, modulation assignments, depth drags, and arming MIDI learn |
+| `canvas_events.rs` | What each `CanvasEvent` does to the patch |
+| `subscriptions.rs` | Timers, keys, MIDI, the control channel, and the watcher threads |
+| `view.rs` | The window: toolbar, canvas, right panel, and stats bar. It reads state and changes nothing |
 
 The selection is not a part: the canvas, inspector, matrix, clipboard, undo, and snapshot all read it, so it stays on `App` as shared state, as the graph stays shared in `Controller`.
 
@@ -217,7 +229,7 @@ An unconnected input reads its `default`: a fixed value, or a transport signal s
 | Add a `Controller` method | The group it belongs to, in `crates/loom-core/src/controller/` (modules, cables, assignments, params, midi, transport, displays, audio). The API stays one flat list; each group is its own `impl Controller` block, shown as a section in the API docs. State with rules of its own is a typed part with private fields (`Slots`, `MidiSync`, `Probes`, `LiveValues`); a helper that two groups need goes in `controller.rs` ([ADR-0034](../adr/0034-controller-flat-api-typed-parts.md)). |
 | Change the patch format | `crates/loom-patch/src/lib.rs`. During the early alpha the format stays at version 1, and a change may stop old files from loading: update the example patches in the same change ([AGENTS.md](../../AGENTS.md#project-stage-early-alpha)). From the first release, add a migration and never break old files (ADR-0008). |
 | Change how the canvas looks or responds | `crates/loom-canvas/src/`. Keep per-frame work small. |
-| Add a panel, button, or setting to the app | `crates/loom-app/src/main.rs`. |
+| Add a panel, button, or setting to the app | The window is drawn in `crates/loom-app/src/view.rs`, panels have their own files (`inspector.rs`, `matrix.rs`), and preferences are in `settings.rs`. A new message goes in `Message` in `main.rs` and its handler in the file of the workflow it belongs to. |
 | Support another audio or MIDI case | `crates/loom-host-desktop/src/lib.rs`. |
 
 ## Tests

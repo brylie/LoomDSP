@@ -9,7 +9,7 @@ How a user opens, saves, and closes patch files in the desktop app, and how the 
 - **Background:** none.
 - **Prior art:** every desktop editor has these commands. We use only the common conventions: shortcuts, a dot or star for unsaved work, and a three-button question.
 - **Issues:** [#14](https://github.com/brylie/LoomDSP/issues/14), [#182](https://github.com/brylie/LoomDSP/issues/182) (examples open as copies: Implemented). Follow-ups this spec absorbs: the lights watcher and telemetry monitor must follow a new engine; `*.saved.ron` files next to examples; Open clears the undo history ([undo](undo.md#commands)).
-- **Code:** `crates/loom-app/src/files.rs` (dialogs, title, extension, `bundled_examples`, `is_example`), and `App::session`, `App::replace`, `App::save`, `App::can_discard`, and `App::copy_if_example` in `main.rs`; tests in `example_tests.rs`. `History::mark_saved` and `is_saved` in `undo.rs`. `Patch::save` in `loom-patch` writes through a temporary file. The lights, telemetry, and MIDI watchers take an engine generation in their subscription identity.
+- **Code:** `crates/loom-app/src/files.rs` (dialogs, title, extension, `bundled_examples`, `is_example`), `App::session` in `boot.rs`, `App::replace`, `App::save`, and `App::can_discard` in `file_commands.rs`, and `Document::copy_if_example` in `document.rs`; tests in `example_tests.rs`. `History::mark_saved` and `is_saved` in `undo.rs`. `Patch::save` in `loom-patch` writes through a temporary file. The lights, telemetry, and MIDI watchers take an engine generation in their subscription identity.
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
      built. See README.md in this folder. -->

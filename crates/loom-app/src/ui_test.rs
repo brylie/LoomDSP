@@ -36,6 +36,7 @@
 //! Not covered: what the operating system and winit deliver, for example
 //! events while the pointer is outside the window.
 
+use crate::subscriptions::{browser_key, help_key};
 use crate::{App, Args, Message, screenshot};
 use iced::advanced::Clipboard;
 use iced::advanced::clipboard::Kind;
@@ -163,10 +164,10 @@ impl Ui {
                 }
                 // The open browser listens to keys whether or not a widget
                 // used them.
-                if browser_open && let Some(message) = crate::browser_key(event.clone(), status, window::Id::unique()) {
+                if browser_open && let Some(message) = browser_key(event.clone(), status, window::Id::unique()) {
                     messages.push(message);
                 }
-                if let Some(message) = crate::help_key(event.clone(), status, window::Id::unique()) {
+                if let Some(message) = help_key(event.clone(), status, window::Id::unique()) {
                     messages.push(message);
                 }
                 // The panic key listens to every key event (panic.md).

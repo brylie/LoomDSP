@@ -13,6 +13,8 @@ use crate::settings::{Change, Message as Prefs};
 use loom_analysis::{max_step, peak};
 use loom_core::safety::{CEILING, FADE_SECONDS};
 use loom_host_desktop::{OutputInfo, Tape};
+use std::rc::Rc;
+use std::time::Duration;
 
 /// The fake devices' sample rate and buffer size.
 const RATE: usize = 48_000;

@@ -7,7 +7,8 @@
 
 use crate::modulation::{self, PolarityChoice};
 use crate::style::{self, button};
-use crate::{App, DIM, Message, param, remove_button};
+use crate::view::remove_button;
+use crate::{App, DIM, Message, param};
 use iced::widget::{
     checkbox, column, container, mouse_area, pick_list, radio, row, scrollable, slider, space, text, text_input,
     tooltip,

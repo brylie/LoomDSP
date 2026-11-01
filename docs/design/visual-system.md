@@ -8,7 +8,7 @@ The shared sizes, button roles, and quiet chrome that every view of the desktop 
 - **Use case and requirements:** FR-PANEL-06 (global themes), NFR-UX-01 (keyboard and focus), NFR-UX-03 (colour is never the only signal).
 - **Background:** the [M1 UX audit](../research/2026-11-p1-ux-audit.md), findings 4, 11, 13, and 17.
 - **Issues:** [#454](https://github.com/brylie/LoomDSP/issues/454). Category colours and the palette: [#459](https://github.com/brylie/LoomDSP/issues/459). Tabs: [#456](https://github.com/brylie/LoomDSP/issues/456).
-- **Code:** `crates/loom-app/src/style.rs` (tokens and button roles), `Family` in `crates/loom-core/src/descriptor.rs`, the family colours in `crates/loom-canvas/src/theme.rs`, `crates/loom-canvas/src/controls.rs` (knob start cap), `stats_bar` in `crates/loom-app/src/main.rs`.
+- **Code:** `crates/loom-app/src/style.rs` (tokens and button roles), `Family` in `crates/loom-core/src/descriptor.rs`, the family colours in `crates/loom-canvas/src/theme.rs`, `crates/loom-canvas/src/controls.rs` (knob start cap), `stats_bar` in `crates/loom-app/src/view.rs`.
 
 ## Goal
 

@@ -1,5 +1,8 @@
 use super::*;
+use crate::view::severity_colour;
 use iced::Rectangle;
+use loom_core::{EngineConfig, TRANSPORT_MODULE, create_engine};
+use std::time::Duration;
 
 /// A full queue stages fresh modules until the idle engine drains it;
 /// the next update commits them without another edit from the player.
