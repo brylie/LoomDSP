@@ -507,6 +507,8 @@ pub struct CanvasPipeline {
     overlay_shapes: InstanceBuffer,
     control_arcs: InstanceBuffer,
     control_shapes: InstanceBuffer,
+    /// Result preview curves, uploaded with the controls.
+    control_lines: InstanceBuffer,
     /// Scope trace pieces: the one buffer a moving scope uploads.
     trace_segments: InstanceBuffer,
     uploaded: u64,
@@ -636,6 +638,7 @@ impl Pipeline for CanvasPipeline {
             overlay_shapes: InstanceBuffer::new(device, "loom-canvas overlay shapes"),
             control_arcs: InstanceBuffer::new(device, "loom-canvas control arcs"),
             control_shapes: InstanceBuffer::new(device, "loom-canvas control shapes"),
+            control_lines: InstanceBuffer::new(device, "loom-canvas control lines"),
             trace_segments: InstanceBuffer::new(device, "loom-canvas trace segments"),
             uploaded: 0,
             controls_uploaded: (0, 0),
@@ -687,6 +690,7 @@ impl Primitive for CanvasPrimitive {
         {
             pipeline.control_arcs.upload(device, queue, &controls.arcs);
             pipeline.control_shapes.upload(device, queue, &controls.shapes);
+            pipeline.control_lines.upload(device, queue, &controls.lines);
             stats::count(Counter::ControlUploads);
             pipeline.controls_uploaded = controls.key;
         }
@@ -724,16 +728,20 @@ impl Primitive for CanvasPrimitive {
 
         // Cables behind the tiles, so modules read as solid objects. Then
         // text bars on the tiles, then the focused cables in front, then
-        // ports over every cable end, then panel controls, then scope
-        // traces in their frames, then the selection, hover, and focus
-        // outlines.
+        // ports over every cable end, then panel controls and the preview
+        // curves in their frames, then scope traces in theirs, then the
+        // selection, hover, and focus outlines.
         let tiles = pipeline.tiles.min(pipeline.scene_shapes.len);
         let markers = pipeline.markers.min(pipeline.scene_shapes.len);
         let bars = self.bars.start.min(markers)..self.bars.end.min(markers);
-        let (arcs, controls) = if self.controls.is_some() {
-            (pipeline.control_arcs.len, pipeline.control_shapes.len)
+        let (arcs, controls, lines) = if self.controls.is_some() {
+            (
+                pipeline.control_arcs.len,
+                pipeline.control_shapes.len,
+                pipeline.control_lines.len,
+            )
         } else {
-            (0, 0)
+            (0, 0, 0)
         };
         let traces = if self.traces.is_some() {
             pipeline.trace_segments.len
@@ -763,6 +771,7 @@ impl Primitive for CanvasPrimitive {
             ),
             (&pipeline.arcs, &pipeline.control_arcs, 4, 0..arcs),
             (&pipeline.shapes, &pipeline.control_shapes, 4, 0..controls),
+            (&pipeline.traces, &pipeline.control_lines, 4, 0..lines),
             (&pipeline.traces, &pipeline.trace_segments, 4, 0..traces),
             (
                 &pipeline.shapes,

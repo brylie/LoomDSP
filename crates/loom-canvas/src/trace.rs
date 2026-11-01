@@ -109,11 +109,18 @@ pub struct Segment {
 
 impl Segment {
     fn new(from: Point, to: Point, colour: Color, clip: Rectangle) -> Self {
+        Self::with_width(from, to, colour, clip, TRACE_WIDTH)
+    }
+
+    /// A piece `width` world units wide, never thinner than one physical
+    /// pixel. Result previews use it for their curves, so a preview is one
+    /// anti-aliased line with round joins at every zoom (#455).
+    pub(crate) fn with_width(from: Point, to: Point, colour: Color, clip: Rectangle, width: f32) -> Self {
         Self {
             ends: [from.x, from.y, to.x, to.y],
             colour: pack(colour).components(),
             clip: [clip.x, clip.y, clip.width, clip.height],
-            params: [TRACE_WIDTH, TRACE_MIN_PX, 0.0, 0.0],
+            params: [width, TRACE_MIN_PX, 0.0, 0.0],
         }
     }
 
@@ -124,6 +131,12 @@ impl Segment {
             Point::new(self.ends[0], self.ends[1]),
             Point::new(self.ends[2], self.ends[3]),
         )
+    }
+
+    /// The width in world units.
+    #[cfg(test)]
+    pub fn width(&self) -> f32 {
+        self.params[0]
     }
 }
 

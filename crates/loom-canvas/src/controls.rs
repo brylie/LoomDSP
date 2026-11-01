@@ -7,9 +7,13 @@
 use crate::gpu::{Arc as ArcShape, Shape};
 use crate::scene::{GRID, Scene, WidgetViewKind};
 use crate::theme::Palette;
+use crate::trace::Segment;
 use iced::{Color, Point, Rectangle, Size};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Width of a result preview's curve, in world units.
+const PREVIEW_WIDTH: f32 = 1.5;
 
 /// A knob's ring starts here, in radians clockwise from the top.
 pub(crate) const KNOB_START: f32 = -0.75 * std::f32::consts::PI;
@@ -147,6 +151,9 @@ pub(crate) struct ControlGeometry {
     pub arcs: Vec<ArcShape>,
     /// Knob bodies and pointers, toggles, radio buttons, and lights.
     pub shapes: Vec<Shape>,
+    /// Result preview curves, drawn over the shapes with the trace
+    /// pipeline.
+    pub lines: Vec<Segment>,
 }
 
 impl ControlGeometry {
@@ -154,6 +161,7 @@ impl ControlGeometry {
         crate::stats::count(crate::stats::Counter::ControlBuilds);
         let mut arcs = Vec::new();
         let mut shapes = Vec::new();
+        let mut lines = Vec::new();
         for module in scene.modules() {
             for (index, widget) in module.panel.widgets.iter().enumerate() {
                 let Some(rect) = module.widget_bounds(index) else {
@@ -336,25 +344,7 @@ impl ControlGeometry {
                         );
                         shapes.push(Shape::new(plot, 3.0, palette.tile, palette.tile_border, 1.0));
                         let samples = values.get(module.id, index).map_or(&[][..], |v| v.shape.as_slice());
-                        if samples.len() > 1 {
-                            for (i, pair) in samples.windows(2).enumerate() {
-                                let x0 = plot.x + 2.0 + (plot.width - 4.0) * i as f32 / (samples.len() - 1) as f32;
-                                let x1 =
-                                    plot.x + 2.0 + (plot.width - 4.0) * (i + 1) as f32 / (samples.len() - 1) as f32;
-                                let y0 = plot.y + 2.0 + (plot.height - 4.0) * (1.0 - pair[0].clamp(0.0, 1.0));
-                                let y1 = plot.y + 2.0 + (plot.height - 4.0) * (1.0 - pair[1].clamp(0.0, 1.0));
-                                shapes.push(Shape::new(
-                                    Rectangle::new(
-                                        Point::new(x0, y0.min(y1) - 0.75),
-                                        Size::new((x1 - x0).max(1.0), (y1 - y0).abs() + 1.5),
-                                    ),
-                                    0.5,
-                                    line_colour,
-                                    Color::TRANSPARENT,
-                                    0.0,
-                                ));
-                            }
-                        }
+                        lines.extend(preview_line(plot, samples, line_colour));
                     }
                 }
             }
@@ -363,8 +353,27 @@ impl ControlGeometry {
             key: (scene.generation(), values.generation()),
             arcs,
             shapes,
+            lines,
         }
     }
+}
+
+/// A result preview's curve: one joined line through the samples, from 0
+/// at the bottom of `plot` to 1 at the top, inside a 2-unit margin. Each
+/// piece is an anti-aliased capsule, drawn like a scope trace, so the line
+/// stays smooth at every zoom (#455).
+fn preview_line(plot: Rectangle, samples: &[f32], colour: Color) -> impl Iterator<Item = Segment> + '_ {
+    let last = samples.len().saturating_sub(1).max(1) as f32;
+    let at = move |i: usize, y: f32| {
+        Point::new(
+            plot.x + 2.0 + (plot.width - 4.0) * i as f32 / last,
+            plot.y + 2.0 + (plot.height - 4.0) * (1.0 - y.clamp(0.0, 1.0)),
+        )
+    };
+    samples
+        .windows(2)
+        .enumerate()
+        .map(move |(i, pair)| Segment::with_width(at(i, pair[0]), at(i + 1, pair[1]), colour, plot, PREVIEW_WIDTH))
 }
 
 /// The live value dot: on the range arc, at the knob angle of `position`.
@@ -942,5 +951,49 @@ mod tests {
         assert_eq!(radio_option(rect, 3, Point::new(5.0, GRID + 1.0)), Some(0));
         assert_eq!(radio_option(rect, 3, Point::new(5.0, 3.0 * GRID + 1.0)), Some(2));
         assert_eq!(radio_option(rect, 3, Point::new(5.0, 4.0 * GRID + 1.0)), None);
+    }
+
+    /// A result preview is one joined line of equal-width pieces inside its
+    /// frame, not a box per sample, so it stays smooth when zoomed and a
+    /// steep step is a line, not a stair (#455).
+    #[test]
+    fn a_result_preview_is_one_joined_line() {
+        let mut module = scene().modules()[0].clone();
+        module.panel = PanelView {
+            width: 9,
+            height: 6,
+            widgets: vec![WidgetView {
+                kind: WidgetViewKind::Shape { width: 9 },
+                x: 0,
+                y: 0,
+                label: "Shape".into(),
+                hover: crate::scene::HoverText::default(),
+            }],
+        };
+        let scene = Scene::new(vec![module], Vec::new());
+        let mut values = PanelValues::new();
+        let samples = vec![0.0, 0.0, 1.0, 1.0, 0.5];
+        values.set(
+            1,
+            0,
+            WidgetValue {
+                shape: samples.clone(),
+                ..WidgetValue::default()
+            },
+        );
+        let geometry = ControlGeometry::build(&scene, &values, &Palette::default());
+
+        // The frame is the only shape; the curve is all lines.
+        assert_eq!(geometry.shapes.len(), 1);
+        assert_eq!(geometry.lines.len(), samples.len() - 1);
+        for pair in geometry.lines.windows(2) {
+            assert_eq!(pair[0].ends().1, pair[1].ends().0, "the pieces join");
+        }
+        assert!(geometry.lines.iter().all(|line| line.width() == PREVIEW_WIDTH));
+        // The step from 0 to 1 is one straight piece from the bottom of the
+        // plot to its top.
+        let (from, to) = geometry.lines[1].ends();
+        assert!(from.y > to.y + 10.0, "the step rises");
+        assert!((to.x - from.x) > 0.0, "the step moves right as it rises");
     }
 }
