@@ -1963,6 +1963,15 @@ impl<Message> PatchCanvas<'_, Message> {
         }
         // Focus is only valid on a control of the one selected module.
         let selected = (self.selection.len() == 1).then(|| *self.selection.iter().next().unwrap_or(&0));
+        let hidden = |m: u32, w: usize| {
+            self.scene
+                .module(m)
+                .and_then(|module| module.panel.widgets.get(w))
+                .is_some_and(|widget| widget.hidden)
+        };
+        // A mode change (from MIDI, say) can hide the focused control. The
+        // key meant for it is used up, so it never moves the tile instead.
+        let lost_to_mode = state.focus.is_some_and(|(m, w)| Some(m) == selected && hidden(m, w));
         if state.focus.is_some_and(|(m, w)| {
             Some(m) != selected
                 || !self
@@ -1972,6 +1981,29 @@ impl<Message> PatchCanvas<'_, Message> {
                     .is_some_and(|widget| widget.is_control() && !widget.hidden)
         }) {
             state.focus = None;
+        }
+        // A hidden select is not drawn, so its list closes too.
+        if state
+            .select_popup
+            .is_some_and(|popup| hidden(popup.module, popup.widget))
+        {
+            state.select_popup = None;
+        }
+        if lost_to_mode
+            && matches!(
+                key.as_ref(),
+                keyboard::Key::Named(
+                    Named::ArrowUp
+                        | Named::ArrowRight
+                        | Named::ArrowDown
+                        | Named::ArrowLeft
+                        | Named::Space
+                        | Named::Enter
+                )
+            )
+        {
+            shell.capture_event();
+            return true;
         }
         if let Some(mut popup) = state.select_popup
             && let Some(WidgetViewKind::Select { options }) = self.widget_kind(popup.module, popup.widget)
@@ -3991,6 +4023,44 @@ mod tests {
         drive(&canvas, &mut state, &key_event(keyboard::key::Named::Space, true), at);
         assert!(drive(&canvas, &mut state, &key_event(keyboard::key::Named::Escape, true), at).is_empty());
         assert!(state.select_popup.is_none());
+    }
+
+    /// When a mode change hides the focused select with its list open, the
+    /// list closes, and the next arrow or Enter edits nothing and moves no
+    /// tile (ADR-0030).
+    #[test]
+    fn hiding_the_focused_select_closes_it_and_uses_up_the_key() {
+        let mut view = module(1, 0.0);
+        let mut select = widget(
+            WidgetViewKind::Select {
+                options: vec!["ADSR".into(), "AD".into()],
+            },
+            0,
+        );
+        select.hidden = true;
+        view.panel = PanelView {
+            width: 6,
+            height: 2,
+            widgets: vec![select],
+        };
+        let scene = Scene::new(vec![view], Vec::new());
+        let selected = BTreeSet::from([1]);
+        let canvas = PatchCanvas::new(&scene, &selected, |event| event);
+        let at = scene.module(1).unwrap().bounds().center();
+        for key in [keyboard::key::Named::ArrowDown, keyboard::key::Named::Enter] {
+            let mut state = State {
+                focus: Some((1, 0)),
+                select_popup: Some(SelectPopup {
+                    module: 1,
+                    widget: 0,
+                    highlight: 1,
+                }),
+                ..State::default()
+            };
+            let events = drive(&canvas, &mut state, &key_event(key, true), at);
+            assert!(events.is_empty(), "{key:?}: {events:?}");
+            assert!(state.select_popup.is_none() && state.focus.is_none());
+        }
     }
 
     /// A removed select cannot swallow the next key meant for the canvas.

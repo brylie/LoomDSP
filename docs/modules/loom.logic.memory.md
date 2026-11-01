@@ -47,7 +47,7 @@ Use Memory to remember a gate until something changes it.
 - **Toggle:** each rising edge on A flips the output, and B turns it off.
 - **Data:** a rising edge on B remembers the level on A.
 
-In Set/Reset and Toggle modes, if both inputs rise at once, reset wins. In Data mode, B reads A on that same frame, so a tie stores a high gate. The output starts low.
+If both inputs rise at once in Set/Reset or Toggle mode, reset wins. In Data mode, B reads A on that same frame, so a tie stores a high gate. The output starts low.
 
 ## Example patch
 
