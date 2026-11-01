@@ -3,12 +3,12 @@
 How a performer links a hardware knob or fader to any parameter in a few seconds, and how those links are saved, shown, and removed.
 
 - **Kind:** living specification.
-- **Status:** Agreed.
+- **Status:** Agreed. [Device mappings](#device-mappings-fr-midi-06) Agreed, P2 (2026-11-01, [#166](https://github.com/brylie/LoomDSP/issues/166)); not built.
 - **Decision behind it:** none of its own. Builds on [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md) (control and audio threads), [ADR-0004](../adr/0004-export-as-runtime-plus-patch-data.md) (export as runtime plus patch data), [ADR-0008](../adr/0008-patch-format-ron.md) (patch format), and [ADR-0013](../adr/0013-modules-carry-their-own-panel.md) (the inspector shows and removes mappings; learn mode extends the gesture to tile controls).
-- **Use case and requirements:** [UC3, perform live](../product/personas-and-use-cases.md#uc3-perform-live-tomas-highest-priority-use-case), FR-MIDI-02. Related, not built here: FR-MIDI-06 (per-device mappings), FR-MIDI-09 (pickup, relative encoders, scaling).
+- **Use case and requirements:** [UC3, perform live](../product/personas-and-use-cases.md#uc3-perform-live-tomas-highest-priority-use-case), FR-MIDI-02. FR-MIDI-06 (per-device mappings, [own section](#device-mappings-fr-midi-06)). Related, not built here: FR-MIDI-09 (pickup, relative encoders, scaling).
 - **Background:** [parameter mapping](modulation.md#parameter-mapping) (value to position and back).
 - **Prior art:** most DAWs and software modular tools have a "learn" gesture: arm a control, move a hardware control, and the two are linked. We use the idea, in our own words.
-- **Issues:** [#24](https://github.com/brylie/LoomDSP/issues/24).
+- **Issues:** [#24](https://github.com/brylie/LoomDSP/issues/24), [#166](https://github.com/brylie/LoomDSP/issues/166) (device mappings).
 - **Code:** `crates/loom-core/src/midi_map.rs` (mappings and feedback), `Engine::apply_midi_maps`, the `Controller` MIDI methods, the `midi` list in `loom-patch`, `crates/loom-app/src/learn.rs` (learn mode), and `LearnView` in `loom-canvas`. Tests: `crates/loom-modules/tests/midi_learn.rs`, and the learn mode tests in `loom-canvas`'s `widget.rs`.
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
@@ -76,7 +76,7 @@ The user touches the control on screen, then moves the hardware control. Learn m
 4. **A mapped control change applies at the start of the buffer it arrives in**, like a screen knob change. *Why:* an unmodulated parameter is constant for a block, and one block is a few milliseconds, too short to hear on a knob move. The desktop host stamps live MIDI at frame 0 today anyway. Output stays deterministic for the same input and block size. An offline render that feeds control changes at frame offsets would depend on the block size. No render path feeds control changes yet; revisit this rule when one does.
 5. **A mapping matches one channel and one controller number,** the ones the user moved while learning. *Why:* what the user moved is what works. Most controllers send each knob on one channel, so this needs no setting. Two controllers that send the same controller number on different channels stay apart.
 6. **Mapped control changes still reach modules.** A MIDI input module (#30) still sees every control change. *Why:* hiding messages that a mapping uses is a surprise that is hard to debug. If this causes trouble in use, a later change can add a "consume" option.
-7. **Mappings are saved with the patch.** A new list in the patch file, empty when missing. The patch format stays at version 1. *Why:* the issue asks for it, and a patch should play the same way when opened again. Per-device mappings that live outside patches are FR-MIDI-06, P2.
+7. **Mappings are saved with the patch.** A new list in the patch file, empty when missing. The patch format stays at version 1. *Why:* the issue asks for it, and a patch should play the same way when opened again. Per-device mappings that live outside patches are [device mappings](#device-mappings-fr-midi-06).
 8. **Real-time rules hold.** The mapping table is built on the control thread and sent with the schedule. The latest-value table is a fixed table of atomics, allocated once when the engine is created. The engine reads the mapping table and stores into the latest-value table with no allocation, lock, or wait (hard rule 1).
 
 ### Patch format
@@ -109,11 +109,101 @@ midi: [
 - [ ] `loom play` with a patch that has mappings responds to the controller with no UI.
 - [x] Processing a mapped control change does not allocate (`tests/no_alloc.rs`).
 
+## Device mappings (FR-MIDI-06)
+
+**Status:** Agreed, P2 ([#166](https://github.com/brylie/LoomDSP/issues/166)). The choices marked "Settled" were made with the maintainer on 2026-11-01. Depends on the [front panel](panels.md#the-panel-editor) and on MIDI hot-plugging ([device changes](device-changes.md), built).
+
+> I set up my 8-knob controller once: knob 1 is slot 1, knob 2 is slot 2, and so on. Every patch I open, the knobs move the first eight controls on its front panel. On one patch I want knob 3 on the filter drive, so I pin Drive to slot 3 in the panel editor.
+
+### Terms
+
+| Term | Meaning |
+|---|---|
+| **Device mapping** | A link from a control change on one MIDI input (channel and controller number) to a **slot**. Saved with the rig, not the patch. |
+| **Slot** | A number from 1 to 16. Each patch decides which front-panel control each slot drives. |
+| **Device file** | The device mappings of one MIDI input. |
+
+### Slots
+
+**Settled:** a device mapping points at a numbered slot, and each patch fills its slots from its front panel. *Why:* the device file knows the hardware and the patch knows the music, so neither needs the other's details, and a patch works on a rig with another controller.
+
+- A patch's slots are filled from its [front panel](panels.md#the-panel-editor) controls bound to parameters. Displays and labels take no slot.
+- **Pinned first:** a front-panel control can be pinned to a slot in the panel editor (widget menu, **Controller slot**: Auto, or 1 to 16). A slot holds one pinned control; pinning a control to a taken slot moves the other one back to Auto.
+- **Then reading order:** the other controls take the free slots in the panel's focus order (reading order). Controls beyond the free slots have no slot.
+- A widget that binds two parameters (XY pad, range) takes two slots in a row, x then y, or low then high.
+- A patch with no front panel has no slots, so device mappings do nothing in it. *Why:* only the player knows which parameters are worth a knob. The status bar says once, when a mapped device is open: `"Keys" has slot mappings, but this patch has no front panel.`
+- Slots resolve through the front panel to the inner parameter, as exposing does ([sub-patches](sub-patches.md#flattening)), so a slot reaches a parameter inside a sub-patch.
+
+### Making a device mapping
+
+**Settled:** in learn mode, on front-panel controls.
+
+- In learn mode, front-panel controls in the Panel pane show their slot number next to their mapping label, for example `3 · CC 73`.
+- Arming a front-panel control and moving a hardware control maps that control, on the input it came from, to the control's slot in that input's device file. The status bar says: `"Keys" CC 73 → slot 3 (Drive). Works in every patch.`
+- A front-panel control with no slot cannot be armed for a device mapping. The status bar says: `Drive has no controller slot. Pin it to a slot in the panel editor.`
+- Arming a tile control or an inspector row still makes a patch mapping, as above.
+- The one-to-one rule holds per device: a slot has one hardware control, and a hardware control drives one slot. Learning moves or replaces, as for patch mappings.
+- Device mappings are rig settings, like preferences. They are written at once and are not in the patch's undo history. *Why:* undo belongs to the patch; a rig change must not be undone by undoing a patch edit.
+
+### Precedence
+
+**Settled:** the patch wins. If a patch mapping and a device mapping use the same channel and controller number on the same input, the patch mapping applies and the device mapping is ignored while that patch plays. The inspector row of the parameter the slot would drive says `Slot 3 is overridden by this patch's CC 73.` *Why:* the patch mapping was made on purpose for this patch.
+
+### Devices
+
+- A device is a MIDI input, identified as in [device changes](device-changes.md#midi-inputs): by its port name, with `(2)` for a second input of the same name. A device that shows several ports has one device file per port.
+- When an input connects, its device file is loaded and its mappings apply. When it disconnects, they stop. Replugging restores them. Opening, creating, or switching patches re-resolves slots.
+- A patch mapping matches any open input, as today. A device mapping matches only its own input. Each MIDI event already carries its input index ([device changes](device-changes.md#midi-inputs)).
+
+### Storage
+
+**Settled:** one file per device.
+
+- `controllers/<device name>.ron` in the folder that holds `preferences.ron` ([preferences](preferences.md)). Characters a file name cannot hold are replaced with `_`.
+- The file follows the preferences write rules: written only on a change, through a temporary file and a rename, and a broken file is renamed `<name>.broken.ron` on the next write ([preferences](preferences.md)).
+- A file that cannot be read gives no mappings and a status bar message. The app keeps running.
+
+```ron
+Controller(
+    device: "Keys",
+    slots: [
+        (slot: 1, channel: 0, controller: 74),
+        (slot: 2, channel: 0, controller: 71),
+    ],
+)
+```
+
+- **Preferences:** the MIDI section lists each device's slot mappings, as `Slot 1 · CC 74 · ch 1`, each with a **×** to remove it ([removing an item](panels.md#removing-an-item)).
+
+### Engine
+
+- The controller resolves device mappings to parameters through the slots, and compiles them with the patch mappings into the one table the engine already reads (rule 1). An entry from a device mapping also carries its input index. *Why:* the engine path, the feedback table, and the real-time rules (rules 2 and 8) stay as they are.
+- `loom play` and plugin export do not read device files. *Why:* `loom play` runs one patch on any rig, and a plugin gets its controls from the host's automation. Patch mappings still work in both.
+
+### Acceptance criteria: device mappings
+
+- [ ] A device mapping made on a front-panel control in one patch moves the control in the same slot of another patch (test, with the fake host).
+- [ ] Pinned controls take their slots; the rest fill free slots in reading order; an XY pad takes two slots (test).
+- [ ] A patch mapping on the same control wins, and the inspector names the override (test).
+- [ ] A device mapping moves only from its own input; a second input sending the same control change does nothing (test).
+- [ ] Unplugging and replugging the device keeps its mappings (test with the fake host, and a manual check with a hardware controller).
+- [ ] A slot reaches a parameter inside a sub-patch through the front panel (test).
+- [ ] A patch with no front panel ignores device mappings and shows the status message once (test).
+- [ ] A broken device file gives no mappings and a message; the next write keeps it as `.broken.ron` (test).
+- [ ] Removing a slot mapping in Preferences stops it at once (test).
+- [ ] Processing a device-mapped control change does not allocate (`tests/no_alloc.rs`).
+
+### Out of scope: device mappings
+
+- Pages or banks of slots (more than 16, or switching sets). Leaning: add when a controller with bank buttons needs it.
+- Sharing device files online, or a library of factory files for known controllers.
+- Pickup, relative encoders, and scaling (FR-MIDI-09). They apply to device mappings too, once agreed.
+- Feedback to LED rings or motorised faders (MIDI out).
+
 ## Out of scope
 
 - One hardware control driving many parameters. Use the Macro module (MT-UI-02, P2) with modulation.
 - A mapping list or matrix. In P1 the labels in learn mode and the inspector rows are enough, because each hardware control has one parameter.
-- Per-device mappings saved outside the patch (FR-MIDI-06, P2).
 - Pickup (soft takeover), relative encoders, value range, and inversion (FR-MIDI-09, P2).
 - Learning notes, pitch bend, aftertouch, program change, 14-bit control changes, and NRPN. Pitch bend and aftertouch reach a patch through the MIDI input module (#30).
 - Mapping on any channel ("omni").

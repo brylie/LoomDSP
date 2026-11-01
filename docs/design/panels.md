@@ -111,7 +111,7 @@ In Edit mode:
 - **Snap:** positions and sizes are whole panel-grid units, the same grid as tiles. *Why:* the same rule as built-in panels; tidy without pixel-pushing (FR-PANEL-05).
 - **No overlap:** a widget dropped on another is moved to the nearest free place. Labels may sit inside frames.
 - **Align and distribute:** with two or more items selected, the pane's **Arrange** menu has Align left, right, top, bottom, centre, and middle, and Distribute horizontally and vertically.
-- **Widget menu:** **Show as** switches to another widget in the same group, such as knob and fader ([panel widgets](panel-widgets.md#the-baseline-set)). **Caption** sets the text under the widget for this panel only; empty means the exposed name. **Unexpose**.
+- **Widget menu:** **Show as** switches to another widget in the same group, such as knob and fader ([panel widgets](panel-widgets.md#the-baseline-set)). **Caption** sets the text under the widget for this panel only; empty means the exposed name. **Controller slot** (front panel only): Auto, or a slot from 1 to 16 for [device mappings](midi-learn.md#device-mappings-fr-midi-06). **Unexpose**.
 - **Panel size:** the panel is as large as its items need. A grip at its bottom-right corner makes it larger, never smaller than its items. The sub-patch's tile takes that size, with ports on its edges as on every tile.
 - One drag, one menu command, or one held arrow key is one undo step, in the patch history.
 
@@ -142,7 +142,7 @@ panel: Some(Panel(
     size: (8, 6),
     widgets: [
         Widget(kind: Knob, at: (0, 1), bind: "cutoff"),
-        Widget(kind: Knob, at: (2, 1), bind: "resonance", caption: Some("Res")),
+        Widget(kind: Knob, at: (2, 1), bind: "resonance", caption: Some("Res"), slot: Some(3)),
         Widget(kind: Curve, at: (0, 3), bind: "shape", size: Some((8, 3))),
     ],
     labels: [Label(at: (4, 1), text: "Voice")],
