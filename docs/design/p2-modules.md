@@ -3,12 +3,12 @@
 The ports, parameters, ranges, defaults, and behaviour of the P2 modules that bring no new engine rules, so each can be built from its catalogue entry without guessing.
 
 - **Kind:** living specification.
-- **Status:** Agreed for Random, Chance, and Phase reset (2026-11-01). Each section is ready to build. Other P2 modules are added here as they are agreed.
+- **Status:** Agreed for Random, Chance, Phase reset, Euclidean rhythm, Selector, Phase shift and reverse, and Macro (2026-11-01). Each section is ready to build. Other P2 modules are added here as they are agreed.
 - **Decision behind it:** none. It follows [ADR-0007](../adr/0007-polymorphic-signal-model.md) (signals), [ADR-0014](../adr/0014-modulation-without-cables.md) (modulation without cables), [ADR-0016](../adr/0016-ports-and-parameters-carry-their-own-text.md) (port and parameter text), and [ADR-0018](../adr/0018-clean-room-module-development.md) (clean room).
-- **Use case and requirements:** FR-LIB-01, FR-LIB-12, FR-LIB-22, NFR-SND-04.
+- **Use case and requirements:** FR-LIB-01, FR-LIB-08, FR-LIB-12, FR-LIB-22, FR-LIB-30, NFR-SND-04.
 - **Background:** [Phase and cycles](../learn/phase-and-cycles.md).
-- **Prior art:** none named. Every module is designed from its purpose.
-- **Issues:** [#304](https://github.com/brylie/LoomDSP/issues/304) (Random), [#305](https://github.com/brylie/LoomDSP/issues/305) (Chance), [#174](https://github.com/brylie/LoomDSP/issues/174) (Phase reset).
+- **Prior art:** none named. Every module is designed from its purpose. The Euclidean rhythm follows published theory: G. Toussaint, "The Euclidean Algorithm Generates Traditional Musical Rhythms", 2005.
+- **Issues:** [#304](https://github.com/brylie/LoomDSP/issues/304) (Random), [#305](https://github.com/brylie/LoomDSP/issues/305) (Chance), [#174](https://github.com/brylie/LoomDSP/issues/174) (Phase reset), [#306](https://github.com/brylie/LoomDSP/issues/306) (Euclidean rhythm), [#310](https://github.com/brylie/LoomDSP/issues/310) (Selector), [#111](https://github.com/brylie/LoomDSP/issues/111) (Phase shift and reverse), [#78](https://github.com/brylie/LoomDSP/issues/78) (Macro).
 - **Code:** `crates/loom-modules/src`, once built.
 
 ## Goal
@@ -79,6 +79,82 @@ The [rules for P1 modules](p1-modules.md#rules-for-all-modules-here) apply: IDs 
 - With nothing on `phase`, the module restarts the transport's bar phase from a trigger, and holds when the transport stops, as the bar phase does ([clock](clock.md#default-inputs)).
 - A jump in the input moves the output by the same amount.
 
+## Euclidean rhythm (MT-GATE-02)
+
+`loom.gate.euclid`: spreads a number of hits as evenly as possible over a number of steps, with rotation.
+
+| | |
+|---|---|
+| Inputs | `phase` (phase, default **bar phase**), `clock` (trigger, default 0), `reset` (trigger, default 0) |
+| Outputs | `trigger`, `gate`, `accent` |
+| Parameters | `source`: 0 Phase (default), 1 Clock. `steps`: whole number 1 to 32, default 16. `hits`: whole number 0 to 32, default 4. `rotation`: whole number 0 to 31, default 0 |
+| Panel | Radio buttons for `source`, knobs for `steps`, `hits`, and `rotation`. A read-only [step grid](panel-widgets.md#step-grid) in the ring layout shows the pattern and the current step, once that widget exists. |
+
+- **The pattern.** Step `i` (from 0) of the unrotated pattern is a hit when `(i × hits) mod steps < hits`. `hits` above `steps` counts as `steps`. Rotation moves the pattern later: step `i` plays pattern step `(i − rotation) mod steps`. *Why this rule:* it is a closed form of the Euclidean spread. It gives the published patterns up to rotation (3 in 8 is `x..x..x.`), and it fixes which rotation is 0, so tests are exact.
+- **Source** is a setting, not chosen by a cable. *Why:* the `phase` input has a default, so a cable cannot be the switch, as on the LFO ([P1 modules](p1-modules.md#lfo-mt-mod-01)).
+- **Phase:** the current step is `floor(phase × steps)`, clamped to `steps − 1`. With nothing on `phase`, the pattern fills one bar and holds when the transport stops. `clock` and `reset` are ignored.
+- **Clock:** each `clock` trigger moves to the next step, wrapping. `reset` goes back to step 0 on its frame; a reset and a clock on the same frame give step 0. The module starts at step 0. `phase` is ignored.
+- **Outputs.** `trigger` is high for one sample on entering a hit step, from either direction. `gate` is high from entering a hit step until leaving it. `accent` is a trigger on entering the step that holds pattern step 0, the pattern's first hit. With 0 hits, nothing fires.
+- **Changes apply at the next step.** The pattern for a step is taken when the step is entered, so turning a knob never cuts a step in half.
+- The first frame counts as entering its step (rule 3), so a pattern that starts on a hit fires at once.
+
+## Selector (MT-ROUTE-01)
+
+`loom.route.selector`: picks one of up to eight inputs.
+
+| | |
+|---|---|
+| Inputs | `in1` to `in8` (default 0), `step` (trigger, default 0), `select` (default 0), `reset` (trigger, default 0) |
+| Output | `out` |
+| Parameters | `mode`: 0 Step (default), 1 Select, 2 Random. `count`: whole number 2 to 8, default 4. `fade`: 0 to 1 s, default 0.005 s. `repeats`: 0 Avoid (default), 1 Allow. `seed` (rule 1) |
+| Panel | Radio buttons for `mode`, knobs for `count` and `fade`. `repeats` and `seed` in the inspector only. |
+
+- **Mode** is a setting, not chosen by which input has a cable ([P1 modules, Sample and hold](p1-modules.md#sample-and-hold-loomrandsample-hold)).
+- **Step:** each `step` trigger moves to the next input, wrapping after `count`. **Select:** the input is `floor(select × count)`, with `select` clamped to 0 to 1 and the result to `count − 1`; so 0.6 with 4 inputs picks the third. **Random:** each `step` trigger picks an input at random from the first `count`. With `repeats` set to Avoid, it never picks the current one again.
+- `reset` goes to input 1 and restarts the random sequence (rule 2). The module starts on input 1.
+- Lowering `count` below the current input moves to the last input in use.
+- **Fade.** Each input has a gain that moves in a straight line toward 1 (the chosen input) or 0 (the others) over `fade` seconds. The output is the sum of each input times its gain, divided by the sum of the gains. At 0 the switch is instant. *Why:* an instant switch clicks on audio; a straight line never overshoots, so the output stays between the inputs, and dividing by the sum keeps the level steady when switches come faster than the fade.
+
+## Phase shift and Phase reverse (MT-PHASE-05)
+
+Two built forms of the Phase warp type (ADR-0017): small, cheap, and needed now to fire at a chosen point of a cycle ([phase and cycles](../learn/phase-and-cycles.md#crossing-a-point-shift-then-detect)). The rest of Phase warp (bend, S-curve, skew, mirror) comes later.
+
+`loom.phase.shift`:
+
+| | |
+|---|---|
+| Inputs | `phase` (phase, default **bar phase**), `offset` (default 0) |
+| Output | `phase` |
+| Parameter | `offset`: −1 to 1, default 0 |
+| Panel | A knob for `offset` |
+
+- The output is `fract(phase + offset parameter + offset input)`.
+
+`loom.phase.reverse`:
+
+| | |
+|---|---|
+| Input | `phase` (phase, default **bar phase**) |
+| Output | `phase` |
+| Parameters | none |
+| Panel | empty |
+
+- The output is `fract(1 − phase)`, so an input of 0 gives 0. *Why:* Phase Trigger's first-frame rule (a phase of exactly 0 on the first frame fires) keeps working on a reversed phase.
+
+## Macro (MT-UI-02)
+
+`loom.ui.macro`: one knob whose value is a signal. Assign its output to many parameters with different depths, so one knob shapes a whole sound ([modulation, Example: a macro](modulation.md#example-a-macro)).
+
+| | |
+|---|---|
+| Inputs | none |
+| Output | `out` |
+| Parameter | `value`: 0 to 1, default 0 |
+| Panel | One knob |
+
+- The output is `value`, smoothed over 5 ms (P1 rule 3). *Why no polarity setting:* each modulation assignment already sets its own polarity.
+- The ID is in the `ui` category, with Button (MT-UI-01). The issue proposed `loom.mod.macro`; this spec wins.
+
 ## Acceptance criteria
 
 Random:
@@ -104,11 +180,35 @@ Phase reset:
 - [ ] After a reset, the output rises at the input's rate from 0 and wraps when it reaches 1 (test).
 - [ ] A reset on the first frame counts (test).
 
+Euclidean rhythm:
+
+- [ ] 3 hits in 8 steps gives `x..x..x.`; 5 in 8 and 5 in 16 match the published patterns up to rotation, and rotation moves them later (unit tests).
+- [ ] Driven by a phase, a hit lands on the same sample at block sizes 1, 77, and 512 (reference test).
+- [ ] Changing `hits` mid-step takes effect at the next step (test).
+- [ ] In Clock mode, a reset and a clock on the same frame give step 0 (test).
+
+Selector:
+
+- [ ] With 4 inputs in Select mode, 0.6 picks the third input; −1 and 2 clamp to the first and fourth (test).
+- [ ] With a fade, no step in the output is larger than the step between the inputs at that moment (test).
+- [ ] Random with Avoid never picks the current input twice in a row over 10,000 steps (test).
+- [ ] Stepping and random picks are the same at block sizes 1, 77, and 512 (reference test).
+
+Phase shift and reverse:
+
+- [ ] Shift by −0.3, then Phase Trigger, fires when a slow phase passes 0.3, rising and falling (test).
+- [ ] Reverse turns 0 into 0 and 0.25 into 0.75 (test).
+
+Macro:
+
+- [ ] The output equals the knob, and one Macro assigned to three parameters moves all three (test).
+
 ## Out of scope
 
 - The Smoothing trait itself (TR-11). Random uses a plain `glide` until it exists.
 - Distributions other than Uniform and Centred.
-- More than four lanes in Chance.
+- More than four lanes in Chance, or more than eight inputs in Selector.
+- The rest of Phase warp (bend, S-curve, skew, mirror, smoothing).
 
 ## Open points
 
