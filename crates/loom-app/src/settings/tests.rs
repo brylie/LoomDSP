@@ -1562,6 +1562,10 @@ fn failed_saves_say_why_and_keep_the_choice() {
     let mut args = args(&dir);
     args.devices.preferences = Some(dir.join("blocked").join(FILE_NAME));
     let fake = Rc::new(Fake::new(&[fake::device("Fake A"), fake::device("Fake B")], &["Pad"]));
+    *fake.audio_inputs.borrow_mut() = devices::Inputs {
+        default: Some("Microphone".into()),
+        devices: vec!["Microphone".into()],
+    };
     let mut app = start(args, &fake);
     let unsaved = |app: &App| app.alerts.status().ends_with("The change applies until you quit.");
 
@@ -1582,10 +1586,17 @@ fn failed_saves_say_why_and_keep_the_choice() {
     assert!(unsaved(&app), "{}", app.alerts.status());
     assert_eq!(app.rig.store.saved().panic, None, "cleared for this run");
 
+    // A patch that uses the input opens it, so turning it off has
+    // something to close.
+    app.controller.add_module("loom.io.audio-in").unwrap();
+    assert!(app.commit());
+    assert_eq!(fake.input_opens.get(), 1);
     app.alerts.say(String::new());
     app.preferences(Message::Input(InputChoice::Off));
     assert!(unsaved(&app), "{}", app.alerts.status());
     assert_eq!(app.rig.store.saved().audio.input, InputChoice::Off);
+    assert_eq!(fake.input_closes.get(), 1, "closed for this run");
+    assert!(app.rig.input.is_none());
 
     app.alerts.say(String::new());
     assert!(fake.is_open("Pad"), "every MIDI input opens when none is saved");
