@@ -3,12 +3,12 @@
 Authors, tags, and a licence stored in every patch, so people who share patches get credit, find patches again, and know what others may do with them.
 
 - **Kind:** living specification.
-- **Status:** Draft
+- **Status:** Agreed (2026-11-01, [#243](https://github.com/brylie/LoomDSP/issues/243)). P2: the file fields, patch info, the licence chooser, the defaults, credit for parts, and [your patches browser](#your-patches-browser). P4: the same filters in the library browser (FR-SHARE-04).
 - **Decision behind it:** [ADR-0023](../adr/0023-patch-licences-spdx-and-creative-commons.md) (licences); the patch format is [ADR-0008](../adr/0008-patch-format-ron.md).
 - **Use case and requirements:** UC7, UC9, FR-FILE-08, FR-FILE-09, FR-FILE-10, FR-SHARE-06, FR-SHARE-07, FR-NATIVE-09.
 - **Prior art:** package manifests list several authors, one per entry (as `Cargo.toml` does). Topic tags on code hosting sites are lowercase words joined by hyphens. Creative Commons offers a licence chooser that asks two questions. We use those conventions, in our own words and UI.
 - **Issues:** [#243](https://github.com/brylie/LoomDSP/issues/243) (decide), [#244](https://github.com/brylie/LoomDSP/issues/244) (umbrella: [#266](https://github.com/brylie/LoomDSP/issues/266) file fields, [#267](https://github.com/brylie/LoomDSP/issues/267) patch info, [#268](https://github.com/brylie/LoomDSP/issues/268) licence chooser), [#245](https://github.com/brylie/LoomDSP/issues/245) (preferences), [#246](https://github.com/brylie/LoomDSP/issues/246) (own patch browser), [#247](https://github.com/brylie/LoomDSP/issues/247) (library filters).
-- **Code:** none yet. The patch format is `crates/loom-patch/src/lib.rs` (`Patch`).
+- **Code:** none yet. SPDX expressions are parsed with the [`spdx`](https://crates.io/crates/spdx) crate (Apache-2.0, accepted under ADR-0006). The patch format is `crates/loom-patch/src/lib.rs` (`Patch`).
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
      built. See README.md in this folder. -->
@@ -51,6 +51,8 @@ The field is spelled `license`, as SPDX spells it, so tools that read SPDX find 
 
 ### Patch info
 
+Patch info is shown in the inspector when no module is selected, under the patch name. *Why:* the inspector already shows "the thing selected", and with nothing selected that thing is the patch.
+
 | Field | Shown as | Edited with |
 |---|---|---|
 | Authors | One name per line, in credit order | A text box with one author per line. Empty lines are dropped. |
@@ -72,6 +74,14 @@ Two questions pick one of the six Creative Commons 4.0 licences. A third answer 
 | "I give up all rights: anyone may do anything with it" | | `CC0-1.0` |
 
 Every licence except `CC0-1.0` requires credit to the authors, which is why the authors field matters. Each answer shows a one-sentence explanation in plain words, and the chooser links to the licence's own page. The app explains; it does not give legal advice.
+
+### Credit for parts
+
+A sub-patch keeps the authors of the patch it came from ([sub-patches](sub-patches.md#library)). Inserting a library item copies its authors into the sub-patch's definition, and a copy of the tile keeps them.
+
+- Patch info shows an **Includes parts by** line: every author of every sub-patch in the patch, at any depth, who is not already in the patch's own authors, in the order first found. It is computed, not stored. *Why:* the patch's author list stays the player's own choice, and part credit appears and disappears with the parts.
+- Editing inside a sub-patch does not change its authors. Its own patch info (inspector, with the sub-patch's tile selected and nothing inside selected) edits them.
+- Clipboard copies of plain modules still carry no authors.
 
 ### Defaults (preferences)
 
@@ -103,13 +113,25 @@ What each licence allows, for the licence filters:
 
 Open source and free software licences must allow both, by their own definitions, so the SPDX list answers for them. "Lets me change it" means the licence allows sharing a changed version; conditions such as credit or share-alike still apply and are shown with the licence.
 
-The browsers themselves (layout, where the user's patches are found, the library source) are specified separately. This spec gives only the data and the filter rules they share.
+The library browser (P4) is specified with the library (FR-SHARE-04). Your patches browser is below.
+
+### Your patches browser
+
+FR-SHARE-06, [#246](https://github.com/brylie/LoomDSP/issues/246).
+
+- **Where patches are found:** the library folder ([preferences](preferences.md), by default `LoomDSP/Library` in Documents), with its subfolders. It holds the player's patches and saved sub-patches alike. Save and Save As start there when the patch has no file yet ([files](files.md)). A patch elsewhere still opens with File > Open, but is not listed. *Why:* one folder to back up and one place to look.
+- **Opening:** File > Browse patches, or **Ctrl+Shift+O** (Cmd+Shift+O), opens an overlay over the canvas, like the [module browser](module-browser.md).
+- **What it shows:** a search field, the author, tag, and licence filters above, and a list. Each row shows the name, authors, tags as chips, the licence's short name, and the date changed. Newest first. A file that does not load shows its file name and "Could not read", and cannot be opened from here.
+- **Search** matches the name, description, and tags, ignoring case. It combines with the filters (all must match).
+- **Keys:** typing goes to the search field. Up and Down move in the list. Enter opens the highlighted patch, asking first about unsaved changes as Open does. Escape closes the overlay. Tab reaches the filters (NFR-UX-01).
+- **Reading files:** the folder is read on a thread off the UI thread when the overlay opens; rows appear as files are read. Only the metadata fields are kept. *Why:* a folder of hundreds of patches must not freeze the window.
+- Inserting a patch as a sub-patch is done from the module browser ([sub-patches](sub-patches.md#library)), not here. *Why:* this browser opens patches; the module browser adds things to the canvas.
 
 ## Rules
 
 1. **Optional and lenient.** A patch opens whether or not it has these fields, and whatever they contain. A licence that is not a valid SPDX expression is kept as written and shown as "Unrecognised licence". *Why:* metadata must never stop someone opening a patch, least of all on stage.
 2. **Authors are a list, in credit order.** Each author is one line of free text, trimmed. Duplicates (ignoring case) are dropped. *Why:* several authors must stay distinct, and the order is how people choose to be credited.
-3. **Credit is kept when a patch changes hands.** Opening someone else's patch and saving it never removes an author. If the user's name is set and not in the list, Save offers once per patch to add it at the end. *Why:* most licences here require credit to the original authors, and a remix should credit both.
+3. **Credit is kept when a patch changes hands.** Opening someone else's patch and saving it never removes an author. If the user's name is set and not in the list, the first Save after opening the patch offers once to add it at the end. Declining is remembered for that patch until it is opened again. *Why:* most licences here require credit to the original authors, and a remix should credit both.
 4. **Names only by default.** The app adds only the name from preferences, never an email address or other contact details. A user can type more, knowing the file is shared. *Why:* shared files spread; personal data in them is hard to take back.
 5. **Tags are lowercase words joined by hyphens.** Letters (in any script), digits, and single hyphens; no spaces; 1 to 32 characters; at most 20 tags per patch. Typed text is tidied: trimmed, lowercased, spaces and underscores become hyphens, other characters are dropped, and duplicates are removed. *Why:* one spelling per idea makes filters match (`Drone`, `drone ` and `drone` are one tag), and allowing every script keeps tags usable in any language.
 6. **A licence is an SPDX expression.** Usually a single identifier from the chooser. **Other** accepts any valid expression, such as `MIT` or `CC-BY-4.0 OR MIT`. *Why:* SPDX names are short, exact, and read by many tools, so a licence written once is understood everywhere.
@@ -133,17 +155,17 @@ The browsers themselves (layout, where the user's patches are found, the library
 
 ## Out of scope
 
-- **The patch browsers themselves.** Their layout and sources get their own specs (FR-SHARE-04, FR-SHARE-06, and the learning library in #240).
-- **Credit for parts.** Modules copied from another patch with the clipboard do not bring their authors along. Revisit with sub-patches (FR-ENCAP), which make parts shareable on their own.
+- **The library browser** (FR-SHARE-04, P4) and the learning library (#240). They use the filters here.
+- **Credit for plain modules** copied with the clipboard.
+- **Thumbnails or previews** in your patches browser.
 - **Licences of embedded assets** (samples, wavetables, FR-FILE-06). They may need their own licence and credit; decide with the self-contained file (FR-SHARE-01).
 - **What an exported plugin shows** of the patch licence (FR-NATIVE-09). Decide with export.
 - **Checking licence compatibility** when patches are combined.
 
+## Settled points
+
+Settled on 2026-11-01 from the written leanings: the phase split above; patch info in the inspector; tags in any script (rule 5); the "add me as author" offer once per patch at the first Save after opening (rule 3); the example patches under `CC0-1.0` (ADR-0023); SPDX parsing with the `spdx` crate. Credit for parts and your patches browser were added in the same review.
+
 ## Open points
 
-1. **Phase.** Leaning: the file fields and patch info in P2, with the user's own patch browser (FR-SHARE-06); the library filters in P4 with the library (FR-SHARE-04). The fields are cheap while the format is still at version 1.
-2. **Where patch info lives.** Leaning: the inspector shows it when no module is selected, under the patch name. A separate window is the alternative.
-3. **Tag characters.** Leaning: letters in any script (as rule 5). Plain ASCII is simpler to type and compare, but would shut out tags in Finnish, Japanese, and other languages.
-4. **The "add me as author" offer.** Leaning: once per patch, at the first Save after opening it. The alternative is never asking and adding a menu command instead.
-5. **The example patches' own licence.** Decided in ADR-0023: `CC0-1.0`.
-6. **Validating SPDX.** Leaning: the `spdx` crate (Apache-2.0, accepted under ADR-0006), which knows the official list and parses expressions.
+None.

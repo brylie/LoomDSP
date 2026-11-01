@@ -3,7 +3,7 @@
 Each port says what range of values it usually carries, so the app can tell the player what a cable holds, warn about likely mistakes, and suggest a fix, without ever changing a module on its own.
 
 - **Kind:** living specification.
-- **Status:** Tier 1 is implemented ([#145](https://github.com/brylie/LoomDSP/issues/145)). Tiers 2 and 3 are Draft proposals. Do not build them yet.
+- **Status:** Tier 1 is implemented ([#145](https://github.com/brylie/LoomDSP/issues/145)). Tiers 2 and 3 are Agreed, P2 ([#146](https://github.com/brylie/LoomDSP/issues/146), [#147](https://github.com/brylie/LoomDSP/issues/147), 2026-11-01), with the open points settled below.
 - **Decision behind it:** no ADR of its own. It builds on [ADR-0007](../adr/0007-polymorphic-signal-model.md), which already says signal types are metadata for colour, default ranges, and module behaviour. Tier 1 does not need a new ADR: it is a small change to `PortSpec`, and modulation is still Draft.
 - **Use case and requirements:** FR-SIG-09, FR-VIS-05, FR-MOD-10 (all proposed here). Related: FR-SIG-02, FR-SIG-03, FR-MOD-08, FR-MOD-09.
 - **Background:** none yet. An explainer on interval arithmetic, and why its results are too wide, would help (see Open points).
@@ -210,15 +210,17 @@ Settled in [#144](https://github.com/brylie/LoomDSP/issues/144):
 - **Pitch convention: -0.5 to 0.5** (ten octaves around middle C). *Why:* it covers the audible and musical pitch range with some margin. Tier 2 warnings may tune the thresholds, not this span.
 - **No ADR.** *Why:* ADR-0007 already says signal types carry default ranges, and ADR-0014 already gives assignments a polarity. This change only replaces where a port's polarity comes from.
 
+## Settled points
+
+Settled on 2026-11-01 from the written leanings ([#146](https://github.com/brylie/LoomDSP/issues/146), [#147](https://github.com/brylie/LoomDSP/issues/147)):
+
+- **Overestimation** is shown with "about" for received and sent ranges and "up to" in warnings, as drafted above. Hover text on the range explains in one sentence why an estimate can be wider than the signal, and links the explainer.
+- **Warnings** use the thresholds in the table: more than 4 times the expected span, or no overlap. They show only in the inspector; canvas ports get no mark. *Why:* marks would add clutter to every patch for advice.
+- **Match** is offered for Constant `value`, and for Add `offset` only while A and B have no cable. Multiply `gain` gets no Match. The default for a module made from a dragged cable waits for that gesture.
+- **API:** `Controller::port_range(port)` and a list of warnings, so `loom check` prints the same warnings as the app.
+- **Phase:** Tiers 2 and 3 are P2.
+- **Explainer:** "What is on this cable?" in `docs/learn/`, written with Tier 2 and linked from this spec.
+
 ## Open points
 
-- **How is overestimation shown?** Options: the word "about" (current draft), a "~" prefix, showing a range only when it differs from the convention, or a tooltip that explains why it may be wide. Try with users.
-- **Warning thresholds.** "More than 4 times the expected span" is a guess. Also: should a warning add a static mark on the port on the canvas? FR-VIS-01 rules out motion, not marks, but marks add clutter.
-- **Match for Add `offset` with inputs connected.** The rule for a Constant would be wrong here. With A fixed at 5 and an offset of -5, Add sends 0 into a pitch input, which is fine. A Match of -1 to 1 would clamp the offset to -1, and Add would send 4. A correct rule picks the range that holds every offset putting the output inside the expected range: from the expected minimum minus the highest input sum, to the expected maximum minus the lowest input sum. Because estimates can be too wide, this needs care. Leaning: no Match for Add with cables in the first cut.
-- **Match for Multiply `gain`.** The useful gain maps the received span of A onto the expected span downstream: expected span divided by received span. That is less obvious to the player than the Constant rule. Leaning: leave Multiply out of the first cut.
-- **A `loom-core` API.** Leaning: `Controller::port_range(port)` and a list of warnings, so `loom check` can print the same warnings as the app.
-- **Which tier goes in which phase** ([roadmap](../product/roadmap.md)). Leaning:
-  - Tier 1 in P1, with modulation, because modulation rule 4 needs polarity on every output anyway.
-  - Tier 2 inspector text and scope scaling in P1 if they are cheap after Tier 1, otherwise P2. Warnings in P2.
-  - Tier 3 in P2, after control ranges ship and the player has used them.
-- **Explainer.** "What is on this cable?" in `docs/learn/`: nominal ranges as conventions, interval arithmetic, why it is too wide (the dependency problem), and why loops are hard to estimate.
+None.

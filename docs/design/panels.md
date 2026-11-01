@@ -3,7 +3,7 @@
 How modules, sub-patches, and patches show controls and displays, and how users build them.
 
 - **Kind:** living specification. It changes as panels are built and used.
-- **Status:** Draft, except [Module panels on tiles](#module-panels-on-tiles-p1) and [Level meters and audio load](#level-meters-and-audio-load-p1), which are Implemented. [Labels and hover text](#labels-and-hover-text) is Implemented. [Scope module](#scope-module) is Implemented, with its trace ([#62](https://github.com/brylie/LoomDSP/issues/62)). [Default panels](#default-panels) and [Exposed controls in a sub-patch](#exposed-controls-in-a-sub-patch) are Draft.
+- **Status:** Draft, except [Module panels on tiles](#module-panels-on-tiles-p1) and [Level meters and audio load](#level-meters-and-audio-load-p1), which are Implemented. [Labels and hover text](#labels-and-hover-text) is Implemented. [Scope module](#scope-module) is Implemented, with its trace ([#62](https://github.com/brylie/LoomDSP/issues/62)). [The panel editor](#the-panel-editor) and [Exposed controls in a sub-patch](#exposed-controls-in-a-sub-patch) are Agreed (P2, 2026-11-01). [Default panels](#default-panels) is Draft.
 - **Decision behind it:** [ADR-0013](../adr/0013-modules-carry-their-own-panel.md) (modules carry their own panel), [ADR-0025](../adr/0025-one-design-language-and-derived-panels.md) (one design language, and panels derived from the declaration).
 - **Requirements:** FR-PANEL-*, FR-CANVAS-10, FR-CANVAS-11, FR-LIB-18, FR-VIS-01 to 04, FR-ENCAP-03, NFR-PERF-04, NFR-UX-01.
 - **Builds on:** [Telemetry](telemetry.md) for live data, [ADR-0010](../adr/0010-own-patch-canvas.md) for the canvas, [parameter mapping](modulation.md#parameter-mapping) for control values.
@@ -96,14 +96,112 @@ A panel reads from top to bottom as **what it does, how it behaves, what you pla
 
 ## The panel editor
 
-Used for sub-patches and patches alike.
+**Status:** Agreed, P2 ([#76](https://github.com/brylie/LoomDSP/issues/76)). The choices marked "Settled" were made with the maintainer on 2026-11-01. Requirements: FR-PANEL-01, 03, 05, 09, 10. Builds on [sub-patches](sub-patches.md) and [exposed controls](#exposed-controls-in-a-sub-patch).
 
-- Open it from a patch or a sub-patch. The same tools appear in both cases.
-- Place widgets on the grid; snap, align, group, resize (FR-PANEL-05).
-- Bind a control by dragging a parameter from the inspector or from a module onto it. Binding a control inside a sub-patch exposes that parameter as the sub-patch's own (FR-ENCAP-03).
-- Leaving the editor shows the result at once: on the tile in the parent, or as the front panel.
+> Inside my Voice sub-patch I open the Panel pane. I drag the filter's cutoff knob onto it, then resonance, then the envelope's shape. I switch the pane to Edit, put a "Filter" frame around the two knobs, and line them up. I go back up a level: the Voice tile now shows exactly that panel.
 
-Built-in module panels are written as data in code, in the same format the editor saves.
+### The Panel pane
+
+**Settled:** the editor is a pane docked beside the canvas.
+
+- The **Panel** button in the toolbar shows or hides the pane. It opens between the canvas and the inspector column, so the inspector stays visible. *Why:* exposing is a drag from the inside to the surface, so both must be on screen at once.
+- The pane shows the panel of the current level: the sub-patch's surface when inside one, or the patch's **front panel** at the top level. The same tools appear at every level. *Why:* FR-PANEL-09, one panel model.
+- The pane has two modes, switched by an **Edit** toggle in its header:
+  - **Play:** widgets work as on a tile. Turning a knob in the pane turns the exposed parameter.
+  - **Edit:** a drag moves widgets instead of changing values. Values cannot change in Edit mode. *Why:* arranging must never nudge a setting by accident.
+- Every change in the pane shows at once on the sub-patch's tile in the parent. There is no separate save or apply.
+- The pane is as wide as the panel at the current canvas zoom, up to half the window, and scrolls beyond that.
+
+### Adding and removing
+
+**Settled:** every control and display on a panel is bound by exposing. Only labels and frames are unbound.
+
+- **Expose by drag:** drag a control or display from an inner tile, or a row from the inspector, onto the pane. It is exposed ([exposed controls](#exposed-controls-in-a-sub-patch)) and placed where it is dropped, snapped to the grid. Works in both modes.
+- **Expose from a menu:** **Expose** in an inspector row's menu places the widget at the first free place, in reading order.
+- At the top level, exposing adds the item to the patch's front panel. The top patch exposes items as a sub-patch does. *Why:* performance mode and later plugin export show the front panel, and it should be built the same way.
+- **Palette** (Edit mode only): **Label** (static text) and **Frame** (a group). Nothing else. *Why:* an unbound knob does nothing, and a panel must never hold broken widgets.
+- **Unexpose** on a widget's menu removes it from the panel and removes the exposed item. If the same item has a second widget on the panel, only this widget goes. Delete removes the selected labels and frames, and unexposes the selected widgets.
+
+### Arranging
+
+In Edit mode:
+
+| Gesture | Result |
+|---|---|
+| Drag a widget, label, or frame | Moves it, snapped to the panel grid. A frame moves with its widgets. |
+| Click | Selects one item. Shift-click adds or removes. |
+| Drag on empty space | Selects the items inside the rectangle. |
+| Arrow keys | Move the selection one grid unit. Shift-arrow: 10. |
+| Alt-arrow | Resizes a selected growable widget or frame by one grid unit, as on [resizable tiles](#resizable-tiles). |
+| Drag the corner grip of a growable widget or a frame | Resizes it, snapped to the grid. |
+
+- **Snap:** positions and sizes are whole panel-grid units, the same grid as tiles. *Why:* the same rule as built-in panels; tidy without pixel-pushing (FR-PANEL-05).
+- **No overlap:** a widget dropped on another is moved to the nearest free place. Labels may sit inside frames.
+- **Align and distribute:** with two or more items selected, the pane's **Arrange** menu has Align left, right, top, bottom, centre, and middle, and Distribute horizontally and vertically.
+- **Widget menu:** **Show as** switches to another widget in the same group, such as knob and fader ([panel widgets](panel-widgets.md#the-baseline-set)). **Caption** sets the text under the widget for this panel only; empty means the exposed name. **Controller slot** (front panel only): Auto, or a slot from 1 to 16 for [device mappings](midi-learn.md#device-mappings-fr-midi-06). **Unexpose**.
+- **Panel size:** the panel is as large as its items need. A grip at its bottom-right corner makes it larger, never smaller than its items. The sub-patch's tile takes that size, with ports on its edges as on every tile.
+- One drag, one menu command, or one held arrow key is one undo step, in the patch history.
+
+### Groups
+
+**Settled:** a group is a titled frame.
+
+- A **frame** is a visible border with an optional title, such as "Filter" or "Amp". Widgets inside its rectangle belong to it.
+- Moving a frame moves its widgets. Resizing it never moves them; a widget left outside stops belonging to it.
+- Frames do not nest. *Why:* one level is enough to read a panel, and nested frames are rules nobody can see.
+- **Group** in the Arrange menu draws a frame around the selection; **Ungroup** removes the frame and keeps the widgets.
+- A frame's title is read by screen readers as the group's name (NFR-UX-02).
+
+### Focus order
+
+- Keyboard focus visits the panel in reading order: top to bottom, then left to right. A frame's widgets are visited together, in reading order inside it. *Why:* focus follows what the eye reads, with no separate order for the player to keep up to date.
+
+### Built-in module panels
+
+**Settled:** a built-in module's panel cannot be changed in P2. *Why:* every Filter looks the same in every patch, tutorial, and help page. For a different layout, collapse the module into a sub-patch and design its panel.
+
+### Saved format
+
+A designed panel is saved with its definition (or, for the front panel, with the patch):
+
+```ron
+panel: Some(Panel(
+    size: (8, 6),
+    widgets: [
+        Widget(kind: Knob, at: (0, 1), bind: "cutoff"),
+        Widget(kind: Knob, at: (2, 1), bind: "resonance", caption: Some("Res"), slot: Some(3)),
+        Widget(kind: Curve, at: (0, 3), bind: "shape", size: Some((8, 3))),
+    ],
+    labels: [Label(at: (4, 1), text: "Voice")],
+    frames: [Frame(at: (0, 0), size: (4, 3), title: Some("Filter"))],
+)),
+```
+
+- `bind` names an exposed item. A panel with no `panel` field gets the derived one ([exposed controls](#exposed-controls-in-a-sub-patch)).
+- Built-in module panels in code use the same structure, with captions, labels, and frames available to them (FR-PANEL-09). Today's `Panel` and `Widget` in `loom-core` gain those fields.
+- A widget whose exposed item is gone when the patch loads is dropped, and the status bar says so. *Why:* a patch must always open.
+
+### Acceptance criteria: panel editor
+
+- [ ] Dragging an inner knob onto the pane exposes the parameter and places a knob where it was dropped; the sub-patch tile in the parent shows it (`Ui` harness).
+- [ ] Expose from the inspector menu places the widget at the first free place in reading order (test).
+- [ ] In Play mode, turning a pane knob changes the parameter; in Edit mode, the same drag moves the knob and the value does not change (`Ui` harness).
+- [ ] Moves and resizes snap to whole grid units; a drop onto another widget lands at the nearest free place (test).
+- [ ] Align left on three widgets gives them one x; Distribute horizontally gives equal gaps (test).
+- [ ] Moving a frame moves its widgets; frames cannot be placed inside frames (test).
+- [ ] Focus order is reading order, with a frame's widgets together (test).
+- [ ] Show as switches a knob to a fader and refuses a widget from another group (test).
+- [ ] Each arrange gesture is one undo step (`Ui` harness).
+- [ ] A designed panel round-trips through the patch file; a widget bound to a missing exposed item is dropped with a status message (test).
+- [ ] At the top level, the pane edits the patch's front panel and saves it with the patch (test).
+- [ ] The Panel pane works by keys alone: Tab into the pane, toggle Edit, move a widget with arrows (`Ui` harness, NFR-UX-01).
+
+### Out of scope: panel editor
+
+- Embedding a sub-patch's panel inside its parent's panel (FR-PANEL-08). Later, as one more widget kind.
+- Performance mode itself: showing only the front panel, locking edits, large controls (FR-PERF-01). It shows the panel this editor builds, and has its own spec.
+- Colours, images, and free styling. ADR-0025 gives one design language.
+- Changing built-in module panels.
 
 ## Interaction on the canvas
 
@@ -189,7 +287,8 @@ The first display module that shows a signal over time.
 |---|---|---|---|---|
 | `window` | Window | 0.001 to 1 s | 0.02 s | Logarithmic. The time shown across the display. One second is the history `ScopeTrace` keeps. |
 | `auto` | Auto | 0 or 1 | 1 | Whole number. On: the trigger level is halfway between the lowest and highest sample, as in [telemetry](telemetry.md). |
-| `level` | Level | -1 to 1 | 0 | The trigger level while `auto` is off. |
+| `level` | Level | -10 to 10 | 0 | The trigger level while `auto` is off. [Control ranges](control-ranges.md) -1 to 1 (default) and -10 to 10, like the scope's vertical ranges ([#329](https://github.com/brylie/LoomDSP/issues/329)). |
+| `slope` | Slope | 0 Rising, 1 Falling | 0 | Which edge starts the trace ([#329](https://github.com/brylie/LoomDSP/issues/329)). |
 
 - Its panel: a knob for `window`, a toggle for `auto`, and a knob for `level`, and below them the scope widget (9 by 5 grid units, bound to `out`, no caption), added in #62. Code: `SCOPE` in `loom-modules/src/display.rs`, `Trigger` in `loom-app/src/live.rs`, and `loom-app/src/probe_menu.rs`.
 - The parameters never change the audio. They tell the app how to draw the trace.
@@ -197,7 +296,7 @@ The first display module that shows a signal over time.
 
 ### Trigger
 
-- `ScopeTrace` takes the level from the module: automatic, or the fixed `level`. The rest of the trigger is unchanged: a rising edge, with hysteresis of a tenth of the history's swing, found to a fraction of a sample. The hysteresis never reaches below the lowest sample, so a fixed level near the bottom of the signal still triggers.
+- `ScopeTrace` takes the level and the slope from the module: automatic, or the fixed `level`; a rising or falling edge. The rest of the trigger is unchanged: the chosen edge, with hysteresis of a tenth of the history's swing, found to a fraction of a sample. The hysteresis never reaches below the lowest sample, so a fixed level near the bottom of the signal still triggers.
 - If no edge crosses a fixed level, the trace runs free, as for a flat signal.
 
 ### Add scope and Add meter
@@ -212,9 +311,39 @@ A one-step gesture on a cable or an output places a scope or a level meter next 
 - While the menu is open, the clipboard shortcuts (copy, cut, duplicate) do nothing.
 - The control channel offers the same action, so it can be checked in the running app.
 
+### Canvas context menu
+
+**Status:** Agreed, P2 ([#330](https://github.com/brylie/LoomDSP/issues/330), 2026-11-01). It grows the probe menu above into the one canvas menu.
+
+A right-click opens a menu for what is under the pointer. Right-clicking a tile that is not selected selects it first.
+
+| Under the pointer | Items |
+|---|---|
+| One tile | Copy, Duplicate, Delete, Help. A sub-patch adds Open, Dissolve, and Save to library ([sub-patches](sub-patches.md)). |
+| A tile in a selection of several | Copy, Duplicate, Delete, Make sub-patch |
+| Empty canvas | Add module here (opens the module browser and places the module at the point), Paste here, Select all |
+| An output | Add scope, Add meter, Disconnect all |
+| An input with a cable | Disconnect |
+| A cable | Add scope, Add meter, Delete cable |
+
+- Each item shows its shortcut on the right. An item that cannot act now is shown dimmed, not hidden. *Why:* the menu teaches the shortcuts, and items that move around are hard to find.
+- **Keyboard:** Shift+F10, or the Menu key, opens the menu for the focused control's module, else the selection, else the canvas centre. Up and Down move, Enter acts, Escape closes (NFR-UX-01).
+- It stays a pop-up over the window: while it is open, the canvas takes no input, as for the probe menu.
+- The control channel can open it and pick an item by name, as it does for the probe menu.
+
+### Acceptance criteria: canvas context menu
+
+- [ ] Each target gets the items in the table, dimmed when they cannot act (`Ui` harness).
+- [ ] Paste here places the pasted modules at the pointer; Add module here places the new module there (`Ui` harness).
+- [ ] Shift+F10 opens the menu for the selection, and the arrows and Enter pick an item (`Ui` harness).
+- [ ] The Add scope and Add meter tests still pass.
+
 ### Acceptance criteria: scope module
 
 - [x] The scope module passes its input through, bit for bit. It has a reference test and a block-size check.
+- [ ] A falling slope starts the trace on a falling edge, and a fixed level of 3 triggers on a signal between 2 and 5 (tests in `crates/loom-app/src/live.rs`).
+- [ ] Level meter: a peak of 1.0 lights the clip light until it is clicked; the peak hold shows the highest peak in dB; a double-click resets both (`Ui` harness).
+- [ ] A patch that makes infinity at the output counts silenced samples and shows the error message for 10 seconds after the last one; clipping with safety Off shows the warning (test).
 - [x] Its parameters are `window`, `auto`, and `level`, with the ranges above, and its panel has a knob, a toggle, and a knob for them.
 - [x] `ScopeTrace` with a fixed level triggers on that level, and runs free when nothing crosses it. With `auto` on it behaves as before.
 - [x] Right-clicking an output or a cable opens the menu. A right-drag pans and opens no menu. Right-clicking a tile, an input, or empty canvas opens none.
@@ -349,12 +478,14 @@ The whole app redraws only when something visible changes ([#90](https://github.
 - A fifth P1 widget, 3 × 6 grid units. It binds to one of its module's **outputs** by name. The registry refuses a meter bound to an output the module does not have.
 - It shows the output's level from -60 dB (empty) to 0 dB (full), bottom to top: a bar for the RMS level and a thin line for the peak. Both rise at once and fall by the whole range in about a second. The bar is green below -12 dB, amber up to -3 dB, and red above. Its label is below it.
 - A meter is a display: pressing or dragging it selects or moves the tile, as with a light.
+- **Clip light and peak hold** (Agreed, P2, [#98](https://github.com/brylie/LoomDSP/issues/98), 2026-11-01). Above the meter, a clip light turns on when the peak reaches 1.0 and stays on until it is clicked. Below it, a readout shows the highest peak since the last reset, in dB to one decimal. Double-clicking the meter resets both. *Why the light says "would clip":* cables are never clipped (ADR-0007). A peak of 1.0 or more on a cable only clips if it reaches the output, so the hover text says "Would clip at the output". The clip light also has a shape, not only a colour (NFR-UX-03).
 - *Why levels fall over a second:* a short peak stays visible long enough to see, and the bar does not flicker.
 
 ### Level meter module
 
 - **`loom.display.meter`**, category Display. One audio input `in` and one output `out` that passes `in` through, sample for sample. No parameters. Its panel is one meter bound to `out`.
 - Mono. For stereo, use two.
+- P2 adds a level history view, with `view` and `window` settings ([panel widgets, Level history](panel-widgets.md#level-history)).
 - *Why a pass-through output:* probes read outputs, and the module can sit inline in a signal path or hang off an output, without changing the sound.
 
 ### How levels reach a meter
@@ -371,6 +502,7 @@ The whole app redraws only when something visible changes ([#90](https://github.
 - The dropout count is red for 10 seconds after it grows.
 - **Redraw.** A thread reads the audio stats four times a second and wakes the UI only when the bar would change: the load or its maximum to the shown 1%, the dropout count, the end of the red time, or the telemetry drops. The load number changes at most twice a second. *Why:* in Iced every message redraws the window, so a timer that refreshed the bar drew two frames a second in an idle patch ([#90](https://github.com/brylie/LoomDSP/issues/90)).
 - *Why:* a performer needs a warning before a problem is audible (FR-PERF-04), and must notice when one just happened. A count that stayed red forever would soon be ignored.
+- **Silenced and clipped output** (Agreed, P2, [#130](https://github.com/brylie/LoomDSP/issues/130), 2026-11-01). The engine counts output samples it turned from NaN or infinity into silence, and samples it clipped to -1 to 1, in two atomics in `EngineStats` (an atomic add on the audio thread, nothing else). The stats bar shows **Output: bad samples silenced** in the error style, and **Output clipped** in the warning style, each for 10 seconds after the last such sample, like the dropout count. Hover text gives the counts since the engine started. *Why:* since #123 a patch that makes NaN just goes quiet, and the player cannot tell why. With the output limiter on, clipping is rare, so the clip message mostly appears with output safety Off.
 
 ### Acceptance criteria: level meters and audio load
 
@@ -664,7 +796,7 @@ A hint is an option on the parameter, in `ParamOptions`. It names one widget fro
 
 ## Exposed controls in a sub-patch
 
-**Status:** Draft, P2. Decision: [ADR-0025](../adr/0025-one-design-language-and-derived-panels.md). Requirements: FR-ENCAP-03, FR-PANEL-03, FR-PANEL-09.
+**Status:** Agreed, P2 (2026-11-01), with [sub-patches](sub-patches.md). The derived panel for a sub-patch with no designed panel uses the [Default panels layout](#layout-1), which is still Draft; until it is agreed, build the derived sub-patch panel last. Decision: [ADR-0025](../adr/0025-one-design-language-and-derived-panels.md). Requirements: FR-ENCAP-03, FR-PANEL-03, FR-PANEL-09.
 
 A sub-patch's surface is made of the same widgets as its inside. *Why:* a user who enters a sub-patch, or leaves it, must not have to learn a new set of widgets. The knob outside is the knob inside, and so is the light, the scope, and the curve.
 
@@ -686,6 +818,5 @@ A sub-patch's surface is made of the same widgets as its inside. *Why:* a user w
 
 ## Open points
 
-- Can users change the layout of a built-in module's panel? Its look cannot change (ADR-0025).
 - How third-party modules add display kinds through the SDK.
 - A derived display value gets a light. Once display values carry a unit and range ([#118](https://github.com/brylie/LoomDSP/issues/118)), should those with a unit get a readout or a meter instead?

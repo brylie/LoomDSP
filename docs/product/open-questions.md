@@ -18,6 +18,10 @@ Each open item lists the options and a current leaning. Close an item by writing
 | OQ-10 | Project name | "LoomDSP" appears to be free (informal search). Do a formal trademark check before a 1.0 release. | |
 | OQ-12 | Maturity of `iced_nodegraph` | Not used for the canvas. Findings reported upstream as a courtesy. | ADR-0010 |
 | OQ-19 | What is a trigger? | An output is high for exactly one sample. Inputs count rising edges above 0.5, with no hysteresis, and the first frame counts as following a low one. A fixed 1 ms pulse was rejected, because close triggers would merge. | FR-SIG-06, ADR-0007 |
+| OQ-17 | Module data beyond parameters | Typed data slots (curve, pattern, buffer). Curves and patterns inline in the patch; audio as WAV files in a sidecar folder. Swapped in from the control thread. Undo covers player edits, not live recording. | FR-LIB-19, ADR-0032, [module data](../design/module-data.md) |
+| OQ-20 | How roles are named and versioned | Namespaced IDs with a version (`loom.role.filter@1`). A new version only adds optional parameters. A part may fill several roles, and may map role names to its own. | FR-SDK-08, ADR-0017, [sub-patches](../design/sub-patches.md#roles) |
+| OQ-21 | What carries across a slot swap | Parameters by role name. Each part keeps its own data in the patch, restored on swap back, never converted. A swap is one undo step. | FR-ENCAP-08, [sub-patches](../design/sub-patches.md#slots) |
+| OQ-22 | Is the scale a module or a patch setting? | Like the transport: the engine holds one tuning and one active scale per patch, read without cables. A Scale and tuning module stores up to 8 scales and switches them from a trigger. | FR-LIB-29, ADR-0033, [scale and tuning](../design/scale-and-tuning.md) |
 
 ## Open
 
@@ -60,12 +64,6 @@ Note effects (arpeggiators, chords, quantise) need notes to move between modules
 
 - **Leaning:** both, with event cables shown as their own colour and automatic conversion where an event output meets a signal input. Needs a design spike in P2, before note effects are built in P3.
 
-### OQ-17. Module data beyond parameters
-
-- Patterns, clips, wavetables, and samples are module state, not parameters (FR-LIB-19).
-- **Questions:** the patch format (RON for small data, separate asset files for audio?), undo for large edits, and handing new data to the audio thread without allocation there (same pattern as schedule swaps, ADR-0001).
-- **Leaning:** a per-module `data` field in the patch for small structured data, asset references for audio. Decide in P2.
-
 ### OQ-18. How third-party modules are distributed
 
 VCV Rack's ecosystem works because people can install modules without building the program (FR-SHARE-05). Our current rule is "compile modules in, no runtime loading of native code" (FR-SDK-04), for safety and portability.
@@ -77,26 +75,6 @@ VCV Rack's ecosystem works because people can install modules without building t
 | WebAssembly modules, run in a sandbox | Safe (sandboxed), one build for all platforms, any language that compiles to WASM. | Slower than native. Real-time safety of the WASM runtime (no allocation or JIT pauses on the audio thread) must be proven. |
 
 - **Leaning:** compile in for now. Spike WebAssembly modules in P4: measure the cost of a filter and an oscillator as WASM against native, and check the runtime's real-time behaviour. Decide before announcing a module SDK.
-
-### OQ-20. How roles are named and versioned
-
-Roles let a slot accept any part with the right ports and parameters (ADR-0017, FR-SDK-08). A role is a contract that patches depend on, so it needs a stable name and a way to change.
-
-- **Questions:** the naming scheme; where a role's contract lives (in the SDK, as data like a module descriptor); what happens when a role gains a parameter; whether a part can fill several roles.
-- **Leaning:** namespaced IDs like module IDs (for example `loom.role.filter`), with a version. A new version may only add optional parameters, so every part that filled the old version still fits. Decide in the roles and slots specification before P2 work starts.
-
-### OQ-21. What carries across a slot swap
-
-Parameters carry across by role name (FR-ENCAP-08). Stored data is harder: a sequencer pattern, a wavetable, or a recorded buffer belongs to one part.
-
-- **Questions:** whether module data carries across when two parts use the same kind of data; how much stored data a slot keeps for parts that are not active; how undo treats a swap.
-- **Leaning:** keep each part's data in the patch, keyed by the part, and restore it when the user swaps back. Never convert data between parts. A swap is one undo step.
-
-### OQ-22. Is the scale a module or a patch setting?
-
-Pitch modules follow a patch-wide scale and tuning (FR-LIB-29). It could be a setting on the patch, like the transport (ADR-0015), or a module.
-
-- **Leaning:** a patch setting, read by modules without cables like the transport, plus a Scale and tuning module (MT-PITCH-03) that changes it from a trigger, so logic can change key between sections.
 
 ## Risks
 

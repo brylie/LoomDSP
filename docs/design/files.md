@@ -82,7 +82,7 @@ If loading fails, the old patch stays running and untouched. The new engine is b
 ### Defaults for the dialogs
 
 - **Extension:** `.ron`. Save As adds it if the user omits it. The filter shows `.ron` files.
-- **Starting folder:** the folder of the current file; otherwise the user's Documents folder. The app does not remember a folder across runs in this version.
+- **Starting folder:** the folder of the current file; otherwise the user's Documents folder. The app does not remember a folder across runs in this version. From P2, the fallback is the library folder instead ([your patches browser](patch-metadata.md#your-patches-browser)).
 - Save As to an existing file uses the dialog's own overwrite confirmation.
 - Save writes the patch where it was opened, except for examples (next).
 - **Examples open as copies** ([#182](https://github.com/brylie/LoomDSP/issues/182)). A file inside the app's **bundled examples folder** opens as an untitled patch with that content, named "<name> (example)" in the title. The app uses `examples/patches` beside the release executable (or beside `LoomDSP.app` on macOS) when that folder contains patches. Otherwise it uses the checkout's `examples/patches`. The release package puts a `.loomdsp-bundled-examples` marker in its patch folder. This identifies examples opened from the download folder even when macOS runs the app from a translocated copy. A file anywhere else is the player's own, even in a folder called `examples`, and Save writes it as usual. The app finds the folder once at start, and tests give it a temporary one. The copy is clean until edited. Save asks for a place, as Save As does, starting in the Documents folder. This applies to File > Open, a path given on the command line, and the control channel's `open`. *Why:* examples are templates. Saving over one rewrites the file as canonical RON, which drops its comments (`Patch::to_ron` does not keep them) and leaves a diff in the repository. Matching the bundled folder, and not any folder name, keeps a player's own `~/Music/examples/set.ron` working with plain Save. Keeping comments would need a comment-preserving RON editor, which is out of scope. To change an example on purpose, use Save As and choose the same path. The `<name>.saved.ron` behaviour went away earlier.
@@ -124,12 +124,21 @@ A failed save keeps the unsaved mark. A save writes to a temporary file in the s
 - [x] Opening a file in some other folder that happens to be named `examples` is not a copy, and Save writes it in place (test). (`example_tests.rs`)
 - [ ] `cargo deny check` passes with the dialog crate on macOS, Windows, and Linux (CI).
 
+## Recent files, the last folder, and dropping a file
+
+**Status:** Agreed, P2 ([#184](https://github.com/brylie/LoomDSP/issues/184), 2026-11-01).
+
+- **File > Open Recent** lists the last 10 patches opened or saved, newest first, by file name with the folder as hover text. Choosing one opens it, asking first about unsaved changes, as Open does. A missing file is shown dimmed; choosing it removes it from the list, with a status message. Examples opened as copies are not listed.
+- **The last folder.** Open and Save dialogs start in the current file's folder; otherwise in the last folder used in a dialog; otherwise in the library folder ([your patches browser](patch-metadata.md#your-patches-browser)).
+- **Where they live:** `recent.ron` beside `preferences.ron` ([preferences](preferences.md)), written through a temporary file and a rename. *Why not the preferences file:* that file is written only when the player changes a preference, and the recent list changes with every open.
+- **Dropping files on the window.** One `.ron` file opens, with the unsaved-changes question. Several files open the first and say `Opened "<name>". Drop one patch at a time.` Any other file says `Only LoomDSP patches (.ron) can be opened here.` *Why open and not insert:* inserting is the module browser's job ([sub-patches](sub-patches.md#library)).
+- **Acceptance:** the list holds 10, newest first, and survives a restart; a missing file is dimmed and removed when chosen; the dialog starts in the remembered folder; dropping one file opens it after the question, several open the first, others show the message (tests, and a manual check of dropping on each platform).
+
 ## Out of scope
 
 - Several patches in several windows (later; needs one engine per window).
-- Recent files list and remembered folders. Autosave and crash recovery have their own spec: [autosave.md](autosave.md).
+- Autosave and crash recovery have their own spec: [autosave.md](autosave.md).
 - Embedded assets (FR-FILE-06) and migrations (FR-FILE-02, from the first release).
-- Drag a file onto the window to open it.
 
 ## Open points
 

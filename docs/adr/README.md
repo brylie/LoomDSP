@@ -66,3 +66,6 @@ The status line holds one of these values and nothing else. The date line is the
 | [0028](0028-app-accessibility-waits-for-iced.md) | App accessibility waits for AccessKit support in Iced | Deferred |
 | [0029](0029-module-families-and-a-shared-palette.md) | Module families and a shared palette | Accepted |
 | [0030](0030-panels-hide-controls-a-mode-does-not-use.md) | Panels hide the controls a mode does not use | Accepted |
+| [0031](0031-sub-patches-stored-as-definitions-and-flattened.md) | Sub-patches are stored as definitions and flattened before compiling | Accepted |
+| [0032](0032-module-data-in-typed-slots.md) | Module data lives in typed slots, with audio in a sidecar folder | Accepted |
+| [0033](0033-one-scale-and-tuning-per-patch.md) | One scale and tuning per patch, read by modules without cables | Accepted |

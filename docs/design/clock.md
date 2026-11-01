@@ -179,7 +179,7 @@ These details were settled while building the module.
 
 ## Rules
 
-**Status:** rules 1 to 6, 10, and 11 are Implemented; run state is saved as the Transport's `run` parameter ([#73](https://github.com/brylie/LoomDSP/issues/73)). Rule 8 holds for the jumps P1 has (a reset and a time signature change). Rules 7 to 9 are Draft.
+**Status:** rules 1 to 6, 10, and 11 are Implemented; run state is saved as the Transport's `run` parameter ([#73](https://github.com/brylie/LoomDSP/issues/73)). Rule 8 holds for the jumps P1 has (a reset and a time signature change). Rule 7 is Agreed for MIDI clock ([MIDI clock](#midi-clock), 2026-11-01) and Draft for the plugin host. Rules 8 and 9 are Draft.
 
 1. **One transport, owned by the engine.** Modules read it; only the transport source changes it. *Why:* every synced module must agree on where the bar starts.
 2. **Position is double precision.** Phases are converted to `f32` only at the end. *Why:* in `f32`, position loses sample accuracy after a few minutes. An hour-long set must stay in step.
@@ -193,6 +193,64 @@ These details were settled while building the module.
 
 10. **A time signature change is a jump, applied at once.** The engine applies it at the start of the next buffer, like any transport change. The position does not move; the bar grid does, so bar phase changes. The change counts as a jump: `jumped` is true for one call, the `jump` trigger fires once, and rule 8 applies, so no skipped bar triggers burst out. A stopped transport takes the change the same way. *Why:* it is the simplest rule that keeps every module honest. A module watching bar phase is told, instead of seeing a silent step. Applying it at the next bar line, as DAWs do, needs the engine to change the grid in the middle of a buffer, which breaks rule 4. A "wait for the bar" option can come later, from the control thread.
 11. **Run and reset inputs are read on a fixed grid.** When the Transport's `run` or `reset` input has a cable, the engine splits every block at multiples of 32 frames, counted from engine start, and handles the transport at the start of each segment of at most 32 frames. The module reads the inputs during a segment, and an edge it finds takes effect at the start of the next segment. So an edge takes effect 1 to 32 frames later (0.7 ms at 48 kHz), at any block size, and every phase is bit-identical at block sizes 1, 32, and 1024. With neither input connected, the engine does not split. *Why not split at the edge:* the edge is not known until the modules that make it have run, and those modules may read the transport. *Why a fixed grid:* the delay depends on the frame count, not on the buffer, so rule 5 holds. *Why not a longer grid:* a stop must feel immediate on stage.
+
+## Clock to phase
+
+**Status:** Agreed, P2 ([#116](https://github.com/brylie/LoomDSP/issues/116), 2026-11-01). Decides how LoomDSP multiplies a clock that arrives only as triggers: turn it into a phase, then multiply the phase as usual with Phase Scale and Phase Trigger. *Why:* every clock tool in LoomDSP works in the phase domain ([phase and cycles](../learn/phase-and-cycles.md)); this module is the one place that has to measure time.
+
+`loom.phase.from-clock` (MT-PHASE-09):
+
+| | |
+|---|---|
+| Input | `clock` (trigger, default 0) |
+| Outputs | `phase` (0 to 1 per clock period), `running` (gate) |
+| Parameters | none |
+| Panel | A light on `running` |
+
+- **Period:** the number of samples between the last two triggers. Until the second trigger there is no period: `phase` stays 0 and `running` is low.
+- **On each trigger,** `phase` snaps to 0 and the period becomes the latest measured one at once. *Why snap:* the output stays aligned with the input; a gradual correction would drift for a while after every change.
+- **Between triggers,** `phase` rises by `1 / period` per sample. If it reaches the end before the next trigger (the clock slowed down), it holds just below 1 until the trigger. *Why hold:* wrapping early would fire a multiplied trigger the input never asked for.
+- **Stopped:** after 2 periods with no trigger, `running` goes low and `phase` holds. The next trigger starts a new measurement, as at the start.
+- All timing is counted in samples, so the output is the same at any block size.
+
+## MIDI clock
+
+**Status:** Agreed, P2 ([#77](https://github.com/brylie/LoomDSP/issues/77), 2026-11-01). Requirements: FR-MIDI-07, FR-LIB-25.
+
+> I play with a drum machine. In Preferences I set the clock source to it. The Transport tile says "Following TR clock", my sequencers follow its tempo and its Start and Stop, and the LoomDSP clock goes on to my synth.
+
+### Following an external clock
+
+- **The source is a preference** (settled). Preferences > MIDI has **Clock source**: Internal (default), or one open MIDI input. *Why:* which device sends the clock is part of the rig and its cables, like the devices themselves ([preferences](preferences.md#audio-and-midi-devices)). A patch opened on another rig never follows a device that is not there.
+- **It replaces the internal transport completely** (rule 7). The Transport tile shows `Following <input> clock` and disables its tempo knob and Run toggle; the `run` and `reset` inputs are ignored while following.
+- **Messages:** Start sets the position to bar 1 and runs. Continue runs from the current position. Stop stops and holds. Song Position Pointer sets the position in sixteenth notes, as a jump (rule 8).
+- **Tempo** is the mean pulse interval over the last 24 pulses (one beat), shown on the tile. *Why:* single pulse intervals jitter by up to a buffer, because the desktop host stamps live MIDI at the start of a buffer ([MIDI learn](midi-learn.md#rules), rule 4).
+- **Position** follows the pulse count: each pulse is 1/24 of a beat. Between pulses the position moves at the smoothed tempo, and it never passes the next pulse's position before that pulse arrives. Position is still computed from an anchor (rule 5); each pulse moves the anchor.
+- **Clock loss** (settled): after 2 beats with no pulse and no Stop, the transport keeps running at the last tempo, and the status bar says `MIDI clock from "<input>" stopped. Running at 122.0 BPM.` When pulses return, it locks to them again at the next pulse, as a jump if the position differs by more than one pulse. *Why:* a loose cable must not stop the music on stage.
+- If the chosen input disconnects, the same rule applies, and the source returns to the input when it connects again ([device changes](device-changes.md)).
+
+### Sending clock
+
+- Preferences > MIDI lists MIDI outputs, each with a **Send clock** check box, off by default.
+- Each checked output gets 24 pulses per quarter note from the transport, Start on a run from bar 1, Continue on a run from elsewhere, Stop on a stop, and Song Position Pointer on every jump. It sends what the transport plays, also while following an external clock, so devices can be chained.
+- The engine computes each pulse's frame and writes it to a fixed-size queue; a host thread sends it at that time, offset by the output latency. *Why:* the audio thread does no I/O (AGENTS.md rule 1).
+- MIDI output devices, and sending notes and control changes, are FR-MIDI-04; this section opens outputs for clock only.
+
+### Acceptance criteria: clock to phase
+
+- [ ] Triggers every 1000 samples give a phase that rises by 0.001 per sample and wraps on each trigger; Phase Scale ×4 and Phase Trigger then fire every 250 samples (test).
+- [ ] Before the second trigger, `phase` is 0 and `running` is low; after 2 periods with no trigger, `running` goes low (test).
+- [ ] A late trigger leaves `phase` held below 1, with no early wrap (test).
+- [ ] The output is the same at block sizes 1, 77, and 512 (reference test).
+
+### Acceptance criteria: MIDI clock
+
+- [ ] A fake input sending pulses at 120 BPM gives a transport tempo of 120 within 0.1 BPM after one beat; Start, Stop, Continue, and Song Position Pointer act as above (tests with the fake host).
+- [ ] Following a clock, the bar phase reaches 0 within one buffer of the 96th pulse after Start (test).
+- [ ] Pulses that stop without a Stop leave the transport running at the last tempo, with the status message; returning pulses lock it again (test).
+- [ ] With Send clock on, a running transport at 120 BPM sends 48 pulses per second, and Start, Stop, Continue, and Song Position Pointer follow the transport (test with a fake output).
+- [ ] Following and sending add no allocation on the audio thread (`no_alloc` test).
+- [ ] Manual check with a hardware drum machine or a second app, in and out.
 
 ## Engine and API
 
@@ -292,7 +350,7 @@ The Transport module's parameters (tempo, time signature, run) are saved like an
 ### Out of scope for P1
 
 - Host transport (with plugin export, later; FR-LIB-25 covers it once export exists).
-- MIDI clock in and out (FR-MIDI-07, P2).
+- MIDI clock in and out. Now [MIDI clock](#midi-clock), P2.
 - Swing and shuffle.
 - Tempo changes over time, such as modulation curves over bars (FR-LIB-16, P3).
 - Tap tempo.

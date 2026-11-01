@@ -132,10 +132,19 @@ Golden-audio tests for whole patches, the other half of NFR-OSS-05 ([#93](https:
 - [x] Every built-in DSP module in `loom_modules::ALL` passes `check_reset_snaps_smoothing`.
 - [x] Every built-in DSP module in `loom_modules::ALL` passes `check_copy_state`, except seeded ones, which pass `check_copy_state_repeatable`. Copying allocates nothing (`no_alloc.rs`).
 
+## Reset returns a module to its start
+
+**Status:** Agreed, P2 ([#108](https://github.com/brylie/LoomDSP/issues/108), 2026-11-01).
+
+- **The rule:** after `reset()`, a module renders bit-identical to a new instance given the current parameters and `reset()` once. That is how the Controller starts every module ([live patching](live-patching.md), rule 7). So nothing glides after a reset, and state such as MIDI Note's last note and velocity is cleared (its gate is low).
+- **`Harness::check_reset()`** renders a module for 1 s with the test's inputs, calls `reset()`, renders again, and compares the second render with the first render of a new instance. It fails unless both are bit-identical.
+- `crates/loom-modules/tests/reset.rs` runs it on every built-in module. A module that cannot pass lists its exception here, with a reason; there are none yet.
+- *Why:* Panic ([panic](panic.md)) and a transport reset rely on `reset()`, and a module that keeps hidden state across it would play differently after a panic than after a load.
+- **Acceptance:** every built-in module passes `check_reset`, including MIDI Note and the seeded modules (test).
+
 ## Out of scope
 
 - Changing parameters, tempo, or the play state during a render. Use the engine tests in `loom-modules/tests/engine.rs`, or add it here when a module needs it.
-- Testing `reset` beyond `check_reset_snaps_smoothing`.
 - Plugin host tests.
 
 ## Open points

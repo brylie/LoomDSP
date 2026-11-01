@@ -45,11 +45,12 @@ Timing is phase-driven: a ramp from 0 to 1 sets where in a cycle a module is ([P
 | MT-PHASE-01 | Phasor | A rising 0 to 1 ramp at a set rate or musical division. | Timebase, Retrigger | P1 | FR-LIB-01 | Built in part (`loom.phase.generator`: rate set by pitch; musical divisions to come) |
 | MT-PHASE-02 | Phase scale | Runs a phase faster or slower by a whole-number ratio, and stays locked to it. | | P1 | FR-LIB-27 | Built (`loom.phase.scale`) |
 | MT-PHASE-03 | Phase trigger | Fires a trigger each time a phase wraps. | | P1 | FR-LIB-27 | Built (`loom.phase.trigger`) |
-| MT-PHASE-04 | Phase reset | Restarts a phase at zero on a trigger. | | P2 | FR-LIB-01 | Planned |
-| MT-PHASE-05 | Phase warp | Changes how a phase moves within each cycle without changing its period: offset, bend, S-curve, skew, reverse, mirror, and smoothing that keeps the wrap point. | | P2 | FR-LIB-01 | Planned |
+| MT-PHASE-04 | Phase reset | Restarts a phase at zero on a trigger. | | P2 | FR-LIB-01 | Specified ([P2 modules](../design/p2-modules.md)) |
+| MT-PHASE-05 | Phase warp | Changes how a phase moves within each cycle without changing its period: offset, bend, S-curve, skew, reverse, mirror, and smoothing that keeps the wrap point. | | P2 | FR-LIB-01 | Specified in part (shift and reverse, [P2 modules](../design/p2-modules.md)) |
 | MT-PHASE-06 | Phase split | Divides one cycle into N parts and outputs a phase for each part. | | P3 | New | Planned |
 | MT-PHASE-08 | Phase wrap and fold | Brings any signal into the 0 to 1 phase range, by wrapping it around or by folding it back at the edges. | | P1 | FR-LIB-01 | Built (`loom.phase.wrap`) |
 | MT-PHASE-07 | Span phase | A phase that covers N bars and is anchored to bar 1, so it has the same value at the same musical time after any jump. | | P3 | New | Planned |
+| MT-PHASE-09 | Clock to phase | Turns a clock that arrives as triggers into a phase, by measuring the time between them, so it can be multiplied and divided like any phase. | | P2 | FR-LIB-27 | Specified ([clock](../design/clock.md#clock-to-phase)) |
 
 ## Sound sources
 
@@ -125,8 +126,8 @@ Modulation assignments already scale and offset any parameter (ADR-0014), so the
 | MT-MIX-01 | Mixer | Sums several inputs, with level, pan, and mute per channel. At unity gain it is a quick merge. P1 builds level and mute. Pan comes later, with stereo signals. | | P1 | FR-LIB-05 | Built (`loom.mix.mixer`) |
 | MT-MIX-02 | Crossfade | Blends two signals by a control, with an equal-power or linear law. | | P1 | FR-LIB-05 | Built (`loom.mix.crossfade`) |
 | MT-MIX-03 | Stereo tool | Pans, sets width, converts between left/right and mid/side, and splits or joins channels. P1 builds join and split. Pan, width, and mid/side come later. | | P1 | FR-SIG-07 | Planned |
-| MT-ROUTE-01 | Selector | Picks one of N inputs. It steps to the next on a trigger, jumps to the input a control value points at, or picks at random. | Seed, Smoothing | P2 | New | Planned |
-| MT-ROUTE-02 | Distributor | Sends one input to one of N outputs, with the same three ways to choose. | Seed | P2 | New | Planned |
+| MT-ROUTE-01 | Selector | Picks one of N inputs. It steps to the next on a trigger, jumps to the input a control value points at, or picks at random. | Seed, Smoothing | P2 | FR-LIB-30 | Specified ([P2 modules](../design/p2-modules.md)) |
+| MT-ROUTE-02 | Distributor | Sends one input to one of N outputs, with the same three ways to choose. | Seed | P2 | FR-LIB-30 | Planned |
 | MT-ROUTE-03 | Mute | Silences a signal on a button or gate, with a short fade so it never clicks. | | P2 | New | Planned |
 | MT-ROUTE-04 | Matrix | Connects N inputs to M outputs with a level and a mute at each crossing. Presets cover a plain multiple, a mutable multiple, and a router that rotates by one place on each trigger. | | P3 | New | Planned |
 | MT-ROUTE-05 | Send and receive | Passes a signal by name without a cable. Needs a decision first, because hidden routing makes patches harder to read (ADR-0014 weighed the same risk). | | P4 | New | Planned |
@@ -160,9 +161,9 @@ All random modules take a seed, so a patch sounds the same each time it loads (N
 
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
-| MT-RAND-01 | Random | A new random value on each trigger, within a range. In walk mode it moves by small steps instead, in one or two dimensions. | Seed, Smoothing | P2 | FR-LIB-12 | Planned |
+| MT-RAND-01 | Random | A new random value on each trigger, within a range. In walk mode it moves by small steps instead, in one or two dimensions. | Seed, Smoothing | P2 | FR-LIB-12 | Specified ([P2 modules](../design/p2-modules.md)) |
 | MT-RAND-02 | Sample and hold | Captures the input on a trigger and holds it, or follows the input while a gate is high. | | P1 | FR-LIB-04 | Built (`loom.rand.sample-hold`) |
-| MT-RAND-03 | Chance | Passes each trigger with a set probability, or sends it to output A or B by chance. Several lanes in one module. | Seed | P2 | FR-LIB-22 | Planned |
+| MT-RAND-03 | Chance | Passes each trigger with a set probability, or sends it to output A or B by chance. Several lanes in one module. | Seed | P2 | FR-LIB-22 | Specified ([P2 modules](../design/p2-modules.md)) |
 
 ## Math and logic
 
@@ -187,7 +188,7 @@ All random modules take a seed, so a patch sounds the same each time it loads (N
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
 | MT-GATE-01 | Gate shaper | Sets the length of a gate, delays it, or turns its start or end into a trigger. | Timebase | P2 | New | Planned |
-| MT-GATE-02 | Euclidean rhythm | Spreads N hits as evenly as possible over M steps, with rotation. | | P2 | FR-LIB-08 | Planned |
+| MT-GATE-02 | Euclidean rhythm | Spreads N hits as evenly as possible over M steps, with rotation. | | P2 | FR-LIB-08 | Specified ([P2 modules](../design/p2-modules.md)) |
 | MT-GATE-03 | Repeater | Repeats a gate at a rate while it is high, or fires a quick burst of N triggers from one trigger. | Timebase | P3 | New | Planned |
 
 ## Pitch and scale
@@ -195,15 +196,15 @@ All random modules take a seed, so a patch sounds the same each time it loads (N
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
 | MT-PITCH-01 | Pitch math | Moves a pitch by octaves, semitones, scale steps, or a frequency ratio; sums several pitches; or spreads a pair around one pitch. | Scale awareness | P2 | FR-LIB-13 | Planned |
-| MT-PITCH-02 | Pitch quantiser | Snaps a pitch signal to the nearest note of a scale, or of the notes being held. | Scale awareness | P2 | FR-LIB-29 | Planned |
-| MT-PITCH-03 | Scale and tuning | Sets the patch-wide scale and tuning (equal divisions, just ratios, imported tuning files) that pitch modules follow. Can be changed live by a trigger. | | P2 | FR-LIB-29 | Planned |
+| MT-PITCH-02 | Pitch quantiser | Snaps a pitch signal to the nearest note of a scale, or of the notes being held. | Scale awareness | P2 | FR-LIB-29 | Specified ([P2 modules](../design/p2-modules.md)) |
+| MT-PITCH-03 | Scale and tuning | Sets the patch-wide scale and tuning (equal divisions, just ratios, imported tuning files) that pitch modules follow. Can be changed live by a trigger. | | P2 | FR-LIB-29 | Specified ([scale and tuning](../design/scale-and-tuning.md)) |
 | MT-PITCH-04 | Pitch tracker | Estimates the pitch of incoming audio. | | P4 | New | Planned |
 
 ## Sequencers and generators
 
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
-| MT-SEQ-01 | Multi-lane sequencer | Steps through stored values in one or more lanes. Each lane has a type (value, gate, pitch, or curve), a length, a direction, and a read mode: by clock, by phase, or by a control value that points at a step. Steps can carry accent, chance, and repeat. P2 builds lanes that share one length and rate (FR-LIB-08). Lanes with their own length, rate, and direction, which give polymetric patterns, come in P3 (FR-LIB-14). | Timebase, Retrigger, Seed, Scale awareness | P2 | FR-LIB-08, FR-LIB-14 | Planned |
+| MT-SEQ-01 | Multi-lane sequencer | Steps through stored values in one or more lanes. Each lane has a type (value, gate, pitch, or curve), a length, a direction, and a read mode: by clock, by phase, or by a control value that points at a step. Steps can carry accent, chance, and repeat. P2 builds four lanes, each with its own length (polymeter), with step attributes (FR-LIB-08). Per-lane rate and direction come in P3 (FR-LIB-14). | Timebase, Retrigger, Seed, Scale awareness | P2 | FR-LIB-08, FR-LIB-14 | Specified in part (P2, [P2 modules](../design/p2-modules.md)) |
 | MT-SEQ-02 | Parameter sequencer | Each step sets its own group of parameter values elsewhere in the patch. | Timebase | P3 | FR-LIB-12 | Planned |
 | MT-SEQ-03 | Piano roll | Notes of any length and pitch in a loop, drawn or recorded. | Timebase, Scale awareness | P3 | New | Planned |
 | MT-SEQ-04 | Generator | Makes melodies or rhythms from a chosen algorithm: random notes in a scale, a random walk, a looping pattern that slowly mutates, a Markov chain, or rule systems such as L-systems and cellular automata. | Seed, Scale awareness, Timebase | P3 | FR-LIB-28 | Planned |
@@ -265,11 +266,11 @@ These depend on how notes travel on cables (OQ-16).
 |---|---|---|---|---|---|---|
 | MT-VIEW-01 | Probe | Shows signals on the tile: over time (scope), one against another (XY), or as a number in chosen units. | | P1 | FR-LIB-17 | Scope mode built (`loom.display.scope`, [panels](../design/panels.md#scope-module)); trace drawing specified in [panels](../design/panels.md#drawing-the-scope-trace). XY mode specified as `loom.display.xy` ([panel widgets](../design/panel-widgets.md#xy-scope)), moved to P2 ([#280](https://github.com/brylie/LoomDSP/issues/280)) |
 | MT-VIEW-02 | Level meter | Shows peak and average level. | | P1 | FR-LIB-17 | Built (`loom.display.meter`) |
-| MT-VIEW-03 | Spectrum | Shows the frequency content of a signal. | | P2 | FR-LIB-17 | Planned |
+| MT-VIEW-03 | Spectrum | Shows the frequency content of a signal. | | P2 | FR-LIB-17 | Specified ([P2 modules](../design/p2-modules.md)) |
 | MT-VIEW-04 | Note monitor | Shows incoming notes and controller values, for checking a setup. | | P2 | New | Planned |
 | MT-VIEW-05 | Tuner | Shows the pitch of a signal against the nearest note. | | P4 | New | Planned |
 | MT-UI-01 | Button | A large button that outputs a toggle or momentary gate. | | P1 | FR-LIB-27 | Built (`loom.ui.button`) |
-| MT-UI-02 | Macro | A knob or slider whose value is a signal. One macro can drive many parameters through modulation assignments. | Smoothing | P2 | FR-LIB-12 | Planned |
+| MT-UI-02 | Macro | A knob or slider whose value is a signal. One macro can drive many parameters through modulation assignments. | Smoothing | P2 | FR-LIB-12 | Specified ([P2 modules](../design/p2-modules.md)) |
 | MT-UI-03 | XY and vector pad | A two-axis control, or one point that blends between several sources. | Smoothing | P2 | FR-LIB-12 | Planned |
 | MT-UI-04 | Keyboard | Plays notes from the canvas or a front panel. | | P2 | New | Planned |
 
@@ -277,9 +278,9 @@ These depend on how notes travel on cables (OQ-16).
 
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
-| MT-STRUCT-01 | Sub-patch | A group of modules collapsed into one, with its own ports and panel. Modes: single, layer (all members run and mix), select (one member runs, chosen by a control), and stack (N copies, each with its own spread values). | Spread | P2 | FR-ENCAP-01, FR-ENCAP-10 | Planned |
-| MT-STRUCT-02 | Patch input and output | Ports inside a sub-patch that become its outer ports. | | P2 | FR-ENCAP-01 | Planned |
-| MT-STRUCT-03 | Slot | A place inside an abstraction that holds any module or sub-patch that fills a given role. Swapped from a menu, with cables kept. | | P2 | FR-ENCAP-08 | Planned |
+| MT-STRUCT-01 | Sub-patch | A group of modules collapsed into one, with its own ports and panel. Modes: single, layer (all members run and mix), select (one member runs, chosen by a control), and stack (N copies, each with its own spread values). | Spread | P2 | FR-ENCAP-01, FR-ENCAP-10 | Specified ([sub-patches](../design/sub-patches.md)) |
+| MT-STRUCT-02 | Patch input and output | Ports inside a sub-patch that become its outer ports. | | P2 | FR-ENCAP-01 | Specified ([sub-patches](../design/sub-patches.md)) |
+| MT-STRUCT-03 | Slot | A place inside an abstraction that holds any module or sub-patch that fills a given role. Swapped from a menu, with cables kept. | | P2 | FR-ENCAP-08 | Specified ([sub-patches](../design/sub-patches.md)) |
 | MT-STRUCT-04 | Effect chain (abstraction) | Several effect slots in series, each with its own mix. | | P2 | FR-ENCAP-08 | Planned |
 | MT-ARR-01 | Note cycle | Plays a stored note pattern that is N bars long, read from the bar phase, and fires an end trigger. | | P3 | FR-LIB-20 | Specified ([arrangement](../design/arrangement.md)) |
 | MT-ARR-02 | Audio cycle | Plays a stored audio loop that is N bars long, read from the bar phase, and fires an end trigger. | | P3 | FR-LIB-20 | Specified ([arrangement](../design/arrangement.md)) |
@@ -353,10 +354,10 @@ A user's own sub-patch can declare a role and then fill any matching slot (FR-EN
 | Phase | Types | Of which new (no requirement yet) |
 |---|---|---|
 | P0 | 3 | 0 |
-| P1 | 34 | 0 |
-| P2 | 57 | 16 |
+| P1 | 35 | 0 |
+| P2 | 57 | 13 |
 | P3 | 32 | 13 |
 | P4 | 46 | 30 |
-| **Total** | **172** | **59** |
+| **Total** | **173** | **56** |
 
 Plus 11 traits and 7 initial roles. The summary is counted from the tables above; update it when entries change.

@@ -3,7 +3,7 @@
 The baseline set of panel widgets that LoomDSP modules, sub-patches, and front panels share, so each kind of interaction has one common way to work.
 
 - **Kind:** living specification.
-- **Status:** Draft, except the XY scope, [read-only shape preview](#read-only-shape-preview), and compact [select list](#select-list) sections, which are Agreed. The widgets that exist today (knob, toggle, radio buttons, button, light, meter) are specified and Implemented in [panels.md](panels.md#module-panels-on-tiles-p1). Other widgets in this document are not yet ready to build.
+- **Status:** Agreed, P2. The plan and its open points were settled with the maintainer on 2026-11-01 ([#278](https://github.com/brylie/LoomDSP/issues/278)); see [Settled in review](#settled-in-review). The [read-only shape preview](#read-only-shape-preview) and the compact [select list](#select-list) are Implemented. The widgets that exist today (knob, toggle, radio buttons, button, light, meter) are specified and Implemented in [panels.md](panels.md#module-panels-on-tiles-p1). Sizes marked "starting size" may be tuned while building, against the estimated label widths ([#120](https://github.com/brylie/LoomDSP/issues/120)), without a spec change.
 - **Decision behind it:** [ADR-0024](../adr/0024-widgets-follow-the-kind-of-value.md) (widgets follow the kind of value, and structured data has shared kinds with one editor each). Builds on [ADR-0013](../adr/0013-modules-carry-their-own-panel.md) (modules carry their own panel).
 - **Use case and requirements:** UC2, UC3. FR-PANEL-02, FR-PANEL-03, FR-PANEL-04, FR-LIB-02, FR-LIB-12, FR-LIB-16, FR-LIB-17, FR-LIB-18, FR-LIB-19, FR-LIB-29, FR-MOD-04, FR-VIS-02, FR-VIS-03, NFR-UX-01, NFR-UX-02, NFR-UX-03.
 - **Builds on:** [panels.md](panels.md) (widgets, layout, interaction, level of detail, redraw), [modulation.md](modulation.md) (range arcs, dots, live value), [telemetry.md](telemetry.md) (probes), [port and parameter text](port-and-parameter-text.md) (labels and descriptions).
@@ -31,9 +31,9 @@ The panels spec already lists a widget set ([panels.md, Widgets](panels.md#widge
 - LFO shows one cycle of the selected shape. Rate and sync change playback, not the shape of that cycle.
 - Ladder shows its small-signal low-pass response from 20 Hz to 20 kHz on a logarithmic horizontal axis and -60 to +12 dB vertically. The model uses the selected number of one-pole stages and its feedback gain, including the bass reduction at high resonance. Drive and nonlinear saturation are omitted because they depend on the input signal. The preview is not a measurement of the live audio. See [How a ladder filter sings](../learn/ladder-filter.md).
 - At middle zoom the shape remains visible without a readable caption; at far zoom the panel is hidden by the existing level-of-detail rules. No separate timer runs for these static shapes.
-- Knobs remain the default control for a single ranged parameter on built-in module tiles. A fader needs a specific task, such as comparing mixer levels or a user-arranged performance panel. The draft fader section does not change that default.
+- Knobs remain the default control for a single ranged parameter on built-in module tiles. A fader needs a specific task, such as comparing mixer levels or a user-arranged performance panel. The [fader](#fader) section does not change that default.
 
-The larger editor, stored-curve editing, parameter handles, and faders remain draft. They need their own agreed interaction rules before implementation.
+The [larger view](#larger-view), stored-curve editing ([Curve](#curve)), and [faders](#fader) are agreed in their own sections. Handles bound to parameters are deferred ([Open points](#open-points)).
 
 ## The baseline set
 
@@ -87,7 +87,7 @@ Structured data that a module keeps beyond its parameters comes in three shared 
 | Data kind | What it holds | Editor | Used by, for example |
 |---|---|---|---|
 | Curve | Up to 64 points with a bend per segment, and optional named markers | Curve | Segment envelope, curve reader, drawn transfer curve, drawn LFO shape |
-| Pattern | Up to 8 lanes of up to 64 steps. Each lane holds gates or values. | Step grid | Multi-lane sequencer, parameter sequencer, matrix, a set of pitch classes (a scale) |
+| Pattern | Up to 8 lanes of up to 64 steps. Each lane holds gates or values. A slot can also give each step attributes: chance (0 to 1), repeat (1 to 4), and accent (on or off). | Step grid | Multi-lane sequencer, parameter sequencer, matrix, a set of pitch classes (a scale) |
 | Buffer | Audio frames, mono or stereo, up to a maximum length the module declares. Up to 64 slice points. A module can set a frame length, so the buffer holds a table of frames. | Waveform | Buffer, buffer reader, slice map, grain engine, audio cycle |
 
 - A module declares its data slots by name and kind, as it declares parameters. A widget binds to a slot by name. The registry refuses a curve widget on a pattern slot.
@@ -130,6 +130,29 @@ These rules hold for every widget. Each widget section below says only what diff
 7. **Draw only what changes, only when seen.** Live widgets (lights, readouts, meters, scopes, playheads) get data only while on screen at a zoom where they are drawn, and wake the UI only when what they draw changes. Data views (curve, step grid, waveform) build their GPU data when the data changes, never per frame (ADR-0010, panels.md, Redraw).
 8. **Colour is never the only signal.** States that colour shows (on and off, modulated, playing step, clipping) also differ by shape, fill, or position (NFR-UX-03). *Why:* colour vision deficiency is common, and stage light changes colours.
 9. **Every widget has a middle-zoom shape.** At middle zoom, text becomes bars and each widget keeps a simple shape that still shows its state. Far out, widgets are not drawn (panels.md, Level of detail).
+10. **One-number widgets take typed values.** See [Typing a value](#typing-a-value).
+11. **Data editors open a larger view.** See [Larger view](#larger-view).
+
+### Typing a value
+
+**Settled:** every one-number widget (knob, fader, number) takes a typed value when it has keyboard focus. *Why:* an exact value, such as a tempo of 128 or a cutoff of 440 Hz, is faster to type than to drag.
+
+- **Start:** with the widget focused, typing a digit, a minus sign, or a decimal point opens a small text field over the widget, holding that character. Enter on a focused one-number widget opens the field holding the current value, selected. Clicking does not open it. *Why:* double-click already resets, and a drag must stay a drag. Keyboard focus comes from Tab or from clicking the widget.
+- **What it accepts:** a number in the parameter's display unit, optionally followed by that unit ("440", "440 Hz", "-6 dB"). A `k` after the number multiplies by 1000 ("2k" for 2000 Hz). A comma is read as a decimal point. *Why:* players type what the label shows, in their own locale's habit.
+- **Commit:** Enter commits. The value is rounded for a whole-number parameter and clamped to the parameter's range. If it is outside the selected [control range](control-ranges.md), the smallest range that holds it is selected, as when a patch loads. One commit is one undo step.
+- **Cancel:** Escape closes the field and changes nothing. So does moving focus away.
+- **Bad text:** text that is not a number in that unit gives the field an outline in the warning style with a short reason in its hover text ("Not a number in Hz"). Enter then does nothing. *Why:* a typo must never become a value.
+- **MIDI learn and modulation** are unchanged. A typed value sets the base value, as a drag does.
+- The inspector's value field, when it is built, follows the same rules.
+
+### Larger view
+
+**Settled:** curve, step grid, and waveform open a larger editor over the canvas.
+
+- A small corner mark (a shape, not only a colour, rule 8) on the widget opens it. On a waveform, double-clicking the outline opens it too, because the outline is a display (rule 1). A curve and a step grid have no display area, so they use the corner mark only. With the widget focused, **Ctrl+Enter** (Cmd+Enter) opens it.
+- The view has a fixed screen size (at least 640 × 360 pixels, and up to 80% of the window), whatever the canvas zoom. It edits the same data with the same gestures, keyboard, and undo as the widget. The widget on the tile follows every edit at once.
+- Escape, the close mark, or a click outside the view closes it. Audio keeps playing.
+- *Why an overlay and not only a bigger tile:* a bigger tile pushes the patch around, and a fixed screen size is readable at any zoom.
 
 ## One number
 
@@ -146,7 +169,7 @@ A straight track with a handle, vertical or horizontal. Same binding, mapping, a
 - **Modulation:** a bar beside the track in the modulation colour, from the lowest to the highest reachable value. The live value is a dot on that bar. Dragging the bar changes the depth of one assignment, as dragging a knob's arc does ([modulation.md, Arc drag](modulation.md#arc-drag)).
 - **Keyboard:** as a knob.
 - **Middle zoom:** track and handle, no text.
-- **Size (leaning):** 2 × 6 grid units vertical, 6 × 2 horizontal.
+- **Size (starting size):** 2 × 6 grid units vertical, 6 × 2 horizontal.
 - *Why a fader as well as a knob:* a row of faders shows several levels at a glance, as on a mixing desk, and a long throw gives finer control on a front panel.
 
 ### Number
@@ -156,9 +179,9 @@ A value shown as text, such as "120.0 BPM" or "7". For parameters where the exac
 - **Binds to:** any parameter. Most useful for whole numbers with many values, such as a division, a step count, or a seed, and for tempo.
 - **Drag:** vertical, relative, through the parameter's mapping, like a knob. Whole-number parameters step by one.
 - **Modulation:** a dot, as on a toggle. The text shows the base value. *Why not the live value:* text that changes every frame cannot be read. The inspector and a readout can show it.
-- **Keyboard:** as a knob. Typing a value is done in the inspector for now (see Open points).
+- **Keyboard:** as a knob, and takes typed values ([Typing a value](#typing-a-value)).
 - **Middle zoom:** a box with a bar for the text.
-- **Size (leaning):** 3 × 2.
+- **Size (starting size):** 3 × 2.
 
 ## One choice
 
@@ -170,21 +193,21 @@ A whole-number parameter can name its values, such as "6 dB", "12 dB", "18 dB", 
 
 ### Select list
 
-**Status:** Agreed for named whole-number choices on a tile. It is for choice lists too long or too wordy for a [segmented control](#segmented-control), such as LFO Shape. The closed selector sits in the choices row, under the module's result view when it has one. The list opens at a readable screen size above or below the box, stays inside the canvas, and marks the current choice. Click, keyboard, drag, reset, modulation, and MIDI learn follow the rules below. Long lists with scrolling remain draft; this first slice supports up to 12 choices.
+**Status:** Agreed for named whole-number choices on a tile. It is for choice lists too long or too wordy for a [segmented control](#segmented-control), such as LFO Shape. The closed selector sits in the choices row, under the module's result view when it has one. The list opens at a readable screen size above or below the box, stays inside the canvas, and marks the current choice. Click, keyboard, drag, reset, modulation, and MIDI learn follow the rules below. Lists longer than 12 choices scroll, and in an open list, typing a letter jumps to the next choice that starts with it (type-ahead).
 
 The current choice is shown as text. Clicking it shows the other choices in a list.
 
 - **Binds to:** a whole-number parameter. Its choice names, or its numbers with the unit.
 - **Closed:** a box with the current choice and a small down-pointing mark at the right end, which says "there is a list here" without colour.
 - **Click:** opens the list. The list shows every choice, the current one marked by a tick and a filled row. It opens below the box, or above when there is no room below, and always inside the canvas. Clicking a choice picks it and closes the list: one undo step. Clicking outside the list, pressing Escape, panning, or zooming closes it without a change.
-- **List size:** fixed screen size with 12 px text, whatever the zoom. This first slice accepts at most 12 choices. A longer scrolling list is a later extension. *Why fixed size:* the list is for reading and picking, so it must be readable at middle zoom.
+- **List size:** fixed screen size with 12 px text, whatever the zoom. Up to 12 rows show at once; a longer list scrolls inside that size. *Why fixed size:* the list is for reading and picking, so it must be readable at middle zoom.
 - **Drag on the closed box:** moves the tile, as on toggles and radio buttons (rule 1). *Why not step through the choices:* a select list is a choice control, and choice controls do not change on a drag. A performer sweeps through choices with a MIDI controller or the arrow keys instead.
 - **Double-click:** resets to the default.
 - **Modulation:** a dot, as on radio buttons. The box shows the base choice.
 - **Keyboard:** focused, Up and Down step the choice at once, as with every whole-number control. Space or Enter opens the list. This differs on purpose from toggles and radio buttons, where Space or Enter picks the next option. *Why:* a select list is used when there are many choices, so stepping one at a time with Space is slow, and Up and Down already step. In the list, Up and Down move the highlight, Enter picks, and Escape closes without a change.
 - **MIDI learn:** a controller sweeps through the choices, as on radio buttons.
 - **Middle zoom:** the box, a bar for the text, and the mark.
-- **Size (leaning):** 6 × 2. The caption is above or below the box, as for a knob.
+- **Size (starting size):** 6 × 2. The caption is above or below the box, as for a knob.
 
 ### Segmented control
 
@@ -230,7 +253,7 @@ A square area with a point. The point's horizontal position is one parameter, it
 - **Keyboard:** one point, so no inside (rule 4) is needed. Left and Right change `x`, Up and Down change `y`, in 1% steps, 0.1% with Shift.
 - **MIDI learn and hover text:** per axis. Each edge of the pad has the hover text of its parameter. Learn for each axis is set in the inspector.
 - **Middle zoom:** the square and the point.
-- **Size (leaning):** 6 × 6, resizable once tiles are ([#61](https://github.com/brylie/LoomDSP/issues/61)).
+- **Size (starting size):** 6 × 6, resizable once tiles are ([#61](https://github.com/brylie/LoomDSP/issues/61)).
 
 ### Range
 
@@ -247,7 +270,7 @@ A track with two handles, for a low and a high value on the same scale. The band
 - **Screen reader:** the label and both values in the parameter's units, such as "Range, 0.20 to 0.70".
 - **MIDI learn and hover text:** per handle, as on the XY pad.
 - **Middle zoom:** the track and the band.
-- **Size (leaning):** 6 × 2 horizontal, or 2 × 6 vertical.
+- **Size (starting size):** 6 × 2 horizontal, or 2 × 6 vertical.
 - *Why one widget and not two knobs:* the band shows the span at a glance, and a drag can never cross the two ends.
 
 ## Module state
@@ -265,7 +288,7 @@ A display value shown as text: a count, a current step, a detected pitch, a posi
 - **Pointer:** a display. Pressing or dragging selects or moves the tile.
 - **Screen reader:** reads the text, but does not announce each change. *Why:* a value read out 10 times a second would drown everything else.
 - **Middle zoom:** a bar for the text.
-- **Size (leaning):** 3 × 2, or 6 × 2 for longer text.
+- **Size (starting size):** 3 × 2, or 6 × 2 for longer text.
 
 ### Meter on a display value
 
@@ -281,7 +304,7 @@ Specified in [panels.md](panels.md#scope-module), built in [#60](https://github.
 
 ### XY scope
 
-**Status:** Agreed for P2 ([#280](https://github.com/brylie/LoomDSP/issues/280)). This is the only widget in this document that is ready to build; the rest stays Draft.
+**Status:** Agreed for P2 ([#280](https://github.com/brylie/LoomDSP/issues/280)).
 
 One signal against another: the first moves the trace left and right, the second up and down. A circle means two sines a quarter cycle apart. A line means the two signals are the same. A stereo signal shows how wide it is.
 
@@ -311,9 +334,29 @@ One signal against another: the first moves the trace left and right, the second
 - **Explainer:** `docs/learn/reading-an-xy-scope.md` (phase, stereo width, and why a circle means a quarter cycle), written with the widget and linked from this section and the module's help.
 - **Acceptance criteria**, following the checklist in [Acceptance criteria](#acceptance-criteria): the registry refuses an XY scope bound to anything but two outputs of its own module; a sine on `x` and a quarter-cycle-later sine on `y` draw a circle (geometry test on the point list); equal signals draw a diagonal and, with `rotate`, a vertical line; points outside `range` clamp to the edge and never wrap; two samples in a trace always come from the same block (paired-probe test); the widget is in `App::ui_snapshot`; middle zoom draws the frame and one point; a silent or still signal draws no frames; the widget is on a test module from [#208](https://github.com/brylie/LoomDSP/issues/208).
 
+### Level history
+
+How loud a signal has been over the last seconds ([#97](https://github.com/brylie/LoomDSP/issues/97)).
+
+- **Binds to:** an output, through the same meter probe as the [meter](panels.md#meter-widget).
+- **Drawing:** the RMS level from −60 to 0 dB over a time window, newest at the right, as a filled shape; the peak as a lighter line above it. Colour is not the only signal: peak and RMS differ in fill (rule 8).
+- **Data:** the telemetry thread keeps the history, one column per 1/100 of the window, and wakes the UI only when a column it would draw changes. A silent history draws no frames (rule 7).
+- **Pointer:** a display (rule 1). **Middle zoom:** the RMS shape only. **Starting size:** 9 × 3, growable.
+- **Used by** the Level Meter (below).
+
+**Level Meter options** (settled; the module is in [panels](panels.md#level-meter-module)): `view`: 0 Meter (default), 1 Meter and history. `window`: 0 1 s, 1 5 s (default), 2 30 s. Both are choices, kept in the inspector. With history, the tile grows to hold a level history beside the meter. *Why an option and not a new module:* it is the same probe and the same job; the merge rule of ADR-0017 makes it one type with a setting.
+
 ### Spectrum
 
-Proposed in [#109](https://github.com/brylie/LoomDSP/issues/109). It belongs to this group and follows its rules.
+The frequency content of a signal ([#109](https://github.com/brylie/LoomDSP/issues/109)). The module is in [P2 modules](p2-modules.md#spectrum-mt-view-03).
+
+- **Binds to:** an output, through a scope probe ([telemetry](telemetry.md)). The FFT runs on the app's telemetry thread, never the audio thread.
+- **Analysis:** 4096 points, Hann window, half overlap (about 12 Hz per bin at 48 kHz). The FFT comes from the `rustfft` crate (MIT or Apache-2.0), used in `loom-app` only, so the engine crates stay portable (AGENTS.md rule 6).
+- **Drawing:** one line, log frequency from 20 Hz to 20 kHz across, −90 to 0 dB up. Bins are reduced to one value per drawn column (the highest), so low and high frequencies read alike. After a peak, the line falls at 20 dB per second. *Why:* a raw spectrum flickers too fast to read.
+- **Tilt:** Flat, or +4.5 dB per octave around 1 kHz, so a full mix reads closer to level across the range.
+- **Hold:** an optional peak line that stays for 2 s, then falls at 20 dB per second.
+- **Data and redraw:** the thread sends the UI new columns only when the drawn line changes. A silent spectrum draws no frames (rule 7).
+- **Pointer:** a display. **Middle zoom:** the line only, no grid. **Starting size:** 9 × 5, growable.
 
 ## Shapes and data
 
@@ -348,15 +391,16 @@ One widget draws and edits every curve: envelope shapes, transfer curves, drawn 
 
 *Why click adds and double-click removes:* double-click means "back to the default" everywhere (rule 1). A curve's default is to have no extra point there, and a segment's default bend is straight.
 
-*Why double-click on empty space does not open the larger view, as on a display:* empty space in a curve is part of an editor, not a display. Its first click has already added a point. The curve's larger view opens from its corner mark (see Open points).
+*Why double-click on empty space does not open the larger view, as on a display:* empty space in a curve is part of an editor, not a display. Its first click has already added a point. The curve's larger view opens from its corner mark ([Larger view](#larger-view)).
 
 - **Live position:** a module that reads the curve publishes where it reads, as a display value from 0 to 1. The curve draws a thin vertical line there and a dot where it meets the curve. The line moves with rule 7.
-- **Modulation:** not shown on the data (rule 3). For a shape from parameters, the shape follows the base values. See Open points for a live shape.
+- **Modulation:** not shown on the data (rule 3). For a shape from parameters, the shape follows the base values. While any of those parameters is modulated, the shape at the live modulated values is drawn as well, as a thin line in the modulation colour, dashed (rule 8). It reads the live value table ([modulation.md, Live value](modulation.md#live-value)) and is sampled on the control thread when the live values change, with rule 7. *Why:* the player sees what the module plays now, and needs no new engine data.
+- **Snap:** holding Ctrl (Cmd) while dragging a point snaps its `x` and `y` to a grid. The module declares the grid: 16 divisions by default; a curve that runs over bars snaps `x` to the bar's beats times 4, so it follows the time signature. Releasing the key drags freely again. The grid is drawn faintly only while the key is held.
 - **Keyboard (rule 4):** Enter goes inside and selects the first point. Left and Right move between points and segments. Space or Enter grabs; then arrows move a point, or Up and Down change a segment's bend; Enter or Escape lets go. The plus key adds a point in the middle of the selected segment. Delete removes the selected point.
 - **Screen reader:** each point reads as "point 3 of 7, time 0.25, level 0.8" in the module's units.
 - **Undo:** one step per gesture or key press.
 - **Middle zoom:** the curve line only. No points or flags.
-- **Size (leaning):** at least 9 × 6. Editing small curves on a tile is cramped, so the curve also opens in a larger view (see Open points).
+- **Size (starting size):** at least 9 × 6. Editing small curves on a tile is cramped, so the curve also opens in a [larger view](#larger-view).
 
 ### Step grid
 
@@ -373,14 +417,15 @@ Rows of steps. Each row (lane) holds gates or values. A column shows the playing
 - **Keyboard (rule 4):** Enter goes inside. Arrows move between cells. Space flips a gate cell. On a value cell, Space or Enter grabs it, Up and Down change it, and Enter or Escape lets go.
 - **Modulation:** cells are data and are not modulated (rule 3).
 - **Middle zoom:** cells as filled or empty shapes, the playing column outlined.
-- **Size (leaning):** one grid unit per step, two per lane, plus a row for the step marker. Lanes longer than the tile scroll sideways, or show in the larger view.
+- **Size (starting size):** one grid unit per step, two per lane, plus a row for the step marker. Lanes longer than the tile scroll sideways, or show in the [larger view](#larger-view).
 - **Layouts.** The panel picks one. Gestures, keyboard, screen reader text, and data are the same in every layout. *Why:* ADR-0024 gives each data kind one editor. A layout changes where the cells are drawn, not how they work.
   - **Rows** (the default): as above.
   - **Ring:** the cells of a lane go around a circle, clockwise from the top. Up to 4 lanes draw as rings inside each other, the first lane outermost. Each ring marks its own playing step: the cell is outlined, with a filled dot on the ring's outer edge. *Why:* lanes of different lengths (polymetric patterns, P3) are on different steps at the same time. If the module also publishes a phase display value, a thin hand from the centre shows it, so a slow cycle visibly moves between steps. Left and Right move around a ring. Up and Down move between rings. *Why a ring:* a rhythm is a cycle. On a ring, the evenness of a Euclidean pattern and the turn of a rotation show at once.
   - **Keys:** for one gate lane that holds a set of pitch classes, one cell per pitch class. With 12 cells, the cells are drawn as one octave of a piano keyboard. With any other number of cells, they are drawn as a ring. The layout follows the number of cells, so a live change of tuning never leaves a broken drawing. Left and Right move in pitch order, black keys included. *Why a piano at all:* most players read a scale fastest on a keyboard. *Why not only a piano:* LoomDSP does not assume 12-tone equal temperament. A tuning with 19 or 31 notes per octave draws as a ring of 19 or 31 cells.
-  - **Which cell is which key:** cell 0 is the tuning's reference pitch class (C in a 12-note tuning, pitch 0.0 in FR-SIG-05), not the scale's root. *Why:* if cells counted from the root, every major scale would draw as the white keys, and the keys would not match the notes. The module marks the root cell. How it is marked is an open point.
-  - **Cell names:** in the keys layout, the module names each cell for hover text and the screen reader, such as "C sharp" in a 12-note tuning or "degree 5 of 19" in another. The names change when the tuning does. See Open points.
+  - **Which cell is which key:** cell 0 is the tuning's reference pitch class (C in a 12-note tuning, pitch 0.0 in FR-SIG-05), not the scale's root. *Why:* if cells counted from the root, every major scale would draw as the white keys, and the keys would not match the notes. The module marks the root cell with a small bar under the key, or outside the ring at that cell. *Why:* outline and dot already mean the playing step.
+  - **Cell names:** in the keys layout, the module names each cell for hover text and the screen reader, such as "C sharp" in a 12-note tuning or "degree 5 of 19" in another. The names change when the tuning does. The module publishes them as a list of display texts, read as a readout reads its text ([#118](https://github.com/brylie/LoomDSP/issues/118)). *Why:* names depend on the active tuning, so they are module state, not descriptor text.
   - The ring and keys layouts draw gate lanes only. The registry refuses them on a data slot that can hold value lanes. *Why:* a value cell is set by height, and a ring has no single up and down.
+- **Step attributes.** When the slot has attributes, an attribute picker above the grid offers Value, Chance, Repeat, and Accent. Picking one makes every cell show and edit that attribute, with the same gestures: drag sets chance and repeat by height, click flips accent. Value is the normal view. The keyboard and the screen reader follow the picked attribute ("step 3 of 16, chance 0.5"). *Why one picker and not more rows:* the grid keeps one cell per step, so its gestures, layouts, and keyboard stay as they are.
 - *Why one grid for gates and values:* the multi-lane sequencer mixes both in one pattern, and a matrix of levels (MT-ROUTE-04) is a grid of value cells. One widget keeps them alike.
 
 ### Waveform
@@ -395,7 +440,7 @@ A buffer drawn as its outline, with markers for where a module reads.
 - **Modulation:** each marker shows its reachable range as a band along the time axis, and its live position as a thin line (rule 3).
 - **Keyboard (rule 4):** markers are the parts. Arrows move between them; grab and move as on a curve.
 - **Middle zoom:** the outline only.
-- **Size (leaning):** at least 9 × 4, resizable.
+- **Size (starting size):** at least 9 × 4, resizable.
 
 ## Static
 
@@ -439,7 +484,7 @@ The catalogue entries that would use each new widget. The knob is used by nearly
 
 ## Acceptance criteria
 
-This is a plan. Each widget gets its own acceptance criteria when its section becomes Agreed, written as for the P1 widgets in [panels.md](panels.md#acceptance-criteria-module-panels). Every widget section, when Agreed, must cover:
+Every widget is done when this checklist passes for it, written as tests as for the P1 widgets in [panels.md](panels.md#acceptance-criteria-module-panels), together with the widget-specific checks below it:
 
 - [ ] The registry refuses each kind of bad binding for the widget, with a message that names the widget.
 - [ ] Pointer gestures follow rule 1 and rule 2, tested with the `Ui` harness by name, not by pixel.
@@ -450,27 +495,49 @@ This is a plan. Each widget gets its own acceptance criteria when its section be
 - [ ] Nothing redraws while nothing it shows changes (rule 7).
 - [ ] The test modules from [#208](https://github.com/brylie/LoomDSP/issues/208) gain the widget.
 
+Widget-specific checks:
+
+| Widget | Checks |
+|---|---|
+| Fader | A 6-unit fader at middle zoom still needs 200 screen pixels for its full range. Dragging the modulation bar changes one assignment's depth. |
+| Number | A whole-number parameter steps by one per drag step. The text shows the base value while modulated. |
+| Typing a value | "2k" on a Hz parameter commits 2000; "abc" leaves the value and blocks Enter; Escape cancels; a value above the selected control range selects a wider range; one commit is one undo step. |
+| Select list | Over 12 choices the list scrolls; type-ahead jumps to the next match. |
+| XY pad | Alt-press jumps the point; a plain press does not. Each axis shows its own modulation bar. |
+| Range | The two handles cannot cross. Each has its own modulation bar and live line. |
+| Readout, meter on a display value | Text uses the display value's unit; the meter follows the display value at rule 7's rate. |
+| Level history | A tone that stops shows RMS falling to the floor over the window; a silent input sends the UI nothing. |
+| Spectrum | A 1 kHz sine peaks in the column holding 1 kHz, within one bin; hold keeps the peak for 2 s; a silent input sends the UI nothing. |
+| Curve | Click adds, double-click removes, segment drag bends, Ctrl-drag snaps; wrap and odd symmetry hold their constraint; the live modulated shape appears only while modulated. |
+| Step grid | Rows, ring, and keys layouts give the same cell for the same key presses; ring and keys are refused on value lanes; Alt-drag draws values. |
+| Waveform | The outline is built once per buffer change; markers set their parameters; frames draw the strip and the current frame. |
+| Larger view | Opens from the corner mark, Ctrl+Enter, and (waveform) double-click; edits in it show on the tile at once; Escape closes it. |
+
 ## Out of scope
 
-- Building any widget. This document only plans them.
 - Themes, skins, and custom images (FR-PANEL-06, FR-PANEL-07).
 - The panel editor ([#76](https://github.com/brylie/LoomDSP/issues/76)). It places these widgets; it does not change how they work.
-- The format of module data in the patch file, and how it reaches the engine. That is [#50](https://github.com/brylie/LoomDSP/issues/50) (OQ-17). This document only names the three data kinds and their limits.
+- The format of module data in the patch file, and how it reaches the engine. That is the [module data](module-data.md) specification ([ADR-0032](../adr/0032-module-data-in-typed-slots.md)). This document only names the three data kinds and their limits.
 - Touch gestures.
+
+## Settled in review
+
+Settled with the maintainer on 2026-11-01 ([#278](https://github.com/brylie/LoomDSP/issues/278)):
+
+- **Larger view:** a corner mark opens an overlay editor ([Larger view](#larger-view)).
+- **Typing a value:** on every one-number widget ([Typing a value](#typing-a-value)).
+- **Snap on a curve:** hold Ctrl (Cmd); the module sets the grid, which follows the bar for curves over bars ([Curve](#curve)).
+- **Live shape under modulation:** drawn as a dashed line ([Curve](#curve)).
+- **Select list type-ahead:** yes, for lists that scroll ([Select list](#select-list)).
+- **Keys layout:** cell names are display texts the module publishes; the root is a bar under the key ([Step grid](#step-grid)).
+- **Widget sizes:** the listed sizes are starting sizes, tuned with [#120](https://github.com/brylie/LoomDSP/issues/120).
+- **Slow history of a display value:** a long time window on the scope, fed by display values instead of audio samples, specified when a module first needs it. The RMS history of a signal is the [level history](#level-history).
 
 ## Open points
 
-- **Larger view.** Curves, step grids, and waveforms are cramped on a tile. Leaning: a small corner mark on the widget opens a larger editor over the canvas, at fixed screen size, editing the same data. On a waveform, double-clicking the outline opens it too, because the outline is a display (rule 1). A curve and a step grid have no display area to double-click, since every press there edits, so they use the corner mark only. Decide with [#61](https://github.com/brylie/LoomDSP/issues/61) (resizable tiles).
-- **Handles bound to parameters on a curve.** An ADSR shape could have handles that set attack, decay, sustain, and release directly. The waveform already binds markers to parameters, so this is the same idea. Leaning: yes, after the read-only shape view is built and tried.
-- **Live shape under modulation.** A shape from parameters could also draw, faintly, the shape at the live modulated values. Leaning: yes, if it needs no new engine data. The live value table ([modulation.md, Live value](modulation.md#live-value)) already has each modulated parameter.
-- **Typing a value on the tile.** Number widgets and knobs could take typed values. Leaning: not on the tile in P2; the inspector has a text field. Revisit with the panel editor.
-- **Select list type-ahead.** Typing a letter in an open list could jump to the first choice that starts with it. Leaning: yes for lists longer than 12, which scroll.
-- **Snap to grid on a curve.** A modifier key, or a module option, that snaps points to a grid of 8 or 16. Which key, and whether the grid follows the transport for curves over bars.
-- **Matrix as data or as parameters.** A matrix (MT-ROUTE-04) with a level at each crossing could store levels as pattern data (no modulation) or as parameters (modulatable, but N × M of them). Decide in its module spec.
-- **Which size of the panel grid suits text widgets.** Sizes above are leanings, to check against the estimated label widths ([#120](https://github.com/brylie/LoomDSP/issues/120)).
-- **Cell names in the keys layout.** Names come from the active tuning (MT-PITCH-03, #309), so they are module state, not descriptor text. Leaning: a list of display texts the module publishes, read like a readout's text ([#118](https://github.com/brylie/LoomDSP/issues/118)).
-- **Marking the root in the keys layout.** Outline and filled dot already mean the playing step, so the root needs another mark, such as a small bar under the key.
-- **Tunings with more than 64 notes per octave.** A pattern lane holds 64 cells, enough for 53 equal divisions of the octave. Larger tunings, such as 72 divisions, would need a longer lane. Leaning: wait until someone asks.
-- **Polar views.** A polar view on the XY scope, where the angle shows the balance between the two sides and the distance shows level, could show a stereo field more plainly than the mid and side view. A polar XY pad (angle and distance) suits the spatialiser (MT-FX-10). Leaning: decide when the spatialiser is designed, since each view has only one clear user today.
-- **Slow history.** A display value drawn over seconds or bars, for a random walk, a slew, or an envelope follower ([#97](https://github.com/brylie/LoomDSP/issues/97)). Leaning: a long time window on the scope, fed by display values instead of audio samples, so it costs little.
-- **Wavetables and FR-LIB-02.** FR-LIB-02 lists a wavetable reader in P1, but buffer data is planned for P2 ([#288](https://github.com/brylie/LoomDSP/issues/288)). Either move the wavetable reader to P2 in FR-LIB-02, or bring buffer data forward. Decide in #278.
+Deferred on purpose, each with the moment it will be decided:
+
+- **Handles bound to parameters on a curve.** An ADSR shape could have handles that set its times and levels directly. Decide after the read-only shape preview has been used for a while.
+- **Matrix as data or as parameters.** Decide in the matrix module's own spec (MT-ROUTE-04).
+- **Tunings with more than 64 notes per octave.** Wait until someone asks.
+- **Polar views** on the XY scope and the XY pad. Decide when the spatialiser (MT-FX-10) is designed.
