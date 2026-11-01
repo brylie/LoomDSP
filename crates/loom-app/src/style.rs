@@ -132,8 +132,10 @@ pub fn quiet_pick_list(theme: &Theme, status: iced::widget::pick_list::Status) -
     let active = !matches!(status, iced::widget::pick_list::Status::Active);
     iced::widget::pick_list::Style {
         text_color: palette.background.base.text,
-        placeholder_color: palette.background.strong.color,
-        handle_color: palette.background.strong.color,
+        // Iced's strong background is 1.76:1 on the panel, too faint for
+        // the one mark that says "this is a choice" (WCAG 1.4.11).
+        placeholder_color: QUIET,
+        handle_color: QUIET,
         background: if active {
             palette.background.weak.color.into()
         } else {
@@ -167,8 +169,9 @@ pub fn markdown(theme: &Theme) -> iced_markdown::Settings {
 #[cfg(test)]
 mod tests {
     /// Quiet text stays readable wherever it sits: secondary text on the
-    /// panels and on the browser's highlighted row, and a closed tab's
-    /// title, all at 4.5:1 or more (WCAG 1.4.3).
+    /// panels and on the browser's highlighted row, a closed tab's title,
+    /// and a quiet pick list's handle and placeholder, all at 4.5:1 or
+    /// more (WCAG 1.4.3).
     #[test]
     fn quiet_text_meets_contrast() {
         use loom_canvas::{MIN_TEXT_CONTRAST, contrast_ratio};
@@ -184,11 +187,22 @@ mod tests {
             })
             .expect("a highlight fill");
         let closed_tab = super::tab(false)(&theme, iced::widget::button::Status::Active).text_color;
+        let pick = super::quiet_pick_list(&theme, iced::widget::pick_list::Status::Active);
         for (name, text, fill) in [
             ("quiet text on the panel", secondary, palette.background.base.color),
             ("quiet text on a card", secondary, palette.background.weak.color),
             ("quiet text on the highlighted row", secondary, highlight),
             ("a closed tab's title", closed_tab, palette.background.base.color),
+            (
+                "a quiet pick list's handle on a card",
+                pick.handle_color,
+                palette.background.weak.color,
+            ),
+            (
+                "a quiet pick list's placeholder on a card",
+                pick.placeholder_color,
+                palette.background.weak.color,
+            ),
         ] {
             let ratio = contrast_ratio(text, fill);
             assert!(ratio >= MIN_TEXT_CONTRAST, "{name}: {ratio:.2}:1");

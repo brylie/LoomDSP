@@ -3,7 +3,7 @@
 The shared sizes, button roles, and quiet chrome that every view of the desktop app uses, so the app looks like one instrument and the controls a performer plays stand out.
 
 - **Kind:** living specification.
-- **Status:** Agreed, P1 (2026-11-01).
+- **Status:** Implemented, P1 (2026-11-01).
 - **Decision behind it:** [ADR-0025](../adr/0025-one-design-language-and-derived-panels.md) (one design language; themes are global), [ADR-0029](../adr/0029-module-families-and-a-shared-palette.md) (module families and a shared palette).
 - **Use case and requirements:** FR-PANEL-06 (global themes), NFR-UX-01 (keyboard and focus), NFR-UX-03 (colour is never the only signal).
 - **Background:** the [P1 UX audit](../research/2026-11-p1-ux-audit.md), findings 4, 11, 13, and 17.
@@ -104,23 +104,23 @@ MIDI shows a count, such as "MIDI: 2 inputs" or "MIDI: no inputs". Its hover tex
 
 Module families:
 
-- [ ] Every module declares a family in its descriptor; one without a family does not compile.
-- [ ] Every family colour has at least 4.5:1 contrast with the header text, and every tint at least 4.5:1 with the dark text (test in `theme.rs`).
-- [ ] Every pair of family colours is at least ΔE 14 (CIE76) apart in normal vision and in protanopia, deuteranopia, and tritanopia simulation (Machado 2009, severity 1), and every swatch is at least ΔE 15 from every reserved colour (test in `theme.rs`).
-- [ ] A tile's header uses its family's colour (test).
-- [ ] With an empty search, the browser lists modules by family in the order above, then by name; each row shows its family; searching a family or category name finds its modules (headless test).
-- [ ] Hovering a tile's header shows the module's family and description (test), and help shows the family.
+- [x] Every module declares a family in its descriptor; one without a family does not compile.
+- [x] Every family colour has at least 4.5:1 contrast with the header text, and every tint at least 4.5:1 with the dark text (test in `theme.rs`).
+- [x] Every pair of family colours is at least ΔE 14 (CIE76) apart in normal vision and in protanopia, deuteranopia, and tritanopia simulation (Machado 2009, severity 1), and every swatch is at least ΔE 15 from every reserved colour (test in `theme.rs`).
+- [x] A tile's header uses its family's colour (test).
+- [x] With an empty search, the browser lists modules by family in the order above, then by name; each row shows its family; searching a family or category name finds its modules (headless test).
+- [x] Hovering a tile's header shows the module's family and description (test), and help shows the family.
 
 The rest:
 
-- [ ] No `.size(N)` or `text_size(N)` literal remains in `crates/loom-app/src` outside `style.rs` (test over the sources).
-- [ ] Every app text size is one of the five tokens (follows from the test above).
-- [ ] The toolbar has no primary button while MIDI learn is off, and Panic is danger red (headless window test on the button pixels, as for #460).
-- [ ] Undo and Redo look different enabled and disabled (existing #460 test still passes).
-- [ ] A knob at position 0 draws an orange arc piece at the start of its sweep, and a knob at 1 draws the full arc (test on the control geometry).
-- [ ] Without `--dev` or a measuring flag, the status bar has no developer tools; with `--dev` it has them (headless `Ui` test).
-- [ ] With four MIDI inputs, the status bar shows "MIDI: 4 inputs" and every item fits at 1280 px wide (headless `Ui` test).
-- [ ] AGENTS.md links this spec from its architecture list.
+- [x] No `.size(N)` or `text_size(N)` literal remains in `crates/loom-app/src` outside `style.rs` (test over the sources).
+- [x] Every app text size is one of the five tokens (follows from the test above).
+- [x] The toolbar has no primary button while MIDI learn is off, and Panic is danger red (headless window test on the button pixels, as for #460).
+- [x] Undo and Redo look different enabled and disabled (existing #460 test still passes).
+- [x] A knob at position 0 draws an orange arc piece at the start of its sweep, and a knob at 1 draws the full arc (test on the control geometry).
+- [x] Without `--dev` or a measuring flag, the status bar has no developer tools; with `--dev` it has them (headless `Ui` test).
+- [x] With four MIDI inputs, the status bar shows "MIDI: 4 inputs" and every item fits at 1280 px wide (headless `Ui` test).
+- [x] AGENTS.md links this spec from its architecture list.
 
 ## Out of scope
 
