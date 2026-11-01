@@ -616,7 +616,7 @@ mod tests {
         assert!(ui.app.assign_drag.is_some_and(|drag| drag.at.is_none()));
         ui.release();
         assert_eq!(ui.app.controller.graph().assignments().count(), before);
-        let _ = ui.app.update(Message::ToggleLearn);
+        let _ = ui.app.update(Message::Learn(crate::learn::Message::Toggle));
         ui.drag(from, row, 8);
         assert_eq!(ui.app.controller.graph().assignments().count(), before);
         assert_eq!(ui.app.drop_row, None);

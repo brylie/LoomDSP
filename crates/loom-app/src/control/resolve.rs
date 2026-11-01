@@ -215,7 +215,7 @@ pub(super) const BUTTONS: [&str; 5] = ["learn", "hold", "panic", "undo", "redo"]
 /// script does not have, and the `add` command adds a module directly.
 pub(super) fn press_message(app: &App, name: &str) -> Result<Message, String> {
     let (message, disabled) = match name {
-        "learn" => (Message::ToggleLearn, None),
+        "learn" => (Message::Learn(crate::learn::Message::Toggle), None),
         "hold" => (
             Message::HoldNote,
             app.midi

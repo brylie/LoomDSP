@@ -56,3 +56,47 @@ fn the_status_names_the_parameter_a_control_left() {
     let status = mapped_status(controller, *mapping, &removed);
     assert!(!status.contains("no longer"), "{status}");
 }
+
+/// Learn mode shows its view only while on, and turning it off disarms.
+#[test]
+fn stopping_learn_mode_disarms_and_hides_the_view() {
+    let mut learn = Learn::default();
+    assert!(!learn.is_on());
+    assert!(learn.shown().is_none());
+    learn.start();
+    assert!(learn.shown().is_some());
+    learn.arm((4, 1), Some(7));
+    assert!(learn.is_armed((4, 1)));
+    assert!(!learn.is_armed((4, 0)));
+    assert_eq!(learn.armed().and_then(|armed| armed.serial), Some(7));
+    learn.stop();
+    assert!(!learn.is_on());
+    assert!(learn.armed().is_none());
+    assert!(learn.shown().is_none());
+}
+
+/// Removing the armed parameter's module disarms it at the next refresh,
+/// and the view follows the armed control.
+#[test]
+fn a_removed_module_disarms_its_parameter() {
+    let mut parts = create_engine(loom_modules::registry(), EngineConfig::default());
+    let controller = &mut parts.controller;
+    let filter = controller.add_module("loom.filter.svf").unwrap();
+    let cutoff = controller
+        .graph()
+        .node(filter)
+        .unwrap()
+        .descriptor
+        .param_index("cutoff")
+        .unwrap();
+    let mut learn = Learn::default();
+    learn.start();
+    learn.arm((filter.0, cutoff), None);
+    learn.refresh(controller);
+    assert!(learn.shown().unwrap().armed.is_some());
+
+    controller.remove_module(filter).unwrap();
+    learn.refresh(controller);
+    assert!(learn.armed().is_none());
+    assert!(learn.shown().unwrap().armed.is_none());
+}

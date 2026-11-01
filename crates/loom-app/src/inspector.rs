@@ -321,10 +321,10 @@ impl App {
                 let mapping = graph
                     .midi_mapping_of(ModuleId(id), index)
                     .map(|(_, m)| m.control.to_string());
-                let mode = if self.learning {
+                let mode = if self.learn.is_on() {
                     // In learn mode a row arms its parameter, and its value
                     // does not change (midi-learn.md).
-                    let armed = self.armed.is_some_and(|a| a.param == (id, index));
+                    let armed = self.learn.is_armed((id, index));
                     let detail = match (armed, &mapping) {
                         (true, _) => "Waiting for MIDI...".to_string(),
                         (false, Some(control)) => control.clone(),
@@ -558,7 +558,7 @@ fn module_view<'a>(m: ModuleRows, drop_row: Option<(u32, usize)>, dragging: bool
                 ])
                 .width(Length::Fill)
                 .style(if armed { style::primary } else { style::secondary })
-                .on_press(Message::LearnParam { module: id, index });
+                .on_press(Message::Learn(crate::learn::Message::Arm((id, index))));
                 // A mapping can be removed in learn mode too.
                 let mut line = row![arm].spacing(4).align_y(iced::Alignment::Center);
                 if p.mapping.is_some() {

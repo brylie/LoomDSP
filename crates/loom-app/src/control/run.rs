@@ -631,7 +631,7 @@ impl App {
     /// The message an inspector row sends in learn mode: it arms the
     /// parameter, or disarms it if it is armed.
     pub(super) fn arm_command(&self, target: &str) -> Result<Message, String> {
-        if !self.learning {
+        if !self.learn.is_on() {
             return Err("MIDI learn is off; press `learn` first".to_string());
         }
         let Some((module, Some(param))) = split_target(target) else {
@@ -648,7 +648,7 @@ impl App {
         let index = descriptor
             .param_index(param)
             .ok_or_else(|| format!("module {module} ({}) has no parameter `{param}`", descriptor.name))?;
-        Ok(Message::LearnParam { module, index })
+        Ok(Message::Learn(crate::learn::Message::Arm((module, index))))
     }
 
     /// Checks a `sample` target: a panel widget by the name it is bound
