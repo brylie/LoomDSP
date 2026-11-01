@@ -57,7 +57,8 @@ How a player collapses part of a patch into one module with its own ports and pa
 3. A port takes the inner port's label, made unique with a number if needed ("in", "in 2").
 4. A modulation assignment from outside to a parameter inside exposes that parameter, and the assignment targets the exposed parameter on the tile. An assignment from inside to outside gets a Patch output for its source, and targets from the tile's new port. *Why:* assignments never cross a level (modulation rule 10).
 5. MIDI mappings, probes, and data move with their modules.
-6. The sound does not change. Collapsing is one undo step.
+6. The Transport and the Scale and tuning module stay outside, even when selected (rule 8). They count as outside the selection, so their cables become ports by points 1 and 2. If only they are selected, collapse does nothing and the status bar says why.
+7. The sound does not change. Collapsing is one undo step.
 
 ### Exposing
 
@@ -85,6 +86,7 @@ Exposing follows [Panels: exposed controls](panels.md#exposed-controls-in-a-sub-
 - The **library folder** is a preference, by default `LoomDSP/Library` in the user's Documents folder ([preferences](preferences.md)).
 - The module browser lists library items next to modules, marked as sub-patches. Adding one asks nothing: it is inserted **as a copy**. **Insert linked** is on the item's menu.
 - Any patch file can be inserted as a sub-patch. A patch with no Patch inputs or outputs gives a tile with no ports.
+- **Patch-wide modules are left out** (rule 8). Save to library writes no Transport and no Scale and tuning module, since a sub-patch never holds them. Inserting a file that has them drops them, and each of their cables becomes a Patch input or output on the new tile, as if they had been outside when it was collapsed. The status bar says so: `Arp: its Transport was left out; connect its clock ports.` A dropped Scale and tuning module's tuning and scales are not kept; the patch's own apply. Opening a library file on its own adds a Transport, as for any patch without one ([clock](clock.md)).
 - Opening a library file with **File > Open** edits it as a patch.
 
 ### Linked library items
@@ -198,6 +200,7 @@ These rules are for implementers. The player never sees the flat graph.
 5. **A patch always opens.** Linked items carry a stored copy. *Why:* a missing library file on another computer must not lose the set.
 6. **Swaps and select changes are click-free.** *Why:* they happen during performance.
 7. **One edit is one undo step, at any level.** *Why:* the [undo](undo.md) rules apply unchanged.
+8. **Patch-wide modules live only at the top level.** A sub-patch never holds the Transport or the Scale and tuning module, so stack copies, layer and select members, and slot parts never repeat them. *Why:* settled with the maintainer. A patch has one transport and one scale ([clock](clock.md), [scale and tuning](scale-and-tuning.md)), and one place to set them. The same reason keeps a paste from adding a transport ([clipboard](clipboard.md), rule 6).
 
 ## Acceptance criteria
 
@@ -213,6 +216,8 @@ Copies, library, and linking:
 
 - [ ] Pasting a sub-patch tile and editing inside the copy does not change the original (test).
 - [ ] Saving a sub-patch to the library writes a patch file that opens on its own and plays the same (test).
+- [ ] Collapsing a selection that includes the Transport leaves it outside, and its cables into the selection become input ports (test).
+- [ ] Inserting a patch file that has a Transport and a Scale and tuning module drops both, turns their cables into ports on the tile, and says so in the status bar; the patch still has one of each (test).
 - [ ] Two linked instances of one library file have separate definitions in the saved patch (test).
 - [ ] Editing inside one of them unlinks it and leaves the other unchanged and linked (test).
 - [ ] Save to library from one linked instance leaves the other instance unchanged in the open patch; reloading the patch updates it (test).

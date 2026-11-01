@@ -57,7 +57,7 @@ How a patch holds one tuning and a set of scales, how pitch modules follow them 
 - `reset` goes back to scale 1.
 - **A change applies on the trigger's sample.** *Why:* the patch chooses the moment. A bar trigger from the Transport changes key on the bar; a Chance in front makes it "sometimes".
 - Changing the tuning or editing a scale is an edit, applied at a buffer boundary and covered by undo, like any module data.
-- **One per patch.** Adding a second, at any level, is refused: `A patch has one Scale and tuning module.` *Why:* "patch-wide" must mean one answer.
+- **One per patch, at the top level.** Adding a second is refused: `A patch has one Scale and tuning module.` A sub-patch never holds one: collapse leaves it outside, and inserting a file drops it ([sub-patches, rule 8](sub-patches.md#rules)). *Why:* "patch-wide" must mean one answer.
 
 ## Following the scale
 
