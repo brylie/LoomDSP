@@ -556,6 +556,43 @@ pub fn parse_depth(input: &str) -> Option<f32> {
 }
 
 impl App {
+    /// Handles a matrix event, and returns what the view must do after it:
+    /// focus the depth field when an edit opens it, or scroll the selected
+    /// card into view when the order or filter changes.
+    pub(crate) fn matrix_message(&mut self, event: Event) -> iced::Task<Message> {
+        let task = match event {
+            Event::Edit(_, Column::Depth) => iced::widget::operation::focus("matrix-depth"),
+            Event::SortBy(_) | Event::ReverseSort | Event::Filter(_) | Event::SelectedOnly(_) => reveal_selected(),
+            _ => iced::Task::none(),
+        };
+        self.matrix_event(event);
+        task
+    }
+
+    /// Handles a key while the matrix has focus. Keeps the selected card in
+    /// view, and focuses the depth field when Enter opens it.
+    pub(crate) fn matrix_key_message(&mut self, key: keyboard::Event) -> iced::Task<Message> {
+        let open_depth = matches!(
+            key,
+            keyboard::Event::KeyPressed {
+                key: keyboard::Key::Named(keyboard::key::Named::Enter),
+                ..
+            }
+        ) && self.matrix.edit.is_none()
+            && self.matrix.cell == Column::Depth;
+        self.matrix_key(key);
+        let scroll = if self.matrix.tab == Tab::Matrix && self.matrix.focused {
+            reveal_selected()
+        } else {
+            iced::Task::none()
+        };
+        if open_depth && self.matrix.edit.as_ref().is_some_and(|e| e.column == Column::Depth) {
+            iced::Task::batch([scroll, iced::widget::operation::focus("matrix-depth")])
+        } else {
+            scroll
+        }
+    }
+
     /// Which one matrix assignment the canvas should show without pinning.
     pub(crate) fn matrix_line(&self) -> Option<loom_canvas::ModulationView> {
         if self.matrix.tab != Tab::Matrix {

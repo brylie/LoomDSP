@@ -159,7 +159,7 @@ fn saving_or_undoing_deletes_the_copy() {
     let setup = Setup::new("save");
     let mut app = setup.boot(Some(setup.file()), &mut Answer::new(Choice::NotNow));
     let dir = edit_and_keep(&mut app);
-    let _ = app.update(Message::Save);
+    let _ = app.update(Message::File(crate::FileAction::Save));
     settle(&mut app, Instant::now(), |_| !dir.join("patch.ron").exists());
     assert!(!dir.join("info.ron").exists());
 
@@ -177,7 +177,7 @@ fn a_clean_exit_deletes_the_folder() {
     let setup = Setup::new("exit");
     let mut app = setup.boot(Some(setup.file()), &mut Answer::new(Choice::NotNow));
     let dir = folder(&app);
-    let _ = app.update(Message::CloseRequested);
+    let _ = app.update(Message::File(crate::FileAction::Close));
     assert!(app.recovery.is_none());
     assert!(!dir.exists());
     assert!(sessions(&setup.root()).is_empty());

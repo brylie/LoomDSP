@@ -79,7 +79,7 @@ fn an_example_opens_as_a_clean_untitled_copy() {
     assert_eq!(app.file, None);
     assert!(!app.unsaved());
 
-    let _ = app.update(Message::CloseRequested);
+    let _ = app.update(Message::File(crate::FileAction::Close));
     assert!(app.quit, "a clean copy closes");
     assert_eq!(fake::asked(), Vec::new(), "and asks nothing");
 }
@@ -148,7 +148,7 @@ fn opening_an_example_from_a_file_gives_a_copy() {
     assert_eq!(app.ui_snapshot().title, "subtractive (example) - LoomDSP");
 
     turn_knob(&mut app);
-    let _ = app.update(Message::CloseRequested);
+    let _ = app.update(Message::File(crate::FileAction::Close));
     assert_eq!(fake::asked(), vec![Asked::Discard("subtractive (example)".to_string())]);
     assert!(!app.quit, "the fake answers Cancel");
 }

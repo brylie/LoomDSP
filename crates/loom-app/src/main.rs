@@ -58,7 +58,7 @@ use loom_core::{
 };
 use loom_host_desktop::{AudioOutput, CallbackStats, RunningAudio, SharedMidi};
 use loom_patch::Patch;
-use matrix::{Column as MatrixColumn, Event as MatrixEvent, Tab as RightTab};
+use matrix::{Event as MatrixEvent, Tab as RightTab};
 use modulation::PolarityChoice;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -280,13 +280,8 @@ enum Message {
     AudioPoll,
     /// Audio input counters or stream health changed.
     InputAudio(input_watch::Event),
-    /// File commands (`docs/design/files.md`).
-    New,
-    Open,
-    Save,
-    SaveAs,
-    /// The window asked to close.
-    CloseRequested,
+    /// A file command, or the window asking to close (`docs/design/files.md`).
+    File(FileAction),
     Measure(bool),
     /// The --bench-seconds run is over.
     BenchDone,
@@ -467,6 +462,22 @@ impl Message {
                 | Self::UnknownLabelDraft { .. }
         )
     }
+}
+
+/// What the player asks of the patch file. Each can ask about unsaved
+/// changes first (`docs/design/files.md`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FileAction {
+    /// Start an empty patch.
+    New,
+    /// Pick a patch file and open it.
+    Open,
+    /// Save to the current file, or ask for one.
+    Save,
+    /// Ask for a file and save to it.
+    SaveAs,
+    /// The window asked to close: quit, unless the player keeps the patch.
+    Close,
 }
 
 /// `opened <path>`, followed by the load notes when there are any, so a note
@@ -1372,6 +1383,25 @@ impl App {
         }
     }
 
+    /// Runs a file command from the toolbar, a shortcut, or the window.
+    fn file_action(&mut self, action: FileAction) {
+        match action {
+            FileAction::New => self.new_patch(),
+            FileAction::Open => self.open(),
+            FileAction::Save => {
+                self.save();
+            }
+            FileAction::SaveAs => {
+                self.save_as();
+            }
+            FileAction::Close => {
+                if self.can_discard() {
+                    self.quit = true;
+                }
+            }
+        }
+    }
+
     fn new_patch(&mut self) {
         if self.can_discard() && self.replace(Source::Empty) {
             self.status = "new patch".to_string();
@@ -1479,7 +1509,7 @@ impl App {
             Subscription::none()
         };
         let telemetry = Subscription::run_with(self.monitor.clone(), monitor::stream).map(Message::Telemetry);
-        let close = iced::window::close_requests().map(|_| Message::CloseRequested);
+        let close = iced::window::close_requests().map(|_| Message::File(FileAction::Close));
         let control = self
             .control
             .iter()
@@ -2242,6 +2272,20 @@ impl App {
         sent
     }
 
+    /// The one entry point for every message. It owns the work that crosses
+    /// workflows, in this order:
+    ///
+    /// 1. Counts the frame and its cause, for `--measure-idle`.
+    /// 2. Sends a safety mode change the engine's full queue refused.
+    /// 3. Tells autosave to look again, unless the message keeps the patch.
+    /// 4. Hands the message to its workflow: the browser, the control
+    ///    channel, the matrix (`matrix_message`, `matrix_key_message`), a
+    ///    clipboard command, or [`handle`](Self::handle) for the rest,
+    ///    which sends file commands to `file_action`.
+    /// 5. Runs the idle engine, and retries a commit that waited for room.
+    /// 6. Quits cleanly when asked, or focuses the browser when it opens.
+    ///
+    /// A workflow returns the `Task` it needs; this joins them.
     fn update(&mut self, message: Message) -> Task<Message> {
         use loom_canvas::stats::FrameCause;
         let cause = match &message {
@@ -2249,7 +2293,7 @@ impl App {
             Message::LiveFrame => FrameCause::Live,
             Message::Meters(_) | Message::Telemetry(_) | Message::Lights(_) => FrameCause::Meters,
             Message::Control(_) | Message::ControlFrame(_) | Message::Located { .. } => FrameCause::Control,
-            Message::Canvas(_) | Message::Key(_) | Message::CloseRequested => FrameCause::Input,
+            Message::Canvas(_) | Message::Key(_) | Message::File(FileAction::Close) => FrameCause::Input,
             Message::Frame(_) => FrameCause::Forced,
             _ => FrameCause::Other,
         };
@@ -2273,49 +2317,8 @@ impl App {
                 })
             }
             Message::Control(call) => self.control(call),
-            Message::Matrix(event) if matches!(event, MatrixEvent::Edit(_, MatrixColumn::Depth)) => {
-                self.matrix_event(event);
-                iced::widget::operation::focus("matrix-depth")
-            }
-            Message::Matrix(event)
-                if matches!(
-                    event,
-                    MatrixEvent::SortBy(_)
-                        | MatrixEvent::ReverseSort
-                        | MatrixEvent::Filter(_)
-                        | MatrixEvent::SelectedOnly(_)
-                ) =>
-            {
-                self.matrix_event(event);
-                matrix::reveal_selected()
-            }
-            Message::MatrixKey(key) => {
-                let open_depth = matches!(
-                    key,
-                    iced::keyboard::Event::KeyPressed {
-                        key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter),
-                        ..
-                    }
-                ) && self.matrix.edit.is_none()
-                    && self.matrix.cell == MatrixColumn::Depth;
-                self.matrix_key(key);
-                let scroll = if self.matrix.tab == RightTab::Matrix && self.matrix.focused {
-                    matrix::reveal_selected()
-                } else {
-                    Task::none()
-                };
-                if open_depth
-                    && self
-                        .matrix
-                        .edit
-                        .as_ref()
-                        .is_some_and(|e| e.column == MatrixColumn::Depth)
-                {
-                    Task::batch([scroll, iced::widget::operation::focus("matrix-depth")])
-                } else {
-                    scroll
-                }
-            }
+            Message::Matrix(event) => self.matrix_message(event),
+            Message::MatrixKey(key) => self.matrix_key_message(key),
             Message::ControlFrame(now) => self.control_frame(now),
             Message::Located {
                 call,
@@ -2436,10 +2439,17 @@ impl App {
         self.step_name = None;
     }
 
+    /// The messages that return no task. Called from [`update`](Self::update),
+    /// which has done the shared work first.
     fn handle(&mut self, message: Message) {
         match message {
             // `update` runs these: they return tasks.
-            Message::Browser(_) | Message::Control(_) | Message::ControlFrame(_) | Message::Located { .. } => {}
+            Message::Browser(_)
+            | Message::Control(_)
+            | Message::ControlFrame(_)
+            | Message::Located { .. }
+            | Message::Matrix(_)
+            | Message::MatrixKey(_) => {}
             Message::ShowHelp => {
                 if self.help.is_none() && self.rig.window.is_none() {
                     let descriptor = self
@@ -2500,8 +2510,6 @@ impl App {
             }
             Message::CloseTileMenu => self.tile_menu = None,
             Message::Key(_) if self.help.is_some() => {}
-            Message::Matrix(event) => self.matrix_event(event),
-            Message::MatrixKey(key) => self.matrix_key(key),
             Message::Preferences(message) => self.preferences(message),
             Message::Key(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) if self.rig.window.is_some() => {
                 // The window takes Escape and its own shortcut, and keeps
@@ -2678,19 +2686,7 @@ impl App {
                     );
                 }
             }
-            Message::New => self.new_patch(),
-            Message::Open => self.open(),
-            Message::Save => {
-                self.save();
-            }
-            Message::SaveAs => {
-                self.save_as();
-            }
-            Message::CloseRequested => {
-                if self.can_discard() {
-                    self.quit = true;
-                }
-            }
+            Message::File(action) => self.file_action(action),
             Message::Measure(on) => {
                 self.measuring = on;
                 self.meter = bench::FrameMeter::default();
@@ -2831,13 +2827,17 @@ impl App {
                         self.redo()
                     }
                     iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("z") => self.undo(),
-                    iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("n") => self.new_patch(),
-                    iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("o") => self.open(),
+                    iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("n") => {
+                        self.file_action(FileAction::New)
+                    }
+                    iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("o") => {
+                        self.file_action(FileAction::Open)
+                    }
                     iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("s") && modifiers.shift() => {
-                        self.save_as();
+                        self.file_action(FileAction::SaveAs);
                     }
                     iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("s") => {
-                        self.save();
+                        self.file_action(FileAction::Save);
                     }
                     iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("y") && !cfg!(target_os = "macos") => {
                         self.redo()
@@ -3395,10 +3395,10 @@ impl App {
         };
         let label = |s: &'static str| text(s).size(style::CONTROL);
         let file = row![
-            button(label("New")).on_press(Message::New),
-            button(label("Open")).on_press(Message::Open),
-            button(label("Save")).on_press(Message::Save),
-            button(label("Save As")).on_press(Message::SaveAs),
+            button(label("New")).on_press(Message::File(FileAction::New)),
+            button(label("Open")).on_press(Message::File(FileAction::Open)),
+            button(label("Save")).on_press(Message::File(FileAction::Save)),
+            button(label("Save As")).on_press(Message::File(FileAction::SaveAs)),
         ];
         let add = tip(
             button(label("Add module")).on_press(Message::OpenBrowser),
