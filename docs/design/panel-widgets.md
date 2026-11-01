@@ -3,7 +3,7 @@
 The baseline set of panel widgets that LoomDSP modules, sub-patches, and front panels share, so each kind of interaction has one common way to work.
 
 - **Kind:** living specification.
-- **Status:** Agreed, P2. The plan and its open points were settled with the maintainer on 2026-11-01 ([#278](https://github.com/brylie/LoomDSP/issues/278)); see [Settled in review](#settled-in-review). The [read-only shape preview](#read-only-shape-preview) and the compact [select list](#select-list) are Implemented. The widgets that exist today (knob, toggle, radio buttons, button, light, meter) are specified and Implemented in [panels.md](panels.md#module-panels-on-tiles-p1). Sizes marked "starting size" may be tuned while building, against the estimated label widths ([#120](https://github.com/brylie/LoomDSP/issues/120)), without a spec change.
+- **Status:** Agreed, M2. The plan and its open points were settled with the maintainer on 2026-11-01 ([#278](https://github.com/brylie/LoomDSP/issues/278)); see [Settled in review](#settled-in-review). The [read-only shape preview](#read-only-shape-preview) and the compact [select list](#select-list) are Implemented. The widgets that exist today (knob, toggle, radio buttons, button, light, meter) are specified and Implemented in [panels.md](panels.md#module-panels-on-tiles-p1). Sizes marked "starting size" may be tuned while building, against the estimated label widths ([#120](https://github.com/brylie/LoomDSP/issues/120)), without a spec change.
 - **Decision behind it:** [ADR-0024](../adr/0024-widgets-follow-the-kind-of-value.md) (widgets follow the kind of value, and structured data has shared kinds with one editor each). Builds on [ADR-0013](../adr/0013-modules-carry-their-own-panel.md) (modules carry their own panel).
 - **Use case and requirements:** UC2, UC3. FR-PANEL-02, FR-PANEL-03, FR-PANEL-04, FR-LIB-02, FR-LIB-12, FR-LIB-16, FR-LIB-17, FR-LIB-18, FR-LIB-19, FR-LIB-29, FR-MOD-04, FR-VIS-02, FR-VIS-03, NFR-UX-01, NFR-UX-02, NFR-UX-03.
 - **Builds on:** [panels.md](panels.md) (widgets, layout, interaction, level of detail, redraw), [modulation.md](modulation.md) (range arcs, dots, live value), [telemetry.md](telemetry.md) (probes), [port and parameter text](port-and-parameter-text.md) (labels and descriptions).
@@ -41,25 +41,25 @@ Widgets are grouped by the **kind of value** they show or edit, not by the modul
 
 | Group | Widget | Binds to | Exists today | Proposed phase |
 |---|---|---|---|---|
-| One number | Knob | A parameter | Yes | P1 |
-| | Fader | A parameter | No (planned as "slider") | P2 |
-| | Number | A parameter | No | P2 |
-| One choice | Toggle | A whole-number parameter, 0 to 1 | Yes | P1 |
-| | Radio buttons | A whole-number parameter | Yes | P1 |
-| | Select list | A whole-number parameter | Yes, named choices up to 12 | P2 |
-| Action | Button | A whole-number parameter, 0 to 1, and a mode parameter | Yes | P1 |
-| Two numbers | XY pad | Two parameters | No | P2 |
-| | Range | Two parameters on one axis: a low and a high | No | P2 |
-| Module state | Light | A display value | Yes | P1 |
-| | Readout | A display value | No | P2 |
-| | Meter | An output, or a display value | Output only | P1, display value in P2 |
-| Signals | Scope | An output | No ([#62](https://github.com/brylie/LoomDSP/issues/62)) | P1 |
-| | XY scope | Two outputs | No | P2 ([#280](https://github.com/brylie/LoomDSP/issues/280)) |
-| | Spectrum | An output | No ([#109](https://github.com/brylie/LoomDSP/issues/109)) | P2 |
-| Shapes and data | Curve | Curve data, or a shape the module computes from its parameters | Read-only shape preview only | P2 |
-| | Step grid | Pattern data. Drawn as rows, a ring, or keys | No | P2 |
-| | Waveform | Buffer data, with markers bound to parameters. Whole, or as the frames of a wavetable | No | P2 |
-| Static | Label | Text written in the panel | No | P2 |
+| One number | Knob | A parameter | Yes | M1 |
+| | Fader | A parameter | No (planned as "slider") | M2 |
+| | Number | A parameter | No | M2 |
+| One choice | Toggle | A whole-number parameter, 0 to 1 | Yes | M1 |
+| | Radio buttons | A whole-number parameter | Yes | M1 |
+| | Select list | A whole-number parameter | Yes, named choices up to 12 | M2 |
+| Action | Button | A whole-number parameter, 0 to 1, and a mode parameter | Yes | M1 |
+| Two numbers | XY pad | Two parameters | No | M2 |
+| | Range | Two parameters on one axis: a low and a high | No | M2 |
+| Module state | Light | A display value | Yes | M1 |
+| | Readout | A display value | No | M2 |
+| | Meter | An output, or a display value | Output only | M1, display value in M2 |
+| Signals | Scope | An output | No ([#62](https://github.com/brylie/LoomDSP/issues/62)) | M1 |
+| | XY scope | Two outputs | No | M2 ([#280](https://github.com/brylie/LoomDSP/issues/280)) |
+| | Spectrum | An output | No ([#109](https://github.com/brylie/LoomDSP/issues/109)) | M2 |
+| Shapes and data | Curve | Curve data, or a shape the module computes from its parameters | Read-only shape preview only | M2 |
+| | Step grid | Pattern data. Drawn as rows, a ring, or keys | No | M2 |
+| | Waveform | Buffer data, with markers bound to parameters. Whole, or as the frames of a wavetable | No | M2 |
+| Static | Label | Text written in the panel | No | M2 |
 
 [FR-PANEL-02](../product/requirements.md) lists this set, with these names, since ADR-0024 was accepted. Earlier names: "slider" is now the **fader**, "selector" the **select list**, and "graph" the **curve**. Each widget is still built only once its section here is Agreed.
 
@@ -100,7 +100,7 @@ Structured data that a module keeps beyond its parameters comes in three shared 
 
 These rules hold for every widget. Each widget section below says only what differs.
 
-1. **The same gesture means the same thing everywhere.** Each group has one set of gestures, and the groups follow the P1 widgets (panels.md, Interaction):
+1. **The same gesture means the same thing everywhere.** Each group has one set of gestures, and the groups follow the M1 widgets (panels.md, Interaction):
 
    | Gesture | One number (knob, fader, number), XY pad, range, and the parts of a data editor (see below) | One choice (toggle, radio buttons, select list) | Display, and empty space in a display |
    |---|---|---|---|
@@ -211,7 +211,7 @@ The current choice is shown as text. Clicking it shows the other choices in a li
 
 ### Segmented control
 
-**Status:** Agreed, P1 ([#453](https://github.com/brylie/LoomDSP/issues/453)).
+**Status:** Agreed, M1 ([#453](https://github.com/brylie/LoomDSP/issues/453)).
 
 A row of joined buttons, one per choice name. The chosen one is filled in the value colour; the others are outlined. All choices are visible, and one click picks any of them.
 
@@ -304,7 +304,7 @@ Specified in [panels.md](panels.md#scope-module), built in [#60](https://github.
 
 ### XY scope
 
-**Status:** Agreed for P2 ([#280](https://github.com/brylie/LoomDSP/issues/280)).
+**Status:** Agreed for M2 ([#280](https://github.com/brylie/LoomDSP/issues/280)).
 
 One signal against another: the first moves the trace left and right, the second up and down. A circle means two sines a quarter cycle apart. A line means the two signals are the same. A stereo signal shows how wide it is.
 
@@ -348,7 +348,7 @@ How loud a signal has been over the last seconds ([#97](https://github.com/bryli
 
 ### Spectrum
 
-The frequency content of a signal ([#109](https://github.com/brylie/LoomDSP/issues/109)). The module is in [P2 modules](p2-modules.md#spectrum-mt-view-03).
+The frequency content of a signal ([#109](https://github.com/brylie/LoomDSP/issues/109)). The module is in [M2 modules](p2-modules.md#spectrum-mt-view-03).
 
 - **Binds to:** an output, through a scope probe ([telemetry](telemetry.md)). The FFT runs on the app's telemetry thread, never the audio thread.
 - **Analysis:** 4096 points, Hann window, half overlap (about 12 Hz per bin at 48 kHz). The FFT comes from the `rustfft` crate (MIT or Apache-2.0), used in `loom-app` only, so the engine crates stay portable (AGENTS.md rule 6).
@@ -420,7 +420,7 @@ Rows of steps. Each row (lane) holds gates or values. A column shows the playing
 - **Size (starting size):** one grid unit per step, two per lane, plus a row for the step marker. Lanes longer than the tile scroll sideways, or show in the [larger view](#larger-view).
 - **Layouts.** The panel picks one. Gestures, keyboard, screen reader text, and data are the same in every layout. *Why:* ADR-0024 gives each data kind one editor. A layout changes where the cells are drawn, not how they work.
   - **Rows** (the default): as above.
-  - **Ring:** the cells of a lane go around a circle, clockwise from the top. Up to 4 lanes draw as rings inside each other, the first lane outermost. Each ring marks its own playing step: the cell is outlined, with a filled dot on the ring's outer edge. *Why:* lanes of different lengths (polymetric patterns, P3) are on different steps at the same time. If the module also publishes a phase display value, a thin hand from the centre shows it, so a slow cycle visibly moves between steps. Left and Right move around a ring. Up and Down move between rings. *Why a ring:* a rhythm is a cycle. On a ring, the evenness of a Euclidean pattern and the turn of a rotation show at once.
+  - **Ring:** the cells of a lane go around a circle, clockwise from the top. Up to 4 lanes draw as rings inside each other, the first lane outermost. Each ring marks its own playing step: the cell is outlined, with a filled dot on the ring's outer edge. *Why:* lanes of different lengths (polymetric patterns, M3) are on different steps at the same time. If the module also publishes a phase display value, a thin hand from the centre shows it, so a slow cycle visibly moves between steps. Left and Right move around a ring. Up and Down move between rings. *Why a ring:* a rhythm is a cycle. On a ring, the evenness of a Euclidean pattern and the turn of a rotation show at once.
   - **Keys:** for one gate lane that holds a set of pitch classes, one cell per pitch class. With 12 cells, the cells are drawn as one octave of a piano keyboard. With any other number of cells, they are drawn as a ring. The layout follows the number of cells, so a live change of tuning never leaves a broken drawing. Left and Right move in pitch order, black keys included. *Why a piano at all:* most players read a scale fastest on a keyboard. *Why not only a piano:* LoomDSP does not assume 12-tone equal temperament. A tuning with 19 or 31 notes per octave draws as a ring of 19 or 31 cells.
   - **Which cell is which key:** cell 0 is the tuning's reference pitch class (C in a 12-note tuning, pitch 0.0 in FR-SIG-05), not the scale's root. *Why:* if cells counted from the root, every major scale would draw as the white keys, and the keys would not match the notes. The module marks the root cell with a small bar under the key, or outside the ring at that cell. *Why:* outline and dot already mean the playing step.
   - **Cell names:** in the keys layout, the module names each cell for hover text and the screen reader, such as "C sharp" in a 12-note tuning or "degree 5 of 19" in another. The names change when the tuning does. The module publishes them as a list of display texts, read as a readout reads its text ([#118](https://github.com/brylie/LoomDSP/issues/118)). *Why:* names depend on the active tuning, so they are module state, not descriptor text.
@@ -484,7 +484,7 @@ The catalogue entries that would use each new widget. The knob is used by nearly
 
 ## Acceptance criteria
 
-Every widget is done when this checklist passes for it, written as tests as for the P1 widgets in [panels.md](panels.md#acceptance-criteria-module-panels), together with the widget-specific checks below it:
+Every widget is done when this checklist passes for it, written as tests as for the M1 widgets in [panels.md](panels.md#acceptance-criteria-module-panels), together with the widget-specific checks below it:
 
 - [ ] The registry refuses each kind of bad binding for the widget, with a message that names the widget.
 - [ ] Pointer gestures follow rule 1 and rule 2, tested with the `Ui` harness by name, not by pixel.

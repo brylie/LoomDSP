@@ -3,10 +3,10 @@
 The shared sizes, button roles, and quiet chrome that every view of the desktop app uses, so the app looks like one instrument and the controls a performer plays stand out.
 
 - **Kind:** living specification.
-- **Status:** Implemented, P1 (2026-11-01).
+- **Status:** Implemented, M1 (2026-11-01).
 - **Decision behind it:** [ADR-0025](../adr/0025-one-design-language-and-derived-panels.md) (one design language; themes are global), [ADR-0029](../adr/0029-module-families-and-a-shared-palette.md) (module families and a shared palette).
 - **Use case and requirements:** FR-PANEL-06 (global themes), NFR-UX-01 (keyboard and focus), NFR-UX-03 (colour is never the only signal).
-- **Background:** the [P1 UX audit](../research/2026-11-p1-ux-audit.md), findings 4, 11, 13, and 17.
+- **Background:** the [M1 UX audit](../research/2026-11-p1-ux-audit.md), findings 4, 11, 13, and 17.
 - **Issues:** [#454](https://github.com/brylie/LoomDSP/issues/454). Category colours and the palette: [#459](https://github.com/brylie/LoomDSP/issues/459). Tabs: [#456](https://github.com/brylie/LoomDSP/issues/456).
 - **Code:** `crates/loom-app/src/style.rs` (tokens and button roles), `Family` in `crates/loom-core/src/descriptor.rs`, the family colours in `crates/loom-canvas/src/theme.rs`, `crates/loom-canvas/src/controls.rs` (knob start cap), `stats_bar` in `crates/loom-app/src/main.rs`.
 
@@ -126,7 +126,7 @@ The rest:
 
 - Tabs and the matrix layout: [#456](https://github.com/brylie/LoomDSP/issues/456).
 - The inspector, help, and browser layouts: [#457](https://github.com/brylie/LoomDSP/issues/457), which uses these tokens.
-- Light theme and user themes: FR-PANEL-06, P2.
+- Light theme and user themes: FR-PANEL-06, M2.
 - Canvas text sizes, which scale with zoom.
 
 ## Open points

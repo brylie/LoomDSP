@@ -3,7 +3,7 @@
 A test harness for module authors: render one module with given inputs and parameters, check it against a stored reference render, and check that block size does not change its output.
 
 - **Kind:** living specification.
-- **Status:** Implemented, P1
+- **Status:** Implemented, M1
 - **Decision behind it:** [ADR-0002](../adr/0002-graph-execution-and-feedback.md) ("The SDK harness must cover this").
 - **Background:** [Block-size invariance](../learn/block-size-invariance.md): why a module must sound the same at any block size, and what breaks it.
 - **Use case and requirements:** FR-SDK-02, NFR-OSS-05.
@@ -134,7 +134,7 @@ Golden-audio tests for whole patches, the other half of NFR-OSS-05 ([#93](https:
 
 ## Reset returns a module to its start
 
-**Status:** Agreed, P2 ([#108](https://github.com/brylie/LoomDSP/issues/108), 2026-11-01).
+**Status:** Agreed, M2 ([#108](https://github.com/brylie/LoomDSP/issues/108), 2026-11-01).
 
 - **The rule:** after `reset()`, a module renders bit-identical to a new instance given the current parameters and `reset()` once. That is how the Controller starts every module ([live patching](live-patching.md), rule 7). So nothing glides after a reset, and state such as MIDI Note's last note and velocity is cleared (its gate is low).
 - **`Harness::check_reset()`** renders a module for 1 s with the test's inputs, calls `reset()`, renders again, and compares the second render with the first render of a new instance. It fails unless both are bit-identical.

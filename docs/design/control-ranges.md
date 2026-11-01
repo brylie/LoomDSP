@@ -72,16 +72,16 @@ PatchModule(id: 5, kind: "loom.math.mul@1", params: {"gain": 0.08}, ranges: {"ga
 ## Out of scope
 
 - Ranges the player types in. A fixed list first; a custom range can come later if the list proves too small.
-- A range selector on the tile. The inspector is enough for now; a panel selector widget is part of FR-PANEL-02 (P2).
+- A range selector on the tile. The inspector is enough for now; a panel selector widget is part of FR-PANEL-02 (M2).
 - Ranges on logarithmic or whole-number parameters (rule 3).
 - Clamping or limiting signals on cables, and clipping at the output. Those are separate fixes, tracked in [#121](https://github.com/brylie/LoomDSP/issues/121).
-- Exposing a parameter's range from a sub-patch (FR-ENCAP-03, P2).
+- Exposing a parameter's range from a sub-patch (FR-ENCAP-03, M2).
 
 ## Open points
 
 - **Default range: -1 to 1** for all three parameters (decided in [#122](https://github.com/brylie/LoomDSP/issues/122)). It is safe and fits pitch and audio. Multiply's default gain of 1 sits at the top of the knob, which is the natural place for "unity". *Why not -10 to 10:* it keeps today's feel but is not safe by default, which is the reason for this spec.
 - **Rule 6 is confirmed:** a smaller range clamps the value, a wider range keeps it.
-- **Clamp and Scale** ([P1 modules](p1-modules.md)) offer the same list for their limits and offset.
+- **Clamp and Scale** ([M1 modules](p1-modules.md)) offer the same list for their limits and offset.
 - **Ranges from what is connected.** Could a range follow the signals around the module? [Port ranges](port-ranges.md) (Draft) proposes that ports declare nominal ranges and that the inspector offers a one-click **Match** for the Range selector. It never changes a range or value on its own, because that would break rules 6 and 7 here. Nothing in this spec waits for it.
 - **Other parameters.** Phase `tune` and `octave` are already in musical units and probably need no ranges. Check each new module as it comes.
 - **Explainer.** Written: [Why feedback FM turns to noise](../learn/feedback-fm.md).

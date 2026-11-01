@@ -92,7 +92,7 @@ The browser is a small floating panel: a search field on top, a list of matches 
 
 ## Out of scope
 
-- Dropping a module onto a cable to insert it (FR-CANVAS-08, P2).
+- Dropping a module onto a cable to insert it (FR-CANVAS-08, M2).
 - Opening the browser from a port drag and auto-connecting the new module (see Open points).
 - Favourites, recently used modules, and user presets.
 - Searching parameter or port names.

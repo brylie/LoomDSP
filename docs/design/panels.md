@@ -3,7 +3,7 @@
 How modules, sub-patches, and patches show controls and displays, and how users build them.
 
 - **Kind:** living specification. It changes as panels are built and used.
-- **Status:** Draft, except [Module panels on tiles](#module-panels-on-tiles-p1) and [Level meters and audio load](#level-meters-and-audio-load-p1), which are Implemented. [Labels and hover text](#labels-and-hover-text) is Implemented. [Scope module](#scope-module) is Implemented, with its trace ([#62](https://github.com/brylie/LoomDSP/issues/62)). [The panel editor](#the-panel-editor) and [Exposed controls in a sub-patch](#exposed-controls-in-a-sub-patch) are Agreed (P2, 2026-11-01). [Default panels](#default-panels) is Draft.
+- **Status:** Draft, except [Module panels on tiles](#module-panels-on-tiles-p1) and [Level meters and audio load](#level-meters-and-audio-load-p1), which are Implemented. [Labels and hover text](#labels-and-hover-text) is Implemented. [Scope module](#scope-module) is Implemented, with its trace ([#62](https://github.com/brylie/LoomDSP/issues/62)). [The panel editor](#the-panel-editor) and [Exposed controls in a sub-patch](#exposed-controls-in-a-sub-patch) are Agreed (M2, 2026-11-01). [Default panels](#default-panels) is Draft.
 - **Decision behind it:** [ADR-0013](../adr/0013-modules-carry-their-own-panel.md) (modules carry their own panel), [ADR-0025](../adr/0025-one-design-language-and-derived-panels.md) (one design language, and panels derived from the declaration).
 - **Requirements:** FR-PANEL-*, FR-CANVAS-10, FR-CANVAS-11, FR-LIB-18, FR-VIS-01 to 04, FR-ENCAP-03, NFR-PERF-04, NFR-UX-01.
 - **Builds on:** [Telemetry](telemetry.md) for live data, [ADR-0010](../adr/0010-own-patch-canvas.md) for the canvas, [parameter mapping](modulation.md#parameter-mapping) for control values.
@@ -48,7 +48,7 @@ Every panel uses the same widget set.
 
 *Why one set:* users learn each control once. A new widget is added to the set, not drawn by one module, so every module and every panel can use it.
 
-The widgets after P1, with their bindings, modulation display, keyboard use, and the catalogue entries that need them, are planned in [Panel widgets](panel-widgets.md) (Draft, [ADR-0024](../adr/0024-widgets-follow-the-kind-of-value.md)). It names the slider "fader", the selector "select list", and the graph "curve", and adds a number, a readout, an XY scope, and a waveform.
+The widgets after M1, with their bindings, modulation display, keyboard use, and the catalogue entries that need them, are planned in [Panel widgets](panel-widgets.md) (Draft, [ADR-0024](../adr/0024-widgets-follow-the-kind-of-value.md)). It names the slider "fader", the selector "select list", and the graph "curve", and adds a number, a readout, an XY scope, and a waveform.
 
 The [read-only shape preview](panel-widgets.md#read-only-shape-preview) is an agreed first slice of the curve widget. Envelope, LFO, and Ladder place it above their controls. Each puts its choices in a row under the full-width shape ([Panel layout](#panel-layout), principle 2); Envelope's Mode is a segmented control. The preview shows a schematic result from parameters, keeps the tile's drag gesture, and has no editing handles. Built-in tiles use knobs for single ranged parameters by default; a fader needs a specific task such as comparing mixer levels.
 
@@ -69,7 +69,7 @@ The [read-only shape preview](panel-widgets.md#read-only-shape-preview) is an ag
 
 ## Panel layout
 
-**Status:** Agreed, P1 ([#453](https://github.com/brylie/LoomDSP/issues/453)). Decision on modes: [ADR-0030](../adr/0030-panels-hide-controls-a-mode-does-not-use.md).
+**Status:** Agreed, M1 ([#453](https://github.com/brylie/LoomDSP/issues/453)). Decision on modes: [ADR-0030](../adr/0030-panels-hide-controls-a-mode-does-not-use.md).
 
 A panel reads from top to bottom as **what it does, how it behaves, what you play, what it reports**. Exact numbers stay one hover away. Every built-in panel follows these principles, and so do derived panels ([Default panels](#default-panels)).
 
@@ -96,7 +96,7 @@ A panel reads from top to bottom as **what it does, how it behaves, what you pla
 
 ## The panel editor
 
-**Status:** Agreed, P2 ([#76](https://github.com/brylie/LoomDSP/issues/76)). The choices marked "Settled" were made with the maintainer on 2026-11-01. Requirements: FR-PANEL-01, 03, 05, 09, 10. Builds on [sub-patches](sub-patches.md) and [exposed controls](#exposed-controls-in-a-sub-patch).
+**Status:** Agreed, M2 ([#76](https://github.com/brylie/LoomDSP/issues/76)). The choices marked "Settled" were made with the maintainer on 2026-11-01. Requirements: FR-PANEL-01, 03, 05, 09, 10. Builds on [sub-patches](sub-patches.md) and [exposed controls](#exposed-controls-in-a-sub-patch).
 
 > Inside my Voice sub-patch I open the Panel pane. I drag the filter's cutoff knob onto it, then resonance, then the envelope's shape. I switch the pane to Edit, put a "Filter" frame around the two knobs, and line them up. I go back up a level: the Voice tile now shows exactly that panel.
 
@@ -158,7 +158,7 @@ In Edit mode:
 
 ### Built-in module panels
 
-**Settled:** a built-in module's panel cannot be changed in P2. *Why:* every Filter looks the same in every patch, tutorial, and help page. For a different layout, collapse the module into a sub-patch and design its panel.
+**Settled:** a built-in module's panel cannot be changed in M2. *Why:* every Filter looks the same in every patch, tutorial, and help page. For a different layout, collapse the module into a sub-patch and design its panel.
 
 ### Saved format
 
@@ -252,7 +252,7 @@ The inspector stays, as the place for:
 
 ### Layout
 
-**Status:** Agreed, P1 ([#457](https://github.com/brylie/LoomDSP/issues/457)).
+**Status:** Agreed, M1 ([#457](https://github.com/brylie/LoomDSP/issues/457)).
 
 - **With nothing selected,** two short lines ("Select a module to edit it." and "Press A over the canvas to add one.") and a **Keyboard shortcuts** button that opens the shortcut list in the help overlay. *Why:* the full list of gestures was useful once and noise after; it was about 30 lines in a 280 px column.
 - **A module** shows its name, the **Help** button, its description, then its parameters. The type ID is not shown here: it is in the header's hover text and in help.
@@ -313,7 +313,7 @@ A one-step gesture on a cable or an output places a scope or a level meter next 
 
 ### Canvas context menu
 
-**Status:** Agreed, P2 ([#330](https://github.com/brylie/LoomDSP/issues/330), 2026-11-01). It grows the probe menu above into the one canvas menu.
+**Status:** Agreed, M2 ([#330](https://github.com/brylie/LoomDSP/issues/330), 2026-11-01). It grows the probe menu above into the one canvas menu.
 
 A right-click opens a menu for what is under the pointer. Right-clicking a tile that is not selected selects it first.
 
@@ -351,17 +351,17 @@ A right-click opens a menu for what is under the pointer. Right-clicking a tile 
 - [x] Undo removes the new module and its cable in one step.
 - [x] Escape and a click outside close the menu and add nothing. While it is open, keys do not reach the canvas.
 
-## Module panels on tiles (P1)
+## Module panels on tiles (M1)
 
-**Status:** Agreed ([#7](https://github.com/brylie/LoomDSP/issues/7)). This section turns the general rules above into what P1 builds for built-in modules. Where the two differ, this section wins for P1.
+**Status:** Agreed ([#7](https://github.com/brylie/LoomDSP/issues/7)). This section turns the general rules above into what M1 builds for built-in modules. Where the two differ, this section wins for M1.
 
 ### Panel declaration ([#67](https://github.com/brylie/LoomDSP/issues/67))
 
 **Status:** Implemented. Code: `Panel`, `Widget`, and `ModuleDescriptor::check_panel` in `loom-core/src/descriptor.rs`.
 
 - A `ModuleDescriptor` has a `panel`: its size in grid units (width and height), and a list of widgets. A module with nothing on its tile has an empty panel.
-- Each widget has a kind, a grid position inside the panel, and a binding by name: a parameter for controls, a display value for lights. *Why names:* parameter names are stable IDs (AGENTS.md rule 5), and the P2 panel editor will save bindings the same way.
-- P1 widgets. Most are 3 grid units wide. The button is wider, so a performance control can be large. Radio buttons are wider too, so their choice names fit ([#394](https://github.com/brylie/LoomDSP/issues/394)).
+- Each widget has a kind, a grid position inside the panel, and a binding by name: a parameter for controls, a display value for lights. *Why names:* parameter names are stable IDs (AGENTS.md rule 5), and the M2 panel editor will save bindings the same way.
+- M1 widgets. Most are 3 grid units wide. The button is wider, so a performance control can be large. Radio buttons are wider too, so their choice names fit ([#394](https://github.com/brylie/LoomDSP/issues/394)).
 
 | Widget | Size (grid units) | Binds to | Behaviour |
 |---|---|---|---|
@@ -469,23 +469,23 @@ The canvas already hides port labels and titles below a size on screen. Panels u
 
 The whole app redraws only when something visible changes ([#90](https://github.com/brylie/LoomDSP/issues/90)): see [Audio load and dropouts](#audio-load-and-dropouts-in-the-stats-bar) for the stats bar.
 
-## Level meters and audio load (P1)
+## Level meters and audio load (M1)
 
-**Status:** Implemented ([#9](https://github.com/brylie/LoomDSP/issues/9)). Code: `WidgetKind::Meter`, `loom-modules/src/display.rs`, `loom-app/src/monitor.rs`, `live.rs`, `alerts.rs`. Requirements: FR-LIB-17, FR-VIS-03 (the level meter module, brought forward from P2), FR-PERF-04.
+**Status:** Implemented ([#9](https://github.com/brylie/LoomDSP/issues/9)). Code: `WidgetKind::Meter`, `loom-modules/src/display.rs`, `loom-app/src/monitor.rs`, `live.rs`, `alerts.rs`. Requirements: FR-LIB-17, FR-VIS-03 (the level meter module, brought forward from M2), FR-PERF-04.
 
 ### Meter widget
 
-- A fifth P1 widget, 3 × 6 grid units. It binds to one of its module's **outputs** by name. The registry refuses a meter bound to an output the module does not have.
+- A fifth M1 widget, 3 × 6 grid units. It binds to one of its module's **outputs** by name. The registry refuses a meter bound to an output the module does not have.
 - It shows the output's level from -60 dB (empty) to 0 dB (full), bottom to top: a bar for the RMS level and a thin line for the peak. Both rise at once and fall by the whole range in about a second. The bar is green below -12 dB, amber up to -3 dB, and red above. Its label is below it.
 - A meter is a display: pressing or dragging it selects or moves the tile, as with a light.
-- **Clip light and peak hold** (Agreed, P2, [#98](https://github.com/brylie/LoomDSP/issues/98), 2026-11-01). Above the meter, a clip light turns on when the peak reaches 1.0 and stays on until it is clicked. Below it, a readout shows the highest peak since the last reset, in dB to one decimal. Double-clicking the meter resets both. *Why the light says "would clip":* cables are never clipped (ADR-0007). A peak of 1.0 or more on a cable only clips if it reaches the output, so the hover text says "Would clip at the output". The clip light also has a shape, not only a colour (NFR-UX-03).
+- **Clip light and peak hold** (Agreed, M2, [#98](https://github.com/brylie/LoomDSP/issues/98), 2026-11-01). Above the meter, a clip light turns on when the peak reaches 1.0 and stays on until it is clicked. Below it, a readout shows the highest peak since the last reset, in dB to one decimal. Double-clicking the meter resets both. *Why the light says "would clip":* cables are never clipped (ADR-0007). A peak of 1.0 or more on a cable only clips if it reaches the output, so the hover text says "Would clip at the output". The clip light also has a shape, not only a colour (NFR-UX-03).
 - *Why levels fall over a second:* a short peak stays visible long enough to see, and the bar does not flicker.
 
 ### Level meter module
 
 - **`loom.display.meter`**, category Display. One audio input `in` and one output `out` that passes `in` through, sample for sample. No parameters. Its panel is one meter bound to `out`.
 - Mono. For stereo, use two.
-- P2 adds a level history view, with `view` and `window` settings ([panel widgets, Level history](panel-widgets.md#level-history)).
+- M2 adds a level history view, with `view` and `window` settings ([panel widgets, Level history](panel-widgets.md#level-history)).
 - *Why a pass-through output:* probes read outputs, and the module can sit inline in a signal path or hang off an output, without changing the sound.
 
 ### How levels reach a meter
@@ -498,11 +498,11 @@ The whole app redraws only when something visible changes ([#90](https://github.
 
 - The stats bar always shows the audio load (the latest callback as a share of its time budget, and the highest so far) and the dropout count: callbacks that overran their buffer, plus errors reported by the audio device.
 - An overload notice from the device that comes before the stream's first callback is not a dropout. No audio was rendered yet, so none was lost. macOS sends one as a stream starts with a very small buffer (32 frames), while the device switches to it. *Why:* counting it turned the count red each time a performer chose a small buffer, for a glitch that never happened. A count that cries wolf gets ignored. (Found on BlackHole 2ch, 2026-10-24, [#26](https://github.com/brylie/LoomDSP/issues/26).)
-- Load is shown normally below 70%, in amber from 70%, and in red from 90%. The colour follows the highest load since the last tick, and the "max" is the highest in the last 10 seconds ([P1 additions](#audio-load-colour)).
+- Load is shown normally below 70%, in amber from 70%, and in red from 90%. The colour follows the highest load since the last tick, and the "max" is the highest in the last 10 seconds ([M1 additions](#audio-load-colour)).
 - The dropout count is red for 10 seconds after it grows.
 - **Redraw.** A thread reads the audio stats four times a second and wakes the UI only when the bar would change: the load or its maximum to the shown 1%, the dropout count, the end of the red time, or the telemetry drops. The load number changes at most twice a second. *Why:* in Iced every message redraws the window, so a timer that refreshed the bar drew two frames a second in an idle patch ([#90](https://github.com/brylie/LoomDSP/issues/90)).
 - *Why:* a performer needs a warning before a problem is audible (FR-PERF-04), and must notice when one just happened. A count that stayed red forever would soon be ignored.
-- **Silenced and clipped output** (Agreed, P2, [#130](https://github.com/brylie/LoomDSP/issues/130), 2026-11-01). The engine counts output samples it turned from NaN or infinity into silence, and samples it clipped to -1 to 1, in two atomics in `EngineStats` (an atomic add on the audio thread, nothing else). The stats bar shows **Output: bad samples silenced** in the error style, and **Output clipped** in the warning style, each for 10 seconds after the last such sample, like the dropout count. Hover text gives the counts since the engine started. *Why:* since #123 a patch that makes NaN just goes quiet, and the player cannot tell why. With the output limiter on, clipping is rare, so the clip message mostly appears with output safety Off.
+- **Silenced and clipped output** (Agreed, M2, [#130](https://github.com/brylie/LoomDSP/issues/130), 2026-11-01). The engine counts output samples it turned from NaN or infinity into silence, and samples it clipped to -1 to 1, in two atomics in `EngineStats` (an atomic add on the audio thread, nothing else). The stats bar shows **Output: bad samples silenced** in the error style, and **Output clipped** in the warning style, each for 10 seconds after the last such sample, like the dropout count. Hover text gives the counts since the engine started. *Why:* since #123 a patch that makes NaN just goes quiet, and the player cannot tell why. With the output limiter on, clipping is rare, so the clip message mostly appears with output safety Off.
 
 ### Acceptance criteria: level meters and audio load
 
@@ -590,9 +590,9 @@ A user zooms in on Clock Divide. The knob says "Division", not `n`. They rest th
 - Touch: long-press for hover text.
 - A shorter delay for the next hover text once one has shown. Consider it if reading a column of ports feels slow in use.
 
-## P1 slice
+## M1 slice
 
-What P1 builds. The rest of this spec is P2.
+What M1 builds. The rest of this spec is M2.
 
 ### Acceptance criteria
 
@@ -604,17 +604,17 @@ What P1 builds. The rest of this spec is P2.
 - [ ] Zoomed far out, controls and displays are not drawn.
 - [ ] Reference laptop, full window: 60 fps with four scopes on screen. Record CPU and GPU in the benchmark doc.
 
-### Out of scope for P1
+### Out of scope for M1
 
-- The panel editor, sub-patch panels, and front panels (P2, FR-PANEL-*).
-- Step grid and graph editing on the tile. They need module data (OQ-17, P2).
-- XY pad, themes, custom skins (P2).
+- The panel editor, sub-patch panels, and front panels (M2, FR-PANEL-*).
+- Step grid and graph editing on the tile. They need module data (OQ-17, M2).
+- XY pad, themes, custom skins (M2).
 - Restyling built-in panels.
 - Docked views at the window edge. Displays are modules.
 
-## P1 additions
+## M1 additions
 
-**Status:** Agreed. Each subsection names its issue. These close the gaps that building the P1 panels found. Choice names, display value text, and lights for one-sample triggers are Implemented.
+**Status:** Agreed. Each subsection names its issue. These close the gaps that building the M1 panels found. Choice names, display value text, and lights for one-sample triggers are Implemented.
 
 ### Choice names
 
@@ -726,7 +726,7 @@ What P1 builds. The rest of this spec is P2.
 - **Cost.** A resize changes the scene once, when the drag ends, and shows a live outline while dragging. Nothing is rebuilt per frame (ADR-0010).
 - **Keyboard.** With a growable tile selected, Alt-arrow keys resize by one grid unit. Shift-arrow still moves the tile by 10 ([Keyboard without a mouse](#keyboard-without-a-mouse)). *Why:* NFR-UX-01. A separate modifier means the two rules never both apply to one key.
 
-### Acceptance criteria: P1 additions
+### Acceptance criteria: M1 additions
 
 - [x] Choice names: the registry refuses a wrong count, an empty name, and names on a continuous parameter. The inspector shows "Toggle" and "Momentary" for Button's `mode` and a slider for a parameter without names. No module hard-codes names in its panel.
 - [x] A one-sample trigger into a Clock Divide or Phase Trigger output light lights it, and it fades in 120 ms. No frames are drawn after the fade.
@@ -739,9 +739,9 @@ What P1 builds. The rest of this spec is P2.
 
 ## Default panels
 
-**Status:** Draft, P2. Decision: [ADR-0025](../adr/0025-one-design-language-and-derived-panels.md). Requirements: FR-PANEL-09, FR-SDK-01, NFR-UX-01.
+**Status:** Draft, M2. Decision: [ADR-0025](../adr/0025-one-design-language-and-derived-panels.md). Requirements: FR-PANEL-09, FR-SDK-01, NFR-UX-01.
 
-A module that declares no panel gets one derived from its parameters, display values, and data slots. The author can change one parameter's widget with a hint, or write the whole panel. *Why:* most of a panel follows from the parameters. P1 panels are already "a knob for every parameter", with a few kept in the inspector. Deriving them means every module, built-in or third-party, gets a consistent, keyboard-reachable panel with no layout work.
+A module that declares no panel gets one derived from its parameters, display values, and data slots. The author can change one parameter's widget with a hint, or write the whole panel. *Why:* most of a panel follows from the parameters. M1 panels are already "a knob for every parameter", with a few kept in the inspector. Deriving them means every module, built-in or third-party, gets a consistent, keyboard-reachable panel with no layout work.
 
 ### Which widget
 
@@ -761,7 +761,7 @@ Each declared item gets one widget, by the first rule that matches:
 - The choice between radio buttons and a select list follows [Radio buttons or a select list?](panel-widgets.md#radio-buttons-or-a-select-list). Choice names come from the parameter ([#160](https://github.com/brylie/LoomDSP/issues/160)).
 - A widget that binds more than one parameter (button, XY pad) is never derived. *Why:* the rules cannot know which two parameters belong together. A module that wants one writes its panel by hand, as the Button module does today.
 - A widget bound to an output (meter, scope, XY scope, spectrum) is never derived either. *Why:* most outputs carry signals that nobody needs to watch on the tile, so a rule would add displays almost everywhere. A display module writes its panel by hand, as the Level Meter does today.
-- A whole-number parameter without names gets a knob, as in P1. Leaning: the number widget, once it exists ([panel-widgets.md, Number](panel-widgets.md#number)).
+- A whole-number parameter without names gets a knob, as in M1. Leaning: the number widget, once it exists ([panel-widgets.md, Number](panel-widgets.md#number)).
 
 ### Hints
 
@@ -788,7 +788,7 @@ A hint is an option on the parameter, in `ParamOptions`. It names one widget fro
 
 ### Acceptance criteria: default panels
 
-- [ ] Each built-in module except Button and Level Meter gets its panel derived, with "inspector only" hints where P1 keeps a parameter in the inspector. Its widgets, bindings, and focus order equal today's hand-written panel (test). Positions may change.
+- [ ] Each built-in module except Button and Level Meter gets its panel derived, with "inspector only" hints where M1 keeps a parameter in the inspector. Its widgets, bindings, and focus order equal today's hand-written panel (test). Positions may change.
 - [ ] Deriving the panel twice from one descriptor gives equal panels (test).
 - [ ] The registry refuses a hint outside its parameter's group, with a message that names the parameter (test).
 - [ ] The registry refuses a hand-written module panel that leaves out a parameter without an "inspector only" hint, with a message that names the parameter (test).
@@ -796,7 +796,7 @@ A hint is an option on the parameter, in `ParamOptions`. It names one widget fro
 
 ## Exposed controls in a sub-patch
 
-**Status:** Agreed, P2 (2026-11-01), with [sub-patches](sub-patches.md). The derived panel for a sub-patch with no designed panel uses the [Default panels layout](#layout-1), which is still Draft; until it is agreed, build the derived sub-patch panel last. Decision: [ADR-0025](../adr/0025-one-design-language-and-derived-panels.md). Requirements: FR-ENCAP-03, FR-PANEL-03, FR-PANEL-09.
+**Status:** Agreed, M2 (2026-11-01), with [sub-patches](sub-patches.md). The derived panel for a sub-patch with no designed panel uses the [Default panels layout](#layout-1), which is still Draft; until it is agreed, build the derived sub-patch panel last. Decision: [ADR-0025](../adr/0025-one-design-language-and-derived-panels.md). Requirements: FR-ENCAP-03, FR-PANEL-03, FR-PANEL-09.
 
 A sub-patch's surface is made of the same widgets as its inside. *Why:* a user who enters a sub-patch, or leaves it, must not have to learn a new set of widgets. The knob outside is the knob inside, and so is the light, the scope, and the curve.
 

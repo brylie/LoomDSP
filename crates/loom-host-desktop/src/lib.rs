@@ -11,7 +11,7 @@
 //! - 32-bit float devices only. This covers CoreAudio, WASAPI shared mode,
 //!   and PipeWire/PulseAudio defaults.
 //! - MIDI ports are chosen at start, or opened and closed by name. Hot-plugging
-//!   comes in P1 (FR-MIDI-08).
+//!   comes in M1 (FR-MIDI-08).
 //!
 //! For development and tests, [`AudioOutput::clock`] plays the engine from
 //! a timer thread instead of a device, [`AudioOutput::stepped`] plays it only

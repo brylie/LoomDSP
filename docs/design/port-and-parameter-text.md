@@ -3,7 +3,7 @@
 Every port and parameter carries a short label and a one-sentence description, so users can learn what a control does where they use it.
 
 - **Kind:** living specification.
-- **Status:** Implemented, for ports, parameters, and display values ([#118](https://github.com/brylie/LoomDSP/issues/118)). [Module names and summaries](#module-names-and-summaries): Agreed and implemented, P1 ([#458](https://github.com/brylie/LoomDSP/issues/458)).
+- **Status:** Implemented, for ports, parameters, and display values ([#118](https://github.com/brylie/LoomDSP/issues/118)). [Module names and summaries](#module-names-and-summaries): Agreed and implemented, M1 ([#458](https://github.com/brylie/LoomDSP/issues/458)).
 - **Decision behind it:** [ADR-0016](../adr/0016-ports-and-parameters-carry-their-own-text.md)
 - **Use case and requirements:** FR-LIB-11, FR-SDK-01, NFR-UX-04
 - **Issues:** #115 (fields and checks), #43 (help pages), [#118](https://github.com/brylie/LoomDSP/issues/118) (display values)
@@ -82,7 +82,7 @@ A module's display values (the lights and step positions of [panels](panels.md#d
 
 ## Module names and summaries
 
-**Status:** Agreed and implemented, P1 ([#458](https://github.com/brylie/LoomDSP/issues/458)). Code: `module_text_follows_the_rules` in `crates/loom-modules/src/lib.rs`.
+**Status:** Agreed and implemented, M1 ([#458](https://github.com/brylie/LoomDSP/issues/458)). Code: `module_text_follows_the_rules` in `crates/loom-modules/src/lib.rs`.
 
 A module's name and one-line summary are the first text a user meets: in the browser, hover text, the inspector, and help. They speak to a musician.
 

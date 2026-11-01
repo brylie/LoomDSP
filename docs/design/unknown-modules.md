@@ -5,7 +5,7 @@ How a patch loads when it uses modules this build of LoomDSP does not have: each
 - **Kind:** living specification.
 - **Status:** Implemented ([#18](https://github.com/brylie/LoomDSP/issues/18)).
 - **Decision behind it:** none. It builds on the patch format ([ADR-0008](../adr/0008-patch-format-ron.md)) and on the rule that the patch format stays at version 1 during the early alpha (AGENTS.md).
-- **Use case and requirements:** FR-FILE-05, NFR-UX-05. Later: FR-SHARE-02 (P4).
+- **Use case and requirements:** FR-FILE-05, NFR-UX-05. Later: FR-SHARE-02 (M4).
 - **Background:** none needed.
 - **Prior art:** many modular and DAW tools keep a missing plugin or module as an empty slot, so a project survives a trip to a computer without it. We describe our own behaviour here.
 - **Issues:** [#18](https://github.com/brylie/LoomDSP/issues/18). Related: [copy and paste](clipboard.md) (pasting an unknown module), [#101](https://github.com/brylie/LoomDSP/issues/101) (keyboard).
@@ -80,7 +80,7 @@ A module is unknown when its `kind` (`"id@version"`) is not in this build's regi
 ## Out of scope
 
 - Unknown parameters or ports on a known module. A known module that gained a parameter in a newer build would keep its version (`@1`) only if the change is compatible; that rule belongs to the patch migration work that starts with the first release (FR-FILE-02, ADR-0008).
-- Saying where a missing module comes from or how to get it (FR-SHARE-02, P4).
+- Saying where a missing module comes from or how to get it (FR-SHARE-02, M4).
 - Placeholders in exported plugins and the web runtime. The export spec decides what an export does with them.
 - Showing unknown modules in the module browser. Only modules this build has are listed.
 

@@ -330,7 +330,7 @@ The host is behind a small trait in tests, with a fake list of devices, rates, a
 - Output channel choice (for example outputs 3 and 4 of an 8-channel interface). Today the engine plays on the first two channels. This needs its own section.
 - A MIDI channel filter on an input. See The window section.
 - Choosing the host audio API (for example ASIO or JACK instead of WASAPI or ALSA). The app uses the system's default API.
-- Per-device MIDI mappings (FR-MIDI-06, P2).
+- Per-device MIDI mappings (FR-MIDI-06, M2).
 - Device choice in `loom play`. It keeps its flags; #163 changes its MIDI default.
 
 ### Open points

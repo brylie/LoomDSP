@@ -3,7 +3,7 @@
 Authors, tags, and a licence stored in every patch, so people who share patches get credit, find patches again, and know what others may do with them.
 
 - **Kind:** living specification.
-- **Status:** Agreed (2026-11-01, [#243](https://github.com/brylie/LoomDSP/issues/243)). P2: the file fields, patch info, the licence chooser, the defaults, credit for parts, and [your patches browser](#your-patches-browser). P4: the same filters in the library browser (FR-SHARE-04).
+- **Status:** Agreed (2026-11-01, [#243](https://github.com/brylie/LoomDSP/issues/243)). M2: the file fields, patch info, the licence chooser, the defaults, credit for parts, and [your patches browser](#your-patches-browser). M4: the same filters in the library browser (FR-SHARE-04).
 - **Decision behind it:** [ADR-0023](../adr/0023-patch-licences-spdx-and-creative-commons.md) (licences); the patch format is [ADR-0008](../adr/0008-patch-format-ron.md).
 - **Use case and requirements:** UC7, UC9, FR-FILE-08, FR-FILE-09, FR-FILE-10, FR-SHARE-06, FR-SHARE-07, FR-NATIVE-09.
 - **Prior art:** package manifests list several authors, one per entry (as `Cargo.toml` does). Topic tags on code hosting sites are lowercase words joined by hyphens. Creative Commons offers a licence chooser that asks two questions. We use those conventions, in our own words and UI.
@@ -113,7 +113,7 @@ What each licence allows, for the licence filters:
 
 Open source and free software licences must allow both, by their own definitions, so the SPDX list answers for them. "Lets me change it" means the licence allows sharing a changed version; conditions such as credit or share-alike still apply and are shown with the licence.
 
-The library browser (P4) is specified with the library (FR-SHARE-04). Your patches browser is below.
+The library browser (M4) is specified with the library (FR-SHARE-04). Your patches browser is below.
 
 ### Your patches browser
 
@@ -155,7 +155,7 @@ FR-SHARE-06, [#246](https://github.com/brylie/LoomDSP/issues/246).
 
 ## Out of scope
 
-- **The library browser** (FR-SHARE-04, P4) and the learning library (#240). They use the filters here.
+- **The library browser** (FR-SHARE-04, M4) and the learning library (#240). They use the filters here.
 - **Credit for plain modules** copied with the clipboard.
 - **Thumbnails or previews** in your patches browser.
 - **Licences of embedded assets** (samples, wavetables, FR-FILE-06). They may need their own licence and credit; decide with the self-contained file (FR-SHARE-01).

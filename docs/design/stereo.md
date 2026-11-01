@@ -28,7 +28,7 @@ The player does nothing to make stereo happen. They patch as today.
 | Patches a stereo output into a control input, such as a cutoff | The control reads the average of the two sides, unless the module already runs per side for another reason. Then each side reads its own channel. |
 | Removes the last stereo cable into a chain | The chain becomes mono again at the next compile. |
 
-How the canvas shows a stereo cable is FR-CANVAS-12 (P2). See Open points.
+How the canvas shows a stereo cable is FR-CANVAS-12 (M2). See Open points.
 
 ## Rules
 
@@ -118,11 +118,11 @@ How the canvas shows a stereo cable is FR-CANVAS-12 (P2). See Open points.
 
 20. **Audio Out has one `Stereo` input, `in`,** in place of `left` and `right`. A mono cable plays on both sides, through rule 12. *Why:* one stereo cable to the output is the natural end of a stereo chain. The mono case behaves as before, and costs nothing.
 
-21. **Join and Split are the first stereo modules,** built in P1 from MT-MIX-03. Join takes two mono inputs (`Stereo` output). Split takes one `Stereo` input and has a mono output per side. *Why:* with one stereo input on Audio Out, a player with separate left and right signals needs Join. Join is also the smallest module that makes stereo, so the feature can be heard and tested. Split gives back the case that a downmix cannot: reading one side on purpose.
+21. **Join and Split are the first stereo modules,** built in M1 from MT-MIX-03. Join takes two mono inputs (`Stereo` output). Split takes one `Stereo` input and has a mono output per side. *Why:* with one stereo input on Audio Out, a player with separate left and right signals needs Join. Join is also the smallest module that makes stereo, so the feature can be heard and tested. Split gives back the case that a downmix cannot: reading one side on purpose.
 
 22. **A meter on a stereo output shows both channels. A scope shows the mean of the two sides,** the same downmix rule 11 gives audio, whatever the output's type. *Why:* level is where the sides most often differ, and a player checks it per side. A scope trace is for shape, and one trace is easier to read. A scope of a signal whose sides are opposite shows a flat line, like any downmix (see the explainer). To see one side, probe a Split output.
 
-23. **A port's hover text says "Stereo" when its cable is stereo,** until FR-CANVAS-12 (P2) draws stereo cables. *Why:* the player needs some way to see a width the engine chose for them.
+23. **A port's hover text says "Stereo" when its cable is stereo,** until FR-CANVAS-12 (M2) draws stereo cables. *Why:* the player needs some way to see a width the engine chose for them.
 
 ### Cost
 
@@ -168,11 +168,11 @@ The compiler, engine, module, no-allocation and UI tests cover the cases above. 
 ## Out of scope
 
 - **More than two channels** (surround, multichannel interfaces). The rules extend, but nothing needs them yet.
-- **Polyphony** (FR-SIG-08, P2). Voice count is another dimension, decided with voice allocation.
+- **Polyphony** (FR-SIG-08, M2). Voice count is another dimension, decided with voice allocation.
 - **Choosing a width by hand,** such as forcing a cable mono. A player who wants that patches through a downmix input or a stereo tool.
 - **Mid/side cables.** Mid/side is a conversion a module does (MT-MIX-03), not a cable width.
-- **Other stereo modules:** pan, width, and mid/side (MT-MIX-03 after P1), a stereo reverb, a stereo mixer. Each follows the catalogue. Join and Split are in scope (rule 21).
-- **Cable styles for stereo** (FR-CANVAS-12, P2).
+- **Other stereo modules:** pan, width, and mid/side (MT-MIX-03 after M1), a stereo reverb, a stereo mixer. Each follows the catalogue. Join and Split are in scope (rule 21).
+- **Cable styles for stereo** (FR-CANVAS-12, M2).
 
 ## Open points
 

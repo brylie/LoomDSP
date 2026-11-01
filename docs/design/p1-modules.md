@@ -1,6 +1,6 @@
-# P1 Module Ports and Parameters Specification
+# M1 Module Ports and Parameters Specification
 
-The ports, parameters, ranges, defaults, and behaviour of the P1 modules that bring no new engine rules, so each can be built from its catalogue entry without guessing.
+The ports, parameters, ranges, defaults, and behaviour of the M1 modules that bring no new engine rules, so each can be built from its catalogue entry without guessing.
 
 - **Kind:** living specification.
 - **Status:** Agreed on merge. Each section is ready to build.
@@ -110,7 +110,7 @@ What the inputs mean depends on the mode:
 - **Reset wins** when set (or toggle) and reset rise on the same frame. *Why:* a stop signal should never lose to a start signal.
 - The state is the same at block sizes 1, 77, and 512, including edges on the first and last frame of a block.
 - Switching mode keeps the state. *Why:* changing a setting should not look like an event.
-- The latch that cycles through N states is [MT-LOGIC-04](https://github.com/brylie/LoomDSP/issues/175), a counter, in P3.
+- The latch that cycles through N states is [MT-LOGIC-04](https://github.com/brylie/LoomDSP/issues/175), a counter, in M3.
 
 ## Mixing and shaping (MT-MIX-01, MT-MIX-02, MT-LEVEL-03, MT-LEVEL-05)
 
@@ -161,7 +161,7 @@ What the inputs mean depends on the mode:
 | Parameters | `factor`: −1 to 1, default 1. `offset`: −10 to 10 (offers the control ranges), default 0 |
 
 - `out = in × factor + offset`. A factor of −1 inverts. Bipolar to unipolar is factor 0.5 with offset 0.5.
-- **Range to range mapping is not built in P1.** It would be a separate module (`remap`), with four range ends, if the need appears. *Why:* factor and offset cover the P1 jobs, and a tile with four range knobs is a different tile.
+- **Range to range mapping is not built in M1.** It would be a separate module (`remap`), with four range ends, if the need appears. *Why:* factor and offset cover the M1 jobs, and a tile with four range knobs is a different tile.
 
 ## Sample and Hold, and Slew (MT-RAND-02, MT-LEVEL-04)
 
@@ -208,7 +208,7 @@ What the inputs mean depends on the mode:
 - `out90` is the same shape at `fract(p + 0.25)`. A sine on `out` and `out90` into an XY scope draws a circle.
 - Shapes are not band-limited. *Why:* an LFO is slow. For audio rate use the oscillators.
 - A free LFO starts at phase 0. Its output is the same at any block size: the phase is advanced one sample at a time in `f64`.
-- The shape source trait and retrigger from the catalogue are not built in P1.
+- The shape source trait and retrigger from the catalogue are not built in M1.
 
 ## Envelope AD mode (MT-ENV-01)
 
@@ -257,7 +257,7 @@ Both follow `loom.filter.svf`: an `in` port, a `cutoff` input in pitch units add
 - **Changing `slope` while playing** keeps the stage states and does not reset them. A stage that was not in the loop keeps running. The output of the old tap and the output of the new tap crossfade over 10 ms. During the crossfade the feedback gain is `resonance × min(old k_max, new k_max)`, so neither loop goes past its own self-oscillation limit. The gain never jumps: when the new `k_max` is lower, the gain first moves down to it over up to 10 ms with only the old tap heard, and then the taps crossfade. When it is higher, the taps crossfade first and the gain then moves up over up to 10 ms. *Why:* a live switch must not click, restart the sound, or burst into oscillation. Moving the tap at once while `k_max` ramps would let the 4-stage loop run with `k` above 4 for part of the 10 ms, for example when going from 18 dB to 24 dB. A jump in the gain is a jump in the output, so it would click.
 - Designed from published theory only (ADR-0018): Stilson and Smith, "Analyzing the Moog VCF with Considerations for Digital Implementation" (1996), and V. Zavalishin, "The Art of VA Filter Design" (stage and feedback topology, zero-delay form). Cite them in the code and the pull request.
 - **Stability.** The cutoff is clamped to 0.45 of the sample rate. NaN and infinity in the input give 0 and clear the stage state. No allocation.
-- No oversampling in P1, so heavy drive can alias. The catalogue's Quality trait is the place for it later.
+- No oversampling in M1, so heavy drive can alias. The catalogue's Quality trait is the place for it later.
 
 ## Controller input (MT-IO-04)
 
@@ -281,7 +281,7 @@ Both follow `loom.filter.svf`: an `in` port, a `cutoff` input in pitch units add
 - `channel` works as on MIDI Note: 0 listens to all 16, 1 to 16 to one.
 - **Smoothing** is a one-pole glide that gets about 99% of the way to a new value in `smoothing` seconds, the same law as parameter smoothing. 0 jumps at once. The knob is linear, not logarithmic, because a logarithmic range cannot start at 0.
 - The module keeps the last value of all 128 controller numbers, so turning `controller` shows that controller's last value at once.
-- Per-note expression is [MT-IO-05](../product/module-catalogue.md), P2.
+- Per-note expression is [MT-IO-05](../product/module-catalogue.md), M2.
 
 ## Acceptance criteria
 

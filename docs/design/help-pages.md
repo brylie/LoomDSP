@@ -3,7 +3,7 @@
 Every built-in module has a Markdown help page, generated from its descriptor, so learners can read what a module does, what each port and parameter means, and how to use it.
 
 - **Kind:** living specification.
-- **Status:** Agreed and Implemented, P1. The command (`loom modules --markdown DIR` and `--check`), the folder `docs/modules/`, the marker line, and the stale-page test were agreed in review of [#385](https://github.com/brylie/LoomDSP/pull/385).
+- **Status:** Agreed and Implemented, M1. The command (`loom modules --markdown DIR` and `--check`), the folder `docs/modules/`, the marker line, and the stale-page test were agreed in review of [#385](https://github.com/brylie/LoomDSP/pull/385).
 - **Decision behind it:** none of its own. Builds on [ADR-0016](../adr/0016-ports-and-parameters-carry-their-own-text.md) (ports and parameters carry their own text) and [ADR-0018](../adr/0018-clean-room-module-development.md) (our own words).
 - **Use case and requirements:** FR-LIB-11.
 - **Issues:** [#43](https://github.com/brylie/LoomDSP/issues/43), [#388](https://github.com/brylie/LoomDSP/issues/388).

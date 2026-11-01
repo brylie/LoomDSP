@@ -4,7 +4,7 @@ The measure line of `--bench`, `--measure`, and `--measure-idle` says why each f
 
 - **Kind:** living specification. Developer tooling.
 - **Status:** Agreed ([#252](https://github.com/brylie/LoomDSP/issues/252), 2026-10-28). Implemented.
-- **Decision behind it:** none. It extends the frame-rate report described in [P1 canvas benchmarks](../benchmarks/p1-canvas.md).
+- **Decision behind it:** none. It extends the frame-rate report described in [M1 canvas benchmarks](../benchmarks/p1-canvas.md).
 - **Use case and requirements:** NFR-PERF-04 (no redraw when nothing changes), the Redraw rules of the [panels spec](panels.md).
 - **Background:** none needed.
 - **Prior art:** none needed.
@@ -56,7 +56,7 @@ The CPU time the whole app process used over the line's interval, user plus syst
 - [x] An idle patch with no assignments and `--no-audio --measure-idle` has no recurring frame cause after startup. Checked in a three-second run: the second report showed `fps=0.0` and the cumulative frame count stayed at 3.
 - [x] A patch with an enabled assignment and `--fake-audio` shows `live` frames. Checked with `examples/patches/modulation.ron --fake-audio --measure-idle`: the final line counted 165 live frames.
 - [x] `--measure-idle` on an idle patch, with the stats bar timer off ([#90](https://github.com/brylie/LoomDSP/issues/90)), prints `fps=0.0` after startup.
-- [x] AGENTS.md and [P1 canvas benchmarks](../benchmarks/p1-canvas.md) explain the new fields.
+- [x] AGENTS.md and [M1 canvas benchmarks](../benchmarks/p1-canvas.md) explain the new fields.
 
 ## Out of scope
 

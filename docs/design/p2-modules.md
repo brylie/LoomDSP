@@ -1,9 +1,9 @@
-# P2 Module Ports and Parameters Specification
+# M2 Module Ports and Parameters Specification
 
-The ports, parameters, ranges, defaults, and behaviour of the P2 modules that bring no new engine rules, so each can be built from its catalogue entry without guessing.
+The ports, parameters, ranges, defaults, and behaviour of the M2 modules that bring no new engine rules, so each can be built from its catalogue entry without guessing.
 
 - **Kind:** living specification.
-- **Status:** Agreed for Random, Chance, Phase reset, Euclidean rhythm, Selector, Phase shift and reverse, Macro, Pitch quantiser, Multi-lane sequencer, and Spectrum (2026-11-01). Each section is ready to build. Other P2 modules are added here as they are agreed.
+- **Status:** Agreed for Random, Chance, Phase reset, Euclidean rhythm, Selector, Phase shift and reverse, Macro, Pitch quantiser, Multi-lane sequencer, and Spectrum (2026-11-01). Each section is ready to build. Other M2 modules are added here as they are agreed.
 - **Decision behind it:** none. It follows [ADR-0007](../adr/0007-polymorphic-signal-model.md) (signals), [ADR-0014](../adr/0014-modulation-without-cables.md) (modulation without cables), [ADR-0016](../adr/0016-ports-and-parameters-carry-their-own-text.md) (port and parameter text), and [ADR-0018](../adr/0018-clean-room-module-development.md) (clean room).
 - **Use case and requirements:** FR-LIB-01, FR-LIB-08, FR-LIB-12, FR-LIB-14, FR-LIB-19, FR-LIB-22, FR-LIB-29, FR-LIB-30, NFR-SND-04.
 - **Background:** [Phase and cycles](../learn/phase-and-cycles.md).
@@ -17,7 +17,7 @@ The ports, parameters, ranges, defaults, and behaviour of the P2 modules that br
 
 ## Rules for all modules here
 
-The [rules for P1 modules](p1-modules.md#rules-for-all-modules-here) apply: IDs by category, a label and description for every port and parameter, 5 ms smoothing for parameters that change a value over time, starting at non-default values, choices with names, and the module checklist with reference tests at block sizes 1, 77, and 512. In addition:
+The [rules for M1 modules](p1-modules.md#rules-for-all-modules-here) apply: IDs by category, a label and description for every port and parameter, 5 ms smoothing for parameters that change a value over time, starting at non-default values, choices with names, and the module checklist with reference tests at block sizes 1, 77, and 512. In addition:
 
 1. **Random modules are seeded** (TR-07). A `seed` parameter, a whole number from 1 to 65535, default 1, is kept in the inspector, as on Noise. The same seed gives the same output on every load and at every block size (NFR-SND-04). A right-hand stereo copy mixes its channel into the seed, as Noise does ([stereo](stereo.md), rule 27). *Why:* a patch varies while it plays, but sounds the same each time it loads.
 2. **A `reset` trigger restarts the random sequence from the seed.** A reset and a trigger on the same frame act in that order: reset first, so the trigger gets the first value of the sequence. *Why:* a bar or phrase clock on `reset` makes a random phrase repeat every N bars.
@@ -91,7 +91,7 @@ The [rules for P1 modules](p1-modules.md#rules-for-all-modules-here) apply: IDs 
 | Panel | Radio buttons for `source`, knobs for `steps`, `hits`, and `rotation`. A read-only [step grid](panel-widgets.md#step-grid) in the ring layout shows the pattern and the current step, once that widget exists. |
 
 - **The pattern.** Step `i` (from 0) of the unrotated pattern is a hit when `(i × hits) mod steps < hits`. `hits` above `steps` counts as `steps`. Rotation moves the pattern later: step `i` plays pattern step `(i − rotation) mod steps`. *Why this rule:* it is a closed form of the Euclidean spread. It gives the published patterns up to rotation (3 in 8 is `x..x..x.`), and it fixes which rotation is 0, so tests are exact.
-- **Source** is a setting, not chosen by a cable. *Why:* the `phase` input has a default, so a cable cannot be the switch, as on the LFO ([P1 modules](p1-modules.md#lfo-mt-mod-01)).
+- **Source** is a setting, not chosen by a cable. *Why:* the `phase` input has a default, so a cable cannot be the switch, as on the LFO ([M1 modules](p1-modules.md#lfo-mt-mod-01)).
 - **Phase:** the current step is `floor(phase × steps)`, clamped to `steps − 1`. With nothing on `phase`, the pattern fills one bar and holds when the transport stops. `clock` and `reset` are ignored.
 - **Clock:** each `clock` trigger moves to the next step, wrapping. `reset` goes back to step 0 on its frame; a reset and a clock on the same frame give step 0. The module starts at step 0. `phase` is ignored.
 - **Outputs.** `trigger` is high for one sample on entering a hit step, from either direction. `gate` is high from entering a hit step until leaving it. `accent` is a trigger on entering the step that holds pattern step 0, the pattern's first hit. With 0 hits, nothing fires.
@@ -109,7 +109,7 @@ The [rules for P1 modules](p1-modules.md#rules-for-all-modules-here) apply: IDs 
 | Parameters | `mode`: 0 Step (default), 1 Select, 2 Random. `count`: whole number 2 to 8, default 4. `fade`: 0 to 1 s, default 0.005 s. `repeats`: 0 Avoid (default), 1 Allow. `seed` (rule 1) |
 | Panel | Radio buttons for `mode`, knobs for `count` and `fade`. `repeats` and `seed` in the inspector only. |
 
-- **Mode** is a setting, not chosen by which input has a cable ([P1 modules, Sample and hold](p1-modules.md#sample-and-hold-loomrandsample-hold)).
+- **Mode** is a setting, not chosen by which input has a cable ([M1 modules, Sample and hold](p1-modules.md#sample-and-hold-loomrandsample-hold)).
 - **Step:** each `step` trigger moves to the next input, wrapping after `count`. **Select:** the input is `floor(select × count)`, with `select` clamped to 0 to 1 and the result to `count − 1`; so 0.6 with 4 inputs picks the third. **Random:** each `step` trigger picks an input at random from the first `count`. With `repeats` set to Avoid, it never picks the current one again.
 - `reset` goes to input 1 and restarts the random sequence (rule 2). The module starts on input 1.
 - Lowering `count` below the current input moves to the last input in use.
@@ -152,7 +152,7 @@ Two built forms of the Phase warp type (ADR-0017): small, cheap, and needed now 
 | Parameter | `value`: 0 to 1, default 0 |
 | Panel | One knob |
 
-- The output is `value`, smoothed over 5 ms (P1 rule 3). *Why no polarity setting:* each modulation assignment already sets its own polarity.
+- The output is `value`, smoothed over 5 ms (M1 rule 3). *Why no polarity setting:* each modulation assignment already sets its own polarity.
 - The ID is in the `ui` category, with Button (MT-UI-01). The issue proposed `loom.mod.macro`; this spec wins.
 
 ## Pitch quantiser (MT-PITCH-02)
@@ -185,7 +185,7 @@ Two built forms of the Phase warp type (ADR-0017): small, cheap, and needed now 
 | Data | `pattern`: 4 lanes of up to 64 steps, with step attributes ([data kinds](panel-widgets.md#data-kinds)). `scale`: a one-lane gate pattern (Own only) |
 | Panel | A step grid (rows layout) for `pattern`, with the attribute picker; radio buttons for `read`; knobs for `division`, `length`, and `steps1` to `steps4`. `type1` to `type4`, `scale`, `root`, and `seed` in the inspector. |
 
-**Settled:** four fixed lanes, each with its own length, so lanes can run in polymeter. *Why four:* ports are static in a descriptor. *Why own lengths in P2:* a 5-step lane against a 16-step lane is one of the quickest ways to make a pattern that keeps changing; it moves forward from P3 (FR-LIB-14). Per-lane rate and direction stay in P3.
+**Settled:** four fixed lanes, each with its own length, so lanes can run in polymeter. *Why four:* ports are static in a descriptor. *Why own lengths in M2:* a 5-step lane against a 16-step lane is one of the quickest ways to make a pattern that keeps changing; it moves forward from M3 (FR-LIB-14). Per-lane rate and direction stay in M3.
 
 **Reading** (`read` is a setting, not chosen by a cable):
 
@@ -295,7 +295,7 @@ Multi-lane sequencer:
 - The Smoothing trait itself (TR-11). Random uses a plain `glide` until it exists.
 - Distributions other than Uniform and Centred.
 - More than four lanes in Chance or the sequencer, or more than eight inputs in Selector.
-- Per-lane rate and direction in the sequencer (P3, FR-LIB-14).
+- Per-lane rate and direction in the sequencer (M3, FR-LIB-14).
 - The rest of Phase warp (bend, S-curve, skew, mirror, smoothing).
 
 ## Open points

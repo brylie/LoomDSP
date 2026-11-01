@@ -103,7 +103,7 @@ enum Command {
         note: Option<u8>,
     },
     /// Play a patch while editing its structure many times per second, and
-    /// report dropouts (P0 exit criterion).
+    /// report dropouts (M0 exit criterion).
     Stress {
         /// Patch file (.ron).
         patch: PathBuf,

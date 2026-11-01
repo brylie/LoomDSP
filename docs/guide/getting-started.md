@@ -107,4 +107,4 @@ These are planned for Phase 1. Each has an issue on GitHub.
 - Modulation on parameters, MIDI learn, and a panic button.
 - Choosing audio and MIDI devices, and plugging devices in while the app runs.
 
-See the [roadmap](../product/roadmap.md) and the [P1 milestone](https://github.com/brylie/LoomDSP/milestone/1) for the full list. Contributions are welcome: [CONTRIBUTING.md](../../CONTRIBUTING.md).
+See the [roadmap](../product/roadmap.md) and the [M1 milestone](https://github.com/brylie/LoomDSP/milestone/1) for the full list. Contributions are welcome: [CONTRIBUTING.md](../../CONTRIBUTING.md).

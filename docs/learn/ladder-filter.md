@@ -3,7 +3,7 @@
 Why a chain of simple filters with feedback gives a resonant low-pass, why four stages self-oscillate and two never do, why the loop needs no unit delay here, and why changing the slope while playing takes care. For players who turn resonance up and want to know what happens, and for people who work on the filter.
 
 - **Kind:** explainer.
-- **Used by:** [P1 modules specification, Ladder low-pass](../design/p1-modules.md#ladder-low-pass-loomfilterladder).
+- **Used by:** [M1 modules specification, Ladder low-pass](../design/p1-modules.md#ladder-low-pass-loomfilterladder).
 - **Related:** [Feedback loops and the unit delay](feedback-loops.md), [Pitch at 0.1 per octave](pitch.md), [Hot patching](hot-patching.md).
 - **Code:** `loom.filter.ladder` in `crates/loom-modules/src/filter.rs`.
 - **Sources:** T. Stilson and J. Smith, "Analyzing the Moog VCF with Considerations for Digital Implementation", ICMC 1996. V. Zavalishin, "The Art of VA Filter Design".

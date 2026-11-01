@@ -136,7 +136,7 @@ Dragging the range arc on a tile knob changes the depth of one assignment.
 #### Not in slice 2
 
 - **Dropping an output on an inspector control.** Agreed, but built after slice 2, in [#188](https://github.com/brylie/LoomDSP/issues/188). See [Inspector drop](#inspector-drop).
-- **Modulate mode.** See [Not planned for P1](#not-planned-for-p1).
+- **Modulate mode.** See [Not planned for M1](#not-planned-for-p1).
 
 ### Inspector drop
 
@@ -183,7 +183,7 @@ The matrix shows the assignments of the current patch level only. Assignments in
 
 *Why a matrix as well as arcs:* arcs are best for one control, the matrix for the whole patch. It is also the place to check for hidden routing, and the keyboard path for people who do not use a mouse.
 
-### Not planned for P1
+### Not planned for M1
 
 - **Modulate mode (select a module, press M, drag controls).** Drag and drop and the inspector already cover the mouse path, and the matrix covers the keyboard path. A mode also changes what every knob drag means, which is risky on stage, where a wrong drag is heard at once. Decided in [#151](https://github.com/brylie/LoomDSP/issues/151). Pinning a source gives most of the benefit without a mode. After trying slice 2, decide whether an arc drag on a knob that the pinned source does not drive yet should create that assignment.
 
@@ -216,7 +216,7 @@ The matrix shows the assignments of the current patch level only. Assignments in
 
 ## Parameter mapping
 
-**Status:** Agreed ([#66](https://github.com/brylie/LoomDSP/issues/66)). The decibel mapping is Agreed, P2 ([#99](https://github.com/brylie/LoomDSP/issues/99), 2026-11-01).
+**Status:** Agreed ([#66](https://github.com/brylie/LoomDSP/issues/66)). The decibel mapping is Agreed, M2 ([#99](https://github.com/brylie/LoomDSP/issues/99), 2026-11-01).
 
 Every parameter maps between its value and its control's position, from 0 to 1. Rules 2 and 3 use this mapping.
 
@@ -282,7 +282,7 @@ modulation: [
 
 A **Macro** module (FR-LIB-12) has one knob on its panel and one output equal to that knob. Assign its output to cutoff, resonance, and drive with different depths. One knob now opens the whole sound, and it can go on the front panel.
 
-## P1 slice
+## M1 slice
 
 ### Acceptance criteria: engine
 
@@ -372,15 +372,15 @@ The nested sub-patch test is deferred until sub-patch navigation exists. The mat
 - [x] One depth slider drag is one undo step.
 - [x] Undo restores the assignments removed by deleting a module, in their old order, and the output is bit-identical to before the delete.
 
-### Out of scope for P1
+### Out of scope for M1
 
-- Modulating an assignment's depth (FR-MOD-02, P2).
-- Per-voice modulation (with polyphony, P2).
+- Modulating an assignment's depth (FR-MOD-02, M2).
+- Per-voice modulation (with polyphony, M2).
 - Response curves on assignments (for example exponential depth).
 - Assignments across sub-patch boundaries. Not planned: expose the parameter instead.
 - MIDI learn. It maps a controller to a base value, a separate feature ([MIDI learn](midi-learn.md), [#24](https://github.com/brylie/LoomDSP/issues/24)).
 
 ## Open points
 
-- Should an assignment be able to target another assignment's depth directly, or through a "depth" parameter on a gain module? Not needed for P1. Decide with FR-MOD-02 (P2).
+- Should an assignment be able to target another assignment's depth directly, or through a "depth" parameter on a gain module? Not needed for M1. Decide with FR-MOD-02 (M2).
 - Try the default depth of 0.25 with users once slice 1 is built.

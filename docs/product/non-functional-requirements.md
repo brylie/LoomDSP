@@ -31,7 +31,7 @@ The audio thread has a hard deadline. At 48 kHz with a 128-sample buffer, each b
 | NFR-PERF-05 | Applying a graph edit (add module or cable) takes under 20 ms from user action to audible result *(proposal)*. | Must | Patching should feel immediate. |
 | NFR-PERF-06 | Benchmarks run in CI and report regressions. | Should | Performance is a feature and needs protection. |
 | NFR-PERF-07 | Incoming MIDI events are applied in the next audio buffer, with timestamps preserved inside the buffer where the driver provides them. | Must | Controller response must feel immediate and timing must stay tight. |
-| NFR-PERF-08 | Benchmark per-sample feedback regions (ADR-0002) in P0 with patches of 1, 10, and 50 modules inside a loop. | Must | Confirms the hybrid execution model before the UI depends on it. |
+| NFR-PERF-08 | Benchmark per-sample feedback regions (ADR-0002) in M0 with patches of 1, 10, and 50 modules inside a loop. | Must | Confirms the hybrid execution model before the UI depends on it. |
 
 ## Sound quality and determinism (`SND`)
 

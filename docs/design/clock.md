@@ -26,7 +26,7 @@ The engine keeps one transport per patch.
 | Time signature | 1 to 32 over 1, 2, 4, 8, 16 | 4/4 | Sets the length of a bar. |
 | Running | on, off | on | Saved in the patch. See rule 6. |
 | Position | beats, double precision | 0 | Quarter-note beats since bar 1. |
-| Source | internal, host, MIDI clock | internal | Host in plugins; MIDI clock in P2. |
+| Source | internal, host, MIDI clock | internal | Host in plugins; MIDI clock in M2. |
 
 ### Controls live on the Transport module
 
@@ -179,7 +179,7 @@ These details were settled while building the module.
 
 ## Rules
 
-**Status:** rules 1 to 6, 10, and 11 are Implemented; run state is saved as the Transport's `run` parameter ([#73](https://github.com/brylie/LoomDSP/issues/73)). Rule 8 holds for the jumps P1 has (a reset and a time signature change). Rule 7 is Agreed for MIDI clock ([MIDI clock](#midi-clock), 2026-11-01) and Draft for the plugin host. Rules 8 and 9 are Draft.
+**Status:** rules 1 to 6, 10, and 11 are Implemented; run state is saved as the Transport's `run` parameter ([#73](https://github.com/brylie/LoomDSP/issues/73)). Rule 8 holds for the jumps M1 has (a reset and a time signature change). Rule 7 is Agreed for MIDI clock ([MIDI clock](#midi-clock), 2026-11-01) and Draft for the plugin host. Rules 8 and 9 are Draft.
 
 1. **One transport, owned by the engine.** Modules read it; only the transport source changes it. *Why:* every synced module must agree on where the bar starts.
 2. **Position is double precision.** Phases are converted to `f32` only at the end. *Why:* in `f32`, position loses sample accuracy after a few minutes. An hour-long set must stay in step.
@@ -196,7 +196,7 @@ These details were settled while building the module.
 
 ## Clock to phase
 
-**Status:** Agreed, P2 ([#116](https://github.com/brylie/LoomDSP/issues/116), 2026-11-01). Decides how LoomDSP multiplies a clock that arrives only as triggers: turn it into a phase, then multiply the phase as usual with Phase Scale and Phase Trigger. *Why:* every clock tool in LoomDSP works in the phase domain ([phase and cycles](../learn/phase-and-cycles.md)); this module is the one place that has to measure time.
+**Status:** Agreed, M2 ([#116](https://github.com/brylie/LoomDSP/issues/116), 2026-11-01). Decides how LoomDSP multiplies a clock that arrives only as triggers: turn it into a phase, then multiply the phase as usual with Phase Scale and Phase Trigger. *Why:* every clock tool in LoomDSP works in the phase domain ([phase and cycles](../learn/phase-and-cycles.md)); this module is the one place that has to measure time.
 
 `loom.phase.from-clock` (MT-PHASE-09):
 
@@ -215,7 +215,7 @@ These details were settled while building the module.
 
 ## MIDI clock
 
-**Status:** Agreed, P2 ([#77](https://github.com/brylie/LoomDSP/issues/77), 2026-11-01). Requirements: FR-MIDI-07, FR-LIB-25.
+**Status:** Agreed, M2 ([#77](https://github.com/brylie/LoomDSP/issues/77), 2026-11-01). Requirements: FR-MIDI-07, FR-LIB-25.
 
 > I play with a drum machine. In Preferences I set the clock source to it. The Transport tile says "Following TR clock", my sequencers follow its tempo and its Start and Stop, and the LoomDSP clock goes on to my synth.
 
@@ -272,7 +272,7 @@ These details were settled while building the module.
 
 ### Jumps
 
-- In P1, the jumps are a reset and a time signature change (rule 10). Starting, stopping, and tempo changes are not jumps.
+- In M1, the jumps are a reset and a time signature change (rule 10). Starting, stopping, and tempo changes are not jumps.
 - A reset sets the position to 0. It counts as a jump at the first frame of the next buffer, whether the transport is running or stopped. A stopped transport stays stopped, and starts from bar 1 later.
 
 ### `ProcessContext`
@@ -308,7 +308,7 @@ Every call to `Module::process` gets the transport:
 
 The Transport module's parameters (tempo, time signature, run) are saved like any module's ([#73](https://github.com/brylie/LoomDSP/issues/73)). `reset` is transient and never saved.
 
-## P1 slice
+## M1 slice
 
 ### Acceptance criteria: engine ([#72](https://github.com/brylie/LoomDSP/issues/72))
 
@@ -347,12 +347,12 @@ The Transport module's parameters (tempo, time signature, run) are saved like an
 - [x] A time signature change while playing sets `jumped` for one call, fires `jump` once, and fires no skipped bar triggers (rule 10), at block sizes 1, 32, and 1024.
 - [x] Removing a cable from `run` leaves the transport as it was, and the toggle works again.
 
-### Out of scope for P1
+### Out of scope for M1
 
 - Host transport (with plugin export, later; FR-LIB-25 covers it once export exists).
-- MIDI clock in and out. Now [MIDI clock](#midi-clock), P2.
+- MIDI clock in and out. Now [MIDI clock](#midi-clock), M2.
 - Swing and shuffle.
-- Tempo changes over time, such as modulation curves over bars (FR-LIB-16, P3).
+- Tempo changes over time, such as modulation curves over bars (FR-LIB-16, M3).
 - Tap tempo.
 
 ## Open points

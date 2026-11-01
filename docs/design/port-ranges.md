@@ -3,7 +3,7 @@
 Each port says what range of values it usually carries, so the app can tell the player what a cable holds, warn about likely mistakes, and suggest a fix, without ever changing a module on its own.
 
 - **Kind:** living specification.
-- **Status:** Tier 1 is implemented ([#145](https://github.com/brylie/LoomDSP/issues/145)). Tiers 2 and 3 are Agreed, P2 ([#146](https://github.com/brylie/LoomDSP/issues/146), [#147](https://github.com/brylie/LoomDSP/issues/147), 2026-11-01), with the open points settled below.
+- **Status:** Tier 1 is implemented ([#145](https://github.com/brylie/LoomDSP/issues/145)). Tiers 2 and 3 are Agreed, M2 ([#146](https://github.com/brylie/LoomDSP/issues/146), [#147](https://github.com/brylie/LoomDSP/issues/147), 2026-11-01), with the open points settled below.
 - **Decision behind it:** no ADR of its own. It builds on [ADR-0007](../adr/0007-polymorphic-signal-model.md), which already says signal types are metadata for colour, default ranges, and module behaviour. Tier 1 does not need a new ADR: it is a small change to `PortSpec`, and modulation is still Draft.
 - **Use case and requirements:** FR-SIG-09, FR-VIS-05, FR-MOD-10 (all proposed here). Related: FR-SIG-02, FR-SIG-03, FR-MOD-08, FR-MOD-09.
 - **Background:** none yet. An explainer on interval arithmetic, and why its results are too wide, would help (see Open points).
@@ -198,8 +198,8 @@ The width matters for warnings. A warning that a gate *never* goes high is safe,
 - Ongoing automatic reconfiguration of modules (rule 13).
 - Units such as hertz or volts on ranges. A range is in cable units; pitch help text can translate.
 - Ranges measured from live audio. Telemetry already gives peaks per probe; a "measured range" view is a separate feature.
-- Ranges through sub-patch boundaries (FR-ENCAP, P2). Leaning: a sub-patch output takes the range its inner graph sends.
-- Per-voice ranges for polyphonic cables (FR-SIG-08, P2).
+- Ranges through sub-patch boundaries (FR-ENCAP, M2). Leaning: a sub-patch output takes the range its inner graph sends.
+- Per-voice ranges for polyphonic cables (FR-SIG-08, M2).
 
 ## Decisions
 
@@ -218,7 +218,7 @@ Settled on 2026-11-01 from the written leanings ([#146](https://github.com/bryli
 - **Warnings** use the thresholds in the table: more than 4 times the expected span, or no overlap. They show only in the inspector; canvas ports get no mark. *Why:* marks would add clutter to every patch for advice.
 - **Match** is offered for Constant `value`, and for Add `offset` only while A and B have no cable. Multiply `gain` gets no Match. The default for a module made from a dragged cable waits for that gesture.
 - **API:** `Controller::port_range(port)` and a list of warnings, so `loom check` prints the same warnings as the app.
-- **Phase:** Tiers 2 and 3 are P2.
+- **Phase:** Tiers 2 and 3 are M2.
 - **Explainer:** "What is on this cable?" in `docs/learn/`, written with Tier 2 and linked from this spec.
 
 ## Open points
