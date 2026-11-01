@@ -236,10 +236,11 @@ fn no_dialog_keeps_the_copy() {
     let app = setup.boot(None, &mut Answer::new(Choice::Unavailable));
     assert!(crashed.join("patch.ron").exists());
     assert!(
-        app.status
+        app.alerts
+            .status()
             .starts_with("Unsaved changes from a crash were kept. Install zenity or kdialog"),
         "{}",
-        app.status
+        app.alerts.status()
     );
 }
 
@@ -258,9 +259,9 @@ fn restore_keeps_an_unchanged_file() {
     assert_eq!(app.title(), "* drone.ron - LoomDSP");
     assert_eq!(app.current_patch(), edited, "the edit is back");
     assert!(
-        app.status.starts_with("Restored unsaved changes from "),
+        app.alerts.status().starts_with("Restored unsaved changes from "),
         "{}",
-        app.status
+        app.alerts.status()
     );
     let dir = folder(&app);
     settle(&mut app, Instant::now(), |_| !crashed.exists());
@@ -380,13 +381,17 @@ fn restore_reports_unknown_modules() {
     let mut answer = Answer::new(Choice::Restore);
     let mut app = setup.boot(None, &mut answer);
     assert!(answer.errors.is_empty());
-    assert!(app.status.contains("future.effect@1"), "{}", app.status);
-    let message = app.status.clone();
+    assert!(
+        app.alerts.status().contains("future.effect@1"),
+        "{}",
+        app.alerts.status()
+    );
+    let message = app.alerts.status().to_string();
     let _ = app.update(Message::Canvas(loom_canvas::CanvasEvent::Move {
         ids: vec![1],
         delta: iced::Vector::new(12.0, 0.0),
     }));
-    assert_eq!(app.status, message);
+    assert_eq!(app.alerts.status(), message);
 }
 
 /// Save As after restoring a copy whose file changed starts next to that
@@ -416,7 +421,11 @@ fn restore_replaces_the_command_line_patch() {
     drop(app);
     let app = setup.boot(Some(setup.file()), &mut Answer::new(Choice::Restore));
     assert_eq!(app.current_patch(), edited);
-    assert!(app.status.ends_with("drone.ron was not opened."), "{}", app.status);
+    assert!(
+        app.alerts.status().ends_with("drone.ron was not opened."),
+        "{}",
+        app.alerts.status()
+    );
 }
 
 /// Runs nobody watches neither ask nor touch the folder.

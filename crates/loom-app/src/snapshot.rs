@@ -423,9 +423,9 @@ impl App {
             playing,
             load,
             max_load,
-            dropouts: self.dropouts.count(),
+            dropouts: self.alerts.dropout_count(),
             telemetry_dropped,
-            input_alert: self.input_alert,
+            input_alert: self.alerts.input_drift(),
         }
     }
 
@@ -529,7 +529,7 @@ impl App {
             .collect();
         UiSnapshot {
             title: self.title(),
-            status: self.status.clone(),
+            status: self.alerts.status().to_string(),
             undo: self.edits.history.undo_step().map(|s| s.name().to_string()),
             redo: self.edits.history.redo_step().map(|s| s.name().to_string()),
             selection: self.selection.iter().copied().collect(),

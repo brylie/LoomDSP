@@ -506,7 +506,7 @@ mod tests {
         assert!(added.enabled);
         ui.drag(from, row, 12);
         assert_eq!(ui.app.controller.graph().assignments().count(), before + 1);
-        assert!(ui.app.status.contains("already modulates"));
+        assert!(ui.app.alerts.status().contains("already modulates"));
         let _ = ui.app.update(Message::Undo);
         assert_eq!(ui.app.controller.graph().assignments().count(), before);
     }
@@ -1134,12 +1134,12 @@ mod tests {
         let from = ui.output(2, "phase");
         let to = ui.input(1, "in");
         ui.drag(from, to, 8);
-        assert_eq!(ui.app.status, "Cannot connect to an unknown module");
+        assert_eq!(ui.app.alerts.status(), "Cannot connect to an unknown module");
         assert_eq!(ui.app.controller.graph().cables().count(), 0);
         let from = ui.output(1, "out");
         let to = ui.input(2, "pitch");
         ui.drag(from, to, 8);
-        assert_eq!(ui.app.status, "Cannot connect to an unknown module");
+        assert_eq!(ui.app.alerts.status(), "Cannot connect to an unknown module");
         assert_eq!(ui.app.controller.graph().cables().count(), 0);
         assert!(ui.app.edits.history.undo_step().is_none());
         let _ = std::fs::remove_file(path);

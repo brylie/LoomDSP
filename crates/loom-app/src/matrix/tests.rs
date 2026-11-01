@@ -214,7 +214,7 @@ fn retarget_keeps_id_order_and_one_undo_step() {
             .expect("cutoff"),
     ));
     ui.app.matrix_event(Event::Source(id, duplicate));
-    assert!(ui.app.status.contains("already modulates"));
+    assert!(ui.app.alerts.status().contains("already modulates"));
     assert_eq!(
         ui.app
             .controller
@@ -505,7 +505,7 @@ fn add_duplicate_and_drag_follow_inspector_edits() {
     ui.app.matrix_event(Event::AddTarget(target));
     ui.app.matrix_event(Event::AddApply);
     assert_eq!(ui.app.controller.graph().assignments().count(), 2);
-    assert!(ui.app.status.contains("already modulates"));
+    assert!(ui.app.alerts.status().contains("already modulates"));
     ui.app.matrix_event(Event::DepthDrag(AssignmentId(1), 0.4));
     ui.app.matrix_event(Event::DepthDrag(AssignmentId(1), 0.5));
     ui.app.matrix_event(Event::DepthReleased);

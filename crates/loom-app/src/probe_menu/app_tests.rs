@@ -175,7 +175,11 @@ fn a_removed_output_adds_nothing() {
     let _ = app.update(Message::ProbeMenu(super::Message::Pick(Probe::Scope)));
     assert_eq!(app.controller.graph().nodes().count(), modules);
     assert_eq!(app.edits.history.undo_step().map(|s| s.name().to_string()), undo);
-    assert!(app.status.contains("the output is gone"), "{}", app.status);
+    assert!(
+        app.alerts.status().contains("the output is gone"),
+        "{}",
+        app.alerts.status()
+    );
 }
 
 /// The menu stays inside the canvas when opened near its edge.

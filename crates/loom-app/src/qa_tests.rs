@@ -140,7 +140,7 @@ impl<'a> Setup<'a> {
             ..tests::app_args()
         };
         let app = App::boot_with(args, &mut recovery::Dialogs, Rc::new(fake::Shared(host.clone())));
-        assert!(tape.is_playing(), "the patch plays: {}", app.status);
+        assert!(tape.is_playing(), "the patch plays: {}", app.alerts.status());
         if let Some(stats) = app.stream.stats() {
             let dev = app.rig.playing.as_ref().map(|p| p.device.clone()).unwrap_or_default();
             host.active_stats.borrow_mut().push((dev, stats.clone()));
@@ -163,7 +163,11 @@ impl Run {
 
     /// Opens an example patch, as File > Open does.
     fn open(&mut self, name: &str) {
-        assert!(self.app.replace(Source::File(&example(name))), "{}", self.app.status);
+        assert!(
+            self.app.replace(Source::File(&example(name))),
+            "{}",
+            self.app.alerts.status()
+        );
     }
 
     fn left(&self) -> Vec<f32> {
@@ -356,7 +360,7 @@ fn no_click_on_a_device_change() {
     run.app.preferences(Prefs::Open);
     run.app
         .preferences(Prefs::Audio(Change::Device(DeviceChoice::Named("Fake B".into()))));
-    assert_eq!(run.tape.stream_starts().len(), 2, "{}", run.app.status);
+    assert_eq!(run.tape.stream_starts().len(), 2, "{}", run.app.alerts.status());
     // The new engine starts the patch again; the note is held again.
     run.hold();
     run.play(0.5);
@@ -440,7 +444,11 @@ fn a_new_sample_rate_ends_the_recording() {
     run.app.preferences(Prefs::Open);
     run.app
         .preferences(Prefs::Audio(Change::Device(DeviceChoice::Named("Fake B".into()))));
-    assert!(run.app.status.contains("The recording stopped"), "{}", run.app.status);
+    assert!(
+        run.app.alerts.status().contains("The recording stopped"),
+        "{}",
+        run.app.alerts.status()
+    );
     assert!(run.app.rig.recorder.is_none());
     assert!(run.tape.is_playing(), "the new device plays");
     let audio = loom_analysis::read_wav(&run.dir.join("run.wav")).unwrap();
@@ -469,9 +477,9 @@ fn a_failed_device_change_keeps_the_recording() {
     run.app
         .preferences(Prefs::Audio(Change::Device(DeviceChoice::Named("Fake B".into()))));
     assert!(
-        run.app.status.contains("Still playing on \"Fake A\""),
+        run.app.alerts.status().contains("Still playing on \"Fake A\""),
         "{}",
-        run.app.status
+        run.app.alerts.status()
     );
     assert!(run.app.rig.recorder.is_some(), "the recording goes on");
     run.play(0.2);
@@ -505,7 +513,7 @@ fn a_lost_named_device_survives_takes_edits_and_reconnects_when_back() {
     assert!(!run.app.stream.is_playing(), "stream stopped immediately");
     assert!(run.app.stream.is_idle(), "engine preserved on idle");
     assert_eq!(
-        run.app.status,
+        run.app.alerts.status(),
         "Audio: \"Fake B\" was lost. Plug it in again, or choose another device in Preferences."
     );
 
@@ -515,7 +523,7 @@ fn a_lost_named_device_survives_takes_edits_and_reconnects_when_back() {
     run.app.add_module(constant, iced::Point::new(50.0, 50.0));
     assert_eq!(run.app.controller.graph().len(), initial_modules + 1);
     assert_eq!(
-        run.app.status,
+        run.app.alerts.status(),
         "Audio: \"Fake B\" was lost. Plug it in again, or choose another device in Preferences."
     );
 
@@ -526,7 +534,7 @@ fn a_lost_named_device_survives_takes_edits_and_reconnects_when_back() {
 
     assert!(run.app.stream.is_playing(), "reconnected to Fake B");
     assert_eq!(run.app.rig.playing.as_ref().unwrap().device, "Fake B");
-    assert_eq!(run.app.status, "Audio: \"Fake B\" is back.");
+    assert_eq!(run.app.alerts.status(), "Audio: \"Fake B\" is back.");
 
     // The newly added module is present and engine plays
     run.play(0.1);
@@ -551,7 +559,10 @@ fn a_lost_system_default_switches_to_the_new_default_immediately() {
 
     assert!(run.app.stream.is_playing(), "switched to new default");
     assert_eq!(run.app.rig.playing.as_ref().unwrap().device, "Fake B");
-    assert_eq!(run.app.status, "Audio: \"Fake A\" was lost. Now playing on \"Fake B\".");
+    assert_eq!(
+        run.app.alerts.status(),
+        "Audio: \"Fake A\" was lost. Now playing on \"Fake B\"."
+    );
 }
 
 /// Choosing another device in Preferences while a Named device is lost
@@ -602,7 +613,7 @@ fn a_silent_stall_is_treated_as_audio_device_loss() {
     assert!(!run.app.stream.is_playing(), "stall stopped audio stream");
     assert!(run.app.stream.is_idle(), "engine preserved on idle");
     assert_eq!(
-        run.app.status,
+        run.app.alerts.status(),
         "Audio: \"Fake B\" was lost. Plug it in again, or choose another device in Preferences."
     );
 }
@@ -632,7 +643,10 @@ fn external_sample_rate_change_rebuilds_engine_at_new_rate() {
 
     assert!(run.app.stream.is_playing(), "audio continues playing");
     assert_eq!(run.app.rig.playing.as_ref().unwrap().rate, 96_000);
-    assert_eq!(run.app.status, "Audio: \"Fake B\" sample rate changed to 96000 Hz.");
+    assert_eq!(
+        run.app.alerts.status(),
+        "Audio: \"Fake B\" sample rate changed to 96000 Hz."
+    );
 }
 
 /// A dead stream error does not cause a second rebuild for the same loss (Rule 3).
@@ -683,7 +697,7 @@ fn ten_consecutive_failed_reopens_stops_retrying() {
     }
 
     assert_eq!(
-        run.app.status,
+        run.app.alerts.status(),
         "Audio: could not reopen \"Fake B\": the stream did not start. Choose a device in Preferences."
     );
     assert!(!run.app.stream.is_playing());
@@ -692,7 +706,7 @@ fn ten_consecutive_failed_reopens_stops_retrying() {
     now += Duration::from_secs(1);
     run.app.check_audio(now);
     assert_eq!(
-        run.app.status,
+        run.app.alerts.status(),
         "Audio: could not reopen \"Fake B\": the stream did not start. Choose a device in Preferences."
     );
 }
@@ -718,7 +732,7 @@ fn lost_system_default_reopen_failure_retries_and_stops() {
     }
 
     assert_eq!(
-        run.app.status,
+        run.app.alerts.status(),
         "Audio: could not reopen \"Fake A\": the stream did not start. Choose a device in Preferences."
     );
     assert!(!run.app.stream.is_playing());
@@ -727,7 +741,7 @@ fn lost_system_default_reopen_failure_retries_and_stops() {
     now += Duration::from_secs(1);
     run.app.check_audio(now);
     assert_eq!(
-        run.app.status,
+        run.app.alerts.status(),
         "Audio: could not reopen \"Fake A\": the stream did not start. Choose a device in Preferences."
     );
 }
@@ -758,7 +772,7 @@ fn lost_named_device_open_failure_retries_and_stops() {
     }
 
     assert_eq!(
-        run.app.status,
+        run.app.alerts.status(),
         "Audio: could not reopen \"Fake B\": the device is busy. Choose a device in Preferences."
     );
     assert!(!run.app.stream.is_playing());
@@ -792,7 +806,7 @@ fn lost_system_default_with_no_devices_continues_watching() {
     assert!(run.app.stream.is_playing());
     assert!(run.app.rig.lost_audio.is_none());
     assert_eq!(
-        run.app.status,
+        run.app.alerts.status(),
         "Audio: \"Fake A\" was lost. Now playing on \"USB DAC\"."
     );
 }
@@ -820,7 +834,7 @@ fn lost_system_default_failing_to_reopen_stops_after_ten_attempts() {
     }
 
     assert_eq!(
-        run.app.status,
+        run.app.alerts.status(),
         "Audio: could not reopen \"Fake A\": the device is busy. Choose a device in Preferences."
     );
     assert!(!run.app.stream.is_playing());
@@ -848,7 +862,7 @@ fn lost_system_default_reconnects_when_device_appears() {
     assert!(run.app.stream.is_playing());
     assert!(run.app.rig.lost_audio.is_none());
     assert_eq!(
-        run.app.status,
+        run.app.alerts.status(),
         "Audio: \"Fake A\" was lost. Now playing on \"USB DAC\"."
     );
 }
@@ -896,5 +910,5 @@ fn change_audio_keeps_lost_audio_when_restart_fails() {
         run.app.rig.lost_audio.is_some(),
         "lost_audio must be preserved when restart fails"
     );
-    assert!(run.app.status.contains("the stream did not start"));
+    assert!(run.app.alerts.status().contains("the stream did not start"));
 }

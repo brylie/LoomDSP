@@ -543,16 +543,13 @@ struct App {
     /// thread so the queues never fill.
     monitor: monitor::Monitor,
     live: Live,
-    /// When the dropout count last grew, for the stats bar warning.
-    dropouts: alerts::Dropouts,
-    /// Input drift warnings while recently active.
-    input_alert: Option<(u64, u64)>,
     /// What belongs to the machine: preferences, devices, MIDI inputs.
     rig: settings::Rig,
+    /// The status line, the stats bar's warnings, and problems reported once.
+    alerts: alerts::Alerts,
     /// Note input shared by every MIDI port and the "Hold note" button.
     midi: Option<SharedMidi>,
     holding: bool,
-    status: String,
     /// Every registered module, for the browser.
     modules: Vec<&'static ModuleDescriptor>,
     /// The module browser, while it is open.
@@ -582,8 +579,6 @@ struct App {
     /// The stream and its callback count at the last control `snapshot`,
     /// for its `advanced` field.
     control_seen: Option<(Arc<CallbackStats>, u64)>,
-    /// True once a failed `--record` has been reported.
-    recording_failed: bool,
     measuring: bool,
     animating: bool,
     /// The status bar shows the developer tools: `--dev`, or a measuring
@@ -600,8 +595,6 @@ struct App {
     arrow_group_closed: bool,
     /// Session-only matrix tab, filters, selection, and pending edit.
     matrix: matrix::State,
-    /// Whether the current patch has already reported a full live-value table.
-    live_value_overflow_reported: bool,
     /// How the canvas starts, for a still image of the window
     /// (`--screenshot-window`). `None` in the app.
     still: Option<loom_canvas::Still>,
@@ -748,7 +741,7 @@ impl App {
         // The compile report gives way to anything that needs reading.
         let mut keep = !status.is_empty();
         if keep {
-            app.status = status;
+            app.alerts.say(status);
         }
         app.document.start_autosave(session_folder);
         if let Some((state, orphan, _)) = recovered {
@@ -757,9 +750,9 @@ impl App {
         }
         if !notes.is_empty() {
             if keep {
-                notes.insert(0, std::mem::take(&mut app.status));
+                notes.insert(0, app.alerts.take_status());
             }
-            app.status = notes.join(" ");
+            app.alerts.say(notes.join(" "));
         }
         app
     }
@@ -771,17 +764,17 @@ impl App {
         // Nothing on disk holds this patch.
         self.edits.history.clear();
         let when = recovery::local_time(orphan.written());
-        self.status = match args.source() {
+        self.alerts.say(match args.source() {
             Source::File(path) => format!(
                 "Restored unsaved changes from {when}. {} was not opened.",
                 files::display_name(Some(path))
             ),
             _ => format!("Restored unsaved changes from {when}."),
-        };
+        });
         for note in self.document.load_notes() {
             if note.contains("not in this version:") {
-                self.status.push(' ');
-                self.status.push_str(note);
+                self.alerts.append(" ");
+                self.alerts.append(note);
             }
         }
         self.document.adopt(orphan);
@@ -813,7 +806,7 @@ impl App {
         }
         let current = self.current_patch();
         if let Some(line) = self.document.autosave(now, current) {
-            self.status = line;
+            self.alerts.say(line);
         }
     }
 
@@ -1004,12 +997,10 @@ impl App {
                 live.set_activity(rig.store.saved().show_activity);
                 live
             },
-            dropouts: alerts::Dropouts::default(),
-            input_alert: None,
             rig,
             midi,
             holding: false,
-            status,
+            alerts: alerts::Alerts::new(status),
             // The app's tests load the test modules but never list them.
             modules: if args.test_modules {
                 registry(true).iter().collect()
@@ -1028,7 +1019,6 @@ impl App {
             control_pending: Vec::new(),
             pointer: pointer::Pointer::new(!args.control.listeners().is_empty()),
             control_seen: None,
-            recording_failed: false,
             measuring: args.bench.redraws(),
             animating: args.bench.bench,
             dev_tools: args.dev || args.bench.reporter().is_some(),
@@ -1037,7 +1027,6 @@ impl App {
             arrow_group_pending: false,
             arrow_group_closed: false,
             matrix: matrix::State::default(),
-            live_value_overflow_reported: false,
             still: None,
             step_name: None,
         };
@@ -1046,12 +1035,12 @@ impl App {
         app.sync_audio_input();
         app.send_panic_trigger();
         if let Some(error) = app.connect_midi(first_midi, connect_midi) {
-            app.status = error;
+            app.alerts.say(error);
         }
         // A patch just loaded is the one on disk.
         app.edits.history.mark_saved();
         app.document.mark_loaded(app.current_patch());
-        if app.status.is_empty() {
+        if app.alerts.status().is_empty() {
             app.report();
         }
         app
@@ -1073,7 +1062,7 @@ impl App {
         let patch = self.current_patch();
         match patch.save(&path) {
             Ok(()) => {
-                self.status = format!("saved {}", path.display());
+                self.alerts.say(format!("saved {}", path.display()));
                 self.document.saved(path, patch);
                 self.edits.history.mark_saved();
                 // The file holds the work now: the copy goes.
@@ -1086,7 +1075,7 @@ impl App {
                     files::display_name(Some(&path))
                 );
                 self.show_error(&message);
-                self.status = message;
+                self.alerts.say(message);
                 false
             }
         }
@@ -1132,9 +1121,10 @@ impl App {
             files::Choice::DontSave => true,
             files::Choice::Cancel => false,
             files::Choice::Unavailable => {
-                self.status =
+                self.alerts.say(
                     "Unsaved changes. No dialog program (zenity or kdialog) is installed: save with Ctrl+S first."
-                        .to_string();
+                        .to_string(),
+                );
                 false
             }
         }
@@ -1155,7 +1145,7 @@ impl App {
                 "Could not open the patch: the audio device is not available ({e}). The current patch is unchanged."
             );
             self.show_error(&message);
-            self.status = message;
+            self.alerts.say(message);
             return false;
         }
         let sample_rate = output
@@ -1171,7 +1161,7 @@ impl App {
             Err(e) => {
                 let message = format!("Could not open the patch: {e}. The current patch is unchanged.");
                 self.show_error(&message);
-                self.status = message;
+                self.alerts.say(message);
                 return false;
             }
         };
@@ -1258,7 +1248,7 @@ impl App {
 
     fn new_patch(&mut self) {
         if self.can_discard() && self.replace(Source::Empty) {
-            self.status = "new patch".to_string();
+            self.alerts.say("new patch".to_string());
         }
     }
 
@@ -1276,7 +1266,7 @@ impl App {
     /// status bar, with any notes about what loaded differently.
     fn open_path(&mut self, path: &std::path::Path) {
         if self.replace(Source::File(path)) {
-            self.status = opened_status(path, self.document.load_notes());
+            self.alerts.say(opened_status(path, self.document.load_notes()));
         }
     }
 
@@ -1563,7 +1553,7 @@ impl App {
             learn::Message::Toggle if self.learn.is_on() => self.stop_learning(),
             learn::Message::Toggle => {
                 self.learn.start();
-                self.status = "MIDI learn: click a control to map it".to_string();
+                self.alerts.say("MIDI learn: click a control to map it".to_string());
                 self.refresh_learn();
             }
             learn::Message::Arm(param) => {
@@ -1585,22 +1575,22 @@ impl App {
             .is_some_and(|spec| spec.is_transient());
         if transient {
             // A live gesture cannot be mapped (transient-params.md).
-            self.status = format!(
+            self.alerts.say(format!(
                 "MIDI learn: {} is a live control and cannot be mapped",
                 learn::param_name(&self.controller, param)
-            );
+            ));
             return;
         }
         if self.learn.is_armed(param) {
             self.learn.disarm();
-            self.status = "MIDI learn: click a control to map it".to_string();
+            self.alerts.say("MIDI learn: click a control to map it".to_string());
         } else {
             let serial = self.controller.last_control_change().map(|seen| seen.serial);
             self.learn.arm(param, serial);
-            self.status = format!(
+            self.alerts.say(format!(
                 "Move a MIDI control to map it to {}",
                 learn::param_name(&self.controller, param)
-            );
+            ));
         }
         self.refresh_learn();
     }
@@ -1636,12 +1626,13 @@ impl App {
                 self.learn.disarm();
                 self.commit();
                 if let Some(mapping) = mapping {
-                    self.status = learn::mapped_status(&self.controller, mapping, &removed);
+                    self.alerts
+                        .say(learn::mapped_status(&self.controller, mapping, &removed));
                 }
             }
             Err(e) => {
                 self.learn.disarm();
-                self.status = format!("error: {e}");
+                self.alerts.say(format!("error: {e}"));
                 self.refresh_learn();
             }
         }
@@ -1652,7 +1643,7 @@ impl App {
 
     fn stop_learning(&mut self) {
         self.learn.stop();
-        self.status = "MIDI learn off".to_string();
+        self.alerts.say("MIDI learn off".to_string());
         self.refresh_learn();
     }
 
@@ -1692,15 +1683,14 @@ impl App {
     fn update_dropouts(&mut self, now: Instant) {
         if let Some(stats) = self.stream.stats() {
             let s = stats.snapshot();
-            self.dropouts.update(s.overruns + s.stream_errors, now);
+            self.alerts.note_dropouts(s.overruns + s.stream_errors, now);
         }
         // A recording that stopped early (a full disk) is reported once.
-        if !self.recording_failed
-            && let Some(error) = self.rig.recorder.as_ref().and_then(loom_host_desktop::Recorder::error)
+        if let Some(error) = self.rig.recorder.as_ref().and_then(loom_host_desktop::Recorder::error)
+            && self.alerts.recording_stopped()
         {
-            self.recording_failed = true;
-            self.status = format!("The recording stopped: {error}");
-            eprintln!("loom-app: {}", self.status);
+            self.alerts.say(format!("The recording stopped: {error}"));
+            eprintln!("loom-app: {}", self.alerts.status());
         }
     }
 
@@ -1791,7 +1781,7 @@ impl App {
         let live: std::collections::HashSet<ProbeId> = self.live.probes().collect();
         self.meter_levels.retain(|probe, _| live.contains(probe));
         if let Err(e) = self.controller.commit() {
-            self.status = format!("error: {e}");
+            self.alerts.say(format!("error: {e}"));
         }
     }
 
@@ -1822,7 +1812,7 @@ impl App {
         self.close_slider_gesture();
         self.edit(|app| {
             if let Err(e) = app.controller.set_range(ModuleId(module), index, range) {
-                app.status = format!("error: {e}");
+                app.alerts.say(format!("error: {e}"));
                 return;
             }
             app.edits.touch(module, index);
@@ -1834,7 +1824,7 @@ impl App {
     /// Sets a parameter from a control on a tile or in the inspector.
     fn set_param(&mut self, module: u32, index: usize, value: f32) {
         if let Err(e) = self.controller.set_param(ModuleId(module), index, value) {
-            self.status = format!("error: {e}");
+            self.alerts.say(format!("error: {e}"));
         }
         self.edits.touch(module, index);
         self.sync_audio_input();
@@ -1890,17 +1880,18 @@ impl App {
             modulation::target_name(graph, target, index),
         );
         if modulation::exists(graph, source, target, index) {
-            self.status = format!("{from} already modulates {to}");
+            self.alerts.say(format!("{from} already modulates {to}"));
             return;
         }
         let depth = modulation::default_depth(&spec);
         match self.controller.add_assignment(source, target, index, depth) {
             Ok(_) => {
                 if self.commit() {
-                    self.status = format!("{from} modulates {to}, {}", modulation::depth_text(depth));
+                    self.alerts
+                        .say(format!("{from} modulates {to}, {}", modulation::depth_text(depth)));
                 }
             }
-            Err(e) => self.status = format!("error: {e}"),
+            Err(e) => self.alerts.say(format!("error: {e}")),
         }
     }
 
@@ -1922,7 +1913,7 @@ impl App {
             match modulation::drag_target(graph, ModuleId(module), param, pinned, selected) {
                 Ok(id) => Some(id),
                 Err(why) => {
-                    self.status = why.to_string();
+                    self.alerts.say(why.to_string());
                     None
                 }
             }
@@ -1933,49 +1924,44 @@ impl App {
         };
         match self.controller.set_assignment_depth(id, a.depth + delta) {
             Ok(depth) => {
-                self.status = format!(
+                self.alerts.say(format!(
                     "{}: depth {}",
                     modulation::source_name(self.controller.graph(), a.source),
                     modulation::depth_text(depth)
-                );
+                ));
             }
-            Err(e) => self.status = format!("error: {e}"),
+            Err(e) => self.alerts.say(format!("error: {e}")),
         }
         self.refresh_values();
     }
 
     fn report(&mut self) {
         if let Some(lost) = &self.rig.lost_audio {
-            self.status = lost.message.clone();
+            self.alerts.say(lost.message.clone());
             return;
         }
         let report = self.controller.last_report();
         let inserted = report.inserted_delays().count();
-        self.status = match report.loops.len() {
+        self.alerts.say(match report.loops.len() {
             0 => "no feedback loops".to_string(),
             n => format!(
                 "{n} feedback {}, {inserted} automatic 1-sample {} (dashed)",
                 if n == 1 { "loop" } else { "loops" },
                 if inserted == 1 { "delay" } else { "delays" },
             ),
-        };
+        });
         // Warn only on entry into the overflow state, including after a
         // patch has returned below the table limit.
-        if report.without_live_value > 0 {
-            if !self.live_value_overflow_reported {
-                self.status.push_str(&format!(
-                    "; {} modulated {} show no live value (table full)",
-                    report.without_live_value,
-                    if report.without_live_value == 1 {
-                        "knob"
-                    } else {
-                        "knobs"
-                    }
-                ));
-                self.live_value_overflow_reported = true;
-            }
-        } else {
-            self.live_value_overflow_reported = false;
+        if self.alerts.live_values_full(report.without_live_value > 0) {
+            self.alerts.append(&format!(
+                "; {} modulated {} show no live value (table full)",
+                report.without_live_value,
+                if report.without_live_value == 1 {
+                    "knob"
+                } else {
+                    "knobs"
+                }
+            ));
         }
     }
 
@@ -2061,7 +2047,8 @@ impl App {
         let Some(step) = step.cloned() else { return };
         let verb = if forward { "Redo" } else { "Undo" };
         if let Err(why) = undo::check(&step, forward, &self.controller) {
-            self.status = format!("Cannot {} {}: {why}", verb.to_lowercase(), step.name());
+            self.alerts
+                .say(format!("Cannot {} {}: {why}", verb.to_lowercase(), step.name()));
             return;
         }
         // An armed parameter is a mode, not an edit: undo disarms it first.
@@ -2091,20 +2078,20 @@ impl App {
                 self.selection
                     .retain(|&id| self.controller.graph().node(ModuleId(id)).is_some());
                 if self.commit() {
-                    self.status = format!("{verb}: {}", step.name());
+                    self.alerts.say(format!("{verb}: {}", step.name()));
                 } else {
                     // The graph has the change but the engine does not. The
                     // history is already cleared by `commit`.
-                    self.status = format!(
+                    self.alerts.say(format!(
                         "{verb} could not reach the engine ({}); undo history cleared",
-                        self.status
-                    );
+                        self.alerts.status()
+                    ));
                 }
             }
             Err(e) => {
                 self.edits.history.clear();
                 self.commit();
-                self.status = format!("{verb} failed ({e}); undo history cleared");
+                self.alerts.say(format!("{verb} failed ({e}); undo history cleared"));
             }
         }
     }
@@ -2124,7 +2111,7 @@ impl App {
             }
             Err(e) => {
                 self.retry_commit = matches!(&e, LoomError::QueueFull);
-                self.status = format!("error: {e}");
+                self.alerts.say(format!("error: {e}"));
                 // The controller stays dirty, so the next commit retries the
                 // change; until then the history cannot be trusted.
                 self.edits.committed(false);
@@ -2247,7 +2234,7 @@ impl App {
                 app.selection = BTreeSet::from([id.0]);
                 app.commit();
             }
-            Err(e) => app.status = format!("Could not add {}: {e}", descriptor.name),
+            Err(e) => app.alerts.say(format!("Could not add {}: {e}", descriptor.name)),
         });
     }
 
@@ -2255,7 +2242,8 @@ impl App {
     /// it. The module and its cable are one undo step.
     fn add_probe(&mut self, probe: probe_menu::Probe, output: loom_canvas::PortRef, world: Point) {
         let Some(descriptor) = self.modules.iter().copied().find(|d| d.id == probe.id()) else {
-            self.status = format!("Cannot {}: no module `{}`", probe.verb(), probe.id());
+            self.alerts
+                .say(format!("Cannot {}: no module `{}`", probe.verb(), probe.id()));
             return;
         };
         let tiles: Vec<iced::Rectangle> = self.scene.modules().iter().map(|m| m.bounds()).collect();
@@ -2272,7 +2260,7 @@ impl App {
             .node(source.module)
             .is_some_and(|node| source.port < node.descriptor.outputs.len());
         if !exists {
-            self.status = format!("Cannot {}: the output is gone", probe.verb());
+            self.alerts.say(format!("Cannot {}: the output is gone", probe.verb()));
             return;
         }
         self.close_slider_gesture();
@@ -2281,7 +2269,7 @@ impl App {
             let id = match app.controller.add_module(descriptor.id) {
                 Ok(id) => id,
                 Err(e) => {
-                    app.status = format!("Cannot {}: {e}", probe.verb());
+                    app.alerts.say(format!("Cannot {}: {e}", probe.verb()));
                     return;
                 }
             };
@@ -2290,7 +2278,7 @@ impl App {
                 // so the edit makes no step.
                 let _ = app.controller.remove_module(id);
                 app.commit();
-                app.status = format!("Cannot {}: {e}", probe.verb());
+                app.alerts.say(format!("Cannot {}: {e}", probe.verb()));
                 return;
             }
             app.positions.insert(id.0, corner);
@@ -2355,7 +2343,7 @@ impl App {
                             self.replace(Source::Recovered(Box::new(patch)));
                         }
                         Ok(_) => {}
-                        Err(error) => self.status = format!("Could not open example: {error}"),
+                        Err(error) => self.alerts.say(format!("Could not open example: {error}")),
                     }
                 }
             }
@@ -2367,7 +2355,7 @@ impl App {
                 if let Some(descriptor) = descriptor {
                     self.help = Some(help::Help::new(descriptor));
                 } else {
-                    self.status = format!("Linked document is not bundled: {link}");
+                    self.alerts.say(format!("Linked document is not bundled: {link}"));
                 }
             }
             Message::CloseTileMenu => self.tile_menu = None,
@@ -2479,7 +2467,7 @@ impl App {
                 self.edits.start_slider_gesture();
                 self.begin_edit();
                 if let Err(e) = self.controller.set_assignment_depth(id, depth) {
-                    self.status = format!("error: {e}");
+                    self.alerts.say(format!("error: {e}"));
                 }
                 self.refresh_values();
             }
@@ -2487,7 +2475,7 @@ impl App {
                 self.close_slider_gesture();
                 self.edit(|app| {
                     if let Err(e) = app.controller.set_assignment_polarity(id, choice.polarity()) {
-                        app.status = format!("error: {e}");
+                        app.alerts.say(format!("error: {e}"));
                     }
                     app.refresh_values();
                 });
@@ -2496,7 +2484,7 @@ impl App {
                 self.close_slider_gesture();
                 self.edit(|app| {
                     if let Err(e) = app.controller.set_assignment_enabled(id, enabled) {
-                        app.status = format!("error: {e}");
+                        app.alerts.say(format!("error: {e}"));
                     } else {
                         app.scene.set_modulation_enabled(id.0, enabled);
                     }
@@ -2509,13 +2497,13 @@ impl App {
                     Ok(removed) => {
                         app.commit();
                         let graph = app.controller.graph();
-                        app.status = format!(
+                        app.alerts.say(format!(
                             "Removed modulation from {} to {}",
                             modulation::source_name(graph, removed.source),
                             modulation::target_name(graph, removed.target, removed.param)
-                        );
+                        ));
                     }
-                    Err(e) => app.status = format!("error: {e}"),
+                    Err(e) => app.alerts.say(format!("error: {e}")),
                 });
             }
             Message::SelectModule(id) => {
@@ -2576,7 +2564,8 @@ impl App {
             }
             Message::AudioPoll => self.poll_audio(),
             Message::InputAudio(event) => {
-                self.input_alert = event.show.then_some((event.underruns, event.overruns));
+                self.alerts
+                    .set_input_drift(event.show.then_some((event.underruns, event.overruns)));
                 if event.failed || event.ready {
                     self.sync_audio_input();
                 }
@@ -2588,7 +2577,7 @@ impl App {
                 max,
             }) => {
                 self.stream.set_load(peak, max);
-                self.dropouts.update(dropouts, at);
+                self.alerts.note_dropouts(dropouts, at);
             }
             Message::Audio(audio_watch::Event::Stalled { callbacks, advanced }) => {
                 // Time the stall from when the watcher last saw a callback,
@@ -2629,14 +2618,14 @@ impl App {
                 self.edit(|app| match app.controller.unmap_midi(ModuleId(module), index) {
                     Ok(Some(mapping)) => {
                         app.commit();
-                        app.status = format!(
+                        app.alerts.say(format!(
                             "Removed {} from {}",
                             mapping.control,
                             learn::param_name(&app.controller, (module, index))
-                        );
+                        ));
                     }
                     Ok(None) => {}
-                    Err(e) => app.status = format!("error: {e}"),
+                    Err(e) => app.alerts.say(format!("error: {e}")),
                 });
             }
             Message::Midi => {
@@ -2708,7 +2697,7 @@ impl App {
             _ => false,
         };
         if forbidden {
-            self.status = "Cannot connect to an unknown module".into();
+            self.alerts.say("Cannot connect to an unknown module");
             self.gestures.cancel_drag();
             return;
         }
@@ -2808,7 +2797,7 @@ impl App {
                     Ok(_) => {
                         self.commit();
                     }
-                    Err(e) => self.status = format!("error: {e}"),
+                    Err(e) => self.alerts.say(format!("error: {e}")),
                 }
             }
             CanvasEvent::Assign { from, module, widget } => {
@@ -2913,12 +2902,13 @@ impl App {
         let Some((transport, index)) = transport_run(&self.controller) else {
             let running = !self.controller.transport().running;
             if let Err(e) = self.controller.set_running(running) {
-                self.status = format!("error: {e}");
+                self.alerts.say(format!("error: {e}"));
             }
             return;
         };
         if run_is_driven(&self.controller) {
-            self.status = "Run follows the cable on the Transport's run input".to_string();
+            self.alerts
+                .say("Run follows the cable on the Transport's run input".to_string());
             return;
         }
         let on = self
@@ -3004,7 +2994,7 @@ impl App {
             clipboard::Group::from_selection(self.controller.graph(), &self.positions, &self.selection, incoming)
                 .with_sizes(&self.sizes);
         if group.is_empty() {
-            self.status = format!("Nothing selected to {verb}");
+            self.alerts.say(format!("Nothing selected to {verb}"));
             return None;
         }
         Some(group)
@@ -3013,7 +3003,7 @@ impl App {
     /// Copy: returns the patch text for the clipboard. Not an edit.
     fn copy(&mut self) -> Option<String> {
         let group = self.selected_group("copy", false)?;
-        self.status = format!("Copied {}", group.describe());
+        self.alerts.say(format!("Copied {}", group.describe()));
         Some(group.to_text())
     }
 
@@ -3029,7 +3019,7 @@ impl App {
         self.step_name = Some(format!("cut {}", group.describe()));
         self.edit(|app| {
             if app.delete_modules(&ids) {
-                app.status = format!("Cut {}", group.describe());
+                app.alerts.say(format!("Cut {}", group.describe()));
             }
         });
         Some(group.to_text())
@@ -3042,12 +3032,12 @@ impl App {
             return;
         }
         let Some(text) = text else {
-            self.status = clipboard::NOTHING_TO_PASTE.to_string();
+            self.alerts.say(clipboard::NOTHING_TO_PASTE.to_string());
             return;
         };
         match clipboard::Group::from_text(&text, self.controller.registry()) {
             Ok(group) => self.add_group(&group, browser::snap(world), "paste", "Pasted"),
-            Err(why) => self.status = why,
+            Err(why) => self.alerts.say(why),
         }
     }
 
@@ -3075,7 +3065,7 @@ impl App {
     /// why.
     fn add_group(&mut self, group: &clipboard::Group, origin: Point, verb: &str, done: &str) {
         if let Err(why) = group.check(&self.controller) {
-            self.status = format!("Cannot {verb}: {why}");
+            self.alerts.say(format!("Cannot {verb}: {why}"));
             return;
         }
         self.step_name = Some(format!("{verb} {}", group.describe()));
@@ -3084,14 +3074,14 @@ impl App {
                 group.apply_sizes(&ids, &mut app.sizes);
                 app.selection = ids.into_iter().collect();
                 if app.commit() {
-                    app.status = format!("{done} {}", group.describe());
+                    app.alerts.say(format!("{done} {}", group.describe()));
                 }
             }
             Err(e) => {
                 // The rollback freed the new modules' slots. Only a commit
                 // hands them back, so the next paste has room.
                 app.commit();
-                app.status = format!("Cannot {verb}: {e}");
+                app.alerts.say(format!("Cannot {verb}: {e}"));
             }
         });
         // `record` clears it, but an edit inside a gesture does not record.
@@ -3352,7 +3342,7 @@ impl App {
         let audio: Element<'_, Message> = if stats.playing {
             let load = bar_text(stats.load_text()).color(severity_colour(alerts::load_severity(self.stream.load().0)));
             let dropouts = bar_text(format!("dropouts {}", stats.dropouts))
-                .color(severity_colour(self.dropouts.severity(Instant::now())));
+                .color(severity_colour(self.alerts.dropout_severity(Instant::now())));
             let mut items = row![bar_text(stats.label).color(DIM), load, dropouts].spacing(10);
             if let Some((underruns, overruns)) = stats.input_alert {
                 items = items.push(
@@ -3414,11 +3404,11 @@ impl App {
         // than wrapped, so the bar stays one line high. Hover shows all
         // of it.
         .push(tooltip(
-            container(bar_text(&self.status).color(DIM))
+            container(bar_text(self.alerts.status()).color(DIM))
                 .width(Length::Fill)
                 .align_x(iced::Alignment::End)
                 .clip(true),
-            container(text(&self.status).size(style::BODY))
+            container(text(self.alerts.status()).size(style::BODY))
                 .padding(6)
                 .max_width(480)
                 .style(container::rounded_box),

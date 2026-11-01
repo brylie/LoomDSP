@@ -55,17 +55,17 @@ fn live_value_overflow_warning_is_latched_per_patch() {
     }
     let (last_target, last_offset, last_id) = last.unwrap();
     assert!(app.commit());
-    assert!(app.status.contains("table full"), "{}", app.status);
+    assert!(app.alerts.status().contains("table full"), "{}", app.alerts.status());
     assert!(app.commit());
-    assert!(!app.status.contains("table full"), "{}", app.status);
+    assert!(!app.alerts.status().contains("table full"), "{}", app.alerts.status());
     app.controller.remove_assignment(last_id).unwrap();
     assert!(app.commit());
-    assert!(!app.status.contains("table full"), "{}", app.status);
+    assert!(!app.alerts.status().contains("table full"), "{}", app.alerts.status());
     app.controller
         .add_assignment(out(source), last_target, last_offset, 0.5)
         .unwrap();
     assert!(app.commit());
-    assert!(app.status.contains("table full"), "{}", app.status);
+    assert!(app.alerts.status().contains("table full"), "{}", app.alerts.status());
 }
 
 /// Audio watcher events update the warning peak and rolling maximum,
@@ -82,7 +82,7 @@ fn audio_watcher_events_update_the_stats_model() {
     }));
     assert_eq!(app.stream.load().0, 0.95);
     assert_eq!(app.stream.load().1, 0.95);
-    assert_eq!(app.dropouts.count(), 1);
+    assert_eq!(app.alerts.dropout_count(), 1);
     let _ = app.update(Message::Audio(audio_watch::Event::Stalled {
         callbacks: 3,
         advanced: now,
@@ -216,7 +216,11 @@ fn fake_audio_keeps_taking_edits() {
                 index: 0,
                 position: ((burst * 500 + i) % 100) as f32 / 100.0,
             });
-            assert!(!app.status.contains("queue is full"), "{}", app.status);
+            assert!(
+                !app.alerts.status().contains("queue is full"),
+                "{}",
+                app.alerts.status()
+            );
         }
         std::thread::sleep(Duration::from_millis(30));
     }
@@ -239,7 +243,11 @@ fn no_audio_keeps_taking_edits() {
             index: 0,
             position: (i % 100) as f32 / 100.0,
         });
-        assert!(!app.status.contains("queue is full"), "move {i}: {}", app.status);
+        assert!(
+            !app.alerts.status().contains("queue is full"),
+            "move {i}: {}",
+            app.alerts.status()
+        );
     }
     assert!(5_000 > capacity);
     let stats = app.controller.stats();
@@ -360,7 +368,11 @@ fn a_drop_assigns_once_and_is_one_undo_step() {
 
     drop_env(&mut app, env, filter, widget);
     assert_eq!(assignments(&app).len(), 1);
-    assert!(app.status.contains("already modulates"), "{}", app.status);
+    assert!(
+        app.alerts.status().contains("already modulates"),
+        "{}",
+        app.alerts.status()
+    );
 
     app.undo();
     assert!(assignments(&app).is_empty());
@@ -380,7 +392,7 @@ fn test_modules_are_listed_only_with_the_flag() {
         ..app_args()
     });
     // The two test modules and the patch's Transport.
-    assert_eq!(app.controller.graph().nodes().count(), 3, "{}", app.status);
+    assert_eq!(app.controller.graph().nodes().count(), 3, "{}", app.alerts.status());
     assert_eq!(app.controller.graph().assignments().count(), 7);
     assert!(app.modules.iter().any(|d| d.id == "test.panel"));
 
@@ -692,7 +704,7 @@ fn an_arc_drag_is_one_step_and_shows_only_its_assignment() {
             .depth
     };
     assert!((depth(&app) - 0.45).abs() < 1e-6, "{}", depth(&app));
-    assert!(app.status.contains("+45%"), "{}", app.status);
+    assert!(app.alerts.status().contains("+45%"), "{}", app.alerts.status());
     assert_eq!(app.edits.history.len(), steps + 1);
     app.undo();
     assert_eq!(depth(&app), 0.25);
@@ -745,7 +757,11 @@ fn an_arc_drag_with_no_choice_changes_nothing() {
     let _ = app.update(Message::Canvas(CanvasEvent::GestureEnd));
     assert_eq!(assignments(&app), before);
     assert_eq!(app.edits.history.len(), steps);
-    assert!(app.status.contains("Several sources"), "{}", app.status);
+    assert!(
+        app.alerts.status().contains("Several sources"),
+        "{}",
+        app.alerts.status()
+    );
 }
 
 /// The scene has one line per assignment, ending on its control.
@@ -869,7 +885,7 @@ fn copy_with_nothing_selected_writes_nothing() {
     let mut app = app();
     app.selection.clear();
     assert!(app.copy().is_none());
-    assert_eq!(app.status, "Nothing selected to copy");
+    assert_eq!(app.alerts.status(), "Nothing selected to copy");
     assert!(app.edits.history.undo_step().is_none(), "copy is not an edit");
 }
 
@@ -878,13 +894,13 @@ fn a_paste_lands_at_the_snapped_point_is_selected_and_is_one_undo_step() {
     let mut app = app();
     let (sine, vca) = two_selected(&mut app);
     let text = app.copy().unwrap();
-    assert_eq!(app.status, "Copied 2 modules");
+    assert_eq!(app.alerts.status(), "Copied 2 modules");
     assert!(app.edits.history.undo_step().is_none(), "copy is not an edit");
 
     let before = app.controller.graph().nodes().count();
     app.paste(Point::new(605.0, 299.0), Some(text));
     assert_eq!(app.controller.graph().nodes().count(), before + 2);
-    assert_eq!(app.status, "Pasted 2 modules");
+    assert_eq!(app.alerts.status(), "Pasted 2 modules");
     assert_eq!(step_name(&app).as_deref(), Some("paste 2 modules"));
     let new: Vec<u32> = app.selection.iter().copied().collect();
     assert_eq!(new.len(), 2, "only the pasted modules are selected");
@@ -941,14 +957,14 @@ fn a_refused_paste_adds_nothing_and_no_step() {
     let mut app = app();
     let before = app.controller.graph().nodes().count();
     app.paste(Point::ORIGIN, None);
-    assert_eq!(app.status, clipboard::NOTHING_TO_PASTE);
+    assert_eq!(app.alerts.status(), clipboard::NOTHING_TO_PASTE);
     app.paste(Point::ORIGIN, Some("not a patch".to_string()));
-    assert_eq!(app.status, clipboard::NOTHING_TO_PASTE);
+    assert_eq!(app.alerts.status(), clipboard::NOTHING_TO_PASTE);
     app.paste(
         Point::ORIGIN,
         Some("Patch(version: 1, modules: [(id: 1, kind: \"loom.none.such\")])".to_string()),
     );
-    assert!(app.status.contains("invalid") && app.status.contains("loom.none.such"));
+    assert!(app.alerts.status().contains("invalid") && app.alerts.status().contains("loom.none.such"));
     assert_eq!(app.controller.graph().nodes().count(), before);
     assert!(app.edits.history.undo_step().is_none());
 }
@@ -1021,7 +1037,7 @@ fn panic_is_not_an_edit() {
     // The MIDI poll runs while the app has an engine, and finds nothing.
     let _ = app.subscription();
     let _ = app.update(Message::MidiPoll);
-    assert!(app.status.starts_with("Panic"), "{}", app.status);
+    assert!(app.alerts.status().starts_with("Panic"), "{}", app.alerts.status());
     assert!(!app.holding, "Hold note lets go");
     let gain = app
         .controller
@@ -1050,9 +1066,13 @@ fn the_panic_key_button_and_command_run_panic() {
         iced::keyboard::Modifiers::COMMAND,
     );
     assert!(messages.iter().any(|m| matches!(m, Message::Panic)), "{messages:?}");
-    assert!(ui.app.status.starts_with("Panic"), "{}", ui.app.status);
+    assert!(
+        ui.app.alerts.status().starts_with("Panic"),
+        "{}",
+        ui.app.alerts.status()
+    );
 
-    ui.app.status.clear();
+    ui.app.alerts.say(String::new());
     let _ = ui.app.update(Message::Browser(browser::Message::Close));
     ui.redraw();
     let button = ui.text("Panic").expect("a Panic button on the toolbar");
@@ -1275,7 +1295,7 @@ fn unknown_module_rejects_new_connections_and_undo_restores_it() {
             output: false,
         },
     });
-    assert_eq!(app.status, "Cannot connect to an unknown module");
+    assert_eq!(app.alerts.status(), "Cannot connect to an unknown module");
     assert_eq!(app.controller.graph().cables().count(), cables);
     assert!(app.edits.history.undo_step().is_none());
     app.canvas_event(CanvasEvent::Delete(vec![missing.0]));
@@ -1432,7 +1452,7 @@ fn a_range_note_shows_in_the_status_bar() {
         (node.params[0], node.range(0)),
         (5.0, Some(loom_core::ParamRange::new(-5.0, 5.0)))
     );
-    assert!(app.status.contains("-0.1 to 0.1"), "{}", app.status);
+    assert!(app.alerts.status().contains("-0.1 to 0.1"), "{}", app.alerts.status());
 }
 
 /// Opening a patch that loads as saved says only "opened <path>". One
@@ -1442,7 +1462,7 @@ fn opening_a_patch_names_only_its_load_notes() {
     let mut app = app();
     let clean = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches/subtractive.ron");
     app.open_path(&clean);
-    assert_eq!(app.status, format!("opened {}", clean.display()));
+    assert_eq!(app.alerts.status(), format!("opened {}", clean.display()));
 
     let dir = std::env::temp_dir().join(format!("loom-app-open-note-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -1455,14 +1475,16 @@ fn opening_a_patch_names_only_its_load_notes() {
     app.open_path(&noted);
     let _ = std::fs::remove_dir_all(&dir);
     assert!(
-        app.status.starts_with(&format!("opened {}: module 1", noted.display())),
+        app.alerts
+            .status()
+            .starts_with(&format!("opened {}: module 1", noted.display())),
         "{}",
-        app.status
+        app.alerts.status()
     );
 
     app.open_path(&clean);
     assert_eq!(
-        app.status,
+        app.alerts.status(),
         format!("opened {}", clean.display()),
         "the old note is gone"
     );

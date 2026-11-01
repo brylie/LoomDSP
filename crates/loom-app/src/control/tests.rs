@@ -581,10 +581,10 @@ fn the_panic_command_and_button_run_panic() {
     let mut app = App::new(crate::tests::app_args());
     let ok = Ok(Map::new());
     assert_eq!(run(&mut app, r#"{"cmd": "panic"}"#), ok);
-    assert!(app.status.starts_with("Panic"), "{}", app.status);
-    app.status.clear();
+    assert!(app.alerts.status().starts_with("Panic"), "{}", app.alerts.status());
+    app.alerts.say(String::new());
     assert_eq!(run(&mut app, r#"{"cmd": "toolbar", "button": "panic"}"#), ok);
-    assert!(app.status.starts_with("Panic"), "{}", app.status);
+    assert!(app.alerts.status().starts_with("Panic"), "{}", app.alerts.status());
 }
 
 /// `toolbar` refuses what a click could not do: dialogs (rule 9),
