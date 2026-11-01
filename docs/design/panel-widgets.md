@@ -186,14 +186,30 @@ The current choice is shown as text. Clicking it shows the other choices in a li
 - **Middle zoom:** the box, a bar for the text, and the mark.
 - **Size (leaning):** 6 × 2. The caption is above or below the box, as for a knob.
 
+### Segmented control
+
+**Status:** Agreed, P1 ([#453](https://github.com/brylie/LoomDSP/issues/453)).
+
+A row of joined buttons, one per choice name. The chosen one is filled in the value colour; the others are outlined. All choices are visible, and one click picks any of them.
+
+- **Binds to:** a whole-number parameter with 2 to 4 choice names. The registry refuses one without names, or with more than 4.
+- **Size:** `width` × 2 grid units, declared on the widget, as for a shape preview. The caption sits in the top row and the segments in the bottom row. Segments share the width equally. The author picks a width that fits the longest name; the cut-label test catches one that does not.
+- **Click:** on a segment picks it: one undo step. **Drag:** moves the tile, as on radio buttons (rule 1). **Double-click:** resets to the default.
+- **Keyboard:** focused, Space or Enter picks the next choice, wrapping round; Up and Right step up, Down and Left step down, as with every whole-number control.
+- **Modulation:** a dot, as on radio buttons. The filled segment shows the base choice.
+- **MIDI learn:** a controller sweeps through the choices.
+- **Middle zoom:** the segments as shapes, the chosen one filled, and a bar for each name.
+- *Why a new widget, not radio buttons in a row:* a segment is a button the size of its name, which is easier to hit than a small dot, and the filled segment reads as the current choice from across a room.
+
 ### Radio buttons or a select list?
 
 They bind to the same parameter, so the author or the panel editor can switch one for the other. A [default panel](panels.md#default-panels) applies these rules when the module gives no hint.
 
-- **Radio buttons** when there are 5 choices or fewer and the panel has room. *Why:* all choices are visible at once, and one click picks any of them. On stage, seeing the options matters.
+- **Segmented control** for 2 to 4 short names ([Panel layout](panels.md#panel-layout), principle 6). *Why:* every choice is visible and one click picks it, in one row.
+- **Radio buttons** for 5 names that must all be visible, when the panel has the height. *Why:* all choices are visible at once, and one click picks any of them. On stage, seeing the options matters.
 - **Select list** when there are more choices, when the names are long, or when the panel is small. Unison voices from 1 to 16, a function choice, a scale, or a musical division such as 1/16 or 2 bars are select lists.
-- **Envelope Mode** uses a select list despite having two choices. The result shape needs the full panel width, and the mode changes less often than the five ranged parameters.
-- **Toggle** for exactly two states that read as off and on. Two named states that are not off and on, such as "Linear" and "Equal power", use radio buttons.
+- **Envelope Mode** uses a segmented control under its result shape, so both modes are visible ([Panel layout](panels.md#panel-layout), principle 2).
+- **Toggle** for exactly two states that read as off and on. Two named states that are not off and on, such as "Linear" and "Equal power", use a segmented control.
 
 ## Action
 

@@ -67,6 +67,33 @@ The [read-only shape preview](panel-widgets.md#read-only-shape-preview) is an ag
 - A tile can have a compact and an expanded size. The scope module, for example, can be resized to show more detail.
 - A sub-patch panel can be placed inside its parent's panel (FR-PANEL-08), as one more widget.
 
+## Panel layout
+
+**Status:** Agreed, P1 ([#453](https://github.com/brylie/LoomDSP/issues/453)). Decision on modes: [ADR-0030](../adr/0030-panels-hide-controls-a-mode-does-not-use.md).
+
+A panel reads from top to bottom as **what it does, how it behaves, what you play, what it reports**. Exact numbers stay one hover away. Every built-in panel follows these principles, and so do derived panels ([Default panels](#default-panels)).
+
+1. **Purpose first.** A result view (envelope shape, filter response, LFO wave, scope, meter) sits at the top at full panel width. *Why:* it answers "what does this module do right now" before any control is read.
+2. **Behaviour before detail.** A choice that changes what other controls mean (envelope mode, filter slope, LFO sync, compare direction) sits directly under the view, or at the top when there is no view. *Why:* the mode is the context for every knob below it.
+3. **Play row.** Continuous controls follow in one row, in the order the sound happens (Attack, Decay, Sustain, Release; Cutoff, then Resonance). Controls set less often go in a second row. *Why:* the hand finds the most-played controls in the same place on every tile.
+4. **Report next to the cause.** A light sits beside the control or port it reports on, or at the right end of the mode row. It never floats alone. *Why:* a light only helps when the eye knows where to look.
+5. **Show only what the mode uses.** A control its mode ignores is hidden ([ADR-0030](../adr/0030-panels-hide-controls-a-mode-does-not-use.md)). The tile keeps its width: a row with a hidden control closes up and is centred again, and the tile gets shorter only when whole rows empty, so ports and cables never move. The inspector still lists the hidden parameter and says which choice does not use it. *Why:* a knob that does nothing misleads a performer; a tile that changes width would move cables on stage.
+6. **Smallest widget that keeps the choice visible.** On and off is a toggle. Two to four short named choices are a [segmented control](panel-widgets.md#segmented-control): one row, every option visible, one click. More choices, or long names, are a select list. Radio buttons are for lists of five that need every name visible and have the height to spare. *Why:* seeing the options matters on stage, and a segmented control shows them in one row.
+7. **One alignment grid.** Captions are centred under their widget. A group's caption sits above it. Groups are one grid unit apart, and a row of controls is centred in the panel. The panel is as wide as its widest row; there are no empty quarters.
+8. **Words fit.** No built-in panel cuts a caption or port label at 100% zoom. If a word does not fit, the layout changes, never the stable ID ([Labels and hover text](#labels-and-hover-text)).
+9. **Details on demand.** Exact values, ranges, units, and descriptions are in hover text, the inspector, and help. The tile shows only what is played or watched.
+10. **Same thing, same place.** Repeated strips (mixer channels) are labelled once per strip. Numbered things use the numbers users see on hardware ("1-2", "3-4" for channel pairs).
+
+### Acceptance criteria: panel layout
+
+- [ ] Every built-in panel puts its result view first, then its choices, then its continuous controls (test over the registry, by widget kind and row).
+- [ ] Every built-in module with 2 to 4 short named choices on its tile uses a segmented control (test over the registry).
+- [ ] A parameter can declare `shown_when`; its widget is hidden while the condition is false, the tile keeps its width, a row with a hidden widget is centred again, and the tile gets shorter only when whole rows empty (tests). Envelope Sustain and Release in AD mode, LFO Rate and Cycles by sync mode, MIDI Controller's controller number, and Scope's Level with Auto on use it.
+- [ ] The inspector marks a hidden parameter "Not used in" its current choice, and Tab skips hidden controls (tests).
+- [ ] No built-in tile is more than one grid unit wider than its widest row needs (test over the registry).
+- [ ] Audio In's pairs read "1-2", "3-4", "5-6", "7-8"; Mixer labels its strips once; Button shows its label on the button; Level Meter's meter caption is not a port name; Scope draws a zero line.
+- [ ] `examples/dev/all-modules.ron` holds every built-in module on a grid, and a test renders it.
+
 ## The panel editor
 
 Used for sub-patches and patches alike.
@@ -592,7 +619,8 @@ Each declared item gets one widget, by the first rule that matches:
 |---|---|
 | A parameter with a hint | The widget the hint names, or none for "inspector only" |
 | A whole-number parameter from 0 to 1, with no choice names | Toggle |
-| A whole-number parameter with choice names, 5 or fewer | Radio buttons |
+| A whole-number parameter with choice names, 2 to 4 | Segmented control |
+| A whole-number parameter with choice names, 5 | Radio buttons |
 | A whole-number parameter with choice names, more than 5 | Select list |
 | Any other parameter | Knob |
 | A display value | Light |
@@ -613,7 +641,7 @@ A hint is an option on the parameter, in `ParamOptions`. It names one widget fro
 
 ### Layout
 
-- Data editors come first, each on its own row, at the full panel width. Then the parameter widgets in the order the parameters are declared. Then the display values, in their declared order.
+- Data editors come first, each on its own row, at the full panel width. Then choice widgets (segmented controls, select lists), then the other parameter widgets in the order the parameters are declared. Then the display values, in their declared order ([Panel layout](#panel-layout)).
 - Widgets flow left to right on the panel grid and wrap at 12 grid units, four knobs wide. Each row is as tall as its tallest widget. Leaning: check the width against real modules and the estimated label widths ([#120](https://github.com/brylie/LoomDSP/issues/120)).
 - The panel's size is the space its widgets fill. A module with nothing to show gets an empty panel, as today.
 - Focus order is the order above, so Tab follows what the user reads.
