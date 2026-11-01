@@ -492,6 +492,20 @@ fn start_error_formatting_and_traits() {
     assert_eq!(format!("{host_err}"), "audio error: backend failed");
 }
 
+/// `AudioOutput::start` returns its error boxed, and `?` still turns it
+/// into a HostError, as `loom play` does.
+#[test]
+fn a_boxed_start_error_converts_to_its_host_error() {
+    let parts = create_engine(loom_modules::registry(), EngineConfig::default());
+    let boxed = Box::new(StartError {
+        output: AudioOutput::clock(48_000, 256),
+        engine: parts.engine,
+        error: HostError::Record("disk full".into()),
+    });
+    let start = || -> Result<(), HostError> { Err(boxed)? };
+    assert!(matches!(start(), Err(HostError::Record(reason)) if reason == "disk full"));
+}
+
 /// CallbackStats supports clearing the dead flag and non-fatal error kinds.
 #[test]
 fn callback_stats_dead_flag_clearing() {
