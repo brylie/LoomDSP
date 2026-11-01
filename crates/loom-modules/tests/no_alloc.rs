@@ -7,6 +7,10 @@
 //! telemetry runs too, both while the UI drains it and while its queues are
 //! full (FR-VIS-04, NFR-RT-07).
 //!
+//! `every_module_never_allocates` runs `process` for every built-in DSP
+//! module, so a new module is checked as soon as it is in `ALL`, whether or
+//! not an example patch uses it.
+//!
 //! The check is active in debug builds, which is how `cargo test` runs.
 //! `assert_no_alloc` has no `AllocDisabler` in release builds, so this file is
 //! empty there: a release build could not abort on allocation anyway.
@@ -17,7 +21,11 @@ mod common;
 
 use assert_no_alloc::{AllocDisabler, assert_no_alloc};
 use common::*;
-use loom_core::{MidiControl, MidiEvent, OutputRef, OutputSafety, ProbeKind, TimeSignature};
+use loom_core::{
+    EngineConfig, InputRef, MidiControl, MidiEvent, ModuleRole, OutputRef, OutputSafety, ProbeKind, TimeSignature,
+    create_engine,
+};
+use std::io::Write;
 
 #[global_allocator]
 static ALLOCATOR: AllocDisabler = AllocDisabler;
@@ -70,6 +78,75 @@ fn copying_state_never_allocates() {
         let running = factory(&config);
         let mut copy = factory(&config);
         assert_no_alloc(|| copy.copy_state_from(&*running));
+    }
+}
+
+/// `process` never allocates for any built-in DSP module, including modules
+/// that no example patch uses (CONTRIBUTING.md, Rules for audio code).
+///
+/// Each module runs alone in its own engine, so a failure points at one
+/// module. A fast LFO feeds every input, so gates cross their threshold and
+/// audio inputs carry a tone. Every output has a probe, so the module is
+/// scheduled (FR-GRAPH-09). Between buffers every parameter moves across its
+/// range, so smoothing and the paths that react to a new value run too.
+///
+/// An allocation aborts the whole test binary, so no test result names the
+/// module. Run with `LOOM_TRACE_NO_ALLOC=1` to print each module's ID before
+/// it runs: the last ID printed is the one that allocated.
+#[test]
+fn every_module_never_allocates() {
+    let trace = std::env::var_os("LOOM_TRACE_NO_ALLOC").is_some();
+    let modules = loom_modules::ALL
+        .iter()
+        .filter(|descriptor| matches!(descriptor.role, ModuleRole::Dsp(_)));
+    for descriptor in modules {
+        // Not `eprintln!`: the test harness captures that, and an abort
+        // throws captured output away.
+        if trace {
+            let _ = writeln!(std::io::stderr(), "every_module_never_allocates: {}", descriptor.id);
+        }
+
+        let mut parts = create_engine(loom_modules::registry(), EngineConfig::with_sample_rate(SAMPLE_RATE));
+        let controller = &mut parts.controller;
+        // A patch has exactly one Transport, and the engine starts with it.
+        let module = match controller.transport_module() {
+            Some(transport) if descriptor.id == "loom.clock.transport" => transport,
+            _ => controller.add_module(descriptor.id).unwrap(),
+        };
+        let lfo = controller.add_module("loom.mod.lfo").unwrap();
+        controller.set_param_named(lfo, "rate", 30.0).unwrap();
+        let wave = controller.output_ref(lfo, "out").unwrap();
+        for port in 0..descriptor.inputs.len() {
+            controller.connect(wave, InputRef { module, port }).unwrap();
+        }
+        for port in 0..descriptor.outputs.len() {
+            controller
+                .add_probe(OutputRef { module, port }, ProbeKind::MeterAndScope)
+                .unwrap();
+        }
+        controller.commit().unwrap();
+
+        let mut left = vec![0.0; 1024];
+        let mut right = vec![0.0; 1024];
+        for i in 0..60usize {
+            // Control thread: allocation allowed here.
+            for (index, param) in descriptor.params.iter().enumerate() {
+                let step = ((i + 3 * index) % 10) as f32 / 9.0;
+                parts
+                    .controller
+                    .set_param(module, index, param.min + (param.max - param.min) * step)
+                    .unwrap();
+            }
+            parts.controller.commit().unwrap();
+            parts.telemetry.meters().for_each(drop);
+            parts.telemetry.scope().for_each(drop);
+            let frames = [1, 32, 128, 129, 1024][i % 5];
+
+            // Audio thread: no allocation allowed.
+            assert_no_alloc(|| {
+                parts.engine.process(&mut left[..frames], &mut right[..frames]);
+            });
+        }
     }
 }
 
