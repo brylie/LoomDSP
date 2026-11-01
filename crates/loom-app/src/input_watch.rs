@@ -163,6 +163,56 @@ pub fn stream(watch: &Watch) -> impl Stream<Item = Event> + use<> {
 mod tests {
     use super::*;
 
+    /// A removed or replaced system input is reported even without a callback error.
+    #[test]
+    fn watcher_reports_a_missing_or_changed_input_device() {
+        use iced::futures::StreamExt;
+        fn missing() -> Result<crate::devices::Inputs, String> {
+            Ok(crate::devices::Inputs {
+                default: Some("Other".into()),
+                devices: vec!["Other".into()],
+            })
+        }
+        fn changed_default() -> Result<crate::devices::Inputs, String> {
+            Ok(crate::devices::Inputs {
+                default: Some("Other".into()),
+                devices: vec!["Test input".into(), "Other".into()],
+            })
+        }
+        for list in [missing as fn() -> _, changed_default] {
+            let parts = loom_core::create_engine(loom_modules::registry(), loom_core::EngineConfig::default());
+            let (writer, _reader) = loom_core::audio_input::input_ring(32, 2);
+            let watch = Watch {
+                status: writer.status(),
+                stats: parts.controller.stats().clone(),
+                tracker: Arc::new(Tracker::new((0, 0))),
+                device: "Test input".into(),
+                system_default: true,
+                list: Some(list),
+                permission_denied: None,
+                active: Vec::new(),
+                displays: parts.controller.display_reader(),
+            };
+            let (send, receive) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let mut events = Box::pin(stream(&watch));
+                iced::futures::executor::block_on(async {
+                    while let Some(event) = events.next().await {
+                        if event.failed {
+                            let _ = send.send(());
+                            break;
+                        }
+                    }
+                });
+            });
+            writer.callback_received();
+            receive
+                .recv_timeout(Duration::from_secs(5))
+                .expect("input loss was reported");
+            assert!(!writer.status().is_live());
+        }
+    }
+
     /// The watcher detects permission denied after a stream started.
     #[test]
     fn watcher_reports_a_late_permission_denial() {

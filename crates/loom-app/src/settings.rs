@@ -1764,6 +1764,8 @@ mod tests {
         let first = app.controller.add_module("loom.io.audio-in").unwrap();
         assert!(app.commit());
         assert_eq!(fake.input_opens.get(), 1);
+        // The running input must also be included when subscriptions are built.
+        let _ = app.subscription();
         let tracker = app.rig.input_tracker.as_ref().unwrap().clone();
         let second = app.controller.add_module("loom.io.audio-in").unwrap();
         assert!(app.commit());

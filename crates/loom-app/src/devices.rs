@@ -1022,6 +1022,52 @@ mod tests {
     use super::fake::{NoMidi, device};
     use super::*;
 
+    /// The system adapter opens, watches, and closes a real loopback input.
+    #[test]
+    #[ignore = "needs a loopback audio device"]
+    fn system_input_adapter_uses_loopback_device() {
+        let Ok(wanted) = std::env::var("LOOM_LOOPBACK") else {
+            eprintln!("skipped: set LOOM_LOOPBACK to the loopback device's name");
+            return;
+        };
+        let inputs = System.audio_inputs().expect("list input devices");
+        assert!(
+            inputs
+                .devices
+                .iter()
+                .any(|name| name.to_lowercase().contains(&wanted.to_lowercase()))
+        );
+        let listed = System.audio_input_lister().unwrap()().expect("list from watcher");
+        assert_eq!(listed, inputs);
+        assert_eq!(
+            System.audio_input_permission_checker().unwrap()(),
+            System.audio_input_permission_denied()
+        );
+        let missing = AudioOptions {
+            device: Some("loom-input-device-that-does-not-exist".into()),
+            exact: true,
+            ..AudioOptions::default()
+        };
+        assert!(System.open_audio_input(&missing, 256).is_err());
+        let options = AudioOptions {
+            device: Some(wanted),
+            exact: false,
+            sample_rate: Some(48_000),
+            buffer_size: Some(256),
+        };
+        let (input, _reader) = System.open_audio_input(&options, 256).expect("open loopback input");
+        assert!(inputs.devices.contains(&input.name().to_string()));
+        let status = input.status();
+        let started = std::time::Instant::now();
+        while status.callbacks() == 0 && started.elapsed() < std::time::Duration::from_secs(10) {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(input.is_live());
+        assert!(status.callbacks() > 0, "the input device must call back");
+        drop(input);
+        assert!(!status.is_live(), "closing the stream makes the reader silent");
+    }
+
     fn outputs(names: &[&str]) -> Outputs {
         Outputs {
             default: names.first().map(|n| n.to_string()),
