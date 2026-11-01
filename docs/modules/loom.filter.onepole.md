@@ -8,6 +8,7 @@ A gentle first-order filter, 6 dB per octave. The cutoff input adds pitch: +0.1 
 |---|---|
 | ID | `loom.filter.onepole` |
 | Version | 1 |
+| Family | Filters and effects |
 | Category | Filter |
 
 ## Inputs

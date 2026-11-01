@@ -35,9 +35,9 @@ The browser is a small floating panel: a search field on top, a list of matches 
 
 ### Searching
 
-- Each module shows its **name**, its **category**, and its **ID** in a quieter style.
-- An empty search lists every module, grouped by category, categories in alphabetical order, modules by name within each.
-- Typing filters the list. A module matches when every word of the query is found in its name, ID, or category, ignoring case. Example: `osc saw` matches `loom.osc.saw`; `filter` matches every module in the Filter category.
+- Each module shows its **name**, a small swatch of its **family** colour with the family name, and its **ID** in a quieter style ([ADR-0029](../adr/0029-module-families-and-a-shared-palette.md)).
+- An empty search lists every module by family, in the family order of the [visual system](visual-system.md#module-families), then by name.
+- Typing filters the list. A module matches when every word of the query is found in its name, ID, category, or family, ignoring case. Example: `osc saw` matches `loom.osc.saw`; `filter` matches every module in the Filter category.
 - Results are ranked: a name that starts with the query first, then a word in the name that starts with it, then any other match. Ties keep the empty-search order.
 - The first result is highlighted after each change to the query.
 - Below the list, the highlighted module's one-sentence `description` is shown, so the user can tell what it does before adding it.
@@ -69,13 +69,13 @@ The browser is a small floating panel: a search field on top, a list of matches 
 1. **The search field takes keys while the browser is open.** Canvas shortcuts (Delete, Space for Run, F, Tab focus) do not fire while typing. *Why:* typing `f` in a query must not frame the patch, and Backspace must not delete the selected module.
 2. **The module goes where the user opened the browser,** not where auto-layout finds room. *Why:* the user opened it there because that is where they want to patch. A module that appears off screen breaks the flow.
 3. **The pointer position is taken when the browser opens,** not when Enter is pressed. *Why:* the pointer may drift onto the list while the user picks a row.
-4. **Search reads only the registry's descriptors** (`name`, `id`, `category`, `description`). *Why:* one source of text (ADR-0016). A new module appears in the browser with no extra work.
+4. **Search reads only the registry's descriptors** (`name`, `id`, `category`, `family`, `description`). *Why:* one source of text (ADR-0016). A new module appears in the browser with no extra work.
 5. **The search code is a plain function with no UI types,** for example `search(registry, query) -> Vec<&ModuleDescriptor>`. *Why:* matching and ranking can then be tested without a window.
 6. **The toolbar drop-down goes away.** *Why:* two ways to add a module that behave differently is confusing; the browser covers both.
 
 ## Acceptance criteria
 
-- [ ] Given an empty query, the list shows every registered module, grouped by category in alphabetical order. (test)
+- [ ] Given an empty query, the list shows every registered module by family in the family order, then by name. (test)
 - [ ] Given the query `saw`, the first result is the saw oscillator. (test)
 - [ ] Given the query `osc saw`, only modules whose name, ID, or category contain both words are listed. (test)
 - [ ] Given the query `FILTER`, every Filter module is listed (case does not matter). (test)

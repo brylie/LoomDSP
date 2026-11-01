@@ -8,6 +8,7 @@ Delays the input by one sample. Marks where a feedback loop is broken.
 |---|---|
 | ID | `loom.time.delay1` |
 | Version | 1 |
+| Family | Level and routing |
 | Category | Time |
 
 ## Inputs

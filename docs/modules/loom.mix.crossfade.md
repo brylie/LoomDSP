@@ -8,6 +8,7 @@ Blends two signals. Equal power keeps the loudness of audio steady; linear is ex
 |---|---|
 | ID | `loom.mix.crossfade` |
 | Version | 1 |
+| Family | Level and routing |
 | Category | Mix |
 
 ## Inputs

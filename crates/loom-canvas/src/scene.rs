@@ -257,6 +257,9 @@ pub struct ModuleView {
     pub id: u32,
     /// Title shown in the header.
     pub title: String,
+    /// Shown when the pointer rests on the header: the module's family
+    /// and description, and its type ID as the name (ADR-0029).
+    pub hover: HoverText,
     /// Header colour, usually by module category.
     pub accent: Color,
     /// Top-left corner in world coordinates.
@@ -924,6 +927,7 @@ mod tests {
             unknown: false,
             id,
             title: format!("m{id}"),
+            hover: crate::scene::HoverText::default(),
             accent: Color::BLACK,
             position: Point::new(x, y),
             inputs: vec![port("a"), port("b")],
@@ -1152,6 +1156,7 @@ mod tests {
             unknown: false,
             id,
             title: String::new(),
+            hover: crate::scene::HoverText::default(),
             accent: Color::BLACK,
             position,
             inputs: vec![port("in")],

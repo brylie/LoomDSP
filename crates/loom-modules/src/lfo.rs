@@ -16,6 +16,7 @@ pub static LFO: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "LFO",
     category: "Modulation",
+    family: loom_core::Family::Modulation,
     description: "A slow wave. Free mode runs at a rate in Hz; synced mode follows a phase, by default the bar phase.",
     inputs: &[PortSpec {
         name: "phase",

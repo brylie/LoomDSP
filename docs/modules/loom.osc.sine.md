@@ -8,6 +8,7 @@ Sine wave shaped from a phase input.
 |---|---|
 | ID | `loom.osc.sine` |
 | Version | 1 |
+| Family | Sources |
 | Category | Oscillator |
 
 ## Inputs

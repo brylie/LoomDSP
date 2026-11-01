@@ -8,6 +8,7 @@ Brings any signal into the phase range, 0 to 1. Wrap goes round the edge; fold t
 |---|---|
 | ID | `loom.phase.wrap` |
 | Version | 1 |
+| Family | Time and rhythm |
 | Category | Phase |
 
 ## Inputs

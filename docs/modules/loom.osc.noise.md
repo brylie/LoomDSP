@@ -8,6 +8,7 @@ White, pink, or brown noise. The seed makes renders repeatable (NFR-SND-04).
 |---|---|
 | ID | `loom.osc.noise` |
 | Version | 1 |
+| Family | Sources |
 | Category | Oscillator |
 
 ## Inputs

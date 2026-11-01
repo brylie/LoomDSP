@@ -8,6 +8,7 @@ Delay-line all-pass filter. Passes all frequencies at equal steady-state level w
 |---|---|
 | ID | `loom.time.allpass` |
 | Version | 1 |
+| Family | Filters and effects |
 | Category | Time |
 
 ## Inputs

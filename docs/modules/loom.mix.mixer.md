@@ -8,6 +8,7 @@ Adds four signals, each with its own level and mute. Two mixers in a row make a 
 |---|---|
 | ID | `loom.mix.mixer` |
 | Version | 1 |
+| Family | Level and routing |
 | Category | Mix |
 
 ## Inputs

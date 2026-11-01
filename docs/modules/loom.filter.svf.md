@@ -8,6 +8,7 @@ State variable filter (trapezoidal integration). The cutoff input adds pitch: +0
 |---|---|
 | ID | `loom.filter.svf` |
 | Version | 1 |
+| Family | Filters and effects |
 | Category | Filter |
 
 ## Inputs

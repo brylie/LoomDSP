@@ -8,6 +8,7 @@ Multiplies a signal by a factor and adds an offset. A factor of -1 inverts. Bipo
 |---|---|
 | ID | `loom.level.scale` |
 | Version | 1 |
+| Family | Level and routing |
 | Category | Level |
 
 ## Inputs

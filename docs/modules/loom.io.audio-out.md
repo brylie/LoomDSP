@@ -8,6 +8,7 @@ Sends a mono or stereo signal to the audio output.
 |---|---|
 | ID | `loom.io.audio-out` |
 | Version | 1 |
+| Family | Interface |
 | Category | I/O |
 
 ## Inputs

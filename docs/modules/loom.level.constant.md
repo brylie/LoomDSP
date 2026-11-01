@@ -8,6 +8,7 @@ Outputs a fixed level, set in decibels. 0 dB is a factor of 1.
 |---|---|
 | ID | `loom.level.constant` |
 | Version | 1 |
+| Family | Level and routing |
 | Category | Level |
 
 ## Inputs

@@ -8,6 +8,7 @@ Converts between decibels and level, and between pitch and frequency in Hz.
 |---|---|
 | ID | `loom.math.convert` |
 | Version | 1 |
+| Family | Logic and math |
 | Category | Math |
 
 ## Inputs

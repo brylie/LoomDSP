@@ -8,6 +8,7 @@ Combines up to four gates with And, Or, or Xor. Only inputs with a cable count. 
 |---|---|
 | ID | `loom.logic.logic` |
 | Version | 1 |
+| Family | Logic and math |
 | Category | Logic |
 
 ## Inputs

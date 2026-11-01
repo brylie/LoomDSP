@@ -71,6 +71,7 @@ pub static MIXER: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Mixer",
     category: "Mix",
+    family: loom_core::Family::LevelAndRouting,
     description: "Adds four signals, each with its own level and mute. Two mixers in a row make a bigger mix.",
     inputs: &[
         mixer_input("in1", "In 1"),
@@ -203,6 +204,7 @@ pub static CROSSFADE: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Crossfade",
     category: "Mix",
+    family: loom_core::Family::LevelAndRouting,
     description: "Blends two signals. Equal power keeps the loudness of audio steady; linear is exact for control signals.",
     inputs: &[
         PortSpec {
@@ -341,6 +343,7 @@ pub static JOIN: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Join",
     category: "Mix",
+    family: loom_core::Family::LevelAndRouting,
     description: "Combines two signals into a stereo cable.",
     inputs: &[
         stereo_port("left", "Left", "The signal for the left side.", Channels::Downmix),
@@ -382,6 +385,7 @@ pub static SPLIT: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Split",
     category: "Mix",
+    family: loom_core::Family::LevelAndRouting,
     description: "Separates a stereo cable into its two sides.",
     inputs: &[stereo_port("in", "In", "The stereo signal to split.", Channels::Stereo)],
     outputs: &[

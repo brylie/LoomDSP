@@ -169,11 +169,12 @@ fn display_name(path: &Path) -> String {
         .map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned())
 }
 
-/// The index page: every module by category, with a link to its page.
+/// The index page: every module by family, in browser order, with a link
+/// to its page (ADR-0029).
 pub fn index(registry: &Registry) -> String {
-    let mut categories: BTreeMap<&str, Vec<&ModuleDescriptor>> = BTreeMap::new();
+    let mut families: BTreeMap<loom_core::Family, Vec<&ModuleDescriptor>> = BTreeMap::new();
     for d in registry.iter() {
-        categories.entry(d.category).or_default().push(d);
+        families.entry(d.family).or_default().push(d);
     }
     let mut out = String::new();
     out.push_str("# Module help pages\n\n");
@@ -183,9 +184,9 @@ pub fn index(registry: &Registry) -> String {
         out,
         "One page for each built-in module, made from its descriptor. After you change a descriptor, run `{REGENERATE}` and commit the pages. Longer notes and example patches go below the marker line at the end of a page. See the [help pages specification](../design/help-pages.md)."
     );
-    for (category, mut modules) in categories {
+    for (family, mut modules) in families {
         modules.sort_by(|a, b| a.name.cmp(b.name).then(a.id.cmp(b.id)));
-        let _ = writeln!(out, "\n## {category}\n");
+        let _ = writeln!(out, "\n## {}\n", family.label());
         out.push_str("| Module | ID | Description |\n|---|---|---|\n");
         for d in modules {
             let _ = writeln!(
@@ -208,6 +209,7 @@ pub fn page(d: &ModuleDescriptor) -> String {
     out.push_str("| | |\n|---|---|\n");
     let _ = writeln!(out, "| ID | `{}` |", d.id);
     let _ = writeln!(out, "| Version | {} |", d.version);
+    let _ = writeln!(out, "| Family | {} |", d.family.label());
     let _ = writeln!(out, "| Category | {} |", cell(d.category));
     out.push_str("\n## Inputs\n\n");
     if d.inputs.is_empty() {

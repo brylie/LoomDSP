@@ -4,11 +4,11 @@ The shared sizes, button roles, and quiet chrome that every view of the desktop 
 
 - **Kind:** living specification.
 - **Status:** Agreed, P1 (2026-11-01).
-- **Decision behind it:** [ADR-0025](../adr/0025-one-design-language-and-derived-panels.md) (one design language; themes are global).
+- **Decision behind it:** [ADR-0025](../adr/0025-one-design-language-and-derived-panels.md) (one design language; themes are global), [ADR-0029](../adr/0029-module-families-and-a-shared-palette.md) (module families and a shared palette).
 - **Use case and requirements:** FR-PANEL-06 (global themes), NFR-UX-01 (keyboard and focus), NFR-UX-03 (colour is never the only signal).
 - **Background:** the [P1 UX audit](../research/2026-11-p1-ux-audit.md), findings 4, 11, 13, and 17.
 - **Issues:** [#454](https://github.com/brylie/LoomDSP/issues/454). Category colours and the palette: [#459](https://github.com/brylie/LoomDSP/issues/459). Tabs: [#456](https://github.com/brylie/LoomDSP/issues/456).
-- **Code:** `crates/loom-app/src/style.rs` (tokens and button roles), `crates/loom-canvas/src/controls.rs` (knob start cap), `stats_bar` in `crates/loom-app/src/main.rs`.
+- **Code:** `crates/loom-app/src/style.rs` (tokens and button roles), `Family` in `crates/loom-core/src/descriptor.rs`, the family colours in `crates/loom-canvas/src/theme.rs`, `crates/loom-canvas/src/controls.rs` (knob start cap), `stats_bar` in `crates/loom-app/src/main.rs`.
 
 ## Goal
 
@@ -61,6 +61,26 @@ No toolbar button is primary unless a mode is on (MIDI learn while learning). Pa
 
 A knob's value arc always shows a short orange start cap, even at its minimum. The cap is the first 4% of the arc's sweep. The white pointer dot still marks the exact value, so the knob's position never depends on colour (NFR-UX-03).
 
+### Module families
+
+Every module belongs to one of eight families ([ADR-0029](../adr/0029-module-families-and-a-shared-palette.md)). Its tile header takes the family's colour, and the module browser lists modules by family.
+
+| Family | Colour | Echoes | Built-in modules |
+|---|---|---|---|
+| Sources | `#62222C` red | audio | Sine, Saw, Pulse, Triangle, Noise |
+| Filters and effects | `#324553` slate | | SVF, Ladder, One-pole, Delay Line, All-Pass |
+| Modulation | `#38589F` blue | modulation | Envelope, LFO, Sample and hold |
+| Time and rhythm | `#463172` violet | phase | Transport, Clock, Clock Divide, Phase, Phase Scale, Phase Trigger, Phase wrap and fold |
+| Notes and pitch | `#624222` brown | pitch | Constant (pitch) |
+| Logic and math | `#716A28` olive | gate | Add, Subtract, Multiply, Divide, Constant, Convert, Compare, Logic, Memory |
+| Level and routing | `#2A7947` green | | Amplifier, Clamp, Constant (level), Scale, Slew, Mixer, Crossfade, Join, Split, 1-Sample Delay |
+| Interface | `#606676` grey | | Audio In, Audio Out, MIDI Note, MIDI Controller, Level Meter, Scope, Button |
+
+- **The palette** holds these 8 colours and a lighter tint of each, 16 swatches in all. A tint is its colour mixed halfway to white and takes dark text. FR-CANVAS-07 will offer the same 16 when users colour modules and groups.
+- **Reserved colours** are not in the palette: orange for editable values, pink for modulation, light green for lights, the focus blue, and the warning red.
+- **The family name** shows in the header's hover text, in each module browser row beside a swatch of its colour, and in help. Headers carry no other mark.
+- **The category** stays as a finer label. Search matches it, and help shows it.
+
 ### Status bar
 
 | Shown | When |
@@ -82,6 +102,17 @@ MIDI shows a count, such as "MIDI: 2 inputs" or "MIDI: no inputs". Its hover tex
 
 ## Acceptance criteria
 
+Module families:
+
+- [ ] Every module declares a family in its descriptor; one without a family does not compile.
+- [ ] Every family colour has at least 4.5:1 contrast with the header text, and every tint at least 4.5:1 with the dark text (test in `theme.rs`).
+- [ ] Every pair of family colours is at least ΔE 14 (CIE76) apart in normal vision and in protanopia, deuteranopia, and tritanopia simulation (Machado 2009, severity 1), and every swatch is at least ΔE 15 from every reserved colour (test in `theme.rs`).
+- [ ] A tile's header uses its family's colour (test).
+- [ ] With an empty search, the browser lists modules by family in the order above, then by name; each row shows its family; searching a family or category name finds its modules (headless test).
+- [ ] Hovering a tile's header shows the module's family and description (test), and help shows the family.
+
+The rest:
+
 - [ ] No `.size(N)` or `text_size(N)` literal remains in `crates/loom-app/src` outside `style.rs` (test over the sources).
 - [ ] Every app text size is one of the five tokens (follows from the test above).
 - [ ] The toolbar has no primary button while MIDI learn is off, and Panic is danger red (headless window test on the button pixels, as for #460).
@@ -93,7 +124,6 @@ MIDI shows a count, such as "MIDI: 2 inputs" or "MIDI: no inputs". Its hover tex
 
 ## Out of scope
 
-- Category colours and the shared palette: [#459](https://github.com/brylie/LoomDSP/issues/459).
 - Tabs and the matrix layout: [#456](https://github.com/brylie/LoomDSP/issues/456).
 - The inspector, help, and browser layouts: [#457](https://github.com/brylie/LoomDSP/issues/457), which uses these tokens.
 - Light theme and user themes: FR-PANEL-06, P2.

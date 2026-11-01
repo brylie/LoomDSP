@@ -8,6 +8,7 @@ A slow wave. Free mode runs at a rate in Hz; synced mode follows a phase, by def
 |---|---|
 | ID | `loom.mod.lfo` |
 | Version | 1 |
+| Family | Modulation |
 | Category | Modulation |
 
 ## Inputs

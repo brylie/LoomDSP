@@ -12,6 +12,7 @@ pub static NOTE_IN: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "MIDI Note",
     category: "MIDI",
+    family: loom_core::Family::Interface,
     description: "Monophonic note input (last-note priority). Pitch includes pitch bend.",
     inputs: &[],
     outputs: &[
@@ -195,6 +196,7 @@ pub static CONTROLLER_IN: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "MIDI Controller",
     category: "MIDI",
+    family: loom_core::Family::Interface,
     description: "Turns a MIDI controller, the pitch bend, or channel aftertouch into a signal. Controllers and aftertouch go from 0 to 1, bend from -1 to 1.",
     inputs: &[],
     outputs: &[PortSpec {

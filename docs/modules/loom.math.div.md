@@ -8,6 +8,7 @@ Divides signal A by signal B. Outputs 0 while B is near zero.
 |---|---|
 | ID | `loom.math.div` |
 | Version | 1 |
+| Family | Logic and math |
 | Category | Math |
 
 ## Inputs

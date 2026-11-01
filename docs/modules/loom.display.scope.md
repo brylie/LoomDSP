@@ -8,6 +8,7 @@ Shows its input over time. Passes the input through unchanged.
 |---|---|
 | ID | `loom.display.scope` |
 | Version | 1 |
+| Family | Interface |
 | Category | Display |
 
 ## Inputs

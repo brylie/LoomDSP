@@ -8,6 +8,7 @@ Takes the input's value on a trigger and holds it. With noise on the input, it m
 |---|---|
 | ID | `loom.rand.sample-hold` |
 | Version | 1 |
+| Family | Modulation |
 | Category | Random |
 
 ## Inputs

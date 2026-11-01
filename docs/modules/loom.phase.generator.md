@@ -8,6 +8,7 @@ Ramp from 0 to 1 at the pitch frequency. Drives oscillators and LFOs.
 |---|---|
 | ID | `loom.phase.generator` |
 | Version | 1 |
+| Family | Time and rhythm |
 | Category | Phase |
 
 ## Inputs

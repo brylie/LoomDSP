@@ -33,19 +33,10 @@ fn signal_shape(signal: SignalType) -> PortShape {
     }
 }
 
-/// Header colour by module category. Muted, so cable colours stand out.
-pub fn category_colour(category: &str) -> Color {
-    match category {
-        "Phase" => Color::from_rgb8(0x5A, 0x4A, 0x82),
-        "Oscillator" => Color::from_rgb8(0x8A, 0x45, 0x45),
-        "Filter" => Color::from_rgb8(0x3D, 0x68, 0x86),
-        "Envelope" => Color::from_rgb8(0x3E, 0x7A, 0x58),
-        "MIDI" => Color::from_rgb8(0x86, 0x6A, 0x3A),
-        "I/O" => Color::from_rgb8(0x6E, 0x6E, 0x78),
-        "Time" => Color::from_rgb8(0x3E, 0x76, 0x78),
-        "Display" => Color::from_rgb8(0x4A, 0x6E, 0x5A),
-        _ => Color::from_rgb8(0x50, 0x54, 0x60),
-    }
+/// Header colour of a module's family, from the shared palette
+/// (ADR-0029, visual-system.md, Module families).
+pub fn family_colour(family: loom_core::Family) -> Color {
+    loom_canvas::Palette::default().families[family.index()]
 }
 
 fn port_view(spec: &PortSpec, stereo: bool) -> PortView {
@@ -498,7 +489,13 @@ pub fn build(controller: &Controller, positions: &BTreeMap<u32, Point>, sizes: &
                     || d.name.to_string(),
                     |unknown| unknown.label.clone().unwrap_or_else(|| unknown.kind.clone()),
                 ),
-                accent: category_colour(d.category),
+                accent: family_colour(d.family),
+                // The header's hover text: family first, so colour is
+                // never the only cue (ADR-0029), and the type ID as the name.
+                hover: loom_canvas::HoverText {
+                    description: format!("{}. {}", d.family.label(), d.description),
+                    name: Some(d.id.to_string()),
+                },
                 position: positions.get(&id.0).copied().unwrap_or(Point::ORIGIN),
                 inputs,
                 outputs,
@@ -754,7 +751,8 @@ mod tests {
                 unknown: false,
                 id: 0,
                 title: d.name.to_string(),
-                accent: category_colour(d.category),
+                hover: loom_canvas::HoverText::default(),
+                accent: family_colour(d.family),
                 position: Point::ORIGIN,
                 inputs: d.inputs.iter().map(|spec| port_view(spec, false)).collect(),
                 outputs: d.outputs.iter().map(|spec| port_view(spec, false)).collect(),
@@ -768,6 +766,31 @@ mod tests {
             });
         }
         assert!(checked > 20, "only {checked} radio options found");
+    }
+
+    /// A tile's header takes its family's colour, and its hover text names
+    /// the family first and the type ID as the name (ADR-0029).
+    #[test]
+    fn headers_show_their_family() {
+        let mut parts = loom_core::create_engine(loom_modules::registry(), loom_core::EngineConfig::default());
+        let cases = [
+            ("loom.osc.sine", loom_core::Family::Sources),
+            ("loom.mod.lfo", loom_core::Family::Modulation),
+            ("loom.logic.divide", loom_core::Family::TimeAndRhythm),
+            ("loom.time.delay1", loom_core::Family::LevelAndRouting),
+        ];
+        for (kind, _) in cases {
+            parts.controller.add_module(kind).unwrap();
+        }
+        let scene = build(&parts.controller, &BTreeMap::new(), &BTreeMap::new());
+        for (tile, (kind, family)) in scene.modules().iter().zip(cases) {
+            assert_eq!(tile.accent, family_colour(family), "{kind}");
+            assert!(
+                tile.hover.description.starts_with(&format!("{}. ", family.label())),
+                "{kind}"
+            );
+            assert_eq!(tile.hover.name.as_deref(), Some(kind));
+        }
     }
 
     /// No built-in tile cuts a port label or caption, and no two pieces of
@@ -784,7 +807,8 @@ mod tests {
                 unknown: false,
                 id: 0,
                 title: d.name.to_string(),
-                accent: category_colour(d.category),
+                hover: loom_canvas::HoverText::default(),
+                accent: family_colour(d.family),
                 position: Point::ORIGIN,
                 inputs: d.inputs.iter().map(|spec| port_view(spec, false)).collect(),
                 outputs: d.outputs.iter().map(|spec| port_view(spec, false)).collect(),

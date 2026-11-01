@@ -8,6 +8,7 @@ Adds two signals and an offset.
 |---|---|
 | ID | `loom.math.add` |
 | Version | 1 |
+| Family | Logic and math |
 | Category | Math |
 
 ## Inputs

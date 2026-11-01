@@ -8,6 +8,7 @@ Runs a phase at multiply / divide times its speed, locked to the input. Divide c
 |---|---|
 | ID | `loom.phase.scale` |
 | Version | 1 |
+| Family | Time and rhythm |
 | Category | Phase |
 
 ## Inputs

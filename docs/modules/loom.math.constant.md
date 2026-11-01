@@ -8,6 +8,7 @@ Outputs a constant value. Useful for pitch offsets, gates, and testing.
 |---|---|
 | ID | `loom.math.constant` |
 | Version | 1 |
+| Family | Logic and math |
 | Category | Math |
 
 ## Inputs

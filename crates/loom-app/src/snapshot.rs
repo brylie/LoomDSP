@@ -631,6 +631,7 @@ mod tests {
             unknown: false,
             id: 1,
             title: "Cramped".into(),
+            hover: loom_canvas::HoverText::default(),
             accent: iced::Color::BLACK,
             position: iced::Point::ORIGIN,
             inputs: Vec::new(),

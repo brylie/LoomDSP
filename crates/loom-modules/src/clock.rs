@@ -52,6 +52,7 @@ pub static CLOCK: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Clock",
     category: "Clock",
+    family: loom_core::Family::TimeAndRhythm,
     description: "A phase, trigger, and gate at a musical rate, locked to the transport's bar 1.",
     inputs: &[],
     outputs: &[

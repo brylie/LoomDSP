@@ -8,6 +8,7 @@ Combines two signals into a stereo cable.
 |---|---|
 | ID | `loom.mix.join` |
 | Version | 1 |
+| Family | Level and routing |
 | Category | Mix |
 
 ## Inputs

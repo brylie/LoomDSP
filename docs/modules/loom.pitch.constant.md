@@ -8,6 +8,7 @@ Outputs a fixed pitch, set in semitones from middle C.
 |---|---|
 | ID | `loom.pitch.constant` |
 | Version | 1 |
+| Family | Notes and pitch |
 | Category | Pitch |
 
 ## Inputs

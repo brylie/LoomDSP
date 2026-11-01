@@ -8,6 +8,7 @@ Interpolated delay line. The time input adds seconds to the time knob.
 |---|---|
 | ID | `loom.time.delay` |
 | Version | 1 |
+| Family | Filters and effects |
 | Category | Time |
 
 ## Inputs

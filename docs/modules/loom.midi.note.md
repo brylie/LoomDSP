@@ -8,6 +8,7 @@ Monophonic note input (last-note priority). Pitch includes pitch bend.
 |---|---|
 | ID | `loom.midi.note` |
 | Version | 1 |
+| Family | Interface |
 | Category | MIDI |
 
 ## Inputs

@@ -8,6 +8,7 @@ A resonant low-pass with a 12, 18, or 24 dB slope. High resonance thins the bass
 |---|---|
 | ID | `loom.filter.ladder` |
 | Version | 1 |
+| Family | Filters and effects |
 | Category | Filter |
 
 ## Inputs

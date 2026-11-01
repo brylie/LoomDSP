@@ -8,6 +8,7 @@ Band-limited triangle wave shaped from a phase input (polyBLAMP).
 |---|---|
 | ID | `loom.osc.triangle` |
 | Version | 1 |
+| Family | Sources |
 | Category | Oscillator |
 
 ## Inputs

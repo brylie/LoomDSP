@@ -567,6 +567,63 @@ impl std::fmt::Debug for ModuleRole {
     }
 }
 
+/// One of the eight groups a module belongs to (ADR-0029). It sets the
+/// tile's header colour and the module's place in the browser. The
+/// descriptor's `category` stays as a finer label for search and help.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Family {
+    /// Oscillators, noise, and other sound makers.
+    Sources,
+    /// Filters, shapers, delays, and other processors.
+    FiltersAndEffects,
+    /// Envelopes, LFOs, and random sources that move parameters.
+    Modulation,
+    /// The transport, clocks, phase, gates, and sequencers.
+    TimeAndRhythm,
+    /// Pitches, scales, and note effects.
+    NotesAndPitch,
+    /// Arithmetic, comparison, and gate logic.
+    LogicAndMath,
+    /// Levels, mixing, routing, and utilities that shape any signal.
+    LevelAndRouting,
+    /// Audio and MIDI in and out, displays, and controls for the player.
+    Interface,
+}
+
+impl Family {
+    /// Every family, in browser order.
+    pub const ALL: [Self; 8] = [
+        Self::Sources,
+        Self::FiltersAndEffects,
+        Self::Modulation,
+        Self::TimeAndRhythm,
+        Self::NotesAndPitch,
+        Self::LogicAndMath,
+        Self::LevelAndRouting,
+        Self::Interface,
+    ];
+
+    /// The name users see.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Sources => "Sources",
+            Self::FiltersAndEffects => "Filters and effects",
+            Self::Modulation => "Modulation",
+            Self::TimeAndRhythm => "Time and rhythm",
+            Self::NotesAndPitch => "Notes and pitch",
+            Self::LogicAndMath => "Logic and math",
+            Self::LevelAndRouting => "Level and routing",
+            Self::Interface => "Interface",
+        }
+    }
+
+    /// The family's place in [`Family::ALL`], which also indexes its
+    /// colour in the theme's palette.
+    pub const fn index(self) -> usize {
+        self as usize
+    }
+}
+
 /// Everything the engine and editor need to know about a module type.
 #[derive(Debug)]
 pub struct ModuleDescriptor {
@@ -577,8 +634,10 @@ pub struct ModuleDescriptor {
     pub version: u32,
     /// Display name.
     pub name: &'static str,
-    /// Category for the module browser.
+    /// A finer label than the family, for search and help.
     pub category: &'static str,
+    /// The group that sets the tile's colour and browser place (ADR-0029).
+    pub family: Family,
     /// One-line description.
     pub description: &'static str,
     /// Inputs (at most 64).
@@ -1516,6 +1575,7 @@ mod tests {
         version: 1,
         name: "Documented",
         category: "Test",
+        family: crate::Family::Interface,
         description: "",
         inputs: &[],
         outputs: &[],
@@ -1530,6 +1590,7 @@ mod tests {
         version: 1,
         name: "Undocumented",
         category: "Test",
+        family: crate::Family::Interface,
         description: "",
         inputs: &[PortSpec {
             name: "in",
@@ -1638,6 +1699,7 @@ mod tests {
             version: 1,
             name: "Buttons",
             category: "Test",
+            family: crate::Family::Interface,
             description: "A button and a toggle.",
             inputs: &[],
             outputs: &[],
@@ -1691,6 +1753,7 @@ mod tests {
             version: 1,
             name: "Choice and shape",
             category: "Test",
+            family: crate::Family::Interface,
             description: "A panel validation test.",
             inputs: &[],
             outputs: &OUTPUT,

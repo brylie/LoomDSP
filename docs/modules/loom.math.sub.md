@@ -8,6 +8,7 @@ Subtracts signal B from signal A.
 |---|---|
 | ID | `loom.math.sub` |
 | Version | 1 |
+| Family | Logic and math |
 | Category | Math |
 
 ## Inputs

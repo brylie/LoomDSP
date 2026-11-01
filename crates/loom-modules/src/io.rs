@@ -12,6 +12,7 @@ pub static UNIT_DELAY: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "1-Sample Delay",
     category: "Time",
+    family: loom_core::Family::LevelAndRouting,
     description: "Delays the input by one sample. Marks where a feedback loop is broken.",
     inputs: &[PortSpec {
         name: "in",
@@ -43,6 +44,7 @@ pub static AUDIO_OUT: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Audio Out",
     category: "I/O",
+    family: loom_core::Family::Interface,
     description: "Sends a mono or stereo signal to the audio output.",
     inputs: &[PortSpec {
         name: "in",
@@ -66,6 +68,7 @@ pub static AUDIO_IN: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Audio In",
     category: "I/O",
+    family: loom_core::Family::Interface,
     description: "Brings a pair of channels from the selected audio input into the patch.",
     inputs: &[],
     outputs: &[PortSpec {

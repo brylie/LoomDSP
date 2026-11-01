@@ -8,6 +8,7 @@ Turns a MIDI controller, the pitch bend, or channel aftertouch into a signal. Co
 |---|---|
 | ID | `loom.midi.controller` |
 | Version | 1 |
+| Family | Interface |
 | Category | MIDI |
 
 ## Inputs

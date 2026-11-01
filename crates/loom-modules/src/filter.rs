@@ -15,6 +15,7 @@ pub static SVF: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "SVF",
     category: "Filter",
+    family: loom_core::Family::FiltersAndEffects,
     description: "State variable filter (trapezoidal integration). The cutoff input adds pitch: +0.1 doubles the cutoff.",
     inputs: &[
         PortSpec {
@@ -216,6 +217,7 @@ pub static ONEPOLE: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "One-pole",
     category: "Filter",
+    family: loom_core::Family::FiltersAndEffects,
     description: "A gentle first-order filter, 6 dB per octave. The cutoff input adds pitch: +0.1 doubles the cutoff. Low cutoffs smooth control signals.",
     inputs: &[
         PortSpec {
@@ -375,6 +377,7 @@ pub static LADDER: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Ladder",
     category: "Filter",
+    family: loom_core::Family::FiltersAndEffects,
     description: "A resonant low-pass with a 12, 18, or 24 dB slope. High resonance thins the bass and, at 18 and 24 dB, sings on its own. The cutoff input adds pitch: +0.1 doubles the cutoff.",
     inputs: &[
         PortSpec {

@@ -8,6 +8,7 @@ Makes a gate from two signals: high while A is above B, or while A is below B. H
 |---|---|
 | ID | `loom.logic.compare` |
 | Version | 1 |
+| Family | Logic and math |
 | Category | Logic |
 
 ## Inputs

@@ -419,6 +419,7 @@ mod tests {
             unknown: false,
             id: 1,
             title: "Filter".into(),
+            hover: crate::scene::HoverText::default(),
             accent: Color::BLACK,
             position: Point::new(24.0, 36.0),
             inputs: vec![port("In"), port("Cutoff")],

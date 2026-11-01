@@ -25,6 +25,7 @@ static LAMP: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Lamp",
     category: "Test",
+    family: loom_core::Family::Interface,
     description: "Publishes display values.",
     inputs: &[],
     outputs: &[PortSpec {

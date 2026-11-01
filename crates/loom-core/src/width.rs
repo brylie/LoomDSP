@@ -141,6 +141,7 @@ mod tests {
                 version: 1,
                 name: $id,
                 category: "Test",
+                family: crate::Family::Interface,
                 description: "",
                 inputs: $inputs,
                 outputs: $outputs,

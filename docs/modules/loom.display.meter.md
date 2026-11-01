@@ -8,6 +8,7 @@ Shows the peak and RMS level of its input. Passes the input through unchanged.
 |---|---|
 | ID | `loom.display.meter` |
 | Version | 1 |
+| Family | Interface |
 | Category | Display |
 
 ## Inputs

@@ -8,6 +8,7 @@ Fires on every Nth trigger. Offset fires earlier in the count. Reset starts the 
 |---|---|
 | ID | `loom.logic.divide` |
 | Version | 1 |
+| Family | Time and rhythm |
 | Category | Logic |
 
 ## Inputs

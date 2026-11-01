@@ -17,6 +17,7 @@ pub static AMP: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Amplifier",
     category: "Level",
+    family: loom_core::Family::LevelAndRouting,
     description: "Scales a signal by a control signal, with a linear or exponential response.",
     inputs: &[
         PortSpec {
@@ -145,6 +146,7 @@ pub static CONSTANT: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Constant (level)",
     category: "Level",
+    family: loom_core::Family::LevelAndRouting,
     description: "Outputs a fixed level, set in decibels. 0 dB is a factor of 1.",
     inputs: &[],
     outputs: &[PortSpec {
@@ -219,6 +221,7 @@ pub static CLAMP: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Clamp",
     category: "Level",
+    family: loom_core::Family::LevelAndRouting,
     description: "Limits a signal to the range between two limits. NaN becomes 0 first, so Clamp makes a signal safe.",
     inputs: &[PortSpec {
         name: "in",
@@ -344,6 +347,7 @@ pub static SCALE: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Scale",
     category: "Level",
+    family: loom_core::Family::LevelAndRouting,
     description: "Multiplies a signal by a factor and adds an offset. A factor of -1 inverts. Bipolar to unipolar is factor 0.5 with offset 0.5.",
     inputs: &[PortSpec {
         name: "in",
@@ -449,6 +453,7 @@ pub static SLEW: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Slew",
     category: "Level",
+    family: loom_core::Family::LevelAndRouting,
     description: "Limits how fast a signal can rise and fall. Times are per 1.0 of change, so a glide takes the same time on any signal.",
     inputs: &[PortSpec {
         name: "in",

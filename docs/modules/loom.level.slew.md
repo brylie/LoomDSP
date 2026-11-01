@@ -8,6 +8,7 @@ Limits how fast a signal can rise and fall. Times are per 1.0 of change, so a gl
 |---|---|
 | ID | `loom.level.slew` |
 | Version | 1 |
+| Family | Level and routing |
 | Category | Level |
 
 ## Inputs

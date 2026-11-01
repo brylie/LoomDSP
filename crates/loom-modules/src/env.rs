@@ -15,6 +15,7 @@ pub static ENVELOPE: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Envelope",
     category: "Envelope",
+    family: loom_core::Family::Modulation,
     description: "A level from 0 to 1, started by a gate. ADSR holds while the gate is high; AD runs once, so a trigger also starts it. Curve bends every stage.",
     inputs: &[PortSpec {
         name: "gate",

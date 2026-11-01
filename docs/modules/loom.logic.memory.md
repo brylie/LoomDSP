@@ -8,6 +8,7 @@ Remembers a gate. Set and reset, toggle, or data (a D latch) mode. Reset wins a 
 |---|---|
 | ID | `loom.logic.memory` |
 | Version | 1 |
+| Family | Logic and math |
 | Category | Logic |
 
 ## Inputs

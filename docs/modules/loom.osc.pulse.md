@@ -8,6 +8,7 @@ Band-limited pulse wave shaped from a phase input (polyBLEP).
 |---|---|
 | ID | `loom.osc.pulse` |
 | Version | 1 |
+| Family | Sources |
 | Category | Oscillator |
 
 ## Inputs

@@ -14,6 +14,7 @@ pub static METER: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Level Meter",
     category: "Display",
+    family: loom_core::Family::Interface,
     description: "Shows the peak and RMS level of its input. Passes the input through unchanged.",
     inputs: &[PortSpec {
         name: "in",
@@ -60,6 +61,7 @@ pub static SCOPE: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Scope",
     category: "Display",
+    family: loom_core::Family::Interface,
     description: "Shows its input over time. Passes the input through unchanged.",
     inputs: &[PortSpec {
         name: "in",

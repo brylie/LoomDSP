@@ -16,6 +16,7 @@ pub static SINE: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Sine",
     category: "Oscillator",
+    family: loom_core::Family::Sources,
     description: "Sine wave shaped from a phase input.",
     inputs: &[PortSpec {
         name: "phase",
@@ -59,6 +60,7 @@ pub static SAW: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Saw",
     category: "Oscillator",
+    family: loom_core::Family::Sources,
     description: "Band-limited saw wave shaped from a phase input (polyBLEP).",
     inputs: &[PortSpec {
         name: "phase",
@@ -139,6 +141,7 @@ pub static PULSE: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Pulse",
     category: "Oscillator",
+    family: loom_core::Family::Sources,
     description: "Band-limited pulse wave shaped from a phase input (polyBLEP).",
     inputs: &[PortSpec {
         name: "phase",
@@ -257,6 +260,7 @@ pub static TRIANGLE: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Triangle",
     category: "Oscillator",
+    family: loom_core::Family::Sources,
     description: "Band-limited triangle wave shaped from a phase input (polyBLAMP).",
     inputs: &[PortSpec {
         name: "phase",
@@ -343,6 +347,7 @@ pub static NOISE: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Noise",
     category: "Oscillator",
+    family: loom_core::Family::Sources,
     description: "White, pink, or brown noise. The seed makes renders repeatable (NFR-SND-04).",
     inputs: &[],
     outputs: &[PortSpec {

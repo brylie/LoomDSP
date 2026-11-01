@@ -208,6 +208,7 @@ mod tests {
             unknown: false,
             id: 7,
             title: "Scope".into(),
+            hover: crate::scene::HoverText::default(),
             accent: Color::BLACK,
             position: Point::ORIGIN,
             inputs: vec![],

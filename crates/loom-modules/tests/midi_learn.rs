@@ -59,6 +59,7 @@ static PROBE: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "test.probe",
     category: "Test",
+    family: loom_core::Family::Interface,
     description: "Writes its parameter and counts control changes.",
     inputs: &[],
     outputs: &[output("out"), output("ccs")],

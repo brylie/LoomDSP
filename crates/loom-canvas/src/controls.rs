@@ -628,6 +628,7 @@ mod tests {
                 unknown: false,
                 id: 1,
                 title: String::new(),
+                hover: crate::scene::HoverText::default(),
                 accent: Color::BLACK,
                 position: Point::ORIGIN,
                 inputs: Vec::new(),
@@ -908,6 +909,7 @@ mod tests {
                 unknown: false,
                 id: 1,
                 title: String::new(),
+                hover: crate::scene::HoverText::default(),
                 accent: Color::BLACK,
                 position: Point::ORIGIN,
                 inputs: Vec::new(),
@@ -955,6 +957,7 @@ mod tests {
             vec![ModuleView {
                 id: 1,
                 title: String::new(),
+                hover: crate::scene::HoverText::default(),
                 accent: Color::BLACK,
                 position: Point::ORIGIN,
                 size: None,

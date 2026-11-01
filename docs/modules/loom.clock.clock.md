@@ -8,6 +8,7 @@ A phase, trigger, and gate at a musical rate, locked to the transport's bar 1.
 |---|---|
 | ID | `loom.clock.clock` |
 | Version | 1 |
+| Family | Time and rhythm |
 | Category | Clock |
 
 ## Inputs

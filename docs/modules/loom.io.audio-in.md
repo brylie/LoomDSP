@@ -8,6 +8,7 @@ Brings a pair of channels from the selected audio input into the patch.
 |---|---|
 | ID | `loom.io.audio-in` |
 | Version | 1 |
+| Family | Interface |
 | Category | I/O |
 
 ## Inputs

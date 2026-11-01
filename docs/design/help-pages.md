@@ -23,7 +23,7 @@ A page has two parts:
 
 | Part | Holds | Who writes it |
 |---|---|---|
-| Generated, from the top to the marker line | Name, description, ID, version, category; inputs with signal type and what they read unconnected; outputs with signal type and polarity; parameters with range, unit, whole-number and logarithmic marks, choice names, and default; the panel's widgets, with each light's label and description. | The command. Never edit it by hand. |
+| Generated, from the top to the marker line | Name, description, ID, version, family, category; inputs with signal type and what they read unconnected; outputs with signal type and polarity; parameters with range, unit, whole-number and logarithmic marks, choice names, and default; the panel's widgets, with each light's label and description. | The command. Never edit it by hand. |
 | Notes, below the marker line | Longer explanation, an example patch, links to explainers in `docs/learn/`. | People. |
 
 The marker line is:
@@ -32,7 +32,7 @@ The marker line is:
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->
 ```
 
-The index lists every module by category, with its name, ID, and description, and links to its page. It is all generated.
+The index lists every module by family, in the module browser's order ([ADR-0029](../adr/0029-module-families-and-a-shared-palette.md)), with its name, ID, and description, and links to its page. It is all generated.
 
 ## Rules
 

@@ -8,6 +8,7 @@ Scales a signal by a control signal, with a linear or exponential response.
 |---|---|
 | ID | `loom.level.amp` |
 | Version | 1 |
+| Family | Level and routing |
 | Category | Level |
 
 ## Inputs

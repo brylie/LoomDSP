@@ -27,6 +27,8 @@ pub struct Model {
     pub id: &'static str,
     pub name: &'static str,
     pub category: &'static str,
+    /// The module's family (ADR-0029).
+    pub family: &'static str,
     pub description: &'static str,
     pub inputs: Vec<Entry>,
     pub outputs: Vec<Entry>,
@@ -80,6 +82,7 @@ impl Help {
             id: d.id,
             name: d.name,
             category: d.category,
+            family: d.family.label(),
             description: d.description,
             inputs: d.inputs.iter().map(|p| port(p, true)).collect(),
             outputs: d.outputs.iter().map(|p| port(p, false)).collect(),
@@ -122,7 +125,11 @@ impl Help {
             button("Close").on_press(Message::CloseHelp)
         ]
         .align_y(iced::Alignment::Center);
-        let mut content = column![text(m.id).size(style::SMALL), text(m.description).size(style::BODY)].spacing(10);
+        let mut content = column![
+            text(format!("{} · {} · {}", m.family, m.category, m.id)).size(style::SMALL),
+            text(m.description).size(style::BODY)
+        ]
+        .spacing(10);
         for (title, entries) in [
             ("Inputs", &m.inputs),
             ("Outputs", &m.outputs),

@@ -8,6 +8,7 @@ Multiplies two signals and a gain. Use it as a ring modulator. To control loudne
 |---|---|
 | ID | `loom.math.mul` |
 | Version | 1 |
+| Family | Logic and math |
 | Category | Math |
 
 ## Inputs

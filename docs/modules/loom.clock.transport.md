@@ -8,6 +8,7 @@ The patch's tempo, time signature, and play state. Every patch has exactly one.
 |---|---|
 | ID | `loom.clock.transport` |
 | Version | 1 |
+| Family | Time and rhythm |
 | Category | Clock |
 
 ## Inputs

@@ -8,6 +8,7 @@ Sends a gate from a large button. Toggle keeps it. Momentary is high only while 
 |---|---|
 | ID | `loom.ui.button` |
 | Version | 1 |
+| Family | Interface |
 | Category | Control |
 
 ## Inputs

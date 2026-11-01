@@ -8,6 +8,7 @@ Band-limited saw wave shaped from a phase input (polyBLEP).
 |---|---|
 | ID | `loom.osc.saw` |
 | Version | 1 |
+| Family | Sources |
 | Category | Oscillator |
 
 ## Inputs

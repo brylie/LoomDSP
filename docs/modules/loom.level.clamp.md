@@ -8,6 +8,7 @@ Limits a signal to the range between two limits. NaN becomes 0 first, so Clamp m
 |---|---|
 | ID | `loom.level.clamp` |
 | Version | 1 |
+| Family | Level and routing |
 | Category | Level |
 
 ## Inputs

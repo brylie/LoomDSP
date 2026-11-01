@@ -8,6 +8,7 @@ A level from 0 to 1, started by a gate. ADSR holds while the gate is high; AD ru
 |---|---|
 | ID | `loom.env.envelope` |
 | Version | 1 |
+| Family | Modulation |
 | Category | Envelope |
 
 ## Inputs

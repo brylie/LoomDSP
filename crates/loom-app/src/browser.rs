@@ -194,7 +194,17 @@ impl Browser {
             let highlighted = i == self.highlight;
             let line = row![
                 text(d.name).size(style::CONTROL),
-                text(d.category).size(style::SMALL).style(text::secondary),
+                // The family's colour and name, so colour is never the only
+                // cue (ADR-0029).
+                container(space().width(8).height(8)).style(move |_: &Theme| container::Style {
+                    background: Some(crate::scene::family_colour(d.family).into()),
+                    border: iced::Border {
+                        radius: 2.0.into(),
+                        ..iced::Border::default()
+                    },
+                    ..container::Style::default()
+                }),
+                text(d.family.label()).size(style::SMALL).style(text::secondary),
                 space::horizontal(),
                 text(d.id).size(style::SMALL).style(text::secondary),
             ]
@@ -240,9 +250,9 @@ impl Browser {
 /// The modules that match a query, best first.
 ///
 /// A module matches when every word of the query is in its name, ID, or
-/// category, ignoring case. Names that start with the query come first,
-/// then names with a word that starts with it, then other matches. Ties
-/// keep the order of an empty search: by category, then by name.
+/// category, or family, ignoring case. Names that start with the query come
+/// first, then names with a word that starts with it, then other matches.
+/// Ties keep the order of an empty search: by family, then by name.
 pub fn search(modules: &[&'static ModuleDescriptor], query: &str) -> Vec<&'static ModuleDescriptor> {
     let query = query.trim().to_lowercase();
     let words: Vec<&str> = query.split_whitespace().collect();
@@ -250,11 +260,11 @@ pub fn search(modules: &[&'static ModuleDescriptor], query: &str) -> Vec<&'stati
         .iter()
         .copied()
         .filter(|d| {
-            let text = format!("{} {} {}", d.name, d.id, d.category).to_lowercase();
+            let text = format!("{} {} {} {}", d.name, d.id, d.category, d.family.label()).to_lowercase();
             words.iter().all(|w| text.contains(w))
         })
         .collect();
-    found.sort_by_key(|d| (d.category, d.name, d.id));
+    found.sort_by_key(|d| (d.family, d.name, d.id));
     if !query.is_empty() {
         // A stable sort, so ties keep the order above.
         found.sort_by_key(|d| Reverse(rank(d.name, &query)));
@@ -335,14 +345,34 @@ mod tests {
     }
 
     #[test]
-    fn empty_query_lists_every_module_by_category_then_name() {
+    fn empty_query_lists_every_module_by_family_then_name() {
         let all = modules();
         let found = search(&all, "  ");
         assert_eq!(found.len(), all.len());
-        let keys: Vec<_> = found.iter().map(|d| (d.category, d.name)).collect();
+        let keys: Vec<_> = found.iter().map(|d| (d.family, d.name)).collect();
         let mut sorted = keys.clone();
         sorted.sort();
         assert_eq!(keys, sorted);
+    }
+
+    /// A family's name finds its modules, and a category still finds
+    /// its own (ADR-0029).
+    #[test]
+    fn family_and_category_names_both_match() {
+        let all = modules();
+        let modulation = search(&all, "modulation");
+        let family = all.iter().filter(|d| d.family == loom_core::Family::Modulation).count();
+        assert!(
+            modulation.len() >= family && family >= 3,
+            "{} of {family}",
+            modulation.len()
+        );
+        assert!(
+            search(&all, "filters and effects")
+                .iter()
+                .any(|d| d.id == "loom.time.delay")
+        );
+        assert!(search(&all, "oscillator").iter().any(|d| d.id == "loom.osc.sine"));
     }
 
     #[test]

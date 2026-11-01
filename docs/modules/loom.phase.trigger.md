@@ -8,6 +8,7 @@ Fires a trigger each time the phase wraps, forward or backward.
 |---|---|
 | ID | `loom.phase.trigger` |
 | Version | 1 |
+| Family | Time and rhythm |
 | Category | Phase |
 
 ## Inputs

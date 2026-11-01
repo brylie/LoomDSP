@@ -5,8 +5,8 @@ use crate::controls::{ControlGeometry, PanelValues, focus_ring, knob_drag, knob_
 use crate::gpu::{Cable, CanvasPrimitive, Geometry, Overlay, Shape};
 use crate::hover::{HOVER_PADDING, HOVER_TEXT_PX, HoverTarget, HoverTimer};
 use crate::scene::{
-    BADGE_TEXT_SIZE, GRID, Hit, HoverText, PORT_HIT_RADIUS, PORT_RADIUS, PortRef, Scene, TILE_WIDTH, WidgetView,
-    WidgetViewKind,
+    BADGE_TEXT_SIZE, GRID, HEADER, Hit, HoverText, PORT_HIT_RADIUS, PORT_RADIUS, PortRef, Scene, TILE_WIDTH,
+    WidgetView, WidgetViewKind,
 };
 use crate::theme::Palette;
 use crate::tile_text::{self, Align, LABEL_SIZE, TITLE_SIZE, TextKind};
@@ -1595,7 +1595,15 @@ impl<Message> PatchCanvas<'_, Message> {
                         .and_then(|m| m.display_at(world))
                         .filter(|&widget| self.has_hover_text(id, widget))
                         .map(|widget| HoverTarget::Control(id, widget));
-                    display.or_else(|| tile_text::port_label_at(self.scene, world).map(HoverTarget::Port))
+                    // The header names the module's family (ADR-0029).
+                    let title = self
+                        .scene
+                        .module(id)
+                        .filter(|m| world.y < m.bounds().y + HEADER)
+                        .map(|_| HoverTarget::Title(id));
+                    display
+                        .or(title)
+                        .or_else(|| tile_text::port_label_at(self.scene, world).map(HoverTarget::Port))
                 })
                 .or(focused),
             _ => focused,
@@ -3123,6 +3131,12 @@ impl<Message> PatchCanvas<'_, Message> {
                     .filter(|text| !text.is_empty());
                 Some((&view.label, &view.hover, value, module.widget_bounds(widget)?))
             }
+            HoverTarget::Title(id) => {
+                let module = self.scene.module(id)?;
+                let tile = module.bounds();
+                let header = Rectangle::new(tile.position(), Size::new(tile.width, HEADER));
+                Some((&module.title, &module.hover, None, header))
+            }
         }
     }
 
@@ -3147,7 +3161,7 @@ impl<Message> PatchCanvas<'_, Message> {
         // (panels.md, Clock mark on transport inputs).
         let follows = match target {
             HoverTarget::Port(port) => self.scene.port(port).and_then(|p| p.follows_transport),
-            HoverTarget::Control(..) => None,
+            HoverTarget::Control(..) | HoverTarget::Title(_) => None,
         };
         let font = renderer.default_font();
         let inner = crate::hover::text_width(bounds.width);
@@ -3331,6 +3345,7 @@ mod tests {
             unknown: false,
             id,
             title: String::new(),
+            hover: crate::scene::HoverText::default(),
             accent: Color::BLACK,
             position: Point::new(x, 0.0),
             inputs: vec![port()],
@@ -3475,6 +3490,35 @@ mod tests {
             ..on(Hit::Module(1))
         };
         assert_eq!(canvas.hover_target(&on_label), Some(HoverTarget::Port(port)));
+    }
+
+    /// Resting on a tile's header shows the module's hover text: its family
+    /// and description (ADR-0029). The body below the header does not.
+    #[test]
+    fn the_header_hovers_with_the_module_family() {
+        let mut m = module(1, 0.0);
+        m.hover = HoverText {
+            description: "Sources. A test module.".into(),
+            name: Some("test.module".into()),
+        };
+        let tile = m.bounds();
+        let scene = Scene::new(vec![m], Vec::new());
+        let none = BTreeSet::new();
+        let canvas = PatchCanvas::new(&scene, &none, |e| e);
+        let at = |y: f32| State {
+            hover: Some(Hit::Module(1)),
+            cursor: Some(Point::new(tile.center_x(), y)),
+            ..State::default()
+        };
+        assert_eq!(
+            canvas.hover_target(&at(tile.y + HEADER * 0.5)),
+            Some(HoverTarget::Title(1))
+        );
+        assert_eq!(canvas.hover_target(&at(tile.y + HEADER + 30.0)), None);
+        let (_, hover, value, anchor) = canvas.hover_content(HoverTarget::Title(1)).unwrap();
+        assert!(hover.description.starts_with("Sources."));
+        assert_eq!(value, None);
+        assert_eq!(anchor.height, HEADER);
     }
 
     /// A light with a description hovers like a control, and its hover
