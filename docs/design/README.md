@@ -83,11 +83,12 @@ Copy [template.md](template.md). Keep it to one feature. Link the ADR, requireme
 | [Devices plugged in and out](device-changes.md) | None (builds on [preferences](preferences.md)) | Agreed, P1 |
 | [Audio input](audio-input.md) | None (builds on [ADR-0020](../adr/0020-inferred-channel-count.md)) | Agreed, P1 |
 | [P1 module ports and parameters](p1-modules.md) | None (builds on [ADR-0007](../adr/0007-polymorphic-signal-model.md)) | Agreed, P1 |
-| [P2 module ports and parameters](p2-modules.md) | None (builds on [ADR-0007](../adr/0007-polymorphic-signal-model.md)) | Random, Chance, Phase reset, Euclidean rhythm, Selector, Phase shift and reverse, Macro Agreed, P2 |
+| [P2 module ports and parameters](p2-modules.md) | None (builds on [ADR-0007](../adr/0007-polymorphic-signal-model.md)) | Random, Chance, Phase reset, Euclidean rhythm, Selector, Phase shift and reverse, Macro, Pitch quantiser, Multi-lane sequencer Agreed, P2 |
 | [Transient parameters](transient-params.md) | None (builds on [ADR-0008](../adr/0008-patch-format-ron.md)) | Agreed, P1 |
 | [Audio QA harness](audio-qa.md) | None (builds on [ADR-0019](../adr/0019-output-safety-stage.md)) | Implemented, developer tooling |
 | [Release downloads](releases.md) | [ADR-0027](../adr/0027-prebuilt-release-downloads.md) | Agreed, P1 |
 | [Unknown modules](unknown-modules.md) | None (builds on [ADR-0008](../adr/0008-patch-format-ron.md)) | Agreed, P1 |
 | [Frame meter](frame-meter.md) | None (extends the [P1 canvas benchmarks](../benchmarks/p1-canvas.md)) | Agreed, developer tooling |
 | [Sub-patches](sub-patches.md) | [ADR-0029](../adr/0029-sub-patches-stored-as-definitions-and-flattened.md), [ADR-0017](../adr/0017-primitives-traits-and-abstractions.md) | Agreed, P2 |
+| [Scale and tuning](scale-and-tuning.md) | [ADR-0031](../adr/0031-one-scale-and-tuning-per-patch.md) | Agreed, P2 |
 | [Module data](module-data.md) | [ADR-0030](../adr/0030-module-data-in-typed-slots.md), [ADR-0024](../adr/0024-widgets-follow-the-kind-of-value.md) | Agreed; buffer data P1, rest P2 |

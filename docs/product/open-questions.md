@@ -21,6 +21,7 @@ Each open item lists the options and a current leaning. Close an item by writing
 | OQ-17 | Module data beyond parameters | Typed data slots (curve, pattern, buffer). Curves and patterns inline in the patch; audio as WAV files in a sidecar folder. Swapped in from the control thread. Undo covers player edits, not live recording. | FR-LIB-19, ADR-0030, [module data](../design/module-data.md) |
 | OQ-20 | How roles are named and versioned | Namespaced IDs with a version (`loom.role.filter@1`). A new version only adds optional parameters. A part may fill several roles, and may map role names to its own. | FR-SDK-08, ADR-0017, [sub-patches](../design/sub-patches.md#roles) |
 | OQ-21 | What carries across a slot swap | Parameters by role name. Each part keeps its own data in the patch, restored on swap back, never converted. A swap is one undo step. | FR-ENCAP-08, [sub-patches](../design/sub-patches.md#slots) |
+| OQ-22 | Is the scale a module or a patch setting? | Like the transport: the engine holds one tuning and one active scale per patch, read without cables. A Scale and tuning module stores up to 8 scales and switches them from a trigger. | FR-LIB-29, ADR-0031, [scale and tuning](../design/scale-and-tuning.md) |
 
 ## Open
 
@@ -74,12 +75,6 @@ VCV Rack's ecosystem works because people can install modules without building t
 | WebAssembly modules, run in a sandbox | Safe (sandboxed), one build for all platforms, any language that compiles to WASM. | Slower than native. Real-time safety of the WASM runtime (no allocation or JIT pauses on the audio thread) must be proven. |
 
 - **Leaning:** compile in for now. Spike WebAssembly modules in P4: measure the cost of a filter and an oscillator as WASM against native, and check the runtime's real-time behaviour. Decide before announcing a module SDK.
-
-### OQ-22. Is the scale a module or a patch setting?
-
-Pitch modules follow a patch-wide scale and tuning (FR-LIB-29). It could be a setting on the patch, like the transport (ADR-0015), or a module.
-
-- **Leaning:** a patch setting, read by modules without cables like the transport, plus a Scale and tuning module (MT-PITCH-03) that changes it from a trigger, so logic can change key between sections.
 
 ## Risks
 

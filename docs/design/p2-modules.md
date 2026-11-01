@@ -3,12 +3,12 @@
 The ports, parameters, ranges, defaults, and behaviour of the P2 modules that bring no new engine rules, so each can be built from its catalogue entry without guessing.
 
 - **Kind:** living specification.
-- **Status:** Agreed for Random, Chance, Phase reset, Euclidean rhythm, Selector, Phase shift and reverse, and Macro (2026-11-01). Each section is ready to build. Other P2 modules are added here as they are agreed.
+- **Status:** Agreed for Random, Chance, Phase reset, Euclidean rhythm, Selector, Phase shift and reverse, Macro, Pitch quantiser, and Multi-lane sequencer (2026-11-01). Each section is ready to build. Other P2 modules are added here as they are agreed.
 - **Decision behind it:** none. It follows [ADR-0007](../adr/0007-polymorphic-signal-model.md) (signals), [ADR-0014](../adr/0014-modulation-without-cables.md) (modulation without cables), [ADR-0016](../adr/0016-ports-and-parameters-carry-their-own-text.md) (port and parameter text), and [ADR-0018](../adr/0018-clean-room-module-development.md) (clean room).
-- **Use case and requirements:** FR-LIB-01, FR-LIB-08, FR-LIB-12, FR-LIB-22, FR-LIB-30, NFR-SND-04.
+- **Use case and requirements:** FR-LIB-01, FR-LIB-08, FR-LIB-12, FR-LIB-14, FR-LIB-19, FR-LIB-22, FR-LIB-29, FR-LIB-30, NFR-SND-04.
 - **Background:** [Phase and cycles](../learn/phase-and-cycles.md).
 - **Prior art:** none named. Every module is designed from its purpose. The Euclidean rhythm follows published theory: G. Toussaint, "The Euclidean Algorithm Generates Traditional Musical Rhythms", 2005.
-- **Issues:** [#304](https://github.com/brylie/LoomDSP/issues/304) (Random), [#305](https://github.com/brylie/LoomDSP/issues/305) (Chance), [#174](https://github.com/brylie/LoomDSP/issues/174) (Phase reset), [#306](https://github.com/brylie/LoomDSP/issues/306) (Euclidean rhythm), [#310](https://github.com/brylie/LoomDSP/issues/310) (Selector), [#111](https://github.com/brylie/LoomDSP/issues/111) (Phase shift and reverse), [#78](https://github.com/brylie/LoomDSP/issues/78) (Macro).
+- **Issues:** [#304](https://github.com/brylie/LoomDSP/issues/304) (Random), [#305](https://github.com/brylie/LoomDSP/issues/305) (Chance), [#174](https://github.com/brylie/LoomDSP/issues/174) (Phase reset), [#306](https://github.com/brylie/LoomDSP/issues/306) (Euclidean rhythm), [#310](https://github.com/brylie/LoomDSP/issues/310) (Selector), [#111](https://github.com/brylie/LoomDSP/issues/111) (Phase shift and reverse), [#78](https://github.com/brylie/LoomDSP/issues/78) (Macro), [#308](https://github.com/brylie/LoomDSP/issues/308) (Pitch quantiser), [#307](https://github.com/brylie/LoomDSP/issues/307) (Multi-lane sequencer). Pitch modules follow [Scale and tuning](scale-and-tuning.md).
 - **Code:** `crates/loom-modules/src`, once built.
 
 ## Goal
@@ -155,6 +155,58 @@ Two built forms of the Phase warp type (ADR-0017): small, cheap, and needed now 
 - The output is `value`, smoothed over 5 ms (P1 rule 3). *Why no polarity setting:* each modulation assignment already sets its own polarity.
 - The ID is in the `ui` category, with Button (MT-UI-01). The issue proposed `loom.mod.macro`; this spec wins.
 
+## Pitch quantiser (MT-PITCH-02)
+
+`loom.pitch.quantise`: snaps a pitch signal to the nearest note of a scale.
+
+| | |
+|---|---|
+| Inputs | `in` (pitch, default 0), `trigger` (trigger, default 0) |
+| Outputs | `out` (pitch), `changed` (trigger) |
+| Parameters | `mode`: 0 Continuous (default), 1 On trigger. `scale`: 0 Patch (default), 1 Own ([TR-08](scale-and-tuning.md#following-the-scale)). `root`: whole number 0 to 63, default 0 (Own only) |
+| Data | `scale`: a one-lane gate pattern, one cell per pitch class (Own only) |
+| Panel | Radio buttons for `mode` and `scale`. With Own, a step grid in the keys layout for the scale, with the playing note as the playing cell. |
+
+- **Snapping:** `out` is the note of the scale nearest to `in` in pitch, in any octave of the tuning ([scale and tuning](scale-and-tuning.md#tunings)). A scale with no notes in gives `out = in`.
+- **Hysteresis:** to move from the current note to a neighbour, `in` must pass the midpoint between them by 10% of the gap. *Why:* a slow or noisy input near a midpoint never flickers between two notes. On the first frame, an exact tie picks the lower note.
+- **Mode** is a setting, not chosen by a cable on `trigger`. Continuous: `out` follows `in` all the time. On trigger: `in` is snapped and held on each rising edge of `trigger` (rule 3).
+- **`changed`** is a one-sample trigger whenever `out` moves to another note, including after a key change. *Why:* it can fire an envelope, so a quantiser plays notes by itself.
+- Snapping to the notes being held waits for the note model (OQ-16).
+
+## Multi-lane sequencer (MT-SEQ-01)
+
+`loom.seq.lanes`: four lanes of stored steps, each with its own length, for gates, pitches, or values.
+
+| | |
+|---|---|
+| Inputs | `phase` (phase, default **bar phase**), `clock` (trigger, default 0), `reset` (trigger, default 0), `select` (default 0) |
+| Outputs | `out1` to `out4`, `accent1` to `accent4` |
+| Parameters | `read`: 0 Phase (default), 1 Clock, 2 Select. `division`: whole number 1 to 64, default 16 (Phase only). `steps1` to `steps4`: whole number 1 to 64, default 16. `type1` to `type4`: 0 Gate, 1 Pitch, 2 Value; defaults Gate, Pitch, Value, Gate. `length`: 0.05 to 1, default 0.5. `scale`: 0 Patch (default), 1 Own. `root`: whole number 0 to 63, default 0 (Own only). `seed` (rule 1) |
+| Data | `pattern`: 4 lanes of up to 64 steps, with step attributes ([data kinds](panel-widgets.md#data-kinds)). `scale`: a one-lane gate pattern (Own only) |
+| Panel | A step grid (rows layout) for `pattern`, with the attribute picker; radio buttons for `read`; knobs for `division`, `length`, and `steps1` to `steps4`. `type1` to `type4`, `scale`, `root`, and `seed` in the inspector. |
+
+**Settled:** four fixed lanes, each with its own length, so lanes can run in polymeter. *Why four:* ports are static in a descriptor. *Why own lengths in P2:* a 5-step lane against a 16-step lane is one of the quickest ways to make a pattern that keeps changing; it moves forward from P3 (FR-LIB-14). Per-lane rate and direction stay in P3.
+
+**Reading** (`read` is a setting, not chosen by a cable):
+
+- **Phase:** `division` sets one step length for all lanes, as steps per phase cycle. The module counts phase cycles (a wrap is a fall of more than 0.5, as in [phase and cycles](../learn/phase-and-cycles.md#finding-the-end-of-a-cycle); a backward wrap counts down). The step count is `cycles × division + floor(phase × division)`, and lane `i` plays step `count mod steps_i`. *Why:* a true polymeter. Lanes share a pulse and drift against each other: 5 steps against 16 line up again every 80 steps. With nothing on `phase`, steps follow the bar and hold when the transport stops.
+- **Clock:** each `clock` trigger adds one to the count. Lane `i` plays `count mod steps_i`.
+- **Select:** lane `i` plays step `floor(select × steps_i)`, with `select` clamped to 0 to 1.
+- `reset` makes the current frame step 0 in every lane, in every mode. The module starts at step 0.
+- A lane **enters a step** when its step number changes, and on the first frame (rule 3). Edits to the pattern or the parameters apply when a step is entered, never mid-step.
+
+**Lane types:**
+
+- **Gate:** a gate cell that plays sets the output high for `length` of the step, then low. In Phase mode the time within a step comes from the phase. In Clock mode the step is the last interval between clocks, in samples; before the second clock, the gate stays high for the whole step. In Select mode a gate cell is high while it is selected.
+- **Pitch:** each cell is a scale degree. Its value from 0 to 1 picks a degree over two octaves above the scale's root (rounded to the nearest of the scale's notes in those two octaves). The output is that note's pitch. A key change moves the notes with it. *Why degrees:* a pattern stays in key when the scale changes.
+- **Value:** each cell is a value from 0 to 1, output as is. Scale it with modulation depth or a Scale module.
+
+**Step attributes** (settled, included now):
+
+- **Chance** (0 to 1, default 1): on entering a step, the lane draws a random number; the step plays only if it is below the chance. A step that does not play leaves a gate low and holds a pitch or value at its last value. Each lane has its own stream from the seed, and draws on every step it enters, whether or not it needs the draw. *Why:* changing one step's chance never changes what the other steps do. `reset` restarts the streams (rule 2).
+- **Repeat** (whole number 1 to 4, default 1): a gate step is split into that many equal parts, each with a gate for `length` of its part. Ignored on pitch and value lanes.
+- **Accent** (on or off, default off): `accent<i>` is high with the same timing as a gate on lane `i`, on accented steps that play. On pitch and value lanes it uses the timing a gate would have. *Why separate outputs:* gates stay plain gates, and accent can drive a level, a filter, or a second envelope.
+
 ## Acceptance criteria
 
 Random:
@@ -203,11 +255,29 @@ Macro:
 
 - [ ] The output equals the knob, and one Macro assigned to three parameters moves all three (test).
 
+Pitch quantiser:
+
+- [ ] In C major, every output is a scale note. A pitch rising from C moves to D only after it passes the C to D midpoint by 10% of the gap, and falling back moves to C only after passing the midpoint by 10% the other way (unit tests).
+- [ ] A slow ramp across one octave in C major gives exactly 7 `changed` triggers (test).
+- [ ] On trigger mode holds between rising edges (test).
+- [ ] Output is the same at block sizes 1, 77, and 512 (reference test).
+
+Multi-lane sequencer:
+
+- [ ] Driven by the bar phase with division 16, each step starts on the same sample at block sizes 1, 77, and 512 (reference test).
+- [ ] A 5-step lane and a 16-step lane line up again after 80 steps, in Phase and Clock modes (test).
+- [ ] Editing a step while it plays does not allocate (`no_alloc` test) and applies at the next step (test).
+- [ ] A pitch lane plays scale degrees, and a key change moves them (test).
+- [ ] A step with chance 0 never plays and 1 always does; changing one step's chance leaves the other steps' choices unchanged (test).
+- [ ] Repeat 3 gives three gates in the step; accent outputs follow accented steps only (test).
+- [ ] The pattern with attributes saves, reloads unchanged, and each edit is one undo step (test, with [module data](module-data.md)).
+
 ## Out of scope
 
 - The Smoothing trait itself (TR-11). Random uses a plain `glide` until it exists.
 - Distributions other than Uniform and Centred.
-- More than four lanes in Chance, or more than eight inputs in Selector.
+- More than four lanes in Chance or the sequencer, or more than eight inputs in Selector.
+- Per-lane rate and direction in the sequencer (P3, FR-LIB-14).
 - The rest of Phase warp (bend, S-curve, skew, mirror, smoothing).
 
 ## Open points

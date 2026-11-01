@@ -38,7 +38,7 @@ Curve and pattern data are written inline, under the module. The module IDs belo
 ```ron
 PatchModule(id: 4, kind: "loom.seq.lanes@1", data: {
     "pattern": Pattern(lanes: [
-        Gates(steps: 16, on: [0, 4, 8, 12]),
+        Gates(steps: 16, on: [0, 4, 8, 12], chance: {6: 0.5}, repeat: {12: 2}, accent: [0, 8]),
         Values(steps: 16, values: [0.0, 0.25, 0.5, 0.25, /* ... */]),
     ]),
 }),
@@ -50,6 +50,7 @@ PatchModule(id: 6, kind: "loom.osc.wavetable@1", data: {
 }),
 ```
 
+- Step attributes are written only where they differ from their defaults (chance 1, repeat 1, no accent).
 - A slot that still has its default is not written. *Why:* patches stay short, and the example patches do not change when a module gains a slot.
 - A slot with `saved: false` is never written.
 - A value that does not fit the slot (too many points, a step past the end) is cut to fit when loading, and the status bar says so. *Why:* a patch must always open.

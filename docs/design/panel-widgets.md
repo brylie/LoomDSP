@@ -87,7 +87,7 @@ Structured data that a module keeps beyond its parameters comes in three shared 
 | Data kind | What it holds | Editor | Used by, for example |
 |---|---|---|---|
 | Curve | Up to 64 points with a bend per segment, and optional named markers | Curve | Segment envelope, curve reader, drawn transfer curve, drawn LFO shape |
-| Pattern | Up to 8 lanes of up to 64 steps. Each lane holds gates or values. | Step grid | Multi-lane sequencer, parameter sequencer, matrix, a set of pitch classes (a scale) |
+| Pattern | Up to 8 lanes of up to 64 steps. Each lane holds gates or values. A slot can also give each step attributes: chance (0 to 1), repeat (1 to 4), and accent (on or off). | Step grid | Multi-lane sequencer, parameter sequencer, matrix, a set of pitch classes (a scale) |
 | Buffer | Audio frames, mono or stereo, up to a maximum length the module declares. Up to 64 slice points. A module can set a frame length, so the buffer holds a table of frames. | Waveform | Buffer, buffer reader, slice map, grain engine, audio cycle |
 
 - A module declares its data slots by name and kind, as it declares parameters. A widget binds to a slot by name. The registry refuses a curve widget on a pattern slot.
@@ -389,6 +389,7 @@ Rows of steps. Each row (lane) holds gates or values. A column shows the playing
   - **Which cell is which key:** cell 0 is the tuning's reference pitch class (C in a 12-note tuning, pitch 0.0 in FR-SIG-05), not the scale's root. *Why:* if cells counted from the root, every major scale would draw as the white keys, and the keys would not match the notes. The module marks the root cell with a small bar under the key, or outside the ring at that cell. *Why:* outline and dot already mean the playing step.
   - **Cell names:** in the keys layout, the module names each cell for hover text and the screen reader, such as "C sharp" in a 12-note tuning or "degree 5 of 19" in another. The names change when the tuning does. The module publishes them as a list of display texts, read as a readout reads its text ([#118](https://github.com/brylie/LoomDSP/issues/118)). *Why:* names depend on the active tuning, so they are module state, not descriptor text.
   - The ring and keys layouts draw gate lanes only. The registry refuses them on a data slot that can hold value lanes. *Why:* a value cell is set by height, and a ring has no single up and down.
+- **Step attributes.** When the slot has attributes, an attribute picker above the grid offers Value, Chance, Repeat, and Accent. Picking one makes every cell show and edit that attribute, with the same gestures: drag sets chance and repeat by height, click flips accent. Value is the normal view. The keyboard and the screen reader follow the picked attribute ("step 3 of 16, chance 0.5"). *Why one picker and not more rows:* the grid keeps one cell per step, so its gestures, layouts, and keyboard stay as they are.
 - *Why one grid for gates and values:* the multi-lane sequencer mixes both in one pattern, and a matrix of levels (MT-ROUTE-04) is a grid of value cells. One widget keeps them alike.
 
 ### Waveform

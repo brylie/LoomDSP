@@ -195,15 +195,15 @@ All random modules take a seed, so a patch sounds the same each time it loads (N
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
 | MT-PITCH-01 | Pitch math | Moves a pitch by octaves, semitones, scale steps, or a frequency ratio; sums several pitches; or spreads a pair around one pitch. | Scale awareness | P2 | FR-LIB-13 | Planned |
-| MT-PITCH-02 | Pitch quantiser | Snaps a pitch signal to the nearest note of a scale, or of the notes being held. | Scale awareness | P2 | FR-LIB-29 | Planned |
-| MT-PITCH-03 | Scale and tuning | Sets the patch-wide scale and tuning (equal divisions, just ratios, imported tuning files) that pitch modules follow. Can be changed live by a trigger. | | P2 | FR-LIB-29 | Planned |
+| MT-PITCH-02 | Pitch quantiser | Snaps a pitch signal to the nearest note of a scale, or of the notes being held. | Scale awareness | P2 | FR-LIB-29 | Specified ([P2 modules](../design/p2-modules.md)) |
+| MT-PITCH-03 | Scale and tuning | Sets the patch-wide scale and tuning (equal divisions, just ratios, imported tuning files) that pitch modules follow. Can be changed live by a trigger. | | P2 | FR-LIB-29 | Specified ([scale and tuning](../design/scale-and-tuning.md)) |
 | MT-PITCH-04 | Pitch tracker | Estimates the pitch of incoming audio. | | P4 | New | Planned |
 
 ## Sequencers and generators
 
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
-| MT-SEQ-01 | Multi-lane sequencer | Steps through stored values in one or more lanes. Each lane has a type (value, gate, pitch, or curve), a length, a direction, and a read mode: by clock, by phase, or by a control value that points at a step. Steps can carry accent, chance, and repeat. P2 builds lanes that share one length and rate (FR-LIB-08). Lanes with their own length, rate, and direction, which give polymetric patterns, come in P3 (FR-LIB-14). | Timebase, Retrigger, Seed, Scale awareness | P2 | FR-LIB-08, FR-LIB-14 | Planned |
+| MT-SEQ-01 | Multi-lane sequencer | Steps through stored values in one or more lanes. Each lane has a type (value, gate, pitch, or curve), a length, a direction, and a read mode: by clock, by phase, or by a control value that points at a step. Steps can carry accent, chance, and repeat. P2 builds four lanes, each with its own length (polymeter), with step attributes (FR-LIB-08). Per-lane rate and direction come in P3 (FR-LIB-14). | Timebase, Retrigger, Seed, Scale awareness | P2 | FR-LIB-08, FR-LIB-14 | Specified in part (P2, [P2 modules](../design/p2-modules.md)) |
 | MT-SEQ-02 | Parameter sequencer | Each step sets its own group of parameter values elsewhere in the patch. | Timebase | P3 | FR-LIB-12 | Planned |
 | MT-SEQ-03 | Piano roll | Notes of any length and pitch in a loop, drawn or recorded. | Timebase, Scale awareness | P3 | New | Planned |
 | MT-SEQ-04 | Generator | Makes melodies or rhythms from a chosen algorithm: random notes in a scale, a random walk, a looping pattern that slowly mutates, a Markov chain, or rule systems such as L-systems and cellular automata. | Seed, Scale awareness, Timebase | P3 | FR-LIB-28 | Planned |
