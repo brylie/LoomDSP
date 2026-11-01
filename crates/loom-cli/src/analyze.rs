@@ -2,7 +2,7 @@
 //! (`docs/design/audio-qa.md`, `loom analyze`). It only measures; the limits a
 //! script passes decide what fails.
 
-use loom_test::analysis::{self, Analysis};
+use loom_analysis::{self as analysis, Analysis};
 use std::path::PathBuf;
 use std::process::ExitCode;
 

@@ -5,7 +5,7 @@
 
 use loom_core::{Controller, EngineConfig, EngineParts, ModuleId, OutputSafety, create_engine};
 use loom_modules::register_all;
-use loom_test::modules as test_modules;
+use loom_modules::test_modules;
 use std::sync::Arc;
 
 /// An engine with the built-in and test modules, and the safety stage off so

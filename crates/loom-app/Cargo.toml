@@ -17,12 +17,11 @@ path = "src/main.rs"
 
 [dependencies]
 loom-core.workspace = true
-loom-modules.workspace = true
+# `test-modules`: the `test.` modules, for --test-modules and the app's tests.
+loom-modules = { workspace = true, features = ["test-modules"] }
 loom-patch.workspace = true
 loom-host-desktop.workspace = true
 loom-canvas.workspace = true
-# The `test.` modules, for --test-modules and the app's tests.
-loom-test.workspace = true
 iced_wgpu.workspace = true
 png.workspace = true
 serde.workspace = true
@@ -44,6 +43,7 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_
 
 [dev-dependencies]
 hound.workspace = true
+loom-analysis.workspace = true
 
 [lints]
 workspace = true

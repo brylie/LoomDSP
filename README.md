@@ -162,6 +162,8 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) to get started. AI-assisted contribution
 | `crates/loom-modules` | Built-in modules, integration tests, and benchmarks. |
 | `crates/loom-patch` | RON patch format: load and save. |
 | `crates/loom-rt` | Small real-time helpers (denormal flushing, smoothing). Reusable outside LoomDSP. |
+| `crates/loom-analysis` | Measurements on recorded audio, for `loom analyze` and audio QA tests. |
+| `crates/loom-test` | The module test harness, for tests only. |
 | `crates/loom-host-desktop` | Audio (cpal) and MIDI (midir) host for desktop. |
 | `crates/loom-cli` | The `loom` command-line tool. |
 | `crates/loom-canvas` | The patch canvas: a GPU-drawn Iced widget ([ADR-0010](docs/adr/0010-own-patch-canvas.md)). |

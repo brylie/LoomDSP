@@ -26,6 +26,8 @@ pub mod mix;
 pub mod osc;
 pub mod phase;
 pub mod rand;
+#[cfg(feature = "test-modules")]
+pub mod test_modules;
 pub mod time;
 pub mod transport;
 pub mod ui;

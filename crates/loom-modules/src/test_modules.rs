@@ -3,7 +3,8 @@
 //! The built-in modules do not cover every panel widget or parameter
 //! mapping, so a test that needs one uses these instead of declaring its
 //! own descriptor. Their IDs start with `test.`, so they never clash with a
-//! real module. Add them to a registry with [`register`].
+//! real module. Add them to a registry with [`register`]. They build only
+//! with the `test-modules` feature, so a plugin build does not carry them.
 //!
 //! - [`PANEL`] (`test.panel`) has every widget kind on its panel, every
 //!   parameter mapping, and one output of each polarity.

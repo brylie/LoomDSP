@@ -1,0 +1,20 @@
+[package]
+name = "loom-analysis"
+description = "Measurements on recorded LoomDSP audio: peak, clipping, steps, and DC."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+readme.workspace = true
+keywords = ["audio", "dsp", "analysis", "wav", "qa"]
+categories = ["multimedia::audio"]
+
+[dependencies]
+loom-core.workspace = true
+hound.workspace = true
+serde.workspace = true
+
+[lints]
+workspace = true

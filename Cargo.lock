@@ -2030,6 +2030,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
+name = "loom-analysis"
+version = "0.1.0"
+dependencies = [
+ "hound",
+ "loom-core",
+ "serde",
+]
+
+[[package]]
 name = "loom-app"
 version = "0.1.0"
 dependencies = [
@@ -2041,12 +2050,12 @@ dependencies = [
  "iced_wgpu",
  "jiff",
  "libc",
+ "loom-analysis",
  "loom-canvas",
  "loom-core",
  "loom-host-desktop",
  "loom-modules",
  "loom-patch",
- "loom-test",
  "png",
  "rfd",
  "ron",
@@ -2071,12 +2080,12 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "hound",
+ "loom-analysis",
  "loom-core",
  "loom-host-desktop",
  "loom-modules",
  "loom-patch",
  "loom-rt",
- "loom-test",
  "serde_json",
 ]
 
@@ -2114,7 +2123,9 @@ version = "0.1.0"
 dependencies = [
  "assert_no_alloc",
  "criterion",
+ "loom-analysis",
  "loom-core",
+ "loom-modules",
  "loom-patch",
  "loom-rt",
  "loom-test",
@@ -2141,7 +2152,6 @@ version = "0.1.0"
 dependencies = [
  "hound",
  "loom-core",
- "serde",
 ]
 
 [[package]]
