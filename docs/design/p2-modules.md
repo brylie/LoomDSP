@@ -191,7 +191,7 @@ Two built forms of the Phase warp type (ADR-0017): small, cheap, and needed now 
 
 - **Phase:** `division` sets one step length for all lanes, as steps per phase cycle. The module counts phase cycles (a wrap is a fall of more than 0.5, as in [phase and cycles](../learn/phase-and-cycles.md#finding-the-end-of-a-cycle); a backward wrap counts down). The step count is `cycles × division + floor(phase × division)`, and lane `i` plays step `count mod steps_i`. *Why:* a true polymeter. Lanes share a pulse and drift against each other: 5 steps against 16 line up again every 80 steps. With nothing on `phase`, steps follow the bar and hold when the transport stops.
 - **Clock:** each `clock` trigger adds one to the count. Lane `i` plays `count mod steps_i`.
-- **Select:** lane `i` plays step `floor(select × steps_i)`, with `select` clamped to 0 to 1.
+- **Select:** lane `i` plays step `floor(select × steps_i)`, with `select` clamped to 0 to 1 and the result to `steps_i − 1`.
 - `reset` makes the current frame step 0 in every lane, in every mode. The module starts at step 0.
 - A lane **enters a step** when its step number changes, and on the first frame (rule 3). Edits to the pattern or the parameters apply when a step is entered, never mid-step.
 
@@ -237,7 +237,7 @@ Chance:
 - [ ] Chance 0 never sends to A, and 1 always does (test).
 - [ ] Over 10,000 triggers at 0.3, between 28% and 32% go to A (test).
 - [ ] A gate of 100 frames chosen for A gives 100 frames on A and none on B (test).
-- [ ] One clock on lane 1 drives lanes 2 to 4 when they have no cable; lane 3's choices are the same whether or not lane 2 has its own cable (test).
+- [ ] One clock on lane 1 drives lanes 2 to 4 when they have no cable. With the same clock cabled to lane 3, lane 3's choices are the same whether or not lane 2 has its own cable (test).
 - [ ] The same seed gives the same choices at block sizes 1, 77, and 512 (reference test).
 
 Phase reset:

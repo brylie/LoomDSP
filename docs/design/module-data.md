@@ -59,7 +59,7 @@ PatchModule(id: 6, kind: "loom.osc.wavetable@1", data: {
 
 **Settled:** audio is saved in a sidecar folder next to the patch.
 
-- Saving `Song.ron` writes each saved buffer to `Song.audio/<module id>-<slot>.wav`. A patch with no saved buffers has no folder.
+- Saving `Song.ron` writes each saved buffer to `Song.audio/<path>-<slot>.wav`. At the top level, `<path>` is the module's ID. Inside a sub-patch, it is the [definition keys](sub-patches.md#patch-file) from the top down and then the module's ID, joined by `.` (`voice.3-table.wav`). A patch with no saved buffers has no folder. *Why the path:* module IDs are unique only inside one definition, and every tile has its own definition, so two copies of a sub-patch must not write the same file.
 - Files are 32-bit float WAV at the engine's sample rate when saved, mono or stereo as the slot holds. *Why:* no loss, and every audio editor reads them.
 - Paths in the patch are relative to the patch file, so the patch and its folder can move together.
 - **Save** rewrites only buffers that changed since the last save, and removes files in the folder that the patch no longer uses. It removes only files whose names follow the pattern above. *Why:* a player's own files in that folder are never deleted.
@@ -116,6 +116,7 @@ Rules for implementers, from ADR-0001 and ADR-0032.
 P1 (buffer):
 
 - [ ] A module with a buffer slot, loaded from a WAV file, saves to the sidecar folder and reloads with the same samples (test).
+- [ ] Two copies of a sub-patch, each holding a buffer in a module with the same ID, save to two files and reload with their own samples (test).
 - [ ] Loading a 48 kHz file into a 44.1 kHz engine resamples it on the control thread (test).
 - [ ] A missing sidecar file opens the patch with a silent buffer and a status message; saving does not write that slot (test).
 - [ ] Save removes an unused file it wrote, and leaves a file of another name (test).
