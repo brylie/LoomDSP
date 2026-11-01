@@ -3,7 +3,7 @@
 Where the app puts module tiles that have no saved position, so a loaded patch reads left to right with few crossing cables.
 
 - **Kind:** living specification.
-- **Status:** Agreed and Implemented, P1.
+- **Status:** Agreed and Implemented, M1.
 - **Decision behind it:** none of its own. Builds on [ADR-0010](../adr/0010-own-patch-canvas.md) (the canvas is free-form; positions belong to the app).
 - **Use case and requirements:** FR-CANVAS-09 (signal flowing left to right), FR-CANVAS-01.
 - **Prior art:** the first steps of layered graph drawing (Sugiyama and others, 1981): break cycles, give each node a layer, then order each layer to reduce crossings. We use only a simple form of each step.

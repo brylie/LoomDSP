@@ -69,7 +69,7 @@ flowchart LR
 
 The song level uses the same two primitives as the part level: a counter driving a step select. Arrangement is a step sequencer of step sequencers.
 
-The automated version of this example is the P3 exit test ([#55](https://github.com/brylie/LoomDSP/issues/55)).
+The automated version of this example is the M3 exit test ([#55](https://github.com/brylie/LoomDSP/issues/55)).
 
 ## Built-in abstractions
 
@@ -91,14 +91,14 @@ Rule options for Looper Group: round robin, random, or chosen by an input. Users
 
 | Needs | Why | Where |
 |---|---|---|
-| Module data (FR-LIB-19, OQ-17) | Cycles store patterns and audio. | [#50](https://github.com/brylie/LoomDSP/issues/50), P2 |
-| Sub-patches (FR-ENCAP-*) | Without them the example is about 30 tiles; with them each part is one tile. | [#51](https://github.com/brylie/LoomDSP/issues/51), P2 |
+| Module data (FR-LIB-19, OQ-17) | Cycles store patterns and audio. | [#50](https://github.com/brylie/LoomDSP/issues/50), M2 |
+| Sub-patches (FR-ENCAP-*) | Without them the example is about 30 tiles; with them each part is one tile. | [#51](https://github.com/brylie/LoomDSP/issues/51), M2 |
 | Trigger convention (OQ-19) | Counters and dividers count triggers. | Decided in [ADR-0007](../adr/0007-polymorphic-signal-model.md#triggers) ([#47](https://github.com/brylie/LoomDSP/issues/47)) |
 | Clock and transport (FR-LIB-16, [clock specification](clock.md)) | Cycles read the bar phase. Their bar phase input follows the transport by default. | [#41](https://github.com/brylie/LoomDSP/issues/41) |
 
 ## Performance note
 
-End → counter → select → play is a cycle in the graph. The compiler inserts a one-sample delay and runs the loop one sample at a time (ADR-0002). The logic modules are cheap, but an Audio Cycle inside such a loop also runs per sample. Measure this with the P3 exit test, and consider giving end outputs a one-block delay if it costs too much.
+End → counter → select → play is a cycle in the graph. The compiler inserts a one-sample delay and runs the loop one sample at a time (ADR-0002). The logic modules are cheap, but an Audio Cycle inside such a loop also runs per sample. Measure this with the M3 exit test, and consider giving end outputs a one-block delay if it costs too much.
 
 ## Open points
 

@@ -48,7 +48,7 @@ An Audio In module that brings sound from an interface into the patch, so LoomDS
 
 ### Clock drift between two devices
 
-Two different devices run on two crystals, so their clocks drift by a few parts per million. P1 handles it without resampling:
+Two different devices run on two crystals, so their clocks drift by a few parts per million. M1 handles it without resampling:
 
 - **Underrun** (the ring has too few frames for the block): the block is zero, reading pauses until the ring is back at the target fill (one buffer), and `input_underruns` goes up by 1.
 - **Overrun** (the ring is more than 2 buffers full): the oldest frames are dropped down to the target, and `input_overruns` goes up by 1.

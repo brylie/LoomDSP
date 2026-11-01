@@ -3,7 +3,7 @@
 How a player collapses part of a patch into one module with its own ports and panel, opens it to edit, saves it to a library, and builds abstractions with swappable slots and modes.
 
 - **Kind:** living specification.
-- **Status:** Agreed, P2. The choices marked "Settled" were made with the maintainer on 2026-11-01. Nothing is built yet.
+- **Status:** Agreed, M2. The choices marked "Settled" were made with the maintainer on 2026-11-01. Nothing is built yet.
 - **Decision behind it:** [ADR-0031](../adr/0031-sub-patches-stored-as-definitions-and-flattened.md) (definitions, flattening, library items as patch files). [ADR-0017](../adr/0017-primitives-traits-and-abstractions.md) for roles and slots. [ADR-0013](../adr/0013-modules-carry-their-own-panel.md) and [ADR-0025](../adr/0025-one-design-language-and-derived-panels.md) for the sub-patch's panel.
 - **Use case and requirements:** FR-ENCAP-01 to FR-ENCAP-10, FR-SDK-08, FR-PANEL-10, FR-PANEL-11, FR-LIB-24, FR-MOD-06. Settles OQ-20 and OQ-21.
 - **Builds on:** [Panels: exposed controls in a sub-patch](panels.md#exposed-controls-in-a-sub-patch) (what the surface shows), [Module data](module-data.md) (data in slots and copies), [Undo](undo.md), [Copy, paste, and duplicate](clipboard.md), [Changing a running patch](live-patching.md).
@@ -248,7 +248,7 @@ Roles, slots, and modes:
 - Embedding a sub-patch's panel inside its parent's panel (FR-PANEL-08). After the panel editor.
 - Watching library files while a patch is open.
 - Converting data between parts on a swap (OQ-21).
-- Sharing the library online (P4, FR-SHARE).
+- Sharing the library online (M4, FR-SHARE).
 
 ## Open points
 

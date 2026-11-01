@@ -3,7 +3,7 @@
 What carries over when the player edits a patch while it plays, so a new cable joins the running sound with no cold start, click, or gap.
 
 - **Kind:** living specification.
-- **Status:** Rules 1 to 5, 7 ([#230](https://github.com/brylie/LoomDSP/issues/230)), and 8 Implemented. Rule 6 Agreed, from the research in [#203](https://github.com/brylie/LoomDSP/issues/203), and built with stereo copies (#23). Rules 9 ([#21](https://github.com/brylie/LoomDSP/issues/21)) and 10 ([#416](https://github.com/brylie/LoomDSP/issues/416)) Agreed, P2 (2026-11-01).
+- **Status:** Rules 1 to 5, 7 ([#230](https://github.com/brylie/LoomDSP/issues/230)), and 8 Implemented. Rule 6 Agreed, from the research in [#203](https://github.com/brylie/LoomDSP/issues/203), and built with stereo copies (#23). Rules 9 ([#21](https://github.com/brylie/LoomDSP/issues/21)) and 10 ([#416](https://github.com/brylie/LoomDSP/issues/416)) Agreed, M2 (2026-11-01).
 - **Decision behind it:** [ADR-0002](../adr/0002-graph-execution-and-feedback.md) (schedules and inserted delays), [ADR-0022](../adr/0022-copies-take-state-from-the-running-instance.md) (state of channel copies).
 - **Use case and requirements:** FR-GRAPH-01, FR-GRAPH-02, FR-GRAPH-03, FR-GRAPH-05, FR-GRAPH-09, FR-SIG-07, NFR-RT-01, NFR-RT-05, NFR-SND-02
 - **Background:** [Hot patching](../learn/hot-patching.md): why a new path clicks, and why a crossfade does not fix it. See also [Feedback loops and the unit delay](../learn/feedback-loops.md).

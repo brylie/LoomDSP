@@ -37,7 +37,7 @@ fn renders_are_bit_identical_across_runs() {
 
 #[test]
 fn output_does_not_depend_on_host_buffer_size() {
-    // FR-GRAPH-04 and the P1 exit criterion: feedback sounds the same at
+    // FR-GRAPH-04 and the M1 exit criterion: feedback sounds the same at
     // buffer sizes 32 and 1024.
     for patch in [
         "subtractive.ron",

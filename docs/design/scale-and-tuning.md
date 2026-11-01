@@ -3,7 +3,7 @@
 How a patch holds one tuning and a set of scales, how pitch modules follow them without cables, and how the patch changes key by itself.
 
 - **Kind:** living specification.
-- **Status:** Agreed, P2 (2026-11-01). The choices marked "Settled" were made with the maintainer. Nothing is built yet.
+- **Status:** Agreed, M2 (2026-11-01). The choices marked "Settled" were made with the maintainer. Nothing is built yet.
 - **Decision behind it:** [ADR-0033](../adr/0033-one-scale-and-tuning-per-patch.md) (one scale and tuning per patch). Settles OQ-22.
 - **Use case and requirements:** FR-LIB-29, FR-SIG-05, FR-LIB-19. Trait TR-08 (scale awareness).
 - **Builds on:** [Module data](module-data.md) (the scales are a pattern slot), [Panel widgets: step grid](panel-widgets.md#step-grid) (the keys layout), [Clock and transport](clock.md) (the same pattern of patch-wide state).
@@ -53,7 +53,7 @@ How a patch holds one tuning and a set of scales, how pitch modules follow them 
 **Settled:** one tuning and up to eight scales.
 
 - A new module has scale 1 = every class in (chromatic), root 0.
-- **Step:** each `next` trigger moves to the next scale, wrapping after `scales`. **Select:** the active scale is `floor(select × scales)`, clamped. Mode is a setting, not chosen by a cable ([P1 modules](p1-modules.md#sample-and-hold-loomrandsample-hold)).
+- **Step:** each `next` trigger moves to the next scale, wrapping after `scales`. **Select:** the active scale is `floor(select × scales)`, clamped. Mode is a setting, not chosen by a cable ([M1 modules](p1-modules.md#sample-and-hold-loomrandsample-hold)).
 - `reset` goes back to scale 1.
 - **A change applies on the trigger's sample.** *Why:* the patch chooses the moment. A bar trigger from the Transport changes key on the bar; a Chance in front makes it "sometimes".
 - Changing the tuning or editing a scale is an edit, applied at a buffer boundary and covered by undo, like any module data.

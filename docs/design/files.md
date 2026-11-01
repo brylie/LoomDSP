@@ -82,7 +82,7 @@ If loading fails, the old patch stays running and untouched. The new engine is b
 ### Defaults for the dialogs
 
 - **Extension:** `.ron`. Save As adds it if the user omits it. The filter shows `.ron` files.
-- **Starting folder:** the folder of the current file; otherwise the user's Documents folder. The app does not remember a folder across runs in this version. From P2, the fallback is the library folder instead ([your patches browser](patch-metadata.md#your-patches-browser)).
+- **Starting folder:** the folder of the current file; otherwise the user's Documents folder. The app does not remember a folder across runs in this version. From M2, the fallback is the library folder instead ([your patches browser](patch-metadata.md#your-patches-browser)).
 - Save As to an existing file uses the dialog's own overwrite confirmation.
 - Save writes the patch where it was opened, except for examples (next).
 - **Examples open as copies** ([#182](https://github.com/brylie/LoomDSP/issues/182)). A file inside the app's **bundled examples folder** opens as an untitled patch with that content, named "<name> (example)" in the title. The app uses `examples/patches` beside the release executable (or beside `LoomDSP.app` on macOS) when that folder contains patches. Otherwise it uses the checkout's `examples/patches`. The release package puts a `.loomdsp-bundled-examples` marker in its patch folder. This identifies examples opened from the download folder even when macOS runs the app from a translocated copy. A file anywhere else is the player's own, even in a folder called `examples`, and Save writes it as usual. The app finds the folder once at start, and tests give it a temporary one. The copy is clean until edited. Save asks for a place, as Save As does, starting in the Documents folder. This applies to File > Open, a path given on the command line, and the control channel's `open`. *Why:* examples are templates. Saving over one rewrites the file as canonical RON, which drops its comments (`Patch::to_ron` does not keep them) and leaves a diff in the repository. Matching the bundled folder, and not any folder name, keeps a player's own `~/Music/examples/set.ron` working with plain Save. Keeping comments would need a comment-preserving RON editor, which is out of scope. To change an example on purpose, use Save As and choose the same path. The `<name>.saved.ron` behaviour went away earlier.
@@ -126,7 +126,7 @@ A failed save keeps the unsaved mark. A save writes to a temporary file in the s
 
 ## Recent files, the last folder, and dropping a file
 
-**Status:** Agreed, P2 ([#184](https://github.com/brylie/LoomDSP/issues/184), 2026-11-01).
+**Status:** Agreed, M2 ([#184](https://github.com/brylie/LoomDSP/issues/184), 2026-11-01).
 
 - **File > Open Recent** lists the last 10 patches opened or saved, newest first, by file name with the folder as hover text. Choosing one opens it, asking first about unsaved changes, as Open does. A missing file is shown dimmed; choosing it removes it from the list, with a status message. Examples opened as copies are not listed.
 - **The last folder.** Open and Save dialogs start in the current file's folder; otherwise in the last folder used in a dialog; otherwise in the library folder ([your patches browser](patch-metadata.md#your-patches-browser)).

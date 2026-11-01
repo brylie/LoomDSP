@@ -138,7 +138,7 @@ Ignoring the filter, a string tuned to A3 ($f_0 = 220\text{ Hz}$) at $f_s = 48\,
 
 3. **With a stereo input, the engine runs two copies (`PerChannel`), while `time` is downmixed (`Downmix`).** *Why:* stereo audio needs independent left and right delay buffers (`~768 KB` total for a stereo 2 s delay line at 48 kHz), while a single delay time keeps both channels at the same delay unless the user splits them on purpose ([stereo spec](stereo.md)).
 
-4. **Catmull-Rom 4-point cubic interpolation, always on in P1.** *Why:* linear interpolation attenuates high frequencies whenever the delay sits between samples, which makes treble flutter during chorus sweeps and turns feedback loops dull (Laakso et al., 1996). Catmull-Rom (cubic Hermite) has continuous tangents ($C^1$) across sample boundaries, so sweeps stay smooth. A `Quality` selector (`TR-06`) waits until a library-wide pattern is chosen for all modules with `TR-06`.
+4. **Catmull-Rom 4-point cubic interpolation, always on in M1.** *Why:* linear interpolation attenuates high frequencies whenever the delay sits between samples, which makes treble flutter during chorus sweeps and turns feedback loops dull (Laakso et al., 1996). Catmull-Rom (cubic Hermite) has continuous tangents ($C^1$) across sample boundaries, so sweeps stay smooth. A `Quality` selector (`TR-06`) waits until a library-wide pattern is chosen for all modules with `TR-06`.
 
 5. **Read position, clamping, and splitting into $k$ and $t$ use `f64`; sample storage and interpolation math use `f32`.** *Why:* at `2.0 s` and `192 kHz`, the buffer index reaches `384,000`, where `f32` has a step size of `1/32` of a sample (`0.03125`). Computing the delay in `f64` keeps fractional steps smooth at every delay length and sample rate, while keeping the buffer in `f32` halves memory bandwidth.
 
@@ -146,7 +146,7 @@ Ignoring the filter, a string tuned to A3 ($f_0 = 220\text{ Hz}$) at $f_s = 48\,
 
 7. **Both modules are ordinary `ModuleRole::Dsp` modules.** External feedback loops made with cables must still pass through `loom.time.delay1` (placed by the user or inserted by the compiler), which adds 1 sample to the loop period. The all-pass's internal feedback stays inside the module and does not form a graph cycle. *Why:* only a fixed 1-sample tap managed by the engine can break a cycle without making the schedule depend on block size or parameter values (ADR-0002, hard rule 2).
 
-8. **Turning the `time` knob glides the read head over 10 ms and bends pitch.** *Why:* sweeping the read position changes the rate at which stored samples are read, just like changing tape speed. Choice of time-change behaviour (pitch glide, crossfade, or jump) belongs to the P2 finished delay (`MT-DELAY-04`).
+8. **Turning the `time` knob glides the read head over 10 ms and bends pitch.** *Why:* sweeping the read position changes the rate at which stored samples are read, just like changing tape speed. Choice of time-change behaviour (pitch glide, crossfade, or jump) belongs to the M2 finished delay (`MT-DELAY-04`).
 
 9. **With `gain = 0`, `loom.time.allpass` is a plain delay and is bit-identical to `loom.time.delay` for the same delay in samples ($d \ge 2$).** Denormals in the all-pass are flushed to `0.0` only on the feedback product $g \cdot r[n]$ when $|g \cdot r[n]| < 10^{-20}$ (matching `safety.rs`). *Why:* flushing $w[n]$ itself would zero out quiet input samples even when $g = 0$. Flushing only $g \cdot r[n]$ stops idle reverb tails from decaying into denormals while leaving $g = 0$ exact. (Because the two `time` knobs have different maximums, setting the same number of seconds on both knobs can round by 1 ULP in normalised position; the bit-identical guarantee is for the same delay $d$ in samples.)
 
@@ -170,10 +170,10 @@ Ignoring the filter, a string tuned to A3 ($f_0 = 220\text{ Hz}$) at $f_s = 48\,
 
 ## Out of scope
 
-- **A frequency-based all-pass filter (`MT-FILTER-12`)** tuned by pitch for building phasers (`MT-FX-02`). Added to the module catalogue as a separate P2 entry.
+- **A frequency-based all-pass filter (`MT-FILTER-12`)** tuned by pitch for building phasers (`MT-FX-02`). Added to the module catalogue as a separate M2 entry.
 - **A `Quality` selector parameter (`TR-06`).** Waits for a library-wide design for the `Quality` trait across oscillators, delays, and samplers.
 - **A pitch input (`SignalType::Pitch`) for tuned delay lines.** Planned for string models and comb filters (`MT-FILTER-05`, `MT-SRC-10`).
-- **Multi-tap, feedback, filtering, ping-pong, tempo sync, and time-change modes (`MT-DELAY-04`).** Planned for P2.
+- **Multi-tap, feedback, filtering, ping-pong, tempo sync, and time-change modes (`MT-DELAY-04`).** Planned for M2.
 - **Patch-wide memory limits (`NFR-SEC-02`).** A per-module cap does not stop a patch from adding many delays; a patch-level memory budget belongs in its own specification and issue.
 - **`Module::copy_state_from` (`ADR-0022`, [#229](https://github.com/brylie/LoomDSP/issues/229)).** Tracked in #229 and #23 alongside stereo copies.
 

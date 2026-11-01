@@ -4,29 +4,31 @@ The roadmap is split into phases. Each phase ends with something usable and has 
 
 ## Overview
 
+Phases are numbered M0 to M4, to match the GitHub milestones. P0 to P2 are issue priorities, so they are kept for that. Accepted ADRs, research snapshots, and benchmark reports are frozen records, so they still say P0 to P4 for the same phases.
+
 | Phase | Name | Main outcome |
 |---|---|---|
-| P0 | Engine foundations | Headless engine that plays a patch file with live MIDI |
-| P1 | Desktop patcher and live basics | Build and play a synth from primitives, with MIDI controllers |
-| P2 | Encapsulation, panels, performance | Sub-patches, front panels, polyphony, performance mode, set lists |
-| P3 | Living systems | Loopers, groups and next actions, counters and logic, scenes, sequencers, note effects |
-| P4 | Sharing and ecosystem | Self-contained shareable patches, patch library, module SDK, community modules |
-| Later | Not scheduled | Plugin and standalone export (CLAP, VST3), web target. Revisit after P3. |
+| M0 | Engine foundations | Headless engine that plays a patch file with live MIDI |
+| M1 | Desktop patcher and live basics | Build and play a synth from primitives, with MIDI controllers |
+| M2 | Encapsulation, panels, performance | Sub-patches, front panels, polyphony, performance mode, set lists |
+| M3 | Living systems | Loopers, groups and next actions, counters and logic, scenes, sequencers, note effects |
+| M4 | Sharing and ecosystem | Self-contained shareable patches, patch library, module SDK, community modules |
+| Later | Not scheduled | Plugin and standalone export (CLAP, VST3), web target. Revisit after M3. |
 
 Why this order:
 
 1. The engine and its real-time rules are the hardest part to change later, so they come first.
-2. Live performance is the main purpose of the app. MIDI controller support starts in P1, not after export.
-3. Living systems (P3) are what LoomDSP is for: patches that play, evolve, and arrange themselves on stage.
-4. Sharing comes next (P4), following VCV Rack: people swap patches and modules, and the ecosystem grows around the core.
-5. **Scope is kept tight on purpose.** Generative live performance and plugin export pull in different directions: plugins bring host integration, parameter automation, many formats, and per-platform builds and signing. Doing both at once risks doing neither well. So plugin and standalone export, and the web target, are deferred ("Later"). We decide after P3 whether to take them on.
+2. Live performance is the main purpose of the app. MIDI controller support starts in M1, not after export.
+3. Living systems (M3) are what LoomDSP is for: patches that play, evolve, and arrange themselves on stage.
+4. Sharing comes next (M4), following VCV Rack: people swap patches and modules, and the ecosystem grows around the core.
+5. **Scope is kept tight on purpose.** Generative live performance and plugin export pull in different directions: plugins bring host integration, parameter automation, many formats, and per-platform builds and signing. Doing both at once risks doing neither well. So plugin and standalone export, and the web target, are deferred ("Later"). We decide after M3 whether to take them on.
 6. The engine core stays portable and WASM-compatible (NFR-PORT-01, NFR-PORT-02), and ADR-0004 records how export would work, so the option stays open at low cost.
 
-**Module types per phase.** The [module catalogue](module-catalogue.md) gives every planned module type a stable ID (such as `MT-FILTER-02`) and a phase. Each phase below builds the catalogue entries marked with that phase. A type's phase follows the use case it unblocks: the subtractive synth in P1, panels and live play in P2, self-arranging sets in P3, and the rest in P4.
+**Module types per phase.** The [module catalogue](module-catalogue.md) gives every planned module type a stable ID (such as `MT-FILTER-02`) and a phase. Each phase below builds the catalogue entries marked with that phase. A type's phase follows the use case it unblocks: the subtractive synth in M1, panels and live play in M2, self-arranging sets in M3, and the rest in M4.
 
 ---
 
-## P0. Engine foundations
+## M0. Engine foundations
 
 **Goal:** prove the core architecture with no UI.
 
@@ -41,7 +43,7 @@ Scope:
 - Offline renderer (FR-GRAPH-06).
 - CLI: `loom play patch.ron`, `loom render patch.ron out.wav`.
 - CI: tests, `assert_no_alloc`, WASM build check, `cargo-deny` licence check.
-- UI spike (OQ-02): Iced with `iced_nodegraph`, 100 nodes, cables, pan and zoom, a live scope. (Done without the scope, which needs the P1 telemetry path.)
+- UI spike (OQ-02): Iced with `iced_nodegraph`, 100 nodes, cables, pan and zoom, a live scope. (Done without the scope, which needs the M1 telemetry path.)
 - Repository basics: `CONTRIBUTING.md`, AI contribution policy, agent context file, issue templates.
 
 Exit criteria:
@@ -52,7 +54,7 @@ Exit criteria:
 - [x] UI spike results recorded. ADR-0009 decided: Iced accepted for the app; both node-editor crates rejected for the canvas, which becomes our own widget (ADR-0010).
 - [x] NFR *(proposal)* numbers reviewed against real benchmarks. Engine numbers are well inside NFR-PERF-01. NFR-PERF-04 restated for the reference laptop (Retina display, full window).
 
-## P1. Desktop patcher and live basics
+## M1. Desktop patcher and live basics
 
 **Goal:** a musician can build a synth from primitives and play it with a MIDI controller.
 
@@ -71,23 +73,23 @@ Scope:
 - MIDI learn, panic, CPU meter (FR-MIDI-02, FR-PERF-04, 05).
 
 Progress:
-Issues for this phase are in the [P1 milestone](https://github.com/brylie/LoomDSP/milestone/1).
+Issues for this phase are in the [M1 milestone](https://github.com/brylie/LoomDSP/milestone/1).
 
 - [x] Canvas prototype: `loom-canvas` and `loom-app`, with tiles, typed ports, cables, level of detail, inspector, live audio, every MIDI input connected, and a stats bar. 120 fps (the display maximum) with 300 modules and the camera moving on the reference laptop ([p1-canvas.md](../benchmarks/p1-canvas.md)). The zoomed-in and idle measurements are still open ([#4](https://github.com/brylie/LoomDSP/issues/4)).
 - [x] Engine-to-UI telemetry ([#6](https://github.com/brylie/LoomDSP/issues/6)).
 - [ ] Module panels on tiles and the scope module (ADR-0013) ([#6](https://github.com/brylie/LoomDSP/issues/6) to [#10](https://github.com/brylie/LoomDSP/issues/10)).
 - [ ] Module browser, undo/redo, copy and paste, open and save ([#11](https://github.com/brylie/LoomDSP/issues/11) to [#15](https://github.com/brylie/LoomDSP/issues/15)).
 - [ ] Modulation on parameters, MIDI learn, panic, device selection and hot-plugging ([#19](https://github.com/brylie/LoomDSP/issues/19) to [#29](https://github.com/brylie/LoomDSP/issues/29)).
-- [ ] Phase 1 module library, test harness, and help pages ([#30](https://github.com/brylie/LoomDSP/issues/30) to [#44](https://github.com/brylie/LoomDSP/issues/44)). The tutorial moved to P2 ([#45](https://github.com/brylie/LoomDSP/issues/45)).
+- [ ] Phase 1 module library, test harness, and help pages ([#30](https://github.com/brylie/LoomDSP/issues/30) to [#44](https://github.com/brylie/LoomDSP/issues/44)). The tutorial moved to M2 ([#45](https://github.com/brylie/LoomDSP/issues/45)).
 
 Exit criteria:
-- [ ] A subtractive synth can be built from primitives in the app, with the module browser, inspector, and cables, and played from MIDI. (The written tutorial, tested with newcomers, is a P2 exit criterion: it is written once the foundation has settled, so it is written once.)
+- [ ] A subtractive synth can be built from primitives in the app, with the module browser, inspector, and cables, and played from MIDI. (The written tutorial, tested with newcomers, is a M2 exit criterion: it is written once the foundation has settled, so it is written once.)
 - [ ] Play that synth with a MIDI keyboard and map 4 knobs with MIDI learn.
-- [x] An FM feedback patch sounds the same at buffer sizes 32 and 1024. (Already true in the P0 engine; covered by tests.)
+- [x] An FM feedback patch sounds the same at buffer sizes 32 and 1024. (Already true in the M0 engine; covered by tests.)
 - [ ] Unplugging and replugging the MIDI controller during playback works without a restart.
 - [ ] Canvas holds 60 fps at full window size on the reference laptop, with 100 modules visible and 300 in the patch, including 4 live scopes (NFR-PERF-04).
 
-## P2. Encapsulation, panels, performance
+## M2. Encapsulation, panels, performance
 
 **Goal:** complex instruments stay manageable and are ready for the stage.
 
@@ -101,9 +103,9 @@ Scope:
 - Modulators as modules (FR-LIB-12), including drawn modulation curves.
 - Module data beyond parameters, for patterns and samples (FR-LIB-19, OQ-17).
 - Cable styles for stereo, polyphony, and inserted delays (FR-CANVAS-12).
-- Design spike: how notes travel on cables (OQ-16), so P3 can build note effects on a settled model.
+- Design spike: how notes travel on cables (OQ-16), so M3 can build note effects on a settled model.
 - Roles, slots, and traits (ADR-0017): a specification first, then slots in abstractions, sub-patch modes, role-bound panel widgets, and traits in the SDK (FR-ENCAP-08 to 10, FR-PANEL-11, FR-SDK-07, 08). Patch-wide scale and tuning (FR-LIB-29).
-- The catalogue's P2 module types, including the first abstractions: a synth voice and an effect chain with swappable slots.
+- The catalogue's M2 module types, including the first abstractions: a synth voice and an effect chain with swappable slots.
 - Patch authors, tags, and licence, and a browser for the user's own patches that filters by them (FR-FILE-08 to 10, FR-SHARE-06, ADR-0023, [specification](../design/patch-metadata.md)).
 
 Exit criteria:
@@ -113,28 +115,28 @@ Exit criteria:
 - [ ] Tutorial: build a subtractive synth from primitives in under 20 minutes (tested with 3 people who did not write the tutorial) ([#45](https://github.com/brylie/LoomDSP/issues/45)). Written last in this phase, when sub-patches, polyphony, and panels have settled.
 - [ ] First real live performance with LoomDSP.
 
-## P3. Living systems
+## M3. Living systems
 
 **Goal:** patches that play, evolve, and arrange themselves. Arrangement happens inside the grid, through loopers, groups, logic, and scenes, not on a timeline (ADR-0011).
 
 Scope:
 - Arrangement from phase-driven primitives (ADR-0012, [specification](../design/arrangement.md)):
   - Note and audio cycles that read the clock's bar phase and output an end trigger (FR-LIB-20).
-  - Counter (with phase output) and Step Select (FR-LIB-22), with Clock Divide from P1 (FR-LIB-27). These small logic modules can be built as early as P1.
+  - Counter (with phase output) and Step Select (FR-LIB-22), with Clock Divide from M1 (FR-LIB-27). These small logic modules can be built as early as M1.
   - Built-in abstractions made from them: Looper Group, Part, Song Sequencer (FR-LIB-21, FR-LIB-24).
 - Scenes: snapshots of module states, switched by triggers, with morph time (FR-LIB-23).
 - Sequencers, including polymetric multi-output step sequencers (FR-LIB-14).
 - Note effects, on the model chosen in OQ-16 (FR-LIB-13).
-- Modulation curves over bars and sections (FR-LIB-16), on the P1 transport and clock modules.
+- Modulation curves over bars and sections (FR-LIB-16), on the M1 transport and clock modules.
 - Record the live output to an audio file while performing (FR-SHARE-03).
-- Seeded melody and rhythm generators (FR-LIB-28), and the rest of the catalogue's P3 module types.
+- Seeded melody and rhythm generators (FR-LIB-28), and the rest of the catalogue's M3 module types.
 
 Exit criteria:
 - [ ] A patch plays group A round robin, each loop twice; after two rounds it plays group B the same way, then returns to A, with no manual action (the [worked example](../design/arrangement.md#worked-example)).
 - [ ] A polymetric step sequencer with lanes of different lengths drives notes and modulation in the same patch.
 - [ ] A 30-minute self-arranging set runs live with zero dropouts.
 
-## P4. Sharing and ecosystem
+## M4. Sharing and ecosystem
 
 **Goal:** people share living systems and extend LoomDSP, as with VCV Rack.
 
@@ -153,7 +155,7 @@ Scope:
 
 ## Later (not scheduled)
 
-These are part of the long-term vision but not on the roadmap. Revisit after P3, when living systems are proven.
+These are part of the long-term vision but not on the roadmap. Revisit after M3, when living systems are proven.
 
 ### Plugin and standalone export
 
@@ -191,7 +193,7 @@ Scope if yes: browser app and open-from-URL (FR-APP-02, 05), WAM2 export (FR-WAM
 
 How we keep the work visible and open to contributors:
 
-- **GitHub Project board** with one milestone per phase (P0 to P4), plus a "Later" milestone for deferred work.
+- **GitHub Project board** with one milestone per phase (M0 to M4), plus a "Later" milestone for deferred work.
 - **Issues reference requirement IDs** (for example "Implements FR-MIDI-02"). This links code to the reason it exists.
 - **Labels:**
   - Type: `bug`, `feature`, `docs`, `research`, `adr`.

@@ -3,7 +3,7 @@
 How a performer links a hardware knob or fader to any parameter in a few seconds, and how those links are saved, shown, and removed.
 
 - **Kind:** living specification.
-- **Status:** Agreed. [Device mappings](#device-mappings-fr-midi-06) Agreed, P2 (2026-11-01, [#166](https://github.com/brylie/LoomDSP/issues/166)); not built. [Mapping modes](#mapping-modes-fr-midi-09) Agreed, P2 (2026-11-01, [#165](https://github.com/brylie/LoomDSP/issues/165)); not built.
+- **Status:** Agreed. [Device mappings](#device-mappings-fr-midi-06) Agreed, M2 (2026-11-01, [#166](https://github.com/brylie/LoomDSP/issues/166)); not built. [Mapping modes](#mapping-modes-fr-midi-09) Agreed, M2 (2026-11-01, [#165](https://github.com/brylie/LoomDSP/issues/165)); not built.
 - **Decision behind it:** none of its own. Builds on [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md) (control and audio threads), [ADR-0004](../adr/0004-export-as-runtime-plus-patch-data.md) (export as runtime plus patch data), [ADR-0008](../adr/0008-patch-format-ron.md) (patch format), and [ADR-0013](../adr/0013-modules-carry-their-own-panel.md) (the inspector shows and removes mappings; learn mode extends the gesture to tile controls).
 - **Use case and requirements:** [UC3, perform live](../product/personas-and-use-cases.md#uc3-perform-live-tomas-highest-priority-use-case), FR-MIDI-02. FR-MIDI-06 (per-device mappings, [own section](#device-mappings-fr-midi-06)). FR-MIDI-09 (pickup, relative encoders, scaling, [own section](#mapping-modes-fr-midi-09)).
 - **Background:** [parameter mapping](modulation.md#parameter-mapping) (value to position and back).
@@ -43,10 +43,10 @@ The user touches the control on screen, then moves the hardware control. Learn m
 
 - **Touch first, then the hardware.** *Why:* the user points at what they want to control and then shows which hardware control does it. This is direct manipulation, and it is the order the user thinks in. Learning from a list in the inspector alone is harder to follow.
 - **In learn mode, nothing on screen changes a value.** Not a click, a drag, or a key. Only the hardware control that makes or uses a mapping does. *Why:* the mode exists so that touching a control on screen is safe.
-- **Learn mode stays on after a mapping.** *Why:* the common task is to map several knobs in a row (the P1 goal maps four). Leaving the mode after each one would add a click per knob.
+- **Learn mode stays on after a mapping.** *Why:* the common task is to map several knobs in a row (the M1 goal maps four). Leaving the mode after each one would add a click per knob.
 - **Outside learn mode, touching a control only changes its value,** as today. *Why:* moving a hardware control after touching a screen knob is normal in play. It must never remap anything by accident.
 - **Only one parameter is armed at a time.** *Why:* the next control change must have exactly one target, so the result is never a surprise.
-- **One hardware control drives one parameter, and a parameter has one hardware control.** Learning a parameter that already has a mapping replaces it. Learning a hardware control that already has a mapping moves it to the new parameter, and the status bar names the parameter it left. *Why:* this is the least confusing rule. What a hardware knob does is always one thing, and the label on screen tells the whole story. Two hardware controls on one parameter would fight and make the value jump. One knob that drives many parameters is a job for the Macro module (MT-UI-02, P2): map the hardware to the macro, and the macro drives many parameters through modulation, where depth and the modulation views show the fan-out.
+- **One hardware control drives one parameter, and a parameter has one hardware control.** Learning a parameter that already has a mapping replaces it. Learning a hardware control that already has a mapping moves it to the new parameter, and the status bar names the parameter it left. *Why:* this is the least confusing rule. What a hardware knob does is always one thing, and the label on screen tells the whole story. Two hardware controls on one parameter would fight and make the value jump. One knob that drives many parameters is a job for the Macro module (MT-UI-02, M2): map the hardware to the macro, and the macro drives many parameters through modulation, where depth and the modulation views show the fan-out.
 - **The control change that makes a mapping also sets the value.** *Why:* the user sees and hears at once that the link works.
 
 ### Playing
@@ -54,13 +54,13 @@ The user touches the control on screen, then moves the hardware control. Learn m
 - A mapped control change sets the parameter's **base value**, the same value the knob on the tile sets. Modulation still adds on top of it ([modulation](modulation.md), rule 2).
 - The value 0 to 127 becomes a position from 0 to 1 (`value / 127`), and then a value with `ParamSpec::denormalize`. So 0 is the minimum, 127 is the maximum, and a logarithmic parameter feels the same on hardware as on screen. Whole-number parameters round, as `denormalize` already does.
 - The tile knob and the inspector follow the hardware, so the screen always shows the value that plays.
-- Moving the knob on screen still works. The last change wins, from either side. A mapped parameter can jump when the hardware control moves after a screen change. Pickup modes that prevent the jump are FR-MIDI-09, P2.
+- Moving the knob on screen still works. The last change wins, from either side. A mapped parameter can jump when the hardware control moves after a screen change. Pickup modes that prevent the jump are FR-MIDI-09, M2.
 - A parameter with smoothing (`smooth_seconds`) glides to the new value as it does for a screen knob. *Why:* a 7-bit control change moves in steps of about 0.8 %. Without smoothing, a step on a cutoff or a level can be heard as a click.
 
 ### Seeing and removing mappings
 
 - The inspector shows a parameter's mapping on its row as `CC <number> · ch <channel>`, with channels counted from 1 as on hardware. A small **×** button next to it deletes the mapping ([removing an item](panels.md#removing-an-item)). This works in and out of learn mode.
-- In learn mode, the labels on the tiles show every mapping in view at a glance. *Why:* with one parameter per hardware control, the labels are a full picture of the mappings. A separate mapping list is not needed in P1.
+- In learn mode, the labels on the tiles show every mapping in view at a glance. *Why:* with one parameter per hardware control, the labels are a full picture of the mappings. A separate mapping list is not needed in M1.
 - Deleting a module deletes its mappings.
 
 ## Rules
@@ -111,7 +111,7 @@ midi: [
 
 ## Device mappings (FR-MIDI-06)
 
-**Status:** Agreed, P2 ([#166](https://github.com/brylie/LoomDSP/issues/166)). The choices marked "Settled" were made with the maintainer on 2026-11-01. Depends on the [front panel](panels.md#the-panel-editor) and on MIDI hot-plugging ([device changes](device-changes.md), built).
+**Status:** Agreed, M2 ([#166](https://github.com/brylie/LoomDSP/issues/166)). The choices marked "Settled" were made with the maintainer on 2026-11-01. Depends on the [front panel](panels.md#the-panel-editor) and on MIDI hot-plugging ([device changes](device-changes.md), built).
 
 > I set up my 8-knob controller once: knob 1 is slot 1, knob 2 is slot 2, and so on. Every patch I open, the knobs move the first eight controls on its front panel. On one patch I want knob 3 on the filter drive, so I pin Drive to slot 3 in the panel editor.
 
@@ -195,7 +195,7 @@ Controller(
 
 ### Mapping modes (FR-MIDI-09)
 
-**Status:** Agreed, P2 ([#165](https://github.com/brylie/LoomDSP/issues/165), 2026-11-01).
+**Status:** Agreed, M2 ([#165](https://github.com/brylie/LoomDSP/issues/165), 2026-11-01).
 
 > After loading a patch, my filter knob on the controller is at the top but the cutoff is low. In pickup mode, turning the knob does nothing until it passes the cutoff, then it follows, with no jump. My endless encoder moves the delay time in small steps. A fader covers only the middle of the reverb mix, and another runs backwards.
 
@@ -237,8 +237,8 @@ Controller(
 
 ## Out of scope
 
-- One hardware control driving many parameters. Use the Macro module (MT-UI-02, P2) with modulation.
-- A mapping list or matrix. In P1 the labels in learn mode and the inspector rows are enough, because each hardware control has one parameter.
+- One hardware control driving many parameters. Use the Macro module (MT-UI-02, M2) with modulation.
+- A mapping list or matrix. In M1 the labels in learn mode and the inspector rows are enough, because each hardware control has one parameter.
 - Learning notes, pitch bend, aftertouch, program change, 14-bit control changes, and NRPN. Pitch bend and aftertouch reach a patch through the MIDI input module (#30).
 - Mapping on any channel ("omni").
 - Hardware moves in undo. Mapping edits are undoable ([undo.md](undo.md)); moves of the mapped hardware control are not.

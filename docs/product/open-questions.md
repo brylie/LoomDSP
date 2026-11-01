@@ -14,7 +14,7 @@ Each open item lists the options and a current leaning. Close an item by writing
 | OQ-06 | VST3 licensing | Steinberg released VST 3 SDK 3.8.0 under the MIT licence (October 2025). The `vst3` crate is MIT/Apache-2.0 and now ships generated bindings. The older `vst3-sys` crate is GPLv3 and is excluded. | FR-NATIVE-02, ADR-0006 |
 | OQ-07 | Plugin wrapper framework | No nih-plug (or its fork nice-plug), because of their contribution policies. Use `clack` (MIT/Apache-2.0) for CLAP. Build our own VST3 adapter on the `vst3` crate and publish it as a crate. | FR-NATIVE-01, 02, FR-SDK-06 |
 | OQ-08 | Exported plugin licence | The runtime is Apache-2.0, with its licence and NOTICE included in every export. The patch author chooses the licence for their patch. | FR-NATIVE-09 |
-| OQ-09 | Block vs. per-sample processing | Hybrid: blocks for acyclic parts, per sample inside feedback loops. Validate with benchmarks in P0. | ADR-0002, NFR-PERF-08 |
+| OQ-09 | Block vs. per-sample processing | Hybrid: blocks for acyclic parts, per sample inside feedback loops. Validate with benchmarks in M0. | ADR-0002, NFR-PERF-08 |
 | OQ-10 | Project name | "LoomDSP" appears to be free (informal search). Do a formal trademark check before a 1.0 release. | |
 | OQ-12 | Maturity of `iced_nodegraph` | Not used for the canvas. Findings reported upstream as a courtesy. | ADR-0010 |
 | OQ-19 | What is a trigger? | An output is high for exactly one sample. Inputs count rising edges above 0.5, with no hysteresis, and the first frame counts as following a low one. A fixed 1 ms pulse was rejected, because close triggers would merge. | FR-SIG-06, ADR-0007 |
@@ -50,7 +50,7 @@ Each open item lists the options and a current leaning. Close an item by writing
 
 - Loopers record audio and MIDI (FR-LIB-20). Recording on the audio thread must not allocate or touch the disk.
 - **Leaning:** record into memory allocated when the looper is created or resized (on the control thread), with a maximum loop length per looper. Saving loops to disk, and loading them, happens on a control thread. Long-form recording to disk is out of scope for now.
-- Decide the maximum lengths and memory budget in P3.
+- Decide the maximum lengths and memory budget in M3.
 
 ### OQ-16. How notes travel on cables
 
@@ -62,7 +62,7 @@ Note effects (arpeggiators, chords, quantise) need notes to move between modules
 | Event cables: a new cable kind carrying sample-timestamped note events | Exact timing, any number of notes, natural for MIDI effects and the timeline. | A second kind of cable. Breaks "every cable is f32" and needs its own scheduling. |
 | Both, with converter modules (events to voices and back) | Each module uses the natural form. | More concepts for users to learn. |
 
-- **Leaning:** both, with event cables shown as their own colour and automatic conversion where an event output meets a signal input. Needs a design spike in P2, before note effects are built in P3.
+- **Leaning:** both, with event cables shown as their own colour and automatic conversion where an event output meets a signal input. Needs a design spike in M2, before note effects are built in M3.
 
 ### OQ-18. How third-party modules are distributed
 
@@ -74,15 +74,15 @@ VCV Rack's ecosystem works because people can install modules without building t
 | Native dynamic libraries (like VCV Rack) | Full speed. Proven model. | Rust has no stable ABI, so modules must match the exact compiler and LoomDSP version. Untrusted native code runs with full access. Builds needed for every platform. |
 | WebAssembly modules, run in a sandbox | Safe (sandboxed), one build for all platforms, any language that compiles to WASM. | Slower than native. Real-time safety of the WASM runtime (no allocation or JIT pauses on the audio thread) must be proven. |
 
-- **Leaning:** compile in for now. Spike WebAssembly modules in P4: measure the cost of a filter and an oscillator as WASM against native, and check the runtime's real-time behaviour. Decide before announcing a module SDK.
+- **Leaning:** compile in for now. Spike WebAssembly modules in M4: measure the cost of a filter and an oscillator as WASM against native, and check the runtime's real-time behaviour. Decide before announcing a module SDK.
 
 ## Risks
 
 | ID | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|---|
 | R-01 | UI work is much larger than DSP work, and the project stalls on the canvas and panel editor. | High | High | Own canvas with a small first version and performance gates (ADR-0010). Ship the headless engine and CLI early so progress stays visible. |
-| R-02 | Per-sample feedback regions are too slow for large patches. | Medium | High | Benchmark in P0 (NFR-PERF-08). Limit per-sample mode to cycle regions only. |
-| R-04 | A dependency's licence blocks permissive plugin export. | Medium | High | `cargo-deny` in CI from P0 with an allow list (ADR-0006). |
+| R-02 | Per-sample feedback regions are too slow for large patches. | Medium | High | Benchmark in M0 (NFR-PERF-08). Limit per-sample mode to cycle regions only. |
+| R-04 | A dependency's licence blocks permissive plugin export. | Medium | High | `cargo-deny` in CI from M0 with an allow list (ADR-0006). |
 | R-05 | Scope creep: features that do not fit the grid (separate DAW views, mixers, track lists). | Medium | Medium | Everything new must be a module (ADR-0011). Non-goals in the vision document. |
 | R-06 | Single maintainer, limited time. | High | High | Small phases with usable results. Public backlog with contributor labels. AI-assisted development. |
 | R-07 | macOS signing and notarisation makes export hard for non-developers. | High | Medium | Document the process. Consider unsigned builds with clear instructions. |
@@ -91,7 +91,7 @@ VCV Rack's ecosystem works because people can install modules without building t
 | R-10 | Strict dependency rules leave a gap with no acceptable crate. | Medium | Medium | Licence rules are strict (Must). AI-policy preference is soft (Should). We can use a permissive crate even if we cannot contribute to it. |
 | R-11 | "Everything is a module" makes the library very large, and the project spreads thin. | High | High | Grow by phase, following the [module catalogue](module-catalogue.md). Prioritise modules for live performance. Build primitives, shared traits, and open abstractions instead of one fixed module per device (ADR-0017). Make the module SDK good enough that the community can add modules. |
 | R-12 | Note handling (OQ-16) is decided late and forces rework in modules already built. | Medium | High | Design spike before the first note effect. Keep MIDI note input behind one module until then. |
-| R-13 | No way to install third-party modules without rebuilding slows the community (OQ-18). | Medium | Medium | Ship a strong built-in library first. Decide OQ-18 early in P4. |
+| R-13 | No way to install third-party modules without rebuilding slows the community (OQ-18). | Medium | Medium | Ship a strong built-in library first. Decide OQ-18 early in M4. |
 
 ## Notes on the background research
 
@@ -100,4 +100,4 @@ The research document was a good starting point. Points that changed during revi
 1. **"Acyclic graph" vs. feedback.** The research describes the graph as a DAG and also promises single-sample feedback. Feedback needs cycles. FR-GRAPH-03 and ADR-0002 resolve this.
 2. **Web Audio block sizes.** The 128-sample AudioWorklet limit only matters for the optional web target. The desktop engine works with any host buffer size.
 3. **Iced vs. Vizia.** We agree with the research's lean toward Iced, for a different reason: `iced_nodegraph` now gives a GPU-rendered node editor for Iced. `iced_audio` (cited in the research) is not needed. We will build our own knobs and sliders.
-4. **Performance figures** in the research come from varied sources. We will replace them with our own benchmarks in P0.
+4. **Performance figures** in the research come from varied sources. We will replace them with our own benchmarks in M0.
