@@ -626,7 +626,8 @@ impl App {
                 self.matrix.reconcile(self.controller.graph());
             }
             Event::AddOpen => {
-                self.matrix.add = Some(Add::default());
+                // Pressing Add again keeps what the open form has picked.
+                self.matrix.add.get_or_insert_with(Add::default);
                 self.matrix.focused = true;
                 self.matrix.cell = Column::Source;
             }
@@ -1345,6 +1346,10 @@ mod tests {
         key(&mut ui, Named::ArrowDown);
         let add = ui.app.matrix.add.as_ref().expect("add picks");
         assert!(add.source.is_some() && add.target.is_some());
+        // Pressing Add again keeps the picks.
+        ui.app.matrix_event(Event::AddOpen);
+        let add = ui.app.matrix.add.as_ref().expect("add picks");
+        assert!(add.source.is_some() && add.target.is_some(), "Add again keeps the form");
         let before_count = ui.app.controller.graph().assignments().count();
         key(&mut ui, Named::Enter);
         assert_eq!(ui.app.controller.graph().assignments().count(), before_count + 1);

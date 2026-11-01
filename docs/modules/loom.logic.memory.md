@@ -2,7 +2,7 @@
 
 <!-- Generated from the module's descriptor by `loom modules --markdown`. Edit the descriptor, not this part. -->
 
-Remembers a gate, in set and reset, toggle, or data (a D latch) mode. Reset wins a tie.
+Remembers a gate, in set and reset, toggle, or data (a D latch) mode. In set and reset or toggle mode, reset wins a tie.
 
 | | |
 |---|---|
@@ -47,7 +47,7 @@ Use Memory to remember a gate until something changes it.
 - **Toggle:** each rising edge on A flips the output, and B turns it off.
 - **Data:** a rising edge on B remembers the level on A.
 
-If both inputs rise at once, reset wins. The output starts low.
+In Set/Reset and Toggle modes, if both inputs rise at once, reset wins. In Data mode, B reads A on that same frame, so a tie stores a high gate. The output starts low.
 
 ## Example patch
 

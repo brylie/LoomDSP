@@ -1969,7 +1969,7 @@ impl<Message> PatchCanvas<'_, Message> {
                     .scene
                     .module(m)
                     .and_then(|module| module.panel.widgets.get(w))
-                    .is_some_and(|widget| widget.is_control())
+                    .is_some_and(|widget| widget.is_control() && !widget.hidden)
         }) {
             state.focus = None;
         }
@@ -2032,14 +2032,11 @@ impl<Message> PatchCanvas<'_, Message> {
                 }
                 let back = modifiers.shift();
                 if let Some((module, widget)) = state.focus {
-                    let controls: Vec<_> = self
+                    let controls = self
                         .scene
                         .module(module)
-                        .into_iter()
-                        .flat_map(|m| m.panel.widgets.iter().enumerate())
-                        .filter(|(_, w)| w.is_control())
-                        .map(|(i, _)| i)
-                        .collect();
+                        .map(|m| focusable(&m.panel))
+                        .unwrap_or_default();
                     let next = controls.iter().position(|&i| i == widget).and_then(|at| {
                         if back {
                             at.checked_sub(1)
@@ -3319,9 +3316,7 @@ fn visible_lights(scene: &Scene, camera: &Camera, size: Size) -> Vec<u32> {
 /// wrapping around. Lights are skipped. `None` if the panel has no
 /// controls.
 fn next_focus(panel: &crate::scene::PanelView, current: Option<usize>, back: bool) -> Option<usize> {
-    let controls: Vec<usize> = (0..panel.widgets.len())
-        .filter(|&i| panel.widgets[i].is_control() && !panel.widgets[i].hidden)
-        .collect();
+    let controls = focusable(panel);
     if controls.is_empty() {
         return None;
     }
@@ -3333,6 +3328,15 @@ fn next_focus(panel: &crate::scene::PanelView, current: Option<usize>, back: boo
         (Some(i), true) => (i + controls.len() - 1) % controls.len(),
     };
     Some(controls[next])
+}
+
+/// The panel's widgets that keyboard focus can land on, in focus order:
+/// its controls, without lights and without controls the mode hides
+/// (ADR-0030). Tab and Enter both walk this list.
+fn focusable(panel: &crate::scene::PanelView) -> Vec<usize> {
+    (0..panel.widgets.len())
+        .filter(|&i| panel.widgets[i].is_control() && !panel.widgets[i].hidden)
+        .collect()
 }
 
 /// A slow figure-eight pan with a zoom swing, around the starting view.
@@ -3421,6 +3425,7 @@ mod tests {
         panel.widgets[2].hidden = true;
         assert_eq!(next_focus(&panel, None, false), Some(0));
         assert_eq!(next_focus(&panel, Some(0), false), Some(0), "only the knob is left");
+        assert_eq!(focusable(&panel), [0], "Tab within a module walks the same list");
     }
 
     #[test]

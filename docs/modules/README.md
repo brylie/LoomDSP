@@ -60,7 +60,7 @@ One page for each built-in module, made from its descriptor. After you change a 
 | [Convert](loom.math.convert.md) | `loom.math.convert` | Converts between decibels and level, and between pitch and frequency in Hz. |
 | [Divide](loom.math.div.md) | `loom.math.div` | Divides signal A by signal B. Outputs 0 while B is near zero. |
 | [Logic](loom.logic.logic.md) | `loom.logic.logic` | Combines up to four gates with And, Or, or Xor; only inputs with a cable count. Invert gives Nand, Nor, Xnor, and Not. |
-| [Memory](loom.logic.memory.md) | `loom.logic.memory` | Remembers a gate, in set and reset, toggle, or data (a D latch) mode. Reset wins a tie. |
+| [Memory](loom.logic.memory.md) | `loom.logic.memory` | Remembers a gate, in set and reset, toggle, or data (a D latch) mode. In set and reset or toggle mode, reset wins a tie. |
 | [Multiply](loom.math.mul.md) | `loom.math.mul` | Multiplies two signals and a gain, for ring modulation. To control loudness, use Amplifier. |
 | [Subtract](loom.math.sub.md) | `loom.math.sub` | Subtracts signal B from signal A. |
 

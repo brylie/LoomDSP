@@ -417,7 +417,7 @@ pub static MEMORY: ModuleDescriptor = ModuleDescriptor {
     name: "Memory",
     category: "Logic",
     family: loom_core::Family::LogicAndMath,
-    description: "Remembers a gate, in set and reset, toggle, or data (a D latch) mode. Reset wins a tie.",
+    description: "Remembers a gate, in set and reset, toggle, or data (a D latch) mode. In set and reset or toggle mode, reset wins a tie.",
     inputs: &[
         PortSpec {
             name: "a",

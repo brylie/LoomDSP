@@ -50,7 +50,7 @@ A slow wave. Free mode runs at a rate in Hz; synced mode follows a phase, by def
 
 Use LFO for slow, repeating movement: vibrato on a pitch, tremolo on a level, or a sweep on a filter cutoff.
 
-In free mode it runs at Rate, in waves per second. In synced mode it follows a phase input, by default the bar phase, so its waves fit the tempo: Cycles sets how many waves fit in one bar. Out +90 is the same wave a quarter cycle ahead.
+In free mode it runs at Rate, in waves per second. In synced mode it follows a phase input, by default the bar phase, so its waves fit the tempo: Cycles sets how many waves fit in one cycle of the phase input. With Phase unconnected that is one bar; with a cable on Phase it is one cycle of that signal. Out +90 is the same wave a quarter cycle ahead.
 
 ## Example patch
 

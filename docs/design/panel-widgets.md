@@ -170,7 +170,7 @@ A whole-number parameter can name its values, such as "6 dB", "12 dB", "18 dB", 
 
 ### Select list
 
-**Status:** Agreed for named whole-number choices on a tile. The first use is Envelope Mode. The closed selector sits in a short settings row above its full-width result view. The list opens at a readable screen size above or below the box, stays inside the canvas, and marks the current choice. Click, keyboard, drag, reset, modulation, and MIDI learn follow the rules below. Long lists with scrolling remain draft; this first slice supports up to 12 choices.
+**Status:** Agreed for named whole-number choices on a tile. It is for choice lists too long or too wordy for a [segmented control](#segmented-control), such as LFO Shape. The closed selector sits in the choices row, under the module's result view when it has one. The list opens at a readable screen size above or below the box, stays inside the canvas, and marks the current choice. Click, keyboard, drag, reset, modulation, and MIDI learn follow the rules below. Long lists with scrolling remain draft; this first slice supports up to 12 choices.
 
 The current choice is shown as text. Clicking it shows the other choices in a list.
 
