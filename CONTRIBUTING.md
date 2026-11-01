@@ -73,6 +73,17 @@ cargo bench -p loom-modules          # optional, takes a few minutes
 
 `mise tasks` lists every check.
 
+### Where tests live
+
+Tests live in their own files, never inline in a code module. Why: a code file then shows only the code, so it is shorter to read and review, and a change to the tests does not show up as a change to the code.
+
+- Unit tests for `foo.rs` go in `foo/tests.rs`, declared at the end of `foo.rs` with `#[cfg(test)] mod tests;`. For `lib.rs`, `main.rs`, or `mod.rs`, the file is `tests.rs` in the same folder.
+- Test fakes and helpers follow the same rule, for example `#[cfg(test)] pub mod fake;` in `devices.rs` with the code in `devices/fake.rs`.
+- A test file can use private items through `use super::*;`, as an inline module can.
+- Integration tests go in the crate's `tests/` folder, as usual.
+
+`mise run test-placement` checks this (`scripts/check-test-placement.sh`). It fails on an inline `#[cfg(test)] mod name { ... }`, and on a `#[test]` in a file that is not a test file. The commit hook and CI run it.
+
 Run the desktop app and the command-line tool:
 
 ```sh
@@ -90,7 +101,7 @@ prek install    # installs the pre-commit and pre-push hooks
 
 | When | Checks |
 |---|---|
-| Every commit (a few seconds) | Whitespace, line endings, TOML/YAML syntax, large files, private keys, `cargo fmt`, `mise run clippy`, `typos` on the changed files, and no direct commits to `main` |
+| Every commit (a few seconds) | Whitespace, line endings, TOML/YAML syntax, large files, private keys, `cargo fmt`, `mise run clippy`, `typos` on the changed files, ADR status lines, tests in their own files, and no direct commits to `main` |
 | Before push | `mise run coverage` (every test, and the coverage minimum), `mise run doctest` (examples in the API docs, which coverage does not run), `mise run docs`, `mise run wasm`, `mise run deny` |
 
 `cargo fmt` and the whitespace hooks fix files for you. When they do, the commit stops: review the changes, stage them, and commit again. Run everything by hand with `prek run --all-files` and `prek run --hook-stage pre-push --all-files`. The configuration is in `prek.toml`.
@@ -113,6 +124,8 @@ Every pull request runs these jobs. All must pass before merging: the main branc
 | Licences | Only permissive licences, no banned crates, only crates.io as a source | `mise run deny-policy` |
 | Security advisories | No dependency has a RustSec advisory. On a pull request, only when it changes `Cargo.toml`, `Cargo.lock`, or `deny.toml`; always on `main` and in the weekly run | `mise run deny-advisories` |
 | Spelling | Typos in code and docs | `mise run typos` |
+| ADR status | Every ADR has one allowed status that matches the index, and none is Proposed | `mise run adr-status` |
+| Test placement | Tests are in their own files, not inline in code modules ([Where tests live](#where-tests-live)) | `mise run test-placement` |
 
 To change a check, change its task in `mise.toml`. The hooks and CI both pick it up.
 

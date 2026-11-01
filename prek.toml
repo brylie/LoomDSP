@@ -122,6 +122,15 @@ entry = "sh scripts/check-adr-status.sh"
 language = "system"
 files = "^docs/adr/[0-9]{4}-.*\\.md$"
 
+[[repos.hooks]]
+id = "test-placement"
+name = "Tests in their own files"
+# Checks every crate, because a moved test file affects its parent.
+entry = "sh scripts/check-test-placement.sh"
+language = "system"
+files = "^crates/.*\\.rs$"
+pass_filenames = false
+
 # ---------------------------------------------------------------------------
 # Slower checks before push.
 # ---------------------------------------------------------------------------
