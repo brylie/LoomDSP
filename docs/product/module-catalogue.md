@@ -45,7 +45,7 @@ Timing is phase-driven: a ramp from 0 to 1 sets where in a cycle a module is ([P
 | MT-PHASE-01 | Phasor | A rising 0 to 1 ramp at a set rate or musical division. | Timebase, Retrigger | P1 | FR-LIB-01 | Built in part (`loom.phase.generator`: rate set by pitch; musical divisions to come) |
 | MT-PHASE-02 | Phase scale | Runs a phase faster or slower by a whole-number ratio, and stays locked to it. | | P1 | FR-LIB-27 | Built (`loom.phase.scale`) |
 | MT-PHASE-03 | Phase trigger | Fires a trigger each time a phase wraps. | | P1 | FR-LIB-27 | Built (`loom.phase.trigger`) |
-| MT-PHASE-04 | Phase reset | Restarts a phase at zero on a trigger. | | P2 | FR-LIB-01 | Planned |
+| MT-PHASE-04 | Phase reset | Restarts a phase at zero on a trigger. | | P2 | FR-LIB-01 | Specified ([P2 modules](../design/p2-modules.md)) |
 | MT-PHASE-05 | Phase warp | Changes how a phase moves within each cycle without changing its period: offset, bend, S-curve, skew, reverse, mirror, and smoothing that keeps the wrap point. | | P2 | FR-LIB-01 | Planned |
 | MT-PHASE-06 | Phase split | Divides one cycle into N parts and outputs a phase for each part. | | P3 | New | Planned |
 | MT-PHASE-08 | Phase wrap and fold | Brings any signal into the 0 to 1 phase range, by wrapping it around or by folding it back at the edges. | | P1 | FR-LIB-01 | Built (`loom.phase.wrap`) |
@@ -160,9 +160,9 @@ All random modules take a seed, so a patch sounds the same each time it loads (N
 
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
-| MT-RAND-01 | Random | A new random value on each trigger, within a range. In walk mode it moves by small steps instead, in one or two dimensions. | Seed, Smoothing | P2 | FR-LIB-12 | Planned |
+| MT-RAND-01 | Random | A new random value on each trigger, within a range. In walk mode it moves by small steps instead, in one or two dimensions. | Seed, Smoothing | P2 | FR-LIB-12 | Specified ([P2 modules](../design/p2-modules.md)) |
 | MT-RAND-02 | Sample and hold | Captures the input on a trigger and holds it, or follows the input while a gate is high. | | P1 | FR-LIB-04 | Built (`loom.rand.sample-hold`) |
-| MT-RAND-03 | Chance | Passes each trigger with a set probability, or sends it to output A or B by chance. Several lanes in one module. | Seed | P2 | FR-LIB-22 | Planned |
+| MT-RAND-03 | Chance | Passes each trigger with a set probability, or sends it to output A or B by chance. Several lanes in one module. | Seed | P2 | FR-LIB-22 | Specified ([P2 modules](../design/p2-modules.md)) |
 
 ## Math and logic
 

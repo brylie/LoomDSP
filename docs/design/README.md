@@ -83,6 +83,7 @@ Copy [template.md](template.md). Keep it to one feature. Link the ADR, requireme
 | [Devices plugged in and out](device-changes.md) | None (builds on [preferences](preferences.md)) | Agreed, P1 |
 | [Audio input](audio-input.md) | None (builds on [ADR-0020](../adr/0020-inferred-channel-count.md)) | Agreed, P1 |
 | [P1 module ports and parameters](p1-modules.md) | None (builds on [ADR-0007](../adr/0007-polymorphic-signal-model.md)) | Agreed, P1 |
+| [P2 module ports and parameters](p2-modules.md) | None (builds on [ADR-0007](../adr/0007-polymorphic-signal-model.md)) | Random, Chance, Phase reset Agreed, P2 |
 | [Transient parameters](transient-params.md) | None (builds on [ADR-0008](../adr/0008-patch-format-ron.md)) | Agreed, P1 |
 | [Audio QA harness](audio-qa.md) | None (builds on [ADR-0019](../adr/0019-output-safety-stage.md)) | Implemented, developer tooling |
 | [Release downloads](releases.md) | [ADR-0027](../adr/0027-prebuilt-release-downloads.md) | Agreed, P1 |
