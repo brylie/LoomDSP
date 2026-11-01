@@ -566,11 +566,11 @@ fn opening_a_patch_ends_a_running_sample() {
 fn the_open_command_opens_an_example_as_a_copy() {
     let mut app = App::new(crate::tests::app_args());
     let examples = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches");
-    app.examples = Some(examples.clone());
+    app.document.set_examples(Some(examples.clone()));
     let path = examples.join("subtractive.ron");
     let line = serde_json::json!({ "cmd": "open", "path": path }).to_string();
     run(&mut app, &line).unwrap();
-    assert_eq!(app.file, None);
+    assert!(app.document.file().is_none());
     assert_eq!(app.ui_snapshot().title, "subtractive (example) - LoomDSP");
 }
 

@@ -139,6 +139,7 @@ The app's state is moving into owned parts, one domain at a time (#466), in the 
 | Part | Owns | Messages |
 |---|---|---|
 | `learn::Learn` (`learn.rs`) | Whether MIDI learn is on, the armed parameter, and what the canvas shows | `Message::Learn(learn::Message)` |
+| `document::Document` (`document.rs`) | The patch's name and file, what the title and the save dialog show, the bundled-examples rule, the saved content that tells unsaved work apart, and the recovery copy and autosave timer | File commands stay `Message::File(FileAction)`, handled by `App::file_action`, because saving also needs the graph, undo, and dialogs |
 
 ## View models for app panels
 
