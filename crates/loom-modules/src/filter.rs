@@ -484,9 +484,10 @@ pub static LADDER: ModuleDescriptor = ModuleDescriptor {
 /// `1 / ((1 + j f/fc)^N + k)` (docs/learn/ladder-filter.md). Drive and
 /// nonlinear saturation depend on the input, so this remains schematic.
 fn ladder_preview(params: &[f32], x: f32) -> f32 {
-    let &[cutoff, resonance, _, slope] = params else {
+    if params.len() != LADDER.params.len() {
         return 0.0;
-    };
+    }
+    let (cutoff, resonance, slope) = (params[Ladder::CUTOFF], params[Ladder::RESONANCE], params[Ladder::SLOPE]);
     let frequency = 20.0 * 1000.0_f32.powf(x.clamp(0.0, 1.0));
     let ratio = frequency / cutoff.max(20.0);
     let stage = slope.round().clamp(0.0, 2.0) as usize;

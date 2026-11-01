@@ -133,9 +133,16 @@ fn envelope_preview(params: &[f32], x: f32) -> f32 {
     if x <= 0.0 || x >= 1.0 {
         return 0.0;
     }
-    let &[attack, decay, sustain, release, mode, curve] = params else {
+    if params.len() != ENVELOPE.params.len() {
         return 0.0;
-    };
+    }
+    let value = |index: usize| params[index];
+    let (attack, decay, sustain) = (
+        value(Envelope::ATTACK),
+        value(Envelope::DECAY),
+        value(Envelope::SUSTAIN),
+    );
+    let (release, mode, curve) = (value(Envelope::RELEASE), value(Envelope::MODE), value(Envelope::CURVE));
     let ad = mode >= 0.5;
     // AD never releases, so its stored Release must not change the view.
     let timed_total = attack + decay + if ad { 0.0 } else { release };

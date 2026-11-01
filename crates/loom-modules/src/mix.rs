@@ -130,13 +130,30 @@ struct Mixer {
 }
 
 impl Mixer {
+    /// Index of `level1`. `level2` to `level4` follow it (checked below).
+    const LEVEL1: usize = MIXER.param_index("level1").unwrap();
+    /// Index of `mute1`. `mute2` to `mute4` follow it (checked below).
+    const MUTE1: usize = MIXER.param_index("mute1").unwrap();
+
+    /// Which input a parameter index belongs to, in the run of
+    /// `MIXER_INPUTS` parameters that starts at `first`.
+    fn input_of(first: usize, index: usize) -> Option<usize> {
+        index.checked_sub(first).filter(|&n| n < MIXER_INPUTS)
+    }
+
     fn new(config: &ModuleConfig) -> Self {
-        let level = |i: usize| Smoothed::new(1.0, config.sample_rate, MIXER.params[i].options.smooth_seconds);
+        let level = |i: usize| {
+            Smoothed::new(
+                1.0,
+                config.sample_rate,
+                MIXER.params[Self::LEVEL1 + i].options.smooth_seconds,
+            )
+        };
         let open = |i: usize| {
             Smoothed::new(
                 1.0,
                 config.sample_rate,
-                MIXER.params[MIXER_INPUTS + i].options.smooth_seconds,
+                MIXER.params[Self::MUTE1 + i].options.smooth_seconds,
             )
         };
         Self {
@@ -147,6 +164,29 @@ impl Mixer {
     }
 }
 
+// The Mixer reads its levels and mutes as two runs of `MIXER_INPUTS`
+// parameters, so each run must stay in order in the descriptor. A reorder
+// that breaks a run is a build error.
+const _: () = {
+    let names = [
+        ["level1", "level2", "level3", "level4"],
+        ["mute1", "mute2", "mute3", "mute4"],
+    ];
+    let firsts = [Mixer::LEVEL1, Mixer::MUTE1];
+    let mut run = 0;
+    while run < names.len() {
+        let mut n = 0;
+        while n < MIXER_INPUTS {
+            assert!(
+                matches!(MIXER.param_index(names[run][n]), Some(i) if i == firsts[run] + n),
+                "Mixer level and mute parameters must each stay in order"
+            );
+            n += 1;
+        }
+        run += 1;
+    }
+};
+
 impl Module for Mixer {
     /// Takes the running state of another instance (ADR-0022).
     fn copy_state_from(&mut self, other: &dyn Module) -> bool {
@@ -154,8 +194,8 @@ impl Module for Mixer {
     }
 
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let modulated: [Param<'_>; MIXER_INPUTS] = std::array::from_fn(|n| io.param(n));
-        let mute_mod: [Param<'_>; MIXER_INPUTS] = std::array::from_fn(|n| io.param(MIXER_INPUTS + n));
+        let modulated: [Param<'_>; MIXER_INPUTS] = std::array::from_fn(|n| io.param(Self::LEVEL1 + n));
+        let mute_mod: [Param<'_>; MIXER_INPUTS] = std::array::from_fn(|n| io.param(Self::MUTE1 + n));
         let (inputs, [out]) = io.split::<MIXER_INPUTS, 1>();
         for (i, out) in out.iter_mut().enumerate() {
             let mut sum = 0.0;
@@ -174,21 +214,16 @@ impl Module for Mixer {
     }
 
     fn set_param(&mut self, index: usize, value: f32) {
-        match index {
-            0..=3 => self.levels[index].set_target(value),
-            4..=7 => {
-                self.open_base[index - MIXER_INPUTS] = 1.0 - value;
-                self.open[index - MIXER_INPUTS].set_target(1.0 - value);
-            }
-            _ => {}
+        if let Some(n) = Self::input_of(Self::LEVEL1, index) {
+            self.levels[n].set_target(value);
+        } else if let Some(n) = Self::input_of(Self::MUTE1, index) {
+            self.open_base[n] = 1.0 - value;
+            self.open[n].set_target(1.0 - value);
         }
     }
 
     fn param_glide(&self, index: usize) -> Option<f32> {
-        match index {
-            0..=3 => self.levels[index].gliding(),
-            _ => None,
-        }
+        Self::input_of(Self::LEVEL1, index).and_then(|n| self.levels[n].gliding())
     }
 
     fn reset(&mut self) {
