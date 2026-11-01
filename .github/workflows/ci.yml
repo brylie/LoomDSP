@@ -372,12 +372,22 @@ jobs:
       - uses: jdx/mise-action@v5
       - run: mise run adr-status
 
+  test-placement:
+    name: Test placement
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@v5
+      - run: mise run test-placement
+
   # One check to mark as "required" in the main branch ruleset, instead of
   # listing every job. Fails if any job above failed or was cancelled.
   ci-success:
     name: CI success
     if: always()
-    needs: [fmt, clippy, test, coverage, loopback, docs, msrv, wasm, deny, advisories, typos, adr-status]
+    needs: [fmt, clippy, test, coverage, loopback, docs, msrv, wasm, deny, advisories, typos, adr-status, test-placement]
     runs-on: ubuntu-latest
     steps:
       - name: Check all jobs passed
