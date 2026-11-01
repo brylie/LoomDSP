@@ -128,6 +128,12 @@ Without the app's Measure toggle, the window redraws only when something changes
 
 Shader names must not be reserved words in Metal or HLSL, because wgpu's translator does not always rename them (the `shader_names` test lists them).
 
+## How the app handles a message
+
+Every Iced message goes through one entry point, `App::update` in `crates/loom-app/src/main.rs`. It owns the work that crosses workflows, in a fixed order: frame accounting, a safety change the engine's queue refused, telling autosave to look again, handing the message to its workflow, running the idle engine and retrying a waiting commit, and quitting cleanly. Each step is listed in its doc comment.
+
+A workflow's messages go to a named handler that returns the `Task` it needs: `matrix_message` and `matrix_key_message` (`matrix.rs`), `browser_message`, `control` for the control channel, and `file_action` for `Message::File(FileAction)`, which the toolbar, the shortcuts, and the window's close request all send. The rest go to `App::handle`. There is no event bus and no second application state. The app's state itself is split into owned parts in #466.
+
 ## View models for app panels
 
 An app panel that needs tests gets a plain-data view model: a small struct built from app state, which both the window and the UI snapshot read. Then a test of `App::ui_snapshot()` checks what the user sees. We add models one panel at a time; there is no framework ([ADR-0021](../adr/0021-plain-data-view-models-and-keyed-identity.md)).
