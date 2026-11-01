@@ -1551,3 +1551,32 @@ fn the_status_bar_counts_midi_and_hides_developer_tools() {
         );
     }
 }
+
+/// When the preferences file cannot be written, each choice still applies
+/// to this run, and the status line says why it was not saved.
+#[test]
+fn failed_saves_say_why_and_keep_the_choice() {
+    let dir = folder("unwritable-choices");
+    std::fs::write(dir.join("blocked"), "").unwrap();
+    let mut args = args(&dir);
+    args.devices.preferences = Some(dir.join("blocked").join(FILE_NAME));
+    let mut app = start(args, &two_devices());
+    let unsaved = |app: &App| app.alerts.status().ends_with("The change applies until you quit.");
+
+    app.alerts.say(String::new());
+    let shown = app.rig.store.saved().show_activity;
+    app.preferences(Message::Activity(!shown));
+    assert!(unsaved(&app), "{}", app.alerts.status());
+
+    app.alerts.say(String::new());
+    change(&mut app, Change::Device(DeviceChoice::Named("Fake B".into())));
+    assert!(unsaved(&app), "{}", app.alerts.status());
+
+    app.alerts.say(String::new());
+    app.set_panic_pref(Some(crate::preferences::PanicPref::Cc(0, 123)));
+    assert!(unsaved(&app), "{}", app.alerts.status());
+    app.alerts.say(String::new());
+    app.preferences(Message::PanicClear);
+    assert!(unsaved(&app), "{}", app.alerts.status());
+    assert_eq!(app.rig.store.saved().panic, None, "cleared for this run");
+}

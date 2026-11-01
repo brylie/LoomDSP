@@ -1437,3 +1437,28 @@ fn socket_refuses_a_path_that_is_too_long() {
     assert!(!path.exists());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// `open` on a file that does not load, and `save` where nothing can be
+/// written, answer with the status line that says why, and change nothing.
+#[test]
+fn open_and_save_failures_answer_with_the_reason() {
+    let mut app = App::new(crate::tests::app_args());
+    // While the channel listens, errors go to the reply, not to a dialog.
+    app.control.push(Listener::Script(PathBuf::from("unused")));
+    let dir = std::env::temp_dir().join(format!("loom-control-fail-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let missing = dir.join("missing.ron");
+    let line = serde_json::json!({ "cmd": "open", "path": missing }).to_string();
+    let error = run(&mut app, &line).unwrap_err();
+    assert!(error.starts_with("Could not open the patch"), "{error}");
+    assert_eq!(error, app.alerts.status());
+
+    // A file where the folder should be: the save cannot be written.
+    std::fs::write(dir.join("blocked"), "").unwrap();
+    let blocked = dir.join("blocked").join("patch.ron");
+    let line = serde_json::json!({ "cmd": "save", "path": blocked }).to_string();
+    let error = run(&mut app, &line).unwrap_err();
+    assert!(error.starts_with("Could not save"), "{error}");
+    assert!(error.ends_with("Your changes are not saved."), "{error}");
+}

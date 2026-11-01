@@ -2166,3 +2166,129 @@ fn a_momentary_hold_makes_no_step_and_a_toggle_press_does() {
     assert_eq!(app.edits.history.len(), steps + 1, "a toggle press is a step");
     assert_eq!(app.controller.graph().node(id).unwrap().params[on], 1.0, "and stays on");
 }
+
+/// File > New on a saved patch starts an empty one and says so.
+#[test]
+fn new_says_it_started_an_empty_patch() {
+    let (mut app, id, _) = app_with_filter();
+    let _ = app.update(Message::File(FileAction::New));
+    assert_eq!(app.alerts.status(), "new patch");
+    let filters = app
+        .controller
+        .graph()
+        .nodes()
+        .filter(|(_, n)| n.descriptor.id == "loom.filter.svf");
+    assert_eq!(filters.count(), 0, "module {id} went with the old patch");
+}
+
+/// With unsaved changes and no dialog program, New keeps the patch and
+/// says how to save first.
+#[test]
+fn new_without_a_dialog_program_keeps_the_patch() {
+    let (mut app, id, cutoff) = app_with_filter();
+    app.edit(|app| {
+        app.controller.set_param(ModuleId(id), cutoff, 0.5).unwrap();
+        app.commit();
+    });
+    assert!(app.unsaved());
+    files::fake::answer_discard(files::Choice::Unavailable);
+    let _ = app.update(Message::File(FileAction::New));
+    assert!(app.controller.graph().node(ModuleId(id)).is_some(), "the patch stays");
+    assert!(
+        app.alerts.status().starts_with("Unsaved changes."),
+        "{}",
+        app.alerts.status()
+    );
+}
+
+/// A help link to a document that is not bundled leaves the help as it is
+/// and says so.
+#[test]
+fn an_unbundled_help_link_says_so() {
+    let mut app = app();
+    let _ = app.update(Message::HelpLink("nowhere.md".to_string()));
+    assert!(app.help.is_none());
+    assert_eq!(app.alerts.status(), "Linked document is not bundled: nowhere.md");
+}
+
+/// Clicking the armed control again disarms it, and a parameter the
+/// module does not have changes nothing but the status line.
+#[test]
+fn learn_disarms_on_a_second_click_and_bad_params_say_why() {
+    let (mut app, id, cutoff) = app_with_filter();
+    let _ = app.update(Message::Learn(learn::Message::Toggle));
+    let _ = app.update(Message::Learn(learn::Message::Arm((id, cutoff))));
+    assert!(app.learn.is_armed((id, cutoff)));
+    let _ = app.update(Message::Learn(learn::Message::Arm((id, cutoff))));
+    assert!(!app.learn.is_armed((id, cutoff)));
+    assert_eq!(app.alerts.status(), "MIDI learn: click a control to map it");
+
+    app.set_param(id, 999, 0.5);
+    assert!(app.alerts.status().starts_with("error: "), "{}", app.alerts.status());
+}
+
+/// The matrix Add form needs both ends before it adds anything.
+#[test]
+fn the_matrix_add_form_needs_a_source_and_a_target() {
+    let (mut app, _, _) = app_with_filter();
+    let _ = app.update(Message::Matrix(matrix::Event::AddOpen));
+    let _ = app.update(Message::Matrix(matrix::Event::AddApply));
+    assert_eq!(app.alerts.status(), "Choose a source and a target");
+    assert!(app.controller.graph().assignments().next().is_none());
+}
+
+/// With no free module slot, Duplicate and an Undo that brings a module
+/// back change nothing and say why.
+#[test]
+fn a_full_patch_refuses_duplicate_and_undo() {
+    let mut app = app();
+    let config = EngineConfig {
+        max_modules: 1,
+        ..EngineConfig::default()
+    };
+    let parts = create_engine(registry(true), config);
+    app.controller = parts.controller;
+    app.stream.keep_idle(parts.engine);
+    app.stream.set_running(None);
+    let sine = app.controller.add_module("loom.osc.sine").unwrap();
+    assert!(app.commit());
+    app.selection = BTreeSet::from([sine.0]);
+    app.duplicate();
+    assert!(
+        app.alerts.status().starts_with("Cannot duplicate: "),
+        "{}",
+        app.alerts.status()
+    );
+    assert_eq!(app.controller.graph().nodes().count(), 1);
+
+    app.edit(|app| {
+        app.controller.remove_module(sine).unwrap();
+        app.commit();
+    });
+    // Something else takes the freed slot.
+    app.controller.add_module("loom.osc.saw").unwrap();
+    assert!(app.commit());
+    let _ = app.update(Message::Undo);
+    assert!(
+        app.alerts.status().starts_with("Cannot undo "),
+        "{}",
+        app.alerts.status()
+    );
+    assert!(app.controller.graph().node(sine).is_none());
+}
+
+/// A help example that does not parse leaves the patch and says why.
+#[test]
+fn a_broken_help_example_says_why() {
+    let mut app = app();
+    let descriptor = *app.modules.first().unwrap();
+    let mut help = help::Help::new(descriptor);
+    help.model.example = Some("not a patch".to_string());
+    app.help = Some(help);
+    let _ = app.update(Message::HelpExample);
+    assert!(
+        app.alerts.status().starts_with("Could not open example: "),
+        "{}",
+        app.alerts.status()
+    );
+}
