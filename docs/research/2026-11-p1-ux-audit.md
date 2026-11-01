@@ -121,7 +121,7 @@ With nothing selected the inspector shows 18 lines of shortcuts, about 30 lines 
 
 ### 8. Help overlay (Medium)
 
-- The descriptor part (Inputs, Outputs, Parameters) scrolls in its own inner box, and the hand-written notes continue below it in the outer overlay. The overlay has two scroll regions, and the example patch is below the window edge.
+- The descriptor part (Inputs, Outputs, Parameters) scrolls in its own inner box, and the hand-written notes continue below it in the outer overlay. The overlay has two scroll regions, and the example patch is below the window edge. *Correction, found while fixing [#457](https://github.com/brylie/LoomDSP/issues/457): this was a misreading. The bar was the scroll thumb of the one scroll region, sized to the part shown. The cut text at the right edge, below, was real: the scrollbar was drawn over the text.*
 - Body text is cut at the right edge ("without digita"), so long lines do not wrap inside the overlay.
 - Sizes do not form a hierarchy: section titles 18 px for Inputs, 22 px for "When to use it"; body 13 px in one part and 15 px in the other (`help.rs:119-140`).
 - The canvas behind is not dimmed, so the overlay floats over live tiles with no clear edge.
