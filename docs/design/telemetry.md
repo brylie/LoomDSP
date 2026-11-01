@@ -6,7 +6,7 @@ How meter and scope data travels from the audio thread to the UI.
 - **Decision behind it:** [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md) (lock-free boundary between control and audio threads).
 - **Requirements:** FR-VIS-04, NFR-RT-01, NFR-RT-07. It serves FR-VIS-01 (live values on ports) and FR-VIS-02 (scope on any cable).
 - **Issue:** [#6](https://github.com/brylie/LoomDSP/issues/6).
-- **Code:** `crates/loom-core/src/telemetry.rs`, `Engine::send_telemetry` in `engine.rs`, probes in `compile.rs`. App side: `crates/loom-app/src/live.rs` (probes and levels) and `monitor.rs` (the telemetry thread).
+- **Code:** `crates/loom-core/src/telemetry.rs`, `Engine::send_telemetry` in `engine.rs`, probes in `compile/build.rs`. App side: `crates/loom-app/src/live.rs` (probes and levels) and `monitor.rs` (the telemetry thread).
 
 ## How it works
 
