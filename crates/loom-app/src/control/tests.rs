@@ -1439,12 +1439,15 @@ fn socket_refuses_a_path_that_is_too_long() {
 }
 
 /// `open` on a file that does not load, and `save` where nothing can be
-/// written, answer with the status line that says why, and change nothing.
+/// written, answer with the status line that says why, change nothing,
+/// and open no dialog.
 #[test]
 fn open_and_save_failures_answer_with_the_reason() {
     let mut app = App::new(crate::tests::app_args());
-    // While the channel listens, errors go to the reply, not to a dialog.
+    // A listener turns the channel on: errors then go to the reply and
+    // the status line, never to a dialog nobody can close (rule 9).
     app.control.push(Listener::Script(PathBuf::from("unused")));
+    let _ = crate::files::fake::asked();
     let dir = std::env::temp_dir().join(format!("loom-control-fail-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
@@ -1461,4 +1464,9 @@ fn open_and_save_failures_answer_with_the_reason() {
     let error = run(&mut app, &line).unwrap_err();
     assert!(error.starts_with("Could not save"), "{error}");
     assert!(error.ends_with("Your changes are not saved."), "{error}");
+    assert_eq!(
+        crate::files::fake::asked(),
+        Vec::new(),
+        "no dialog while the channel is on"
+    );
 }

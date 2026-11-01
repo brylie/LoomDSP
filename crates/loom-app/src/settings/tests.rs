@@ -1552,15 +1552,17 @@ fn the_status_bar_counts_midi_and_hides_developer_tools() {
     }
 }
 
-/// When the preferences file cannot be written, each choice still applies
-/// to this run, and the status line says why it was not saved.
+/// When the preferences file cannot be written, each choice (activity,
+/// device, panic trigger, audio input, MIDI input) still applies to this
+/// run, and the status line says why it was not saved.
 #[test]
 fn failed_saves_say_why_and_keep_the_choice() {
     let dir = folder("unwritable-choices");
     std::fs::write(dir.join("blocked"), "").unwrap();
     let mut args = args(&dir);
     args.devices.preferences = Some(dir.join("blocked").join(FILE_NAME));
-    let mut app = start(args, &two_devices());
+    let fake = Rc::new(Fake::new(&[fake::device("Fake A"), fake::device("Fake B")], &["Pad"]));
+    let mut app = start(args, &fake);
     let unsaved = |app: &App| app.alerts.status().ends_with("The change applies until you quit.");
 
     app.alerts.say(String::new());
@@ -1579,4 +1581,15 @@ fn failed_saves_say_why_and_keep_the_choice() {
     app.preferences(Message::PanicClear);
     assert!(unsaved(&app), "{}", app.alerts.status());
     assert_eq!(app.rig.store.saved().panic, None, "cleared for this run");
+
+    app.alerts.say(String::new());
+    app.preferences(Message::Input(InputChoice::Off));
+    assert!(unsaved(&app), "{}", app.alerts.status());
+    assert_eq!(app.rig.store.saved().audio.input, InputChoice::Off);
+
+    app.alerts.say(String::new());
+    assert!(fake.is_open("Pad"), "every MIDI input opens when none is saved");
+    app.preferences(Message::Midi("Pad".to_string(), false));
+    assert!(unsaved(&app), "{}", app.alerts.status());
+    assert!(!fake.is_open("Pad"), "closed for this run");
 }

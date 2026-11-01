@@ -241,3 +241,6 @@ pub(crate) fn opened_status(path: &std::path::Path, notes: &[String]) -> String 
         format!("opened {}: {}", path.display(), notes.join("; "))
     }
 }
+
+#[cfg(test)]
+mod tests;

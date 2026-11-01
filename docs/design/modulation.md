@@ -366,7 +366,7 @@ The nested sub-patch test is deferred until sub-patch navigation exists. The mat
 
 ### Acceptance criteria: undo
 
-**Status:** Agreed. The third was tested when [#12](https://github.com/brylie/LoomDSP/issues/12) was built, in `loom-app/src/undo/tests.rs`. The first two are tested in `loom-app/src/main.rs` since [#70](https://github.com/brylie/LoomDSP/issues/70).
+**Status:** Agreed. The third was tested when [#12](https://github.com/brylie/LoomDSP/issues/12) was built, in `loom-app/src/undo/tests.rs`. The first two are tested since [#70](https://github.com/brylie/LoomDSP/issues/70), in `loom-app/src/tests.rs`: `a_drop_assigns_once_and_is_one_undo_step` and `inspector_rows_edit_and_remove_assignments`.
 
 - [x] Undo removes an assignment that was just made. Redo brings it back.
 - [x] One depth slider drag is one undo step.

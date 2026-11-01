@@ -8,15 +8,10 @@ use std::time::Duration;
 /// the next update commits them without another edit from the player.
 #[test]
 fn a_full_queue_retries_staged_modules() {
-    let mut app = app();
-    let config = EngineConfig {
+    let mut app = app_with_engine(EngineConfig {
         command_capacity: 4,
         ..EngineConfig::default()
-    };
-    let parts = create_engine(registry(true), config);
-    app.controller = parts.controller;
-    app.stream.keep_idle(parts.engine);
-    app.stream.set_running(None);
+    });
     for _ in 0..4 {
         app.controller.add_module("loom.osc.sine").unwrap();
     }
@@ -2291,6 +2286,67 @@ fn a_broken_help_example_says_why() {
     let _ = app.update(Message::HelpExample);
     assert!(
         app.alerts.status().starts_with("Could not open example: "),
+        "{}",
+        app.alerts.status()
+    );
+}
+
+/// An app on an idle engine built with `config`, so a test can fill its
+/// module table or command queue.
+fn app_with_engine(config: EngineConfig) -> App {
+    let mut app = app();
+    let parts = create_engine(registry(true), config);
+    app.controller = parts.controller;
+    app.stream.keep_idle(parts.engine);
+    app.stream.set_running(None);
+    app
+}
+
+/// When the module table is full, adding a module says so on the status
+/// line, and the patch keeps the modules it had.
+#[test]
+fn a_full_module_table_says_the_module_was_not_added() {
+    let mut app = app_with_engine(EngineConfig {
+        max_modules: 1,
+        ..EngineConfig::default()
+    });
+    let sine = registry(true).resolve("loom.osc.sine").unwrap();
+    app.add_module(sine, Point::ORIGIN);
+    let count = app.controller.graph().nodes().count();
+
+    app.add_module(sine, Point::new(200.0, 0.0));
+
+    let status = app.alerts.status();
+    assert!(status.starts_with(&format!("Could not add {}:", sine.name)), "{status}");
+    assert_eq!(app.controller.graph().nodes().count(), count);
+}
+
+/// When the command queue is full, Panic says it did not run, and the
+/// next Panic runs once the engine has drained the queue.
+#[test]
+fn a_panic_that_cannot_be_sent_says_so() {
+    let mut app = app_with_engine(EngineConfig {
+        command_capacity: 1,
+        ..EngineConfig::default()
+    });
+    app.panic();
+    assert!(
+        app.alerts.status().starts_with("Panic: every note"),
+        "{}",
+        app.alerts.status()
+    );
+
+    app.panic();
+
+    let status = app.alerts.status();
+    assert!(
+        status.starts_with("Panic: ") && !status.contains("every note"),
+        "{status}"
+    );
+    let _ = app.update(Message::Tick);
+    app.panic();
+    assert!(
+        app.alerts.status().starts_with("Panic: every note"),
         "{}",
         app.alerts.status()
     );
