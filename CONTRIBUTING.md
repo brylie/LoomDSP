@@ -82,7 +82,7 @@ Tests live in their own files, never inline in a code module. Why: a code file t
 - A test file can use private items through `use super::*;`, as an inline module can.
 - Integration tests go in the crate's `tests/` folder, as usual.
 
-`mise run test-placement` checks this (`scripts/check-test-placement.sh`). It fails on an inline `#[cfg(test)] mod name { ... }`, and on a `#[test]` in a file that is not a test file. The commit hook and CI run it.
+`mise run test-placement` checks this (`scripts/check-test-placement.sh`, tested by `scripts/test-check-test-placement.sh`). It fails on an inline `#[cfg(test)] mod name { ... }`, and on a `#[test]` in a file that is not a test file. The commit hook and CI run it.
 
 Run the desktop app and the command-line tool:
 

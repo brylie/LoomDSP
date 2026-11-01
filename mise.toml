@@ -114,7 +114,8 @@ run = "sh scripts/check-adr-status.sh"
 
 [tasks.test-placement]
 description = "Check that tests live in their own files, not inline in code modules"
-run = "sh scripts/check-test-placement.sh"
+# The first command tests the check itself on small example crates.
+run = ["sh scripts/test-check-test-placement.sh", "sh scripts/check-test-placement.sh"]
 
 [tasks.worktree-targets]
 description = "Test worktree target ownership and orphan pruning"

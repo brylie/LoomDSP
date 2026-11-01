@@ -33,7 +33,8 @@ for file in $sources; do
     awk -v file="$file" -v base="$base" '
         # `#[cfg(test)]`, or `#[cfg(all(test, ...))]` for platform-only tests.
         /^[[:space:]]*#\[cfg\((test|all\(test[,)].*)\)\][[:space:]]*$/ { pending = 1; next }
-        pending && /^[[:space:]]*#\[/ { next }
+        # Doc comments, comments, and blank lines may sit there too.
+        pending && /^[[:space:]]*(#\[|\/\/|$)/ { next }
         pending {
             pending = 0
             if (match($0, /^[[:space:]]*(pub(\([a-z]+\))? )?mod [a-z_0-9]+ *\{/)) {
