@@ -3,7 +3,7 @@
 - **Kind:** Research snapshot. Non-normative.
 - **Date:** 2026-11-01, on `main` at fd6f938 (after #485).
 - **Follows:** [the learner review](2026-11-learner-ux-review.md) and the other persona reviews from the same day.
-- **Used by:** the issues listed under [Issues](#issues). Decisions go in specs, ADRs, or the contributor docs.
+- **Used by:** pull request #516 (findings 1 and 2) and issues #517 and #518. Decisions go in specs, ADRs, or the contributor docs.
 
 This review reads LoomDSP as Leo, the module developer in the [personas](../product/personas-and-use-cases.md): a Rust programmer interested in DSP who "wants to write a new filter or oscillator and have it appear in the module browser", and needs "a documented module SDK, a test harness, examples, and a clear contribution process". Here the interface is not the app's window but the contributor docs, the Rust API, the tests, and the feedback they give. For an open-source project that tags issues for newcomers, this path decides whether a first contribution becomes a second. Do not update this snapshot later; write a new one after the fixes.
 
@@ -98,18 +98,18 @@ Third-party modules are compiled into the main build from source (FR-SDK-04) and
 
 ## Issues
 
-Proposed, grouped to keep the backlog small. Not filed yet.
+Grouped to keep the backlog small. Findings 1 and 2 were fixed at once rather than filed. Priority and size are on the LoomDSP project board.
 
 | Issue | Findings | Milestone | Priority | Size |
 |---|---|---|---|---|
-| A module guide that stays true: fix the example, a compiled template, and a shorter setup path | 1, 3, 5 | M2 | P1 | S |
-| The no-allocation test covers every module's `process` | 2 | M2 | P1 | S |
-| Module issues ready for newcomers: labels and design references | 4 | M2 | P2 | S |
-| Not filed here: positional `io.split` (note it in the template), out-of-tree modules (FR-SDK-04, FR-SHARE-05) | 6, 7 | | | |
+| [#516](https://github.com/brylie/LoomDSP/pull/516) (pull request): fix the CONTRIBUTING and architecture examples, and check every module's `process` for allocation | 1, 2 | | | |
+| [#517](https://github.com/brylie/LoomDSP/issues/517) A module template compiled in CI, and a shorter setup path | 3, 5, 6 | M2 | P1 | S |
+| [#518](https://github.com/brylie/LoomDSP/issues/518) Module issues ready for newcomers: labels, design references, and a reading list | 4 | M2 | P2 | S |
+| Not filed here: out-of-tree modules (FR-SDK-04, FR-SHARE-05) | 7 | | | |
 
 ## Suggested order
 
-1. The no-allocation test over every module (2). It closes a gap in a hard rule, and the loop already exists in `non_finite.rs`.
-2. Fix the CONTRIBUTING example (1). Minutes of work; then the template, so it cannot drift again (3).
-3. Label and reference the ready module issues (4), so the next newcomer has a place to start.
-4. Shorten the setup path (5).
+1. The no-allocation test over every module (2). Done in #516.
+2. Fix the CONTRIBUTING example (1), done in #516; then the template, so it cannot drift again (3, #517).
+3. Label and reference the ready module issues (4, #518), so the next newcomer has a place to start.
+4. Shorten the setup path (5, #517).
