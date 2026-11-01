@@ -100,7 +100,9 @@ pub static SVF: ModuleDescriptor = ModuleDescriptor {
         .smooth(0.01),
     ],
     role: ModuleRole::Dsp(|config| Box::new(Svf::new(config))),
-    panel: Panel::new(6, 3, &[Widget::knob(0, 0, "cutoff"), Widget::knob(3, 0, "resonance")]),
+    // Eight units wide with the knobs centred: the gutters give the
+    // Resonance caption and the Bandpass and Highpass labels room (#455).
+    panel: Panel::new(8, 3, &[Widget::knob(1, 0, "cutoff"), Widget::knob(4, 0, "resonance")]),
     displays: &[],
 };
 

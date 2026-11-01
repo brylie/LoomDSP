@@ -261,7 +261,9 @@ pub static CONTROLLER_IN: ModuleDescriptor = ModuleDescriptor {
             Widget::radio(0, 0, "source"),
             Widget::knob(6, 0, "controller"),
             Widget::knob(9, 0, "channel"),
-            Widget::knob(6, 3, "smoothing"),
+            // Under Channel, whose short caption leaves room above it.
+            // Under Controller, its ring met that longer caption (#455).
+            Widget::knob(9, 3, "smoothing"),
         ],
     ),
     displays: &[],

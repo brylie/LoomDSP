@@ -35,7 +35,7 @@ State variable filter (trapezoidal integration). The cutoff input adds pitch: +0
 
 ## Panel
 
-6 by 3 grid units.
+8 by 3 grid units.
 
 - Knob: **Cutoff** (`cutoff`)
 - Knob: **Resonance** (`resonance`)

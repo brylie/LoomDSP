@@ -601,20 +601,51 @@ mod tests {
         })
     }
 
-    /// The SVF tile cuts its Resonance caption, and the snapshot says what
-    /// is drawn. A label that fits has no `shown`.
+    /// A label that fits has no `shown`. SVF's Resonance caption was cut
+    /// until labels could use the empty space beside them (#455).
     #[test]
-    fn a_cut_label_shows_what_the_tile_draws() {
+    fn a_label_that_fits_has_no_shown() {
         let snapshot = open("subtractive.ron").ui_snapshot();
         let svf = snapshot.tiles.iter().find(|t| t.title == "SVF").unwrap();
-        let resonance = svf.widgets.iter().find(|w| w.label == "Resonance").unwrap();
-        assert_eq!(resonance.shown.as_deref(), Some("Reson…"));
-        let cutoff = svf.widgets.iter().find(|w| w.label == "Cutoff").unwrap();
-        assert_eq!(cutoff.shown, None);
-        let json = serde_json::to_value(resonance).unwrap();
-        assert_eq!(json["label"], "Resonance");
-        assert_eq!(json["shown"], "Reson…");
-        assert!(serde_json::to_value(cutoff).unwrap().get("shown").is_none());
+        for label in ["Resonance", "Cutoff"] {
+            let widget = svf.widgets.iter().find(|w| w.label == label).unwrap();
+            assert_eq!(widget.shown, None, "{label}");
+            assert!(serde_json::to_value(widget).unwrap().get("shown").is_none());
+        }
+    }
+
+    /// A caption with no room even beside it is cut, and the snapshot says
+    /// what is drawn: the canvas's own text layout decides.
+    #[test]
+    fn a_cut_label_shows_what_the_tile_draws() {
+        let knob = |x, label: &str| loom_canvas::WidgetView {
+            kind: WidgetViewKind::Knob { steps: 0 },
+            x,
+            y: 0,
+            label: label.into(),
+            hover: loom_canvas::HoverText::default(),
+        };
+        // Two long captions on touching knobs, filling the panel.
+        let module = ModuleView {
+            size: None,
+            unknown: false,
+            id: 1,
+            title: "Cramped".into(),
+            accent: iced::Color::BLACK,
+            position: iced::Point::ORIGIN,
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            panel: loom_canvas::PanelView {
+                width: 6,
+                height: 3,
+                widgets: vec![knob(0, "Much longer caption"), knob(3, "Another long caption")],
+            },
+        };
+        let cut = cut_labels(&module);
+        for index in 0..2 {
+            let shown = cut.get(&TextKind::Caption(index)).expect("cut");
+            assert!(shown.ends_with('…'), "{shown}");
+        }
     }
 
     /// Every label the example patches cut, so a change that cuts more is
@@ -640,14 +671,8 @@ mod tests {
                 }
             }
         }
-        let expected = [
-            "plucked-string.ron SVF: Bandpass -> Bandp…",
-            "plucked-string.ron SVF: Highpass -> Highpa…",
-            "plucked-string.ron SVF: Resonance -> Reson…",
-            "subtractive.ron SVF: Bandpass -> Bandp…",
-            "subtractive.ron SVF: Highpass -> Highpa…",
-            "subtractive.ron SVF: Resonance -> Reson…",
-        ];
+        // None since labels use the empty space beside them (#455).
+        let expected: [&str; 0] = [];
         assert_eq!(cut, expected);
     }
 

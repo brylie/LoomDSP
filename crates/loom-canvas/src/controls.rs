@@ -444,6 +444,19 @@ pub(crate) fn knob_centre(rect: Rectangle) -> Point {
     Point::new(rect.x + rect.width * 0.5, rect.y + GRID - 1.0)
 }
 
+/// What a knob always draws: its ring, range arc, and live dot. Text beside
+/// a knob may use the rest of the knob's cell (tile_text.rs). The focus
+/// ring is left out: it shows only while the knob has keyboard focus, and
+/// it stays above the caption anyway.
+pub(crate) fn knob_drawn(rect: Rectangle) -> Rectangle {
+    let centre = knob_centre(rect);
+    let reach = RANGE_RADIUS + LIVE_RADIUS;
+    Rectangle::new(
+        Point::new(centre.x - reach, centre.y - reach),
+        Size::new(2.0 * reach, 2.0 * reach),
+    )
+}
+
 /// Centre of a knob's dial and the radius halfway across its range ring:
 /// where a press on a modulated knob drags depth, not the value
 /// (modulation.md, Arc drag). Both in world units. Tests use it to press

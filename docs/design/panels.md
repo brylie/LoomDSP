@@ -222,7 +222,7 @@ A one-step gesture on a cable or an output places a scope or a level meter next 
 
 **Status:** Implemented. Code: `ModuleView::width`, `widget_bounds`, and `tile_size` in `loom-canvas/src/scene.rs`.
 
-- **The panel sits between the port columns.** Each side has a port label column 4 grid units wide. A label longer than its column is cut with "…", and the port's [hover text](#labels-and-hover-text) shows it in full.
+- **The panel sits between the port columns.** Each side has a port label column 4 grid units wide. A longer label may grow inward into empty space on its row ([Labels and hover text](#labels-and-hover-text)). A label that still does not fit is cut with "…", and the port's hover text shows it in full.
 - Tile width is 4 + panel width + 4 grid units, and at least 11 (today's width), so titles still fit. Tile height is the header plus the taller of the port rows and the panel.
 - A tile with an empty panel keeps the old label layout: each side gets half the tile. *Why:* nothing sits between the columns, so cutting labels would hide text for no reason.
 - *Why:* tiles stay compact, and ports and cables keep their place at the tile edges.
@@ -364,8 +364,8 @@ A user zooms in on Clock Divide. The knob says "Division", not `n`. They rest th
 
 | Place | Showed before | Shows now |
 |---|---|---|
-| Port label on a tile | name | label, cut with "…" to fit its column as now |
-| Caption of a knob, toggle, button, or radio group | parameter name | parameter label, cut with "…" to fit the widget |
+| Port label on a tile | name | label, grown into empty space on its row, then cut with "…" |
+| Caption of a knob, toggle, button, or radio group | parameter name | parameter label, grown into empty space on its line, then cut with "…" |
 | Option of a radio group | choice name | choice name, cut with "…" to fit the widget ([#394](https://github.com/brylie/LoomDSP/issues/394)) |
 | Caption of a meter | output name | output label |
 | Caption of a light | display value name | display value label ([#118](https://github.com/brylie/LoomDSP/issues/118)) |
@@ -374,7 +374,8 @@ A user zooms in on Clock Divide. The knob says "Division", not `n`. They rest th
 | Hover text on a light or meter | none | label, description, and value ([#118](https://github.com/brylie/LoomDSP/issues/118)) |
 
 - **Names stay out of sight, except in hover text.** The hover text shows the stable name below the description, dimmed, when it differs from the label other than in letter case. So `n` shows under "Division", but `cutoff` does not repeat under "Cutoff". *Why:* names are what patch files and `loom modules` use, so a user who edits a RON file can find the port. Everywhere else, the label is the better text.
-- **Captions and radio options are cut, never wrapped.** A label that does not fit is cut with "…", and the hover text shows it in full. Radio buttons are 6 units wide, so no built-in choice name is cut; a test checks this for every module. A longer name from a third-party module is cut and shows in full in the inspector. Widths are estimated per character, with narrow letters counting less, so "Division" fits under a knob, while "Resonance" is cut. *Why:* the grid layout of tiles does not change with text length, and estimating keeps text layout out of every frame.
+- **Captions and radio options are cut, never wrapped.** A label that does not fit is cut with "…", and the hover text shows it in full. Radio buttons are 6 units wide, so no built-in choice name is cut; a test checks this for every module. A longer name from a third-party module is cut and shows in full in the inspector. Widths are estimated per character, with narrow letters counting less. *Why:* the grid layout of tiles does not change with text length, and estimating keeps text layout out of every frame.
+- **Labels use empty space before they are cut** ([#455](https://github.com/brylie/LoomDSP/issues/455)). A port label may grow inward from its column, along its row, up to 3 units before anything the panel draws there, and never past the middle of the tile. A caption may grow on both sides along its line: up to 3 units before another widget's drawn part (a knob's ring and range arc, a radio's buttons), halfway into a gap it shares with other text less 1.5 units, up to 3 units before a port label, and no further than the port markers' inset. A caption that fits is centred on its widget. One that fits only off centre moves the least it needs toward the free side, and its centre stays over its widget. A shape that reaches 1 unit or less into a line of text does not count, because the line's box is taller than its letters. Labels grow only within the tile's grid size, so tiles never change size with text. A test checks every built-in module: no port label or caption is cut, and no two pieces of text are closer than 1 unit. *Why:* "Resonance" and "Highpass" were cut on the filters although empty space sat beside them. Where no rule finds room, the panel layout changes: SVF's panel is 8 units wide with centred knobs, and MIDI Controller's Smoothing knob sits under Channel.
 
 ### Hover text
 

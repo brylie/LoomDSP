@@ -770,6 +770,53 @@ mod tests {
         assert!(checked > 20, "only {checked} radio options found");
     }
 
+    /// No built-in tile cuts a port label or caption, and no two pieces of
+    /// text on a tile overlap or touch, now that labels may grow into empty space
+    /// beside them (#455). Resonance, Bandpass, Highpass, Hysteresis,
+    /// Controller, Smoothing, and Semitones were cut before.
+    #[test]
+    fn no_built_in_tile_text_is_cut_or_overlaps() {
+        let registry = loom_modules::registry();
+        let mut problems = Vec::new();
+        for d in registry.iter() {
+            let module = ModuleView {
+                size: None,
+                unknown: false,
+                id: 0,
+                title: d.name.to_string(),
+                accent: category_colour(d.category),
+                position: Point::ORIGIN,
+                inputs: d.inputs.iter().map(|spec| port_view(spec, false)).collect(),
+                outputs: d.outputs.iter().map(|spec| port_view(spec, false)).collect(),
+                panel: panel_view(d),
+            };
+            let mut boxes: Vec<(String, iced::Rectangle)> = Vec::new();
+            loom_canvas::for_each_tile_text(&module, |item| {
+                if item.content.ends_with('…') {
+                    problems.push(format!("{}: {} is cut", d.id, item.content));
+                }
+                let text = item.bounds();
+                // At least one unit apart side by side, so two labels never
+                // read as one.
+                let spaced = iced::Rectangle {
+                    x: text.x - 1.0,
+                    width: text.width + 2.0,
+                    ..text
+                };
+                for (other, b) in &boxes {
+                    if spaced
+                        .intersection(b)
+                        .is_some_and(|i| i.width > 0.01 && i.height > 0.01)
+                    {
+                        problems.push(format!("{}: {} touches {other}", d.id, item.content));
+                    }
+                }
+                boxes.push((item.content.to_string(), text));
+            });
+        }
+        assert!(problems.is_empty(), "{problems:#?}");
+    }
+
     #[test]
     fn toggles_and_radio_buttons_use_whole_values() {
         let on = param("on", 0.0, 1.0, 0.0, "").integer();
