@@ -192,7 +192,7 @@ The app sets text size inline at 11, 12, 13, 14, 15, 17, 18, and 22 px across `m
 ### 18. Small fixes (Low)
 
 - Envelope's shape preview line is drawn in visible steps at 100% zoom. It should be smooth like the LFO preview.
-- Scope's display has no zero line or grid, so a signal's offset is hard to judge.
+- Scope's display has no zero line or grid, so a signal's offset is hard to judge. *Correction, found while fixing [#453](https://github.com/brylie/LoomDSP/issues/453): the zero line was there, half a world unit thick, too faint to see at 100%. It is now 1 unit thick.*
 - MIDI Controller's Source radio has three choices next to two knobs and a third knob below; the tile is twice the height it needs.
 
 ### 19. Result curves look beaded and stepped when zoomed (High)
