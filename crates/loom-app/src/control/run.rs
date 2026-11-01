@@ -243,10 +243,10 @@ impl App {
             }
             Command::Open { path, .. } => {
                 if self.replace(crate::Source::File(&path)) {
-                    self.status = format!("opened {}", path.display());
+                    self.alerts.say(format!("opened {}", path.display()));
                     Ok(Map::new())
                 } else {
-                    Err(self.status.clone())
+                    Err(self.alerts.status().to_string())
                 }
             }
             Command::Save { path, .. } => {
@@ -254,7 +254,7 @@ impl App {
                 if self.write_to(path) {
                     Ok(Map::new())
                 } else {
-                    Err(self.status.clone())
+                    Err(self.alerts.status().to_string())
                 }
             }
             Command::Note { note, velocity, on, .. } => {
@@ -497,10 +497,10 @@ impl App {
             }
             Command::New => {
                 if self.replace(crate::Source::Empty) {
-                    self.status = "new patch".to_string();
+                    self.alerts.say("new patch".to_string());
                     Ok(Map::new())
                 } else {
-                    Err(self.status.clone())
+                    Err(self.alerts.status().to_string())
                 }
             }
         };
@@ -533,7 +533,7 @@ impl App {
         if !matches!(report, Report::Midi) {
             reply.insert("playing".to_string(), Value::String(self.playing_line()));
         }
-        reply.insert("status".to_string(), Value::String(self.status.clone()));
+        reply.insert("status".to_string(), Value::String(self.alerts.status().to_string()));
         match report {
             Report::Safety => {}
             Report::Audio => {
@@ -711,7 +711,7 @@ impl App {
             .find(|id| !before.contains(id));
         match added {
             Some(module) => Ok(fields(json!({ "module": module }))),
-            None => Err(self.status.clone()),
+            None => Err(self.alerts.status().to_string()),
         }
     }
 
@@ -737,7 +737,7 @@ impl App {
             .find(|id| !before.contains(id));
         match added {
             Some(module) => Ok(fields(json!({ "module": module }))),
-            None => Err(self.status.clone()),
+            None => Err(self.alerts.status().to_string()),
         }
     }
 

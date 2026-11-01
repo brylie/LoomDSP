@@ -503,7 +503,7 @@ impl App {
         let mut preferences = self.rig.store.saved().clone();
         preferences.output_safety = mode;
         if let Some(error) = self.rig.save(preferences) {
-            self.status = error;
+            self.alerts.say(error);
         }
         // With no device there is no engine playing to tell. The next
         // engine is built with the new mode.
@@ -521,13 +521,13 @@ impl App {
         let mut preferences = self.rig.store.saved().clone();
         preferences.show_activity = on;
         if let Some(error) = self.rig.save(preferences) {
-            self.status = error;
+            self.alerts.say(error);
         }
         self.live.set_activity(on);
         self.carrying.clear();
         self.sync_live();
         if let Err(error) = self.controller.commit() {
-            self.status = format!("error: {error}");
+            self.alerts.say(format!("error: {error}"));
         }
     }
 
@@ -556,7 +556,7 @@ impl App {
             if self.rig.input.take().is_some() {
                 let _ = self.controller.set_audio_input(None);
             }
-            self.input_alert = None;
+            self.alerts.set_input_drift(None);
             self.rig.input_tracker = None;
             self.rig.input_attempted = None;
             self.rig.input_named_lost = false;
@@ -567,10 +567,10 @@ impl App {
                 let _ = self.controller.set_audio_input(None);
             }
             self.rig.input_tracker = None;
-            self.input_alert = None;
+            self.alerts.set_input_drift(None);
             if !self.rig.input_permission_reported {
-                self.status = input_error_message("microphone permission denied");
-                self.rig.input_error_status = Some(self.status.clone());
+                self.alerts.say(input_error_message("microphone permission denied"));
+                self.rig.input_error_status = Some(self.alerts.status().to_string());
                 self.rig.input_permission_reported = true;
             }
             return;
@@ -585,7 +585,8 @@ impl App {
                     && self.controller.display(id, 0).is_some_and(|active| active >= 0.5)
             });
             if live && !self.rig.input_warned {
-                self.status = "Audio input is live. Use headphones, or keep the gain low, to avoid feedback.".into();
+                self.alerts
+                    .say("Audio input is live. Use headphones, or keep the gain low, to avoid feedback.");
                 self.rig.input_warned = true;
             }
             return;
@@ -594,14 +595,15 @@ impl App {
             let name = input.name().to_string();
             drop(input);
             self.rig.input_tracker = None;
-            self.input_alert = None;
+            self.alerts.set_input_drift(None);
             let _ = self.controller.set_audio_input(None);
             self.rig.input_attempted = None;
             self.rig.input_named_lost =
                 self.rig.flags.input.is_some() || matches!(self.rig.store.saved().audio.input, InputChoice::Named(_));
             if !self.rig.input_error_reported {
-                self.status = format!("Audio input: \"{name}\" was lost. Trying to reopen it.");
-                self.rig.input_error_status = Some(self.status.clone());
+                self.alerts
+                    .say(format!("Audio input: \"{name}\" was lost. Trying to reopen it."));
+                self.rig.input_error_status = Some(self.alerts.status().to_string());
                 self.rig.input_error_reported = true;
             }
         }
@@ -669,15 +671,17 @@ impl App {
                         .rig
                         .input_error_status
                         .take()
-                        .is_some_and(|status| status == self.status);
+                        .is_some_and(|status| status == self.alerts.status());
                     if let Some(name) = fallback {
-                        self.status = format!("Audio input: \"{name}\" is not available. Using the system default.");
+                        self.alerts.say(format!(
+                            "Audio input: \"{name}\" is not available. Using the system default."
+                        ));
                     } else if error_was_shown && let Some(input) = self.rig.input.as_ref() {
                         let name = input.name();
-                        self.status = format!("Audio input: \"{name}\" is back.");
+                        self.alerts.say(format!("Audio input: \"{name}\" is back."));
                     }
                 }
-                Err(error) => self.status = format!("Audio input: {error}."),
+                Err(error) => self.alerts.say(format!("Audio input: {error}.")),
             },
             Err(error) => {
                 let reported = if input_permission_denied(&error) {
@@ -686,8 +690,8 @@ impl App {
                     &mut self.rig.input_error_reported
                 };
                 if !*reported {
-                    self.status = input_error_message(&error);
-                    self.rig.input_error_status = Some(self.status.clone());
+                    self.alerts.say(input_error_message(&error));
+                    self.rig.input_error_status = Some(self.alerts.status().to_string());
                     *reported = true;
                 }
             }
@@ -696,7 +700,7 @@ impl App {
 
     /// Changes the input without restarting the output stream.
     fn choose_audio_input(&mut self, choice: InputChoice) {
-        self.input_alert = None;
+        self.alerts.set_input_drift(None);
         self.rig.input_tracker = None;
         self.rig.flags.input = None;
         self.rig.flags.no_input = false;
@@ -713,7 +717,7 @@ impl App {
         self.rig.input_named_lost = false;
         self.sync_audio_input();
         if let Some(error) = error {
-            self.status = error;
+            self.alerts.say(error);
         }
     }
 
@@ -757,12 +761,12 @@ impl App {
             let output = match devices::open_choice(&*self.rig.host, &play) {
                 Ok(output) => output,
                 Err(e) => {
-                    self.status = self.could_not_use(&play, &e);
+                    self.alerts.say(self.could_not_use(&play, &e));
                     return;
                 }
             };
             if let Err(e) = self.restart_audio(output) {
-                self.status = e;
+                self.alerts.say(e);
                 return;
             }
             self.rig.lost_audio = None;
@@ -777,7 +781,7 @@ impl App {
         // The flags that are left still set this run; what is saved is the
         // player's choice.
         if let Some(error) = self.rig.save(saved) {
-            self.status = error;
+            self.alerts.say(error);
         }
     }
 
@@ -971,7 +975,7 @@ impl App {
         self.refresh_values();
         // After the commit, which sets the status line too.
         if let Some(error) = record_error {
-            self.status = error;
+            self.alerts.say(error);
         }
         Ok(())
     }
@@ -992,7 +996,7 @@ impl App {
     /// Stops audio immediately without fading out. Used when the audio device
     /// was lost or disconnected (device-changes.md, Audio device loss).
     pub(crate) fn stop_audio_immediate(&mut self) {
-        self.input_alert = None;
+        self.alerts.set_input_drift(None);
         if let Some(audio) = self.stream.take_running() {
             audio.stop_immediate();
         }
@@ -1043,14 +1047,16 @@ impl App {
                 if let Ok(output) = self.rig.host.open(&options)
                     && self.restart_audio(output).is_ok()
                 {
-                    self.status = format!("Audio: \"{old_name}\" was lost. Now playing on \"{new_default}\".");
+                    self.alerts.say(format!(
+                        "Audio: \"{old_name}\" was lost. Now playing on \"{new_default}\"."
+                    ));
                     self.rig.lost_audio = None;
                     switched = true;
                 }
             }
             if !switched {
                 let message = format!("Audio: \"{old_name}\" was lost.");
-                self.status = message.clone();
+                self.alerts.say(message.clone());
                 self.rig.lost_audio = Some(LostAudio {
                     device: old_name,
                     was_system_default: true,
@@ -1064,7 +1070,7 @@ impl App {
             // Named device: plays nothing, keeps engine idle
             let message =
                 format!("Audio: \"{old_name}\" was lost. Plug it in again, or choose another device in Preferences.");
-            self.status = message.clone();
+            self.alerts.say(message.clone());
             self.rig.lost_audio = Some(LostAudio {
                 device: old_name,
                 was_system_default: false,
@@ -1119,7 +1125,9 @@ impl App {
                         if let Ok(output) = devices::open_choice(&*self.rig.host, &choice)
                             && self.restart_audio(output).is_ok()
                         {
-                            self.status = format!("Audio: \"{device_name}\" sample rate changed to {new_rate} Hz.");
+                            self.alerts.say(format!(
+                                "Audio: \"{device_name}\" sample rate changed to {new_rate} Hz."
+                            ));
                             rate_changed = true;
                         }
                     }
@@ -1162,10 +1170,10 @@ impl App {
                         match self.rig.host.open(&options) {
                             Ok(output) => match self.restart_audio(output) {
                                 Ok(()) => {
-                                    self.status = format!(
+                                    self.alerts.say(format!(
                                         "Audio: \"{}\" was lost. Now playing on \"{new_default}\".",
                                         lost.device
-                                    );
+                                    ));
                                     self.rig.lost_audio = None;
                                     return;
                                 }
@@ -1187,7 +1195,7 @@ impl App {
                             "Audio: could not reopen \"{}\": {reason}. Choose a device in Preferences.",
                             lost.device
                         );
-                        self.status = message.clone();
+                        self.alerts.say(message.clone());
                         lost.message = message;
                     }
                 }
@@ -1205,7 +1213,7 @@ impl App {
                     match devices::open_choice(&*self.rig.host, &saved) {
                         Ok(output) => match self.restart_audio(output) {
                             Ok(()) => {
-                                self.status = format!("Audio: \"{}\" is back.", lost.device);
+                                self.alerts.say(format!("Audio: \"{}\" is back.", lost.device));
                                 self.rig.lost_audio = None;
                                 return;
                             }
@@ -1226,7 +1234,7 @@ impl App {
                             "Audio: could not reopen \"{}\": {reason}. Choose a device in Preferences.",
                             lost.device
                         );
-                        self.status = message.clone();
+                        self.alerts.say(message.clone());
                         lost.message = message;
                     }
                 }
@@ -1239,7 +1247,7 @@ impl App {
     /// stops after two more silent buffers, or at the stop limit (100 ms,
     /// longer for large buffers; output safety, rule 14). Used by Open, New, quit, and device changes.
     pub(crate) fn stop_audio(&mut self) {
-        self.input_alert = None;
+        self.alerts.set_input_drift(None);
         if let Some(audio) = self.stream.take_running() {
             // A full queue cannot fade: the limit then stops the stream.
             let _ = self.controller.fade_out();
@@ -1351,7 +1359,7 @@ impl App {
         }
         self.rig.seen_midi = list;
         if !lines.is_empty() {
-            self.status = lines.join(" ");
+            self.alerts.say(lines.join(" "));
         }
     }
 
@@ -1363,7 +1371,7 @@ impl App {
             (true, Some(_)) | (false, None) => return,
             (true, None) => {
                 if let Err(e) = self.open_input(name) {
-                    self.status = format!("MIDI: {e}");
+                    self.alerts.say(format!("MIDI: {e}"));
                     return;
                 }
             }
@@ -1374,7 +1382,7 @@ impl App {
         let mut preferences = self.rig.store.saved().clone();
         preferences.midi.set(name, on);
         if let Some(error) = self.rig.save(preferences) {
-            self.status = error;
+            self.alerts.say(error);
         }
     }
 

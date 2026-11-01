@@ -90,11 +90,11 @@ fn denied_audio_input_does_not_stop_the_patch() {
     app.controller.add_module("loom.io.audio-in").unwrap();
     assert!(app.commit());
     assert!(app.stream.is_playing());
-    assert!(app.status.contains("microphone was denied"));
-    app.status = "other status".into();
+    assert!(app.alerts.status().contains("microphone was denied"));
+    app.alerts.say("other status");
     app.rig.input_attempted = None;
     app.sync_audio_input();
-    assert_eq!(app.status, "other status");
+    assert_eq!(app.alerts.status(), "other status");
 }
 
 /// A permission denied after opening silences input and reports the cause.
@@ -114,10 +114,10 @@ fn permission_denied_after_input_opens_is_reported() {
     app.sync_audio_input();
     assert!(app.rig.input.is_none());
     assert!(app.stream.is_playing());
-    assert!(app.status.contains("microphone was denied"));
-    app.status = "other status".into();
+    assert!(app.alerts.status().contains("microphone was denied"));
+    app.alerts.say("other status");
     app.sync_audio_input();
-    assert_eq!(app.status, "other status");
+    assert_eq!(app.alerts.status(), "other status");
     assert_eq!(fake.input_closes.get(), 1);
 }
 
@@ -153,7 +153,7 @@ fn unavailable_input_keeps_other_audio_playing() {
         assert!(app.commit());
         assert!(app.stream.is_playing());
         assert!(app.rig.input.is_none());
-        assert!(app.status.contains(if denied {
+        assert!(app.alerts.status().contains(if denied {
             "microphone was denied"
         } else {
             "no audio input"
@@ -162,10 +162,10 @@ fn unavailable_input_keeps_other_audio_playing() {
         assert_eq!(app.controller.display(input, 0), Some(0.0));
         assert_eq!(tape.left()[1023], 0.2);
         assert_eq!(tape.right()[1023], 0.2);
-        app.status = "other status".into();
+        app.alerts.say("other status");
         app.rig.input_attempted = None;
         app.sync_audio_input();
-        assert_eq!(app.status, "other status");
+        assert_eq!(app.alerts.status(), "other status");
     }
 }
 
@@ -192,19 +192,19 @@ fn failed_audio_input_reopens() {
     assert_eq!(fake.input_closes.get(), 1);
     assert_eq!(fake.input_opens.get(), 2);
     assert!(app.rig.input.as_ref().unwrap().is_live());
-    assert_eq!(app.status, "Audio input: \"Microphone\" is back.");
+    assert_eq!(app.alerts.status(), "Audio input: \"Microphone\" is back.");
 
     // A later loss must be reported again, even after a successful reopen.
     *fake.input_error.borrow_mut() = Some("device busy".into());
     fake.input_writer.borrow().as_ref().unwrap().status().fail();
     app.sync_audio_input();
     assert!(app.rig.input.is_none());
-    assert!(app.status.contains("was lost"));
+    assert!(app.alerts.status().contains("was lost"));
 
     // A permission refusal is distinct from the earlier device error.
     fake.input_permission_denied.set(true);
     app.sync_audio_input();
-    assert!(app.status.contains("microphone was denied"));
+    assert!(app.alerts.status().contains("microphone was denied"));
 }
 
 /// Recovery preserves newer messages, and permission denial stays once per run.
@@ -220,20 +220,24 @@ fn input_recovery_preserves_other_status_and_permission_latch() {
     let mut app = start(args(&dir), &fake);
     app.controller.add_module("loom.io.audio-in").unwrap();
     assert!(app.commit());
-    assert!(app.status.contains("microphone was denied"));
-    app.status = "newer message".into();
+    assert!(app.alerts.status().contains("microphone was denied"));
+    app.alerts.say("newer message");
     fake.input_permission_denied.set(false);
     app.sync_audio_input();
     assert!(app.rig.input.is_some());
-    assert_eq!(app.status, "newer message");
+    assert_eq!(app.alerts.status(), "newer message");
     fake.input_permission_denied.set(true);
     app.sync_audio_input();
     assert!(app.rig.input.is_none());
-    assert_eq!(app.status, "newer message", "permission denial is shown once per run");
+    assert_eq!(
+        app.alerts.status(),
+        "newer message",
+        "permission denial is shown once per run"
+    );
 
     // Choosing an input makes the permission warning eligible again.
     app.choose_audio_input(InputChoice::SystemDefault);
-    assert!(app.status.contains("microphone was denied"));
+    assert!(app.alerts.status().contains("microphone was denied"));
 }
 
 /// A lost named input stays silent until that same device returns.
@@ -279,7 +283,7 @@ fn missing_saved_input_falls_back_without_saving() {
     assert!(app.commit());
     assert_eq!(app.rig.input.as_ref().unwrap().name(), "Microphone");
     assert_eq!(app.rig.store.saved().audio.input, InputChoice::Named("Missing".into()));
-    assert!(app.status.contains("system default"));
+    assert!(app.alerts.status().contains("system default"));
 }
 
 /// Input flags apply for one run and do not replace the saved choice.
@@ -377,8 +381,8 @@ fn audio_input_plays_through_the_fake_host() {
         failed: false,
         ready: true,
     }));
-    assert!(app.status.contains("avoid feedback"));
-    app.status = "other status".into();
+    assert!(app.alerts.status().contains("avoid feedback"));
+    app.alerts.say("other status");
     let _ = app.update(crate::Message::InputAudio(crate::input_watch::Event {
         underruns: 0,
         overruns: 0,
@@ -386,7 +390,7 @@ fn audio_input_plays_through_the_fake_host() {
         failed: false,
         ready: true,
     }));
-    assert_eq!(app.status, "other status", "the warning is shown once per run");
+    assert_eq!(app.alerts.status(), "other status", "the warning is shown once per run");
 }
 
 /// A fake host supplies a recorded stereo input identically at each block size.
@@ -597,8 +601,16 @@ fn a_missing_device_falls_back_and_the_file_is_unchanged() {
     let fake = Rc::new(Fake::new(&[fake::device("Fake A")], &[]));
     let app = start(args(&dir), &fake);
     assert_eq!(fake.opened(), ["Fake A"]);
-    assert!(app.status.contains("\"Fake B\" is not connected"), "{}", app.status);
-    assert!(app.status.contains("Playing on \"Fake A\""), "{}", app.status);
+    assert!(
+        app.alerts.status().contains("\"Fake B\" is not connected"),
+        "{}",
+        app.alerts.status()
+    );
+    assert!(
+        app.alerts.status().contains("Playing on \"Fake A\""),
+        "{}",
+        app.alerts.status()
+    );
     assert_eq!(std::fs::read_to_string(path).unwrap(), text);
     assert_eq!(
         app.rig.shown_audio().device,
@@ -615,9 +627,9 @@ fn a_rate_the_device_does_not_offer_plays_at_its_default() {
     let app = start(args(&dir), &two_devices());
     assert_eq!(app.stream.sample_rate(), 48_000.0);
     assert!(
-        app.status.contains("does not offer 96000 Hz. Using 48000 Hz."),
+        app.alerts.status().contains("does not offer 96000 Hz. Using 48000 Hz."),
         "{}",
-        app.status
+        app.alerts.status()
     );
     assert_eq!(std::fs::read_to_string(path).unwrap(), text);
 }
@@ -692,7 +704,7 @@ fn a_device_that_fails_to_open_leaves_the_old_one_playing() {
     assert_eq!(app.rig.playing.as_ref().unwrap().device, "Fake A");
     assert!(!dir.join(FILE_NAME).exists(), "nothing saved");
     assert_eq!(
-        app.status,
+        app.alerts.status(),
         "Could not use \"Fake B\" at 48000 Hz: the device is busy. Still playing on \"Fake A\"."
     );
 }
@@ -717,7 +729,7 @@ fn a_device_that_fails_to_start_hands_back_to_the_old_one() {
     assert!(fake.is_open("Keys"));
     assert!(!dir.join(FILE_NAME).exists(), "nothing saved");
     assert_eq!(
-        app.status,
+        app.alerts.status(),
         "Could not use \"Fake B\": the stream did not start. Still playing on \"Fake A\"."
     );
 }
@@ -743,7 +755,7 @@ fn when_neither_device_starts_audio_is_off_and_nothing_is_saved() {
     assert!(app.rig.playing.is_none());
     assert!(!dir.join(FILE_NAME).exists(), "nothing saved");
     assert_eq!(
-        app.status,
+        app.alerts.status(),
         "Could not use \"Fake B\": the stream did not start. Audio is off."
     );
 
@@ -759,7 +771,11 @@ fn when_neither_device_starts_audio_is_off_and_nothing_is_saved() {
             index: 0,
             position: (i % 100) as f32 / 100.0,
         });
-        assert!(!app.status.contains("queue is full"), "move {i}: {}", app.status);
+        assert!(
+            !app.alerts.status().contains("queue is full"),
+            "move {i}: {}",
+            app.alerts.status()
+        );
     }
 }
 
@@ -926,7 +942,7 @@ fn an_input_plugged_in_is_opened_unless_it_is_off() {
         Ok(&["Keys".to_string(), "Drums".to_string()][..]),
         "the window follows"
     );
-    assert_eq!(app.status, "MIDI: \"Keys\" connected.");
+    assert_eq!(app.alerts.status(), "MIDI: \"Keys\" connected.");
     fake.play("Keys", &[0x90, 60, 100]);
     assert!(wait_for(&app, 1.0), "a note on it plays");
 }
@@ -944,7 +960,7 @@ fn an_input_unplugged_releases_its_notes_and_comes_back() {
     fake.unplug("Keys");
     app.poll_midi();
     assert!(wait_for(&app, 0.0), "the held note is released");
-    assert_eq!(app.status, "MIDI: \"Keys\" disconnected.");
+    assert_eq!(app.alerts.status(), "MIDI: \"Keys\" disconnected.");
     assert!(!fake.is_open("Keys"));
     assert!(app.stream.is_playing(), "the app keeps playing");
 
@@ -1024,18 +1040,30 @@ fn inputs_that_fail_are_reported_and_the_others_play() {
     fake.broken_midi.borrow_mut().push("Late".into());
     let mut app = start(args(&dir), &fake);
     assert_eq!(app.open_midi_inputs(), ["Keys"]);
-    assert!(app.status.contains("Busy: the port is busy"), "{}", app.status);
+    assert!(
+        app.alerts.status().contains("Busy: the port is busy"),
+        "{}",
+        app.alerts.status()
+    );
 
-    app.status.clear();
+    app.alerts.say(String::new());
     app.poll_midi();
-    assert!(app.status.is_empty(), "nothing changed: {}", app.status);
+    assert!(
+        app.alerts.status().is_empty(),
+        "nothing changed: {}",
+        app.alerts.status()
+    );
     fake.plug("Late");
     app.poll_midi();
-    assert!(app.status.contains("could not open \"Late\""), "{}", app.status);
+    assert!(
+        app.alerts.status().contains("could not open \"Late\""),
+        "{}",
+        app.alerts.status()
+    );
     assert_eq!(app.open_midi_inputs(), ["Keys"]);
 
     app.preferences(Message::Midi("Busy".into(), true));
-    assert!(app.status.starts_with("MIDI: Busy"), "{}", app.status);
+    assert!(app.alerts.status().starts_with("MIDI: Busy"), "{}", app.alerts.status());
     assert_eq!(app.open_midi_inputs(), ["Keys"]);
 
     fake.midi_list_fails.set(true);
@@ -1052,7 +1080,11 @@ fn an_unreadable_input_list_at_start_is_reported() {
     fake.midi_list_fails.set(true);
     let app = start(args(&dir), &fake);
     assert!(app.rig.ports.is_empty());
-    assert!(app.status.contains("the MIDI service is not running"), "{}", app.status);
+    assert!(
+        app.alerts.status().contains("the MIDI service is not running"),
+        "{}",
+        app.alerts.status()
+    );
 }
 
 /// The Panic section of the window: Learn shows it is waiting and turns
@@ -1071,7 +1103,7 @@ fn the_panic_section_learns_and_cancels() {
     let _ = app.update(crate::Message::Midi);
     assert_eq!(app.panic_line(), "Waiting for MIDI...", "no MIDI came yet");
     app.preferences(Message::PanicLearn);
-    assert!(app.status.contains("cancelled"), "{}", app.status);
+    assert!(app.alerts.status().contains("cancelled"), "{}", app.alerts.status());
     assert_eq!(app.panic_line(), "None");
 
     // A note on is learned too.
@@ -1271,9 +1303,9 @@ fn a_failed_save_still_changes_the_mode() {
     app.preferences(Message::Safety(OutputSafety::Clean));
     assert_eq!(app.rig.sent, [OutputSafety::Clean], "the engine runs Clean");
     assert!(
-        app.status.ends_with("The change applies until you quit."),
+        app.alerts.status().ends_with("The change applies until you quit."),
         "{}",
-        app.status
+        app.alerts.status()
     );
 }
 
@@ -1310,7 +1342,11 @@ fn a_broken_file_still_starts_with_safety_on() {
     let path = write(&dir, "(output_safety: \"off\"");
     let mut app = start(args(&dir), &two_devices());
     assert_eq!(app.controller.config().output_safety, OutputSafety::LowLatency);
-    assert!(app.status.contains("Could not read preferences"), "{}", app.status);
+    assert!(
+        app.alerts.status().contains("Could not read preferences"),
+        "{}",
+        app.alerts.status()
+    );
     app.preferences(Message::Safety(OutputSafety::Clean));
     assert_eq!(
         std::fs::read_to_string(dir.join("preferences.broken.ron")).unwrap(),
@@ -1514,4 +1550,33 @@ fn the_status_bar_counts_midi_and_hides_developer_tools() {
             "developer tools with --dev only"
         );
     }
+}
+
+/// When the preferences file cannot be written, each choice still applies
+/// to this run, and the status line says why it was not saved.
+#[test]
+fn failed_saves_say_why_and_keep_the_choice() {
+    let dir = folder("unwritable-choices");
+    std::fs::write(dir.join("blocked"), "").unwrap();
+    let mut args = args(&dir);
+    args.devices.preferences = Some(dir.join("blocked").join(FILE_NAME));
+    let mut app = start(args, &two_devices());
+    let unsaved = |app: &App| app.alerts.status().ends_with("The change applies until you quit.");
+
+    app.alerts.say(String::new());
+    let shown = app.rig.store.saved().show_activity;
+    app.preferences(Message::Activity(!shown));
+    assert!(unsaved(&app), "{}", app.alerts.status());
+
+    app.alerts.say(String::new());
+    change(&mut app, Change::Device(DeviceChoice::Named("Fake B".into())));
+    assert!(unsaved(&app), "{}", app.alerts.status());
+
+    app.alerts.say(String::new());
+    app.set_panic_pref(Some(crate::preferences::PanicPref::Cc(0, 123)));
+    assert!(unsaved(&app), "{}", app.alerts.status());
+    app.alerts.say(String::new());
+    app.preferences(Message::PanicClear);
+    assert!(unsaved(&app), "{}", app.alerts.status());
+    assert_eq!(app.rig.store.saved().panic, None, "cleared for this run");
 }

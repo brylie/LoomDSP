@@ -34,9 +34,10 @@ impl App {
         match self.controller.panic() {
             Ok(()) => {
                 self.holding = false;
-                self.status = "Panic: every note released and every module reset.".to_string();
+                self.alerts
+                    .say("Panic: every note released and every module reset.".to_string());
             }
-            Err(e) => self.status = format!("Panic: {e}"),
+            Err(e) => self.alerts.say(format!("Panic: {e}")),
         }
     }
 
@@ -45,7 +46,7 @@ impl App {
     pub(crate) fn send_panic_trigger(&mut self) {
         let trigger = self.rig.store.saved().panic.map(PanicPref::trigger);
         if let Err(e) = self.controller.set_panic_trigger(trigger) {
-            self.status = format!("Panic: {e}");
+            self.alerts.say(format!("Panic: {e}"));
         }
     }
 
@@ -54,13 +55,14 @@ impl App {
     pub(crate) fn learn_panic(&mut self) {
         if self.rig.panic_learn.is_some() {
             self.rig.panic_learn = None;
-            self.status = "Panic: learn cancelled.".to_string();
+            self.alerts.say("Panic: learn cancelled.".to_string());
             return;
         }
         let cc = self.controller.last_control_change().map(|seen| seen.serial);
         let note = self.controller.last_note_on().map(|seen| seen.serial);
         self.rig.panic_learn = Some(cc.max(note).unwrap_or(0));
-        self.status = "Panic: move a control or press a pad to set the trigger.".to_string();
+        self.alerts
+            .say("Panic: move a control or press a pad to set the trigger.".to_string());
     }
 
     /// Takes the first control change or note on that arrived since learn
@@ -91,7 +93,7 @@ impl App {
         };
         self.rig.panic_learn = None;
         self.set_panic_pref(Some(learned));
-        self.status = format!("Panic: {}.", learned.trigger());
+        self.alerts.say(format!("Panic: {}.", learned.trigger()));
         true
     }
 
@@ -103,7 +105,7 @@ impl App {
         let mut preferences = self.rig.store.saved().clone();
         preferences.panic = panic;
         if let Some(error) = self.rig.store.save(preferences).err() {
-            self.status = error;
+            self.alerts.say(error);
         }
         self.send_panic_trigger();
     }
