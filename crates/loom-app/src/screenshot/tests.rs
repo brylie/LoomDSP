@@ -107,7 +107,7 @@ fn a_window_drag_draws_over_the_inspector() {
         output: true,
     };
     assert!(app.scene.port(from).is_some());
-    app.assign_drag = Some(crate::AssignDrag {
+    app.gestures.drag(crate::gestures::AssignDrag {
         from,
         start: Point::new(900.0, 400.0),
         at: Some(Point::new(1250.0, 150.0)),

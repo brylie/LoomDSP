@@ -18,6 +18,7 @@ mod edits;
 #[cfg(test)]
 mod example_tests;
 mod files;
+mod gestures;
 mod help;
 mod input_watch;
 mod inspector;
@@ -486,15 +487,6 @@ fn opened_status(path: &std::path::Path, notes: &[String]) -> String {
     }
 }
 
-/// An output drag drawn across the window with the canvas's zoom.
-#[derive(Clone, Copy)]
-struct AssignDrag {
-    from: loom_canvas::PortRef,
-    start: Point,
-    at: Option<Point>,
-    zoom: f32,
-}
-
 struct App {
     controller: Controller,
     /// A full command queue left fresh modules staged for a later commit.
@@ -502,18 +494,15 @@ struct App {
     positions: BTreeMap<u32, Point>,
     /// Original placeholder positions and their initial displayed positions.
     unknown_positions: BTreeMap<u32, (Option<(f32, f32)>, Point)>,
-    /// Unapplied inspector label text for a placeholder.
-    unknown_label_draft: Option<(u32, String)>,
     /// Saved tile dimensions in grid units, keyed by module ID.
     sizes: BTreeMap<u32, (u8, u8)>,
     scene: Scene,
     /// The mode values the scene was built with (ADR-0030). A change
     /// rebuilds the scene, so hidden controls follow the mode.
     mode_key: Vec<(u32, usize, i64)>,
-    /// The output drag drawn over the entire window.
-    assign_drag: Option<AssignDrag>,
-    /// The eligible inspector row under the pointer.
-    drop_row: Option<(u32, usize)>,
+    /// Modulation gestures in progress: the Add modulation list, an output
+    /// dragged onto the inspector, an arc drag, a placeholder label.
+    gestures: gestures::Gestures,
     /// Live values of panel controls and lights, apart from the scene so a
     /// knob turn does not rebuild tiles or cables.
     values: PanelValues,
@@ -625,13 +614,8 @@ struct App {
     arrow_group_pending: bool,
     /// A toolbar or inspector action closed that group before its canvas timer.
     arrow_group_closed: bool,
-    /// The parameter whose **Add modulation** list is open.
-    adding: Option<(u32, usize)>,
     /// Session-only matrix tab, filters, selection, and pending edit.
     matrix: matrix::State,
-    /// During an arc drag: the assignment it changes, once picked, or
-    /// `Some(None)` when none fits and the drag does nothing.
-    depth_drag: Option<Option<AssignmentId>>,
     /// Whether the current patch has already reported a full live-value table.
     live_value_overflow_reported: bool,
     /// How the canvas starts, for a still image of the window
@@ -994,12 +978,10 @@ impl App {
             retry_commit: false,
             positions,
             unknown_positions,
-            unknown_label_draft: None,
             sizes,
             mode_key,
             scene,
-            assign_drag: None,
-            drop_row: None,
+            gestures: gestures::Gestures::default(),
             values,
             lights: BTreeMap::new(),
             run_driven,
@@ -1074,9 +1056,7 @@ impl App {
             edits: edits::Edits::default(),
             arrow_group_pending: false,
             arrow_group_closed: false,
-            adding: None,
             matrix: matrix::State::default(),
-            depth_drag: None,
             live_value_overflow_reported: false,
             still: None,
             step_name: None,
@@ -1720,7 +1700,7 @@ impl App {
                 .unwrap_or_default();
             shown.insert(widget, (level.rms, level.peak, level.right));
         }
-        let dragging = self.depth_drag.flatten();
+        let dragging = self.gestures.depth_target();
         scene::update_panel_values_dragging(&mut self.values, &self.controller, &shown, dragging);
         // A scope's window or trigger may have changed.
         self.publish_watch();
@@ -1950,7 +1930,7 @@ impl App {
             return;
         };
         let graph = self.controller.graph();
-        let picked = *self.depth_drag.get_or_insert_with(|| {
+        let picked = self.gestures.pick_depth(|| {
             let pinned = pinned.map(|p| OutputRef {
                 module: ModuleId(p.module),
                 port: p.index,
@@ -2091,7 +2071,7 @@ impl App {
 
     /// Undoes (`forward` false) or redoes the next step.
     fn step(&mut self, forward: bool) {
-        self.unknown_label_draft = None;
+        self.gestures.clear_label();
         let step = if forward {
             self.edits.history.redo_step()
         } else {
@@ -2448,9 +2428,9 @@ impl App {
             }
             Message::AddProbe { probe, output, world } => self.add_probe(probe, output, world),
             Message::Canvas(event) => self.canvas_event(event),
-            Message::UnknownLabelDraft { module, value } => self.unknown_label_draft = Some((module, value)),
+            Message::UnknownLabelDraft { module, value } => self.gestures.draft_label(module, value),
             Message::UnknownLabelApply { module } => {
-                if let Some((_, value)) = self.unknown_label_draft.take().filter(|(id, _)| *id == module) {
+                if let Some(value) = self.gestures.take_label(module) {
                     let label = (!value.is_empty()).then_some(value);
                     self.edit(|app| {
                         if app.controller.set_unknown_label(ModuleId(module), label) {
@@ -2460,11 +2440,8 @@ impl App {
                 }
             }
             Message::DropRow(row) => {
-                self.drop_row = if self.assign_drag.is_some() && !self.learn.is_on() {
-                    row
-                } else {
-                    None
-                };
+                let allowed = !self.learn.is_on();
+                self.gestures.hover_row(row, allowed);
             }
             Message::Param {
                 module,
@@ -2507,14 +2484,10 @@ impl App {
             Message::Range { module, index, range } => self.set_range(module, index, range),
             Message::SliderReleased => self.close_slider_gesture(),
             Message::AddModulation { module, index } => {
-                self.adding = if self.adding == Some((module, index)) {
-                    None
-                } else {
-                    Some((module, index))
-                };
+                self.gestures.toggle_adding((module, index));
             }
             Message::Assign { source, module, index } => {
-                self.adding = None;
+                self.gestures.close_adding();
                 self.close_slider_gesture();
                 self.edit(|app| app.assign(source, ModuleId(module), index));
             }
@@ -2759,8 +2732,7 @@ impl App {
         };
         if forbidden {
             self.status = "Cannot connect to an unknown module".into();
-            self.assign_drag = None;
-            self.drop_row = None;
+            self.gestures.cancel_drag();
             return;
         }
         let edits = undo::is_edit(&self.controller, &event);
@@ -2776,34 +2748,26 @@ impl App {
         match event {
             CanvasEvent::PointerDown => {}
             CanvasEvent::AssignDrag { from, start, at, zoom } => {
-                self.assign_drag = Some(AssignDrag { from, start, at, zoom });
+                self.gestures.drag(gestures::AssignDrag { from, start, at, zoom });
             }
             CanvasEvent::AssignDrop { from, at } => {
-                if at.is_some()
-                    && self.assign_drag.is_some_and(|drag| drag.from == from)
-                    && !self.learn.is_on()
-                    && let Some((module, index)) = self.drop_row
-                {
+                let landed = at.is_some() && !self.learn.is_on();
+                if let Some((module, index)) = self.gestures.finish_drag(from, landed) {
                     let source = OutputRef {
                         module: ModuleId(from.module),
                         port: from.index,
                     };
                     self.assign(source, ModuleId(module), index);
                 }
-                self.assign_drag = None;
-                self.drop_row = None;
             }
-            CanvasEvent::AssignCancel => {
-                self.assign_drag = None;
-                self.drop_row = None;
-            }
+            CanvasEvent::AssignCancel => self.gestures.cancel_drag(),
             CanvasEvent::GestureStart => {
                 self.close_slider_gesture();
                 self.edits.start_gesture();
                 self.begin_edit();
             }
             CanvasEvent::GestureEnd => {
-                if self.depth_drag.take().is_some() {
+                if self.gestures.end_depth() {
                     self.refresh_values();
                 }
                 self.end_gesture();
@@ -3160,7 +3124,7 @@ impl App {
     fn view(&self) -> Element<'_, Message> {
         let mut canvas = PatchCanvas::new(&self.scene, &self.selection, Message::Canvas)
             .values(&self.values)
-            .window_drag_line(self.assign_drag.is_some())
+            .window_drag_line(self.gestures.assign_drag().is_some())
             .traces(&self.traces)
             .activity(self.carrying.iter().map(|output| (output.module.0, output.port)))
             .frame_key(self.frame_key)
@@ -3203,7 +3167,7 @@ impl App {
         // (its camera) in the same place in the widget tree. Tested by
         // `ui_test::tests::the_camera_survives_opening_the_browser`.
         let mut layers = stack![main];
-        if let Some(drag) = self.assign_drag
+        if let Some(drag) = self.gestures.assign_drag()
             && let Some(at) = drag.at
             && let Some(port) = self.scene.port(drag.from)
         {
@@ -3369,8 +3333,8 @@ impl App {
     fn inspector(&self) -> Element<'_, Message> {
         inspector::view(
             self.inspector_model(),
-            self.drop_row,
-            self.assign_drag.is_some() && !self.learn.is_on(),
+            self.gestures.drop_row(),
+            self.gestures.assign_drag().is_some() && !self.learn.is_on(),
         )
     }
 

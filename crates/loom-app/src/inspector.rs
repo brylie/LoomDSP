@@ -283,10 +283,9 @@ impl App {
                 id,
                 kind: unknown.kind.clone(),
                 label: self
-                    .unknown_label_draft
-                    .as_ref()
-                    .filter(|(module, _)| *module == id)
-                    .map_or_else(|| unknown.label.clone().unwrap_or_default(), |(_, label)| label.clone()),
+                    .gestures
+                    .label_draft(id)
+                    .map_or_else(|| unknown.label.clone().unwrap_or_default(), str::to_string),
                 params: unknown
                     .params
                     .iter()
@@ -337,7 +336,7 @@ impl App {
                         step: param::slider_step(spec),
                         control: ParamControl::of(spec, value),
                         assignments: self.assignment_rows(id, index),
-                        adding: (self.adding == Some((id, index))).then(|| self.sources(id, index)),
+                        adding: (self.gestures.adding() == Some((id, index))).then(|| self.sources(id, index)),
                     }
                 };
                 let unused = (!d.is_shown(index, &node.params)).then(|| {

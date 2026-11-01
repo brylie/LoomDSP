@@ -521,10 +521,13 @@ mod tests {
         ui.move_to(from);
         ui.press();
         ui.move_to(cutoff);
-        assert_eq!(ui.app.assign_drag.expect("window drag").zoom, ui.canvas().camera.zoom);
-        assert_eq!(ui.app.drop_row, Some((4, 0)));
+        assert_eq!(
+            ui.app.gestures.assign_drag().expect("window drag").zoom,
+            ui.canvas().camera.zoom
+        );
+        assert_eq!(ui.app.gestures.drop_row(), Some((4, 0)));
         ui.move_to(resonance);
-        assert_eq!(ui.app.drop_row, Some((4, 1)));
+        assert_eq!(ui.app.gestures.drop_row(), Some((4, 1)));
         ui.release();
     }
 
@@ -552,7 +555,7 @@ mod tests {
         ui.move_to(from);
         ui.press();
         ui.move_to(row);
-        assert_eq!(ui.app.drop_row, None);
+        assert_eq!(ui.app.gestures.drop_row(), None);
         ui.release();
         assert_eq!(ui.app.controller.graph().assignments().count(), before);
     }
@@ -592,7 +595,7 @@ mod tests {
             }
             ui.release();
             assert_eq!(ui.app.controller.graph().assignments().count(), before);
-            assert!(ui.app.assign_drag.is_none());
+            assert!(ui.app.gestures.assign_drag().is_none());
         }
     }
 
@@ -613,13 +616,13 @@ mod tests {
         ui.cursor = mouse::Cursor::Unavailable;
         ui.step(&[Event::Mouse(mouse::Event::CursorLeft)]);
         ui.move_to(Point::new(WINDOW.width + 20.0, WINDOW.height + 20.0));
-        assert!(ui.app.assign_drag.is_some_and(|drag| drag.at.is_none()));
+        assert!(ui.app.gestures.assign_drag().is_some_and(|drag| drag.at.is_none()));
         ui.release();
         assert_eq!(ui.app.controller.graph().assignments().count(), before);
         let _ = ui.app.update(Message::Learn(crate::learn::Message::Toggle));
         ui.drag(from, row, 8);
         assert_eq!(ui.app.controller.graph().assignments().count(), before);
-        assert_eq!(ui.app.drop_row, None);
+        assert_eq!(ui.app.gestures.drop_row(), None);
     }
 
     fn connected(ui: &Ui, from: (u32, usize), to: (u32, usize)) -> bool {
@@ -663,10 +666,10 @@ mod tests {
         ui.move_to(from);
         ui.press();
         ui.move_to(Point::new(input.x + 3.0, input.y + 2.0));
-        assert_eq!(ui.app.assign_drag.expect("output drag").at, Some(input));
+        assert_eq!(ui.app.gestures.assign_drag().expect("output drag").at, Some(input));
         let empty = Point::new(1000.0, 800.0);
         ui.move_to(empty);
-        assert_eq!(ui.app.assign_drag.expect("output drag").at, Some(empty));
+        assert_eq!(ui.app.gestures.assign_drag().expect("output drag").at, Some(empty));
         ui.release();
     }
 

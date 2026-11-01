@@ -455,13 +455,13 @@ fn add_modulation_matches_a_drop() {
         module: filter.0,
         index: cutoff,
     });
-    assert_eq!(app.adding, Some((filter.0, cutoff)));
+    assert_eq!(app.gestures.adding(), Some((filter.0, cutoff)));
     let _ = app.update(Message::Assign {
         source,
         module: filter.0,
         index: cutoff,
     });
-    assert_eq!(app.adding, None);
+    assert_eq!(app.gestures.adding(), None);
     let picked = assignments(&app);
     assert!(modulation::exists(app.controller.graph(), source, filter, cutoff));
 
@@ -681,7 +681,7 @@ fn an_arc_drag_is_one_step_and_shows_only_its_assignment() {
     let during = mark(&app);
     assert_ne!(during, both, "the arc shows the dragged assignment alone");
     let _ = app.update(Message::Canvas(CanvasEvent::GestureEnd));
-    assert_eq!(app.depth_drag, None);
+    assert!(!app.gestures.depth_dragging());
     let depth = |app: &App| {
         app.controller
             .graph()

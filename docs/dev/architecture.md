@@ -140,6 +140,9 @@ The app's state is moving into owned parts, one domain at a time (#466), in the 
 |---|---|---|
 | `learn::Learn` (`learn.rs`) | Whether MIDI learn is on, the armed parameter, and what the canvas shows | `Message::Learn(learn::Message)` |
 | `document::Document` (`document.rs`) | The patch's name and file, what the title and the save dialog show, the bundled-examples rule, the saved content that tells unsaved work apart, and the recovery copy and autosave timer | File commands stay `Message::File(FileAction)`, handled by `App::file_action`, because saving also needs the graph, undo, and dialogs |
+| `gestures::Gestures` (`gestures.rs`) | Modulation gestures in progress: the open **Add modulation** list, an output dragged onto an inspector row and the row under it, an arc drag's picked assignment, and a placeholder label being typed | Inspector and canvas messages, such as `AddModulation`, `DropRow`, and `UnknownLabelDraft`; the finished edit goes through undo in `App` |
+
+The selection is not a part: the canvas, inspector, matrix, clipboard, undo, and snapshot all read it, so it stays on `App` as shared state, as the graph stays shared in `Controller`.
 
 ## View models for app panels
 
