@@ -490,11 +490,12 @@ pub fn view<'a>(model: MatrixModel, state: &State, graph: &Graph) -> Element<'a,
             .step(0.01_f32)
             // Cards share one width, so filling it lines the sliders up.
             .width(Length::Fill);
-        let polarity: Element<'a, Message> = if editing.is_some_and(|e| e.column == Column::Polarity) {
-            let assignment = graph.assignment(id).expect("visible assignment");
+        let polarity: Element<'a, Message> = if let Some(edit) = editing.filter(|e| e.column == Column::Polarity)
+            && let Some(assignment) = graph.assignment(id)
+        {
             let own = modulation::source_polarity(graph, assignment.source);
             let options = PolarityChoice::options(own);
-            let current = options[editing.expect("editing polarity").choice];
+            let current = options[edit.choice];
             pick_list(options, Some(current), move |p| Message::Matrix(Event::Polarity(id, p)))
                 .text_size(style::SMALL)
                 .into()
@@ -802,10 +803,9 @@ impl App {
             self.matrix.edit = None;
             return;
         }
-        if self.matrix.add.is_some() {
+        if let Some(add) = self.matrix.add.as_mut() {
             let options_sources = sources(self.controller.graph());
             let options_targets = targets(self.controller.graph());
-            let add = self.matrix.add.as_mut().expect("open add");
             match key {
                 keyboard::Key::Named(Named::ArrowLeft) => self.matrix.cell = Column::Source,
                 keyboard::Key::Named(Named::ArrowRight) => self.matrix.cell = Column::Target,

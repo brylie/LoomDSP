@@ -669,8 +669,8 @@ impl App {
                         .is_some_and(|status| status == self.status);
                     if let Some(name) = fallback {
                         self.status = format!("Audio input: \"{name}\" is not available. Using the system default.");
-                    } else if error_was_shown {
-                        let name = self.rig.input.as_ref().expect("input was just installed").name();
+                    } else if error_was_shown && let Some(input) = self.rig.input.as_ref() {
+                        let name = input.name();
                         self.status = format!("Audio input: \"{name}\" is back.");
                     }
                 }
@@ -962,7 +962,8 @@ impl App {
                 self.audio_callbacks_seen = 0;
                 self.audio_callbacks_advanced = Instant::now();
             }
-            Err((engine, e)) => {
+            Err(refused) => {
+                let (engine, e) = *refused;
                 self.audio_name = format!("no audio ({e})");
                 self.rig.playing = None;
                 self.midi = None;

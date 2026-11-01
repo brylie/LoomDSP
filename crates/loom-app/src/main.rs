@@ -1014,7 +1014,7 @@ impl App {
         // alongside them, so a keyboard is never hidden behind another port.
         // The inputs are opened once the app is built, on its controller.
         let first_midi = rig.attach(sender);
-        let midi = rig.midi_in.clone().expect("attached");
+        let midi = rig.midi_in.clone().expect("Rig::attach always sets midi_in");
 
         let (audio, midi, audio_name, idle_engine) = match output {
             Ok(mut output) => {
@@ -1428,43 +1428,45 @@ impl App {
             .map(Message::Audio),
             None => Subscription::none(),
         };
-        let input_watch = self.rig.input.as_ref().map(|input| {
-            let stats = self.controller.stats().clone();
-            let tracker = self
-                .rig
-                .input_tracker
-                .as_ref()
-                .expect("open input has drift tracker")
-                .clone();
-            Subscription::run_with(
-                input_watch::Watch {
-                    status: input.status(),
-                    stats,
-                    tracker,
-                    device: input.name().to_string(),
-                    system_default: self.rig.flags.input.is_none()
-                        && matches!(
-                            self.rig.store.saved().audio.input,
-                            preferences::InputChoice::SystemDefault
-                        ),
-                    list: self.rig.host.audio_input_lister(),
-                    permission_denied: self.rig.host.audio_input_permission_checker(),
-                    active: self
-                        .controller
-                        .graph()
-                        .nodes()
-                        .filter_map(|(id, node)| {
-                            (node.descriptor.id == "loom.io.audio-in")
-                                .then(|| self.controller.display_source(id, 0))
-                                .flatten()
-                        })
-                        .collect(),
-                    displays: self.controller.display_reader(),
-                },
-                input_watch::stream,
-            )
-            .map(Message::InputAudio)
-        });
+        // An open input always has a drift tracker: both are set and cleared
+        // together.
+        let input_watch = self
+            .rig
+            .input
+            .as_ref()
+            .zip(self.rig.input_tracker.as_ref())
+            .map(|(input, tracker)| {
+                let stats = self.controller.stats().clone();
+                let tracker = tracker.clone();
+                Subscription::run_with(
+                    input_watch::Watch {
+                        status: input.status(),
+                        stats,
+                        tracker,
+                        device: input.name().to_string(),
+                        system_default: self.rig.flags.input.is_none()
+                            && matches!(
+                                self.rig.store.saved().audio.input,
+                                preferences::InputChoice::SystemDefault
+                            ),
+                        list: self.rig.host.audio_input_lister(),
+                        permission_denied: self.rig.host.audio_input_permission_checker(),
+                        active: self
+                            .controller
+                            .graph()
+                            .nodes()
+                            .filter_map(|(id, node)| {
+                                (node.descriptor.id == "loom.io.audio-in")
+                                    .then(|| self.controller.display_source(id, 0))
+                                    .flatten()
+                            })
+                            .collect(),
+                        displays: self.controller.display_reader(),
+                    },
+                    input_watch::stream,
+                )
+                .map(Message::InputAudio)
+            });
         // Live modulated values move every block, so a patch with an
         // assignment that is on follows them every frame.
         // Without audio the engine does not run, so nothing moves.

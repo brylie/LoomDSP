@@ -335,10 +335,8 @@ fn start_with(root: &Path, perform: Perform) -> Result<Startup, String> {
     orphans.sort_by_key(|o| std::cmp::Reverse(o.written));
     // The rest are released, and offered at later starts.
     let orphan = (!orphans.is_empty()).then(|| orphans.remove(0));
-    Ok(Startup {
-        session: Session::new(dir, lock, perform),
-        orphan,
-    })
+    let session = Session::new(dir, lock, perform).map_err(|e| format!("cannot start the autosave thread: {e}"))?;
+    Ok(Startup { session, orphan })
 }
 
 impl Orphan {
@@ -469,7 +467,9 @@ struct Writer {
 }
 
 impl Writer {
-    fn spawn(dir: PathBuf, mut perform: Perform) -> Self {
+    /// Starts the thread. The system can refuse a new thread; then autosave
+    /// is off for this run, as when the folder cannot be made.
+    fn spawn(dir: PathBuf, mut perform: Perform) -> io::Result<Self> {
         let shared = Arc::new(Shared {
             state: Mutex::new(WriterState::default()),
             changed: Condvar::new(),
@@ -511,9 +511,8 @@ impl Writer {
                     state.done.push((id, result));
                     thread.changed.notify_all();
                 }
-            })
-            .expect("the recovery writer thread starts");
-        Self { shared, next: 0 }
+            })?;
+        Ok(Self { shared, next: 0 })
     }
 
     /// Hands a job to the thread, in place of any it has not started.
@@ -672,16 +671,16 @@ pub struct Session {
 }
 
 impl Session {
-    fn new(dir: PathBuf, lock: File, perform: Perform) -> Self {
-        Self {
-            writer: Writer::spawn(dir.clone(), perform),
+    fn new(dir: PathBuf, lock: File, perform: Perform) -> io::Result<Self> {
+        Ok(Self {
+            writer: Writer::spawn(dir.clone(), perform)?,
             #[cfg(test)]
             dir,
             lock: Some(lock),
             schedule: Schedule::default(),
             failing: false,
             restored_from: None,
-        }
+        })
     }
 
     /// The session folder.

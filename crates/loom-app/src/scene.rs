@@ -332,7 +332,9 @@ pub fn update_panel_values_dragging(
                 match d.control_param(w, &node.params) {
                     Some(p) => {
                         // The knob spans the selected range (control-ranges.md).
-                        let spec = &node.spec(p).expect("the index is a parameter");
+                        let spec = &node
+                            .spec(p)
+                            .expect("node.spec covers every parameter index of the node");
                         let value = node.params[p];
                         let all = reaches.get(&(id, p)).map_or(&[][..], Vec::as_slice);
                         let assigned = match &dragged {
