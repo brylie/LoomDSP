@@ -12,8 +12,8 @@ fn a_full_queue_retries_staged_modules() {
     };
     let parts = create_engine(registry(true), config);
     app.controller = parts.controller;
-    app.idle_engine = Some(parts.engine);
-    app._audio = None;
+    app.stream.keep_idle(parts.engine);
+    app.stream.set_running(None);
     for _ in 0..4 {
         app.controller.add_module("loom.osc.sine").unwrap();
     }
@@ -36,8 +36,8 @@ fn live_value_overflow_warning_is_latched_per_patch() {
     let mut app = app();
     let parts = create_engine(registry(true), EngineConfig::default());
     app.controller = parts.controller;
-    app.idle_engine = Some(parts.engine);
-    app._audio = None;
+    app.stream.keep_idle(parts.engine);
+    app.stream.set_running(None);
     let source = app.controller.add_module("loom.math.constant").unwrap();
     let mut last = None;
     for _ in 0..257 {
@@ -80,15 +80,15 @@ fn audio_watcher_events_update_the_stats_model() {
         peak: 0.95,
         max: 0.95,
     }));
-    assert_eq!(app.load_peak, 0.95);
-    assert_eq!(app.load_max, 0.95);
+    assert_eq!(app.stream.load().0, 0.95);
+    assert_eq!(app.stream.load().1, 0.95);
     assert_eq!(app.dropouts.count(), 1);
     let _ = app.update(Message::Audio(audio_watch::Event::Stalled {
         callbacks: 3,
         advanced: now,
     }));
-    assert_eq!(app.audio_callbacks_seen, 3);
-    assert!(app.audio_callbacks_advanced >= now);
+    assert_eq!(app.stream.callbacks().0, 3);
+    assert!(app.stream.callbacks().1 >= now);
 }
 
 /// #16: the inspector help text names every canvas shortcut, the new
@@ -206,7 +206,7 @@ fn fake_audio_keeps_taking_edits() {
         no_audio: false,
         ..app_args()
     });
-    assert!(app._audio.is_some(), "the clock plays the engine");
+    assert!(app.stream.is_playing(), "the clock plays the engine");
     let filter = app.controller.add_module("loom.filter.svf").unwrap();
     app.commit();
     for burst in 0..10 {
@@ -229,7 +229,7 @@ fn fake_audio_keeps_taking_edits() {
 #[test]
 fn no_audio_keeps_taking_edits() {
     let mut app = app();
-    assert!(app._audio.is_none() && app.idle_engine.is_some());
+    assert!(!app.stream.is_playing() && app.stream.is_idle());
     let filter = app.controller.add_module("loom.filter.svf").unwrap();
     app.commit();
     let capacity = loom_core::EngineConfig::default().command_capacity;
@@ -1721,7 +1721,7 @@ fn the_transport_position_moves_only_while_running() {
     app.controller.add_assignment(out(scale), filter, cutoff, 1.0).unwrap();
     app.commit();
     let settings = app.controller.transport();
-    let beats_per_frame = settings.tempo / 60.0 / f64::from(app.sample_rate);
+    let beats_per_frame = settings.tempo / 60.0 / f64::from(app.stream.sample_rate());
     let beats_per_bar = settings.time_signature.beats_per_bar();
     // The bar phase the knob shows, from the live value of the last
     // frame the engine ran.

@@ -1273,7 +1273,7 @@ fn preferences_commands_change_what_the_window_shows() {
     assert!(app.rig.window.is_none(), "the commands leave the window closed");
 
     let reply = run(&mut app, r#"{"cmd": "output_safety", "mode": "clean"}"#).unwrap();
-    assert_eq!(app.output_safety, OutputSafety::Clean);
+    assert_eq!(app.stream.output_safety(), OutputSafety::Clean);
     assert!(
         reply["playing"].as_str().unwrap().starts_with("Playing on"),
         "{reply:?}"
@@ -1305,7 +1305,7 @@ fn audio_is_refused_with_no_device() {
     let error = run(&mut app, r#"{"cmd": "audio", "rate": 48000}"#).unwrap_err();
     assert!(error.contains("--fake-audio"), "{error}");
     assert!(run(&mut app, r#"{"cmd": "output_safety", "mode": "off"}"#).is_ok());
-    assert_eq!(app.output_safety, OutputSafety::Off);
+    assert_eq!(app.stream.output_safety(), OutputSafety::Off);
 }
 
 /// A device can start, call back a few times, and then stop with no

@@ -89,7 +89,7 @@ fn denied_audio_input_does_not_stop_the_patch() {
     let mut app = start(args(&dir), &fake);
     app.controller.add_module("loom.io.audio-in").unwrap();
     assert!(app.commit());
-    assert!(app._audio.is_some());
+    assert!(app.stream.is_playing());
     assert!(app.status.contains("microphone was denied"));
     app.status = "other status".into();
     app.rig.input_attempted = None;
@@ -113,7 +113,7 @@ fn permission_denied_after_input_opens_is_reported() {
     fake.input_permission_denied.set(true);
     app.sync_audio_input();
     assert!(app.rig.input.is_none());
-    assert!(app._audio.is_some());
+    assert!(app.stream.is_playing());
     assert!(app.status.contains("microphone was denied"));
     app.status = "other status".into();
     app.sync_audio_input();
@@ -151,7 +151,7 @@ fn unavailable_input_keeps_other_audio_playing() {
             .connect_named(constant, "out", other_output, "in")
             .unwrap();
         assert!(app.commit());
-        assert!(app._audio.is_some());
+        assert!(app.stream.is_playing());
         assert!(app.rig.input.is_none());
         assert!(app.status.contains(if denied {
             "microphone was denied"
@@ -550,7 +550,7 @@ fn audio_input_choice_is_saved_without_restarting_output() {
     app.preferences(Message::Input(InputChoice::Off));
     assert_eq!(fake.input_closes.get(), 1);
     assert_eq!(app.rig.store.saved().audio.input, InputChoice::Off);
-    assert!(app._audio.is_some());
+    assert!(app.stream.is_playing());
     app.controller.remove_module(module).unwrap();
     assert!(app.commit());
     assert!(
@@ -569,8 +569,8 @@ fn no_saved_devices_play_on_the_defaults_with_every_midi_input() {
     ));
     let app = start(args(&dir), &fake);
     assert_eq!(fake.opened(), ["Fake A"]);
-    assert_eq!(app.sample_rate, 48_000.0);
-    assert!(app._audio.is_some());
+    assert_eq!(app.stream.sample_rate(), 48_000.0);
+    assert!(app.stream.is_playing());
     assert!(fake.is_open("Keys") && fake.is_open("Pad"));
     assert_eq!(app.controller.config().output_safety, OutputSafety::LowLatency);
     assert!(!dir.join(FILE_NAME).exists(), "starting writes nothing");
@@ -613,7 +613,7 @@ fn a_rate_the_device_does_not_offer_plays_at_its_default() {
     let text = "(audio: (sample_rate: Hz(96000)))";
     let path = write(&dir, text);
     let app = start(args(&dir), &two_devices());
-    assert_eq!(app.sample_rate, 48_000.0);
+    assert_eq!(app.stream.sample_rate(), 48_000.0);
     assert!(
         app.status.contains("does not offer 96000 Hz. Using 48000 Hz."),
         "{}",
@@ -638,7 +638,7 @@ fn a_rate_change_keeps_the_patch_and_its_history() {
 
     change(&mut app, Change::Rate(RateChoice::Hz(44_100)));
     assert_eq!(app.controller.config().sample_rate, 44_100.0);
-    assert_eq!(app.sample_rate, 44_100.0);
+    assert_eq!(app.stream.sample_rate(), 44_100.0);
     assert_eq!(
         app.rig.last_stop,
         Some(true),
@@ -688,7 +688,7 @@ fn a_device_that_fails_to_open_leaves_the_old_one_playing() {
     let generation = app.generation;
     change(&mut app, Change::Device(DeviceChoice::Named("Fake B".into())));
     assert_eq!(app.generation, generation);
-    assert!(app._audio.is_some());
+    assert!(app.stream.is_playing());
     assert_eq!(app.rig.playing.as_ref().unwrap().device, "Fake A");
     assert!(!dir.join(FILE_NAME).exists(), "nothing saved");
     assert_eq!(
@@ -710,7 +710,7 @@ fn a_device_that_fails_to_start_hands_back_to_the_old_one() {
 
     change(&mut app, Change::Device(DeviceChoice::Named("Fake B".into())));
     assert_eq!(fake.opened(), ["Fake A", "Fake B", "Fake A"], "back to the old device");
-    assert!(app._audio.is_some(), "sound is still playing");
+    assert!(app.stream.is_playing(), "sound is still playing");
     assert_eq!(app.rig.playing.as_ref().unwrap().device, "Fake A");
     assert_eq!(app.controller.graph().len(), modules, "with the same patch");
     assert_eq!(app.edits.history.len(), 1);
@@ -731,7 +731,7 @@ fn when_neither_device_starts_audio_is_off_and_nothing_is_saved() {
     fake.wont_start.borrow_mut().extend(["Fake A".into(), "Fake B".into()]);
     let fake = Rc::new(fake);
     let mut app = start(args(&dir), &fake);
-    assert!(app._audio.is_some());
+    assert!(app.stream.is_playing());
 
     change(&mut app, Change::Device(DeviceChoice::Named("Fake B".into())));
     assert_eq!(
@@ -739,7 +739,7 @@ fn when_neither_device_starts_audio_is_off_and_nothing_is_saved() {
         ["Fake A", "Fake B", "Fake A"],
         "it tried the old device again"
     );
-    assert!(app._audio.is_none(), "audio is off");
+    assert!(!app.stream.is_playing(), "audio is off");
     assert!(app.rig.playing.is_none());
     assert!(!dir.join(FILE_NAME).exists(), "nothing saved");
     assert_eq!(
@@ -749,7 +749,7 @@ fn when_neither_device_starts_audio_is_off_and_nothing_is_saved() {
 
     // The failed stream took its engine; an idle one takes its place,
     // so edits still work, well past the queue's size (#220).
-    assert!(app.idle_engine.is_some());
+    assert!(app.stream.is_idle());
     let constant = loom_modules::registry().resolve("loom.math.constant").unwrap();
     app.add_module(constant, iced::Point::new(100.0, 100.0));
     let id = *app.selection.first().unwrap();
@@ -829,7 +829,7 @@ fn turning_an_input_off_releases_its_notes_and_is_saved() {
     );
     fake.play("Keys", &[0x90, 62, 100]);
     assert!(wait_for(&app, 1.0), "the other input still plays");
-    assert!(app._audio.is_some(), "audio did not stop");
+    assert!(app.stream.is_playing(), "audio did not stop");
 }
 
 /// The panic trigger (panic.md, MIDI trigger): Learn takes the next
@@ -946,7 +946,7 @@ fn an_input_unplugged_releases_its_notes_and_comes_back() {
     assert!(wait_for(&app, 0.0), "the held note is released");
     assert_eq!(app.status, "MIDI: \"Keys\" disconnected.");
     assert!(!fake.is_open("Keys"));
-    assert!(app._audio.is_some(), "the app keeps playing");
+    assert!(app.stream.is_playing(), "the app keeps playing");
 
     fake.plug("Keys");
     app.poll_midi();
@@ -1160,7 +1160,7 @@ fn turning_a_real_input_off_releases_its_notes_and_is_saved() {
     assert!(!wait_for(&app, 1.0), "the input that is off does not play");
     keys.note_on(0, 62, 100).unwrap();
     assert!(wait_for(&app, 1.0), "the other input still plays");
-    assert!(app._audio.is_some(), "audio did not stop");
+    assert!(app.stream.is_playing(), "audio did not stop");
 }
 
 #[test]
@@ -1253,7 +1253,7 @@ fn the_safety_flag_is_shown_and_never_saved() {
     flagged.output_safety = Some(OutputSafety::Off);
     let mut app = start(flagged, &two_devices());
     assert_eq!(app.controller.config().output_safety, OutputSafety::Off);
-    assert_eq!(app.output_safety, OutputSafety::Off, "the window shows Off");
+    assert_eq!(app.stream.output_safety(), OutputSafety::Off, "the window shows Off");
     assert!(app.rig.safety_flag, "with the flag note");
     app.quit = true;
     let _ = app.update(crate::Message::Tick);
@@ -1396,12 +1396,12 @@ fn boot_open_failure_leaves_engine_idle_and_reports_error() {
     fake.broken.borrow_mut().push("Fake A".into());
     let fake = Rc::new(fake);
     let app = start(args(&dir), &fake);
-    assert!(app._audio.is_none());
-    assert!(app.idle_engine.is_some());
+    assert!(!app.stream.is_playing());
+    assert!(app.stream.is_idle());
     assert!(
-        app.audio_name.contains("the device is busy"),
+        app.stream.label().contains("the device is busy"),
         "audio_name: {:?}",
-        app.audio_name
+        app.stream.label()
     );
 }
 
@@ -1421,10 +1421,10 @@ fn check_audio_returns_early_when_audio_disabled() {
     let dir = folder("check-audio-disabled");
     let fake = two_devices();
     let mut app = start(args(&dir), &fake);
-    app.no_audio = true;
+    app.stream.set_playback(crate::stream::Playback::Off);
     app.check_audio(Instant::now());
-    app.no_audio = false;
-    app.fake_audio = true;
+    app.stream.set_playback(crate::stream::Playback::Device);
+    app.stream.set_playback(crate::stream::Playback::Fake);
     app.check_audio(Instant::now());
 }
 
@@ -1447,7 +1447,7 @@ fn handle_audio_loss_guards_and_named_fallback() {
     // When audio was never playing and not lost, return early
     app.rig.lost_audio = None;
     app.rig.playing = None;
-    assert!(app._audio.is_none());
+    assert!(!app.stream.is_playing());
     app.handle_audio_loss("ignored");
     assert!(app.rig.lost_audio.is_none());
 
@@ -1455,7 +1455,7 @@ fn handle_audio_loss_guards_and_named_fallback() {
     let output = loom_host_desktop::AudioOutput::clock(48_000, 256);
     let parts = loom_core::create_engine(loom_modules::registry(), loom_core::EngineConfig::default());
     let running = output.start(parts.engine).unwrap();
-    app._audio = Some(running);
+    app.stream.set_running(Some(running));
     let mut saved = app.rig.store.saved().clone();
     saved.audio.device = DeviceChoice::Named("Saved Device".into());
     app.rig.save(saved);
@@ -1465,7 +1465,7 @@ fn handle_audio_loss_guards_and_named_fallback() {
     // When _audio is present, playing is None, and saved is SystemDefault, falls back to "audio device"
     let output2 = loom_host_desktop::AudioOutput::clock(48_000, 256);
     let parts2 = loom_core::create_engine(loom_modules::registry(), loom_core::EngineConfig::default());
-    app._audio = Some(output2.start(parts2.engine).unwrap());
+    app.stream.set_running(Some(output2.start(parts2.engine).unwrap()));
     app.rig.lost_audio = None;
     let mut saved2 = app.rig.store.saved().clone();
     saved2.audio.device = DeviceChoice::SystemDefault;
