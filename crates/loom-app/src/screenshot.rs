@@ -357,7 +357,7 @@ pub fn run_window(args: &crate::Args, path: &Path) -> Result<(), String> {
         canvas.bounds.size(),
     )?;
     app.scene = scene;
-    app.depth_drag = Some(shown.dragging);
+    app.gestures.show_depth(shown.dragging);
     app.refresh_values();
     app.selection.extend(shown.selected);
     app.still = Some(shown.still);
