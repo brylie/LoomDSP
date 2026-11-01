@@ -178,7 +178,7 @@ jobs:
       # GitHub's own coverage, for the "Restrict code coverage" ruleset rule.
       # Uploads on pushes to main (the baseline) and on pull requests. A pull
       # request from a fork gets a read-only token and cannot upload; see
-      # CONTRIBUTING.md, "Coverage and code quality gates".
+      # CONTRIBUTING.md, "Coverage gate".
       - name: Upload coverage to GitHub
         if: >-
           ${{ !cancelled() && hashFiles('target/cobertura.xml') != '' && (

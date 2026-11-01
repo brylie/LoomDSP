@@ -138,9 +138,9 @@ To change a check, change its task in `mise.toml`. The hooks and CI both pick it
 
 Why warnings fail CI but not your local build: a warning while you are still editing is noise, but a warning on `main` is a problem someone else inherits. `mise run clippy`, `docs`, and `wasm` treat warnings as errors, as CI does, so the checks catch them before you push.
 
-### Coverage and code quality gates
+### Coverage gate
 
-Besides "CI success", the main branch ruleset has two gates from [GitHub Code Quality](https://docs.github.com/en/code-security/concepts/code-quality/code-quality).
+Besides "CI success", the main branch ruleset has a coverage gate from [GitHub Code Quality](https://docs.github.com/en/code-security/concepts/code-quality/code-quality).
 
 **Line coverage.** A pull request is blocked when its line coverage is under 80%, or more than 1 percentage point below `main`. The Coverage job uploads a Cobertura report (`target/cobertura.xml`) with [`actions/upload-code-coverage`](https://github.com/actions/upload-code-coverage), and a bot comments on the pull request with the total and the files that changed. It also sends the coverage (`target/lcov.info`) and the test results to [Codecov](https://codecov.io/gh/brylie/LoomDSP), which comments on the pull request too. Codecov adds two statuses: the lines a pull request changes need 80% coverage (`codecov/patch`), and total coverage may not fall by more than 5% (`codecov/project`).
 
@@ -151,7 +151,7 @@ Besides "CI success", the main branch ruleset has two gates from [GitHub Code Qu
 
 **Pull requests from forks.** GitHub gives a fork's workflow a read-only token, so the Coverage job cannot upload its report. It still measures coverage, fails under the minimum, and attaches the report as the `coverage` artifact, so the minimum is still checked. A maintainer checks the rest when reviewing. *Open point:* GitHub's documentation does not yet say whether the coverage rule blocks a pull request with no uploaded report or lets it through. We will record what it does on the next pull request from a fork.
 
-**Code quality findings.** A pull request is blocked by any Code Quality finding of severity "error". Code Quality's rule-based analysis uses CodeQL, which covers C#, Go, Java, JavaScript, Python, Ruby, and TypeScript, but not Rust. So for LoomDSP's Rust code, the quality gate is Clippy: CI runs it with warnings as errors, and the hooks run the same task. The CodeQL checks run only on GitHub, so there is no local command for them. If one blocks your pull request, its finding is shown inline on the pull request.
+**Lints.** The ruleset has no CodeQL gate: CodeQL does not analyse Rust, so its checks were slow and found nothing in LoomDSP's code. Clippy is the lint gate instead. CI runs it with warnings as errors, and the hooks run the same task.
 
 Dependabot opens weekly pull requests for dependency updates.
 
