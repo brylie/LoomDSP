@@ -9,7 +9,7 @@ The desktop app keeps a recovery copy of the open patch while it has unsaved cha
 - **Background:** none.
 - **Prior art:** most desktop editors keep a hidden copy of unsaved work and offer it after a crash. We use only that convention: a quiet background copy, and a question at the next start.
 - **Issues:** [#15](https://github.com/brylie/LoomDSP/issues/15).
-- **Code:** `crates/loom-app/src/recovery.rs` (folders, locks, the writer thread, the schedule, the offer), and `App::boot`, `App::restored`, and `App::autosave` in `main.rs`. It reuses `Patch::from_graph` and `Patch::save` from `loom-patch`, finds the folders with `etcetera`, and formats times with `jiff`. Tests: `recovery/tests.rs` and `autosave_tests.rs`.
+- **Code:** `crates/loom-app/src/recovery.rs` (folders, locks, the writer thread, the schedule, the offer), `App::boot` and `App::restored` in `boot.rs`, and `App::autosave` in `main.rs`. It reuses `Patch::from_graph` and `Patch::save` from `loom-patch`, finds the folders with `etcetera`, and formats times with `jiff`. Tests: `recovery/tests.rs` and `autosave_tests.rs`.
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
      built. See README.md in this folder. -->

@@ -7,6 +7,7 @@ use super::*;
 use crate::recovery::tests::{TempDir, sessions};
 use crate::recovery::{Choice, Orphan, Prompt};
 use std::fs;
+use std::time::Duration;
 
 /// Answers the start-up offer and records what was shown.
 struct Answer {
