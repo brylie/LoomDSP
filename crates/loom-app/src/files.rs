@@ -201,6 +201,10 @@ pub fn dialogs_available() -> bool {
 /// Tells the user that something failed. One button, so it cannot be a
 /// question.
 pub fn show_error(message: &str) {
+    // Tests record the message: a native dialog would stop them.
+    #[cfg(test)]
+    fake::show_error(message);
+    #[cfg(not(test))]
     MessageDialog::new()
         .set_level(MessageLevel::Error)
         .set_title("LoomDSP")
@@ -209,9 +213,9 @@ pub fn show_error(message: &str) {
         .show();
 }
 
-/// Stand-ins for the Save dialog and the unsaved changes question in
-/// tests, which must not stop at a native dialog. Each test runs on its own
-/// thread, so each has its own record.
+/// Stand-ins for the Save dialog, the unsaved changes question, and error
+/// messages in tests, which must not stop at a native dialog. Each test
+/// runs on its own thread, so each has its own record.
 #[cfg(test)]
 pub mod fake;
 

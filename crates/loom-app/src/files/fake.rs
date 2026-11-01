@@ -9,6 +9,8 @@ pub enum Asked {
     Save(Option<PathBuf>),
     /// The unsaved changes question, with the patch name it showed.
     Discard(String),
+    /// An error message, with the text it showed.
+    Error(String),
 }
 
 thread_local! {
@@ -54,4 +56,9 @@ pub(super) fn pick_save(current: Option<&Path>) -> Option<Option<PathBuf>> {
 pub(super) fn confirm_discard(name: &str) -> Option<Choice> {
     ASKED.with(|asked| asked.borrow_mut().push(Asked::Discard(name.to_string())));
     Some(DISCARD_ANSWER.with(|answer| answer.replace(Choice::Cancel)))
+}
+
+/// Records the error message in place of the dialog.
+pub(super) fn show_error(message: &str) {
+    ASKED.with(|asked| asked.borrow_mut().push(Asked::Error(message.to_string())));
 }

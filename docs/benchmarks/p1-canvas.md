@@ -58,15 +58,25 @@ Each line is `key=value` pairs separated by spaces. The numbers come from the ca
 - `worst_ms`: the longest gap between two frames since the start, after the first 10.
 - `frames`, `scene_builds`, `control_builds`, `scene_uploads`, `control_uploads`, `overlay_uploads`, `trace_uploads`: totals since the start. A still or moving camera should build and upload the scene once. A knob turn adds control builds and uploads, never scene builds. A moving scope trace adds trace uploads only.
 
-**Idle.** `--measure` and `--bench` redraw every frame, so they measure drawing cost. `--measure-idle` prints the same lines without forcing a redraw: it counts only the frames the app draws by itself. The report runs on its own thread and sends the app no messages, so it adds no frames. An idle patch prints `frames=0` after the first second (the panels spec, Redraw). Until [#90](https://github.com/brylie/LoomDSP/issues/90) it printed 4 to 7 frames a second, from the stats bar timer and the device polls:
+**Idle.** `--measure` and `--bench` redraw every frame, so they measure drawing cost. `--measure-idle` prints the same lines without forcing a redraw: it counts only the frames the app draws by itself. The report runs on its own thread and sends the app no messages, so it adds no frames. With nothing changing on screen, the app draws no frames ([panels spec, Redraw](../design/panels.md#redraw)). Until [#90](https://github.com/brylie/LoomDSP/issues/90) it drew 4 to 7 frames a second, from the stats bar timer and the device polls.
 
 Each line also prints `causes=tick:N,live:N,meters:N,control:N,input:N,redraw:N,forced:N,other:N` as totals since the report began. A frame can count under several causes. `cpu=N.N` is the whole process's user plus system CPU time during that line's interval, as a percentage of one core. The final line covers the full measured interval. See [frame meter](../design/frame-meter.md).
+
+A patch that plays is not idle, even with the camera still. A scope on screen changes every frame, so it draws every frame. Lights and signal activity on ports change a few times a second, and so do live values on modulated controls. These frames are counted under `meters` and are by design. To measure a truly idle app, run without audio or MIDI:
+
+```sh
+cargo run --release -p loom-app -- examples/patches/subtractive.ron --measure-idle --bench-seconds 10 --no-audio --no-midi
+```
+
+After start-up, each line prints `fps=0.0`, and `frames` stops counting up. The final line can show one or two more frames, from closing the window.
+
+To see what a scope costs, run the same patch with an audio device: `subtractive.ron` has a scope, so it draws about 30 frames a second, nearly all under `meters` (MacBook, 2026-11-01). `fm-feedback.ron` has no scope, but its signal activity still draws about 10 frames a second:
 
 ```sh
 cargo run --release -p loom-app -- examples/patches/subtractive.ron --measure-idle --bench-seconds 10
 ```
 
-For idle CPU, read Activity Monitor during the same run. Without an audio device, add `--fake-audio`: the engine then runs from a timer, so live values, lights, and meters move as with a device, and their redraws are counted too.
+For idle CPU, read Activity Monitor during the same run. Without an audio device, use `--fake-audio` in place of `--no-audio`: the engine then runs from a timer, so live values, lights, and meters move as with a device, and their redraws are counted too.
 
 Record from the stats bar, or the final line, after about 10 seconds:
 
