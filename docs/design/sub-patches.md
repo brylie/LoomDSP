@@ -201,7 +201,7 @@ These rules are for implementers. The player never sees the flat graph.
 5. **A patch always opens.** Linked items carry a stored copy. *Why:* a missing library file on another computer must not lose the set.
 6. **Swaps and select changes are click-free.** *Why:* they happen during performance.
 7. **One edit is one undo step, at any level.** *Why:* the [undo](undo.md) rules apply unchanged.
-8. **Patch-wide modules live only at the top level.** A sub-patch never holds the Transport or the Scale and tuning module, so stack copies, layer and select members, slot parts, and linked items refreshed on load never repeat them. *Why:* settled with the maintainer. A patch has one transport and one scale ([clock](clock.md), [scale and tuning](scale-and-tuning.md)), and one place to set them. The same reason keeps a paste from adding a transport ([clipboard](clipboard.md), rule 6).
+8. **Patch-wide modules live only at the top level.** A sub-patch never holds the Transport or the Scale and tuning module, so stack copies, layer and select members, slot parts, and linked items refreshed on load never repeat them. Inside a sub-patch, adding one is refused, and a paste leaves them out: their cables are dropped, since a cable cannot reach the top level (rule 4), and the status bar says so. *Why:* settled with the maintainer. A patch has one transport and one scale ([clock](clock.md), [scale and tuning](scale-and-tuning.md)), and one place to set them. The same reason keeps a paste from adding a transport ([clipboard](clipboard.md), rule 6).
 
 ## Acceptance criteria
 

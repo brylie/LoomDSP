@@ -57,7 +57,7 @@ How a patch holds one tuning and a set of scales, how pitch modules follow them 
 - `reset` goes back to scale 1.
 - **A change applies on the trigger's sample.** *Why:* the patch chooses the moment. A bar trigger from the Transport changes key on the bar; a Chance in front makes it "sometimes".
 - Changing the tuning or editing a scale is an edit, applied at a buffer boundary and covered by undo, like any module data.
-- **One per patch, at the top level.** Adding a second is refused: `A patch has one Scale and tuning module.` A sub-patch never holds one: collapse leaves it outside, and inserting a file drops it ([sub-patches, rule 8](sub-patches.md#rules)). *Why:* "patch-wide" must mean one answer.
+- **One per patch, at the top level.** Adding a second is refused: `A patch has one Scale and tuning module.` Adding one inside a sub-patch is refused, even when the patch has none: `The Scale and tuning module lives at the top level.` A paste leaves it out when the patch already has one, or when pasting inside a sub-patch; the rest of the paste goes ahead, cables to it are dropped, and the status bar says so. Collapse leaves it outside, and inserting a file drops it ([sub-patches, rule 8](sub-patches.md#rules)). *Why:* "patch-wide" must mean one answer.
 
 ## Following the scale
 
@@ -79,7 +79,8 @@ How a patch holds one tuning and a set of scales, how pitch modules follow them 
 - [ ] A Scala file imports, saves in the patch, and reloads without the file; a broken file is refused with its line number (tests).
 - [ ] A `next` trigger switches the scale, and a quantiser later in the patch uses the new scale on the same sample, at block sizes 1, 77, and 512 (reference test).
 - [ ] A quantiser placed before the Scale module in the module list still switches on the same sample (test: the hidden cable orders them).
-- [ ] A second Scale and tuning module is refused, also inside a sub-patch (test).
+- [ ] A second Scale and tuning module is refused (test).
+- [ ] Adding a Scale and tuning module inside a sub-patch is refused, even when the patch has none; pasting a group that holds one inside a sub-patch adds the rest without it (tests).
 - [ ] A patch without the module quantises to 12 equal divisions, chromatic (test).
 - [ ] A module set to Own ignores a patch key change, but follows a patch tuning change (test).
 - [ ] Switching scales does not allocate on the audio thread (`no_alloc` test).
