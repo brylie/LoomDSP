@@ -250,7 +250,8 @@ The first display module that shows a signal over time.
 |---|---|---|---|---|
 | `window` | Window | 0.001 to 1 s | 0.02 s | Logarithmic. The time shown across the display. One second is the history `ScopeTrace` keeps. |
 | `auto` | Auto | 0 or 1 | 1 | Whole number. On: the trigger level is halfway between the lowest and highest sample, as in [telemetry](telemetry.md). |
-| `level` | Level | -1 to 1 | 0 | The trigger level while `auto` is off. |
+| `level` | Level | -10 to 10 | 0 | The trigger level while `auto` is off. [Control ranges](control-ranges.md) -1 to 1 (default) and -10 to 10, like the scope's vertical ranges ([#329](https://github.com/brylie/LoomDSP/issues/329)). |
+| `slope` | Slope | 0 Rising, 1 Falling | 0 | Which edge starts the trace ([#329](https://github.com/brylie/LoomDSP/issues/329)). |
 
 - Its panel: a knob for `window`, a toggle for `auto`, and a knob for `level`, and below them the scope widget (9 by 5 grid units, bound to `out`, no caption), added in #62. Code: `SCOPE` in `loom-modules/src/display.rs`, `Trigger` in `loom-app/src/live.rs`, and `loom-app/src/probe_menu.rs`.
 - The parameters never change the audio. They tell the app how to draw the trace.
@@ -258,7 +259,7 @@ The first display module that shows a signal over time.
 
 ### Trigger
 
-- `ScopeTrace` takes the level from the module: automatic, or the fixed `level`. The rest of the trigger is unchanged: a rising edge, with hysteresis of a tenth of the history's swing, found to a fraction of a sample. The hysteresis never reaches below the lowest sample, so a fixed level near the bottom of the signal still triggers.
+- `ScopeTrace` takes the level and the slope from the module: automatic, or the fixed `level`; a rising or falling edge. The rest of the trigger is unchanged: the chosen edge, with hysteresis of a tenth of the history's swing, found to a fraction of a sample. The hysteresis never reaches below the lowest sample, so a fixed level near the bottom of the signal still triggers.
 - If no edge crosses a fixed level, the trace runs free, as for a flat signal.
 
 ### Add scope and Add meter
@@ -273,9 +274,39 @@ A one-step gesture on a cable or an output places a scope or a level meter next 
 - While the menu is open, the clipboard shortcuts (copy, cut, duplicate) do nothing.
 - The control channel offers the same action, so it can be checked in the running app.
 
+### Canvas context menu
+
+**Status:** Agreed, P2 ([#330](https://github.com/brylie/LoomDSP/issues/330), 2026-11-01). It grows the probe menu above into the one canvas menu.
+
+A right-click opens a menu for what is under the pointer. Right-clicking a tile that is not selected selects it first.
+
+| Under the pointer | Items |
+|---|---|
+| One tile | Copy, Duplicate, Delete, Help. A sub-patch adds Open, Dissolve, and Save to library ([sub-patches](sub-patches.md)). |
+| A tile in a selection of several | Copy, Duplicate, Delete, Make sub-patch |
+| Empty canvas | Add module here (opens the module browser and places the module at the point), Paste here, Select all |
+| An output | Add scope, Add meter, Disconnect all |
+| An input with a cable | Disconnect |
+| A cable | Add scope, Add meter, Delete cable |
+
+- Each item shows its shortcut on the right. An item that cannot act now is shown dimmed, not hidden. *Why:* the menu teaches the shortcuts, and items that move around are hard to find.
+- **Keyboard:** Shift+F10, or the Menu key, opens the menu for the focused control's module, else the selection, else the canvas centre. Up and Down move, Enter acts, Escape closes (NFR-UX-01).
+- It stays a pop-up over the window: while it is open, the canvas takes no input, as for the probe menu.
+- The control channel can open it and pick an item by name, as it does for the probe menu.
+
+### Acceptance criteria: canvas context menu
+
+- [ ] Each target gets the items in the table, dimmed when they cannot act (`Ui` harness).
+- [ ] Paste here places the pasted modules at the pointer; Add module here places the new module there (`Ui` harness).
+- [ ] Shift+F10 opens the menu for the selection, and the arrows and Enter pick an item (`Ui` harness).
+- [ ] The Add scope and Add meter tests still pass.
+
 ### Acceptance criteria: scope module
 
 - [x] The scope module passes its input through, bit for bit. It has a reference test and a block-size check.
+- [ ] A falling slope starts the trace on a falling edge, and a fixed level of 3 triggers on a signal between 2 and 5 (tests in `crates/loom-app/src/live.rs`).
+- [ ] Level meter: a peak of 1.0 lights the clip light until it is clicked; the peak hold shows the highest peak in dB; a double-click resets both (`Ui` harness).
+- [ ] A patch that makes infinity at the output counts silenced samples and shows the error message for 10 seconds after the last one; clipping with safety Off shows the warning (test).
 - [x] Its parameters are `window`, `auto`, and `level`, with the ranges above, and its panel has a knob, a toggle, and a knob for them.
 - [x] `ScopeTrace` with a fixed level triggers on that level, and runs free when nothing crosses it. With `auto` on it behaves as before.
 - [x] Right-clicking an output or a cable opens the menu. A right-drag pans and opens no menu. Right-clicking a tile, an input, or empty canvas opens none.
@@ -409,6 +440,7 @@ The whole app redraws only when something visible changes ([#90](https://github.
 - A fifth P1 widget, 3 × 6 grid units. It binds to one of its module's **outputs** by name. The registry refuses a meter bound to an output the module does not have.
 - It shows the output's level from -60 dB (empty) to 0 dB (full), bottom to top: a bar for the RMS level and a thin line for the peak. Both rise at once and fall by the whole range in about a second. The bar is green below -12 dB, amber up to -3 dB, and red above. Its label is below it.
 - A meter is a display: pressing or dragging it selects or moves the tile, as with a light.
+- **Clip light and peak hold** (Agreed, P2, [#98](https://github.com/brylie/LoomDSP/issues/98), 2026-11-01). Above the meter, a clip light turns on when the peak reaches 1.0 and stays on until it is clicked. Below it, a readout shows the highest peak since the last reset, in dB to one decimal. Double-clicking the meter resets both. *Why the light says "would clip":* cables are never clipped (ADR-0007). A peak of 1.0 or more on a cable only clips if it reaches the output, so the hover text says "Would clip at the output". The clip light also has a shape, not only a colour (NFR-UX-03).
 - *Why levels fall over a second:* a short peak stays visible long enough to see, and the bar does not flicker.
 
 ### Level meter module
@@ -432,6 +464,7 @@ The whole app redraws only when something visible changes ([#90](https://github.
 - The dropout count is red for 10 seconds after it grows.
 - **Redraw.** A thread reads the audio stats four times a second and wakes the UI only when the bar would change: the load or its maximum to the shown 1%, the dropout count, the end of the red time, or the telemetry drops. The load number changes at most twice a second. *Why:* in Iced every message redraws the window, so a timer that refreshed the bar drew two frames a second in an idle patch ([#90](https://github.com/brylie/LoomDSP/issues/90)).
 - *Why:* a performer needs a warning before a problem is audible (FR-PERF-04), and must notice when one just happened. A count that stayed red forever would soon be ignored.
+- **Silenced and clipped output** (Agreed, P2, [#130](https://github.com/brylie/LoomDSP/issues/130), 2026-11-01). The engine counts output samples it turned from NaN or infinity into silence, and samples it clipped to -1 to 1, in two atomics in `EngineStats` (an atomic add on the audio thread, nothing else). The stats bar shows **Output: bad samples silenced** in the error style, and **Output clipped** in the warning style, each for 10 seconds after the last such sample, like the dropout count. Hover text gives the counts since the engine started. *Why:* since #123 a patch that makes NaN just goes quiet, and the player cannot tell why. With the output limiter on, clipping is rare, so the clip message mostly appears with output safety Off.
 
 ### Acceptance criteria: level meters and audio load
 

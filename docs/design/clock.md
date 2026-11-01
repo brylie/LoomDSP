@@ -194,6 +194,25 @@ These details were settled while building the module.
 10. **A time signature change is a jump, applied at once.** The engine applies it at the start of the next buffer, like any transport change. The position does not move; the bar grid does, so bar phase changes. The change counts as a jump: `jumped` is true for one call, the `jump` trigger fires once, and rule 8 applies, so no skipped bar triggers burst out. A stopped transport takes the change the same way. *Why:* it is the simplest rule that keeps every module honest. A module watching bar phase is told, instead of seeing a silent step. Applying it at the next bar line, as DAWs do, needs the engine to change the grid in the middle of a buffer, which breaks rule 4. A "wait for the bar" option can come later, from the control thread.
 11. **Run and reset inputs are read on a fixed grid.** When the Transport's `run` or `reset` input has a cable, the engine splits every block at multiples of 32 frames, counted from engine start, and handles the transport at the start of each segment of at most 32 frames. The module reads the inputs during a segment, and an edge it finds takes effect at the start of the next segment. So an edge takes effect 1 to 32 frames later (0.7 ms at 48 kHz), at any block size, and every phase is bit-identical at block sizes 1, 32, and 1024. With neither input connected, the engine does not split. *Why not split at the edge:* the edge is not known until the modules that make it have run, and those modules may read the transport. *Why a fixed grid:* the delay depends on the frame count, not on the buffer, so rule 5 holds. *Why not a longer grid:* a stop must feel immediate on stage.
 
+## Clock to phase
+
+**Status:** Agreed, P2 ([#116](https://github.com/brylie/LoomDSP/issues/116), 2026-11-01). Decides how LoomDSP multiplies a clock that arrives only as triggers: turn it into a phase, then multiply the phase as usual with Phase Scale and Phase Trigger. *Why:* every clock tool in LoomDSP works in the phase domain ([phase and cycles](../learn/phase-and-cycles.md)); this module is the one place that has to measure time.
+
+`loom.phase.from-clock` (MT-PHASE-09):
+
+| | |
+|---|---|
+| Input | `clock` (trigger, default 0) |
+| Outputs | `phase` (0 to 1 per clock period), `running` (gate) |
+| Parameters | none |
+| Panel | A light on `running` |
+
+- **Period:** the number of samples between the last two triggers. Until the second trigger there is no period: `phase` stays 0 and `running` is low.
+- **On each trigger,** `phase` snaps to 0 and the period becomes the latest measured one at once. *Why snap:* the output stays aligned with the input; a gradual correction would drift for a while after every change.
+- **Between triggers,** `phase` rises by `1 / period` per sample. If it reaches the end before the next trigger (the clock slowed down), it holds just below 1 until the trigger. *Why hold:* wrapping early would fire a multiplied trigger the input never asked for.
+- **Stopped:** after 2 periods with no trigger, `running` goes low and `phase` holds. The next trigger starts a new measurement, as at the start.
+- All timing is counted in samples, so the output is the same at any block size.
+
 ## MIDI clock
 
 **Status:** Agreed, P2 ([#77](https://github.com/brylie/LoomDSP/issues/77), 2026-11-01). Requirements: FR-MIDI-07, FR-LIB-25.
@@ -216,6 +235,13 @@ These details were settled while building the module.
 - Each checked output gets 24 pulses per quarter note from the transport, Start on a run from bar 1, Continue on a run from elsewhere, Stop on a stop, and Song Position Pointer on every jump. It sends what the transport plays, also while following an external clock, so devices can be chained.
 - The engine computes each pulse's frame and writes it to a fixed-size queue; a host thread sends it at that time, offset by the output latency. *Why:* the audio thread does no I/O (AGENTS.md rule 1).
 - MIDI output devices, and sending notes and control changes, are FR-MIDI-04; this section opens outputs for clock only.
+
+### Acceptance criteria: clock to phase
+
+- [ ] Triggers every 1000 samples give a phase that rises by 0.001 per sample and wraps on each trigger; Phase Scale ×4 and Phase Trigger then fire every 250 samples (test).
+- [ ] Before the second trigger, `phase` is 0 and `running` is low; after 2 periods with no trigger, `running` goes low (test).
+- [ ] A late trigger leaves `phase` held below 1, with no early wrap (test).
+- [ ] The output is the same at block sizes 1, 77, and 512 (reference test).
 
 ### Acceptance criteria: MIDI clock
 

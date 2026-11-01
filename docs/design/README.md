@@ -56,19 +56,19 @@ Copy [template.md](template.md). Keep it to one feature. Link the ADR, requireme
 |---|---|---|
 | [Arrangement](arrangement.md) | [ADR-0012](../adr/0012-arrangement-from-phase-driven-primitives.md) | Draft, P3 |
 | [Telemetry](telemetry.md) | [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md) | Implemented, P1 |
-| [Panels](panels.md) | [ADR-0013](../adr/0013-modules-carry-their-own-panel.md), [ADR-0025](../adr/0025-one-design-language-and-derived-panels.md) | Module panels on tiles, level meters, and audio load Implemented (P1); labels and hover text Implemented; P1 additions (choice names, trigger lights, clock mark, load colour, keyboard, activity, scope trace, resizable tiles) Agreed; panel editor and exposed controls Agreed (P2); rest Draft |
+| [Panels](panels.md) | [ADR-0013](../adr/0013-modules-carry-their-own-panel.md), [ADR-0025](../adr/0025-one-design-language-and-derived-panels.md) | Module panels on tiles, level meters, and audio load Implemented (P1); labels and hover text Implemented; P1 additions (choice names, trigger lights, clock mark, load colour, keyboard, activity, scope trace, resizable tiles) Agreed; panel editor, exposed controls, context menu, scope slope, meter clip and hold, output warnings Agreed (P2); rest Draft |
 | [Panel widgets](panel-widgets.md) | [ADR-0024](../adr/0024-widgets-follow-the-kind-of-value.md) | Agreed, P2; shape preview and compact select list Implemented |
 | [Stereo cables](stereo.md) | [ADR-0020](../adr/0020-inferred-channel-count.md), [ADR-0022](../adr/0022-copies-take-state-from-the-running-instance.md) | Agreed, P1 |
 | [Changing a running patch](live-patching.md) | [ADR-0002](../adr/0002-graph-execution-and-feedback.md), [ADR-0022](../adr/0022-copies-take-state-from-the-running-instance.md) | Rules 1 to 5 Implemented; rule 6 Agreed, P1; rules 9 and 10 (cable fades, staged retry) Agreed, P2 |
 | [Modulation](modulation.md) | [ADR-0014](../adr/0014-modulation-without-cables.md) | Engine, parameter mapping, and editing slices 1 to 3 Agreed (P1); slice 2 built; decibel mapping Agreed (P2) |
 | [Undo and redo](undo.md) | None (builds on [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md)) | Implemented, P1 |
 | [Control ranges](control-ranges.md) | None (extends parameter mapping) | Agreed, P1 |
-| [Port ranges](port-ranges.md) | None (builds on [ADR-0007](../adr/0007-polymorphic-signal-model.md)) | Tier 1 Agreed, Tiers 2 and 3 Draft, P1 and P2 |
-| [Module test harness](module-test-harness.md) | [ADR-0002](../adr/0002-graph-execution-and-feedback.md) | Implemented, P1 |
-| [Clock and transport](clock.md) | [ADR-0015](../adr/0015-one-transport-per-patch.md) | Engine sections, Clock Divide, and Phase Trigger Implemented (P1); Transport, Clock, Phase Scale, and rules 10 and 11 Agreed (P1); MIDI clock Agreed (P2); rest Draft |
+| [Port ranges](port-ranges.md) | None (builds on [ADR-0007](../adr/0007-polymorphic-signal-model.md)) | Tier 1 Agreed (P1), Tiers 2 and 3 Agreed (P2) |
+| [Module test harness](module-test-harness.md) | [ADR-0002](../adr/0002-graph-execution-and-feedback.md) | Implemented, P1; reset check Agreed, P2 |
+| [Clock and transport](clock.md) | [ADR-0015](../adr/0015-one-transport-per-patch.md) | Engine sections, Clock Divide, and Phase Trigger Implemented (P1); Transport, Clock, Phase Scale, and rules 10 and 11 Agreed (P1); MIDI clock and Clock to phase Agreed (P2); rest Draft |
 | [Delay line and all-pass](delay.md) | [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md), [ADR-0002](../adr/0002-graph-execution-and-feedback.md), [ADR-0017](../adr/0017-primitives-traits-and-abstractions.md), [ADR-0020](../adr/0020-inferred-channel-count.md) | Implemented, P1 |
 | [Port and parameter text](port-and-parameter-text.md) | [ADR-0016](../adr/0016-ports-and-parameters-carry-their-own-text.md) | Implemented, P1 |
-| [Open, Save, and Save As](files.md) | None (builds on [ADR-0008](../adr/0008-patch-format-ron.md)) | Implemented, P1 |
+| [Open, Save, and Save As](files.md) | None (builds on [ADR-0008](../adr/0008-patch-format-ron.md)) | Implemented, P1; recent files and dropping a file Agreed, P2 |
 | [MIDI learn](midi-learn.md) | None (builds on [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md) and [ADR-0013](../adr/0013-modules-carry-their-own-panel.md)) | Agreed, P1; device mappings and mapping modes Agreed, P2 |
 | [Module browser](module-browser.md) | None (builds on [ADR-0010](../adr/0010-own-patch-canvas.md)) | Implemented, P1 |
 | [Automatic placement](auto-placement.md) | None (builds on [ADR-0010](../adr/0010-own-patch-canvas.md)) | Implemented, P1 |

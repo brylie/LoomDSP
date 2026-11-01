@@ -124,12 +124,21 @@ A failed save keeps the unsaved mark. A save writes to a temporary file in the s
 - [x] Opening a file in some other folder that happens to be named `examples` is not a copy, and Save writes it in place (test). (`example_tests.rs`)
 - [ ] `cargo deny check` passes with the dialog crate on macOS, Windows, and Linux (CI).
 
+## Recent files, the last folder, and dropping a file
+
+**Status:** Agreed, P2 ([#184](https://github.com/brylie/LoomDSP/issues/184), 2026-11-01).
+
+- **File > Open Recent** lists the last 10 patches opened or saved, newest first, by file name with the folder as hover text. Choosing one opens it, asking first about unsaved changes, as Open does. A missing file is shown dimmed; choosing it removes it from the list, with a status message. Examples opened as copies are not listed.
+- **The last folder.** Open and Save dialogs start in the current file's folder; otherwise in the last folder used in a dialog; otherwise in the library folder ([your patches browser](patch-metadata.md#your-patches-browser)).
+- **Where they live:** `recent.ron` beside `preferences.ron` ([preferences](preferences.md)), written through a temporary file and a rename. *Why not the preferences file:* that file is written only when the player changes a preference, and the recent list changes with every open.
+- **Dropping files on the window.** One `.ron` file opens, with the unsaved-changes question. Several files open the first and say `Opened "<name>". Drop one patch at a time.` Any other file says `Only LoomDSP patches (.ron) can be opened here.` *Why open and not insert:* inserting is the module browser's job ([sub-patches](sub-patches.md#library)).
+- **Acceptance:** the list holds 10, newest first, and survives a restart; a missing file is dimmed and removed when chosen; the dialog starts in the remembered folder; dropping one file opens it after the question, several open the first, others show the message (tests, and a manual check of dropping on each platform).
+
 ## Out of scope
 
 - Several patches in several windows (later; needs one engine per window).
-- Recent files list and remembered folders. Autosave and crash recovery have their own spec: [autosave.md](autosave.md).
+- Autosave and crash recovery have their own spec: [autosave.md](autosave.md).
 - Embedded assets (FR-FILE-06) and migrations (FR-FILE-02, from the first release).
-- Drag a file onto the window to open it.
 
 ## Open points
 

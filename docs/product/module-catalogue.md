@@ -50,6 +50,7 @@ Timing is phase-driven: a ramp from 0 to 1 sets where in a cycle a module is ([P
 | MT-PHASE-06 | Phase split | Divides one cycle into N parts and outputs a phase for each part. | | P3 | New | Planned |
 | MT-PHASE-08 | Phase wrap and fold | Brings any signal into the 0 to 1 phase range, by wrapping it around or by folding it back at the edges. | | P1 | FR-LIB-01 | Built (`loom.phase.wrap`) |
 | MT-PHASE-07 | Span phase | A phase that covers N bars and is anchored to bar 1, so it has the same value at the same musical time after any jump. | | P3 | New | Planned |
+| MT-PHASE-09 | Clock to phase | Turns a clock that arrives as triggers into a phase, by measuring the time between them, so it can be multiplied and divided like any phase. | | P2 | FR-LIB-27 | Specified ([clock](../design/clock.md#clock-to-phase)) |
 
 ## Sound sources
 
@@ -353,10 +354,10 @@ A user's own sub-patch can declare a role and then fill any matching slot (FR-EN
 | Phase | Types | Of which new (no requirement yet) |
 |---|---|---|
 | P0 | 3 | 0 |
-| P1 | 34 | 0 |
-| P2 | 57 | 16 |
+| P1 | 35 | 0 |
+| P2 | 57 | 13 |
 | P3 | 32 | 13 |
 | P4 | 46 | 30 |
-| **Total** | **172** | **59** |
+| **Total** | **173** | **56** |
 
 Plus 11 traits and 7 initial roles. The summary is counted from the tables above; update it when entries change.
