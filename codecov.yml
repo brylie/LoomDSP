@@ -19,6 +19,11 @@ coverage:
     patch:
       default:
         target: auto
+        # Report patch coverage but never fail on it. Codecov counts moved
+        # lines as new, so a pure refactor shows old gaps as a drop. The
+        # project status above and the 80% minimum in the ruleset are the
+        # real coverage gates.
+        informational: true
 
 comment:
   # Post the PR comment only once both reports are in, like the statuses.
