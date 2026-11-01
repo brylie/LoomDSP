@@ -8,6 +8,7 @@ Shows the peak and RMS level of its input. Passes the input through unchanged.
 |---|---|
 | ID | `loom.display.meter` |
 | Version | 1 |
+| Family | Interface |
 | Category | Display |
 
 ## Inputs
@@ -36,7 +37,9 @@ None.
 
 ## When to use it
 
-Use Level Meter to monitor peak and RMS levels across the signal path. It helps avoid digital clipping and keep proper headroom before the final output. The input passes through to the output with zero latency.
+Use Level Meter to watch how loud a signal is at any point in a patch. It shows the peak and the RMS level, so you can see when a signal gets near the top of its range before the output stage has to limit it.
+
+The input passes through unchanged, so you can put the meter in the middle of a chain.
 
 ## Example patch
 

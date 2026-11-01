@@ -39,9 +39,9 @@ mod width;
 pub use compile::{CompileReport, FeedbackLoop};
 pub use controller::{Controller, EngineParts, MidiSender, create_engine};
 pub use descriptor::{
-    ButtonMode, Channels, DisplayKind, DisplaySpec, MAX_DISPLAYS, MissingText, ModuleConfig, ModuleDescriptor,
+    ButtonMode, Channels, DisplayKind, DisplaySpec, Family, MAX_DISPLAYS, MissingText, ModuleConfig, ModuleDescriptor,
     ModuleRole, Panel, ParamMapping, ParamOptions, ParamRange, ParamSpec, Polarity, PortDefault, PortRange, PortSpec,
-    SpecKind, Undocumented, Widget, WidgetKind, assert_documented,
+    ShownWhen, SpecKind, Undocumented, Widget, WidgetKind, assert_documented, number_text,
 };
 pub use display::{DisplayReader, DisplaySource, TriggerFlag};
 pub use engine::{Engine, EngineConfig, EngineStats, RestartFadeSender};

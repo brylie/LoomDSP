@@ -34,6 +34,7 @@ pub static ADD: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Add",
     category: "Math",
+    family: loom_core::Family::LogicAndMath,
     description: "Adds two signals and an offset.",
     inputs: &[
         PortSpec {
@@ -128,7 +129,8 @@ pub static MUL: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Multiply",
     category: "Math",
-    description: "Multiplies two signals and a gain. Use it as a ring modulator. To control loudness, use Amplifier.",
+    family: loom_core::Family::LogicAndMath,
+    description: "Multiplies two signals and a gain, for ring modulation. To control loudness, use Amplifier.",
     inputs: &[
         PortSpec {
             name: "a",
@@ -224,6 +226,7 @@ pub static SUB: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Subtract",
     category: "Math",
+    family: loom_core::Family::LogicAndMath,
     description: "Subtracts signal B from signal A.",
     inputs: &[
         PortSpec {
@@ -283,6 +286,7 @@ pub static DIV: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Divide",
     category: "Math",
+    family: loom_core::Family::LogicAndMath,
     description: "Divides signal A by signal B. Outputs 0 while B is near zero.",
     inputs: &[
         PortSpec {
@@ -339,6 +343,7 @@ pub static CONSTANT: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Constant",
     category: "Math",
+    family: loom_core::Family::LogicAndMath,
     description: "Outputs a constant value. Useful for pitch offsets, gates, and testing.",
     inputs: &[],
     outputs: &[PortSpec {
@@ -423,6 +428,7 @@ pub static CONVERT: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Convert",
     category: "Math",
+    family: loom_core::Family::LogicAndMath,
     description: "Converts between decibels and level, and between pitch and frequency in Hz.",
     inputs: &[PortSpec {
         name: "in",
@@ -456,7 +462,7 @@ pub static CONVERT: ModuleDescriptor = ModuleDescriptor {
     .choices(&["dB to level", "Level to dB", "Pitch to Hz", "Hz to pitch"])],
     role: ModuleRole::Dsp(|_| Box::new(Convert { mode: 0 })),
     // Four radio buttons are 3 wide and 5 tall.
-    panel: Panel::new(6, 5, &[Widget::radio(0, 0, "mode")]),
+    panel: Panel::new(6, 2, &[Widget::select(0, 0, "mode")]),
     displays: &[],
 };
 
@@ -497,8 +503,9 @@ impl Module for Convert {
 pub static PITCH_CONSTANT: ModuleDescriptor = ModuleDescriptor {
     id: "loom.pitch.constant",
     version: 1,
-    name: "Constant (pitch)",
+    name: "Pitch Constant",
     category: "Pitch",
+    family: loom_core::Family::NotesAndPitch,
     description: "Outputs a fixed pitch, set in semitones from middle C.",
     inputs: &[],
     outputs: &[PortSpec {

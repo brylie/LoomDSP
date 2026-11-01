@@ -1,13 +1,14 @@
-# One-pole
+# One-Pole
 
 <!-- Generated from the module's descriptor by `loom modules --markdown`. Edit the descriptor, not this part. -->
 
-A gentle first-order filter, 6 dB per octave. The cutoff input adds pitch: +0.1 doubles the cutoff. Low cutoffs smooth control signals.
+A gentle 6 dB per octave filter with low-pass and high-pass outputs; low cutoffs smooth control signals. The cutoff input adds pitch: +0.1 doubles the cutoff.
 
 | | |
 |---|---|
 | ID | `loom.filter.onepole` |
 | Version | 1 |
+| Family | Filters and effects |
 | Category | Filter |
 
 ## Inputs
@@ -40,7 +41,9 @@ A gentle first-order filter, 6 dB per octave. The cutoff input adds pitch: +0.1 
 
 ## When to use it
 
-Use One-pole for gentle 6 dB per octave filtering, subtle tone shaping, or smoothing modulation signals. It offers simultaneous lowpass and highpass outputs with no resonant peak. The cutoff input tracks pitch at 0.1 per octave.
+Use One-Pole for a gentle slope: soften a bright sound, take away some low end, or smooth a stepped control signal. It cuts 6 dB per octave and has no resonance, so it never rings.
+
+Lowpass and Highpass come from the same cutoff, so together they split a signal into a low part and a high part. The cutoff input tracks pitch at 0.1 per octave.
 
 ## Example patch
 

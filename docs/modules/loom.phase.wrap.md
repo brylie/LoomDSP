@@ -1,4 +1,4 @@
-# Phase wrap and fold
+# Phase Wrap and Fold
 
 <!-- Generated from the module's descriptor by `loom modules --markdown`. Edit the descriptor, not this part. -->
 
@@ -8,6 +8,7 @@ Brings any signal into the phase range, 0 to 1. Wrap goes round the edge; fold t
 |---|---|
 | ID | `loom.phase.wrap` |
 | Version | 1 |
+| Family | Time and rhythm |
 | Category | Phase |
 
 ## Inputs
@@ -26,19 +27,21 @@ Brings any signal into the phase range, 0 to 1. Wrap goes round the edge; fold t
 
 | Parameter | Range | Default | Description |
 |---|---|---|---|
-| **Mode** (`mode`) | 0 to 1, whole numbers, choices Wrap, Fold | 0 | Wrap goes round the edge. Fold turns back at the edges. |
+| **Mode** (`mode`) | Wrap or Fold | Wrap | Wrap goes round the edge. Fold turns back at the edges. |
 
 ## Panel
 
-6 by 3 grid units.
+5 by 2 grid units.
 
-- Radio buttons: **Mode** (`mode`) (Wrap, Fold)
+- Segmented control: **Mode** (`mode`)
 
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->
 
 ## When to use it
 
-Use Phase wrap and fold to constrain arbitrary modulation signals into the valid phase domain (0 to 1). In Wrap mode, signals wrap circularly past the boundaries. In Fold mode, signals reflect back at 0 and 1, creating wavefolding timbres.
+Use Phase Wrap and Fold to bring any signal into the phase range, 0 to 1, so it can drive a wave shaper.
+
+Wrap goes round the edge, like a clock. Fold turns back at 0 and 1, which on an oscillator makes new harmonics as the signal grows.
 
 ## Example patch
 

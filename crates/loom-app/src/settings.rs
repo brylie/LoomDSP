@@ -8,8 +8,9 @@
 
 use crate::devices::{self, Host, InputPort, MidiPort, Playing, Wanted};
 use crate::preferences::{AudioPrefs, BufferChoice, DeviceChoice, InputChoice, Preferences, RateChoice, Store};
+use crate::style::{self, button};
 use crate::{App, undo};
-use iced::widget::{button, checkbox, column, container, opaque, pick_list, radio, row, rule, scrollable, space, text};
+use iced::widget::{checkbox, column, container, opaque, pick_list, radio, row, rule, scrollable, space, text};
 use iced::{Element, Length};
 use loom_core::{EngineConfig, EngineParts, MidiInputId, OutputSafety, create_engine};
 use loom_host_desktop::{AudioOutput, MidiInputInfo, Outputs, Recorder, STOP_LIMIT, SharedMidi};
@@ -1392,8 +1393,8 @@ impl App {
     /// The window, over the canvas, while it is open.
     pub(crate) fn preferences_view(&self) -> Option<Element<'_, crate::Message>> {
         let window = self.rig.window.as_ref()?;
-        let heading = |label: &'static str| text(label).size(15);
-        let note = |line: String| text(line).size(12).color(crate::DIM);
+        let heading = |label: &'static str| text(label).size(style::HEADING);
+        let note = |line: String| text(line).size(style::BODY).color(crate::DIM);
 
         let mut safety = column![heading("Output safety")].spacing(6);
         for (mode, line) in [
@@ -1417,8 +1418,8 @@ impl App {
                     radio(label, mode, Some(self.output_safety), |m| crate::Message::Preferences(
                         Message::Safety(m)
                     ))
-                    .size(14)
-                    .text_size(13),
+                    .size(style::SWITCH)
+                    .text_size(style::CONTROL),
                     container(note(line.to_string())).padding([0, 24]),
                 ]
                 .spacing(2),
@@ -1432,17 +1433,17 @@ impl App {
         let midi = self.midi_section(window, note);
         let panic = column![
             row![
-                text(self.panic_line()).size(13).width(Length::Fill),
+                text(self.panic_line()).size(style::CONTROL).width(Length::Fill),
                 button(
                     text(if self.rig.panic_learn.is_some() {
                         "Cancel"
                     } else {
                         "Learn"
                     })
-                    .size(13)
+                    .size(style::CONTROL)
                 )
                 .on_press(crate::Message::Preferences(Message::PanicLearn)),
-                button(text("Clear").size(13)).on_press_maybe(
+                button(text("Clear").size(style::CONTROL)).on_press_maybe(
                     self.rig
                         .store
                         .saved()
@@ -1458,9 +1459,9 @@ impl App {
 
         let panel = column![
             row![
-                text("Preferences").size(18),
+                text("Preferences").size(style::TITLE),
                 space::horizontal(),
-                button(text("Close").size(13)).on_press(crate::Message::Preferences(Message::Close)),
+                button(text("Close").size(style::CONTROL)).on_press(crate::Message::Preferences(Message::Close)),
             ]
             .align_y(iced::Alignment::Center),
             scrollable(
@@ -1526,9 +1527,10 @@ impl App {
                         pick_list(devices, selected, |item: Item<DeviceChoice>| {
                             crate::Message::Preferences(Message::Audio(Change::Device(item.value)))
                         })
-                        .text_size(13)
+                        .text_size(style::CONTROL)
                         .width(Length::Fill),
-                        button(text("Refresh").size(13)).on_press(crate::Message::Preferences(Message::Refresh)),
+                        button(text("Refresh").size(style::CONTROL))
+                            .on_press(crate::Message::Preferences(Message::Refresh)),
                     ]
                     .spacing(8)
                     .into(),
@@ -1553,7 +1555,7 @@ impl App {
                         pick_list(rates, selected, |item: Item<RateChoice>| {
                             crate::Message::Preferences(Message::Audio(Change::Rate(item.value)))
                         })
-                        .text_size(13)
+                        .text_size(style::CONTROL)
                         .width(Length::Fill)
                         .into(),
                     ));
@@ -1577,7 +1579,7 @@ impl App {
                         pick_list(buffers, selected, |item: Item<BufferChoice>| {
                             crate::Message::Preferences(Message::Audio(Change::Buffer(item.value)))
                         })
-                        .text_size(13)
+                        .text_size(style::CONTROL)
                         .width(Length::Fill)
                         .into(),
                     ));
@@ -1617,7 +1619,7 @@ impl App {
                     pick_list(choices, selected, |item: Item<InputChoice>| {
                         crate::Message::Preferences(Message::Input(item.value))
                     })
-                    .text_size(13)
+                    .text_size(style::CONTROL)
                     .width(Length::Fill)
                     .into(),
                 ));
@@ -1688,8 +1690,8 @@ impl App {
                         checkbox(on)
                             .label(name.clone())
                             .on_toggle(move |on| crate::Message::Preferences(Message::Midi(name.clone(), on)))
-                            .size(14)
-                            .text_size(13),
+                            .size(style::SWITCH)
+                            .text_size(style::CONTROL),
                     );
                 }
                 section = section.push(note("New MIDI inputs are on until you turn them off.".into()));
@@ -1706,7 +1708,7 @@ impl App {
 
 /// A control with its label on the left.
 fn labelled<'a>(label: &'a str, control: Element<'a, crate::Message>) -> Element<'a, crate::Message> {
-    row![text(label).size(13).width(100), control]
+    row![text(label).size(style::CONTROL).width(100), control]
         .spacing(8)
         .align_y(iced::Alignment::Center)
         .into()
@@ -3215,5 +3217,41 @@ mod tests {
         let recent = Instant::now() + Duration::from_millis(100);
         app.check_audio(recent);
         assert_eq!(app.rig.lost_audio.as_ref().unwrap().attempts, 0);
+    }
+
+    /// The status bar shows what a performer needs: the developer tools
+    /// only with `--dev`, and MIDI inputs as a count, so four inputs fit
+    /// in a 1280 px window (visual-system.md, Status bar).
+    #[test]
+    fn the_status_bar_counts_midi_and_hides_developer_tools() {
+        for dev in [false, true] {
+            let dir = folder(if dev { "status-dev" } else { "status-plain" });
+            let fake = Rc::new(Fake::new(
+                &[fake::device("Fake A")],
+                &[
+                    "Long Keyboard Name MIDI 1",
+                    "Long Keyboard Name DAW",
+                    "Pad Controller Port",
+                    "Pedal Board",
+                ],
+            ));
+            let app = start(Args { dev, ..args(&dir) }, &fake);
+            assert_eq!(app.rig.ports.len(), 4);
+            let mut ui = crate::ui_test::Ui::with_app(app);
+            let midi = ui.text("MIDI: 4 inputs").expect("the MIDI count");
+            assert!(
+                midi.x + midi.width <= 1280.0,
+                "the MIDI count ends at {}",
+                midi.x + midi.width
+            );
+            assert!(ui.text("Long Keyboard Name DAW").is_none(), "names only in hover text");
+            // Switch labels are not text widgets, so look for the frame
+            // summary, which shows with the Measure and Move camera switches.
+            assert_eq!(
+                ui.text("redraws on change").is_some(),
+                dev,
+                "developer tools with --dev only"
+            );
+        }
     }
 }

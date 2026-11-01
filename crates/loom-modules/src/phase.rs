@@ -16,6 +16,7 @@ pub static PHASE: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Phase",
     category: "Phase",
+    family: loom_core::Family::TimeAndRhythm,
     description: "Ramp from 0 to 1 at the pitch frequency. Drives oscillators and LFOs.",
     inputs: &[
         PortSpec {
@@ -161,6 +162,7 @@ pub static PHASE_TRIGGER: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Phase Trigger",
     category: "Phase",
+    family: loom_core::Family::TimeAndRhythm,
     description: "Fires a trigger each time the phase wraps, forward or backward.",
     inputs: &[PortSpec {
         name: "phase",
@@ -232,8 +234,9 @@ impl Module for PhaseTrigger {
 pub static WRAP: ModuleDescriptor = ModuleDescriptor {
     id: "loom.phase.wrap",
     version: 1,
-    name: "Phase wrap and fold",
+    name: "Phase Wrap and Fold",
     category: "Phase",
+    family: loom_core::Family::TimeAndRhythm,
     description: "Brings any signal into the phase range, 0 to 1. Wrap goes round the edge; fold turns back at the edges.",
     inputs: &[PortSpec {
         name: "in",
@@ -266,7 +269,7 @@ pub static WRAP: ModuleDescriptor = ModuleDescriptor {
     .integer()
     .choices(&["Wrap", "Fold"])],
     role: ModuleRole::Dsp(|_| Box::new(Wrap { fold: false })),
-    panel: Panel::new(6, 3, &[Widget::radio(0, 0, "mode")]),
+    panel: Panel::new(5, 2, &[Widget::segmented(0, 0, 5, "mode")]),
     displays: &[],
 };
 
@@ -323,6 +326,7 @@ pub static SCALE: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Phase Scale",
     category: "Phase",
+    family: loom_core::Family::TimeAndRhythm,
     description: "Runs a phase at multiply / divide times its speed, locked to the input. Divide counts the input's wraps from the first cycle or the last reset.",
     inputs: &[
         PortSpec {

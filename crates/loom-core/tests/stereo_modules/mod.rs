@@ -45,6 +45,7 @@ macro_rules! descriptor {
             version: 1,
             name: $id,
             category: "Test",
+            family: loom_core::Family::Interface,
             description: "A test module.",
             inputs: $inputs,
             outputs: $outputs,

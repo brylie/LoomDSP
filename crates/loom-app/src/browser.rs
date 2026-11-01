@@ -1,6 +1,7 @@
 //! The module browser: search the registry and add a module where the user
 //! opened the browser. Spec: `docs/design/module-browser.md`.
 
+use crate::style;
 use iced::widget::{column, container, mouse_area, row, scrollable, space, text, text_input};
 use iced::{Element, Length, Point, Rectangle, Task, Theme};
 use loom_canvas::GRID;
@@ -14,7 +15,7 @@ const ROW_HEIGHT: f32 = 26.0;
 /// Rows shown before the list scrolls.
 const ROWS: usize = 10;
 /// Height of the area for the highlighted module's description.
-const DESCRIPTION_HEIGHT: f32 = 52.0;
+const DESCRIPTION_HEIGHT: f32 = 64.0;
 const PADDING: f32 = 8.0;
 const SPACING: f32 = 6.0;
 const INPUT_HEIGHT: f32 = 30.0;
@@ -140,6 +141,12 @@ impl Browser {
         iced::widget::operation::focus(INPUT)
     }
 
+    /// The modules the list shows, best first.
+    #[cfg(test)]
+    pub fn results(&self) -> &[&'static ModuleDescriptor] {
+        &self.results
+    }
+
     /// The highlighted module, if there are results.
     pub fn highlighted(&self) -> Option<&'static ModuleDescriptor> {
         self.results.get(self.highlight).copied()
@@ -186,16 +193,24 @@ impl Browser {
             .id(INPUT)
             .on_input(Message::Query)
             .on_submit(Message::Submit)
-            .size(14)
+            .size(style::CONTROL)
             .padding(6);
 
         let rows = self.results.iter().enumerate().map(|(i, d)| {
             let highlighted = i == self.highlight;
             let line = row![
-                text(d.name).size(13),
-                text(d.category).size(11).style(text::secondary),
-                space::horizontal(),
-                text(d.id).size(11).style(text::secondary),
+                text(d.name).size(style::CONTROL),
+                // The family's colour and name, so colour is never the only
+                // cue (ADR-0029).
+                container(space().width(8).height(8)).style(move |_: &Theme| container::Style {
+                    background: Some(crate::scene::family_colour(d.family).into()),
+                    border: iced::Border {
+                        radius: 2.0.into(),
+                        ..iced::Border::default()
+                    },
+                    ..container::Style::default()
+                }),
+                text(d.family.label()).size(style::SMALL).color(style::QUIET),
             ]
             .spacing(8)
             .align_y(iced::Alignment::Center);
@@ -211,26 +226,35 @@ impl Browser {
                 .into()
         });
         let list: Element<'_, Message> = if self.results.is_empty() {
-            container(text("No modules match.").size(13).style(text::secondary))
+            container(text("No modules match.").size(style::CONTROL).color(style::QUIET))
                 .padding(8)
                 .height(LIST_HEIGHT)
                 .into()
         } else {
+            // The scrollbar takes its own space, so it covers no row text.
             scrollable(column(rows))
                 .id(LIST)
+                .spacing(4)
                 .height(LIST_HEIGHT)
                 .on_scroll(|viewport| Message::Scrolled(viewport.absolute_offset().y))
                 .into()
         };
-        let description = self.highlighted().map_or("", |d| d.description);
-        let panel = column![
-            input,
-            list,
-            container(text(description).size(12)).height(DESCRIPTION_HEIGHT),
-        ]
-        .spacing(SPACING)
-        .padding(PADDING)
-        .width(WIDTH);
+        // The ID goes with the description, so no row is cut by a column
+        // or covered by the scrollbar (module-browser.md).
+        let about = self.highlighted().map_or_else(
+            || column![],
+            |d| {
+                column![
+                    text(d.description).size(style::BODY),
+                    text(d.id).size(style::SMALL).color(style::QUIET),
+                ]
+                .spacing(2)
+            },
+        );
+        let panel = column![input, list, container(about).height(DESCRIPTION_HEIGHT)]
+            .spacing(SPACING)
+            .padding(PADDING)
+            .width(WIDTH);
         let panel = container(panel).style(panel_style);
         iced::widget::pin(iced::widget::opaque(panel)).position(self.at).into()
     }
@@ -239,9 +263,9 @@ impl Browser {
 /// The modules that match a query, best first.
 ///
 /// A module matches when every word of the query is in its name, ID, or
-/// category, ignoring case. Names that start with the query come first,
-/// then names with a word that starts with it, then other matches. Ties
-/// keep the order of an empty search: by category, then by name.
+/// category, or family, ignoring case. Names that start with the query come
+/// first, then names with a word that starts with it, then other matches.
+/// Ties keep the order of an empty search: by family, then by name.
 pub fn search(modules: &[&'static ModuleDescriptor], query: &str) -> Vec<&'static ModuleDescriptor> {
     let query = query.trim().to_lowercase();
     let words: Vec<&str> = query.split_whitespace().collect();
@@ -249,11 +273,11 @@ pub fn search(modules: &[&'static ModuleDescriptor], query: &str) -> Vec<&'stati
         .iter()
         .copied()
         .filter(|d| {
-            let text = format!("{} {} {}", d.name, d.id, d.category).to_lowercase();
+            let text = format!("{} {} {} {}", d.name, d.id, d.category, d.family.label()).to_lowercase();
             words.iter().all(|w| text.contains(w))
         })
         .collect();
-    found.sort_by_key(|d| (d.category, d.name, d.id));
+    found.sort_by_key(|d| (d.family, d.name, d.id));
     if !query.is_empty() {
         // A stable sort, so ties keep the order above.
         found.sort_by_key(|d| Reverse(rank(d.name, &query)));
@@ -305,17 +329,19 @@ fn panel_style(theme: &Theme) -> container::Style {
     }
 }
 
-fn row_style(theme: &Theme, highlighted: bool) -> container::Style {
+/// The highlighted row: a lifted grey with an orange outline, like a
+/// selected card, so its quieter text stays readable on it.
+pub(crate) fn row_style(theme: &Theme, highlighted: bool) -> container::Style {
     if !highlighted {
         return container::Style::default();
     }
     let palette = theme.extended_palette();
     container::Style {
-        background: Some(palette.primary.weak.color.into()),
-        text_color: Some(palette.primary.weak.text),
+        background: Some(palette.background.weak.color.into()),
         border: iced::Border {
+            color: palette.primary.base.color,
+            width: 1.0,
             radius: 4.0.into(),
-            ..iced::Border::default()
         },
         ..container::Style::default()
     }
@@ -334,14 +360,34 @@ mod tests {
     }
 
     #[test]
-    fn empty_query_lists_every_module_by_category_then_name() {
+    fn empty_query_lists_every_module_by_family_then_name() {
         let all = modules();
         let found = search(&all, "  ");
         assert_eq!(found.len(), all.len());
-        let keys: Vec<_> = found.iter().map(|d| (d.category, d.name)).collect();
+        let keys: Vec<_> = found.iter().map(|d| (d.family, d.name)).collect();
         let mut sorted = keys.clone();
         sorted.sort();
         assert_eq!(keys, sorted);
+    }
+
+    /// A family's name finds its modules, and a category still finds
+    /// its own (ADR-0029).
+    #[test]
+    fn family_and_category_names_both_match() {
+        let all = modules();
+        let modulation = search(&all, "modulation");
+        let family = all.iter().filter(|d| d.family == loom_core::Family::Modulation).count();
+        assert!(
+            modulation.len() >= family && family >= 3,
+            "{} of {family}",
+            modulation.len()
+        );
+        assert!(
+            search(&all, "filters and effects")
+                .iter()
+                .any(|d| d.id == "loom.time.delay")
+        );
+        assert!(search(&all, "oscillator").iter().any(|d| d.id == "loom.osc.sine"));
     }
 
     #[test]

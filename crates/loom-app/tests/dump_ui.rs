@@ -56,6 +56,19 @@ fn widget(json: &serde_json::Value, id: u32, label: &str) -> serde_json::Value {
     widgets.iter().find(|w| w["label"] == label).expect("a widget").clone()
 }
 
+/// The first widget of `kind` on module `id`, for widgets with no caption,
+/// such as a meter.
+fn widget_of_kind(json: &serde_json::Value, id: u32, kind: &str) -> serde_json::Value {
+    let tile = json["tiles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["id"] == id)
+        .expect("a tile");
+    let widgets = tile["widgets"].as_array().unwrap();
+    widgets.iter().find(|w| w["kind"] == kind).expect("a widget").clone()
+}
+
 fn json_of(result: &Output) -> serde_json::Value {
     assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
     serde_json::from_slice(&result.stdout).expect("JSON")
@@ -71,7 +84,7 @@ fn frames_run_the_engine_first() {
         "the engine has not run"
     );
     assert_eq!(widget(&still, 2, "Level")["position"], 0.0);
-    assert_eq!(widget(&still, 4, "Out")["position"], 0.0);
+    assert_eq!(widget_of_kind(&still, 4, "meter")["position"], 0.0);
 
     let ran = json_of(&dump_of(&patch, &["--frames", "4800"]));
     let knob = widget(&ran, 3, "Cutoff");
@@ -84,7 +97,7 @@ fn frames_run_the_engine_first() {
     assert!(level > 0.5, "the gate is held: {level}");
     // A steady 0.6 is -4.4 dB, which a meter from -60 dB to 0 dB shows at
     // about 0.926.
-    let meter = widget(&ran, 4, "Out");
+    let meter = widget_of_kind(&ran, 4, "meter");
     let (rms, peak) = (meter["position"].as_f64().unwrap(), meter["peak"].as_f64().unwrap());
     assert!((rms - 0.926).abs() < 0.01, "the meter shows the constant: {meter}");
     assert!((peak - rms).abs() < 0.01, "a constant peaks at its RMS level: {meter}");

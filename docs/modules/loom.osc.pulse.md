@@ -2,12 +2,13 @@
 
 <!-- Generated from the module's descriptor by `loom modules --markdown`. Edit the descriptor, not this part. -->
 
-Band-limited pulse wave shaped from a phase input (polyBLEP).
+A pulse wave with a set width, shaped from a phase input. Its sharp edges are smoothed so high notes stay clean.
 
 | | |
 |---|---|
 | ID | `loom.osc.pulse` |
 | Version | 1 |
+| Family | Sources |
 | Category | Oscillator |
 
 ## Inputs
@@ -38,7 +39,9 @@ Band-limited pulse wave shaped from a phase input (polyBLEP).
 
 ## When to use it
 
-Use Pulse to generate square and pulse waveforms shaped from a phase input. PolyBLEP band-limiting suppresses digital aliasing across the audio spectrum. Adjust the width parameter for rich harmonic variation or classic pulse width modulation.
+Use Pulse for hollow and buzzy sounds. Width sets how much of each cycle is high: 0.5 is a square wave, and narrow widths sound thinner. Moving the width with an LFO gives a slowly changing tone.
+
+It needs a phase input, usually from Phase. Its sharp edges are smoothed, so high notes do not gain harsh extra tones.
 
 ## Example patch
 

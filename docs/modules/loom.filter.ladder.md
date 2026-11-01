@@ -2,12 +2,13 @@
 
 <!-- Generated from the module's descriptor by `loom modules --markdown`. Edit the descriptor, not this part. -->
 
-A resonant low-pass with a 12, 18, or 24 dB slope. High resonance thins the bass and, at 18 and 24 dB, sings on its own. The cutoff input adds pitch: +0.1 doubles the cutoff.
+A resonant low-pass with a 12, 18, or 24 dB slope; high resonance thins the bass and, at 18 and 24 dB, sings on its own. The cutoff input adds pitch: +0.1 doubles the cutoff.
 
 | | |
 |---|---|
 | ID | `loom.filter.ladder` |
 | Version | 1 |
+| Family | Filters and effects |
 | Category | Filter |
 
 ## Inputs
@@ -30,14 +31,14 @@ A resonant low-pass with a 12, 18, or 24 dB slope. High resonance thins the bass
 | **Cutoff** (`cutoff`) | 20 to 20000 Hz, logarithmic | 1000 Hz | The frequency where the filter starts to cut. |
 | **Resonance** (`resonance`) | 0 to 1 | 0.2 | Feeds the output back to boost the cutoff. At 1, the 18 and 24 dB slopes oscillate on their own. |
 | **Drive** (`drive`) | 0 to 1 | 0 | Raises the input level, up to 8 times (+18 dB), so the feedback saturates sooner. |
-| **Slope** (`slope`) | 0 to 2, whole numbers, choices 12 dB, 18 dB, 24 dB | 2 | How steeply the filter cuts above the cutoff: two, three, or four stages in the loop. |
+| **Slope** (`slope`) | 12 dB, 18 dB, or 24 dB | 24 dB | How steeply the filter cuts above the cutoff: two, three, or four stages in the loop. |
 
 ## Panel
 
-12 by 11 grid units.
+11 by 10 grid units.
 
 - Shape preview: **Response** (`out`) (read-only)
-- Radio buttons: **Slope** (`slope`) (12 dB, 18 dB, 24 dB)
+- Segmented control: **Slope** (`slope`)
 - Knob: **Cutoff** (`cutoff`)
 - Knob: **Resonance** (`resonance`)
 - Knob: **Drive** (`drive`)
@@ -82,4 +83,4 @@ Patch(
 - [How a ladder filter sings](../learn/ladder-filter.md)
 - [Pitch at 0.1 per octave](../learn/pitch.md)
 - [SVF](loom.filter.svf.md)
-- [One-pole](loom.filter.onepole.md)
+- [One-Pole](loom.filter.onepole.md)

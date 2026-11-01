@@ -8,6 +8,7 @@ Scales a signal by a control signal, with a linear or exponential response.
 |---|---|
 | ID | `loom.level.amp` |
 | Version | 1 |
+| Family | Level and routing |
 | Category | Level |
 
 ## Inputs
@@ -28,20 +29,22 @@ Scales a signal by a control signal, with a linear or exponential response.
 | Parameter | Range | Default | Description |
 |---|---|---|---|
 | **Gain** (`gain`) | 0 to 2 | 1 | A fixed amount the output is multiplied by. |
-| **Response** (`response`) | 0 to 1, whole numbers, choices Linear, Exponential | 0 | How the level maps to loudness: linear, or exponential over 60 dB. |
+| **Response** (`response`) | Linear or Exponential | Linear | How the level maps to loudness: linear, or exponential over 60 dB. |
 
 ## Panel
 
-6 by 6 grid units.
+9 by 5 grid units.
 
+- Segmented control: **Response** (`response`)
 - Knob: **Gain** (`gain`)
-- Radio buttons: **Response** (`response`) (Linear, Exponential)
 
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->
 
 ## When to use it
 
-Use Amplifier to scale an audio signal with a control voltage or envelope. Choose linear response for modulation signals and exponential response for natural audio volume control.
+Use Amplifier to make a signal louder or quieter under control of another signal, such as an envelope or an LFO.
+
+Level reads 1 with no cable, so the signal passes at full level until you connect something. The linear response suits control signals. The exponential response follows how we hear loudness, so it suits volume. Gain multiplies the result by a fixed amount.
 
 ## Example patch
 

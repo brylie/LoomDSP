@@ -76,6 +76,7 @@ Copy [template.md](template.md). Keep it to one feature. Link the ADR, requireme
 | [Output safety](output-safety.md) | [ADR-0019](../adr/0019-output-safety-stage.md) | Implemented, P1; rule 15 (fade in on restart) Agreed |
 | [Autosave and crash recovery](autosave.md) | None (builds on [ADR-0008](../adr/0008-patch-format-ron.md) and [files](files.md)) | Implemented, P1 |
 | [App preferences](preferences.md) | None (builds on [ADR-0019](../adr/0019-output-safety-stage.md)) | Implemented, P1 |
+| [Visual system](visual-system.md) | [ADR-0025](../adr/0025-one-design-language-and-derived-panels.md) | Agreed, P1 |
 | [Patch metadata](patch-metadata.md) | [ADR-0023](../adr/0023-patch-licences-spdx-and-creative-commons.md) | Agreed, P2 and P4 |
 | [Control channel](control-channel.md) | None (builds on [ADR-0021](../adr/0021-plain-data-view-models-and-keyed-identity.md)) | Implemented, developer tooling |
 | [Module help pages](help-pages.md) | None (builds on [ADR-0016](../adr/0016-ports-and-parameters-carry-their-own-text.md)) | Agreed and Implemented, P1 |
@@ -89,6 +90,6 @@ Copy [template.md](template.md). Keep it to one feature. Link the ADR, requireme
 | [Release downloads](releases.md) | [ADR-0027](../adr/0027-prebuilt-release-downloads.md) | Agreed, P1 |
 | [Unknown modules](unknown-modules.md) | None (builds on [ADR-0008](../adr/0008-patch-format-ron.md)) | Agreed, P1 |
 | [Frame meter](frame-meter.md) | None (extends the [P1 canvas benchmarks](../benchmarks/p1-canvas.md)) | Agreed, developer tooling |
-| [Sub-patches](sub-patches.md) | [ADR-0029](../adr/0029-sub-patches-stored-as-definitions-and-flattened.md), [ADR-0017](../adr/0017-primitives-traits-and-abstractions.md) | Agreed, P2 |
-| [Scale and tuning](scale-and-tuning.md) | [ADR-0031](../adr/0031-one-scale-and-tuning-per-patch.md) | Agreed, P2 |
-| [Module data](module-data.md) | [ADR-0030](../adr/0030-module-data-in-typed-slots.md), [ADR-0024](../adr/0024-widgets-follow-the-kind-of-value.md) | Agreed; buffer data P1, rest P2 |
+| [Sub-patches](sub-patches.md) | [ADR-0031](../adr/0031-sub-patches-stored-as-definitions-and-flattened.md), [ADR-0017](../adr/0017-primitives-traits-and-abstractions.md) | Agreed, P2 |
+| [Scale and tuning](scale-and-tuning.md) | [ADR-0033](../adr/0033-one-scale-and-tuning-per-patch.md) | Agreed, P2 |
+| [Module data](module-data.md) | [ADR-0032](../adr/0032-module-data-in-typed-slots.md), [ADR-0024](../adr/0024-widgets-follow-the-kind-of-value.md) | Agreed; buffer data P1, rest P2 |

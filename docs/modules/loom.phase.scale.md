@@ -8,6 +8,7 @@ Runs a phase at multiply / divide times its speed, locked to the input. Divide c
 |---|---|
 | ID | `loom.phase.scale` |
 | Version | 1 |
+| Family | Time and rhythm |
 | Category | Phase |
 
 ## Inputs
@@ -41,7 +42,9 @@ Runs a phase at multiply / divide times its speed, locked to the input. Divide c
 
 ## When to use it
 
-Use Phase Scale to create harmonic frequency ratios and phase-locked sub-oscillators. It multiplies or divides an incoming phase ramp by integer factors while maintaining phase alignment. Reset restarts the divider on demand.
+Use Phase Scale to make a phase that runs faster or slower than another but stays locked to it. Multiply runs it faster, for example to play notes that are octaves above. Divide runs it slower, for example to get a phase that wraps once every four bars.
+
+It follows the bar phase with no cable. Reset starts counting wraps again.
 
 ## Example patch
 
@@ -73,4 +76,4 @@ Patch(
 ## See also
 
 - [Phase and cycles](../learn/phase-and-cycles.md)
-- [Phase Generator](loom.phase.generator.md)
+- [Phase](loom.phase.generator.md)

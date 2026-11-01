@@ -8,6 +8,7 @@ A phase, trigger, and gate at a musical rate, locked to the transport's bar 1.
 |---|---|
 | ID | `loom.clock.clock` |
 | Version | 1 |
+| Family | Time and rhythm |
 | Category | Clock |
 
 ## Inputs
@@ -26,12 +27,12 @@ None.
 
 | Parameter | Range | Default | Description |
 |---|---|---|---|
-| **Rate** (`rate`) | 0 to 23, whole numbers, choices 4 bars, 4 bars dotted, 4 bars triplet, 2 bars, 2 bars dotted, 2 bars triplet, 1 bar, 1 bar dotted, 1 bar triplet, 1/2, 1/2 dotted, 1/2 triplet, 1/4, 1/4 dotted, 1/4 triplet, 1/8, 1/8 dotted, 1/8 triplet, 1/16, 1/16 dotted, 1/16 triplet, 1/32, 1/32 dotted, 1/32 triplet | 12 | The length of one cycle: 4 bars to 1/32, straight, dotted, or triplet. |
+| **Rate** (`rate`) | 4 bars, 4 bars dotted, 4 bars triplet, 2 bars, 2 bars dotted, 2 bars triplet, 1 bar, 1 bar dotted, 1 bar triplet, 1/2, 1/2 dotted, 1/2 triplet, 1/4, 1/4 dotted, 1/4 triplet, 1/8, 1/8 dotted, 1/8 triplet, 1/16, 1/16 dotted, 1/16 triplet, 1/32, 1/32 dotted, or 1/32 triplet | 1/4 | The length of one cycle: 4 bars to 1/32, straight, dotted, or triplet. |
 | **Width** (`width`) | 1 to 99 % | 50 % | How much of each cycle the gate is high. |
 
 ## Panel
 
-6 by 5 grid units.
+9 by 3 grid units.
 
 - Knob: **Rate** (`rate`)
 - Knob: **Width** (`width`)

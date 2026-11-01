@@ -2,8 +2,11 @@
 //! session-only sorting, filtering, selection, and edit state.
 
 use crate::modulation::{self, PolarityChoice};
+use crate::style::{self, button};
 use crate::{App, DIM, Message, remove_button};
-use iced::widget::{button, checkbox, column, container, pick_list, row, scrollable, slider, space, text, text_input};
+use iced::widget::{
+    checkbox, column, container, mouse_area, pick_list, row, scrollable, slider, space, text, text_input,
+};
 use iced::{Element, Length, keyboard};
 use loom_core::{AssignmentId, Graph, ModuleId, OutputRef, WidgetKind};
 use serde::Serialize;
@@ -86,8 +89,8 @@ pub(crate) fn reveal_selected() -> iced::Task<Message> {
 }
 
 /// Marks the active cell so its actual bounds can guide scrolling.
-fn matrix_cell<'a>(content: impl Into<Element<'a, Message>>, width: f32, selected: bool) -> Element<'a, Message> {
-    let cell = container(content).width(width);
+fn matrix_cell<'a>(content: impl Into<Element<'a, Message>>, selected: bool) -> Element<'a, Message> {
+    let cell = container(content);
     if selected {
         cell.id("matrix-selected-cell")
     } else {
@@ -118,8 +121,9 @@ pub enum Column {
 }
 
 impl Column {
-    /// Every column in left-to-right keyboard order.
-    pub const ALL: [Self; 5] = [Self::On, Self::Source, Self::Target, Self::Depth, Self::Polarity];
+    /// Every column in keyboard order, which is reading order on a card:
+    /// on and source, then target and polarity, then depth.
+    pub const ALL: [Self; 5] = [Self::On, Self::Source, Self::Target, Self::Polarity, Self::Depth];
 
     /// The heading shown above this column.
     pub const fn label(self) -> &'static str {
@@ -266,14 +270,6 @@ impl State {
         }
     }
 
-    /// Selects a column heading, reversing a repeated sort.
-    pub fn sort_by(&mut self, column: Column) {
-        self.sort = Some((
-            column,
-            self.sort.is_some_and(|(old, reverse)| old == column && !reverse),
-        ));
-    }
-
     /// Drops a selected row or edit if its assignment was deleted.
     pub fn reconcile(&mut self, graph: &Graph) {
         if self.selected.is_some_and(|id| graph.assignment(id).is_none()) {
@@ -307,7 +303,13 @@ pub fn targets(graph: &Graph) -> Vec<TargetPick> {
                     let eligible = !spec.options.transient
                         && node.descriptor.panel.widgets.iter().any(|w| {
                             w.bind == spec.name
-                                && matches!(w.kind, WidgetKind::Knob | WidgetKind::Toggle | WidgetKind::Radio)
+                                && matches!(
+                                    w.kind,
+                                    WidgetKind::Knob
+                                        | WidgetKind::Toggle
+                                        | WidgetKind::Radio
+                                        | WidgetKind::Segmented { .. }
+                                )
                         });
                     eligible.then(|| TargetPick {
                         module,
@@ -323,7 +325,10 @@ pub fn targets(graph: &Graph) -> Vec<TargetPick> {
 #[derive(Debug, Clone)]
 pub enum Event {
     Tab(Tab),
-    Sort(Column),
+    /// Sort by a column, or `None` for engine order, keeping the direction.
+    SortBy(Option<Column>),
+    /// Reverse the current sort.
+    ReverseSort,
     Filter(String),
     SelectedOnly(bool),
     Select(AssignmentId, Column),
@@ -344,53 +349,71 @@ pub enum Event {
     Cancel,
 }
 
-/// Draws the tab's matrix from the same model used by the snapshot.
+/// Width kept for a card's depth value, such as "-100%".
+const DEPTH_TEXT: f32 = 52.0;
+
+/// How the Sort by pick list names a sort: engine order or a column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SortPick(pub Option<Column>);
+
+impl SortPick {
+    /// Engine order, then every column in keyboard order.
+    fn all() -> Vec<Self> {
+        std::iter::once(Self(None))
+            .chain(Column::ALL.into_iter().map(|c| Self(Some(c))))
+            .collect()
+    }
+}
+
+impl fmt::Display for SortPick {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.0.map_or("Engine order", Column::label))
+    }
+}
+
+/// Draws the tab's matrix from the same model used by the snapshot: one
+/// card per assignment, so every part fits the right-hand column without
+/// scrolling sideways (modulation.md, slice 3).
 pub fn view<'a>(model: MatrixModel, state: &State, graph: &Graph) -> Element<'a, Message> {
     let mut content = column![].spacing(7).width(Length::Fill);
-    let sort = model.sort;
-    let mut headings = row![space().width(20)].spacing(3);
-    for column in Column::ALL {
-        let arrow = match sort {
-            Some((c, true)) if c == column => " ↓",
-            Some((c, false)) if c == column => " ↑",
-            _ => "",
-        };
-        let width = match column {
-            Column::On => 40,
-            Column::Source | Column::Target => 125,
-            Column::Depth => 95,
-            Column::Polarity => 140,
-        };
-        headings = headings.push(
-            button(text(format!("{}{arrow}", column.label())).size(11))
-                .on_press(Message::Matrix(Event::Sort(column)))
-                .padding([2, 3])
-                .width(width),
-        );
-    }
-    let mut table = column![headings].spacing(3).width(Length::Fixed(600.0));
     content = content.push(
         text_input("Filter modules or parameters", &model.filter)
             .on_input(|s| Message::Matrix(Event::Filter(s)))
-            .size(12),
+            .size(style::CONTROL),
     );
     content = content.push(
-        checkbox(model.selected_only)
-            .label("Selected module only")
-            .on_toggle(|v| Message::Matrix(Event::SelectedOnly(v)))
-            .size(13)
-            .text_size(12),
+        row![
+            checkbox(model.selected_only)
+                .label("Selected module only")
+                .on_toggle(|v| Message::Matrix(Event::SelectedOnly(v)))
+                .size(style::SWITCH)
+                .text_size(style::CONTROL),
+            space::horizontal(),
+            button(text("Add").size(style::CONTROL)).on_press(Message::Matrix(Event::AddOpen)),
+        ]
+        .align_y(iced::Alignment::Center),
     );
-    if let Some(id) = model.selected {
-        content = content.push(
-            text(format!(
-                "Row #{id}: {} cell{}",
-                model.cell.label(),
-                if model.editing { " (editing)" } else { "" }
-            ))
-            .size(11),
-        );
+    let mut sort = row![
+        text("Sort by").size(style::SMALL).color(DIM),
+        pick_list(SortPick::all(), Some(SortPick(model.sort.map(|(c, _)| c))), |p| {
+            Message::Matrix(Event::SortBy(p.0))
+        })
+        .text_size(style::SMALL),
+    ]
+    .spacing(6)
+    .align_y(iced::Alignment::Center);
+    if let Some((_, reverse)) = model.sort {
+        sort = sort.push(iced::widget::tooltip(
+            button(text(if reverse { "↓" } else { "↑" }).size(style::CONTROL))
+                .style(style::plain)
+                .on_press(Message::Matrix(Event::ReverseSort)),
+            container(text("Reverse the order").size(style::BODY))
+                .padding(6)
+                .style(container::rounded_box),
+            iced::widget::tooltip::Position::Top,
+        ));
     }
+    content = content.push(sort);
     if let Some(add) = &state.add {
         let sources = sources(graph);
         let targets = targets(graph);
@@ -398,140 +421,127 @@ pub fn view<'a>(model: MatrixModel, state: &State, graph: &Graph) -> Element<'a,
             column![
                 pick_list(sources, add.source.clone(), |s| Message::Matrix(Event::AddSource(s)))
                     .placeholder("Source output")
-                    .text_size(11),
+                    .text_size(style::SMALL),
                 pick_list(targets, add.target.clone(), |t| Message::Matrix(Event::AddTarget(t)))
                     .placeholder("Target parameter")
-                    .text_size(11),
+                    .text_size(style::SMALL),
                 row![
-                    button("Create").on_press(Message::Matrix(Event::AddApply)),
+                    button("Create")
+                        .on_press(Message::Matrix(Event::AddApply))
+                        .style(style::primary),
                     button("Cancel").on_press(Message::Matrix(Event::Cancel)),
                 ]
                 .spacing(5),
             ]
             .spacing(5),
         );
-    } else {
-        content = content.push(button("Add").on_press(Message::Matrix(Event::AddOpen)));
     }
+    let mut table = column![].spacing(6).width(Length::Fill);
     if model.rows.is_empty() {
-        table = table.push(text("No modulation assignments").size(12).color(DIM));
+        table = table.push(text("No modulation assignments").size(style::BODY).color(DIM));
     }
     for a in model.rows {
         let id = AssignmentId(a.id);
         let selected = state.selected == Some(id);
         let editing = state.edit.as_ref().filter(|e| e.id == id);
+        let focused = |column: Column| selected && state.cell == column;
+        // A cell is plain text until edited; a click selects it and edits.
+        let cell = |label: String, column: Column| -> Element<'a, Message> {
+            button(text(label).size(style::SMALL))
+                .padding([1, 4])
+                .style(style::cell(focused(column)))
+                .on_press(Message::Matrix(Event::Edit(id, column)))
+                .into()
+        };
         let on = checkbox(a.on)
             .on_toggle(move |v| Message::Matrix(Event::Enabled(id, v)))
-            .size(13);
+            .size(style::SWITCH);
         let source: Element<'a, Message> = if editing.is_some_and(|e| e.column == Column::Source) {
             let options = sources(graph);
             let current = editing.and_then(|e| options.get(e.choice)).cloned();
             pick_list(options, current, move |s| Message::Matrix(Event::Source(id, s)))
-                .text_size(11)
+                .text_size(style::SMALL)
                 .into()
         } else {
-            button(text(a.source).size(11))
-                .on_press(Message::Matrix(Event::Edit(id, Column::Source)))
-                .style(if selected && state.cell == Column::Source {
-                    button::primary
-                } else {
-                    button::secondary
-                })
-                .into()
+            cell(a.source, Column::Source)
         };
         let target: Element<'a, Message> = if editing.is_some_and(|e| e.column == Column::Target) {
             let options = targets(graph);
             let current = editing.and_then(|e| options.get(e.choice)).cloned();
             pick_list(options, current, move |t| Message::Matrix(Event::Target(id, t)))
-                .text_size(11)
+                .text_size(style::SMALL)
                 .into()
         } else {
-            button(text(a.target).size(11))
-                .on_press(Message::Matrix(Event::Edit(id, Column::Target)))
-                .style(if selected && state.cell == Column::Target {
-                    button::primary
-                } else {
-                    button::secondary
-                })
-                .into()
+            cell(a.target, Column::Target)
         };
-        let depth: Element<'a, Message> = if let Some(e) = editing.filter(|e| e.column == Column::Depth) {
+        let depth_value: Element<'a, Message> = if let Some(e) = editing.filter(|e| e.column == Column::Depth) {
             text_input(&modulation::depth_text(a.depth), &e.depth)
                 .id("matrix-depth")
                 .on_input(|s| Message::Matrix(Event::DepthText(s)))
                 .on_submit(Message::Matrix(Event::Apply))
-                .size(11)
-                .width(55)
+                .size(style::SMALL)
+                .width(52)
                 .into()
         } else {
-            row![
-                button(text(modulation::depth_text(a.depth)).size(11))
-                    .on_press(Message::Matrix(Event::Edit(id, Column::Depth)))
-                    .style(if selected && state.cell == Column::Depth {
-                        button::primary
-                    } else {
-                        button::secondary
-                    }),
-                slider(-1.0..=1.0, a.depth, move |v| Message::Matrix(Event::DepthDrag(id, v)))
-                    .on_release(Message::Matrix(Event::DepthReleased))
-                    .step(0.01_f32)
-                    .width(55),
-            ]
-            .spacing(2)
-            .into()
+            cell(modulation::depth_text(a.depth), Column::Depth)
         };
+        let depth_slider = slider(-1.0..=1.0, a.depth, move |v| Message::Matrix(Event::DepthDrag(id, v)))
+            .on_release(Message::Matrix(Event::DepthReleased))
+            .step(0.01_f32)
+            // Cards share one width, so filling it lines the sliders up.
+            .width(Length::Fill);
         let polarity: Element<'a, Message> = if editing.is_some_and(|e| e.column == Column::Polarity) {
             let assignment = graph.assignment(id).expect("visible assignment");
             let own = modulation::source_polarity(graph, assignment.source);
             let options = PolarityChoice::options(own);
             let current = options[editing.expect("editing polarity").choice];
             pick_list(options, Some(current), move |p| Message::Matrix(Event::Polarity(id, p)))
-                .text_size(11)
+                .text_size(style::SMALL)
                 .into()
         } else {
-            button(text(a.polarity).size(11))
-                .on_press(Message::Matrix(Event::Edit(id, Column::Polarity)))
-                .style(if selected && state.cell == Column::Polarity {
-                    button::primary
-                } else {
-                    button::secondary
-                })
-                .into()
+            cell(a.polarity, Column::Polarity)
         };
-        let line = row![
-            button(
-                text(if selected {
-                    if state.cell == Column::On { "▶" } else { "●" }
-                } else {
-                    "○"
-                })
-                .size(11)
-            )
-            .on_press(Message::Matrix(Event::Select(id, state.cell)))
-            .width(20),
-            matrix_cell(on, 40.0, selected && state.cell == Column::On),
-            matrix_cell(source, 125.0, selected && state.cell == Column::Source),
-            matrix_cell(target, 125.0, selected && state.cell == Column::Target),
-            matrix_cell(depth, 95.0, selected && state.cell == Column::Depth),
-            matrix_cell(polarity, 140.0, selected && state.cell == Column::Polarity),
-            remove_button("Remove modulation", Message::Matrix(Event::Remove(id))),
+        let card = column![
+            row![
+                matrix_cell(on, focused(Column::On)),
+                matrix_cell(source, focused(Column::Source)),
+                space::horizontal(),
+                remove_button("Remove modulation", Message::Matrix(Event::Remove(id))),
+            ]
+            .spacing(4)
+            .align_y(iced::Alignment::Center),
+            row![
+                text("→").size(style::SMALL).color(DIM),
+                matrix_cell(target, focused(Column::Target)),
+                space::horizontal(),
+                matrix_cell(polarity, focused(Column::Polarity)),
+            ]
+            .spacing(4)
+            .padding([0, 4])
+            .align_y(iced::Alignment::Center),
+            row![
+                depth_slider,
+                container(matrix_cell(depth_value, focused(Column::Depth))).width(DEPTH_TEXT),
+            ]
+            .spacing(6)
+            .padding([0, 4])
+            .align_y(iced::Alignment::Center),
         ]
-        .spacing(3)
-        .align_y(iced::Alignment::Center);
-        let line = container(line).padding(3).style(if selected {
-            container::rounded_box
-        } else {
-            container::transparent
-        });
-        table = table.push(if selected { line.id("matrix-selected-row") } else { line });
+        .spacing(2);
+        let card = mouse_area(
+            container(card)
+                .padding(6)
+                .width(Length::Fill)
+                .style(style::card(selected)),
+        )
+        .on_press(Message::Matrix(Event::Select(id, state.cell)));
+        let card = container(card);
+        table = table.push(if selected { card.id("matrix-selected-row") } else { card });
     }
     content = content.push(
         scrollable(table)
             .id("matrix-table")
-            .direction(scrollable::Direction::Both {
-                vertical: scrollable::Scrollbar::default(),
-                horizontal: scrollable::Scrollbar::default(),
-            })
+            .spacing(4)
             .width(Length::Fill)
             .height(Length::Fill),
     );
@@ -576,7 +586,17 @@ impl App {
                 self.matrix.edit = None;
                 self.matrix.add = None;
             }
-            Event::Sort(column) => self.matrix.sort_by(column),
+            Event::SortBy(column) => {
+                // A new column starts ascending; the same one keeps its
+                // direction.
+                let reverse = self.matrix.sort.is_some_and(|(c, r)| Some(c) == column && r);
+                self.matrix.sort = column.map(|c| (c, reverse));
+            }
+            Event::ReverseSort => {
+                if let Some((_, reverse)) = &mut self.matrix.sort {
+                    *reverse = !*reverse;
+                }
+            }
             Event::Filter(filter) => {
                 self.matrix.filter = filter;
                 self.matrix.focused = false;
@@ -606,7 +626,8 @@ impl App {
                 self.matrix.reconcile(self.controller.graph());
             }
             Event::AddOpen => {
-                self.matrix.add = Some(Add::default());
+                // Pressing Add again keeps what the open form has picked.
+                self.matrix.add.get_or_insert_with(Add::default);
                 self.matrix.focused = true;
                 self.matrix.cell = Column::Source;
             }
@@ -998,22 +1019,20 @@ mod tests {
             check(&mut ui);
         }
         assert_eq!(ui.app.matrix.selected, Some(AssignmentId(32)));
-        let first_x = check(&mut ui).x;
-        ui.tap(keyboard::Key::Named(Named::ArrowRight), keyboard::Modifiers::default());
-        assert_eq!(check(&mut ui).x, first_x, "an already visible cell does not scroll");
-        for _ in 0..3 {
+        // Every cell of a card fits the column, so moving between cells
+        // never scrolls sideways (#456).
+        for _ in 0..4 {
             ui.tap(keyboard::Key::Named(Named::ArrowRight), keyboard::Modifiers::default());
+            assert_eq!(check(&mut ui).x, 0.0, "no sideways scroll");
         }
-        let x = check(&mut ui).x;
-        assert!(x > 0.0);
         for _ in 0..31 {
             ui.tap(keyboard::Key::Named(Named::ArrowUp), keyboard::Modifiers::default());
-            assert_eq!(check(&mut ui).x, x);
+            assert_eq!(check(&mut ui).x, 0.0, "no sideways scroll");
         }
         assert_eq!(ui.app.matrix.selected, Some(AssignmentId(1)));
-        ui.send(Message::Matrix(Event::Sort(Column::Depth)));
+        ui.send(Message::Matrix(Event::SortBy(Some(Column::Depth))));
         check(&mut ui);
-        ui.send(Message::Matrix(Event::Sort(Column::Depth)));
+        ui.send(Message::Matrix(Event::ReverseSort));
         check(&mut ui);
         ui.send(Message::Matrix(Event::Filter("LFO".into())));
         check(&mut ui);
@@ -1059,14 +1078,14 @@ mod tests {
         ui.app.matrix_event(Event::Tab(Tab::Matrix));
         let model = |ui: &Ui| ui.app.matrix.model(ui.app.controller.graph(), &ui.app.selection);
         assert_eq!(model(&ui).rows.iter().map(|r| r.id).collect::<Vec<_>>(), vec![1, 2]);
-        ui.app.matrix_event(Event::Sort(Column::Depth));
+        ui.app.matrix_event(Event::SortBy(Some(Column::Depth)));
         assert_eq!(model(&ui).rows.iter().map(|r| r.id).collect::<Vec<_>>(), vec![1, 2]);
-        ui.app.matrix_event(Event::Sort(Column::Depth));
+        ui.app.matrix_event(Event::ReverseSort);
         assert_eq!(model(&ui).rows.iter().map(|r| r.id).collect::<Vec<_>>(), vec![2, 1]);
         for column in Column::ALL {
-            ui.app.matrix_event(Event::Sort(column));
+            ui.app.matrix_event(Event::SortBy(Some(column)));
             assert_eq!(model(&ui).rows.len(), 2, "{} ascending", column.label());
-            ui.app.matrix_event(Event::Sort(column));
+            ui.app.matrix_event(Event::ReverseSort);
             assert_eq!(model(&ui).sort, Some((column, true)), "{} descending", column.label());
         }
         ui.app.matrix_event(Event::Filter("LFO".into()));
@@ -1310,8 +1329,9 @@ mod tests {
             ui.app.controller.graph().assignment(id).expect("assignment").param,
             before_target
         );
+        // Polarity comes right after the target, as on the card.
         key(&mut ui, Named::ArrowRight);
-        key(&mut ui, Named::ArrowRight);
+        assert_eq!(ui.app.matrix.cell, Column::Polarity);
         key(&mut ui, Named::Enter);
         key(&mut ui, Named::ArrowDown);
         key(&mut ui, Named::Enter);
@@ -1326,6 +1346,10 @@ mod tests {
         key(&mut ui, Named::ArrowDown);
         let add = ui.app.matrix.add.as_ref().expect("add picks");
         assert!(add.source.is_some() && add.target.is_some());
+        // Pressing Add again keeps the picks.
+        ui.app.matrix_event(Event::AddOpen);
+        let add = ui.app.matrix.add.as_ref().expect("add picks");
+        assert!(add.source.is_some() && add.target.is_some(), "Add again keeps the form");
         let before_count = ui.app.controller.graph().assignments().count();
         key(&mut ui, Named::Enter);
         assert_eq!(ui.app.controller.graph().assignments().count(), before_count + 1);
@@ -1360,7 +1384,8 @@ mod tests {
             ui.tap(keyboard::Key::Named(named), keyboard::Modifiers::default());
         };
         key(&mut ui, Named::ArrowDown);
-        for _ in 0..3 {
+        // Depth is the last cell: on, source, target, polarity, depth.
+        for _ in 0..4 {
             key(&mut ui, Named::ArrowRight);
         }
         assert_eq!(ui.app.matrix.cell, Column::Depth);
@@ -1471,5 +1496,43 @@ mod tests {
                 .is_empty()
         );
         assert!(ui.app.matrix.selected.is_none());
+    }
+
+    /// Every part of every card fits the right-hand column: a 24-character
+    /// source shows in full, there are no column titles or row marker
+    /// text, and the snapshot says which tab is open (#456).
+    #[test]
+    fn cards_fit_the_column() {
+        let mut ui = Ui::open("modulation.ron");
+        let hold = ui.app.controller.add_module("loom.rand.sample-hold").unwrap();
+        let svf = ModuleId(4);
+        ui.app
+            .controller
+            .add_assignment(OutputRef { module: hold, port: 0 }, svf, 1, 0.25)
+            .unwrap();
+        ui.app.matrix_event(Event::Tab(Tab::Matrix));
+        ui.app.matrix_event(Event::Select(AssignmentId(1), Column::Polarity));
+        assert_eq!(ui.app.ui_snapshot().matrix.tab, Tab::Matrix);
+
+        let source = format!("Sample and Hold #{}: Out", hold.0);
+        assert_eq!(source.len(), 24);
+        let column = ui.app.matrix.model(ui.app.controller.graph(), &ui.app.selection);
+        let right = crate::WINDOW.width;
+        let left = right - 280.0;
+        let mut labels = vec![source.clone()];
+        for row in &column.rows {
+            labels.extend([row.source.clone(), row.target.clone(), row.polarity.clone()]);
+            labels.push(modulation::depth_text(row.depth));
+        }
+        for label in labels {
+            let bounds = ui.text(&label).unwrap_or_else(|| panic!("`{label}` is not shown"));
+            assert!(
+                bounds.x >= left && bounds.x + bounds.width <= right,
+                "`{label}` at {bounds:?} is outside the column"
+            );
+        }
+        for gone in ["On", "Source", "Target", "Depth", "Polarity", "Row #1: Polarity cell"] {
+            assert!(ui.text(gone).is_none(), "`{gone}` is still shown");
+        }
     }
 }

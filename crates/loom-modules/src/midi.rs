@@ -12,6 +12,7 @@ pub static NOTE_IN: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "MIDI Note",
     category: "MIDI",
+    family: loom_core::Family::Interface,
     description: "Monophonic note input (last-note priority). Pitch includes pitch bend.",
     inputs: &[],
     outputs: &[
@@ -195,6 +196,7 @@ pub static CONTROLLER_IN: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "MIDI Controller",
     category: "MIDI",
+    family: loom_core::Family::Interface,
     description: "Turns a MIDI controller, the pitch bend, or channel aftertouch into a signal. Controllers and aftertouch go from 0 to 1, bend from -1 to 1.",
     inputs: &[],
     outputs: &[PortSpec {
@@ -230,7 +232,8 @@ pub static CONTROLLER_IN: ModuleDescriptor = ModuleDescriptor {
             unit: "",
             options: ParamOptions::DEFAULT,
         }
-        .integer(),
+        .integer()
+        .shown_when("source", &[0]),
         ParamSpec {
             name: "channel",
             label: "Channel",
@@ -255,13 +258,14 @@ pub static CONTROLLER_IN: ModuleDescriptor = ModuleDescriptor {
     ],
     role: ModuleRole::Dsp(|config| Box::new(ControllerIn::new(config.sample_rate))),
     panel: Panel::new(
-        12,
-        6,
+        9,
+        5,
         &[
-            Widget::radio(0, 0, "source"),
-            Widget::knob(6, 0, "controller"),
-            Widget::knob(9, 0, "channel"),
-            Widget::knob(6, 3, "smoothing"),
+            Widget::select(0, 0, "source"),
+            // Shown only for the Controller source (ADR-0030).
+            Widget::knob(0, 2, "controller"),
+            Widget::knob(3, 2, "channel"),
+            Widget::knob(6, 2, "smoothing"),
         ],
     ),
     displays: &[],

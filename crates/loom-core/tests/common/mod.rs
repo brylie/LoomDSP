@@ -43,6 +43,7 @@ pub static FOLLOWER: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Follower",
     category: "Test",
+    family: loom_core::Family::Interface,
     description: "Copies transport defaults to outputs.",
     inputs: &[
         port("bar", SignalType::Phase).with_default(PortDefault::BarPhase),
@@ -106,6 +107,7 @@ pub static BAR_COPY: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Bar",
     category: "Test",
+    family: loom_core::Family::Interface,
     description: "Copies the bar phase.",
     inputs: &[port("bar", SignalType::Phase).with_default(PortDefault::BarPhase)],
     outputs: &[port("bar", SignalType::Phase)],

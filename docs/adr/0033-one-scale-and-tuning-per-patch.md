@@ -1,9 +1,9 @@
-# ADR-0031: One scale and tuning per patch, read by modules without cables
+# ADR-0033: One scale and tuning per patch, read by modules without cables
 
 - **Status:** Accepted
 - **Date:** 2026-11-01
 - **Related requirements:** FR-LIB-29, FR-SIG-05, FR-LIB-19
-- **Related decisions:** ADR-0002 (graph execution), ADR-0007 (signal model), ADR-0015 (one transport per patch), ADR-0017 (traits), ADR-0030 (module data)
+- **Related decisions:** ADR-0002 (graph execution), ADR-0007 (signal model), ADR-0015 (one transport per patch), ADR-0017 (traits), ADR-0032 (module data)
 - **Specification:** [Scale and tuning](../design/scale-and-tuning.md)
 
 ## Context
@@ -32,5 +32,5 @@ Option 3.
 - **One key change moves the whole patch,** on the sample the trigger arrives, at any block size.
 - **Every pitch module agrees on what a note is,** because there is one tuning. A module with its own scale still names the same notes.
 - **The compiler gains implicit edges.** A pitch module that feeds the Scale module's trigger makes a loop, which the compiler breaks with a unit delay and reports, as for any other loop (ADR-0002).
-- **The scale and tuning are module data** (ADR-0030): stored with the patch, so imported tunings travel with it, and handed to the engine without allocation.
+- **The scale and tuning are module data** (ADR-0032): stored with the patch, so imported tunings travel with it, and handed to the engine without allocation.
 - **Plugin export** keeps the scale inside the patch; hosts have no say in it.

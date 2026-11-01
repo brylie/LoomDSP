@@ -1,4 +1,4 @@
-# ADR-0029: Sub-patches are stored as definitions and flattened before compiling
+# ADR-0031: Sub-patches are stored as definitions and flattened before compiling
 
 - **Status:** Accepted
 - **Date:** 2026-11-01

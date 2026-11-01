@@ -2,12 +2,13 @@
 
 <!-- Generated from the module's descriptor by `loom modules --markdown`. Edit the descriptor, not this part. -->
 
-State variable filter (trapezoidal integration). The cutoff input adds pitch: +0.1 doubles the cutoff.
+A resonant filter with low-pass, band-pass, high-pass, and notch outputs. The cutoff input adds pitch: +0.1 doubles the cutoff.
 
 | | |
 |---|---|
 | ID | `loom.filter.svf` |
 | Version | 1 |
+| Family | Filters and effects |
 | Category | Filter |
 
 ## Inputs
@@ -35,7 +36,7 @@ State variable filter (trapezoidal integration). The cutoff input adds pitch: +0
 
 ## Panel
 
-6 by 3 grid units.
+8 by 3 grid units.
 
 - Knob: **Cutoff** (`cutoff`)
 - Knob: **Resonance** (`resonance`)
@@ -44,7 +45,9 @@ State variable filter (trapezoidal integration). The cutoff input adds pitch: +0
 
 ## When to use it
 
-Use SVF when you need sharp 12 dB per octave resonant filtering with distinct lowpass, bandpass, highpass, or notch outputs. It provides warm analog-style sweeps and clean resonance without digital cramping near Nyquist.
+Use SVF when you want a resonant filter with several outputs at once. Lowpass, Bandpass, Highpass, and Notch all follow the same cutoff and resonance, so you can blend them or switch between them by moving one cable.
+
+It cuts 12 dB per octave. Raise the resonance to boost the frequencies near the cutoff; high values ring. The cutoff input tracks pitch at 0.1 per octave, so an envelope or the note's pitch can move it.
 
 ## Example patch
 
@@ -73,4 +76,4 @@ Patch(
 ## See also
 
 - [Subtractive patch](../../examples/patches/subtractive.ron)
-- [One-pole](loom.filter.onepole.md)
+- [One-Pole](loom.filter.onepole.md)

@@ -281,6 +281,7 @@ mod tests {
             version: 1,
             name: "NaN",
             category: "Test",
+            family: crate::Family::Interface,
             description: "",
             inputs: &[port("in", crate::SignalType::Modulation).with_default(PortDefault::Value(f32::NAN))],
             outputs: &[],
@@ -301,6 +302,7 @@ mod tests {
                 version: 1,
                 name: "Ports",
                 category: "Test",
+                family: crate::Family::Interface,
                 description: "",
                 inputs: $inputs,
                 outputs: $outputs,
@@ -412,6 +414,7 @@ mod tests {
             version: 1,
             name: "Quiet",
             category: "Test",
+            family: crate::Family::Interface,
             description: "",
             inputs: &[crate::PortSpec {
                 name: "in",
@@ -445,6 +448,7 @@ mod tests {
             version: 1,
             name: "Dark",
             category: "Test",
+            family: crate::Family::Interface,
             description: "",
             inputs: &[],
             outputs: &[],
@@ -484,6 +488,7 @@ mod tests {
                     version: 1,
                     name: "Ranges",
                     category: "Test",
+                    family: crate::Family::Interface,
                     description: "",
                     inputs: &[],
                     outputs: &[],
@@ -553,6 +558,7 @@ mod tests {
                     version: 1,
                     name: "Choices",
                     category: "Test",
+                    family: crate::Family::Interface,
                     description: "",
                     inputs: &[],
                     outputs: &[],
@@ -606,6 +612,7 @@ mod tests {
                 version: 1,
                 name: "Params",
                 category: "Test",
+                family: crate::Family::Interface,
                 description: "",
                 inputs: &[],
                 outputs: &[],
@@ -653,6 +660,7 @@ mod tests {
                 version: 1,
                 name: "Panel",
                 category: "Test",
+                family: crate::Family::Interface,
                 description: "",
                 inputs: &[],
                 outputs: &[port("out", crate::SignalType::Audio)],
@@ -770,6 +778,7 @@ mod tests {
             version: 1,
             name: "Displays",
             category: "Test",
+            family: crate::Family::Interface,
             description: "",
             inputs: &[],
             outputs: &[],
@@ -791,6 +800,7 @@ mod tests {
             version: 1,
             name: "Delay Default",
             category: "Test",
+            family: crate::Family::Interface,
             description: "",
             inputs: &[port("in", crate::SignalType::Audio).with_default(PortDefault::Value(0.5))],
             outputs: &[port("out", crate::SignalType::Audio)],
@@ -804,6 +814,7 @@ mod tests {
             version: 1,
             name: "Output Default",
             category: "Test",
+            family: crate::Family::Interface,
             description: "",
             inputs: &[crate::PortSpec {
                 channels: Channels::Stereo,
@@ -830,6 +841,7 @@ mod tests {
             version: 1,
             name: "Delay With Params",
             category: "Test",
+            family: crate::Family::Interface,
             description: "",
             inputs: &[port("in", crate::SignalType::Audio)],
             outputs: &[port("out", crate::SignalType::Audio)],
@@ -851,6 +863,7 @@ mod tests {
             version: 1,
             name: "Output With Params",
             category: "Test",
+            family: crate::Family::Interface,
             description: "",
             inputs: &[crate::PortSpec {
                 channels: Channels::Stereo,
@@ -875,6 +888,7 @@ mod tests {
             version: 1,
             name: "Delay With Displays",
             category: "Test",
+            family: crate::Family::Interface,
             description: "",
             inputs: &[port("in", crate::SignalType::Audio)],
             outputs: &[port("out", crate::SignalType::Audio)],
@@ -890,5 +904,75 @@ mod tests {
                 .contains("only DSP modules can have parameters or display values"),
             "{error}"
         );
+    }
+
+    /// `shown_when` names a choice parameter, or an on and off switch, of
+    /// the same module, and choices it has (ADR-0030). A segmented control
+    /// binds 2 to 4 named choices. The errors name what is wrong.
+    #[test]
+    fn refuses_bad_mode_conditions_and_segmented_controls() {
+        macro_rules! with {
+            ($params:expr, $widgets:expr) => {{
+                static DESCRIPTOR: ModuleDescriptor = ModuleDescriptor {
+                    id: "test.modes",
+                    version: 1,
+                    name: "Modes",
+                    category: "Test",
+                    family: crate::Family::Interface,
+                    description: "",
+                    inputs: &[],
+                    outputs: &[],
+                    params: $params,
+                    role: ModuleRole::Dsp(|_| unreachable!("never created")),
+                    panel: crate::Panel::new(9, 5, $widgets),
+                    displays: &[],
+                };
+                Registry::new()
+                    .register(&DESCRIPTOR)
+                    .map_err(|error| error.to_string())
+            }};
+        }
+        const MODE: crate::ParamSpec = param("mode", 0.0, 1.0, 0.0, "").integer().choices(&["A", "B"]);
+        assert_eq!(
+            with!(
+                &[MODE, param("depth", 0.0, 1.0, 0.0, "").shown_when("mode", &[1])],
+                &[
+                    crate::Widget::segmented(0, 0, 6, "mode"),
+                    crate::Widget::knob(0, 2, "depth")
+                ]
+            ),
+            Ok(())
+        );
+        let refused = [
+            (
+                with!(&[MODE, param("depth", 0.0, 1.0, 0.0, "").shown_when("nope", &[0])], &[]),
+                "shown when `nope`: no such parameter",
+            ),
+            (
+                with!(&[MODE, param("depth", 0.0, 1.0, 0.0, "").shown_when("mode", &[2])], &[]),
+                "names a choice the parameter does not have",
+            ),
+            (
+                with!(
+                    &[
+                        param("gain", 0.0, 2.0, 0.0, ""),
+                        param("depth", 0.0, 1.0, 0.0, "").shown_when("gain", &[0])
+                    ],
+                    &[]
+                ),
+                "needs a parameter with choice names",
+            ),
+            (
+                with!(
+                    &[param("level", 0.0, 1.0, 0.0, "")],
+                    &[crate::Widget::segmented(0, 0, 6, "level")]
+                ),
+                "a segmented control needs a width and 2 to 4 named whole-number choices",
+            ),
+        ];
+        for (result, expected) in refused {
+            let error = result.unwrap_err();
+            assert!(error.contains(expected), "{error}");
+        }
     }
 }

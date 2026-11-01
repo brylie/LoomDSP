@@ -8,6 +8,7 @@ Fires a trigger each time the phase wraps, forward or backward.
 |---|---|
 | ID | `loom.phase.trigger` |
 | Version | 1 |
+| Family | Time and rhythm |
 | Category | Phase |
 
 ## Inputs
@@ -36,7 +37,9 @@ None.
 
 ## When to use it
 
-Use Phase Trigger to convert phase wraps into single-sample trigger impulses. Each time the input phase wraps, forward (1 to 0) or backward (0 to 1), an output trigger is emitted. This is ideal for syncing clocks, step sequencers, and sample-and-hold circuits.
+Use Phase Trigger to turn the start of every cycle into a trigger, to start an envelope or step a sequence in time with an oscillator or a clock phase.
+
+It fires when the phase wraps forward (from near 1 to near 0) or backward.
 
 ## Example patch
 

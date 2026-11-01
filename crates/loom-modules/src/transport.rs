@@ -29,6 +29,7 @@ pub static TRANSPORT: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Transport",
     category: "Clock",
+    family: loom_core::Family::TimeAndRhythm,
     description: "The patch's tempo, time signature, and play state. Every patch has exactly one.",
     inputs: &[
         PortSpec {

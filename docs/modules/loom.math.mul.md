@@ -2,12 +2,13 @@
 
 <!-- Generated from the module's descriptor by `loom modules --markdown`. Edit the descriptor, not this part. -->
 
-Multiplies two signals and a gain. Use it as a ring modulator. To control loudness, use Amplifier.
+Multiplies two signals and a gain, for ring modulation. To control loudness, use Amplifier.
 
 | | |
 |---|---|
 | ID | `loom.math.mul` |
 | Version | 1 |
+| Family | Logic and math |
 | Category | Math |
 
 ## Inputs
@@ -27,7 +28,7 @@ Multiplies two signals and a gain. Use it as a ring modulator. To control loudne
 
 | Parameter | Range | Default | Description |
 |---|---|---|---|
-| **Gain** (`gain`) | -10 to 10, control ranges -0.1 to 0.1, -1 to 1, 0 to 1, -5 to 5, 0 to 5, -10 to 10, 0 to 10 (default -1 to 1) | 1 | A fixed amount the product is multiplied by. |
+| **Gain** (`gain`) | -10 to 10. Control ranges -0.1 to 0.1, -1 to 1, 0 to 1, -5 to 5, 0 to 5, -10 to 10, 0 to 10 (default -1 to 1) | 1 | A fixed amount the product is multiplied by. |
 
 ## Panel
 
@@ -39,7 +40,9 @@ Multiplies two signals and a gain. Use it as a ring modulator. To control loudne
 
 ## When to use it
 
-Use Multiply for mathematical multiplication of two signals, ring modulation, or amplitude scaling with a fixed gain knob. When multiplying two audio signals, it generates sum and difference sideband frequencies.
+Use Multiply to multiply two signals, for example for ring modulation: two audio signals multiplied give the sum and difference of their frequencies. B reads 1 with no cable, so with one input connected, Multiply is a fixed gain.
+
+To control loudness with an envelope, Amplifier is usually the better choice.
 
 ## Example patch
 

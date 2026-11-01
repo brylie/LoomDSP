@@ -8,6 +8,7 @@ Adds two signals and an offset.
 |---|---|
 | ID | `loom.math.add` |
 | Version | 1 |
+| Family | Logic and math |
 | Category | Math |
 
 ## Inputs
@@ -27,7 +28,7 @@ Adds two signals and an offset.
 
 | Parameter | Range | Default | Description |
 |---|---|---|---|
-| **Offset** (`offset`) | -10 to 10, control ranges -0.1 to 0.1, -1 to 1, 0 to 1, -5 to 5, 0 to 5, -10 to 10, 0 to 10 (default -1 to 1) | 0 | A fixed amount added to the sum. |
+| **Offset** (`offset`) | -10 to 10. Control ranges -0.1 to 0.1, -1 to 1, 0 to 1, -5 to 5, 0 to 5, -10 to 10, 0 to 10 (default -1 to 1) | 0 | A fixed amount added to the sum. |
 
 ## Panel
 
@@ -39,7 +40,7 @@ Adds two signals and an offset.
 
 ## When to use it
 
-Use Add to sum two audio or modulation signals with a manual offset. It is commonly used for transposing pitch signals, mixing control voltages, or creating complex modulation waveforms.
+Use Add to sum two signals and a fixed offset: mix two control signals, or move a pitch up or down. With one input connected, Add shifts it by the offset.
 
 ## Example patch
 

@@ -18,7 +18,8 @@ pub static DELAY: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Delay Line",
     category: "Time",
-    description: "Interpolated delay line. The time input adds seconds to the time knob.",
+    family: loom_core::Family::FiltersAndEffects,
+    description: "Plays its input back after a set time, for echoes, chorus, and feedback. The time input adds seconds to the time knob.",
     inputs: &[
         PortSpec {
             name: "in",
@@ -71,7 +72,8 @@ pub static ALLPASS: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "All-Pass",
     category: "Time",
-    description: "Delay-line all-pass filter. Passes all frequencies at equal steady-state level while smearing phase, for reverbs and diffusers.",
+    family: loom_core::Family::FiltersAndEffects,
+    description: "A delay-based filter that passes every frequency at the same level but smears their timing. Chains of them build reverbs and diffusers.",
     inputs: &[
         PortSpec {
             name: "in",

@@ -22,7 +22,7 @@ mod trace;
 mod widget;
 
 pub use camera::{Camera, MAX_ZOOM, MIN_ZOOM};
-pub use controls::{ModulationMark, PanelValues, WidgetValue, knob_range_ring};
+pub use controls::{ModulationMark, PanelValues, WidgetValue, knob_range_ring, segment_centre};
 pub use drag_line::DragLine;
 pub use scene::{
     CLOCK_MARK_RADIUS, CableView, GRID, HEADER, Hit, HoverText, LABEL_COLUMNS, ModulationView, ModuleView,

@@ -3,7 +3,7 @@
 Every port and parameter carries a short label and a one-sentence description, so users can learn what a control does where they use it.
 
 - **Kind:** living specification.
-- **Status:** Implemented, for ports, parameters, and display values ([#118](https://github.com/brylie/LoomDSP/issues/118)).
+- **Status:** Implemented, for ports, parameters, and display values ([#118](https://github.com/brylie/LoomDSP/issues/118)). [Module names and summaries](#module-names-and-summaries): Agreed and implemented, P1 ([#458](https://github.com/brylie/LoomDSP/issues/458)).
 - **Decision behind it:** [ADR-0016](../adr/0016-ports-and-parameters-carry-their-own-text.md)
 - **Use case and requirements:** FR-LIB-11, FR-SDK-01, NFR-UX-04
 - **Issues:** #115 (fields and checks), #43 (help pages), [#118](https://github.com/brylie/LoomDSP/issues/118) (display values)
@@ -79,6 +79,27 @@ A module's display values (the lights and step positions of [panels](panels.md#d
 - [x] The harness and the registry check them as for ports and parameters.
 - [x] A light's caption is its label, and hovering it shows the description and the value. A test beside `tiles_show_labels_not_names` in `crates/loom-app/src/scene.rs` checks the labels.
 - [x] A meter's hover text is its output's label, description, and level.
+
+## Module names and summaries
+
+**Status:** Agreed and implemented, P1 ([#458](https://github.com/brylie/LoomDSP/issues/458)). Code: `module_text_follows_the_rules` in `crates/loom-modules/src/lib.rs`.
+
+A module's name and one-line summary are the first text a user meets: in the browser, hover text, the inspector, and help. They speak to a musician.
+
+1. **Names are Title Case.** Every major word starts with a capital, including the part after a hyphen: All-Pass, One-Pole, 1-Sample Delay, Phase Wrap and Fold, Sample and Hold. Short joining words (and, or, of, the, a, to, in) stay lower case unless they come first. Acronyms keep their capitals (SVF, LFO, MIDI). *Why:* one rule, so names read as names and sort predictably.
+2. **The kind of value comes first in a name.** Constant, Level Constant, Pitch Constant. *Why:* parentheses read as an afterthought, and "Level Constant" says what it makes.
+3. **A summary is at most two sentences, and the first says what the module does for the user.** "A filter that keeps the low, band, high, or notch part of a sound", not "State variable filter (trapezoidal integration)". *Why:* the summary shows in a tooltip and the browser's description line.
+4. **No internal method names, no requirement IDs, no claims of sound quality** in a summary or any descriptor text. How it is built (polyBLEP, trapezoidal integration, cubic interpolation) goes in the hand-written notes, with an explainer link where a term needs one. Words like warm, rich, classic, pristine, or ideal are left out: the user can hear the sound. *Why:* the plain style in AGENTS.md, and readers with English as a second language.
+5. **A choice parameter's range is its choices,** such as "ADSR or AD", in help and the generated pages. A parameter with several control ranges gives its full range, then the control ranges as their own sentence.
+6. **Hand-written notes follow the same style:** short sentences, plain words, facts that match the code, and module names as they are now.
+
+### Acceptance criteria: module names and summaries
+
+- [x] Every built-in module name is Title Case with the hyphen rule above (test over the registry).
+- [x] No descriptor text contains `FR-`, `NFR-`, or a word from the deny list (polyBLEP, polyBLAMP, trapezoidal, Nyquist, warm, rich, classic, pristine, ideal) (test over the registry).
+- [x] Every module summary is at most two sentences (test).
+- [x] Choice parameters show their choices, not "0 to 1, whole numbers", in help and the generated pages (test on the range text).
+- [x] The hand-written notes that used sales words, unexplained jargon, or old names are rewritten, and the help pages are regenerated.
 
 ## Out of scope
 

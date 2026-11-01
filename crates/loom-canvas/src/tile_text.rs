@@ -8,7 +8,7 @@
 //! Positions are anchors, as Iced reads them: centred text is centred on
 //! its anchor, and right-aligned text ends at it.
 
-use crate::controls::{knob_centre, light_centre, radio_centre};
+use crate::controls::{knob_centre, knob_drawn, light_centre, radio_centre};
 use crate::scene::{CLOCK_MARK_SPACE, GRID, HEADER, ModuleView, PortRef, WidgetViewKind, fit_label, text_width};
 use iced::{Point, Rectangle, Size};
 use std::borrow::Cow;
@@ -115,6 +115,10 @@ pub fn for_each<'a>(module: &'a ModuleView, mut f: impl FnMut(TextItem<'a>)) {
         });
     }
 
+    // What the panel draws, so labels can grow only into empty space on
+    // their line (panels.md, Labels and hover text; #455).
+    let panel = panel_boxes(module);
+
     let label_width = module.label_width();
     let ports = module
         .inputs
@@ -122,6 +126,7 @@ pub fn for_each<'a>(module: &'a ModuleView, mut f: impl FnMut(TextItem<'a>)) {
         .enumerate()
         .map(|(i, p)| (false, i, p))
         .chain(module.outputs.iter().enumerate().map(|(i, p)| (true, i, p)));
+    let mut port_boxes = Vec::new();
     for (output, index, port) in ports {
         let y = if output {
             module.output_position(index).y
@@ -140,8 +145,24 @@ pub fn for_each<'a>(module: &'a ModuleView, mut f: impl FnMut(TextItem<'a>)) {
         } else {
             (tile.x + 9.0 + mark, Align::Left)
         };
-        let width = label_width - mark;
-        f(TextItem {
+        // A label may grow inward, into empty space on its row, as far as
+        // its half of the tile. A tile with an empty panel already gives
+        // each side half the tile.
+        let mut width = label_width - mark;
+        if !module.panel.widgets.is_empty() {
+            let row = line_box(tile.x, tile.width, y);
+            let middle = tile.center_x();
+            let on_row = panel.iter().map(|o| o.bounds).filter(|b| overlaps_line(*b, row));
+            let room = if output {
+                let edge = on_row.filter(|b| b.x < x).map(|b| b.x + b.width).fold(middle, f32::max);
+                x - edge - GAP
+            } else {
+                let edge = on_row.filter(|b| b.x + b.width > x).map(|b| b.x).fold(middle, f32::min);
+                edge - GAP - x
+            };
+            width = width.max(room);
+        }
+        let item = TextItem {
             kind: TextKind::Port(PortRef {
                 module: module.id,
                 output,
@@ -152,30 +173,99 @@ pub fn for_each<'a>(module: &'a ModuleView, mut f: impl FnMut(TextItem<'a>)) {
             align,
             size: LABEL_SIZE,
             width,
-        });
+        };
+        port_boxes.push(item.bounds());
+        f(item);
     }
 
+    let (inner_left, inner_right) = (tile.x + 9.0, tile.x + tile.width - 9.0);
     for (index, widget) in module.panel.widgets.iter().enumerate() {
         let Some(rect) = module.widget_bounds(index) else {
             continue;
         };
-        let y = match &widget.kind {
-            WidgetViewKind::Knob { .. } => knob_centre(rect).y + 1.5 * GRID,
-            WidgetViewKind::Meter | WidgetViewKind::Scope => rect.y + rect.height - GRID * 0.5,
-            WidgetViewKind::Shape { .. } => rect.y + rect.height - GRID * 0.5,
-            WidgetViewKind::Toggle | WidgetViewKind::Light => light_centre(rect).y + GRID,
-            WidgetViewKind::Button => rect.y + rect.height - GRID * 0.5,
-            WidgetViewKind::Radio { .. } => rect.y + GRID * 0.5,
-            WidgetViewKind::Select { .. } => rect.y + GRID * 0.5,
+        let y = caption_y(&widget.kind, rect);
+        let line = line_box(tile.x, tile.width, y);
+        let centre = rect.center_x();
+        let natural = text_width(&widget.label, LABEL_SIZE);
+        let own = natural.min(rect.width) * 0.5;
+        // How far the caption may reach on each side: past what other
+        // widgets draw, halfway into a gap it shares with other text (less
+        // half of `GAP`, so two captions never run together), and up to the
+        // port labels and the port markers' inset.
+        let (mut left, mut right) = (inner_left, inner_right);
+        for o in panel
+            .iter()
+            .filter(|o| o.owner != index && overlaps_line(o.bounds, line))
+        {
+            let (b, text) = (o.bounds, o.text);
+            let (near_left, near_right) = if text {
+                (centre - own, centre + own)
+            } else {
+                (centre, centre)
+            };
+            if b.x + b.width <= near_left + 0.01 {
+                left = left.max(if text {
+                    (b.x + b.width + near_left + GAP) * 0.5
+                } else {
+                    b.x + b.width + GAP
+                });
+            } else if b.x >= near_right - 0.01 {
+                right = right.min(if text {
+                    (b.x + near_right - GAP) * 0.5
+                } else {
+                    b.x - GAP
+                });
+            } else {
+                (left, right) = (left.max(centre - own), right.min(centre + own));
+            }
+        }
+        for b in port_boxes.iter().filter(|b| overlaps_line(**b, line)) {
+            if b.center_x() < centre {
+                left = left.max(b.x + b.width + GAP);
+            } else {
+                right = right.min(b.x - GAP);
+            }
+        }
+        // Centred when it fits. Otherwise moved the least it needs toward
+        // the free side, as long as it stays over its widget. Otherwise cut.
+        let half = (centre - left).min(right - centre);
+        let (anchor, width) = if natural * 0.5 <= half {
+            (centre, rect.width.max(2.0 * half))
+        } else {
+            let moved = if centre - left < right - centre {
+                left + natural * 0.5
+            } else {
+                right - natural * 0.5
+            };
+            if natural <= right - left && (rect.x..=rect.x + rect.width).contains(&moved) {
+                (moved, natural)
+            } else {
+                (centre, rect.width.max(2.0 * half))
+            }
         };
         f(TextItem {
             kind: TextKind::Caption(index),
-            content: fit_label(&widget.label, rect.width, LABEL_SIZE),
-            anchor: Point::new(rect.center_x(), y),
+            content: fit_label(&widget.label, width, LABEL_SIZE),
+            anchor: Point::new(anchor, y),
             align: Align::Center,
             size: LABEL_SIZE,
-            width: rect.width,
+            width,
         });
+        if let WidgetViewKind::Segmented { options, .. } = &widget.kind {
+            // Each name is centred in its segment, and cut to fit it.
+            for (i, option) in options.iter().enumerate() {
+                let segment = crate::controls::segment_rect(rect, i, options.len());
+                let width = segment.width - 4.0;
+                f(TextItem {
+                    kind: TextKind::Option(index, i),
+                    content: fit_label(option, width, LABEL_SIZE),
+                    anchor: segment.center(),
+                    align: Align::Center,
+                    size: LABEL_SIZE,
+                    width,
+                });
+            }
+        }
         if let WidgetViewKind::Radio { options } = &widget.kind {
             // Option text runs from just right of its button to the
             // widget's right edge. It is cut with "…" like a caption, never
@@ -196,6 +286,104 @@ pub fn for_each<'a>(module: &'a ModuleView, mut f: impl FnMut(TextItem<'a>)) {
         }
     }
 }
+
+/// Something a panel draws, as text beside it sees it.
+struct PanelBox {
+    /// The widget it belongs to, by index.
+    owner: usize,
+    /// Its box in world units.
+    bounds: Rectangle,
+    /// True for text: a caption or a radio option, at the width it has
+    /// before any label grows. Other text shares the gap between them;
+    /// drawn parts keep [`GAP`] clear.
+    text: bool,
+}
+
+/// What every widget on a module's panel draws: its control or display,
+/// its caption, and its radio options.
+fn panel_boxes(module: &ModuleView) -> Vec<PanelBox> {
+    let mut boxes = Vec::new();
+    for (owner, widget) in module.panel.widgets.iter().enumerate() {
+        let Some(rect) = module.widget_bounds(owner) else {
+            continue;
+        };
+        let drawn = match &widget.kind {
+            WidgetViewKind::Knob { .. } => knob_drawn(rect),
+            // The buttons, in a column below the caption row.
+            WidgetViewKind::Radio { .. } => {
+                let right = radio_centre(rect, 0).x + 5.0;
+                Rectangle::new(
+                    Point::new(rect.x, rect.y + GRID),
+                    Size::new(right - rect.x, rect.height - GRID),
+                )
+            }
+            // The segments, in the row below the caption.
+            WidgetViewKind::Segmented { .. } => Rectangle::new(
+                Point::new(rect.x, rect.y + GRID),
+                Size::new(rect.width, rect.height - GRID),
+            ),
+            _ => rect,
+        };
+        boxes.push(PanelBox {
+            owner,
+            bounds: drawn,
+            text: false,
+        });
+        let caption = text_width(&widget.label, LABEL_SIZE).min(rect.width);
+        boxes.push(PanelBox {
+            owner,
+            bounds: line_box(rect.center_x() - caption * 0.5, caption, caption_y(&widget.kind, rect)),
+            text: true,
+        });
+        if let WidgetViewKind::Radio { options } = &widget.kind {
+            for (i, option) in options.iter().enumerate() {
+                let centre = radio_centre(rect, i);
+                let width = text_width(option, LABEL_SIZE).min(rect.width - 12.0);
+                boxes.push(PanelBox {
+                    owner,
+                    bounds: line_box(centre.x + 6.0, width, centre.y),
+                    text: true,
+                });
+            }
+        }
+    }
+    boxes
+}
+
+/// Space kept between a label that grew and what is beside it.
+const GAP: f32 = 3.0;
+
+/// Where a widget's caption sits, as the vertical centre of its text.
+fn caption_y(kind: &WidgetViewKind, rect: Rectangle) -> f32 {
+    match kind {
+        WidgetViewKind::Knob { .. } => knob_centre(rect).y + 1.5 * GRID,
+        WidgetViewKind::Meter | WidgetViewKind::Scope => rect.y + rect.height - GRID * 0.5,
+        WidgetViewKind::Shape { .. } => rect.y + rect.height - GRID * 0.5,
+        WidgetViewKind::Toggle | WidgetViewKind::Light => light_centre(rect).y + GRID,
+        // On the face of the button.
+        WidgetViewKind::Button => rect.center_y(),
+        WidgetViewKind::Radio { .. } => rect.y + GRID * 0.5,
+        WidgetViewKind::Select { .. } | WidgetViewKind::Segmented { .. } => rect.y + GRID * 0.5,
+    }
+}
+
+/// The box of one line of label text from `x`, `width` wide, centred on
+/// `y`. As tall as [`TextItem::bounds`] makes it.
+fn line_box(x: f32, width: f32, y: f32) -> Rectangle {
+    let height = LABEL_SIZE * 1.2;
+    Rectangle::new(Point::new(x, y - height * 0.5), Size::new(width, height))
+}
+
+/// True when `b` reaches more than [`TOUCH`] into the line of text
+/// `line`. The line's box is 1.2 times the font size, taller than its
+/// letters, so a shape that only touches its edge does not meet the text.
+fn overlaps_line(b: Rectangle, line: Rectangle) -> bool {
+    b.y < line.y + line.height - TOUCH && b.y + b.height > line.y + TOUCH
+}
+
+/// How far a shape may reach into a line of text's box without meeting its
+/// letters, in world units.
+const TOUCH: f32 = 1.0;
 
 /// The port whose label is under a world point. Text is drawn above every
 /// tile, so a label can show over a tile that overlaps its own. Every tile
@@ -243,6 +431,7 @@ mod tests {
             y,
             label: label.into(),
             hover: HoverText::default(),
+            hidden: false,
         }
     }
 
@@ -252,12 +441,13 @@ mod tests {
             unknown: false,
             id: 1,
             title: "Filter".into(),
+            hover: crate::scene::HoverText::default(),
             accent: Color::BLACK,
             position: Point::new(24.0, 36.0),
             inputs: vec![port("In"), port("Cutoff")],
             outputs: vec![port("Lowpass"), port("Bandpass")],
             panel: PanelView {
-                width: 9,
+                width: 12,
                 height: 8,
                 widgets: vec![
                     widget(WidgetViewKind::Knob { steps: 0 }, 0, 0, "Cutoff"),
@@ -272,7 +462,7 @@ mod tests {
                         3,
                         "Slope",
                     ),
-                    widget(WidgetViewKind::Meter, 6, 2, "Out"),
+                    widget(WidgetViewKind::Meter, 9, 2, "Out"),
                 ],
             },
         }
@@ -303,6 +493,8 @@ mod tests {
         }
     }
 
+    /// A caption that fits its widget is centred on it. A longer one may
+    /// move toward empty space, but its centre stays over its widget.
     #[test]
     fn captions_are_centred_on_their_widgets() {
         // #92: captions were anchored at the widget's left edge, and Iced
@@ -312,16 +504,41 @@ mod tests {
             if let TextKind::Caption(index) = item.kind {
                 let widget = module.widget_bounds(index).unwrap();
                 let text = item.bounds();
-                assert!(
-                    (text.center_x() - widget.center_x()).abs() < 1e-3,
-                    "{}: text centre {} vs widget centre {}",
-                    item.content,
-                    text.center_x(),
-                    widget.center_x()
-                );
-                assert!(text.width <= widget.width, "{} fits its widget", item.content);
+                if text_width(&item.content, LABEL_SIZE) <= widget.width {
+                    assert!(
+                        (text.center_x() - widget.center_x()).abs() < 1e-3,
+                        "{}: text centre {} vs widget centre {}",
+                        item.content,
+                        text.center_x(),
+                        widget.center_x()
+                    );
+                } else {
+                    assert!(
+                        (widget.x..=widget.x + widget.width).contains(&text.center_x()),
+                        "{} moved off its widget",
+                        item.content
+                    );
+                }
             }
         }
+    }
+
+    /// A caption with empty space beside it grows into it instead of being
+    /// cut (#455). Resonance has a light on its right, whose caption is on
+    /// another line, and Cutoff's caption on its left, so it moves a little
+    /// right, toward the space, and stays over its knob.
+    #[test]
+    fn a_caption_grows_into_empty_space() {
+        let module = module();
+        let resonance = items(&module)
+            .into_iter()
+            .find(|item| item.kind == TextKind::Caption(1))
+            .expect("the Resonance caption");
+        let knob = module.widget_bounds(1).unwrap();
+        assert_eq!(resonance.content, "Resonance");
+        assert!(resonance.bounds().width > knob.width, "wider than its knob");
+        assert!(resonance.anchor.x > knob.center_x(), "moved toward the space");
+        assert!(resonance.anchor.x < knob.x + knob.width, "still over its knob");
     }
 
     #[test]

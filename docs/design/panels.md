@@ -50,7 +50,7 @@ Every panel uses the same widget set.
 
 The widgets after P1, with their bindings, modulation display, keyboard use, and the catalogue entries that need them, are planned in [Panel widgets](panel-widgets.md) (Draft, [ADR-0024](../adr/0024-widgets-follow-the-kind-of-value.md)). It names the slider "fader", the selector "select list", and the graph "curve", and adds a number, a readout, an XY scope, and a waveform.
 
-The [read-only shape preview](panel-widgets.md#read-only-shape-preview) is an agreed first slice of the curve widget. Envelope, LFO, and Ladder place it above their controls. Envelope places its compact Mode selector in a settings row above the full-width shape, so the less-used choice does not narrow the result view. The preview shows a schematic result from parameters, keeps the tile's drag gesture, and has no editing handles. Built-in tiles use knobs for single ranged parameters by default; a fader needs a specific task such as comparing mixer levels.
+The [read-only shape preview](panel-widgets.md#read-only-shape-preview) is an agreed first slice of the curve widget. Envelope, LFO, and Ladder place it above their controls. Each puts its choices in a row under the full-width shape ([Panel layout](#panel-layout), principle 2); Envelope's Mode is a segmented control. The preview shows a schematic result from parameters, keeps the tile's drag gesture, and has no editing handles. Built-in tiles use knobs for single ranged parameters by default; a fader needs a specific task such as comparing mixer levels.
 
 ## Bindings
 
@@ -66,6 +66,33 @@ The [read-only shape preview](panel-widgets.md#read-only-shape-preview) is an ag
 - Ports stay on the tile's left and right edges, outside the panel area. *Why:* cables must stay easy to read, whatever the panel holds.
 - A tile can have a compact and an expanded size. The scope module, for example, can be resized to show more detail.
 - A sub-patch panel can be placed inside its parent's panel (FR-PANEL-08), as one more widget.
+
+## Panel layout
+
+**Status:** Agreed, P1 ([#453](https://github.com/brylie/LoomDSP/issues/453)). Decision on modes: [ADR-0030](../adr/0030-panels-hide-controls-a-mode-does-not-use.md).
+
+A panel reads from top to bottom as **what it does, how it behaves, what you play, what it reports**. Exact numbers stay one hover away. Every built-in panel follows these principles, and so do derived panels ([Default panels](#default-panels)).
+
+1. **Purpose first.** A result view (envelope shape, filter response, LFO wave, scope, meter) sits at the top at full panel width. *Why:* it answers "what does this module do right now" before any control is read.
+2. **Behaviour before detail.** A choice that changes what other controls mean (envelope mode, filter slope, LFO sync, compare direction) sits directly under the view, or at the top when there is no view. *Why:* the mode is the context for every knob below it.
+3. **Play row.** Continuous controls follow in one row, in the order the sound happens (Attack, Decay, Sustain, Release; Cutoff, then Resonance). Controls set less often go in a second row. *Why:* the hand finds the most-played controls in the same place on every tile.
+4. **Report next to the cause.** A light sits beside the control or port it reports on, or at the right end of the mode row. It never floats alone. *Why:* a light only helps when the eye knows where to look.
+5. **Show only what the mode uses.** A control its mode ignores is hidden ([ADR-0030](../adr/0030-panels-hide-controls-a-mode-does-not-use.md)). The tile keeps its width: a row with a hidden control closes up and is centred again, and the tile gets shorter only when whole rows empty, so ports and cables never move. The inspector still lists the hidden parameter and says which choice does not use it. *Why:* a knob that does nothing misleads a performer; a tile that changes width would move cables on stage.
+6. **Smallest widget that keeps the choice visible.** On and off is a toggle. Two to four short named choices are a [segmented control](panel-widgets.md#segmented-control): one row, every option visible, one click. More choices, or long names, are a select list. Radio buttons are for lists of five that need every name visible and have the height to spare. *Why:* seeing the options matters on stage, and a segmented control shows them in one row.
+7. **One alignment grid.** Captions are centred under their widget. A group's caption sits above it. Groups are one grid unit apart, and a row of controls is centred in the panel. The panel is as wide as its widest row; there are no empty quarters.
+8. **Words fit.** No built-in panel cuts a caption or port label at 100% zoom. If a word does not fit, the layout changes, never the stable ID ([Labels and hover text](#labels-and-hover-text)).
+9. **Details on demand.** Exact values, ranges, units, and descriptions are in hover text, the inspector, and help. The tile shows only what is played or watched.
+10. **Same thing, same place.** Repeated strips (mixer channels) are labelled once per strip. Numbered things use the numbers users see on hardware ("1-2", "3-4" for channel pairs).
+
+### Acceptance criteria: panel layout
+
+- [x] Every built-in panel puts its result view first, then its choices, then its continuous controls (test over the registry, by widget kind and row).
+- [x] Every built-in module with 2 to 4 short named choices on its tile uses a segmented control (test over the registry).
+- [x] A parameter can declare `shown_when`; its widget is hidden while the condition is false, the tile keeps its width, a row with a hidden widget is centred again, and the tile gets shorter only when whole rows empty (tests). Envelope Sustain and Release in AD mode, LFO Rate and Cycles by sync mode, MIDI Controller's controller number, and Scope's Level with Auto on use it.
+- [x] The inspector marks a hidden parameter "Not used in" its current choice, and Tab skips hidden controls (tests).
+- [x] No built-in tile is more than one grid unit wider than its widest row needs (test over the registry).
+- [x] Audio In's pairs read "1-2", "3-4", "5-6", "7-8"; Mixer labels its strips once; Button shows its label on the button; Level Meter's meter caption is not a port name; Scope's zero line is visible at 100% zoom.
+- [x] `examples/dev/all-modules.ron` holds every built-in module on a grid, and a test renders it.
 
 ## The panel editor
 
@@ -223,6 +250,16 @@ The inspector stays, as the place for:
 - typing exact values;
 - modulation ranges, MIDI mappings, and other settings that do not fit on a control.
 
+### Layout
+
+**Status:** Agreed, P1 ([#457](https://github.com/brylie/LoomDSP/issues/457)).
+
+- **With nothing selected,** two short lines ("Select a module to edit it." and "Press A over the canvas to add one.") and a **Keyboard shortcuts** button that opens the shortcut list in the help overlay. *Why:* the full list of gestures was useful once and noise after; it was about 30 lines in a 280 px column.
+- **A module** shows its name, the **Help** button, its description, then its parameters. The type ID is not shown here: it is in the header's hover text and in help.
+- **Ports** come last, under small **Inputs** and **Outputs** headings, one line each: the label, then the signal kind and usual range ("audio, -1 to 1"). The description is in the line's hover text.
+- **Modulation assignments** under a parameter use the matrix's card ([modulation.md](modulation.md#slice-3-the-modulation-matrix)) without the target line: on and source with ×, the polarity as a quiet pick list, then the depth slider and value. **+ Add modulation** is a button.
+- The scrollbar takes its own space, so it never covers a value.
+
 MIDI learn grew past the inspector. ADR-0013 places it there, and that ADR is frozen, so the change is recorded here: learn mode arms controls on tiles as well as inspector rows, and the inspector shows each parameter's mapping and removes it ([MIDI learn](midi-learn.md#seeing-and-removing-mappings)). *Why:* touching the control you want, then the hardware, is the order the user thinks in.
 
 ### Removing an item
@@ -351,7 +388,7 @@ A right-click opens a menu for what is under the pointer. Right-clicking a tile 
 
 **Status:** Implemented. Code: `ModuleView::width`, `widget_bounds`, and `tile_size` in `loom-canvas/src/scene.rs`.
 
-- **The panel sits between the port columns.** Each side has a port label column 4 grid units wide. A label longer than its column is cut with "…", and the port's [hover text](#labels-and-hover-text) shows it in full.
+- **The panel sits between the port columns.** Each side has a port label column 4 grid units wide. A longer label may grow inward into empty space on its row ([Labels and hover text](#labels-and-hover-text)). A label that still does not fit is cut with "…", and the port's hover text shows it in full.
 - Tile width is 4 + panel width + 4 grid units, and at least 11 (today's width), so titles still fit. Tile height is the header plus the taller of the port rows and the panel.
 - A tile with an empty panel keeps the old label layout: each side gets half the tile. *Why:* nothing sits between the columns, so cutting labels would hide text for no reason.
 - *Why:* tiles stay compact, and ports and cables keep their place at the tile edges.
@@ -390,6 +427,7 @@ The canvas already hides port labels and titles below a size on screen. Panels u
 - **Text too small to read leaves a faint bar.** A rounded bar, as wide as the text and half as tall as its letters, sits where the text would be. *Why:* a tile that loses all its text looks empty from far out, but a real panel seen from across a room still shows where things are written ([#92](https://github.com/brylie/LoomDSP/issues/92)). Text that small cannot be read anyway, and drawing it would mean thousands of glyph layouts in a large patch.
 - Bars are shapes in the scene's instanced buffer. They are built when the scene changes, never per frame, so they cost almost nothing at any zoom.
 - Text, bars, and hover on port labels all take their places from one list (`tile_text.rs`), so a bar always sits exactly where its text would be.
+- **Framing keeps labels readable** ([#455](https://github.com/brylie/LoomDSP/issues/455)). Opening a patch, and framing it with F or Home, fit the whole patch with a 40 px margin, but never zoom out past the first zoom where port labels show (7.5 / 9, about 83%), and never zoom in past 100%. A patch that does not fit at that zoom shows its left edge at the margin, where automatic placement puts its sources, and its top edge too if it is also too tall; the user pans to the rest. *Why:* fitting a large patch made every label a bar, so a new user opened an example and saw no words on its controls. The signal starts on the left, so the left edge is where reading starts. `--screenshot` without `--zoom` still fits the whole patch, because its images are overviews.
 
 ### Redraw ([#68](https://github.com/brylie/LoomDSP/issues/68))
 
@@ -495,8 +533,8 @@ A user zooms in on Clock Divide. The knob says "Division", not `n`. They rest th
 
 | Place | Showed before | Shows now |
 |---|---|---|
-| Port label on a tile | name | label, cut with "…" to fit its column as now |
-| Caption of a knob, toggle, button, or radio group | parameter name | parameter label, cut with "…" to fit the widget |
+| Port label on a tile | name | label, grown into empty space on its row, then cut with "…" |
+| Caption of a knob, toggle, button, or radio group | parameter name | parameter label, grown into empty space on its line, then cut with "…" |
 | Option of a radio group | choice name | choice name, cut with "…" to fit the widget ([#394](https://github.com/brylie/LoomDSP/issues/394)) |
 | Caption of a meter | output name | output label |
 | Caption of a light | display value name | display value label ([#118](https://github.com/brylie/LoomDSP/issues/118)) |
@@ -505,7 +543,8 @@ A user zooms in on Clock Divide. The knob says "Division", not `n`. They rest th
 | Hover text on a light or meter | none | label, description, and value ([#118](https://github.com/brylie/LoomDSP/issues/118)) |
 
 - **Names stay out of sight, except in hover text.** The hover text shows the stable name below the description, dimmed, when it differs from the label other than in letter case. So `n` shows under "Division", but `cutoff` does not repeat under "Cutoff". *Why:* names are what patch files and `loom modules` use, so a user who edits a RON file can find the port. Everywhere else, the label is the better text.
-- **Captions and radio options are cut, never wrapped.** A label that does not fit is cut with "…", and the hover text shows it in full. Radio buttons are 6 units wide, so no built-in choice name is cut; a test checks this for every module. A longer name from a third-party module is cut and shows in full in the inspector. Widths are estimated per character, with narrow letters counting less, so "Division" fits under a knob, while "Resonance" is cut. *Why:* the grid layout of tiles does not change with text length, and estimating keeps text layout out of every frame.
+- **Captions and radio options are cut, never wrapped.** A label that does not fit is cut with "…", and the hover text shows it in full. Radio buttons are 6 units wide, so no built-in choice name is cut; a test checks this for every module. A longer name from a third-party module is cut and shows in full in the inspector. Widths are estimated per character, with narrow letters counting less. *Why:* the grid layout of tiles does not change with text length, and estimating keeps text layout out of every frame.
+- **Labels use empty space before they are cut** ([#455](https://github.com/brylie/LoomDSP/issues/455)). A port label may grow inward from its column, along its row, up to 3 units before anything the panel draws there, and never past the middle of the tile. A caption may grow on both sides along its line: up to 3 units before another widget's drawn part (a knob's ring and range arc, a radio's buttons), halfway into a gap it shares with other text less 1.5 units, up to 3 units before a port label, and no further than the port markers' inset. A caption that fits is centred on its widget. One that fits only off centre moves the least it needs toward the free side, and its centre stays over its widget. A shape that reaches 1 unit or less into a line of text does not count, because the line's box is taller than its letters. Labels grow only within the tile's grid size, so tiles never change size with text. A test checks every built-in module: no port label or caption is cut, and no two pieces of text are closer than 1 unit. *Why:* "Resonance" and "Highpass" were cut on the filters although empty space sat beside them. Where no rule finds room, the panel layout changes: SVF's panel is 8 units wide with centred knobs, and MIDI Controller's Smoothing knob sits under Channel.
 
 ### Hover text
 
@@ -712,7 +751,8 @@ Each declared item gets one widget, by the first rule that matches:
 |---|---|
 | A parameter with a hint | The widget the hint names, or none for "inspector only" |
 | A whole-number parameter from 0 to 1, with no choice names | Toggle |
-| A whole-number parameter with choice names, 5 or fewer | Radio buttons |
+| A whole-number parameter with choice names, 2 to 4 | Segmented control |
+| A whole-number parameter with choice names, 5 | Radio buttons |
 | A whole-number parameter with choice names, more than 5 | Select list |
 | Any other parameter | Knob |
 | A display value | Light |
@@ -733,7 +773,7 @@ A hint is an option on the parameter, in `ParamOptions`. It names one widget fro
 
 ### Layout
 
-- Data editors come first, each on its own row, at the full panel width. Then the parameter widgets in the order the parameters are declared. Then the display values, in their declared order.
+- Data editors come first, each on its own row, at the full panel width. Then choice widgets (segmented controls, select lists), then the other parameter widgets in the order the parameters are declared. Then the display values, in their declared order ([Panel layout](#panel-layout)).
 - Widgets flow left to right on the panel grid and wrap at 12 grid units, four knobs wide. Each row is as tall as its tallest widget. Leaning: check the width against real modules and the estimated label widths ([#120](https://github.com/brylie/LoomDSP/issues/120)).
 - The panel's size is the space its widgets fill. A module with nothing to show gets an empty panel, as today.
 - Focus order is the order above, so Tab follows what the user reads.

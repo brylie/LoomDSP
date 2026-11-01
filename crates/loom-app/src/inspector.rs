@@ -6,9 +6,10 @@
 //! test of the snapshot checks what the user sees.
 
 use crate::modulation::{self, PolarityChoice};
-use crate::{App, DIM, HELP, Message, param, remove_button};
+use crate::style::{self, button};
+use crate::{App, DIM, Message, param, remove_button};
 use iced::widget::{
-    button, column, container, mouse_area, pick_list, radio, row, scrollable, slider, space, text, text_input, toggler,
+    checkbox, column, container, mouse_area, pick_list, radio, row, scrollable, slider, space, text, text_input,
     tooltip,
 };
 use iced::{Element, Length, Theme};
@@ -81,8 +82,11 @@ pub struct PortRow {
     pub direction: &'static str,
     /// Human-readable port label.
     pub label: &'static str,
-    /// Port description and nominal range.
+    /// Port description and nominal range, shown in hover text.
     pub description: String,
+    /// Signal kind and nominal range, such as "audio, -1 to 1", shown on
+    /// the port's line.
+    pub details: String,
 }
 
 /// One parameter.
@@ -101,6 +105,9 @@ pub struct ParamRow {
     pub mapping: Option<String>,
     /// The **Range** selector, for a parameter that offers ranges.
     pub range: Option<RangeRow>,
+    /// "Not used in AD" while the module's mode hides this parameter's
+    /// control on the tile (ADR-0030). The row stays, so it can be set.
+    pub unused: Option<String>,
     pub mode: ParamMode,
     /// Whether a dragged output can target this row.
     #[serde(skip)]
@@ -330,11 +337,27 @@ impl App {
                         adding: (self.adding == Some((id, index))).then(|| self.sources(id, index)),
                     }
                 };
+                let unused = (!d.is_shown(index, &node.params)).then(|| {
+                    let mode = spec.options.shown_when.and_then(|w| d.param_index(w.param));
+                    match mode.map(|m| (&d.params[m], node.params[m])) {
+                        Some((mode, value)) => match mode.choice_name(value) {
+                            Some(choice) => format!("Not used in {choice}"),
+                            // An on and off switch, such as Scope's Auto.
+                            None => format!(
+                                "Not used while {} is {}",
+                                mode.label,
+                                if value > 0.5 { "on" } else { "off" }
+                            ),
+                        },
+                        None => "Not used in this mode".to_string(),
+                    }
+                });
                 ParamRow {
                     index,
                     label: spec.label,
                     description: spec.description,
                     name: hover.name,
+                    unused,
                     value: param::format(spec, value),
                     mapping,
                     range,
@@ -342,9 +365,15 @@ impl App {
                     accepts_drop: {
                         let bound = d.panel.widgets.iter().filter(|w| w.bind == spec.name);
                         bound.clone().next().is_none()
-                            || bound
-                                .into_iter()
-                                .any(|w| matches!(w.kind, WidgetKind::Knob | WidgetKind::Toggle | WidgetKind::Radio))
+                            || bound.into_iter().any(|w| {
+                                matches!(
+                                    w.kind,
+                                    WidgetKind::Knob
+                                        | WidgetKind::Toggle
+                                        | WidgetKind::Radio
+                                        | WidgetKind::Segmented { .. }
+                                )
+                            })
                     },
                 }
             })
@@ -365,6 +394,7 @@ impl App {
                         direction,
                         label: p.label,
                         description: format!("{} Usually {min} to {max}.", p.description),
+                        details: format!("{}, {min} to {max}", p.signal.name()),
                     }
                 })
                 .collect(),
@@ -446,21 +476,22 @@ impl App {
 /// The inspector's widgets.
 pub fn view<'a>(model: Inspector, drop_row: Option<(u32, usize)>, dragging: bool) -> Element<'a, Message> {
     let content: Element<'a, Message> = match model {
+        // Short, with the full list one click away (visual-system.md).
         Inspector::Help => column![
-            text("Inspector").size(17),
-            text("Select a module to edit its parameters.").size(12).color(DIM),
-            text(HELP).size(11).color(DIM),
+            text("Select a module to edit it.").size(style::BODY).color(DIM),
+            text("Press A over the canvas to add one.").size(style::BODY).color(DIM),
+            button(text("Keyboard shortcuts").size(style::CONTROL)).on_press(Message::ShowShortcuts),
         ]
         .spacing(8)
         .into(),
-        Inspector::Several(n) => text(format!("{n} modules selected")).size(13).into(),
+        Inspector::Several(n) => text(format!("{n} modules selected")).size(style::CONTROL).into(),
         Inspector::Empty => text("").into(),
         Inspector::Unknown(m) => {
             let id = m.id;
             let mut rows = column![
-                text(m.kind).size(17),
-                text("This version of LoomDSP does not have this module. It makes no sound. Its settings are kept and saved.").size(12),
-                text("Label").size(12),
+                text(m.kind).size(style::HEADING),
+                text("This version of LoomDSP does not have this module. It makes no sound. Its settings are kept and saved.").size(style::BODY),
+                text("Label").size(style::BODY),
                 row![
                     text_input("Label", &m.label)
                         .on_input(move |value| Message::UnknownLabelDraft { module: id, value })
@@ -469,7 +500,7 @@ pub fn view<'a>(model: Inspector, drop_row: Option<(u32, usize)>, dragging: bool
                 ].spacing(6),
             ].spacing(6);
             for (name, value) in m.params {
-                rows = rows.push(text(format!("{name}: {value}")).size(12));
+                rows = rows.push(text(format!("{name}: {value}")).size(style::BODY));
             }
             for link in m.links {
                 let (label, message) = match link {
@@ -478,7 +509,7 @@ pub fn view<'a>(model: Inspector, drop_row: Option<(u32, usize)>, dragging: bool
                 };
                 rows = rows.push(
                     row![
-                        text(label).size(11),
+                        text(label).size(style::SMALL),
                         space::horizontal(),
                         remove_button("Remove link", message)
                     ]
@@ -489,7 +520,8 @@ pub fn view<'a>(model: Inspector, drop_row: Option<(u32, usize)>, dragging: bool
         }
         Inspector::Module(m) => module_view(m, drop_row, dragging),
     };
-    container(scrollable(container(content).padding(12)))
+    // The scrollbar takes its own space, so it never covers a value.
+    container(scrollable(container(content).padding(12)).spacing(4))
         .width(280)
         .height(Length::Fill)
         .into()
@@ -499,16 +531,16 @@ fn module_view<'a>(m: ModuleRows, drop_row: Option<(u32, usize)>, dragging: bool
     let id = m.id;
     let mut items = column![
         row![
-            text(m.name).size(17),
+            text(m.name).size(style::HEADING),
             space::horizontal(),
-            button("Help").on_press(Message::ShowModuleHelp(id))
-        ],
-        text(m.kind).size(11).color(DIM),
-        text(m.description).size(12),
+            button(text("Help").size(style::CONTROL)).on_press(Message::ShowModuleHelp(id))
+        ]
+        .align_y(iced::Alignment::Center),
+        text(m.description).size(style::BODY),
     ]
     .spacing(6);
     if m.params.is_empty() {
-        items = items.push(text("No parameters.").size(12).color(DIM));
+        items = items.push(text("No parameters.").size(style::BODY).color(DIM));
     }
     for p in m.params {
         let index = p.index;
@@ -516,10 +548,14 @@ fn module_view<'a>(m: ModuleRows, drop_row: Option<(u32, usize)>, dragging: bool
         let unmap = Message::Unmap { module: id, index };
         let line: Element<'a, Message> = match p.mode {
             ParamMode::Learn { armed, detail } => {
-                let arm = button(row![text(p.label).size(12), space::horizontal(), text(detail).size(12)])
-                    .width(Length::Fill)
-                    .style(if armed { button::primary } else { button::secondary })
-                    .on_press(Message::LearnParam { module: id, index });
+                let arm = button(row![
+                    text(p.label).size(style::BODY),
+                    space::horizontal(),
+                    text(detail).size(style::BODY)
+                ])
+                .width(Length::Fill)
+                .style(if armed { style::primary } else { style::secondary })
+                .on_press(Message::LearnParam { module: id, index });
                 // A mapping can be removed in learn mode too.
                 let mut line = row![arm].spacing(4).align_y(iced::Alignment::Center);
                 if p.mapping.is_some() {
@@ -534,20 +570,22 @@ fn module_view<'a>(m: ModuleRows, drop_row: Option<(u32, usize)>, dragging: bool
                 assignments,
                 adding,
             } => {
-                let mut tip = column![text(p.description).size(12)].spacing(4);
+                let mut tip = column![text(p.description).size(style::BODY)].spacing(4);
                 if let Some(name) = p.name {
-                    tip = tip.push(text(name).size(11).color(DIM));
+                    tip = tip.push(text(name).size(style::SMALL).color(DIM));
                 }
                 let mut rows = column![
                     row![
                         tooltip(
-                            text(p.label).size(12),
+                            text(p.label).size(style::BODY),
                             container(tip).padding(6).max_width(260).style(container::rounded_box),
                             tooltip::Position::Top,
                         ),
                         space::horizontal(),
-                        text(p.value).size(12).color(DIM),
-                    ],
+                        text(p.unused.unwrap_or_default()).size(style::SMALL).color(DIM),
+                        text(p.value).size(style::BODY).color(DIM),
+                    ]
+                    .spacing(6),
                     match p.range {
                         Some(range) => row![
                             value_control(id, index, control, position, step),
@@ -563,7 +601,7 @@ fn module_view<'a>(m: ModuleRows, drop_row: Option<(u32, usize)>, dragging: bool
                 if let Some(control) = p.mapping {
                     rows = rows.push(
                         row![
-                            text(control).size(11).color(DIM),
+                            text(control).size(style::SMALL).color(DIM),
                             space::horizontal(),
                             remove_button("Remove MIDI mapping", unmap),
                         ]
@@ -599,12 +637,27 @@ fn module_view<'a>(m: ModuleRows, drop_row: Option<(u32, usize)>, dragging: bool
     if !m.drives.is_empty() {
         items = items.push(drives_view(m.drives));
     }
+    // One line per port, its description in hover text.
+    let mut direction = "";
     for port in m.ports {
-        items = items.push(
-            text(format!("{}: {}. {}", port.direction, port.label, port.description))
-                .size(11)
-                .color(DIM),
-        );
+        if port.direction != direction {
+            direction = port.direction;
+            let heading = if direction == "Input" { "Inputs" } else { "Outputs" };
+            items = items.push(text(heading).size(style::SMALL).color(DIM));
+        }
+        let line = row![
+            text(port.label).size(style::SMALL),
+            space::horizontal(),
+            text(port.details).size(style::SMALL).color(DIM),
+        ];
+        items = items.push(tooltip(
+            line,
+            container(text(port.description).size(style::BODY))
+                .padding(6)
+                .max_width(260)
+                .style(container::rounded_box),
+            tooltip::Position::Top,
+        ));
     }
     items.into()
 }
@@ -633,7 +686,11 @@ fn value_control<'a>(
         ParamControl::Radio { choices, selected } => {
             let mut list = column![].spacing(3);
             for (i, name) in choices.into_iter().enumerate() {
-                list = list.push(radio(name, i, Some(selected), pick).size(12).text_size(12));
+                list = list.push(
+                    radio(name, i, Some(selected), pick)
+                        .size(style::SWITCH)
+                        .text_size(style::BODY),
+                );
             }
             list.into()
         }
@@ -645,7 +702,7 @@ fn value_control<'a>(
                 .collect();
             let current = options.get(selected).copied();
             pick_list(options, current, move |c: Choice| pick(c.index))
-                .text_size(12)
+                .text_size(style::BODY)
                 .width(Length::Fill)
                 .into()
         }
@@ -669,9 +726,9 @@ fn range_view<'a>(module: u32, index: usize, range: RangeRow) -> Element<'a, Mes
             range: n.index,
         })
         .placeholder("Full")
-        .text_size(11)
+        .text_size(style::SMALL)
         .width(96),
-        container(text("Range: what a full turn of the control covers.").size(12))
+        container(text("Range: what a full turn of the control covers.").size(style::BODY))
             .padding(6)
             .style(container::rounded_box),
         tooltip::Position::Top,
@@ -717,44 +774,41 @@ fn modulation_view<'a>(
     let mut rows = column![].spacing(6);
     for a in assignments {
         let id = a.id;
-        let assignment = column![
+        // The same card as the modulation matrix, without the target line:
+        // the target is this parameter (modulation.md, slice 3).
+        let card = column![
             row![
-                text(a.source).size(11),
+                checkbox(a.enabled)
+                    .on_toggle(move |enabled| Message::Enabled { id, enabled })
+                    .size(style::SWITCH),
+                text(a.source).size(style::SMALL),
                 space::horizontal(),
                 remove_button("Remove modulation", Message::Unassign(id)),
             ]
+            .spacing(4)
             .align_y(center),
+            pick_list(a.polarities, Some(a.polarity), move |choice| Message::Polarity {
+                id,
+                choice
+            })
+            .text_size(style::SMALL)
+            .padding([1, 4])
+            .style(style::quiet_pick_list),
             row![
                 slider(-1.0..=1.0, a.depth, move |depth| Message::Depth { id, depth })
                     .on_release(Message::SliderReleased)
                     .step(0.01_f32),
-                text(a.depth_text).size(11).width(36),
-            ]
-            .spacing(6)
-            .align_y(center),
-            row![
-                pick_list(a.polarities, Some(a.polarity), move |choice| Message::Polarity {
-                    id,
-                    choice
-                },)
-                .text_size(11),
-                space::horizontal(),
-                toggler(a.enabled)
-                    .label(if a.enabled { "On" } else { "Off" })
-                    .on_toggle(move |enabled| Message::Enabled { id, enabled })
-                    .size(14)
-                    .text_size(11),
+                text(a.depth_text).size(style::SMALL).width(40),
             ]
             .spacing(6)
             .align_y(center),
         ]
-        .spacing(3);
-        rows = rows.push(container(assignment).padding([0, 8]));
+        .spacing(2);
+        rows = rows.push(container(card).padding(6).width(Length::Fill).style(style::card(false)));
     }
     rows = rows.push(
-        button(text(if adding.is_some() { "Cancel" } else { "Add modulation" }).size(11))
-            .padding([2, 6])
-            .style(button::text)
+        button(text(if adding.is_some() { "Cancel" } else { "+ Add modulation" }).size(style::SMALL))
+            .padding([2, 8])
             .on_press(Message::AddModulation { module, index }),
     );
     if let Some(sources) = adding {
@@ -762,10 +816,10 @@ fn modulation_view<'a>(
         for s in sources {
             let source = s.source;
             list = list.push(
-                button(text(s.name).size(11))
+                button(text(s.name).size(style::SMALL))
                     .width(Length::Fill)
                     .padding([2, 6])
-                    .style(button::secondary)
+                    .style(style::secondary)
                     .on_press_maybe(s.enabled.then_some(Message::Assign { source, module, index })),
             );
         }
@@ -776,16 +830,16 @@ fn modulation_view<'a>(
 
 /// **Drives**: one group per output. A line selects its target.
 fn drives_view<'a>(drives: Vec<DrivesGroup>) -> Element<'a, Message> {
-    let mut list = column![text("Drives").size(13)].spacing(4);
+    let mut list = column![text("Drives").size(style::CONTROL)].spacing(4);
     for group in drives {
-        list = list.push(text(group.output).size(11).color(DIM));
+        list = list.push(text(group.output).size(style::SMALL).color(DIM));
         for line in group.lines {
-            let label = text(line.text).size(11);
+            let label = text(line.text).size(style::SMALL);
             list = list.push(
                 button(if line.enabled { label } else { label.color(DIM) })
                     .width(Length::Fill)
                     .padding([2, 8])
-                    .style(button::text)
+                    .style(style::plain)
                     .on_press(Message::SelectModule(line.target)),
             );
         }

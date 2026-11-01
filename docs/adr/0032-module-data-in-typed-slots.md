@@ -1,4 +1,4 @@
-# ADR-0030: Module data lives in typed slots, with audio in a sidecar folder
+# ADR-0032: Module data lives in typed slots, with audio in a sidecar folder
 
 - **Status:** Accepted
 - **Date:** 2026-11-01

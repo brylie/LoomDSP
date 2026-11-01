@@ -21,7 +21,8 @@ pub static BUTTON: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Button",
     category: "Control",
-    description: "Sends a gate from a large button. Toggle keeps it. Momentary is high only while held.",
+    family: loom_core::Family::Interface,
+    description: "Sends a gate from a large button. Toggle keeps it on; Momentary is high only while held.",
     inputs: &[],
     outputs: &[PortSpec {
         name: "gate",
@@ -70,7 +71,7 @@ pub static BUTTON: ModuleDescriptor = ModuleDescriptor {
         .transient(),
     ],
     role: ModuleRole::Dsp(|_| Box::new(Button::default())),
-    panel: Panel::new(6, 3, &[Widget::button(0, 0, "on", "hold", "mode")]),
+    panel: Panel::new(6, 3, &[Widget::button(0, 0, "on", "hold", "mode").captioned("Gate")]),
     displays: &[],
 };
 

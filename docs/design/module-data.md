@@ -4,7 +4,7 @@ How modules keep data beyond parameters (curves, patterns, and audio), how it is
 
 - **Kind:** living specification.
 - **Status:** Agreed. [Buffer data](#buffer-data) and [Loading audio into a slot](#loading-audio-into-a-slot) are P1. The rest is P2. The choices marked "Settled" were made with the maintainer on 2026-11-01. Nothing is built yet.
-- **Decision behind it:** [ADR-0030](../adr/0030-module-data-in-typed-slots.md) (typed slots, sidecar audio, swap and return). [ADR-0024](../adr/0024-widgets-follow-the-kind-of-value.md) for the three data kinds and their editors.
+- **Decision behind it:** [ADR-0032](../adr/0032-module-data-in-typed-slots.md) (typed slots, sidecar audio, swap and return). [ADR-0024](../adr/0024-widgets-follow-the-kind-of-value.md) for the three data kinds and their editors.
 - **Use case and requirements:** FR-LIB-19, FR-LIB-02 (wavetable reader), FR-ENCAP-08. Settles OQ-17.
 - **Builds on:** [Panel widgets: data kinds](panel-widgets.md#data-kinds) (what each kind holds and its limits), [Undo](undo.md), [Open, Save, and Save As](files.md), [Autosave](autosave.md), [Copy, paste, and duplicate](clipboard.md), [Stereo cables](stereo.md).
 - **Background:** none yet.
@@ -80,7 +80,7 @@ P1, so the wavetable reader can ship (FR-LIB-02).
 
 ## Reaching the audio thread
 
-Rules for implementers, from ADR-0001 and ADR-0030.
+Rules for implementers, from ADR-0001 and ADR-0032.
 
 1. **Curve and pattern:** a new value is built on the control thread in a fixed-capacity box, sent to the engine through the command queue, and swapped in at a buffer boundary. The old box goes back on the return queue to be freed on the control thread.
 2. **Buffer:** storage is allocated on the control thread at the slot's maximum when the module is created or its maximum changes. Loading a file fills new storage and swaps it in, as in rule 1.

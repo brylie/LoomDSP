@@ -153,6 +153,14 @@ pub enum WidgetViewKind {
         /// Option labels.
         options: Vec<String>,
     },
+    /// A row of joined buttons, one per option (panel-widgets.md,
+    /// Segmented control).
+    Segmented {
+        /// Option labels, left to right.
+        options: Vec<String>,
+        /// Width in panel grid units.
+        width: u8,
+    },
     /// A brightness.
     Light,
     /// A level meter: an RMS bar and a peak line.
@@ -183,6 +191,9 @@ pub struct WidgetView {
     /// Shown below the label when the pointer rests on a control. Empty
     /// for lights and meters, which have no hover text.
     pub hover: HoverText,
+    /// True while the module's mode does not use this control (ADR-0030).
+    /// A hidden widget has no bounds, so it is not drawn, hit, or focused.
+    pub hidden: bool,
 }
 
 impl WidgetView {
@@ -198,6 +209,7 @@ impl WidgetView {
             WidgetViewKind::Button => (6, 3),
             WidgetViewKind::Radio { options } => (6, options.len() as u8 + 1),
             WidgetViewKind::Select { .. } => (6, 2),
+            WidgetViewKind::Segmented { width, .. } => (*width, 2),
         }
     }
 
@@ -220,6 +232,7 @@ impl WidgetView {
                 | WidgetViewKind::Toggle
                 | WidgetViewKind::Radio { .. }
                 | WidgetViewKind::Select { .. }
+                | WidgetViewKind::Segmented { .. }
         )
     }
 }
@@ -257,6 +270,9 @@ pub struct ModuleView {
     pub id: u32,
     /// Title shown in the header.
     pub title: String,
+    /// Shown when the pointer rests on the header: the module's family
+    /// and description, and its type ID as the name (ADR-0029).
+    pub hover: HoverText,
     /// Header colour, usually by module category.
     pub accent: Color,
     /// Top-left corner in world coordinates.
@@ -342,7 +358,7 @@ impl ModuleView {
 
     /// The world bounds of panel widget `index`.
     pub fn widget_bounds(&self, index: usize) -> Option<Rectangle> {
-        let widget = self.panel.widgets.get(index)?;
+        let widget = self.panel.widgets.get(index).filter(|w| !w.hidden)?;
         let origin = self.panel_origin();
         let (w, h) = widget.size();
         let extra = if matches!(widget.kind, WidgetViewKind::Scope | WidgetViewKind::Meter) {
@@ -924,6 +940,7 @@ mod tests {
             unknown: false,
             id,
             title: format!("m{id}"),
+            hover: crate::scene::HoverText::default(),
             accent: Color::BLACK,
             position: Point::new(x, y),
             inputs: vec![port("a"), port("b")],
@@ -939,6 +956,7 @@ mod tests {
             y,
             label: "k".into(),
             hover: HoverText::default(),
+            hidden: false,
         }
     }
 
@@ -957,6 +975,7 @@ mod tests {
                     y: 0,
                     label: String::new(),
                     hover: HoverText::default(),
+                    hidden: false,
                 },
             ],
         };
@@ -1029,6 +1048,7 @@ mod tests {
                     y: 0,
                     label: "l".into(),
                     hover: HoverText::default(),
+                    hidden: false,
                 },
             ],
         };
@@ -1152,6 +1172,7 @@ mod tests {
             unknown: false,
             id,
             title: String::new(),
+            hover: crate::scene::HoverText::default(),
             accent: Color::BLACK,
             position,
             inputs: vec![port("in")],

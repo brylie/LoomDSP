@@ -2,12 +2,13 @@
 
 <!-- Generated from the module's descriptor by `loom modules --markdown`. Edit the descriptor, not this part. -->
 
-White, pink, or brown noise. The seed makes renders repeatable (NFR-SND-04).
+White, pink, or brown noise. The seed makes every render the same.
 
 | | |
 |---|---|
 | ID | `loom.osc.noise` |
 | Version | 1 |
+| Family | Sources |
 | Category | Oscillator |
 
 ## Inputs
@@ -25,19 +26,21 @@ None.
 | Parameter | Range | Default | Description |
 |---|---|---|---|
 | **Seed** (`seed`) | 1 to 65535, whole numbers | 1 | Picks the noise pattern. The same seed gives the same noise. |
-| **Colour** (`colour`) | 0 to 2, whole numbers, choices White, Pink, Brown | 0 | White falls flat across the spectrum, pink falls 3 dB per octave, and brown falls 6 dB per octave. |
+| **Colour** (`colour`) | White, Pink, or Brown | White | White falls flat across the spectrum, pink falls 3 dB per octave, and brown falls 6 dB per octave. |
 
 ## Panel
 
-6 by 4 grid units.
+9 by 2 grid units.
 
-- Radio buttons: **Colour** (`colour`) (White, Pink, Brown)
+- Segmented control: **Colour** (`colour`)
 
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->
 
 ## When to use it
 
-Use Noise to generate non-periodic audio textures, percussion snares, wind sounds, or random modulation sources. Choose White for equal energy per Hertz, Pink for equal energy per octave, or Brown for a 6 dB per octave low frequency emphasis.
+Use Noise for sounds without a pitch, such as wind, breath, or the body of a snare, or as a random source for Sample and Hold.
+
+White noise is flat across the spectrum, pink falls 3 dB per octave, and brown falls 6 dB per octave, so each sounds darker than the last. The seed picks the pattern: the same seed gives the same noise in every render.
 
 ## Example patch
 
@@ -61,5 +64,5 @@ Patch(
 
 ## See also
 
-- [Sample and hold](loom.rand.sample-hold.md)
+- [Sample and Hold](loom.rand.sample-hold.md)
 - [SVF](loom.filter.svf.md)

@@ -18,10 +18,10 @@ Each open item lists the options and a current leaning. Close an item by writing
 | OQ-10 | Project name | "LoomDSP" appears to be free (informal search). Do a formal trademark check before a 1.0 release. | |
 | OQ-12 | Maturity of `iced_nodegraph` | Not used for the canvas. Findings reported upstream as a courtesy. | ADR-0010 |
 | OQ-19 | What is a trigger? | An output is high for exactly one sample. Inputs count rising edges above 0.5, with no hysteresis, and the first frame counts as following a low one. A fixed 1 ms pulse was rejected, because close triggers would merge. | FR-SIG-06, ADR-0007 |
-| OQ-17 | Module data beyond parameters | Typed data slots (curve, pattern, buffer). Curves and patterns inline in the patch; audio as WAV files in a sidecar folder. Swapped in from the control thread. Undo covers player edits, not live recording. | FR-LIB-19, ADR-0030, [module data](../design/module-data.md) |
+| OQ-17 | Module data beyond parameters | Typed data slots (curve, pattern, buffer). Curves and patterns inline in the patch; audio as WAV files in a sidecar folder. Swapped in from the control thread. Undo covers player edits, not live recording. | FR-LIB-19, ADR-0032, [module data](../design/module-data.md) |
 | OQ-20 | How roles are named and versioned | Namespaced IDs with a version (`loom.role.filter@1`). A new version only adds optional parameters. A part may fill several roles, and may map role names to its own. | FR-SDK-08, ADR-0017, [sub-patches](../design/sub-patches.md#roles) |
 | OQ-21 | What carries across a slot swap | Parameters by role name. Each part keeps its own data in the patch, restored on swap back, never converted. A swap is one undo step. | FR-ENCAP-08, [sub-patches](../design/sub-patches.md#slots) |
-| OQ-22 | Is the scale a module or a patch setting? | Like the transport: the engine holds one tuning and one active scale per patch, read without cables. A Scale and tuning module stores up to 8 scales and switches them from a trigger. | FR-LIB-29, ADR-0031, [scale and tuning](../design/scale-and-tuning.md) |
+| OQ-22 | Is the scale a module or a patch setting? | Like the transport: the engine holds one tuning and one active scale per patch, read without cables. A Scale and tuning module stores up to 8 scales and switches them from a trigger. | FR-LIB-29, ADR-0033, [scale and tuning](../design/scale-and-tuning.md) |
 
 ## Open
 

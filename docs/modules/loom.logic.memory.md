@@ -2,20 +2,21 @@
 
 <!-- Generated from the module's descriptor by `loom modules --markdown`. Edit the descriptor, not this part. -->
 
-Remembers a gate. Set and reset, toggle, or data (a D latch) mode. Reset wins a tie.
+Remembers a gate, in set and reset, toggle, or data (a D latch) mode. In set and reset or toggle mode, reset wins a tie.
 
 | | |
 |---|---|
 | ID | `loom.logic.memory` |
 | Version | 1 |
+| Family | Logic and math |
 | Category | Logic |
 
 ## Inputs
 
 | Port | Signal | Unconnected | Description |
 |---|---|---|---|
-| **A** (`a`) | gate | 0 | In Set and reset, a rising edge turns the output on. In Toggle, a rising edge flips it. In Data, this is the level to remember. |
-| **B** (`b`) | gate | 0 | A rising edge turns the output off (Set and reset, Toggle), or is the clock that remembers A (Data). |
+| **A** (`a`) | gate | 0 | In Set/Reset, a rising edge turns the output on. In Toggle, a rising edge flips it. In Data, this is the level to remember. |
+| **B** (`b`) | gate | 0 | A rising edge turns the output off (Set/Reset, Toggle), or is the clock that remembers A (Data). |
 
 ## Outputs
 
@@ -27,20 +28,26 @@ Remembers a gate. Set and reset, toggle, or data (a D latch) mode. Reset wins a 
 
 | Parameter | Range | Default | Description |
 |---|---|---|---|
-| **Mode** (`mode`) | 0 to 2, whole numbers, choices Set and reset, Toggle, Data | 0 | Set and reset, Toggle, or Data. Changing it keeps the state. |
+| **Mode** (`mode`) | Set/Reset, Toggle, or Data | Set/Reset | Set/Reset, Toggle, or Data. Changing it keeps the state. |
 
 ## Panel
 
-9 by 4 grid units.
+9 by 2 grid units.
 
-- Radio buttons: **Mode** (`mode`) (Set and reset, Toggle, Data)
+- Select: **Mode** (`mode`)
 - Light: **State** (`state`): Lit while the remembered gate is high.
 
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->
 
 ## When to use it
 
-Use Memory as a flip-flop or digital latch. It supports Set and reset, Toggle, and Data modes. Reset takes priority when both inputs receive simultaneous triggers.
+Use Memory to remember a gate until something changes it.
+
+- **Set/Reset:** a rising edge on A turns the output on, and one on B turns it off.
+- **Toggle:** each rising edge on A flips the output, and B turns it off.
+- **Data:** a rising edge on B remembers the level on A.
+
+If both inputs rise at once in Set/Reset or Toggle mode, reset wins. In Data mode, B reads A on that same frame, so a tie stores a high gate. The output starts low.
 
 ## Example patch
 

@@ -2,12 +2,13 @@
 
 <!-- Generated from the module's descriptor by `loom modules --markdown`. Edit the descriptor, not this part. -->
 
-Multiplies a signal by a factor and adds an offset. A factor of -1 inverts. Bipolar to unipolar is factor 0.5 with offset 0.5.
+Multiplies a signal by a factor and adds an offset. A factor of -1 inverts it; factor 0.5 with offset 0.5 turns bipolar into unipolar.
 
 | | |
 |---|---|
 | ID | `loom.level.scale` |
 | Version | 1 |
+| Family | Level and routing |
 | Category | Level |
 
 ## Inputs
@@ -40,7 +41,9 @@ Multiplies a signal by a factor and adds an offset. A factor of -1 inverts. Bipo
 
 ## When to use it
 
-Use Scale to remap, invert, or offset control voltages. Multiplying by -1 inverts a signal, while setting factor to 0.5 and offset to 0.5 transforms a bipolar signal (-1 to 1) into a unipolar signal (0 to 1).
+Use Scale to fit a signal to the range another module expects. Factor multiplies the signal and Offset adds to it.
+
+A factor of -1 turns a signal upside down. A factor of 0.5 with an offset of 0.5 turns a signal from -1 to 1 into one from 0 to 1.
 
 ## Example patch
 

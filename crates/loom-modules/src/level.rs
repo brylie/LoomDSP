@@ -17,6 +17,7 @@ pub static AMP: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Amplifier",
     category: "Level",
+    family: loom_core::Family::LevelAndRouting,
     description: "Scales a signal by a control signal, with a linear or exponential response.",
     inputs: &[
         PortSpec {
@@ -79,7 +80,11 @@ pub static AMP: ModuleDescriptor = ModuleDescriptor {
         })
     }),
     // A knob is 3 by 3 and a two-way radio is 3 by 3, so the tile is 3 by 6.
-    panel: Panel::new(6, 6, &[Widget::knob(0, 0, "gain"), Widget::radio(0, 3, "response")]),
+    panel: Panel::new(
+        9,
+        5,
+        &[Widget::segmented(0, 0, 9, "response"), Widget::knob(3, 2, "gain")],
+    ),
     displays: &[],
 };
 
@@ -143,8 +148,9 @@ impl Module for Amp {
 pub static CONSTANT: ModuleDescriptor = ModuleDescriptor {
     id: "loom.level.constant",
     version: 1,
-    name: "Constant (level)",
+    name: "Level Constant",
     category: "Level",
+    family: loom_core::Family::LevelAndRouting,
     description: "Outputs a fixed level, set in decibels. 0 dB is a factor of 1.",
     inputs: &[],
     outputs: &[PortSpec {
@@ -219,6 +225,7 @@ pub static CLAMP: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Clamp",
     category: "Level",
+    family: loom_core::Family::LevelAndRouting,
     description: "Limits a signal to the range between two limits. NaN becomes 0 first, so Clamp makes a signal safe.",
     inputs: &[PortSpec {
         name: "in",
@@ -344,7 +351,8 @@ pub static SCALE: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Scale",
     category: "Level",
-    description: "Multiplies a signal by a factor and adds an offset. A factor of -1 inverts. Bipolar to unipolar is factor 0.5 with offset 0.5.",
+    family: loom_core::Family::LevelAndRouting,
+    description: "Multiplies a signal by a factor and adds an offset. A factor of -1 inverts it; factor 0.5 with offset 0.5 turns bipolar into unipolar.",
     inputs: &[PortSpec {
         name: "in",
         label: "In",
@@ -449,6 +457,7 @@ pub static SLEW: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Slew",
     category: "Level",
+    family: loom_core::Family::LevelAndRouting,
     description: "Limits how fast a signal can rise and fall. Times are per 1.0 of change, so a glide takes the same time on any signal.",
     inputs: &[PortSpec {
         name: "in",
@@ -648,7 +657,7 @@ mod shaping_tests {
         out
     }
 
-    /// Constant (level) outputs 1.0 at 0 dB and 0.5012 at -6 dB.
+    /// Level Constant outputs 1.0 at 0 dB and 0.5012 at -6 dB.
     #[test]
     fn constant_level_in_decibels() {
         for (db, expected) in [(0.0, 1.0), (-6.0, 0.5012), (12.0, 3.981), (-60.0, 0.001)] {

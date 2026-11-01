@@ -86,6 +86,7 @@ pub static PANEL: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Test Panel",
     category: "Test",
+    family: loom_core::Family::Interface,
     description: "Every panel widget and parameter mapping, for tests.",
     inputs: &[],
     outputs: &[output("uni", Polarity::Unipolar), output("bi", Polarity::Bipolar)],
@@ -193,6 +194,7 @@ macro_rules! mirror_module {
             version: 1,
             name: $id,
             category: "Test",
+            family: loom_core::Family::Interface,
             description: "Writes its parameter, or the modulated buffer.",
             inputs: &[],
             outputs: &[PortSpec {
