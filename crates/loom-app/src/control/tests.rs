@@ -1,3 +1,5 @@
+use super::run::{crop_region, save_screenshot, search};
+use super::transport::*;
 use super::*;
 
 fn run(app: &mut App, line: &str) -> Answer {

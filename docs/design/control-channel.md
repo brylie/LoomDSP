@@ -7,7 +7,7 @@ A development-only way for a script or an AI agent to drive the running app by n
 - **Decision behind it:** None. It builds on the plain-data UI snapshot ([ADR-0021](../adr/0021-plain-data-view-models-and-keyed-identity.md)).
 - **Use case and requirements:** Developer tooling. No user requirement.
 - **Issues:** [#207](https://github.com/brylie/LoomDSP/issues/207) (part 3), `press` and `arm`: [#256](https://github.com/brylie/LoomDSP/issues/256); pointer commands: [#251](https://github.com/brylie/LoomDSP/issues/251); lights, meters, and screenshot areas: [#254](https://github.com/brylie/LoomDSP/issues/254); stats and cut labels in the snapshot: [#234](https://github.com/brylie/LoomDSP/issues/234); places in the snapshot: [#250](https://github.com/brylie/LoomDSP/issues/250); `sample`: [#255](https://github.com/brylie/LoomDSP/issues/255); devices and stream health: [#26](https://github.com/brylie/LoomDSP/issues/26); script variables: [#340](https://github.com/brylie/LoomDSP/issues/340); related [#190](https://github.com/brylie/LoomDSP/issues/190) (accessibility).
-- **Code:** `crates/loom-app/src/control.rs`, `pointer.rs` (pointer commands), `targets.rs` (names); the clock and recorder it relies on are in `crates/loom-host-desktop`.
+- **Code:** `crates/loom-app/src/control.rs` (commands and their types), `control/transport.rs` (socket and script lines), `control/run.rs` (running each command), `control/resolve.rs` (names in commands to ports, keys, and places on screen), `pointer.rs` (pointer commands), `targets.rs` (names); the clock and recorder it relies on are in `crates/loom-host-desktop`.
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
      built. See README.md in this folder. -->

@@ -321,7 +321,7 @@ A **Macro** module (FR-LIB-12) has one knob on its panel and one output equal to
 
 <a id="acceptance-criteria-slices-2-and-3"></a>
 
-**Status:** Agreed ([#151](https://github.com/brylie/LoomDSP/issues/151)). Checked in [#172](https://github.com/brylie/LoomDSP/issues/172): engine tests in `loom-modules/tests/modulation.rs`, canvas tests in `loom-canvas/src/widget.rs` and `controls.rs`, app tests in `loom-app/src/main.rs` and `scene.rs`.
+**Status:** Agreed ([#151](https://github.com/brylie/LoomDSP/issues/151)). Checked in [#172](https://github.com/brylie/LoomDSP/issues/172): engine tests in `loom-modules/tests/modulation.rs`, canvas tests in `loom-canvas/src/widget/tests.rs` and `controls/tests.rs`, app tests in `loom-app/src/tests.rs` and `scene/tests.rs`.
 
 - [x] Modulated knobs show the live value: the last frame of the block, before module inputs.
 - [x] Publishing and reading live values does not allocate or wait on the audio thread (`tests/no_alloc.rs`).

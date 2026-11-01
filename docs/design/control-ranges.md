@@ -8,7 +8,7 @@ A choice of ranges for wide controls, such as Multiply's gain, so a player can m
 - **Use case and requirements:** FR-MOD-09 (proposed here), FR-MOD-03, FR-MOD-08, FR-SIG-03.
 - **Background:** [Why feedback FM turns to noise](../learn/feedback-fm.md): exponential pitch, the one-sample loop, and aliasing at high depth.
 - **Issues:** [#121](https://github.com/brylie/LoomDSP/issues/121) (the problem that started this), [#122](https://github.com/brylie/LoomDSP/issues/122) (this spec).
-- **Code:** `ParamRange`, `ParamSpec::ranges`, `in_range`, `load_range`, and `check_ranges` in `loom-core/src/descriptor.rs`; `Node::spec` in `graph.rs`; `Controller::set_range`; the ranged specs in `ParamFill` and `MidiMapOp` (`compile.rs`); `WIDE_RANGES` in `loom-modules/src/math.rs`; `ranges` in `loom-patch`; the **Range** selector in `loom-app/src/inspector.rs`.
+- **Code:** `ParamRange`, `ParamSpec::ranges`, `in_range`, `load_range`, and `check_ranges` in `loom-core/src/descriptor.rs`; `Node::spec` in `graph.rs`; `Controller::set_range`; the ranged specs in `ParamFill` (`compile/schedule.rs`) and `MidiMapOp` (`midi_map.rs`, built in `compile/midi_maps.rs`); `WIDE_RANGES` in `loom-modules/src/math.rs`; `ranges` in `loom-patch`; the **Range** selector in `loom-app/src/inspector.rs`.
 
 ## Goal
 
