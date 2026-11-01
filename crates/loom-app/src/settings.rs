@@ -386,8 +386,12 @@ impl App {
         rate: Option<Option<u32>>,
         buffer: Option<Option<u32>>,
     ) -> Result<Change, String> {
-        if self.no_audio || self.fake_audio {
-            let flag = if self.no_audio { "--no-audio" } else { "--fake-audio" };
+        if self.stream.without_device() {
+            let flag = if self.stream.playback().is_off() {
+                "--no-audio"
+            } else {
+                "--fake-audio"
+            };
             return Err(format!("there are no audio devices to choose with {flag}"));
         }
         let read;
@@ -492,10 +496,9 @@ impl App {
     /// Picks the output safety mode (preferences.md, Changing the mode at
     /// run time).
     fn choose_output_safety(&mut self, mode: OutputSafety) {
-        if mode == self.output_safety {
+        if !self.stream.set_output_safety(mode) {
             return;
         }
-        self.output_safety = mode;
         self.rig.safety_flag = false;
         let mut preferences = self.rig.store.saved().clone();
         preferences.output_safety = mode;
@@ -504,7 +507,7 @@ impl App {
         }
         // With no device there is no engine playing to tell. The next
         // engine is built with the new mode.
-        if self._audio.is_some() {
+        if self.stream.is_playing() {
             self.rig.safety_pending = Some(mode);
             self.send_pending_safety();
         }
@@ -540,8 +543,8 @@ impl App {
 
     /// Keeps the input stream in step with the patch and the current output.
     pub(crate) fn sync_audio_input(&mut self) {
-        let needed = self._audio.is_some()
-            && !self.fake_audio
+        let needed = self.stream.is_playing()
+            && !self.stream.playback().is_fake()
             && !self.rig.flags.no_input
             && (self.rig.flags.input.is_some() || !matches!(self.rig.store.saved().audio.input, InputChoice::Off))
             && self
@@ -618,8 +621,8 @@ impl App {
             .as_ref()
             .and_then(|playing| playing.buffer)
             .or_else(|| {
-                self.audio_stats
-                    .as_ref()
+                self.stream
+                    .stats()
                     .map(|stats| stats.snapshot().largest_buffer)
                     .filter(|&frames| frames > 0)
                     .and_then(|frames| u32::try_from(frames).ok())
@@ -627,7 +630,7 @@ impl App {
         let Some(buffer) = buffer else { return };
         self.rig.input_attempted = Some(now);
         let mut options = loom_host_desktop::AudioOptions {
-            sample_rate: Some(self.sample_rate as u32),
+            sample_rate: Some(self.stream.sample_rate() as u32),
             buffer_size: Some(buffer),
             ..Default::default()
         };
@@ -748,7 +751,7 @@ impl App {
             }
         }
 
-        if !self.no_audio && !self.fake_audio {
+        if !self.stream.without_device() {
             // The new device opens first: if it fails, the old one keeps
             // playing and nothing is saved (Rule D5).
             let output = match devices::open_choice(&*self.rig.host, &play) {
@@ -865,7 +868,7 @@ impl App {
     /// stay the same and the history still applies.
     fn rebuilt_engine(&self, rate: f32) -> Result<EngineParts, loom_core::LoomError> {
         let config = EngineConfig {
-            output_safety: self.output_safety,
+            output_safety: self.stream.output_safety(),
             ..EngineConfig::with_sample_rate(rate)
         };
         let mut parts = create_engine(crate::registry(self.test_modules), config);
@@ -891,10 +894,10 @@ impl App {
     /// The new engine holds the patch as it is now, at the current rate.
     /// Does nothing while a device plays or an idle engine is in place.
     pub(crate) fn keep_engine_idle(&mut self) {
-        if self._audio.is_some() || self.idle_engine.is_some() {
+        if self.stream.has_engine() {
             return;
         }
-        let Ok(parts) = self.rebuilt_engine(self.sample_rate) else {
+        let Ok(parts) = self.rebuilt_engine(self.stream.sample_rate()) else {
             return;
         };
         let EngineParts {
@@ -914,7 +917,7 @@ impl App {
         self.traces = loom_canvas::ScopeTraces::new();
         self.live = crate::live::Live::showing_activity();
         self.live.set_activity(self.rig.store.saved().show_activity);
-        self.idle_engine = Some(engine);
+        self.stream.keep_idle(engine);
         // The stopped engine's live values are gone; show the new one's.
         self.refresh_values();
     }
@@ -942,8 +945,7 @@ impl App {
         self.live.set_activity(self.rig.store.saved().show_activity);
         self.lights.clear();
         self.meter_levels.clear();
-        self.sample_rate = output.sample_rate() as f32;
-        self.idle_engine = None;
+        self.stream.prepare(output.sample_rate() as f32);
         self.holding = false;
         let refused = self.rig.record_into(&mut output);
         let started = self.rig.host.start(output, engine);
@@ -952,22 +954,15 @@ impl App {
         match started {
             Ok(audio) => {
                 record_error = refused.map(|e| self.rig.end_recording(&e));
-                self.audio_stats = Some(audio.stats().clone());
-                self.load_peak = 0.0;
-                self.load_max = 0.0;
-                self._audio = Some(audio);
-                self.audio_name = label;
+                self.stream.started(audio, label);
                 self.rig.playing = Some(playing);
                 self.midi = self.rig.midi_in.clone();
-                self.audio_callbacks_seen = 0;
-                self.audio_callbacks_advanced = Instant::now();
             }
             Err(refused) => {
                 let (engine, e) = *refused;
-                self.audio_name = format!("no audio ({e})");
+                self.stream.refused(engine, &e);
                 self.rig.playing = None;
                 self.midi = None;
-                self.idle_engine = Some(engine);
                 return Err(e);
             }
         }
@@ -998,15 +993,12 @@ impl App {
     /// was lost or disconnected (device-changes.md, Audio device loss).
     pub(crate) fn stop_audio_immediate(&mut self) {
         self.input_alert = None;
-        if let Some(audio) = self._audio.take() {
+        if let Some(audio) = self.stream.take_running() {
             audio.stop_immediate();
         }
         self.rig.input.take();
         self.rig.input_tracker = None;
         self.rig.input_attempted = None;
-        self.audio_stats = None;
-        self.load_peak = 0.0;
-        self.load_max = 0.0;
         self.rig.playing = None;
     }
 
@@ -1014,10 +1006,10 @@ impl App {
     pub(crate) fn handle_audio_loss(&mut self, _reason: &str) {
         // Rule 3: The engine is never rebuilt twice for one loss. A second error
         // from the same dead stream is ignored.
-        if self._audio.is_none() && self.rig.lost_audio.is_some() {
+        if !self.stream.is_playing() && self.rig.lost_audio.is_some() {
             return;
         }
-        if self._audio.is_none() && self.rig.playing.is_none() {
+        if !self.stream.is_playing() && self.rig.playing.is_none() {
             return;
         }
         let was_system_default = matches!(self.rig.wanted().device, devices::Pick::SystemDefault);
@@ -1093,24 +1085,22 @@ impl App {
 
     /// Checks for audio device loss, silent stalls, and device reconnection at `now`.
     pub(crate) fn check_audio(&mut self, now: Instant) {
-        if self.no_audio || self.fake_audio {
+        if self.stream.without_device() {
             return;
         }
 
         // 1. If audio is running, check for loss (dead stream, stall > 1s, missing device)
-        if self._audio.is_some() {
+        if self.stream.is_playing() {
             let mut callbacks_advancing = false;
-            if let Some(stats) = &self.audio_stats {
+            if let Some(stats) = self.stream.stats().cloned() {
                 let snap = stats.snapshot();
                 if snap.is_dead {
                     self.handle_audio_loss("the audio device reported an error");
                     return;
                 }
-                if snap.callbacks > self.audio_callbacks_seen {
-                    self.audio_callbacks_seen = snap.callbacks;
-                    self.audio_callbacks_advanced = now;
+                if self.stream.observe_callbacks(snap.callbacks, now) {
                     callbacks_advancing = true;
-                } else if now.saturating_duration_since(self.audio_callbacks_advanced) > Duration::from_secs(1) {
+                } else if self.stream.stalled(now) {
                     let mut rate_changed = false;
                     let device_default = matches!(
                         self.rig.store.saved().audio.sample_rate,
@@ -1250,7 +1240,7 @@ impl App {
     /// longer for large buffers; output safety, rule 14). Used by Open, New, quit, and device changes.
     pub(crate) fn stop_audio(&mut self) {
         self.input_alert = None;
-        if let Some(audio) = self._audio.take() {
+        if let Some(audio) = self.stream.take_running() {
             // A full queue cannot fade: the limit then stops the stream.
             let _ = self.controller.fade_out();
             self.rig.last_stop = Some(audio.stop(STOP_LIMIT));
@@ -1258,9 +1248,6 @@ impl App {
         self.rig.input.take();
         self.rig.input_tracker = None;
         self.rig.input_attempted = None;
-        self.audio_stats = None;
-        self.load_peak = 0.0;
-        self.load_max = 0.0;
         self.rig.playing = None;
     }
 
@@ -1416,9 +1403,9 @@ impl App {
             };
             safety = safety.push(
                 column![
-                    radio(label, mode, Some(self.output_safety), |m| crate::Message::Preferences(
-                        Message::Safety(m)
-                    ))
+                    radio(label, mode, Some(self.stream.output_safety()), |m| {
+                        crate::Message::Preferences(Message::Safety(m))
+                    })
                     .size(style::SWITCH)
                     .text_size(style::CONTROL),
                     container(note(line.to_string())).padding([0, 24]),
@@ -1634,8 +1621,8 @@ impl App {
                         ));
                     }
                     let buffer = output.buffer.or_else(|| {
-                        self.audio_stats
-                            .as_ref()
+                        self.stream
+                            .stats()
                             .map(|stats| stats.snapshot().largest_buffer)
                             .filter(|&frames| frames > 0)
                             .and_then(|frames| u32::try_from(frames).ok())
@@ -1654,23 +1641,23 @@ impl App {
 
     /// The line under the audio controls: what is playing now.
     pub(crate) fn playing_line(&self) -> String {
-        if self.no_audio {
+        if self.stream.playback().is_off() {
             return "Audio is off for this run (--no-audio).".to_string();
         }
-        if self.fake_audio {
+        if self.stream.playback().is_fake() {
             return "No device for this run (--fake-audio).".to_string();
         }
         match &self.rig.playing {
             Some(playing) => {
                 let frames = self
-                    .audio_stats
-                    .as_ref()
+                    .stream
+                    .stats()
                     .map(|s| s.snapshot().largest_buffer)
                     .filter(|&f| f > 0)
                     .and_then(|f| u32::try_from(f).ok());
                 playing.describe(frames)
             }
-            None => format!("Not playing: {}.", self.audio_name),
+            None => format!("Not playing: {}.", self.stream.label()),
         }
     }
 

@@ -411,15 +411,15 @@ impl App {
         let engine = self.controller.stats();
         let telemetry_dropped = engine.dropped_meters.load(std::sync::atomic::Ordering::Relaxed)
             + engine.dropped_scope.load(std::sync::atomic::Ordering::Relaxed);
-        let (playing, load, max_load) = match &self.audio_stats {
+        let (playing, load, max_load) = match self.stream.stats() {
             Some(stats) => {
                 let s = stats.snapshot();
-                (true, s.last_load, self.load_max)
+                (true, s.last_load, self.stream.load().1)
             }
             None => (false, 0.0, 0.0),
         };
         Stats {
-            label: self.audio_name.clone(),
+            label: self.stream.label().to_string(),
             playing,
             load,
             max_load,

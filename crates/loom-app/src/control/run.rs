@@ -551,7 +551,7 @@ impl App {
     /// counts the ones the next `advanced` compares with, as a `snapshot`
     /// does.
     pub(super) fn audio_health(&mut self, remember: bool) -> Value {
-        let Some(stats) = self.audio_stats.clone() else {
+        let Some(stats) = self.stream.stats().cloned() else {
             return json!({
                 "device": null, "rate": null, "buffer": null, "callbacks": 0,
                 "advanced": null, "stream_errors": 0, "start_overloads": 0, "overruns": 0,

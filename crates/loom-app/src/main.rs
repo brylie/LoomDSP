@@ -42,6 +42,7 @@ mod screenshot;
 mod script_vars;
 mod settings;
 mod snapshot;
+mod stream;
 mod style;
 mod targets;
 #[cfg(test)]
@@ -58,7 +59,7 @@ use loom_core::{
     AssignmentId, Controller, EngineConfig, EngineParts, InputRef, LoomError, MidiEvent, ModuleDescriptor, ModuleId,
     OutputRef, OutputSafety, ProbeId, TRANSPORT_MODULE, create_engine,
 };
-use loom_host_desktop::{AudioOutput, CallbackStats, RunningAudio, SharedMidi};
+use loom_host_desktop::{AudioOutput, CallbackStats, SharedMidi};
 use loom_patch::Patch;
 use matrix::{Event as MatrixEvent, Tab as RightTab};
 use modulation::PolarityChoice;
@@ -530,24 +531,14 @@ struct App {
     document: document::Document,
     /// Counts the engines built. Background watchers restart when it changes.
     generation: u64,
-    sample_rate: f32,
-    no_audio: bool,
-    fake_audio: bool,
-    /// The safety stage's mode, for every engine this app builds.
-    output_safety: OutputSafety,
     /// The `test.` modules are loaded (`--test-modules`).
     test_modules: bool,
     /// Set when the app should exit after this update.
     quit: bool,
     theme: Theme,
-    _audio: Option<RunningAudio>,
-    /// The engine, when no audio device plays it. The app never renders
-    /// with it: each update only applies the queued edits
-    /// (`App::drain_idle_engine`), so the queue never fills. Tests run it by
-    /// hand with `App::process`, so they can check what depends on a
-    /// running engine (live values, lights, meters). Keeping it costs the
-    /// real audio path nothing: there is none.
-    idle_engine: Option<loom_core::Engine>,
+    /// The output stream or idle engine, its counters, and how this run
+    /// plays.
+    stream: stream::Stream,
     /// Meter and scope data from the engine, drained on the telemetry
     /// thread so the queues never fill.
     monitor: monitor::Monitor,
@@ -558,13 +549,6 @@ struct App {
     input_alert: Option<(u64, u64)>,
     /// What belongs to the machine: preferences, devices, MIDI inputs.
     rig: settings::Rig,
-    audio_stats: Option<Arc<CallbackStats>>,
-    /// Audio load values from the watcher's completed tick.
-    load_peak: f64,
-    load_max: f64,
-    audio_callbacks_seen: u64,
-    audio_callbacks_advanced: Instant,
-    audio_name: String,
     /// Note input shared by every MIDI port and the "Hold note" button.
     midi: Option<SharedMidi>,
     holding: bool,
@@ -993,10 +977,14 @@ impl App {
             selection: BTreeSet::new(),
             document: document::Document::new(name, file, stamp, load_notes),
             generation,
-            sample_rate,
-            no_audio: args.no_audio,
-            fake_audio: args.fake_audio,
-            output_safety: args.output_safety.unwrap_or(rig.store.saved().output_safety),
+            stream: stream::Stream::new(
+                audio,
+                idle_engine,
+                audio_name,
+                sample_rate,
+                stream::Playback::from_flags(args.no_audio, args.fake_audio),
+                args.output_safety.unwrap_or(rig.store.saved().output_safety),
+            ),
             test_modules: args.test_modules,
             quit: false,
             theme: Theme::custom(
@@ -1010,13 +998,6 @@ impl App {
                     danger: Color::from_rgb8(0xE0, 0x4F, 0x4F),
                 },
             ),
-            audio_stats: audio.as_ref().map(|a| a.stats().clone()),
-            load_peak: 0.0,
-            load_max: 0.0,
-            audio_callbacks_seen: 0,
-            audio_callbacks_advanced: Instant::now(),
-            _audio: audio,
-            idle_engine,
             monitor: monitor::Monitor::new(telemetry, sample_rate, generation),
             live: {
                 let mut live = Live::showing_activity();
@@ -1026,7 +1007,6 @@ impl App {
             dropouts: alerts::Dropouts::default(),
             input_alert: None,
             rig,
-            audio_name,
             midi,
             holding: false,
             status,
@@ -1167,9 +1147,10 @@ impl App {
         // playing. The engine is built at the rate of the device that will
         // play it.
         // A recording goes on into the same file (rig.recorder).
-        let (output, _) = settings::open_output(&self.rig, self.no_audio, self.fake_audio);
+        let playback = self.stream.playback();
+        let (output, _) = settings::open_output(&self.rig, playback.is_off(), playback.is_fake());
         // Playing now and no device to play on afterwards: keep what plays.
-        if let (Err(e), true) = (&output, self._audio.is_some()) {
+        if let (Err(e), true) = (&output, self.stream.is_playing()) {
             let message = format!(
                 "Could not open the patch: the audio device is not available ({e}). The current patch is unchanged."
             );
@@ -1180,9 +1161,9 @@ impl App {
         let sample_rate = output
             .as_ref()
             .map(|o| o.sample_rate() as f32)
-            .unwrap_or(self.sample_rate);
+            .unwrap_or(self.stream.sample_rate());
         let config = EngineConfig {
-            output_safety: self.output_safety,
+            output_safety: self.stream.output_safety(),
             ..EngineConfig::with_sample_rate(sample_rate)
         };
         let session = match Self::session(config, self.test_modules, source) {
@@ -1202,15 +1183,15 @@ impl App {
         let args = Args {
             patch: None,
             generate: None,
-            no_audio: self.no_audio,
-            fake_audio: self.fake_audio,
+            no_audio: playback.is_off(),
+            fake_audio: playback.is_fake(),
             record: None,
             bench: bench::Options {
                 measure: self.measuring,
                 ..Default::default()
             },
             control: control::Options::default(),
-            output_safety: Some(self.output_safety),
+            output_safety: Some(self.stream.output_safety()),
             devices: devices::Options::default(),
             view: screenshot::Options::default(),
             dump_ui: false,
@@ -1320,7 +1301,7 @@ impl App {
         };
         // The audio numbers and stalled callbacks are read on a thread,
         // which wakes the UI only when the stats bar changes (#90).
-        let audio_watch = match &self.audio_stats {
+        let audio_watch = match self.stream.stats() {
             Some(stats) => Subscription::run_with(
                 audio_watch::Watch {
                     stats: stats.clone(),
@@ -1374,7 +1355,7 @@ impl App {
         // assignment that is on follows them every frame.
         // Without audio the engine does not run, so nothing moves.
         let live = if !self.measuring
-            && self._audio.is_some()
+            && self.stream.is_playing()
             && self.controller.graph().assignments().any(|(_, a)| a.enabled)
         {
             iced::window::frames().map(|_| Message::LiveFrame)
@@ -1424,7 +1405,7 @@ impl App {
         // Once a device is lost, reconnection is tried by polling four
         // times a second (device-changes.md, Audio device loss).
         let waiting_for_input = self.rig.input.is_none()
-            && self._audio.is_some()
+            && self.stream.is_playing()
             && !self.rig.flags.no_input
             && (self.rig.flags.input.is_some()
                 || !matches!(self.rig.store.saved().audio.input, preferences::InputChoice::Off))
@@ -1433,7 +1414,7 @@ impl App {
                 .graph()
                 .nodes()
                 .any(|(_, node)| node.descriptor.id == "loom.io.audio-in");
-        let audio_poll = if !self.no_audio && !self.fake_audio && (self._audio.is_none() || waiting_for_input) {
+        let audio_poll = if !self.stream.without_device() && (!self.stream.is_playing() || waiting_for_input) {
             iced::time::every(Duration::from_millis(250)).map(|_| Message::AudioPoll)
         } else {
             Subscription::none()
@@ -1536,7 +1517,7 @@ impl App {
     /// command queue when no device plays, and edits would fail once it is
     /// full (#220). It renders no audio, so lights and meters stay still.
     fn drain_idle_engine(&mut self) {
-        if let Some(engine) = self.idle_engine.as_mut() {
+        if let Some(engine) = self.stream.idle_mut() {
             engine.apply_pending();
         }
         // What the engine handed back is freed here, after any message,
@@ -1550,7 +1531,7 @@ impl App {
     /// the engine gives the same output at any block size.
     fn process(&mut self, frames: usize) {
         const CHUNK: usize = 4096;
-        let engine = self.idle_engine.as_mut().expect("an audio device plays the engine");
+        let engine = self.stream.idle_mut().expect("an audio device plays the engine");
         let (mut left, mut right) = (vec![0.0; CHUNK], vec![0.0; CHUNK]);
         let mut remaining = frames;
         while remaining > 0 {
@@ -1709,7 +1690,7 @@ impl App {
     /// Takes the latest dropout count for the stats bar warning. Runs on
     /// every tick and, in Measure mode, on every frame.
     fn update_dropouts(&mut self, now: Instant) {
-        if let Some(stats) = &self.audio_stats {
+        if let Some(stats) = self.stream.stats() {
             let s = stats.snapshot();
             self.dropouts.update(s.overruns + s.stream_errors, now);
         }
@@ -2606,17 +2587,13 @@ impl App {
                 peak,
                 max,
             }) => {
-                self.load_peak = peak;
-                self.load_max = max;
+                self.stream.set_load(peak, max);
                 self.dropouts.update(dropouts, at);
             }
             Message::Audio(audio_watch::Event::Stalled { callbacks, advanced }) => {
                 // Time the stall from when the watcher last saw a callback,
                 // as a poll on this thread would have.
-                if callbacks >= self.audio_callbacks_seen {
-                    self.audio_callbacks_seen = callbacks;
-                    self.audio_callbacks_advanced = self.audio_callbacks_advanced.max(advanced);
-                }
+                self.stream.watcher_saw(callbacks, advanced);
                 self.poll_audio();
             }
             Message::Meters(levels) => {
@@ -3373,7 +3350,7 @@ impl App {
         // The snapshot reads the same model, so the two cannot disagree.
         let stats = self.stats_model();
         let audio: Element<'_, Message> = if stats.playing {
-            let load = bar_text(stats.load_text()).color(severity_colour(alerts::load_severity(self.load_peak)));
+            let load = bar_text(stats.load_text()).color(severity_colour(alerts::load_severity(self.stream.load().0)));
             let dropouts = bar_text(format!("dropouts {}", stats.dropouts))
                 .color(severity_colour(self.dropouts.severity(Instant::now())));
             let mut items = row![bar_text(stats.label).color(DIM), load, dropouts].spacing(10);
