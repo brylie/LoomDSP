@@ -136,7 +136,7 @@ Dragging the range arc on a tile knob changes the depth of one assignment.
 #### Not in slice 2
 
 - **Dropping an output on an inspector control.** Agreed, but built after slice 2, in [#188](https://github.com/brylie/LoomDSP/issues/188). See [Inspector drop](#inspector-drop).
-- **Modulate mode.** See [Not planned for M1](#not-planned-for-p1).
+- **Modulate mode.** See [Not planned for M1](#not-planned-for-m1).
 
 ### Inspector drop
 

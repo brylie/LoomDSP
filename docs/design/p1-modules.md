@@ -28,7 +28,7 @@ Modules in the clock family (Transport, Clock, Phase Scale) are in [clock.md](cl
 
 ## Constant family (MT-LEVEL-01)
 
-The catalogue type is built as three modules, one per unit. *Why not one module with a unit setting:* the knob's range, mapping, and unit all change with the unit, and parameters are static ([descriptor rules](panels.md#module-panels-on-tiles-p1)). Three small tiles are clearer on stage than one tile whose knob changes meaning.
+The catalogue type is built as three modules, one per unit. *Why not one module with a unit setting:* the knob's range, mapping, and unit all change with the unit, and parameters are static ([descriptor rules](panels.md#module-panels-on-tiles-m1)). Three small tiles are clearer on stage than one tile whose knob changes meaning.
 
 | Module | Output | Parameter | Range | Default |
 |---|---|---|---|---|

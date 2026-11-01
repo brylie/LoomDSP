@@ -3,7 +3,7 @@
 The baseline set of panel widgets that LoomDSP modules, sub-patches, and front panels share, so each kind of interaction has one common way to work.
 
 - **Kind:** living specification.
-- **Status:** Agreed, M2. The plan and its open points were settled with the maintainer on 2026-11-01 ([#278](https://github.com/brylie/LoomDSP/issues/278)); see [Settled in review](#settled-in-review). The [read-only shape preview](#read-only-shape-preview) and the compact [select list](#select-list) are Implemented. The widgets that exist today (knob, toggle, radio buttons, button, light, meter) are specified and Implemented in [panels.md](panels.md#module-panels-on-tiles-p1). Sizes marked "starting size" may be tuned while building, against the estimated label widths ([#120](https://github.com/brylie/LoomDSP/issues/120)), without a spec change.
+- **Status:** Agreed, M2. The plan and its open points were settled with the maintainer on 2026-11-01 ([#278](https://github.com/brylie/LoomDSP/issues/278)); see [Settled in review](#settled-in-review). The [read-only shape preview](#read-only-shape-preview) and the compact [select list](#select-list) are Implemented. The widgets that exist today (knob, toggle, radio buttons, button, light, meter) are specified and Implemented in [panels.md](panels.md#module-panels-on-tiles-m1). Sizes marked "starting size" may be tuned while building, against the estimated label widths ([#120](https://github.com/brylie/LoomDSP/issues/120)), without a spec change.
 - **Decision behind it:** [ADR-0024](../adr/0024-widgets-follow-the-kind-of-value.md) (widgets follow the kind of value, and structured data has shared kinds with one editor each). Builds on [ADR-0013](../adr/0013-modules-carry-their-own-panel.md) (modules carry their own panel).
 - **Use case and requirements:** UC2, UC3. FR-PANEL-02, FR-PANEL-03, FR-PANEL-04, FR-LIB-02, FR-LIB-12, FR-LIB-16, FR-LIB-17, FR-LIB-18, FR-LIB-19, FR-LIB-29, FR-MOD-04, FR-VIS-02, FR-VIS-03, NFR-UX-01, NFR-UX-02, NFR-UX-03.
 - **Builds on:** [panels.md](panels.md) (widgets, layout, interaction, level of detail, redraw), [modulation.md](modulation.md) (range arcs, dots, live value), [telemetry.md](telemetry.md) (probes), [port and parameter text](port-and-parameter-text.md) (labels and descriptions).
@@ -158,7 +158,7 @@ These rules hold for every widget. Each widget section below says only what diff
 
 ### Knob
 
-Implemented ([panels.md](panels.md#module-panels-on-tiles-p1)). Listed here as the reference for the other number controls.
+Implemented ([panels.md](panels.md#module-panels-on-tiles-m1)). Listed here as the reference for the other number controls.
 
 ### Fader
 
