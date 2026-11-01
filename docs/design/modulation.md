@@ -156,17 +156,22 @@ Dropping an output on a parameter row in the inspector makes an assignment, the 
 
 **Status:** Agreed and built ([#71](https://github.com/brylie/LoomDSP/issues/71)). The nested sub-patch test waits for sub-patches.
 
-A panel beside the inspector. Columns: on, source (module and output), target (module and parameter), depth, polarity. Sort and filter by module, or show only the selected module. Every cell can be edited by keyboard (NFR-UX-01). **Add**, then pick a source and a target, creates an assignment. Delete removes the selected row.
+A panel beside the inspector, with one card per assignment showing: on, source (module and output), target (module and parameter), depth, polarity. Sort and filter by module, or show only the selected module. Every cell can be edited by keyboard (NFR-UX-01). **Add**, then pick a source and a target, creates an assignment. Delete removes the selected row.
 
 Details settled for the build:
 
-- **Where.** A tab in the right-hand column next to **Inspector**. The window shows one of them at a time. It remembers the last tab for the session only. *Why:* the window is already full; a tab costs no space.
-- **Rows.** One per assignment, in the order the engine applies them (rule 12), grouped by target when sorted by target. Columns: **On** (check box), **Source** ("Module name #id: Output label"), **Target** ("Module name #id: Parameter label"), the same form as the inspector, so two modules with one name stay apart, **Depth** (a number from −100 to 100 percent, typed or dragged), **Polarity** (a choice: the same choices as the inspector). The table scrolls horizontally inside the right-hand column.
-- **Sort.** Click a column title to sort by it; click again to reverse. The default is the engine's order.
+- **Where.** A tab in the right-hand column next to **Inspector**, 280 px wide. The window shows one of them at a time. The open tab has a fill and a border; the other is plain dim text, so the two differ by shape as well as colour ([visual system](visual-system.md)). It remembers the last tab for the session only. *Why:* the window is already full; a tab costs no space.
+- **Cards** ([#456](https://github.com/brylie/LoomDSP/issues/456)). One card per assignment, in the order the engine applies them (rule 12), grouped by target when sorted by target. Each card has three lines, read in this order, which is also the order Left and Right move through its cells:
+  1. **On** (check box), **Source** ("Module name #id: Output label"), and the **×** that removes it.
+  2. An arrow, **Target** ("Module name #id: Parameter label"), and **Polarity** (the same choices as the inspector).
+  3. **Depth**: a slider across the card and its value, from −100 to 100 percent, typed or dragged.
+
+  Source and target use the inspector's form, so two modules with one name stay apart. Cells are plain text with a light fill on hover and an outline while focused; the selected card is outlined. Every card fits the column, so nothing scrolls sideways. *Why:* the earlier one-line table was 600 px wide in a 280 px column, so Depth and Polarity, the cells changed most, were off screen. Cards match how the inspector shows an assignment.
+- **Sort.** A **Sort by** list picks engine order (the default) or one of on, source, target, depth, or polarity. Picking a new one sorts ascending; a small arrow button beside it reverses the order.
 - **Filter.** A text field matches the module or parameter name. A check box **Selected module only** shows rows whose source or target is the selected module. Filters hide rows; they never change assignments.
 - **Add.** The **Add** button opens two pick lists (source output, target parameter) with the same rules as a drop: the target can be a knob, toggle, or radio parameter; the depth is the default depth; a duplicate adds nothing and the status bar says so.
 - **Remove.** The **×** button of [Removing an item](panels.md#removing-an-item), or Delete on the selected row.
-- **Keyboard.** Up and Down move between visible rows and scroll the selected row into view by the smallest distance needed. Left and Right move between cells and scroll the chosen column into view by the smallest distance needed without losing the row. Sorting and filtering constrain navigation to the displayed rows and keep the selected cell in view when it remains visible. Enter edits the cell (toggle, open the choice, or type); Escape leaves a cell being edited, and takes the key before pinned lines; Tab leaves the table. Selection and scrolling are session-only and do not add undo steps.
+- **Keyboard.** Up and Down move between visible rows and scroll the selected row into view by the smallest distance needed. Left and Right move between the cells of the selected card. Sorting and filtering constrain navigation to the displayed rows and keep the selected cell in view when it remains visible. Enter edits the cell (toggle, open the choice, or type); Escape leaves a cell being edited, and takes the key before pinned lines; Tab leaves the table. Selection and scrolling are session-only and do not add undo steps.
 - **Selection.** Selecting a row selects the target module on the canvas and shows the assignment's line (as if pinned) without pinning it. Selecting a module on the canvas does not move the selected row.
 - **Edits** go through the controller and undo like the inspector's: a depth drag is one step ([Undo](#undo)).
 - **Changing a source or target** keeps the assignment's id, place in engine order, depth, polarity, and on/off state. It is one undo step. The new endpoint must exist and may not duplicate another assignment; otherwise the row stays unchanged and the status bar explains why.
@@ -342,6 +347,8 @@ A **Macro** module (FR-LIB-12) has one knob on its panel and one output equal to
 
 - [x] The matrix lists every assignment in the current patch level, and every cell can be edited by keyboard (a test drives it with keys alone).
 - [x] Sorting by each column, the text filter, and **Selected module only** show the right rows and change no assignment (test).
+- [x] Every cell of every card, including a 24-character source, shows inside the 280 px column, and moving between cells never scrolls sideways (test, [#456](https://github.com/brylie/LoomDSP/issues/456)).
+- [x] The snapshot reports the open tab, and the open tab differs from the other by its border as well as its colour (test and [visual system](visual-system.md)).
 - [x] **Add** makes an assignment with the default depth; a duplicate adds nothing and the status bar says so (test).
 - [x] Editing on, depth, or polarity, and removing a row, are undo steps like the inspector's; undo restores a removed row in place (test).
 - [x] Selecting a row selects its target module and shows its line without pinning (test).

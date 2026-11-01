@@ -446,8 +446,8 @@ impl App {
 /// The inspector's widgets.
 pub fn view<'a>(model: Inspector, drop_row: Option<(u32, usize)>, dragging: bool) -> Element<'a, Message> {
     let content: Element<'a, Message> = match model {
+        // The tab above already says "Inspector".
         Inspector::Help => column![
-            text("Inspector").size(style::HEADING),
             text("Select a module to edit its parameters.")
                 .size(style::BODY)
                 .color(DIM),

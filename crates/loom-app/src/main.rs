@@ -2263,7 +2263,10 @@ impl App {
             Message::Matrix(event)
                 if matches!(
                     event,
-                    MatrixEvent::Sort(_) | MatrixEvent::Filter(_) | MatrixEvent::SelectedOnly(_)
+                    MatrixEvent::SortBy(_)
+                        | MatrixEvent::ReverseSort
+                        | MatrixEvent::Filter(_)
+                        | MatrixEvent::SelectedOnly(_)
                 ) =>
             {
                 self.matrix_event(event);
@@ -3462,11 +3465,16 @@ impl App {
 
     /// Inspector and matrix share the same width in the right-hand column.
     fn right_panel(&self) -> Element<'_, Message> {
-        let tabs = row![
-            button("Inspector").on_press(Message::Matrix(MatrixEvent::Tab(RightTab::Inspector))),
-            button("Matrix").on_press(Message::Matrix(MatrixEvent::Tab(RightTab::Matrix))),
-        ]
-        .spacing(4);
+        // The open tab has a fill and a border (visual-system.md, Tabs).
+        let tab = |label: &'static str, which: RightTab| {
+            button(text(label).size(style::CONTROL))
+                .padding([4, 12])
+                .style(style::tab(self.matrix.tab == which))
+                .on_press(Message::Matrix(MatrixEvent::Tab(which)))
+        };
+        let tabs = row![tab("Inspector", RightTab::Inspector), tab("Matrix", RightTab::Matrix)]
+            .spacing(4)
+            .padding([6, 8]);
         let panel = match self.matrix.tab {
             RightTab::Inspector => self.inspector(),
             RightTab::Matrix => matrix::view(
