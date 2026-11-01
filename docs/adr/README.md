@@ -69,3 +69,4 @@ The status line holds one of these values and nothing else. The date line is the
 | [0031](0031-sub-patches-stored-as-definitions-and-flattened.md) | Sub-patches are stored as definitions and flattened before compiling | Accepted |
 | [0032](0032-module-data-in-typed-slots.md) | Module data lives in typed slots, with audio in a sidecar folder | Accepted |
 | [0033](0033-one-scale-and-tuning-per-patch.md) | One scale and tuning per patch, read by modules without cables | Accepted |
+| [0034](0034-controller-flat-api-typed-parts.md) | The controller keeps a flat API over typed internal parts | Accepted |

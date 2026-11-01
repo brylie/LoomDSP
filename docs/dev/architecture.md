@@ -196,6 +196,7 @@ An unconnected input reads its `default`: a fixed value, or a transport signal s
 |---|---|
 | Add a module | `crates/loom-modules/src/` (copy a similar module), then `lib.rs`. See CONTRIBUTING.md. |
 | Change how the graph runs | `crates/loom-core/src/compile.rs` (one child module per step in `compile/`) and `engine.rs`. Read ADR-0001 and ADR-0002 first. |
+| Add a `Controller` method | The group it belongs to, in `crates/loom-core/src/controller/` (modules, cables, assignments, params, midi, transport, displays, audio). The API stays one flat list; each group is its own `impl Controller` block, shown as a section in the API docs. State with rules of its own is a typed part with private fields (`Slots`, `MidiSync`, `Probes`, `LiveValues`); a helper that two groups need goes in `controller.rs` ([ADR-0034](../adr/0034-controller-flat-api-typed-parts.md)). |
 | Change the patch format | `crates/loom-patch/src/lib.rs`. During the early alpha the format stays at version 1, and a change may stop old files from loading: update the example patches in the same change ([AGENTS.md](../../AGENTS.md#project-stage-early-alpha)). From the first release, add a migration and never break old files (ADR-0008). |
 | Change how the canvas looks or responds | `crates/loom-canvas/src/`. Keep per-frame work small. |
 | Add a panel, button, or setting to the app | `crates/loom-app/src/main.rs`. |
