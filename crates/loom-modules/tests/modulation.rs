@@ -5,7 +5,7 @@ use loom_core::{
     create_engine,
 };
 use loom_modules::register_all;
-use loom_test::modules as test_modules;
+use loom_modules::test_modules;
 use std::sync::Arc;
 
 fn engine() -> EngineParts {

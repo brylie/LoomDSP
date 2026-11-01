@@ -87,11 +87,11 @@ Every render fails if a port or parameter has an empty label or description, and
 
 ### Test modules
 
-`loom_test::modules` holds small modules for tests only. The built-in modules do not cover every panel widget or parameter mapping yet, so engine, app, and canvas tests share these instead of each declaring its own descriptor.
+`loom_modules::test_modules` holds small modules for tests only. It builds only with the `test-modules` feature of `loom-modules`, which is off by default. *Why not in `loom-test`:* the app ships them for `--test-modules`, and the harness should not ship. The built-in modules do not cover every panel widget or parameter mapping yet, so engine, app, and canvas tests share these instead of each declaring its own descriptor.
 
 - `test.panel` has one of every widget kind (a knob for a continuous and a whole-number parameter, a toggle, radio buttons with three options, a button, a light, and a meter), every parameter mapping (linear, logarithmic, whole-number, and one smoothed parameter), and one unipolar and one bipolar output.
 - `test.linear`, `test.log`, `test.steps`, and `test.smooth` each have one parameter and one bipolar output `out`, which writes what the engine gave that parameter. A test reads it to see the modulated value.
-- `loom_test::modules::register` adds them all to a registry, which checks their panels.
+- `loom_modules::test_modules::register` adds them all to a registry, which checks their panels.
 - Their IDs start with `test.`, so they never clash with a real module.
 - The app registers them in its own tests, and in a normal run only with `--test-modules`. Only with that flag does its module browser list them. `examples/dev/test-widgets.ron` uses them: one of each widget, with an assignment on each control. Open it with `--test-modules`, `--dump-ui`, `--screenshot-window`, or the control channel to check a widget by hand. *Why:* some widgets are on no built-in module yet, so a manual check of them needs a patch, and a normal user should never see these modules.
 

@@ -4,9 +4,9 @@
 mod common;
 
 use common::*;
+use loom_analysis::{max_step, peak};
 use loom_core::safety::{FADE_SECONDS, samples};
 use loom_core::{EngineConfig, EngineParts, MidiEvent, ModuleId, OutputSafety, PanicTrigger, ProbeKind, create_engine};
-use loom_test::analysis::{max_step, peak};
 
 const BLOCKS: [usize; 3] = [1, 77, 512];
 

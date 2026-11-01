@@ -18,24 +18,17 @@
 //!     .check(reference!("sine"));
 //! ```
 //!
-//! [`modules`] holds test-only modules (IDs under `test.`) with every
-//! panel widget, parameter mapping, and output polarity, for tests that the
-//! built-in modules do not cover.
-//!
-//! [`analysis`] measures recorded audio (peak, clipping, steps, DC), for
-//! app tests and `loom analyze` (`docs/design/audio-qa.md`).
-//!
 //! References are 32-bit float WAV files, so a reviewer can listen to them.
 //! Create or update them with `LOOM_UPDATE_REFERENCES=1 cargo test`.
 //!
-//! This crate reads and writes files, so it is for tests and developer
-//! tools on the desktop only (the app uses [`modules`] for
-//! `--test-modules`). The engine crates never depend on it.
+//! This crate reads and writes files, so it is for tests on the desktop
+//! only. Every crate lists it under `[dev-dependencies]`, so it never ships.
+//! The measurements of recorded audio, which `loom analyze` ships, are in
+//! `loom-analysis`, and the `test.` modules are in
+//! `loom_modules::test_modules`.
 
 #![warn(missing_docs)]
 
-pub mod analysis;
-pub mod modules;
 mod reference;
 mod signal;
 

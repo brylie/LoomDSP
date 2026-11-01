@@ -10,9 +10,9 @@ use super::*;
 use crate::devices::fake::{self, Fake};
 use crate::preferences::DeviceChoice;
 use crate::settings::{Change, Message as Prefs};
+use loom_analysis::{max_step, peak};
 use loom_core::safety::{CEILING, FADE_SECONDS};
 use loom_host_desktop::{OutputInfo, Tape};
-use loom_test::analysis::{max_step, peak};
 
 /// The fake devices' sample rate and buffer size.
 const RATE: usize = 48_000;
@@ -416,7 +416,7 @@ fn record_covers_the_whole_run() {
     assert!(recorder.as_ref().is_some_and(|r| r.dropped() == 0));
     drop(recorder);
 
-    let audio = loom_test::analysis::read_wav(&path).unwrap();
+    let audio = loom_analysis::read_wav(&path).unwrap();
     assert_eq!(audio.sample_rate, RATE as u32);
     assert_eq!(audio.channels[0], tape, "the file is what was played");
 }
@@ -443,7 +443,7 @@ fn a_new_sample_rate_ends_the_recording() {
     assert!(run.app.status.contains("The recording stopped"), "{}", run.app.status);
     assert!(run.app.rig.recorder.is_none());
     assert!(run.tape.is_playing(), "the new device plays");
-    let audio = loom_test::analysis::read_wav(&run.dir.join("run.wav")).unwrap();
+    let audio = loom_analysis::read_wav(&run.dir.join("run.wav")).unwrap();
     assert_eq!(audio.sample_rate, RATE as u32);
     assert!(audio.frames() >= played, "the first stream is in the file");
 }
@@ -479,7 +479,7 @@ fn a_failed_device_change_keeps_the_recording() {
     run.app.quit = true;
     let _ = run.app.update(Message::Tick);
     drop(run.app.rig.recorder.take());
-    let audio = loom_test::analysis::read_wav(&run.dir.join("run.wav")).unwrap();
+    let audio = loom_analysis::read_wav(&run.dir.join("run.wav")).unwrap();
     assert_eq!(audio.channels[0], run.left(), "both streams are in the file");
 }
 

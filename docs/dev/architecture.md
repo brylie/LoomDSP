@@ -11,6 +11,7 @@ flowchart BT
     modules[loom-modules<br/>built-in modules]
     patch[loom-patch<br/>RON patch files]
     test[loom-test<br/>module test harness]
+    analysis[loom-analysis<br/>measures recorded audio]
     host[loom-host-desktop<br/>audio and MIDI devices]
     canvas[loom-canvas<br/>patch canvas widget]
     cli[loom-cli<br/>the loom tool]
@@ -20,8 +21,9 @@ flowchart BT
     modules --> core
     patch --> core
     test --> core
+    analysis --> core
     host --> core
-    cli --> modules & patch & host
+    cli --> modules & patch & host & analysis
     app --> modules & patch & host & canvas
 ```
 
@@ -29,9 +31,10 @@ flowchart BT
 |---|---|---|
 | `loom-rt` | Small real-time helpers: denormal flushing, parameter smoothing. | No dependencies on the rest. |
 | `loom-core` | The `Module` trait, the editable `Graph`, the compiler, the `Engine` that runs on the audio thread, and the `Controller` that edits it. | Portable: builds for WebAssembly. No threads, files, or audio APIs. |
-| `loom-modules` | Every built-in module, plus integration tests and benchmarks. | Same as `loom-core`. |
+| `loom-modules` | Every built-in module, plus integration tests and benchmarks. The `test-modules` feature adds `test_modules`, modules with IDs under `test.` for tests and `loom-app --test-modules`. | Same as `loom-core`. |
 | `loom-patch` | Loads, saves, and migrates patch files. | Same as `loom-core`. |
-| `loom-test` | The module test harness: renders one module, checks block-size invariance, and compares with reference WAV files. | Desktop only, for tests. Only `dev-dependencies` use it. |
+| `loom-test` | The module test harness: renders one module, checks block-size invariance, and compares with reference WAV files. | Desktop only, for tests. Only `dev-dependencies` use it, so it never ships. |
+| `loom-analysis` | Measures recorded audio: peak, clipping, the largest step, and DC. `loom analyze` and the app's audio QA tests use the same functions ([audio QA](../design/audio-qa.md)). | Desktop only: it reads WAV files. |
 | `loom-host-desktop` | Connects the engine to audio devices (cpal) and MIDI inputs (midir). For development, can also play it from a timer with no device, play it only when a test steps a tape (`AudioOutput::stepped`), and record it to a WAV file across many streams (`Recorder`). | Desktop only. The only crate that knows about audio APIs. |
 | `loom-canvas` | The patch canvas: an Iced widget drawn by one custom GPU primitive. | Knows nothing about the engine. It draws a `Scene` and reports gestures. |
 | `loom-cli` | The `loom` command: list modules, check, render, play, stress-test, measure WAV files, and act as a virtual MIDI controller for tests. `loom modules --markdown` writes the module help pages in `docs/modules/` ([help pages](../design/help-pages.md)). | |

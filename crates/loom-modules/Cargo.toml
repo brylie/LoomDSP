@@ -15,7 +15,17 @@ categories = ["multimedia::audio"]
 loom-core.workspace = true
 loom-rt.workspace = true
 
+[features]
+# `test_modules`: modules with IDs under `test.` that cover every panel
+# widget and parameter mapping, for tests and `loom-app --test-modules`.
+# Off by default, so a plugin build does not carry them.
+test-modules = []
+
 [dev-dependencies]
+# The integration tests use `test_modules`; a dev-dependency on this crate
+# turns the feature on for them.
+loom-modules = { path = ".", features = ["test-modules"] }
+loom-analysis.workspace = true
 loom-patch.workspace = true
 loom-test.workspace = true
 assert_no_alloc.workspace = true

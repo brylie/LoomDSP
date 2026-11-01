@@ -67,7 +67,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// The modules a patch can use: the built-ins, and with `test_modules`
-/// also the `test.` modules from `loom_test::modules`, which have widgets
+/// also the `test.` modules from `loom_modules::test_modules`, which have widgets
 /// no built-in module has yet. The app's own tests always get them.
 fn registry(test_modules: bool) -> Arc<loom_core::Registry> {
     if !(test_modules || cfg!(test)) {
@@ -75,7 +75,7 @@ fn registry(test_modules: bool) -> Arc<loom_core::Registry> {
     }
     let mut registry = loom_core::Registry::new();
     loom_modules::register_all(&mut registry).expect("built-in modules are valid and unique");
-    loom_test::modules::register(&mut registry).expect("test modules are valid and unique");
+    loom_modules::test_modules::register(&mut registry).expect("test modules are valid and unique");
     Arc::new(registry)
 }
 
