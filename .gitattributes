@@ -1,5 +1,4 @@
 # Third-party agent skills vendored into .agents/ are not LoomDSP code.
 # Marking them vendored keeps them out of GitHub's language statistics, so
-# the repository shows as Rust (see CONTRIBUTING.md, "Coverage and code
-# quality gates").
+# the repository shows as Rust (see CONTRIBUTING.md, "Coverage gate").
 .agents/** linguist-vendored
