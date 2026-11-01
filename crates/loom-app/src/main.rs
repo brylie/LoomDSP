@@ -3634,7 +3634,7 @@ fn severity_colour(severity: alerts::Severity) -> Color {
 
 /// Inspector help text, shown with nothing selected. It lists every canvas
 /// gesture and shortcut (#16), so keep it in step with `PatchCanvas::handle`
-/// and the key handling in `loom-canvas/src/widget.rs`.
+/// and the key handling in `loom-canvas/src/widget/input.rs` and `panel_input.rs`.
 pub(crate) const HELP: &str = "A or a double-click on empty canvas opens the module browser at the pointer; type, then Enter adds.\n\
 Drag from a port to patch a cable. Drag a connected input to move or remove its cable.\n\
 Drag tiles to move them. Shift-click or drag a box to select several. Cmd/Ctrl+A selects all.\n\

@@ -8,7 +8,7 @@ A searchable list of module types that adds the chosen module to the canvas, whe
 - **Use case and requirements:** FR-CANVAS-03, FR-CANVAS-06, NFR-UX-01, NFR-UX-05.
 - **Prior art:** many node editors open a search box at the pointer when you press a key on the canvas, and add the chosen node there. We use the idea, not any product's layout or wording.
 - **Issues:** [#11](https://github.com/brylie/LoomDSP/issues/11)
-- **Code:** `crates/loom-app/src/browser.rs` (search and panel), `crates/loom-canvas/src/widget.rs` (`CanvasEvent::OpenBrowser`).
+- **Code:** `crates/loom-app/src/browser.rs` (search and panel), `crates/loom-canvas/src/widget/event.rs` (`CanvasEvent::OpenBrowser`).
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
      built. See README.md in this folder. -->

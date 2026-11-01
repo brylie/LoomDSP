@@ -62,7 +62,7 @@ params: &[
 
 ## Display values
 
-**Status:** Implemented ([#118](https://github.com/brylie/LoomDSP/issues/118)). Code: `DisplaySpec` in `loom-core/src/descriptor.rs`, `panel_view` and `display_text` in `loom-app/src/scene.rs`, `hover_content` in `loom-canvas/src/widget.rs`.
+**Status:** Implemented ([#118](https://github.com/brylie/LoomDSP/issues/118)). Code: `DisplaySpec` in `loom-core/src/descriptor.rs`, `panel_view` and `display_text` in `loom-app/src/scene.rs`, `hover_content` in `loom-canvas/src/widget/hover_text.rs`.
 
 A module's display values (the lights and step positions of [panels](panels.md#display-values-69)) get the same treatment.
 

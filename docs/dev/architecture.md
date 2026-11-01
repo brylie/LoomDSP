@@ -119,7 +119,7 @@ The same path carries every structural edit: add, remove, connect, disconnect. P
 | GPU data | `gpu.rs` | Turns a scene into instances: one rounded rectangle per tile, header, and port, and one entry per cable. Uploaded only when the generation changes. |
 | Shaders | `canvas.wgsl` | Rounded rectangles shade only their own pixels. Cables are curves built in the vertex shader. Pan and zoom change one small uniform buffer, which also holds the opacity of cables that are not in focus. |
 | Panel controls | `controls.rs` | Knobs, toggles, radio buttons, buttons, lights, and meters on tiles. Their live values live in `PanelValues`, which has its own generation number and its own GPU buffers. Turning a knob or a light changing rebuilds only these buffers, never the tiles, ports, or cables. |
-| Widget | `widget.rs` | Mouse and keyboard handling, and the per-frame overlay: selection and hover outlines, and the cables of selected and hovered modules drawn in front. Text goes through Iced and is skipped when too small to read. |
+| Widget | `widget.rs` and `widget/` | The `PatchCanvas` widget and its state. `input.rs` handles mouse and keyboard events, `panel_input.rs` panel controls, focus, and choice pop-ups, and `hover_text.rs` what the pointer is over. `draw.rs` draws the per-frame overlay: selection and hover outlines, the cables of selected and hovered modules in front, and panel text. Text goes through Iced and is skipped when too small to read. `event.rs` holds `CanvasEvent`. |
 
 Without the app's Measure toggle, the window redraws only when something changes.
 

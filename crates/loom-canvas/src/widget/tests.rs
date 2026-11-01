@@ -1,3 +1,4 @@
+use super::panel_input::{focusable, next_focus};
 use super::*;
 use crate::WidgetValue;
 use crate::scene::{CableView, ModuleView, PanelView, PortShape, PortView, WidgetView};

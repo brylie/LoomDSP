@@ -523,7 +523,7 @@ The whole app redraws only when something visible changes ([#90](https://github.
 
 ## Labels and hover text
 
-**Status:** Implemented, except the manual check below. Code: `loom-app/src/scene.rs` (labels), `loom-canvas/src/hover.rs` (timing and placement), `draw_hover_text` in `loom-canvas/src/widget.rs`, and the inspector in `loom-app/src/main.rs`. Builds on [port and parameter text](port-and-parameter-text.md) ([ADR-0016](../adr/0016-ports-and-parameters-carry-their-own-text.md)): every port and parameter has a `label` and a one-sentence `description`. This section says where the label and description appear.
+**Status:** Implemented, except the manual check below. Code: `loom-app/src/scene.rs` (labels), `loom-canvas/src/hover.rs` (timing and placement), `draw_hover_text` in `loom-canvas/src/widget/hover_text.rs`, and the inspector in `loom-app/src/main.rs`. Builds on [port and parameter text](port-and-parameter-text.md) ([ADR-0016](../adr/0016-ports-and-parameters-carry-their-own-text.md)): every port and parameter has a `label` and a one-sentence `description`. This section says where the label and description appear.
 
 ### Goal
 

@@ -120,7 +120,7 @@ A failed save keeps the unsaved mark. A save writes to a temporary file in the s
 - [ ] Given a read-only target, when saved, then the message appears and the mark stays.
 - [ ] After Open, undo is disabled, and the lights and meters show the new patch (manual check).
 - [x] Saving does not leave a `*.saved.ron` file next to examples. (`example_tests.rs`)
-- [x] Opening a file inside the bundled examples folder gives an untitled patch with its content, and Save asks for a place. The example file is unchanged (test with a temporary examples folder). Closing the window after opening one asks nothing. (`example_tests.rs`; the control channel's `open` in `control.rs`)
+- [x] Opening a file inside the bundled examples folder gives an untitled patch with its content, and Save asks for a place. The example file is unchanged (test with a temporary examples folder). Closing the window after opening one asks nothing. (`example_tests.rs`; the control channel's `open` in `control/run.rs`)
 - [x] Opening a file in some other folder that happens to be named `examples` is not a copy, and Save writes it in place (test). (`example_tests.rs`)
 - [ ] `cargo deny check` passes with the dialog crate on macOS, Windows, and Linux (CI).
 
