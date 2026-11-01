@@ -3,9 +3,9 @@
 How a performer links a hardware knob or fader to any parameter in a few seconds, and how those links are saved, shown, and removed.
 
 - **Kind:** living specification.
-- **Status:** Agreed. [Device mappings](#device-mappings-fr-midi-06) Agreed, P2 (2026-11-01, [#166](https://github.com/brylie/LoomDSP/issues/166)); not built.
+- **Status:** Agreed. [Device mappings](#device-mappings-fr-midi-06) Agreed, P2 (2026-11-01, [#166](https://github.com/brylie/LoomDSP/issues/166)); not built. [Mapping modes](#mapping-modes-fr-midi-09) Agreed, P2 (2026-11-01, [#165](https://github.com/brylie/LoomDSP/issues/165)); not built.
 - **Decision behind it:** none of its own. Builds on [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md) (control and audio threads), [ADR-0004](../adr/0004-export-as-runtime-plus-patch-data.md) (export as runtime plus patch data), [ADR-0008](../adr/0008-patch-format-ron.md) (patch format), and [ADR-0013](../adr/0013-modules-carry-their-own-panel.md) (the inspector shows and removes mappings; learn mode extends the gesture to tile controls).
-- **Use case and requirements:** [UC3, perform live](../product/personas-and-use-cases.md#uc3-perform-live-tomas-highest-priority-use-case), FR-MIDI-02. FR-MIDI-06 (per-device mappings, [own section](#device-mappings-fr-midi-06)). Related, not built here: FR-MIDI-09 (pickup, relative encoders, scaling).
+- **Use case and requirements:** [UC3, perform live](../product/personas-and-use-cases.md#uc3-perform-live-tomas-highest-priority-use-case), FR-MIDI-02. FR-MIDI-06 (per-device mappings, [own section](#device-mappings-fr-midi-06)). FR-MIDI-09 (pickup, relative encoders, scaling, [own section](#mapping-modes-fr-midi-09)).
 - **Background:** [parameter mapping](modulation.md#parameter-mapping) (value to position and back).
 - **Prior art:** most DAWs and software modular tools have a "learn" gesture: arm a control, move a hardware control, and the two are linked. We use the idea, in our own words.
 - **Issues:** [#24](https://github.com/brylie/LoomDSP/issues/24), [#166](https://github.com/brylie/LoomDSP/issues/166) (device mappings).
@@ -193,18 +193,52 @@ Controller(
 - [ ] Removing a slot mapping in Preferences stops it at once (test).
 - [ ] Processing a device-mapped control change does not allocate (`tests/no_alloc.rs`).
 
-### Out of scope: device mappings
+### Mapping modes (FR-MIDI-09)
+
+**Status:** Agreed, P2 ([#165](https://github.com/brylie/LoomDSP/issues/165), 2026-11-01).
+
+> After loading a patch, my filter knob on the controller is at the top but the cutoff is low. In pickup mode, turning the knob does nothing until it passes the cutoff, then it follows, with no jump. My endless encoder moves the delay time in small steps. A fader covers only the middle of the reverb mix, and another runs backwards.
+
+| Mode | What a control change does |
+|---|---|
+| **Absolute** (default) | Sets the position, as in [Playing](#playing). |
+| **Pickup** | Ignored until the control's position crosses the parameter's current position, or comes within one step (1/127) of it. Then it follows, as Absolute, until the parameter changes from somewhere else. |
+| **Relative** | Reads the value as a step up or down, and moves the position by 1/128 per step. |
+
+- **The default stays Absolute** (settled). The mode is chosen on the mapping's row in the inspector, in a small menu with Mode, Range, Invert, and Encoding. *Why:* a new learner sees the knob work at once; a player who wants pickup sets it once per mapping, and device mappings keep it in their file.
+- **Range and invert** (Absolute and Pickup): `low` and `high` from 0 to 1 of the parameter's position, default 0 and 1. The control's 0 to 127 maps onto that span, through `denormalize` as before. **Invert** swaps the ends.
+- **Encoding** (Relative): **Offset 64** (default; 65 and up is up by value − 64, 63 and below is down by 64 − value), **Two's complement** (1 to 63 up, 127 down to 65 is −1 to −63), or **Sign bit** (1 to 63 up, 65 to 127 down by value − 64). A relative move is clamped to the parameter's range.
+- **Pickup lives in the engine.** The engine already holds each parameter's base value and orders screen edits and control changes (rule 2), so it knows the current position. A screen edit, a preset change, an undo, or a patch load makes a pickup mapping wait again. *Why in the engine:* the comparison must use the value that plays, in the order rule 2 already defines.
+- **Seeing a waiting pickup.** While a pickup mapping waits and its hardware moves, a hollow ghost mark at the hardware's position is drawn on the control, on the tile and in the inspector, for one second after the last move. The engine reports the waiting position in the latest-value table (rule 2). *Why:* the player sees which way to turn, without a mode to enter.
+- **Patch format:** optional fields on each mapping, written only when not the default:
+
+  ```ron
+  (target: (3, "cutoff"), channel: 0, controller: 74, mode: Pickup, range: (0.2, 0.8), invert: true),
+  (target: (5, "time"), channel: 0, controller: 20, mode: Relative(Offset64)),
+  ```
+
+  Device files use the same fields. The patch format stays at version 1.
+
+### Acceptance criteria: mapping modes
+
+- [ ] Absolute with range 0.2 to 0.8 maps 0 to position 0.2 and 127 to 0.8; with Invert, 0 maps to 0.8 (engine test at block sizes 1, 77, and 512).
+- [ ] Pickup ignores a control above the current position until it comes down past it, then follows; a screen edit makes it wait again (engine test).
+- [ ] Relative in each encoding moves by the right number of steps in each direction, and stops at the range ends (engine test).
+- [ ] A waiting pickup shows its ghost mark while the hardware moves, and not after it catches (UI snapshot).
+- [ ] Modes, ranges, invert, and encodings save and load in patches and device files; a mapping with none writes no new fields (test).
+- [ ] Manual check with a hardware knob and an endless encoder.
+
+## Out of scope: device mappings
 
 - Pages or banks of slots (more than 16, or switching sets). Leaning: add when a controller with bank buttons needs it.
 - Sharing device files online, or a library of factory files for known controllers.
-- Pickup, relative encoders, and scaling (FR-MIDI-09). They apply to device mappings too, once agreed.
+- Nothing here limits [mapping modes](#mapping-modes-fr-midi-09): they apply to device mappings too.
 - Feedback to LED rings or motorised faders (MIDI out).
 
 ## Out of scope
 
 - One hardware control driving many parameters. Use the Macro module (MT-UI-02, P2) with modulation.
 - A mapping list or matrix. In P1 the labels in learn mode and the inspector rows are enough, because each hardware control has one parameter.
-- Pickup (soft takeover), relative encoders, value range, and inversion (FR-MIDI-09, P2).
 - Learning notes, pitch bend, aftertouch, program change, 14-bit control changes, and NRPN. Pitch bend and aftertouch reach a patch through the MIDI input module (#30).
 - Mapping on any channel ("omni").
 - Hardware moves in undo. Mapping edits are undoable ([undo.md](undo.md)); moves of the mapped hardware control are not.

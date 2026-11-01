@@ -3,9 +3,9 @@
 What carries over when the player edits a patch while it plays, so a new cable joins the running sound with no cold start, click, or gap.
 
 - **Kind:** living specification.
-- **Status:** Rules 1 to 5, 7 ([#230](https://github.com/brylie/LoomDSP/issues/230)), and 8 Implemented. Rule 6 Agreed, from the research in [#203](https://github.com/brylie/LoomDSP/issues/203), and built with stereo copies (#23).
+- **Status:** Rules 1 to 5, 7 ([#230](https://github.com/brylie/LoomDSP/issues/230)), and 8 Implemented. Rule 6 Agreed, from the research in [#203](https://github.com/brylie/LoomDSP/issues/203), and built with stereo copies (#23). Rules 9 ([#21](https://github.com/brylie/LoomDSP/issues/21)) and 10 ([#416](https://github.com/brylie/LoomDSP/issues/416)) Agreed, P2 (2026-11-01).
 - **Decision behind it:** [ADR-0002](../adr/0002-graph-execution-and-feedback.md) (schedules and inserted delays), [ADR-0022](../adr/0022-copies-take-state-from-the-running-instance.md) (state of channel copies).
-- **Use case and requirements:** FR-GRAPH-01, FR-GRAPH-02, FR-GRAPH-03, FR-GRAPH-09, FR-SIG-07, NFR-RT-01, NFR-RT-05, NFR-SND-02
+- **Use case and requirements:** FR-GRAPH-01, FR-GRAPH-02, FR-GRAPH-03, FR-GRAPH-05, FR-GRAPH-09, FR-SIG-07, NFR-RT-01, NFR-RT-05, NFR-SND-02
 - **Background:** [Hot patching](../learn/hot-patching.md): why a new path clicks, and why a crossfade does not fix it. See also [Feedback loops and the unit delay](../learn/feedback-loops.md).
 - **Prior art:** in Eurorack, every module runs all the time, and a cable only connects what is already running. VCV Rack behaves the same way. Named only to explain the expectation.
 - **Issues:** #203, #23, [#230](https://github.com/brylie/LoomDSP/issues/230), [#22](https://github.com/brylie/LoomDSP/issues/22) (rule 8)
@@ -63,6 +63,18 @@ Every edit that changes the graph compiles a new schedule on the control thread.
 
    A feedback loop that reaches nothing is still in the compile report with its inserted delays, so the canvas shows them, but it does not run. *Why:* the requirement saves CPU in large patches, and a module nobody hears or sees changes nothing the player can tell. *Why these roots:* the specs for telemetry and panels promise that what the screen shows is live, and the specs do not say a light may freeze. *Why pause and not reset:* a player who unplugs and replugs an LFO expects it to keep its settings and phase, not start cold. *Cost:* a paused module resumes with old state. A delay line unplugged at its output and plugged in again a minute later first plays the audio it held a minute ago, where hardware would play the last seconds of its input. A module that will one day have side effects (MIDI out) must count as a root.
 
+9. **A cable change fades over 5 ms** (FR-GRAPH-05). When a schedule swap changes what feeds an input (a cable added, removed, or moved to another output), the input holds the last value it read before the swap and moves in a straight line to the new signal over 5 ms, sample by sample. The same holds for a modulation assignment that is added or removed: its contribution ramps in or out over 5 ms.
+   - **Only audio, modulation, and pitch inputs fade** (by the port's `SignalType`). Gate, trigger, and phase inputs switch on the swap frame. *Why:* a ramped gate crosses 0.5 late and fires late, and a ramped phase passes through values that look like wraps.
+   - **Nothing fades on the first schedule** after a load or a new engine. *Why:* a patch renders the same whether or not it was edited live first; the output fade-in covers the start ([output safety](output-safety.md)).
+   - The fade state is a fixed slot per input, prepared on the control thread with the schedule. The engine adds no allocation, lock, or wait (AGENTS.md rule 1).
+   - Fixed at 5 ms, with no setting. *Why:* long enough to soften the step, short enough that nobody hears it as a fade.
+   - *Why hold the last value, not crossfade from the old signal:* the old source may be gone, and keeping it running costs CPU for a sound that is leaving. Holding the last value keeps the input continuous, which is all a click needs. The rules above still make the new signal right from its first sample (rules 5 and 6); the fade only softens the step the cable itself makes.
+
+10. **Staged modules are retried when the queue has room** ([#416](https://github.com/brylie/LoomDSP/issues/416)). When a commit has more new modules than the bounded command queue can hold, the rest are staged on the control side, as today. While anything is staged, a watcher thread reads the queue's free space every 10 ms and wakes the UI when there is room for the next staged module. The UI then commits again. The watcher stops when nothing is staged. *Why a watcher:* the audio thread may not signal a waiting thread, because that takes a lock (AGENTS.md rule 1). Reading a counter from another thread is safe, and the app already wakes this way for audio state and MIDI learn.
+    - The longest wait after the engine makes room is one audio buffer plus 10 ms.
+    - A queue that stays full causes no compile and no repeated attempt: the watcher wakes the UI only when free space grows.
+    - A staged module stays staged until it is committed; nothing is lost. The status bar keeps saying how many modules are waiting, and the undo step for the edit is recorded once, when the edit was made.
+
 ### Click threshold
 
 The measurements compare what the engine plays with the ideal continuation: what the patch would play if the new path had been running all along. An error that peaks above -40 dBFS (0.01) counts as a click. One below -60 dBFS (0.001) counts as inaudible. *Why:* a one-sample error near -40 dBFS is audible over quiet material, and -60 dBFS is below the noise of most rooms. The numbers are a test tool, not a perception study. A listening check confirms them (see Acceptance criteria).
@@ -79,11 +91,17 @@ The measurements compare what the engine plays with the ideal continuation: what
 - [x] Pasting a filter while the patch plays adds no glide (an app test, or a manual check listed in the pull request). Reference renders that contained the glide are updated in the same pull request. (`first_values.rs` adds modules to a running engine with `set_params` before the commit, the calls paste and undo make in `clipboard.rs` and `undo.rs`. A listening check in the app is in the pull request.)
 - [x] Given a chain that reaches nothing, then it is not processed, and a cable that connects it again resumes its state (rule 8). Lights, probes, and modulated parameters keep their modules running, and an unreachable loop is reported but not run. (`loom-core/tests/reach.rs`, `compile.rs` tests, `engine.rs` in `loom-modules`)
 - [ ] Listening check, rule 5: in the app, with a sustained sound, close a feedback loop into a Multiply's B input, and add a second cable to a running loop. No click is heard. (Manual check.)
+- [ ] Given a running sine into a filter, when its cable is removed, then the filter input ramps from the last value to 0 over 5 ms, at block sizes 1, 77, and 512 when the edit lands on the same frame (test, rule 9).
+- [ ] A gate, trigger, or phase input switches on the swap frame with no ramp (test, rule 9).
+- [ ] Adding a modulation assignment ramps its contribution in over 5 ms (test, rule 9).
+- [ ] A patch rendered from load has no fades (test: bit-identical to the current reference renders, rule 9).
+- [ ] The fades and the staged retry add no allocation on the audio thread (`no_alloc` test).
+- [ ] With a small command queue and a paste larger than it, every staged module is committed after the engine drains the queue, with no edit and no periodic tick, and the audio matches a commit with enough capacity (app test, rule 10).
+- [ ] A queue that stays full causes no repeated compile (test, rule 10).
 - [ ] Listening check, rule 6: with a resonant filter and a sustained sound, patch a stereo source into the chain. No click is heard. (Manual check, with #23.)
 
 ## Out of scope
 
-- **Fading cables in and out** (FR-GRAPH-05). A fade softens the step that plugging a cable makes in any system, hardware included. This spec is about state, so that the step is no bigger than plugging the cable should make.
 - **Keeping the state of a deleted module for undo.** Undo of a delete creates a new instance (rule 4). A later change could hand the old state over through the same method as ADR-0022.
 - **Replacing a module with a newer version** while it plays.
 
