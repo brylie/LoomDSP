@@ -132,7 +132,13 @@ Shader names must not be reserved words in Metal or HLSL, because wgpu's transla
 
 Every Iced message goes through one entry point, `App::update` in `crates/loom-app/src/main.rs`. It owns the work that crosses workflows, in a fixed order: frame accounting, a safety change the engine's queue refused, telling autosave to look again, handing the message to its workflow, running the idle engine and retrying a waiting commit, and quitting cleanly. Each step is listed in its doc comment.
 
-A workflow's messages go to a named handler that returns the `Task` it needs: `matrix_message` and `matrix_key_message` (`matrix.rs`), `browser_message`, `control` for the control channel, and `file_action` for `Message::File(FileAction)`, which the toolbar, the shortcuts, and the window's close request all send. The rest go to `App::handle`. There is no event bus and no second application state. The app's state itself is split into owned parts in #466.
+A workflow's messages go to a named handler that returns the `Task` it needs: `matrix_message` and `matrix_key_message` (`matrix.rs`), `browser_message`, `control` for the control channel, and `file_action` for `Message::File(FileAction)`, which the toolbar, the shortcuts, and the window's close request all send. The rest go to `App::handle`. There is no event bus and no second application state.
+
+The app's state is moving into owned parts, one domain at a time (#466), in the pattern of [ADR-0034](../adr/0034-controller-flat-api-typed-parts.md): each part keeps its fields private, has its own small API and nested `Message`, and `App` coordinates the parts with the controller, undo, and the status bar.
+
+| Part | Owns | Messages |
+|---|---|---|
+| `learn::Learn` (`learn.rs`) | Whether MIDI learn is on, the armed parameter, and what the canvas shows | `Message::Learn(learn::Message)` |
 
 ## View models for app panels
 

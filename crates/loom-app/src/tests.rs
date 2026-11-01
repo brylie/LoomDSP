@@ -1096,7 +1096,7 @@ fn a_momentary_hold_is_not_part_of_the_patch() {
     let text = app.current_patch().to_ron().unwrap();
     assert!(!text.contains("hold"), "{text}");
     app.arm((id.0, hold));
-    assert!(app.armed.is_none(), "a hold cannot be a MIDI learn target");
+    assert!(app.learn.armed().is_none(), "a hold cannot be a MIDI learn target");
 
     app.selection = BTreeSet::from([id.0]);
     let snapshot = app.ui_snapshot();

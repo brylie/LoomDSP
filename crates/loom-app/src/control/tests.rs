@@ -324,7 +324,7 @@ fn a_script_maps_a_control_in_learn_mode() {
             .contains("press `learn` first")
     );
     assert_eq!(run(&mut app, r#"{"cmd": "toolbar", "button": "learn"}"#), ok);
-    assert!(app.learning);
+    assert!(app.learn.is_on());
     assert_eq!(run(&mut app, r#"{"cmd": "select", "modules": [4]}"#), ok);
     assert_eq!(run(&mut app, r#"{"cmd": "arm", "target": "4:cutoff"}"#), ok);
     let row = &run(&mut app, r#"{"cmd": "snapshot"}"#).unwrap()["snapshot"]["inspector"]["module"]["params"][0];
@@ -334,9 +334,9 @@ fn a_script_maps_a_control_in_learn_mode() {
     // parameter has learned it, so turning learn mode off next cannot
     // lose the mapping.
     assert_eq!(run(&mut app, r#"{"cmd": "cc", "controller": 21, "value": 64}"#), ok);
-    assert!(app.armed.is_none(), "the armed parameter learned the control");
+    assert!(app.learn.armed().is_none(), "the armed parameter learned the control");
     assert_eq!(run(&mut app, r#"{"cmd": "toolbar", "button": "learn"}"#), ok);
-    assert!(!app.learning);
+    assert!(!app.learn.is_on());
     assert_eq!(run(&mut app, r#"{"cmd": "toolbar", "button": "hold"}"#), ok);
     assert!(app.holding);
 

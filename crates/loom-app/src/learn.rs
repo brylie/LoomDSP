@@ -71,6 +71,85 @@ pub fn stream(watch: &Watch) -> impl Stream<Item = u32> + use<> {
     rx
 }
 
+/// What the player asks of learn mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Message {
+    /// Turn learn mode on or off.
+    Toggle,
+    /// Arm a parameter, or disarm it if it is armed. Ignored while learn
+    /// mode is off.
+    Arm(Param),
+}
+
+/// Learn mode's state: whether it is on, the armed parameter, and what the
+/// canvas shows. The app owns one and reaches it through these methods;
+/// mapping a control and the status bar stay with the app, because they
+/// touch the controller and undo.
+#[derive(Default)]
+pub struct Learn {
+    on: bool,
+    armed: Option<Armed>,
+    /// Rebuilt by [`refresh`](Self::refresh) when mappings or the armed
+    /// parameter change.
+    view: LearnView,
+}
+
+impl Learn {
+    /// True while learn mode is on.
+    pub fn is_on(&self) -> bool {
+        self.on
+    }
+
+    /// Turns learn mode on. Nothing is armed yet.
+    pub fn start(&mut self) {
+        self.on = true;
+    }
+
+    /// Turns learn mode off and disarms.
+    pub fn stop(&mut self) {
+        self.on = false;
+        self.armed = None;
+    }
+
+    /// The armed parameter, if any.
+    pub fn armed(&self) -> Option<Armed> {
+        self.armed
+    }
+
+    /// True if `param` is armed.
+    pub fn is_armed(&self, param: Param) -> bool {
+        self.armed.is_some_and(|armed| armed.param == param)
+    }
+
+    /// Arms `param`. Only a control change newer than `serial`, the last
+    /// one seen now, maps it.
+    pub fn arm(&mut self, param: Param, serial: Option<u32>) {
+        self.armed = Some(Armed { param, serial });
+    }
+
+    /// Disarms, keeping learn mode on.
+    pub fn disarm(&mut self) {
+        self.armed = None;
+    }
+
+    /// What the canvas shows while learn mode is on.
+    pub fn shown(&self) -> Option<&LearnView> {
+        self.on.then_some(&self.view)
+    }
+
+    /// Rebuilds what the canvas shows, after mappings or the armed parameter
+    /// changed. A removed module disarms its parameter.
+    pub fn refresh(&mut self, controller: &Controller) {
+        if self
+            .armed
+            .is_some_and(|armed| controller.graph().node(ModuleId(armed.param.0)).is_none())
+        {
+            self.armed = None;
+        }
+        self.view = view(controller, self.armed);
+    }
+}
+
 /// What learn mode shows on the canvas: the armed control and a label on
 /// every mapped control.
 pub fn view(controller: &Controller, armed: Option<Armed>) -> LearnView {

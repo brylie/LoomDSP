@@ -51,7 +51,7 @@ use clap::Parser;
 use iced::widget::{column, container, mouse_area, row, rule, space, stack, text, toggler, tooltip};
 use iced::{Color, Element, Length, Point, Size, Subscription, Task, Theme};
 use live::Live;
-use loom_canvas::{CanvasEvent, DragLine, LearnView, PanelValues, PatchCanvas, Scene};
+use loom_canvas::{CanvasEvent, DragLine, PanelValues, PatchCanvas, Scene};
 use loom_core::{
     AssignmentId, Controller, EngineConfig, EngineParts, InputRef, LoomError, MidiEvent, ModuleDescriptor, ModuleId,
     OutputRef, OutputSafety, ProbeId, TRANSPORT_MODULE, create_engine,
@@ -311,13 +311,8 @@ enum Message {
     /// What the telemetry thread found that changed on screen: meter levels
     /// and scope traces.
     Telemetry(monitor::Update),
-    /// Turn MIDI learn mode on or off.
-    ToggleLearn,
-    /// In learn mode, arm a parameter from the inspector.
-    LearnParam {
-        module: u32,
-        index: usize,
-    },
+    /// MIDI learn: turn it on or off, or arm a parameter.
+    Learn(learn::Message),
     /// Time to check whether a recovery copy is due.
     Autosave,
     /// Remove a parameter's MIDI mapping.
@@ -648,12 +643,8 @@ struct App {
     /// The status bar shows the developer tools: `--dev`, or a measuring
     /// flag (visual-system.md, Status bar).
     dev_tools: bool,
-    /// MIDI learn mode (`docs/design/midi-learn.md`).
-    learning: bool,
-    /// The parameter the next control change maps to.
-    armed: Option<learn::Armed>,
-    /// What learn mode shows on the canvas.
-    learn_view: LearnView,
+    /// MIDI learn mode, the armed parameter, and what the canvas shows.
+    learn: learn::Learn,
     /// Undo and redo (`docs/design/undo.md`): the history, and the edit
     /// or gesture being recorded.
     edits: edits::Edits,
@@ -1145,9 +1136,7 @@ impl App {
             measuring: args.bench.redraws(),
             animating: args.bench.bench,
             dev_tools: args.dev || args.bench.reporter().is_some(),
-            learning: false,
-            armed: None,
-            learn_view: LearnView::default(),
+            learn: learn::Learn::default(),
             edits: edits::Edits::default(),
             arrow_group_pending: false,
             arrow_group_closed: false,
@@ -1593,7 +1582,7 @@ impl App {
     /// In learn mode, it also listens for Escape.
     fn midi_watch(&self) -> Subscription<Message> {
         let mapped = self.controller.graph().midi_mappings().next().is_some();
-        let watch = (mapped || self.learning || self.rig.panic_learn.is_some()).then(|| {
+        let watch = (mapped || self.learn.is_on() || self.rig.panic_learn.is_some()).then(|| {
             let watch = learn::Watch {
                 reader: self.controller.midi_reader(),
                 generation: self.generation,
@@ -1699,12 +1688,24 @@ impl App {
     /// Rebuilds what learn mode shows, after mappings or the armed
     /// parameter changed. A removed module disarms its parameter.
     fn refresh_learn(&mut self) {
-        if let Some(armed) = self.armed
-            && self.controller.graph().node(ModuleId(armed.param.0)).is_none()
-        {
-            self.armed = None;
+        self.learn.refresh(&self.controller);
+    }
+
+    /// Turns learn mode on or off, or arms a parameter.
+    fn learn_message(&mut self, message: learn::Message) {
+        match message {
+            learn::Message::Toggle if self.learn.is_on() => self.stop_learning(),
+            learn::Message::Toggle => {
+                self.learn.start();
+                self.status = "MIDI learn: click a control to map it".to_string();
+                self.refresh_learn();
+            }
+            learn::Message::Arm(param) => {
+                if self.learn.is_on() {
+                    self.arm(param);
+                }
+            }
         }
-        self.learn_view = learn::view(&self.controller, self.armed);
     }
 
     /// Arms a parameter in learn mode, or disarms it if it is armed.
@@ -1724,14 +1725,12 @@ impl App {
             );
             return;
         }
-        if self.armed.is_some_and(|armed| armed.param == param) {
-            self.armed = None;
+        if self.learn.is_armed(param) {
+            self.learn.disarm();
             self.status = "MIDI learn: click a control to map it".to_string();
         } else {
-            self.armed = Some(learn::Armed {
-                param,
-                serial: self.controller.last_control_change().map(|seen| seen.serial),
-            });
+            let serial = self.controller.last_control_change().map(|seen| seen.serial);
+            self.learn.arm(param, serial);
             self.status = format!(
                 "Move a MIDI control to map it to {}",
                 learn::param_name(&self.controller, param)
@@ -1749,7 +1748,7 @@ impl App {
         if self.panic_midi_arrived() {
             return;
         }
-        let Some(armed) = self.armed else { return };
+        let Some(armed) = self.learn.armed() else { return };
         let Some(seen) = self.controller.last_control_change() else {
             return;
         };
@@ -1768,14 +1767,14 @@ impl App {
                     .midi_mappings()
                     .find(|(i, _)| *i == id)
                     .map(|(_, m)| *m);
-                self.armed = None;
+                self.learn.disarm();
                 self.commit();
                 if let Some(mapping) = mapping {
                     self.status = learn::mapped_status(&self.controller, mapping, &removed);
                 }
             }
             Err(e) => {
-                self.armed = None;
+                self.learn.disarm();
                 self.status = format!("error: {e}");
                 self.refresh_learn();
             }
@@ -1786,8 +1785,7 @@ impl App {
     }
 
     fn stop_learning(&mut self) {
-        self.learning = false;
-        self.armed = None;
+        self.learn.stop();
         self.status = "MIDI learn off".to_string();
         self.refresh_learn();
     }
@@ -2201,7 +2199,7 @@ impl App {
             return;
         }
         // An armed parameter is a mode, not an edit: undo disarms it first.
-        self.armed = None;
+        self.learn.disarm();
         let applied = undo::apply_with_sizes(
             &step,
             forward,
@@ -2559,7 +2557,7 @@ impl App {
                 }
             }
             Message::DropRow(row) => {
-                self.drop_row = if self.assign_drag.is_some() && !self.learning {
+                self.drop_row = if self.assign_drag.is_some() && !self.learn.is_on() {
                     row
                 } else {
                     None
@@ -2772,20 +2770,7 @@ impl App {
                 self.sync_audio_input();
                 self.refresh_values();
             }
-            Message::ToggleLearn => {
-                if self.learning {
-                    self.stop_learning();
-                } else {
-                    self.learning = true;
-                    self.status = "MIDI learn: click a control to map it".to_string();
-                    self.refresh_learn();
-                }
-            }
-            Message::LearnParam { module, index } => {
-                if self.learning {
-                    self.arm((module, index));
-                }
-            }
+            Message::Learn(message) => self.learn_message(message),
             Message::Unmap { module, index } => {
                 self.close_slider_gesture();
                 self.edit(|app| match app.controller.unmap_midi(ModuleId(module), index) {
@@ -2818,7 +2803,7 @@ impl App {
             Message::Key(iced::keyboard::Event::KeyPressed {
                 key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
                 ..
-            }) if self.learning => self.stop_learning(),
+            }) if self.learn.is_on() => self.stop_learning(),
             Message::Key(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) if modifiers.command() => {
                 // Ctrl+Z or Cmd+Z undoes; adding Shift redoes. Ctrl+Y also
                 // redoes, except on macOS.
@@ -2893,7 +2878,7 @@ impl App {
             CanvasEvent::AssignDrop { from, at } => {
                 if at.is_some()
                     && self.assign_drag.is_some_and(|drag| drag.from == from)
-                    && !self.learning
+                    && !self.learn.is_on()
                     && let Some((module, index)) = self.drop_row
                 {
                     let source = OutputRef {
@@ -3293,7 +3278,7 @@ impl App {
                     && self.matrix.add.is_none(),
             )
             .animate(self.animating)
-            .learn(self.learning.then_some(&self.learn_view));
+            .learn(self.learn.shown());
         if let Some(still) = self.still {
             canvas = canvas.still(still);
         }
@@ -3423,8 +3408,8 @@ impl App {
         let setup = row![
             // Primary only while learning: a mode that is on.
             button(label("MIDI learn"))
-                .on_press(Message::ToggleLearn)
-                .style(if self.learning {
+                .on_press(Message::Learn(learn::Message::Toggle))
+                .style(if self.learn.is_on() {
                     style::primary
                 } else {
                     style::secondary
@@ -3482,7 +3467,7 @@ impl App {
         inspector::view(
             self.inspector_model(),
             self.drop_row,
-            self.assign_drag.is_some() && !self.learning,
+            self.assign_drag.is_some() && !self.learn.is_on(),
         )
     }
 
