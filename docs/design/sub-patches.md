@@ -95,6 +95,7 @@ Exposing follows [Panels: exposed controls](panels.md#exposed-controls-in-a-sub-
 
 - The patch stores, for each linked tile, the library path and that tile's own copy of the definition.
 - On load, if the library file differs from a tile's copy, that copy is replaced. The status bar names the sub-patches that changed: `Updated from the library: Voice, Delay chain.` Exposed values are kept by exposed name; a value whose name is gone is dropped.
+- A refreshed copy drops a Transport or Scale and tuning module the library file has gained, as inserting does (rule 8). Its cables become ports on the tile, and the status bar says so.
 - If the library file is missing or does not load, the stored copy is used, and the status bar says so. *Why:* a patch must always open, even on another computer.
 - **Unlink** on the tile menu makes it a normal copy.
 - **Save to library** from a linked instance writes the file. No other tile in the open patch changes. Other linked tiles pick up the new file the next time the patch loads. *Why:* no action at a distance. An edit in one place never undoes a decision made in another.
@@ -200,7 +201,7 @@ These rules are for implementers. The player never sees the flat graph.
 5. **A patch always opens.** Linked items carry a stored copy. *Why:* a missing library file on another computer must not lose the set.
 6. **Swaps and select changes are click-free.** *Why:* they happen during performance.
 7. **One edit is one undo step, at any level.** *Why:* the [undo](undo.md) rules apply unchanged.
-8. **Patch-wide modules live only at the top level.** A sub-patch never holds the Transport or the Scale and tuning module, so stack copies, layer and select members, and slot parts never repeat them. *Why:* settled with the maintainer. A patch has one transport and one scale ([clock](clock.md), [scale and tuning](scale-and-tuning.md)), and one place to set them. The same reason keeps a paste from adding a transport ([clipboard](clipboard.md), rule 6).
+8. **Patch-wide modules live only at the top level.** A sub-patch never holds the Transport or the Scale and tuning module, so stack copies, layer and select members, slot parts, and linked items refreshed on load never repeat them. *Why:* settled with the maintainer. A patch has one transport and one scale ([clock](clock.md), [scale and tuning](scale-and-tuning.md)), and one place to set them. The same reason keeps a paste from adding a transport ([clipboard](clipboard.md), rule 6).
 
 ## Acceptance criteria
 
