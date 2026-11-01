@@ -162,7 +162,7 @@ Widget identity: Iced keeps widget state (a scroll offset, an open list, the can
 
 ## Describing a module
 
-A module is a `static` `ModuleDescriptor` plus a struct that implements `Module`. The descriptor is plain data, written with named fields:
+A module is a `static` `ModuleDescriptor` plus a struct that implements `Module`. The descriptor is plain data, written with named fields. This is Clock Divide's, shortened; the full one is in `crates/loom-modules/src/logic.rs`:
 
 ```rust
 pub static DIVIDE: ModuleDescriptor = ModuleDescriptor {
@@ -170,7 +170,8 @@ pub static DIVIDE: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Clock Divide",
     category: "Logic",
-    description: "Fires on every Nth trigger. Offset fires earlier in the count. Reset starts the count again.",
+    family: Family::TimeAndRhythm,
+    description: "Fires on every Nth trigger, so a fast clock makes slower rhythms. Offset fires earlier in the count, and Reset starts the count again.",
     inputs: &[
         PortSpec {
             name: "trigger",
@@ -178,7 +179,7 @@ pub static DIVIDE: ModuleDescriptor = ModuleDescriptor {
             signal: SignalType::Gate,
             description: "The triggers to count.",
             default: PortDefault::Value(0.0),
-            polarity: Polarity::Unipolar,
+            range: PortRange::Signal,
             channels: Channels::Downmix,
         },
         // ...
@@ -199,8 +200,8 @@ pub static DIVIDE: ModuleDescriptor = ModuleDescriptor {
         // ...
     ],
     role: ModuleRole::Dsp(|_| Box::new(Divide::new())),
-    panel: Panel::new(6, 3, &[Widget::knob(0, 0, "n"), Widget::knob(3, 0, "offset")]),
-    displays: &[],
+    panel: Panel::new(/* columns, rows, widgets */),
+    displays: &[/* ... */],
 };
 ```
 
