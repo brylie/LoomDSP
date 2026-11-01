@@ -12,7 +12,7 @@ coverage:
     project:
       default:
         target: auto
-        # Fail only when total coverage falls by 5% or more from the base
+        # Fail only when total coverage falls by more than 5% from the base
         # commit. Timing-dependent tests make small swings normal.
         threshold: 5%
     patch:
