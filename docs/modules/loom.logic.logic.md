@@ -35,9 +35,9 @@ Combines up to four gates with And, Or, or Xor; only inputs with a cable count. 
 
 ## Panel
 
-9 by 4 grid units.
+9 by 2 grid units.
 
-- Radio buttons: **Operation** (`op`) (And, Or, Xor)
+- Segmented control: **Operation** (`op`)
 - Toggle: **Invert** (`invert`)
 
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->

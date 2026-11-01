@@ -204,9 +204,15 @@ pub struct Widget {
     /// `Reson…` for `Resonance`. Left out when the whole label shows.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shown: Option<String>,
-    /// knob, toggle, radio, button, light, meter, or scope.
+    /// knob, toggle, radio, segmented, select, button, light, meter, or
+    /// scope.
     pub kind: &'static str,
-    pub bounds: Rect,
+    /// Where the widget is drawn. Left out while it is hidden.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bounds: Option<Rect>,
+    /// True while the module's mode does not use this control (ADR-0030).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub hidden: bool,
     /// Control position, light brightness, or meter RMS level.
     pub position: f32,
     /// A meter's peak level. 0 for other widgets.
@@ -308,6 +314,7 @@ fn kind_name(kind: &WidgetViewKind) -> &'static str {
         WidgetViewKind::Toggle => "toggle",
         WidgetViewKind::Radio { .. } => "radio",
         WidgetViewKind::Select { .. } => "select",
+        WidgetViewKind::Segmented { .. } => "segmented",
         WidgetViewKind::Light => "light",
         WidgetViewKind::Meter => "meter",
         WidgetViewKind::Scope => "scope",
@@ -485,7 +492,8 @@ impl App {
                                 label: w.label.clone(),
                                 shown: cut.get(&TextKind::Caption(index)).cloned(),
                                 kind: kind_name(&w.kind),
-                                bounds: m.widget_bounds(index).expect("a widget of this panel").into(),
+                                bounds: m.widget_bounds(index).map(Rect::from),
+                                hidden: w.hidden,
                                 position: value.position,
                                 peak: value.peak,
                                 right: value.right,
@@ -624,6 +632,7 @@ mod tests {
             y: 0,
             label: label.into(),
             hover: loom_canvas::HoverText::default(),
+            hidden: false,
         };
         // Two long captions on touching knobs, filling the panel.
         let module = ModuleView {

@@ -32,9 +32,9 @@ None.
 
 ## Panel
 
-12 by 6 grid units.
+9 by 5 grid units.
 
-- Radio buttons: **Source** (`source`) (Controller, Pitch bend, Aftertouch)
+- Select: **Source** (`source`)
 - Knob: **Controller** (`controller`)
 - Knob: **Channel** (`channel`)
 - Knob: **Smoothing** (`smoothing`)

@@ -31,9 +31,9 @@ Converts between decibels and level, and between pitch and frequency in Hz.
 
 ## Panel
 
-6 by 5 grid units.
+6 by 2 grid units.
 
-- Radio buttons: **Mode** (`mode`) (dB to level, Level to dB, Pitch to Hz, Hz to pitch)
+- Select: **Mode** (`mode`)
 
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->
 

@@ -33,7 +33,7 @@ Fires on every Nth trigger, so a fast clock makes slower rhythms. Offset fires e
 
 ## Panel
 
-6 by 5 grid units.
+9 by 3 grid units.
 
 - Knob: **Division** (`n`)
 - Knob: **Offset** (`offset`)

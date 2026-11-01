@@ -15,8 +15,8 @@ Remembers a gate, in set and reset, toggle, or data (a D latch) mode. Reset wins
 
 | Port | Signal | Unconnected | Description |
 |---|---|---|---|
-| **A** (`a`) | gate | 0 | In Set and reset, a rising edge turns the output on. In Toggle, a rising edge flips it. In Data, this is the level to remember. |
-| **B** (`b`) | gate | 0 | A rising edge turns the output off (Set and reset, Toggle), or is the clock that remembers A (Data). |
+| **A** (`a`) | gate | 0 | In Set/Reset, a rising edge turns the output on. In Toggle, a rising edge flips it. In Data, this is the level to remember. |
+| **B** (`b`) | gate | 0 | A rising edge turns the output off (Set/Reset, Toggle), or is the clock that remembers A (Data). |
 
 ## Outputs
 
@@ -28,13 +28,13 @@ Remembers a gate, in set and reset, toggle, or data (a D latch) mode. Reset wins
 
 | Parameter | Range | Default | Description |
 |---|---|---|---|
-| **Mode** (`mode`) | Set and reset, Toggle, or Data | Set and reset | Set and reset, Toggle, or Data. Changing it keeps the state. |
+| **Mode** (`mode`) | Set/Reset, Toggle, or Data | Set/Reset | Set/Reset, Toggle, or Data. Changing it keeps the state. |
 
 ## Panel
 
-9 by 4 grid units.
+9 by 2 grid units.
 
-- Radio buttons: **Mode** (`mode`) (Set and reset, Toggle, Data)
+- Select: **Mode** (`mode`)
 - Light: **State** (`state`): Lit while the remembered gate is high.
 
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->
@@ -43,7 +43,7 @@ Remembers a gate, in set and reset, toggle, or data (a D latch) mode. Reset wins
 
 Use Memory to remember a gate until something changes it.
 
-- **Set and reset:** a rising edge on A turns the output on, and one on B turns it off.
+- **Set/Reset:** a rising edge on A turns the output on, and one on B turns it off.
 - **Toggle:** each rising edge on A flips the output, and B turns it off.
 - **Data:** a rising edge on B remembers the level on A.
 

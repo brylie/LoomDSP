@@ -1026,6 +1026,7 @@ mod tests {
                     y: 0,
                     label: "Gain".into(),
                     hover: crate::scene::HoverText::default(),
+                    hidden: false,
                 }],
             },
         };

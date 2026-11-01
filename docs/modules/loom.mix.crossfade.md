@@ -33,10 +33,10 @@ Blends two signals. Equal power keeps the loudness of audio steady; linear is ex
 
 ## Panel
 
-6 by 6 grid units.
+11 by 5 grid units.
 
+- Segmented control: **Law** (`law`)
 - Knob: **Mix** (`mix`)
-- Radio buttons: **Law** (`law`) (Equal power, Linear)
 
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->
 

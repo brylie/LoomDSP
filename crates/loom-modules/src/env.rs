@@ -67,7 +67,8 @@ pub static ENVELOPE: ModuleDescriptor = ModuleDescriptor {
             default: 0.7,
             unit: "",
             options: ParamOptions::DEFAULT,
-        },
+        }
+        .shown_when("mode", &[0]),
         ParamSpec {
             name: "release",
             label: "Release",
@@ -78,7 +79,8 @@ pub static ENVELOPE: ModuleDescriptor = ModuleDescriptor {
             unit: "s",
             options: ParamOptions::DEFAULT,
         }
-        .logarithmic(),
+        .logarithmic()
+        .shown_when("mode", &[0]),
         ParamSpec {
             name: "mode",
             label: "Mode",
@@ -107,9 +109,9 @@ pub static ENVELOPE: ModuleDescriptor = ModuleDescriptor {
         15,
         10,
         &[
-            Widget::select(0, 0, "mode"),
-            Widget::light(12, 0, "level"),
-            Widget::shape(0, 2, 15, "out", "Shape", envelope_preview),
+            Widget::shape(0, 0, 15, "out", "Shape", envelope_preview),
+            Widget::segmented(0, 5, 6, "mode"),
+            Widget::light(12, 5, "level"),
             Widget::knob(0, 7, "attack"),
             Widget::knob(3, 7, "decay"),
             Widget::knob(6, 7, "sustain"),

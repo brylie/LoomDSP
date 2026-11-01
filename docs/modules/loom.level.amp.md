@@ -33,10 +33,10 @@ Scales a signal by a control signal, with a linear or exponential response.
 
 ## Panel
 
-6 by 6 grid units.
+9 by 5 grid units.
 
+- Segmented control: **Response** (`response`)
 - Knob: **Gain** (`gain`)
-- Radio buttons: **Response** (`response`) (Linear, Exponential)
 
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->
 

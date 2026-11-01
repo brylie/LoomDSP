@@ -80,7 +80,8 @@ pub static LFO: ModuleDescriptor = ModuleDescriptor {
             options: ParamOptions::DEFAULT,
         }
         .logarithmic()
-        .smooth(0.005),
+        .smooth(0.005)
+        .shown_when("sync", &[0]),
         ParamSpec {
             name: "cycles",
             label: "Cycles",
@@ -91,7 +92,8 @@ pub static LFO: ModuleDescriptor = ModuleDescriptor {
             unit: "",
             options: ParamOptions::DEFAULT,
         }
-        .integer(),
+        .integer()
+        .shown_when("sync", &[1]),
         ParamSpec {
             name: "shape",
             label: "Shape",
@@ -108,13 +110,14 @@ pub static LFO: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::Dsp(|config| Box::new(Lfo::new(config))),
     panel: Panel::new(
         15,
-        11,
+        10,
         &[
             Widget::shape(0, 0, 15, "out", "Wave", lfo_preview),
-            Widget::radio(0, 5, "sync"),
-            Widget::radio(6, 5, "shape"),
-            Widget::knob(12, 5, "rate"),
-            Widget::knob(12, 8, "cycles"),
+            Widget::segmented(0, 5, 7, "sync"),
+            Widget::select(9, 5, "shape"),
+            // One of these shows, by the sync mode (ADR-0030).
+            Widget::knob(3, 7, "rate"),
+            Widget::knob(9, 7, "cycles"),
         ],
     ),
     displays: &[],

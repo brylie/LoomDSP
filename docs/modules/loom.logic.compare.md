@@ -33,9 +33,9 @@ Makes a gate from two signals: high while A is above B, or while A is below B. H
 
 ## Panel
 
-9 by 4 grid units.
+7 by 5 grid units.
 
-- Radio buttons: **Mode** (`mode`) (Above, Below)
+- Segmented control: **Mode** (`mode`)
 - Knob: **Hysteresis** (`hysteresis`)
 
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->

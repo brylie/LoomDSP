@@ -78,12 +78,12 @@ pub static DIVIDE: ModuleDescriptor = ModuleDescriptor {
     ],
     role: ModuleRole::Dsp(|_| Box::new(Divide::new())),
     panel: Panel::new(
-        6,
-        5,
+        9,
+        3,
         &[
             Widget::knob(0, 0, "n"),
             Widget::knob(3, 0, "offset"),
-            Widget::light(0, 3, "fired"),
+            Widget::light(6, 0, "fired"),
         ],
     ),
     displays: &[DisplaySpec {
@@ -243,7 +243,11 @@ pub static COMPARE: ModuleDescriptor = ModuleDescriptor {
             high: false,
         })
     }),
-    panel: Panel::new(9, 4, &[Widget::radio(0, 0, "mode"), Widget::knob(6, 0, "hysteresis")]),
+    panel: Panel::new(
+        7,
+        5,
+        &[Widget::segmented(0, 0, 7, "mode"), Widget::knob(2, 2, "hysteresis")],
+    ),
     displays: &[],
 };
 
@@ -353,7 +357,11 @@ pub static LOGIC: ModuleDescriptor = ModuleDescriptor {
         .integer(),
     ],
     role: ModuleRole::Dsp(|_| Box::new(Logic { op: 0, invert: false })),
-    panel: Panel::new(9, 4, &[Widget::radio(0, 0, "op"), Widget::toggle(6, 0, "invert")]),
+    panel: Panel::new(
+        9,
+        2,
+        &[Widget::segmented(0, 0, 6, "op"), Widget::toggle(6, 0, "invert")],
+    ),
     displays: &[],
 };
 
@@ -415,7 +423,7 @@ pub static MEMORY: ModuleDescriptor = ModuleDescriptor {
             name: "a",
             label: "A",
             signal: SignalType::Gate,
-            description: "In Set and reset, a rising edge turns the output on. In Toggle, a rising edge flips it. In Data, this is the level to remember.",
+            description: "In Set/Reset, a rising edge turns the output on. In Toggle, a rising edge flips it. In Data, this is the level to remember.",
             default: PortDefault::Value(0.0),
             range: loom_core::PortRange::Signal,
             channels: Channels::Downmix,
@@ -424,7 +432,7 @@ pub static MEMORY: ModuleDescriptor = ModuleDescriptor {
             name: "b",
             label: "B",
             signal: SignalType::Gate,
-            description: "A rising edge turns the output off (Set and reset, Toggle), or is the clock that remembers A (Data).",
+            description: "A rising edge turns the output off (Set/Reset, Toggle), or is the clock that remembers A (Data).",
             default: PortDefault::Value(0.0),
             range: loom_core::PortRange::Signal,
             channels: Channels::Downmix,
@@ -442,7 +450,7 @@ pub static MEMORY: ModuleDescriptor = ModuleDescriptor {
     params: &[ParamSpec {
         name: "mode",
         label: "Mode",
-        description: "Set and reset, Toggle, or Data. Changing it keeps the state.",
+        description: "Set/Reset, Toggle, or Data. Changing it keeps the state.",
         min: 0.0,
         max: 2.0,
         default: 0.0,
@@ -450,9 +458,9 @@ pub static MEMORY: ModuleDescriptor = ModuleDescriptor {
         options: ParamOptions::DEFAULT,
     }
     .integer()
-    .choices(&["Set and reset", "Toggle", "Data"])],
+    .choices(&["Set/Reset", "Toggle", "Data"])],
     role: ModuleRole::Dsp(|_| Box::new(Memory::default())),
-    panel: Panel::new(9, 4, &[Widget::radio(0, 0, "mode"), Widget::light(6, 0, "state")]),
+    panel: Panel::new(9, 2, &[Widget::select(0, 0, "mode"), Widget::light(6, 0, "state")]),
     displays: &[DisplaySpec {
         name: "state",
         label: "State",
@@ -793,7 +801,7 @@ mod gate_tests {
         );
     }
 
-    /// Set and reset: reset wins a tie, and edges fall on the same frame at
+    /// Set/Reset: reset wins a tie, and edges fall on the same frame at
     /// any block size, including the first and last frame of a block.
     #[test]
     fn memory_set_reset_and_block_invariance() {

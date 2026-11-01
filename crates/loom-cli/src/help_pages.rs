@@ -316,6 +316,7 @@ fn widget(d: &ModuleDescriptor, w: &Widget) -> String {
             format!("Radio buttons: {} ({})", param(w.bind), cell(&choices.join(", ")))
         }
         WidgetKind::Select => format!("Select: {}", param(w.bind)),
+        WidgetKind::Segmented { .. } => format!("Segmented control: {}", param(w.bind)),
         WidgetKind::Button { mode: "", hold } => format!("Button: {} (momentary)", param(hold)),
         WidgetKind::Button { mode, hold } => format!(
             "Button: {} (toggle), {} (momentary), chosen by {}",

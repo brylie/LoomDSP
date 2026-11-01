@@ -462,7 +462,7 @@ pub static CONVERT: ModuleDescriptor = ModuleDescriptor {
     .choices(&["dB to level", "Level to dB", "Pitch to Hz", "Hz to pitch"])],
     role: ModuleRole::Dsp(|_| Box::new(Convert { mode: 0 })),
     // Four radio buttons are 3 wide and 5 tall.
-    panel: Panel::new(6, 5, &[Widget::radio(0, 0, "mode")]),
+    panel: Panel::new(6, 2, &[Widget::select(0, 0, "mode")]),
     displays: &[],
 };
 

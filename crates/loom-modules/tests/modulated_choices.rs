@@ -162,7 +162,7 @@ fn logic_follows_a_modulated_op() {
     assert_eq!(render(&mut parts, 16)[8], 0.0);
 }
 
-/// Memory in Data mode takes the level of A on a clock edge. Set and reset
+/// Memory in Data mode takes the level of A on a clock edge. Set/Reset
 /// mode (the base) would ignore A. Modulated to Data (mode 2), a high A and
 /// a rising clock give a high output.
 #[test]

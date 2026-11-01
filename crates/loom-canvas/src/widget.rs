@@ -2177,7 +2177,11 @@ impl<Message> PatchCanvas<'_, Message> {
                                 0.0
                             }
                         }
-                        Some(WidgetViewKind::Radio { options } | WidgetViewKind::Select { options }) => {
+                        Some(
+                            WidgetViewKind::Radio { options }
+                            | WidgetViewKind::Select { options }
+                            | WidgetViewKind::Segmented { options, .. },
+                        ) => {
                             let last = options.len().saturating_sub(1) as f32;
                             (position.round() + if up { 1.0 } else { -1.0 }).clamp(0.0, last)
                         }
@@ -2206,7 +2210,7 @@ impl<Message> PatchCanvas<'_, Message> {
                         Some(WidgetViewKind::Button) => {
                             self.press_button_key(state, named, module, widget, shell);
                         }
-                        Some(WidgetViewKind::Radio { options }) => {
+                        Some(WidgetViewKind::Radio { options } | WidgetViewKind::Segmented { options, .. }) => {
                             let next = (position.round() as usize + 1) % options.len().max(1);
                             self.set_control(shell, module, widget, next as f32);
                         }
@@ -2334,6 +2338,12 @@ impl<Message> PatchCanvas<'_, Message> {
                         .module(module)
                         .and_then(|m| m.widget_bounds(widget))
                         .and_then(|rect| radio_option(rect, options.len(), world))
+                        .map(|option| ChoiceClick::Set(module, widget, option as f32)),
+                    Some(WidgetViewKind::Segmented { options, .. }) => self
+                        .scene
+                        .module(module)
+                        .and_then(|m| m.widget_bounds(widget))
+                        .and_then(|rect| crate::controls::segment_at(rect, options.len(), world))
                         .map(|option| ChoiceClick::Set(module, widget, option as f32)),
                     Some(WidgetViewKind::Select { .. }) => Some(ChoiceClick::Open(module, widget)),
                     _ => None,
@@ -2934,7 +2944,28 @@ impl<Message> PatchCanvas<'_, Message> {
                 let (size, colour) = match item.kind {
                     TextKind::Title => (title_px, self.palette.text),
                     _ if !show_labels => return,
+                    // The chosen segment is filled with the value colour,
+                    // so its name is dark (visual-system.md, contrast).
+                    TextKind::Option(widget, option)
+                        if matches!(
+                            module.panel.widgets.get(widget).map(|w| &w.kind),
+                            Some(WidgetViewKind::Segmented { .. })
+                        ) && self.position(module.id, widget).round() as usize == option =>
+                    {
+                        (label_px, self.palette.background)
+                    }
                     TextKind::Option(..) => (label_px, self.palette.text),
+                    // A button's label is on its face: light on the off
+                    // face, dark on the orange face while on.
+                    TextKind::Caption(widget)
+                        if matches!(
+                            module.panel.widgets.get(widget).map(|w| &w.kind),
+                            Some(WidgetViewKind::Button)
+                        ) =>
+                    {
+                        let on = self.position(module.id, widget) > 0.5;
+                        (label_px, if on { self.palette.background } else { self.palette.text })
+                    }
                     _ => (label_px, self.palette.text_dim),
                 };
                 // A focused or turning knob shows its value instead of its
@@ -2977,9 +3008,14 @@ impl<Message> PatchCanvas<'_, Message> {
                     };
                     let box_rect = select_box(rect);
                     let chosen = values.position(module.id, index).round().max(0.0) as usize;
+                    // Cut to the box with "…", never wrapped; the open list
+                    // shows the whole name. The text starts 7 units in, and
+                    // the arrow takes the last 11.
+                    let room = box_rect.width - 18.0;
                     let choice = options.get(chosen).map_or("", String::as_str);
+                    let choice = crate::scene::fit_label(choice, room, crate::tile_text::LABEL_SIZE);
                     renderer.fill_text(
-                        text(choice, label_px, (box_rect.width - 22.0) * zoom, text::Alignment::Left),
+                        text(&choice, label_px, room * zoom, text::Alignment::Left),
                         to_screen(Point::new(box_rect.x + 7.0, box_rect.center_y())),
                         self.palette.text,
                         clip,
@@ -3284,7 +3320,7 @@ fn visible_lights(scene: &Scene, camera: &Camera, size: Size) -> Vec<u32> {
 /// controls.
 fn next_focus(panel: &crate::scene::PanelView, current: Option<usize>, back: bool) -> Option<usize> {
     let controls: Vec<usize> = (0..panel.widgets.len())
-        .filter(|&i| panel.widgets[i].is_control())
+        .filter(|&i| panel.widgets[i].is_control() && !panel.widgets[i].hidden)
         .collect();
     if controls.is_empty() {
         return None;
@@ -3361,6 +3397,7 @@ mod tests {
             y: 0,
             label: String::new(),
             hover: crate::scene::HoverText::default(),
+            hidden: false,
         }
     }
 
@@ -3375,6 +3412,15 @@ mod tests {
                 widget(WidgetViewKind::Toggle, 6),
             ],
         }
+    }
+
+    /// Tab skips a control its module's mode hides (ADR-0030).
+    #[test]
+    fn tab_skips_hidden_controls() {
+        let mut panel = panel();
+        panel.widgets[2].hidden = true;
+        assert_eq!(next_focus(&panel, None, false), Some(0));
+        assert_eq!(next_focus(&panel, Some(0), false), Some(0), "only the knob is left");
     }
 
     #[test]

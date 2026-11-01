@@ -1389,4 +1389,37 @@ mod tests {
             );
         }
     }
+
+    /// A click on Envelope's AD segment picks AD, and the tile hides
+    /// Sustain and Release at once (panel-widgets.md, Segmented control;
+    /// ADR-0030).
+    #[test]
+    fn a_segment_click_changes_the_mode_and_hides_its_controls() {
+        let mut ui = Ui::open("sine.ron");
+        let env = ui.app.controller.add_module("loom.env.envelope").unwrap();
+        ui.app.refresh();
+        ui.step(&[]);
+        let tile = ui.app.scene.module(env.0).unwrap().clone();
+        let rect = tile.widget_bounds(1).expect("the mode segments");
+        let ad = loom_canvas::segment_centre(rect, 1, 2);
+        let at = ui.canvas().to_window(ad);
+        ui.move_to(at);
+        ui.press();
+        ui.release();
+        let node = ui.app.controller.graph().node(env).unwrap();
+        let mode = node.params[node.descriptor.param_index("mode").unwrap()];
+        assert_eq!(mode, 1.0, "AD picked");
+        let hidden: Vec<_> = ui
+            .app
+            .scene
+            .module(env.0)
+            .unwrap()
+            .panel
+            .widgets
+            .iter()
+            .filter(|w| w.hidden)
+            .map(|w| w.label.clone())
+            .collect();
+        assert_eq!(hidden, ["Sustain", "Release"]);
+    }
 }

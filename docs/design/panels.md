@@ -86,13 +86,13 @@ A panel reads from top to bottom as **what it does, how it behaves, what you pla
 
 ### Acceptance criteria: panel layout
 
-- [ ] Every built-in panel puts its result view first, then its choices, then its continuous controls (test over the registry, by widget kind and row).
-- [ ] Every built-in module with 2 to 4 short named choices on its tile uses a segmented control (test over the registry).
-- [ ] A parameter can declare `shown_when`; its widget is hidden while the condition is false, the tile keeps its width, a row with a hidden widget is centred again, and the tile gets shorter only when whole rows empty (tests). Envelope Sustain and Release in AD mode, LFO Rate and Cycles by sync mode, MIDI Controller's controller number, and Scope's Level with Auto on use it.
-- [ ] The inspector marks a hidden parameter "Not used in" its current choice, and Tab skips hidden controls (tests).
-- [ ] No built-in tile is more than one grid unit wider than its widest row needs (test over the registry).
-- [ ] Audio In's pairs read "1-2", "3-4", "5-6", "7-8"; Mixer labels its strips once; Button shows its label on the button; Level Meter's meter caption is not a port name; Scope draws a zero line.
-- [ ] `examples/dev/all-modules.ron` holds every built-in module on a grid, and a test renders it.
+- [x] Every built-in panel puts its result view first, then its choices, then its continuous controls (test over the registry, by widget kind and row).
+- [x] Every built-in module with 2 to 4 short named choices on its tile uses a segmented control (test over the registry).
+- [x] A parameter can declare `shown_when`; its widget is hidden while the condition is false, the tile keeps its width, a row with a hidden widget is centred again, and the tile gets shorter only when whole rows empty (tests). Envelope Sustain and Release in AD mode, LFO Rate and Cycles by sync mode, MIDI Controller's controller number, and Scope's Level with Auto on use it.
+- [x] The inspector marks a hidden parameter "Not used in" its current choice, and Tab skips hidden controls (tests).
+- [x] No built-in tile is more than one grid unit wider than its widest row needs (test over the registry).
+- [x] Audio In's pairs read "1-2", "3-4", "5-6", "7-8"; Mixer labels its strips once; Button shows its label on the button; Level Meter's meter caption is not a port name; Scope's zero line is visible at 100% zoom.
+- [x] `examples/dev/all-modules.ron` holds every built-in module on a grid, and a test renders it.
 
 ## The panel editor
 

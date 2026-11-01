@@ -232,7 +232,8 @@ pub static CONTROLLER_IN: ModuleDescriptor = ModuleDescriptor {
             unit: "",
             options: ParamOptions::DEFAULT,
         }
-        .integer(),
+        .integer()
+        .shown_when("source", &[0]),
         ParamSpec {
             name: "channel",
             label: "Channel",
@@ -257,15 +258,14 @@ pub static CONTROLLER_IN: ModuleDescriptor = ModuleDescriptor {
     ],
     role: ModuleRole::Dsp(|config| Box::new(ControllerIn::new(config.sample_rate))),
     panel: Panel::new(
-        12,
-        6,
+        9,
+        5,
         &[
-            Widget::radio(0, 0, "source"),
-            Widget::knob(6, 0, "controller"),
-            Widget::knob(9, 0, "channel"),
-            // Under Channel, whose short caption leaves room above it.
-            // Under Controller, its ring met that longer caption (#455).
-            Widget::knob(9, 3, "smoothing"),
+            Widget::select(0, 0, "source"),
+            // Shown only for the Controller source (ADR-0030).
+            Widget::knob(0, 2, "controller"),
+            Widget::knob(3, 2, "channel"),
+            Widget::knob(6, 2, "smoothing"),
         ],
     ),
     displays: &[],

@@ -95,14 +95,14 @@ Gates are high above 0.5 ([ADR-0007](../adr/0007-polymorphic-signal-model.md)). 
 |---|---|
 | Inputs | `a`, `b` (default 0) |
 | Output | `out` (gate) |
-| Parameter | `mode`: 0 Set and reset (default), 1 Toggle, 2 Data |
+| Parameter | `mode`: 0 Set/Reset (default), 1 Toggle, 2 Data |
 | Display value | `state` (a light) |
 
 What the inputs mean depends on the mode:
 
 | Mode | `a` | `b` |
 |---|---|---|
-| Set and reset | Set: a rising edge turns `out` on | Reset: a rising edge turns `out` off |
+| Set/Reset | Set: a rising edge turns `out` on | Reset: a rising edge turns `out` off |
 | Toggle | Toggle: a rising edge flips `out` | Reset: a rising edge turns `out` off |
 | Data | Data: a gate | Clock: on a rising edge, `out` takes the level of `a` |
 

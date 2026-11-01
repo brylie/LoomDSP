@@ -35,10 +35,10 @@ A resonant low-pass with a 12, 18, or 24 dB slope; high resonance thins the bass
 
 ## Panel
 
-12 by 11 grid units.
+11 by 10 grid units.
 
 - Shape preview: **Response** (`out`) (read-only)
-- Radio buttons: **Slope** (`slope`) (12 dB, 18 dB, 24 dB)
+- Segmented control: **Slope** (`slope`)
 - Knob: **Cutoff** (`cutoff`)
 - Knob: **Resonance** (`resonance`)
 - Knob: **Drive** (`drive`)

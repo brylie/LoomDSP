@@ -251,6 +251,21 @@ pub fn for_each<'a>(module: &'a ModuleView, mut f: impl FnMut(TextItem<'a>)) {
             size: LABEL_SIZE,
             width,
         });
+        if let WidgetViewKind::Segmented { options, .. } = &widget.kind {
+            // Each name is centred in its segment, and cut to fit it.
+            for (i, option) in options.iter().enumerate() {
+                let segment = crate::controls::segment_rect(rect, i, options.len());
+                let width = segment.width - 4.0;
+                f(TextItem {
+                    kind: TextKind::Option(index, i),
+                    content: fit_label(option, width, LABEL_SIZE),
+                    anchor: segment.center(),
+                    align: Align::Center,
+                    size: LABEL_SIZE,
+                    width,
+                });
+            }
+        }
         if let WidgetViewKind::Radio { options } = &widget.kind {
             // Option text runs from just right of its button to the
             // widget's right edge. It is cut with "…" like a caption, never
@@ -302,6 +317,11 @@ fn panel_boxes(module: &ModuleView) -> Vec<PanelBox> {
                     Size::new(right - rect.x, rect.height - GRID),
                 )
             }
+            // The segments, in the row below the caption.
+            WidgetViewKind::Segmented { .. } => Rectangle::new(
+                Point::new(rect.x, rect.y + GRID),
+                Size::new(rect.width, rect.height - GRID),
+            ),
             _ => rect,
         };
         boxes.push(PanelBox {
@@ -340,9 +360,10 @@ fn caption_y(kind: &WidgetViewKind, rect: Rectangle) -> f32 {
         WidgetViewKind::Meter | WidgetViewKind::Scope => rect.y + rect.height - GRID * 0.5,
         WidgetViewKind::Shape { .. } => rect.y + rect.height - GRID * 0.5,
         WidgetViewKind::Toggle | WidgetViewKind::Light => light_centre(rect).y + GRID,
-        WidgetViewKind::Button => rect.y + rect.height - GRID * 0.5,
+        // On the face of the button.
+        WidgetViewKind::Button => rect.center_y(),
         WidgetViewKind::Radio { .. } => rect.y + GRID * 0.5,
-        WidgetViewKind::Select { .. } => rect.y + GRID * 0.5,
+        WidgetViewKind::Select { .. } | WidgetViewKind::Segmented { .. } => rect.y + GRID * 0.5,
     }
 }
 
@@ -410,6 +431,7 @@ mod tests {
             y,
             label: label.into(),
             hover: HoverText::default(),
+            hidden: false,
         }
     }
 

@@ -38,9 +38,9 @@ A level from 0 to 1 that rises and falls when a gate starts it. ADSR holds while
 
 15 by 10 grid units.
 
-- Select: **Mode** (`mode`)
-- Light: **Level** (`level`): The envelope's level, from dark at 0 to full at 1.
 - Shape preview: **Shape** (`out`) (read-only)
+- Segmented control: **Mode** (`mode`)
+- Light: **Level** (`level`): The envelope's level, from dark at 0 to full at 1.
 - Knob: **Attack** (`attack`)
 - Knob: **Decay** (`decay`)
 - Knob: **Sustain** (`sustain`)

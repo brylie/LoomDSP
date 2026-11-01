@@ -158,10 +158,10 @@ mod tests {
                     );
                     continue;
                 }
-                // The amplifier's response is a radio, not a knob.
+                // The amplifier's response is a segmented control, not a knob.
                 if descriptor.id == "loom.level.amp" && param.name == "response" {
                     assert!(
-                        matches!(widget.map(|w| w.kind), Some(loom_core::WidgetKind::Radio)),
+                        matches!(widget.map(|w| w.kind), Some(loom_core::WidgetKind::Segmented { .. })),
                         "amp.response"
                     );
                     continue;
@@ -169,7 +169,7 @@ mod tests {
                 // Convert's mode is a radio, not a knob.
                 if descriptor.id == "loom.math.convert" && param.name == "mode" {
                     assert!(
-                        matches!(widget.map(|w| w.kind), Some(loom_core::WidgetKind::Radio)),
+                        matches!(widget.map(|w| w.kind), Some(loom_core::WidgetKind::Select)),
                         "convert.mode"
                     );
                     continue;
@@ -205,6 +205,7 @@ mod tests {
                                 loom_core::WidgetKind::Radio
                                     | loom_core::WidgetKind::Toggle
                                     | loom_core::WidgetKind::Select
+                                    | loom_core::WidgetKind::Segmented { .. }
                             )
                         ),
                         "{}.{}",
@@ -352,5 +353,80 @@ mod tests {
         let lfo = crate::registry().resolve("loom.mod.lfo").unwrap();
         let shape = lfo.params.iter().find(|p| p.name == "shape").unwrap();
         assert!(shape.range_text().contains(", or "), "{}", shape.range_text());
+    }
+
+    /// Every built-in panel reads top to bottom as view, then choices, then
+    /// continuous controls (panels.md, Panel layout, principles 1 to 3): no
+    /// result view starts below a choice or knob, and no choice starts
+    /// below a knob.
+    #[test]
+    fn panels_put_the_view_first_then_choices_then_knobs() {
+        use loom_core::WidgetKind as K;
+        let rank = |kind: &K| match kind {
+            K::Shape { .. } | K::Scope | K::Meter => Some(0),
+            K::Segmented { .. } | K::Select | K::Radio => Some(1),
+            K::Knob => Some(2),
+            _ => None,
+        };
+        for d in crate::registry().iter() {
+            let ranked: Vec<_> = d
+                .panel
+                .widgets
+                .iter()
+                .filter_map(|w| rank(&w.kind).map(|r| (r, w.y, w.bind)))
+                .collect();
+            for &(ra, ya, a) in &ranked {
+                for &(rb, yb, b) in &ranked {
+                    assert!(
+                        !(ra < rb && ya > yb),
+                        "{}: `{a}` sits below `{b}`, which should come after it",
+                        d.id
+                    );
+                }
+            }
+        }
+    }
+
+    /// Two to four named choices use a segmented control or, for long
+    /// names, a select list, never a column of radio buttons (principle 6).
+    #[test]
+    fn short_choice_lists_are_not_radio_columns() {
+        for d in crate::registry().iter() {
+            for w in d
+                .panel
+                .widgets
+                .iter()
+                .filter(|w| w.kind == loom_core::WidgetKind::Radio)
+            {
+                let choices = d.params[d.param_index(w.bind).unwrap()].options.choices.len();
+                assert!(
+                    choices > 4,
+                    "{}: `{}` has {choices} choices as radio buttons",
+                    d.id,
+                    w.bind
+                );
+            }
+        }
+    }
+
+    /// No built-in panel is more than one grid unit wider than its widest
+    /// row of widgets needs (principle 7: no empty quarters).
+    #[test]
+    fn panels_are_no_wider_than_their_rows() {
+        for d in crate::registry().iter() {
+            let widest = d
+                .panel
+                .widgets
+                .iter()
+                .map(|w| w.x + d.widget_size(w).0)
+                .max()
+                .unwrap_or(0);
+            assert!(
+                d.panel.width <= widest + 1 || d.panel.widgets.is_empty(),
+                "{}: the panel is {} wide, its widest row {widest}",
+                d.id,
+                d.panel.width
+            );
+        }
     }
 }

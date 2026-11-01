@@ -32,9 +32,9 @@ Takes the input's value on a trigger and holds it. With noise on the input, it m
 
 ## Panel
 
-6 by 3 grid units.
+7 by 2 grid units.
 
-- Radio buttons: **Mode** (`mode`) (Sample, Track)
+- Segmented control: **Mode** (`mode`)
 
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->
 

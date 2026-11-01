@@ -109,6 +109,14 @@ fn panel_view(d: &ModuleDescriptor) -> PanelView {
                         .find(|p| p.name == w.bind)
                         .map_or_else(Vec::new, |p| p.options.choices.iter().map(|o| o.to_string()).collect()),
                 },
+                WidgetKind::Segmented { width } => WidgetViewKind::Segmented {
+                    options: d
+                        .params
+                        .iter()
+                        .find(|p| p.name == w.bind)
+                        .map_or_else(Vec::new, |p| p.options.choices.iter().map(|o| o.to_string()).collect()),
+                    width,
+                },
                 WidgetKind::Button { .. } => WidgetViewKind::Button,
                 // Light, and any kind this app does not draw yet.
                 _ => WidgetViewKind::Light,
@@ -142,8 +150,11 @@ fn panel_view(d: &ModuleDescriptor) -> PanelView {
                 kind,
                 x: w.x,
                 y: w.y,
-                label: label.to_string(),
+                // A widget can caption itself, such as "1" under a mixer
+                // strip; the hover text keeps the full label.
+                label: w.caption.unwrap_or(label).to_string(),
                 hover,
+                hidden: false,
             }
         })
         .collect();
@@ -152,6 +163,89 @@ fn panel_view(d: &ModuleDescriptor) -> PanelView {
         height: d.panel.height,
         widgets,
     }
+}
+
+/// The panel for a module with these parameter values: widgets whose mode
+/// does not use them are hidden, and the panel closes up around them
+/// (ADR-0030, panels.md, Panel layout, principle 5).
+pub fn panel_for(d: &ModuleDescriptor, values: &[f32]) -> PanelView {
+    let mut panel = panel_view(d);
+    let hidden: Vec<bool> = d
+        .panel
+        .widgets
+        .iter()
+        .map(|w| w.is_control() && d.param_index(w.bind).is_some_and(|i| !d.is_shown(i, values)))
+        .collect();
+    if hidden.iter().any(|&h| h) {
+        close_up(&mut panel, &hidden);
+    }
+    panel
+}
+
+/// Hides the marked widgets and closes the panel up around them, keeping
+/// its width (ADR-0030). A row that loses a widget closes its gap and is
+/// centred again in the space the row had. Grid rows that only hidden
+/// widgets used are removed, so the panel gets shorter.
+pub fn close_up(panel: &mut PanelView, hidden: &[bool]) {
+    for (widget, &h) in panel.widgets.iter_mut().zip(hidden) {
+        widget.hidden = h;
+    }
+    // Close up each row that lost a widget: rows are the widgets that start
+    // on the same grid row.
+    let rows: std::collections::BTreeSet<u8> = panel.widgets.iter().filter(|w| w.hidden).map(|w| w.y).collect();
+    for row in rows {
+        let all: Vec<usize> = (0..panel.widgets.len())
+            .filter(|&i| panel.widgets[i].y == row)
+            .collect();
+        let start = all.iter().map(|&i| panel.widgets[i].x).min().unwrap_or(0);
+        let end = all
+            .iter()
+            .map(|&i| panel.widgets[i].x + panel.widgets[i].size().0)
+            .max()
+            .unwrap_or(0);
+        let mut shown: Vec<usize> = all.into_iter().filter(|&i| !panel.widgets[i].hidden).collect();
+        shown.sort_by_key(|&i| panel.widgets[i].x);
+        let used: u8 = shown.iter().map(|&i| panel.widgets[i].size().0).sum();
+        let mut x = start + (end - start - used.min(end - start)) / 2;
+        for i in shown {
+            panel.widgets[i].x = x;
+            x += panel.widgets[i].size().0;
+        }
+    }
+    // Remove grid rows that no shown widget covers but a hidden one did.
+    let covers = |w: &WidgetView, r: u8| w.y <= r && r < w.y + w.size().1;
+    let mut removed = 0;
+    for r in (0..panel.height).rev() {
+        let by_hidden = panel.widgets.iter().any(|w| w.hidden && covers(w, r));
+        let by_shown = panel.widgets.iter().any(|w| !w.hidden && covers(w, r));
+        if by_hidden && !by_shown {
+            for w in panel.widgets.iter_mut().filter(|w| !w.hidden && w.y > r) {
+                w.y -= 1;
+            }
+            removed += 1;
+        }
+    }
+    panel.height -= removed;
+}
+
+/// The values the panel layout depends on: each mode parameter that some
+/// `shown_when` names, by module (ADR-0030). The app rebuilds the scene
+/// when this changes, which is a mode click, never a knob turn.
+pub fn mode_key(controller: &Controller) -> Vec<(u32, usize, i64)> {
+    let mut key = Vec::new();
+    for (id, node) in controller.graph().nodes() {
+        let d = node.descriptor;
+        for p in d.params {
+            if let Some(when) = p.options.shown_when
+                && let Some(mode) = d.param_index(when.param)
+            {
+                let value = node.params.get(mode).copied().unwrap_or(d.params[mode].default);
+                key.push((id.0, mode, value.round() as i64));
+            }
+        }
+    }
+    key.dedup();
+    key
 }
 
 /// A control's position for the canvas: the knob position from 0 to 1, the
@@ -506,7 +600,7 @@ pub fn build(controller: &Controller, positions: &BTreeMap<u32, Point>, sizes: &
                         widgets: Vec::new(),
                     }
                 } else {
-                    panel_view(d)
+                    panel_for(d, &node.params)
                 },
             }
         })
@@ -743,7 +837,12 @@ mod tests {
         let registry = loom_modules::registry();
         let mut checked = 0;
         for d in registry.iter() {
-            if !d.panel.widgets.iter().any(|w| w.kind == WidgetKind::Radio) {
+            if !d
+                .panel
+                .widgets
+                .iter()
+                .any(|w| matches!(w.kind, WidgetKind::Radio | WidgetKind::Segmented { .. }))
+            {
                 continue;
             }
             let module = ModuleView {
@@ -765,7 +864,25 @@ mod tests {
                 }
             });
         }
-        assert!(checked > 20, "only {checked} radio options found");
+        assert!(checked > 20, "only {checked} radio and segment options found");
+    }
+
+    /// Every built-in select list's choices fit its closed box, so the
+    /// current choice is never cut (panels.md, Panel layout, principle 8).
+    /// The box leaves 50 world units for text: 6 grid units, less its
+    /// margins and arrow (`select_box`, and the room the canvas gives it).
+    #[test]
+    fn every_select_choice_fits_its_box() {
+        let room = 6.0 * loom_canvas::GRID - 4.0 - 18.0;
+        for d in loom_modules::registry().iter() {
+            for w in d.panel.widgets.iter().filter(|w| w.kind == WidgetKind::Select) {
+                let param = &d.params[d.param_index(w.bind).unwrap()];
+                for choice in param.options.choices {
+                    let shown = loom_canvas::fit_label(choice, room, 9.0);
+                    assert_eq!(shown, *choice, "{}: `{choice}` is cut in its select box", d.id);
+                }
+            }
+        }
     }
 
     /// A tile's header takes its family's colour, and its hover text names
@@ -875,7 +992,9 @@ mod tests {
     fn meters_and_lights_show_labels_and_descriptions() {
         let meter_module = &loom_modules::display::METER;
         let meter = &panel_view(meter_module).widgets[0];
-        assert_eq!(meter.label, "Out");
+        // The meter has no caption: "Out" read as a port (panels.md, Panel
+        // layout). Its hover text still names the output.
+        assert_eq!(meter.label, "");
         assert_eq!(meter.hover.description, meter_module.outputs[0].description);
         let light = panel_view(&loom_modules::env::ENVELOPE)
             .widgets
@@ -932,16 +1051,16 @@ mod tests {
         assert_eq!(display_text(divide, &divide.panel.widgets[0], 0.5, None), "");
     }
 
-    /// A radio widget reads its names from the parameter (panels.md, Choice
-    /// names), so it shows the same words as the inspector.
+    /// A choice widget reads its names from the parameter (panels.md,
+    /// Choice names), so it shows the same words as the inspector.
     #[test]
-    fn radio_buttons_show_the_parameter_choice_names() {
+    fn choice_widgets_show_the_parameter_choice_names() {
         let lfo = &loom_modules::lfo::LFO;
         let view = panel_view(lfo);
-        let WidgetViewKind::Radio { options } = &view.widgets[2].kind else {
-            panic!("the shape is a radio");
+        let WidgetViewKind::Segmented { options, .. } = &view.widgets[1].kind else {
+            panic!("the sync mode is a segmented control");
         };
-        let shape = &lfo.params[lfo.param_index("shape").unwrap()];
+        let shape = &lfo.params[lfo.param_index("sync").unwrap()];
         assert_eq!(
             options,
             &shape.options.choices.iter().map(|o| o.to_string()).collect::<Vec<_>>()
@@ -968,11 +1087,11 @@ mod tests {
         let envelope = parts.controller.add_module("loom.env.envelope").unwrap();
         let mut values = PanelValues::new();
         update_panel_values(&mut values, &parts.controller, &BTreeMap::new());
-        let before = values.get(envelope.0, 2).unwrap().shape.clone();
+        let before = values.get(envelope.0, 0).unwrap().shape.clone();
         let panel = panel_view(&loom_modules::env::ENVELOPE);
-        assert_eq!(panel.widgets[2].label, "Shape");
-        assert!(!panel.widgets[2].is_control());
-        assert!(matches!(panel.widgets[0].kind, WidgetViewKind::Select { .. }));
+        assert_eq!(panel.widgets[0].label, "Shape");
+        assert!(!panel.widgets[0].is_control());
+        assert!(matches!(panel.widgets[1].kind, WidgetViewKind::Segmented { .. }));
         let still_generation = values.generation();
         update_panel_values(&mut values, &parts.controller, &BTreeMap::new());
         assert_eq!(
@@ -982,7 +1101,100 @@ mod tests {
         );
         parts.controller.set_param_named(envelope, "attack", 1.0).unwrap();
         update_panel_values(&mut values, &parts.controller, &BTreeMap::new());
-        assert_ne!(values.get(envelope.0, 2).unwrap().shape, before);
+        assert_ne!(values.get(envelope.0, 0).unwrap().shape, before);
         assert_eq!(panel, panel_view(&loom_modules::env::ENVELOPE));
+    }
+
+    /// Envelope in AD mode hides Sustain and Release: the tile keeps its
+    /// size, and Attack, Decay, and Curve close up, centred in their row
+    /// (ADR-0030). In ADSR mode all five show where they were declared.
+    #[test]
+    fn a_mode_hides_the_controls_it_does_not_use() {
+        let d = &loom_modules::env::ENVELOPE;
+        let mut values: Vec<f32> = d.params.iter().map(|p| p.default).collect();
+        let adsr = panel_for(d, &values);
+        assert!(adsr.widgets.iter().all(|w| !w.hidden));
+        values[d.param_index("mode").unwrap()] = 1.0;
+        let ad = panel_for(d, &values);
+        assert_eq!((ad.width, ad.height), (adsr.width, adsr.height), "same size");
+        let shown: Vec<_> = ad.widgets.iter().filter(|w| w.y == 7 && !w.hidden).collect();
+        let labels: Vec<_> = shown.iter().map(|w| w.label.as_str()).collect();
+        assert_eq!(labels, ["Attack", "Decay", "Curve"]);
+        // Nine units of knobs, centred in the row's fifteen.
+        assert_eq!(shown.iter().map(|w| w.x).collect::<Vec<_>>(), [3, 6, 9]);
+        let hidden: Vec<_> = ad
+            .widgets
+            .iter()
+            .filter(|w| w.hidden)
+            .map(|w| w.label.as_str())
+            .collect();
+        assert_eq!(hidden, ["Sustain", "Release"]);
+    }
+
+    /// Rows that only hidden widgets used are removed, so the panel gets
+    /// shorter, and widgets below them move up; the width never changes.
+    #[test]
+    fn hiding_a_whole_row_shortens_the_panel() {
+        let knob = |x, y, label: &str| WidgetView {
+            kind: WidgetViewKind::Knob { steps: 0 },
+            x,
+            y,
+            label: label.into(),
+            hover: HoverText::default(),
+            hidden: false,
+        };
+        let mut panel = PanelView {
+            width: 6,
+            height: 9,
+            widgets: vec![knob(0, 0, "A"), knob(0, 3, "B"), knob(3, 3, "C"), knob(0, 6, "D")],
+        };
+        close_up(&mut panel, &[false, true, true, false]);
+        assert_eq!((panel.width, panel.height), (6, 6));
+        assert_eq!((panel.widgets[3].x, panel.widgets[3].y), (0, 3), "D moved up");
+    }
+
+    /// The inspector keeps a hidden parameter and says which choice does
+    /// not use it (ADR-0030).
+    #[test]
+    fn the_inspector_marks_a_hidden_parameter() {
+        let mut app = crate::tests::app();
+        let env = app.controller.add_module("loom.env.envelope").unwrap();
+        app.controller.set_param_named(env, "mode", 1.0).unwrap();
+        let _ = app.update(crate::Message::SelectModule(env.0));
+        let crate::inspector::Inspector::Module(rows) = app.inspector_model() else {
+            panic!("the envelope's rows");
+        };
+        let note = |label: &str| rows.params.iter().find(|p| p.label == label).unwrap().unused.clone();
+        assert_eq!(note("Sustain").as_deref(), Some("Not used in AD"));
+        assert_eq!(note("Attack"), None);
+    }
+
+    /// `examples/dev/all-modules.ron` holds every built-in module once, and
+    /// lays out with no tile over another, so panel changes can be checked
+    /// side by side (panels.md, Panel layout).
+    #[test]
+    fn the_all_modules_patch_has_every_module_without_overlap() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/dev/all-modules.ron");
+        let app = crate::App::new(crate::Args {
+            patch: Some(path),
+            ..crate::tests::app_args()
+        });
+        let graph = app.controller.graph();
+        let mut kinds: Vec<&str> = graph.nodes().map(|(_, node)| node.descriptor.id).collect();
+        kinds.sort_unstable();
+        let mut registry: Vec<&str> = loom_modules::registry().iter().map(|d| d.id).collect();
+        registry.sort_unstable();
+        assert_eq!(kinds, registry, "every built-in module, once");
+        let tiles: Vec<_> = app
+            .scene
+            .modules()
+            .iter()
+            .map(|m| (m.title.clone(), m.bounds()))
+            .collect();
+        for (i, (a, ra)) in tiles.iter().enumerate() {
+            for (b, rb) in &tiles[i + 1..] {
+                assert!(ra.intersection(rb).is_none(), "{a} overlaps {b}");
+            }
+        }
     }
 }

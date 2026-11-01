@@ -247,6 +247,23 @@ impl ControlGeometry {
                             shapes.push(circle(centre, 3.5, fill, palette.control_track, 1.2));
                         }
                     }
+                    WidgetViewKind::Segmented { options, .. } => {
+                        let chosen = position.round() as usize;
+                        for i in 0..options.len() {
+                            let fill = if i == chosen {
+                                palette.control_value
+                            } else {
+                                palette.control_body
+                            };
+                            shapes.push(Shape::new(
+                                segment_rect(rect, i, options.len()),
+                                3.0,
+                                fill,
+                                palette.control_track,
+                                1.0,
+                            ));
+                        }
+                    }
                     WidgetViewKind::Select { .. } => {
                         let box_rect = select_box(rect);
                         shapes.push(Shape::new(
@@ -290,9 +307,11 @@ impl ControlGeometry {
                         // rebuilds these.
                         let area = crate::trace::trace_area(rect);
                         shapes.push(Shape::new(area, 3.0, palette.background, palette.tile_border, 1.0));
+                        // The zero line: thick enough to see at 100% zoom, so
+                        // a signal's offset can be judged.
                         let centre =
-                            Rectangle::new(Point::new(area.x, area.center_y() - 0.25), Size::new(area.width, 0.5));
-                        shapes.push(Shape::new(centre, 0.0, palette.control_track, Color::TRANSPARENT, 0.0));
+                            Rectangle::new(Point::new(area.x, area.center_y() - 0.5), Size::new(area.width, 1.0));
+                        shapes.push(Shape::new(centre, 0.0, palette.tile_border, Color::TRANSPARENT, 0.0));
                     }
                     WidgetViewKind::Meter => {
                         let track = meter_track(rect);
@@ -520,6 +539,12 @@ pub(crate) fn focus_ring(kind: &WidgetViewKind, rect: Rectangle) -> (Rectangle, 
         }
         WidgetViewKind::Toggle => (toggle_track(rect).expand(2.5), 8.0),
         WidgetViewKind::Select { .. } => (select_box(rect).expand(2.0), 5.0),
+        // The segments, below the caption row.
+        WidgetViewKind::Segmented { options, .. } => {
+            let first = segment_rect(rect, 0, options.len());
+            let last = segment_rect(rect, options.len().saturating_sub(1), options.len());
+            (first.union(&last).expand(2.0), 5.0)
+        }
         WidgetViewKind::Button => (button_body(rect).expand(2.5), 8.0),
         // The options, below the caption row.
         WidgetViewKind::Radio { .. } => (
@@ -545,11 +570,12 @@ pub(crate) fn select_box(rect: Rectangle) -> Rectangle {
     )
 }
 
-/// The face of a button: the cell above its caption row.
-fn button_body(rect: Rectangle) -> Rectangle {
+/// The face of a button: its whole cell, with its caption on it
+/// (panels.md, Panel layout, principle 10).
+pub(crate) fn button_body(rect: Rectangle) -> Rectangle {
     Rectangle::new(
-        Point::new(rect.x + 4.0, rect.y + 2.0),
-        Size::new(rect.width - 8.0, rect.height - GRID - 4.0),
+        Point::new(rect.x + 4.0, rect.y + 4.0),
+        Size::new(rect.width - 8.0, rect.height - 8.0),
     )
 }
 
@@ -564,6 +590,27 @@ pub(crate) fn radio_centre(rect: Rectangle, i: usize) -> Point {
 }
 
 /// The radio option under a world point, if any.
+/// Segment `index` of a segmented control with `count` segments: equal
+/// shares of the bottom row, with a 1-unit gap between them.
+pub(crate) fn segment_rect(rect: Rectangle, index: usize, count: usize) -> Rectangle {
+    let count = count.max(1) as f32;
+    let width = (rect.width - 4.0) / count;
+    Rectangle::new(
+        Point::new(rect.x + 2.0 + width * index as f32, rect.y + GRID),
+        Size::new(width - 1.0, GRID - 1.0),
+    )
+}
+
+/// The centre of segment `index`, for tests and scripts that click it.
+pub fn segment_centre(rect: Rectangle, index: usize, count: usize) -> Point {
+    segment_rect(rect, index, count).center()
+}
+
+/// The segment of a segmented control under a world point, if any.
+pub(crate) fn segment_at(rect: Rectangle, count: usize, point: Point) -> Option<usize> {
+    (0..count).find(|&i| segment_rect(rect, i, count).expand(0.5).contains(point))
+}
+
 pub(crate) fn radio_option(rect: Rectangle, options: usize, point: Point) -> Option<usize> {
     let row = ((point.y - rect.y) / GRID).floor() as isize - 1;
     (row >= 0 && (row as usize) < options).then_some(row as usize)
@@ -621,6 +668,7 @@ mod tests {
             y: 0,
             label: String::new(),
             hover: crate::scene::HoverText::default(),
+            hidden: false,
         };
         Scene::new(
             vec![ModuleView {
@@ -923,6 +971,7 @@ mod tests {
                         y: 0,
                         label: String::new(),
                         hover: crate::scene::HoverText::default(),
+                        hidden: false,
                     }],
                 },
             }],
@@ -973,6 +1022,7 @@ mod tests {
                         y: 0,
                         label: String::new(),
                         hover: crate::scene::HoverText::default(),
+                        hidden: false,
                     }],
                 },
             }],
@@ -1018,6 +1068,7 @@ mod tests {
                 y: 0,
                 label: "Shape".into(),
                 hover: crate::scene::HoverText::default(),
+                hidden: false,
             }],
         };
         let scene = Scene::new(vec![module], Vec::new());

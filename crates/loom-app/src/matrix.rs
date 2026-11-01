@@ -303,7 +303,13 @@ pub fn targets(graph: &Graph) -> Vec<TargetPick> {
                     let eligible = !spec.options.transient
                         && node.descriptor.panel.widgets.iter().any(|w| {
                             w.bind == spec.name
-                                && matches!(w.kind, WidgetKind::Knob | WidgetKind::Toggle | WidgetKind::Radio)
+                                && matches!(
+                                    w.kind,
+                                    WidgetKind::Knob
+                                        | WidgetKind::Toggle
+                                        | WidgetKind::Radio
+                                        | WidgetKind::Segmented { .. }
+                                )
                         });
                     eligible.then(|| TargetPick {
                         module,

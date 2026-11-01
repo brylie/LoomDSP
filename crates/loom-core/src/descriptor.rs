@@ -281,6 +281,19 @@ pub struct ParamOptions {
     pub ranges: &'static [ParamRange],
     /// The range a new module starts with. One of `ranges`.
     pub default_range: Option<ParamRange>,
+    /// When the parameter's widget shows on the tile: only while another
+    /// choice parameter holds one of the listed choices, or always when
+    /// `None`. Set with [`ParamSpec::shown_when`]. ADR-0030.
+    pub shown_when: Option<ShownWhen>,
+}
+
+/// A condition on one choice parameter of the same module (ADR-0030).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShownWhen {
+    /// The choice parameter's name.
+    pub param: &'static str,
+    /// The choices, by index from 0, under which the widget shows.
+    pub choices: &'static [u32],
 }
 
 /// A span a control can cover: the values at the knob's minimum and maximum
@@ -324,6 +337,7 @@ impl ParamOptions {
         choices: &[],
         ranges: &[],
         default_range: None,
+        shown_when: None,
         transient: false,
     };
 }
@@ -438,6 +452,15 @@ impl ParamSpec {
     /// an empty name. Spec: `docs/design/panels.md`, Choice names.
     pub const fn choices(mut self, names: &'static [&'static str]) -> Self {
         self.options.choices = names;
+        self
+    }
+
+    /// Shows the parameter's widget only while the choice parameter `param`
+    /// holds one of `choices`, counted from 0 (ADR-0030). The inspector
+    /// still lists it. The registry refuses a `param` that is missing or
+    /// has no choice names, and a choice it does not have.
+    pub const fn shown_when(mut self, param: &'static str, choices: &'static [u32]) -> Self {
+        self.options.shown_when = Some(ShownWhen { param, choices });
         self
     }
 
@@ -816,9 +839,20 @@ pub struct Widget {
     /// What it shows: a parameter name for controls, a display value name
     /// for lights, an output name for meters and scopes.
     pub bind: &'static str,
+    /// The tile's caption, when it differs from the bound item's label,
+    /// such as "1" under each mixer strip's level (panels.md, Panel layout,
+    /// principle 10). Hover text and the inspector keep the full label.
+    /// `Some("")` shows no caption. Set with [`Widget::captioned`].
+    pub caption: Option<&'static str>,
 }
 
 impl Widget {
+    /// The same widget with its own tile caption (principle 10).
+    pub const fn captioned(mut self, caption: &'static str) -> Self {
+        self.caption = Some(caption);
+        self
+    }
+
     /// A knob for parameter `param`.
     pub const fn knob(x: u8, y: u8, param: &'static str) -> Self {
         Self {
@@ -826,6 +860,7 @@ impl Widget {
             x,
             y,
             bind: param,
+            caption: None,
         }
     }
 
@@ -836,6 +871,7 @@ impl Widget {
             x,
             y,
             bind: param,
+            caption: None,
         }
     }
 
@@ -849,6 +885,19 @@ impl Widget {
             x,
             y,
             bind: param,
+            caption: None,
+        }
+    }
+
+    /// A segmented control: one joined button per choice name, `width`
+    /// grid units wide, for a parameter with 2 to 4 named values.
+    pub const fn segmented(x: u8, y: u8, width: u8, param: &'static str) -> Self {
+        Self {
+            kind: WidgetKind::Segmented { width },
+            x,
+            y,
+            bind: param,
+            caption: None,
         }
     }
 
@@ -859,6 +908,7 @@ impl Widget {
             x,
             y,
             bind: param,
+            caption: None,
         }
     }
 
@@ -869,6 +919,7 @@ impl Widget {
             x,
             y,
             bind: display,
+            caption: None,
         }
     }
 
@@ -879,6 +930,7 @@ impl Widget {
             x,
             y,
             bind: output,
+            caption: None,
         }
     }
 
@@ -890,6 +942,7 @@ impl Widget {
             x,
             y,
             bind: output,
+            caption: None,
         }
     }
 
@@ -909,6 +962,7 @@ impl Widget {
             x,
             y,
             bind: output,
+            caption: None,
         }
     }
 
@@ -927,6 +981,7 @@ impl Widget {
             x,
             y,
             bind: param,
+            caption: None,
         }
     }
 
@@ -939,6 +994,7 @@ impl Widget {
             x,
             y,
             bind: param,
+            caption: None,
         }
     }
 
@@ -970,6 +1026,12 @@ pub enum WidgetKind {
     Radio,
     /// A compact box that opens a list of named choices.
     Select,
+    /// A row of joined buttons, one per choice name, for 2 to 4 named
+    /// choices (panel-widgets.md, Segmented control).
+    Segmented {
+        /// Width in panel grid units. The segments share it equally.
+        width: u8,
+    },
     /// A display value as brightness, clamped to 0 to 1.
     Light,
     /// The level of one of the module's outputs, from a port probe: an RMS
@@ -1012,6 +1074,7 @@ impl PartialEq for WidgetKind {
             | (Self::Light, Self::Light)
             | (Self::Meter, Self::Meter)
             | (Self::Scope, Self::Scope) => true,
+            (Self::Segmented { width: a }, Self::Segmented { width: b }) => a == b,
             // Kinds compare their visible form. Function addresses are not
             // stable identities for a shape sampler across codegen units.
             (
@@ -1124,6 +1187,7 @@ impl ModuleDescriptor {
             WidgetKind::Shape { width, .. } => (width, 5),
             WidgetKind::Toggle | WidgetKind::Light => (3, 2),
             WidgetKind::Select => (6, 2),
+            WidgetKind::Segmented { width } => (width, 2),
             WidgetKind::Button { .. } => (6, 3),
             WidgetKind::Radio => {
                 let choices = self
@@ -1132,6 +1196,21 @@ impl ModuleDescriptor {
                 (6, u8::try_from(choices + 1).unwrap_or(u8::MAX))
             }
         }
+    }
+
+    /// True when parameter `index` shows its widget for these values
+    /// (ADR-0030): always, unless it is `shown_when` a choice that is not
+    /// the current one.
+    pub fn is_shown(&self, index: usize, values: &[f32]) -> bool {
+        let Some(when) = self.params.get(index).and_then(|p| p.options.shown_when) else {
+            return true;
+        };
+        let Some(mode) = self.param_index(when.param) else {
+            return true;
+        };
+        let value = values.get(mode).copied().unwrap_or(self.params[mode].default);
+        let choice = (value - self.params[mode].min).round();
+        when.choices.iter().any(|&c| c as f32 == choice)
     }
 
     /// Index of a display value by name.
@@ -1194,6 +1273,33 @@ impl ModuleDescriptor {
         for param in self.params {
             param.check_choices()?;
             param.check_ranges()?;
+            if let Some(when) = param.options.shown_when {
+                let problem = |text: &str| {
+                    Err(format!(
+                        "parameter `{}`: shown when `{}`: {text}",
+                        param.name, when.param
+                    ))
+                };
+                let Some(mode) = self.param_index(when.param).map(|i| &self.params[i]) else {
+                    return problem("no such parameter");
+                };
+                // Choice names, or an on and off switch (0 or 1).
+                let count = if mode.options.choices.is_empty() {
+                    if mode.options.integer && mode.min == 0.0 && mode.max == 1.0 {
+                        2
+                    } else {
+                        0
+                    }
+                } else {
+                    mode.options.choices.len()
+                };
+                if count == 0 {
+                    return problem("needs a parameter with choice names, or a whole number from 0 to 1");
+                }
+                if when.choices.is_empty() || when.choices.iter().any(|&c| c as usize >= count) {
+                    return problem("names a choice the parameter does not have");
+                }
+            }
         }
         let panel = &self.panel;
         for (i, widget) in panel.widgets.iter().enumerate() {
@@ -1240,6 +1346,13 @@ impl ModuleDescriptor {
                     }
                     WidgetKind::Radio if !integer || param.options.choices.is_empty() => {
                         return Err(name("radio buttons need a whole-number parameter with choice names"));
+                    }
+                    WidgetKind::Segmented { width }
+                        if !integer || !(2..=4).contains(&param.options.choices.len()) || width == 0 =>
+                    {
+                        return Err(name(
+                            "a segmented control needs a width and 2 to 4 named whole-number choices",
+                        ));
                     }
                     WidgetKind::Select
                         if !integer || param.options.choices.is_empty() || param.options.choices.len() > 12 =>

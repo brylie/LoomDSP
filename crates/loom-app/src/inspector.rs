@@ -105,6 +105,9 @@ pub struct ParamRow {
     pub mapping: Option<String>,
     /// The **Range** selector, for a parameter that offers ranges.
     pub range: Option<RangeRow>,
+    /// "Not used in AD" while the module's mode hides this parameter's
+    /// control on the tile (ADR-0030). The row stays, so it can be set.
+    pub unused: Option<String>,
     pub mode: ParamMode,
     /// Whether a dragged output can target this row.
     #[serde(skip)]
@@ -334,11 +337,27 @@ impl App {
                         adding: (self.adding == Some((id, index))).then(|| self.sources(id, index)),
                     }
                 };
+                let unused = (!d.is_shown(index, &node.params)).then(|| {
+                    let mode = spec.options.shown_when.and_then(|w| d.param_index(w.param));
+                    match mode.map(|m| (&d.params[m], node.params[m])) {
+                        Some((mode, value)) => match mode.choice_name(value) {
+                            Some(choice) => format!("Not used in {choice}"),
+                            // An on and off switch, such as Scope's Auto.
+                            None => format!(
+                                "Not used while {} is {}",
+                                mode.label,
+                                if value > 0.5 { "on" } else { "off" }
+                            ),
+                        },
+                        None => "Not used in this mode".to_string(),
+                    }
+                });
                 ParamRow {
                     index,
                     label: spec.label,
                     description: spec.description,
                     name: hover.name,
+                    unused,
                     value: param::format(spec, value),
                     mapping,
                     range,
@@ -346,9 +365,15 @@ impl App {
                     accepts_drop: {
                         let bound = d.panel.widgets.iter().filter(|w| w.bind == spec.name);
                         bound.clone().next().is_none()
-                            || bound
-                                .into_iter()
-                                .any(|w| matches!(w.kind, WidgetKind::Knob | WidgetKind::Toggle | WidgetKind::Radio))
+                            || bound.into_iter().any(|w| {
+                                matches!(
+                                    w.kind,
+                                    WidgetKind::Knob
+                                        | WidgetKind::Toggle
+                                        | WidgetKind::Radio
+                                        | WidgetKind::Segmented { .. }
+                                )
+                            })
                     },
                 }
             })
@@ -557,8 +582,10 @@ fn module_view<'a>(m: ModuleRows, drop_row: Option<(u32, usize)>, dragging: bool
                             tooltip::Position::Top,
                         ),
                         space::horizontal(),
+                        text(p.unused.unwrap_or_default()).size(style::SMALL).color(DIM),
                         text(p.value).size(style::BODY).color(DIM),
-                    ],
+                    ]
+                    .spacing(6),
                     match p.range {
                         Some(range) => row![
                             value_control(id, index, control, position, step),

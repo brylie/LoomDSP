@@ -110,12 +110,12 @@ pub static CLOCK: ModuleDescriptor = ModuleDescriptor {
     ],
     role: ModuleRole::Dsp(|_| Box::new(Clock::new())),
     panel: Panel::new(
-        6,
-        5,
+        9,
+        3,
         &[
             Widget::knob(0, 0, "rate"),
             Widget::knob(3, 0, "width"),
-            Widget::light(0, 3, "fired"),
+            Widget::light(6, 0, "fired"),
         ],
     ),
     displays: &[DisplaySpec {

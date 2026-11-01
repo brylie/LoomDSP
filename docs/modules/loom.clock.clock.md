@@ -32,7 +32,7 @@ None.
 
 ## Panel
 
-6 by 5 grid units.
+9 by 3 grid units.
 
 - Knob: **Rate** (`rate`)
 - Knob: **Width** (`width`)

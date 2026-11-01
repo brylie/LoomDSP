@@ -222,6 +222,7 @@ mod tests {
                     y: 0,
                     label: String::new(),
                     hover: crate::scene::HoverText::default(),
+                    hidden: false,
                 }],
             },
         };

@@ -30,9 +30,9 @@ None.
 
 ## Panel
 
-6 by 4 grid units.
+9 by 2 grid units.
 
-- Radio buttons: **Colour** (`colour`) (White, Pink, Brown)
+- Segmented control: **Colour** (`colour`)
 
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->
 

@@ -71,7 +71,7 @@ pub static BUTTON: ModuleDescriptor = ModuleDescriptor {
         .transient(),
     ],
     role: ModuleRole::Dsp(|_| Box::new(Button::default())),
-    panel: Panel::new(6, 3, &[Widget::button(0, 0, "on", "hold", "mode")]),
+    panel: Panel::new(6, 3, &[Widget::button(0, 0, "on", "hold", "mode").captioned("Gate")]),
     displays: &[],
 };
 

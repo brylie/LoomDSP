@@ -500,6 +500,9 @@ struct App {
     /// Saved tile dimensions in grid units, keyed by module ID.
     sizes: BTreeMap<u32, (u8, u8)>,
     scene: Scene,
+    /// The mode values the scene was built with (ADR-0030). A change
+    /// rebuilds the scene, so hidden controls follow the mode.
+    mode_key: Vec<(u32, usize, i64)>,
     /// The output drag drawn over the entire window.
     assign_drag: Option<AssignDrag>,
     /// The eligible inspector row under the pointer.
@@ -1035,6 +1038,7 @@ impl App {
         };
 
         let scene = scene::build(&controller, &positions, &sizes);
+        let mode_key = scene::mode_key(&controller);
         let mut values = PanelValues::new();
         scene::update_panel_values(&mut values, &controller, &BTreeMap::new());
         // The loaded patch may already have a cable on run, before any
@@ -1047,6 +1051,7 @@ impl App {
             unknown_positions,
             unknown_label_draft: None,
             sizes,
+            mode_key,
             scene,
             assign_drag: None,
             drop_row: None,
@@ -1653,6 +1658,7 @@ impl App {
     fn refresh(&mut self) {
         layout::auto_layout(&self.controller, &mut self.positions);
         self.scene = scene::build(&self.controller, &self.positions, &self.sizes);
+        self.mode_key = scene::mode_key(&self.controller);
         self.refresh_values();
         self.refresh_learn();
         self.matrix.reconcile(self.controller.graph());
@@ -1757,6 +1763,13 @@ impl App {
     /// Rebuilds the control, light, and meter values. Only changed values
     /// change what the canvas uploads.
     fn refresh_values(&mut self) {
+        // A mode change shows or hides controls, which changes the panel
+        // (ADR-0030). Rare: a mode click, never a knob turn.
+        let mode_key = scene::mode_key(&self.controller);
+        if mode_key != self.mode_key {
+            self.scene = scene::build(&self.controller, &self.positions, &self.sizes);
+            self.mode_key = mode_key;
+        }
         let mut shown: scene::ShownValues = self
             .lights
             .iter()
@@ -5571,7 +5584,7 @@ mod tests {
         assert_eq!(tile(env).bounds, view.bounds().into());
         assert_eq!(tile(sine).outputs[0].badge_bounds.map(|b| b.width), Some(drawn.width));
 
-        let knob = tile(filter).widgets[widget].bounds;
+        let knob = tile(filter).widgets[widget].bounds.expect("a shown knob");
         let filter_view = app.scene.module(filter.0).unwrap();
         assert_eq!(knob, filter_view.widget_bounds(widget).unwrap().into());
 
