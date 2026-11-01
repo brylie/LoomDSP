@@ -1,0 +1,114 @@
+//! The app's visual tokens: its text sizes, switch size, and button roles
+//! (`docs/design/visual-system.md`). Every view takes its sizes and button
+//! looks from here, so the app reads as one instrument, and a future theme
+//! changes them in one place (FR-PANEL-06).
+//!
+//! The canvas keeps its own text sizes in world units, because tile text
+//! grows and shrinks with zoom.
+
+use iced::widget::button as iced_button;
+use iced::widget::markdown as iced_markdown;
+use iced::{Element, Theme};
+
+/// Table cells, row details, and captions in the inspector and matrix.
+pub const SMALL: f32 = 11.0;
+/// Running text, hover text, and the status bar.
+pub const BODY: f32 = 12.0;
+/// Buttons, fields, pick lists, and the labels of toggles and checkboxes.
+pub const CONTROL: f32 = 13.0;
+/// Section headings and the patch name.
+pub const HEADING: f32 = 15.0;
+/// Help and dialog titles.
+pub const TITLE: f32 = 18.0;
+/// The marker of a toggle, checkbox, or radio button.
+pub const SWITCH: f32 = 14.0;
+
+/// A button in the default role, secondary: quiet, so the patch and its
+/// values stand out. Give it another role with `.style(style::primary)`,
+/// `style::danger`, or `style::plain`.
+pub fn button<'a, M>(content: impl Into<Element<'a, M>>) -> iced_button::Button<'a, M> {
+    iced_button(content).style(secondary)
+}
+
+/// The one main action of a view, or a mode that is on: orange.
+pub fn primary(theme: &Theme, status: iced_button::Status) -> iced_button::Style {
+    iced_button::primary(theme, status)
+}
+
+/// Every other button: a lifted grey fill with light text.
+pub fn secondary(theme: &Theme, status: iced_button::Status) -> iced_button::Style {
+    iced_button::secondary(theme, status)
+}
+
+/// The emergency control, Panic: red.
+pub fn danger(theme: &Theme, status: iced_button::Status) -> iced_button::Style {
+    iced_button::danger(theme, status)
+}
+
+/// Small inline actions, such as the × that removes a row: text only.
+pub fn plain(theme: &Theme, status: iced_button::Status) -> iced_button::Style {
+    iced_button::text(theme, status)
+}
+
+/// Markdown in the help overlay, on the same scale as the rest of the app.
+pub fn markdown(theme: &Theme) -> iced_markdown::Settings {
+    let mut settings = iced_markdown::Settings::with_text_size(BODY, theme);
+    settings.h1_size = TITLE.into();
+    settings.h2_size = HEADING.into();
+    settings.h3_size = HEADING.into();
+    settings.h4_size = CONTROL.into();
+    settings.h5_size = CONTROL.into();
+    settings.h6_size = CONTROL.into();
+    settings.code_size = SMALL.into();
+    settings
+}
+
+#[cfg(test)]
+mod tests {
+    /// No app source writes a size inline: every `.size(...)` and
+    /// `text_size(...)` takes a token from this module, and no view builds
+    /// an Iced button, whose default role is primary. Only this module may
+    /// (visual-system.md, rule 1).
+    #[test]
+    fn sizes_and_buttons_come_only_from_this_module() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut problems = Vec::new();
+        for entry in std::fs::read_dir(&dir).expect("the source folder") {
+            let path = entry.expect("a source file").path();
+            if path.extension().is_none_or(|e| e != "rs") || path.ends_with("style.rs") {
+                continue;
+            }
+            let source = std::fs::read_to_string(&path).expect("a readable source file");
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            for (n, line) in source.lines().enumerate() {
+                for call in [".size(", "text_size("] {
+                    for (at, _) in line.match_indices(call) {
+                        let arg = line[at + call.len()..].trim_start();
+                        if arg.starts_with(|c: char| c.is_ascii_digit()) {
+                            problems.push(format!("{name}:{}: {}", n + 1, line.trim()));
+                        }
+                    }
+                }
+                let imports_button = line.contains("use iced::widget::")
+                    && (line.contains("button") || source_import_has_button(&source, n));
+                if imports_button {
+                    problems.push(format!("{name}:{}: imports Iced's button", n + 1));
+                }
+            }
+        }
+        assert!(problems.is_empty(), "{problems:#?}");
+    }
+
+    /// True when the `use iced::widget::{...}` that starts on line `n`
+    /// lists `button` on one of its later lines.
+    fn source_import_has_button(source: &str, n: usize) -> bool {
+        let rest: Vec<&str> = source.lines().skip(n).collect();
+        let Some(end) = rest.iter().position(|l| l.contains("};")) else {
+            return false;
+        };
+        rest[..=end].iter().any(|l| {
+            l.split(|c: char| !c.is_alphanumeric() && c != '_')
+                .any(|w| w == "button")
+        })
+    }
+}

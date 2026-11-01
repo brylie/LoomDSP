@@ -76,6 +76,7 @@ Copy [template.md](template.md). Keep it to one feature. Link the ADR, requireme
 | [Output safety](output-safety.md) | [ADR-0019](../adr/0019-output-safety-stage.md) | Implemented, P1; rule 15 (fade in on restart) Agreed |
 | [Autosave and crash recovery](autosave.md) | None (builds on [ADR-0008](../adr/0008-patch-format-ron.md) and [files](files.md)) | Implemented, P1 |
 | [App preferences](preferences.md) | None (builds on [ADR-0019](../adr/0019-output-safety-stage.md)) | Implemented, P1 |
+| [Visual system](visual-system.md) | [ADR-0025](../adr/0025-one-design-language-and-derived-panels.md) | Agreed, P1 |
 | [Patch metadata](patch-metadata.md) | [ADR-0023](../adr/0023-patch-licences-spdx-and-creative-commons.md) | Draft, P2 and P4 |
 | [Control channel](control-channel.md) | None (builds on [ADR-0021](../adr/0021-plain-data-view-models-and-keyed-identity.md)) | Implemented, developer tooling |
 | [Module help pages](help-pages.md) | None (builds on [ADR-0016](../adr/0016-ports-and-parameters-carry-their-own-text.md)) | Agreed and Implemented, P1 |

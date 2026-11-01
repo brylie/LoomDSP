@@ -6,10 +6,10 @@
 //! test of the snapshot checks what the user sees.
 
 use crate::modulation::{self, PolarityChoice};
+use crate::style::{self, button};
 use crate::{App, DIM, HELP, Message, param, remove_button};
 use iced::widget::{
-    button, column, container, mouse_area, pick_list, radio, row, scrollable, slider, space, text, text_input, toggler,
-    tooltip,
+    column, container, mouse_area, pick_list, radio, row, scrollable, slider, space, text, text_input, toggler, tooltip,
 };
 use iced::{Element, Length, Theme};
 use loom_core::{AssignmentId, ModuleId, OutputRef, WidgetKind};
@@ -447,20 +447,22 @@ impl App {
 pub fn view<'a>(model: Inspector, drop_row: Option<(u32, usize)>, dragging: bool) -> Element<'a, Message> {
     let content: Element<'a, Message> = match model {
         Inspector::Help => column![
-            text("Inspector").size(17),
-            text("Select a module to edit its parameters.").size(12).color(DIM),
-            text(HELP).size(11).color(DIM),
+            text("Inspector").size(style::HEADING),
+            text("Select a module to edit its parameters.")
+                .size(style::BODY)
+                .color(DIM),
+            text(HELP).size(style::SMALL).color(DIM),
         ]
         .spacing(8)
         .into(),
-        Inspector::Several(n) => text(format!("{n} modules selected")).size(13).into(),
+        Inspector::Several(n) => text(format!("{n} modules selected")).size(style::CONTROL).into(),
         Inspector::Empty => text("").into(),
         Inspector::Unknown(m) => {
             let id = m.id;
             let mut rows = column![
-                text(m.kind).size(17),
-                text("This version of LoomDSP does not have this module. It makes no sound. Its settings are kept and saved.").size(12),
-                text("Label").size(12),
+                text(m.kind).size(style::HEADING),
+                text("This version of LoomDSP does not have this module. It makes no sound. Its settings are kept and saved.").size(style::BODY),
+                text("Label").size(style::BODY),
                 row![
                     text_input("Label", &m.label)
                         .on_input(move |value| Message::UnknownLabelDraft { module: id, value })
@@ -469,7 +471,7 @@ pub fn view<'a>(model: Inspector, drop_row: Option<(u32, usize)>, dragging: bool
                 ].spacing(6),
             ].spacing(6);
             for (name, value) in m.params {
-                rows = rows.push(text(format!("{name}: {value}")).size(12));
+                rows = rows.push(text(format!("{name}: {value}")).size(style::BODY));
             }
             for link in m.links {
                 let (label, message) = match link {
@@ -478,7 +480,7 @@ pub fn view<'a>(model: Inspector, drop_row: Option<(u32, usize)>, dragging: bool
                 };
                 rows = rows.push(
                     row![
-                        text(label).size(11),
+                        text(label).size(style::SMALL),
                         space::horizontal(),
                         remove_button("Remove link", message)
                     ]
@@ -499,16 +501,16 @@ fn module_view<'a>(m: ModuleRows, drop_row: Option<(u32, usize)>, dragging: bool
     let id = m.id;
     let mut items = column![
         row![
-            text(m.name).size(17),
+            text(m.name).size(style::HEADING),
             space::horizontal(),
             button("Help").on_press(Message::ShowModuleHelp(id))
         ],
-        text(m.kind).size(11).color(DIM),
-        text(m.description).size(12),
+        text(m.kind).size(style::SMALL).color(DIM),
+        text(m.description).size(style::BODY),
     ]
     .spacing(6);
     if m.params.is_empty() {
-        items = items.push(text("No parameters.").size(12).color(DIM));
+        items = items.push(text("No parameters.").size(style::BODY).color(DIM));
     }
     for p in m.params {
         let index = p.index;
@@ -516,10 +518,14 @@ fn module_view<'a>(m: ModuleRows, drop_row: Option<(u32, usize)>, dragging: bool
         let unmap = Message::Unmap { module: id, index };
         let line: Element<'a, Message> = match p.mode {
             ParamMode::Learn { armed, detail } => {
-                let arm = button(row![text(p.label).size(12), space::horizontal(), text(detail).size(12)])
-                    .width(Length::Fill)
-                    .style(if armed { button::primary } else { button::secondary })
-                    .on_press(Message::LearnParam { module: id, index });
+                let arm = button(row![
+                    text(p.label).size(style::BODY),
+                    space::horizontal(),
+                    text(detail).size(style::BODY)
+                ])
+                .width(Length::Fill)
+                .style(if armed { style::primary } else { style::secondary })
+                .on_press(Message::LearnParam { module: id, index });
                 // A mapping can be removed in learn mode too.
                 let mut line = row![arm].spacing(4).align_y(iced::Alignment::Center);
                 if p.mapping.is_some() {
@@ -534,19 +540,19 @@ fn module_view<'a>(m: ModuleRows, drop_row: Option<(u32, usize)>, dragging: bool
                 assignments,
                 adding,
             } => {
-                let mut tip = column![text(p.description).size(12)].spacing(4);
+                let mut tip = column![text(p.description).size(style::BODY)].spacing(4);
                 if let Some(name) = p.name {
-                    tip = tip.push(text(name).size(11).color(DIM));
+                    tip = tip.push(text(name).size(style::SMALL).color(DIM));
                 }
                 let mut rows = column![
                     row![
                         tooltip(
-                            text(p.label).size(12),
+                            text(p.label).size(style::BODY),
                             container(tip).padding(6).max_width(260).style(container::rounded_box),
                             tooltip::Position::Top,
                         ),
                         space::horizontal(),
-                        text(p.value).size(12).color(DIM),
+                        text(p.value).size(style::BODY).color(DIM),
                     ],
                     match p.range {
                         Some(range) => row![
@@ -563,7 +569,7 @@ fn module_view<'a>(m: ModuleRows, drop_row: Option<(u32, usize)>, dragging: bool
                 if let Some(control) = p.mapping {
                     rows = rows.push(
                         row![
-                            text(control).size(11).color(DIM),
+                            text(control).size(style::SMALL).color(DIM),
                             space::horizontal(),
                             remove_button("Remove MIDI mapping", unmap),
                         ]
@@ -602,7 +608,7 @@ fn module_view<'a>(m: ModuleRows, drop_row: Option<(u32, usize)>, dragging: bool
     for port in m.ports {
         items = items.push(
             text(format!("{}: {}. {}", port.direction, port.label, port.description))
-                .size(11)
+                .size(style::SMALL)
                 .color(DIM),
         );
     }
@@ -633,7 +639,11 @@ fn value_control<'a>(
         ParamControl::Radio { choices, selected } => {
             let mut list = column![].spacing(3);
             for (i, name) in choices.into_iter().enumerate() {
-                list = list.push(radio(name, i, Some(selected), pick).size(12).text_size(12));
+                list = list.push(
+                    radio(name, i, Some(selected), pick)
+                        .size(style::SWITCH)
+                        .text_size(style::BODY),
+                );
             }
             list.into()
         }
@@ -645,7 +655,7 @@ fn value_control<'a>(
                 .collect();
             let current = options.get(selected).copied();
             pick_list(options, current, move |c: Choice| pick(c.index))
-                .text_size(12)
+                .text_size(style::BODY)
                 .width(Length::Fill)
                 .into()
         }
@@ -669,9 +679,9 @@ fn range_view<'a>(module: u32, index: usize, range: RangeRow) -> Element<'a, Mes
             range: n.index,
         })
         .placeholder("Full")
-        .text_size(11)
+        .text_size(style::SMALL)
         .width(96),
-        container(text("Range: what a full turn of the control covers.").size(12))
+        container(text("Range: what a full turn of the control covers.").size(style::BODY))
             .padding(6)
             .style(container::rounded_box),
         tooltip::Position::Top,
@@ -719,7 +729,7 @@ fn modulation_view<'a>(
         let id = a.id;
         let assignment = column![
             row![
-                text(a.source).size(11),
+                text(a.source).size(style::SMALL),
                 space::horizontal(),
                 remove_button("Remove modulation", Message::Unassign(id)),
             ]
@@ -728,7 +738,7 @@ fn modulation_view<'a>(
                 slider(-1.0..=1.0, a.depth, move |depth| Message::Depth { id, depth })
                     .on_release(Message::SliderReleased)
                     .step(0.01_f32),
-                text(a.depth_text).size(11).width(36),
+                text(a.depth_text).size(style::SMALL).width(36),
             ]
             .spacing(6)
             .align_y(center),
@@ -737,13 +747,13 @@ fn modulation_view<'a>(
                     id,
                     choice
                 },)
-                .text_size(11),
+                .text_size(style::SMALL),
                 space::horizontal(),
                 toggler(a.enabled)
                     .label(if a.enabled { "On" } else { "Off" })
                     .on_toggle(move |enabled| Message::Enabled { id, enabled })
-                    .size(14)
-                    .text_size(11),
+                    .size(style::SWITCH)
+                    .text_size(style::SMALL),
             ]
             .spacing(6)
             .align_y(center),
@@ -752,9 +762,9 @@ fn modulation_view<'a>(
         rows = rows.push(container(assignment).padding([0, 8]));
     }
     rows = rows.push(
-        button(text(if adding.is_some() { "Cancel" } else { "Add modulation" }).size(11))
+        button(text(if adding.is_some() { "Cancel" } else { "Add modulation" }).size(style::SMALL))
             .padding([2, 6])
-            .style(button::text)
+            .style(style::plain)
             .on_press(Message::AddModulation { module, index }),
     );
     if let Some(sources) = adding {
@@ -762,10 +772,10 @@ fn modulation_view<'a>(
         for s in sources {
             let source = s.source;
             list = list.push(
-                button(text(s.name).size(11))
+                button(text(s.name).size(style::SMALL))
                     .width(Length::Fill)
                     .padding([2, 6])
-                    .style(button::secondary)
+                    .style(style::secondary)
                     .on_press_maybe(s.enabled.then_some(Message::Assign { source, module, index })),
             );
         }
@@ -776,16 +786,16 @@ fn modulation_view<'a>(
 
 /// **Drives**: one group per output. A line selects its target.
 fn drives_view<'a>(drives: Vec<DrivesGroup>) -> Element<'a, Message> {
-    let mut list = column![text("Drives").size(13)].spacing(4);
+    let mut list = column![text("Drives").size(style::CONTROL)].spacing(4);
     for group in drives {
-        list = list.push(text(group.output).size(11).color(DIM));
+        list = list.push(text(group.output).size(style::SMALL).color(DIM));
         for line in group.lines {
-            let label = text(line.text).size(11);
+            let label = text(line.text).size(style::SMALL);
             list = list.push(
                 button(if line.enabled { label } else { label.color(DIM) })
                     .width(Length::Fill)
                     .padding([2, 8])
-                    .style(button::text)
+                    .style(style::plain)
                     .on_press(Message::SelectModule(line.target)),
             );
         }

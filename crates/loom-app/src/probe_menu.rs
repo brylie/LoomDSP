@@ -2,7 +2,8 @@
 //! meter places that module next to it, already connected. Spec:
 //! `docs/design/panels.md`, Add scope and Add meter.
 
-use iced::widget::{button, column, container, text};
+use crate::style::{self, button};
+use iced::widget::{column, container, text};
 use iced::{Element, Length, Point, Rectangle, Size, Theme};
 use loom_canvas::{GRID, PortRef, tile_size};
 use loom_core::ModuleDescriptor;
@@ -82,11 +83,11 @@ impl ProbeMenu {
     /// The menu, placed at its corner. The app lays it over the window.
     pub fn view(&self) -> Element<'_, Message> {
         let item = |label: &'static str, probe: Probe| {
-            button(text(label).size(13))
+            button(text(label).size(style::CONTROL))
                 .on_press(Message::Pick(probe))
                 .width(Length::Fill)
                 .height(ITEM_HEIGHT)
-                .style(button::text)
+                .style(style::plain)
         };
         let menu = column![item("Add scope", Probe::Scope), item("Add meter", Probe::Meter)]
             .padding(PADDING)

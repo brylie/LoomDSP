@@ -21,6 +21,9 @@ pub(crate) const KNOB_START: f32 = -0.75 * std::f32::consts::PI;
 pub(crate) const KNOB_SWEEP: f32 = 1.5 * std::f32::consts::PI;
 /// Radius of a knob's ring, in world units.
 const KNOB_RADIUS: f32 = 9.0;
+/// The least of a knob's value arc that is drawn, as a share of its sweep.
+/// The white pointer still marks the exact value.
+const KNOB_START_CAP: f32 = 0.04;
 /// Radius of a knob's modulation range arc: just outside its ring.
 const RANGE_RADIUS: f32 = 11.75;
 /// A knob's focus ring reaches this far left, right, and up from its centre:
@@ -186,16 +189,16 @@ impl ControlGeometry {
                             KNOB_SWEEP,
                             palette.control_track,
                         ));
-                        if t > 0.0 {
-                            arcs.push(ArcShape::new(
-                                centre,
-                                KNOB_RADIUS,
-                                2.5,
-                                KNOB_START,
-                                KNOB_SWEEP * t,
-                                palette.control_value,
-                            ));
-                        }
+                        // At least a short cap, so a knob at its minimum
+                        // still reads as live (visual-system.md, Knobs).
+                        arcs.push(ArcShape::new(
+                            centre,
+                            KNOB_RADIUS,
+                            2.5,
+                            KNOB_START,
+                            KNOB_SWEEP * t.max(KNOB_START_CAP),
+                            palette.control_value,
+                        ));
                         if let ModulationMark::Range { low, high } = modulation {
                             arcs.push(ArcShape::new(
                                 centre,
@@ -669,8 +672,39 @@ mod tests {
         // The scene, and so the tile, port, and cable buffers, did not change.
         assert_eq!(scene.generation(), scene_generation);
         assert_ne!(after.key, before.key);
-        // A value arc appeared on the knob.
-        assert_eq!(after.arcs.len(), before.arcs.len() + 1);
+        // The knob's value arc grew from its start cap to half its sweep.
+        assert_eq!(after.arcs.len(), before.arcs.len());
+        assert!((before.arcs[1].sweep() - KNOB_SWEEP * KNOB_START_CAP).abs() < 1e-6);
+        assert!((after.arcs[1].sweep() - KNOB_SWEEP * 0.5).abs() < 1e-6);
+    }
+
+    /// A knob at its minimum still draws an orange start cap, so it reads as
+    /// live; at its maximum it draws the whole arc (visual-system.md,
+    /// Knobs).
+    #[test]
+    fn a_knob_at_its_minimum_shows_a_start_cap() {
+        let scene = scene();
+        let palette = Palette::default();
+        let value_arc = |position: f32| {
+            let mut values = PanelValues::new();
+            values.set(
+                1,
+                0,
+                WidgetValue {
+                    position,
+                    ..WidgetValue::default()
+                },
+            );
+            ControlGeometry::build(&scene, &values, &palette).arcs[1]
+        };
+        let low = value_arc(0.0);
+        assert_eq!(
+            low.colour(),
+            pack(palette.control_value).components(),
+            "in the value colour"
+        );
+        assert!(low.sweep() > 0.0, "a start cap at 0");
+        assert!((value_arc(1.0).sweep() - KNOB_SWEEP).abs() < 1e-6, "the whole arc at 1");
     }
 
     fn modulated(position: f32, modulation: ModulationMark) -> WidgetValue {

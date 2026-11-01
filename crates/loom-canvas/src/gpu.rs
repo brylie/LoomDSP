@@ -103,6 +103,18 @@ impl Arc {
             unused: [0.0; 4],
         }
     }
+
+    /// The sweep in radians.
+    #[cfg(test)]
+    pub fn sweep(&self) -> f32 {
+        self.angles[1]
+    }
+
+    /// The colour, packed as the GPU reads it.
+    #[cfg(test)]
+    pub fn colour(&self) -> [f32; 4] {
+        self.colour
+    }
 }
 
 /// One cable.

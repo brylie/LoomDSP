@@ -1,6 +1,7 @@
 //! Offline module help from the running registry and bundled notes.
 
-use iced::widget::{button, column, container, markdown, row, scrollable, space, text};
+use crate::style::{self, button};
+use iced::widget::{column, container, markdown, row, scrollable, space, text};
 use iced::{Element, Length, Theme};
 use loom_core::ModuleDescriptor;
 use serde::Serialize;
@@ -116,20 +117,20 @@ impl Help {
     pub fn view(&self, theme: Theme) -> Element<'_, Message> {
         let m = &self.model;
         let header = row![
-            text(m.name).size(22),
+            text(m.name).size(style::TITLE),
             space::horizontal(),
             button("Close").on_press(Message::CloseHelp)
         ]
         .align_y(iced::Alignment::Center);
-        let mut content = column![text(m.id).size(12), text(m.description).size(15)].spacing(10);
+        let mut content = column![text(m.id).size(style::SMALL), text(m.description).size(style::BODY)].spacing(10);
         for (title, entries) in [
             ("Inputs", &m.inputs),
             ("Outputs", &m.outputs),
             ("Parameters", &m.params),
         ] {
-            content = content.push(text(title).size(18));
+            content = content.push(text(title).size(style::HEADING));
             if entries.is_empty() {
-                content = content.push(text("None.").size(13));
+                content = content.push(text("None.").size(style::BODY));
             }
             for entry in entries {
                 content = content.push(
@@ -137,14 +138,14 @@ impl Help {
                         "{} ({}) · {}\n{}",
                         entry.label, entry.name, entry.details, entry.description
                     ))
-                    .size(13),
+                    .size(style::BODY),
                 );
             }
         }
         if m.example.is_some() {
             content = content.push(button("Open example").on_press(Message::HelpExample));
         }
-        content = content.push(markdown::view(&self.markdown, theme).map(Message::HelpLink));
+        content = content.push(markdown::view(&self.markdown, style::markdown(&theme)).map(Message::HelpLink));
         container(
             container(
                 column![

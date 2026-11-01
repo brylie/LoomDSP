@@ -662,7 +662,9 @@ mod tests {
     /// A window image shows enabled buttons as enabled. Iced picks a
     /// button's look while it handles a redraw, and draws it as disabled
     /// before the first one, so without a redraw every button looked
-    /// disabled (#460).
+    /// disabled (#460). The toolbar also follows its button roles: no
+    /// primary button while MIDI learn is off, and Panic in danger red
+    /// (visual-system.md, Toolbar).
     #[test]
     fn window_images_draw_enabled_and_disabled_buttons_apart() {
         let app = example_app("subtractive.ron");
@@ -673,7 +675,9 @@ mod tests {
             );
             return;
         };
-        let primary = app.theme().palette().primary;
+        let palette = app.theme().palette();
+        let rgb = |c: iced::Color| [c.r, c.g, c.b].map(|v| (v * 255.0).round() as i32);
+        let near = |got: [u8; 3], want: [i32; 3]| got.iter().zip(want).all(|(&g, w)| (i32::from(g) - w).abs() <= 3);
         // The same app laid out by the test harness, to find the buttons
         // by their text. A new patch has nothing to undo.
         let mut ui = crate::ui_test::Ui::with_app(app);
@@ -689,16 +693,21 @@ mod tests {
         let new = fill("New");
         let undo = fill("Undo");
         assert_ne!(new, undo, "an enabled and a disabled button look the same");
-        let expected = [primary.r, primary.g, primary.b].map(|c| (c * 255.0).round() as i32);
+        for label in ["New", "Open", "Add module", "Redo", "MIDI learn", "Preferences"] {
+            assert!(!near(fill(label), rgb(palette.primary)), "{label} is primary");
+        }
+        let panic = fill("Panic");
+        assert!(
+            near(panic, rgb(palette.danger)),
+            "Panic is drawn {panic:?}, not danger red"
+        );
+        let primary = palette.primary;
+        let expected = rgb(primary);
         let is_primary = |rgb: &[u8]| {
             rgb.iter()
                 .zip(expected)
                 .all(|(&got, want)| (i32::from(got) - want).abs() <= 3)
         };
-        assert!(
-            is_primary(&new),
-            "New is drawn {new:?}, not the primary colour {expected:?}"
-        );
 
         // A toggler keeps its status the same way: an assignment that is on
         // fills its switch with the primary colour.

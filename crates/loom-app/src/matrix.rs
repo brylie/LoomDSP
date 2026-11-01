@@ -2,8 +2,9 @@
 //! session-only sorting, filtering, selection, and edit state.
 
 use crate::modulation::{self, PolarityChoice};
+use crate::style::{self, button};
 use crate::{App, DIM, Message, remove_button};
-use iced::widget::{button, checkbox, column, container, pick_list, row, scrollable, slider, space, text, text_input};
+use iced::widget::{checkbox, column, container, pick_list, row, scrollable, slider, space, text, text_input};
 use iced::{Element, Length, keyboard};
 use loom_core::{AssignmentId, Graph, ModuleId, OutputRef, WidgetKind};
 use serde::Serialize;
@@ -362,7 +363,7 @@ pub fn view<'a>(model: MatrixModel, state: &State, graph: &Graph) -> Element<'a,
             Column::Polarity => 140,
         };
         headings = headings.push(
-            button(text(format!("{}{arrow}", column.label())).size(11))
+            button(text(format!("{}{arrow}", column.label())).size(style::SMALL))
                 .on_press(Message::Matrix(Event::Sort(column)))
                 .padding([2, 3])
                 .width(width),
@@ -372,14 +373,14 @@ pub fn view<'a>(model: MatrixModel, state: &State, graph: &Graph) -> Element<'a,
     content = content.push(
         text_input("Filter modules or parameters", &model.filter)
             .on_input(|s| Message::Matrix(Event::Filter(s)))
-            .size(12),
+            .size(style::BODY),
     );
     content = content.push(
         checkbox(model.selected_only)
             .label("Selected module only")
             .on_toggle(|v| Message::Matrix(Event::SelectedOnly(v)))
-            .size(13)
-            .text_size(12),
+            .size(style::SWITCH)
+            .text_size(style::BODY),
     );
     if let Some(id) = model.selected {
         content = content.push(
@@ -388,7 +389,7 @@ pub fn view<'a>(model: MatrixModel, state: &State, graph: &Graph) -> Element<'a,
                 model.cell.label(),
                 if model.editing { " (editing)" } else { "" }
             ))
-            .size(11),
+            .size(style::SMALL),
         );
     }
     if let Some(add) = &state.add {
@@ -398,12 +399,14 @@ pub fn view<'a>(model: MatrixModel, state: &State, graph: &Graph) -> Element<'a,
             column![
                 pick_list(sources, add.source.clone(), |s| Message::Matrix(Event::AddSource(s)))
                     .placeholder("Source output")
-                    .text_size(11),
+                    .text_size(style::SMALL),
                 pick_list(targets, add.target.clone(), |t| Message::Matrix(Event::AddTarget(t)))
                     .placeholder("Target parameter")
-                    .text_size(11),
+                    .text_size(style::SMALL),
                 row![
-                    button("Create").on_press(Message::Matrix(Event::AddApply)),
+                    button("Create")
+                        .on_press(Message::Matrix(Event::AddApply))
+                        .style(style::primary),
                     button("Cancel").on_press(Message::Matrix(Event::Cancel)),
                 ]
                 .spacing(5),
@@ -414,7 +417,7 @@ pub fn view<'a>(model: MatrixModel, state: &State, graph: &Graph) -> Element<'a,
         content = content.push(button("Add").on_press(Message::Matrix(Event::AddOpen)));
     }
     if model.rows.is_empty() {
-        table = table.push(text("No modulation assignments").size(12).color(DIM));
+        table = table.push(text("No modulation assignments").size(style::BODY).color(DIM));
     }
     for a in model.rows {
         let id = AssignmentId(a.id);
@@ -422,20 +425,20 @@ pub fn view<'a>(model: MatrixModel, state: &State, graph: &Graph) -> Element<'a,
         let editing = state.edit.as_ref().filter(|e| e.id == id);
         let on = checkbox(a.on)
             .on_toggle(move |v| Message::Matrix(Event::Enabled(id, v)))
-            .size(13);
+            .size(style::SWITCH);
         let source: Element<'a, Message> = if editing.is_some_and(|e| e.column == Column::Source) {
             let options = sources(graph);
             let current = editing.and_then(|e| options.get(e.choice)).cloned();
             pick_list(options, current, move |s| Message::Matrix(Event::Source(id, s)))
-                .text_size(11)
+                .text_size(style::SMALL)
                 .into()
         } else {
-            button(text(a.source).size(11))
+            button(text(a.source).size(style::SMALL))
                 .on_press(Message::Matrix(Event::Edit(id, Column::Source)))
                 .style(if selected && state.cell == Column::Source {
-                    button::primary
+                    style::primary
                 } else {
-                    button::secondary
+                    style::secondary
                 })
                 .into()
         };
@@ -443,15 +446,15 @@ pub fn view<'a>(model: MatrixModel, state: &State, graph: &Graph) -> Element<'a,
             let options = targets(graph);
             let current = editing.and_then(|e| options.get(e.choice)).cloned();
             pick_list(options, current, move |t| Message::Matrix(Event::Target(id, t)))
-                .text_size(11)
+                .text_size(style::SMALL)
                 .into()
         } else {
-            button(text(a.target).size(11))
+            button(text(a.target).size(style::SMALL))
                 .on_press(Message::Matrix(Event::Edit(id, Column::Target)))
                 .style(if selected && state.cell == Column::Target {
-                    button::primary
+                    style::primary
                 } else {
-                    button::secondary
+                    style::secondary
                 })
                 .into()
         };
@@ -460,17 +463,17 @@ pub fn view<'a>(model: MatrixModel, state: &State, graph: &Graph) -> Element<'a,
                 .id("matrix-depth")
                 .on_input(|s| Message::Matrix(Event::DepthText(s)))
                 .on_submit(Message::Matrix(Event::Apply))
-                .size(11)
+                .size(style::SMALL)
                 .width(55)
                 .into()
         } else {
             row![
-                button(text(modulation::depth_text(a.depth)).size(11))
+                button(text(modulation::depth_text(a.depth)).size(style::SMALL))
                     .on_press(Message::Matrix(Event::Edit(id, Column::Depth)))
                     .style(if selected && state.cell == Column::Depth {
-                        button::primary
+                        style::primary
                     } else {
-                        button::secondary
+                        style::secondary
                     }),
                 slider(-1.0..=1.0, a.depth, move |v| Message::Matrix(Event::DepthDrag(id, v)))
                     .on_release(Message::Matrix(Event::DepthReleased))
@@ -486,15 +489,15 @@ pub fn view<'a>(model: MatrixModel, state: &State, graph: &Graph) -> Element<'a,
             let options = PolarityChoice::options(own);
             let current = options[editing.expect("editing polarity").choice];
             pick_list(options, Some(current), move |p| Message::Matrix(Event::Polarity(id, p)))
-                .text_size(11)
+                .text_size(style::SMALL)
                 .into()
         } else {
-            button(text(a.polarity).size(11))
+            button(text(a.polarity).size(style::SMALL))
                 .on_press(Message::Matrix(Event::Edit(id, Column::Polarity)))
                 .style(if selected && state.cell == Column::Polarity {
-                    button::primary
+                    style::primary
                 } else {
-                    button::secondary
+                    style::secondary
                 })
                 .into()
         };
@@ -505,7 +508,7 @@ pub fn view<'a>(model: MatrixModel, state: &State, graph: &Graph) -> Element<'a,
                 } else {
                     "○"
                 })
-                .size(11)
+                .size(style::SMALL)
             )
             .on_press(Message::Matrix(Event::Select(id, state.cell)))
             .width(20),

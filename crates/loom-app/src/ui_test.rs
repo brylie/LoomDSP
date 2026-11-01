@@ -109,6 +109,7 @@ impl Ui {
             recovery_dir: None,
             no_recovery: false,
             test_modules: false,
+            dev: false,
         });
         Self::with_app(app)
     }

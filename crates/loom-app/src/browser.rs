@@ -1,6 +1,7 @@
 //! The module browser: search the registry and add a module where the user
 //! opened the browser. Spec: `docs/design/module-browser.md`.
 
+use crate::style;
 use iced::widget::{column, container, mouse_area, row, scrollable, space, text, text_input};
 use iced::{Element, Length, Point, Rectangle, Task, Theme};
 use loom_canvas::GRID;
@@ -186,16 +187,16 @@ impl Browser {
             .id(INPUT)
             .on_input(Message::Query)
             .on_submit(Message::Submit)
-            .size(14)
+            .size(style::CONTROL)
             .padding(6);
 
         let rows = self.results.iter().enumerate().map(|(i, d)| {
             let highlighted = i == self.highlight;
             let line = row![
-                text(d.name).size(13),
-                text(d.category).size(11).style(text::secondary),
+                text(d.name).size(style::CONTROL),
+                text(d.category).size(style::SMALL).style(text::secondary),
                 space::horizontal(),
-                text(d.id).size(11).style(text::secondary),
+                text(d.id).size(style::SMALL).style(text::secondary),
             ]
             .spacing(8)
             .align_y(iced::Alignment::Center);
@@ -211,7 +212,7 @@ impl Browser {
                 .into()
         });
         let list: Element<'_, Message> = if self.results.is_empty() {
-            container(text("No modules match.").size(13).style(text::secondary))
+            container(text("No modules match.").size(style::CONTROL).style(text::secondary))
                 .padding(8)
                 .height(LIST_HEIGHT)
                 .into()
@@ -226,7 +227,7 @@ impl Browser {
         let panel = column![
             input,
             list,
-            container(text(description).size(12)).height(DESCRIPTION_HEIGHT),
+            container(text(description).size(style::BODY)).height(DESCRIPTION_HEIGHT),
         ]
         .spacing(SPACING)
         .padding(PADDING)
