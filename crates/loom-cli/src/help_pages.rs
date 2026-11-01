@@ -6,9 +6,7 @@
 //! Longer notes and an example patch go below [`MARKER`]; regenerating keeps
 //! everything after it.
 
-use loom_core::{
-    Channels, ModuleDescriptor, ParamMapping, ParamSpec, Polarity, PortDefault, PortSpec, Registry, Widget, WidgetKind,
-};
+use loom_core::{Channels, ModuleDescriptor, Polarity, PortSpec, Registry, Widget, WidgetKind};
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::io;
@@ -222,7 +220,7 @@ pub fn page(d: &ModuleDescriptor) -> String {
                 "| {} | {} | {} | {} |",
                 port_name(p),
                 signal(p),
-                unconnected(p.default),
+                p.default.text(),
                 cell(p.description)
             );
         }
@@ -256,8 +254,8 @@ pub fn page(d: &ModuleDescriptor) -> String {
                 out,
                 "| {} | {} | {} | {} |",
                 name(p.label, p.name),
-                range(p),
-                with_unit(p.default, p.unit),
+                cell(&p.range_text()),
+                cell(&p.value_text(p.default)),
                 cell(p.description)
             );
         }
@@ -295,59 +293,6 @@ fn signal(p: &PortSpec) -> String {
     match p.channels {
         Channels::Stereo => format!("{}, stereo", p.signal.name()),
         _ => p.signal.name().to_string(),
-    }
-}
-
-/// What an unconnected input reads, in words.
-fn unconnected(default: PortDefault) -> String {
-    match default {
-        PortDefault::Value(v) => number(v),
-        PortDefault::BarPhase => "bar phase".to_string(),
-        PortDefault::BeatPhase => "beat phase".to_string(),
-        PortDefault::Playing => "play gate".to_string(),
-    }
-}
-
-/// A parameter's range, with its unit and options.
-fn range(p: &ParamSpec) -> String {
-    let mut text = format!("{} to {}", number(p.min), with_unit(p.max, p.unit));
-    if p.options.integer {
-        text.push_str(", whole numbers");
-    }
-    if p.options.mapping == ParamMapping::Logarithmic {
-        text.push_str(", logarithmic");
-    }
-    if let Some(default) = p.default_range() {
-        let names: Vec<String> = p.options.ranges.iter().map(ToString::to_string).collect();
-        text.push_str(&format!(", control ranges {} (default {default})", names.join(", ")));
-    }
-    if !p.options.choices.is_empty() {
-        text.push_str(", choices ");
-        text.push_str(&cell(&p.options.choices.join(", ")));
-    }
-    if p.is_transient() {
-        text.push_str(", not saved");
-    }
-    text
-}
-
-/// A number followed by its unit, if it has one.
-fn with_unit(value: f32, unit: &str) -> String {
-    if unit.is_empty() {
-        number(value)
-    } else {
-        format!("{} {}", number(value), cell(unit))
-    }
-}
-
-/// A number as Rust prints it: no trailing zeros, no exponent for the
-/// ranges modules use.
-fn number(value: f32) -> String {
-    // -0 reads as 0 to people.
-    if value == 0.0 {
-        "0".to_string()
-    } else {
-        value.to_string()
     }
 }
 
@@ -414,6 +359,7 @@ fn cell(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use loom_core::PortDefault;
 
     /// The committed folder of help pages.
     fn docs_dir() -> PathBuf {
@@ -533,7 +479,7 @@ mod tests {
                 assert!(text.contains(&port_name(p)), "{} {}", d.id, p.name);
             }
             for p in d.params {
-                assert!(text.contains(&format!("| {} | {} |", name(p.label, p.name), range(p))));
+                assert!(text.contains(&format!("| {} | {} |", name(p.label, p.name), cell(&p.range_text()))));
             }
         }
     }
@@ -542,14 +488,13 @@ mod tests {
     #[test]
     fn values_read_as_words() {
         assert_eq!(cell("a | b"), "a \\| b");
-        assert_eq!(number(-0.0), "0");
-        assert_eq!(number(0.25), "0.25");
-        assert_eq!(number(20000.0), "20000");
-        assert_eq!(with_unit(440.0, "Hz"), "440 Hz");
-        assert_eq!(unconnected(PortDefault::BarPhase), "bar phase");
-        assert_eq!(unconnected(PortDefault::BeatPhase), "beat phase");
-        assert_eq!(unconnected(PortDefault::Playing), "play gate");
-        assert_eq!(unconnected(PortDefault::Value(1.0)), "1");
+        assert_eq!(loom_core::number_text(-0.0), "0");
+        assert_eq!(loom_core::number_text(0.25), "0.25");
+        assert_eq!(loom_core::number_text(20000.0), "20000");
+        assert_eq!(PortDefault::BarPhase.text(), "bar phase");
+        assert_eq!(PortDefault::BeatPhase.text(), "beat phase");
+        assert_eq!(PortDefault::Playing.text(), "play gate");
+        assert_eq!(PortDefault::Value(1.0).text(), "1");
         assert_eq!(name("", "x"), "`x`");
         assert_eq!(notes_of("no marker"), None);
         assert_eq!(notes_of(&format!("a\n{MARKER}\nb\n")).as_deref(), Some("b\n"));

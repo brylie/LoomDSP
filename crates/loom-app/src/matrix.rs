@@ -535,6 +535,7 @@ pub fn view<'a>(model: MatrixModel, state: &State, graph: &Graph) -> Element<'a,
     content = content.push(
         scrollable(table)
             .id("matrix-table")
+            .spacing(4)
             .width(Length::Fill)
             .height(Length::Fill),
     );

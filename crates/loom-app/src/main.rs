@@ -244,6 +244,8 @@ enum Message {
     OpenBrowser,
     /// Open help for the browser highlight or selected tile.
     ShowHelp,
+    /// Open the keyboard shortcuts page in the help overlay.
+    ShowShortcuts,
     /// Open help for a specific tile.
     ShowModuleHelp(u32),
     /// Close module help.
@@ -2440,7 +2442,13 @@ impl App {
                                 })
                                 .flatten()
                         });
-                    self.help = descriptor.map(help::Help::new);
+                    // With nothing to describe, F1 shows the shortcuts.
+                    self.help = Some(descriptor.map_or_else(help::Help::shortcuts, help::Help::new));
+                }
+            }
+            Message::ShowShortcuts => {
+                if self.rig.window.is_none() {
+                    self.help = Some(help::Help::shortcuts());
                 }
             }
             Message::ShowModuleHelp(id) => {
@@ -3599,7 +3607,8 @@ fn bar_text<'a>(content: impl text::IntoFragment<'a>) -> iced::widget::Text<'a> 
     text(content).size(style::BODY).wrapping(text::Wrapping::None)
 }
 
-const DIM: Color = Color::from_rgb(0.62, 0.65, 0.71);
+/// Quiet text. The same as `style::QUIET`, kept as a short name here.
+const DIM: Color = style::QUIET;
 
 /// Stats bar colour for a warning level.
 fn severity_colour(severity: alerts::Severity) -> Color {
@@ -3613,7 +3622,7 @@ fn severity_colour(severity: alerts::Severity) -> Color {
 /// Inspector help text, shown with nothing selected. It lists every canvas
 /// gesture and shortcut (#16), so keep it in step with `PatchCanvas::handle`
 /// and the key handling in `loom-canvas/src/widget.rs`.
-const HELP: &str = "A or a double-click on empty canvas opens the module browser at the pointer; type, then Enter adds.\n\
+pub(crate) const HELP: &str = "A or a double-click on empty canvas opens the module browser at the pointer; type, then Enter adds.\n\
 Drag from a port to patch a cable. Drag a connected input to move or remove its cable.\n\
 Drag tiles to move them. Shift-click or drag a box to select several. Cmd/Ctrl+A selects all.\n\
 Delete or Backspace removes the selection.\n\

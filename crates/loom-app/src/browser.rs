@@ -15,7 +15,7 @@ const ROW_HEIGHT: f32 = 26.0;
 /// Rows shown before the list scrolls.
 const ROWS: usize = 10;
 /// Height of the area for the highlighted module's description.
-const DESCRIPTION_HEIGHT: f32 = 52.0;
+const DESCRIPTION_HEIGHT: f32 = 64.0;
 const PADDING: f32 = 8.0;
 const SPACING: f32 = 6.0;
 const INPUT_HEIGHT: f32 = 30.0;
@@ -141,6 +141,12 @@ impl Browser {
         iced::widget::operation::focus(INPUT)
     }
 
+    /// The modules the list shows, best first.
+    #[cfg(test)]
+    pub fn results(&self) -> &[&'static ModuleDescriptor] {
+        &self.results
+    }
+
     /// The highlighted module, if there are results.
     pub fn highlighted(&self) -> Option<&'static ModuleDescriptor> {
         self.results.get(self.highlight).copied()
@@ -204,9 +210,7 @@ impl Browser {
                     },
                     ..container::Style::default()
                 }),
-                text(d.family.label()).size(style::SMALL).style(text::secondary),
-                space::horizontal(),
-                text(d.id).size(style::SMALL).style(text::secondary),
+                text(d.family.label()).size(style::SMALL).color(style::QUIET),
             ]
             .spacing(8)
             .align_y(iced::Alignment::Center);
@@ -222,26 +226,35 @@ impl Browser {
                 .into()
         });
         let list: Element<'_, Message> = if self.results.is_empty() {
-            container(text("No modules match.").size(style::CONTROL).style(text::secondary))
+            container(text("No modules match.").size(style::CONTROL).color(style::QUIET))
                 .padding(8)
                 .height(LIST_HEIGHT)
                 .into()
         } else {
+            // The scrollbar takes its own space, so it covers no row text.
             scrollable(column(rows))
                 .id(LIST)
+                .spacing(4)
                 .height(LIST_HEIGHT)
                 .on_scroll(|viewport| Message::Scrolled(viewport.absolute_offset().y))
                 .into()
         };
-        let description = self.highlighted().map_or("", |d| d.description);
-        let panel = column![
-            input,
-            list,
-            container(text(description).size(style::BODY)).height(DESCRIPTION_HEIGHT),
-        ]
-        .spacing(SPACING)
-        .padding(PADDING)
-        .width(WIDTH);
+        // The ID goes with the description, so no row is cut by a column
+        // or covered by the scrollbar (module-browser.md).
+        let about = self.highlighted().map_or_else(
+            || column![],
+            |d| {
+                column![
+                    text(d.description).size(style::BODY),
+                    text(d.id).size(style::SMALL).color(style::QUIET),
+                ]
+                .spacing(2)
+            },
+        );
+        let panel = column![input, list, container(about).height(DESCRIPTION_HEIGHT)]
+            .spacing(SPACING)
+            .padding(PADDING)
+            .width(WIDTH);
         let panel = container(panel).style(panel_style);
         iced::widget::pin(iced::widget::opaque(panel)).position(self.at).into()
     }
@@ -316,17 +329,19 @@ fn panel_style(theme: &Theme) -> container::Style {
     }
 }
 
-fn row_style(theme: &Theme, highlighted: bool) -> container::Style {
+/// The highlighted row: a lifted grey with an orange outline, like a
+/// selected card, so its quieter text stays readable on it.
+pub(crate) fn row_style(theme: &Theme, highlighted: bool) -> container::Style {
     if !highlighted {
         return container::Style::default();
     }
     let palette = theme.extended_palette();
     container::Style {
-        background: Some(palette.primary.weak.color.into()),
-        text_color: Some(palette.primary.weak.text),
+        background: Some(palette.background.weak.color.into()),
         border: iced::Border {
+            color: palette.primary.base.color,
+            width: 1.0,
             radius: 4.0.into(),
-            ..iced::Border::default()
         },
         ..container::Style::default()
     }

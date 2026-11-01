@@ -57,9 +57,11 @@ The index lists every module by family, in the module browser's order ([ADR-0029
 
 **Status:** Agreed and implemented.
 
-The app shows a module's help in an overlay. F1 opens it for the highlighted module in the browser, including while the search field has focus, or for the selected tile. The inspector has a help action, and the tile menu has a help item. Escape closes the overlay. The same help view is used for all three entry points.
+The app shows a module's help in an overlay over a dimmed backdrop. F1 opens it for the highlighted module in the browser, including while the search field has focus, or for the selected tile; with neither, F1 opens the **Keyboard shortcuts** page, which the inspector's button also opens. The inspector has a help action, and the tile menu has a help item. Escape, the **Close** button, or a click on the backdrop closes the overlay; a click inside it does nothing else. The same help view is used for all entry points.
 
-The view builds its description, port and parameter information from the module descriptor, as the generated page does. It shows the hand-written notes below that information as Markdown. Notes and example patches are bundled at compile time, so help works without the repository or a network connection. It does not add a separate link to the GitHub page.
+The overlay has a fixed title row with **Close**, and one scrolling body in reading order ([#457](https://github.com/brylie/LoomDSP/issues/457)): the family, category, and ID; the summary; the hand-written notes up to their example; **Parameters**, **Inputs**, and **Outputs**; then **Open example** and the example section. Each entry shows its label, its details in words with units ("20 to 20000 Hz, logarithmic. Default 1000 Hz.", "audio; reads 0 with no cable", "audio, bipolar"), and its description. Text wraps inside the overlay, and the scrollbar takes its own space. Sizes come from the [visual system](visual-system.md); the details use the same text as the generated pages (`ParamSpec::range_text`, `PortDefault::text`).
+
+The view builds its description, port and parameter information from the module descriptor, as the generated page does. It shows the hand-written notes as Markdown, split around the reference sections as above. Notes and example patches are bundled at compile time, so help works without the repository or a network connection. It does not add a separate link to the GitHub page.
 
 When a module has an example, **Open example** opens it as a new patch. It uses the usual unsaved-changes prompt before replacing the current patch. A module without an example has no Open example action. The view has a plain-data model exposed through `App::ui_snapshot()` and `--dump-ui`. Use `--select ID --show-help` with `--dump-ui` or `--screenshot-window` to inspect it without a window. Links to other module pages open their bundled help; links to other documents report that they are not bundled.
 
@@ -68,6 +70,9 @@ When a module has an example, **Open example** opens it as a new patch. It uses 
 - [x] F1 opens help for the highlighted browser item, even with search focused, and for the selected tile. The inspector action and tile menu open the same view. Escape closes it.
 - [x] The view shows description, ports and parameters from the descriptor and renders bundled hand-written notes as Markdown.
 - [x] Open example loads the bundled example after the usual unsaved-changes flow; it is absent when there is no example.
+- [x] With nothing selected, the inspector shows two short lines and a **Keyboard shortcuts** button; it and F1 open the shortcuts page (test, [#457](https://github.com/brylie/LoomDSP/issues/457)).
+- [x] Help details read as words with units, with no "unconnected:" and no stray spaces (test).
+- [x] Help text stays inside the overlay; a click on the backdrop closes it and a click inside does not (test).
 - [x] UI snapshots and `--dump-ui` report the open help view and its content.
 - [x] Help and examples work without access to the repository or network.
 

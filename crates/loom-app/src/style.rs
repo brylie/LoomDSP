@@ -23,6 +23,11 @@ pub const TITLE: f32 = 18.0;
 /// The marker of a toggle, checkbox, or radio button.
 pub const SWITCH: f32 = 14.0;
 
+/// Quiet text: details, IDs, and the title of a closed tab. Iced's own
+/// secondary text colour is 4.27:1 on the panels, under the 4.5:1 that
+/// WCAG asks for, so the app uses this instead (a test checks it).
+pub const QUIET: iced::Color = iced::Color::from_rgb(0.66, 0.69, 0.75);
+
 /// A button in the default role, secondary: quiet, so the patch and its
 /// values stand out. Give it another role with `.style(style::primary)`,
 /// `style::danger`, or `style::plain`.
@@ -83,11 +88,7 @@ pub fn tab(open: bool) -> impl Fn(&Theme, iced_button::Status) -> iced_button::S
         let hovered = matches!(status, iced_button::Status::Hovered | iced_button::Status::Pressed);
         iced_button::Style {
             background: (open || hovered).then(|| palette.background.weak.color.into()),
-            text_color: if open {
-                palette.background.base.text
-            } else {
-                palette.background.strong.color
-            },
+            text_color: if open { palette.background.base.text } else { QUIET },
             border: iced::Border {
                 color: if open {
                     palette.background.strong.color
@@ -123,6 +124,33 @@ pub fn card(selected: bool) -> impl Fn(&Theme) -> iced::widget::container::Style
     }
 }
 
+/// A pick list that reads as plain text until hovered or opened, such as
+/// an assignment's polarity on its card. Its handle stays visible, so it
+/// still looks like a choice.
+pub fn quiet_pick_list(theme: &Theme, status: iced::widget::pick_list::Status) -> iced::widget::pick_list::Style {
+    let palette = theme.extended_palette();
+    let active = !matches!(status, iced::widget::pick_list::Status::Active);
+    iced::widget::pick_list::Style {
+        text_color: palette.background.base.text,
+        placeholder_color: palette.background.strong.color,
+        handle_color: palette.background.strong.color,
+        background: if active {
+            palette.background.weak.color.into()
+        } else {
+            iced::Color::TRANSPARENT.into()
+        },
+        border: iced::Border {
+            color: if active {
+                palette.background.strong.color
+            } else {
+                iced::Color::TRANSPARENT
+            },
+            width: 1.0,
+            radius: 3.0.into(),
+        },
+    }
+}
+
 /// Markdown in the help overlay, on the same scale as the rest of the app.
 pub fn markdown(theme: &Theme) -> iced_markdown::Settings {
     let mut settings = iced_markdown::Settings::with_text_size(BODY, theme);
@@ -138,6 +166,35 @@ pub fn markdown(theme: &Theme) -> iced_markdown::Settings {
 
 #[cfg(test)]
 mod tests {
+    /// Quiet text stays readable wherever it sits: secondary text on the
+    /// panels and on the browser's highlighted row, and a closed tab's
+    /// title, all at 4.5:1 or more (WCAG 1.4.3).
+    #[test]
+    fn quiet_text_meets_contrast() {
+        use loom_canvas::{MIN_TEXT_CONTRAST, contrast_ratio};
+        let app = crate::tests::app();
+        let theme = app.theme();
+        let palette = theme.extended_palette();
+        let secondary = super::QUIET;
+        let highlight = crate::browser::row_style(&theme, true)
+            .background
+            .map(|b| match b {
+                iced::Background::Color(c) => c,
+                _ => panic!("a flat highlight"),
+            })
+            .expect("a highlight fill");
+        let closed_tab = super::tab(false)(&theme, iced::widget::button::Status::Active).text_color;
+        for (name, text, fill) in [
+            ("quiet text on the panel", secondary, palette.background.base.color),
+            ("quiet text on a card", secondary, palette.background.weak.color),
+            ("quiet text on the highlighted row", secondary, highlight),
+            ("a closed tab's title", closed_tab, palette.background.base.color),
+        ] {
+            let ratio = contrast_ratio(text, fill);
+            assert!(ratio >= MIN_TEXT_CONTRAST, "{name}: {ratio:.2}:1");
+        }
+    }
+
     /// No app source writes a size inline: every `.size(...)` and
     /// `text_size(...)` takes a token from this module, and no view builds
     /// an Iced button, whose default role is primary. Only this module may

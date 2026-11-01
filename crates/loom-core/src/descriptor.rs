@@ -167,6 +167,28 @@ pub enum PortDefault {
     Playing,
 }
 
+impl PortDefault {
+    /// What an unconnected input reads, in words, for help text.
+    pub fn text(self) -> String {
+        match self {
+            Self::Value(v) => number_text(v),
+            Self::BarPhase => "bar phase".to_string(),
+            Self::BeatPhase => "beat phase".to_string(),
+            Self::Playing => "play gate".to_string(),
+        }
+    }
+}
+
+/// A number as help text shows it: no trailing zeros, and 0 for -0, which
+/// reads as 0 to people.
+pub fn number_text(value: f32) -> String {
+    if value == 0.0 {
+        "0".to_string()
+    } else {
+        value.to_string()
+    }
+}
+
 /// One parameter.
 ///
 /// Write it as a struct literal, so every field is named and a missing one
@@ -321,6 +343,40 @@ pub enum ParamMapping {
 }
 
 impl ParamSpec {
+    /// A value of this parameter with its unit, such as "1000 Hz", for help
+    /// text. The in-app help and the generated pages share it.
+    pub fn value_text(&self, value: f32) -> String {
+        if self.unit.is_empty() {
+            number_text(value)
+        } else {
+            format!("{} {}", number_text(value), self.unit)
+        }
+    }
+
+    /// The parameter's range in words, with its unit and options, such as
+    /// "0.0005 to 10 s, logarithmic", for help text.
+    pub fn range_text(&self) -> String {
+        let mut text = format!("{} to {}", number_text(self.min), self.value_text(self.max));
+        if self.options.integer {
+            text.push_str(", whole numbers");
+        }
+        if self.options.mapping == ParamMapping::Logarithmic {
+            text.push_str(", logarithmic");
+        }
+        if let Some(default) = self.default_range() {
+            let names: Vec<String> = self.options.ranges.iter().map(ToString::to_string).collect();
+            text.push_str(&format!(", control ranges {} (default {default})", names.join(", ")));
+        }
+        if !self.options.choices.is_empty() {
+            text.push_str(", choices ");
+            text.push_str(&self.options.choices.join(", "));
+        }
+        if self.is_transient() {
+            text.push_str(", not saved");
+        }
+        text
+    }
+
     /// Marks the parameter as a whole number.
     pub const fn integer(mut self) -> Self {
         self.options.integer = true;

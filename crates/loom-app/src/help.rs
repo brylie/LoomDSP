@@ -37,11 +37,18 @@ pub struct Model {
     pub example: Option<String>,
 }
 
-/// The open overlay and its parsed Markdown.
+/// The open overlay and its parsed Markdown: the notes before the
+/// example, and the example section with what follows it.
 pub struct Help {
     pub model: Model,
-    markdown: Vec<markdown::Item>,
+    lead: Vec<markdown::Item>,
+    tail: Vec<markdown::Item>,
 }
+
+/// Where the hand-written notes' example section starts. The overlay shows
+/// the reference sections between the notes and the example
+/// (help-pages.md, In the app).
+const EXAMPLE_HEADING: &str = "\n## Example";
 
 impl Help {
     /// Builds the view from the actual registry descriptor.
@@ -55,27 +62,25 @@ impl Help {
             .and_then(|(_, rest)| rest.split_once("```"))
             .map(|(example, _)| example.trim().to_string());
         let port = |p: &loom_core::PortSpec, input: bool| {
-            let channels = if p.channels == loom_core::Channels::Stereo {
+            let stereo = if p.channels == loom_core::Channels::Stereo {
                 ", stereo"
             } else {
                 ""
             };
-            let extra = if input {
-                let default = match p.default {
-                    loom_core::PortDefault::Value(value) => value.to_string(),
-                    loom_core::PortDefault::BarPhase => "bar phase".into(),
-                    loom_core::PortDefault::BeatPhase => "beat phase".into(),
-                    loom_core::PortDefault::Playing => "play gate".into(),
-                };
-                format!("unconnected: {default}")
+            let details = if input {
+                format!("{}{stereo}; reads {} with no cable", p.signal.name(), p.default.text())
             } else {
-                format!("{:?}", p.polarity())
+                format!(
+                    "{}{stereo}, {}",
+                    p.signal.name(),
+                    format!("{:?}", p.polarity()).to_lowercase()
+                )
             };
             Entry {
                 name: p.name,
                 label: p.label,
                 description: p.description,
-                details: format!("{}{channels}, {extra}", p.signal.name()),
+                details,
             }
         };
         let model = Model {
@@ -93,83 +98,122 @@ impl Help {
                     name: p.name,
                     label: p.label,
                     description: p.description,
-                    details: format!(
-                        "{} to {} {}, default {}{}",
-                        p.min,
-                        p.max,
-                        p.unit,
-                        p.default,
-                        if p.options.choices.is_empty() {
-                            String::new()
-                        } else {
-                            format!(", choices {}", p.options.choices.join(", "))
-                        }
-                    ),
+                    details: format!("{}. Default {}.", p.range_text(), p.value_text(p.default)),
                 })
                 .collect(),
             notes: notes.clone(),
             example,
         };
+        Self::from_model(model)
+    }
+
+    /// The keyboard shortcuts page: every canvas gesture and shortcut,
+    /// opened from the inspector or with F1 when nothing is selected.
+    pub fn shortcuts() -> Self {
+        let notes: String = crate::HELP.lines().map(|line| format!("- {}\n", line.trim())).collect();
+        Self::from_model(Model {
+            id: "",
+            name: "Keyboard shortcuts",
+            category: "",
+            family: "",
+            description: "",
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            params: Vec::new(),
+            notes,
+            example: None,
+        })
+    }
+
+    /// Parses the notes, split before the example section.
+    fn from_model(model: Model) -> Self {
+        let (lead, tail) = match model.notes.find(EXAMPLE_HEADING) {
+            Some(at) => model.notes.split_at(at),
+            None => (model.notes.as_str(), ""),
+        };
         Self {
-            markdown: markdown::parse(&notes).collect(),
+            lead: markdown::parse(lead).collect(),
+            tail: markdown::parse(tail).collect(),
             model,
         }
     }
 
-    /// Draws the overlay from the same model exposed to snapshots.
+    /// Draws the overlay from the same model exposed to snapshots: a fixed
+    /// title row, then one scrolling body in reading order (summary, notes,
+    /// Parameters, Inputs, Outputs, example), over a dimmed backdrop that
+    /// closes help when clicked.
     pub fn view(&self, theme: Theme) -> Element<'_, Message> {
         let m = &self.model;
         let header = row![
             text(m.name).size(style::TITLE),
             space::horizontal(),
-            button("Close").on_press(Message::CloseHelp)
+            button(text("Close").size(style::CONTROL)).on_press(Message::CloseHelp)
         ]
         .align_y(iced::Alignment::Center);
-        let mut content = column![
-            text(format!("{} · {} · {}", m.family, m.category, m.id)).size(style::SMALL),
-            text(m.description).size(style::BODY)
-        ]
-        .spacing(10);
+        let mut content = column![].spacing(12).width(Length::Fill);
+        if !m.id.is_empty() {
+            content = content.push(
+                text(format!("{} · {} · {}", m.family, m.category, m.id))
+                    .size(style::SMALL)
+                    .color(style::QUIET),
+            );
+            content = content.push(text(m.description).size(style::BODY));
+        }
+        content = content.push(markdown::view(&self.lead, style::markdown(&theme)).map(Message::HelpLink));
         for (title, entries) in [
+            ("Parameters", &m.params),
             ("Inputs", &m.inputs),
             ("Outputs", &m.outputs),
-            ("Parameters", &m.params),
         ] {
+            if m.id.is_empty() {
+                break;
+            }
             content = content.push(text(title).size(style::HEADING));
             if entries.is_empty() {
-                content = content.push(text("None.").size(style::BODY));
+                content = content.push(text("None.").size(style::BODY).color(style::QUIET));
             }
             for entry in entries {
                 content = content.push(
-                    text(format!(
-                        "{} ({}) · {}\n{}",
-                        entry.label, entry.name, entry.details, entry.description
-                    ))
-                    .size(style::BODY),
+                    column![
+                        text(entry.label).size(style::CONTROL),
+                        text(entry.details.clone()).size(style::SMALL).color(style::QUIET),
+                        text(entry.description).size(style::BODY),
+                    ]
+                    .spacing(2),
                 );
             }
         }
         if m.example.is_some() {
-            content = content.push(button("Open example").on_press(Message::HelpExample));
+            content = content.push(button(text("Open example").size(style::CONTROL)).on_press(Message::HelpExample));
         }
-        content = content.push(markdown::view(&self.markdown, style::markdown(&theme)).map(Message::HelpLink));
-        container(
-            container(
-                column![
-                    header,
-                    scrollable(content).id("module-help-content").height(Length::Fill)
-                ]
-                .spacing(10),
-            )
-            .padding(20)
-            .width(720)
-            .height(Length::Fill)
-            .style(container::rounded_box),
+        content = content.push(markdown::view(&self.tail, style::markdown(&theme)).map(Message::HelpLink));
+        let panel = container(
+            column![
+                header,
+                // The scrollbar takes its own space, so text wraps before it
+                // instead of running under it.
+                scrollable(content)
+                    .id("module-help-content")
+                    .spacing(10)
+                    .height(Length::Fill)
+            ]
+            .spacing(12),
         )
-        .center_x(Length::Fill)
-        .center_y(Length::Fill)
-        .padding(30)
-        .into()
+        .padding(20)
+        .width(Length::Fill)
+        .max_width(720)
+        .height(Length::Fill)
+        .style(container::rounded_box);
+        // The panel takes its own clicks; the backdrop around it closes help.
+        let backdrop = container(iced::widget::opaque(panel))
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
+            .padding(30)
+            .style(|_: &Theme| container::Style {
+                background: Some(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.55).into()),
+                ..container::Style::default()
+            });
+        iced::widget::mouse_area(backdrop).on_press(Message::CloseHelp).into()
     }
 }
 
@@ -407,5 +451,107 @@ mod tests {
         let _ = clean.app.update(Message::HelpExample);
         assert!(clean.app.help.is_none());
         assert!(clean.app.file.is_none());
+    }
+
+    /// Clicks the middle of a window rectangle.
+    fn click(ui: &mut Ui, at: Point) {
+        ui.move_to(at);
+        ui.press();
+        ui.release();
+    }
+
+    /// With nothing selected the inspector is short, and its button and F1
+    /// open the shortcuts page (#457).
+    #[test]
+    fn empty_inspector_and_f1_open_the_shortcuts() {
+        let mut ui = Ui::open("subtractive.ron");
+        assert!(ui.text("Select a module to edit it.").is_some());
+        assert!(
+            ui.text(crate::HELP.lines().next().unwrap()).is_none(),
+            "no shortcut list in the panel"
+        );
+        let button = ui.text("Keyboard shortcuts").expect("the shortcuts button").center();
+        click(&mut ui, button);
+        assert_eq!(ui.app.help.as_ref().map(|h| h.model.name), Some("Keyboard shortcuts"));
+        ui.tap(Key::Named(Named::Escape), Modifiers::default());
+        assert!(ui.app.help.is_none());
+        ui.tap(Key::Named(Named::F1), Modifiers::default());
+        assert_eq!(ui.app.help.as_ref().map(|h| h.model.name), Some("Keyboard shortcuts"));
+    }
+
+    /// Help details read as words with units: no "unconnected:", no stray
+    /// spaces, and lower-case signal kinds (#457).
+    #[test]
+    fn help_details_read_as_words_with_units() {
+        let svf = loom_modules::registry().resolve("loom.filter.svf").unwrap();
+        let help = Help::new(svf);
+        let m = &help.model;
+        assert_eq!(m.params[0].details, "20 to 20000 Hz, logarithmic. Default 1000 Hz.");
+        assert_eq!(m.inputs[0].details, "audio; reads 0 with no cable");
+        assert_eq!(m.outputs[0].details, "audio, bipolar");
+        for entry in m.params.iter().chain(&m.inputs).chain(&m.outputs) {
+            assert!(!entry.details.contains("unconnected"), "{}", entry.details);
+            assert!(!entry.details.contains(" ,"), "{}", entry.details);
+        }
+    }
+
+    /// Help text wraps inside the overlay, and a click on the dimmed
+    /// backdrop closes help while a click inside it does not (#457).
+    #[test]
+    fn help_wraps_inside_and_closes_from_the_backdrop() {
+        let mut ui = Ui::open("subtractive.ron");
+        let _ = ui.app.update(Message::Canvas(CanvasEvent::Select(vec![4])));
+        ui.tap(Key::Named(Named::F1), Modifiers::default());
+        let close = ui.text("Close").expect("the Close button");
+        // The panel ends 20 px right of its Close button.
+        let right = close.x + close.width + 20.0;
+        let help = ui.app.help.as_ref().unwrap().model.clone();
+        for entry in help.params.iter().chain(&help.inputs).chain(&help.outputs) {
+            let text = ui.text(entry.description).expect("an entry's description");
+            assert!(
+                text.x + text.width <= right,
+                "{} runs past the panel",
+                entry.description
+            );
+        }
+        // "Parameters" shows only in help; the summary is also in the
+        // inspector, outside the overlay.
+        let heading = ui.text("Parameters").expect("a help heading");
+        click(&mut ui, heading.center());
+        assert!(ui.app.help.is_some(), "a click inside keeps help open");
+        click(&mut ui, Point::new(10.0, crate::WINDOW.height / 2.0));
+        assert!(ui.app.help.is_none(), "a click on the backdrop closes help");
+    }
+
+    /// The inspector lists each port on one line with its signal and range,
+    /// and keeps its description for hover text (#457).
+    #[test]
+    fn inspector_ports_are_one_line_each() {
+        let mut ui = Ui::open("subtractive.ron");
+        let _ = ui.app.update(Message::Canvas(CanvasEvent::Select(vec![4])));
+        let crate::inspector::Inspector::Module(rows) = ui.app.inspector_model() else {
+            panic!("the SVF's rows");
+        };
+        let input = &rows.ports[0];
+        assert_eq!((input.label, input.details.as_str()), ("In", "audio, -1 to 1"));
+        assert!(input.description.starts_with("The audio to filter."));
+        assert!(ui.text("audio, -1 to 1").is_some());
+        assert!(ui.text(&rows.kind).is_none(), "no raw type line");
+    }
+
+    /// Browser rows show no ID; the highlighted module's ID shows under
+    /// its description (#457).
+    #[test]
+    fn the_browser_shows_the_id_under_the_description() {
+        let mut ui = Ui::open("subtractive.ron");
+        // As a user opens it: A over the canvas.
+        let canvas = ui.canvas();
+        ui.move_to(Point::new(canvas.bounds.x + 8.0, canvas.bounds.y + 8.0));
+        ui.tap(Key::Character("a".into()), Modifiers::default());
+        let first = ui.app.browser.as_ref().unwrap().highlighted().unwrap();
+        assert!(ui.text(first.id).is_some(), "the highlighted ID");
+        assert!(ui.text(first.description).is_some());
+        let second = ui.app.browser.as_ref().unwrap().results()[1];
+        assert!(ui.text(second.id).is_none(), "no ID on other rows");
     }
 }

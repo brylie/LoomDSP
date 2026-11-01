@@ -7,9 +7,10 @@
 
 use crate::modulation::{self, PolarityChoice};
 use crate::style::{self, button};
-use crate::{App, DIM, HELP, Message, param, remove_button};
+use crate::{App, DIM, Message, param, remove_button};
 use iced::widget::{
-    column, container, mouse_area, pick_list, radio, row, scrollable, slider, space, text, text_input, toggler, tooltip,
+    checkbox, column, container, mouse_area, pick_list, radio, row, scrollable, slider, space, text, text_input,
+    tooltip,
 };
 use iced::{Element, Length, Theme};
 use loom_core::{AssignmentId, ModuleId, OutputRef, WidgetKind};
@@ -81,8 +82,11 @@ pub struct PortRow {
     pub direction: &'static str,
     /// Human-readable port label.
     pub label: &'static str,
-    /// Port description and nominal range.
+    /// Port description and nominal range, shown in hover text.
     pub description: String,
+    /// Signal kind and nominal range, such as "audio, -1 to 1", shown on
+    /// the port's line.
+    pub details: String,
 }
 
 /// One parameter.
@@ -365,6 +369,7 @@ impl App {
                         direction,
                         label: p.label,
                         description: format!("{} Usually {min} to {max}.", p.description),
+                        details: format!("{}, {min} to {max}", p.signal.name()),
                     }
                 })
                 .collect(),
@@ -446,12 +451,11 @@ impl App {
 /// The inspector's widgets.
 pub fn view<'a>(model: Inspector, drop_row: Option<(u32, usize)>, dragging: bool) -> Element<'a, Message> {
     let content: Element<'a, Message> = match model {
-        // The tab above already says "Inspector".
+        // Short, with the full list one click away (visual-system.md).
         Inspector::Help => column![
-            text("Select a module to edit its parameters.")
-                .size(style::BODY)
-                .color(DIM),
-            text(HELP).size(style::SMALL).color(DIM),
+            text("Select a module to edit it.").size(style::BODY).color(DIM),
+            text("Press A over the canvas to add one.").size(style::BODY).color(DIM),
+            button(text("Keyboard shortcuts").size(style::CONTROL)).on_press(Message::ShowShortcuts),
         ]
         .spacing(8)
         .into(),
@@ -491,7 +495,8 @@ pub fn view<'a>(model: Inspector, drop_row: Option<(u32, usize)>, dragging: bool
         }
         Inspector::Module(m) => module_view(m, drop_row, dragging),
     };
-    container(scrollable(container(content).padding(12)))
+    // The scrollbar takes its own space, so it never covers a value.
+    container(scrollable(container(content).padding(12)).spacing(4))
         .width(280)
         .height(Length::Fill)
         .into()
@@ -503,9 +508,9 @@ fn module_view<'a>(m: ModuleRows, drop_row: Option<(u32, usize)>, dragging: bool
         row![
             text(m.name).size(style::HEADING),
             space::horizontal(),
-            button("Help").on_press(Message::ShowModuleHelp(id))
-        ],
-        text(m.kind).size(style::SMALL).color(DIM),
+            button(text("Help").size(style::CONTROL)).on_press(Message::ShowModuleHelp(id))
+        ]
+        .align_y(iced::Alignment::Center),
         text(m.description).size(style::BODY),
     ]
     .spacing(6);
@@ -605,12 +610,27 @@ fn module_view<'a>(m: ModuleRows, drop_row: Option<(u32, usize)>, dragging: bool
     if !m.drives.is_empty() {
         items = items.push(drives_view(m.drives));
     }
+    // One line per port, its description in hover text.
+    let mut direction = "";
     for port in m.ports {
-        items = items.push(
-            text(format!("{}: {}. {}", port.direction, port.label, port.description))
-                .size(style::SMALL)
-                .color(DIM),
-        );
+        if port.direction != direction {
+            direction = port.direction;
+            let heading = if direction == "Input" { "Inputs" } else { "Outputs" };
+            items = items.push(text(heading).size(style::SMALL).color(DIM));
+        }
+        let line = row![
+            text(port.label).size(style::SMALL),
+            space::horizontal(),
+            text(port.details).size(style::SMALL).color(DIM),
+        ];
+        items = items.push(tooltip(
+            line,
+            container(text(port.description).size(style::BODY))
+                .padding(6)
+                .max_width(260)
+                .style(container::rounded_box),
+            tooltip::Position::Top,
+        ));
     }
     items.into()
 }
@@ -727,44 +747,41 @@ fn modulation_view<'a>(
     let mut rows = column![].spacing(6);
     for a in assignments {
         let id = a.id;
-        let assignment = column![
+        // The same card as the modulation matrix, without the target line:
+        // the target is this parameter (modulation.md, slice 3).
+        let card = column![
             row![
+                checkbox(a.enabled)
+                    .on_toggle(move |enabled| Message::Enabled { id, enabled })
+                    .size(style::SWITCH),
                 text(a.source).size(style::SMALL),
                 space::horizontal(),
                 remove_button("Remove modulation", Message::Unassign(id)),
             ]
+            .spacing(4)
             .align_y(center),
+            pick_list(a.polarities, Some(a.polarity), move |choice| Message::Polarity {
+                id,
+                choice
+            })
+            .text_size(style::SMALL)
+            .padding([1, 4])
+            .style(style::quiet_pick_list),
             row![
                 slider(-1.0..=1.0, a.depth, move |depth| Message::Depth { id, depth })
                     .on_release(Message::SliderReleased)
                     .step(0.01_f32),
-                text(a.depth_text).size(style::SMALL).width(36),
-            ]
-            .spacing(6)
-            .align_y(center),
-            row![
-                pick_list(a.polarities, Some(a.polarity), move |choice| Message::Polarity {
-                    id,
-                    choice
-                },)
-                .text_size(style::SMALL),
-                space::horizontal(),
-                toggler(a.enabled)
-                    .label(if a.enabled { "On" } else { "Off" })
-                    .on_toggle(move |enabled| Message::Enabled { id, enabled })
-                    .size(style::SWITCH)
-                    .text_size(style::SMALL),
+                text(a.depth_text).size(style::SMALL).width(40),
             ]
             .spacing(6)
             .align_y(center),
         ]
-        .spacing(3);
-        rows = rows.push(container(assignment).padding([0, 8]));
+        .spacing(2);
+        rows = rows.push(container(card).padding(6).width(Length::Fill).style(style::card(false)));
     }
     rows = rows.push(
-        button(text(if adding.is_some() { "Cancel" } else { "Add modulation" }).size(style::SMALL))
-            .padding([2, 6])
-            .style(style::plain)
+        button(text(if adding.is_some() { "Cancel" } else { "+ Add modulation" }).size(style::SMALL))
+            .padding([2, 8])
             .on_press(Message::AddModulation { module, index }),
     );
     if let Some(sources) = adding {

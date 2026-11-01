@@ -31,11 +31,12 @@ Before the browser, the toolbar had a drop-down of module IDs and an Add button.
 
 The panel's corner goes at that point, moved in as needed so the whole panel stays inside the canvas. *Why:* the toolbar button opens it at the canvas centre, not under the button, because only the canvas knows its camera, and so where the centre is in the patch.
 
-The browser is a small floating panel: a search field on top, a list of matches below, and the highlighted module's description at the bottom. The search field has keyboard focus as soon as the browser opens, so the user can type at once.
+The browser is a small floating panel: a search field on top, a list of matches below, and the highlighted module's description and ID at the bottom. The search field has keyboard focus as soon as the browser opens, so the user can type at once.
 
 ### Searching
 
-- Each module shows its **name**, a small swatch of its **family** colour with the family name, and its **ID** in a quieter style ([ADR-0029](../adr/0029-module-families-and-a-shared-palette.md)).
+- Each module shows its **name** and a small swatch of its **family** colour with the family name ([ADR-0029](../adr/0029-module-families-and-a-shared-palette.md)). The highlighted module's **ID** shows under its description at the bottom, in a quieter style, so no row is cut and the scrollbar covers no text ([#457](https://github.com/brylie/LoomDSP/issues/457)).
+- The highlighted row is a lifted grey with an orange outline, so its quieter text stays readable (at least 4.5:1, tested).
 - An empty search lists every module by family, in the family order of the [visual system](visual-system.md#module-families), then by name.
 - Typing filters the list. A module matches when every word of the query is found in its name, ID, category, or family, ignoring case. Example: `osc saw` matches `loom.osc.saw`; `filter` matches every module in the Filter category.
 - Results are ranked: a name that starts with the query first, then a word in the name that starts with it, then any other match. Ties keep the empty-search order.

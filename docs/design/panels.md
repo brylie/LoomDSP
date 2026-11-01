@@ -125,6 +125,16 @@ The inspector stays, as the place for:
 - typing exact values;
 - modulation ranges, MIDI mappings, and other settings that do not fit on a control.
 
+### Layout
+
+**Status:** Agreed, P1 ([#457](https://github.com/brylie/LoomDSP/issues/457)).
+
+- **With nothing selected,** two short lines ("Select a module to edit it." and "Press A over the canvas to add one.") and a **Keyboard shortcuts** button that opens the shortcut list in the help overlay. *Why:* the full list of gestures was useful once and noise after; it was about 30 lines in a 280 px column.
+- **A module** shows its name, the **Help** button, its description, then its parameters. The type ID is not shown here: it is in the header's hover text and in help.
+- **Ports** come last, under small **Inputs** and **Outputs** headings, one line each: the label, then the signal kind and usual range ("audio, -1 to 1"). The description is in the line's hover text.
+- **Modulation assignments** under a parameter use the matrix's card ([modulation.md](modulation.md#slice-3-the-modulation-matrix)) without the target line: on and source with ×, the polarity as a quiet pick list, then the depth slider and value. **+ Add modulation** is a button.
+- The scrollbar takes its own space, so it never covers a value.
+
 MIDI learn grew past the inspector. ADR-0013 places it there, and that ADR is frozen, so the change is recorded here: learn mode arms controls on tiles as well as inspector rows, and the inspector shows each parameter's mapping and removes it ([MIDI learn](midi-learn.md#seeing-and-removing-mappings)). *Why:* touching the control you want, then the hardware, is the order the user thinks in.
 
 ### Removing an item

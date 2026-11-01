@@ -709,22 +709,20 @@ mod tests {
                 .all(|(&got, want)| (i32::from(got) - want).abs() <= 3)
         };
 
-        // A toggler keeps its status the same way: an assignment that is on
-        // fills its switch with the primary colour.
+        // A checkbox keeps its status the same way: an assignment that is
+        // on fills its box, left of its source, with the primary colour.
         let mut app = example_app("modulation.ron");
         app.selection.insert(4);
         let pixels = render_window(&app).expect("the renderer used above");
         let mut ui = crate::ui_test::Ui::with_app(app);
-        // The switch's label is not a text widget, so find the LFO
-        // assignment's depth, which sits right above the switch.
-        let depth = ui.text("+8%").expect("the LFO assignment's depth");
-        let top = (depth.y + depth.height) as usize;
-        let left = (depth.x - 20.0) as usize;
-        let filled = (top..top + 30)
-            .flat_map(|y| (left..left + 40).map(move |x| (y * width + x) * 4))
+        let source = ui.text("LFO #5: Out").expect("the LFO assignment's source");
+        let y = source.center_y() as usize;
+        let left = (source.x - 30.0) as usize;
+        let filled = (y - 4..y + 4)
+            .flat_map(|y| (left..source.x as usize).map(move |x| (y * width + x) * 4))
             .filter(|&at| is_primary(&pixels[at..at + 3]))
             .count();
-        assert!(filled > 20, "the On switch is not filled with the primary colour");
+        assert!(filled > 20, "the On box is not filled with the primary colour");
     }
 
     /// A headless window draw exercises the second GPU primitive and shows

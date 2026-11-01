@@ -41,7 +41,7 @@ pub use controller::{Controller, EngineParts, MidiSender, create_engine};
 pub use descriptor::{
     ButtonMode, Channels, DisplayKind, DisplaySpec, Family, MAX_DISPLAYS, MissingText, ModuleConfig, ModuleDescriptor,
     ModuleRole, Panel, ParamMapping, ParamOptions, ParamRange, ParamSpec, Polarity, PortDefault, PortRange, PortSpec,
-    SpecKind, Undocumented, Widget, WidgetKind, assert_documented,
+    SpecKind, Undocumented, Widget, WidgetKind, assert_documented, number_text,
 };
 pub use display::{DisplayReader, DisplaySource, TriggerFlag};
 pub use engine::{Engine, EngineConfig, EngineStats, RestartFadeSender};
