@@ -1162,18 +1162,41 @@ impl ButtonMode {
 
 impl ModuleDescriptor {
     /// Index of the input with this name.
-    pub fn input_index(&self, name: &str) -> Option<usize> {
-        self.inputs.iter().position(|p| p.name == name)
+    ///
+    /// A `const fn`, so a module can name its ports by looking them up in
+    /// its own descriptor at compile time. A wrong name is then a build
+    /// error, and reordering the descriptor cannot leave an index behind:
+    ///
+    /// ```
+    /// # static SVF: loom_core::ModuleDescriptor = loom_core::ModuleDescriptor {
+    /// #     id: "doc.svf", version: 1, name: "SVF", category: "Doc", family: loom_core::Family::FiltersAndEffects, description: "",
+    /// #     inputs: &[], outputs: &[], params: &[], role: loom_core::ModuleRole::UnitDelay,
+    /// #     panel: loom_core::Panel::EMPTY, displays: &[],
+    /// # };
+    /// # const _: Option<usize> = SVF.input_index("in");
+    /// // In a module: const IN: usize = SVF.input_index("in").unwrap();
+    /// ```
+    pub const fn input_index(&self, name: &str) -> Option<usize> {
+        port_position(self.inputs, name)
     }
 
-    /// Index of the output with this name.
-    pub fn output_index(&self, name: &str) -> Option<usize> {
-        self.outputs.iter().position(|p| p.name == name)
+    /// Index of the output with this name. A `const fn`, like
+    /// [`input_index`](Self::input_index).
+    pub const fn output_index(&self, name: &str) -> Option<usize> {
+        port_position(self.outputs, name)
     }
 
-    /// Index of the parameter with this name.
-    pub fn param_index(&self, name: &str) -> Option<usize> {
-        self.params.iter().position(|p| p.name == name)
+    /// Index of the parameter with this name. A `const fn`, like
+    /// [`input_index`](Self::input_index).
+    pub const fn param_index(&self, name: &str) -> Option<usize> {
+        let mut i = 0;
+        while i < self.params.len() {
+            if same_name(self.params[i].name, name) {
+                return Some(i);
+            }
+            i += 1;
+        }
+        None
     }
 
     /// Width and height of `widget` in grid units. Radio buttons are one row
@@ -1537,6 +1560,34 @@ impl std::fmt::Display for Undocumented {
 struct Text {
     undocumented: Undocumented,
     value: &'static str,
+}
+
+/// Index of the port named `name` in `ports`.
+const fn port_position(ports: &[PortSpec], name: &str) -> Option<usize> {
+    let mut i = 0;
+    while i < ports.len() {
+        if same_name(ports[i].name, name) {
+            return Some(i);
+        }
+        i += 1;
+    }
+    None
+}
+
+/// `a == b`, in a `const fn`, where `str` equality is not available yet.
+const fn same_name(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < a.len() {
+        if a[i] != b[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
 }
 
 const fn is_blank(text: &str) -> bool {

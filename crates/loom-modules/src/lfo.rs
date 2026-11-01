@@ -144,13 +144,18 @@ struct Lfo {
 }
 
 impl Lfo {
+    const SYNC: usize = LFO.param_index("sync").unwrap();
+    const RATE: usize = LFO.param_index("rate").unwrap();
+    const CYCLES: usize = LFO.param_index("cycles").unwrap();
+    const SHAPE: usize = LFO.param_index("shape").unwrap();
+
     fn new(config: &ModuleConfig) -> Self {
         Self {
             sample_rate: f64::from(config.sample_rate),
             synced: false,
             cycles: 1.0,
             shape: 0,
-            rate: Smoothed::new(1.0, config.sample_rate, LFO.params[1].options.smooth_seconds),
+            rate: Smoothed::new(1.0, config.sample_rate, LFO.params[Self::RATE].options.smooth_seconds),
             phase: 0.0,
         }
     }
@@ -183,7 +188,12 @@ impl Module for Lfo {
     }
 
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let (sync_mod, rate_mod, cycles_mod, shape_mod) = (io.param(0), io.param(1), io.param(2), io.param(3));
+        let (sync_mod, rate_mod, cycles_mod, shape_mod) = (
+            io.param(Self::SYNC),
+            io.param(Self::RATE),
+            io.param(Self::CYCLES),
+            io.param(Self::SHAPE),
+        );
         let ([phase_in], [out, out90, phase_out]) = io.split::<1, 3>();
         for i in 0..out.len() {
             // Modulated values count for this frame only, so removing an
@@ -213,16 +223,16 @@ impl Module for Lfo {
 
     fn set_param(&mut self, index: usize, value: f32) {
         match index {
-            0 => self.synced = value >= 0.5,
-            1 => self.rate.set_target(value),
-            2 => self.cycles = f64::from(value.round().max(1.0)),
-            3 => self.shape = value as u8,
+            Self::SYNC => self.synced = value >= 0.5,
+            Self::RATE => self.rate.set_target(value),
+            Self::CYCLES => self.cycles = f64::from(value.round().max(1.0)),
+            Self::SHAPE => self.shape = value as u8,
             _ => {}
         }
     }
 
     fn param_glide(&self, index: usize) -> Option<f32> {
-        if index == 1 { self.rate.gliding() } else { None }
+        if index == Self::RATE { self.rate.gliding() } else { None }
     }
 
     fn reset(&mut self) {

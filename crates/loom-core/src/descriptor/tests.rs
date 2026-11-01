@@ -363,3 +363,58 @@ fn select_and_shape_panel_bindings_are_checked() {
             .contains("shape needs")
     );
 }
+
+/// A port for [`NAMED`].
+const fn port(name: &'static str) -> PortSpec {
+    PortSpec {
+        name,
+        label: name,
+        signal: SignalType::Audio,
+        description: "A test port.",
+        default: PortDefault::Value(0.0),
+        range: crate::PortRange::Signal,
+        channels: Channels::PerChannel,
+    }
+}
+
+/// An input and a parameter share the name `cutoff`, like on a filter.
+static NAMED: ModuleDescriptor = ModuleDescriptor {
+    id: "test.named",
+    version: 1,
+    name: "Named",
+    category: "Test",
+    family: crate::Family::Interface,
+    description: "",
+    inputs: &[port("in"), port("cutoff")],
+    outputs: &[port("low"), port("high")],
+    params: &[GAIN, CUTOFF],
+    role: ModuleRole::UnitDelay,
+    panel: Panel::EMPTY,
+    displays: &[],
+};
+
+/// Looked up at compile time, the way modules name their indices.
+const NAMED_CUTOFF: usize = NAMED.param_index("cutoff").unwrap();
+const NAMED_CUTOFF_IN: usize = NAMED.input_index("cutoff").unwrap();
+const NAMED_HIGH_OUT: usize = NAMED.output_index("high").unwrap();
+
+/// Each lookup searches its own list, at compile time and at run time.
+#[test]
+fn indices_are_found_by_name_in_their_own_list() {
+    assert_eq!((NAMED_CUTOFF, NAMED_CUTOFF_IN, NAMED_HIGH_OUT), (1, 1, 1));
+    assert_eq!(NAMED.param_index("gain"), Some(0));
+    assert_eq!(NAMED.input_index("in"), Some(0));
+    assert_eq!(NAMED.output_index("low"), Some(0));
+    // `in` is an input, not a parameter or an output.
+    assert_eq!(NAMED.param_index("in"), None);
+    assert_eq!(NAMED.output_index("in"), None);
+}
+
+/// Only the whole name matches: not a prefix, a longer name, or another case.
+#[test]
+fn only_the_exact_name_matches() {
+    for name in ["cut", "cutoffs", "Cutoff", ""] {
+        assert_eq!(NAMED.param_index(name), None, "{name:?}");
+        assert_eq!(NAMED.input_index(name), None, "{name:?}");
+    }
+}

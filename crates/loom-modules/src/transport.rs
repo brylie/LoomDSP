@@ -195,15 +195,15 @@ pub static TRANSPORT: ModuleDescriptor = ModuleDescriptor {
 };
 
 /// Parameter indices.
-const TEMPO: usize = 0;
-const NUMERATOR: usize = 1;
-const DENOMINATOR: usize = 2;
-const RUN: usize = 3;
-const RESET: usize = 4;
+const TEMPO: usize = TRANSPORT.param_index("tempo").unwrap();
+const NUMERATOR: usize = TRANSPORT.param_index("numerator").unwrap();
+const DENOMINATOR: usize = TRANSPORT.param_index("denominator").unwrap();
+const RUN: usize = TRANSPORT.param_index("run").unwrap();
+const RESET: usize = TRANSPORT.param_index("reset").unwrap();
 
 /// Input indices.
-const RUN_IN: usize = 0;
-const RESET_IN: usize = 1;
+const RUN_IN: usize = TRANSPORT.input_index("run").unwrap();
+const RESET_IN: usize = TRANSPORT.input_index("reset").unwrap();
 
 /// State for `loom.clock.transport`.
 ///

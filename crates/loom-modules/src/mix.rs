@@ -263,7 +263,11 @@ pub static CROSSFADE: ModuleDescriptor = ModuleDescriptor {
     ],
     role: ModuleRole::Dsp(|config| {
         Box::new(Crossfade {
-            mix: Smoothed::new(0.5, config.sample_rate, CROSSFADE.params[0].options.smooth_seconds),
+            mix: Smoothed::new(
+                0.5,
+                config.sample_rate,
+                CROSSFADE.params[Crossfade::MIX].options.smooth_seconds,
+            ),
             linear: false,
         })
     }),
@@ -277,6 +281,11 @@ struct Crossfade {
     linear: bool,
 }
 
+impl Crossfade {
+    const MIX: usize = CROSSFADE.param_index("mix").unwrap();
+    const LAW: usize = CROSSFADE.param_index("law").unwrap();
+}
+
 impl Module for Crossfade {
     /// Takes the running state of another instance (ADR-0022).
     fn copy_state_from(&mut self, other: &dyn Module) -> bool {
@@ -284,7 +293,7 @@ impl Module for Crossfade {
     }
 
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let (modulated, law_mod) = (io.param(0), io.param(1));
+        let (modulated, law_mod) = (io.param(Self::MIX), io.param(Self::LAW));
         let ([a, b], [out]) = io.split::<2, 1>();
         for (i, out) in out.iter_mut().enumerate() {
             let linear = law_mod.map_or(i, self.linear, |v| v >= 0.5);
@@ -305,13 +314,14 @@ impl Module for Crossfade {
 
     fn set_param(&mut self, index: usize, value: f32) {
         match index {
-            0 => self.mix.set_target(value),
-            _ => self.linear = value >= 0.5,
+            Self::MIX => self.mix.set_target(value),
+            Self::LAW => self.linear = value >= 0.5,
+            _ => {}
         }
     }
 
     fn param_glide(&self, index: usize) -> Option<f32> {
-        if index == 0 { self.mix.gliding() } else { None }
+        if index == Self::MIX { self.mix.gliding() } else { None }
     }
 
     fn reset(&mut self) {
@@ -366,15 +376,21 @@ pub static JOIN: ModuleDescriptor = ModuleDescriptor {
 #[derive(Clone)]
 struct Join;
 
+impl Join {
+    const LEFT_IN: usize = JOIN.input_index("left").unwrap();
+    const RIGHT_IN: usize = JOIN.input_index("right").unwrap();
+    const OUT: usize = JOIN.output_index("out").unwrap();
+}
+
 impl Module for Join {
     fn copy_state_from(&mut self, other: &dyn Module) -> bool {
         loom_core::copy_state(self, other)
     }
 
     fn process(&mut self, _: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let [left, _] = io.stereo_input(0);
-        let [right, _] = io.stereo_input(1);
-        let [out_left, out_right] = io.stereo_output(0);
+        let [left, _] = io.stereo_input(Self::LEFT_IN);
+        let [right, _] = io.stereo_input(Self::RIGHT_IN);
+        let [out_left, out_right] = io.stereo_output(Self::OUT);
         out_left.copy_from_slice(left);
         out_right.copy_from_slice(right);
     }
@@ -403,15 +419,21 @@ pub static SPLIT: ModuleDescriptor = ModuleDescriptor {
 #[derive(Clone)]
 struct Split;
 
+impl Split {
+    const IN: usize = SPLIT.input_index("in").unwrap();
+    const LEFT_OUT: usize = SPLIT.output_index("left").unwrap();
+    const RIGHT_OUT: usize = SPLIT.output_index("right").unwrap();
+}
+
 impl Module for Split {
     fn copy_state_from(&mut self, other: &dyn Module) -> bool {
         loom_core::copy_state(self, other)
     }
 
     fn process(&mut self, _: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let [left, right] = io.stereo_input(0);
-        io.output(0).copy_from_slice(left);
-        io.output(1).copy_from_slice(right);
+        let [left, right] = io.stereo_input(Self::IN);
+        io.output(Self::LEFT_OUT).copy_from_slice(left);
+        io.output(Self::RIGHT_OUT).copy_from_slice(right);
     }
 }
 

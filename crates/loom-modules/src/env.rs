@@ -211,6 +211,13 @@ struct Envelope {
 }
 
 impl Envelope {
+    const ATTACK: usize = ENVELOPE.param_index("attack").unwrap();
+    const DECAY: usize = ENVELOPE.param_index("decay").unwrap();
+    const SUSTAIN: usize = ENVELOPE.param_index("sustain").unwrap();
+    const RELEASE: usize = ENVELOPE.param_index("release").unwrap();
+    const MODE: usize = ENVELOPE.param_index("mode").unwrap();
+    const CURVE: usize = ENVELOPE.param_index("curve").unwrap();
+
     /// An idle envelope with the default parameters.
     fn new(config: &ModuleConfig) -> Self {
         Self {
@@ -267,12 +274,12 @@ impl Module for Envelope {
     }
 
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let attack = io.param(0);
-        let decay = io.param(1);
-        let sustain = io.param(2);
-        let release = io.param(3);
-        let mode = io.param(4);
-        let curve = io.param(5);
+        let attack = io.param(Self::ATTACK);
+        let decay = io.param(Self::DECAY);
+        let sustain = io.param(Self::SUSTAIN);
+        let release = io.param(Self::RELEASE);
+        let mode = io.param(Self::MODE);
+        let curve = io.param(Self::CURVE);
         let ([gate], [out]) = io.split::<1, 1>();
         for (i, (out, &g)) in out.iter_mut().zip(gate).enumerate() {
             let attack = attack.at_or(i, self.attack);
@@ -348,12 +355,12 @@ impl Module for Envelope {
 
     fn set_param(&mut self, index: usize, value: f32) {
         match index {
-            0 => self.attack = value,
-            1 => self.decay = value,
-            2 => self.sustain = value,
-            3 => self.release = value,
-            4 => self.ad = value >= 0.5,
-            5 => self.curve = value,
+            Self::ATTACK => self.attack = value,
+            Self::DECAY => self.decay = value,
+            Self::SUSTAIN => self.sustain = value,
+            Self::RELEASE => self.release = value,
+            Self::MODE => self.ad = value >= 0.5,
+            Self::CURVE => self.curve = value,
             _ => {}
         }
     }

@@ -79,7 +79,7 @@ pub static ADD: ModuleDescriptor = ModuleDescriptor {
     .ranges(WIDE_RANGES, DEFAULT_RANGE)],
     role: ModuleRole::Dsp(|config| {
         Box::new(Add {
-            offset: Smoothed::new(0.0, config.sample_rate, ADD.params[0].options.smooth_seconds),
+            offset: Smoothed::new(0.0, config.sample_rate, ADD.params[Add::OFFSET].options.smooth_seconds),
         })
     }),
     panel: Panel::new(3, 3, &[Widget::knob(0, 0, "offset")]),
@@ -91,6 +91,10 @@ struct Add {
     offset: Smoothed,
 }
 
+impl Add {
+    const OFFSET: usize = ADD.param_index("offset").unwrap();
+}
+
 impl Module for Add {
     /// Takes the running state of another instance (ADR-0022).
     fn copy_state_from(&mut self, other: &dyn Module) -> bool {
@@ -98,7 +102,7 @@ impl Module for Add {
     }
 
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let param = io.param(0);
+        let param = io.param(Self::OFFSET);
         let ([a, b], [out]) = io.split::<2, 1>();
         for (i, ((out, &a), &b)) in out.iter_mut().zip(a).zip(b).enumerate() {
             let offset = param.at_or(i, self.offset.tick());
@@ -107,13 +111,17 @@ impl Module for Add {
     }
 
     fn set_param(&mut self, index: usize, value: f32) {
-        if index == 0 {
+        if index == Self::OFFSET {
             self.offset.set_target(value);
         }
     }
 
     fn param_glide(&self, index: usize) -> Option<f32> {
-        if index == 0 { self.offset.gliding() } else { None }
+        if index == Self::OFFSET {
+            self.offset.gliding()
+        } else {
+            None
+        }
     }
 
     /// Snaps the offset to its target (live patching spec, rule 7).
@@ -174,7 +182,7 @@ pub static MUL: ModuleDescriptor = ModuleDescriptor {
     .ranges(WIDE_RANGES, DEFAULT_RANGE)],
     role: ModuleRole::Dsp(|config| {
         Box::new(Mul {
-            gain: Smoothed::new(1.0, config.sample_rate, MUL.params[0].options.smooth_seconds),
+            gain: Smoothed::new(1.0, config.sample_rate, MUL.params[Mul::GAIN].options.smooth_seconds),
         })
     }),
     panel: Panel::new(3, 3, &[Widget::knob(0, 0, "gain")]),
@@ -186,6 +194,11 @@ struct Mul {
     gain: Smoothed,
 }
 
+impl Mul {
+    const B_IN: usize = MUL.input_index("b").unwrap();
+    const GAIN: usize = MUL.param_index("gain").unwrap();
+}
+
 impl Module for Mul {
     /// Takes the running state of another instance (ADR-0022).
     fn copy_state_from(&mut self, other: &dyn Module) -> bool {
@@ -193,8 +206,8 @@ impl Module for Mul {
     }
 
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let b_connected = io.is_connected(1);
-        let param = io.param(0);
+        let b_connected = io.is_connected(Self::B_IN);
+        let param = io.param(Self::GAIN);
         let ([a, b], [out]) = io.split::<2, 1>();
         for (i, ((out, &a), &b)) in out.iter_mut().zip(a).zip(b).enumerate() {
             let b = if b_connected { b } else { 1.0 };
@@ -204,13 +217,13 @@ impl Module for Mul {
     }
 
     fn set_param(&mut self, index: usize, value: f32) {
-        if index == 0 {
+        if index == Self::GAIN {
             self.gain.set_target(value);
         }
     }
 
     fn param_glide(&self, index: usize) -> Option<f32> {
-        if index == 0 { self.gain.gliding() } else { None }
+        if index == Self::GAIN { self.gain.gliding() } else { None }
     }
 
     /// Snaps the gain to its target (live patching spec, rule 7).
@@ -326,9 +339,13 @@ pub static DIV: ModuleDescriptor = ModuleDescriptor {
 /// Stateless, so a NaN or infinity on an input cannot stay in the module.
 struct Div;
 
+impl Div {
+    const B_IN: usize = DIV.input_index("b").unwrap();
+}
+
 impl Module for Div {
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let b_connected = io.is_connected(1);
+        let b_connected = io.is_connected(Self::B_IN);
         let ([a, b], [out]) = io.split::<2, 1>();
         for ((out, &a), &b) in out.iter_mut().zip(a).zip(b) {
             let b = if b_connected { b } else { 1.0 };
@@ -369,7 +386,11 @@ pub static CONSTANT: ModuleDescriptor = ModuleDescriptor {
     .ranges(WIDE_RANGES, DEFAULT_RANGE)],
     role: ModuleRole::Dsp(|config: &ModuleConfig| {
         Box::new(Constant {
-            value: Smoothed::new(0.0, config.sample_rate, CONSTANT.params[0].options.smooth_seconds),
+            value: Smoothed::new(
+                0.0,
+                config.sample_rate,
+                CONSTANT.params[Constant::VALUE].options.smooth_seconds,
+            ),
         })
     }),
     panel: Panel::new(3, 3, &[Widget::knob(0, 0, "value")]),
@@ -381,6 +402,10 @@ struct Constant {
     value: Smoothed,
 }
 
+impl Constant {
+    const VALUE: usize = CONSTANT.param_index("value").unwrap();
+}
+
 impl Module for Constant {
     /// Takes the running state of another instance (ADR-0022).
     fn copy_state_from(&mut self, other: &dyn Module) -> bool {
@@ -388,7 +413,7 @@ impl Module for Constant {
     }
 
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let param = io.param(0);
+        let param = io.param(Self::VALUE);
         let ([], [out]) = io.split::<0, 1>();
         for (i, out) in out.iter_mut().enumerate() {
             *out = param.at_or(i, self.value.tick());
@@ -396,13 +421,17 @@ impl Module for Constant {
     }
 
     fn set_param(&mut self, index: usize, value: f32) {
-        if index == 0 {
+        if index == Self::VALUE {
             self.value.set_target(value);
         }
     }
 
     fn param_glide(&self, index: usize) -> Option<f32> {
-        if index == 0 { self.value.gliding() } else { None }
+        if index == Self::VALUE {
+            self.value.gliding()
+        } else {
+            None
+        }
     }
 
     fn reset(&mut self) {
@@ -471,6 +500,8 @@ struct Convert {
 }
 
 impl Convert {
+    const MODE: usize = CONVERT.param_index("mode").unwrap();
+
     /// Converts one value in the current mode. Never gives infinity or NaN
     /// for a finite input. A NaN input stays NaN.
     fn convert(&self, x: f32) -> f32 {
@@ -493,7 +524,7 @@ impl Module for Convert {
     }
 
     fn set_param(&mut self, index: usize, value: f32) {
-        if index == 0 {
+        if index == Self::MODE {
             self.mode = value.round().clamp(0.0, 3.0) as u8;
         }
     }
@@ -530,7 +561,11 @@ pub static PITCH_CONSTANT: ModuleDescriptor = ModuleDescriptor {
     .smooth(0.005)],
     role: ModuleRole::Dsp(|config| {
         Box::new(PitchConstant {
-            semitones: Smoothed::new(0.0, config.sample_rate, PITCH_CONSTANT.params[0].options.smooth_seconds),
+            semitones: Smoothed::new(
+                0.0,
+                config.sample_rate,
+                PITCH_CONSTANT.params[PitchConstant::SEMITONES].options.smooth_seconds,
+            ),
         })
     }),
     panel: Panel::new(3, 3, &[Widget::knob(0, 0, "semitones")]),
@@ -542,6 +577,10 @@ struct PitchConstant {
     semitones: Smoothed,
 }
 
+impl PitchConstant {
+    const SEMITONES: usize = PITCH_CONSTANT.param_index("semitones").unwrap();
+}
+
 impl Module for PitchConstant {
     /// Takes the running state of another instance (ADR-0022).
     fn copy_state_from(&mut self, other: &dyn Module) -> bool {
@@ -549,7 +588,7 @@ impl Module for PitchConstant {
     }
 
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let param = io.param(0);
+        let param = io.param(Self::SEMITONES);
         let ([], [out]) = io.split::<0, 1>();
         for (i, out) in out.iter_mut().enumerate() {
             let semitones = param.at_or(i, self.semitones.tick());
@@ -559,13 +598,17 @@ impl Module for PitchConstant {
     }
 
     fn set_param(&mut self, index: usize, value: f32) {
-        if index == 0 {
+        if index == Self::SEMITONES {
             self.semitones.set_target(value);
         }
     }
 
     fn param_glide(&self, index: usize) -> Option<f32> {
-        if index == 0 { self.semitones.gliding() } else { None }
+        if index == Self::SEMITONES {
+            self.semitones.gliding()
+        } else {
+            None
+        }
     }
 
     fn reset(&mut self) {

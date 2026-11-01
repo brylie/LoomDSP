@@ -176,7 +176,11 @@ pub static PULSE: ModuleDescriptor = ModuleDescriptor {
         Box::new(Pulse {
             previous: 0.0,
             previous_fall: 0.5,
-            width: Smoothed::new(0.5, config.sample_rate, PULSE.params[0].options.smooth_seconds),
+            width: Smoothed::new(
+                0.5,
+                config.sample_rate,
+                PULSE.params[Pulse::WIDTH].options.smooth_seconds,
+            ),
         })
     }),
     panel: Panel::new(3, 3, &[Widget::knob(0, 0, "width")]),
@@ -191,6 +195,10 @@ struct Pulse {
     width: Smoothed,
 }
 
+impl Pulse {
+    const WIDTH: usize = PULSE.param_index("width").unwrap();
+}
+
 impl Module for Pulse {
     /// Takes the running state of another instance (ADR-0022).
     fn copy_state_from(&mut self, other: &dyn Module) -> bool {
@@ -198,7 +206,7 @@ impl Module for Pulse {
     }
 
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let modulated = io.param(0);
+        let modulated = io.param(Self::WIDTH);
         let ([phase], [out]) = io.split::<1, 1>();
         for (i, (out, &p)) in out.iter_mut().zip(phase).enumerate() {
             let width = modulated.at_or(i, self.width.tick()).clamp(0.01, 0.99);
@@ -237,13 +245,17 @@ impl Module for Pulse {
     }
 
     fn set_param(&mut self, index: usize, value: f32) {
-        if index == 0 {
+        if index == Self::WIDTH {
             self.width.set_target(value);
         }
     }
 
     fn param_glide(&self, index: usize) -> Option<f32> {
-        if index == 0 { self.width.gliding() } else { None }
+        if index == Self::WIDTH {
+            self.width.gliding()
+        } else {
+            None
+        }
     }
 
     fn reset(&mut self) {
@@ -430,6 +442,9 @@ struct Noise {
 }
 
 impl Noise {
+    const SEED: usize = NOISE.param_index("seed").unwrap();
+    const COLOUR: usize = NOISE.param_index("colour").unwrap();
+
     fn new(sample_rate: f32) -> Self {
         let leak = (-std::f32::consts::TAU * BROWN_LEAK_HZ / sample_rate).exp();
         let mut noise = Self {
@@ -527,7 +542,7 @@ impl Module for Noise {
             self.restart(self.active);
             self.brown = brown;
         }
-        let (seed, colour_mod) = (io.param(0), io.param(1));
+        let (seed, colour_mod) = (io.param(Self::SEED), io.param(Self::COLOUR));
         let ([], [out]) = io.split::<0, 1>();
         for (i, out) in out.iter_mut().enumerate() {
             // The colour counts for this frame only; the base stays in the
@@ -556,12 +571,12 @@ impl Module for Noise {
 
     fn set_param(&mut self, index: usize, value: f32) {
         match index {
-            0 => {
+            Self::SEED => {
                 self.seed = value.round().max(1.0) as u32;
                 self.active = self.seed;
                 self.restart(self.seed);
             }
-            1 => self.colour = value as u8,
+            Self::COLOUR => self.colour = value as u8,
             _ => {}
         }
     }

@@ -76,11 +76,11 @@ pub static BUTTON: ModuleDescriptor = ModuleDescriptor {
 };
 
 /// Index of `mode`.
-const MODE: usize = 0;
+const MODE: usize = BUTTON.param_index("mode").unwrap();
 /// Index of `on`, the toggle latch.
-const ON: usize = 1;
+const ON: usize = BUTTON.param_index("on").unwrap();
 /// Index of `hold`, the momentary hold.
-const HOLD: usize = 2;
+const HOLD: usize = BUTTON.param_index("hold").unwrap();
 
 /// The latest value of each parameter. The gate is `on` or `hold`.
 #[derive(Default)]

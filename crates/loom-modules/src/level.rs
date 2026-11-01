@@ -75,7 +75,7 @@ pub static AMP: ModuleDescriptor = ModuleDescriptor {
     ],
     role: ModuleRole::Dsp(|config| {
         Box::new(Amp {
-            gain: Smoothed::new(1.0, config.sample_rate, AMP.params[0].options.smooth_seconds),
+            gain: Smoothed::new(1.0, config.sample_rate, AMP.params[Amp::GAIN].options.smooth_seconds),
             exponential: false,
         })
     }),
@@ -95,6 +95,10 @@ struct Amp {
 }
 
 impl Amp {
+    const GAIN: usize = AMP.param_index("gain").unwrap();
+    const RESPONSE: usize = AMP.param_index("response").unwrap();
+    const LEVEL_IN: usize = AMP.input_index("level").unwrap();
+
     /// The factor for a level: 0 below zero, 1 at 1, then the chosen curve.
     fn curve(&self, level: f32) -> f32 {
         let level = level.max(0.0);
@@ -117,8 +121,8 @@ impl Module for Amp {
     }
 
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let level_connected = io.is_connected(1);
-        let modulated = io.param(0);
+        let level_connected = io.is_connected(Self::LEVEL_IN);
+        let modulated = io.param(Self::GAIN);
         let ([input, level], [out]) = io.split::<2, 1>();
         for (i, ((out, &input), &level)) in out.iter_mut().zip(input).zip(level).enumerate() {
             let level = if level_connected { self.curve(level) } else { 1.0 };
@@ -129,13 +133,14 @@ impl Module for Amp {
 
     fn set_param(&mut self, index: usize, value: f32) {
         match index {
-            0 => self.gain.set_target(value),
-            _ => self.exponential = value >= 0.5,
+            Self::GAIN => self.gain.set_target(value),
+            Self::RESPONSE => self.exponential = value >= 0.5,
+            _ => {}
         }
     }
 
     fn param_glide(&self, index: usize) -> Option<f32> {
-        if index == 0 { self.gain.gliding() } else { None }
+        if index == Self::GAIN { self.gain.gliding() } else { None }
     }
 
     fn reset(&mut self) {
@@ -175,7 +180,11 @@ pub static CONSTANT: ModuleDescriptor = ModuleDescriptor {
     .smooth(0.005)],
     role: ModuleRole::Dsp(|config| {
         Box::new(ConstantLevel {
-            db: Smoothed::new(0.0, config.sample_rate, CONSTANT.params[0].options.smooth_seconds),
+            db: Smoothed::new(
+                0.0,
+                config.sample_rate,
+                CONSTANT.params[ConstantLevel::LEVEL].options.smooth_seconds,
+            ),
         })
     }),
     panel: Panel::new(3, 3, &[Widget::knob(0, 0, "level")]),
@@ -188,6 +197,10 @@ struct ConstantLevel {
     db: Smoothed,
 }
 
+impl ConstantLevel {
+    const LEVEL: usize = CONSTANT.param_index("level").unwrap();
+}
+
 impl Module for ConstantLevel {
     /// Takes the running state of another instance (ADR-0022).
     fn copy_state_from(&mut self, other: &dyn Module) -> bool {
@@ -195,7 +208,7 @@ impl Module for ConstantLevel {
     }
 
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let modulated = io.param(0);
+        let modulated = io.param(Self::LEVEL);
         let ([], [out]) = io.split::<0, 1>();
         for (i, out) in out.iter_mut().enumerate() {
             let db = modulated.at_or(i, self.db.tick());
@@ -204,13 +217,13 @@ impl Module for ConstantLevel {
     }
 
     fn set_param(&mut self, index: usize, value: f32) {
-        if index == 0 {
+        if index == Self::LEVEL {
             self.db.set_target(value);
         }
     }
 
     fn param_glide(&self, index: usize) -> Option<f32> {
-        if index == 0 { self.db.gliding() } else { None }
+        if index == Self::LEVEL { self.db.gliding() } else { None }
     }
 
     fn reset(&mut self) {
@@ -271,8 +284,16 @@ pub static CLAMP: ModuleDescriptor = ModuleDescriptor {
     ],
     role: ModuleRole::Dsp(|config| {
         Box::new(Clamp {
-            low: Smoothed::new(-1.0, config.sample_rate, CLAMP.params[0].options.smooth_seconds),
-            high: Smoothed::new(1.0, config.sample_rate, CLAMP.params[1].options.smooth_seconds),
+            low: Smoothed::new(
+                -1.0,
+                config.sample_rate,
+                CLAMP.params[Clamp::LOW].options.smooth_seconds,
+            ),
+            high: Smoothed::new(
+                1.0,
+                config.sample_rate,
+                CLAMP.params[Clamp::HIGH].options.smooth_seconds,
+            ),
         })
     }),
     panel: Panel::new(6, 3, &[Widget::knob(0, 0, "low"), Widget::knob(3, 0, "high")]),
@@ -305,6 +326,11 @@ struct Clamp {
     high: Smoothed,
 }
 
+impl Clamp {
+    const LOW: usize = CLAMP.param_index("low").unwrap();
+    const HIGH: usize = CLAMP.param_index("high").unwrap();
+}
+
 impl Module for Clamp {
     /// Takes the running state of another instance (ADR-0022).
     fn copy_state_from(&mut self, other: &dyn Module) -> bool {
@@ -312,7 +338,7 @@ impl Module for Clamp {
     }
 
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let (low_mod, high_mod) = (io.param(0), io.param(1));
+        let (low_mod, high_mod) = (io.param(Self::LOW), io.param(Self::HIGH));
         let ([input], [out]) = io.split::<1, 1>();
         for (i, (out, &x)) in out.iter_mut().zip(input).enumerate() {
             let low = low_mod.at_or(i, self.low.tick());
@@ -323,16 +349,16 @@ impl Module for Clamp {
 
     fn set_param(&mut self, index: usize, value: f32) {
         match index {
-            0 => self.low.set_target(value),
-            1 => self.high.set_target(value),
+            Self::LOW => self.low.set_target(value),
+            Self::HIGH => self.high.set_target(value),
             _ => {}
         }
     }
 
     fn param_glide(&self, index: usize) -> Option<f32> {
         match index {
-            0 => self.low.gliding(),
-            1 => self.high.gliding(),
+            Self::LOW => self.low.gliding(),
+            Self::HIGH => self.high.gliding(),
             _ => None,
         }
     }
@@ -397,8 +423,16 @@ pub static SCALE: ModuleDescriptor = ModuleDescriptor {
     ],
     role: ModuleRole::Dsp(|config| {
         Box::new(Scale {
-            factor: Smoothed::new(1.0, config.sample_rate, SCALE.params[0].options.smooth_seconds),
-            offset: Smoothed::new(0.0, config.sample_rate, SCALE.params[1].options.smooth_seconds),
+            factor: Smoothed::new(
+                1.0,
+                config.sample_rate,
+                SCALE.params[Scale::FACTOR].options.smooth_seconds,
+            ),
+            offset: Smoothed::new(
+                0.0,
+                config.sample_rate,
+                SCALE.params[Scale::OFFSET].options.smooth_seconds,
+            ),
         })
     }),
     panel: Panel::new(6, 3, &[Widget::knob(0, 0, "factor"), Widget::knob(3, 0, "offset")]),
@@ -411,6 +445,11 @@ struct Scale {
     offset: Smoothed,
 }
 
+impl Scale {
+    const FACTOR: usize = SCALE.param_index("factor").unwrap();
+    const OFFSET: usize = SCALE.param_index("offset").unwrap();
+}
+
 impl Module for Scale {
     /// Takes the running state of another instance (ADR-0022).
     fn copy_state_from(&mut self, other: &dyn Module) -> bool {
@@ -418,7 +457,7 @@ impl Module for Scale {
     }
 
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let (factor_mod, offset_mod) = (io.param(0), io.param(1));
+        let (factor_mod, offset_mod) = (io.param(Self::FACTOR), io.param(Self::OFFSET));
         let ([input], [out]) = io.split::<1, 1>();
         for (i, (out, &x)) in out.iter_mut().zip(input).enumerate() {
             let factor = factor_mod.at_or(i, self.factor.tick());
@@ -429,16 +468,16 @@ impl Module for Scale {
 
     fn set_param(&mut self, index: usize, value: f32) {
         match index {
-            0 => self.factor.set_target(value),
-            1 => self.offset.set_target(value),
+            Self::FACTOR => self.factor.set_target(value),
+            Self::OFFSET => self.offset.set_target(value),
             _ => {}
         }
     }
 
     fn param_glide(&self, index: usize) -> Option<f32> {
         match index {
-            0 => self.factor.gliding(),
-            1 => self.offset.gliding(),
+            Self::FACTOR => self.factor.gliding(),
+            Self::OFFSET => self.offset.gliding(),
             _ => None,
         }
     }
@@ -531,6 +570,11 @@ struct Slew {
     fresh: bool,
 }
 
+impl Slew {
+    const RISE: usize = SLEW.param_index("rise").unwrap();
+    const FALL: usize = SLEW.param_index("fall").unwrap();
+}
+
 impl Module for Slew {
     /// Takes the running state of another instance (ADR-0022).
     fn copy_state_from(&mut self, other: &dyn Module) -> bool {
@@ -538,7 +582,7 @@ impl Module for Slew {
     }
 
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let (rise_mod, fall_mod) = (io.param(0), io.param(1));
+        let (rise_mod, fall_mod) = (io.param(Self::RISE), io.param(Self::FALL));
         let ([input], [out]) = io.split::<1, 1>();
         for (i, (out, &x)) in out.iter_mut().zip(input).enumerate() {
             if x.is_finite() {
@@ -547,8 +591,8 @@ impl Module for Slew {
                     self.out = f64::from(x);
                     self.fresh = false;
                 } else {
-                    let rise = rise_mod.at_or(i, self.rise).max(SLEW.params[0].min);
-                    let fall = fall_mod.at_or(i, self.fall).max(SLEW.params[1].min);
+                    let rise = rise_mod.at_or(i, self.rise).max(SLEW.params[Self::RISE].min);
+                    let fall = fall_mod.at_or(i, self.fall).max(SLEW.params[Self::FALL].min);
                     // Constant rate: 1.0 of change takes `rise` or `fall` seconds.
                     let target = f64::from(x);
                     let rate = f64::from(self.sample_rate);
@@ -565,8 +609,8 @@ impl Module for Slew {
 
     fn set_param(&mut self, index: usize, value: f32) {
         match index {
-            0 => self.rise = value,
-            1 => self.fall = value,
+            Self::RISE => self.rise = value,
+            Self::FALL => self.fall = value,
             _ => {}
         }
     }
