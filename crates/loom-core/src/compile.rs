@@ -1655,6 +1655,7 @@ mod tests {
         version: 1,
         name: "Follower",
         category: "Test",
+        family: crate::Family::Interface,
         description: "Inputs with every kind of default.",
         inputs: &[
             port("bar", crate::SignalType::Phase).with_default(PortDefault::BarPhase),
@@ -1767,6 +1768,7 @@ mod tests {
             version: 1,
             name: "Stereo input",
             category: "Test",
+            family: crate::Family::Interface,
             description: "A stereo input for testing.",
             inputs: &[port("in", crate::SignalType::Audio).with_channels(Channels::Stereo)],
             outputs: &[port("out", crate::SignalType::Audio)],

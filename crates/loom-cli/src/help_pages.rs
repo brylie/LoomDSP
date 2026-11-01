@@ -6,9 +6,7 @@
 //! Longer notes and an example patch go below [`MARKER`]; regenerating keeps
 //! everything after it.
 
-use loom_core::{
-    Channels, ModuleDescriptor, ParamMapping, ParamSpec, Polarity, PortDefault, PortSpec, Registry, Widget, WidgetKind,
-};
+use loom_core::{Channels, ModuleDescriptor, Polarity, PortSpec, Registry, Widget, WidgetKind};
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::io;
@@ -169,11 +167,12 @@ fn display_name(path: &Path) -> String {
         .map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned())
 }
 
-/// The index page: every module by category, with a link to its page.
+/// The index page: every module by family, in browser order, with a link
+/// to its page (ADR-0029).
 pub fn index(registry: &Registry) -> String {
-    let mut categories: BTreeMap<&str, Vec<&ModuleDescriptor>> = BTreeMap::new();
+    let mut families: BTreeMap<loom_core::Family, Vec<&ModuleDescriptor>> = BTreeMap::new();
     for d in registry.iter() {
-        categories.entry(d.category).or_default().push(d);
+        families.entry(d.family).or_default().push(d);
     }
     let mut out = String::new();
     out.push_str("# Module help pages\n\n");
@@ -183,9 +182,9 @@ pub fn index(registry: &Registry) -> String {
         out,
         "One page for each built-in module, made from its descriptor. After you change a descriptor, run `{REGENERATE}` and commit the pages. Longer notes and example patches go below the marker line at the end of a page. See the [help pages specification](../design/help-pages.md)."
     );
-    for (category, mut modules) in categories {
+    for (family, mut modules) in families {
         modules.sort_by(|a, b| a.name.cmp(b.name).then(a.id.cmp(b.id)));
-        let _ = writeln!(out, "\n## {category}\n");
+        let _ = writeln!(out, "\n## {}\n", family.label());
         out.push_str("| Module | ID | Description |\n|---|---|---|\n");
         for d in modules {
             let _ = writeln!(
@@ -208,6 +207,7 @@ pub fn page(d: &ModuleDescriptor) -> String {
     out.push_str("| | |\n|---|---|\n");
     let _ = writeln!(out, "| ID | `{}` |", d.id);
     let _ = writeln!(out, "| Version | {} |", d.version);
+    let _ = writeln!(out, "| Family | {} |", d.family.label());
     let _ = writeln!(out, "| Category | {} |", cell(d.category));
     out.push_str("\n## Inputs\n\n");
     if d.inputs.is_empty() {
@@ -220,7 +220,7 @@ pub fn page(d: &ModuleDescriptor) -> String {
                 "| {} | {} | {} | {} |",
                 port_name(p),
                 signal(p),
-                unconnected(p.default),
+                p.default.text(),
                 cell(p.description)
             );
         }
@@ -254,8 +254,8 @@ pub fn page(d: &ModuleDescriptor) -> String {
                 out,
                 "| {} | {} | {} | {} |",
                 name(p.label, p.name),
-                range(p),
-                with_unit(p.default, p.unit),
+                cell(&p.range_text()),
+                cell(&p.default_text()),
                 cell(p.description)
             );
         }
@@ -296,59 +296,6 @@ fn signal(p: &PortSpec) -> String {
     }
 }
 
-/// What an unconnected input reads, in words.
-fn unconnected(default: PortDefault) -> String {
-    match default {
-        PortDefault::Value(v) => number(v),
-        PortDefault::BarPhase => "bar phase".to_string(),
-        PortDefault::BeatPhase => "beat phase".to_string(),
-        PortDefault::Playing => "play gate".to_string(),
-    }
-}
-
-/// A parameter's range, with its unit and options.
-fn range(p: &ParamSpec) -> String {
-    let mut text = format!("{} to {}", number(p.min), with_unit(p.max, p.unit));
-    if p.options.integer {
-        text.push_str(", whole numbers");
-    }
-    if p.options.mapping == ParamMapping::Logarithmic {
-        text.push_str(", logarithmic");
-    }
-    if let Some(default) = p.default_range() {
-        let names: Vec<String> = p.options.ranges.iter().map(ToString::to_string).collect();
-        text.push_str(&format!(", control ranges {} (default {default})", names.join(", ")));
-    }
-    if !p.options.choices.is_empty() {
-        text.push_str(", choices ");
-        text.push_str(&cell(&p.options.choices.join(", ")));
-    }
-    if p.is_transient() {
-        text.push_str(", not saved");
-    }
-    text
-}
-
-/// A number followed by its unit, if it has one.
-fn with_unit(value: f32, unit: &str) -> String {
-    if unit.is_empty() {
-        number(value)
-    } else {
-        format!("{} {}", number(value), cell(unit))
-    }
-}
-
-/// A number as Rust prints it: no trailing zeros, no exponent for the
-/// ranges modules use.
-fn number(value: f32) -> String {
-    // -0 reads as 0 to people.
-    if value == 0.0 {
-        "0".to_string()
-    } else {
-        value.to_string()
-    }
-}
-
 /// One panel widget, in words.
 fn widget(d: &ModuleDescriptor, w: &Widget) -> String {
     let param = |bind: &str| {
@@ -369,6 +316,7 @@ fn widget(d: &ModuleDescriptor, w: &Widget) -> String {
             format!("Radio buttons: {} ({})", param(w.bind), cell(&choices.join(", ")))
         }
         WidgetKind::Select => format!("Select: {}", param(w.bind)),
+        WidgetKind::Segmented { .. } => format!("Segmented control: {}", param(w.bind)),
         WidgetKind::Button { mode: "", hold } => format!("Button: {} (momentary)", param(hold)),
         WidgetKind::Button { mode, hold } => format!(
             "Button: {} (toggle), {} (momentary), chosen by {}",
@@ -412,6 +360,7 @@ fn cell(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use loom_core::PortDefault;
 
     /// The committed folder of help pages.
     fn docs_dir() -> PathBuf {
@@ -531,7 +480,7 @@ mod tests {
                 assert!(text.contains(&port_name(p)), "{} {}", d.id, p.name);
             }
             for p in d.params {
-                assert!(text.contains(&format!("| {} | {} |", name(p.label, p.name), range(p))));
+                assert!(text.contains(&format!("| {} | {} |", name(p.label, p.name), cell(&p.range_text()))));
             }
         }
     }
@@ -540,14 +489,13 @@ mod tests {
     #[test]
     fn values_read_as_words() {
         assert_eq!(cell("a | b"), "a \\| b");
-        assert_eq!(number(-0.0), "0");
-        assert_eq!(number(0.25), "0.25");
-        assert_eq!(number(20000.0), "20000");
-        assert_eq!(with_unit(440.0, "Hz"), "440 Hz");
-        assert_eq!(unconnected(PortDefault::BarPhase), "bar phase");
-        assert_eq!(unconnected(PortDefault::BeatPhase), "beat phase");
-        assert_eq!(unconnected(PortDefault::Playing), "play gate");
-        assert_eq!(unconnected(PortDefault::Value(1.0)), "1");
+        assert_eq!(loom_core::number_text(-0.0), "0");
+        assert_eq!(loom_core::number_text(0.25), "0.25");
+        assert_eq!(loom_core::number_text(20000.0), "20000");
+        assert_eq!(PortDefault::BarPhase.text(), "bar phase");
+        assert_eq!(PortDefault::BeatPhase.text(), "beat phase");
+        assert_eq!(PortDefault::Playing.text(), "play gate");
+        assert_eq!(PortDefault::Value(1.0).text(), "1");
         assert_eq!(name("", "x"), "`x`");
         assert_eq!(notes_of("no marker"), None);
         assert_eq!(notes_of(&format!("a\n{MARKER}\nb\n")).as_deref(), Some("b\n"));

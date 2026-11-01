@@ -40,13 +40,15 @@ mod screenshot;
 mod script_vars;
 mod settings;
 mod snapshot;
+mod style;
 mod targets;
 #[cfg(test)]
 mod ui_test;
 mod undo;
 
+use crate::style::button;
 use clap::Parser;
-use iced::widget::{button, column, container, mouse_area, row, rule, space, stack, text, toggler, tooltip};
+use iced::widget::{column, container, mouse_area, row, rule, space, stack, text, toggler, tooltip};
 use iced::{Color, Element, Length, Point, Size, Subscription, Task, Theme};
 use live::Live;
 use loom_canvas::{CanvasEvent, DragLine, LearnView, PanelValues, PatchCanvas, Scene};
@@ -150,6 +152,11 @@ struct Args {
     /// this flag.
     #[arg(long)]
     test_modules: bool,
+    /// For developers: show the frame meter's Measure and Move camera
+    /// switches in the status bar. They also show with --measure,
+    /// --measure-idle, or --bench (docs/design/visual-system.md).
+    #[arg(long)]
+    dev: bool,
 }
 
 impl Args {
@@ -237,6 +244,8 @@ enum Message {
     OpenBrowser,
     /// Open help for the browser highlight or selected tile.
     ShowHelp,
+    /// Open the keyboard shortcuts page in the help overlay.
+    ShowShortcuts,
     /// Open help for a specific tile.
     ShowModuleHelp(u32),
     /// Close module help.
@@ -491,6 +500,9 @@ struct App {
     /// Saved tile dimensions in grid units, keyed by module ID.
     sizes: BTreeMap<u32, (u8, u8)>,
     scene: Scene,
+    /// The mode values the scene was built with (ADR-0030). A change
+    /// rebuilds the scene, so hidden controls follow the mode.
+    mode_key: Vec<(u32, usize, i64)>,
     /// The output drag drawn over the entire window.
     assign_drag: Option<AssignDrag>,
     /// The eligible inspector row under the pointer.
@@ -622,6 +634,9 @@ struct App {
     recording_failed: bool,
     measuring: bool,
     animating: bool,
+    /// The status bar shows the developer tools: `--dev`, or a measuring
+    /// flag (visual-system.md, Status bar).
+    dev_tools: bool,
     /// MIDI learn mode (`docs/design/midi-learn.md`).
     learning: bool,
     /// The parameter the next control change maps to.
@@ -1023,6 +1038,7 @@ impl App {
         };
 
         let scene = scene::build(&controller, &positions, &sizes);
+        let mode_key = scene::mode_key(&controller);
         let mut values = PanelValues::new();
         scene::update_panel_values(&mut values, &controller, &BTreeMap::new());
         // The loaded patch may already have a cable on run, before any
@@ -1035,6 +1051,7 @@ impl App {
             unknown_positions,
             unknown_label_draft: None,
             sizes,
+            mode_key,
             scene,
             assign_drag: None,
             drop_row: None,
@@ -1116,6 +1133,7 @@ impl App {
             recording_failed: false,
             measuring: args.bench.redraws(),
             animating: args.bench.bench,
+            dev_tools: args.dev || args.bench.reporter().is_some(),
             learning: false,
             armed: None,
             learn_view: LearnView::default(),
@@ -1317,6 +1335,7 @@ impl App {
             recovery_dir: None,
             no_recovery: true,
             test_modules: self.test_modules,
+            dev: self.dev_tools,
         };
         let rig = std::mem::replace(&mut self.rig, settings::Rig::empty());
         let mut fresh = Self::assemble(output, sample_rate, session, self.generation + 1, &args, rig, true);
@@ -1639,6 +1658,7 @@ impl App {
     fn refresh(&mut self) {
         layout::auto_layout(&self.controller, &mut self.positions);
         self.scene = scene::build(&self.controller, &self.positions, &self.sizes);
+        self.mode_key = scene::mode_key(&self.controller);
         self.refresh_values();
         self.refresh_learn();
         self.matrix.reconcile(self.controller.graph());
@@ -1743,6 +1763,13 @@ impl App {
     /// Rebuilds the control, light, and meter values. Only changed values
     /// change what the canvas uploads.
     fn refresh_values(&mut self) {
+        // A mode change shows or hides controls, which changes the panel
+        // (ADR-0030). Rare: a mode click, never a knob turn.
+        let mode_key = scene::mode_key(&self.controller);
+        if mode_key != self.mode_key {
+            self.scene = scene::build(&self.controller, &self.positions, &self.sizes);
+            self.mode_key = mode_key;
+        }
         let mut shown: scene::ShownValues = self
             .lights
             .iter()
@@ -2251,7 +2278,10 @@ impl App {
             Message::Matrix(event)
                 if matches!(
                     event,
-                    MatrixEvent::Sort(_) | MatrixEvent::Filter(_) | MatrixEvent::SelectedOnly(_)
+                    MatrixEvent::SortBy(_)
+                        | MatrixEvent::ReverseSort
+                        | MatrixEvent::Filter(_)
+                        | MatrixEvent::SelectedOnly(_)
                 ) =>
             {
                 self.matrix_event(event);
@@ -2425,7 +2455,13 @@ impl App {
                                 })
                                 .flatten()
                         });
-                    self.help = descriptor.map(help::Help::new);
+                    // With nothing to describe, F1 shows the shortcuts.
+                    self.help = Some(descriptor.map_or_else(help::Help::shortcuts, help::Help::new));
+                }
+            }
+            Message::ShowShortcuts => {
+                if self.rig.window.is_none() {
+                    self.help = Some(help::Help::shortcuts());
                 }
             }
             Message::ShowModuleHelp(id) => {
@@ -3341,61 +3377,77 @@ impl App {
         .into()
     }
 
+    /// The toolbar: the patch name, then buttons in groups (file, add,
+    /// play, edit, setup), with wider space between groups than inside them
+    /// (visual-system.md, Toolbar).
     fn toolbar(&self) -> Element<'_, Message> {
-        let hold = button(text(if self.holding { "Release note" } else { "Hold note" }).size(13))
-            .on_press_maybe(self.midi.as_ref().map(|_| Message::HoldNote));
+        let tip = |button: iced::widget::Button<'static, Message>, hint: &'static str| -> Element<'static, Message> {
+            tooltip(
+                button,
+                container(text(hint).size(style::BODY))
+                    .padding(6)
+                    .style(container::rounded_box),
+                tooltip::Position::Bottom,
+            )
+            .into()
+        };
+        let label = |s: &'static str| text(s).size(style::CONTROL);
+        let file = row![
+            button(label("New")).on_press(Message::New),
+            button(label("Open")).on_press(Message::Open),
+            button(label("Save")).on_press(Message::Save),
+            button(label("Save As")).on_press(Message::SaveAs),
+        ];
+        let add = tip(
+            button(label("Add module")).on_press(Message::OpenBrowser),
+            "Or press A over the canvas, or double-click empty canvas",
+        );
+        let play = row![
+            button(label(if self.holding { "Release note" } else { "Hold note" }))
+                .on_press_maybe(self.midi.as_ref().map(|_| Message::HoldNote)),
+            tip(
+                button(label("Panic")).on_press(Message::Panic).style(style::danger),
+                if cfg!(target_os = "macos") {
+                    "Silence everything: Cmd+."
+                } else {
+                    "Silence everything: Ctrl+."
+                },
+            ),
+        ];
+        let edit = row![
+            self.history_button("Undo", "Undo", self.edits.history.undo_step(), Message::Undo),
+            self.history_button("Redo", "Redo", self.edits.history.redo_step(), Message::Redo),
+        ];
+        let setup = row![
+            // Primary only while learning: a mode that is on.
+            button(label("MIDI learn"))
+                .on_press(Message::ToggleLearn)
+                .style(if self.learning {
+                    style::primary
+                } else {
+                    style::secondary
+                }),
+            tip(
+                button(label("Preferences")).on_press(Message::Preferences(settings::Message::Open)),
+                if cfg!(target_os = "macos") { "Cmd+," } else { "Ctrl+," },
+            ),
+        ];
+        let group = |items: iced::widget::Row<'static, Message>| items.spacing(6).align_y(iced::Alignment::Center);
         row![
             text(format!(
                 "{}{}",
                 if self.unsaved() { "* " } else { "" },
                 self.patch_name()
             ))
-            .size(15),
-            button(text("New").size(13)).on_press(Message::New),
-            button(text("Open").size(13)).on_press(Message::Open),
-            button(text("Save").size(13)).on_press(Message::Save),
-            button(text("Save As").size(13)).on_press(Message::SaveAs),
+            .size(style::HEADING),
+            group(file),
             space::horizontal(),
-            tooltip(
-                button(text("Add module").size(13)).on_press(Message::OpenBrowser),
-                container(text("Or press A over the canvas, or double-click empty canvas").size(12))
-                    .padding(6)
-                    .style(container::rounded_box),
-                tooltip::Position::Bottom,
-            ),
-            hold,
-            tooltip(
-                button(text("Panic").size(13)).on_press(Message::Panic),
-                container(
-                    text(if cfg!(target_os = "macos") {
-                        "Silence everything: Cmd+."
-                    } else {
-                        "Silence everything: Ctrl+."
-                    })
-                    .size(12)
-                )
-                .padding(6)
-                .style(container::rounded_box),
-                tooltip::Position::Bottom,
-            ),
-            self.history_button("Undo", "Undo", self.edits.history.undo_step(), Message::Undo),
-            self.history_button("Redo", "Redo", self.edits.history.redo_step(), Message::Redo),
-            button(text("MIDI learn").size(13))
-                .on_press(Message::ToggleLearn)
-                .style(if self.learning {
-                    button::primary
-                } else {
-                    button::secondary
-                }),
-            tooltip(
-                button(text("Preferences").size(13)).on_press(Message::Preferences(settings::Message::Open)),
-                container(text(if cfg!(target_os = "macos") { "Cmd+," } else { "Ctrl+," }).size(12))
-                    .padding(6)
-                    .style(container::rounded_box),
-                tooltip::Position::Bottom,
-            ),
+            add,
+            group(play),
+            group(edit),
+            group(setup),
         ]
-        .spacing(8)
+        .spacing(20)
         .padding([6, 10])
         .align_y(iced::Alignment::Center)
         .into()
@@ -3415,8 +3467,10 @@ impl App {
             None => format!("Nothing to {}", verb.to_lowercase()),
         };
         tooltip(
-            button(text(label).size(13)).on_press_maybe(step.map(|_| message)),
-            container(text(hint).size(12)).padding(6).style(container::rounded_box),
+            button(text(label).size(style::CONTROL)).on_press_maybe(step.map(|_| message)),
+            container(text(hint).size(style::BODY))
+                .padding(6)
+                .style(container::rounded_box),
             tooltip::Position::Bottom,
         )
         .into()
@@ -3432,11 +3486,16 @@ impl App {
 
     /// Inspector and matrix share the same width in the right-hand column.
     fn right_panel(&self) -> Element<'_, Message> {
-        let tabs = row![
-            button("Inspector").on_press(Message::Matrix(MatrixEvent::Tab(RightTab::Inspector))),
-            button("Matrix").on_press(Message::Matrix(MatrixEvent::Tab(RightTab::Matrix))),
-        ]
-        .spacing(4);
+        // The open tab has a fill and a border (visual-system.md, Tabs).
+        let tab = |label: &'static str, which: RightTab| {
+            button(text(label).size(style::CONTROL))
+                .padding([4, 12])
+                .style(style::tab(self.matrix.tab == which))
+                .on_press(Message::Matrix(MatrixEvent::Tab(which)))
+        };
+        let tabs = row![tab("Inspector", RightTab::Inspector), tab("Matrix", RightTab::Matrix)]
+            .spacing(4)
+            .padding([6, 8]);
         let panel = match self.matrix.tab {
             RightTab::Inspector => self.inspector(),
             RightTab::Matrix => matrix::view(
@@ -3477,45 +3536,64 @@ impl App {
         } else {
             bar_text(stats.label).color(DIM).into()
         };
-        let midi = match self.rig.ports.as_slice() {
-            [] => "MIDI: no inputs".to_string(),
-            ports => format!(
-                "MIDI: {}",
-                ports.iter().map(|port| port.name()).collect::<Vec<_>>().join(", ")
-            ),
-        };
-        row![
-            toggler(self.measuring)
-                .label("Measure")
-                .on_toggle(Message::Measure)
-                .size(14)
-                .text_size(12),
-            toggler(self.animating)
-                .label("Move camera")
-                .on_toggle(Message::Animate)
-                .size(14)
-                .text_size(12),
-            bar_text(frames),
-            bar_text(format!("{} modules, {} cables", graph.len(), graph.cables().count())),
-            audio,
-            bar_text(midi).color(DIM),
-            // The status takes the remaining width and is cut off rather than
-            // wrapped, so the bar stays one line high. Hover shows all of it.
-            tooltip(
-                container(bar_text(&self.status).color(DIM))
-                    .width(Length::Fill)
-                    .align_x(iced::Alignment::End)
-                    .clip(true),
-                container(text(&self.status).size(12))
+        // A count, with the names in hover text, so a long list never
+        // pushes the other items off the window (visual-system.md, rule 7).
+        let midi: Element<'_, Message> = match self.rig.ports.as_slice() {
+            [] => bar_text("MIDI: no inputs").color(DIM).into(),
+            ports => tooltip(
+                bar_text(match ports.len() {
+                    1 => "MIDI: 1 input".to_string(),
+                    n => format!("MIDI: {n} inputs"),
+                })
+                .color(DIM),
+                container(text(ports.iter().map(|port| port.name()).collect::<Vec<_>>().join("\n")).size(style::BODY))
                     .padding(6)
-                    .max_width(480)
                     .style(container::rounded_box),
                 tooltip::Position::Top,
-            ),
-        ]
-        .spacing(16)
+            )
+            .into(),
+        };
+        let mut bar = row![].spacing(16).align_y(iced::Alignment::Center);
+        if self.dev_tools {
+            bar = bar
+                .push(
+                    toggler(self.measuring)
+                        .label("Measure")
+                        .on_toggle(Message::Measure)
+                        .size(style::SWITCH)
+                        .text_size(style::BODY),
+                )
+                .push(
+                    toggler(self.animating)
+                        .label("Move camera")
+                        .on_toggle(Message::Animate)
+                        .size(style::SWITCH)
+                        .text_size(style::BODY),
+                )
+                .push(bar_text(frames));
+        }
+        bar.push(bar_text(format!(
+            "{} modules, {} cables",
+            graph.len(),
+            graph.cables().count()
+        )))
+        .push(audio)
+        .push(midi)
+        // The status takes the remaining width and is cut off rather
+        // than wrapped, so the bar stays one line high. Hover shows all
+        // of it.
+        .push(tooltip(
+            container(bar_text(&self.status).color(DIM))
+                .width(Length::Fill)
+                .align_x(iced::Alignment::End)
+                .clip(true),
+            container(text(&self.status).size(style::BODY))
+                .padding(6)
+                .max_width(480)
+                .style(container::rounded_box),
+            tooltip::Position::Top,
+        ))
         .padding([4, 10])
-        .align_y(iced::Alignment::Center)
         .into()
     }
 }
@@ -3525,11 +3603,13 @@ impl App {
 /// with hover text that names what it removes (panels.md, The inspector).
 fn remove_button<'a>(what: &'a str, on_press: Message) -> Element<'a, Message> {
     tooltip(
-        button(text("×").size(14))
+        button(text("×").size(style::CONTROL))
             .padding([0, 6])
-            .style(button::text)
+            .style(style::plain)
             .on_press(on_press),
-        container(text(what).size(12)).padding(6).style(container::rounded_box),
+        container(text(what).size(style::BODY))
+            .padding(6)
+            .style(container::rounded_box),
         tooltip::Position::Top,
     )
     .into()
@@ -3537,10 +3617,11 @@ fn remove_button<'a>(what: &'a str, on_press: Message) -> Element<'a, Message> {
 
 /// Stats bar text: one line, never wrapped.
 fn bar_text<'a>(content: impl text::IntoFragment<'a>) -> iced::widget::Text<'a> {
-    text(content).size(12).wrapping(text::Wrapping::None)
+    text(content).size(style::BODY).wrapping(text::Wrapping::None)
 }
 
-const DIM: Color = Color::from_rgb(0.62, 0.65, 0.71);
+/// Quiet text. The same as `style::QUIET`, kept as a short name here.
+const DIM: Color = style::QUIET;
 
 /// Stats bar colour for a warning level.
 fn severity_colour(severity: alerts::Severity) -> Color {
@@ -3554,7 +3635,7 @@ fn severity_colour(severity: alerts::Severity) -> Color {
 /// Inspector help text, shown with nothing selected. It lists every canvas
 /// gesture and shortcut (#16), so keep it in step with `PatchCanvas::handle`
 /// and the key handling in `loom-canvas/src/widget.rs`.
-const HELP: &str = "A or a double-click on empty canvas opens the module browser at the pointer; type, then Enter adds.\n\
+pub(crate) const HELP: &str = "A or a double-click on empty canvas opens the module browser at the pointer; type, then Enter adds.\n\
 Drag from a port to patch a cable. Drag a connected input to move or remove its cable.\n\
 Drag tiles to move them. Shift-click or drag a box to select several. Cmd/Ctrl+A selects all.\n\
 Delete or Backspace removes the selection.\n\
@@ -3777,6 +3858,7 @@ mod tests {
             recovery_dir: None,
             no_recovery: false,
             test_modules: false,
+            dev: false,
         }
     }
 
@@ -5502,7 +5584,7 @@ mod tests {
         assert_eq!(tile(env).bounds, view.bounds().into());
         assert_eq!(tile(sine).outputs[0].badge_bounds.map(|b| b.width), Some(drawn.width));
 
-        let knob = tile(filter).widgets[widget].bounds;
+        let knob = tile(filter).widgets[widget].bounds.expect("a shown knob");
         let filter_view = app.scene.module(filter.0).unwrap();
         assert_eq!(knob, filter_view.widget_bounds(widget).unwrap().into());
 

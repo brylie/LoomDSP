@@ -1,4 +1,4 @@
-# Sample and hold
+# Sample and Hold
 
 <!-- Generated from the module's descriptor by `loom modules --markdown`. Edit the descriptor, not this part. -->
 
@@ -8,6 +8,7 @@ Takes the input's value on a trigger and holds it. With noise on the input, it m
 |---|---|
 | ID | `loom.rand.sample-hold` |
 | Version | 1 |
+| Family | Modulation |
 | Category | Random |
 
 ## Inputs
@@ -27,19 +28,21 @@ Takes the input's value on a trigger and holds it. With noise on the input, it m
 
 | Parameter | Range | Default | Description |
 |---|---|---|---|
-| **Mode** (`mode`) | 0 to 1, whole numbers, choices Sample, Track | 0 | Sample: take the value on the rising edge. Track: follow the input while the trigger is high. |
+| **Mode** (`mode`) | Sample or Track | Sample | Sample: take the value on the rising edge. Track: follow the input while the trigger is high. |
 
 ## Panel
 
-6 by 3 grid units.
+7 by 2 grid units.
 
-- Radio buttons: **Mode** (`mode`) (Sample, Track)
+- Segmented control: **Mode** (`mode`)
 
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->
 
 ## When to use it
 
-Use Sample and hold to capture and freeze instantaneous values on incoming trigger edges. When fed with white noise, it produces classic stepped random control voltages. In Track mode, it passes the input while trigger is high.
+Use Sample and Hold to take a signal's value at a moment and keep it. With Noise on the input and a clock on Trigger, it makes a new random value on each step.
+
+In Sample mode it takes a value on each rising edge. In Track mode it follows the input while the trigger is high and holds the last value while it is low. The output starts at 0.
 
 ## Example patch
 

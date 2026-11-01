@@ -8,6 +8,7 @@ Separates a stereo cable into its two sides.
 |---|---|
 | ID | `loom.mix.split` |
 | Version | 1 |
+| Family | Level and routing |
 | Category | Mix |
 
 ## Inputs

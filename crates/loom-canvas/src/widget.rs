@@ -5,8 +5,8 @@ use crate::controls::{ControlGeometry, PanelValues, focus_ring, knob_drag, knob_
 use crate::gpu::{Cable, CanvasPrimitive, Geometry, Overlay, Shape};
 use crate::hover::{HOVER_PADDING, HOVER_TEXT_PX, HoverTarget, HoverTimer};
 use crate::scene::{
-    BADGE_TEXT_SIZE, GRID, Hit, HoverText, PORT_HIT_RADIUS, PORT_RADIUS, PortRef, Scene, TILE_WIDTH, WidgetView,
-    WidgetViewKind,
+    BADGE_TEXT_SIZE, GRID, HEADER, Hit, HoverText, PORT_HIT_RADIUS, PORT_RADIUS, PortRef, Scene, TILE_WIDTH,
+    WidgetView, WidgetViewKind,
 };
 use crate::theme::Palette;
 use crate::tile_text::{self, Align, LABEL_SIZE, TITLE_SIZE, TextKind};
@@ -42,6 +42,9 @@ const ARROW_GROUP: Duration = Duration::from_millis(500);
 const TITLE_MIN_PX: f32 = 6.5;
 /// Port labels are drawn when they would be at least this tall on screen.
 const LABEL_MIN_PX: f32 = 7.5;
+/// The smallest zoom where port labels and captions are drawn. Opening a
+/// patch and framing it (F, Home) never zoom out past it (#455).
+const READABLE_ZOOM: f32 = LABEL_MIN_PX / LABEL_SIZE;
 
 /// Opacity of cables that are not in focus. It never changes with hover or
 /// selection, so moving the pointer only changes the cables it points at,
@@ -1081,7 +1084,7 @@ impl<Message> PatchCanvas<'_, Message> {
                 }
                 if new_frame && bounds.width > 0.0 {
                     if let Some(world) = self.scene.bounds() {
-                        state.camera.frame(world, bounds.size());
+                        state.camera.frame_readable(world, bounds.size(), READABLE_ZOOM);
                     }
                     state.framed_key = Some(self.frame_key);
                     // A new frame key means a new patch: its lights have to
@@ -1149,7 +1152,7 @@ impl<Message> PatchCanvas<'_, Message> {
                     }
                     keyboard::Key::Named(Named::Home) | keyboard::Key::Character("f") => {
                         if let Some(world) = self.scene.bounds() {
-                            state.camera.frame(world, bounds.size());
+                            state.camera.frame_readable(world, bounds.size(), READABLE_ZOOM);
                             shell.request_redraw();
                         }
                         shell.capture_event();
@@ -1592,7 +1595,17 @@ impl<Message> PatchCanvas<'_, Message> {
                         .and_then(|m| m.display_at(world))
                         .filter(|&widget| self.has_hover_text(id, widget))
                         .map(|widget| HoverTarget::Control(id, widget));
-                    display.or_else(|| tile_text::port_label_at(self.scene, world).map(HoverTarget::Port))
+                    // The header names the module's family (ADR-0029).
+                    let title = self
+                        .scene
+                        .module(id)
+                        .filter(|m| world.y < m.bounds().y + HEADER)
+                        .map(|_| HoverTarget::Title(id));
+                    // Text is drawn above every tile, so a port label that
+                    // shows over this tile's header hovers before the title.
+                    display
+                        .or_else(|| tile_text::port_label_at(self.scene, world).map(HoverTarget::Port))
+                        .or(title)
                 })
                 .or(focused),
             _ => focused,
@@ -1952,15 +1965,47 @@ impl<Message> PatchCanvas<'_, Message> {
         }
         // Focus is only valid on a control of the one selected module.
         let selected = (self.selection.len() == 1).then(|| *self.selection.iter().next().unwrap_or(&0));
+        let hidden = |m: u32, w: usize| {
+            self.scene
+                .module(m)
+                .and_then(|module| module.panel.widgets.get(w))
+                .is_some_and(|widget| widget.hidden)
+        };
+        // A mode change (from MIDI, say) can hide the focused control. The
+        // key meant for it is used up, so it never moves the tile instead.
+        let lost_to_mode = state.focus.is_some_and(|(m, w)| Some(m) == selected && hidden(m, w));
         if state.focus.is_some_and(|(m, w)| {
             Some(m) != selected
                 || !self
                     .scene
                     .module(m)
                     .and_then(|module| module.panel.widgets.get(w))
-                    .is_some_and(|widget| widget.is_control())
+                    .is_some_and(|widget| widget.is_control() && !widget.hidden)
         }) {
             state.focus = None;
+        }
+        // A hidden select is not drawn, so its list closes too.
+        if state
+            .select_popup
+            .is_some_and(|popup| hidden(popup.module, popup.widget))
+        {
+            state.select_popup = None;
+        }
+        if lost_to_mode
+            && matches!(
+                key.as_ref(),
+                keyboard::Key::Named(
+                    Named::ArrowUp
+                        | Named::ArrowRight
+                        | Named::ArrowDown
+                        | Named::ArrowLeft
+                        | Named::Space
+                        | Named::Enter
+                )
+            )
+        {
+            shell.capture_event();
+            return true;
         }
         if let Some(mut popup) = state.select_popup
             && let Some(WidgetViewKind::Select { options }) = self.widget_kind(popup.module, popup.widget)
@@ -2021,14 +2066,11 @@ impl<Message> PatchCanvas<'_, Message> {
                 }
                 let back = modifiers.shift();
                 if let Some((module, widget)) = state.focus {
-                    let controls: Vec<_> = self
+                    let controls = self
                         .scene
                         .module(module)
-                        .into_iter()
-                        .flat_map(|m| m.panel.widgets.iter().enumerate())
-                        .filter(|(_, w)| w.is_control())
-                        .map(|(i, _)| i)
-                        .collect();
+                        .map(|m| focusable(&m.panel))
+                        .unwrap_or_default();
                     let next = controls.iter().position(|&i| i == widget).and_then(|at| {
                         if back {
                             at.checked_sub(1)
@@ -2166,7 +2208,11 @@ impl<Message> PatchCanvas<'_, Message> {
                                 0.0
                             }
                         }
-                        Some(WidgetViewKind::Radio { options } | WidgetViewKind::Select { options }) => {
+                        Some(
+                            WidgetViewKind::Radio { options }
+                            | WidgetViewKind::Select { options }
+                            | WidgetViewKind::Segmented { options, .. },
+                        ) => {
                             let last = options.len().saturating_sub(1) as f32;
                             (position.round() + if up { 1.0 } else { -1.0 }).clamp(0.0, last)
                         }
@@ -2195,7 +2241,7 @@ impl<Message> PatchCanvas<'_, Message> {
                         Some(WidgetViewKind::Button) => {
                             self.press_button_key(state, named, module, widget, shell);
                         }
-                        Some(WidgetViewKind::Radio { options }) => {
+                        Some(WidgetViewKind::Radio { options } | WidgetViewKind::Segmented { options, .. }) => {
                             let next = (position.round() as usize + 1) % options.len().max(1);
                             self.set_control(shell, module, widget, next as f32);
                         }
@@ -2323,6 +2369,12 @@ impl<Message> PatchCanvas<'_, Message> {
                         .module(module)
                         .and_then(|m| m.widget_bounds(widget))
                         .and_then(|rect| radio_option(rect, options.len(), world))
+                        .map(|option| ChoiceClick::Set(module, widget, option as f32)),
+                    Some(WidgetViewKind::Segmented { options, .. }) => self
+                        .scene
+                        .module(module)
+                        .and_then(|m| m.widget_bounds(widget))
+                        .and_then(|rect| crate::controls::segment_at(rect, options.len(), world))
                         .map(|option| ChoiceClick::Set(module, widget, option as f32)),
                     Some(WidgetViewKind::Select { .. }) => Some(ChoiceClick::Open(module, widget)),
                     _ => None,
@@ -2923,7 +2975,28 @@ impl<Message> PatchCanvas<'_, Message> {
                 let (size, colour) = match item.kind {
                     TextKind::Title => (title_px, self.palette.text),
                     _ if !show_labels => return,
+                    // The chosen segment is filled with the value colour,
+                    // so its name is dark (visual-system.md, contrast).
+                    TextKind::Option(widget, option)
+                        if matches!(
+                            module.panel.widgets.get(widget).map(|w| &w.kind),
+                            Some(WidgetViewKind::Segmented { .. })
+                        ) && self.position(module.id, widget).round() as usize == option =>
+                    {
+                        (label_px, self.palette.background)
+                    }
                     TextKind::Option(..) => (label_px, self.palette.text),
+                    // A button's label is on its face: light on the off
+                    // face, dark on the orange face while on.
+                    TextKind::Caption(widget)
+                        if matches!(
+                            module.panel.widgets.get(widget).map(|w| &w.kind),
+                            Some(WidgetViewKind::Button)
+                        ) =>
+                    {
+                        let on = self.position(module.id, widget) > 0.5;
+                        (label_px, if on { self.palette.background } else { self.palette.text })
+                    }
                     _ => (label_px, self.palette.text_dim),
                 };
                 // A focused or turning knob shows its value instead of its
@@ -2966,9 +3039,14 @@ impl<Message> PatchCanvas<'_, Message> {
                     };
                     let box_rect = select_box(rect);
                     let chosen = values.position(module.id, index).round().max(0.0) as usize;
+                    // Cut to the box with "…", never wrapped; the open list
+                    // shows the whole name. The text starts 7 units in, and
+                    // the arrow takes the last 11.
+                    let room = box_rect.width - 18.0;
                     let choice = options.get(chosen).map_or("", String::as_str);
+                    let choice = crate::scene::fit_label(choice, room, crate::tile_text::LABEL_SIZE);
                     renderer.fill_text(
-                        text(choice, label_px, (box_rect.width - 22.0) * zoom, text::Alignment::Left),
+                        text(&choice, label_px, room * zoom, text::Alignment::Left),
                         to_screen(Point::new(box_rect.x + 7.0, box_rect.center_y())),
                         self.palette.text,
                         clip,
@@ -3120,6 +3198,12 @@ impl<Message> PatchCanvas<'_, Message> {
                     .filter(|text| !text.is_empty());
                 Some((&view.label, &view.hover, value, module.widget_bounds(widget)?))
             }
+            HoverTarget::Title(id) => {
+                let module = self.scene.module(id)?;
+                let tile = module.bounds();
+                let header = Rectangle::new(tile.position(), Size::new(tile.width, HEADER));
+                Some((&module.title, &module.hover, None, header))
+            }
         }
     }
 
@@ -3144,7 +3228,7 @@ impl<Message> PatchCanvas<'_, Message> {
         // (panels.md, Clock mark on transport inputs).
         let follows = match target {
             HoverTarget::Port(port) => self.scene.port(port).and_then(|p| p.follows_transport),
-            HoverTarget::Control(..) => None,
+            HoverTarget::Control(..) | HoverTarget::Title(_) => None,
         };
         let font = renderer.default_font();
         let inner = crate::hover::text_width(bounds.width);
@@ -3266,9 +3350,7 @@ fn visible_lights(scene: &Scene, camera: &Camera, size: Size) -> Vec<u32> {
 /// wrapping around. Lights are skipped. `None` if the panel has no
 /// controls.
 fn next_focus(panel: &crate::scene::PanelView, current: Option<usize>, back: bool) -> Option<usize> {
-    let controls: Vec<usize> = (0..panel.widgets.len())
-        .filter(|&i| panel.widgets[i].is_control())
-        .collect();
+    let controls = focusable(panel);
     if controls.is_empty() {
         return None;
     }
@@ -3280,6 +3362,15 @@ fn next_focus(panel: &crate::scene::PanelView, current: Option<usize>, back: boo
         (Some(i), true) => (i + controls.len() - 1) % controls.len(),
     };
     Some(controls[next])
+}
+
+/// The panel's widgets that keyboard focus can land on, in focus order:
+/// its controls, without lights and without controls the mode hides
+/// (ADR-0030). Tab and Enter both walk this list.
+fn focusable(panel: &crate::scene::PanelView) -> Vec<usize> {
+    (0..panel.widgets.len())
+        .filter(|&i| panel.widgets[i].is_control() && !panel.widgets[i].hidden)
+        .collect()
 }
 
 /// A slow figure-eight pan with a zoom swing, around the starting view.
@@ -3328,6 +3419,7 @@ mod tests {
             unknown: false,
             id,
             title: String::new(),
+            hover: crate::scene::HoverText::default(),
             accent: Color::BLACK,
             position: Point::new(x, 0.0),
             inputs: vec![port()],
@@ -3343,6 +3435,7 @@ mod tests {
             y: 0,
             label: String::new(),
             hover: crate::scene::HoverText::default(),
+            hidden: false,
         }
     }
 
@@ -3357,6 +3450,16 @@ mod tests {
                 widget(WidgetViewKind::Toggle, 6),
             ],
         }
+    }
+
+    /// Tab skips a control its module's mode hides (ADR-0030).
+    #[test]
+    fn tab_skips_hidden_controls() {
+        let mut panel = panel();
+        panel.widgets[2].hidden = true;
+        assert_eq!(next_focus(&panel, None, false), Some(0));
+        assert_eq!(next_focus(&panel, Some(0), false), Some(0), "only the knob is left");
+        assert_eq!(focusable(&panel), [0], "Tab within a module walks the same list");
     }
 
     #[test]
@@ -3376,6 +3479,9 @@ mod tests {
         // Port labels hidden, titles shown.
         assert_eq!(detail(0.7), Detail::Middle);
         assert_eq!(detail(0.3), Detail::Far);
+        // Framing stops at the first zoom that still draws labels.
+        assert_eq!(detail(READABLE_ZOOM), Detail::Close);
+        assert_eq!(detail(READABLE_ZOOM * 0.9), Detail::Middle);
     }
 
     #[test]
@@ -3469,6 +3575,70 @@ mod tests {
             ..on(Hit::Module(1))
         };
         assert_eq!(canvas.hover_target(&on_label), Some(HoverTarget::Port(port)));
+    }
+
+    /// Resting on a tile's header shows the module's hover text: its family
+    /// and description (ADR-0029). The body below the header does not.
+    #[test]
+    fn the_header_hovers_with_the_module_family() {
+        let mut m = module(1, 0.0);
+        m.hover = HoverText {
+            description: "Sources. A test module.".into(),
+            name: Some("test.module".into()),
+        };
+        let tile = m.bounds();
+        let scene = Scene::new(vec![m], Vec::new());
+        let none = BTreeSet::new();
+        let canvas = PatchCanvas::new(&scene, &none, |e| e);
+        let at = |y: f32| State {
+            hover: Some(Hit::Module(1)),
+            cursor: Some(Point::new(tile.center_x(), y)),
+            ..State::default()
+        };
+        assert_eq!(
+            canvas.hover_target(&at(tile.y + HEADER * 0.5)),
+            Some(HoverTarget::Title(1))
+        );
+        assert_eq!(canvas.hover_target(&at(tile.y + HEADER + 30.0)), None);
+        let (_, hover, value, anchor) = canvas.hover_content(HoverTarget::Title(1)).unwrap();
+        assert!(hover.description.starts_with("Sources."));
+        assert_eq!(value, None);
+        assert_eq!(anchor.height, HEADER);
+    }
+
+    /// A port label drawn over another tile's header hovers as the port,
+    /// not as that tile's title, because text is drawn above every tile.
+    #[test]
+    fn a_port_label_over_a_header_hovers_as_the_port() {
+        let port = PortRef {
+            module: 1,
+            output: true,
+            index: 0,
+        };
+        let mut below = module(1, 0.0);
+        below.panel = panel();
+        let mut label = None;
+        tile_text::for_each(&below, |item| {
+            if item.kind == TextKind::Port(port) {
+                label = Some(item.bounds().center());
+            }
+        });
+        let label = label.expect("a port label");
+        let mut cover = module(2, 0.0);
+        cover.inputs.clear();
+        cover.outputs.clear();
+        cover.position = Point::new(label.x - 40.0, label.y - HEADER * 0.5);
+        let scene = Scene::new(vec![below, cover], Vec::new());
+        let header = scene.module(2).unwrap().bounds();
+        assert!(label.y < header.y + HEADER, "the label is in the cover's header");
+        let none = BTreeSet::new();
+        let canvas = PatchCanvas::new(&scene, &none, |e| e);
+        let state = State {
+            hover: Some(Hit::Module(2)),
+            cursor: Some(label),
+            ..State::default()
+        };
+        assert_eq!(canvas.hover_target(&state), Some(HoverTarget::Port(port)));
     }
 
     /// A light with a description hovers like a control, and its hover
@@ -3890,6 +4060,44 @@ mod tests {
         drive(&canvas, &mut state, &key_event(keyboard::key::Named::Space, true), at);
         assert!(drive(&canvas, &mut state, &key_event(keyboard::key::Named::Escape, true), at).is_empty());
         assert!(state.select_popup.is_none());
+    }
+
+    /// When a mode change hides the focused select with its list open, the
+    /// list closes, and the next arrow or Enter edits nothing and moves no
+    /// tile (ADR-0030).
+    #[test]
+    fn hiding_the_focused_select_closes_it_and_uses_up_the_key() {
+        let mut view = module(1, 0.0);
+        let mut select = widget(
+            WidgetViewKind::Select {
+                options: vec!["ADSR".into(), "AD".into()],
+            },
+            0,
+        );
+        select.hidden = true;
+        view.panel = PanelView {
+            width: 6,
+            height: 2,
+            widgets: vec![select],
+        };
+        let scene = Scene::new(vec![view], Vec::new());
+        let selected = BTreeSet::from([1]);
+        let canvas = PatchCanvas::new(&scene, &selected, |event| event);
+        let at = scene.module(1).unwrap().bounds().center();
+        for key in [keyboard::key::Named::ArrowDown, keyboard::key::Named::Enter] {
+            let mut state = State {
+                focus: Some((1, 0)),
+                select_popup: Some(SelectPopup {
+                    module: 1,
+                    widget: 0,
+                    highlight: 1,
+                }),
+                ..State::default()
+            };
+            let events = drive(&canvas, &mut state, &key_event(key, true), at);
+            assert!(events.is_empty(), "{key:?}: {events:?}");
+            assert!(state.select_popup.is_none() && state.focus.is_none());
+        }
     }
 
     /// A removed select cannot swallow the next key meant for the canvas.

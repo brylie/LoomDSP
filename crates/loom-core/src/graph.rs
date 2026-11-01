@@ -56,6 +56,7 @@ pub(crate) static UNKNOWN_DESCRIPTOR: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Unknown module",
     category: "Unknown",
+    family: crate::Family::Interface,
     description: "This version does not have this module.",
     inputs: &[],
     outputs: &[],

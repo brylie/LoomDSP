@@ -64,3 +64,5 @@ The status line holds one of these values and nothing else. The date line is the
 | [0026](0026-browser-demo-feasibility.md) | A browser demo waits for a spike; pre-rendered audio examples come first | Accepted |
 | [0027](0027-prebuilt-release-downloads.md) | Prebuilt release downloads from a tagged GitHub Actions build | Accepted |
 | [0028](0028-app-accessibility-waits-for-iced.md) | App accessibility waits for AccessKit support in Iced | Deferred |
+| [0029](0029-module-families-and-a-shared-palette.md) | Module families and a shared palette | Accepted |
+| [0030](0030-panels-hide-controls-a-mode-does-not-use.md) | Panels hide the controls a mode does not use | Accepted |

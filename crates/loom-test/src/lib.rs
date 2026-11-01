@@ -8,7 +8,7 @@
 //! use loom_test::{Harness, Signal, reference};
 //!
 //! # static SINE: loom_core::ModuleDescriptor = loom_core::ModuleDescriptor {
-//! #     id: "doc.sine", version: 1, name: "Sine", category: "Doc", description: "",
+//! #     id: "doc.sine", version: 1, name: "Sine", category: "Doc", family: loom_core::Family::Sources, description: "",
 //! #     inputs: &[], outputs: &[], params: &[], role: loom_core::ModuleRole::UnitDelay,
 //! #     panel: loom_core::Panel::EMPTY, displays: &[],
 //! # };

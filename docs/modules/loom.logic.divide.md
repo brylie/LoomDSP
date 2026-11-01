@@ -2,12 +2,13 @@
 
 <!-- Generated from the module's descriptor by `loom modules --markdown`. Edit the descriptor, not this part. -->
 
-Fires on every Nth trigger. Offset fires earlier in the count. Reset starts the count again.
+Fires on every Nth trigger, so a fast clock makes slower rhythms. Offset fires earlier in the count, and Reset starts the count again.
 
 | | |
 |---|---|
 | ID | `loom.logic.divide` |
 | Version | 1 |
+| Family | Time and rhythm |
 | Category | Logic |
 
 ## Inputs
@@ -32,7 +33,7 @@ Fires on every Nth trigger. Offset fires earlier in the count. Reset starts the 
 
 ## Panel
 
-6 by 5 grid units.
+9 by 3 grid units.
 
 - Knob: **Division** (`n`)
 - Knob: **Offset** (`offset`)
@@ -42,7 +43,9 @@ Fires on every Nth trigger. Offset fires earlier in the count. Reset starts the 
 
 ## When to use it
 
-Use Clock Divide to generate sub-rhythms and polyrhythms from a master trigger source. It fires an output trigger once every N input triggers. An offset parameter shifts which step in the cycle fires the trigger.
+Use Clock Divide to make slower rhythms from a fast clock. It fires on every Nth trigger, so a division of 4 turns quarter notes into whole notes.
+
+Offset moves which trigger in the count fires, and Reset starts the count again, for example on bar 1.
 
 ## Example patch
 

@@ -1324,6 +1324,7 @@ mod tests {
         version: 1,
         name: "Gate",
         category: "Test",
+        family: crate::Family::Interface,
         description: "A button for the queue test.",
         inputs: &[],
         outputs: &[],

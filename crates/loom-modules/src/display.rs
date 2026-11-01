@@ -14,6 +14,7 @@ pub static METER: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Level Meter",
     category: "Display",
+    family: loom_core::Family::Interface,
     description: "Shows the peak and RMS level of its input. Passes the input through unchanged.",
     inputs: &[PortSpec {
         name: "in",
@@ -35,7 +36,7 @@ pub static METER: ModuleDescriptor = ModuleDescriptor {
     }],
     params: &[],
     role: ModuleRole::Dsp(|_| Box::new(Meter)),
-    panel: Panel::new(3, 6, &[Widget::meter(0, 0, "out")]),
+    panel: Panel::new(3, 6, &[Widget::meter(0, 0, "out").captioned("")]),
     displays: &[],
 };
 
@@ -60,6 +61,7 @@ pub static SCOPE: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Scope",
     category: "Display",
+    family: loom_core::Family::Interface,
     description: "Shows its input over time. Passes the input through unchanged.",
     inputs: &[PortSpec {
         name: "in",
@@ -111,17 +113,18 @@ pub static SCOPE: ModuleDescriptor = ModuleDescriptor {
             default: 0.0,
             unit: "",
             options: ParamOptions::DEFAULT,
-        },
+        }
+        .shown_when("auto", &[0]),
     ],
     role: ModuleRole::Dsp(|_| Box::new(Meter)),
     panel: Panel::new(
         9,
         8,
         &[
-            Widget::knob(0, 0, "window"),
-            Widget::toggle(3, 0, "auto"),
-            Widget::knob(6, 0, "level"),
-            Widget::scope(0, 3, "out"),
+            Widget::scope(0, 0, "out"),
+            Widget::knob(0, 5, "window"),
+            Widget::toggle(3, 5, "auto"),
+            Widget::knob(6, 5, "level"),
         ],
     ),
     displays: &[],

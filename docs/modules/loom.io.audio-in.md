@@ -8,6 +8,7 @@ Brings a pair of channels from the selected audio input into the patch.
 |---|---|
 | ID | `loom.io.audio-in` |
 | Version | 1 |
+| Family | Interface |
 | Category | I/O |
 
 ## Inputs
@@ -24,15 +25,15 @@ None.
 
 | Parameter | Range | Default | Description |
 |---|---|---|---|
-| **Pair** (`pair`) | 1 to 4, whole numbers, choices 1, 2, 3, 4 | 1 | The input channel pair to read. |
+| **Pair** (`pair`) | 1-2, 3-4, 5-6, or 7-8 | 1-2 | The input channel pair to read. |
 | **Gain** (`gain`) | 0 to 4 | 1 | Scales the input level. |
 | **Mute** (`mute`) | 0 to 1, whole numbers | 0 | Fades the input to silence. |
 
 ## Panel
 
-12 by 6 grid units.
+9 by 5 grid units.
 
-- Radio buttons: **Pair** (`pair`) (1, 2, 3, 4)
+- Segmented control: **Pair** (`pair`)
 - Knob: **Gain** (`gain`)
 - Toggle: **Mute** (`mute`)
 - Light: **Active** (`active`): Lit when the selected input pair carries sound.

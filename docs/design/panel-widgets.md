@@ -27,7 +27,7 @@ The panels spec already lists a widget set ([panels.md, Widgets](panels.md#widge
 
 - A module can declare a pure sampler on a display widget. The sampler takes its current parameter values and a horizontal position from 0 to 1, and returns a vertical position from 0 to 1. The app samples it on the control thread when panel values change. The canvas draws those values from its separate control buffer. No drawing or allocation runs on the audio thread.
 - The preview is 5 grid units high and sits above the related controls. It uses the width declared by the panel. Modules without a useful result have no preview and no reserved gap. Its bounded surface, caption, and lightened module-category tint mark it as a display; orange remains the editable-value colour. It has no handles or editing pointer, and a drag on it moves the tile.
-- Envelope places its live Level and compact Mode selector in a small row above the shape. The shape spans the full panel width, with the five parameter knobs in one row below. Mode changes the result but is used less often, so it does not take space from the visual. The shape shows one cycle. Timed stages use their durations with a minimum schematic width of 12 percent of the timed total or 30 ms, whichever is longer, so a short attack remains visible. Its hold segment is one fifth of the timed duration. AD omits hold and release. The view shows the selected bend but cannot predict the gate's release time.
+- Envelope puts the shape first, at the full panel width, then a row with the Mode segmented control and the live Level light, then the five parameter knobs ([Panel layout](panels.md#panel-layout)). In AD mode, Sustain and Release are hidden and the other knobs close up ([ADR-0030](../adr/0030-panels-hide-controls-a-mode-does-not-use.md)). The shape shows one cycle. Timed stages use their durations with a minimum schematic width of 12 percent of the timed total or 30 ms, whichever is longer, so a short attack remains visible. Its hold segment is one fifth of the timed duration. AD omits hold and release. The view shows the selected bend but cannot predict the gate's release time.
 - LFO shows one cycle of the selected shape. Rate and sync change playback, not the shape of that cycle.
 - Ladder shows its small-signal low-pass response from 20 Hz to 20 kHz on a logarithmic horizontal axis and -60 to +12 dB vertically. The model uses the selected number of one-pole stages and its feedback gain, including the bass reduction at high resonance. Drive and nonlinear saturation are omitted because they depend on the input signal. The preview is not a measurement of the live audio. See [How a ladder filter sings](../learn/ladder-filter.md).
 - At middle zoom the shape remains visible without a readable caption; at far zoom the panel is hidden by the existing level-of-detail rules. No separate timer runs for these static shapes.
@@ -170,7 +170,7 @@ A whole-number parameter can name its values, such as "6 dB", "12 dB", "18 dB", 
 
 ### Select list
 
-**Status:** Agreed for named whole-number choices on a tile. The first use is Envelope Mode. The closed selector sits in a short settings row above its full-width result view. The list opens at a readable screen size above or below the box, stays inside the canvas, and marks the current choice. Click, keyboard, drag, reset, modulation, and MIDI learn follow the rules below. Long lists with scrolling remain draft; this first slice supports up to 12 choices.
+**Status:** Agreed for named whole-number choices on a tile. It is for choice lists too long or too wordy for a [segmented control](#segmented-control), such as LFO Shape. The closed selector sits in the choices row, under the module's result view when it has one. The list opens at a readable screen size above or below the box, stays inside the canvas, and marks the current choice. Click, keyboard, drag, reset, modulation, and MIDI learn follow the rules below. Long lists with scrolling remain draft; this first slice supports up to 12 choices.
 
 The current choice is shown as text. Clicking it shows the other choices in a list.
 
@@ -186,14 +186,30 @@ The current choice is shown as text. Clicking it shows the other choices in a li
 - **Middle zoom:** the box, a bar for the text, and the mark.
 - **Size (leaning):** 6 × 2. The caption is above or below the box, as for a knob.
 
+### Segmented control
+
+**Status:** Agreed, P1 ([#453](https://github.com/brylie/LoomDSP/issues/453)).
+
+A row of joined buttons, one per choice name. The chosen one is filled in the value colour; the others are outlined. All choices are visible, and one click picks any of them.
+
+- **Binds to:** a whole-number parameter with 2 to 4 choice names. The registry refuses one without names, or with more than 4.
+- **Size:** `width` × 2 grid units, declared on the widget, as for a shape preview. The caption sits in the top row and the segments in the bottom row. Segments share the width equally. The author picks a width that fits the longest name; the cut-label test catches one that does not.
+- **Click:** on a segment picks it: one undo step. **Drag:** moves the tile, as on radio buttons (rule 1). **Double-click:** resets to the default.
+- **Keyboard:** focused, Space or Enter picks the next choice, wrapping round; Up and Right step up, Down and Left step down, as with every whole-number control.
+- **Modulation:** a dot, as on radio buttons. The filled segment shows the base choice.
+- **MIDI learn:** a controller sweeps through the choices.
+- **Middle zoom:** the segments as shapes, the chosen one filled, and a bar for each name.
+- *Why a new widget, not radio buttons in a row:* a segment is a button the size of its name, which is easier to hit than a small dot, and the filled segment reads as the current choice from across a room.
+
 ### Radio buttons or a select list?
 
 They bind to the same parameter, so the author or the panel editor can switch one for the other. A [default panel](panels.md#default-panels) applies these rules when the module gives no hint.
 
-- **Radio buttons** when there are 5 choices or fewer and the panel has room. *Why:* all choices are visible at once, and one click picks any of them. On stage, seeing the options matters.
+- **Segmented control** for 2 to 4 short names ([Panel layout](panels.md#panel-layout), principle 6). *Why:* every choice is visible and one click picks it, in one row.
+- **Radio buttons** for 5 names that must all be visible, when the panel has the height. *Why:* all choices are visible at once, and one click picks any of them. On stage, seeing the options matters.
 - **Select list** when there are more choices, when the names are long, or when the panel is small. Unison voices from 1 to 16, a function choice, a scale, or a musical division such as 1/16 or 2 bars are select lists.
-- **Envelope Mode** uses a select list despite having two choices. The result shape needs the full panel width, and the mode changes less often than the five ranged parameters.
-- **Toggle** for exactly two states that read as off and on. Two named states that are not off and on, such as "Linear" and "Equal power", use radio buttons.
+- **Envelope Mode** uses a segmented control under its result shape, so both modes are visible ([Panel layout](panels.md#panel-layout), principle 2).
+- **Toggle** for exactly two states that read as off and on. Two named states that are not off and on, such as "Linear" and "Equal power", use a segmented control.
 
 ## Action
 

@@ -1003,6 +1003,7 @@ mod tests {
             version: 1,
             name: "Quiet",
             category: "Test",
+            family: loom_core::Family::Interface,
             description: "",
             inputs: &[PortSpec {
                 name: "in",

@@ -162,7 +162,7 @@ fn logic_follows_a_modulated_op() {
     assert_eq!(render(&mut parts, 16)[8], 0.0);
 }
 
-/// Memory in Data mode takes the level of A on a clock edge. Set and reset
+/// Memory in Data mode takes the level of A on a clock edge. Set/Reset
 /// mode (the base) would ignore A. Modulated to Data (mode 2), a high A and
 /// a rising clock give a high output.
 #[test]
@@ -185,7 +185,7 @@ fn memory_follows_a_modulated_mode() {
     assert_eq!(render(&mut parts, 16)[8], 1.0);
 }
 
-/// Sample and hold takes the ramp's first value and holds it (about 0) in
+/// Sample and Hold takes the ramp's first value and holds it (about 0) in
 /// Sample mode. Modulated to Track, it follows the ramp while the trigger is
 /// high, so after 100 frames of a 261 Hz phase it is above 0.3.
 #[test]

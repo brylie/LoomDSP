@@ -8,6 +8,7 @@ A slow wave. Free mode runs at a rate in Hz; synced mode follows a phase, by def
 |---|---|
 | ID | `loom.mod.lfo` |
 | Version | 1 |
+| Family | Modulation |
 | Category | Modulation |
 
 ## Inputs
@@ -28,18 +29,18 @@ A slow wave. Free mode runs at a rate in Hz; synced mode follows a phase, by def
 
 | Parameter | Range | Default | Description |
 |---|---|---|---|
-| **Sync** (`sync`) | 0 to 1, whole numbers, choices Free, Synced | 0 | Free: run at the rate. Synced: follow the phase input. |
+| **Sync** (`sync`) | Free or Synced | Free | Free: run at the rate. Synced: follow the phase input. |
 | **Rate** (`rate`) | 0.01 to 50 Hz, logarithmic | 1 Hz | How many waves per second in free mode. |
 | **Cycles** (`cycles`) | 1 to 16, whole numbers | 1 | How many waves fit in one cycle of the phase input in synced mode. |
-| **Shape** (`shape`) | 0 to 4, whole numbers, choices Sine, Triangle, Ramp up, Ramp down, Square | 0 | The wave: sine, triangle, ramp up, ramp down, or square. |
+| **Shape** (`shape`) | Sine, Triangle, Ramp up, Ramp down, or Square | Sine | The wave: sine, triangle, ramp up, ramp down, or square. |
 
 ## Panel
 
-15 by 11 grid units.
+15 by 10 grid units.
 
 - Shape preview: **Wave** (`out`) (read-only)
-- Radio buttons: **Sync** (`sync`) (Free, Synced)
-- Radio buttons: **Shape** (`shape`) (Sine, Triangle, Ramp up, Ramp down, Square)
+- Segmented control: **Sync** (`sync`)
+- Select: **Shape** (`shape`)
 - Knob: **Rate** (`rate`)
 - Knob: **Cycles** (`cycles`)
 
@@ -47,7 +48,9 @@ A slow wave. Free mode runs at a rate in Hz; synced mode follows a phase, by def
 
 ## When to use it
 
-Use LFO to produce cyclical modulation signals for vibrato, tremolo, filter sweeps, or pulse width modulation. Free mode runs at a specified frequency in Hertz, while Synced mode locks to bar phase or an external phase ramp.
+Use LFO for slow, repeating movement: vibrato on a pitch, tremolo on a level, or a sweep on a filter cutoff.
+
+In free mode it runs at Rate, in waves per second. In synced mode it follows a phase input, by default the bar phase, so its waves fit the tempo: Cycles sets how many waves fit in one cycle of the phase input. With Phase unconnected that is one bar; with a cable on Phase it is one cycle of that signal. Out +90 is the same wave a quarter cycle ahead.
 
 ## Example patch
 

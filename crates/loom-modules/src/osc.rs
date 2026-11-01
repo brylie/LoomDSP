@@ -16,6 +16,7 @@ pub static SINE: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Sine",
     category: "Oscillator",
+    family: loom_core::Family::Sources,
     description: "Sine wave shaped from a phase input.",
     inputs: &[PortSpec {
         name: "phase",
@@ -59,7 +60,8 @@ pub static SAW: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Saw",
     category: "Oscillator",
-    description: "Band-limited saw wave shaped from a phase input (polyBLEP).",
+    family: loom_core::Family::Sources,
+    description: "A sawtooth wave, with every harmonic, shaped from a phase input. Its sharp edges are smoothed so high notes stay clean.",
     inputs: &[PortSpec {
         name: "phase",
         label: "Phase",
@@ -139,7 +141,8 @@ pub static PULSE: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Pulse",
     category: "Oscillator",
-    description: "Band-limited pulse wave shaped from a phase input (polyBLEP).",
+    family: loom_core::Family::Sources,
+    description: "A pulse wave with a set width, shaped from a phase input. Its sharp edges are smoothed so high notes stay clean.",
     inputs: &[PortSpec {
         name: "phase",
         label: "Phase",
@@ -257,7 +260,8 @@ pub static TRIANGLE: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Triangle",
     category: "Oscillator",
-    description: "Band-limited triangle wave shaped from a phase input (polyBLAMP).",
+    family: loom_core::Family::Sources,
+    description: "A triangle wave with few harmonics, shaped from a phase input. Its corners are smoothed so high notes stay clean.",
     inputs: &[PortSpec {
         name: "phase",
         label: "Phase",
@@ -343,7 +347,8 @@ pub static NOISE: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Noise",
     category: "Oscillator",
-    description: "White, pink, or brown noise. The seed makes renders repeatable (NFR-SND-04).",
+    family: loom_core::Family::Sources,
+    description: "White, pink, or brown noise. The seed makes every render the same.",
     inputs: &[],
     outputs: &[PortSpec {
         name: "out",
@@ -378,7 +383,7 @@ pub static NOISE: ModuleDescriptor = ModuleDescriptor {
 .integer()
     .choices(&["White", "Pink", "Brown"])],
     role: ModuleRole::Dsp(|config: &ModuleConfig| Box::new(Noise::new(config.sample_rate))),
-    panel: Panel::new(6, 4, &[Widget::radio(0, 0, "colour")]),
+    panel: Panel::new(9, 2, &[Widget::segmented(0, 0, 9, "colour")]),
     displays: &[],
 };
 

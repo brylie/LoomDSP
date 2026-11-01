@@ -1,4 +1,4 @@
-# Constant (pitch)
+# Pitch Constant
 
 <!-- Generated from the module's descriptor by `loom modules --markdown`. Edit the descriptor, not this part. -->
 
@@ -8,6 +8,7 @@ Outputs a fixed pitch, set in semitones from middle C.
 |---|---|
 | ID | `loom.pitch.constant` |
 | Version | 1 |
+| Family | Notes and pitch |
 | Category | Pitch |
 
 ## Inputs
@@ -36,7 +37,7 @@ None.
 
 ## When to use it
 
-Use Constant (pitch) to output a steady musical pitch defined in semitones relative to middle C (0 semitones = 0.0 pitch). An offset of +12 semitones equals +0.1 pitch (one octave).
+Use Pitch Constant when a patch needs a fixed pitch, set in semitones from middle C: a drone, a fixed interval to add to a note, or a test tone. 12 semitones is one octave, which is 0.1 in pitch.
 
 ## Example patch
 

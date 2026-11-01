@@ -15,7 +15,8 @@ pub static SVF: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "SVF",
     category: "Filter",
-    description: "State variable filter (trapezoidal integration). The cutoff input adds pitch: +0.1 doubles the cutoff.",
+    family: loom_core::Family::FiltersAndEffects,
+    description: "A resonant filter with low-pass, band-pass, high-pass, and notch outputs. The cutoff input adds pitch: +0.1 doubles the cutoff.",
     inputs: &[
         PortSpec {
             name: "in",
@@ -100,7 +101,9 @@ pub static SVF: ModuleDescriptor = ModuleDescriptor {
         .smooth(0.01),
     ],
     role: ModuleRole::Dsp(|config| Box::new(Svf::new(config))),
-    panel: Panel::new(6, 3, &[Widget::knob(0, 0, "cutoff"), Widget::knob(3, 0, "resonance")]),
+    // Eight units wide with the knobs centred: the gutters give the
+    // Resonance caption and the Bandpass and Highpass labels room (#455).
+    panel: Panel::new(8, 3, &[Widget::knob(1, 0, "cutoff"), Widget::knob(4, 0, "resonance")]),
     displays: &[],
 };
 
@@ -212,9 +215,10 @@ impl Module for Svf {
 pub static ONEPOLE: ModuleDescriptor = ModuleDescriptor {
     id: "loom.filter.onepole",
     version: 1,
-    name: "One-pole",
+    name: "One-Pole",
     category: "Filter",
-    description: "A gentle first-order filter, 6 dB per octave. The cutoff input adds pitch: +0.1 doubles the cutoff. Low cutoffs smooth control signals.",
+    family: loom_core::Family::FiltersAndEffects,
+    description: "A gentle 6 dB per octave filter with low-pass and high-pass outputs; low cutoffs smooth control signals. The cutoff input adds pitch: +0.1 doubles the cutoff.",
     inputs: &[
         PortSpec {
             name: "in",
@@ -373,7 +377,8 @@ pub static LADDER: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Ladder",
     category: "Filter",
-    description: "A resonant low-pass with a 12, 18, or 24 dB slope. High resonance thins the bass and, at 18 and 24 dB, sings on its own. The cutoff input adds pitch: +0.1 doubles the cutoff.",
+    family: loom_core::Family::FiltersAndEffects,
+    description: "A resonant low-pass with a 12, 18, or 24 dB slope; high resonance thins the bass and, at 18 and 24 dB, sings on its own. The cutoff input adds pitch: +0.1 doubles the cutoff.",
     inputs: &[
         PortSpec {
             name: "in",
@@ -453,14 +458,15 @@ pub static LADDER: ModuleDescriptor = ModuleDescriptor {
     ],
     role: ModuleRole::Dsp(|config| Box::new(Ladder::new(config))),
     panel: Panel::new(
-        12,
         11,
+        10,
         &[
-            Widget::shape(0, 0, 12, "out", "Response", ladder_preview),
-            Widget::radio(0, 5, "slope"),
-            Widget::knob(6, 5, "cutoff"),
-            Widget::knob(9, 5, "resonance"),
-            Widget::knob(6, 8, "drive"),
+            Widget::shape(0, 0, 11, "out", "Response", ladder_preview),
+            Widget::segmented(0, 5, 11, "slope"),
+            // One unit apart, so "Resonance" fits between its neighbours.
+            Widget::knob(0, 7, "cutoff"),
+            Widget::knob(4, 7, "resonance"),
+            Widget::knob(8, 7, "drive"),
         ],
     ),
     displays: &[],

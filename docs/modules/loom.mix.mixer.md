@@ -8,6 +8,7 @@ Adds four signals, each with its own level and mute. Two mixers in a row make a 
 |---|---|
 | ID | `loom.mix.mixer` |
 | Version | 1 |
+| Family | Level and routing |
 | Category | Mix |
 
 ## Inputs
@@ -55,7 +56,9 @@ Adds four signals, each with its own level and mute. Two mixers in a row make a 
 
 ## When to use it
 
-Use Mixer to combine up to four signals with dedicated volume controls and click-free mutes. Muting an input fades the signal down smoothly over 5 milliseconds to prevent pops. Stereo signals are mixed independently on left and right channels.
+Use Mixer to add up to four signals, each with its own level. Mute silences an input with a 5 ms fade, so it does not click.
+
+Each side of a stereo cable is mixed on its own. For more than four inputs, feed one mixer into another.
 
 ## Example patch
 

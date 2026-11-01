@@ -362,18 +362,39 @@ pub fn run_window(args: &crate::Args, path: &Path) -> Result<(), String> {
     app.selection.extend(shown.selected);
     app.still = Some(shown.still);
 
+    let pixels = draw_window(&app, &mut renderer, logical, options.scale);
+    write_png(path, physical, &pixels)
+}
+
+/// Draws one frame of the whole window and returns its RGBA pixels.
+///
+/// The frame first gets a redraw event, as every frame in the app does.
+/// Iced's buttons choose their look (enabled, hovered, disabled) while they
+/// handle a redraw, and draw as disabled before the first one (#460).
+fn draw_window(app: &crate::App, renderer: &mut iced::Renderer, logical: Size, scale: f32) -> Vec<u8> {
+    let physical = physical_size(logical, scale).expect("the caller checked the size");
     // A new cache, so the canvas starts from the still state.
     let theme = app.theme();
-    let mut ui = UserInterface::build(app.view(), logical, Cache::default(), &mut renderer);
+    let mut ui = UserInterface::build(app.view(), logical, Cache::default(), renderer);
+    let redraw = iced::Event::Window(iced::window::Event::RedrawRequested(std::time::Instant::now()));
+    // The image is one still frame, so what the widgets ask for is dropped.
+    let mut messages = Vec::new();
+    let _ = ui.update(
+        &[redraw],
+        mouse::Cursor::Unavailable,
+        renderer,
+        &mut iced::advanced::clipboard::Null,
+        &mut messages,
+    );
     let style = Style {
         text_color: theme.palette().text,
     };
-    ui.draw(&mut renderer, &theme, &style, mouse::Cursor::Unavailable);
+    ui.draw(renderer, &theme, &style, mouse::Cursor::Unavailable);
     // The renderer holds text paragraphs weakly, and the widget tree owns
     // them, so the tree must live until the frame is drawn.
-    let pixels = Headless::screenshot(&mut renderer, physical, options.scale, theme.palette().background);
+    let pixels = Headless::screenshot(renderer, physical, scale, theme.palette().background);
     drop(ui);
-    write_png(path, physical, &pixels)
+    pixels
 }
 
 /// Where the canvas is in the window, and its camera. The canvas reports a
@@ -615,36 +636,101 @@ pub(crate) fn write_png(path: &Path, size: Size<u32>, rgba: &[u8]) -> Result<(),
 mod tests {
     use super::*;
 
+    /// The window at its default size, drawn by `draw_window` with the wgpu
+    /// renderer. `None` on a machine without a GPU adapter.
+    fn render_window(app: &crate::App) -> Option<Vec<u8>> {
+        let mut renderer = iced::futures::executor::block_on(<iced::Renderer as Headless>::new(
+            Font::DEFAULT,
+            Pixels(16.0),
+            Some("wgpu"),
+        ))?;
+        Some(draw_window(app, &mut renderer, crate::WINDOW, 1.0))
+    }
+
+    /// The headless app for an example patch, as `--screenshot-window`
+    /// builds it.
+    fn example_app(name: &str) -> crate::App {
+        let mut args = crate::tests::app_args();
+        args.patch = Some(
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../examples/patches")
+                .join(name),
+        );
+        crate::snapshot::headless(&args).expect("example patch")
+    }
+
+    /// A window image shows enabled buttons as enabled. Iced picks a
+    /// button's look while it handles a redraw, and draws it as disabled
+    /// before the first one, so without a redraw every button looked
+    /// disabled (#460). The toolbar also follows its button roles: no
+    /// primary button while MIDI learn is off, and Panic in danger red
+    /// (visual-system.md, Toolbar).
+    #[test]
+    fn window_images_draw_enabled_and_disabled_buttons_apart() {
+        let app = example_app("subtractive.ron");
+        let Some(pixels) = render_window(&app) else {
+            assert!(
+                !std::env::var("LOOM_REQUIRE_GPU").is_ok_and(|value| value == "1"),
+                "coverage requires a GPU adapter"
+            );
+            return;
+        };
+        let palette = app.theme().palette();
+        let rgb = |c: iced::Color| [c.r, c.g, c.b].map(|v| (v * 255.0).round() as i32);
+        let near = |got: [u8; 3], want: [i32; 3]| got.iter().zip(want).all(|(&g, w)| (i32::from(g) - w).abs() <= 3);
+        // The same app laid out by the test harness, to find the buttons
+        // by their text. A new patch has nothing to undo.
+        let mut ui = crate::ui_test::Ui::with_app(app);
+        assert!(ui.app.edits.history.undo_step().is_none());
+        let width = crate::WINDOW.width as usize;
+        let mut fill = |label: &str| {
+            let text = ui.text(label).unwrap_or_else(|| panic!("no `{label}` button"));
+            // Inside the button's padding, left of its text.
+            let (x, y) = ((text.x - 4.0) as usize, text.center_y() as usize);
+            let at = (y * width + x) * 4;
+            [pixels[at], pixels[at + 1], pixels[at + 2]]
+        };
+        let new = fill("New");
+        let undo = fill("Undo");
+        assert_ne!(new, undo, "an enabled and a disabled button look the same");
+        for label in ["New", "Open", "Add module", "Redo", "MIDI learn", "Preferences"] {
+            assert!(!near(fill(label), rgb(palette.primary)), "{label} is primary");
+        }
+        let panic = fill("Panic");
+        assert!(
+            near(panic, rgb(palette.danger)),
+            "Panic is drawn {panic:?}, not danger red"
+        );
+        let primary = palette.primary;
+        let expected = rgb(primary);
+        let is_primary = |rgb: &[u8]| {
+            rgb.iter()
+                .zip(expected)
+                .all(|(&got, want)| (i32::from(got) - want).abs() <= 3)
+        };
+
+        // A checkbox keeps its status the same way: an assignment that is
+        // on fills its box, left of its source, with the primary colour.
+        let mut app = example_app("modulation.ron");
+        app.selection.insert(4);
+        let pixels = render_window(&app).expect("the renderer used above");
+        let mut ui = crate::ui_test::Ui::with_app(app);
+        let source = ui.text("LFO #5: Out").expect("the LFO assignment's source");
+        let y = source.center_y() as usize;
+        let left = (source.x - 30.0) as usize;
+        let filled = (y - 4..y + 4)
+            .flat_map(|y| (left..source.x as usize).map(move |x| (y * width + x) * 4))
+            .filter(|&at| is_primary(&pixels[at..at + 3]))
+            .count();
+        assert!(filled > 20, "the On box is not filled with the primary colour");
+    }
+
     /// A headless window draw exercises the second GPU primitive and shows
     /// the dragged cable in the inspector, outside the canvas's clip.
     #[test]
     fn a_window_drag_draws_over_the_inspector() {
-        let mut args = crate::tests::app_args();
-        args.patch =
-            Some(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches/subtractive.ron"));
-        let mut app = crate::snapshot::headless(&args).expect("example patch");
-        let render = |app: &crate::App| {
-            let mut renderer = iced::futures::executor::block_on(<iced::Renderer as Headless>::new(
-                Font::DEFAULT,
-                Pixels(16.0),
-                Some("wgpu"),
-            ))?;
-            let theme = app.theme();
-            let mut ui = UserInterface::build(app.view(), crate::WINDOW, Cache::default(), &mut renderer);
-            let style = Style {
-                text_color: theme.palette().text,
-            };
-            ui.draw(&mut renderer, &theme, &style, mouse::Cursor::Unavailable);
-            let pixels = Headless::screenshot(
-                &mut renderer,
-                physical_size(crate::WINDOW, 1.0).expect("window size"),
-                1.0,
-                theme.palette().background,
-            );
-            drop(ui);
-            Some(pixels)
-        };
-        let Some(before) = render(&app) else {
+        let mut app = example_app("subtractive.ron");
+        let Some(before) = render_window(&app) else {
             assert!(
                 !std::env::var("LOOM_REQUIRE_GPU").is_ok_and(|value| value == "1"),
                 "coverage requires a GPU adapter"
@@ -663,7 +749,7 @@ mod tests {
             at: Some(Point::new(1250.0, 150.0)),
             zoom: 1.0,
         });
-        let after = render(&app).expect("the renderer used above");
+        let after = render_window(&app).expect("the renderer used above");
         let width = crate::WINDOW.width as usize;
         let changed = (120..220)
             .flat_map(|y| (1180..1250).map(move |x| (y * width + x) * 4))

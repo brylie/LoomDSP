@@ -176,6 +176,7 @@ static SEEDED_NOISE: loom_core::ModuleDescriptor = loom_core::ModuleDescriptor {
     version: 1,
     name: "Seeded noise test",
     category: "Test",
+    family: loom_core::Family::Interface,
     description: "Tests a seeded module turning stereo.",
     inputs: &[loom_core::PortSpec {
         name: "in",

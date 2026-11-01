@@ -12,6 +12,7 @@ pub static UNIT_DELAY: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "1-Sample Delay",
     category: "Time",
+    family: loom_core::Family::LevelAndRouting,
     description: "Delays the input by one sample. Marks where a feedback loop is broken.",
     inputs: &[PortSpec {
         name: "in",
@@ -43,6 +44,7 @@ pub static AUDIO_OUT: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Audio Out",
     category: "I/O",
+    family: loom_core::Family::Interface,
     description: "Sends a mono or stereo signal to the audio output.",
     inputs: &[PortSpec {
         name: "in",
@@ -66,6 +68,7 @@ pub static AUDIO_IN: ModuleDescriptor = ModuleDescriptor {
     version: 1,
     name: "Audio In",
     category: "I/O",
+    family: loom_core::Family::Interface,
     description: "Brings a pair of channels from the selected audio input into the patch.",
     inputs: &[],
     outputs: &[PortSpec {
@@ -89,7 +92,8 @@ pub static AUDIO_IN: ModuleDescriptor = ModuleDescriptor {
             options: loom_core::ParamOptions::DEFAULT,
         }
         .integer()
-        .choices(&["1", "2", "3", "4"]),
+        // The channels each pair reads, as on an interface (principle 10).
+        .choices(&["1-2", "3-4", "5-6", "7-8"]),
         loom_core::ParamSpec {
             name: "gain",
             label: "Gain",
@@ -123,13 +127,13 @@ pub static AUDIO_IN: ModuleDescriptor = ModuleDescriptor {
         })
     }),
     panel: Panel::new(
-        12,
-        6,
+        9,
+        5,
         &[
-            loom_core::Widget::radio(0, 0, "pair"),
-            loom_core::Widget::knob(6, 0, "gain"),
-            loom_core::Widget::toggle(9, 0, "mute"),
-            loom_core::Widget::light(9, 2, "active"),
+            loom_core::Widget::segmented(0, 0, 9, "pair"),
+            loom_core::Widget::knob(0, 2, "gain"),
+            loom_core::Widget::toggle(3, 2, "mute"),
+            loom_core::Widget::light(6, 2, "active"),
         ],
     ),
     displays: &[loom_core::DisplaySpec {
