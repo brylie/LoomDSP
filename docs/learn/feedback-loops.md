@@ -5,7 +5,7 @@ Why a loop in a patch needs a one-sample delay, why the engine runs loops one sa
 - **Kind:** explainer.
 - **Used by:** [ADR-0002](../adr/0002-graph-execution-and-feedback.md) (graph execution and feedback), [live patching specification](../design/live-patching.md), [modulation specification](../design/modulation.md) (rule 8).
 - **Related:** [Block-size invariance](block-size-invariance.md), [Hot patching](hot-patching.md), [Delays and interpolation](delays-and-interpolation.md), [Feedback FM](feedback-fm.md).
-- **Code:** `crates/loom-core/src/compile.rs` (Tarjan's algorithm in `compile/order.rs`), `loom.time.delay1`.
+- **Code:** `crates/loom-core/src/compile.rs` (Tarjan's algorithm in `compile/order.rs`, in `compile/steps.rs`, `LoopOrder` orders each loop and picks the cables to break, and `Plan::add_loop` inserts their delays), `loom.time.delay1`.
 
 ## A loop has no first step
 

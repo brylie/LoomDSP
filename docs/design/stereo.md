@@ -9,7 +9,7 @@ How the engine decides which cables carry stereo, and what modules do with it, s
 - **Background:** [Stereo cables](../learn/stereo-cables.md): why copies, how each signal type downmixes, why a downmix can cancel. [Hot patching](../learn/hot-patching.md): why a cold copy 1 clicks.
 - **Prior art:** Eurorack patches stereo as two cables and dual modules. VCV Rack carries several channels on one cable and lets each module decide what to do with them. Bitwig Grid works in stereo by default. Named only to explain the trade-offs; the rules below are our own.
 - **Issues:** #23, #203 (new paths without a cold start)
-- **Code:** `crates/loom-core/src/descriptor.rs`, `compile.rs`, `module.rs`, and `engine.rs`; Join and Split in `crates/loom-modules/src/mix.rs`.
+- **Code:** `crates/loom-core/src/descriptor.rs`, `compile.rs` (downmixes in `compile/inputs.rs`), `module.rs`, and `engine.rs`; Join and Split in `crates/loom-modules/src/mix.rs`.
 
 ## Goal
 

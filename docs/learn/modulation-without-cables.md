@@ -5,7 +5,7 @@ Why a modulation depth is a share of a knob's range and not of its units, how po
 - **Kind:** explainer.
 - **Used by:** [ADR-0014](../adr/0014-modulation-without-cables.md), [modulation specification](../design/modulation.md) (rules 2, 4, 8, and the engine section).
 - **Related:** [Pitch at 0.1 per octave](pitch.md), [Feedback loops and the unit delay](feedback-loops.md), [Block-size invariance](block-size-invariance.md).
-- **Code:** `loom_core::module::Param`, `ParamSpec::normalize`, `ParamSpec::denormalize`, `crates/loom-core/src/compile.rs`.
+- **Code:** `loom_core::module::Param`, `ParamSpec::normalize`, `ParamSpec::denormalize`, `crates/loom-core/src/compile.rs` (fills planned in `compile/inputs.rs`).
 
 ## What an assignment is
 
