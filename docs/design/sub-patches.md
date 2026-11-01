@@ -81,7 +81,7 @@ Exposing follows [Panels: exposed controls](panels.md#exposed-controls-in-a-sub-
 
 **Settled.** A library item is an ordinary patch file.
 
-- **Save to library** (on the sub-patch's tile menu, or **File > Save to library** inside it) writes the definition as a patch file in the library folder. Its Patch inputs and outputs are its ports, and its exposed items and panel come along. Its patch metadata (authors, tags, licence, [patch metadata](patch-metadata.md)) is the sub-patch's own.
+- **Save to library** (on the sub-patch's tile menu, or **File > Save to library** inside it) writes the definition as a patch file in the library folder. Its Patch inputs and outputs are its ports, and its exposed items and panel come along. Its patch metadata (authors, tags, licence) is the sub-patch's own, and patch info credits it as a part ([credit for parts](patch-metadata.md#credit-for-parts)).
 - The **library folder** is a preference, by default `LoomDSP/Library` in the user's Documents folder ([preferences](preferences.md)).
 - The module browser lists library items next to modules, marked as sub-patches. Adding one asks nothing: it is inserted **as a copy**. **Insert linked** is on the item's menu.
 - Any patch file can be inserted as a sub-patch. A patch with no Patch inputs or outputs gives a tile with no ports.
@@ -247,4 +247,3 @@ Roles, slots, and modes:
 ## Open points
 
 - **CPU in select mode.** Every member runs, so a select of 8 members costs 8 members. Leaning: measure with the first real abstraction. If needed, pause a member that has been silent and unselected for a while, decided at a fixed sample count, not a block, so output stays block-size invariant.
-- **Credit for parts.** A library item has its own authors. Leaning: inserting it adds its authors to the patch's credits ([patch metadata](patch-metadata.md#open-points)). Decide with #267.
