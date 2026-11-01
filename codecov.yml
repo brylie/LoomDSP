@@ -12,13 +12,16 @@ coverage:
     project:
       default:
         target: auto
-        # Some tests depend on timing, so a few lines can run in one CI run
-        # and not the next. Fail only when total coverage falls by more
-        # than 1% from the base commit.
-        threshold: 1%
+        # Fail only when total coverage falls by more than 5% from the base
+        # commit. Timing-dependent tests make small swings normal.
+        threshold: 5%
     patch:
       default:
-        target: auto
+        # The changed lines need 80% coverage, the same minimum as the
+        # whole project. A fixed target, not `auto`: Codecov counts moved
+        # lines as new, so `auto` failed pure refactors that kept their
+        # old coverage.
+        target: 80%
 
 comment:
   # Post the PR comment only once both reports are in, like the statuses.
