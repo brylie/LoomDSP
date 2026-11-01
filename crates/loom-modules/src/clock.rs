@@ -127,9 +127,9 @@ pub static CLOCK: ModuleDescriptor = ModuleDescriptor {
 };
 
 /// Index of `rate`.
-const RATE: usize = 0;
+const RATE: usize = CLOCK.param_index("rate").unwrap();
 /// Index of `width`.
-const WIDTH: usize = 1;
+const WIDTH: usize = CLOCK.param_index("width").unwrap();
 
 /// The length of one cycle of rate `index`, in quarter-note beats.
 ///

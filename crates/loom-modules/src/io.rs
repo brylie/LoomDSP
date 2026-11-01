@@ -154,13 +154,20 @@ struct AudioIn {
     active: bool,
 }
 
+impl AudioIn {
+    const PAIR: usize = AUDIO_IN.param_index("pair").unwrap();
+    const GAIN: usize = AUDIO_IN.param_index("gain").unwrap();
+    const MUTE: usize = AUDIO_IN.param_index("mute").unwrap();
+    const OUT: usize = AUDIO_IN.output_index("out").unwrap();
+}
+
 impl loom_core::Module for AudioIn {
     fn process(&mut self, ctx: &loom_core::ProcessContext<'_>, io: &mut loom_core::PortIo<'_>) {
-        let pair = io.param(0);
-        let gain = io.param(1);
-        let mute = io.param(2);
+        let pair = io.param(Self::PAIR);
+        let gain = io.param(Self::GAIN);
+        let mute = io.param(Self::MUTE);
         let (input, channels) = ctx.audio_input();
-        let [left, right] = io.stereo_output(0);
+        let [left, right] = io.stereo_output(Self::OUT);
         self.active = false;
         for (i, (left, right)) in left.iter_mut().zip(right.iter_mut()).enumerate() {
             let pair = pair.map_or(i, self.pair, |value| value.round().clamp(1.0, 4.0) as usize);
@@ -194,9 +201,9 @@ impl loom_core::Module for AudioIn {
 
     fn set_param(&mut self, index: usize, value: f32) {
         match index {
-            0 => self.pair = value.round().clamp(1.0, 4.0) as usize,
-            1 => self.gain.set_target(value),
-            2 => {
+            Self::PAIR => self.pair = value.round().clamp(1.0, 4.0) as usize,
+            Self::GAIN => self.gain.set_target(value),
+            Self::MUTE => {
                 self.mute = value >= 0.5;
                 self.open.set_target(if self.mute { 0.0 } else { 1.0 });
             }
@@ -205,7 +212,7 @@ impl loom_core::Module for AudioIn {
     }
 
     fn param_glide(&self, index: usize) -> Option<f32> {
-        if index == 1 { self.gain.gliding() } else { None }
+        if index == Self::GAIN { self.gain.gliding() } else { None }
     }
 
     fn reset(&mut self) {

@@ -130,13 +130,30 @@ struct Mixer {
 }
 
 impl Mixer {
+    /// Index of `level1`. `level2` to `level4` follow it (checked below).
+    const LEVEL1: usize = MIXER.param_index("level1").unwrap();
+    /// Index of `mute1`. `mute2` to `mute4` follow it (checked below).
+    const MUTE1: usize = MIXER.param_index("mute1").unwrap();
+
+    /// Which input a parameter index belongs to, in the run of
+    /// `MIXER_INPUTS` parameters that starts at `first`.
+    fn input_of(first: usize, index: usize) -> Option<usize> {
+        index.checked_sub(first).filter(|&n| n < MIXER_INPUTS)
+    }
+
     fn new(config: &ModuleConfig) -> Self {
-        let level = |i: usize| Smoothed::new(1.0, config.sample_rate, MIXER.params[i].options.smooth_seconds);
+        let level = |i: usize| {
+            Smoothed::new(
+                1.0,
+                config.sample_rate,
+                MIXER.params[Self::LEVEL1 + i].options.smooth_seconds,
+            )
+        };
         let open = |i: usize| {
             Smoothed::new(
                 1.0,
                 config.sample_rate,
-                MIXER.params[MIXER_INPUTS + i].options.smooth_seconds,
+                MIXER.params[Self::MUTE1 + i].options.smooth_seconds,
             )
         };
         Self {
@@ -147,6 +164,29 @@ impl Mixer {
     }
 }
 
+// The Mixer reads its levels and mutes as two runs of `MIXER_INPUTS`
+// parameters, so each run must stay in order in the descriptor. A reorder
+// that breaks a run is a build error.
+const _: () = {
+    let names = [
+        ["level1", "level2", "level3", "level4"],
+        ["mute1", "mute2", "mute3", "mute4"],
+    ];
+    let firsts = [Mixer::LEVEL1, Mixer::MUTE1];
+    let mut run = 0;
+    while run < names.len() {
+        let mut n = 0;
+        while n < MIXER_INPUTS {
+            assert!(
+                matches!(MIXER.param_index(names[run][n]), Some(i) if i == firsts[run] + n),
+                "Mixer level and mute parameters must each stay in order"
+            );
+            n += 1;
+        }
+        run += 1;
+    }
+};
+
 impl Module for Mixer {
     /// Takes the running state of another instance (ADR-0022).
     fn copy_state_from(&mut self, other: &dyn Module) -> bool {
@@ -154,8 +194,8 @@ impl Module for Mixer {
     }
 
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let modulated: [Param<'_>; MIXER_INPUTS] = std::array::from_fn(|n| io.param(n));
-        let mute_mod: [Param<'_>; MIXER_INPUTS] = std::array::from_fn(|n| io.param(MIXER_INPUTS + n));
+        let modulated: [Param<'_>; MIXER_INPUTS] = std::array::from_fn(|n| io.param(Self::LEVEL1 + n));
+        let mute_mod: [Param<'_>; MIXER_INPUTS] = std::array::from_fn(|n| io.param(Self::MUTE1 + n));
         let (inputs, [out]) = io.split::<MIXER_INPUTS, 1>();
         for (i, out) in out.iter_mut().enumerate() {
             let mut sum = 0.0;
@@ -174,21 +214,16 @@ impl Module for Mixer {
     }
 
     fn set_param(&mut self, index: usize, value: f32) {
-        match index {
-            0..=3 => self.levels[index].set_target(value),
-            4..=7 => {
-                self.open_base[index - MIXER_INPUTS] = 1.0 - value;
-                self.open[index - MIXER_INPUTS].set_target(1.0 - value);
-            }
-            _ => {}
+        if let Some(n) = Self::input_of(Self::LEVEL1, index) {
+            self.levels[n].set_target(value);
+        } else if let Some(n) = Self::input_of(Self::MUTE1, index) {
+            self.open_base[n] = 1.0 - value;
+            self.open[n].set_target(1.0 - value);
         }
     }
 
     fn param_glide(&self, index: usize) -> Option<f32> {
-        match index {
-            0..=3 => self.levels[index].gliding(),
-            _ => None,
-        }
+        Self::input_of(Self::LEVEL1, index).and_then(|n| self.levels[n].gliding())
     }
 
     fn reset(&mut self) {
@@ -263,7 +298,11 @@ pub static CROSSFADE: ModuleDescriptor = ModuleDescriptor {
     ],
     role: ModuleRole::Dsp(|config| {
         Box::new(Crossfade {
-            mix: Smoothed::new(0.5, config.sample_rate, CROSSFADE.params[0].options.smooth_seconds),
+            mix: Smoothed::new(
+                0.5,
+                config.sample_rate,
+                CROSSFADE.params[Crossfade::MIX].options.smooth_seconds,
+            ),
             linear: false,
         })
     }),
@@ -277,6 +316,11 @@ struct Crossfade {
     linear: bool,
 }
 
+impl Crossfade {
+    const MIX: usize = CROSSFADE.param_index("mix").unwrap();
+    const LAW: usize = CROSSFADE.param_index("law").unwrap();
+}
+
 impl Module for Crossfade {
     /// Takes the running state of another instance (ADR-0022).
     fn copy_state_from(&mut self, other: &dyn Module) -> bool {
@@ -284,7 +328,7 @@ impl Module for Crossfade {
     }
 
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let (modulated, law_mod) = (io.param(0), io.param(1));
+        let (modulated, law_mod) = (io.param(Self::MIX), io.param(Self::LAW));
         let ([a, b], [out]) = io.split::<2, 1>();
         for (i, out) in out.iter_mut().enumerate() {
             let linear = law_mod.map_or(i, self.linear, |v| v >= 0.5);
@@ -305,13 +349,14 @@ impl Module for Crossfade {
 
     fn set_param(&mut self, index: usize, value: f32) {
         match index {
-            0 => self.mix.set_target(value),
-            _ => self.linear = value >= 0.5,
+            Self::MIX => self.mix.set_target(value),
+            Self::LAW => self.linear = value >= 0.5,
+            _ => {}
         }
     }
 
     fn param_glide(&self, index: usize) -> Option<f32> {
-        if index == 0 { self.mix.gliding() } else { None }
+        if index == Self::MIX { self.mix.gliding() } else { None }
     }
 
     fn reset(&mut self) {
@@ -366,15 +411,21 @@ pub static JOIN: ModuleDescriptor = ModuleDescriptor {
 #[derive(Clone)]
 struct Join;
 
+impl Join {
+    const LEFT_IN: usize = JOIN.input_index("left").unwrap();
+    const RIGHT_IN: usize = JOIN.input_index("right").unwrap();
+    const OUT: usize = JOIN.output_index("out").unwrap();
+}
+
 impl Module for Join {
     fn copy_state_from(&mut self, other: &dyn Module) -> bool {
         loom_core::copy_state(self, other)
     }
 
     fn process(&mut self, _: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let [left, _] = io.stereo_input(0);
-        let [right, _] = io.stereo_input(1);
-        let [out_left, out_right] = io.stereo_output(0);
+        let [left, _] = io.stereo_input(Self::LEFT_IN);
+        let [right, _] = io.stereo_input(Self::RIGHT_IN);
+        let [out_left, out_right] = io.stereo_output(Self::OUT);
         out_left.copy_from_slice(left);
         out_right.copy_from_slice(right);
     }
@@ -403,15 +454,21 @@ pub static SPLIT: ModuleDescriptor = ModuleDescriptor {
 #[derive(Clone)]
 struct Split;
 
+impl Split {
+    const IN: usize = SPLIT.input_index("in").unwrap();
+    const LEFT_OUT: usize = SPLIT.output_index("left").unwrap();
+    const RIGHT_OUT: usize = SPLIT.output_index("right").unwrap();
+}
+
 impl Module for Split {
     fn copy_state_from(&mut self, other: &dyn Module) -> bool {
         loom_core::copy_state(self, other)
     }
 
     fn process(&mut self, _: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let [left, right] = io.stereo_input(0);
-        io.output(0).copy_from_slice(left);
-        io.output(1).copy_from_slice(right);
+        let [left, right] = io.stereo_input(Self::IN);
+        io.output(Self::LEFT_OUT).copy_from_slice(left);
+        io.output(Self::RIGHT_OUT).copy_from_slice(right);
     }
 }
 

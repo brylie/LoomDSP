@@ -84,6 +84,9 @@ struct Phase {
 }
 
 impl Phase {
+    const TUNE: usize = PHASE.param_index("tune").unwrap();
+    const OCTAVE: usize = PHASE.param_index("octave").unwrap();
+
     fn new(config: &ModuleConfig) -> Self {
         Self {
             phase: 0.0,
@@ -122,8 +125,8 @@ impl Module for Phase {
     }
 
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let tune = io.param(0);
-        let octave = io.param(1);
+        let tune = io.param(Self::TUNE);
+        let octave = io.param(Self::OCTAVE);
         let ([pitch_in, reset], [out]) = io.split::<2, 1>();
         for (i, ((out, &p), &r)) in out.iter_mut().zip(pitch_in).zip(reset).enumerate() {
             let offset =
@@ -140,8 +143,8 @@ impl Module for Phase {
 
     fn set_param(&mut self, index: usize, value: f32) {
         match index {
-            0 => self.tune = value,
-            1 => self.octave = value.round(),
+            Self::TUNE => self.tune = value,
+            Self::OCTAVE => self.octave = value.round(),
             _ => {}
         }
     }
@@ -278,6 +281,8 @@ struct Wrap {
 }
 
 impl Wrap {
+    const MODE: usize = WRAP.param_index("mode").unwrap();
+
     /// `x - floor(x)`, always in `[0, 1)`.
     fn wrap(x: f32) -> f32 {
         let w = x - x.floor();
@@ -295,7 +300,7 @@ impl Wrap {
 
 impl Module for Wrap {
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let mode_mod = io.param(0);
+        let mode_mod = io.param(Self::MODE);
         let ([input], [out]) = io.split::<1, 1>();
         for (i, (out, &x)) in out.iter_mut().zip(input).enumerate() {
             // A modulated mode counts for this frame only; the base stays
@@ -313,7 +318,7 @@ impl Module for Wrap {
     }
 
     fn set_param(&mut self, index: usize, value: f32) {
-        if index == 0 {
+        if index == Self::MODE {
             self.fold = value >= 0.5;
         }
     }
@@ -401,6 +406,9 @@ struct PhaseScale {
 }
 
 impl PhaseScale {
+    const MULTIPLY: usize = SCALE.param_index("multiply").unwrap();
+    const DIVIDE: usize = SCALE.param_index("divide").unwrap();
+
     fn new() -> Self {
         Self {
             multiply: 1,
@@ -419,7 +427,7 @@ impl Module for PhaseScale {
     }
 
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let (multiply_mod, divide_mod) = (io.param(0), io.param(1));
+        let (multiply_mod, divide_mod) = (io.param(Self::MULTIPLY), io.param(Self::DIVIDE));
         let ([phase, reset], [out]) = io.split::<2, 1>();
         for (i, out) in out.iter_mut().enumerate() {
             // A modulated value counts for this frame only. The base stays
@@ -457,8 +465,8 @@ impl Module for PhaseScale {
 
     fn set_param(&mut self, index: usize, value: f32) {
         match index {
-            0 => self.multiply = value.round().max(1.0) as i64,
-            1 => self.divide = value.round().max(1.0) as i64,
+            Self::MULTIPLY => self.multiply = value.round().max(1.0) as i64,
+            Self::DIVIDE => self.divide = value.round().max(1.0) as i64,
             _ => {}
         }
     }

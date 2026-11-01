@@ -108,6 +108,9 @@ struct Divide {
 }
 
 impl Divide {
+    const N: usize = DIVIDE.param_index("n").unwrap();
+    const OFFSET: usize = DIVIDE.param_index("offset").unwrap();
+
     fn new() -> Self {
         Self {
             n: 2,
@@ -134,8 +137,8 @@ impl Module for Divide {
     }
 
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let n = io.param(0);
-        let offset = io.param(1);
+        let n = io.param(Self::N);
+        let offset = io.param(Self::OFFSET);
         let ([trigger_in, reset], [out]) = io.split::<2, 1>();
         for (i, ((out, &t), &r)) in out.iter_mut().zip(trigger_in).zip(reset).enumerate() {
             // Modulated values live only for this frame. The fields keep the
@@ -161,8 +164,8 @@ impl Module for Divide {
         // The engine clamps and rounds whole-number parameters, so the
         // casts below are exact. `max(1)` guards the division all the same.
         match index {
-            0 => self.n = (value as u64).max(1),
-            1 => self.offset = value as u64,
+            Self::N => self.n = (value as u64).max(1),
+            Self::OFFSET => self.offset = value as u64,
             _ => {}
         }
     }
@@ -260,6 +263,11 @@ struct Compare {
     high: bool,
 }
 
+impl Compare {
+    const MODE: usize = COMPARE.param_index("mode").unwrap();
+    const HYSTERESIS: usize = COMPARE.param_index("hysteresis").unwrap();
+}
+
 impl Module for Compare {
     /// Takes the running state of another instance (ADR-0022).
     fn copy_state_from(&mut self, other: &dyn Module) -> bool {
@@ -267,7 +275,7 @@ impl Module for Compare {
     }
 
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let (mode_mod, hysteresis_mod) = (io.param(0), io.param(1));
+        let (mode_mod, hysteresis_mod) = (io.param(Self::MODE), io.param(Self::HYSTERESIS));
         let ([a, b], [gate]) = io.split::<2, 1>();
         for (i, gate) in gate.iter_mut().enumerate() {
             let below = mode_mod.map_or(i, self.below, |v| v >= 0.5);
@@ -284,8 +292,8 @@ impl Module for Compare {
 
     fn set_param(&mut self, index: usize, value: f32) {
         match index {
-            0 => self.below = value >= 0.5,
-            1 => self.hysteresis = value,
+            Self::MODE => self.below = value >= 0.5,
+            Self::HYSTERESIS => self.hysteresis = value,
             _ => {}
         }
     }
@@ -372,10 +380,15 @@ struct Logic {
     invert: bool,
 }
 
+impl Logic {
+    const OP: usize = LOGIC.param_index("op").unwrap();
+    const INVERT: usize = LOGIC.param_index("invert").unwrap();
+}
+
 impl Module for Logic {
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let connected: [bool; 4] = std::array::from_fn(|n| io.is_connected(n));
-        let (op_mod, invert_mod) = (io.param(0), io.param(1));
+        let (op_mod, invert_mod) = (io.param(Self::OP), io.param(Self::INVERT));
         let (inputs, [out]) = io.split::<4, 1>();
         for (i, out) in out.iter_mut().enumerate() {
             // Modulated values count for this frame only; the base stays in
@@ -403,8 +416,8 @@ impl Module for Logic {
 
     fn set_param(&mut self, index: usize, value: f32) {
         match index {
-            0 => self.op = value as u8,
-            1 => self.invert = value >= 0.5,
+            Self::OP => self.op = value as u8,
+            Self::INVERT => self.invert = value >= 0.5,
             _ => {}
         }
     }
@@ -479,6 +492,10 @@ struct Memory {
     edge_b: EdgeDetector,
 }
 
+impl Memory {
+    const MODE: usize = MEMORY.param_index("mode").unwrap();
+}
+
 impl Module for Memory {
     /// Takes the running state of another instance (ADR-0022).
     fn copy_state_from(&mut self, other: &dyn Module) -> bool {
@@ -486,7 +503,7 @@ impl Module for Memory {
     }
 
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let mode_mod = io.param(0);
+        let mode_mod = io.param(Self::MODE);
         let ([a, b], [out]) = io.split::<2, 1>();
         for (i, out) in out.iter_mut().enumerate() {
             let mode = mode_mod.map_or(i, self.mode, |v| v.round().clamp(0.0, 2.0) as u8);
@@ -506,7 +523,7 @@ impl Module for Memory {
     }
 
     fn set_param(&mut self, index: usize, value: f32) {
-        if index == 0 {
+        if index == Self::MODE {
             self.mode = value as u8;
         }
     }

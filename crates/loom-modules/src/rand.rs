@@ -75,6 +75,10 @@ struct SampleHold {
     held: f32,
 }
 
+impl SampleHold {
+    const MODE: usize = SAMPLE_HOLD.param_index("mode").unwrap();
+}
+
 impl Module for SampleHold {
     /// Takes the running state of another instance (ADR-0022).
     fn copy_state_from(&mut self, other: &dyn Module) -> bool {
@@ -82,7 +86,7 @@ impl Module for SampleHold {
     }
 
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let mode_mod = io.param(0);
+        let mode_mod = io.param(Self::MODE);
         let ([input, trigger], [out]) = io.split::<2, 1>();
         for (i, out) in out.iter_mut().enumerate() {
             let track = mode_mod.map_or(i, self.track, |v| v >= 0.5);
@@ -97,7 +101,7 @@ impl Module for SampleHold {
     }
 
     fn set_param(&mut self, index: usize, value: f32) {
-        if index == 0 {
+        if index == Self::MODE {
             self.track = value >= 0.5;
         }
     }

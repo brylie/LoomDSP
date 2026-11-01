@@ -92,6 +92,9 @@ struct NoteIn {
 }
 
 impl NoteIn {
+    const CHANNEL: usize = NOTE_IN.param_index("channel").unwrap();
+    const BEND_RANGE: usize = NOTE_IN.param_index("bend-range").unwrap();
+
     /// True when a message on `channel` (0 to 15) passes the `listen`
     /// setting, where 0 means every channel and 1 to 16 pick one.
     fn accepts(listen: u8, channel: u8) -> bool {
@@ -146,8 +149,8 @@ impl Module for NoteIn {
     }
 
     fn process(&mut self, ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let channel = io.param(0);
-        let bend_range = io.param(1);
+        let channel = io.param(Self::CHANNEL);
+        let bend_range = io.param(Self::BEND_RANGE);
         let ([], [pitch_out, gate_out, velocity_out]) = io.split::<0, 3>();
         let mut events = ctx.midi().peekable();
         for i in 0..pitch_out.len() {
@@ -171,8 +174,8 @@ impl Module for NoteIn {
 
     fn set_param(&mut self, index: usize, value: f32) {
         match index {
-            0 => self.channel = value.round() as u8,
-            1 => self.bend_range = value,
+            Self::CHANNEL => self.channel = value.round() as u8,
+            Self::BEND_RANGE => self.bend_range = value,
             _ => {}
         }
     }
@@ -294,6 +297,11 @@ struct ControllerIn {
 }
 
 impl ControllerIn {
+    const SOURCE: usize = CONTROLLER_IN.param_index("source").unwrap();
+    const CONTROLLER: usize = CONTROLLER_IN.param_index("controller").unwrap();
+    const CHANNEL: usize = CONTROLLER_IN.param_index("channel").unwrap();
+    const SMOOTHING: usize = CONTROLLER_IN.param_index("smoothing").unwrap();
+
     /// A module that has seen no messages, with the default parameters.
     fn new(sample_rate: f32) -> Self {
         Self {
@@ -358,10 +366,10 @@ impl Module for ControllerIn {
     }
 
     fn process(&mut self, ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let source = io.param(0);
-        let controller = io.param(1);
-        let channel = io.param(2);
-        let smoothing = io.param(3);
+        let source = io.param(Self::SOURCE);
+        let controller = io.param(Self::CONTROLLER);
+        let channel = io.param(Self::CHANNEL);
+        let smoothing = io.param(Self::SMOOTHING);
         let ([], [out]) = io.split::<0, 1>();
         let mut events = ctx.midi().peekable();
         for (i, out) in out.iter_mut().enumerate() {
@@ -396,10 +404,10 @@ impl Module for ControllerIn {
 
     fn set_param(&mut self, index: usize, value: f32) {
         match index {
-            0 => self.source = value.round().clamp(0.0, 2.0) as u8,
-            1 => self.controller = value.round().clamp(0.0, 127.0) as u8,
-            2 => self.channel = value.round().clamp(0.0, 16.0) as u8,
-            3 => self.coefficient = Self::coefficient(value, self.sample_rate),
+            Self::SOURCE => self.source = value.round().clamp(0.0, 2.0) as u8,
+            Self::CONTROLLER => self.controller = value.round().clamp(0.0, 127.0) as u8,
+            Self::CHANNEL => self.channel = value.round().clamp(0.0, 16.0) as u8,
+            Self::SMOOTHING => self.coefficient = Self::coefficient(value, self.sample_rate),
             _ => {}
         }
     }

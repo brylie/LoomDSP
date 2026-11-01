@@ -117,6 +117,8 @@ struct Svf {
 }
 
 impl Svf {
+    const CUTOFF: usize = SVF.param_index("cutoff").unwrap();
+    const RESONANCE: usize = SVF.param_index("resonance").unwrap();
     fn new(config: &ModuleConfig) -> Self {
         Self {
             sample_rate: config.sample_rate,
@@ -126,9 +128,13 @@ impl Svf {
             cutoff: Smoothed::new(
                 pitch::from_hz(1_000.0),
                 config.sample_rate,
-                SVF.params[0].options.smooth_seconds,
+                SVF.params[Self::CUTOFF].options.smooth_seconds,
             ),
-            resonance: Smoothed::new(0.2, config.sample_rate, SVF.params[1].options.smooth_seconds),
+            resonance: Smoothed::new(
+                0.2,
+                config.sample_rate,
+                SVF.params[Self::RESONANCE].options.smooth_seconds,
+            ),
             ic1: 0.0,
             ic2: 0.0,
         }
@@ -142,8 +148,8 @@ impl Module for Svf {
     }
 
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let cutoff_param = io.param(0);
-        let resonance_param = io.param(1);
+        let cutoff_param = io.param(Self::CUTOFF);
+        let resonance_param = io.param(Self::RESONANCE);
         let ([input, cutoff_mod], [lp, bp, hp, notch]) = io.split::<2, 4>();
         let nyquist_limit = self.sample_rate * 0.49;
         for i in 0..input.len() {
@@ -183,8 +189,8 @@ impl Module for Svf {
 
     fn set_param(&mut self, index: usize, value: f32) {
         match index {
-            0 => self.cutoff.set_target(pitch::from_hz(value)),
-            1 => self.resonance.set_target(value),
+            Self::CUTOFF => self.cutoff.set_target(pitch::from_hz(value)),
+            Self::RESONANCE => self.resonance.set_target(value),
             _ => {}
         }
     }
@@ -193,8 +199,8 @@ impl Module for Svf {
         match index {
             // The cutoff glides in pitch. The engine glides in the knob's
             // position, which is also logarithmic, so the paths match.
-            0 => self.cutoff.gliding().map(pitch::to_hz),
-            1 => self.resonance.gliding(),
+            Self::CUTOFF => self.cutoff.gliding().map(pitch::to_hz),
+            Self::RESONANCE => self.resonance.gliding(),
             _ => None,
         }
     }
@@ -287,6 +293,7 @@ struct OnePole {
 }
 
 impl OnePole {
+    const CUTOFF: usize = ONEPOLE.param_index("cutoff").unwrap();
     /// A one-pole at 1 kHz with a cleared state.
     fn new(config: &ModuleConfig) -> Self {
         Self {
@@ -295,7 +302,7 @@ impl OnePole {
             cutoff: Smoothed::new(
                 pitch::from_hz(1_000.0),
                 config.sample_rate,
-                ONEPOLE.params[0].options.smooth_seconds,
+                ONEPOLE.params[Self::CUTOFF].options.smooth_seconds,
             ),
             state: 0.0,
         }
@@ -309,7 +316,7 @@ impl Module for OnePole {
     }
 
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let cutoff_param = io.param(0);
+        let cutoff_param = io.param(Self::CUTOFF);
         let ([input, cutoff_mod], [lp, hp]) = io.split::<2, 2>();
         let nyquist_limit = self.sample_rate * 0.49;
         for i in 0..input.len() {
@@ -335,13 +342,13 @@ impl Module for OnePole {
     }
 
     fn set_param(&mut self, index: usize, value: f32) {
-        if index == 0 {
+        if index == Self::CUTOFF {
             self.cutoff.set_target(pitch::from_hz(value));
         }
     }
 
     fn param_glide(&self, index: usize) -> Option<f32> {
-        if index == 0 {
+        if index == Self::CUTOFF {
             self.cutoff.gliding().map(pitch::to_hz)
         } else {
             None
@@ -477,9 +484,10 @@ pub static LADDER: ModuleDescriptor = ModuleDescriptor {
 /// `1 / ((1 + j f/fc)^N + k)` (docs/learn/ladder-filter.md). Drive and
 /// nonlinear saturation depend on the input, so this remains schematic.
 fn ladder_preview(params: &[f32], x: f32) -> f32 {
-    let &[cutoff, resonance, _, slope] = params else {
+    if params.len() != LADDER.params.len() {
         return 0.0;
-    };
+    }
+    let (cutoff, resonance, slope) = (params[Ladder::CUTOFF], params[Ladder::RESONANCE], params[Ladder::SLOPE]);
     let frequency = 20.0 * 1000.0_f32.powf(x.clamp(0.0, 1.0));
     let ratio = frequency / cutoff.max(20.0);
     let stage = slope.round().clamp(0.0, 2.0) as usize;
@@ -553,6 +561,10 @@ struct Ladder {
 }
 
 impl Ladder {
+    const CUTOFF: usize = LADDER.param_index("cutoff").unwrap();
+    const RESONANCE: usize = LADDER.param_index("resonance").unwrap();
+    const DRIVE: usize = LADDER.param_index("drive").unwrap();
+    const SLOPE: usize = LADDER.param_index("slope").unwrap();
     /// A 24 dB ladder at 1 kHz with a cleared state.
     fn new(config: &ModuleConfig) -> Self {
         let params = LADDER.params;
@@ -562,10 +574,10 @@ impl Ladder {
             cutoff: Smoothed::new(
                 pitch::from_hz(1_000.0),
                 config.sample_rate,
-                params[0].options.smooth_seconds,
+                params[Self::CUTOFF].options.smooth_seconds,
             ),
-            resonance: Smoothed::new(0.2, config.sample_rate, params[1].options.smooth_seconds),
-            drive: Smoothed::new(0.0, config.sample_rate, params[2].options.smooth_seconds),
+            resonance: Smoothed::new(0.2, config.sample_rate, params[Self::RESONANCE].options.smooth_seconds),
+            drive: Smoothed::new(0.0, config.sample_rate, params[Self::DRIVE].options.smooth_seconds),
             slope: 2,
             target: 2,
             weights: [0.0, 0.0, 1.0],
@@ -679,10 +691,10 @@ impl Module for Ladder {
     }
 
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let cutoff_param = io.param(0);
-        let resonance_param = io.param(1);
-        let drive_param = io.param(2);
-        let slope_param = io.param(3);
+        let cutoff_param = io.param(Self::CUTOFF);
+        let resonance_param = io.param(Self::RESONANCE);
+        let drive_param = io.param(Self::DRIVE);
+        let slope_param = io.param(Self::SLOPE);
         let ([input, cutoff_mod], [out]) = io.split::<2, 1>();
         let nyquist_limit = self.sample_rate * 0.45;
         for i in 0..input.len() {
@@ -718,19 +730,19 @@ impl Module for Ladder {
 
     fn set_param(&mut self, index: usize, value: f32) {
         match index {
-            0 => self.cutoff.set_target(pitch::from_hz(value)),
-            1 => self.resonance.set_target(value),
-            2 => self.drive.set_target(value),
-            3 => self.slope = value.round().clamp(0.0, 2.0) as usize,
+            Self::CUTOFF => self.cutoff.set_target(pitch::from_hz(value)),
+            Self::RESONANCE => self.resonance.set_target(value),
+            Self::DRIVE => self.drive.set_target(value),
+            Self::SLOPE => self.slope = value.round().clamp(0.0, 2.0) as usize,
             _ => {}
         }
     }
 
     fn param_glide(&self, index: usize) -> Option<f32> {
         match index {
-            0 => self.cutoff.gliding().map(pitch::to_hz),
-            1 => self.resonance.gliding(),
-            2 => self.drive.gliding(),
+            Self::CUTOFF => self.cutoff.gliding().map(pitch::to_hz),
+            Self::RESONANCE => self.resonance.gliding(),
+            Self::DRIVE => self.drive.gliding(),
             _ => None,
         }
     }
