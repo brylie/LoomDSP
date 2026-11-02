@@ -13,7 +13,7 @@ struct Bench {
     alerts: Alerts,
     choice: InputChoice,
     flag: Option<&'static str>,
-    needed: bool,
+    wanted: bool,
     output_playing: bool,
 }
 
@@ -29,7 +29,7 @@ impl Bench {
             alerts: Alerts::default(),
             choice: InputChoice::SystemDefault,
             flag: None,
-            needed: true,
+            wanted: true,
             output_playing: true,
         };
         bench.plug(devices);
@@ -53,8 +53,8 @@ impl Bench {
     /// One sync that honours the retry wait.
     fn sync_now(&mut self) {
         let demand = Demand {
-            needed: self.needed,
-            output_playing: self.output_playing,
+            wanted: self.wanted,
+            needed: self.wanted && self.output_playing,
             flag: self.flag,
             choice: &self.choice,
             buffer: Some(256),
@@ -95,14 +95,14 @@ impl Bench {
 #[test]
 fn the_stream_follows_the_demand() {
     let mut bench = Bench::new(&["Mic"]);
-    bench.needed = false;
+    bench.wanted = false;
     bench.sync();
     assert_eq!(bench.fake.input_opens.get(), 0, "no permission prompt until needed");
-    bench.needed = true;
+    bench.wanted = true;
     bench.sync();
     assert_eq!(bench.device().as_deref(), Some("Mic"));
     assert_eq!(bench.status(), "", "a first open says nothing");
-    bench.needed = false;
+    bench.wanted = false;
     bench.sync();
     assert_eq!(bench.device(), None);
     assert_eq!(bench.fake.input_closes.get(), 1);
@@ -113,8 +113,8 @@ fn the_stream_follows_the_demand() {
 fn opening_waits_for_the_output_buffer() {
     let mut bench = Bench::new(&["Mic"]);
     let demand = Demand {
+        wanted: true,
         needed: true,
-        output_playing: true,
         flag: None,
         choice: &bench.choice,
         buffer: None,
@@ -311,12 +311,10 @@ fn a_stopped_output_keeps_the_wait_for_a_named_input() {
     assert!(bench.session.named_lost());
 
     // The audio poll syncs while the output is stopped.
-    bench.needed = false;
     bench.output_playing = false;
     bench.sync();
     assert!(bench.session.named_lost());
 
-    bench.needed = true;
     bench.output_playing = true;
     bench.sync();
     assert_eq!(bench.device(), None, "the default does not stand in");
@@ -327,24 +325,30 @@ fn a_stopped_output_keeps_the_wait_for_a_named_input() {
     assert_eq!(bench.device().as_deref(), Some("Other"), "the fallback applies again");
 }
 
-/// With the output playing, losing the demand ends the wait: the player took
-/// the Audio In away, so a later one starts fresh and may fall back.
+/// Removing the last Audio In ends the wait, whether or not the output plays:
+/// the player took the input away, so a later one starts fresh and may fall
+/// back to the system default.
 #[test]
 fn removing_the_last_audio_in_ends_the_wait() {
-    let mut bench = Bench::new(&["Other", "Mic"]);
-    bench.choice = InputChoice::Named("Mic".into());
-    bench.sync();
-    bench.plug(&["Other"]);
-    bench.fail_stream();
-    bench.sync();
-    assert!(bench.session.named_lost());
+    for output_playing in [true, false] {
+        let mut bench = Bench::new(&["Other", "Mic"]);
+        bench.choice = InputChoice::Named("Mic".into());
+        bench.sync();
+        bench.plug(&["Other"]);
+        bench.fail_stream();
+        bench.sync();
+        assert!(bench.session.named_lost());
 
-    bench.needed = false;
-    bench.sync();
-    assert!(!bench.session.named_lost());
-    bench.needed = true;
-    bench.sync();
-    assert_eq!(bench.device().as_deref(), Some("Other"));
+        bench.output_playing = output_playing;
+        bench.wanted = false;
+        bench.sync();
+        assert!(!bench.session.named_lost(), "output playing: {output_playing}");
+
+        bench.wanted = true;
+        bench.output_playing = true;
+        bench.sync();
+        assert_eq!(bench.device().as_deref(), Some("Other"));
+    }
 }
 
 /// A stopped output closes an open stream and the next one reopens it, with
@@ -409,7 +413,7 @@ fn a_full_queue_does_not_stop_a_close() {
     // Other commands fill the queue, so the engine's reader stays in place
     // when it drains.
     while bench.parts.controller.set_output_safety(OutputSafety::Off).is_ok() {}
-    bench.needed = false;
+    bench.wanted = false;
     bench.sync();
     assert_eq!(bench.device(), None);
     assert_eq!(bench.fake.input_closes.get(), 1);
