@@ -102,8 +102,8 @@ fn input_config_falls_back_to_a_usable_default() {
         sample_rate: Some(48_000),
         ..AudioOptions::default()
     };
-    let failed = || -> Result<Vec<cpal::SupportedStreamConfigRange>, HostError> {
-        Err(HostError::Audio("listing failed".into()))
+    let failed = || -> Result<Vec<cpal::SupportedStreamConfigRange>, InputError> {
+        Err(InputError::Other("listing failed".into()))
     };
     let chosen = choose_input_config(
         "Interface",
@@ -113,8 +113,8 @@ fn input_config_falls_back_to_a_usable_default() {
     )
     .unwrap();
     assert_eq!(chosen.channels, 2);
-    let failed = || -> Result<Vec<cpal::SupportedStreamConfigRange>, HostError> {
-        Err(HostError::Audio("listing failed".into()))
+    let failed = || -> Result<Vec<cpal::SupportedStreamConfigRange>, InputError> {
+        Err(InputError::Other("listing failed".into()))
     };
     assert!(matches!(
         choose_input_config(
@@ -123,7 +123,7 @@ fn input_config_falls_back_to_a_usable_default() {
             failed,
             &options
         ),
-        Err(HostError::Audio(_))
+        Err(InputError::Other(_))
     ));
 }
 
@@ -147,7 +147,7 @@ fn input_config_rejects_an_unsupported_rate() {
             ranges,
             &options
         ),
-        Err(HostError::UnsupportedSampleRate { rate: 96_000, .. })
+        Err(InputError::UnsupportedRate { rate: 96_000, .. })
     ));
 }
 
@@ -163,4 +163,81 @@ fn interleaved_input_is_packed_into_frames() {
     assert!(reader.read_block(&mut frames));
     assert_eq!(frames[0], [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
     assert_eq!(frames[1], [10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0]);
+}
+
+/// A backend error with a kind and some text.
+fn backend(kind: cpal::ErrorKind, text: &'static str) -> cpal::Error {
+    cpal::Error::with_message(kind, text)
+}
+
+/// Each kind reaches its category, wherever the words of the message point.
+#[test]
+fn backend_errors_are_sorted_by_kind_not_by_words() {
+    assert_eq!(
+        InputError::from_backend(&backend(cpal::ErrorKind::PermissionDenied, "no"), None),
+        InputError::PermissionDenied
+    );
+    for kind in [cpal::ErrorKind::DeviceNotAvailable, cpal::ErrorKind::DeviceBusy] {
+        assert_eq!(
+            InputError::from_backend(&backend(kind, "gone"), Some("Mic")),
+            InputError::Unavailable {
+                device: Some("Mic".into()),
+                detail: Some("gone".into())
+            }
+        );
+    }
+    assert_eq!(
+        InputError::from_backend(&backend(cpal::ErrorKind::UnsupportedConfig, "bad"), Some("Mic")),
+        InputError::UnsupportedConfig("bad".into())
+    );
+    // Words alone are not evidence of a refusal.
+    assert_eq!(
+        InputError::from_backend(&backend(cpal::ErrorKind::BackendError, "permission denied"), None),
+        InputError::Other("permission denied".into())
+    );
+}
+
+/// The text of each category is what the status bar has always shown.
+#[test]
+fn input_errors_keep_their_text() {
+    let cases = [
+        (InputError::PermissionDenied, "microphone permission denied"),
+        (
+            InputError::Unavailable {
+                device: None,
+                detail: None,
+            },
+            "no audio input device found",
+        ),
+        (
+            InputError::Unavailable {
+                device: Some("Mic".into()),
+                detail: None,
+            },
+            "no audio input device found matching `Mic`",
+        ),
+        (
+            InputError::Unavailable {
+                device: Some("Mic".into()),
+                detail: Some("it left".into()),
+            },
+            "audio error: it left",
+        ),
+        (
+            InputError::UnsupportedRate {
+                device: "Mic".into(),
+                rate: 96_000,
+            },
+            "\"Mic\" does not offer 96000 Hz",
+        ),
+        (
+            InputError::UnsupportedFormat("Mic".into()),
+            "audio device `Mic` does not support 32-bit float input",
+        ),
+        (InputError::UnsupportedConfig("bad".into()), "audio error: bad"),
+        (InputError::Other("odd".into()), "audio error: odd"),
+    ];
+    for (error, text) in cases {
+        assert_eq!(error.to_string(), text);
+    }
 }

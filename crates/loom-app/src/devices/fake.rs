@@ -1,5 +1,5 @@
 use super::*;
-use loom_host_desktop::MidiInputState;
+use loom_host_desktop::{InputError, MidiInputState};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -24,7 +24,7 @@ pub struct Fake {
     /// Number of input streams closed.
     pub input_closes: std::cell::Cell<usize>,
     /// Simulates a refusal to open the input.
-    pub input_error: RefCell<Option<String>>,
+    pub input_error: RefCell<Option<InputError>>,
     /// Simulates a permission denied after the stream opened.
     pub input_permission_denied: std::cell::Cell<bool>,
     /// Devices that fail to open.
@@ -269,7 +269,7 @@ impl Host for Shared {
         &self,
         options: &AudioOptions,
         buffer: usize,
-    ) -> Result<(Box<dyn InputPort>, loom_core::audio_input::InputReader), String> {
+    ) -> Result<(Box<dyn InputPort>, loom_core::audio_input::InputReader), InputError> {
         if let Some(error) = &*self.0.input_error.borrow() {
             return Err(error.clone());
         }
@@ -291,7 +291,10 @@ impl Host for Shared {
                     .cloned()
             })
             .or_else(|| options.device.is_none().then(|| inputs.default.clone()).flatten())
-            .ok_or("no audio input device available")?;
+            .ok_or_else(|| InputError::Unavailable {
+                device: options.device.clone(),
+                detail: None,
+            })?;
         let (writer, reader) = loom_core::audio_input::input_ring(buffer, 2);
         let status = writer.status();
         *self.0.input_writer.borrow_mut() = Some(writer);

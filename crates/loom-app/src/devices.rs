@@ -9,7 +9,7 @@
 use crate::preferences::{AudioPrefs, BufferChoice, DeviceChoice, RateChoice};
 use loom_core::MidiInputId;
 use loom_host_desktop::{
-    AudioOptions, AudioOutput, MidiConnection, MidiInputInfo, OutputInfo, Outputs, RunningAudio, SharedMidi,
+    AudioOptions, AudioOutput, InputError, MidiConnection, MidiInputInfo, OutputInfo, Outputs, RunningAudio, SharedMidi,
 };
 use std::path::PathBuf;
 
@@ -143,8 +143,11 @@ pub trait Host {
         &self,
         _options: &AudioOptions,
         _output_buffer: usize,
-    ) -> Result<(Box<dyn InputPort>, loom_core::audio_input::InputReader), String> {
-        Err("no audio input device available".into())
+    ) -> Result<(Box<dyn InputPort>, loom_core::audio_input::InputReader), InputError> {
+        Err(InputError::Unavailable {
+            device: None,
+            detail: None,
+        })
     }
     /// Starts an output with an engine. A device can still refuse here,
     /// after it opened. On refusal, returns the [`loom_core::Engine`] so it
@@ -263,14 +266,8 @@ impl Host for System {
         &self,
         options: &AudioOptions,
         output_buffer: usize,
-    ) -> Result<(Box<dyn InputPort>, loom_core::audio_input::InputReader), String> {
-        let (input, reader) =
-            loom_host_desktop::AudioInput::start(options, output_buffer).map_err(|error| match error {
-                loom_host_desktop::HostError::UnsupportedSampleRate { device, rate } => {
-                    format!("\"{device}\" does not offer {rate} Hz")
-                }
-                other => other.to_string(),
-            })?;
+    ) -> Result<(Box<dyn InputPort>, loom_core::audio_input::InputReader), InputError> {
+        let (input, reader) = loom_host_desktop::AudioInput::start(options, output_buffer)?;
         Ok((Box::new(input), reader))
     }
 

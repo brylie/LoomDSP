@@ -29,7 +29,7 @@ mod virtual_midi;
 
 mod input;
 pub use input::AudioInput;
-pub use input::microphone_access_denied;
+pub use input::{InputError, microphone_access_denied};
 
 pub use capture::{Capture, CaptureReport};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -71,6 +71,9 @@ pub enum HostError {
     /// An error from the audio backend.
     #[error("audio error: {0}")]
     Audio(String),
+    /// An audio input stream could not open.
+    #[error(transparent)]
+    Input(#[from] InputError),
     /// No MIDI input port matched.
     #[error("no MIDI input port found{}", .0.as_deref().map(|n| format!(" matching `{n}`")).unwrap_or_default())]
     NoMidiPort(Option<String>),
@@ -141,7 +144,11 @@ impl HostError {
         // ask for what the device offers.
         matches!(
             self,
-            Self::NoOutputDevice(_) | Self::NoInputDevice(_) | Self::NoMidiPort(_) | Self::NoMidiService(_)
+            Self::NoOutputDevice(_)
+                | Self::NoInputDevice(_)
+                | Self::NoMidiPort(_)
+                | Self::NoMidiService(_)
+                | Self::Input(InputError::Unavailable { detail: None, .. })
         )
     }
 }

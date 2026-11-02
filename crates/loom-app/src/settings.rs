@@ -13,21 +13,15 @@ use crate::{App, undo};
 use iced::widget::{checkbox, column, container, opaque, pick_list, radio, row, rule, scrollable, space, text};
 use iced::{Element, Length};
 use loom_core::{EngineConfig, EngineParts, MidiInputId, OutputSafety, create_engine};
-use loom_host_desktop::{AudioOutput, MidiInputInfo, Outputs, Recorder, STOP_LIMIT, SharedMidi};
+use loom_host_desktop::{AudioOutput, InputError, MidiInputInfo, Outputs, Recorder, STOP_LIMIT, SharedMidi};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-/// Whether a host error describes a microphone permission refusal.
-fn input_permission_denied(error: &str) -> bool {
-    let lower = error.to_lowercase();
-    lower.contains("denied") || lower.contains("permission") || lower.contains("not authorized")
-}
-
 /// Makes an input error actionable without reporting it from a callback.
-fn input_error_message(error: &str) -> String {
-    if input_permission_denied(error) {
+fn input_error_message(error: &InputError) -> String {
+    if matches!(error, InputError::PermissionDenied) {
         let place = if cfg!(target_os = "macos") {
             "System Settings, Privacy and Security, Microphone"
         } else if cfg!(target_os = "windows") {
@@ -569,7 +563,7 @@ impl App {
             self.rig.input_tracker = None;
             self.alerts.set_input_drift(None);
             if !self.rig.input_permission_reported {
-                self.alerts.say(input_error_message("microphone permission denied"));
+                self.alerts.say(input_error_message(&InputError::PermissionDenied));
                 self.rig.input_error_status = Some(self.alerts.status().to_string());
                 self.rig.input_permission_reported = true;
             }
@@ -684,7 +678,7 @@ impl App {
                 Err(error) => self.alerts.say(format!("Audio input: {error}.")),
             },
             Err(error) => {
-                let reported = if input_permission_denied(&error) {
+                let reported = if matches!(error, InputError::PermissionDenied) {
                     &mut self.rig.input_permission_reported
                 } else {
                     &mut self.rig.input_error_reported

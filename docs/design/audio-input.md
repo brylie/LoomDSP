@@ -78,7 +78,7 @@ A new **Audio input** row in the Audio section of Preferences:
 
 - **macOS asks for microphone permission** the first time an input stream opens. The app bundle ([`scripts/bundle-macos.sh`](../../scripts/bundle-macos.sh)) must carry `NSMicrophoneUsageDescription` ("LoomDSP uses audio input so patches can process live sound."). Without it, macOS stops the app.
 - **If the player denies access, or the OS blocks it,** the module is silent and the status bar says `Audio input: access to the microphone was denied. Allow LoomDSP in System Settings, Privacy and Security, Microphone.` (The text names the right place for each OS.) The message shows once per run, and again if the player changes the input device.
-- **Windows and Linux** may have no prompt; the same message shows if the stream cannot open.
+- **Windows and Linux** may have no prompt. The message shows when the audio backend reports a refused permission as such: ALSA and PulseAudio do. WASAPI on Windows reports only its own text, so a refusal there shows `Audio input: audio error: <text>.` instead. *Why:* the app does not search error text for words, because a backend's wording is no evidence of a refusal.
 
 ## Feedback
 

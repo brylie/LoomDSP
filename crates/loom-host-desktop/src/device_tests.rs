@@ -485,7 +485,7 @@ fn audio_input_receives_sound_from_a_loopback_device() {
     let Some(output) = or_skip(AudioOutput::open(&options)) else {
         return;
     };
-    let Some((input, reader)) = or_skip(AudioInput::start(&options, 256)) else {
+    let Some((input, reader)) = or_skip(AudioInput::start(&options, 256).map_err(HostError::from)) else {
         return;
     };
     let config = EngineConfig {

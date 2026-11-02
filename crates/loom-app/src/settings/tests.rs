@@ -85,7 +85,7 @@ fn audio_input_follows_module_lifecycle() {
 fn denied_audio_input_does_not_stop_the_patch() {
     let dir = folder("audio-input-denied");
     let fake = two_devices();
-    *fake.input_error.borrow_mut() = Some("permission denied".into());
+    *fake.input_error.borrow_mut() = Some(InputError::PermissionDenied);
     let mut app = start(args(&dir), &fake);
     app.controller.add_module("loom.io.audio-in").unwrap();
     assert!(app.commit());
@@ -136,7 +136,7 @@ fn unavailable_input_keeps_other_audio_playing() {
             ..Fake::new(&[fake::device("Fake A")], &[])
         });
         if denied {
-            *fake.input_error.borrow_mut() = Some("permission denied".into());
+            *fake.input_error.borrow_mut() = Some(InputError::PermissionDenied);
         }
         let mut options = args(&dir);
         options.output_safety = Some(OutputSafety::Off);
@@ -195,7 +195,7 @@ fn failed_audio_input_reopens() {
     assert_eq!(app.alerts.status(), "Audio input: \"Microphone\" is back.");
 
     // A later loss must be reported again, even after a successful reopen.
-    *fake.input_error.borrow_mut() = Some("device busy".into());
+    *fake.input_error.borrow_mut() = Some(InputError::Other("device busy".into()));
     fake.input_writer.borrow().as_ref().unwrap().status().fail();
     app.sync_audio_input();
     assert!(app.rig.input.is_none());
@@ -238,6 +238,80 @@ fn input_recovery_preserves_other_status_and_permission_latch() {
     // Choosing an input makes the permission warning eligible again.
     app.choose_audio_input(InputChoice::SystemDefault);
     assert!(app.alerts.status().contains("microphone was denied"));
+}
+
+/// Every category reaches the status bar with its own text, and only a real
+/// refusal is called one, whatever the backend's words say.
+#[test]
+fn input_error_categories_have_their_own_status() {
+    let cases = [
+        (InputError::PermissionDenied, "microphone was denied"),
+        (
+            InputError::Unavailable {
+                device: Some("Mic".into()),
+                detail: None,
+            },
+            "Audio input: no audio input device found matching `Mic`.",
+        ),
+        (
+            InputError::UnsupportedRate {
+                device: "Mic".into(),
+                rate: 96_000,
+            },
+            "Audio input: \"Mic\" does not offer 96000 Hz.",
+        ),
+        (
+            InputError::UnsupportedFormat("Mic".into()),
+            "Audio input: audio device `Mic` does not support 32-bit float input.",
+        ),
+        (
+            InputError::Other("permission denied by a plug-in".into()),
+            "Audio input: audio error: permission denied by a plug-in.",
+        ),
+    ];
+    for (error, text) in cases {
+        assert!(input_error_message(&error).contains(text), "{error:?}");
+    }
+    assert!(!input_error_message(&InputError::Other("permission denied".into())).contains("was denied"));
+}
+
+/// A refusal is reported after an earlier device error, because the two have
+/// separate latches. A later device error after recovery is reported again.
+#[test]
+fn permission_denial_after_a_device_error_and_failure_after_recovery_are_reported() {
+    let dir = folder("audio-input-typed-errors");
+    let fake = two_devices();
+    *fake.audio_inputs.borrow_mut() = devices::Inputs {
+        default: Some("Mic".into()),
+        devices: vec!["Mic".into()],
+    };
+    *fake.input_error.borrow_mut() = Some(InputError::Other("device busy".into()));
+    let mut app = start(args(&dir), &fake);
+    app.controller.add_module("loom.io.audio-in").unwrap();
+    assert!(app.commit());
+    assert_eq!(app.alerts.status(), "Audio input: audio error: device busy.");
+
+    *fake.input_error.borrow_mut() = Some(InputError::PermissionDenied);
+    app.rig.input_attempted = None;
+    app.sync_audio_input();
+    assert!(app.alerts.status().contains("microphone was denied"));
+
+    // The device opens: recovery leaves the refusal's latch alone.
+    *fake.input_error.borrow_mut() = None;
+    app.rig.input_attempted = None;
+    app.sync_audio_input();
+    assert!(app.rig.input.is_some());
+    assert_eq!(app.alerts.status(), "Audio input: \"Mic\" is back.");
+
+    // The stream fails and the reopen fails: the loss shows, not silence.
+    *fake.input_error.borrow_mut() = Some(InputError::Other("device busy".into()));
+    fake.input_writer.borrow().as_ref().unwrap().status().fail();
+    app.sync_audio_input();
+    assert!(app.rig.input.is_none());
+    assert_eq!(
+        app.alerts.status(),
+        "Audio input: \"Mic\" was lost. Trying to reopen it."
+    );
 }
 
 /// A lost named input stays silent until that same device returns.

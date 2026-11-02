@@ -1,8 +1,71 @@
 //! Desktop audio input, connected to the engine by a bounded SPSC ring.
 
-use crate::{AudioOptions, HostError, audio_error, device_name, find_device};
+use crate::{AudioOptions, device_name, find_device};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use loom_core::audio_input::{InputReader, InputStatus, InputWriter, MAX_INPUT_CHANNELS, input_ring};
+
+/// Why an input stream could not open.
+///
+/// The categories come from `cpal`'s error kinds and the macOS permission
+/// check, never from the words of a message. CoreAudio, ALSA, and PulseAudio
+/// report a refused permission as a kind. WASAPI does not, so a refusal there
+/// arrives as [`InputError::Other`], with the backend's text.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum InputError {
+    /// The system refused access to the microphone.
+    #[error("microphone permission denied")]
+    PermissionDenied,
+    /// No device matched, or the device is gone or busy.
+    #[error("{}", unavailable_text(.device, .detail))]
+    Unavailable {
+        /// The device asked for, if one was named.
+        device: Option<String>,
+        /// The backend's text, when it reported the problem.
+        detail: Option<String>,
+    },
+    /// The device does not offer the output's sample rate.
+    #[error("\"{device}\" does not offer {rate} Hz")]
+    UnsupportedRate {
+        /// Device name.
+        device: String,
+        /// Requested rate.
+        rate: u32,
+    },
+    /// The device has no 32-bit float configuration.
+    #[error("audio device `{0}` does not support 32-bit float input")]
+    UnsupportedFormat(String),
+    /// The backend refused the chosen configuration.
+    #[error("audio error: {0}")]
+    UnsupportedConfig(String),
+    /// Any other backend failure, with the backend's text.
+    #[error("audio error: {0}")]
+    Other(String),
+}
+
+impl InputError {
+    /// Sorts a backend error by its kind, keeping its text for diagnostics.
+    fn from_backend(error: &cpal::Error, device: Option<&str>) -> Self {
+        let detail = error.to_string();
+        match error.kind() {
+            cpal::ErrorKind::PermissionDenied => Self::PermissionDenied,
+            cpal::ErrorKind::DeviceNotAvailable | cpal::ErrorKind::DeviceBusy => Self::Unavailable {
+                device: device.map(str::to_string),
+                detail: Some(detail),
+            },
+            cpal::ErrorKind::UnsupportedConfig => Self::UnsupportedConfig(detail),
+            _ => Self::Other(detail),
+        }
+    }
+}
+
+/// The text of [`InputError::Unavailable`].
+fn unavailable_text(device: &Option<String>, detail: &Option<String>) -> String {
+    match (detail, device) {
+        (Some(detail), _) => format!("audio error: {detail}"),
+        (None, Some(device)) => format!("no audio input device found matching `{device}`"),
+        (None, None) => "no audio input device found".to_string(),
+    }
+}
 
 /// Whether the operating system has refused microphone access to this app.
 /// Other platforms report permission errors when opening the stream.
@@ -78,23 +141,32 @@ impl AudioInput {
     /// Opens and starts an input at the output's sample rate. The returned
     /// reader is installed on the controller. `output_buffer` sizes the ring
     /// and must be the output buffer size in frames.
-    pub fn start(options: &AudioOptions, output_buffer: usize) -> Result<(Self, InputReader), HostError> {
+    pub fn start(options: &AudioOptions, output_buffer: usize) -> Result<(Self, InputReader), InputError> {
         request_microphone_access();
         if microphone_access_denied() {
-            return Err(HostError::Audio("microphone permission denied".into()));
+            return Err(InputError::PermissionDenied);
         }
         let host = cpal::default_host();
         let device = match &options.device {
             None => host.default_input_device(),
-            Some(wanted) => find_device(host.input_devices().map_err(audio_error)?, wanted, options.exact),
+            Some(wanted) => {
+                let devices = host
+                    .input_devices()
+                    .map_err(|error| InputError::from_backend(&error, Some(wanted)))?;
+                find_device(devices, wanted, options.exact)
+            }
         }
-        .ok_or_else(|| HostError::NoInputDevice(options.device.clone()))?;
+        .ok_or_else(|| InputError::Unavailable {
+            device: options.device.clone(),
+            detail: None,
+        })?;
         let name = device_name(&device);
-        let default = device.default_input_config().map_err(audio_error)?;
+        let backend = |error: cpal::Error| InputError::from_backend(&error, Some(&name));
+        let default = device.default_input_config().map_err(backend)?;
         let config = choose_input_config(
             &name,
             default,
-            || device.supported_input_configs().map_err(audio_error),
+            || device.supported_input_configs().map_err(backend),
             options,
         )?;
         let device_channels = usize::from(config.channels.max(1));
@@ -111,8 +183,8 @@ impl AudioInput {
                 move |_: cpal::Error| failed.fail(),
                 None,
             )
-            .map_err(audio_error)?;
-        stream.play().map_err(audio_error)?;
+            .map_err(backend)?;
+        stream.play().map_err(backend)?;
         Ok((
             Self {
                 _stream: stream,
@@ -150,9 +222,9 @@ impl AudioInput {
 fn choose_input_config<I>(
     name: &str,
     default: cpal::SupportedStreamConfig,
-    ranges: impl FnOnce() -> Result<I, HostError>,
+    ranges: impl FnOnce() -> Result<I, InputError>,
     options: &AudioOptions,
-) -> Result<cpal::StreamConfig, HostError>
+) -> Result<cpal::StreamConfig, InputError>
 where
     I: IntoIterator<Item = cpal::SupportedStreamConfigRange>,
 {
@@ -194,12 +266,12 @@ where
     }
     let supported = best.ok_or_else(|| {
         if options.sample_rate.is_some() {
-            HostError::UnsupportedSampleRate {
+            InputError::UnsupportedRate {
                 device: name.to_string(),
                 rate,
             }
         } else {
-            HostError::UnsupportedInputFormat(name.to_string())
+            InputError::UnsupportedFormat(name.to_string())
         }
     })?;
     let mut config = supported.config();
