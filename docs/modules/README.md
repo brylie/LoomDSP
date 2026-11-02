@@ -30,6 +30,7 @@ One page for each built-in module, made from its descriptor. After you change a 
 |---|---|---|
 | [Envelope](loom.env.envelope.md) | `loom.env.envelope` | A level from 0 to 1 that rises and falls when a gate starts it. ADSR holds while the gate is high; AD runs once, so a trigger also starts it. |
 | [LFO](loom.mod.lfo.md) | `loom.mod.lfo` | A slow wave. Free mode runs at a rate in Hz; synced mode follows a phase, by default the bar phase. |
+| [Random](loom.rand.random.md) | `loom.rand.random` | A new random value on each trigger, within a range, or a random walk. The seed makes it repeatable. |
 | [Sample and Hold](loom.rand.sample-hold.md) | `loom.rand.sample-hold` | Takes the input's value on a trigger and holds it. With noise on the input, it makes stepped random values. |
 
 ## Time and rhythm

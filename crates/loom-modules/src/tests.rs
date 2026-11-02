@@ -20,6 +20,7 @@ fn panels_follow_the_spec() {
     let inspector_only = [
         ("loom.osc.noise", "seed"),
         ("loom.rand.chance", "seed"),
+        ("loom.rand.random", "seed"),
         ("loom.midi.note", "channel"),
         ("loom.midi.note", "bend-range"),
         ("loom.ui.button", "mode"),
@@ -86,6 +87,8 @@ fn panels_follow_the_spec() {
                 ("loom.logic.logic", "invert"),
                 ("loom.logic.memory", "mode"),
                 ("loom.rand.sample-hold", "mode"),
+                ("loom.rand.random", "mode"),
+                ("loom.rand.random", "shape"),
                 ("loom.osc.noise", "colour"),
                 ("loom.mod.lfo", "sync"),
                 ("loom.mod.lfo", "shape"),
@@ -168,6 +171,11 @@ fn parameters_in_hz_and_seconds_are_logarithmic() {
             // logarithmic range needs a minimum above 0 (p1-modules.md,
             // Controller input).
             if (descriptor.id, param.name) == ("loom.midi.controller", "smoothing") {
+                assert_eq!(param.options.mapping, ParamMapping::Linear);
+                continue;
+            }
+            // Random's glide starts at 0 (no glide), for the same reason.
+            if (descriptor.id, param.name) == ("loom.rand.random", "glide") {
                 assert_eq!(param.options.mapping, ParamMapping::Linear);
                 continue;
             }

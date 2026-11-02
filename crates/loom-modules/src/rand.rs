@@ -1,10 +1,12 @@
 //! Random and stepped sources (FR-LIB-01).
 
+use crate::math::{DEFAULT_RANGE, WIDE_RANGES};
 use loom_core::signal::{EdgeDetector, gate_is_high};
 use loom_core::{
-    Channels, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, PortDefault, PortIo, PortSpec,
-    ProcessContext, SignalType, Widget,
+    Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, PortDefault, PortIo,
+    PortSpec, ProcessContext, SignalType, Widget,
 };
+use loom_rt::Smoothed;
 
 /// A seeded random stream: xorshift32 (G. Marsaglia, "Xorshift RNGs", Journal
 /// of Statistical Software, 2003), started from a mixed seed.
@@ -61,6 +63,370 @@ const fn seed_param(description: &'static str) -> ParamSpec {
 /// A seed value as the whole number the streams start from.
 fn seed_from(value: f32) -> u32 {
     value.round().clamp(1.0, 65535.0) as u32
+}
+
+/// `loom.rand.random` (MT-RAND-01): a new random value on each trigger, within
+/// a range, or a random walk.
+pub static RANDOM: ModuleDescriptor = ModuleDescriptor {
+    id: "loom.rand.random",
+    version: 1,
+    name: "Random",
+    category: "Random",
+    family: loom_core::Family::Modulation,
+    description: "A new random value on each trigger, within a range, or a random walk. The seed makes it repeatable.",
+    inputs: &[
+        PortSpec {
+            name: "trigger",
+            label: "Trigger",
+            signal: SignalType::Gate,
+            description: "A rising edge makes a new value on both outputs.",
+            default: PortDefault::Value(0.0),
+            range: loom_core::PortRange::Signal,
+            channels: Channels::Downmix,
+        },
+        PortSpec {
+            name: "reset",
+            label: "Reset",
+            signal: SignalType::Gate,
+            description: "A rising edge restarts the values from the seed. A walk also goes back to the middle.",
+            default: PortDefault::Value(0.0),
+            range: loom_core::PortRange::Signal,
+            channels: Channels::Downmix,
+        },
+    ],
+    outputs: &[
+        PortSpec {
+            name: "out",
+            label: "Out",
+            signal: SignalType::Modulation,
+            description: "A random value. It starts in the middle of the range.",
+            default: PortDefault::Value(0.0),
+            range: loom_core::PortRange::Signal,
+            channels: Channels::PerChannel,
+        },
+        PortSpec {
+            name: "out2",
+            label: "Out 2",
+            signal: SignalType::Modulation,
+            description: "A second random value, independent of the first.",
+            default: PortDefault::Value(0.0),
+            range: loom_core::PortRange::Signal,
+            channels: Channels::PerChannel,
+        },
+    ],
+    params: &[
+        ParamSpec {
+            name: "mode",
+            label: "Mode",
+            description: "Step: each trigger picks a new value. Walk: each trigger moves a little from the last value.",
+            min: 0.0,
+            max: 1.0,
+            default: 0.0,
+            unit: "",
+            options: ParamOptions::DEFAULT,
+        }
+        .integer()
+        .choices(&["Step", "Walk"]),
+        ParamSpec {
+            name: "low",
+            label: "Low",
+            description: "One end of the range.",
+            min: -10.0,
+            max: 10.0,
+            default: 0.0,
+            unit: "",
+            options: ParamOptions::DEFAULT,
+        }
+        .smooth(0.005)
+        .ranges(WIDE_RANGES, DEFAULT_RANGE),
+        ParamSpec {
+            name: "high",
+            label: "High",
+            description: "The other end of the range.",
+            min: -10.0,
+            max: 10.0,
+            default: 1.0,
+            unit: "",
+            options: ParamOptions::DEFAULT,
+        }
+        .smooth(0.005)
+        .ranges(WIDE_RANGES, DEFAULT_RANGE),
+        ParamSpec {
+            name: "shape",
+            label: "Shape",
+            description: "Uniform: every value is equally likely. Centred: values near the middle are more likely.",
+            min: 0.0,
+            max: 1.0,
+            default: 0.0,
+            unit: "",
+            options: ParamOptions::DEFAULT,
+        }
+        .integer()
+        .choices(&["Uniform", "Centred"]),
+        ParamSpec {
+            name: "step",
+            label: "Step",
+            description: "The largest move of a walk, as a fraction of the range.",
+            min: 0.0,
+            max: 1.0,
+            default: 0.1,
+            unit: "",
+            options: ParamOptions::DEFAULT,
+        },
+        // Not logarithmic: 0 must be reachable, and it means no glide.
+        ParamSpec {
+            name: "glide",
+            label: "Glide",
+            description: "The time each output takes to reach a new value, in a straight line. At 0 it steps.",
+            min: 0.0,
+            max: 5.0,
+            default: 0.0,
+            unit: "s",
+            options: ParamOptions::DEFAULT,
+        },
+        seed_param("Picks the sequence of values. The same seed gives the same values."),
+    ],
+    role: ModuleRole::Dsp(|config| Box::new(Random::new(config))),
+    panel: Panel::new(
+        12,
+        5,
+        &[
+            Widget::segmented(0, 0, 6, "mode"),
+            Widget::segmented(6, 0, 6, "shape"),
+            Widget::knob(0, 2, "low"),
+            Widget::knob(3, 2, "high"),
+            Widget::knob(6, 2, "step"),
+            Widget::knob(9, 2, "glide"),
+        ],
+    ),
+    displays: &[],
+};
+
+/// One output of Random. `position` is where the output is going, from 0 to
+/// 1 inside the range, so a moved range rescales the output at once and a
+/// walk cannot leave it.
+///
+/// A glide is counted in frames and each value is computed from its start, so
+/// rounding cannot build up and the glide ends exactly on its target.
+#[derive(Clone)]
+struct Voice {
+    rng: Rng,
+    position: f32,
+    from: f32,
+    glide_frames: u32,
+    glide_done: u32,
+}
+
+impl Voice {
+    /// The position the output is at now.
+    fn current(&self) -> f32 {
+        if self.glide_done >= self.glide_frames {
+            self.position
+        } else {
+            self.from + (self.position - self.from) * (self.glide_done as f32 / self.glide_frames as f32)
+        }
+    }
+
+    /// Goes to the middle at once, with no glide.
+    fn centre(&mut self) {
+        self.position = 0.5;
+        self.from = 0.5;
+        self.glide_frames = 0;
+        self.glide_done = 0;
+    }
+
+    /// Takes a new position on a trigger. Always two draws, whatever the
+    /// settings, so a change of mode or shape does not shift later numbers.
+    fn trigger(&mut self, walk: bool, centred: bool, step: f32, glide_frames: u32) {
+        let (first, second) = (self.rng.draw(), self.rng.draw());
+        let draw = if centred { (first + second) * 0.5 } else { first };
+        self.from = self.current();
+        self.position = if walk {
+            bounce(self.position + step * (2.0 * draw - 1.0))
+        } else {
+            draw
+        };
+        self.glide_frames = glide_frames;
+        self.glide_done = 0;
+    }
+}
+
+/// Reflects a position that moved past 0 or 1 back by the overshoot, so
+/// values spread over the whole range and never stick to an edge. One
+/// reflection is enough: a move is never larger than 1.
+fn bounce(position: f32) -> f32 {
+    let reflected = if position < 0.0 {
+        -position
+    } else if position > 1.0 {
+        2.0 - position
+    } else {
+        position
+    };
+    reflected.clamp(0.0, 1.0)
+}
+
+/// State for `loom.rand.random`.
+#[derive(Clone)]
+struct Random {
+    voices: [Voice; 2],
+    trigger: EdgeDetector,
+    reset: EdgeDetector,
+    walk: bool,
+    centred: bool,
+    low: Smoothed,
+    high: Smoothed,
+    step: f32,
+    glide: f32,
+    sample_rate: f32,
+    /// The knob's base seed. Only `set_param` writes it.
+    seed: u32,
+    /// The seed the streams last started from: the modulated seed while an
+    /// assignment is active, otherwise the base.
+    active: u32,
+    /// The stereo channel the streams last started for.
+    channel: usize,
+}
+
+impl Random {
+    const MODE: usize = RANDOM.param_index("mode").unwrap();
+    const LOW: usize = RANDOM.param_index("low").unwrap();
+    const HIGH: usize = RANDOM.param_index("high").unwrap();
+    const SHAPE: usize = RANDOM.param_index("shape").unwrap();
+    const STEP: usize = RANDOM.param_index("step").unwrap();
+    const GLIDE: usize = RANDOM.param_index("glide").unwrap();
+    const SEED: usize = RANDOM.param_index("seed").unwrap();
+
+    fn new(config: &ModuleConfig) -> Self {
+        let smoothed = |index: usize, value: f32| {
+            Smoothed::new(value, config.sample_rate, RANDOM.params[index].options.smooth_seconds)
+        };
+        let mut random = Self {
+            voices: std::array::from_fn(|_| Voice {
+                rng: Rng(1),
+                position: 0.5,
+                from: 0.5,
+                glide_frames: 0,
+                glide_done: 0,
+            }),
+            trigger: EdgeDetector::new(),
+            reset: EdgeDetector::new(),
+            walk: false,
+            centred: false,
+            low: smoothed(Self::LOW, 0.0),
+            high: smoothed(Self::HIGH, 1.0),
+            step: 0.1,
+            glide: 0.0,
+            sample_rate: config.sample_rate,
+            seed: 1,
+            active: 1,
+            channel: 0,
+        };
+        random.restart(1);
+        random
+    }
+
+    /// Starts each output's stream again from `seed`. Positions stay.
+    fn restart(&mut self, seed: u32) {
+        for (number, voice) in self.voices.iter_mut().enumerate() {
+            voice.rng = Rng::new(seed, self.channel, number as u32);
+        }
+    }
+}
+
+impl Module for Random {
+    /// Takes the running state of another instance, then starts the streams
+    /// again from the seed (stereo spec, rule 27).
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        let Some(other) = other.as_any().downcast_ref::<Self>() else {
+            return false;
+        };
+        *self = other.clone();
+        self.restart(self.active);
+        true
+    }
+
+    fn process(&mut self, ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        if self.channel != ctx.channel() {
+            self.channel = ctx.channel();
+            self.restart(self.active);
+        }
+        let (mode, low, high) = (io.param(Self::MODE), io.param(Self::LOW), io.param(Self::HIGH));
+        let (shape, step, glide) = (io.param(Self::SHAPE), io.param(Self::STEP), io.param(Self::GLIDE));
+        let seed = io.param(Self::SEED);
+        let ([trigger, reset], [out, out2]) = io.split::<2, 2>();
+        let mut outs = [out, out2];
+        for i in 0..trigger.len() {
+            let next = seed.map_or(i, self.seed, seed_from);
+            if next != self.active {
+                self.active = next;
+                self.restart(next);
+            }
+            let walk = mode.map_or(i, self.walk, |v| v >= 0.5);
+            // A reset comes before a trigger on the same frame, so the
+            // trigger gets the first value of the sequence.
+            if self.reset.rising(reset[i]) {
+                self.restart(self.active);
+                if walk {
+                    // The same walk must replay, so a glide in progress
+                    // ends here. In step mode it finishes, and the output
+                    // then holds until the next trigger.
+                    self.voices.iter_mut().for_each(Voice::centre);
+                }
+            }
+            if self.trigger.rising(trigger[i]) {
+                let centred = shape.map_or(i, self.centred, |v| v >= 0.5);
+                let step = step.at_or(i, self.step);
+                let frames = (glide.at_or(i, self.glide) * self.sample_rate).round() as u32;
+                for voice in &mut self.voices {
+                    voice.trigger(walk, centred, step, frames);
+                }
+            }
+            let low = low.at_or(i, self.low.tick());
+            let high = high.at_or(i, self.high.tick());
+            let (bottom, span) = (low.min(high), (high - low).abs());
+            for (voice, out) in self.voices.iter_mut().zip(&mut outs) {
+                out[i] = bottom + voice.current() * span;
+                voice.glide_done = voice.glide_done.saturating_add(1);
+            }
+        }
+    }
+
+    fn set_param(&mut self, index: usize, value: f32) {
+        match index {
+            Self::MODE => self.walk = value >= 0.5,
+            Self::LOW => self.low.set_target(value),
+            Self::HIGH => self.high.set_target(value),
+            Self::SHAPE => self.centred = value >= 0.5,
+            Self::STEP => self.step = value,
+            Self::GLIDE => self.glide = value,
+            Self::SEED => {
+                self.seed = seed_from(value);
+                self.active = self.seed;
+                self.restart(self.seed);
+            }
+            _ => {}
+        }
+    }
+
+    fn param_glide(&self, index: usize) -> Option<f32> {
+        match index {
+            Self::LOW => self.low.gliding(),
+            Self::HIGH => self.high.gliding(),
+            _ => None,
+        }
+    }
+
+    /// Back to the middle and the start of the sequence, with the range
+    /// snapped to its targets (live patching spec, rule 7).
+    fn reset(&mut self) {
+        self.trigger.reset();
+        self.reset.reset();
+        self.voices.iter_mut().for_each(Voice::centre);
+        let (low, high) = (self.low.target(), self.high.target());
+        self.low.reset(low);
+        self.high.reset(high);
+        self.restart(self.active);
+    }
 }
 
 /// One trigger input of Chance.
@@ -443,3 +809,6 @@ mod tests;
 
 #[cfg(test)]
 mod chance_tests;
+
+#[cfg(test)]
+mod random_tests;

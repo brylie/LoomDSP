@@ -79,6 +79,7 @@ pub static ALL: &[&ModuleDescriptor] = &[
     &logic::MEMORY,
     &rand::SAMPLE_HOLD,
     &rand::CHANCE,
+    &rand::RANDOM,
     &level::SLEW,
     &ui::BUTTON,
     &time::DELAY,

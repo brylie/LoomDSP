@@ -449,6 +449,38 @@ fn chance() {
         .check(reference!("chance"));
 }
 
+/// Reference render for `loom.rand.random`: both outputs step on a clock.
+#[test]
+fn random_step() {
+    Harness::new(&rand::RANDOM)
+        .seconds(0.1)
+        .input(
+            "trigger",
+            Signal::from_fn(|frame| if frame % 200 == 0 { 1.0 } else { 0.0 }),
+        )
+        .param("low", -0.5)
+        .param("high", 0.5)
+        .check(reference!("random_step"));
+}
+
+/// Reference render for `loom.rand.random`: a centred walk that glides, and
+/// restarts on a reset.
+#[test]
+fn random_walk() {
+    Harness::new(&rand::RANDOM)
+        .seconds(0.1)
+        .input(
+            "trigger",
+            Signal::from_fn(|frame| if frame % 100 == 0 { 1.0 } else { 0.0 }),
+        )
+        .input("reset", Signal::from_fn(|frame| if frame == 2400 { 1.0 } else { 0.0 }))
+        .param("mode", 1.0)
+        .param("shape", 1.0)
+        .param("step", 0.3)
+        .param("glide", 0.001)
+        .check(reference!("random_walk"));
+}
+
 #[test]
 fn every_dsp_module_has_a_reference_test() {
     // Add a test above when you add a module to `ALL`.
@@ -478,6 +510,7 @@ fn every_dsp_module_has_a_reference_test() {
         &logic::MEMORY,
         &rand::SAMPLE_HOLD,
         &rand::CHANCE,
+        &rand::RANDOM,
         &level::SLEW,
         &phase::SCALE,
         &phase::RESET,
