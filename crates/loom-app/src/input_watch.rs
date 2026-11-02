@@ -106,56 +106,142 @@ impl Tracker {
     }
 }
 
-/// Emits only when the counts, warning visibility, or stream health change.
-pub fn stream(watch: &Watch) -> impl Stream<Item = Event> + use<> {
-    let (mut tx, rx) = mpsc::channel(4);
-    let watch = watch.clone();
-    std::thread::spawn(move || {
-        let counts = || {
-            (
-                watch.stats.input_underruns.load(Ordering::Relaxed),
-                watch.stats.input_overruns.load(Ordering::Relaxed),
-            )
-        };
-        // The first read always reaches the UI, even after a subscription
-        // restart, so it can clear a warning that expired while restarting.
-        let mut sent = None;
-        let mut last_list = Instant::now();
-        let mut callbacks = watch.status.callbacks();
-        let mut last_callback = Instant::now();
-        while !tx.is_closed() {
-            let now = Instant::now();
-            let current = watch.status.callbacks();
-            if current != callbacks {
-                callbacks = current;
-                last_callback = now;
-            } else if watch.list.is_some()
-                && now.duration_since(last_callback) > Duration::from_secs(if callbacks == 0 { 10 } else { 1 })
-            {
+/// How long a stream that has never called back may stay quiet. Some devices
+/// take seconds to start.
+const FIRST_CALLBACK_LIMIT: Duration = Duration::from_secs(10);
+/// How long a running stream may stay quiet.
+const CALLBACK_LIMIT: Duration = Duration::from_secs(1);
+/// How often the permission and the device list are checked.
+const CHECK_EVERY: Duration = Duration::from_secs(1);
+/// How often the worker looks at the stream.
+const POLL: Duration = Duration::from_millis(250);
+
+/// Why a stream that has not reported an error must still be replaced.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Failure {
+    /// The system refused microphone access.
+    PermissionDenied,
+    /// The device this stream opened is no longer listed.
+    DeviceMissing,
+    /// The stream follows the system default, which is now another device.
+    DefaultChanged,
+}
+
+/// What one look at the stream decided.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Tick {
+    /// Callbacks stopped for longer than the limit.
+    stalled: bool,
+    /// The permission and the device list should be checked now.
+    check_due: bool,
+}
+
+/// The watcher's timing decisions, with the time given as an input so tests
+/// need no clock and no sleep.
+struct Health {
+    callbacks: u64,
+    last_callback: Instant,
+    last_check: Instant,
+    /// Whether silence counts as a failure. Hosts that cannot list devices
+    /// have no real stream behind them, so their callbacks say nothing.
+    detect_stalls: bool,
+}
+
+impl Health {
+    /// Starts counting from this moment, with the callbacks seen so far.
+    fn new(callbacks: u64, now: Instant, detect_stalls: bool) -> Self {
+        Self {
+            callbacks,
+            last_callback: now,
+            last_check: now,
+            detect_stalls,
+        }
+    }
+
+    /// Takes the current callback count and decides what is due.
+    fn tick(&mut self, callbacks: u64, now: Instant) -> Tick {
+        let mut stalled = false;
+        if callbacks != self.callbacks {
+            self.callbacks = callbacks;
+            self.last_callback = now;
+        } else if self.detect_stalls {
+            let limit = if callbacks == 0 {
+                FIRST_CALLBACK_LIMIT
+            } else {
+                CALLBACK_LIMIT
+            };
+            stalled = now.duration_since(self.last_callback) > limit;
+        }
+        let check_due = now.duration_since(self.last_check) >= CHECK_EVERY;
+        if check_due {
+            self.last_check = now;
+        }
+        Tick { stalled, check_due }
+    }
+}
+
+/// Decides from the permission and the device list whether the stream must
+/// be replaced. A list that could not be read says nothing about the device:
+/// listing can fail for a moment, and that must not interrupt a live input.
+fn check_failure(
+    denied: bool,
+    listed: Option<&Result<crate::devices::Inputs, String>>,
+    device: &str,
+    system_default: bool,
+) -> Option<Failure> {
+    if denied {
+        return Some(Failure::PermissionDenied);
+    }
+    let inputs = listed?.as_ref().ok()?;
+    if !inputs.devices.iter().any(|name| name == device) {
+        Some(Failure::DeviceMissing)
+    } else if system_default && inputs.default.as_deref() != Some(device) {
+        Some(Failure::DefaultChanged)
+    } else {
+        None
+    }
+}
+
+/// Samples the host and the stream until the subscription ends.
+fn run(watch: &Watch, mut tx: mpsc::Sender<Event>) {
+    let counts = || {
+        (
+            watch.stats.input_underruns.load(Ordering::Relaxed),
+            watch.stats.input_overruns.load(Ordering::Relaxed),
+        )
+    };
+    // The first read always reaches the UI, even after a subscription
+    // restart, so it can clear a warning that expired while restarting.
+    let mut sent = None;
+    let mut health = Health::new(watch.status.callbacks(), Instant::now(), watch.list.is_some());
+    while !tx.is_closed() {
+        let now = Instant::now();
+        let tick = health.tick(watch.status.callbacks(), now);
+        if tick.stalled {
+            watch.status.fail();
+        }
+        if tick.check_due {
+            let denied = watch.permission_denied.is_some_and(|check| check());
+            let listed = watch.list.map(|list| list());
+            if check_failure(denied, listed.as_ref(), &watch.device, watch.system_default).is_some() {
                 watch.status.fail();
             }
-            if last_list.elapsed() >= Duration::from_secs(1) {
-                last_list = Instant::now();
-                if watch.permission_denied.is_some_and(|check| check()) {
-                    watch.status.fail();
-                }
-                if let Some(list) = watch.list
-                    && let Ok(inputs) = list()
-                    && (!inputs.devices.contains(&watch.device)
-                        || (watch.system_default && inputs.default.as_deref() != Some(&watch.device)))
-                {
-                    watch.status.fail();
-                }
-            }
-            let ready = watch.active.iter().any(|source| watch.displays.read(*source) >= 0.5);
-            let event = watch.tracker.read(counts(), !watch.status.is_live(), ready, now);
-            let next = (event.underruns, event.overruns, event.show, event.failed, event.ready);
-            if Some(next) != sent && tx.try_send(event).is_ok() {
-                sent = Some(next);
-            }
-            std::thread::sleep(Duration::from_millis(250));
         }
-    });
+        let ready = watch.active.iter().any(|source| watch.displays.read(*source) >= 0.5);
+        let event = watch.tracker.read(counts(), !watch.status.is_live(), ready, now);
+        let next = (event.underruns, event.overruns, event.show, event.failed, event.ready);
+        if Some(next) != sent && tx.try_send(event).is_ok() {
+            sent = Some(next);
+        }
+        std::thread::sleep(POLL);
+    }
+}
+
+/// Emits only when the counts, warning visibility, or stream health change.
+pub fn stream(watch: &Watch) -> impl Stream<Item = Event> + use<> {
+    let (tx, rx) = mpsc::channel(4);
+    let watch = watch.clone();
+    std::thread::spawn(move || run(&watch, tx));
     rx
 }
 
