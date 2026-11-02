@@ -285,3 +285,29 @@ fn a_change_of_shape_does_not_shift_the_stream() {
     };
     assert_eq!(values([0.0, 0.0]).1, values([1.0, 0.0]).1);
 }
+
+/// A right-hand stereo copy mixes its channel into the seed, so it does not
+/// play the left side's numbers (M2 modules, rule 1).
+#[test]
+fn a_right_hand_copy_gives_other_values() {
+    use loom_core::testing::run_with_transport_and_channel;
+    let trigger = clock(100);
+    let reset = vec![0.0; trigger.len()];
+    let side = |channel: usize| {
+        let mut m = random(&[]);
+        let mut out = vec![0.0; trigger.len()];
+        let mut out2 = vec![0.0; trigger.len()];
+        run_with_transport_and_channel(
+            m.as_mut(),
+            RATE,
+            loom_core::TransportInfo::default(),
+            &[&trigger, &reset],
+            &[true, true],
+            &mut [&mut out, &mut out2],
+            &[],
+            channel,
+        );
+        out
+    };
+    assert_ne!(side(0), side(1));
+}

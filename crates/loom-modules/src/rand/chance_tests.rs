@@ -200,3 +200,29 @@ fn a_draw_is_below_one() {
         assert!((0.0..1.0).contains(&rng.draw()));
     }
 }
+
+/// A right-hand stereo copy mixes its channel into the seed, so it does not
+/// make the left side's choices (M2 modules, rule 1).
+#[test]
+fn a_right_hand_copy_makes_other_choices() {
+    use loom_core::testing::run_with_transport_and_channel;
+    let trigger = clock(1_000, 2);
+    let zeros = vec![0.0; 1_000];
+    let side = |channel: usize| {
+        let mut m = chance(&[]);
+        let mut outs = vec![vec![0.0; 1_000]; 8];
+        let mut parts: Vec<&mut [f32]> = outs.iter_mut().map(Vec::as_mut_slice).collect();
+        run_with_transport_and_channel(
+            m.as_mut(),
+            48_000.0,
+            loom_core::TransportInfo::default(),
+            &[&trigger, &zeros, &zeros, &zeros, &zeros],
+            &[true, false, false, false, false],
+            &mut parts,
+            &[],
+            channel,
+        );
+        outs.swap_remove(0)
+    };
+    assert_ne!(side(0), side(1));
+}
