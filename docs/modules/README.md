@@ -36,6 +36,7 @@ One page for each built-in module, made from its descriptor. After you change a 
 
 | Module | ID | Description |
 |---|---|---|
+| [Chance](loom.rand.chance.md) | `loom.rand.chance` | Four lanes that pass each trigger or gate to output A with a set chance, and to output B otherwise. |
 | [Clock](loom.clock.clock.md) | `loom.clock.clock` | A phase, trigger, and gate at a musical rate, locked to the transport's bar 1. |
 | [Clock Divide](loom.logic.divide.md) | `loom.logic.divide` | Fires on every Nth trigger, so a fast clock makes slower rhythms. Offset fires earlier in the count, and Reset starts the count again. |
 | [Phase](loom.phase.generator.md) | `loom.phase.generator` | Ramp from 0 to 1 at the pitch frequency. Drives oscillators and LFOs. |

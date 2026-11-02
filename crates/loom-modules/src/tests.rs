@@ -19,6 +19,7 @@ fn panels_follow_the_spec() {
     // `on` is the button itself. Its `mode` stays in the inspector.
     let inspector_only = [
         ("loom.osc.noise", "seed"),
+        ("loom.rand.chance", "seed"),
         ("loom.midi.note", "channel"),
         ("loom.midi.note", "bend-range"),
         ("loom.ui.button", "mode"),

@@ -11,7 +11,14 @@ fn process(phase: &[f32], reset: &[f32]) -> Vec<f32> {
         max_block: phase.len(),
     });
     let mut out = vec![0.0; phase.len()];
-    run(m.as_mut(), 48_000.0, &[phase, reset], &[true, true], &mut [&mut out], &[]);
+    run(
+        m.as_mut(),
+        48_000.0,
+        &[phase, reset],
+        &[true, true],
+        &mut [&mut out],
+        &[],
+    );
     out
 }
 

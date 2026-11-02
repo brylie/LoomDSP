@@ -432,6 +432,23 @@ fn phase_reset() {
     }
 }
 
+/// Reference render for `loom.rand.chance`: one clock into lane 1 drives all
+/// four lanes, each with its own chance. Every lane fires on the same frames
+/// at every block size, and the same seed gives the same choices.
+#[test]
+fn chance() {
+    Harness::new(&rand::CHANCE)
+        .seconds(0.1)
+        .input(
+            "trigger1",
+            Signal::from_fn(|frame| if frame % 120 < 40 { 1.0 } else { 0.0 }),
+        )
+        .param("chance2", 0.25)
+        .param("chance3", 0.75)
+        .param("chance4", 1.0)
+        .check(reference!("chance"));
+}
+
 #[test]
 fn every_dsp_module_has_a_reference_test() {
     // Add a test above when you add a module to `ALL`.
@@ -460,6 +477,7 @@ fn every_dsp_module_has_a_reference_test() {
         &logic::LOGIC,
         &logic::MEMORY,
         &rand::SAMPLE_HOLD,
+        &rand::CHANCE,
         &level::SLEW,
         &phase::SCALE,
         &phase::RESET,
