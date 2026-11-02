@@ -2,6 +2,7 @@ use super::*;
 use crate::devices::fake::{self, Event, Fake};
 use crate::preferences::FILE_NAME;
 use crate::{Args, Source, recovery};
+use loom_host_desktop::InputError;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -62,14 +63,11 @@ fn audio_input_follows_module_lifecycle() {
     assert_eq!(fake.input_opens.get(), 1);
     // The running input must also be included when subscriptions are built.
     let _ = app.subscription();
-    let tracker = app.rig.input_tracker.as_ref().unwrap().clone();
+    let tracker = app.rig.input.open().unwrap().1.clone();
     let second = app.controller.add_module("loom.io.audio-in").unwrap();
     assert!(app.commit());
     assert_eq!(fake.input_opens.get(), 1);
-    assert!(std::sync::Arc::ptr_eq(
-        &tracker,
-        app.rig.input_tracker.as_ref().unwrap()
-    ));
+    assert!(std::sync::Arc::ptr_eq(&tracker, app.rig.input.open().unwrap().1));
     app.controller.remove_module(first).unwrap();
     assert!(app.commit());
     assert_eq!(fake.input_closes.get(), 0);
@@ -77,7 +75,7 @@ fn audio_input_follows_module_lifecycle() {
     assert!(app.commit());
     assert_eq!(fake.input_closes.get(), 1);
     assert!(fake.input_writer.borrow().is_none());
-    assert!(app.rig.input_tracker.is_none());
+    assert!(app.rig.input.open().is_none());
 }
 
 /// A refused input leaves output playing and reports a useful error once.
@@ -92,7 +90,7 @@ fn denied_audio_input_does_not_stop_the_patch() {
     assert!(app.stream.is_playing());
     assert!(app.alerts.status().contains("microphone was denied"));
     app.alerts.say("other status");
-    app.rig.input_attempted = None;
+    app.rig.input.forget_attempt();
     app.sync_audio_input();
     assert_eq!(app.alerts.status(), "other status");
 }
@@ -109,10 +107,10 @@ fn permission_denied_after_input_opens_is_reported() {
     let mut app = start(args(&dir), &fake);
     app.controller.add_module("loom.io.audio-in").unwrap();
     assert!(app.commit());
-    assert!(app.rig.input.is_some());
+    assert!(app.rig.input.port().is_some());
     fake.input_permission_denied.set(true);
     app.sync_audio_input();
-    assert!(app.rig.input.is_none());
+    assert!(app.rig.input.port().is_none());
     assert!(app.stream.is_playing());
     assert!(app.alerts.status().contains("microphone was denied"));
     app.alerts.say("other status");
@@ -152,7 +150,7 @@ fn unavailable_input_keeps_other_audio_playing() {
             .unwrap();
         assert!(app.commit());
         assert!(app.stream.is_playing());
-        assert!(app.rig.input.is_none());
+        assert!(app.rig.input.port().is_none());
         assert!(app.alerts.status().contains(if denied {
             "microphone was denied"
         } else {
@@ -163,7 +161,7 @@ fn unavailable_input_keeps_other_audio_playing() {
         assert_eq!(tape.left()[1023], 0.2);
         assert_eq!(tape.right()[1023], 0.2);
         app.alerts.say("other status");
-        app.rig.input_attempted = None;
+        app.rig.input.forget_attempt();
         app.sync_audio_input();
         assert_eq!(app.alerts.status(), "other status");
     }
@@ -191,14 +189,14 @@ fn failed_audio_input_reopens() {
     }));
     assert_eq!(fake.input_closes.get(), 1);
     assert_eq!(fake.input_opens.get(), 2);
-    assert!(app.rig.input.as_ref().unwrap().is_live());
+    assert!(app.rig.input.port().unwrap().is_live());
     assert_eq!(app.alerts.status(), "Audio input: \"Microphone\" is back.");
 
     // A later loss must be reported again, even after a successful reopen.
     *fake.input_error.borrow_mut() = Some(InputError::Other("device busy".into()));
     fake.input_writer.borrow().as_ref().unwrap().status().fail();
     app.sync_audio_input();
-    assert!(app.rig.input.is_none());
+    assert!(app.rig.input.port().is_none());
     assert!(app.alerts.status().contains("was lost"));
 
     // A permission refusal is distinct from the earlier device error.
@@ -224,11 +222,11 @@ fn input_recovery_preserves_other_status_and_permission_latch() {
     app.alerts.say("newer message");
     fake.input_permission_denied.set(false);
     app.sync_audio_input();
-    assert!(app.rig.input.is_some());
+    assert!(app.rig.input.port().is_some());
     assert_eq!(app.alerts.status(), "newer message");
     fake.input_permission_denied.set(true);
     app.sync_audio_input();
-    assert!(app.rig.input.is_none());
+    assert!(app.rig.input.port().is_none());
     assert_eq!(
         app.alerts.status(),
         "newer message",
@@ -238,41 +236,6 @@ fn input_recovery_preserves_other_status_and_permission_latch() {
     // Choosing an input makes the permission warning eligible again.
     app.choose_audio_input(InputChoice::SystemDefault);
     assert!(app.alerts.status().contains("microphone was denied"));
-}
-
-/// Every category reaches the status bar with its own text, and only a real
-/// refusal is called one, whatever the backend's words say.
-#[test]
-fn input_error_categories_have_their_own_status() {
-    let cases = [
-        (InputError::PermissionDenied, "microphone was denied"),
-        (
-            InputError::Unavailable {
-                device: Some("Mic".into()),
-                detail: None,
-            },
-            "Audio input: no audio input device found matching `Mic`.",
-        ),
-        (
-            InputError::UnsupportedRate {
-                device: "Mic".into(),
-                rate: 96_000,
-            },
-            "Audio input: \"Mic\" does not offer 96000 Hz.",
-        ),
-        (
-            InputError::UnsupportedFormat("Mic".into()),
-            "Audio input: audio device `Mic` does not support 32-bit float input.",
-        ),
-        (
-            InputError::Other("permission denied by a plug-in".into()),
-            "Audio input: audio error: permission denied by a plug-in.",
-        ),
-    ];
-    for (error, text) in cases {
-        assert!(input_error_message(&error).contains(text), "{error:?}");
-    }
-    assert!(!input_error_message(&InputError::Other("permission denied".into())).contains("was denied"));
 }
 
 /// A refusal is reported after an earlier device error, because the two have
@@ -292,22 +255,22 @@ fn permission_denial_after_a_device_error_and_failure_after_recovery_are_reporte
     assert_eq!(app.alerts.status(), "Audio input: audio error: device busy.");
 
     *fake.input_error.borrow_mut() = Some(InputError::PermissionDenied);
-    app.rig.input_attempted = None;
+    app.rig.input.forget_attempt();
     app.sync_audio_input();
     assert!(app.alerts.status().contains("microphone was denied"));
 
     // The device opens: recovery leaves the refusal's latch alone.
     *fake.input_error.borrow_mut() = None;
-    app.rig.input_attempted = None;
+    app.rig.input.forget_attempt();
     app.sync_audio_input();
-    assert!(app.rig.input.is_some());
+    assert!(app.rig.input.port().is_some());
     assert_eq!(app.alerts.status(), "Audio input: \"Mic\" is back.");
 
     // The stream fails and the reopen fails: the loss shows, not silence.
     *fake.input_error.borrow_mut() = Some(InputError::Other("device busy".into()));
     fake.input_writer.borrow().as_ref().unwrap().status().fail();
     app.sync_audio_input();
-    assert!(app.rig.input.is_none());
+    assert!(app.rig.input.port().is_none());
     assert_eq!(
         app.alerts.status(),
         "Audio input: \"Mic\" was lost. Trying to reopen it."
@@ -333,12 +296,12 @@ fn named_audio_input_waits_for_its_return() {
     };
     fake.input_writer.borrow().as_ref().unwrap().status().fail();
     app.sync_audio_input();
-    assert!(app.rig.input.is_none());
+    assert!(app.rig.input.port().is_none());
     assert_eq!(fake.input_opens.get(), 1);
     fake.audio_inputs.borrow_mut().devices.push("Microphone".into());
-    app.rig.input_attempted = None;
+    app.rig.input.forget_attempt();
     app.sync_audio_input();
-    assert_eq!(app.rig.input.as_ref().unwrap().name(), "Microphone");
+    assert_eq!(app.rig.input.port().unwrap().name(), "Microphone");
     assert_eq!(fake.input_opens.get(), 2);
 }
 
@@ -355,7 +318,7 @@ fn missing_saved_input_falls_back_without_saving() {
     let mut app = start(args(&dir), &fake);
     app.controller.add_module("loom.io.audio-in").unwrap();
     assert!(app.commit());
-    assert_eq!(app.rig.input.as_ref().unwrap().name(), "Microphone");
+    assert_eq!(app.rig.input.port().unwrap().name(), "Microphone");
     assert_eq!(app.rig.store.saved().audio.input, InputChoice::Named("Missing".into()));
     assert!(app.alerts.status().contains("system default"));
 }
@@ -385,10 +348,10 @@ fn audio_input_flags_do_not_change_saved_choice() {
         app.controller.add_module("loom.io.audio-in").unwrap();
         assert!(app.commit());
         if disabled {
-            assert!(app.rig.input.is_none());
+            assert!(app.rig.input.port().is_none());
             assert_eq!(fake.input_opens.get(), 0);
         } else {
-            assert_eq!(app.rig.input.as_ref().unwrap().name(), "Chosen input");
+            assert_eq!(app.rig.input.port().unwrap().name(), "Chosen input");
         }
         assert_eq!(app.rig.store.saved().audio.input, InputChoice::Named("Saved".into()));
         app.preferences(Message::Safety(OutputSafety::Off));
@@ -432,7 +395,7 @@ fn audio_input_plays_through_the_fake_host() {
         failed: false,
         ready: true,
     }));
-    assert!(!app.rig.input_warned, "silent input is not live sound");
+    assert!(!app.rig.input.feedback_warned(), "silent input is not live sound");
     for _ in 0..4 {
         {
             let mut writer = fake.input_writer.borrow_mut();
@@ -1670,7 +1633,7 @@ fn failed_saves_say_why_and_keep_the_choice() {
     assert!(unsaved(&app), "{}", app.alerts.status());
     assert_eq!(app.rig.store.saved().audio.input, InputChoice::Off);
     assert_eq!(fake.input_closes.get(), 1, "closed for this run");
-    assert!(app.rig.input.is_none());
+    assert!(app.rig.input.port().is_none());
 
     app.alerts.say(String::new());
     assert!(fake.is_open("Pad"), "every MIDI input opens when none is saved");

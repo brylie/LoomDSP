@@ -35,45 +35,38 @@ impl App {
             .map(Message::Audio),
             None => Subscription::none(),
         };
-        // An open input always has a drift tracker: both are set and cleared
-        // together.
-        let input_watch = self
-            .rig
-            .input
-            .as_ref()
-            .zip(self.rig.input_tracker.as_ref())
-            .map(|(input, tracker)| {
-                let stats = self.controller.stats().clone();
-                let tracker = tracker.clone();
-                Subscription::run_with(
-                    input_watch::Watch {
-                        status: input.status(),
-                        stats,
-                        tracker,
-                        device: input.name().to_string(),
-                        system_default: self.rig.flags.input.is_none()
-                            && matches!(
-                                self.rig.store.saved().audio.input,
-                                preferences::InputChoice::SystemDefault
-                            ),
-                        list: self.rig.host.audio_input_lister(),
-                        permission_denied: self.rig.host.audio_input_permission_checker(),
-                        active: self
-                            .controller
-                            .graph()
-                            .nodes()
-                            .filter_map(|(id, node)| {
-                                (node.descriptor.id == "loom.io.audio-in")
-                                    .then(|| self.controller.display_source(id, 0))
-                                    .flatten()
-                            })
-                            .collect(),
-                        displays: self.controller.display_reader(),
-                    },
-                    input_watch::stream,
-                )
-                .map(Message::InputAudio)
-            });
+        let input_watch = self.rig.input.open().map(|(input, tracker)| {
+            let stats = self.controller.stats().clone();
+            let tracker = tracker.clone();
+            Subscription::run_with(
+                input_watch::Watch {
+                    status: input.status(),
+                    stats,
+                    tracker,
+                    device: input.name().to_string(),
+                    system_default: self.rig.flags.input.is_none()
+                        && matches!(
+                            self.rig.store.saved().audio.input,
+                            preferences::InputChoice::SystemDefault
+                        ),
+                    list: self.rig.host.audio_input_lister(),
+                    permission_denied: self.rig.host.audio_input_permission_checker(),
+                    active: self
+                        .controller
+                        .graph()
+                        .nodes()
+                        .filter_map(|(id, node)| {
+                            (node.descriptor.id == "loom.io.audio-in")
+                                .then(|| self.controller.display_source(id, 0))
+                                .flatten()
+                        })
+                        .collect(),
+                    displays: self.controller.display_reader(),
+                },
+                input_watch::stream,
+            )
+            .map(Message::InputAudio)
+        });
         // Live modulated values move every block, so a patch with an
         // assignment that is on follows them every frame.
         // Without audio the engine does not run, so nothing moves.
@@ -127,16 +120,7 @@ impl App {
         // While audio plays, the audio watcher reports stalled callbacks.
         // Once a device is lost, reconnection is tried by polling four
         // times a second (device-changes.md, Audio device loss).
-        let waiting_for_input = self.rig.input.is_none()
-            && self.stream.is_playing()
-            && !self.rig.flags.no_input
-            && (self.rig.flags.input.is_some()
-                || !matches!(self.rig.store.saved().audio.input, preferences::InputChoice::Off))
-            && self
-                .controller
-                .graph()
-                .nodes()
-                .any(|(_, node)| node.descriptor.id == "loom.io.audio-in");
+        let waiting_for_input = self.rig.input.port().is_none() && self.stream.is_playing() && self.input_wanted();
         let audio_poll = if !self.stream.without_device() && (!self.stream.is_playing() || waiting_for_input) {
             iced::time::every(Duration::from_millis(250)).map(|_| Message::AudioPoll)
         } else {

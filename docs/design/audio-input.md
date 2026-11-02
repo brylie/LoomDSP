@@ -9,7 +9,7 @@ An Audio In module that brings sound from an interface into the patch, so LoomDS
 - **Background:** [Output safety](../learn/output-safety.md) (why a loud loop must be stopped at the output).
 - **Prior art:** none needed.
 - **Issues:** [#29](https://github.com/brylie/LoomDSP/issues/29).
-- **Code:** `loom.io.audio-in` in `crates/loom-modules/src/io.rs`; the input stream in `crates/loom-host-desktop`; the `Host` trait in `crates/loom-app/src/devices.rs`.
+- **Code:** `loom.io.audio-in` in `crates/loom-modules/src/io.rs`; the input stream in `crates/loom-host-desktop`; the `Host` trait in `crates/loom-app/src/devices.rs`; the stream's lifecycle and messages in `InputSession`, `crates/loom-app/src/input_session.rs`.
 
 ## Goal
 

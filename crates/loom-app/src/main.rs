@@ -25,6 +25,7 @@ mod file_commands;
 mod files;
 mod gestures;
 mod help;
+mod input_session;
 mod input_watch;
 mod inspector;
 mod layout;
@@ -1298,7 +1299,7 @@ impl App {
             }
             Message::LiveFrame => {
                 scene::update_live_values(&mut self.values, &self.controller);
-                if !self.rig.input_warned && self.rig.input.is_some() {
+                if !self.rig.input.feedback_warned() && self.rig.input.port().is_some() {
                     self.sync_audio_input();
                 }
             }
