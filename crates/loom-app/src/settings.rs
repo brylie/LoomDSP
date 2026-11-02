@@ -512,7 +512,8 @@ impl App {
 
     /// Keeps the input stream in step with the patch and the current output.
     pub(crate) fn sync_audio_input(&mut self) {
-        let needed = self.stream.is_playing() && !self.stream.playback().is_fake() && self.input_wanted();
+        let output_playing = self.stream.is_playing();
+        let needed = output_playing && !self.stream.playback().is_fake() && self.input_wanted();
         let buffer = self
             .rig
             .playing
@@ -527,6 +528,7 @@ impl App {
             });
         let demand = Demand {
             needed,
+            output_playing,
             flag: self.rig.flags.input.as_deref(),
             choice: &self.rig.store.saved().audio.input,
             buffer,

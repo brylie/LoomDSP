@@ -14,6 +14,7 @@ struct Bench {
     choice: InputChoice,
     flag: Option<&'static str>,
     needed: bool,
+    output_playing: bool,
 }
 
 impl Bench {
@@ -29,6 +30,7 @@ impl Bench {
             choice: InputChoice::SystemDefault,
             flag: None,
             needed: true,
+            output_playing: true,
         };
         bench.plug(devices);
         bench
@@ -52,6 +54,7 @@ impl Bench {
     fn sync_now(&mut self) {
         let demand = Demand {
             needed: self.needed,
+            output_playing: self.output_playing,
             flag: self.flag,
             choice: &self.choice,
             buffer: Some(256),
@@ -111,6 +114,7 @@ fn opening_waits_for_the_output_buffer() {
     let mut bench = Bench::new(&["Mic"]);
     let demand = Demand {
         needed: true,
+        output_playing: true,
         flag: None,
         choice: &bench.choice,
         buffer: None,
@@ -305,13 +309,42 @@ fn a_stopped_output_keeps_the_wait_for_a_named_input() {
     assert!(bench.session.named_lost());
     bench.session.stream_stopped();
     assert!(bench.session.named_lost());
+
+    // The audio poll syncs while the output is stopped.
+    bench.needed = false;
+    bench.output_playing = false;
     bench.sync();
-    assert_eq!(bench.device(), None);
+    assert!(bench.session.named_lost());
+
+    bench.needed = true;
+    bench.output_playing = true;
+    bench.sync();
+    assert_eq!(bench.device(), None, "the default does not stand in");
 
     bench.session.choose(&mut bench.parts.controller);
     assert!(!bench.session.named_lost());
     bench.sync();
     assert_eq!(bench.device().as_deref(), Some("Other"), "the fallback applies again");
+}
+
+/// With the output playing, losing the demand ends the wait: the player took
+/// the Audio In away, so a later one starts fresh and may fall back.
+#[test]
+fn removing_the_last_audio_in_ends_the_wait() {
+    let mut bench = Bench::new(&["Other", "Mic"]);
+    bench.choice = InputChoice::Named("Mic".into());
+    bench.sync();
+    bench.plug(&["Other"]);
+    bench.fail_stream();
+    bench.sync();
+    assert!(bench.session.named_lost());
+
+    bench.needed = false;
+    bench.sync();
+    assert!(!bench.session.named_lost());
+    bench.needed = true;
+    bench.sync();
+    assert_eq!(bench.device().as_deref(), Some("Other"));
 }
 
 /// A stopped output closes an open stream and the next one reopens it, with

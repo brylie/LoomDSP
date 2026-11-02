@@ -49,6 +49,9 @@ enum Phase {
 pub(crate) struct Demand<'a> {
     /// The output plays, the patch has an Audio In, and the input is not off.
     pub needed: bool,
+    /// The output stream plays. While it does not, a lost named input is
+    /// still waited for, because the demand can come back with the stream.
+    pub output_playing: bool,
     /// Part of a device name from `--input`, for this run.
     pub flag: Option<&'a str>,
     /// The saved choice.
@@ -173,7 +176,18 @@ impl InputSession {
         alerts: &mut Alerts,
     ) {
         if !demand.needed {
+            // One interface often carries both directions, so a lost output
+            // and a lost input come together. The audio poll syncs while the
+            // output is stopped, and that must not end the wait: the patch
+            // would come back on the default microphone.
+            let keep_waiting = !demand.output_playing && self.named_lost();
             self.close(controller);
+            if keep_waiting {
+                self.phase = Phase::Waiting {
+                    last_attempt: None,
+                    named_lost: true,
+                };
+            }
             alerts.set_input_drift(None);
             return;
         }
