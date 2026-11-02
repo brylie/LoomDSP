@@ -54,3 +54,48 @@ Four lanes that pass each trigger or gate to output A with a set chance, and to 
 - Knob: **Chance 4** (`chance4`)
 
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->
+
+## When to use it
+
+Use only **A** for a probability gate: at a chance of 0.75, about three of every four hits pass. Use **A** and **B** together to split one rhythm into two parts that never play at once.
+
+A trigger stays a trigger and a gate keeps its length, so Chance works on clocks and on note gates alike. One clock into lane 1 feeds all four lanes, and each lane still chooses for itself.
+
+Put a bar clock on **Reset** to make a random pattern repeat. The same seed always gives the same choices.
+
+## Example patch
+
+A clock with some hits taken out, playing a short envelope on a sine wave.
+
+```ron
+Patch(
+    version: 1,
+    name: "Sometimes",
+    modules: [
+        PatchModule(id: 1, kind: "loom.clock.transport@1"),
+        PatchModule(id: 2, kind: "loom.phase.scale@1", params: {"multiply": 8}),
+        PatchModule(id: 3, kind: "loom.phase.trigger@1"),
+        PatchModule(id: 4, kind: "loom.rand.chance@1", params: {"chance1": 0.75}),
+        PatchModule(id: 5, kind: "loom.env.envelope@1"),
+        PatchModule(id: 6, kind: "loom.phase.generator@1"),
+        PatchModule(id: 7, kind: "loom.osc.sine@1"),
+        PatchModule(id: 8, kind: "loom.math.mul@1", params: {"gain": 0.3}),
+        PatchModule(id: 9, kind: "loom.io.audio-out@1"),
+    ],
+    cables: [
+        PatchCable(from: (2, "phase"), to: (3, "phase")),
+        PatchCable(from: (3, "trigger"), to: (4, "trigger1")),
+        PatchCable(from: (4, "a1"), to: (5, "gate")),
+        PatchCable(from: (6, "phase"), to: (7, "phase")),
+        PatchCable(from: (7, "out"), to: (8, "a")),
+        PatchCable(from: (5, "out"), to: (8, "b")),
+        PatchCable(from: (8, "out"), to: (9, "in")),
+    ],
+)
+```
+
+## See also
+
+- [Repeatable randomness](../learn/repeatable-randomness.md)
+- [Triggers and gates](../learn/triggers-and-gates.md)
+- [Random](loom.rand.random.md)
