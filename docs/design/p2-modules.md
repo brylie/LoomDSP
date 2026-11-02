@@ -3,13 +3,13 @@
 The ports, parameters, ranges, defaults, and behaviour of the M2 modules that bring no new engine rules, so each can be built from its catalogue entry without guessing.
 
 - **Kind:** living specification.
-- **Status:** Agreed for Random, Chance, Phase reset, Euclidean rhythm, Selector, Phase shift and reverse, Macro, Pitch quantiser, Multi-lane sequencer, and Spectrum (2026-11-01). Each section is ready to build. Other M2 modules are added here as they are agreed.
+- **Status:** Implemented for Random, Chance, and Phase reset. Agreed for Euclidean rhythm, Selector, Phase shift and reverse, Macro, Pitch quantiser, Multi-lane sequencer, and Spectrum (2026-11-01). Each of those sections is ready to build. Other M2 modules are added here as they are agreed.
 - **Decision behind it:** none. It follows [ADR-0007](../adr/0007-polymorphic-signal-model.md) (signals), [ADR-0014](../adr/0014-modulation-without-cables.md) (modulation without cables), [ADR-0016](../adr/0016-ports-and-parameters-carry-their-own-text.md) (port and parameter text), and [ADR-0018](../adr/0018-clean-room-module-development.md) (clean room).
 - **Use case and requirements:** FR-LIB-01, FR-LIB-08, FR-LIB-12, FR-LIB-14, FR-LIB-19, FR-LIB-22, FR-LIB-29, FR-LIB-30, NFR-SND-04.
-- **Background:** [Phase and cycles](../learn/phase-and-cycles.md).
-- **Prior art:** none named. Every module is designed from its purpose. The Euclidean rhythm follows published theory: G. Toussaint, "The Euclidean Algorithm Generates Traditional Musical Rhythms", 2005.
+- **Background:** [Phase and cycles](../learn/phase-and-cycles.md), [Repeatable randomness](../learn/repeatable-randomness.md).
+- **Prior art:** none named. Every module is designed from its purpose. The Euclidean rhythm follows published theory: G. Toussaint, "The Euclidean Algorithm Generates Traditional Musical Rhythms", 2005. The random streams are xorshift (G. Marsaglia, "Xorshift RNGs", 2003), started through the mixing step of G. Steele, D. Lea, and C. Flood, "Fast Splittable Pseudorandom Number Generators", 2014.
 - **Issues:** [#304](https://github.com/brylie/LoomDSP/issues/304) (Random), [#305](https://github.com/brylie/LoomDSP/issues/305) (Chance), [#174](https://github.com/brylie/LoomDSP/issues/174) (Phase reset), [#306](https://github.com/brylie/LoomDSP/issues/306) (Euclidean rhythm), [#310](https://github.com/brylie/LoomDSP/issues/310) (Selector), [#111](https://github.com/brylie/LoomDSP/issues/111) (Phase shift and reverse), [#78](https://github.com/brylie/LoomDSP/issues/78) (Macro), [#308](https://github.com/brylie/LoomDSP/issues/308) (Pitch quantiser), [#307](https://github.com/brylie/LoomDSP/issues/307) (Multi-lane sequencer), [#109](https://github.com/brylie/LoomDSP/issues/109) (Spectrum). Pitch modules follow [Scale and tuning](scale-and-tuning.md).
-- **Code:** `crates/loom-modules/src`, once built.
+- **Code:** `crates/loom-modules/src/rand.rs` and `phase.rs` for the modules built so far.
 
 ## Goal
 
@@ -32,17 +32,18 @@ The [rules for M1 modules](p1-modules.md#rules-for-all-modules-here) apply: IDs 
 | Inputs | `trigger` (trigger, default 0), `reset` (trigger, default 0) |
 | Outputs | `out`, `out2` |
 | Parameters | `mode`: 0 Step (default), 1 Walk. `low`: −10 to 10, default 0. `high`: −10 to 10, default 1. `shape`: 0 Uniform (default), 1 Centred. `step`: 0 to 1, default 0.1. `glide`: 0 to 5 s, default 0. `seed` (rule 1) |
-| Panel | `low` and `high` on one [range](panel-widgets.md#range) widget; until it exists, two knobs. Radio buttons for `mode` and `shape`. Knobs for `step` and `glide`. `seed` in the inspector only. |
+| Panel | `low` and `high` on one [range](panel-widgets.md#range) widget; until it exists, two knobs. Segmented controls for `mode` and `shape`. Knobs for `step` and `glide`. `seed` in the inspector only. |
 
 - **Position inside the range.** The module keeps each output's position `u` from 0 to 1, and outputs `low + u × (high − low)`. If `low` is above `high`, the two are swapped. *Why:* a moved or modulated range rescales the output at once, and a walk can never leave it.
 - `low` and `high` have the [control ranges](control-ranges.md) −1 to 1 (default) and −10 to 10.
-- **Step mode:** on each trigger, `u` gets a new draw. `out2` gets its own, independent draw on the same trigger. *Why two outputs:* one clock often needs two unrelated random values, such as a pitch and a velocity.
-- **Walk mode:** on each trigger, the position moves by a random amount. With one output used, `u` moves by a draw from −`step` to +`step`. The two outputs together move as one point in two dimensions: a random step of length up to `step`, in any direction, with an even spread over the disc. `step` is a fraction of the range.
+- **Two independent outputs.** `out` and `out2` each have their own stream and position, and both move on every trigger. *Why two outputs:* one clock often needs two unrelated random values, such as a pitch and a velocity. To send one value to several places, drag several cables from one output.
+- **Step mode:** on each trigger, `u` gets a new draw.
+- **Walk mode:** on each trigger, `u` moves by a draw from −`step` to +`step`. `step` is a fraction of the range. *Why no shared two-dimensional step:* it would change how `out` moves depending on whether `out2` is used, and a module cannot see its output cables. A cable must not change another output's sound ([#529](https://github.com/brylie/LoomDSP/issues/529)). Two independent walks still draw a path on an XY scope.
 - **Edges bounce** (settled). A move past 0 or 1 reflects back by the overshoot. *Why:* values stay spread over the whole range and never stick to an edge, as they would if they stopped there.
 - **Shape** (settled). Uniform: every value equally likely. Centred: the mean of two uniform draws, so values near the middle are more likely (a triangle shape). In walk mode, the shape applies to each step's size.
 - **Glide** (settled). With `glide` above 0, each output moves to its new value in a straight line over `glide` seconds. A trigger during a glide starts a new glide from where the output is. At 0 the output steps. When the Smoothing trait (TR-11, FR-SDK-07) exists, `glide` moves onto it.
 - **Start:** both positions start at the middle (0.5). The outputs hold until the first trigger.
-- **Reset** (rule 2) restarts the generator from the seed. In walk mode it also puts both positions back at the middle, so the same walk replays. In step mode the outputs hold until the next trigger.
+- **Reset** (rule 2) restarts the generator from the seed. In walk mode it also puts both positions back at the middle at once, ending any glide, so the same walk replays. In step mode a running glide finishes, and the outputs then hold until the next trigger.
 
 ## Chance (MT-RAND-03)
 
@@ -225,26 +226,26 @@ Two built forms of the Phase warp type (ADR-0017): small, cheap, and needed now 
 
 Random:
 
-- [ ] The same seed gives the same values at block sizes 1, 77, and 512 (reference test).
-- [ ] Over 100,000 triggers in step mode with Uniform, each tenth of the range gets 10% of the values, within 1 percentage point (test).
-- [ ] Centred puts more values in the middle fifth than in either outer fifth (test).
-- [ ] Walk mode never leaves the range, in one and two dimensions, including while the range is modulated (test).
-- [ ] A reset replays the same values from the start, in step and walk mode (test).
-- [ ] With `glide` 0.1 s, a new value is reached after 0.1 s in a straight line (test).
+- [x] The same seed gives the same values at block sizes 1, 77, and 512 (reference test).
+- [x] Over 100,000 triggers in step mode with Uniform, each tenth of the range gets 10% of the values, within 1 percentage point (test).
+- [x] Centred puts more values in the middle fifth than in either outer fifth (test).
+- [x] Walk mode never leaves the range on either output, including while the range is modulated (test).
+- [x] A reset replays the same values from the start, in step and walk mode (test).
+- [x] With `glide` 0.1 s, a new value is reached after 0.1 s in a straight line (test).
 
 Chance:
 
-- [ ] Chance 0 never sends to A, and 1 always does (test).
-- [ ] Over 10,000 triggers at 0.3, between 28% and 32% go to A (test).
-- [ ] A gate of 100 frames chosen for A gives 100 frames on A and none on B (test).
-- [ ] One clock on lane 1 drives lanes 2 to 4 when they have no cable. With the same clock cabled to lane 3, lane 3's choices are the same whether or not lane 2 has its own cable (test).
-- [ ] The same seed gives the same choices at block sizes 1, 77, and 512 (reference test).
+- [x] Chance 0 never sends to A, and 1 always does (test).
+- [x] Over 10,000 triggers at 0.3, between 28% and 32% go to A (test).
+- [x] A gate of 100 frames chosen for A gives 100 frames on A and none on B (test).
+- [x] One clock on lane 1 drives lanes 2 to 4 when they have no cable. With the same clock cabled to lane 3, lane 3's choices are the same whether or not lane 2 has its own cable (test).
+- [x] The same seed gives the same choices at block sizes 1, 77, and 512 (reference test).
 
 Phase reset:
 
-- [ ] A reset lands on the same sample at block sizes 1, 77, and 512 (test).
-- [ ] After a reset, the output rises at the input's rate from 0 and wraps when it reaches 1 (test).
-- [ ] A reset on the first frame counts (test).
+- [x] A reset lands on the same sample at block sizes 1, 77, and 512 (test).
+- [x] After a reset, the output rises at the input's rate from 0 and wraps when it reaches 1 (test).
+- [x] A reset on the first frame counts (test).
 
 Spectrum:
 

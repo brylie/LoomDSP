@@ -22,6 +22,7 @@ LoomDSP is also a way to learn modular sound design, for musicians and for the p
 | [Stopping a stream without a click](stopping-a-stream.md) | Why the engine fades out, why the host waits for silent buffers, and why a new sample rate paused a stream on macOS. |
 | [How a ladder filter sings](ladder-filter.md) | Why inverted feedback through stages makes a peak, why four stages sing at the cutoff and two never do, how a loop runs with no unit delay, and how to change the slope without a burst. |
 | [Delays and interpolation](delays-and-interpolation.md) | How a circular buffer works, why linear interpolation dulls sweeps and loops, why the all-pass needs two samples of delay, and how to tune a loop. |
+| [Repeatable randomness](repeatable-randomness.md) | Why a random part plays the same after a reload, why a small seed needs mixing, why each lane has its own stream, and why a walk bounces. |
 
 ## Writing one
 

@@ -463,7 +463,7 @@ The catalogue entries that would use each new widget. The knob is used by nearly
 | Range | MT-RAND-01 range, MT-LEVEL-05 limits, MT-LEVEL-03 range map, MT-LOGIC-01 window, MT-NOTE-07 pitch and velocity ranges, MT-SAMPLE-05 zones, MT-SEQ-04 note range |
 | Readout | MT-VIEW-01 number mode, MT-VIEW-04, MT-VIEW-05, MT-PITCH-04, MT-LOGIC-04 count, MT-CLOCK-01 position, MT-ROUTE-01 current input, MT-ARR-05 current part |
 | Meter on a display value | MT-DYN-01 gain reduction, MT-ENV-04 level, MT-DYN-02, MT-VIEW-05 and MT-PITCH-04 (centre-zero), MT-ENV-05 |
-| XY scope | MT-VIEW-01 XY mode, MT-MIX-03 stereo width, MT-SRC-04 attractors, MT-SRC-12, MT-FILTER-10 (the two outputs make a circle), MT-PHASE-05 (phase in against phase out shows the warp), MT-RAND-01 walk in two dimensions |
+| XY scope | MT-VIEW-01 XY mode, MT-MIX-03 stereo width, MT-SRC-04 attractors, MT-SRC-12, MT-FILTER-10 (the two outputs make a circle), MT-PHASE-05 (phase in against phase out shows the warp), MT-RAND-01 walk (its two outputs as X and Y) |
 | Curve, data | MT-ENV-02, MT-MOD-02 (drawn LFOs, section curves for FR-LIB-16, velocity and keytracking curves), MT-SHAPE-01 drawn curve, TR-01 drawn shape (so MT-SRC-01 and MT-MOD-01) |
 | Curve, shape from parameters | MT-ENV-01, MT-ENV-03, MT-PHASE-05, MT-SHAPE-01 built-in curves, MT-MIX-02 law, MT-LEVEL-03 range map, MT-DYN-01 transfer curve, MT-FILTER-01 to MT-FILTER-04 and MT-EQ-01 response |
 | Step grid, data | MT-SEQ-01, MT-SEQ-02, MT-ROUTE-04, MT-SRC-03 partial levels |

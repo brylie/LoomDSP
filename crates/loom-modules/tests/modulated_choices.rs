@@ -206,3 +206,37 @@ fn sample_hold_follows_a_modulated_mode() {
     let left = render(&mut parts, 128);
     assert!(left[100] > 0.3, "{}", left[100]);
 }
+
+/// A walk stays inside its range while an assignment moves the range. With
+/// `low` pulled up by a modulation source, the output stays above the new
+/// `low` and below `high`, and still moves (M2 modules, Random).
+#[test]
+fn a_random_walk_stays_in_a_modulated_range() {
+    let mut parts = engine();
+    let ramp = parts.controller.add_module("loom.phase.generator").unwrap();
+    let clock = parts.controller.add_module("loom.phase.trigger").unwrap();
+    parts.controller.connect_named(ramp, "phase", clock, "phase").unwrap();
+    let amount = source(&mut parts.controller, 1.0);
+    let random = parts.controller.add_module("loom.rand.random").unwrap();
+    parts
+        .controller
+        .connect_named(clock, "trigger", random, "trigger")
+        .unwrap();
+    let param = |name: &str| loom_modules::rand::RANDOM.param_index(name).unwrap();
+    parts.controller.set_param(random, param("mode"), 1.0).unwrap();
+    parts.controller.set_param(random, param("step"), 0.5).unwrap();
+    parts
+        .controller
+        .add_assignment_named(amount, "out", random, "low", 0.25)
+        .unwrap();
+    listen(&mut parts.controller, random, "out");
+    parts.controller.commit().unwrap();
+    let left = render(&mut parts, 48_000);
+    // The assignment moves `low` by a quarter of its -1 to 1 control: to 0.5.
+    let settled = &left[4_800..];
+    let (min, max) = settled
+        .iter()
+        .fold((f32::MAX, f32::MIN), |(low, high), &v| (low.min(v), high.max(v)));
+    assert!(min >= 0.5 - 1e-3 && max <= 1.0, "{min} to {max}");
+    assert!(max - min > 0.25, "the walk still moves: {min} to {max}");
+}
