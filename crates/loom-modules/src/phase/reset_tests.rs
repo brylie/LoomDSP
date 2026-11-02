@@ -69,12 +69,17 @@ fn a_non_finite_input_gives_zero_and_is_not_kept() {
     assert_eq!(out, [0.0, 0.25, 0.0, 0.5]);
 }
 
-/// Finite inputs of opposite sign can overflow when subtracted. The output
-/// is still a phase, and the next ordinary input recovers.
+/// Finite inputs of opposite sign would overflow if subtracted directly. The
+/// output is still a phase, and later ordinary inputs keep their fractions.
 #[test]
 fn opposite_extremes_do_not_produce_nan() {
-    let out = process(&[-f32::MAX, f32::MAX, 0.25, 0.5], &[1.0, 0.0, 0.0, 1.0]);
-    assert_eq!(out[1], 0.0);
-    assert!(out.iter().all(|v| (0.0..1.0).contains(v)), "{out:?}");
-    assert_eq!(out[3], 0.0);
+    let out = process(&[-f32::MAX, f32::MAX, 0.25, 0.5], &[1.0, 0.0, 0.0, 0.0]);
+    assert_eq!(out, [0.0, 0.0, 0.25, 0.5]);
+}
+
+/// A reset on an input outside 0 to 1 counts from that input's phase.
+#[test]
+fn a_reset_outside_the_phase_range_keeps_the_speed() {
+    let out = process(&[1000.75, 0.25, 0.5], &[1.0, 0.0, 0.0]);
+    assert_eq!(out, [0.0, 0.5, 0.75]);
 }

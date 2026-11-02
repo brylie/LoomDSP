@@ -528,8 +528,8 @@ pub static RESET: ModuleDescriptor = ModuleDescriptor {
     displays: &[],
 };
 
-/// State for `loom.phase.reset`: `offset` is the input's value at the last
-/// reset. The module keeps a distance from the input, not a phase of its
+/// State for `loom.phase.reset`: `offset` is the input's wrapped value at the
+/// last reset. The module keeps a distance from the input, not a phase of its
 /// own, so it can never run at another speed or drift away from the input.
 #[derive(Clone)]
 struct PhaseReset {
@@ -553,17 +553,14 @@ impl Module for PhaseReset {
                 *out = 0.0;
                 continue;
             }
+            // Cables are not limited to 0 to 1. Wrapping first keeps both
+            // values small, so a huge input can neither overflow here nor
+            // leave an offset so large that later fractions are lost.
+            let phase = Wrap::wrap(phase);
             if restart {
                 self.offset = phase;
             }
-            // Two huge values of opposite sign overflow to infinity. So large
-            // a number is whole, so 0 is also its wrapped value.
-            let distance = phase - self.offset;
-            *out = if distance.is_finite() {
-                Wrap::wrap(distance)
-            } else {
-                0.0
-            };
+            *out = Wrap::wrap(phase - self.offset);
         }
     }
 
