@@ -478,6 +478,94 @@ impl Module for PhaseScale {
     }
 }
 
+/// `loom.phase.reset` (MT-PHASE-04): restarts a phase at zero on a trigger.
+pub static RESET: ModuleDescriptor = ModuleDescriptor {
+    id: "loom.phase.reset",
+    version: 1,
+    name: "Phase Reset",
+    category: "Phase",
+    family: loom_core::Family::TimeAndRhythm,
+    description: "Restarts a phase at zero on a trigger. After that, the phase moves at the input's speed.",
+    inputs: &[
+        PortSpec {
+            name: "phase",
+            label: "Phase",
+            signal: SignalType::Phase,
+            description: "The phase to restart. With no cable, it follows the bar.",
+            // An unpatched Phase Reset restarts the bar phase from a
+            // trigger, and holds when the transport stops.
+            default: PortDefault::BarPhase,
+            range: loom_core::PortRange::Signal,
+            channels: Channels::Downmix,
+        },
+        PortSpec {
+            name: "reset",
+            label: "Reset",
+            signal: SignalType::Gate,
+            description: "A rising edge makes the output 0 on that frame.",
+            default: PortDefault::Value(0.0),
+            range: loom_core::PortRange::Signal,
+            channels: Channels::Downmix,
+        },
+    ],
+    outputs: &[PortSpec {
+        name: "phase",
+        label: "Phase",
+        signal: SignalType::Phase,
+        description: "The input phase, counted from the last reset.",
+        default: PortDefault::Value(0.0),
+        range: loom_core::PortRange::Signal,
+        channels: Channels::PerChannel,
+    }],
+    params: &[],
+    role: ModuleRole::Dsp(|_| {
+        Box::new(PhaseReset {
+            offset: 0.0,
+            edge: EdgeDetector::new(),
+        })
+    }),
+    panel: Panel::new(2, 2, &[]),
+    displays: &[],
+};
+
+/// State for `loom.phase.reset`: `offset` is the input's value at the last
+/// reset. The module keeps a distance from the input, not a phase of its
+/// own, so it can never run at another speed or drift away from the input.
+#[derive(Clone)]
+struct PhaseReset {
+    offset: f32,
+    edge: EdgeDetector,
+}
+
+impl Module for PhaseReset {
+    /// Takes the running state of another instance (ADR-0022).
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+
+    fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        let ([phase, reset], [out]) = io.split::<2, 1>();
+        for ((out, &phase), &reset) in out.iter_mut().zip(phase).zip(reset) {
+            let restart = self.edge.rising(reset);
+            // A phase module must not pass NaN on to oscillators, and a bad
+            // value must not stay in the offset.
+            if !phase.is_finite() {
+                *out = 0.0;
+                continue;
+            }
+            if restart {
+                self.offset = phase;
+            }
+            *out = Wrap::wrap(phase - self.offset);
+        }
+    }
+
+    fn reset(&mut self) {
+        self.offset = 0.0;
+        self.edge.reset();
+    }
+}
+
 #[cfg(test)]
 mod tests;
 
@@ -486,3 +574,6 @@ mod wrap_tests;
 
 #[cfg(test)]
 mod scale_tests;
+
+#[cfg(test)]
+mod reset_tests;

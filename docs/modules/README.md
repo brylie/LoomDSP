@@ -39,6 +39,7 @@ One page for each built-in module, made from its descriptor. After you change a 
 | [Clock](loom.clock.clock.md) | `loom.clock.clock` | A phase, trigger, and gate at a musical rate, locked to the transport's bar 1. |
 | [Clock Divide](loom.logic.divide.md) | `loom.logic.divide` | Fires on every Nth trigger, so a fast clock makes slower rhythms. Offset fires earlier in the count, and Reset starts the count again. |
 | [Phase](loom.phase.generator.md) | `loom.phase.generator` | Ramp from 0 to 1 at the pitch frequency. Drives oscillators and LFOs. |
+| [Phase Reset](loom.phase.reset.md) | `loom.phase.reset` | Restarts a phase at zero on a trigger. After that, the phase moves at the input's speed. |
 | [Phase Scale](loom.phase.scale.md) | `loom.phase.scale` | Runs a phase at multiply / divide times its speed, locked to the input. Divide counts the input's wraps from the first cycle or the last reset. |
 | [Phase Trigger](loom.phase.trigger.md) | `loom.phase.trigger` | Fires a trigger each time the phase wraps, forward or backward. |
 | [Phase Wrap and Fold](loom.phase.wrap.md) | `loom.phase.wrap` | Brings any signal into the phase range, 0 to 1. Wrap goes round the edge; fold turns back at the edges. |

@@ -38,6 +38,7 @@ pub static ALL: &[&ModuleDescriptor] = &[
     &phase::PHASE_TRIGGER,
     &phase::WRAP,
     &phase::SCALE,
+    &phase::RESET,
     &lfo::LFO,
     &osc::SINE,
     &osc::SAW,

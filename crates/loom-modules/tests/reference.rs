@@ -413,6 +413,25 @@ fn allpass() {
         .check(reference!("allpass"));
 }
 
+/// Reference render for `loom.phase.reset`: a 40 Hz phase restarted twice.
+/// The reset lands on the same sample at every block size (the harness
+/// compares them), and the output is 0 there.
+#[test]
+fn phase_reset() {
+    const RESETS: [usize; 2] = [500, 1700];
+    let render = Harness::new(&phase::RESET)
+        .seconds(0.1)
+        .input("phase", Signal::phase(40.0))
+        .input(
+            "reset",
+            Signal::from_fn(|frame| if RESETS.contains(&frame) { 1.0 } else { 0.0 }),
+        )
+        .check(reference!("phase_reset"));
+    for frame in RESETS {
+        assert_eq!(render.output("phase")[frame], 0.0, "frame {frame}");
+    }
+}
+
 #[test]
 fn every_dsp_module_has_a_reference_test() {
     // Add a test above when you add a module to `ALL`.
@@ -443,6 +462,7 @@ fn every_dsp_module_has_a_reference_test() {
         &rand::SAMPLE_HOLD,
         &level::SLEW,
         &phase::SCALE,
+        &phase::RESET,
         &lfo::LFO,
         &env::ENVELOPE,
         &math::ADD,
