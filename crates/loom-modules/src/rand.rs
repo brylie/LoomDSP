@@ -296,6 +296,8 @@ impl Random {
     const GLIDE: usize = RANDOM.param_index("glide").unwrap();
     const SEED: usize = RANDOM.param_index("seed").unwrap();
 
+    /// A module with every parameter at its default, its outputs in the
+    /// middle of the range, and its streams started from seed 1.
     fn new(config: &ModuleConfig) -> Self {
         let smoothed = |index: usize, value: f32| {
             Smoothed::new(value, config.sample_rate, RANDOM.params[index].options.smooth_seconds)
@@ -603,6 +605,8 @@ impl Chance {
     const SEED: usize = CHANCE.param_index("seed").unwrap();
     const TRIGGER1_IN: usize = CHANCE.input_index("trigger1").unwrap();
 
+    /// A module with every parameter at its default, every lane low, and its
+    /// streams started from seed 1.
     fn new() -> Self {
         let mut chance = Self {
             chances: [0.5; CHANCE_LANES],

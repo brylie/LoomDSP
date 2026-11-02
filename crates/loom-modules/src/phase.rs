@@ -556,7 +556,14 @@ impl Module for PhaseReset {
             if restart {
                 self.offset = phase;
             }
-            *out = Wrap::wrap(phase - self.offset);
+            // Two huge values of opposite sign overflow to infinity. So large
+            // a number is whole, so 0 is also its wrapped value.
+            let distance = phase - self.offset;
+            *out = if distance.is_finite() {
+                Wrap::wrap(distance)
+            } else {
+                0.0
+            };
         }
     }
 
