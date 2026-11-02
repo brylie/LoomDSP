@@ -311,3 +311,16 @@ fn a_right_hand_copy_gives_other_values() {
     };
     assert_ne!(side(0), side(1));
 }
+
+/// State copies only between instances of the same module.
+#[test]
+fn another_module_gives_no_state_to_copy() {
+    let ModuleRole::Dsp(create) = SAMPLE_HOLD.role else {
+        unreachable!()
+    };
+    let other = create(&ModuleConfig {
+        sample_rate: 48_000.0,
+        max_block: 64,
+    });
+    assert!(!random(&[]).copy_state_from(other.as_ref()));
+}

@@ -240,3 +240,42 @@ fn a_random_walk_stays_in_a_modulated_range() {
     assert!(min >= 0.5 - 1e-3 && max <= 1.0, "{min} to {max}");
     assert!(max - min > 0.25, "the walk still moves: {min} to {max}");
 }
+
+/// What `output` of a seeded module plays on a fast clock, with or without an
+/// assignment on its seed.
+fn seeded_on_a_clock(kind: &str, trigger: &str, output: &str, modulate_seed: bool) -> Vec<f32> {
+    let mut parts = engine();
+    let ramp = parts.controller.add_module("loom.phase.generator").unwrap();
+    let clock = parts.controller.add_module("loom.phase.trigger").unwrap();
+    parts.controller.connect_named(ramp, "phase", clock, "phase").unwrap();
+    let module = parts.controller.add_module(kind).unwrap();
+    parts
+        .controller
+        .connect_named(clock, "trigger", module, trigger)
+        .unwrap();
+    if modulate_seed {
+        let amount = source(&mut parts.controller, 1.0);
+        parts
+            .controller
+            .add_assignment_named(amount, "out", module, "seed", 0.5)
+            .unwrap();
+    }
+    listen(&mut parts.controller, module, output);
+    parts.controller.commit().unwrap();
+    render(&mut parts, 48_000)
+}
+
+/// A modulated seed picks another sequence, and it is still repeatable, as a
+/// knob's seed is (M2 modules, rule 1).
+#[test]
+fn a_modulated_seed_picks_another_repeatable_sequence() {
+    for (kind, trigger, output) in [
+        ("loom.rand.random", "trigger", "out"),
+        ("loom.rand.chance", "trigger1", "a1"),
+    ] {
+        let base = seeded_on_a_clock(kind, trigger, output, false);
+        let modulated = seeded_on_a_clock(kind, trigger, output, true);
+        assert_ne!(base, modulated, "{kind}");
+        assert_eq!(modulated, seeded_on_a_clock(kind, trigger, output, true), "{kind}");
+    }
+}
