@@ -204,6 +204,37 @@ fn every_module_recovers_from_huge_samples() {
     }
 }
 
+/// The `hold` knob keeps a gate open for as long as it says, through the module.
+#[test]
+fn a_gate_stays_open_for_its_hold() {
+    let open_for = |hold: f32| {
+        let render = Harness::new(&DYNAMICS)
+            .seconds(1.0)
+            .param("mode", 3.0)
+            .param("threshold", -20.0)
+            .param("hold", hold)
+            .param("attack", 0.000_1)
+            .param("release", 0.01)
+            .input(
+                "in",
+                // Loud for 100 ms, then 40 dB under the threshold.
+                Signal::from_fn(|frame| if frame < 4_800 { 0.5 } else { 0.001 }),
+            )
+            .render();
+        let out = render.output("out");
+        // The first frame after the loud part where the gate has clearly begun to close.
+        let closing = out[4_800..].iter().position(|x| *x < 0.000_9).expect("the gate closes");
+        closing as f32 / RATE
+    };
+    for hold in [0.02f32, 0.25] {
+        let measured = open_for(hold);
+        assert!(
+            (measured - hold).abs() < 0.002,
+            "hold {hold}: stayed open for {measured}"
+        );
+    }
+}
+
 /// With every gain at 0 and both cuts off, the EQ leaves the input bit for bit.
 #[test]
 fn a_flat_eq_leaves_the_input_untouched() {
@@ -242,12 +273,75 @@ fn the_eq_curve_agrees_with_the_sound() {
         let render = harness.render();
         let measured = db(peak(render.output("out"), 24_000) / 0.1);
         let x = (hz / 20.0).log10() / 3.0;
-        let drawn = sample(&values, x) * 48.0 - 24.0;
+        let drawn = sample(&values, x, RATE) * 48.0 - 24.0;
         // A sine's peak between samples reads a little low.
         assert!(
             (measured - drawn).abs() < 0.2,
             "{hz} Hz: heard {measured}, drawn {drawn}"
         );
+    }
+}
+
+/// Near the top of the range, the curve shows what the filter does at this
+/// sample rate. An analogue curve would draw a bell at 16 kHz as 8 dB too high
+/// at 20 kHz, at 44.1 kHz.
+#[test]
+fn the_eq_curve_agrees_with_the_sound_near_the_top_of_the_range() {
+    let loom_core::WidgetKind::Shape { sample, .. } = EQ.panel.widgets[0].kind else {
+        panic!("the first widget is the curve");
+    };
+    let values: Vec<f32> = EQ
+        .params
+        .iter()
+        .map(|p| match p.name {
+            "mid_freq" => 16_000.0,
+            "mid_gain" => 12.0,
+            _ => p.default,
+        })
+        .collect();
+    for rate in [44_100.0f32, 48_000.0, 96_000.0] {
+        for hz in [8_000.0f32, 16_000.0, 20_000.0] {
+            let step = std::f64::consts::TAU * f64::from(hz) / f64::from(rate);
+            let render = Harness::new(&EQ)
+                .sample_rate(rate)
+                .seconds(1.0)
+                .param("mid_freq", 16_000.0)
+                .param("mid_gain", 12.0)
+                .input("in", Signal::from_fn(move |f| 0.1 * (f as f64 * step).sin() as f32))
+                .render();
+            let tail = (rate / 2.0) as usize;
+            let out = render.output("out");
+            let power: f32 = out[out.len() - tail..].iter().map(|x| x * x).sum::<f32>() / tail as f32;
+            // A sine of amplitude 0.1 has a power of 0.005.
+            let measured = 10.0 * (power / 0.005).log10();
+            let x = (hz / 20.0).log10() / 3.0;
+            let drawn = sample(&values, x, rate) * 48.0 - 24.0;
+            assert!(
+                (measured - drawn).abs() < 0.2,
+                "{rate} Hz, at {hz} Hz: heard {measured}, drawn {drawn}"
+            );
+        }
+    }
+}
+
+/// The curve stays finite at a sample rate too low for its 20 kHz axis.
+#[test]
+fn the_eq_curve_stays_finite_at_a_low_sample_rate() {
+    let loom_core::WidgetKind::Shape { sample, .. } = EQ.panel.widgets[0].kind else {
+        panic!("the first widget is the curve");
+    };
+    let values: Vec<f32> = EQ
+        .params
+        .iter()
+        .map(|p| match p.name {
+            "low_slope" | "high_slope" => 2.0,
+            "mid_gain" | "high_gain" => 12.0,
+            _ => p.default,
+        })
+        .collect();
+    for step in 0..=100 {
+        let y = sample(&values, step as f32 / 100.0, 22_050.0);
+        assert!((0.0..=1.0).contains(&y), "at {step}: {y}");
     }
 }
 
@@ -286,7 +380,7 @@ fn the_dynamics_curve_agrees_with_the_sound() {
         }
         let render = harness.render();
         let measured = level + db(peak(render.output("gain"), 4_800));
-        let drawn = sample(&values, (level + 60.0) / 60.0) * 60.0 - 60.0;
+        let drawn = sample(&values, (level + 60.0) / 60.0, RATE) * 60.0 - 60.0;
         assert!(
             (measured - drawn).abs() < 0.1,
             "mode {mode}: heard {measured}, drawn {drawn}"

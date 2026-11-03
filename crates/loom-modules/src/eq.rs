@@ -186,22 +186,29 @@ fn slope_of(value: f32) -> Option<CutSlope> {
     }
 }
 
+/// The highest corner frequency, as a share of the sample rate.
+const TOP_OF_RATE: f32 = 0.49;
+
 /// The curve on the panel: 20 Hz to 20 kHz across on a logarithmic scale, and
-/// -24 to 24 dB up. It adds up the analogue response of the same five sections.
-fn response_preview(params: &[f32], x: f32) -> f32 {
-    let hz = 20.0 * 1_000.0f32.powf(x.clamp(0.0, 1.0));
-    let cut = |side: CutSide, corner: usize, slope: usize| {
-        slope_of(params[slope]).map_or(0.0, |slope| side.analogue_gain_db(params[corner], slope, hz))
+/// -24 to 24 dB up. It adds up the digital response of the same five sections
+/// at this sample rate, so it shows what the filters do near the top of the range
+/// (`docs/learn/filters-near-half-the-sample-rate.md`).
+fn response_preview(params: &[f32], x: f32, sample_rate: f32) -> f32 {
+    let at_hz = 20.0 * 1_000.0f32.powf(x.clamp(0.0, 1.0));
+    // The same limit as the audio.
+    let corner = |index: usize| params[index].clamp(1.0, sample_rate * TOP_OF_RATE);
+    let cut = |side: CutSide, index: usize, slope: usize| {
+        slope_of(params[slope]).map_or(0.0, |slope| side.gain_db(corner(index), slope, at_hz, sample_rate))
     };
-    let shape = |shape: Shape| shape.analogue_gain_db(hz);
+    let shape = |shape: Shape| shape.gain_db(at_hz, sample_rate);
     let db = cut(CutSide::Low, Eq::LOW_CUT, Eq::LOW_SLOPE)
-        + shape(low_shelf(params[Eq::LOW_FREQ], params[Eq::LOW_GAIN]))
+        + shape(low_shelf(corner(Eq::LOW_FREQ), params[Eq::LOW_GAIN]))
         + shape(Shape::Bell {
-            hz: params[Eq::MID_FREQ],
+            hz: corner(Eq::MID_FREQ),
             gain_db: params[Eq::MID_GAIN],
             q: params[Eq::MID_Q],
         })
-        + shape(high_shelf(params[Eq::HIGH_FREQ], params[Eq::HIGH_GAIN]))
+        + shape(high_shelf(corner(Eq::HIGH_FREQ), params[Eq::HIGH_GAIN]))
         + cut(CutSide::High, Eq::HIGH_CUT, Eq::HIGH_SLOPE);
     ((db + 24.0) / 48.0).clamp(0.0, 1.0)
 }
@@ -377,7 +384,7 @@ impl Module for Eq {
             io.param(Self::HIGH_SLOPE),
         ];
         let rate = self.sample_rate;
-        let top = rate * 0.49;
+        let top = rate * TOP_OF_RATE;
         // Hertz for a frame: the modulated value, or the glide. A bad value uses
         // the parameter's default for that frame, as NaN would stay in a filter.
         let hz_of = |index: usize, value: f32| {

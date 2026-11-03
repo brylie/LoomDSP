@@ -19,6 +19,8 @@ const SLOPED: &[u32] = &[0, 2];
 const NOT_LIMIT: &[u32] = &[0, 2, 3, 4];
 /// The modes that use the range: expand, gate, and duck.
 const RANGED: &[u32] = &[2, 3, 4];
+/// The modes that hold: Gate and Duck.
+const HELD: &[u32] = &[3, 4];
 
 /// `loom.dyn.dynamics`: one gain on both sides, from a level and a curve.
 pub static DYNAMICS: ModuleDescriptor = ModuleDescriptor {
@@ -120,6 +122,18 @@ pub static DYNAMICS: ModuleDescriptor = ModuleDescriptor {
         .logarithmic()
         .shown_when("mode", NOT_LIMIT),
         ParamSpec {
+            name: "hold",
+            label: "Hold",
+            description: "How long it stays as it is after the signal falls, before the release begins.",
+            min: 0.001,
+            max: 2.0,
+            default: 0.02,
+            unit: "s",
+            options: ParamOptions::DEFAULT,
+        }
+        .logarithmic()
+        .shown_when("mode", HELD),
+        ParamSpec {
             name: "release",
             label: "Release",
             description: "How fast the gain moves when the signal falls.",
@@ -183,7 +197,7 @@ pub static DYNAMICS: ModuleDescriptor = ModuleDescriptor {
         15,
         14,
         &[
-            Widget::shape(0, 0, 12, "out", "Curve", curve_preview),
+            Widget::shape(0, 0, 12, "out", "Curve", |params, x, _| curve_preview(params, x)),
             Widget::meter(12, 0, "reduction"),
             Widget::select(0, 6, "mode"),
             Widget::segmented(6, 6, 6, "detect"),
@@ -193,9 +207,10 @@ pub static DYNAMICS: ModuleDescriptor = ModuleDescriptor {
             Widget::knob(6, 8, "knee"),
             Widget::knob(9, 8, "range"),
             Widget::knob(0, 11, "attack"),
-            Widget::knob(3, 11, "release"),
-            Widget::knob(6, 11, "output"),
-            Widget::knob(9, 11, "mix"),
+            Widget::knob(3, 11, "hold"),
+            Widget::knob(6, 11, "release"),
+            Widget::knob(9, 11, "output"),
+            Widget::knob(12, 11, "mix"),
         ],
     ),
     displays: &[DisplaySpec {
@@ -260,6 +275,7 @@ struct Dynamics {
     knee: f32,
     range: f32,
     attack: f32,
+    hold: f32,
     release: f32,
     detect: f32,
     match_on: bool,
@@ -280,6 +296,7 @@ impl Dynamics {
     const KNEE: usize = DYNAMICS.param_index("knee").unwrap();
     const RANGE: usize = DYNAMICS.param_index("range").unwrap();
     const ATTACK: usize = DYNAMICS.param_index("attack").unwrap();
+    const HOLD: usize = DYNAMICS.param_index("hold").unwrap();
     const RELEASE: usize = DYNAMICS.param_index("release").unwrap();
     const DETECT: usize = DYNAMICS.param_index("detect").unwrap();
     const MATCH: usize = DYNAMICS.param_index("match").unwrap();
@@ -300,6 +317,7 @@ impl Dynamics {
             },
             detection: Detection::Peak,
             attack_seconds: params[Self::ATTACK].default,
+            hold_seconds: params[Self::HOLD].default,
             release_seconds: params[Self::RELEASE].default,
             sample_rate: rate,
         };
@@ -317,6 +335,7 @@ impl Dynamics {
             knee: params[Self::KNEE].default,
             range: params[Self::RANGE].default,
             attack: params[Self::ATTACK].default,
+            hold: params[Self::HOLD].default,
             release: params[Self::RELEASE].default,
             detect: params[Self::DETECT].default,
             match_on: false,
@@ -340,9 +359,10 @@ impl Module for Dynamics {
             io.param(Self::KNEE),
             io.param(Self::RANGE),
         );
-        let (mode, attack, release, detect) = (
+        let (mode, attack, hold, release, detect) = (
             io.param(Self::MODE),
             io.param(Self::ATTACK),
+            io.param(Self::HOLD),
             io.param(Self::RELEASE),
             io.param(Self::DETECT),
         );
@@ -367,6 +387,7 @@ impl Module for Dynamics {
                     Detection::Peak
                 },
                 attack_seconds: attack.at_or(i, self.attack),
+                hold_seconds: hold.at_or(i, self.hold),
                 release_seconds: release.at_or(i, self.release),
                 sample_rate: self.sample_rate,
             };
@@ -417,6 +438,7 @@ impl Module for Dynamics {
             Self::KNEE => self.knee = value,
             Self::RANGE => self.range = value,
             Self::ATTACK => self.attack = value,
+            Self::HOLD => self.hold = value,
             Self::RELEASE => self.release = value,
             Self::DETECT => self.detect = value,
             Self::MATCH => self.match_on = value >= 0.5,

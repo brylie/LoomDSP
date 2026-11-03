@@ -443,7 +443,7 @@ pub static LADDER: ModuleDescriptor = ModuleDescriptor {
         11,
         10,
         &[
-            Widget::shape(0, 0, 11, "out", "Response", ladder_preview),
+            Widget::shape(0, 0, 11, "out", "Response", |params, x, _| ladder_preview(params, x)),
             Widget::segmented(0, 5, 11, "slope"),
             // One unit apart, so "Resonance" fits between its neighbours.
             Widget::knob(0, 7, "cutoff"),

@@ -988,15 +988,17 @@ impl Widget {
     }
 
     /// A read-only result shape above its controls. `sample` maps the module's
-    /// parameter values and a horizontal position in 0..1 to a vertical
-    /// position in 0..1. It runs on the UI thread, never in audio processing.
+    /// parameter values, a horizontal position in 0..1, and the sample rate to a
+    /// vertical position in 0..1. A digital filter's response depends on the
+    /// sample rate, so a preview of one needs it. It runs on the UI thread,
+    /// never in audio processing.
     pub const fn shape(
         x: u8,
         y: u8,
         width: u8,
         output: &'static str,
         label: &'static str,
-        sample: fn(&[f32], f32) -> f32,
+        sample: fn(&[f32], f32, f32) -> f32,
     ) -> Self {
         Self {
             kind: WidgetKind::Shape { width, label, sample },
@@ -1088,8 +1090,9 @@ pub enum WidgetKind {
         width: u8,
         /// Caption shown beneath the read-only result.
         label: &'static str,
-        /// Pure sampler: parameter values, horizontal position, vertical position.
-        sample: fn(&[f32], f32) -> f32,
+        /// Pure sampler: parameter values, horizontal position, and sample rate
+        /// to a vertical position.
+        sample: fn(&[f32], f32, f32) -> f32,
     },
     /// A large button for whole-number parameters from 0 to 1.
     ///

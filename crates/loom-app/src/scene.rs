@@ -312,6 +312,7 @@ pub fn update_panel_values_dragging(
     dragging: Option<loom_core::AssignmentId>,
 ) {
     let reaches = crate::modulation::reaches(controller.graph());
+    let sample_rate = controller.config().sample_rate;
     // The dragged knob's arc shows only the dragged assignment. Whether it
     // shows the live dot still depends on all of them.
     let dragged = dragging
@@ -324,7 +325,7 @@ pub fn update_panel_values_dragging(
                 WidgetValue {
                     shape: (0..=SHAPE_SEGMENTS)
                         .map(|i| {
-                            let y = sample(&node.params, i as f32 / SHAPE_SEGMENTS as f32);
+                            let y = sample(&node.params, i as f32 / SHAPE_SEGMENTS as f32, sample_rate);
                             if y.is_finite() { y.clamp(0.0, 1.0) } else { 0.0 }
                         })
                         .collect(),

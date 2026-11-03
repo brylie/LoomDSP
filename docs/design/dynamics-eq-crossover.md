@@ -6,7 +6,7 @@ Three processors that finish a sound and shape a live vocal or instrument chain,
 - **Status:** Implemented, M2 (2026-11-03).
 - **Decision behind it:** [ADR-0035](../adr/0035-pure-dsp-algorithms-in-loom-dsp.md) (algorithms in `loom-dsp`), [ADR-0018](../adr/0018-clean-room-module-development.md) (clean room), [ADR-0020](../adr/0020-inferred-channel-count.md) (stereo ports).
 - **Use case and requirements:** FR-LIB-09, FR-LIB-15, FR-PANEL-02.
-- **Background:** [How a dynamics processor hears a level](../learn/dynamics-detection.md).
+- **Background:** [How a dynamics processor hears a level](../learn/dynamics-detection.md), [Filters near half the sample rate](../learn/filters-near-half-the-sample-rate.md).
 - **Prior art:** none named. Each module is designed from its purpose and the sources under [Sources](#sources).
 - **Issues:** [#541](https://github.com/brylie/LoomDSP/issues/541). Related: [#538](https://github.com/brylie/LoomDSP/issues/538) (latency), [#282](https://github.com/brylie/LoomDSP/issues/282) (read-only curve).
 - **Code:** `crates/loom-dsp/src/dynamics.rs`, `loudness.rs`, `filter/eq.rs`, `filter/crossover.rs`, and `crates/loom-modules/src/dynamics.rs`, `eq.rs`, `filter.rs`. Tests: `crates/loom-modules/tests/dynamics_eq_crossover.rs`.
@@ -43,6 +43,7 @@ The [rules for M1 modules](p1-modules.md#rules-for-all-modules-here) apply.
 | `ratio` | 1 to 20 | 4 | Logarithmic. Compress and Expand only |
 | `knee` | 0 to 24 dB | 6 dB | Compress and Expand only |
 | `attack` | 0.1 ms to 200 ms | 10 ms | Logarithmic. Not in Limit |
+| `hold` | 1 ms to 2 s | 20 ms | Logarithmic. Gate and Duck only |
 | `release` | 10 ms to 2 s | 150 ms | Logarithmic |
 | `range` | 0 to 96 dB | 40 dB | The most the gain falls. Expand, Gate, and Duck only |
 | `detect` | 0 Peak, 1 RMS | Peak | Choice. Not in Limit |
@@ -71,7 +72,7 @@ The [rules for M1 modules](p1-modules.md#rules-for-all-modules-here) apply.
 | Gate | 0 while open, `-range` while closed. See rule 7. |
 | Duck | `-range` while the level is above the threshold, otherwise 0. See rule 7. |
 
-7. **Gate and Duck have two thresholds and a hold.** The state changes when the level passes the threshold going one way. It changes back only once the level is 3 dB past it the other way and has stayed there for 20 ms. *Why:* a level close to the threshold would otherwise flip the state on every cycle and chatter.
+7. **Gate and Duck have two thresholds and a hold.** The state changes when the level passes the threshold going one way. It changes back only once the level is 3 dB past it the other way and has stayed there for `hold`. A hold shortened while it runs ends at its new length. *Why:* a level close to the threshold would otherwise flip the state on every cycle and chatter. *Why a knob:* a short hold suits a drum, and a longer one keeps a duck from pumping between words.
 8. **Limit holds its ceiling on the detected signal.** With the main input as the detector, no sidechain, and `match` off and fully faded out, no sample leaves above the threshold before `output` and `mix`, within rounding. `match` fades out so it does not click: most of its gain is gone in 5 ms, and all of it in about 21 ms. Until then, a limited sample can still pass the threshold. *Why `match` off:* it runs after the limit and can raise the level by up to 24 dB (rule 11). It is for comparing (rule 14), so a ceiling that must hold leaves it off. Output safety protects speakers and ears, not this ceiling. See [what a limiter's ceiling promises](../learn/dynamics-detection.md#what-a-limiters-ceiling-promises). There is no lookahead, so a fast peak is turned down on its own sample, which adds some distortion. Lookahead waits for #538.
 
 ### Showing the effect
@@ -119,7 +120,8 @@ The signal passes through five sections in this order.
 4. **Flat means untouched.** With every gain at 0 and both cuts Off, the output equals the input exactly. *Why:* a user who bypasses by zeroing knobs must not get a changed signal.
 5. **The mid band's gain is the gain at its centre.** Shelves reach half their gain in dB at their set frequency. *Why:* it is what the knob's name says.
 6. **A cut switched On or Off crossfades over 5 ms,** with its filters always running. *Why:* no click, and the filter is already settled.
-7. **The curve** shows 20 Hz to 20 kHz across on a logarithmic scale, and -24 to 24 dB up. It computes the analogue response of the same five sections.
+7. **The curve** shows 20 Hz to 20 kHz across on a logarithmic scale, and -24 to 24 dB up. It computes the digital response of the same five sections at the engine's sample rate. *Why:* the top of the range is squeezed toward half the sample rate, and an analogue curve would disagree with the sound there by several dB. See [Filters near half the sample rate](../learn/filters-near-half-the-sample-rate.md).
+8. **A bell narrows near half the sample rate.** Its centre and its gain stay right, and the curve shows the narrowing. This is a known limit of the filter, not a target. *Why it stays:* the published fixes have not been shown to keep rule 4's stability under audio-rate modulation, and oversampling adds latency, which waits for #538.
 
 ## Crossover (MT-FILTER-07)
 
@@ -157,6 +159,8 @@ The signal passes through five sections in this order.
 - [x] The Crossover's sum is flat within 0.01 dB from 20 Hz to 20 kHz, with two and with three bands.
 - [x] Each Crossover band falls at 24 dB per octave well past its split.
 - [x] Huge finite samples leave no bad state in any of the three: the output stays finite and comes back to normal.
+- [x] Given a bell at 16 kHz at 44.1, 48, and 96 kHz, the EQ's curve agrees with the measured sound within 0.2 dB, at 8, 16, and 20 kHz.
+- [x] Given Gate with `hold` at 20 ms or 250 ms, the gate stays open for that time after the level falls, within 2 ms.
 - [x] `docs/learn/` has an explainer on dynamics detection.
 - [x] A gain reduction meter works on a display value, in the app, and in `--dump-ui`.
 
@@ -193,6 +197,6 @@ Agreed with the maintainer on 2026-11-03.
 - **Lookahead:** none now, so no dependency on #538.
 - **The `gain` output on Dynamics:** included. One detector can drive anything else in a patch, which suits a modular tool, and it costs one buffer.
 - **EQ sections:** five fixed sections with one mid band, as a second EQ adds another. "Peak" in the catalogue is called the mid band, or a bell, here: the word also means a signal's highest level, as Dynamics uses it.
-- **Gate and Duck timing:** 3 dB and 20 ms are fixed. A knob can be added later, and a removed knob breaks patches once released.
+- **Gate and Duck timing:** the 3 dB is fixed. `hold` is a knob, because professional tools offer it and ducking needs a longer one. Its default of 20 ms is the value it had while fixed.
 - **Level match:** K-weighted. It costs more than plain RMS, but it is a published standard, and plain RMS misjudges a change in the low end.
 - **`match` in Limit:** stays available, and Limit's ceiling is promised only with it off. Disabling it would still leave `output` and `mix` able to pass the ceiling, and it would remove the comparison where it helps most. The output stage is what protects speakers and ears. Limiting after `match`, capping its gain, moving the ceiling after `output` and `mix`, and a fixed ceiling with a drive knob were also considered. [The explainer](../learn/dynamics-detection.md#five-ways-to-make-the-ceiling-hold-and-what-each-costs) gives what each costs.

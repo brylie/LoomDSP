@@ -309,7 +309,7 @@ fn a_button_writes_the_parameter_its_mode_chooses() {
 /// registry rejects invalid choice and shape declarations before drawing.
 #[test]
 fn select_and_shape_panel_bindings_are_checked() {
-    fn sample(_: &[f32], x: f32) -> f32 {
+    fn sample(_: &[f32], x: f32, _: f32) -> f32 {
         x
     }
     static OUTPUT: [PortSpec; 1] = [PortSpec {

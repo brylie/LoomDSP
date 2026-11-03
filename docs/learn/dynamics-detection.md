@@ -46,7 +46,7 @@ A compressor's gain falls when the signal rises. A gate's gain rises when the si
 A gate is a switch. If the level sits close to its threshold, a single threshold flips the switch many times a second, and it chatters. Two fixes work together:
 
 - **Two thresholds.** It opens at the threshold, and closes only 3 dB below it. A level that wanders within those 3 dB does nothing.
-- **A hold.** It closes only after the level has stayed below for 20 ms. A low note's level dips every cycle, and this keeps those dips from closing it.
+- **A hold.** It closes only after the level has stayed below for the time on the Hold knob, 20 ms by default. A low note's level dips every cycle, and this keeps those dips from closing it. A longer hold stops a duck from rising between words.
 
 Duck is the same switch the other way around.
 

@@ -153,9 +153,20 @@ impl Shape {
         }
     }
 
-    /// The analogue filter's gain at `hz`, in dB. It needs no sample rate, so
-    /// a panel can draw it. The digital filter matches it, with the top of the
-    /// range squeezed toward half of the sample rate.
+    /// The digital filter's gain at `at_hz`, in dB, which a panel can draw. It is
+    /// the analogue gain at the frequency the bilinear transform moves `at_hz`
+    /// to, so the top of the range is squeezed toward half of the sample rate.
+    /// `hz` must be below half of `sample_rate`.
+    #[inline]
+    pub fn gain_db(self, at_hz: f32, sample_rate: f32) -> f32 {
+        let hz = self.hz();
+        // No signal reaches half of the sample rate, and the warp has a pole there.
+        let warp = prewarp(at_hz.min(sample_rate * 0.499), sample_rate) / prewarp(hz, sample_rate);
+        self.analogue_gain_db(hz * warp)
+    }
+
+    /// The analogue filter's gain at `hz`, in dB. The digital filter matches it
+    /// well below half of the sample rate. See [`Self::gain_db`] for the rest.
     #[inline]
     pub fn analogue_gain_db(self, hz: f32) -> f32 {
         let mix = self.mix();
@@ -255,6 +266,18 @@ impl CutSide {
             CutSlope::Db24 => FOURTH_ORDER_Q
                 .iter()
                 .map(|&q| self.shape(hz, q).analogue_gain_db(at_hz))
+                .sum(),
+        }
+    }
+
+    /// The digital gain of a cut at `at_hz`, in dB. See [`Shape::gain_db`].
+    #[inline]
+    pub fn gain_db(self, hz: f32, slope: CutSlope, at_hz: f32, sample_rate: f32) -> f32 {
+        match slope {
+            CutSlope::Db12 => self.shape(hz, BUTTERWORTH_Q).gain_db(at_hz, sample_rate),
+            CutSlope::Db24 => FOURTH_ORDER_Q
+                .iter()
+                .map(|&q| self.shape(hz, q).gain_db(at_hz, sample_rate))
                 .sum(),
         }
     }

@@ -23,6 +23,7 @@
 //!     },
 //!     detection: Detection::Peak,
 //!     attack_seconds: 0.01,
+//!     hold_seconds: 0.02,
 //!     release_seconds: 0.15,
 //!     sample_rate: 48_000.0,
 //! });
@@ -33,9 +34,6 @@
 
 /// How far below the threshold a gate or duck must fall to change back.
 const HYSTERESIS_DB: f32 = 3.0;
-
-/// How long the level must stay there first.
-const HOLD_SECONDS: f32 = 0.02;
 
 /// The time constant of the RMS detector's power filter.
 const RMS_SECONDS: f32 = 0.01;
@@ -156,6 +154,9 @@ pub struct Settings {
     /// How fast the gain moves when the signal rises, above 0. A limiter acts
     /// on the same sample.
     pub attack_seconds: f32,
+    /// How long a gate or a duck stays as it is after the level falls, at least
+    /// 0. Other modes do not use it.
+    pub hold_seconds: f32,
     /// How fast the gain moves when the signal falls, above 0.
     pub release_seconds: f32,
     /// The sample rate in hertz.
@@ -169,6 +170,7 @@ pub struct Coefficients {
     curve: Curve,
     detection: Detection,
     attack: f32,
+    hold_frames: u32,
     release: f32,
 }
 
@@ -180,6 +182,7 @@ impl Coefficients {
             curve,
             detection,
             attack_seconds,
+            hold_seconds,
             release_seconds,
             sample_rate,
         } = settings;
@@ -187,12 +190,14 @@ impl Coefficients {
         debug_assert!(curve.knee_db >= 0.0, "knee {}", curve.knee_db);
         debug_assert!(curve.range_db >= 0.0, "range {}", curve.range_db);
         debug_assert!(attack_seconds > 0.0, "attack {attack_seconds}");
+        debug_assert!(hold_seconds >= 0.0, "hold {hold_seconds}");
         debug_assert!(release_seconds > 0.0, "release {release_seconds}");
         let limit = curve.mode == Mode::Limit;
         Self {
             curve,
             detection: if limit { Detection::Peak } else { detection },
             attack: if limit { 0.0 } else { pole(attack_seconds, sample_rate) },
+            hold_frames: (hold_seconds * sample_rate) as u32,
             release: pole(release_seconds, sample_rate),
         }
     }
@@ -203,8 +208,6 @@ impl Coefficients {
 pub struct Dynamics {
     /// The RMS detector's factor.
     rms_pole: f32,
-    /// How many frames the hold lasts.
-    hold_frames: u32,
     /// The RMS detector's power. It always runs, so a change of detection finds
     /// it settled.
     power: f32,
@@ -224,7 +227,6 @@ impl Dynamics {
     pub fn new(sample_rate: f32) -> Self {
         Self {
             rms_pole: pole(RMS_SECONDS, sample_rate),
-            hold_frames: (HOLD_SECONDS * sample_rate) as u32,
             power: 0.0,
             gain_db: 0.0,
             above: false,
@@ -269,18 +271,20 @@ impl Dynamics {
 
     /// Moves the two-threshold state of a gate or a duck on by one frame.
     #[inline]
-    fn update_above(&mut self, over_db: f32) {
+    fn update_above(&mut self, over_db: f32, hold_frames: u32) {
         if over_db >= 0.0 {
             self.above = true;
-            self.hold = self.hold_frames;
+            self.hold = hold_frames;
         } else if over_db < -HYSTERESIS_DB {
+            // A hold that was shortened while it ran ends at the new length.
+            self.hold = self.hold.min(hold_frames);
             if self.hold == 0 {
                 self.above = false;
             } else {
                 self.hold -= 1;
             }
         } else {
-            self.hold = self.hold_frames;
+            self.hold = hold_frames;
         }
     }
 
@@ -294,16 +298,17 @@ impl Dynamics {
             curve,
             detection,
             attack,
+            hold_frames,
             release,
         } = coefficients;
         let level_db = self.detect(key, detection);
         let target = match curve.mode {
             Mode::Gate => {
-                self.update_above(level_db - curve.threshold_db);
+                self.update_above(level_db - curve.threshold_db, hold_frames);
                 if self.above { 0.0 } else { -curve.range_db }
             }
             Mode::Duck => {
-                self.update_above(level_db - curve.threshold_db);
+                self.update_above(level_db - curve.threshold_db, hold_frames);
                 if self.above { -curve.range_db } else { 0.0 }
             }
             _ => curve.gain_db(level_db),

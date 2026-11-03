@@ -226,6 +226,7 @@ fn dynamics_and_loudness_never_allocate() {
                 },
                 detection: dynamics::Detection::Rms,
                 attack_seconds: 0.01,
+                hold_seconds: 0.02,
                 release_seconds: 0.1,
                 sample_rate: RATE,
             });

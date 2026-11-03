@@ -113,7 +113,7 @@ pub static LFO: ModuleDescriptor = ModuleDescriptor {
         15,
         10,
         &[
-            Widget::shape(0, 0, 15, "out", "Wave", lfo_preview),
+            Widget::shape(0, 0, 15, "out", "Wave", |params, x, _| lfo_preview(params, x)),
             Widget::segmented(0, 5, 7, "sync"),
             Widget::select(9, 5, "shape"),
             // One of these shows, by the sync mode (ADR-0030).

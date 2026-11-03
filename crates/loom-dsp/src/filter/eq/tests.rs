@@ -1,5 +1,5 @@
 use super::*;
-use crate::testing::{RATE, tone_gain, warped};
+use crate::testing::{RATE, tone_gain};
 
 /// The measured gain of a section in dB.
 fn measured_db(shape: Shape, hz: f64) -> f64 {
@@ -49,8 +49,7 @@ fn response_matches_the_theory() {
     for shape in shapes() {
         for hz in [40.0, 100.0, 200.0, 500.0, 1_000.0, 2_000.0, 5_000.0, 15_000.0] {
             let measured = measured_db(shape, hz);
-            let corner = f64::from(shape.hz());
-            let expected = f64::from(shape.analogue_gain_db((warped(hz, corner) * corner) as f32));
+            let expected = f64::from(shape.gain_db(hz as f32, RATE));
             // A deep cut far from its corner is a tiny signal, so the
             // measurement itself is less exact there.
             if expected > -50.0 {

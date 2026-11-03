@@ -35,6 +35,7 @@ Compresses, limits, expands, gates, or ducks a signal, with a sidechain that can
 | **Knee** (`knee`) | 0 to 24 dB | 6 dB | How gently it starts, as a width around the threshold. |
 | **Range** (`range`) | 0 to 96 dB | 40 dB | The most the gain can fall. |
 | **Attack** (`attack`) | 0.0001 to 0.2 s, logarithmic | 0.01 s | How fast the gain moves when the signal rises. |
+| **Hold** (`hold`) | 0.001 to 2 s, logarithmic | 0.02 s | How long it stays as it is after the signal falls, before the release begins. |
 | **Release** (`release`) | 0.01 to 2 s, logarithmic | 0.15 s | How fast the gain moves when the signal falls. |
 | **Detect** (`detect`) | Peak or RMS | Peak | How it reads the level: each peak, or the average power. |
 | **Match** (`match`) | Off or On | Off | Turns the result to the loudness of the input, so you compare the sound and not the level. |
@@ -55,6 +56,7 @@ Compresses, limits, expands, gates, or ducks a signal, with a sidechain that can
 - Knob: **Knee** (`knee`)
 - Knob: **Range** (`range`)
 - Knob: **Attack** (`attack`)
+- Knob: **Hold** (`hold`)
 - Knob: **Release** (`release`)
 - Knob: **Output** (`output`)
 - Knob: **Mix** (`mix`)
@@ -68,6 +70,8 @@ Use Dynamics to even out a vocal, hold a peak down, clean up noise between phras
 Watch the curve to see what the settings mean, and the meter to see how hard it works. Everything to the right of the threshold on the curve is where it compresses or limits, and everything to the left is where it expands or gates.
 
 A cable on Side sets the level instead of the input. Duck with a kick on Side lowers a pad on each hit. The Gain output carries the same gain, from 0 to 1, so one detector can move anything else in a patch.
+
+In Gate and Duck, Hold is how long it stays as it is after the signal falls. Turn it up if a gate closes between words, or if a duck pumps.
 
 Attack and release always describe the signal. Attack is how fast it reacts when the signal rises, and release is how fast it reacts when the signal falls, in every mode.
 

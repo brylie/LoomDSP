@@ -1,6 +1,9 @@
 use super::*;
 use crate::testing::RATE;
 
+/// The hold in these tests.
+const HOLD_SECONDS: f32 = 0.02;
+
 /// A curve with these settings.
 fn curve(mode: Mode) -> Curve {
     Curve {
@@ -18,6 +21,7 @@ fn fast(curve: Curve, detection: Detection) -> Coefficients {
         curve,
         detection,
         attack_seconds: 0.001,
+        hold_seconds: HOLD_SECONDS,
         release_seconds: 0.01,
         sample_rate: RATE,
     })
@@ -63,6 +67,7 @@ fn compression_matches_the_static_curve() {
                     curve,
                     detection: Detection::Peak,
                     attack_seconds: 0.000_1,
+                    hold_seconds: HOLD_SECONDS,
                     release_seconds: 2.0,
                     sample_rate: RATE,
                 });
@@ -147,6 +152,7 @@ fn attack_and_release_follow_their_times() {
         curve: curve(Mode::Compress),
         detection: Detection::Peak,
         attack_seconds: attack,
+        hold_seconds: HOLD_SECONDS,
         release_seconds: release,
         sample_rate: RATE,
     });
@@ -185,6 +191,7 @@ fn attack_means_the_signal_rose_in_every_mode() {
             curve: curve(mode),
             detection: Detection::Peak,
             attack_seconds: attack,
+            hold_seconds: HOLD_SECONDS,
             release_seconds: release,
             sample_rate: RATE,
         });
@@ -266,6 +273,55 @@ fn a_gate_holds_before_it_closes() {
     assert!(!dynamics.above);
 }
 
+/// The hold follows its setting, and a duck uses it as a gate does.
+#[test]
+fn the_hold_lasts_as_long_as_it_is_set() {
+    for mode in [Mode::Gate, Mode::Duck] {
+        for hold_seconds in [0.001, 0.25, 2.0] {
+            let coefficients = Coefficients::new(Settings {
+                curve: curve(mode),
+                detection: Detection::Peak,
+                attack_seconds: 0.001,
+                hold_seconds,
+                release_seconds: 0.01,
+                sample_rate: RATE,
+            });
+            let mut dynamics = Dynamics::new(RATE);
+            dynamics.tick(1.0, coefficients);
+            for i in 0..(hold_seconds * RATE) as usize {
+                dynamics.tick(factor(-30.0), coefficients);
+                assert!(dynamics.above, "{mode:?} {hold_seconds}, frame {i}");
+            }
+            dynamics.tick(factor(-30.0), coefficients);
+            assert!(!dynamics.above, "{mode:?} {hold_seconds}");
+        }
+    }
+}
+
+/// A hold shortened while it runs ends at its new length, not its old one.
+#[test]
+fn a_shorter_hold_takes_effect_at_once() {
+    let settings = |hold_seconds| {
+        Coefficients::new(Settings {
+            curve: curve(Mode::Gate),
+            detection: Detection::Peak,
+            attack_seconds: 0.001,
+            hold_seconds,
+            release_seconds: 0.01,
+            sample_rate: RATE,
+        })
+    };
+    let mut dynamics = Dynamics::new(RATE);
+    dynamics.tick(1.0, settings(2.0));
+    let short = settings(0.001);
+    for _ in 0..(0.001 * RATE) as usize {
+        dynamics.tick(factor(-30.0), short);
+        assert!(dynamics.above);
+    }
+    dynamics.tick(factor(-30.0), short);
+    assert!(!dynamics.above);
+}
+
 /// A closed gate settles at its range, and an open duck at unity.
 #[test]
 fn gate_and_duck_reach_their_range() {
@@ -308,6 +364,7 @@ fn a_slow_release_does_not_stall() {
         curve: curve(Mode::Gate),
         detection: Detection::Peak,
         attack_seconds: 0.001,
+        hold_seconds: HOLD_SECONDS,
         release_seconds: 2.0,
         sample_rate: RATE,
     });

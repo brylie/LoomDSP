@@ -3,7 +3,7 @@
 - **Kind:** Research snapshot. Non-normative.
 - **Date:** 2026-11-03, on PR 553 at 027632a.
 - **Reviews:** [Dynamics, EQ, and Crossover specification](../design/dynamics-eq-crossover.md).
-- **Used by:** nothing yet. Decisions go in specs, ADRs, or the product docs.
+- **Used by:** findings 1 and 2 changed the [spec](../design/dynamics-eq-crossover.md) and the modules in the same pull request. Decisions go in specs, ADRs, or the product docs.
 
 This review asks one question of each behaviour: would an experienced DSP practitioner or a user of professional tools find it familiar, and where it differs, is there a good reason? Do not update this snapshot later; write a new one after any changes.
 

@@ -110,7 +110,7 @@ pub static ENVELOPE: ModuleDescriptor = ModuleDescriptor {
         15,
         10,
         &[
-            Widget::shape(0, 0, 15, "out", "Shape", envelope_preview),
+            Widget::shape(0, 0, 15, "out", "Shape", |params, x, _| envelope_preview(params, x)),
             Widget::segmented(0, 5, 6, "mode"),
             Widget::light(12, 5, "level"),
             Widget::knob(0, 7, "attack"),
