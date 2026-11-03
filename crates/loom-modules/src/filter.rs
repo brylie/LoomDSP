@@ -1,6 +1,7 @@
 //! Filters (FR-LIB-03).
 
 use crate::cached::Cached;
+use crate::mix::stereo_port;
 use loom_core::signal::pitch;
 use loom_core::{
     Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, PortDefault, PortIo,
@@ -604,19 +605,6 @@ impl Module for Ladder {
     }
 }
 
-/// One output of `loom.filter.crossover`.
-const fn crossover_out(name: &'static str, label: &'static str, description: &'static str) -> PortSpec {
-    PortSpec {
-        name,
-        label,
-        signal: SignalType::Audio,
-        description,
-        default: PortDefault::Value(0.0),
-        range: loom_core::PortRange::Signal,
-        channels: Channels::PerChannel,
-    }
-}
-
 /// `loom.filter.crossover`: two or three bands that sum to a flat level
 /// (MT-FILTER-07). The algorithm is in [`crossover`]. Spec:
 /// `docs/design/dynamics-eq-crossover.md`.
@@ -627,15 +615,26 @@ pub static CROSSOVER: ModuleDescriptor = ModuleDescriptor {
     category: "Filter",
     family: loom_core::Family::FiltersAndEffects,
     description: "Splits a signal into two or three frequency bands that sum to a flat level.",
-    inputs: &[crossover_out("in", "In", "The signal to split.")],
+    inputs: &[stereo_port("in", "In", "The signal to split.", Channels::PerChannel)],
     outputs: &[
-        crossover_out("low", "Low", "The frequencies below the lower split."),
-        crossover_out(
+        stereo_port(
+            "low",
+            "Low",
+            "The frequencies below the lower split.",
+            Channels::PerChannel,
+        ),
+        stereo_port(
             "mid",
             "Mid",
             "The frequencies between the splits. Silent with two bands.",
+            Channels::PerChannel,
         ),
-        crossover_out("high", "High", "The frequencies above the upper split."),
+        stereo_port(
+            "high",
+            "High",
+            "The frequencies above the upper split.",
+            Channels::PerChannel,
+        ),
     ],
     params: &[
         ParamSpec {

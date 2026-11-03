@@ -37,6 +37,62 @@ fn knob(x: u8, y: u8) -> WidgetView {
     }
 }
 
+/// A meter grows only where no widget is in its way: here, a toggle below it
+/// stops it growing down, as on the Dynamics panel, but it still grows across.
+/// With nothing in the way, it takes all the extra size.
+#[test]
+fn a_meter_does_not_grow_over_a_widget() {
+    let widget = |kind, x, y| WidgetView {
+        kind,
+        x,
+        y,
+        label: String::new(),
+        hover: HoverText::default(),
+        hidden: false,
+    };
+    let mut m = module(1, 0.0, 0.0);
+    m.panel = PanelView {
+        width: 3,
+        height: 8,
+        widgets: vec![
+            widget(WidgetViewKind::Meter { zero: 0.0 }, 0, 0),
+            widget(WidgetViewKind::Toggle, 0, 6),
+        ],
+    };
+    let meter = m.widget_bounds(0).unwrap();
+    let toggle = m.widget_bounds(1).unwrap();
+    let initial = m.bounds();
+    m.size = Some((40, 40));
+    let grown = m.widget_bounds(0).unwrap();
+    assert!(m.bounds().height > initial.height, "the tile grew");
+    assert_eq!(grown.height, meter.height, "the toggle is below it");
+    assert_eq!(grown.width - meter.width, m.bounds().width - initial.width);
+    assert!(grown.y + grown.height <= toggle.y);
+
+    // The same, with the toggle to the right of the meter.
+    m.size = None;
+    m.panel.width = 6;
+    m.panel.height = 6;
+    m.panel.widgets[1] = widget(WidgetViewKind::Toggle, 3, 0);
+    let meter = m.widget_bounds(0).unwrap();
+    let initial = m.bounds();
+    m.size = Some((40, 40));
+    let grown = m.widget_bounds(0).unwrap();
+    assert_eq!(grown.width, meter.width, "the toggle is beside it");
+    assert_eq!(grown.height - meter.height, m.bounds().height - initial.height);
+
+    // Alone, it takes all of it.
+    m.size = None;
+    m.panel.width = 3;
+    m.panel.widgets.truncate(1);
+    let meter = m.widget_bounds(0).unwrap();
+    let initial = m.bounds();
+    m.size = Some((40, 40));
+    let grown = m.widget_bounds(0).unwrap();
+    assert_eq!(grown.height - meter.height, m.bounds().height - initial.height);
+    assert_eq!(grown.width - meter.width, m.bounds().width - initial.width);
+}
+
 /// A saved size grows displays, ports, and hit bounds while controls stay put.
 #[test]
 fn growable_tiles_use_saved_dimensions() {

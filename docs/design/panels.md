@@ -719,7 +719,7 @@ What M1 builds. The rest of this spec is M2.
 
 - **The handle.** A small grip at the bottom-right corner of a tile that has a **growable** widget (a scope, a meter, an XY scope, later a spectrum or curve). Other tiles have no handle. Dragging it changes the tile's size and snaps to the grid. The cursor shows a resize cursor over it.
 - **Minimum and maximum.** The minimum is the size the panel declares (the tile cannot be smaller than its layout). The maximum is 64 by 64 grid units.
-- **What grows.** Only growable widgets. They take all extra width and height. Other widgets keep their size and position, top left.
+- **What grows.** Only growable widgets. They take all extra width and height. Other widgets keep their size and position, top left. A meter does not grow over a widget: with one below it, it keeps its height, and with one to its right, it keeps its width. *Why:* a panel can place a meter above a control, as Dynamics does, and a covered control cannot be read or reached.
 - **Ports.** Inputs stay on the left edge and outputs on the right, spread evenly over the new height, in port order. Cable ends, hit-testing, and hover follow the new size.
 - **Saved.** The patch file gets an optional `size: (w, h)` next to the position, in grid units. A tile without one has its declared size. Files without the field load unchanged (ADR-0008).
 - **Undo.** One resize drag is one undo step. The size is part of the clipboard: paste keeps it.

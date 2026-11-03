@@ -366,10 +366,10 @@ impl ModuleView {
         let widget = self.panel.widgets.get(index).filter(|w| !w.hidden)?;
         let origin = self.panel_origin();
         let (w, h) = widget.size();
-        let extra = if matches!(widget.kind, WidgetViewKind::Scope | WidgetViewKind::Meter { .. }) {
-            self.size() - self.minimum_size()
-        } else {
-            iced::Size::ZERO
+        let extra = match widget.kind {
+            WidgetViewKind::Scope => self.size() - self.minimum_size(),
+            WidgetViewKind::Meter { .. } => self.meter_growth(widget),
+            _ => iced::Size::ZERO,
         };
         Some(Rectangle::new(
             Point::new(
@@ -378,6 +378,22 @@ impl ModuleView {
             ),
             iced::Size::new(f32::from(w) * GRID + extra.width, f32::from(h) * GRID + extra.height),
         ))
+    }
+
+    /// The tile's extra size that `meter` can take without covering another
+    /// widget. A hidden widget counts, so a meter does not jump when a setting
+    /// shows or hides one (`docs/design/panels.md`, Resizable tiles).
+    fn meter_growth(&self, meter: &WidgetView) -> iced::Size {
+        let extra = self.size() - self.minimum_size();
+        let (width, height) = meter.size();
+        let (right, bottom) = (meter.x + width, meter.y + height);
+        let others = || self.panel.widgets.iter().map(|other| (other, other.size()));
+        let below = others().any(|(o, (w, _))| o.y >= bottom && o.x < right && o.x + w > meter.x);
+        let beside = others().any(|(o, (_, h))| o.x >= right && o.y < bottom && o.y + h > meter.y);
+        iced::Size::new(
+            if beside { 0.0 } else { extra.width },
+            if below { 0.0 } else { extra.height },
+        )
     }
 
     /// Width available for a port label, in world units: half the tile
