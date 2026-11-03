@@ -66,7 +66,7 @@ Patch(
     modules: [
         PatchModule(id: 1, kind: "loom.clock.transport@1"),
         PatchModule(id: 2, kind: "loom.gate.euclid@1", params: {"steps": 8, "hits": 3}),
-        PatchModule(id: 3, kind: "loom.env.envelope@1", params: {"attack": 0.001, "decay": 0.08, "sustain": 0.0, "release": 0.05}),
+        PatchModule(id: 3, kind: "loom.env.envelope@1", params: {"mode": 1, "attack": 0.001, "decay": 0.08}),
         PatchModule(id: 4, kind: "loom.osc.noise@1"),
         PatchModule(id: 5, kind: "loom.math.mul@1", params: {"gain": 0.3}),
         PatchModule(id: 6, kind: "loom.io.audio-out@1"),

@@ -83,10 +83,21 @@ fn harness(descriptor: &'static ModuleDescriptor, running: bool, busy: bool) -> 
         .fold(harness, |h, port| h.input(port.name, Signal::extreme_busy()))
 }
 
-/// The panic message of `check`, if it fails.
-fn failure(check: impl FnOnce()) -> Option<String> {
+/// The panic message of `check` on module `id`, if it fails. A plain assert
+/// panics with a `&str`, and an `unwrap` with no message says nothing about the
+/// module, so the report always names it.
+fn failure(id: &str, check: impl FnOnce()) -> Option<String> {
     let failed = catch_unwind(AssertUnwindSafe(check)).err()?;
-    Some(failed.downcast_ref::<String>().cloned().unwrap_or_default())
+    let message = failed
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| failed.downcast_ref::<&str>().copied())
+        .unwrap_or("panicked with no message");
+    Some(if message.starts_with(id) {
+        message.to_string()
+    } else {
+        format!("{id}: {message}")
+    })
 }
 
 /// Every input of every DSP module, on `running` and `busy`: one with an
@@ -104,9 +115,9 @@ fn check_all(running: bool, busy: bool) {
                 .iter()
                 .any(|(id, input, _)| *id == descriptor.id && *input == port.name);
             failed.extend(if excused {
-                failure(|| harness.check_extreme_stays_bounded_on(port.name))
+                failure(descriptor.id, || harness.check_extreme_stays_bounded_on(port.name))
             } else {
-                failure(|| harness.check_extreme_recovery_on(port.name))
+                failure(descriptor.id, || harness.check_extreme_recovery_on(port.name))
             });
         }
     }
@@ -149,7 +160,10 @@ fn every_exception_is_needed() {
         let needed = [(false, false), (false, true), (true, false), (true, true)]
             .into_iter()
             .any(|(running, busy)| {
-                failure(|| harness(descriptor, running, busy).check_extreme_recovery_on(input)).is_some()
+                failure(id, || {
+                    harness(descriptor, running, busy).check_extreme_recovery_on(input)
+                })
+                .is_some()
             });
         assert!(needed, "{id} `{input}` passes the full check, so it needs no exception");
     }

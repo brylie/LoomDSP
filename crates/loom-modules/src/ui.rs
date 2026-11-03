@@ -131,7 +131,7 @@ pub static MACRO: ModuleDescriptor = ModuleDescriptor {
         signal: SignalType::Modulation,
         description: "The knob's value, from 0 to 1, smoothed so it never steps.",
         default: PortDefault::Value(0.0),
-        range: loom_core::PortRange::Signal,
+        range: loom_core::PortRange::Span(0.0, 1.0),
         channels: Channels::PerChannel,
     }],
     params: &[ParamSpec {

@@ -57,7 +57,7 @@ Chance sends a trigger to A when the draw is below `chance`, so a chance of 1 mu
 
 ## Stereo
 
-If a module runs as two copies, one per side, with one list, both sides play the same numbers: mono in disguise. So a copy mixes its channel number into the seed. See [stereo cables](stereo-cables.md). Selector does not: its numbers pick which input to play, and both sides of a stereo signal must pick the same one.
+If a module runs as two copies, one per side, with one list, both sides play the same numbers: mono in disguise. So a copy mixes its channel number into the seed. See [stereo cables](stereo-cables.md). Selector does not: its numbers pick which input to play. Both sides make the same picks unless a stereo modulation source is assigned to a Selector parameter ([ADR-0036](../adr/0036-a-seeded-route-keeps-both-sides-together.md)).
 
 ## How other tools handle it
 

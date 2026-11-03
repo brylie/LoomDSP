@@ -39,3 +39,11 @@ fn a_turn_of_the_knob_is_smoothed() {
     assert!(out.windows(2).all(|pair| pair[1] >= pair[0]), "it must only rise");
     assert!(out[4_799] > 0.999, "{}", out[4_799]);
 }
+
+/// The output runs from 0 to 1, so it is unipolar. A knob at 0 then leaves every
+/// parameter it is assigned to where it is, whatever polarity the assignment
+/// takes from it.
+#[test]
+fn the_output_is_unipolar() {
+    assert_eq!(MACRO.outputs[0].polarity(), loom_core::Polarity::Unipolar);
+}

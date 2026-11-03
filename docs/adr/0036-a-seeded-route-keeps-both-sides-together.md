@@ -5,6 +5,7 @@
 - **Related requirements:** FR-LIB-30, FR-SIG-07, NFR-SND-04
 - **Refines:** [ADR-0022](0022-copies-take-state-from-the-running-instance.md), for the seeded modules that choose a route.
 - **Specification:** [Stereo cables](../design/stereo.md) rules 15 and 27, [M2 modules](../design/p2-modules.md#selector-mt-route-01)
+- **Background:** [Repeatable randomness](../learn/repeatable-randomness.md), [Stereo cables](../learn/stereo-cables.md)
 - **Issue:** [#310](https://github.com/brylie/LoomDSP/issues/310)
 
 ## Context

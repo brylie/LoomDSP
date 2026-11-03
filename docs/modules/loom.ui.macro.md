@@ -19,7 +19,7 @@ None.
 
 | Port | Signal | Polarity | Description |
 |---|---|---|---|
-| **Out** (`out`) | modulation | bipolar | The knob's value, from 0 to 1, smoothed so it never steps. |
+| **Out** (`out`) | modulation | unipolar | The knob's value, from 0 to 1, smoothed so it never steps. |
 
 ## Parameters
 
