@@ -78,17 +78,25 @@ impl<Message> PatchCanvas<'_, Message> {
             .map(|w| (module.id, w))
     }
 
+    /// How a drag on this control turns pointer movement into a value.
+    pub(super) fn value_drag(&self, module: u32, widget: usize, zoom: f32) -> ValueDrag {
+        let rect = self.scene.module(module).and_then(|m| m.widget_bounds(widget));
+        match (self.widget_kind(module, widget), rect) {
+            (Some(WidgetViewKind::Fader { vertical, .. }), Some(rect)) => ValueDrag::fader(rect, *vertical, zoom),
+            _ => ValueDrag::KNOB,
+        }
+    }
+
     /// True if `world` is on the ring around a knob where its range arc is
-    /// drawn, and the knob has an enabled assignment: there a drag changes
-    /// depth, not the value. This holds when the arc has zero length and
-    /// the knob shows the dot, so depth 0 can be dragged back out of.
+    /// drawn, or on the place of a fader's bar, and the control has an enabled
+    /// assignment: there a drag changes depth, not the value. This holds when
+    /// the range has zero length and the control shows the dot, so depth 0 can
+    /// be dragged back out of.
     pub(super) fn on_range_ring(&self, module: u32, widget: usize, world: Point) -> bool {
         let Some(m) = self.scene.module(module) else {
             return false;
         };
-        let (Some(rect), Some(WidgetViewKind::Knob { .. })) =
-            (m.widget_bounds(widget), self.widget_kind(module, widget))
-        else {
+        let Some(rect) = m.widget_bounds(widget) else {
             return false;
         };
         let modulated = self.values.and_then(|v| v.get(module, widget)).is_some_and(|v| {
@@ -97,9 +105,16 @@ impl<Message> PatchCanvas<'_, Message> {
                 crate::controls::ModulationMark::Range { .. } | crate::controls::ModulationMark::Dot
             )
         });
-        let d = world - crate::controls::knob_centre(rect);
-        let distance = (d.x * d.x + d.y * d.y).sqrt();
-        modulated && (crate::controls::RANGE_RING_INNER..=crate::controls::RANGE_RING_OUTER).contains(&distance)
+        modulated
+            && match self.widget_kind(module, widget) {
+                Some(WidgetViewKind::Knob { .. }) => {
+                    let d = world - crate::controls::knob_centre(rect);
+                    let distance = (d.x * d.x + d.y * d.y).sqrt();
+                    (crate::controls::RANGE_RING_INNER..=crate::controls::RANGE_RING_OUTER).contains(&distance)
+                }
+                Some(WidgetViewKind::Fader { vertical, .. }) => crate::controls::on_fader_bar(rect, *vertical, world),
+                _ => false,
+            }
     }
 
     pub(super) fn position(&self, module: u32, widget: usize) -> f32 {
@@ -503,7 +518,9 @@ impl<Message> PatchCanvas<'_, Message> {
                 } else {
                     let position = self.position(module, widget);
                     let next = match self.widget_kind(module, widget) {
-                        Some(WidgetViewKind::Knob { steps }) => knob_step(position, up, modifiers.shift(), *steps),
+                        Some(WidgetViewKind::Knob { steps } | WidgetViewKind::Fader { steps, .. }) => {
+                            knob_step(position, up, modifiers.shift(), *steps)
+                        }
                         Some(WidgetViewKind::Toggle) => {
                             if up {
                                 1.0
@@ -549,12 +566,17 @@ impl<Message> PatchCanvas<'_, Message> {
                             self.set_control(shell, module, widget, next as f32);
                         }
                         Some(WidgetViewKind::Select { .. }) if !repeat => self.open_select(state, module, widget),
-                        Some(WidgetViewKind::Knob { .. }) if matches!(named, Named::Space) && !repeat => {
+                        Some(WidgetViewKind::Knob { .. } | WidgetViewKind::Fader { .. })
+                            if matches!(named, Named::Space) && !repeat =>
+                        {
                             self.emit(shell, CanvasEvent::ToggleRun);
                         }
                         _ => {}
                     }
-                    !matches!(self.widget_kind(module, widget), Some(WidgetViewKind::Knob { .. }) if matches!(named, Named::Enter))
+                    !matches!(
+                        self.widget_kind(module, widget),
+                        Some(WidgetViewKind::Knob { .. } | WidgetViewKind::Fader { .. }) if matches!(named, Named::Enter)
+                    )
                 } else if matches!(named, Named::Space) {
                     // Space with nothing focused is the Run shortcut. A
                     // repeat is swallowed so holding the key does not toggle

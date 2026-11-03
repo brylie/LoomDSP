@@ -148,6 +148,13 @@ pub enum WidgetViewKind {
         /// Option labels.
         options: Vec<String>,
     },
+    /// A straight track with a handle (panel-widgets.md, Fader).
+    Fader {
+        /// True for a vertical track, false for a horizontal one.
+        vertical: bool,
+        /// Whole-number values to step through, or 0, as for a knob.
+        steps: u32,
+    },
     /// Compact choice box with a pop-up list.
     Select {
         /// Option labels.
@@ -207,6 +214,8 @@ impl WidgetView {
     pub fn size(&self) -> (u8, u8) {
         match &self.kind {
             WidgetViewKind::Knob { .. } => (3, 3),
+            WidgetViewKind::Fader { vertical: true, .. } => (2, 6),
+            WidgetViewKind::Fader { vertical: false, .. } => (6, 2),
             WidgetViewKind::Meter { .. } => (3, 6),
             WidgetViewKind::Scope => (9, 5),
             WidgetViewKind::Shape { width } => (*width, 5),
@@ -227,6 +236,15 @@ impl WidgetView {
         )
     }
 
+    /// The whole-number steps of a one-number control (panel-widgets.md, One
+    /// number), or `None` for any other widget. 0 means a smooth value.
+    pub fn number_steps(&self) -> Option<u32> {
+        match self.kind {
+            WidgetViewKind::Knob { steps } | WidgetViewKind::Fader { steps, .. } => Some(steps),
+            _ => None,
+        }
+    }
+
     /// True for controls that take a dropped output as a modulation
     /// assignment: knobs, toggles, radio buttons, and select lists (`docs/design/modulation.md`,
     /// Making an assignment).
@@ -234,6 +252,7 @@ impl WidgetView {
         matches!(
             self.kind,
             WidgetViewKind::Knob { .. }
+                | WidgetViewKind::Fader { .. }
                 | WidgetViewKind::Toggle
                 | WidgetViewKind::Radio { .. }
                 | WidgetViewKind::Select { .. }

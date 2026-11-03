@@ -1,7 +1,7 @@
 //! The patch canvas widget: input handling and drawing.
 
 use crate::camera::Camera;
-use crate::controls::{ControlGeometry, PanelValues, focus_ring, knob_drag, knob_step, radio_option, select_box};
+use crate::controls::{ControlGeometry, PanelValues, ValueDrag, focus_ring, knob_step, radio_option, select_box};
 use crate::gpu::{Cable, CanvasPrimitive, Geometry, Overlay, Shape};
 use crate::hover::{HOVER_PADDING, HOVER_TEXT_PX, HoverTarget, HoverTimer};
 use crate::scene::{
@@ -176,7 +176,7 @@ pub enum PointerDrag {
     Move(Vec<u32>),
     /// A growable tile is being resized.
     Resize(u32),
-    /// A knob is turned: module ID and widget index.
+    /// A knob or a fader is dragged: module ID and widget index.
     Knob(u32, usize),
     /// A button is held: module ID and widget index.
     Button(u32, usize),
@@ -187,7 +187,8 @@ pub enum PointerDrag {
         /// True when the cable was pulled off an input.
         pulled: bool,
     },
-    /// A knob's range arc is dragged: module ID and widget index.
+    /// A knob's range arc or a fader's bar is dragged: module ID and widget
+    /// index.
     Depth(u32, usize),
     /// A selection box is drawn.
     Select,
@@ -461,8 +462,10 @@ enum Interaction {
     Turning {
         module: u32,
         widget: usize,
-        /// Pointer height on screen at the last move.
-        last_y: f32,
+        /// How pointer movement changes the value.
+        drag: ValueDrag,
+        /// Where the pointer was along the drag at the last move.
+        last: f32,
         position: f32,
     },
     /// A button is held. Pointer up reports a release, wherever the pointer
@@ -476,12 +479,14 @@ enum Interaction {
         /// cable (modulation.md, Making an assignment).
         pulled: bool,
     },
-    /// Dragging a knob's range arc: its depth, not its value.
+    /// Dragging a knob's range arc or a fader's bar: its depth, not its value.
     Depth {
         module: u32,
         widget: usize,
-        /// Pointer height on screen at the last move.
-        last_y: f32,
+        /// How pointer movement changes the depth.
+        drag: ValueDrag,
+        /// Where the pointer was along the drag at the last move.
+        last: f32,
     },
     Selecting {
         start: Point,

@@ -1473,4 +1473,51 @@ mod tests {
         assert_eq!(shape(&ui), before + 1.0, "Enter commits one choice");
         assert_eq!(ui.app.scene.module(lfo.0).unwrap().position, position);
     }
+
+    /// A fader on a float parameter keeps every value in its range: a drag to
+    /// mid-range does not snap through a whole number, and a parameter bound
+    /// only to a fader takes a modulation assignment, in the inspector and the
+    /// matrix (panel-widgets.md, Fader).
+    #[test]
+    fn a_fader_sets_a_float_value_and_takes_an_assignment() {
+        let mut ui = Ui::open("sine.ron");
+        let id = select_new(&mut ui, "test.panel");
+        let param = |ui: &Ui, name: &str| {
+            let node = ui.app.controller.graph().node(id).unwrap();
+            node.params[node.descriptor.param_index(name).unwrap()]
+        };
+        let at = ui.control(id.0, "wide");
+        let zoom = ui.canvas().camera.zoom;
+        let before = param(&ui, "wide");
+        let to = Point::new(at.x + 20.0, at.y);
+        ui.drag(at, to, 4);
+        let moved = param(&ui, "wide") - before;
+        let throw = (loom_canvas::GRID * 6.0 - 8.0) * zoom;
+        assert!(
+            (moved - 20.0 / throw.max(200.0)).abs() < 1e-3,
+            "{moved}: a small drag makes a small change, with no snap"
+        );
+
+        let (_, kind, spec) =
+            crate::scene::control_param(&ui.app.controller, id.0, widget_of(&ui, id, "tall")).unwrap();
+        assert_eq!(kind, loom_core::WidgetKind::Fader { vertical: true });
+        let position = crate::scene::control_position(kind, &spec, 1_000.0);
+        assert!(position > 0.0 && position < 1.0, "through the logarithmic mapping");
+        let value = crate::scene::control_value(kind, &spec, position);
+        assert!((value - 1_000.0).abs() < 0.5, "{value}");
+        assert!(kind.takes_modulation());
+        assert!(kind.has_range());
+        assert!(kind.is_one_number());
+    }
+
+    /// The widget index of the control bound to a parameter.
+    fn widget_of(ui: &Ui, module: ModuleId, param: &str) -> usize {
+        let node = ui.app.controller.graph().node(module).unwrap();
+        node.descriptor
+            .panel
+            .widgets
+            .iter()
+            .position(|w| w.bind == param)
+            .unwrap()
+    }
 }

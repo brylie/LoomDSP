@@ -932,6 +932,29 @@ impl Widget {
         }
     }
 
+    /// A vertical fader for any parameter: a track with a handle, 2 × 6 grid
+    /// units (panel-widgets.md, Fader).
+    pub const fn fader(x: u8, y: u8, param: &'static str) -> Self {
+        Self {
+            kind: WidgetKind::Fader { vertical: true },
+            x,
+            y,
+            bind: param,
+            caption: None,
+        }
+    }
+
+    /// A horizontal fader for any parameter, 6 × 2 grid units.
+    pub const fn fader_horizontal(x: u8, y: u8, param: &'static str) -> Self {
+        Self {
+            kind: WidgetKind::Fader { vertical: false },
+            x,
+            y,
+            bind: param,
+            caption: None,
+        }
+    }
+
     /// A toggle for a whole-number parameter from 0 to 1.
     pub const fn toggle(x: u8, y: u8, param: &'static str) -> Self {
         Self {
@@ -1090,6 +1113,11 @@ impl Widget {
 pub enum WidgetKind {
     /// A dial for any parameter.
     Knob,
+    /// A straight track with a handle, for any parameter.
+    Fader {
+        /// True for a vertical track, false for a horizontal one.
+        vertical: bool,
+    },
     /// Off or on, for a whole-number parameter from 0 to 1.
     Toggle,
     /// One button per choice name, for a whole-number parameter that names
@@ -1136,9 +1164,35 @@ pub enum WidgetKind {
     },
 }
 
+impl WidgetKind {
+    /// True for a widget that shows one number on a position, and sets it
+    /// through the parameter's mapping (panel-widgets.md, One number). It
+    /// takes typed values.
+    ///
+    /// `WidgetKind` is `non_exhaustive`, so a new kind compiles at every
+    /// `_` arm. Code that treats number controls alike asks this, not a list.
+    pub const fn is_one_number(&self) -> bool {
+        matches!(self, Self::Knob | Self::Fader { .. })
+    }
+
+    /// True for a widget that draws a modulation assignment's reach as a
+    /// range, and a live value on it: an arc or a bar (rule 3). Other controls
+    /// show a dot.
+    pub const fn has_range(&self) -> bool {
+        matches!(self, Self::Knob | Self::Fader { .. })
+    }
+
+    /// True for a control that takes a dropped output as a modulation
+    /// assignment (modulation.md, Making an assignment).
+    pub const fn takes_modulation(&self) -> bool {
+        self.is_one_number() || matches!(self, Self::Toggle | Self::Radio | Self::Select | Self::Segmented { .. })
+    }
+}
+
 impl PartialEq for WidgetKind {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
+            (Self::Fader { vertical: a }, Self::Fader { vertical: b }) => a == b,
             (Self::Knob, Self::Knob)
             | (Self::Toggle, Self::Toggle)
             | (Self::Radio, Self::Radio)
@@ -1277,6 +1331,8 @@ impl ModuleDescriptor {
     pub fn widget_size(&self, widget: &Widget) -> (u8, u8) {
         match widget.kind {
             WidgetKind::Knob => (3, 3),
+            WidgetKind::Fader { vertical: true } => (2, 6),
+            WidgetKind::Fader { vertical: false } => (6, 2),
             WidgetKind::Meter => (3, 6),
             WidgetKind::Scope => (9, 5),
             WidgetKind::Shape { width, .. } => (width, 5),

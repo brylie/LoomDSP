@@ -447,7 +447,7 @@ impl<Message> PatchCanvas<'_, Message> {
                     _ if learned.is_some() => learned,
                     TextKind::Caption(widget) if active == Some((module.id, widget)) => values
                         .get(module.id, widget)
-                        .filter(|_| matches!(module.panel.widgets[widget].kind, WidgetViewKind::Knob { .. }))
+                        .filter(|_| module.panel.widgets[widget].number_steps().is_some())
                         .map(|v| v.text.as_str()),
                     _ => None,
                 };

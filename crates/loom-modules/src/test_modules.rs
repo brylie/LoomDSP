@@ -81,6 +81,8 @@ const ON: usize = 4;
 /// | `held` | whole-number, 0 to 1, transient | none (the button's hold) |
 /// | `long` | whole-number, 0 to 15, named | select list that scrolls |
 /// | `voices` | whole-number, 1 to 16, not named | select list of numbers |
+/// | `tall` | logarithmic, 20 to 20 000 Hz | vertical fader |
+/// | `wide` | linear, 0 to 1 | horizontal fader |
 ///
 /// Outputs `uni` (unipolar) and `bi` (bipolar) both write `level`. The
 /// light `lit` shows `on`, modulated, as of the last frame of the block.
@@ -109,16 +111,18 @@ pub static PANEL: ModuleDescriptor = ModuleDescriptor {
             "Lima", "Mike", "November", "Oscar", "Papa",
         ]),
         param("voices", 1.0, 16.0, 1.0, "voices").integer(),
+        param("tall", 20.0, 20_000.0, 1_000.0, "Hz").logarithmic(),
+        param("wide", 0.0, 1.0, 0.5, ""),
     ],
     role: ModuleRole::Dsp(|_| {
         Box::new(TestPanel {
-            params: [0.0; 11],
+            params: [0.0; 13],
             lit: 0.0,
         })
     }),
     panel: Panel::new(
         18,
-        13,
+        18,
         &[
             Widget::knob(0, 0, "level"),
             Widget::knob(3, 0, "cutoff"),
@@ -132,6 +136,8 @@ pub static PANEL: ModuleDescriptor = ModuleDescriptor {
             Widget::scope(0, 8, "bi"),
             Widget::select(9, 8, "long"),
             Widget::select(9, 10, "voices"),
+            Widget::fader(15, 7, "tall"),
+            Widget::fader_horizontal(9, 12, "wide"),
         ],
     ),
     displays: &[DisplaySpec {
@@ -144,7 +150,7 @@ pub static PANEL: ModuleDescriptor = ModuleDescriptor {
 };
 
 struct TestPanel {
-    params: [f32; 11],
+    params: [f32; 13],
     /// `on` at the last frame of the last block, for the light.
     lit: f32,
 }

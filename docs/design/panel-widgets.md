@@ -42,7 +42,7 @@ Widgets are grouped by the **kind of value** they show or edit, not by the modul
 | Group | Widget | Binds to | Exists today | Proposed phase |
 |---|---|---|---|---|
 | One number | Knob | A parameter | Yes | M1 |
-| | Fader | A parameter | No (planned as "slider") | M2 |
+| | Fader | A parameter | Yes | M2 |
 | | Number | A parameter | No | M2 |
 | One choice | Toggle | A whole-number parameter, 0 to 1 | Yes | M1 |
 | | Radio buttons | A whole-number parameter | Yes | M1 |
@@ -161,6 +161,8 @@ These rules hold for every widget. Each widget section below says only what diff
 Implemented ([panels.md](panels.md#module-panels-on-tiles-m1)). Listed here as the reference for the other number controls.
 
 ### Fader
+
+**Status:** Implemented on the test modules. Typed values are in [Typing a value](#typing-a-value).
 
 A straight track with a handle, vertical or horizontal. Same binding, mapping, and gestures as a knob.
 

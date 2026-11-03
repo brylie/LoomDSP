@@ -46,10 +46,18 @@ const DOT_RADIUS: f32 = 2.5;
 /// Line width of that ring. It is drawn at least one pixel wide at any zoom.
 const RING_WIDTH: f32 = 1.0;
 
+/// The fewest screen pixels for a number control's full range.
+const MIN_THROW: f32 = 200.0;
+/// A horizontal fader's track centre, below the top of its second row.
+const FADER_ACROSS: f32 = 3.0;
+/// How far a fader's modulation bar sits from the centre of its track: clear
+/// of the handle.
+const FADER_BAR_AWAY: f32 = 8.0;
+
 /// The live value of one widget.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct WidgetValue {
-    /// Knob: position from 0 to 1. Toggle and button: 0 or 1. Radio and
+    /// Knob and fader: position from 0 to 1. Toggle and button: 0 or 1. Radio and
     /// select: option index. Light: brightness from 0 to 1. Meter: RMS level from 0 to 1.
     pub position: f32,
     /// Meter: peak level from 0 to 1. Unused by other widgets.
@@ -216,6 +224,33 @@ impl ControlGeometry {
                         let angle = KNOB_START + KNOB_SWEEP * t;
                         let tip = Point::new(centre.x + 4.0 * angle.sin(), centre.y - 4.0 * angle.cos());
                         shapes.push(circle(tip, 1.5, palette.text, Color::TRANSPARENT, 0.0));
+                    }
+                    WidgetViewKind::Fader { vertical, .. } => {
+                        let t = position.clamp(0.0, 1.0);
+                        let track = fader_track(rect, *vertical);
+                        shapes.push(Shape::new(track, 1.5, palette.control_track, Color::TRANSPARENT, 0.0));
+                        let filled = fader_span(track, *vertical, 0.0, t.max(KNOB_START_CAP));
+                        shapes.push(Shape::new(filled, 1.5, palette.control_value, Color::TRANSPARENT, 0.0));
+                        if let ModulationMark::Range { low, high } = modulation {
+                            shapes.push(Shape::new(
+                                fader_bar(rect, *vertical, low, high),
+                                1.0,
+                                palette.modulation,
+                                Color::TRANSPARENT,
+                                0.0,
+                            ));
+                        }
+                        if let Some(live) = values.get(module.id, index).and_then(|v| v.live) {
+                            let at = fader_bar_point(rect, *vertical, live);
+                            shapes.push(circle(at, LIVE_RADIUS, palette.modulation, palette.text, 0.8));
+                        }
+                        shapes.push(Shape::new(
+                            fader_handle(rect, *vertical, t),
+                            2.0,
+                            palette.control_body,
+                            palette.text,
+                            1.0,
+                        ));
                     }
                     WidgetViewKind::Toggle => {
                         let on = position > 0.5;
@@ -438,7 +473,8 @@ fn live_dot_centre(centre: Point, position: f32) -> Point {
 fn modulation_dot(kind: &WidgetViewKind, rect: Rectangle, mark: ModulationMark, palette: &Palette) -> Option<Shape> {
     let centre = modulation_dot_centre(kind, rect);
     match (kind, mark) {
-        (_, ModulationMark::None) | (WidgetViewKind::Knob { .. }, ModulationMark::Range { .. }) => None,
+        (_, ModulationMark::None)
+        | (WidgetViewKind::Knob { .. } | WidgetViewKind::Fader { .. }, ModulationMark::Range { .. }) => None,
         // Displays have no parameter, so no assignments.
         (
             WidgetViewKind::Light | WidgetViewKind::Meter { .. } | WidgetViewKind::Scope | WidgetViewKind::Shape { .. },
@@ -466,6 +502,8 @@ pub(crate) fn modulation_dot_centre(kind: &WidgetViewKind, rect: Rectangle) -> P
             let c = knob_centre(rect);
             Point::new(c.x, c.y + KNOB_RADIUS + 0.5)
         }
+        // In the middle of the bar's place beside the track.
+        WidgetViewKind::Fader { vertical, .. } => fader_bar_point(rect, *vertical, 0.5),
         // Right of the track.
         WidgetViewKind::Toggle => {
             let track = toggle_track(rect);
@@ -552,6 +590,7 @@ pub(crate) fn focus_ring(kind: &WidgetViewKind, rect: Rectangle) -> (Rectangle, 
                 KNOB_FOCUS_CORNER,
             )
         }
+        WidgetViewKind::Fader { vertical, .. } => (fader_drawn(rect, *vertical), 4.0),
         WidgetViewKind::Toggle => (toggle_track(rect).expand(2.5), 8.0),
         WidgetViewKind::Select { .. } => (select_box(rect).expand(2.0), 5.0),
         // The segments, below the caption row.
@@ -574,6 +613,116 @@ pub(crate) fn focus_ring(kind: &WidgetViewKind, rect: Rectangle) -> (Rectangle, 
         WidgetViewKind::Light | WidgetViewKind::Meter { .. } | WidgetViewKind::Scope | WidgetViewKind::Shape { .. } => {
             (rect.expand(1.0), 4.0)
         }
+    }
+}
+
+/// A fader's track: down the cell above the caption row, or across the cell
+/// below it.
+pub(crate) fn fader_track(rect: Rectangle, vertical: bool) -> Rectangle {
+    if vertical {
+        Rectangle::new(
+            Point::new(rect.center_x() - 1.5, rect.y + 4.0),
+            Size::new(3.0, rect.height - GRID - 8.0),
+        )
+    } else {
+        Rectangle::new(
+            Point::new(rect.x + 4.0, rect.y + GRID + FADER_ACROSS - 1.5),
+            Size::new(rect.width - 8.0, 3.0),
+        )
+    }
+}
+
+/// The part of a track from position `low` to position `high`.
+fn fader_span(track: Rectangle, vertical: bool, low: f32, high: f32) -> Rectangle {
+    if vertical {
+        Rectangle::new(
+            Point::new(track.x, track.y + track.height * (1.0 - high)),
+            Size::new(track.width, track.height * (high - low)),
+        )
+    } else {
+        Rectangle::new(
+            Point::new(track.x + track.width * low, track.y),
+            Size::new(track.width * (high - low), track.height),
+        )
+    }
+}
+
+/// A fader's handle at position `t`.
+pub(crate) fn fader_handle(rect: Rectangle, vertical: bool, t: f32) -> Rectangle {
+    let track = fader_track(rect, vertical);
+    if vertical {
+        Rectangle::new(
+            Point::new(track.center_x() - 6.0, track.y + track.height * (1.0 - t) - 2.5),
+            Size::new(12.0, 5.0),
+        )
+    } else {
+        Rectangle::new(
+            Point::new(track.x + track.width * t - 2.5, track.center_y() - 4.0),
+            Size::new(5.0, 8.0),
+        )
+    }
+}
+
+/// The modulation bar beside a track, from position `low` to `high`.
+fn fader_bar(rect: Rectangle, vertical: bool, low: f32, high: f32) -> Rectangle {
+    let track = fader_track(rect, vertical);
+    fader_span(
+        if vertical {
+            Rectangle::new(
+                Point::new(track.center_x() + FADER_BAR_AWAY - 1.0, track.y),
+                Size::new(2.0, track.height),
+            )
+        } else {
+            Rectangle::new(
+                Point::new(track.x, track.center_y() + FADER_BAR_AWAY - 1.0),
+                Size::new(track.width, 2.0),
+            )
+        },
+        vertical,
+        low,
+        high,
+    )
+}
+
+/// The point at position `t` on the modulation bar: where the live dot goes.
+/// With `t` at 0.5, tests and scripts press here to drag depth.
+pub fn fader_bar_point(rect: Rectangle, vertical: bool, t: f32) -> Point {
+    let track = fader_track(rect, vertical);
+    let t = t.clamp(0.0, 1.0);
+    if vertical {
+        Point::new(track.center_x() + FADER_BAR_AWAY, track.y + track.height * (1.0 - t))
+    } else {
+        Point::new(track.x + track.width * t, track.center_y() + FADER_BAR_AWAY)
+    }
+}
+
+/// True if a press at `world` is on the fader's modulation bar, or its place
+/// beside the track: there a drag changes depth, not the value.
+pub(crate) fn on_fader_bar(rect: Rectangle, vertical: bool, world: Point) -> bool {
+    let track = fader_track(rect, vertical);
+    let away = if vertical {
+        world.x - track.center_x()
+    } else {
+        world.y - track.center_y()
+    };
+    let along = if vertical {
+        track.y - 2.0 <= world.y && world.y <= track.y + track.height + 2.0
+    } else {
+        track.x - 2.0 <= world.x && world.x <= track.x + track.width + 2.0
+    };
+    along && (FADER_BAR_AWAY - 2.5..=FADER_BAR_AWAY + 2.5).contains(&away)
+}
+
+/// What a fader always draws: its cell without the caption row. Text beside
+/// it may use the rest.
+pub(crate) fn fader_drawn(rect: Rectangle, vertical: bool) -> Rectangle {
+    if vertical {
+        Rectangle::new(rect.position(), Size::new(rect.width, rect.height - GRID))
+    } else {
+        Rectangle::new(
+            Point::new(rect.x, rect.y + GRID - 2.0),
+            Size::new(rect.width, rect.height - GRID + 2.0),
+        )
     }
 }
 
@@ -648,12 +797,55 @@ pub(crate) fn mix(a: Color, b: Color, t: f32) -> Color {
     )
 }
 
-/// A knob's new position after the pointer moved `dy` screen pixels (up is
-/// negative). The full range is 200 pixels at any zoom; Shift is 10 times
-/// finer.
-pub(crate) fn knob_drag(position: f32, dy: f32, fine: bool) -> f32 {
-    let scale = if fine { 0.1 } else { 1.0 };
-    (position - dy / 200.0 * scale).clamp(0.0, 1.0)
+/// How a drag on a number control turns pointer movement into a new value:
+/// which way it reads, and how many screen pixels make the full range.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ValueDrag {
+    /// True if movement along the screen's x axis counts. Otherwise y does.
+    horizontal: bool,
+    /// Screen pixels for the full range.
+    throw: f32,
+}
+
+impl ValueDrag {
+    /// A knob: up raises, and the full range is 200 pixels at any zoom.
+    pub const KNOB: Self = Self {
+        horizontal: false,
+        throw: MIN_THROW,
+    };
+
+    /// A fader: along its track. The full range is the track on screen, and
+    /// at least 200 pixels, so a short fader is never coarse (panel-widgets.md,
+    /// Fader).
+    pub fn fader(rect: Rectangle, vertical: bool, zoom: f32) -> Self {
+        let track = fader_track(rect, vertical);
+        let length = if vertical { track.height } else { track.width };
+        Self {
+            horizontal: !vertical,
+            throw: (length * zoom).max(MIN_THROW),
+        }
+    }
+
+    /// Where a screen point lies along the drag, growing as the value does.
+    pub fn along(&self, screen: Point) -> f32 {
+        if self.horizontal { screen.x } else { -screen.y }
+    }
+
+    /// A new position after the pointer moved `moved` pixels along the drag.
+    /// Shift is 10 times finer.
+    pub fn moved(&self, position: f32, moved: f32, fine: bool) -> f32 {
+        let scale = if fine { 0.1 } else { 1.0 };
+        (position + moved / self.throw * scale).clamp(0.0, 1.0)
+    }
+
+    /// The cursor that says which way this drag goes.
+    pub fn cursor(&self) -> iced::mouse::Interaction {
+        if self.horizontal {
+            iced::mouse::Interaction::ResizingHorizontally
+        } else {
+            iced::mouse::Interaction::ResizingVertically
+        }
+    }
 }
 
 /// A knob's new position after one arrow key press: 1% of the range, 0.1%

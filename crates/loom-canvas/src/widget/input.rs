@@ -22,11 +22,15 @@ impl<Message> PatchCanvas<'_, Message> {
         }
         state.interaction = match still.drag {
             Some(StillDrag::Wire { from, pulled }) => Interaction::Wiring { from, pulled },
-            Some(StillDrag::Depth(module, widget)) => Interaction::Depth {
-                module,
-                widget,
-                last_y: still.pointer.map_or(0.0, |p| state.camera.to_screen(p).y),
-            },
+            Some(StillDrag::Depth(module, widget)) => {
+                let drag = self.value_drag(module, widget, state.camera.zoom);
+                Interaction::Depth {
+                    module,
+                    widget,
+                    drag,
+                    last: still.pointer.map_or(0.0, |p| drag.along(state.camera.to_screen(p))),
+                }
+            }
             None => Interaction::Idle,
         };
         if still.hover_text {
@@ -346,11 +350,13 @@ impl<Message> PatchCanvas<'_, Message> {
                     Interaction::Turning {
                         module,
                         widget,
-                        last_y,
+                        drag,
+                        last,
                         position,
                     } => {
-                        let next = knob_drag(*position, screen.y - *last_y, state.modifiers.shift());
-                        *last_y = screen.y;
+                        let along = drag.along(screen);
+                        let next = drag.moved(*position, along - *last, state.modifiers.shift());
+                        *last = along;
                         if next != *position {
                             *position = next;
                             let event = CanvasEvent::SetControl {
@@ -361,11 +367,18 @@ impl<Message> PatchCanvas<'_, Message> {
                             self.emit(shell, event);
                         }
                     }
-                    Interaction::Depth { module, widget, last_y } => {
-                        let dy = screen.y - *last_y;
-                        *last_y = screen.y;
-                        // The knob's own drag scale: up raises, down lowers.
-                        let delta = knob_drag(0.5, dy, state.modifiers.shift()) - 0.5;
+                    Interaction::Depth {
+                        module,
+                        widget,
+                        drag,
+                        last,
+                    } => {
+                        let along = drag.along(screen);
+                        let moved = along - *last;
+                        *last = along;
+                        // The control's own drag scale: the way that raises
+                        // the value raises the depth.
+                        let delta = drag.moved(0.5, moved, state.modifiers.shift()) - 0.5;
                         if delta != 0.0 {
                             let event = CanvasEvent::DragDepth {
                                 module: *module,
@@ -588,12 +601,14 @@ impl<Message> PatchCanvas<'_, Message> {
         if let Some((module, widget)) = self.depth_drag_at(&hit, world) {
             // The selection stays as it is: a selected source module is one
             // way the drag picks its assignment (modulation.md, Arc drag).
+            let drag = self.value_drag(module, widget, state.camera.zoom);
             self.begin(
                 state,
                 Interaction::Depth {
                     module,
                     widget,
-                    last_y: screen.y,
+                    drag,
+                    last: drag.along(screen),
                 },
                 shell,
             );
@@ -637,13 +652,15 @@ impl<Message> PatchCanvas<'_, Message> {
                 }
                 let position = self.position(module, widget);
                 let click = match self.widget_kind(module, widget) {
-                    Some(WidgetViewKind::Knob { .. }) => {
+                    Some(WidgetViewKind::Knob { .. } | WidgetViewKind::Fader { .. }) => {
+                        let drag = self.value_drag(module, widget, state.camera.zoom);
                         self.begin(
                             state,
                             Interaction::Turning {
                                 module,
                                 widget,
-                                last_y: screen.y,
+                                drag,
+                                last: drag.along(screen),
                                 position,
                             },
                             shell,

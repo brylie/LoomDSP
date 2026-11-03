@@ -31,6 +31,8 @@ fn the_panel_has_every_widget_kind() {
     assert!(kinds.contains(&WidgetKind::Meter));
     assert!(kinds.contains(&WidgetKind::Scope));
     assert!(kinds.contains(&WidgetKind::Select));
+    assert!(kinds.contains(&WidgetKind::Fader { vertical: true }));
+    assert!(kinds.contains(&WidgetKind::Fader { vertical: false }));
 }
 
 #[test]

@@ -321,7 +321,8 @@ fn no_hover_text_during_a_drag() {
         Interaction::Turning {
             module: 1,
             widget: 0,
-            last_y: 0.0,
+            drag: ValueDrag::KNOB,
+            last: 0.0,
             position: 0.5,
         },
         Interaction::Moving {
@@ -1002,6 +1003,126 @@ fn typing_in_an_open_list_jumps_to_the_next_match() {
         at,
     );
     assert!(events.is_empty(), "{events:?}");
+}
+
+/// A fader tile with one modulated fader: `vertical` or not.
+fn fader_scene(vertical: bool) -> (Scene, PanelValues) {
+    let mut view = module(1, 0.0);
+    view.panel = PanelView {
+        width: 6,
+        height: 6,
+        widgets: vec![widget(WidgetViewKind::Fader { vertical, steps: 0 }, 0)],
+    };
+    let mut values = PanelValues::new();
+    values.set(
+        1,
+        0,
+        WidgetValue {
+            position: 0.25,
+            modulation: crate::ModulationMark::Range { low: 0.1, high: 0.4 },
+            ..WidgetValue::default()
+        },
+    );
+    (Scene::new(vec![view], Vec::new()), values)
+}
+
+/// Both faders change their value along the track, relative: pressing moves
+/// nothing, and a drag across the track moves nothing either. A press on the
+/// bar beside the track drags depth, and the value stays.
+#[test]
+fn a_fader_drags_along_its_track_and_its_bar_drags_depth() {
+    for vertical in [true, false] {
+        let (scene, values) = fader_scene(vertical);
+        let selected = BTreeSet::from([1]);
+        let canvas = PatchCanvas::new(&scene, &selected, |event| event).values(&values);
+        let rect = scene.module(1).unwrap().widget_bounds(0).unwrap();
+        let at = crate::controls::fader_track(rect, vertical).center();
+        let way = |d: f32| {
+            if vertical {
+                Point::new(at.x, at.y - d)
+            } else {
+                Point::new(at.x + d, at.y)
+            }
+        };
+        let moved = |to: Point| Event::Mouse(mouse::Event::CursorMoved { position: to });
+        let released = Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left));
+
+        let mut state = State::default();
+        let pressed = drive(&canvas, &mut state, &click(mouse::Button::Left), at);
+        assert!(
+            !pressed.iter().any(|e| matches!(e, CanvasEvent::SetControl { .. })),
+            "a press moves nothing"
+        );
+        let events = drive(&canvas, &mut state, &moved(way(100.0)), way(100.0));
+        assert!(
+            events.contains(&CanvasEvent::SetControl {
+                module: 1,
+                widget: 0,
+                position: 0.75,
+            }),
+            "100 of 200 pixels adds half the range: {events:?}"
+        );
+        drive(&canvas, &mut state, &released, way(100.0));
+
+        // Across the track, the value stays.
+        let across = if vertical {
+            Point::new(at.x + 40.0, at.y)
+        } else {
+            Point::new(at.x, at.y + 40.0)
+        };
+        let mut state = State::default();
+        drive(&canvas, &mut state, &click(mouse::Button::Left), at);
+        let events = drive(&canvas, &mut state, &moved(across), across);
+        assert!(!events.iter().any(|e| matches!(e, CanvasEvent::SetControl { .. })));
+        drive(&canvas, &mut state, &released, across);
+
+        // The bar drags depth.
+        let bar = crate::controls::fader_bar_point(rect, vertical, 0.5);
+        let on_bar = |d: f32| {
+            if vertical {
+                Point::new(bar.x, bar.y - d)
+            } else {
+                Point::new(bar.x + d, bar.y)
+            }
+        };
+        let mut state = State::default();
+        drive(&canvas, &mut state, &click(mouse::Button::Left), bar);
+        assert!(matches!(state.interaction, Interaction::Depth { .. }));
+        let events = drive(&canvas, &mut state, &moved(on_bar(20.0)), on_bar(20.0));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, CanvasEvent::DragDepth { delta, .. } if (delta - 0.1).abs() < 1e-5)),
+            "{events:?}"
+        );
+        assert!(!events.iter().any(|e| matches!(e, CanvasEvent::SetControl { .. })));
+    }
+}
+
+/// A fader takes the keys a knob takes: arrows change its value, in 1% steps
+/// or one whole number, and Tab focuses it.
+#[test]
+fn a_fader_takes_the_keys_of_a_knob() {
+    let (scene, values) = fader_scene(true);
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |event| event).values(&values);
+    let at = scene.module(1).unwrap().bounds().center();
+    let mut state = State {
+        focus: Some((1, 0)),
+        ..State::default()
+    };
+    let events = drive(&canvas, &mut state, &key_event(keyboard::key::Named::ArrowUp, true), at);
+    assert!(events.contains(&CanvasEvent::SetControl {
+        module: 1,
+        widget: 0,
+        position: 0.26,
+    }));
+    assert_eq!(focusable(&scene.module(1).unwrap().panel), [0]);
+    assert_eq!(
+        scene.module(1).unwrap().panel.widgets[0].size(),
+        (2, 6),
+        "a vertical fader is tall"
+    );
 }
 
 /// A drag in progress when a pop-up opens ends at the next redraw,

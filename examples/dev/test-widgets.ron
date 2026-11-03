@@ -21,6 +21,9 @@ Patch(
         PatchModulation(source: (1, "uni"), target: (2, "level"), depth: 0.25),
         PatchModulation(source: (1, "bi"), target: (2, "cutoff"), depth: -0.25),
         PatchModulation(source: (1, "uni"), target: (2, "steps"), depth: 0.3),
+        // Faders: a range bar on a logarithmic and a linear one.
+        PatchModulation(source: (1, "uni"), target: (2, "tall"), depth: 0.25),
+        PatchModulation(source: (1, "bi"), target: (2, "wide"), depth: 0.25),
         // Toggle, radio, and button: the depths a drop gives them (one step).
         PatchModulation(source: (1, "uni"), target: (2, "on"), depth: 1.0),
         PatchModulation(source: (1, "bi"), target: (2, "choice"), depth: 0.5),

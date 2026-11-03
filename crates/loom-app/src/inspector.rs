@@ -14,7 +14,7 @@ use iced::widget::{
     tooltip,
 };
 use iced::{Element, Length, Theme};
-use loom_core::{AssignmentId, ModuleId, OutputRef, WidgetKind};
+use loom_core::{AssignmentId, ModuleId, OutputRef};
 use serde::Serialize;
 
 /// What the inspector shows.
@@ -367,16 +367,7 @@ impl App {
                     mode,
                     accepts_drop: {
                         let bound = d.panel.widgets.iter().filter(|w| w.bind == spec.name);
-                        bound.clone().next().is_none()
-                            || bound.into_iter().any(|w| {
-                                matches!(
-                                    w.kind,
-                                    WidgetKind::Knob
-                                        | WidgetKind::Toggle
-                                        | WidgetKind::Radio
-                                        | WidgetKind::Segmented { .. }
-                                )
-                            })
+                        bound.clone().next().is_none() || bound.into_iter().any(|w| w.kind.takes_modulation())
                     },
                 }
             })

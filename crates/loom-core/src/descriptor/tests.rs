@@ -448,3 +448,23 @@ fn a_select_list_needs_a_whole_number_with_at_most_128_values() {
     assert!(too_long.contains("select list"), "{too_long}");
     assert!(check(spec(1.0, 4.0)).is_err(), "not a whole number");
 }
+
+/// A fader binds to any parameter, and the registry names it when the
+/// parameter does not exist or the fader leaves the panel.
+#[test]
+fn a_fader_needs_a_parameter_and_room() {
+    static PARAMS: [ParamSpec; 1] = [CUTOFF];
+    static TALL: [Widget; 1] = [Widget::fader(0, 0, "cutoff")];
+    static WIDE: [Widget; 1] = [Widget::fader_horizontal(0, 0, "cutoff")];
+    static MISSING: [Widget; 1] = [Widget::fader(0, 0, "nothing")];
+    let descriptor = |widgets, width, height| ModuleDescriptor {
+        params: &PARAMS,
+        panel: Panel::new(width, height, widgets),
+        ..NAMED
+    };
+    assert!(descriptor(&TALL, 2, 6).check_panel().is_ok());
+    assert!(descriptor(&WIDE, 6, 2).check_panel().is_ok());
+    assert!(descriptor(&TALL, 2, 5).check_panel().unwrap_err().contains("outside"));
+    assert!(descriptor(&WIDE, 5, 2).check_panel().unwrap_err().contains("outside"));
+    assert!(descriptor(&MISSING, 2, 6).check_panel().is_err());
+}

@@ -104,17 +104,19 @@ impl<Message> PatchCanvas<'_, Message> {
         if state.cursor.is_some_and(|point| self.resize_at(point).is_some()) {
             return mouse::Interaction::ResizingDiagonallyDown;
         }
-        let on_ring = state
+        let on_range = state
             .hover
             .zip(state.cursor)
-            .is_some_and(|(hit, world)| self.depth_drag_at(&hit, world).is_some());
-        if on_ring {
-            return mouse::Interaction::ResizingVertically;
+            .and_then(|(hit, world)| self.depth_drag_at(&hit, world));
+        if let Some((module, widget)) = on_range {
+            return self.value_drag(module, widget, state.camera.zoom).cursor();
         }
         match state.hover {
             Some(Hit::Port(_) | Hit::Badge(_)) => mouse::Interaction::Pointer,
             Some(Hit::Widget { module, widget }) => match self.widget_kind(module, widget) {
-                Some(WidgetViewKind::Knob { .. }) => mouse::Interaction::ResizingVertically,
+                Some(WidgetViewKind::Knob { .. } | WidgetViewKind::Fader { .. }) => {
+                    self.value_drag(module, widget, state.camera.zoom).cursor()
+                }
                 _ => mouse::Interaction::Pointer,
             },
             Some(Hit::Module(_)) => mouse::Interaction::Grab,

@@ -311,6 +311,7 @@ fn cut_labels(module: &ModuleView) -> Cut {
 fn kind_name(kind: &WidgetViewKind) -> &'static str {
     match kind {
         WidgetViewKind::Knob { .. } => "knob",
+        WidgetViewKind::Fader { .. } => "fader",
         WidgetViewKind::Toggle => "toggle",
         WidgetViewKind::Radio { .. } => "radio",
         WidgetViewKind::Select { .. } => "select",
