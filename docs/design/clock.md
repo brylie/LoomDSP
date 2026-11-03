@@ -35,7 +35,7 @@ Every patch has exactly one **Transport** module, as it has one audio output. It
 - a **Run** toggle, a **Reset** button, a **tempo** [number](panel-widgets.md#number) with a typed value, and the time signature;
 - a **run** input (gate) and a **reset** input (trigger), so anything in the patch can start and stop time.
 
-There are no transport controls in the app toolbar. The Space key toggles Run when no panel control is focused, as a shortcut to the same control. When a panel control has focus, Space and Enter act on that control instead ([panels](panels.md#interaction-68)).
+There are no transport controls in the app toolbar. The Space key toggles Run when no panel control or text field is focused, as a shortcut to the same control. When a panel control has focus, Space and Enter act on that control instead ([panels](panels.md#interaction-68)).
 
 *Why on a module:* it follows ADR-0011 and ADR-0013. Time is controlled where you see it, it can go on a front panel, and it can be patched. Starting the clock from a pad, a sequencer, or a logic module is ordinary patching.
 
@@ -43,7 +43,7 @@ There are no transport controls in the app toolbar. The Space key toggles Run wh
 
 | How | What happens |
 |---|---|
-| Click Run on the Transport panel, or press Space when no panel control is focused | Toggles running. |
+| Click Run on the Transport panel, or press Space when no panel control or text field is focused | Toggles running. |
 | A gate into the run input | High runs, low stops. While the input is connected, it decides, and the Run toggle shows its state. |
 | A trigger into reset, or the Reset button | Returns to bar 1 and fires the jump trigger. While stopped, the next start begins at bar 1. |
 
@@ -174,7 +174,7 @@ These details were settled while building the module.
 - **The button does not drag the tile.** In both modes, pointer down on the button leaves the tile where it is. Drag the tile from its header.
 - **Key repeat is ignored.** A held key does not flip the gate again.
 - **Switching mode needs no clearing.** The two modes use different parameters, so a latched `on` does not show as a hold, and a hold does not change the latch. The gate follows the mode at once. *Why:* the old rule (clear `on` when the mode becomes Momentary) existed only because both modes shared one saved parameter ([#161](https://github.com/brylie/LoomDSP/issues/161)).
-- **Space.** When a panel control has keyboard focus, Space and Enter act on that control and do not toggle Run. Space toggles Run only when no panel control is focused: the canvas reports `ToggleRun` and the app calls `Controller::set_running`. A repeated Space does not toggle again. Enter with nothing focused does nothing. *Why:* if both ran, a focused Button patched into run would be asked to change twice. The focused control is the one being played. The canvas consumes the key, so Run's handler, when the Transport module is built ([#73](https://github.com/brylie/LoomDSP/issues/73)), must not also see it.
+- **Space.** When a panel control has keyboard focus, Space and Enter act on that control and do not toggle Run. A text field with focus keeps Space too ([panels](panels.md#keyboard-without-a-mouse)). Space toggles Run only when neither has focus: the canvas reports `ToggleRun` and the app calls `Controller::set_running`. A repeated Space does not toggle again. Enter with nothing focused does nothing. *Why:* if both ran, a focused Button patched into run would be asked to change twice. The focused control is the one being played. The canvas consumes the key, so Run's handler, when the Transport module is built ([#73](https://github.com/brylie/LoomDSP/issues/73)), must not also see it.
 - **A hold is never saved.** `hold` is transient, so a patch saved while a button is held loads with the gate low, and a hold does not mark the patch changed. A press and a release that land in the same buffer are applied in order, so a very short tap can be missed by the module; this is the commands queue's order and is out of scope.
 
 ## Rules

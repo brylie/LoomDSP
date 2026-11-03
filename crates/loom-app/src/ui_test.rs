@@ -288,6 +288,28 @@ impl Ui {
         self.redraw();
     }
 
+    /// True when a named text field has keyboard focus, read from the
+    /// widgets. `ui.focus` moves focus with no message, so `App::text_focus`
+    /// would not know.
+    pub fn text_field_focused(&mut self) -> bool {
+        self.focused_field().is_some()
+    }
+
+    /// The ID of the focused field, if it has one, read as a focus step
+    /// reads it.
+    pub fn focused_field(&mut self) -> Option<iced::advanced::widget::Id> {
+        use iced::advanced::widget::operation::{self, Operation, Outcome};
+        let mut find = operation::focusable::find_focused();
+        {
+            let mut operation = operation::black_box(&mut find);
+            self.with_ui(|ui, renderer, _| ui.operate(renderer, &mut operation));
+        }
+        match Operation::finish(&find) {
+            Outcome::Some(id) => Some(id),
+            _ => None,
+        }
+    }
+
     /// Where the inspector's value field for this parameter is in the window.
     pub fn value_field(&mut self, module: u32, index: usize) -> Point {
         use iced::advanced::widget::operation::{Focusable, Outcome};
@@ -2540,6 +2562,22 @@ mod tests {
         assert!(ui.app.value_draft.is_none());
         assert!(!ui.app.text_focus.any);
         assert_eq!(param_value(&ui, id, "cutoff"), before);
+    }
+
+    /// Tab in a value field also moves the canvas's focus, so a keyboard user
+    /// keeps their place. Only a field in a view's list keeps Tab for itself.
+    #[test]
+    fn tab_from_a_value_field_moves_the_canvas() {
+        use keyboard::key::Named;
+        let mut ui = Ui::open("sine.ron");
+        let (id, _) = focus_cutoff_field(&mut ui);
+        assert!(!ui.app.tab_moves_between_fields(), "a value field is in no list");
+        let messages = ui.tap(keyboard::Key::Named(Named::Tab), keyboard::Modifiers::default());
+        assert!(
+            messages.iter().any(|m| matches!(m, Message::Canvas(_))),
+            "the canvas took Tab: {messages:?}"
+        );
+        assert_ne!(ui.app.selection.iter().copied().next(), Some(id.0), "focus moved on");
     }
 
     /// A draft ends when focus moves to another value field, and a new patch

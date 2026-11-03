@@ -76,15 +76,14 @@ impl<Message> PatchCanvas<'_, Message> {
         let keys_elsewhere = match event {
             Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
                 (self.matrix_keyboard && !modifiers.command())
-                    || (self.text_field_keys && !matches!(key, keyboard::Key::Named(keyboard::key::Named::Tab)))
+                    || (self.text_field_keys
+                        && (self.text_field_keeps_tab
+                            || !matches!(key, keyboard::Key::Named(keyboard::key::Named::Tab))))
             }
             _ => false,
         };
         if keys_elsewhere {
-            self.release_every_key_hold(state, shell);
-            if std::mem::take(&mut state.arrow_gesture) {
-                self.emit(shell, CanvasEvent::GestureEnd);
-            }
+            self.leave_keys(state, shell);
             return;
         }
 

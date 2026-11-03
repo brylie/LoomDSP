@@ -2394,3 +2394,153 @@ fn a_panic_that_cannot_be_sent_says_so() {
         app.alerts.status()
     );
 }
+
+/// Presses a key as a real keyboard does, with its text, and returns the
+/// messages it sends.
+fn press_key(
+    ui: &mut crate::ui_test::Ui,
+    key: iced::keyboard::Key,
+    text: Option<&str>,
+    modifiers: iced::keyboard::Modifiers,
+) -> Vec<Message> {
+    ui.step(&[iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+        modified_key: key.clone(),
+        key,
+        physical_key: iced::keyboard::key::Physical::Unidentified(iced::keyboard::key::NativeCode::Unidentified),
+        location: iced::keyboard::Location::Standard,
+        modifiers,
+        text: text.map(Into::into),
+        repeat: false,
+    })])
+}
+
+/// A new patch with its Authors box in focus. It leaves the pointer over the
+/// canvas when `over_canvas` is true, as after a person clicks the box and
+/// moves the mouse away, and over the box otherwise.
+fn typing_in_authors(over_canvas: bool) -> crate::ui_test::Ui {
+    let mut ui = crate::ui_test::Ui::open("sine.ron");
+    let _ = ui
+        .app
+        .update(Message::Canvas(loom_canvas::CanvasEvent::Select(Vec::new())));
+    ui.redraw();
+    let label = ui.text("Authors, one per line").expect("the patch form shows");
+    let field = Point::new(label.center_x(), label.y + label.height + 14.0);
+    ui.move_to(field);
+    ui.press();
+    ui.release();
+    assert!(ui.text_field_focused(), "the click focused the box");
+    if over_canvas {
+        ui.move_to(Point::new(400.0, 700.0));
+    }
+    ui
+}
+
+/// Messages the canvas sent.
+fn from_canvas(messages: &[Message]) -> Vec<String> {
+    messages
+        .iter()
+        .filter(|m| matches!(m, Message::Canvas(_)))
+        .map(|m| format!("{m:?}"))
+        .collect()
+}
+
+/// Typing in a text box acts on the text alone, wherever the pointer is. A
+/// space used to toggle Run as well, which stopped the music, and Tab and A
+/// acted on the patch behind the box (clipboard.md, rule 7; panels.md,
+/// Keyboard without a mouse).
+#[test]
+fn keys_stay_out_of_the_canvas_while_typing() {
+    use iced::keyboard::{Key, Modifiers, key::Named};
+    let keys = [
+        ("Space", Key::Named(Named::Space), Some(" "), Modifiers::default()),
+        ("A", Key::Character("a".into()), Some("a"), Modifiers::default()),
+        ("F", Key::Character("f".into()), Some("f"), Modifiers::default()),
+        ("Tab", Key::Named(Named::Tab), None, Modifiers::default()),
+        ("Backspace", Key::Named(Named::Backspace), None, Modifiers::default()),
+        ("Enter", Key::Named(Named::Enter), None, Modifiers::default()),
+        ("Left", Key::Named(Named::ArrowLeft), None, Modifiers::default()),
+        ("Cmd+V", Key::Character("v".into()), None, Modifiers::COMMAND),
+    ];
+    for over_canvas in [false, true] {
+        for (name, key, text, modifiers) in keys.clone() {
+            let mut ui = typing_in_authors(over_canvas);
+            let messages = press_key(&mut ui, key, text, modifiers);
+            assert_eq!(
+                from_canvas(&messages),
+                Vec::<String>::new(),
+                "{name}, pointer over canvas: {over_canvas}"
+            );
+        }
+    }
+}
+
+/// The space still reaches the text, and Escape hands the keys back: focus
+/// is read on each press, so Space is the Run shortcut again.
+#[test]
+fn escape_from_a_text_box_gives_keys_back_to_the_canvas() {
+    use iced::keyboard::{Key, Modifiers, key::Named};
+    let mut ui = typing_in_authors(true);
+    let typed = press_key(&mut ui, Key::Named(Named::Space), Some(" "), Modifiers::default());
+    assert!(
+        typed.iter().any(|m| matches!(m, Message::PatchInfo(_))),
+        "the box took the space: {typed:?}"
+    );
+
+    let escaped = press_key(&mut ui, Key::Named(Named::Escape), None, Modifiers::default());
+    assert_eq!(from_canvas(&escaped), Vec::<String>::new(), "Escape only left the box");
+    assert!(!ui.text_field_focused(), "Escape left the box");
+
+    let after = press_key(&mut ui, Key::Named(Named::Space), Some(" "), Modifiers::default());
+    assert!(
+        after
+            .iter()
+            .any(|m| matches!(m, Message::Canvas(loom_canvas::CanvasEvent::ToggleRun))),
+        "Space toggles Run again: {after:?}"
+    );
+}
+
+/// Tab moves through one view's text fields and wraps, sent as a real key.
+/// It stays inside the patch browser, so focus cannot land on the form behind
+/// it. The browser focuses its search field by a task, which sends no message,
+/// so the key cannot wait for the app to have heard of the focus.
+#[test]
+fn tab_moves_between_the_fields_of_one_view() {
+    use iced::advanced::widget::Id;
+    use iced::keyboard::{Key, Modifiers, key::Named};
+    let tab = Key::Named(Named::Tab);
+    let [authors, tags] = crate::patch_info::TEXT_FIELDS;
+    let mut ui = typing_in_authors(false);
+    assert_eq!(ui.focused_field(), Some(Id::new(authors)), "the click focused Authors");
+
+    ui.tap(tab.clone(), Modifiers::default());
+    assert_eq!(ui.focused_field(), Some(Id::new(tags)), "Tab goes to Tags");
+    ui.tap(tab.clone(), Modifiers::default());
+    assert_eq!(ui.focused_field(), Some(Id::new(authors)), "Tab wraps to Authors");
+    ui.tap(tab.clone(), Modifiers::SHIFT);
+    assert_eq!(ui.focused_field(), Some(Id::new(tags)), "Shift-Tab wraps back to Tags");
+
+    let _ = press_key(&mut ui, Key::Named(Named::Escape), None, Modifiers::default());
+    ui.app.patches = Some(crate::patches::PatchBrowser::new(1, PathBuf::from("unread")));
+    ui.redraw();
+    let [search, author] = crate::patches::TEXT_FIELDS;
+    ui.focus(search);
+    ui.tap(tab.clone(), Modifiers::default());
+    assert_eq!(ui.focused_field(), Some(Id::new(author)));
+    ui.tap(tab, Modifiers::default());
+    assert_eq!(ui.focused_field(), Some(Id::new(search)), "wrapped inside the browser");
+}
+
+/// Tab goes forward and Shift-Tab back, wrapping at both ends. It takes three
+/// fields to see this: with two, both directions land on the same one.
+#[test]
+fn tab_steps_forward_and_shift_tab_back() {
+    use crate::editing::field_after;
+    use iced::advanced::widget::Id;
+    let fields = ["one", "two", "three"];
+    let step = |from: &'static str, backwards| field_after(&fields, Id::new(from), backwards);
+    assert_eq!(step("one", false), Id::new("two"));
+    assert_eq!(step("three", false), Id::new("one"), "forward wraps");
+    assert_eq!(step("two", true), Id::new("one"));
+    assert_eq!(step("one", true), Id::new("three"), "backward wraps");
+    assert_eq!(step("other", false), Id::new("other"), "a field not listed stays");
+}

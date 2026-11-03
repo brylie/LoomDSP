@@ -314,6 +314,12 @@ enum Message {
         found: control::Found,
         then: control::AfterSearch,
     },
+    /// Whether a text field has focus, for a `type` command.
+    TypeFocus {
+        call: control::Call,
+        text: String,
+        focused: bool,
+    },
     Animate(bool),
     Frame(Instant),
     /// A slow tick while a recording runs, to notice a write error.
@@ -538,6 +544,7 @@ impl Message {
             | Self::Control(_)
             | Self::ControlFrame(_)
             | Self::Located { .. }
+            | Self::TypeFocus { .. }
             | Self::Frame(_)
             | Self::Tick
             | Self::Audio(_)
@@ -1071,7 +1078,9 @@ impl App {
             Message::Tick => FrameCause::Tick,
             Message::LiveFrame => FrameCause::Live,
             Message::Meters(_) | Message::Telemetry(_) | Message::Lights(_) => FrameCause::Meters,
-            Message::Control(_) | Message::ControlFrame(_) | Message::Located { .. } => FrameCause::Control,
+            Message::Control(_) | Message::ControlFrame(_) | Message::Located { .. } | Message::TypeFocus { .. } => {
+                FrameCause::Control
+            }
             Message::Canvas(_) | Message::Key(_) | Message::File(FileAction::Close) => FrameCause::Input,
             Message::Frame(_) => FrameCause::Forced,
             _ => FrameCause::Other,
@@ -1113,6 +1122,18 @@ impl App {
             {
                 self.open_patches()
             }
+            Message::Key(iced::keyboard::Event::KeyPressed {
+                key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab),
+                modifiers,
+                ..
+            }) if !modifiers.command() && !modifiers.alt() && !self.tab_fields().is_empty() => {
+                iced::advanced::widget::operate(editing::StepFocus {
+                    fields: self.tab_fields(),
+                    backwards: modifiers.shift(),
+                    current: None,
+                })
+                .discard()
+            }
             Message::Canvas(CanvasEvent::Paste { world }) => {
                 let generation = self.generation;
                 iced::clipboard::read().map(move |text| Message::Pasted {
@@ -1134,6 +1155,10 @@ impl App {
                 found,
                 then,
             } => self.located(call, &target, &found, then),
+            Message::TypeFocus { call, text, focused } => {
+                self.type_after_focus_check(call, &text, focused);
+                Task::none()
+            }
             message if self.clipboard_key(&message).is_some() => self.clipboard_command(&message),
             message => {
                 self.handle(message);
@@ -1320,6 +1345,7 @@ impl App {
             | Message::TextFocus(_)
             | Message::ValueSubmit { .. }
             | Message::Located { .. }
+            | Message::TypeFocus { .. }
             | Message::Matrix(_)
             | Message::MatrixKey(_) => {}
             Message::ShowHelp => {

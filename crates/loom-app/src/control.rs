@@ -116,6 +116,10 @@ pub enum Command {
         #[serde(default)]
         modifiers: Vec<String>,
     },
+    /// Types into the text field that has focus (Typing text).
+    Type {
+        text: String,
+    },
     /// Clicks a toolbar button by its fixed command name.
     Toolbar {
         button: String,
@@ -272,6 +276,9 @@ pub(crate) enum Step {
         frames_left: u16,
     },
     Locate(String),
+    /// Text for the field that has focus: checks that one has, once earlier
+    /// commands are drawn, then types it.
+    Type(String),
     /// A window capture, of the whole window or of an area.
     Screenshot(PathBuf, Area),
     /// Pointer or key events on their way to the view, by the command's

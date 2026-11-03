@@ -21,6 +21,7 @@ fn blocked_by_question(command: &Command) -> bool {
         | Command::Undo
         | Command::Redo
         | Command::Arm { .. }
+        | Command::Type { .. }
         | Command::OutputSafety { .. }
         | Command::Audio { .. }
         | Command::Midi { .. } => true,
@@ -218,6 +219,15 @@ impl App {
                     call.answer(answer);
                 }
                 Step::Locate(target) => tasks.push(search(call, target, AfterSearch::Locate)),
+                Step::Type(text) => {
+                    tasks.push(
+                        crate::editing::text_field_focused().map(move |focused| Message::TypeFocus {
+                            call: call.clone(),
+                            text: text.clone(),
+                            focused,
+                        }),
+                    )
+                }
                 Step::Screenshot(path, Area::Target { target, margin }) => {
                     tasks.push(search(call, target, AfterSearch::Screenshot { path, margin }));
                 }
@@ -353,6 +363,13 @@ impl App {
                         let steps = key_events(k, m).into_iter().map(PointerStep::Key).collect();
                         Then::AfterDraw(Step::Pointer(self.pointer.push(steps), false))
                     }
+                    Err(error) => Then::Now(Err(error)),
+                };
+                return (then, Task::batch(tasks));
+            }
+            Command::Type { text } => {
+                let then = match type_events(&text) {
+                    Ok(_) => Then::AfterDraw(Step::Type(text)),
                     Err(error) => Then::Now(Err(error)),
                 };
                 return (then, Task::batch(tasks));
@@ -810,6 +827,29 @@ impl App {
             Ok(Map::new())
         } else {
             Err("the MIDI queue is full".to_string())
+        }
+    }
+
+    /// Types the text of a `type` command, now that the window has said
+    /// whether a text field has focus. With none, no key is sent: a letter
+    /// would reach the app's shortcuts.
+    pub(crate) fn type_after_focus_check(&mut self, call: Call, text: &str, focused: bool) {
+        if !focused {
+            call.answer(Err(
+                "no text field has focus, so nothing was typed; open or click one first".to_string(),
+            ));
+            return;
+        }
+        match type_events(text) {
+            Ok(events) => {
+                let steps = events.into_iter().map(PointerStep::Key).collect();
+                self.control_pending.push(Pending {
+                    frames: FRAMES_BEFORE_ANSWER,
+                    call,
+                    step: Step::Pointer(self.pointer.push(steps), false),
+                });
+            }
+            Err(error) => call.answer(Err(error)),
         }
     }
 

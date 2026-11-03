@@ -1061,6 +1061,101 @@ fn keys_reach_the_open_browser_and_the_bar_draws_the_clock() {
     assert!(ui.app.browser.is_none(), "Escape closed the browser");
 }
 
+/// Runs a `type` command as the app does: the window reports whether a text
+/// field has focus, and then the keys go in, one frame at a time.
+fn run_type(ui: &mut crate::ui_test::Ui, text: &str) -> Answer {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let call = Call {
+        command: Command::Type { text: text.to_string() },
+        reply: Reply(Arc::new(Mutex::new(Some(sender)))),
+    };
+    let focused = ui.text_field_focused();
+    let _ = ui.app.update(Message::TypeFocus {
+        call,
+        text: text.to_string(),
+        focused,
+    });
+    for _ in 0..200 {
+        if let Ok(answer) = receiver.try_recv() {
+            return answer;
+        }
+        ui.redraw();
+        let _ = ui.app.update(Message::ControlFrame(Instant::now()));
+    }
+    receiver.try_recv().expect("answered after drawing")
+}
+
+/// An app with the script's pointer on, for typing tests.
+fn typing_ui() -> crate::ui_test::Ui {
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    ui.app.pointer = crate::pointer::Pointer::new(true);
+    ui
+}
+
+/// Every character reaches the search field, so the list filters as a person
+/// typing would see it. One frame per character keeps them all.
+#[test]
+fn type_filters_the_open_browser() {
+    let mut ui = typing_ui();
+    let _ = ui.app.update(Message::OpenBrowser);
+    ui.redraw();
+    ui.focus(crate::browser::INPUT);
+    let before = ui.app.browser.as_ref().unwrap().results().len();
+
+    assert_eq!(run_type(&mut ui, "osc saw"), Ok(Map::new()));
+
+    let browser = ui.app.browser.as_ref().unwrap();
+    let names: Vec<&str> = browser.results().iter().map(|d| d.id).collect();
+    assert!(names.len() < before, "the list was filtered");
+    assert!(names.contains(&"loom.osc.saw"), "found {names:?}");
+}
+
+/// With no text field in focus nothing is typed. A letter would otherwise
+/// reach the shortcuts: `a` would open the browser.
+#[test]
+fn type_is_refused_with_no_text_field_in_focus() {
+    let mut ui = typing_ui();
+    let error = run_type(&mut ui, "a").unwrap_err();
+    assert!(error.contains("no text field has focus"), "{error}");
+    for _ in 0..4 {
+        ui.redraw();
+    }
+    assert!(ui.app.browser.is_none(), "no key reached the shortcuts");
+}
+
+/// An open question stops keys reaching the patch and its fields, so `type`
+/// says so and does not claim it worked.
+#[test]
+fn type_is_refused_while_a_question_is_open() {
+    let mut app = scripted_with_changes();
+    run(&mut app, r#"{"cmd": "toolbar", "button": "new"}"#).unwrap();
+    assert!(app.question.is_some(), "the New button raised the question");
+    assert!(run(&mut app, r#"{"cmd": "type", "text": "a"}"#).is_err());
+}
+
+/// A `type` keeps case and spaces, and takes only text.
+#[test]
+fn typed_text_becomes_one_key_per_character() {
+    use iced::keyboard::{Event, Key, key::Named};
+    let events = resolve::type_events("A b").unwrap();
+    assert_eq!(events.len(), 6, "a press and a release per character");
+    let pressed: Vec<(Key, String)> = events
+        .iter()
+        .filter_map(|e| match e {
+            Event::KeyPressed { key, text, .. } => Some((key.clone(), text.as_ref().unwrap().to_string())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(pressed[0], (Key::Character("A".into()), "A".to_string()));
+    assert_eq!(pressed[1], (Key::Named(Named::Space), " ".to_string()));
+    assert_eq!(pressed[2], (Key::Character("b".into()), "b".to_string()));
+
+    assert!(resolve::type_events("").is_err());
+    assert!(resolve::type_events("one\ntwo").unwrap_err().contains("use `key`"));
+    assert!(resolve::type_events(&"x".repeat(501)).is_err());
+    assert!(resolve::type_events(&"x".repeat(500)).is_ok());
+}
+
 /// Keys go through the view: Cmd+Z, which no widget takes, reaches the
 /// app and undoes, as from the keyboard.
 #[test]

@@ -340,3 +340,51 @@ pub(super) fn key_events(key: keyboard::Key, modifiers: keyboard::Modifiers) -> 
         },
     ]
 }
+
+/// The most characters one `type` command takes. Each takes two frames, so
+/// this stays well inside the time a listener waits for an answer.
+const MAX_TYPED: usize = 500;
+
+/// The key presses and releases that type `text`, one pair per character, or
+/// why it cannot be typed. Enter and Tab act on the field or the window, so
+/// a script sends those with `key`.
+pub(super) fn type_events(text: &str) -> Result<Vec<keyboard::Event>, String> {
+    if text.is_empty() {
+        return Err("no text to type".to_string());
+    }
+    if text.chars().count() > MAX_TYPED {
+        return Err(format!("`type` takes at most {MAX_TYPED} characters"));
+    }
+    if text.chars().any(char::is_control) {
+        return Err("`type` takes text only; use `key` for Enter, Tab, and other keys".to_string());
+    }
+    let physical = keyboard::key::Physical::Unidentified(keyboard::key::NativeCode::Unidentified);
+    let modifiers = keyboard::Modifiers::default();
+    Ok(text
+        .chars()
+        .flat_map(|c| {
+            let key = match c {
+                ' ' => keyboard::Key::Named(keyboard::key::Named::Space),
+                _ => keyboard::Key::Character(c.to_string().into()),
+            };
+            [
+                keyboard::Event::KeyPressed {
+                    key: key.clone(),
+                    modified_key: key.clone(),
+                    physical_key: physical,
+                    location: keyboard::Location::Standard,
+                    modifiers,
+                    text: Some(c.to_string().into()),
+                    repeat: false,
+                },
+                keyboard::Event::KeyReleased {
+                    key: key.clone(),
+                    modified_key: key,
+                    physical_key: physical,
+                    location: keyboard::Location::Standard,
+                    modifiers,
+                },
+            ]
+        })
+        .collect())
+}
