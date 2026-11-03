@@ -46,7 +46,11 @@ fn names_find_parameters_ports_then_lights_and_meters() {
     assert!(matches!(badge, Part::Badge(PortRef { output: true, .. })));
     assert_eq!(name(graph, badge), Some(format!("{env}:badge:out")));
     // No assignment, so no badge is drawn.
-    assert!(world_bounds(&app.scene, badge).unwrap_err().contains("no badge"));
+    assert!(
+        world_bounds(&app.scene, &app.values, badge)
+            .unwrap_err()
+            .contains("no badge")
+    );
     assert!(find(graph, env, "badge:gate").is_err(), "inputs have no badge");
 }
 
@@ -122,6 +126,6 @@ fn prefixes_and_errors() {
     };
     assert_eq!(name(graph, Part::Port(gone)), None);
     // Not on the canvas: the scene has no module 999.
-    assert!(world_bounds(&app.scene, Part::Control(999, 0)).is_err());
-    assert!(world_bounds(&app.scene, Part::Port(PortRef { module: 999, ..gone })).is_err());
+    assert!(world_bounds(&app.scene, &app.values, Part::Control(999, 0)).is_err());
+    assert!(world_bounds(&app.scene, &app.values, Part::Port(PortRef { module: 999, ..gone })).is_err());
 }

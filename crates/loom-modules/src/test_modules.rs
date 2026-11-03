@@ -117,6 +117,10 @@ pub static PANEL: ModuleDescriptor = ModuleDescriptor {
         param("voices", 1.0, 16.0, 1.0, "voices").integer(),
         param("pad_x", 0.0, 1.0, 0.5, ""),
         param("pad_y", 20.0, 20_000.0, 1_000.0, "Hz").logarithmic(),
+        param("span_low", -10.0, 10.0, 0.0, "").ranges(crate::math::WIDE_RANGES, crate::math::DEFAULT_RANGE),
+        param("span_high", -10.0, 10.0, 1.0, "").ranges(crate::math::WIDE_RANGES, crate::math::DEFAULT_RANGE),
+        param("tall_low", 0.0, 1.0, 0.25, ""),
+        param("tall_high", 0.0, 1.0, 0.75, ""),
         param("tall", 20.0, 20_000.0, 1_000.0, "Hz").logarithmic(),
         param("wide", 0.0, 1.0, 0.5, ""),
         param("count", 0.0, 1000.0, 7.0, "").integer(),
@@ -124,7 +128,7 @@ pub static PANEL: ModuleDescriptor = ModuleDescriptor {
     ],
     role: ModuleRole::Dsp(|_| {
         Box::new(TestPanel {
-            params: [0.0; 17],
+            params: [0.0; 21],
             lit: 0.0,
         })
     }),
@@ -149,6 +153,8 @@ pub static PANEL: ModuleDescriptor = ModuleDescriptor {
             Widget::number(0, 14, "count"),
             Widget::number(5, 14, "tempo"),
             Widget::xy_pad(12, 14, "pad_x", "pad_y", "Position"),
+            Widget::range(0, 16, "span_low", "span_high", "Span"),
+            Widget::range_vertical(10, 14, "tall_low", "tall_high", "Tall"),
         ],
     ),
     displays: &[DisplaySpec {
@@ -161,7 +167,7 @@ pub static PANEL: ModuleDescriptor = ModuleDescriptor {
 };
 
 struct TestPanel {
-    params: [f32; 17],
+    params: [f32; 21],
     /// `on` at the last frame of the last block, for the light.
     lit: f32,
 }

@@ -1081,6 +1081,30 @@ impl Widget {
         }
     }
 
+    /// A range: a horizontal track with two handles, for `low` and `high` on
+    /// one scale. Neither parameter's label names the pair, so it takes its own
+    /// caption (panel-widgets.md, Range).
+    pub const fn range(x: u8, y: u8, low: &'static str, high: &'static str, caption: &'static str) -> Self {
+        Self {
+            kind: WidgetKind::Range { high, vertical: false },
+            x,
+            y,
+            bind: low,
+            caption: Some(caption),
+        }
+    }
+
+    /// A range on a vertical track.
+    pub const fn range_vertical(x: u8, y: u8, low: &'static str, high: &'static str, caption: &'static str) -> Self {
+        Self {
+            kind: WidgetKind::Range { high, vertical: true },
+            x,
+            y,
+            bind: low,
+            caption: Some(caption),
+        }
+    }
+
     /// A knob for parameter `param`.
     pub const fn knob(x: u8, y: u8, param: &'static str) -> Self {
         Self {
@@ -1638,6 +1662,52 @@ impl ModuleDescriptor {
         self.param_index(widget.bind)
     }
 
+    /// The parameter that shares its selected control range with parameter
+    /// `index`: the other one on a range widget (control-ranges.md, Ranges on
+    /// a range widget).
+    pub fn range_partner(&self, index: usize) -> Option<usize> {
+        let name = self.params.get(index)?.name;
+        self.panel.widgets.iter().find_map(|w| match w.kind {
+            WidgetKind::Range { high, .. } if w.bind == name => self.param_index(high),
+            WidgetKind::Range { high, .. } if high == name => self.param_index(w.bind),
+            _ => None,
+        })
+    }
+
+    /// The range a loaded module gets for parameter `index`, and whether the
+    /// loader reports it, as [`ParamSpec::load_range`] says. A parameter on a
+    /// range widget shares its range: the pair keeps a saved range they agree
+    /// on that holds both values, and otherwise takes the smallest that does
+    /// (control-ranges.md, Ranges on a range widget). `saved` and `value` give
+    /// a parameter's saved range and its value, clamped to `min` and `max`.
+    pub fn load_range(
+        &self,
+        index: usize,
+        saved: impl Fn(&ParamSpec) -> Option<ParamRange>,
+        value: impl Fn(&ParamSpec) -> f32,
+    ) -> Option<(ParamRange, bool)> {
+        let spec = self.params.get(index)?;
+        let Some(other) = self.range_partner(index).and_then(|i| self.params.get(i)) else {
+            return spec.load_range(saved(spec), value(spec));
+        };
+        let default = spec.default_range()?;
+        let (a, b) = (value(spec), value(other));
+        let holds = |range: &ParamRange| range.contains(a) && range.contains(b);
+        let smallest = spec
+            .options
+            .ranges
+            .iter()
+            .copied()
+            .find(|range| holds(range))
+            .unwrap_or(ParamRange::new(spec.min, spec.max));
+        Some(match (saved(spec), saved(other)) {
+            (None, None) if holds(&default) => (default, false),
+            (None, None) => (smallest, false),
+            (Some(x), Some(y)) if x == y && spec.options.ranges.contains(&x) && holds(&x) => (x, false),
+            _ => (smallest, true),
+        })
+    }
+
     /// How a button widget answers a gesture, from its mode parameter. A
     /// button with no mode parameter ([`Widget::momentary`]) is always
     /// momentary. `None` for another widget or a missing name.
@@ -1741,6 +1811,20 @@ impl ModuleDescriptor {
                     }
                     if param.options.shown_when != other.options.shown_when {
                         return Err(name("its two parameters must be shown for the same choices"));
+                    }
+                    // Both handles sit on one track, so one position must mean
+                    // one value for both (panel-widgets.md, Range).
+                    if matches!(widget.kind, WidgetKind::Range { .. })
+                        && (param.min != other.min
+                            || param.max != other.max
+                            || param.options.mapping != other.options.mapping
+                            || param.options.integer != other.options.integer
+                            || param.options.ranges != other.options.ranges
+                            || param.options.default_range != other.options.default_range)
+                    {
+                        return Err(name(
+                            "its two parameters must have the same range, mapping, and control ranges",
+                        ));
                     }
                 }
                 match widget.kind {

@@ -144,6 +144,14 @@ impl App {
                 return;
             }
             app.edits.touch(module, index);
+            let partner = app
+                .controller
+                .graph()
+                .node(ModuleId(module))
+                .and_then(|n| n.descriptor.range_partner(index));
+            if let Some(partner) = partner {
+                app.edits.touch(module, partner);
+            }
             app.commit();
         });
         self.refresh_values();
@@ -162,9 +170,14 @@ impl App {
         let outside = node
             .spec(index)
             .is_some_and(|selected| !(selected.min..=selected.max).contains(&value));
+        // A range widget's two parameters share a range, so it must hold both
+        // (control-ranges.md, Ranges on a range widget).
+        let partner = node.descriptor.range_partner(index).map(|p| node.params[p]);
         let wider = (outside && !spec.options.ranges.is_empty()).then(|| {
-            spec.smallest_range_holding(value)
-                .unwrap_or(loom_core::ParamRange::new(spec.min, spec.max))
+            let holds =
+                |range: &loom_core::ParamRange| range.contains(value) && partner.is_none_or(|v| range.contains(v));
+            let listed = spec.options.ranges.iter().copied().find(holds);
+            listed.unwrap_or(loom_core::ParamRange::new(spec.min, spec.max))
         });
         if let Some(range) = wider {
             if let Err(e) = self.controller.set_range(id, index, range) {

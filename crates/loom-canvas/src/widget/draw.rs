@@ -175,6 +175,22 @@ impl<Message> PatchCanvas<'_, Message> {
             overlay
                 .shapes
                 .push(Shape::new(ring, radius, Color::TRANSPARENT, p.focus, 1.5));
+            // Inside a range, the picked part has its own outline: thicker
+            // while it is grabbed (panel-widgets.md, rule 4).
+            if let (WidgetViewKind::Range { vertical, .. }, Some(inside)) = (&view.kind, state.inside)
+                && (inside.module, inside.widget) == (m.id, widget)
+            {
+                let at = |part| self.part_position(m.id, widget, part);
+                let ring = match inside.part {
+                    0 => range_handle(rect, *vertical, at(ControlPart::Main)).expand(2.0),
+                    2 => range_handle(rect, *vertical, at(ControlPart::Second)).expand(2.0),
+                    _ => range_track(rect, *vertical).expand(3.0),
+                };
+                let width = if inside.grab.is_some() { 2.5 } else { 1.5 };
+                overlay
+                    .shapes
+                    .push(Shape::new(ring, 2.0, Color::TRANSPARENT, p.selection, width));
+            }
         }
         match &state.interaction {
             Interaction::Wiring { from, pulled } => {
@@ -189,6 +205,10 @@ impl<Message> PatchCanvas<'_, Message> {
                     let part = state.cursor.map(|world| self.drop_part(module, widget, world));
                     let (ring, radius) = match (&view.kind, part) {
                         (WidgetViewKind::XyPad { .. }, Some(part)) => (xy_edge_ring(xy_area(rect), part), 2.0),
+                        (WidgetViewKind::Range { vertical, .. }, Some(part)) => {
+                            let at = self.part_position(module, widget, part);
+                            (range_handle(rect, *vertical, at).expand(2.0), 2.0)
+                        }
                         _ => focus_ring(&view.kind, rect),
                     };
                     overlay
@@ -477,6 +497,7 @@ impl<Message> PatchCanvas<'_, Message> {
                                 WidgetViewKind::Knob { .. }
                                     | WidgetViewKind::Fader { .. }
                                     | WidgetViewKind::XyPad { .. }
+                                    | WidgetViewKind::Range { .. }
                             )
                         })
                         .map(|v| v.text.as_str()),

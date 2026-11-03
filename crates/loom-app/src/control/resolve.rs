@@ -131,7 +131,7 @@ pub fn locate(app: &App, target: &str, found: &Found) -> Result<Rectangle, Strin
         return Ok(to_window(view, tile.bounds()));
     };
     let part = crate::targets::find(app.controller.graph(), module, name)?;
-    let world = crate::targets::world_bounds(&app.scene, part)?;
+    let world = crate::targets::world_bounds(&app.scene, &app.values, part)?;
     Ok(to_window(view, world))
 }
 

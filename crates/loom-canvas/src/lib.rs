@@ -26,6 +26,7 @@ pub use controls::{
     ModulationMark, PanelValues, PartValue, WidgetValue, fader_bar_point, knob_range_ring, segment_centre, xy_area,
     xy_edge_point,
 };
+pub use controls::{part_bounds, range_bar_point};
 pub use drag_line::DragLine;
 pub use scene::{
     CLOCK_MARK_RADIUS, CableView, GRID, HEADER, Hit, HoverText, LABEL_COLUMNS, ModulationView, ModuleView,

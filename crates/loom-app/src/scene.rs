@@ -70,6 +70,17 @@ fn transport_default(spec: &PortSpec) -> Option<TransportSignal> {
     }
 }
 
+/// One parameter's text, for an edge of an XY pad or a handle of a range.
+fn part_text(d: &ModuleDescriptor, name: &str) -> PartText {
+    d.params
+        .iter()
+        .find(|p| p.name == name)
+        .map_or_else(PartText::default, |p| PartText {
+            label: p.label.to_string(),
+            hover: HoverText::new(p.label, p.description, p.name),
+        })
+}
+
 /// The canvas view of a module's panel (ADR-0013). Controls show their
 /// parameter's label, meters their output's, and lights their display
 /// value's, each with its description as hover text
@@ -95,20 +106,13 @@ fn panel_view(d: &ModuleDescriptor) -> PanelView {
                     vertical,
                     steps: steps(),
                 },
-                WidgetKind::XyPad { y } => {
-                    let text = |name: &str| {
-                        d.params
-                            .iter()
-                            .find(|p| p.name == name)
-                            .map_or_else(PartText::default, |p| PartText {
-                                label: p.label.to_string(),
-                                hover: HoverText::new(p.label, p.description, p.name),
-                            })
-                    };
-                    WidgetViewKind::XyPad {
-                        parts: Box::new([text(w.bind()), text(y)]),
-                    }
-                }
+                WidgetKind::XyPad { y } => WidgetViewKind::XyPad {
+                    parts: Box::new([part_text(d, w.bind()), part_text(d, y)]),
+                },
+                WidgetKind::Range { high, vertical } => WidgetViewKind::Range {
+                    vertical,
+                    parts: Box::new([part_text(d, w.bind()), part_text(d, high)]),
+                },
                 WidgetKind::Toggle => WidgetViewKind::Toggle,
                 WidgetKind::Meter => WidgetViewKind::Meter {
                     zero: d.meter_display(w).map_or(0.0, |display| display.range.zero()),

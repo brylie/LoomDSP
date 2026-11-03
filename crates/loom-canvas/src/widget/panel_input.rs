@@ -91,16 +91,146 @@ impl<Message> PatchCanvas<'_, Message> {
         let rect = self.scene.module(module).and_then(|m| m.widget_bounds(widget));
         match (self.widget_kind(module, widget), rect) {
             (Some(WidgetViewKind::XyPad { .. }), Some(rect)) => xy_nearest_edge(xy_area(rect), world),
+            (Some(WidgetViewKind::Range { vertical, .. }), Some(rect)) => {
+                let (low, high) = (
+                    self.part_position(module, widget, ControlPart::Main),
+                    self.part_position(module, widget, ControlPart::Second),
+                );
+                range_nearest(rect, *vertical, low, high, world)
+            }
             _ => ControlPart::Main,
         }
     }
 
-    /// What a double-click resets: both values of an XY pad, or the
-    /// control's one value.
-    pub(super) fn reset_part(&self, module: u32, widget: usize) -> ControlPart {
+    /// What a double-click at `world` resets: both values of an XY pad, one or
+    /// both of a range, or the control's one value. `None` on a range's track
+    /// outside the band, where it only selects the module.
+    pub(super) fn reset_part(&self, module: u32, widget: usize, world: Point) -> Option<ControlPart> {
         match self.widget_kind(module, widget) {
-            Some(WidgetViewKind::XyPad { .. }) => ControlPart::Both,
-            _ => ControlPart::Main,
+            Some(WidgetViewKind::XyPad { .. }) => Some(ControlPart::Both),
+            Some(WidgetViewKind::Range { vertical, .. }) => {
+                let rect = self.scene.module(module)?.widget_bounds(widget)?;
+                let low = self.part_position(module, widget, ControlPart::Main);
+                let high = self.part_position(module, widget, ControlPart::Second);
+                RangeGrab::at(rect, *vertical, low, high, world).map(RangeGrab::reset)
+            }
+            _ => Some(ControlPart::Main),
+        }
+    }
+
+    /// The keyboard on a range: going inside, picking a part, grabbing it, and
+    /// moving it (panel-widgets.md, rule 4). Returns true if the key was used.
+    /// Learn mode has its own keys, and Tab always leaves.
+    fn range_keys(
+        &self,
+        state: &mut State,
+        key: &keyboard::Key,
+        modifiers: keyboard::Modifiers,
+        repeat: bool,
+        shell: &mut Shell<'_, Message>,
+    ) -> bool {
+        use keyboard::key::Named;
+        let Some((module, widget)) = state.focus else {
+            state.inside = None;
+            return false;
+        };
+        let Some(WidgetViewKind::Range { vertical, .. }) = self.widget_kind(module, widget) else {
+            state.inside = None;
+            return false;
+        };
+        let vertical = *vertical;
+        if state.inside.is_some_and(|i| (i.module, i.widget) != (module, widget)) {
+            state.inside = None;
+        }
+        if self.learn.is_some() {
+            state.inside = None;
+            return false;
+        }
+        let keyboard::Key::Named(named) = key.as_ref() else {
+            return false;
+        };
+        let low = self.part_position(module, widget, ControlPart::Main);
+        let high = self.part_position(module, widget, ControlPart::Second);
+        match (named, state.inside) {
+            (Named::Tab, _) => {
+                state.inside = None;
+                false
+            }
+            (Named::Enter, None) => {
+                if !repeat {
+                    state.inside = Some(Inside {
+                        module,
+                        widget,
+                        part: 0,
+                        grab: None,
+                    });
+                }
+                true
+            }
+            // Space on the widget itself does what it does on a knob.
+            (Named::Space | Named::Escape, None) => false,
+            (Named::ArrowUp | Named::ArrowDown | Named::ArrowLeft | Named::ArrowRight, None) => true,
+            (Named::Escape, Some(inside)) if inside.grab.is_some() => {
+                state.inside = Some(Inside { grab: None, ..inside });
+                true
+            }
+            // Pinned lines hide first; the next Escape leaves (modulation.md,
+            // Lines).
+            (Named::Escape, Some(_)) if self.pin(state).is_some() => false,
+            (Named::Escape, Some(_)) => {
+                state.inside = None;
+                true
+            }
+            (Named::Enter, Some(inside)) if inside.grab.is_some() => {
+                if !repeat {
+                    state.inside = Some(Inside { grab: None, ..inside });
+                }
+                true
+            }
+            (Named::Space, Some(inside)) if inside.grab.is_some() => true,
+            (Named::Space | Named::Enter, Some(inside)) => {
+                if !repeat {
+                    let grab = match inside.part {
+                        0 => RangeGrab::handle(ControlPart::Main, low, high),
+                        2 => RangeGrab::handle(ControlPart::Second, low, high),
+                        _ => RangeGrab::Band,
+                    };
+                    state.inside = Some(Inside {
+                        grab: Some(grab),
+                        ..inside
+                    });
+                }
+                true
+            }
+            (Named::ArrowUp | Named::ArrowDown | Named::ArrowLeft | Named::ArrowRight, Some(inside)) => {
+                let along = if vertical {
+                    matches!(named, Named::ArrowUp | Named::ArrowDown)
+                } else {
+                    matches!(named, Named::ArrowLeft | Named::ArrowRight)
+                };
+                if !along {
+                    return true;
+                }
+                let up = matches!(named, Named::ArrowUp | Named::ArrowRight);
+                let Some(grab) = inside.grab else {
+                    let part = if up {
+                        inside.part.saturating_add(1).min(2)
+                    } else {
+                        inside.part.saturating_sub(1)
+                    };
+                    state.inside = Some(Inside { part, ..inside });
+                    return true;
+                };
+                let step = if modifiers.shift() { 0.001 } else { 0.01 };
+                let (_, next_low, next_high) = grab.moved(low, high, if up { step } else { -step });
+                if !state.arrow_gesture {
+                    state.arrow_gesture = true;
+                    self.emit(shell, CanvasEvent::GestureStart);
+                }
+                self.set_pad(shell, module, widget, (low, high), (next_low, next_high));
+                true
+            }
+            _ => false,
         }
     }
 
@@ -131,6 +261,7 @@ impl<Message> PatchCanvas<'_, Message> {
         let rect = self.scene.module(module).and_then(|m| m.widget_bounds(widget));
         match (self.widget_kind(module, widget), rect) {
             (Some(WidgetViewKind::Fader { vertical, .. }), Some(rect)) => ValueDrag::fader(rect, *vertical, zoom),
+            (Some(WidgetViewKind::Range { vertical, .. }), Some(rect)) => ValueDrag::range(rect, *vertical, zoom),
             (Some(WidgetViewKind::Number { steps }), _) => ValueDrag::number(*steps),
             _ => ValueDrag::KNOB,
         }
@@ -155,6 +286,7 @@ impl<Message> PatchCanvas<'_, Message> {
                 crate::controls::on_fader_bar(rect, *vertical, world).then_some(ControlPart::Main)
             }
             WidgetViewKind::XyPad { .. } => xy_bar_at(xy_area(rect), world),
+            WidgetViewKind::Range { vertical, .. } => range_bar_at(rect, *vertical, world),
             _ => None,
         }?;
         let mark = self.values?.part_mark(module, widget, part);
@@ -428,6 +560,11 @@ impl<Message> PatchCanvas<'_, Message> {
             return true;
         }
         if self.open_typed_field(state, key, modifiers, text, repeat) {
+            shell.request_redraw();
+            shell.capture_event();
+            return true;
+        }
+        if self.range_keys(state, key, modifiers, repeat, shell) {
             shell.request_redraw();
             shell.capture_event();
             return true;

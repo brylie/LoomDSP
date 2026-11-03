@@ -30,6 +30,9 @@ Patch(
         // edge for `y`, whose assignment is off.
         PatchModulation(source: (1, "uni"), target: (2, "pad_x"), depth: 0.25),
         PatchModulation(source: (1, "bi"), target: (2, "pad_y"), depth: 0.25, enabled: false),
+        // A range: a bar and a live line for each handle.
+        PatchModulation(source: (1, "uni"), target: (2, "span_low"), depth: 0.25),
+        PatchModulation(source: (1, "bi"), target: (2, "span_high"), depth: 0.25),
         // A number shows a dot, and its text keeps the base value.
         PatchModulation(source: (1, "uni"), target: (2, "tempo"), depth: 0.25),
         // Toggle, radio, and button: the depths a drop gives them (one step).

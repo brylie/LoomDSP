@@ -171,6 +171,13 @@ pub enum WidgetViewKind {
         /// The text of `x`, then of `y`.
         parts: Box<[PartText; 2]>,
     },
+    /// A track with two handles (panel-widgets.md, Range).
+    Range {
+        /// True for a vertical track, false for a horizontal one.
+        vertical: bool,
+        /// The text of `low`, then of `high`.
+        parts: Box<[PartText; 2]>,
+    },
     /// A value shown as text in a box (panel-widgets.md, Number).
     Number {
         /// Whole-number values to step through, or 0, as for a knob.
@@ -225,7 +232,7 @@ impl WidgetViewKind {
     /// The text of each value of a widget that binds two, or `None`.
     pub fn parts(&self) -> Option<&[PartText; 2]> {
         match self {
-            Self::XyPad { parts } => Some(parts),
+            Self::XyPad { parts } | Self::Range { parts, .. } => Some(parts),
             _ => None,
         }
     }
@@ -261,8 +268,8 @@ impl WidgetView {
     pub fn size(&self) -> (u8, u8) {
         match &self.kind {
             WidgetViewKind::Knob { .. } => (3, 3),
-            WidgetViewKind::Fader { vertical: true, .. } => (2, 6),
-            WidgetViewKind::Fader { vertical: false, .. } => (6, 2),
+            WidgetViewKind::Fader { vertical: true, .. } | WidgetViewKind::Range { vertical: true, .. } => (2, 6),
+            WidgetViewKind::Fader { vertical: false, .. } | WidgetViewKind::Range { vertical: false, .. } => (6, 2),
             WidgetViewKind::XyPad { .. } => (6, 6),
             WidgetViewKind::Number { .. } => (5, 2),
             WidgetViewKind::Readout { width } => (*width, 2),
@@ -310,6 +317,7 @@ impl WidgetView {
             WidgetViewKind::Knob { .. }
                 | WidgetViewKind::Fader { .. }
                 | WidgetViewKind::XyPad { .. }
+                | WidgetViewKind::Range { .. }
                 | WidgetViewKind::Number { .. }
                 | WidgetViewKind::Toggle
                 | WidgetViewKind::Radio { .. }

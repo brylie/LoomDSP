@@ -333,6 +333,7 @@ fn kind_name(kind: &WidgetViewKind) -> &'static str {
         WidgetViewKind::Knob { .. } => "knob",
         WidgetViewKind::Fader { .. } => "fader",
         WidgetViewKind::XyPad { .. } => "xy_pad",
+        WidgetViewKind::Range { .. } => "range",
         WidgetViewKind::Number { .. } => "number",
         WidgetViewKind::Toggle => "toggle",
         WidgetViewKind::Radio { .. } => "radio",

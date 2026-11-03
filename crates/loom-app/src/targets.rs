@@ -12,7 +12,7 @@
 //! `badge:OUTPUT` names an output's assignment count badge, such as
 //! `5:badge:out`.
 
-use loom_canvas::{PORT_HIT_RADIUS, PortRef, Scene};
+use loom_canvas::{ControlPart, PORT_HIT_RADIUS, PanelValues, PortRef, Scene};
 use loom_core::{Graph, ModuleId};
 
 /// The prefix that names a light or a meter only.
@@ -161,8 +161,30 @@ pub fn name(graph: &Graph, part: Part) -> Option<String> {
 
 /// Where a part is drawn, in world units: a widget's rectangle, the
 /// square a port is hit in, or a badge. An error when it is not drawn.
-pub fn world_bounds(scene: &Scene, part: Part) -> Result<iced::Rectangle, String> {
+///
+/// A name on an XY pad or a range aims at that value: inside the pad, at the
+/// middle of that value's edge, or at the handle (`docs/design/control-channel.md`,
+/// rule 10).
+pub fn world_bounds(scene: &Scene, values: &PanelValues, part: Part) -> Result<iced::Rectangle, String> {
     let not_drawn = || "it is not on the canvas".to_string();
+    if let Part::Control(module, widget) | Part::Second(module, widget) = part
+        && let Some(aim) = scene.module(module).and_then(|m| {
+            let rect = m.widget_bounds(widget)?;
+            let control = if matches!(part, Part::Second(..)) {
+                ControlPart::Second
+            } else {
+                ControlPart::Main
+            };
+            loom_canvas::part_bounds(
+                &m.panel.widgets.get(widget)?.kind,
+                rect,
+                values.part_position(module, widget, control),
+                control,
+            )
+        })
+    {
+        return Ok(aim);
+    }
     match part {
         Part::Control(module, widget) | Part::Second(module, widget) | Part::Display(module, widget) => scene
             .module(module)

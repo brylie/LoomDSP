@@ -531,7 +531,9 @@ fn pick_up(controller: &mut Controller, target: &Named) -> Result<(PortRef, bool
 fn find_point(controller: &Controller, scene: &Scene, target: &Named) -> Result<Point, String> {
     descriptor(controller, target.module)?;
     let part = crate::targets::find(controller.graph(), target.module, &target.name)?;
-    crate::targets::world_bounds(scene, part)
+    let mut values = PanelValues::new();
+    crate::scene::update_panel_values(&mut values, controller, &BTreeMap::new());
+    crate::targets::world_bounds(scene, &values, part)
         .map(|bounds| bounds.center())
         .map_err(|e| format!("{}:{}: {e}", target.module, target.name))
 }
@@ -564,7 +566,7 @@ fn depth_assignment(
     // their depth in the inspector.
     if !kind.has_range() {
         return Err(format!(
-            "the control for {module}:{} shows no range, so it has none to drag",
+            "the control for {module}:{} is not a knob, a fader, an XY pad, or a range, so it has no range to drag",
             spec.name
         ));
     }

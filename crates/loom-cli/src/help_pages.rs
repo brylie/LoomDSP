@@ -309,6 +309,7 @@ fn widget(d: &ModuleDescriptor, w: &Widget) -> String {
         WidgetKind::Fader { .. } => format!("Fader: {}", param(w.bind())),
         WidgetKind::Number => format!("Number: {}", param(w.bind())),
         WidgetKind::XyPad { y } => format!("XY pad: {}, {}", param(w.bind()), param(y)),
+        WidgetKind::Range { high, .. } => format!("Range: {} to {}", param(w.bind()), param(high)),
         WidgetKind::Toggle => format!("Toggle: {}", param(w.bind())),
         WidgetKind::Radio => {
             let choices = d

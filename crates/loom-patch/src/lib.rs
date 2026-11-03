@@ -647,14 +647,29 @@ impl Patch {
         }
         for (index, spec) in descriptor.params.iter().enumerate() {
             let value = spec.clamp(module.params.get(spec.name).copied().unwrap_or(spec.default));
-            let saved = module
-                .ranges
-                .get(spec.name)
-                .map(|&(min, max)| ParamRange::new(min, max));
-            let Some((range, reported)) = spec.load_range(saved, value) else {
+            let saved_of = |spec: &loom_core::ParamSpec| {
+                module
+                    .ranges
+                    .get(spec.name)
+                    .map(|&(min, max)| ParamRange::new(min, max))
+            };
+            let saved = saved_of(spec);
+            let value_of =
+                |spec: &loom_core::ParamSpec| spec.clamp(module.params.get(spec.name).copied().unwrap_or(spec.default));
+            let Some((range, reported)) = descriptor.load_range(index, saved_of, value_of) else {
                 continue;
             };
-            if reported && let Some(saved) = saved {
+            let partner = descriptor.range_partner(index);
+            if reported && let Some(partner) = partner {
+                // Said once for the pair (control-ranges.md, Ranges on a range
+                // widget).
+                if index < partner {
+                    notes.push(format!(
+                        "module {}: parameters `{}` and `{}` share a range, and the saved ranges do not hold both values; they load with {range}",
+                        module.id, spec.name, descriptor.params[partner].name
+                    ));
+                }
+            } else if reported && let Some(saved) = saved {
                 notes.push(format!(
                     "module {}: parameter `{}` was saved with range {saved}, which {}; it loads with {range}",
                     module.id,

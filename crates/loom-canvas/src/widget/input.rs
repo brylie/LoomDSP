@@ -401,6 +401,23 @@ impl<Message> PatchCanvas<'_, Message> {
                         *position = next;
                         self.set_pad(shell, module, widget, before, next);
                     }
+                    Interaction::Range {
+                        module,
+                        widget,
+                        grab,
+                        drag,
+                        last,
+                        position,
+                    } => {
+                        let along = drag.along(screen);
+                        let delta = drag.moved(0.5, along - *last, state.modifiers.shift()) - 0.5;
+                        *last = along;
+                        let (next_grab, low, high) = grab.moved(position.0, position.1, delta);
+                        *grab = next_grab;
+                        let (module, widget, before) = (*module, *widget, *position);
+                        *position = (low, high);
+                        self.set_pad(shell, module, widget, before, (low, high));
+                    }
                     Interaction::Depth {
                         module,
                         widget,
@@ -474,6 +491,7 @@ impl<Message> PatchCanvas<'_, Message> {
                         | Interaction::Resizing { .. }
                         | Interaction::Turning { .. }
                         | Interaction::Pad { .. }
+                        | Interaction::Range { .. }
                         | Interaction::Wiring { .. }
                         | Interaction::Depth { .. }
                 );
@@ -575,6 +593,7 @@ impl<Message> PatchCanvas<'_, Message> {
                     | Interaction::Moving { .. }
                     | Interaction::Turning { .. }
                     | Interaction::Pad { .. }
+                    | Interaction::Range { .. }
                     | Interaction::Depth { .. } => {}
                 }
                 if gesture {
@@ -640,6 +659,9 @@ impl<Message> PatchCanvas<'_, Message> {
         }
         let shift = state.modifiers.shift();
         let hit = self.scene.hit(world, state.hit_radius());
+        // A press ends the keyboard's inside of a composite widget and any
+        // grab (panel-widgets.md, rule 4).
+        state.inside = None;
         state.tab_focus = false;
         state.focus_first = false;
         // The ring of a modulated knob reaches a little past the knob's
@@ -681,9 +703,14 @@ impl<Message> PatchCanvas<'_, Message> {
                 self.select_for_edit(module, shell);
                 state.focus = Some((module, widget));
                 let now = Instant::now();
-                let double = state
-                    .last_click
-                    .is_some_and(|(at, m, w)| m == module && w == widget && now - at < DOUBLE_CLICK);
+                // Where a double-click resets, and so what it must land on
+                // twice: `low` then `high` is not a double-click.
+                let reset = self.reset_part(module, widget, world);
+                let double = reset.is_some_and(|part| {
+                    state
+                        .last_click
+                        .is_some_and(|(at, m, w, p)| m == module && w == widget && p == part && now - at < DOUBLE_CLICK)
+                });
                 // A button's second press is another press. Other controls
                 // reset to the default (panels.md, Interaction).
                 let button = matches!(self.widget_kind(module, widget), Some(WidgetViewKind::Button));
@@ -694,18 +721,43 @@ impl<Message> PatchCanvas<'_, Message> {
                         CanvasEvent::ResetControl {
                             module,
                             widget,
-                            part: self.reset_part(module, widget),
+                            part: reset.unwrap_or_default(),
                         },
                     );
                     return;
                 }
-                state.last_click = Some((now, module, widget));
+                state.last_click = reset.map(|part| (now, module, widget, part));
                 if button {
                     self.press_button(state, module, widget, shell);
                     return;
                 }
                 let position = self.position(module, widget);
                 let click = match self.widget_kind(module, widget) {
+                    Some(WidgetViewKind::Range { vertical, .. }) => {
+                        let vertical = *vertical;
+                        let bounds = self.scene.module(module).and_then(|m| m.widget_bounds(widget));
+                        let high = self.part_position(module, widget, ControlPart::Second);
+                        let grab = bounds.and_then(|rect| RangeGrab::at(rect, vertical, position, high, world));
+                        if let (Some(grab), Some(rect)) = (grab, bounds) {
+                            let drag = ValueDrag::range(rect, vertical, state.camera.zoom);
+                            self.begin(
+                                state,
+                                Interaction::Range {
+                                    module,
+                                    widget,
+                                    grab,
+                                    drag,
+                                    last: drag.along(screen),
+                                    position: (position, high),
+                                },
+                                shell,
+                            );
+                            return;
+                        }
+                        // A press on the track outside the band moves the tile,
+                        // and never jumps a handle (panel-widgets.md, rule 2).
+                        None
+                    }
                     Some(WidgetViewKind::XyPad { .. }) => {
                         let Some(area) = self
                             .scene

@@ -504,6 +504,105 @@ fn an_xy_pad_needs_two_parameters_that_hide_together() {
     assert_eq!(GOOD[0].params().collect::<Vec<_>>(), ["cutoff", "gain"]);
 }
 
+/// A range needs two parameters with the same range, mapping, and control
+/// ranges, because both handles sit on one track (panel-widgets.md, Range).
+#[test]
+fn a_range_needs_parameters_that_share_a_track() {
+    const OFFERED: &[ParamRange] = &[ParamRange::new(-1.0, 1.0), ParamRange::new(-10.0, 10.0)];
+    const LESS: &[ParamRange] = &[ParamRange::new(-10.0, 10.0)];
+    static PARAMS: [ParamSpec; 7] = [
+        param("low", 0.0, 1.0, 0.0, ""),
+        param("high", 0.0, 1.0, 1.0, ""),
+        param("wider", 0.0, 2.0, 1.0, ""),
+        param("curved", 0.1, 1.0, 1.0, "").logarithmic(),
+        param("a", -10.0, 10.0, 0.0, "").ranges(OFFERED, ParamRange::new(-1.0, 1.0)),
+        param("b", -10.0, 10.0, 1.0, "").ranges(OFFERED, ParamRange::new(-1.0, 1.0)),
+        param("c", -10.0, 10.0, 1.0, "").ranges(LESS, ParamRange::new(-10.0, 10.0)),
+    ];
+    static GOOD: [Widget; 1] = [Widget::range(0, 0, "low", "high", "Span")];
+    static TALL: [Widget; 1] = [Widget::range_vertical(0, 0, "low", "high", "Span")];
+    static RANGES: [Widget; 1] = [Widget::range(0, 0, "a", "b", "Span")];
+    static WIDER: [Widget; 1] = [Widget::range(0, 0, "low", "wider", "Span")];
+    static CURVED: [Widget; 1] = [Widget::range(0, 0, "low", "curved", "Span")];
+    static LISTS: [Widget; 1] = [Widget::range(0, 0, "a", "c", "Span")];
+    let check = |widgets, width, height| {
+        ModuleDescriptor {
+            params: &PARAMS,
+            panel: Panel::new(width, height, widgets),
+            ..NAMED
+        }
+        .check_panel()
+    };
+    assert!(check(&GOOD, 6, 2).is_ok());
+    assert!(check(&TALL, 2, 6).is_ok());
+    assert!(check(&RANGES, 6, 2).is_ok());
+    assert!(check(&GOOD, 5, 2).unwrap_err().contains("outside"));
+    for bad in [&WIDER, &CURVED, &LISTS] {
+        assert!(check(bad, 6, 2).unwrap_err().contains("same range"));
+    }
+}
+
+/// A range widget's two parameters load with one range: a saved one they agree
+/// on that holds both, or else the smallest that does, and no saved value
+/// changes (control-ranges.md, Ranges on a range widget).
+#[test]
+fn a_range_widgets_parameters_load_with_one_range() {
+    const R1: ParamRange = ParamRange::new(-1.0, 1.0);
+    const R5: ParamRange = ParamRange::new(-5.0, 5.0);
+    const R10: ParamRange = ParamRange::new(-10.0, 10.0);
+    const OFFERED: &[ParamRange] = &[R1, R5, R10];
+    static PARAMS: [ParamSpec; 3] = [
+        param("a", -10.0, 10.0, 0.0, "").ranges(OFFERED, R1),
+        param("b", -10.0, 10.0, 1.0, "").ranges(OFFERED, R1),
+        param("alone", -10.0, 10.0, 1.0, "").ranges(OFFERED, R1),
+    ];
+    static WIDGETS: [Widget; 1] = [Widget::range(0, 0, "a", "b", "Span")];
+    let d = ModuleDescriptor {
+        params: &PARAMS,
+        panel: Panel::new(6, 2, &WIDGETS),
+        ..NAMED
+    };
+    assert_eq!(d.range_partner(0), Some(1));
+    assert_eq!(d.range_partner(1), Some(0));
+    assert_eq!(d.range_partner(2), None);
+
+    let load = |index, saved: [Option<ParamRange>; 2], values: [f32; 2]| {
+        let at = |spec: &ParamSpec| usize::from(spec.name == "b");
+        d.load_range(index, |spec| saved[at(spec)], |spec| values[at(spec)])
+    };
+    assert_eq!(load(0, [None, None], [0.0, 1.0]), Some((R1, false)), "the default");
+    assert_eq!(
+        load(0, [None, None], [0.0, 3.0]),
+        Some((R5, false)),
+        "holds both, no report"
+    );
+    assert_eq!(
+        load(1, [None, None], [0.0, 3.0]),
+        Some((R5, false)),
+        "the same for both"
+    );
+    assert_eq!(
+        load(0, [Some(R10), Some(R10)], [0.0, 1.0]),
+        Some((R10, false)),
+        "agreed"
+    );
+    assert_eq!(
+        load(0, [Some(R1), Some(R10)], [0.0, 1.0]),
+        Some((R1, true)),
+        "they differ"
+    );
+    assert_eq!(
+        load(1, [Some(R1), Some(R10)], [0.0, 1.0]),
+        Some((R1, true)),
+        "the same for both"
+    );
+    assert_eq!(
+        load(0, [Some(R1), Some(R1)], [0.0, 3.0]),
+        Some((R5, true)),
+        "does not hold both"
+    );
+}
+
 /// A button shows one parameter. Its mode and hold do not count as bound, so a
 /// lookup by name finds what it found before widgets could bind two.
 #[test]

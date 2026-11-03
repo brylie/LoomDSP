@@ -134,6 +134,7 @@ impl<Message> PatchCanvas<'_, Message> {
             Some(Hit::Port(_) | Hit::Badge(_)) => mouse::Interaction::Pointer,
             Some(Hit::Widget { module, widget }) => match self.widget_kind(module, widget) {
                 Some(WidgetViewKind::XyPad { .. }) => mouse::Interaction::Crosshair,
+                Some(WidgetViewKind::Range { .. }) => self.value_drag(module, widget, state.camera.zoom).cursor(),
                 Some(kind) if kind.is_one_number() => self.value_drag(module, widget, state.camera.zoom).cursor(),
                 _ => mouse::Interaction::Pointer,
             },
