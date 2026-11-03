@@ -835,7 +835,11 @@ impl App {
         }
         let current = self.current_patch();
         if let Some(line) = self.document.autosave(now, current) {
-            self.alerts.say(line);
+            if line == recovery::AUTOSAVE_WORKS {
+                self.alerts.say(line);
+            } else {
+                self.alerts.warn(line);
+            }
         }
     }
 
@@ -1021,7 +1025,7 @@ impl App {
         let live: std::collections::HashSet<ProbeId> = self.live.probes().collect();
         self.meter_levels.retain(|probe, _| live.contains(probe));
         if let Err(e) = self.controller.commit() {
-            self.alerts.say(format!("error: {e}"));
+            self.alerts.warn(e.to_string());
         }
     }
 
@@ -1197,7 +1201,7 @@ impl App {
         let Some(folder) = self.library_folder() else {
             if self.rig.store.saved().library_folder().is_none() {
                 self.alerts
-                    .say("No library folder: set `library` in the preferences file.".to_string());
+                    .warn("No library folder: set `library` in the preferences file.".to_string());
             }
             return Task::none();
         };
@@ -1253,7 +1257,7 @@ impl App {
                 app.selection = BTreeSet::from([id.0]);
                 app.commit();
             }
-            Err(e) => app.alerts.say(format!("Could not add {}: {e}", descriptor.name)),
+            Err(e) => app.alerts.warn(format!("Could not add {}: {e}", descriptor.name)),
         });
     }
 
@@ -1262,7 +1266,7 @@ impl App {
     fn add_probe(&mut self, probe: probe_menu::Probe, output: loom_canvas::PortRef, world: Point) {
         let Some(descriptor) = self.modules.iter().copied().find(|d| d.id == probe.id()) else {
             self.alerts
-                .say(format!("Cannot {}: no module `{}`", probe.verb(), probe.id()));
+                .warn(format!("Cannot {}: no module `{}`", probe.verb(), probe.id()));
             return;
         };
         let tiles: Vec<iced::Rectangle> = self.scene.modules().iter().map(|m| m.bounds()).collect();
@@ -1279,7 +1283,7 @@ impl App {
             .node(source.module)
             .is_some_and(|node| source.port < node.descriptor.outputs.len());
         if !exists {
-            self.alerts.say(format!("Cannot {}: the output is gone", probe.verb()));
+            self.alerts.warn(format!("Cannot {}: the output is gone", probe.verb()));
             return;
         }
         self.close_slider_gesture();
@@ -1288,7 +1292,7 @@ impl App {
             let id = match app.controller.add_module(descriptor.id) {
                 Ok(id) => id,
                 Err(e) => {
-                    app.alerts.say(format!("Cannot {}: {e}", probe.verb()));
+                    app.alerts.warn(format!("Cannot {}: {e}", probe.verb()));
                     return;
                 }
             };
@@ -1297,7 +1301,7 @@ impl App {
                 // so the edit makes no step.
                 let _ = app.controller.remove_module(id);
                 app.commit();
-                app.alerts.say(format!("Cannot {}: {e}", probe.verb()));
+                app.alerts.warn(format!("Cannot {}: {e}", probe.verb()));
                 return;
             }
             app.positions.insert(id.0, corner);
@@ -1362,7 +1366,7 @@ impl App {
                 if let Some(example) = example {
                     match Patch::from_ron(&example) {
                         Ok(patch) => self.after_discard(question::AfterDiscard::Example(Box::new(patch))),
-                        Err(error) => self.alerts.say(format!("Could not open example: {error}")),
+                        Err(error) => self.alerts.warn(format!("Could not open example: {error}")),
                     }
                 }
             }
@@ -1374,7 +1378,7 @@ impl App {
                 if let Some(descriptor) = descriptor {
                     self.help = Some(help::Help::new(descriptor));
                 } else {
-                    self.alerts.say(format!("Linked document is not bundled: {link}"));
+                    self.alerts.warn(format!("Linked document is not bundled: {link}"));
                 }
             }
             Message::CloseTileMenu => self.tile_menu = None,
@@ -1519,7 +1523,7 @@ impl App {
                 self.edits.start_slider_gesture();
                 self.begin_edit();
                 if let Err(e) = self.controller.set_assignment_depth(id, depth) {
-                    self.alerts.say(format!("error: {e}"));
+                    self.alerts.warn(e.to_string());
                 }
                 self.refresh_values();
             }
@@ -1527,7 +1531,7 @@ impl App {
                 self.close_slider_gesture();
                 self.edit(|app| {
                     if let Err(e) = app.controller.set_assignment_polarity(id, choice.polarity()) {
-                        app.alerts.say(format!("error: {e}"));
+                        app.alerts.warn(e.to_string());
                     }
                     app.refresh_values();
                 });
@@ -1536,7 +1540,7 @@ impl App {
                 self.close_slider_gesture();
                 self.edit(|app| {
                     if let Err(e) = app.controller.set_assignment_enabled(id, enabled) {
-                        app.alerts.say(format!("error: {e}"));
+                        app.alerts.warn(e.to_string());
                     } else {
                         app.scene.set_modulation_enabled(id.0, enabled);
                     }
@@ -1555,7 +1559,7 @@ impl App {
                             modulation::target_name(graph, removed.target, removed.param)
                         ));
                     }
-                    Err(e) => app.alerts.say(format!("error: {e}")),
+                    Err(e) => app.alerts.warn(e.to_string()),
                 });
             }
             Message::SelectModule(id) => {
@@ -1678,7 +1682,7 @@ impl App {
                         ));
                     }
                     Ok(None) => {}
-                    Err(e) => app.alerts.say(format!("error: {e}")),
+                    Err(e) => app.alerts.warn(e.to_string()),
                 });
             }
             Message::Midi => {
@@ -1740,13 +1744,13 @@ impl App {
         let Some((transport, index)) = transport_run(&self.controller) else {
             let running = !self.controller.transport().running;
             if let Err(e) = self.controller.set_running(running) {
-                self.alerts.say(format!("error: {e}"));
+                self.alerts.warn(e.to_string());
             }
             return;
         };
         if run_is_driven(&self.controller) {
             self.alerts
-                .say("Run follows the cable on the Transport's run input".to_string());
+                .warn("Run follows the cable on the Transport's run input".to_string());
             return;
         }
         let on = self

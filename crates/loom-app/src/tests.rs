@@ -2257,7 +2257,12 @@ fn learn_disarms_on_a_second_click_and_bad_params_say_why() {
     assert_eq!(app.alerts.status(), "MIDI learn: click a control to map it");
 
     app.set_param(id, 999, 0.5);
-    assert!(app.alerts.status().starts_with("error: "), "{}", app.alerts.status());
+    assert_eq!(
+        app.alerts.severity(),
+        alerts::Severity::Warning,
+        "{}",
+        app.alerts.status()
+    );
 }
 
 /// The matrix Add form needs both ends before it adds anything.

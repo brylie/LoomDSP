@@ -492,7 +492,7 @@ impl App {
         let mut preferences = self.rig.store.saved().clone();
         preferences.output_safety = mode;
         if let Some(error) = self.rig.save(preferences) {
-            self.alerts.say(error);
+            self.alerts.warn(error);
         }
         // With no device there is no engine playing to tell. The next
         // engine is built with the new mode.
@@ -514,7 +514,7 @@ impl App {
         let mut preferences = self.rig.store.saved().clone();
         preferences.author = author;
         if let Some(error) = self.rig.save(preferences) {
-            self.alerts.say(error);
+            self.alerts.warn(error);
         }
     }
 
@@ -526,7 +526,7 @@ impl App {
         let mut preferences = self.rig.store.saved().clone();
         preferences.licence = licence;
         if let Some(error) = self.rig.save(preferences) {
-            self.alerts.say(error);
+            self.alerts.warn(error);
         }
     }
 
@@ -538,13 +538,13 @@ impl App {
         let mut preferences = self.rig.store.saved().clone();
         preferences.show_activity = on;
         if let Some(error) = self.rig.save(preferences) {
-            self.alerts.say(error);
+            self.alerts.warn(error);
         }
         self.live.set_activity(on);
         self.carrying.clear();
         self.sync_live();
         if let Err(error) = self.controller.commit() {
-            self.alerts.say(format!("error: {error}"));
+            self.alerts.warn(error.to_string());
         }
     }
 
@@ -609,7 +609,7 @@ impl App {
         self.rig.input.choose(&mut self.controller, &mut self.alerts);
         self.sync_audio_input();
         if let Some(error) = error {
-            self.alerts.say(error);
+            self.alerts.warn(error);
         }
     }
 
@@ -653,12 +653,12 @@ impl App {
             let output = match devices::open_choice(&*self.rig.host, &play) {
                 Ok(output) => output,
                 Err(e) => {
-                    self.alerts.say(self.could_not_use(&play, &e));
+                    self.alerts.warn(self.could_not_use(&play, &e));
                     return;
                 }
             };
             if let Err(e) = self.restart_audio(output) {
-                self.alerts.say(e);
+                self.alerts.warn(e);
                 return;
             }
             self.audio_back();
@@ -673,7 +673,7 @@ impl App {
         // The flags that are left still set this run; what is saved is the
         // player's choice.
         if let Some(error) = self.rig.save(saved) {
-            self.alerts.say(error);
+            self.alerts.warn(error);
         }
     }
 
@@ -867,7 +867,7 @@ impl App {
         self.refresh_values();
         // After the commit, which sets the status line too.
         if let Some(error) = record_error {
-            self.alerts.say(error);
+            self.alerts.warn(error);
         }
         Ok(())
     }
@@ -1277,7 +1277,7 @@ impl App {
             (true, Some(_)) | (false, None) => return,
             (true, None) => {
                 if let Err(e) = self.open_input(name) {
-                    self.alerts.say(format!("MIDI: {e}"));
+                    self.alerts.warn(format!("MIDI: {e}"));
                     return;
                 }
             }
@@ -1288,7 +1288,7 @@ impl App {
         let mut preferences = self.rig.store.saved().clone();
         preferences.midi.set(name, on);
         if let Some(error) = self.rig.save(preferences) {
-            self.alerts.say(error);
+            self.alerts.warn(error);
         }
     }
 

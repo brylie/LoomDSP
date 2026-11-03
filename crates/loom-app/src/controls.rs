@@ -41,7 +41,7 @@ impl App {
             .is_some_and(|spec| spec.is_transient());
         if transient {
             // A live gesture cannot be mapped (transient-params.md).
-            self.alerts.say(format!(
+            self.alerts.warn(format!(
                 "MIDI learn: {} is a live control and cannot be mapped",
                 learn::param_name(&self.controller, param)
             ));
@@ -98,7 +98,7 @@ impl App {
             }
             Err(e) => {
                 self.learn.disarm();
-                self.alerts.say(format!("error: {e}"));
+                self.alerts.warn(e.to_string());
                 self.refresh_learn();
             }
         }
@@ -140,7 +140,7 @@ impl App {
         self.close_slider_gesture();
         self.edit(|app| {
             if let Err(e) = app.controller.set_range(ModuleId(module), index, range) {
-                app.alerts.say(format!("error: {e}"));
+                app.alerts.warn(e.to_string());
                 return;
             }
             app.edits.touch(module, index);
@@ -168,7 +168,7 @@ impl App {
         });
         if let Some(range) = wider {
             if let Err(e) = self.controller.set_range(id, index, range) {
-                self.alerts.say(format!("error: {e}"));
+                self.alerts.warn(e.to_string());
             }
             self.set_param(module, index, value);
             // The commit puts the bounds into the schedule (control-ranges.md,
@@ -299,7 +299,7 @@ impl App {
     /// Sets a parameter from a control on a tile or in the inspector.
     pub(crate) fn set_param(&mut self, module: u32, index: usize, value: f32) {
         if let Err(e) = self.controller.set_param(ModuleId(module), index, value) {
-            self.alerts.say(format!("error: {e}"));
+            self.alerts.warn(e.to_string());
         }
         self.edits.touch(module, index);
         self.sync_audio_input();
@@ -360,7 +360,7 @@ impl App {
             modulation::target_name(graph, target, index),
         );
         if modulation::exists(graph, source, target, index) {
-            self.alerts.say(format!("{from} already modulates {to}"));
+            self.alerts.warn(format!("{from} already modulates {to}"));
             return;
         }
         let depth = modulation::default_depth(&spec);
@@ -371,7 +371,7 @@ impl App {
                         .say(format!("{from} modulates {to}, {}", modulation::depth_text(depth)));
                 }
             }
-            Err(e) => self.alerts.say(format!("error: {e}")),
+            Err(e) => self.alerts.warn(e.to_string()),
         }
     }
 
@@ -393,7 +393,7 @@ impl App {
             match modulation::drag_target(graph, ModuleId(module), param, pinned, selected) {
                 Ok(id) => Some(id),
                 Err(why) => {
-                    self.alerts.say(why.to_string());
+                    self.alerts.warn(why.to_string());
                     None
                 }
             }
@@ -410,7 +410,7 @@ impl App {
                     modulation::depth_text(depth)
                 ));
             }
-            Err(e) => self.alerts.say(format!("error: {e}")),
+            Err(e) => self.alerts.warn(e.to_string()),
         }
         self.refresh_values();
     }

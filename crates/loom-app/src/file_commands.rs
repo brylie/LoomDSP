@@ -56,7 +56,7 @@ impl App {
             Ok(()) => Some(dir),
             Err(e) => {
                 self.alerts
-                    .say(format!("Could not make the library folder \"{}\": {e}.", dir.display()));
+                    .warn(format!("Could not make the library folder \"{}\": {e}.", dir.display()));
                 None
             }
         }
@@ -75,7 +75,7 @@ impl App {
     /// only the convenience, so it is only said.
     fn used_folder_of(&mut self, path: &Path) {
         if let Err(e) = self.rig.recent.used_folder_of(path) {
-            self.alerts.say(format!("Could not keep the last folder: {e}."));
+            self.alerts.warn(format!("Could not keep the last folder: {e}."));
         }
     }
 
@@ -94,7 +94,7 @@ impl App {
         // from another folder, and the same file is listed once.
         let path = std::path::absolute(file).unwrap_or_else(|_| file.to_path_buf());
         if let Err(e) = self.rig.recent.remember(&path) {
-            self.alerts.say(format!("Could not keep the recent patches: {e}."));
+            self.alerts.warn(format!("Could not keep the recent patches: {e}."));
         }
     }
 
@@ -157,7 +157,7 @@ impl App {
         self.finish_edits();
         if !self.control.is_empty() {
             self.alerts
-                .say("Save As opens a file dialog; use the `save` command instead.".to_string());
+                .warn("Save As opens a file dialog; use the `save` command instead.".to_string());
             return false;
         }
         // A patch with no file yet starts in the last folder used, or else
@@ -442,7 +442,7 @@ impl App {
                 format!(" Note: {notes}.")
             };
             self.alerts
-                .say(format!("Opened \"{name}\". Drop one patch at a time.{notes}"));
+                .warn(format!("Opened \"{name}\". Drop one patch at a time.{notes}"));
         }
     }
 
@@ -470,12 +470,12 @@ impl App {
         // cannot open.
         if !path.is_file() {
             if let Err(e) = self.rig.recent.forget(&path) {
-                self.alerts.say(format!("Could not keep the recent patches: {e}."));
+                self.alerts.warn(format!("Could not keep the recent patches: {e}."));
                 return;
             }
             let name = files::display_name(Some(&path));
             self.alerts
-                .say(format!("\"{name}\" is no longer there, so it is off the list."));
+                .warn(format!("\"{name}\" is no longer there, so it is off the list."));
             return;
         }
         self.after_discard(AfterDiscard::OpenPath(path));
@@ -486,7 +486,7 @@ impl App {
     pub(crate) fn file_dropped(&mut self, path: PathBuf) {
         if self.question.is_some() {
             self.alerts
-                .say("The dropped file was not opened: answer the question first.".to_string());
+                .warn("The dropped file was not opened: answer the question first.".to_string());
         } else {
             self.drops.push(path);
         }
@@ -500,7 +500,7 @@ impl App {
         }
         if self.question.is_some() {
             self.alerts
-                .say("The dropped file was not opened: answer the question first.".to_string());
+                .warn("The dropped file was not opened: answer the question first.".to_string());
             return;
         }
         match crate::recent::dropped(&drops) {
@@ -509,7 +509,7 @@ impl App {
             }
             crate::recent::Dropped::NoPatch => {
                 self.alerts
-                    .say("Only LoomDSP patches (.ron) can be opened here.".to_string());
+                    .warn("Only LoomDSP patches (.ron) can be opened here.".to_string());
             }
         }
     }

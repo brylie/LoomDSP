@@ -37,7 +37,7 @@ impl App {
                 self.alerts
                     .say("Panic: every note released and every module reset.".to_string());
             }
-            Err(e) => self.alerts.say(format!("Panic: {e}")),
+            Err(e) => self.alerts.warn(format!("Panic: {e}")),
         }
     }
 
@@ -46,7 +46,7 @@ impl App {
     pub(crate) fn send_panic_trigger(&mut self) {
         let trigger = self.rig.store.saved().panic.map(PanicPref::trigger);
         if let Err(e) = self.controller.set_panic_trigger(trigger) {
-            self.alerts.say(format!("Panic: {e}"));
+            self.alerts.warn(format!("Panic: {e}"));
         }
     }
 
@@ -105,7 +105,7 @@ impl App {
         let mut preferences = self.rig.store.saved().clone();
         preferences.panic = panic;
         if let Some(error) = self.rig.store.save(preferences).err() {
-            self.alerts.say(error);
+            self.alerts.warn(error);
         }
         self.send_panic_trigger();
     }

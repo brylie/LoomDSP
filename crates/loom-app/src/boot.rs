@@ -417,7 +417,7 @@ impl App {
         app.sync_audio_input();
         app.send_panic_trigger();
         if let Some(error) = app.connect_midi(first_midi, connect_midi) {
-            app.alerts.say(error);
+            app.alerts.warn(error);
         }
         // A new patch credits the user and takes their default licence
         // (patch-metadata.md, Defaults).

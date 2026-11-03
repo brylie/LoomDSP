@@ -114,6 +114,10 @@ impl Info {
     }
 }
 
+/// What the status bar says when autosave recovers from a failure. Every
+/// other line from the autosave thread reports a problem.
+pub const AUTOSAVE_WORKS: &str = "Autosave works again.";
+
 /// A time as RFC 3339 text in UTC, the form `info.ron` keeps.
 fn timestamp(time: SystemTime) -> Option<String> {
     jiff::Timestamp::try_from(time).ok().map(|t| t.to_string())
@@ -708,7 +712,7 @@ impl Session {
                 Ok(()) => {
                     if self.failing {
                         self.failing = false;
-                        status.push("Autosave works again.".to_string());
+                        status.push(AUTOSAVE_WORKS.to_string());
                     }
                     if let Some(orphan) = self.restored_from.take()
                         && let Err(e) = orphan.discard()

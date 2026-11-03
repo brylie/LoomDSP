@@ -742,7 +742,7 @@ impl App {
             .assignments()
             .any(|(other, a)| other != id && a.source == source && a.target == module && a.param == param)
         {
-            self.alerts.say(format!(
+            self.alerts.warn(format!(
                 "{} already modulates {}",
                 modulation::source_name(self.controller.graph(), source),
                 modulation::target_name(self.controller.graph(), module, param)
@@ -755,7 +755,7 @@ impl App {
                 Ok(()) => {
                     app.commit();
                 }
-                Err(e) => app.alerts.say(format!("error: {e}")),
+                Err(e) => app.alerts.warn(e.to_string()),
             },
         );
         self.matrix.edit = None;
@@ -768,7 +768,7 @@ impl App {
             return;
         };
         let (Some(source), Some(target)) = (&add.source, &add.target) else {
-            self.alerts.say("Choose a source and a target".to_string());
+            self.alerts.warn("Choose a source and a target".to_string());
             return;
         };
         let (source, module, param) = (source.output, target.module, target.param);
@@ -790,7 +790,7 @@ impl App {
                     self.handle(Message::SliderReleased);
                     self.matrix.edit = None;
                 }
-                None => self.alerts.say("Depth must be between -100% and 100%".to_string()),
+                None => self.alerts.warn("Depth must be between -100% and 100%".to_string()),
             },
             Column::Source => {
                 if let Some(source) = sources(self.controller.graph()).get(edit.choice) {
