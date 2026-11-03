@@ -171,7 +171,7 @@ Settled on 2026-11-01 from the written leanings: the phase split above; patch in
 
 Points the spec left open, settled while building (M2). Each is small; say so in review if one should change.
 
-- **Patch info edits are not undo steps.** Authors, tags, and the licence change at once and mark the patch unsaved, but undo and redo do not cover them. The text fields have their own undo. Added to [undo: what is not undoable](undo.md#what-is-not-undoable).
+- **Patch info edits are not undo steps.** Authors, tags, and the licence change at once and mark the patch unsaved, but undo and redo do not cover them. The text fields have no undo of their own, so while one has focus the undo shortcuts do nothing, rather than undo a canvas edit behind it. Added to [undo: what is not undoable](undo.md#what-is-not-undoable).
 - **Author filter.** "Matches" means the author contains the typed text, ignoring case, so `ada` finds `Ada Lovelace`.
 - **Search** matches when every word typed is in the name, description, or tags, as the module browser does.
 - **Tags longer than 32 characters** are cut to 32 by tidying, not refused.
@@ -179,8 +179,13 @@ Points the spec left open, settled while building (M2). Each is small; say so in
 - **A file that does not read** is listed only while no search or filter is set, since nothing about it can match.
 - **The licence link** is shown as the page's address in text. The app cannot open a web page yet.
 - **"No licence" and "No default".** The chooser has a button that clears the licence (or the default). It never sets one by itself.
-- **Credit question.** It appears at the first Save of each opened or new patch, when "Your name" is set and not among the authors. With no dialog available (Linux without zenity or kdialog) or with the control channel on, nothing is asked or added, and the next Save asks again.
-- **The library folder** is the `library` field of the preferences file. It has no control in the Preferences window yet. Save As starts there for a patch with no file, when the folder exists.
+- **Credit question.** It appears at the first Save of each opened or new patch, when "Your name" is set and not among the authors. Its two buttons are **Add my name** and **Not for this patch**; the save goes ahead either way. With no dialog available (Linux without zenity or kdialog) or with the control channel on, nothing is asked or added, and the next Save asks again.
+- **The library folder** is the `library` field of the preferences file. It has no control in the Preferences window yet. It is made the first time Save As or the browser needs it. Save As starts there for a patch with no file, suggesting a free name from the patch name (`Name.ron`, then `Name 2.ron`).
+- **"Your name"** is saved on Enter or when the Preferences window closes, so a New made with the window still open uses the name saved before.
+- **Deprecated SPDX identifiers**, such as `GPL-3.0` (now `GPL-3.0-only`), are read strictly: they show as "Unrecognised licence" and **Other** refuses them. Identifiers newer than the `spdx` crate's list do too, until the crate is updated.
+- **Browser rows** show tags as text joined by dots, not as chips, to keep rows one line high. The browser opens from a **Browse** toolbar button (the app has no menu bar) and Ctrl+Shift+O.
+- **Tab to the filters** relies on Iced's own focus order; it has no test yet.
+- **The description** is kept on save but not shown or edited in patch info yet (#512).
 - **Credit for parts** shows nothing until sub-patches exist (#51). The inspector already has the **Includes parts by** line, empty.
 
 ## Open points

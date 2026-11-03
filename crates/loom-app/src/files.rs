@@ -31,6 +31,36 @@ pub fn display_name(file: Option<&Path>) -> String {
         .unwrap_or_else(|| "Untitled".to_string())
 }
 
+/// A file name made from a patch name: characters that file systems refuse
+/// are dropped, and the ends are trimmed of spaces and dots. "Untitled"
+/// when nothing is left. No extension.
+pub fn file_stem(name: &str) -> String {
+    let stem: String = name
+        .chars()
+        .filter(|c| !c.is_control() && !matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|'))
+        .collect();
+    let stem = stem.trim_matches(|c: char| c.is_whitespace() || c == '.');
+    if stem.is_empty() {
+        "Untitled".to_string()
+    } else {
+        stem.to_string()
+    }
+}
+
+/// A patch file in `dir` named after `name` that does not exist yet:
+/// `Name.ron`, else `Name 2.ron`, `Name 3.ron`, and so on. Save As
+/// suggests it, so a second new patch does not meet the replace question.
+pub fn free_path(dir: &Path, name: &str) -> PathBuf {
+    let stem = file_stem(name);
+    let mut path = dir.join(format!("{stem}.{EXTENSION}"));
+    let mut n = 2;
+    while path.exists() {
+        path = dir.join(format!("{stem} {n}.{EXTENSION}"));
+        n += 1;
+    }
+    path
+}
+
 /// The window title for a patch shown under `name`: `* name - LoomDSP`
 /// with unsaved changes.
 pub fn titled(name: &str, unsaved: bool) -> String {
@@ -208,15 +238,16 @@ pub fn confirm_add_author(name: &str, authors: &[String]) -> Option<bool> {
         .set_description(format!(
             "{by} Adding your name credits your changes. Every author stays in the list."
         ))
-        .set_buttons(MessageButtons::YesNoCancelCustom(
+        // Two answers only: the save goes ahead either way, so a Cancel
+        // button would promise something the question does not do.
+        .set_buttons(MessageButtons::OkCancelCustom(
             "Add my name".to_string(),
             "Not for this patch".to_string(),
-            "Cancel".to_string(),
         ))
         .show();
     match result {
         MessageDialogResult::Custom(label) if label == "Add my name" => Some(true),
-        MessageDialogResult::Yes => Some(true),
+        MessageDialogResult::Ok | MessageDialogResult::Yes => Some(true),
         _ => Some(false),
     }
 }

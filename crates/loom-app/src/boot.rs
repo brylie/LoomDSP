@@ -397,6 +397,7 @@ impl App {
             matrix: matrix::State::default(),
             still: None,
             step_name: None,
+            history_key: None,
         };
         // A stream that failed to start took the engine with it.
         app.keep_engine_idle();

@@ -337,6 +337,13 @@ enum Message {
     Key(iced::keyboard::Event),
     /// Take back the last step (`docs/design/undo.md`).
     Undo,
+    /// An undo or redo shortcut, after checking whether a text field has
+    /// focus. While one has, the shortcut does nothing: the field is
+    /// being edited, and undo would change the patch behind it.
+    HistoryKey {
+        redo: bool,
+        typing: bool,
+    },
     /// Replay the step undo took back.
     Redo,
     /// An exact parameter value, in the parameter's units, sent as a knob
@@ -615,6 +622,9 @@ struct App {
     /// The name for the step the edit in progress makes, when a command
     /// names it (cut, paste, duplicate) rather than what changed.
     step_name: Option<String>,
+    /// An undo (`false`) or redo (`true`) shortcut waiting for the check
+    /// that no text field has focus.
+    history_key: Option<bool>,
 }
 
 /// Where a patch comes from.
@@ -963,6 +973,15 @@ impl App {
                 Task::none()
             }
         };
+        // An undo or redo shortcut asks the window whether a text field has
+        // focus first.
+        let task = match self.history_key.take() {
+            Some(redo) => Task::batch([
+                task,
+                editing::text_field_focused().map(move |typing| Message::HistoryKey { redo, typing }),
+            ]),
+            None => task,
+        };
         self.drain_idle_engine();
         // The audio callback, or the idle engine above, makes room for the
         // staged modules. Tick messages keep this retry moving even without
@@ -999,9 +1018,13 @@ impl App {
     /// Opens your patches browser over the library folder, which is read
     /// on a thread (patch-metadata.md, Your patches browser).
     fn open_patches(&mut self) -> Task<Message> {
-        let Some(folder) = self.rig.store.saved().library_folder() else {
-            self.alerts
-                .say("No library folder: set `library` in the preferences file.".to_string());
+        // The folder is made on first use, so a new player's library
+        // starts empty rather than missing.
+        let Some(folder) = self.library_folder() else {
+            if self.rig.store.saved().library_folder().is_none() {
+                self.alerts
+                    .say("No library folder: set `library` in the preferences file.".to_string());
+            }
             return Task::none();
         };
         self.browser = None;
@@ -1186,6 +1209,15 @@ impl App {
             Message::Key(_) if self.help.is_some() => {}
             Message::Preferences(message) => self.preferences(message),
             Message::PatchInfo(message) => self.patch_info_message(message),
+            Message::HistoryKey { redo, typing } => {
+                if !typing {
+                    if redo {
+                        self.redo();
+                    } else {
+                        self.undo();
+                    }
+                }
+            }
             Message::Licence(message) => self.licence_message(message),
             Message::Patches(_) => {}
             Message::Key(iced::keyboard::Event::KeyPressed { key, .. }) if self.chooser.is_some() => {
@@ -1485,10 +1517,12 @@ impl App {
                 // Ctrl+Z or Cmd+Z undoes; adding Shift redoes. Ctrl+Y also
                 // redoes, except on macOS.
                 match key.as_ref() {
+                    // Undo and redo wait for a focus check: a text field
+                    // being edited keeps them (undo.md, Gestures).
                     iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("z") && modifiers.shift() => {
-                        self.redo()
+                        self.history_key = Some(true)
                     }
-                    iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("z") => self.undo(),
+                    iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("z") => self.history_key = Some(false),
                     iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("n") => {
                         self.file_action(FileAction::New)
                     }
@@ -1502,7 +1536,7 @@ impl App {
                         self.file_action(FileAction::Save);
                     }
                     iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("y") && !cfg!(target_os = "macos") => {
-                        self.redo()
+                        self.history_key = Some(true)
                     }
                     iced::keyboard::Key::Character(",") => self.toggle_preferences(),
                     _ => {}

@@ -261,6 +261,15 @@ impl Ui {
         self.run(task, &mut VecDeque::new(), &mut Vec::new());
     }
 
+    /// Gives keyboard focus to the widget with this ID, as a click on it
+    /// would, and draws the frame.
+    pub fn focus(&mut self, id: &'static str) {
+        let mut operation =
+            iced::advanced::widget::operation::focusable::focus::<()>(iced::advanced::widget::Id::new(id));
+        self.with_ui(|ui, renderer, _| ui.operate(renderer, &mut operation));
+        self.redraw();
+    }
+
     /// Moves the pointer to a window point.
     pub fn move_to(&mut self, p: Point) -> Vec<Message> {
         self.cursor = mouse::Cursor::Available(p);

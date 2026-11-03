@@ -44,6 +44,21 @@ impl App {
         }
     }
 
+    /// The library folder, made if it is missing. `None`, with a status
+    /// line, when there is none or it cannot be made: Save As then starts
+    /// where the system chooses.
+    pub(crate) fn library_folder(&mut self) -> Option<PathBuf> {
+        let dir = self.rig.store.saved().library_folder()?;
+        match std::fs::create_dir_all(&dir) {
+            Ok(()) => Some(dir),
+            Err(e) => {
+                self.alerts
+                    .say(format!("Could not make the library folder \"{}\": {e}.", dir.display()));
+                None
+            }
+        }
+    }
+
     /// Offers once per patch to add the user's name to its authors, before
     /// the first Save (patch-metadata.md, rule 3). Never with the control
     /// channel on, where nobody could answer a dialog.
@@ -57,7 +72,8 @@ impl App {
                 self.document.edit_info(|info| info.authors.push(name));
                 // The authors box shows the new name, so its next edit
                 // keeps it.
-                self.patch_info = crate::patch_info::State::new(self.document.info());
+                // Only the authors box: a tag being typed stays.
+                self.patch_info.authors = crate::patch_info::State::new(self.document.info()).authors;
             }
             Some(false) => {}
             None => self.document.credit_not_asked(),
@@ -76,15 +92,15 @@ impl App {
 
     pub(crate) fn save_as(&mut self) -> bool {
         self.finish_edits();
-        // A patch with no file yet starts in the library folder, when it
-        // is there (patch-metadata.md, Your patches browser).
-        let library = self
-            .rig
-            .store
-            .saved()
-            .library_folder()
-            .filter(|dir| dir.is_dir())
-            .map(|dir| dir.join(format!("{}.{}", files::display_name(None), files::EXTENSION)));
+        // A patch with no file yet starts in the library folder, made when
+        // it is missing, under a free name taken from the patch name
+        // (patch-metadata.md, Your patches browser).
+        let library = match self.document.save_start() {
+            Some(_) => None,
+            None => self
+                .library_folder()
+                .map(|dir| files::free_path(&dir, self.document.name())),
+        };
         match files::pick_save(self.document.save_start().or(library.as_deref())) {
             Some(path) => self.write_to(path),
             None => false,

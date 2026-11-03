@@ -138,3 +138,33 @@ fn browse_opens_patches_in_the_app() {
     assert_eq!(app.document.file(), Some(dir.join("live/bass.ron").as_path()));
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// A new player's library folder does not exist yet. Save As for a patch
+/// with no file makes it and starts there, under a free name from the patch
+/// name; Browse makes it too, so the browser opens on an empty library.
+#[test]
+fn the_library_folder_is_made_when_first_needed() {
+    use crate::files::fake::{self as dialogs, Asked};
+    let root = std::env::temp_dir().join(format!("loom-patches-made-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let dir = root.join("Documents/LoomDSP/Library");
+    let mut app = App::new(crate::tests::app_args());
+    let mut preferences = app.rig.store.saved().clone();
+    preferences.library = Some(dir.clone());
+    let _ = app.rig.store.save(preferences);
+
+    let _ = dialogs::asked();
+    dialogs::answer_save(None);
+    assert!(!app.save_as(), "the dialog was cancelled");
+    assert!(dir.is_dir(), "Save As made the library folder");
+    assert_eq!(dialogs::asked(), [Asked::Save(Some(dir.join("Untitled.ron")))]);
+    std::fs::write(dir.join("Untitled.ron"), "Patch(version: 1)").unwrap();
+    assert!(!app.save_as());
+    assert_eq!(dialogs::asked(), [Asked::Save(Some(dir.join("Untitled 2.ron")))]);
+
+    std::fs::remove_dir_all(&root).unwrap();
+    let _ = app.update(AppMessage::File(FileAction::Browse));
+    assert!(dir.is_dir(), "Browse made the library folder");
+    assert!(app.patches.is_some());
+    let _ = std::fs::remove_dir_all(root);
+}

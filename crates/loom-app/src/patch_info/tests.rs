@@ -174,7 +174,9 @@ fn saving_someone_elses_patch_keeps_credit_and_offers_once() {
     // Opened again, it asks again; accepting adds the name at the end.
     app.open_path(&patch);
     dialogs::answer_add_author(Some(true));
+    app.patch_info.tag_draft = "half-typ".into();
     assert!(app.save());
+    assert_eq!(app.patch_info.tag_draft, "half-typ", "a tag being typed is kept");
     assert_eq!(dialogs::asked(), [Asked::AddAuthor("Sam Rivera".into())]);
     assert_eq!(
         loom_patch::Patch::load(&patch).unwrap().authors,
@@ -295,4 +297,57 @@ fn the_window_shows_patch_info_the_chooser_and_the_browser() {
     assert!(ui.app.patches.is_none());
     assert_eq!(ui.app.document.name(), "Low Drone");
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/// undo.md, Gestures: the undo shortcuts do nothing while a text field
+/// has focus, because Iced's text fields have no undo of their own and
+/// undo would change the patch behind the field. With the field left, they
+/// work again.
+#[test]
+fn undo_keys_leave_a_focused_text_field_alone() {
+    use crate::ui_test::Ui;
+    use iced::keyboard::{Key, Modifiers, key::Named};
+    let mut ui = Ui::with_app(App::new(crate::tests::app_args()));
+    let sine = ui
+        .app
+        .modules
+        .iter()
+        .copied()
+        .find(|d| d.id == "loom.osc.sine")
+        .unwrap();
+    ui.app.add_module(sine, iced::Point::ORIGIN);
+    ui.app.selection.clear();
+    ui.redraw();
+    let count = ui.app.controller.graph().nodes().count();
+
+    let z = || Key::Character("z".into());
+    ui.focus(TAG_INPUT);
+    ui.typewrite("drone");
+    ui.tap(z(), Modifiers::COMMAND);
+    assert_eq!(
+        ui.app.controller.graph().nodes().count(),
+        count,
+        "typing keeps the canvas edit"
+    );
+    assert_eq!(ui.app.patch_info.tag_draft, "drone");
+
+    ui.tap(Key::Named(Named::Escape), Modifiers::empty());
+    ui.tap(z(), Modifiers::COMMAND);
+    assert_eq!(
+        ui.app.controller.graph().nodes().count(),
+        count - 1,
+        "out of the field, undo works"
+    );
+
+    // Redo waits for the field the same way.
+    ui.focus(TAG_INPUT);
+    ui.tap(z(), Modifiers::COMMAND | Modifiers::SHIFT);
+    assert_eq!(
+        ui.app.controller.graph().nodes().count(),
+        count - 1,
+        "typing keeps redo too"
+    );
+    ui.tap(Key::Named(Named::Escape), Modifiers::empty());
+    ui.tap(z(), Modifiers::COMMAND | Modifiers::SHIFT);
+    assert_eq!(ui.app.controller.graph().nodes().count(), count);
 }
