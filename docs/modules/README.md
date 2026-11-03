@@ -97,4 +97,5 @@ One page for each built-in module, made from its descriptor. After you change a 
 | [Level Meter](loom.display.meter.md) | `loom.display.meter` | Shows the peak and RMS level of its input. Passes the input through unchanged. |
 | [MIDI Controller](loom.midi.controller.md) | `loom.midi.controller` | Turns a MIDI controller, the pitch bend, or channel aftertouch into a signal. Controllers and aftertouch go from 0 to 1, bend from -1 to 1. |
 | [MIDI Note](loom.midi.note.md) | `loom.midi.note` | Monophonic note input (last-note priority). Pitch includes pitch bend. |
+| [Macro](loom.ui.macro.md) | `loom.ui.macro` | One knob whose value is a signal. Assign it to many parameters, so one knob shapes a whole sound. |
 | [Scope](loom.display.scope.md) | `loom.display.scope` | Shows its input over time. Passes the input through unchanged. |

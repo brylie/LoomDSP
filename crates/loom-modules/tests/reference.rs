@@ -457,6 +457,17 @@ fn phase_reverse() {
         .check(reference!("phase_reverse"));
 }
 
+/// Reference render for `loom.ui.macro`: the knob's value on the output, with
+/// no glide from its first frame.
+#[test]
+fn macro_value() {
+    let render = Harness::new(&ui::MACRO)
+        .seconds(0.02)
+        .param("value", 0.6)
+        .check(reference!("macro"));
+    assert!(render.output("out").iter().all(|&value| value == 0.6));
+}
+
 /// Reference render for `loom.rand.chance`: one clock into lane 1 drives all
 /// four lanes, each with its own chance. Every lane fires on the same frames
 /// at every block size, and the same seed gives the same choices.
@@ -557,6 +568,9 @@ fn every_dsp_module_has_a_reference_test() {
         &display::SCOPE,
         &logic::DIVIDE,
         &ui::BUTTON,
+        &ui::MACRO,
+        &phase::SHIFT,
+        &phase::REVERSE,
         &time::DELAY,
         &time::ALLPASS,
         &clock::CLOCK,

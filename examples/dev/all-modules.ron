@@ -60,6 +60,7 @@ Patch(
         PatchModule(id: 52, kind: "loom.filter.crossover@1", position: Some((1600.0, 1920.0))),
         PatchModule(id: 53, kind: "loom.phase.shift@1", position: Some((0.0, 2400.0))),
         PatchModule(id: 54, kind: "loom.phase.reverse@1", position: Some((320.0, 2400.0))),
+        PatchModule(id: 55, kind: "loom.ui.macro@1", position: Some((640.0, 2400.0))),
         PatchModule(id: 99, kind: "loom.clock.transport@1", position: Some((1920.0, 0.0))),
     ],
     cables: [],

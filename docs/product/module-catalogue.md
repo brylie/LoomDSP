@@ -46,7 +46,7 @@ Timing is phase-driven: a ramp from 0 to 1 sets where in a cycle a module is ([P
 | MT-PHASE-02 | Phase scale | Runs a phase faster or slower by a whole-number ratio, and stays locked to it. | | M1 | FR-LIB-27 | Built (`loom.phase.scale`) |
 | MT-PHASE-03 | Phase trigger | Fires a trigger each time a phase wraps. | | M1 | FR-LIB-27 | Built (`loom.phase.trigger`) |
 | MT-PHASE-04 | Phase reset | Restarts a phase at zero on a trigger. | | M2 | FR-LIB-01 | Built (`loom.phase.reset`) |
-| MT-PHASE-05 | Phase warp | Changes how a phase moves within each cycle without changing its period: offset, bend, S-curve, skew, reverse, mirror, and smoothing that keeps the wrap point. | | M2 | FR-LIB-01 | Specified in part (shift and reverse, [M2 modules](../design/p2-modules.md)) |
+| MT-PHASE-05 | Phase warp | Changes how a phase moves within each cycle without changing its period: offset, bend, S-curve, skew, reverse, mirror, and smoothing that keeps the wrap point. | | M2 | FR-LIB-01 | Built in part (`loom.phase.shift`, `loom.phase.reverse`); the rest is planned |
 | MT-PHASE-06 | Phase split | Divides one cycle into N parts and outputs a phase for each part. | | M3 | New | Planned |
 | MT-PHASE-08 | Phase wrap and fold | Brings any signal into the 0 to 1 phase range, by wrapping it around or by folding it back at the edges. | | M1 | FR-LIB-01 | Built (`loom.phase.wrap`) |
 | MT-PHASE-07 | Span phase | A phase that covers N bars and is anchored to bar 1, so it has the same value at the same musical time after any jump. | | M3 | New | Planned |
@@ -270,7 +270,7 @@ These depend on how notes travel on cables (OQ-16).
 | MT-VIEW-04 | Note monitor | Shows incoming notes and controller values, for checking a setup. | | M2 | New | Planned |
 | MT-VIEW-05 | Tuner | Shows the pitch of a signal against the nearest note. | | M4 | New | Planned |
 | MT-UI-01 | Button | A large button that outputs a toggle or momentary gate. | | M1 | FR-LIB-27 | Built (`loom.ui.button`) |
-| MT-UI-02 | Macro | A knob or slider whose value is a signal. One macro can drive many parameters through modulation assignments. | Smoothing | M2 | FR-LIB-12 | Specified ([M2 modules](../design/p2-modules.md)) |
+| MT-UI-02 | Macro | A knob or slider whose value is a signal. One macro can drive many parameters through modulation assignments. | Smoothing | M2 | FR-LIB-12 | Built (`loom.ui.macro`) |
 | MT-UI-03 | XY and vector pad | A two-axis control, or one point that blends between several sources. | Smoothing | M2 | FR-LIB-12 | Planned |
 | MT-UI-04 | Keyboard | Plays notes from the canvas or a front panel. | | M2 | New | Planned |
 

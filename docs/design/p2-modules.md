@@ -3,13 +3,13 @@
 The ports, parameters, ranges, defaults, and behaviour of the M2 modules that bring no new engine rules, so each can be built from its catalogue entry without guessing.
 
 - **Kind:** living specification.
-- **Status:** Implemented for Random, Chance, and Phase reset. Agreed for Euclidean rhythm, Selector, Phase shift and reverse, Macro, Pitch quantiser, Multi-lane sequencer, and Spectrum (2026-11-01). Each of those sections is ready to build. Other M2 modules are added here as they are agreed.
+- **Status:** Implemented for Random, Chance, Phase reset, Phase shift and reverse, and Macro. Agreed for Euclidean rhythm, Selector, Pitch quantiser, Multi-lane sequencer, and Spectrum (2026-11-01). Each of those sections is ready to build. Other M2 modules are added here as they are agreed.
 - **Decision behind it:** none. It follows [ADR-0007](../adr/0007-polymorphic-signal-model.md) (signals), [ADR-0014](../adr/0014-modulation-without-cables.md) (modulation without cables), [ADR-0016](../adr/0016-ports-and-parameters-carry-their-own-text.md) (port and parameter text), and [ADR-0018](../adr/0018-clean-room-module-development.md) (clean room).
 - **Use case and requirements:** FR-LIB-01, FR-LIB-08, FR-LIB-12, FR-LIB-14, FR-LIB-19, FR-LIB-22, FR-LIB-29, FR-LIB-30, NFR-SND-04.
 - **Background:** [Phase and cycles](../learn/phase-and-cycles.md), [Repeatable randomness](../learn/repeatable-randomness.md).
 - **Prior art:** none named. Every module is designed from its purpose. The Euclidean rhythm follows published theory: G. Toussaint, "The Euclidean Algorithm Generates Traditional Musical Rhythms", 2005. The random streams are xorshift (G. Marsaglia, "Xorshift RNGs", 2003), started through the 32-bit finaliser of MurmurHash3 (A. Appleby).
 - **Issues:** [#304](https://github.com/brylie/LoomDSP/issues/304) (Random), [#305](https://github.com/brylie/LoomDSP/issues/305) (Chance), [#174](https://github.com/brylie/LoomDSP/issues/174) (Phase reset), [#306](https://github.com/brylie/LoomDSP/issues/306) (Euclidean rhythm), [#310](https://github.com/brylie/LoomDSP/issues/310) (Selector), [#111](https://github.com/brylie/LoomDSP/issues/111) (Phase shift and reverse), [#78](https://github.com/brylie/LoomDSP/issues/78) (Macro), [#308](https://github.com/brylie/LoomDSP/issues/308) (Pitch quantiser), [#307](https://github.com/brylie/LoomDSP/issues/307) (Multi-lane sequencer), [#109](https://github.com/brylie/LoomDSP/issues/109) (Spectrum). Pitch modules follow [Scale and tuning](scale-and-tuning.md).
-- **Code:** `crates/loom-modules/src/rand.rs` and `phase.rs` for the modules built so far.
+- **Code:** `crates/loom-modules/src/rand.rs`, `phase.rs`, and `ui.rs` for the modules built so far.
 
 ## Goal
 
@@ -130,6 +130,7 @@ Two built forms of the Phase warp type (ADR-0017): small, cheap, and needed now 
 | Panel | A knob for `offset` |
 
 - The output is `fract(phase + offset parameter + offset input)`.
+- A non-finite `offset` input reads as 0, and a non-finite `phase` gives 0, as on Phase reset. *Why:* a phase module must not pass NaN on to oscillators.
 
 `loom.phase.reverse`:
 
@@ -267,12 +268,12 @@ Selector:
 
 Phase shift and reverse:
 
-- [ ] Shift by −0.3, then Phase Trigger, fires when a slow phase passes 0.3, rising and falling (test).
-- [ ] Reverse turns 0 into 0 and 0.25 into 0.75 (test).
+- [x] Shift by −0.3, then Phase Trigger, fires when a slow phase passes 0.3, rising and falling (test).
+- [x] Reverse turns 0 into 0 and 0.25 into 0.75 (test).
 
 Macro:
 
-- [ ] The output equals the knob, and one Macro assigned to three parameters moves all three (test).
+- [x] The output equals the knob, and one Macro assigned to three parameters moves all three (test).
 
 Pitch quantiser:
 

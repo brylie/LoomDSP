@@ -9,6 +9,7 @@ use loom_core::{
     ButtonMode, Channels, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, PortDefault, PortIo,
     PortSpec, ProcessContext, SignalType, Widget,
 };
+use loom_rt::Smoothed;
 
 /// `loom.ui.button`: a gate from a large button.
 ///
@@ -113,5 +114,95 @@ impl Module for Button {
     }
 }
 
+/// `loom.ui.macro` (MT-UI-02): one knob whose value is a signal. Assign its
+/// output to many parameters with different depths, so one knob shapes a whole
+/// sound.
+pub static MACRO: ModuleDescriptor = ModuleDescriptor {
+    id: "loom.ui.macro",
+    version: 1,
+    name: "Macro",
+    category: "Control",
+    family: loom_core::Family::Interface,
+    description: "One knob whose value is a signal. Assign it to many parameters, so one knob shapes a whole sound.",
+    inputs: &[],
+    outputs: &[PortSpec {
+        name: "out",
+        label: "Out",
+        signal: SignalType::Modulation,
+        description: "The knob's value, from 0 to 1, smoothed so it never steps.",
+        default: PortDefault::Value(0.0),
+        range: loom_core::PortRange::Signal,
+        channels: Channels::PerChannel,
+    }],
+    params: &[ParamSpec {
+        name: "value",
+        label: "Value",
+        description: "The value on the output.",
+        min: 0.0,
+        max: 1.0,
+        default: 0.0,
+        unit: "",
+        options: ParamOptions::DEFAULT,
+    }
+    .smooth(0.005)],
+    role: ModuleRole::Dsp(|config| {
+        Box::new(Macro {
+            value: Smoothed::new(
+                0.0,
+                config.sample_rate,
+                MACRO.params[Macro::VALUE].options.smooth_seconds,
+            ),
+        })
+    }),
+    panel: Panel::new(3, 3, &[Widget::knob(0, 0, "value")]),
+    displays: &[],
+};
+
+/// State for `loom.ui.macro`: only the knob's glide.
+#[derive(Clone)]
+struct Macro {
+    value: Smoothed,
+}
+
+impl Macro {
+    const VALUE: usize = MACRO.param_index("value").unwrap();
+}
+
+impl Module for Macro {
+    /// Takes the running state of another instance (ADR-0022).
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+
+    fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        let modulated = io.param(Self::VALUE);
+        let ([], [out]) = io.split::<0, 1>();
+        for (i, sample) in out.iter_mut().enumerate() {
+            *sample = modulated.at_or(i, self.value.tick());
+        }
+    }
+
+    fn set_param(&mut self, index: usize, value: f32) {
+        if index == Self::VALUE {
+            self.value.set_target(value);
+        }
+    }
+
+    fn param_glide(&self, index: usize) -> Option<f32> {
+        if index == Self::VALUE {
+            self.value.gliding()
+        } else {
+            None
+        }
+    }
+
+    fn reset(&mut self) {
+        self.value.reset(self.value.target());
+    }
+}
+
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod macro_tests;

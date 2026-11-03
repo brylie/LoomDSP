@@ -90,6 +90,7 @@ pub static ALL: &[&ModuleDescriptor] = &[
     &rand::RANDOM,
     &level::SLEW,
     &ui::BUTTON,
+    &ui::MACRO,
     &time::DELAY,
     &time::ALLPASS,
 ];
