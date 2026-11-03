@@ -84,6 +84,17 @@ pub enum CanvasEvent {
         /// The new position.
         position: f32,
     },
+    /// A typed value was committed. The app parses the text, because it knows
+    /// the parameter. One commit is one undo step (panel-widgets.md, Typing a
+    /// value).
+    TypedValue {
+        /// Module ID.
+        module: u32,
+        /// Index in the module's panel widgets.
+        widget: usize,
+        /// The text, as typed.
+        text: String,
+    },
     /// A button was pressed, by the pointer or by Space or Enter.
     ///
     /// The app decides the parameter value from the button's mode. The

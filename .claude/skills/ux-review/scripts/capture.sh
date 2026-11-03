@@ -20,10 +20,12 @@ app() {
     cargo run --release -q -p loom-app -- "$@"
 }
 
-# The size holds the whole gallery at zoom 1. Below about zoom 0.83 labels draw
-# as grey bars, and a review would judge those instead of the words.
-app examples/dev/all-modules.ron --screenshot "$out/gallery.png" --zoom 1 --size 2300x2250
+# Zoom 1, because below about 0.83 labels draw as grey bars, and a review would
+# judge those instead of the words. The size comes from the patch, because a
+# fixed one would silently cut off the rows that new modules add.
 app examples/dev/all-modules.ron --dump-ui >"$out/gallery.json"
+app examples/dev/all-modules.ron --screenshot "$out/gallery.png" --zoom 1 \
+    --size "$(python3 "$here/measure.py" size "$out/gallery.json")"
 app "$patch" --dump-ui --select "$module" >"$out/patch.json"
 python3 "$here/measure.py" dump "$out/gallery.json" "$out/patch.json" >"$out/measures.txt"
 

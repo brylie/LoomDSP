@@ -389,9 +389,9 @@ fn test_modules_are_listed_only_with_the_flag() {
         test_modules: true,
         ..app_args()
     });
-    // The two test modules and the patch's Transport.
-    assert_eq!(app.controller.graph().nodes().count(), 3, "{}", app.alerts.status());
-    assert_eq!(app.controller.graph().assignments().count(), 7);
+    // The three test modules and the patch's Transport.
+    assert_eq!(app.controller.graph().nodes().count(), 4, "{}", app.alerts.status());
+    assert_eq!(app.controller.graph().assignments().count(), 10);
     assert!(app.modules.iter().any(|d| d.id == "test.panel"));
 
     let app = self::app();
@@ -1229,13 +1229,20 @@ fn the_watcher_sends_a_moving_reduction_meter() {
     let readings = |watch: &lights::Watch| watch.read().iter().map(|&(_, r)| r).collect::<Vec<f32>>();
 
     app.process(480);
-    let quiet = lights::changed(&vec![None; watch.lights.len()], &readings(&watch), &watch.ranges).unwrap();
+    let quiet = lights::changed(
+        &vec![None; watch.lights.len()],
+        &readings(&watch),
+        &watch.ranges,
+        &watch.readouts,
+    )
+    .unwrap();
     assert_eq!(quiet[entry], Some(255), "no signal, no reduction");
 
     app.controller.connect_named(source, "out", dynamics, "in").unwrap();
     app.commit();
     app.process(4_800);
-    let loud = lights::changed(&quiet, &readings(&watch), &watch.ranges).expect("the meter moved, so it is sent");
+    let loud = lights::changed(&quiet, &readings(&watch), &watch.ranges, &watch.readouts)
+        .expect("the meter moved, so it is sent");
     assert!(loud[entry] < quiet[entry], "the bar moved down: {:?}", loud[entry]);
 }
 
@@ -2484,39 +2491,35 @@ fn escape_from_a_text_box_gives_keys_back_to_the_canvas() {
     );
 }
 
-/// Tab moves through one view's text fields and wraps. It stays inside the
-/// patch browser, so focus cannot land on the form behind it, and a field
-/// outside the list keeps its focus.
+/// Tab moves through one view's text fields and wraps, sent as a real key.
+/// It stays inside the patch browser, so focus cannot land on the form behind
+/// it. The browser focuses its search field by a task, which sends no message,
+/// so the key cannot wait for the app to have heard of the focus.
 #[test]
 fn tab_moves_between_the_fields_of_one_view() {
     use iced::advanced::widget::Id;
+    use iced::keyboard::{Key, Modifiers, key::Named};
+    let tab = Key::Named(Named::Tab);
     let [authors, tags] = crate::patch_info::TEXT_FIELDS;
     let mut ui = typing_in_authors(false);
-    assert_eq!(ui.app.tab_fields(), &crate::patch_info::TEXT_FIELDS);
     assert_eq!(ui.focused_field(), Some(Id::new(authors)), "the click focused Authors");
 
-    ui.step_focus(ui.app.tab_fields(), false);
+    ui.tap(tab.clone(), Modifiers::default());
     assert_eq!(ui.focused_field(), Some(Id::new(tags)), "Tab goes to Tags");
-    ui.step_focus(ui.app.tab_fields(), false);
+    ui.tap(tab.clone(), Modifiers::default());
     assert_eq!(ui.focused_field(), Some(Id::new(authors)), "Tab wraps to Authors");
-    ui.step_focus(ui.app.tab_fields(), true);
+    ui.tap(tab.clone(), Modifiers::SHIFT);
     assert_eq!(ui.focused_field(), Some(Id::new(tags)), "Shift-Tab wraps back to Tags");
 
-    // In the patch browser the list is the browser's own, so Tab never goes
-    // to Authors behind it, even from its last field.
+    let _ = press_key(&mut ui, Key::Named(Named::Escape), None, Modifiers::default());
     ui.app.patches = Some(crate::patches::PatchBrowser::new(1, PathBuf::from("unread")));
     ui.redraw();
     let [search, author] = crate::patches::TEXT_FIELDS;
     ui.focus(search);
-    assert_eq!(ui.app.tab_fields(), &crate::patches::TEXT_FIELDS);
-    ui.step_focus(ui.app.tab_fields(), false);
+    ui.tap(tab.clone(), Modifiers::default());
     assert_eq!(ui.focused_field(), Some(Id::new(author)));
-    ui.step_focus(ui.app.tab_fields(), false);
+    ui.tap(tab, Modifiers::default());
     assert_eq!(ui.focused_field(), Some(Id::new(search)), "wrapped inside the browser");
-
-    // A named field that is not in the list keeps its focus.
-    ui.step_focus(&crate::patch_info::TEXT_FIELDS, false);
-    assert_eq!(ui.focused_field(), Some(Id::new(search)));
 }
 
 /// Tab goes forward and Shift-Tab back, wrapping at both ends. It takes three

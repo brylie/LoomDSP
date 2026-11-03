@@ -30,6 +30,7 @@
 //! }
 //! ```
 
+use crate::phase::wrap;
 use std::f32::consts::TAU as TAU_F32;
 use std::f64::consts::TAU;
 
@@ -37,7 +38,7 @@ use std::f64::consts::TAU;
 /// nothing to band limit and no state.
 #[inline]
 pub fn sine(phase: f32) -> f32 {
-    (TAU_F32 * (phase - phase.floor())).sin()
+    (TAU_F32 * wrap(phase)).sin()
 }
 
 /// Polynomial band-limited step. Smooths the jump at the wrap point, which
@@ -69,12 +70,6 @@ pub fn poly_blamp(t: f32, dt: f32) -> f32 {
     } else {
         0.0
     }
-}
-
-/// `x` wrapped to 0 to 1.
-#[inline]
-fn wrap(x: f32) -> f32 {
-    x - x.floor()
 }
 
 /// A band-limited saw at `t` from 0 to 1. `step` is the size of the phase step
@@ -162,10 +157,11 @@ impl Saw {
     pub fn tick(&mut self, phase: f32) -> f32 {
         let t = wrap(phase);
         // The phase step tells us the frequency, so the shaper does not
-        // need a separate frequency input.
+        // need a separate frequency input. A falling phase wraps to a step
+        // near 1, so take the shorter way round the cycle.
         let step = wrap(t - self.previous);
         self.previous = t;
-        saw(t, step)
+        saw(t, step.min(1.0 - step))
     }
 }
 

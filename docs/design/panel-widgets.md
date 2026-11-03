@@ -3,7 +3,7 @@
 The baseline set of panel widgets that LoomDSP modules, sub-patches, and front panels share, so each kind of interaction has one common way to work.
 
 - **Kind:** living specification.
-- **Status:** Agreed, M2. The plan and its open points were settled with the maintainer on 2026-11-01 ([#278](https://github.com/brylie/LoomDSP/issues/278)); see [Settled in review](#settled-in-review). The [read-only shape preview](#read-only-shape-preview) and the compact [select list](#select-list) are Implemented. The widgets that exist today (knob, toggle, radio buttons, button, light, meter) are specified and Implemented in [panels.md](panels.md#module-panels-on-tiles-m1). Sizes marked "starting size" may be tuned while building, against the estimated label widths ([#120](https://github.com/brylie/LoomDSP/issues/120)), without a spec change.
+- **Status:** Agreed, M2. The plan and its open points were settled with the maintainer on 2026-11-01 ([#278](https://github.com/brylie/LoomDSP/issues/278)); see [Settled in review](#settled-in-review). The [read-only shape preview](#read-only-shape-preview) and the [select list](#select-list) are Implemented. The widgets that exist today (knob, toggle, radio buttons, button, light, meter) are specified and Implemented in [panels.md](panels.md#module-panels-on-tiles-m1). Sizes marked "starting size" may be tuned while building, against the estimated label widths ([#120](https://github.com/brylie/LoomDSP/issues/120)), without a spec change.
 - **Decision behind it:** [ADR-0024](../adr/0024-widgets-follow-the-kind-of-value.md) (widgets follow the kind of value, and structured data has shared kinds with one editor each). Builds on [ADR-0013](../adr/0013-modules-carry-their-own-panel.md) (modules carry their own panel).
 - **Use case and requirements:** UC2, UC3. FR-PANEL-02, FR-PANEL-03, FR-PANEL-04, FR-LIB-02, FR-LIB-12, FR-LIB-16, FR-LIB-17, FR-LIB-18, FR-LIB-19, FR-LIB-29, FR-MOD-04, FR-VIS-02, FR-VIS-03, NFR-UX-01, NFR-UX-02, NFR-UX-03.
 - **Builds on:** [panels.md](panels.md) (widgets, layout, interaction, level of detail, redraw), [modulation.md](modulation.md) (range arcs, dots, live value), [telemetry.md](telemetry.md) (probes), [port and parameter text](port-and-parameter-text.md) (labels and descriptions).
@@ -42,16 +42,16 @@ Widgets are grouped by the **kind of value** they show or edit, not by the modul
 | Group | Widget | Binds to | Exists today | Proposed phase |
 |---|---|---|---|---|
 | One number | Knob | A parameter | Yes | M1 |
-| | Fader | A parameter | No (planned as "slider") | M2 |
-| | Number | A parameter | No | M2 |
+| | Fader | A parameter | Yes | M2 |
+| | Number | A parameter | Yes | M2 |
 | One choice | Toggle | A whole-number parameter, 0 to 1 | Yes | M1 |
 | | Radio buttons | A whole-number parameter | Yes | M1 |
-| | Select list | A whole-number parameter | Yes, named choices up to 12 | M2 |
+| | Select list | A whole-number parameter | Yes | M2 |
 | Action | Button | A whole-number parameter, 0 to 1, and a mode parameter | Yes | M1 |
 | Two numbers | XY pad | Two parameters | No | M2 |
 | | Range | Two parameters on one axis: a low and a high | No | M2 |
 | Module state | Light | A display value | Yes | M1 |
-| | Readout | A display value | No | M2 |
+| | Readout | A display value | Yes | M2 |
 | | Meter | An output, or a display value | Yes | M1, display value in M2 |
 | Signals | Scope | An output | No ([#62](https://github.com/brylie/LoomDSP/issues/62)) | M1 |
 | | XY scope | Two outputs | No | M2 ([#280](https://github.com/brylie/LoomDSP/issues/280)) |
@@ -135,15 +135,22 @@ These rules hold for every widget. Each widget section below says only what diff
 
 ### Typing a value
 
-**Settled:** every one-number widget (knob, fader, number) takes a typed value when it has keyboard focus. *Why:* an exact value, such as a tempo of 128 or a cutoff of 440 Hz, is faster to type than to drag.
+**Status:** Implemented. **Settled:** every one-number widget (knob, fader, number) takes a typed value when it has keyboard focus. *Why:* an exact value, such as a tempo of 128 or a cutoff of 440 Hz, is faster to type than to drag.
 
-- **Start:** with the widget focused, typing a digit, a minus sign, or a decimal point opens a small text field over the widget, holding that character. Enter on a focused one-number widget opens the field holding the current value, selected. Clicking does not open it. *Why:* double-click already resets, and a drag must stay a drag. Keyboard focus comes from Tab or from clicking the widget.
-- **What it accepts:** a number in the parameter's display unit, optionally followed by that unit ("440", "440 Hz", "-6 dB"). A `k` after the number multiplies by 1000 ("2k" for 2000 Hz). A comma is read as a decimal point. *Why:* players type what the label shows, in their own locale's habit.
+- **Start:** with the widget focused, typing a digit, a minus sign, or a decimal point (or a comma, read as one) opens a small text field over the widget, holding that character. Enter on a focused one-number widget opens the field holding the current value, selected. Clicking does not open it. *Why:* double-click already resets, and a drag must stay a drag. Keyboard focus comes from Tab or from clicking the widget.
+- **What it accepts:** a number in the parameter's display unit, optionally followed by that unit, in any case and with or without a space ("440", "440 Hz", "440hz", "-6 dB"). A `k` after the number multiplies by 1000 ("2k" and "2 kHz" for 2000 Hz). A comma is read as a decimal point. *Why:* players type what the label shows, in their own locale's habit.
 - **Commit:** Enter commits. The value is rounded for a whole-number parameter and clamped to the parameter's range. If it is outside the selected [control range](control-ranges.md), the smallest range that holds it is selected, as when a patch loads. One commit is one undo step.
 - **Cancel:** Escape closes the field and changes nothing. So does moving focus away.
-- **Bad text:** text that is not a number in that unit gives the field an outline in the warning style with a short reason in its hover text ("Not a number in Hz"). Enter then does nothing. *Why:* a typo must never become a value.
+- **Bad text:** text that is not a number in that unit gives the field an outline in the warning style with a short reason on a line below it, or above it at the canvas's bottom edge ("Not a number in Hz"). Enter then does nothing, and the text stays to be corrected. *Why:* a typo must never become a value.
 - **MIDI learn and modulation** are unchanged. A typed value sets the base value, as a drag does.
-- The inspector's value field, when it is built, follows the same rules.
+- **The field:** the canvas draws it at a fixed screen size. It has a caret, with Left, Right, Backspace, and Delete. There is no paste. While it is open it takes every key except the panic shortcut. The caret does not blink, because a blink would wake the UI (rule 7).
+- **Moving focus away:** Tab, a press outside, a pan, a zoom, the window losing focus, or the widget being removed or hidden closes the field with no change. Tab then moves focus as usual.
+- **Unchanged text:** Enter closes the field with no edit and no undo step. *Why:* the text shown is rounded, so committing it would change the value.
+- **MIDI learn:** no field opens. Digits do nothing, and Enter arms the control.
+- **Inspector:** a one-number parameter has an always-visible field beside its slider, with the same rules. In learn mode it is plain text, so a click arms the row. Text that is not a number gets the warning outline, with the reason in hover text.
+- **Inspector focus:** a field selects its text when it gets focus, and again after a commit, so a typed number replaces the value, as Enter on a canvas control does. Tab, Escape, or moving focus to anything else, another field included, drops the draft. *Why:* without the selection, typing 440 on "1000 Hz" gives "1000 Hz440".
+- **Keys in a text field:** while a text field in the app has focus, the canvas takes no key press except Tab. Tab closes the field with no change, then moves the canvas's focus as usual. In a view with several text fields, Tab moves between them instead, and the canvas does not take it ([panels](panels.md#keyboard-without-a-mouse)). The panic shortcut and the app's own Command shortcuts still work. Command+V, Command+A, and Command+0 do not reach the canvas, because a field uses the first two and they would otherwise also act on the patch. A press on the canvas ends the field's focus, so the pointer needs no such rule. *Why:* an arrow that moves the caret must not also move a tile, and Backspace must not delete the module.
+- **During a drag:** no field opens. *Why:* the drag's next move would overwrite the typed value, and the commit would join the drag's undo step.
 
 ### Larger view
 
@@ -162,6 +169,8 @@ Implemented ([panels.md](panels.md#module-panels-on-tiles-m1)). Listed here as t
 
 ### Fader
 
+**Status:** Implemented on the test modules. Typed values are in [Typing a value](#typing-a-value).
+
 A straight track with a handle, vertical or horizontal. Same binding, mapping, and gestures as a knob.
 
 - **Binds to:** any parameter. The author or panel editor picks the direction.
@@ -174,14 +183,16 @@ A straight track with a handle, vertical or horizontal. Same binding, mapping, a
 
 ### Number
 
+**Status:** Implemented on the test modules. Typed values are in [Typing a value](#typing-a-value).
+
 A value shown as text, such as "120.0 BPM" or "7". For parameters where the exact number matters more than a position.
 
 - **Binds to:** any parameter. Most useful for whole numbers with many values, such as a division, a step count, or a seed, and for tempo.
-- **Drag:** vertical, relative, through the parameter's mapping, like a knob. Whole-number parameters step by one.
+- **Drag:** vertical, relative, through the parameter's mapping, like a knob. Whole-number parameters step by one: each value takes `max(4, 200 / steps)` pixels, and 10 times that with Shift. *Why:* a small range then feels like a knob, and a large range, such as a seed, never skips a value.
 - **Modulation:** a dot, as on a toggle. The text shows the base value. *Why not the live value:* text that changes every frame cannot be read. The inspector and a readout can show it.
 - **Keyboard:** as a knob, and takes typed values ([Typing a value](#typing-a-value)).
 - **Middle zoom:** a box with a bar for the text.
-- **Size (starting size):** 3 × 2.
+- **Size (starting size):** 5 × 2. The caption is above the box. *Why not 3 × 2:* "120.0 BPM" needs 5 units to show whole.
 
 ## One choice
 
@@ -193,14 +204,16 @@ A whole-number parameter can name its values, such as "6 dB", "12 dB", "18 dB", 
 
 ### Select list
 
-**Status:** Agreed for named whole-number choices on a tile. It is for choice lists too long or too wordy for a [segmented control](#segmented-control), such as LFO Shape. The closed selector sits in the choices row, under the module's result view when it has one. The list opens at a readable screen size above or below the box, stays inside the canvas, and marks the current choice. Click, keyboard, drag, reset, modulation, and MIDI learn follow the rules below. Lists longer than 12 choices scroll, and in an open list, typing a letter jumps to the next choice that starts with it (type-ahead).
+**Status:** Implemented. It is for choice lists too long or too wordy for a [segmented control](#segmented-control), such as LFO Shape. The closed selector sits in the choices row, under the module's result view when it has one. The list opens at a readable screen size above or below the box, stays inside the canvas, and marks the current choice. Click, keyboard, drag, reset, modulation, and MIDI learn follow the rules below. Lists longer than 12 choices scroll, and in any open list, typing a character jumps to the next choice that starts with it (type-ahead).
 
 The current choice is shown as text. Clicking it shows the other choices in a list.
 
-- **Binds to:** a whole-number parameter. Its choice names, or its numbers with the unit.
+- **Binds to:** a whole-number parameter with up to 128 values. Its choice names, or its numbers with the unit. The registry refuses more. *Why:* a longer range is faster to reach on a [number](#number).
 - **Closed:** a box with the current choice and a small down-pointing mark at the right end, which says "there is a list here" without colour.
 - **Click:** opens the list. The list shows every choice, the current one marked by a tick and a filled row. It opens below the box, or above when there is no room below, and always inside the canvas. Clicking a choice picks it and closes the list: one undo step. Clicking outside the list, pressing Escape, panning, or zooming closes it without a change.
-- **List size:** fixed screen size with 12 px text, whatever the zoom. Up to 12 rows show at once; a longer list scrolls inside that size. *Why fixed size:* the list is for reading and picking, so it must be readable at middle zoom.
+- **List size:** fixed screen size with 12 px text, whatever the zoom. Up to 12 rows show at once, and fewer on a canvas too short for them. A longer list scrolls inside that size, with the mouse wheel or the keyboard, and a bar at its right edge shows how much is out of view. *Why fixed size:* the list is for reading and picking, so it must be readable at middle zoom.
+- **Wheel:** over an open list it scrolls the list, and a list too short to scroll stays open. Elsewhere it closes the list, as rule 1 says for the canvas.
+- **Type-ahead:** in an open list, typing a character jumps to the next choice that starts with it, ignoring case and wrapping round. Any character counts, so "1/16" can be found. A key that matches nothing is used up. *Why:* a letter must not reach the canvas behind the list, where `a` opens the module browser.
 - **Drag on the closed box:** moves the tile, as on toggles and radio buttons (rule 1). *Why not step through the choices:* a select list is a choice control, and choice controls do not change on a drag. A performer sweeps through choices with a MIDI controller or the arrow keys instead.
 - **Double-click:** resets to the default.
 - **Modulation:** a dot, as on radio buttons. The box shows the base choice.
@@ -281,16 +294,20 @@ Implemented. Lights for one-sample triggers are [#114](https://github.com/brylie
 
 ### Readout
 
+**Status:** Implemented on the test modules.
+
 A display value shown as text: a count, a current step, a detected pitch, a position in bars and beats.
 
-- **Binds to:** a display value. Its format comes from the display value's unit: a plain number with a set number of decimals, a note name with cents, or choice names (for example, which input a selector passes). Needs display values to carry text and a unit ([#118](https://github.com/brylie/LoomDSP/issues/118)).
-- **Update rate:** at most 10 times a second, and only when the shown text changes. *Why:* text that changes faster cannot be read, and each change lays out text again.
+- **Binds to:** a display value of the Level kind. Its format comes from the display value's range: a plain number with a set number of decimals and the unit, a note name with cents, such as "A4 +12¢", or choice names (for example, which input a selector passes). A value that is not finite reads "--". The registry refuses a Trigger display value. *Why:* reading a trigger takes it, and the watcher is its only reader ([Lights for one-sample triggers](panels.md#lights-for-one-sample-triggers)).
+- **Update rate:** at most 10 times a second, and only when the shown text changes, even while a light on the same screen fades at 30 Hz. *Why:* text that changes faster cannot be read, and each change lays out text again.
 - **Pointer:** a display. Pressing or dragging selects or moves the tile.
 - **Screen reader:** reads the text, but does not announce each change. *Why:* a value read out 10 times a second would drown everything else.
 - **Middle zoom:** a bar for the text.
 - **Size (starting size):** 3 × 2, or 6 × 2 for longer text.
 
 ### Meter on a display value
+
+**Status:** Implemented.
 
 The meter exists for outputs. The baseline also lets it bind to a display value, scaled by the display value's range. *Why:* gain reduction in a dynamics module, or an envelope follower's level, is module state, not an output level in decibels. One meter shape keeps "how much" looking the same everywhere.
 
@@ -456,7 +473,7 @@ The catalogue entries that would use each new widget. The knob is used by nearly
 |---|---|
 | Fader | MT-MIX-01 levels, MT-MIX-02, MT-UI-02, MT-EQ-01 band gains, MT-ARR-06, MT-SRC-03 group levels |
 | Number | MT-CLOCK-01 tempo, MT-CLOCK-03 division, MT-PHASE-02 ratio, MT-PHASE-06, MT-GATE-02 hits, steps, and rotation, MT-LOGIC-04 count, MT-PITCH-01 offsets, MT-IO-04 controller number, MT-ARR-01 and MT-ARR-02 length in bars, TR-07 seed |
-| Radio buttons | MT-FILTER-04 slope, MT-MIX-02 law, MT-LEVEL-02 response, MT-PHASE-08 wrap or fold, MT-ROUTE-01 and MT-ROUTE-02 how to choose, MT-DELAY-04 time change, MT-LOGIC-01 mode, TR-02 timebase, TR-03 retrigger |
+| Radio buttons | MT-FILTER-04 slope, MT-MIX-02 law, MT-LEVEL-02 response, MT-PHASE-08 wrap or fold, MT-ROUTE-02 how to choose, MT-DELAY-04 time change, MT-LOGIC-01 mode, TR-02 timebase, TR-03 retrigger |
 | Select list | MT-SRC-08 and MT-VOICE-04 unison voices, MT-SRC-02 colour, MT-LEVEL-01 unit, MT-MATH-02 function, MT-MATH-03 conversion, MT-LOGIC-02 operation, MT-VOICE-01 merge mode, MT-SHAPE-01 curve, MT-DYN-01 mode, MT-FX-01 space, MT-SEQ-04 algorithm, MT-PITCH-02 and MT-PITCH-03 scale, MT-ENV-01 mode, TR-01 basic shape, TR-02 musical division, TR-05 character, TR-06 quality |
 | Toggle | MT-MIX-01 mute, MT-ENV-01 loop, MT-DELAY-04 ping-pong, MT-SRC-01 sync |
 | XY pad | MT-UI-03, MT-STATE-02, MT-FX-10 position |
@@ -500,9 +517,9 @@ Widget-specific checks:
 | Widget | Checks |
 |---|---|
 | Fader | A 6-unit fader at middle zoom still needs 200 screen pixels for its full range. Dragging the modulation bar changes one assignment's depth. |
-| Number | A whole-number parameter steps by one per drag step. The text shows the base value while modulated. |
+| Number | A whole-number parameter steps by one per drag step, also with at least 1000 values. The text shows the base value while modulated. |
 | Typing a value | "2k" on a Hz parameter commits 2000; "abc" leaves the value and blocks Enter; Escape cancels; a value above the selected control range selects a wider range; one commit is one undo step. |
-| Select list | Over 12 choices the list scrolls; type-ahead jumps to the next match. |
+| Select list | Over 12 choices the list scrolls; type-ahead jumps to the next match; a parameter without names shows its numbers with the unit. |
 | XY pad | Alt-press jumps the point; a plain press does not. Each axis shows its own modulation bar. |
 | Range | The two handles cannot cross. Each has its own modulation bar and live line. |
 | Readout, meter on a display value | Text uses the display value's unit; the meter follows the display value at rule 7's rate. |
@@ -528,7 +545,7 @@ Settled with the maintainer on 2026-11-01 ([#278](https://github.com/brylie/Loom
 - **Typing a value:** on every one-number widget ([Typing a value](#typing-a-value)).
 - **Snap on a curve:** hold Ctrl (Cmd); the module sets the grid, which follows the bar for curves over bars ([Curve](#curve)).
 - **Live shape under modulation:** drawn as a dashed line ([Curve](#curve)).
-- **Select list type-ahead:** yes, for lists that scroll ([Select list](#select-list)).
+- **Select list type-ahead:** yes, in every open list, so a short list behaves like a long one ([Select list](#select-list)). Corrected on 2026-11-03 from "for lists that scroll".
 - **Keys layout:** cell names are display texts the module publishes; the root is a bar under the key ([Step grid](#step-grid)).
 - **Widget sizes:** the listed sizes are starting sizes, tuned with [#120](https://github.com/brylie/LoomDSP/issues/120).
 - **Slow history of a display value:** a long time window on the scope, fed by display values instead of audio samples, specified when a module first needs it. The RMS history of a signal is the [level history](#level-history).

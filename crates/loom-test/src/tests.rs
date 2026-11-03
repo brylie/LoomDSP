@@ -564,17 +564,19 @@ struct Count {
     target: f32,
     copies: bool,
     snaps: bool,
+    clears: bool,
 }
 
 impl Count {
     /// A count at 0 with gain 1.
-    fn new(copies: bool, snaps: bool) -> Self {
+    fn new(copies: bool, snaps: bool, clears: bool) -> Self {
         Self {
             frames: 0.0,
             gain: 1.0,
             target: 1.0,
             copies,
             snaps,
+            clears,
         }
     }
 }
@@ -593,7 +595,9 @@ impl Module for Count {
     }
 
     fn reset(&mut self) {
-        self.frames = 0.0;
+        if self.clears {
+            self.frames = 0.0;
+        }
         if self.snaps {
             self.gain = self.target;
         }
@@ -604,9 +608,9 @@ impl Module for Count {
     }
 }
 
-/// A [`Count`] descriptor with the given copying and snapping.
+/// A [`Count`] descriptor with the given copying, snapping, and clearing.
 macro_rules! count {
-    ($name:ident, $id:literal, $copies:literal, $snaps:literal) => {
+    ($name:ident, $id:literal, $copies:literal, $snaps:literal, $clears:literal) => {
         static $name: ModuleDescriptor = ModuleDescriptor {
             id: $id,
             version: 1,
@@ -617,16 +621,17 @@ macro_rules! count {
             inputs: &[],
             outputs: &[port("out", SignalType::Modulation)],
             params: &[param("gain", 0.0, 4.0, 1.0, "")],
-            role: ModuleRole::Dsp(|_| Box::new(Count::new($copies, $snaps))),
+            role: ModuleRole::Dsp(|_| Box::new(Count::new($copies, $snaps, $clears))),
             panel: loom_core::Panel::EMPTY,
             displays: &[],
         };
     };
 }
 
-count!(COUNT, "test.count", true, true);
-count!(COUNT_NO_COPY, "test.count-no-copy", false, true);
-count!(COUNT_NO_SNAP, "test.count-no-snap", true, false);
+count!(COUNT, "test.count", true, true, true);
+count!(COUNT_NO_COPY, "test.count-no-copy", false, true, true);
+count!(COUNT_NO_SNAP, "test.count-no-snap", true, false, true);
+count!(COUNT_NO_CLEAR, "test.count-no-clear", true, true, false);
 
 /// A module that hands over all its state passes the copy check and says
 /// it copied.
@@ -647,13 +652,10 @@ fn a_module_that_keeps_its_state_fails_the_copy_check() {
     Harness::new(&COUNT_NO_COPY).frames(200).check_copy_state(100);
 }
 
-/// A module whose `reset` snaps its glide passes the reset check.
+/// A module whose `reset` clears its count and snaps its glide passes.
 #[test]
-fn a_reset_that_snaps_passes() {
-    Harness::new(&COUNT)
-        .frames(200)
-        .param("gain", 2.0)
-        .check_reset_snaps_smoothing();
+fn a_reset_that_clears_and_snaps_passes() {
+    Harness::new(&COUNT).frames(200).param("gain", 2.0).check_reset();
 }
 
 /// A module that still glides after `reset` fails the reset check.
@@ -663,7 +665,150 @@ fn a_reset_that_leaves_a_glide_fails() {
     Harness::new(&COUNT_NO_SNAP)
         .frames(200)
         .param("gain", 2.0)
-        .check_reset_snaps_smoothing();
+        .check_reset();
+}
+
+/// A module that keeps what `process` changed fails the reset check, on the
+/// first frame, which is what a player would hear after a panic.
+#[test]
+#[should_panic(expected = "test.count-no-clear: output `out` at frame 0")]
+fn a_reset_that_keeps_state_fails() {
+    Harness::new(&COUNT_NO_CLEAR).frames(200).check_reset();
+}
+
+/// The copy check names the block size, so a failure at one size is easy to
+/// reproduce. Block size 1 runs first.
+#[test]
+#[should_panic(expected = "(block size 1, `copy_state_from` returned false)")]
+fn the_copy_check_runs_at_block_size_one() {
+    Harness::new(&COUNT_NO_COPY).frames(200).check_copy_state(100);
+}
+
+/// A phase counted from its value at the last rising edge of `reset`. With
+/// `wraps` off, it stores the input as it comes, as Phase Reset once did: a huge
+/// stored value leaves no fraction in later ones (#552).
+#[derive(Clone)]
+struct PhaseOffset {
+    wraps: bool,
+    offset: f32,
+    high: bool,
+}
+
+impl Module for PhaseOffset {
+    fn process(&mut self, _: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        let ([phase, reset], [out]) = io.split::<2, 1>();
+        for ((out, &phase), &reset) in out.iter_mut().zip(phase).zip(reset) {
+            let phase = if self.wraps { phase - phase.floor() } else { phase };
+            if reset > 0.5 && !self.high {
+                self.offset = phase;
+            }
+            self.high = reset > 0.5;
+            let x = phase - self.offset;
+            *out = x - x.floor();
+        }
+    }
+}
+
+/// A [`PhaseOffset`] descriptor that wraps its input or not.
+macro_rules! phase_offset {
+    ($name:ident, $id:literal, $wraps:literal) => {
+        static $name: ModuleDescriptor = ModuleDescriptor {
+            id: $id,
+            version: 1,
+            name: "Phase Offset",
+            category: "Test",
+            family: loom_core::Family::Interface,
+            description: "Counts a phase from the last reset.",
+            inputs: &[port("phase", SignalType::Phase), port("reset", SignalType::Gate)],
+            outputs: &[port("phase", SignalType::Phase)],
+            params: &[],
+            role: ModuleRole::Dsp(|_| {
+                Box::new(PhaseOffset {
+                    wraps: $wraps,
+                    offset: 0.0,
+                    high: false,
+                })
+            }),
+            panel: loom_core::Panel::EMPTY,
+            displays: &[],
+        };
+    };
+}
+
+phase_offset!(PHASE_OFFSET, "test.phase-offset", true);
+phase_offset!(STICKY_OFFSET, "test.sticky-offset", false);
+
+/// A harness for a phase offset module on the extreme check's slow signal.
+fn on_extreme_busy(descriptor: &'static ModuleDescriptor) -> Harness {
+    Harness::new(descriptor)
+        .frames(EXTREME_RENDER)
+        .input("phase", Signal::extreme_busy())
+        .input("reset", Signal::extreme_busy())
+}
+
+/// A module that keeps a captured phase small passes, though its offset differs
+/// from a clean render's: the phase moves at the same speed.
+#[test]
+fn a_wrapped_capture_passes_the_extreme_check() {
+    on_extreme_busy(&PHASE_OFFSET).check_extreme_recovery();
+}
+
+/// The first bug in Phase Reset (#531): subtracting a huge value of the other
+/// sign overflows, and wrapping it gives NaN. A hold of one sign misses this,
+/// because the stored value and the input cancel.
+#[test]
+#[should_panic(expected = "not finite")]
+fn a_stored_huge_value_that_overflows_fails_the_extreme_check() {
+    on_extreme_busy(&STICKY_OFFSET).check_extreme_stays_bounded_on("phase");
+}
+
+/// The second bug in Phase Reset (#531): after a huge capture, ordinary inputs
+/// lose their fraction, so the output stops moving. Its values stay inside 0 to
+/// 1, so only the comparison sees this, which needs the next edge to come after
+/// it. The stored `f32::MAX` is held for the first pass, which has no overflow.
+#[test]
+#[should_panic(expected = "after 3.4028235e38 then 3.4028235e38 on input `phase`, output `phase`")]
+fn a_stored_huge_value_that_loses_the_fraction_fails_the_extreme_check() {
+    on_extreme_busy(&STICKY_OFFSET).check_extreme_recovery();
+}
+
+/// The check for one input looks at that input only, so a fault on another stays
+/// out of it. The sticky module's faults are on `phase`.
+#[test]
+fn the_check_for_one_input_leaves_the_others_alone() {
+    on_extreme_busy(&STICKY_OFFSET).check_extreme_recovery_on("reset");
+}
+
+/// A name that is no input fails, so a table of exceptions cannot go stale.
+#[test]
+#[should_panic(expected = "test.phase-offset: there is no input `nope`")]
+fn the_check_for_one_input_needs_a_real_input() {
+    on_extreme_busy(&PHASE_OFFSET).check_extreme_recovery_on("nope");
+}
+
+/// A render too short to show the next edge fails, so the check cannot be
+/// shortened by accident.
+#[test]
+#[should_panic(expected = "the extreme check needs 48000")]
+fn the_extreme_check_needs_its_whole_render() {
+    Harness::new(&PHASE_OFFSET).frames(1_000).check_extreme_recovery();
+}
+
+// The settling time ends before the next edge, or nothing is compared.
+const _: () = assert!(EXTREME_START + EXTREME_FRAMES + EXTREME_SETTLE < EXTREME_NEXT_EDGE);
+
+/// Holding the value across the edge is what makes a capture see it: the wave
+/// must rise inside the hold, and the second rise must come after the settling.
+#[test]
+fn the_extreme_timing_covers_the_edges() {
+    let wave = Signal::extreme_busy().render(EXTREME_RENDER, DEFAULT_SAMPLE_RATE);
+    let edges: Vec<usize> = (1..wave.len())
+        .filter(|&i| wave[i] > 0.5 && wave[i - 1] <= 0.5)
+        .collect();
+    assert_eq!(edges.len(), 2, "{edges:?}");
+    assert!((EXTREME_START..EXTREME_FLIP).contains(&edges[0]), "{edges:?}");
+    assert!(wave[EXTREME_START] <= 0.5);
+    assert_eq!(edges[1], EXTREME_NEXT_EDGE);
 }
 
 /// The repeatable check passes for a module that copies the same way twice.

@@ -9,7 +9,7 @@ use iced::widget::{
     checkbox, column, container, mouse_area, pick_list, row, scrollable, slider, space, text, text_input,
 };
 use iced::{Element, Length, keyboard};
-use loom_core::{AssignmentId, Graph, ModuleId, OutputRef, WidgetKind};
+use loom_core::{AssignmentId, Graph, ModuleId, OutputRef};
 use serde::Serialize;
 use std::fmt;
 
@@ -302,16 +302,12 @@ pub fn targets(graph: &Graph) -> Vec<TargetPick> {
                 .enumerate()
                 .filter_map(move |(param, spec)| {
                     let eligible = !spec.options.transient
-                        && node.descriptor.panel.widgets.iter().any(|w| {
-                            w.bind == spec.name
-                                && matches!(
-                                    w.kind,
-                                    WidgetKind::Knob
-                                        | WidgetKind::Toggle
-                                        | WidgetKind::Radio
-                                        | WidgetKind::Segmented { .. }
-                                )
-                        });
+                        && node
+                            .descriptor
+                            .panel
+                            .widgets
+                            .iter()
+                            .any(|w| w.bind == spec.name && w.kind.takes_modulation());
                     eligible.then(|| TargetPick {
                         module,
                         param,

@@ -321,7 +321,8 @@ fn no_hover_text_during_a_drag() {
         Interaction::Turning {
             module: 1,
             widget: 0,
-            last_y: 0.0,
+            drag: ValueDrag::KNOB,
+            last: 0.0,
             position: 0.5,
         },
         Interaction::Moving {
@@ -689,6 +690,8 @@ fn hiding_the_focused_select_closes_it_and_uses_up_the_key() {
                 module: 1,
                 widget: 0,
                 highlight: 1,
+                scroll: 0,
+                wheel: 0.0,
             }),
             ..State::default()
         };
@@ -711,6 +714,8 @@ fn stale_select_popup_passes_escape_to_normal_key_handling() {
                 module,
                 widget: 999,
                 highlight: 0,
+                scroll: 0,
+                wheel: 0.0,
             }),
             ..State::default()
         };
@@ -718,6 +723,971 @@ fn stale_select_popup_passes_escape_to_normal_key_handling() {
         assert_eq!(events, vec![CanvasEvent::Select(Vec::new())]);
         assert!(state.select_popup.is_none());
     }
+}
+
+/// A press on empty canvas with a stale list goes on to normal handling, so
+/// the removed widget's list cannot swallow it. The same holds for the wheel,
+/// which then zooms.
+#[test]
+fn stale_select_popup_passes_the_pointer_to_normal_handling() {
+    let scene = chain();
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |event| event);
+    let stale = || {
+        Some(SelectPopup {
+            module: 999,
+            widget: 0,
+            highlight: 0,
+            scroll: 0,
+            wheel: 0.0,
+        })
+    };
+    let empty = Point::new(790.0, 590.0);
+    let mut state = State {
+        select_popup: stale(),
+        ..State::default()
+    };
+    drive(&canvas, &mut state, &click(mouse::Button::Left), empty);
+    assert!(state.select_popup.is_none());
+    assert!(matches!(state.interaction, Interaction::Selecting { .. }));
+
+    let mut state = State {
+        select_popup: stale(),
+        ..State::default()
+    };
+    let zoom = state.camera.zoom;
+    drive(
+        &canvas,
+        &mut state,
+        &Event::Mouse(mouse::Event::WheelScrolled {
+            delta: mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 },
+        }),
+        empty,
+    );
+    assert_ne!(state.camera.zoom, zoom, "the wheel zooms again");
+}
+
+/// An open list commits to its own widget, even when keyboard focus has moved
+/// to another control. A press outside the canvas, or the window losing focus,
+/// closes it with no edit.
+#[test]
+fn select_popup_commits_to_its_own_widget_and_closes_with_no_edit() {
+    let select = || WidgetViewKind::Select {
+        options: vec!["ADSR".into(), "AD".into()],
+    };
+    let mut view = module(1, 0.0);
+    view.panel = PanelView {
+        width: 12,
+        height: 2,
+        widgets: vec![widget(select(), 0), widget(select(), 6)],
+    };
+    let scene = Scene::new(vec![view], Vec::new());
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |event| event);
+    let at = scene.module(1).unwrap().widget_bounds(1).unwrap().center();
+    let open = || {
+        Some(SelectPopup {
+            module: 1,
+            widget: 0,
+            highlight: 1,
+            scroll: 0,
+            wheel: 0.0,
+        })
+    };
+    let mut state = State {
+        focus: Some((1, 1)),
+        select_popup: open(),
+        ..State::default()
+    };
+    let chosen = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Enter, true), at);
+    assert_eq!(
+        chosen,
+        vec![CanvasEvent::SetControl {
+            module: 1,
+            widget: 0,
+            position: 1.0
+        }]
+    );
+
+    let mut state = State {
+        select_popup: open(),
+        ..State::default()
+    };
+    let unfocused = drive(&canvas, &mut state, &Event::Window(window::Event::Unfocused), at);
+    assert!(state.select_popup.is_none());
+    assert!(!unfocused.iter().any(|e| matches!(e, CanvasEvent::SetControl { .. })));
+}
+
+/// A canvas with one open select list of `count` choices named `c0`, `c1`,
+/// and so on.
+fn long_list(count: usize) -> Scene {
+    let mut view = module(1, 0.0);
+    view.panel = PanelView {
+        width: 6,
+        height: 2,
+        widgets: vec![widget(
+            WidgetViewKind::Select {
+                options: (0..count).map(|i| format!("c{i}")).collect(),
+            },
+            0,
+        )],
+    };
+    Scene::new(vec![view], Vec::new())
+}
+
+/// A key press that carries typed text, as a real keyboard sends it.
+fn typed(key: keyboard::Key, text: &str) -> Event {
+    Event::Keyboard(keyboard::Event::KeyPressed {
+        key: key.clone(),
+        modified_key: key,
+        physical_key: keyboard::key::Physical::Unidentified(keyboard::key::NativeCode::Unidentified),
+        location: keyboard::Location::Standard,
+        modifiers: keyboard::Modifiers::default(),
+        text: Some(text.into()),
+        repeat: false,
+    })
+}
+
+/// Over 12 choices the list shows 12 rows and scrolls: the wheel moves it,
+/// a press picks the row under the pointer, and Down keeps the highlight in
+/// view.
+#[test]
+fn a_long_select_list_scrolls() {
+    let scene = long_list(30);
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |event| event);
+    let canvas_area = Rectangle::new(Point::ORIGIN, Size::new(800.0, 600.0));
+    let box_at = scene.module(1).unwrap().widget_bounds(0).unwrap().center();
+    let mut state = State::default();
+    drive(&canvas, &mut state, &click(mouse::Button::Left), box_at);
+    drive(
+        &canvas,
+        &mut state,
+        &Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+        box_at,
+    );
+    let list = canvas.select_popup_bounds(&state, canvas_area).unwrap();
+    assert_eq!(list.height, SELECT_ROW_PX * 12.0, "12 rows show");
+
+    let inside = Point::new(list.x + 20.0, list.y + SELECT_ROW_PX * 0.5);
+    let wheel = |y| {
+        Event::Mouse(mouse::Event::WheelScrolled {
+            delta: mouse::ScrollDelta::Lines { x: 0.0, y },
+        })
+    };
+    let zoom = state.camera.zoom;
+    drive(&canvas, &mut state, &wheel(-3.0), inside);
+    assert_eq!(state.select_popup.unwrap().scroll, 3);
+    assert_eq!(state.camera.zoom, zoom, "the wheel does not zoom over a list");
+
+    // Small trackpad steps add up to a whole row.
+    let pixels = Event::Mouse(mouse::Event::WheelScrolled {
+        delta: mouse::ScrollDelta::Pixels {
+            x: 0.0,
+            y: -SELECT_ROW_PX * 0.6,
+        },
+    });
+    drive(&canvas, &mut state, &pixels, inside);
+    assert_eq!(state.select_popup.unwrap().scroll, 3);
+    drive(&canvas, &mut state, &pixels, inside);
+    assert_eq!(state.select_popup.unwrap().scroll, 4);
+
+    // It stops at either end.
+    drive(&canvas, &mut state, &wheel(-100.0), inside);
+    assert_eq!(state.select_popup.unwrap().scroll, 18);
+    drive(&canvas, &mut state, &wheel(100.0), inside);
+    assert_eq!(state.select_popup.unwrap().scroll, 0);
+
+    // A press picks the row it is on, counting what has scrolled away.
+    drive(&canvas, &mut state, &wheel(-5.0), inside);
+    let picked = drive(&canvas, &mut state, &click(mouse::Button::Left), inside);
+    assert!(picked.contains(&CanvasEvent::SetControl {
+        module: 1,
+        widget: 0,
+        position: 5.0
+    }));
+
+    // The keyboard scrolls the highlight into view.
+    let mut state = State::default();
+    drive(&canvas, &mut state, &Event::Window(window::Event::Focused), box_at);
+    canvas.open_select(&mut state, 1, 0);
+    for _ in 0..15 {
+        drive(
+            &canvas,
+            &mut state,
+            &key_event(keyboard::key::Named::ArrowDown, true),
+            box_at,
+        );
+    }
+    let popup = state.select_popup.unwrap();
+    assert_eq!((popup.highlight, popup.scroll), (15, 4));
+}
+
+/// The list stays inside a short canvas, and a list that is too short to
+/// scroll takes the wheel and stays open.
+#[test]
+fn a_select_list_fits_the_canvas_and_a_short_one_keeps_the_wheel() {
+    assert_eq!(select_popup::select_rows(100.0, 30), 4);
+    assert_eq!(select_popup::select_rows(5.0, 30), 1, "always one row");
+    assert_eq!(select_popup::select_rows(600.0, 3), 3);
+
+    let scene = long_list(3);
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |event| event);
+    let mut state = State {
+        size: Size::new(800.0, 600.0),
+        ..State::default()
+    };
+    canvas.open_select(&mut state, 1, 0);
+    let list = canvas
+        .select_popup_bounds(&state, Rectangle::new(Point::ORIGIN, Size::new(800.0, 600.0)))
+        .unwrap();
+    let inside = Point::new(list.x + 20.0, list.y + 5.0);
+    drive(
+        &canvas,
+        &mut state,
+        &Event::Mouse(mouse::Event::WheelScrolled {
+            delta: mouse::ScrollDelta::Lines { x: 0.0, y: -1.0 },
+        }),
+        inside,
+    );
+    let popup = state.select_popup.expect("stays open");
+    assert_eq!(popup.scroll, 0);
+}
+
+/// When the canvas grows with a scrolled list open, the scroll comes back, so
+/// the list has no blank rows and a press on its last row picks the last value.
+#[test]
+fn a_list_on_a_grown_canvas_has_no_blank_rows() {
+    let scene = long_list(30);
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |event| event);
+    let area = Rectangle::new(Point::ORIGIN, Size::new(800.0, 600.0));
+    // Scrolled to the end on a canvas 4 rows tall.
+    let mut state = State {
+        size: Size::new(800.0, 4.0 * SELECT_ROW_PX),
+        ..State::default()
+    };
+    canvas.open_select(&mut state, 1, 0);
+    state.select_popup.as_mut().unwrap().scroll = 26;
+
+    // Then `drive` gives it a canvas with room for all 12 rows.
+    state.size = area.size();
+    let list = canvas.select_popup_bounds(&state, area).unwrap();
+    let last = Point::new(list.x + 20.0, list.y + list.height - 1.0);
+    let events = drive(&canvas, &mut state, &click(mouse::Button::Left), last);
+    assert!(
+        events.contains(&CanvasEvent::SetControl {
+            module: 1,
+            widget: 0,
+            position: 29.0
+        }),
+        "{events:?}"
+    );
+}
+
+/// Typing jumps to the next choice that starts with the text, ignoring case
+/// and wrapping round. A key that matches nothing is used up, so `a` does not
+/// open the browser behind the list, and a key with Command still passes.
+#[test]
+fn typing_in_an_open_list_jumps_to_the_next_match() {
+    let mut view = module(1, 0.0);
+    view.panel = PanelView {
+        width: 6,
+        height: 2,
+        widgets: vec![widget(
+            WidgetViewKind::Select {
+                options: vec!["Sine".into(), "Saw".into(), "Tri".into(), "1/16".into()],
+            },
+            0,
+        )],
+    };
+    let scene = Scene::new(vec![view], Vec::new());
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |event| event);
+    let at = scene.module(1).unwrap().bounds().center();
+    let mut state = State {
+        focus: Some((1, 0)),
+        ..State::default()
+    };
+    canvas.open_select(&mut state, 1, 0);
+    let letter = |c: &str| typed(keyboard::Key::Character(c.into()), c);
+    let highlight = |state: &State| state.select_popup.unwrap().highlight;
+
+    drive(&canvas, &mut state, &letter("s"), at);
+    assert_eq!(highlight(&state), 1, "searches from after the highlight");
+    drive(&canvas, &mut state, &letter("S"), at);
+    assert_eq!(highlight(&state), 0, "ignores case and wraps round");
+    drive(&canvas, &mut state, &letter("1"), at);
+    assert_eq!(highlight(&state), 3, "any character, so 1/16 can be found");
+
+    let events = drive(&canvas, &mut state, &letter("a"), at);
+    assert!(events.is_empty(), "no match edits nothing: {events:?}");
+    assert_eq!(highlight(&state), 3);
+    assert!(state.select_popup.is_some());
+
+    // Backspace sends a control character, and must not delete the module.
+    let events = drive(
+        &canvas,
+        &mut state,
+        &typed(keyboard::Key::Named(keyboard::key::Named::Backspace), "\u{8}"),
+        at,
+    );
+    assert!(events.is_empty(), "{events:?}");
+}
+
+/// A fader tile with one modulated fader: `vertical` or not.
+fn fader_scene(vertical: bool) -> (Scene, PanelValues) {
+    let mut view = module(1, 0.0);
+    view.panel = PanelView {
+        width: 6,
+        height: 6,
+        widgets: vec![widget(WidgetViewKind::Fader { vertical, steps: 0 }, 0)],
+    };
+    let mut values = PanelValues::new();
+    values.set(
+        1,
+        0,
+        WidgetValue {
+            position: 0.25,
+            modulation: crate::ModulationMark::Range { low: 0.1, high: 0.4 },
+            ..WidgetValue::default()
+        },
+    );
+    (Scene::new(vec![view], Vec::new()), values)
+}
+
+/// During a drag the cursor shows the drag's own direction, as it did on hover.
+#[test]
+fn a_fader_drag_keeps_its_cursor() {
+    for (vertical, expected) in [
+        (true, mouse::Interaction::ResizingVertically),
+        (false, mouse::Interaction::ResizingHorizontally),
+    ] {
+        let (scene, values) = fader_scene(vertical);
+        let selected = BTreeSet::from([1]);
+        let canvas = PatchCanvas::new(&scene, &selected, |event| event).values(&values);
+        let rect = scene.module(1).unwrap().widget_bounds(0).unwrap();
+        let at = crate::controls::fader_track(rect, vertical).center();
+        let mut state = State::default();
+        drive(&canvas, &mut state, &click(mouse::Button::Left), at);
+        assert!(matches!(state.interaction, Interaction::Turning { .. }));
+        assert_eq!(state.interaction.cursor(), Some(expected));
+    }
+    assert_eq!(Interaction::Idle.cursor(), None);
+}
+
+/// Both faders change their value along the track, relative: pressing moves
+/// nothing, and a drag across the track moves nothing either. A press on the
+/// bar beside the track drags depth, and the value stays.
+#[test]
+fn a_fader_drags_along_its_track_and_its_bar_drags_depth() {
+    for vertical in [true, false] {
+        let (scene, values) = fader_scene(vertical);
+        let selected = BTreeSet::from([1]);
+        let canvas = PatchCanvas::new(&scene, &selected, |event| event).values(&values);
+        let rect = scene.module(1).unwrap().widget_bounds(0).unwrap();
+        let at = crate::controls::fader_track(rect, vertical).center();
+        let way = |d: f32| {
+            if vertical {
+                Point::new(at.x, at.y - d)
+            } else {
+                Point::new(at.x + d, at.y)
+            }
+        };
+        let moved = |to: Point| Event::Mouse(mouse::Event::CursorMoved { position: to });
+        let released = Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left));
+
+        let mut state = State::default();
+        let pressed = drive(&canvas, &mut state, &click(mouse::Button::Left), at);
+        assert!(
+            !pressed.iter().any(|e| matches!(e, CanvasEvent::SetControl { .. })),
+            "a press moves nothing"
+        );
+        let events = drive(&canvas, &mut state, &moved(way(100.0)), way(100.0));
+        assert!(
+            events.contains(&CanvasEvent::SetControl {
+                module: 1,
+                widget: 0,
+                position: 0.75,
+            }),
+            "100 of 200 pixels adds half the range: {events:?}"
+        );
+        drive(&canvas, &mut state, &released, way(100.0));
+
+        // Across the track, the value stays.
+        let across = if vertical {
+            Point::new(at.x + 40.0, at.y)
+        } else {
+            Point::new(at.x, at.y + 40.0)
+        };
+        let mut state = State::default();
+        drive(&canvas, &mut state, &click(mouse::Button::Left), at);
+        let events = drive(&canvas, &mut state, &moved(across), across);
+        assert!(!events.iter().any(|e| matches!(e, CanvasEvent::SetControl { .. })));
+        drive(&canvas, &mut state, &released, across);
+
+        // The bar drags depth.
+        let bar = crate::controls::fader_bar_point(rect, vertical, 0.5);
+        let on_bar = |d: f32| {
+            if vertical {
+                Point::new(bar.x, bar.y - d)
+            } else {
+                Point::new(bar.x + d, bar.y)
+            }
+        };
+        let mut state = State::default();
+        drive(&canvas, &mut state, &click(mouse::Button::Left), bar);
+        assert!(matches!(state.interaction, Interaction::Depth { .. }));
+        let events = drive(&canvas, &mut state, &moved(on_bar(20.0)), on_bar(20.0));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, CanvasEvent::DragDepth { delta, .. } if (delta - 0.1).abs() < 1e-5)),
+            "{events:?}"
+        );
+        assert!(!events.iter().any(|e| matches!(e, CanvasEvent::SetControl { .. })));
+    }
+}
+
+/// A fader takes the keys a knob takes: arrows change its value, in 1% steps
+/// or one whole number, and Tab focuses it.
+#[test]
+fn a_fader_takes_the_keys_of_a_knob() {
+    let (scene, values) = fader_scene(true);
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |event| event).values(&values);
+    let at = scene.module(1).unwrap().bounds().center();
+    let mut state = State {
+        focus: Some((1, 0)),
+        ..State::default()
+    };
+    let events = drive(&canvas, &mut state, &key_event(keyboard::key::Named::ArrowUp, true), at);
+    assert!(events.contains(&CanvasEvent::SetControl {
+        module: 1,
+        widget: 0,
+        position: 0.26,
+    }));
+    assert_eq!(focusable(&scene.module(1).unwrap().panel), [0]);
+    assert_eq!(
+        scene.module(1).unwrap().panel.widgets[0].size(),
+        (2, 6),
+        "a vertical fader is tall"
+    );
+}
+
+/// A selected tile with one knob, focused, with its value text set.
+fn typed_scene() -> (Scene, PanelValues) {
+    let mut view = module(1, 0.0);
+    view.panel = PanelView {
+        width: 3,
+        height: 3,
+        widgets: vec![widget(WidgetViewKind::Knob { steps: 0 }, 0)],
+    };
+    let mut values = PanelValues::new();
+    values.set(
+        1,
+        0,
+        WidgetValue {
+            position: 0.5,
+            text: "128.0 BPM".into(),
+            ..WidgetValue::default()
+        },
+    );
+    (Scene::new(vec![view], Vec::new()), values)
+}
+
+/// A key press with `key` and `text` set apart, and modifiers held. On a layout
+/// such as AZERTY a digit's key is not the digit.
+fn typed_key(key: keyboard::Key, text: Option<&str>, modifiers: keyboard::Modifiers, repeat: bool) -> Event {
+    Event::Keyboard(keyboard::Event::KeyPressed {
+        key: key.clone(),
+        modified_key: key,
+        physical_key: keyboard::key::Physical::Unidentified(keyboard::key::NativeCode::Unidentified),
+        location: keyboard::Location::Standard,
+        modifiers,
+        text: text.map(Into::into),
+        repeat,
+    })
+}
+
+/// Types text into the canvas, one character per key press.
+fn type_text(canvas: &PatchCanvas<'_, CanvasEvent>, state: &mut State, text: &str, at: Point) -> Vec<CanvasEvent> {
+    let mut events = Vec::new();
+    for c in text.chars() {
+        let c = c.to_string();
+        events.extend(drive(
+            canvas,
+            state,
+            &typed(keyboard::Key::Character(c.as_str().into()), &c),
+            at,
+        ));
+    }
+    events
+}
+
+/// While an app text field has focus the canvas takes no key press, so a key
+/// that edits the text never moves, deletes, or runs anything. Tab still moves
+/// focus, and the pointer still works.
+#[test]
+fn a_focused_text_field_keeps_keys_from_the_canvas() {
+    use keyboard::key::Named;
+    let (scene, values) = typed_scene();
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |event| event)
+        .values(&values)
+        .text_field_keys(true);
+    let at = scene.module(1).unwrap().bounds().center();
+    let mut state = State::default();
+    for key in [
+        Named::Enter,
+        Named::ArrowLeft,
+        Named::Space,
+        Named::Escape,
+        Named::Backspace,
+    ] {
+        let events = drive(&canvas, &mut state, &key_event(key, true), at);
+        assert!(events.is_empty(), "{key:?} did nothing, but sent {events:?}");
+    }
+    assert_eq!(state.focus, None, "Enter did not focus a control");
+
+    let paste = typed_key(
+        keyboard::Key::Character("v".into()),
+        None,
+        keyboard::Modifiers::COMMAND,
+        false,
+    );
+    assert!(drive(&canvas, &mut state, &paste, at).is_empty(), "the field pastes");
+
+    let events = drive(&canvas, &mut state, &key_event(Named::Tab, true), at);
+    assert!(!events.is_empty(), "Tab still moves focus");
+    assert!(!drive(&canvas, &mut state, &click(mouse::Button::Left), at).is_empty());
+}
+
+/// A press outside the canvas with a list open also takes the keys from the
+/// canvas, as it does with no list open.
+#[test]
+fn a_press_outside_closes_a_select_list_and_clears_focus() {
+    let scene = long_list(3);
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |event| event);
+    let mut state = State {
+        focus: Some((1, 0)),
+        size: Size::new(800.0, 600.0),
+        ..State::default()
+    };
+    canvas.open_select(&mut state, 1, 0);
+    let events = drive(
+        &canvas,
+        &mut state,
+        &click(mouse::Button::Left),
+        Point::new(-10.0, -10.0),
+    );
+    assert!(events.is_empty());
+    assert!(state.select_popup.is_none());
+    assert_eq!(state.focus, None);
+}
+
+/// A select list stays inside the canvas with its box panned off either edge.
+#[test]
+fn a_select_list_stays_in_the_canvas_when_its_box_is_off_an_edge() {
+    let scene = long_list(5);
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |event| event);
+    let area = Rectangle::new(Point::ORIGIN, Size::new(400.0, 300.0));
+    for pan in [-5000.0, 5000.0] {
+        let mut state = State {
+            size: area.size(),
+            ..State::default()
+        };
+        state.camera.pan(Vector::new(0.0, pan));
+        canvas.open_select(&mut state, 1, 0);
+        let list = canvas.select_popup_bounds(&state, area).unwrap();
+        assert!(list.y >= 0.0 && list.y + list.height <= area.height, "{pan}: {list:?}");
+    }
+}
+
+/// During a drag no field opens: the drag's next move would overwrite the
+/// typed value, and the commit would join the drag's undo step.
+#[test]
+fn no_typed_field_opens_during_a_drag() {
+    let (scene, values) = typed_scene();
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |event| event).values(&values);
+    let at = scene.module(1).unwrap().bounds().center();
+    let mut state = State {
+        focus: Some((1, 0)),
+        interaction: Interaction::Panning {
+            last: Point::ORIGIN,
+            click: None,
+        },
+        ..State::default()
+    };
+    type_text(&canvas, &mut state, "5", at);
+    assert!(state.typed.is_none());
+}
+
+/// The reason for bad text goes below the field, above it at the canvas's
+/// bottom edge, and never past the right edge.
+#[test]
+fn the_reason_for_bad_text_stays_in_the_canvas() {
+    let canvas = Rectangle::new(Point::new(10.0, 20.0), Size::new(400.0, 300.0));
+    let field = |x, y| Rectangle::new(Point::new(x, y), Size::new(110.0, 23.0));
+
+    let middle = typed_field::typed_reason_bounds(field(50.0, 100.0), 120.0, canvas);
+    assert!(middle.y > 100.0, "below");
+    assert_eq!(middle.x, 50.0);
+
+    let bottom = typed_field::typed_reason_bounds(field(50.0, 297.0), 120.0, canvas);
+    assert!(bottom.y < 297.0, "above");
+
+    let right = typed_field::typed_reason_bounds(field(300.0, 100.0), 200.0, canvas);
+    assert!(right.x + right.width <= canvas.x + canvas.width);
+
+    let wide = typed_field::typed_reason_bounds(field(300.0, 100.0), 900.0, canvas);
+    assert_eq!((wide.x, wide.width), (canvas.x, canvas.width), "a long reason is cut");
+}
+
+/// A digit opens the field holding it, and Enter commits what was typed. Left,
+/// Right, Backspace, and Delete edit at the caret.
+#[test]
+fn a_digit_opens_the_typed_field_and_enter_commits() {
+    let (scene, values) = typed_scene();
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |event| event).values(&values);
+    let at = scene.module(1).unwrap().bounds().center();
+    let mut state = State {
+        focus: Some((1, 0)),
+        ..State::default()
+    };
+    assert!(type_text(&canvas, &mut state, "129", at).is_empty());
+    assert_eq!(state.typed.as_ref().unwrap().text, "129");
+
+    let named = |key| key_event(key, true);
+    use keyboard::key::Named;
+    drive(&canvas, &mut state, &named(Named::ArrowLeft), at);
+    drive(&canvas, &mut state, &named(Named::Backspace), at);
+    assert_eq!(state.typed.as_ref().unwrap().text, "19", "Backspace takes the 2");
+    drive(&canvas, &mut state, &named(Named::Home), at);
+    drive(&canvas, &mut state, &named(Named::Delete), at);
+    assert_eq!(state.typed.as_ref().unwrap().text, "9", "Delete takes the 1");
+    drive(
+        &canvas,
+        &mut state,
+        &typed(keyboard::Key::Character("1".into()), "1"),
+        at,
+    );
+    drive(&canvas, &mut state, &named(Named::End), at);
+    drive(
+        &canvas,
+        &mut state,
+        &typed(keyboard::Key::Character("0".into()), "0"),
+        at,
+    );
+    assert_eq!(state.typed.as_ref().unwrap().text, "190");
+
+    let committed = drive(&canvas, &mut state, &named(Named::Enter), at);
+    assert_eq!(
+        committed,
+        vec![CanvasEvent::TypedValue {
+            module: 1,
+            widget: 0,
+            text: "190".into()
+        }]
+    );
+    assert!(state.typed.is_none());
+    assert_eq!(state.focus, Some((1, 0)), "focus stays on the control");
+}
+
+/// The first key reads the typed text, not the key, so a layout where a digit
+/// needs Shift still opens the field. A minus sign, a decimal point, and a comma
+/// each start a number. Letters do not.
+#[test]
+fn the_field_opens_on_what_was_typed_not_on_the_key() {
+    let (scene, values) = typed_scene();
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |event| event).values(&values);
+    let at = scene.module(1).unwrap().bounds().center();
+    let none = keyboard::Modifiers::default();
+    for (key, text, opens) in [
+        ("&", "1", true),
+        ("-", "-", true),
+        (".", ".", true),
+        (",", ",", true),
+        ("1", "&", false),
+        ("x", "x", false),
+    ] {
+        let mut state = State {
+            focus: Some((1, 0)),
+            ..State::default()
+        };
+        let event = typed_key(keyboard::Key::Character(key.into()), Some(text), none, false);
+        drive(&canvas, &mut state, &event, at);
+        assert_eq!(state.typed.is_some(), opens, "{key} {text}");
+        if opens {
+            assert_eq!(state.typed.unwrap().text, text);
+        }
+    }
+    // With Command, a digit or a dot stays a shortcut, so Cmd+. can panic.
+    let mut state = State {
+        focus: Some((1, 0)),
+        ..State::default()
+    };
+    let event = typed_key(
+        keyboard::Key::Character(".".into()),
+        Some("."),
+        keyboard::Modifiers::COMMAND,
+        false,
+    );
+    drive(&canvas, &mut state, &event, at);
+    assert!(state.typed.is_none());
+    // A control that does not take numbers ignores a digit.
+    let mut state = State::default();
+    drive(
+        &canvas,
+        &mut state,
+        &typed(keyboard::Key::Character("1".into()), "1"),
+        at,
+    );
+    assert!(state.typed.is_none(), "no focus, no field");
+}
+
+/// While the field is open it takes every key: Backspace does not delete the
+/// module, and `f` does not frame the view. A held Enter does nothing, so it
+/// cannot commit and open again. Tab closes it, and then moves on as usual.
+#[test]
+fn the_open_field_takes_every_key() {
+    let (scene, values) = typed_scene();
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |event| event).values(&values);
+    let at = scene.module(1).unwrap().bounds().center();
+    let mut state = State {
+        focus: Some((1, 0)),
+        ..State::default()
+    };
+    use keyboard::key::Named;
+    type_text(&canvas, &mut state, "1", at);
+    let camera = state.camera;
+    for event in [
+        key_event(Named::Backspace, true),
+        key_event(Named::Delete, true),
+        typed(keyboard::Key::Character("f".into()), "f"),
+        typed(keyboard::Key::Character("a".into()), "a"),
+        typed_key(
+            keyboard::Key::Character("v".into()),
+            Some("v"),
+            keyboard::Modifiers::COMMAND,
+            false,
+        ),
+        key_event(Named::ArrowUp, true),
+    ] {
+        let events = drive(&canvas, &mut state, &event, at);
+        assert!(events.is_empty(), "{event:?}: {events:?}");
+    }
+    assert_eq!(state.camera, camera);
+    assert_eq!(
+        state.typed.as_ref().unwrap().text,
+        "fa",
+        "letters are text; Cmd+V is not"
+    );
+
+    let held = typed_key(
+        keyboard::Key::Named(Named::Enter),
+        None,
+        keyboard::Modifiers::default(),
+        true,
+    );
+    assert!(drive(&canvas, &mut state, &held, at).is_empty());
+    assert!(state.typed.is_some(), "a repeat does not commit");
+
+    let tabbed = drive(&canvas, &mut state, &key_event(Named::Tab, true), at);
+    assert!(state.typed.is_none());
+    assert_eq!(tabbed, vec![CanvasEvent::Select(vec![1])], "Tab moves on as usual");
+}
+
+/// Enter opens the field with the value text selected, and Enter again closes
+/// it with no event: the text is rounded, so committing it would change the
+/// value. A character replaces the selection. Escape cancels.
+#[test]
+fn enter_on_unchanged_text_commits_nothing() {
+    let (scene, values) = typed_scene();
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |event| event).values(&values);
+    let at = scene.module(1).unwrap().bounds().center();
+    let mut state = State {
+        focus: Some((1, 0)),
+        ..State::default()
+    };
+    use keyboard::key::Named;
+    assert!(drive(&canvas, &mut state, &key_event(Named::Enter, true), at).is_empty());
+    assert_eq!(state.typed.as_ref().unwrap().text, "128.0 BPM");
+    assert!(drive(&canvas, &mut state, &key_event(Named::Enter, true), at).is_empty());
+    assert!(state.typed.is_none(), "closed, with no edit");
+
+    drive(&canvas, &mut state, &key_event(Named::Enter, true), at);
+    type_text(&canvas, &mut state, "9", at);
+    assert_eq!(state.typed.as_ref().unwrap().text, "9", "the selection is replaced");
+    assert!(drive(&canvas, &mut state, &key_event(Named::Escape, true), at).is_empty());
+    assert!(state.typed.is_none());
+    assert_eq!(state.focus, Some((1, 0)), "Escape closes only the field");
+
+    // Selected text and Backspace leave an empty field, and the next character
+    // goes in it.
+    drive(&canvas, &mut state, &key_event(Named::Enter, true), at);
+    drive(&canvas, &mut state, &key_event(Named::Backspace, true), at);
+    assert_eq!(state.typed.as_ref().unwrap().text, "");
+}
+
+/// Bad text stays open and Enter does nothing. It can be corrected, and then
+/// Enter commits.
+#[test]
+fn bad_typed_text_blocks_enter_until_it_is_corrected() {
+    let (scene, values) = typed_scene();
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |event| event)
+        .values(&values)
+        .typed_check(|_, _, text| {
+            text.parse::<f32>()
+                .map(|_| ())
+                .map_err(|_| "Not a number in Hz".to_string())
+        });
+    let at = scene.module(1).unwrap().bounds().center();
+    let mut state = State {
+        focus: Some((1, 0)),
+        ..State::default()
+    };
+    use keyboard::key::Named;
+    type_text(&canvas, &mut state, "1a", at);
+    assert_eq!(
+        canvas.typed_error(state.typed.as_ref().unwrap()),
+        Some("Not a number in Hz".to_string())
+    );
+    assert!(drive(&canvas, &mut state, &key_event(Named::Enter, true), at).is_empty());
+    assert!(state.typed.is_some(), "bad text keeps the field open");
+    drive(&canvas, &mut state, &key_event(Named::Backspace, true), at);
+    assert!(canvas.typed_error(state.typed.as_ref().unwrap()).is_none());
+    assert_eq!(drive(&canvas, &mut state, &key_event(Named::Enter, true), at).len(), 1);
+}
+
+/// A press outside, the wheel, the window losing focus, or the widget going
+/// each close the field with no value, and the event still does its work. A
+/// press on the field is used up, and stays open.
+#[test]
+fn moving_focus_away_closes_the_field_with_no_change() {
+    let (scene, values) = typed_scene();
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |event| event).values(&values);
+    let at = scene.module(1).unwrap().bounds().center();
+    let opened = || {
+        let mut state = State {
+            focus: Some((1, 0)),
+            ..State::default()
+        };
+        type_text(&canvas, &mut state, "5", at);
+        state
+    };
+    let edits = |events: &[CanvasEvent]| {
+        events
+            .iter()
+            .any(|e| matches!(e, CanvasEvent::TypedValue { .. } | CanvasEvent::SetControl { .. }))
+    };
+
+    let mut state = opened();
+    let area = Rectangle::new(Point::ORIGIN, Size::new(800.0, 600.0));
+    let on_field = canvas
+        .typed_field_bounds(&state, area, state.typed.as_ref().unwrap())
+        .unwrap()
+        .center();
+    assert!(!edits(&drive(
+        &canvas,
+        &mut state,
+        &click(mouse::Button::Left),
+        on_field
+    )));
+    assert!(state.typed.is_some(), "a press on the field stays");
+    assert!(matches!(state.interaction, Interaction::Idle));
+
+    let mut state = opened();
+    let empty = Point::new(790.0, 590.0);
+    assert!(!edits(&drive(&canvas, &mut state, &click(mouse::Button::Left), empty)));
+    assert!(state.typed.is_none());
+    assert!(
+        matches!(state.interaction, Interaction::Selecting { .. }),
+        "the press still works"
+    );
+
+    let mut state = opened();
+    let zoom = state.camera.zoom;
+    let wheel = Event::Mouse(mouse::Event::WheelScrolled {
+        delta: mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 },
+    });
+    assert!(!edits(&drive(&canvas, &mut state, &wheel, at)));
+    assert!(state.typed.is_none());
+    assert_ne!(state.camera.zoom, zoom, "the wheel still zooms");
+
+    let mut state = opened();
+    assert!(!edits(&drive(
+        &canvas,
+        &mut state,
+        &Event::Window(window::Event::Unfocused),
+        at
+    )));
+    assert!(state.typed.is_none());
+
+    // The module has gone from the selection.
+    let mut state = opened();
+    let none = BTreeSet::new();
+    let unselected = PatchCanvas::new(&scene, &none, |event| event).values(&values);
+    assert!(!edits(&drive(
+        &unselected,
+        &mut state,
+        &key_event(keyboard::key::Named::Enter, true),
+        at
+    )));
+    assert!(state.typed.is_none());
+}
+
+/// A press elsewhere in the window takes the keys from the canvas, so a digit
+/// typed in an inspector field cannot open a field on the tile as well.
+#[test]
+fn a_press_outside_the_canvas_takes_its_focus() {
+    let (scene, values) = typed_scene();
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |event| event).values(&values);
+    let mut state = State {
+        focus: Some((1, 0)),
+        ..State::default()
+    };
+    drive(
+        &canvas,
+        &mut state,
+        &click(mouse::Button::Left),
+        Point::new(5_000.0, 10.0),
+    );
+    assert_eq!(state.focus, None);
+    type_text(&canvas, &mut state, "5", Point::new(5_000.0, 10.0));
+    assert!(state.typed.is_none());
+}
+
+/// In MIDI learn mode no field opens: a digit does nothing, and Enter arms.
+#[test]
+fn no_field_opens_in_midi_learn_mode() {
+    let (scene, values) = typed_scene();
+    let selected = BTreeSet::from([1]);
+    let learn = LearnView::default();
+    let canvas = PatchCanvas::new(&scene, &selected, |event| event)
+        .values(&values)
+        .learn(Some(&learn));
+    let at = scene.module(1).unwrap().bounds().center();
+    let mut state = State {
+        focus: Some((1, 0)),
+        ..State::default()
+    };
+    assert!(type_text(&canvas, &mut state, "5", at).is_empty());
+    assert!(state.typed.is_none());
+    let armed = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Enter, true), at);
+    assert_eq!(armed, vec![CanvasEvent::Learn { module: 1, widget: 0 }]);
+    assert!(state.typed.is_none());
 }
 
 /// A drag in progress when a pop-up opens ends at the next redraw,

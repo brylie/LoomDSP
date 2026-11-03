@@ -167,7 +167,7 @@ impl Module for Svf {
             let coefficients = svf::Coefficients::new(cutoff_hz, 2.0 - 1.98 * resonance, self.sample_rate);
 
             let x = input[i];
-            let x = if x.is_finite() { x } else { 0.0 };
+            let x = loom_dsp::guard(x);
             let outputs = self.filter.tick(x, coefficients);
             lp[i] = outputs.low;
             bp[i] = outputs.band;
@@ -317,7 +317,7 @@ impl Module for OnePole {
             let cutoff_hz = if cutoff_hz.is_nan() { 1_000.0 } else { cutoff_hz }.clamp(0.5, nyquist_limit);
             let coefficients = one_pole::Coefficients::new(cutoff_hz, self.sample_rate);
             let x = input[i];
-            let x = if x.is_finite() { x } else { 0.0 };
+            let x = loom_dsp::guard(x);
             let outputs = self.filter.tick(x, coefficients);
             lp[i] = outputs.low;
             hp[i] = outputs.high;
@@ -565,6 +565,7 @@ impl Module for Ladder {
                 out[i] = 0.0;
                 continue;
             }
+            let x = loom_dsp::guard(x);
             let coefficients = ladder::Coefficients::new(ladder::Settings {
                 cutoff_hz,
                 feedback: resonance * limit,

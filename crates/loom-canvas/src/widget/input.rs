@@ -22,11 +22,15 @@ impl<Message> PatchCanvas<'_, Message> {
         }
         state.interaction = match still.drag {
             Some(StillDrag::Wire { from, pulled }) => Interaction::Wiring { from, pulled },
-            Some(StillDrag::Depth(module, widget)) => Interaction::Depth {
-                module,
-                widget,
-                last_y: still.pointer.map_or(0.0, |p| state.camera.to_screen(p).y),
-            },
+            Some(StillDrag::Depth(module, widget)) => {
+                let drag = self.value_drag(module, widget, state.camera.zoom);
+                Interaction::Depth {
+                    module,
+                    widget,
+                    drag,
+                    last: still.pointer.map_or(0.0, |p| drag.along(state.camera.to_screen(p))),
+                }
+            }
             None => Interaction::Idle,
         };
         if still.hover_text {
@@ -50,14 +54,7 @@ impl<Message> PatchCanvas<'_, Message> {
     ) {
         let over = cursor.is_over(bounds);
         let screen = relative(cursor, bounds);
-
-        // A text field keeps every key, whichever the canvas would have used.
-        // Iced offers an event to every sibling, even after one has taken it
-        // (clipboard.md, rule 7).
-        if self.typing.get() && matches!(event, Event::Keyboard(keyboard::Event::KeyPressed { .. })) {
-            self.leave_keys(state, shell);
-            return;
-        }
+        state.size = bounds.size();
 
         if self.matrix_escape
             && matches!(
@@ -75,12 +72,16 @@ impl<Message> PatchCanvas<'_, Message> {
             return;
         }
 
-        if self.matrix_keyboard
-            && matches!(
-                event,
-                Event::Keyboard(keyboard::Event::KeyPressed { modifiers, .. }) if !modifiers.command()
-            )
-        {
+        let keys_elsewhere = match event {
+            Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
+                (self.matrix_keyboard && !modifiers.command())
+                    || (self.text_field_keys
+                        && (self.text_field_keeps_tab
+                            || !matches!(key, keyboard::Key::Named(keyboard::key::Named::Tab))))
+            }
+            _ => false,
+        };
+        if keys_elsewhere {
             self.leave_keys(state, shell);
             return;
         }
@@ -99,9 +100,21 @@ impl<Message> PatchCanvas<'_, Message> {
             self.release_every_key_hold(state, shell);
             self.end_gestures(state, shell);
             state.interaction = Interaction::Idle;
+            state.typed = None;
             if !matches!(event, Event::Window(_)) {
                 return;
             }
+        }
+
+        // An open list comes before every other use of the pointer. A stale
+        // one is closed first, so the event still does its normal work.
+        self.close_stale_select(state);
+        if self.select_popup_event(state, event, bounds, over, screen, shell) {
+            return;
+        }
+        self.close_stale_typed(state);
+        if self.typed_field_event(state, event, bounds, screen, shell) {
+            return;
         }
 
         match event {
@@ -140,6 +153,7 @@ impl<Message> PatchCanvas<'_, Message> {
                         state.camera.frame_readable(world, bounds.size(), READABLE_ZOOM);
                     }
                     state.framed_key = Some(self.frame_key);
+                    state.typed = None;
                     // A new frame key means a new patch: its lights have to
                     // be reported again, even if the list looks the same.
                     state.reported_lights = None;
@@ -172,8 +186,12 @@ impl<Message> PatchCanvas<'_, Message> {
                 state.modifiers = *modifiers;
             }
             Event::Keyboard(keyboard::Event::KeyPressed {
-                key, modifiers, repeat, ..
-            }) if self.focus_keys(state, key, *modifiers, *repeat, over, shell) => {}
+                key,
+                modifiers,
+                repeat,
+                text,
+                ..
+            }) if self.focus_keys(state, key, *modifiers, text.as_deref(), *repeat, shell) => {}
             Event::Keyboard(keyboard::Event::KeyReleased { key, .. }) => {
                 self.release_key(state, key, shell);
             }
@@ -234,12 +252,6 @@ impl<Message> PatchCanvas<'_, Message> {
             }
             Event::Mouse(mouse::Event::WheelScrolled { delta }) if over => {
                 let Some(screen) = screen else { return };
-                if state.select_popup.take().is_some() {
-                    state.last_click = None;
-                    shell.request_redraw();
-                    shell.capture_event();
-                    return;
-                }
                 match *delta {
                     // A mouse wheel zooms.
                     mouse::ScrollDelta::Lines { y, .. } => {
@@ -262,43 +274,14 @@ impl<Message> PatchCanvas<'_, Message> {
                 shell.request_redraw();
                 shell.capture_event();
             }
-            Event::Mouse(mouse::Event::ButtonPressed(_)) if !over && state.select_popup.is_some() => {
-                state.select_popup = None;
-                state.last_click = None;
-                shell.request_redraw();
+            // A press elsewhere in the window, such as an inspector field,
+            // takes the keys from the canvas, so a digit never opens a field
+            // on a control the player has left.
+            Event::Mouse(mouse::Event::ButtonPressed(_)) if !over => {
+                state.focus = None;
             }
             Event::Mouse(mouse::Event::ButtonPressed(button)) if over => {
                 let Some(screen) = screen else { return };
-                if let Some(popup) = state.select_popup.take() {
-                    let double = *button == mouse::Button::Left
-                        && self.scene.hit(state.camera.to_world(screen), state.hit_radius())
-                            == Hit::Widget {
-                                module: popup.module,
-                                widget: popup.widget,
-                            }
-                        && state.last_click.is_some_and(|(at, module, widget)| {
-                            module == popup.module && widget == popup.widget && Instant::now() - at < DOUBLE_CLICK
-                        });
-                    state.last_click = None;
-                    if double {
-                        self.emit(
-                            shell,
-                            CanvasEvent::ResetControl {
-                                module: popup.module,
-                                widget: popup.widget,
-                            },
-                        );
-                    } else if *button == mouse::Button::Left
-                        && let Some(rect) = self.select_popup_bounds_for(state, bounds, popup)
-                        && rect.contains(screen)
-                    {
-                        let index = ((screen.y - rect.y) / SELECT_ROW_PX).floor() as usize;
-                        self.set_control(shell, popup.module, popup.widget, index as f32);
-                    }
-                    shell.request_redraw();
-                    shell.capture_event();
-                    return;
-                }
                 if self.matrix_keyboard {
                     self.emit(shell, CanvasEvent::PointerDown);
                 }
@@ -380,11 +363,13 @@ impl<Message> PatchCanvas<'_, Message> {
                     Interaction::Turning {
                         module,
                         widget,
-                        last_y,
+                        drag,
+                        last,
                         position,
                     } => {
-                        let next = knob_drag(*position, screen.y - *last_y, state.modifiers.shift());
-                        *last_y = screen.y;
+                        let along = drag.along(screen);
+                        let next = drag.moved(*position, along - *last, state.modifiers.shift());
+                        *last = along;
                         if next != *position {
                             *position = next;
                             let event = CanvasEvent::SetControl {
@@ -395,11 +380,18 @@ impl<Message> PatchCanvas<'_, Message> {
                             self.emit(shell, event);
                         }
                     }
-                    Interaction::Depth { module, widget, last_y } => {
-                        let dy = screen.y - *last_y;
-                        *last_y = screen.y;
-                        // The knob's own drag scale: up raises, down lowers.
-                        let delta = knob_drag(0.5, dy, state.modifiers.shift()) - 0.5;
+                    Interaction::Depth {
+                        module,
+                        widget,
+                        drag,
+                        last,
+                    } => {
+                        let along = drag.along(screen);
+                        let moved = along - *last;
+                        *last = along;
+                        // The control's own drag scale: the way that raises
+                        // the value raises the depth.
+                        let delta = drag.moved(0.5, moved, state.modifiers.shift()) - 0.5;
                         if delta != 0.0 {
                             let event = CanvasEvent::DragDepth {
                                 module: *module,
@@ -578,7 +570,6 @@ impl<Message> PatchCanvas<'_, Message> {
                 }
             }
             Event::Window(window::Event::Unfocused) => {
-                state.select_popup = None;
                 // A key release never arrives if the window loses focus
                 // while Space or Enter is held. End every hold here.
                 self.release_pointer_hold(state, shell);
@@ -623,12 +614,14 @@ impl<Message> PatchCanvas<'_, Message> {
         if let Some((module, widget)) = self.depth_drag_at(&hit, world) {
             // The selection stays as it is: a selected source module is one
             // way the drag picks its assignment (modulation.md, Arc drag).
+            let drag = self.value_drag(module, widget, state.camera.zoom);
             self.begin(
                 state,
                 Interaction::Depth {
                     module,
                     widget,
-                    last_y: screen.y,
+                    drag,
+                    last: drag.along(screen),
                 },
                 shell,
             );
@@ -672,13 +665,15 @@ impl<Message> PatchCanvas<'_, Message> {
                 }
                 let position = self.position(module, widget);
                 let click = match self.widget_kind(module, widget) {
-                    Some(WidgetViewKind::Knob { .. }) => {
+                    Some(kind) if kind.is_one_number() => {
+                        let drag = self.value_drag(module, widget, state.camera.zoom);
                         self.begin(
                             state,
                             Interaction::Turning {
                                 module,
                                 widget,
-                                last_y: screen.y,
+                                drag,
+                                last: drag.along(screen),
                                 position,
                             },
                             shell,

@@ -176,6 +176,11 @@ impl App {
         let browser =
             (open && self.browser.is_some() && self.help.is_none()).then(|| iced::event::listen_with(browser_key));
         let help_keys = open.then(|| iced::event::listen_with(help_key));
+        // A draft in a value field ends on Escape, and the app has to know
+        // when text focus may have moved (panel-widgets.md, Typing a value).
+        let text_focus = open.then(|| iced::event::listen_with(crate::controls::text_focus_event));
+        let value_draft =
+            (open && self.value_draft.is_some()).then(|| iced::event::listen_with(crate::controls::value_draft_event));
         // The patches browser hears Up, Down, and Escape over its fields.
         let patches_keys = (open && self.patches.is_some() && self.chooser.is_none())
             .then(|| iced::event::listen_with(crate::patches::key));
@@ -195,6 +200,8 @@ impl App {
                 .chain(browser)
                 .chain(help_keys)
                 .chain(patches_keys)
+                .chain(value_draft)
+                .chain(text_focus)
                 .chain(question_keys)
                 .chain(panic)
                 .chain(drops)
@@ -215,23 +222,24 @@ impl App {
     /// there are none.
     pub(crate) fn watched_lights(&self) -> Option<lights::Watch> {
         let graph = self.controller.graph();
-        let (lights, ranges): (Vec<_>, Vec<_>) = self
+        let (lights, (ranges, readouts)): (Vec<_>, (Vec<_>, Vec<_>)) = self
             .visible_displays
             .iter()
             .filter_map(|&id| Some((id, graph.node(ModuleId(id))?.descriptor)))
             .flat_map(|(id, d)| {
                 d.panel.widgets.iter().enumerate().filter_map(move |(index, w)| {
                     let display = (!w.is_control()).then(|| d.display_index(w.bind))??;
-                    Some(((id, index), display, lights::range(d, w)))
+                    Some(((id, index), display, lights::range(d, w), lights::readout(d, w)))
                 })
             })
-            .filter_map(|(light, display, range)| {
+            .filter_map(|(light, display, range, readout)| {
                 let source = self.controller.display_source(ModuleId(light.0), display)?;
-                Some(((light, source), range))
+                Some(((light, source), (range, readout)))
             })
             .unzip();
         (!lights.is_empty()).then(|| lights::Watch {
             reader: self.controller.display_reader(),
+            readouts,
             lights,
             ranges,
             generation: self.generation,

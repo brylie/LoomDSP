@@ -208,8 +208,8 @@ pub struct Widget {
     /// `Reson…` for `Resonance`. Left out when the whole label shows.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shown: Option<String>,
-    /// knob, toggle, radio, segmented, select, button, light, meter, or
-    /// scope.
+    /// knob, fader, number, toggle, radio, segmented, select, button, light,
+    /// readout, meter, or scope.
     pub kind: &'static str,
     /// Where the widget is drawn. Left out while it is hidden.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -303,7 +303,7 @@ fn cut_labels(module: &ModuleView) -> Cut {
             TextKind::Port(port) if port.output => module.outputs.get(port.index).map(|p| &p.label),
             TextKind::Port(port) => module.inputs.get(port.index).map(|p| &p.label),
             TextKind::Caption(index) => module.panel.widgets.get(index).map(|w| &w.label),
-            TextKind::Title | TextKind::Unknown | TextKind::Option(..) => None,
+            TextKind::Title | TextKind::Unknown | TextKind::Option(..) | TextKind::Value(..) => None,
         };
         if label.is_some_and(|label| *label != item.content) {
             cut.0.push((item.kind, item.content.into_owned()));
@@ -315,11 +315,14 @@ fn cut_labels(module: &ModuleView) -> Cut {
 fn kind_name(kind: &WidgetViewKind) -> &'static str {
     match kind {
         WidgetViewKind::Knob { .. } => "knob",
+        WidgetViewKind::Fader { .. } => "fader",
+        WidgetViewKind::Number { .. } => "number",
         WidgetViewKind::Toggle => "toggle",
         WidgetViewKind::Radio { .. } => "radio",
         WidgetViewKind::Select { .. } => "select",
         WidgetViewKind::Segmented { .. } => "segmented",
         WidgetViewKind::Light => "light",
+        WidgetViewKind::Readout { .. } => "readout",
         WidgetViewKind::Meter { .. } => "meter",
         WidgetViewKind::Scope => "scope",
         WidgetViewKind::Shape { .. } => "shape",

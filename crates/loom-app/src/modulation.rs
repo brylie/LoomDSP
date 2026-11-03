@@ -269,7 +269,7 @@ pub fn mark(kind: WidgetKind, spec: &ParamSpec, base: f32, reaches: &[Reach]) ->
     if reaches.iter().all(|r| !r.enabled) {
         return ModulationMark::Ring;
     }
-    if kind != WidgetKind::Knob {
+    if !kind.has_range() {
         return ModulationMark::Dot;
     }
     let (mut low, mut high) = (0.0_f32, 0.0_f32);

@@ -322,7 +322,7 @@ fn select_and_shape_panel_bindings_are_checked() {
         channels: Channels::PerChannel,
     }];
     static PARAMS: [ParamSpec; 1] = [param("mode", 0.0, 1.0, 0.0, "").integer().choices(&["First", "Second"])];
-    static NO_CHOICES: [ParamSpec; 1] = [param("mode", 0.0, 1.0, 0.0, "").integer()];
+    static NOT_WHOLE: [ParamSpec; 1] = [param("mode", 0.0, 1.0, 0.0, "")];
     static VALID: [Widget; 2] = [
         Widget::shape(0, 0, 6, "out", "Result", sample),
         Widget::select(0, 5, "mode"),
@@ -351,7 +351,7 @@ fn select_and_shape_panel_bindings_are_checked() {
     assert_eq!(Widget::shape(0, 0, 6, "out", "Result", sample), VALID[0]);
 
     assert!(
-        descriptor(&VALID, &NO_CHOICES)
+        descriptor(&VALID, &NOT_WHOLE)
             .check_panel()
             .unwrap_err()
             .contains("select list")
@@ -416,5 +416,186 @@ fn only_the_exact_name_matches() {
     for name in ["cut", "cutoffs", "Cutoff", ""] {
         assert_eq!(NAMED.param_index(name), None, "{name:?}");
         assert_eq!(NAMED.input_index(name), None, "{name:?}");
+    }
+}
+
+/// A select list takes names or numbers, up to 128 values, and only on a
+/// whole-number parameter (panel-widgets.md, Select list).
+#[test]
+fn a_select_list_needs_a_whole_number_with_at_most_128_values() {
+    static SELECT: [Widget; 1] = [Widget::select(0, 0, "p")];
+    let spec = |min, max| param("p", min, max, min, "voices");
+    assert_eq!(spec(1.0, 4.0).integer().value_count(), 4);
+    assert_eq!(
+        spec(1.0, 2.0).integer().value_names(),
+        ["1 voices", "2 voices"],
+        "numbers with the unit"
+    );
+    let named = spec(0.0, 1.0).integer().choices(&["Off", "On"]);
+    assert_eq!(named.value_names(), ["Off", "On"]);
+
+    let check = |param: ParamSpec| -> Result<(), String> {
+        let params: &'static [ParamSpec] = Box::leak(Box::new([param]));
+        let descriptor = ModuleDescriptor {
+            params,
+            panel: Panel::new(6, 2, &SELECT),
+            ..NAMED
+        };
+        descriptor.check_panel().map_err(|error| error.to_string())
+    };
+    assert!(check(spec(1.0, 128.0).integer()).is_ok());
+    let too_long = check(spec(1.0, 129.0).integer()).unwrap_err();
+    assert!(too_long.contains("select list"), "{too_long}");
+    assert!(check(spec(1.0, 4.0)).is_err(), "not a whole number");
+}
+
+/// A fader binds to any parameter, and the registry names it when the
+/// parameter does not exist or the fader leaves the panel.
+#[test]
+fn a_fader_needs_a_parameter_and_room() {
+    static PARAMS: [ParamSpec; 1] = [CUTOFF];
+    static TALL: [Widget; 1] = [Widget::fader(0, 0, "cutoff")];
+    static WIDE: [Widget; 1] = [Widget::fader_horizontal(0, 0, "cutoff")];
+    static MISSING: [Widget; 1] = [Widget::fader(0, 0, "nothing")];
+    let descriptor = |widgets, width, height| ModuleDescriptor {
+        params: &PARAMS,
+        panel: Panel::new(width, height, widgets),
+        ..NAMED
+    };
+    assert!(descriptor(&TALL, 2, 6).check_panel().is_ok());
+    assert!(descriptor(&WIDE, 6, 2).check_panel().is_ok());
+    assert!(descriptor(&TALL, 2, 5).check_panel().unwrap_err().contains("outside"));
+    assert!(descriptor(&WIDE, 5, 2).check_panel().unwrap_err().contains("outside"));
+    assert!(descriptor(&MISSING, 2, 6).check_panel().is_err());
+}
+
+/// A typed value takes its unit and `k` in the forms players type, reads a
+/// comma as a decimal point, rounds whole numbers, and clamps. Anything else is
+/// refused by name (panel-widgets.md, Typing a value).
+#[test]
+fn typed_values_read_units_k_and_commas() {
+    let hz = param("f", 20.0, 20_000.0, 1_000.0, "Hz");
+    for (text, value) in [
+        ("440", 440.0),
+        ("440 Hz", 440.0),
+        ("440Hz", 440.0),
+        ("440 hz", 440.0),
+        ("  440  ", 440.0),
+        ("2k", 2000.0),
+        ("2K", 2000.0),
+        ("2k Hz", 2000.0),
+        ("2kHz", 2000.0),
+        ("2 kHz", 2000.0),
+        ("1,5k", 1500.0),
+        ("1000000", 20_000.0),
+        ("-5", 20.0),
+    ] {
+        assert_eq!(hz.parse_value_text(text), Ok(value), "{text}");
+    }
+    assert_eq!(param("g", -60.0, 6.0, 0.0, "dB").parse_value_text("-6 dB"), Ok(-6.0));
+    assert_eq!(
+        param("n", 0.0, 10.0, 0.0, "").integer().parse_value_text("3.6"),
+        Ok(4.0)
+    );
+    let whole = param("n", 0.0, 10.0, 0.0, "").integer();
+    assert!(whole.parse_value_text("-0.4").unwrap().is_sign_positive(), "never -0");
+    let around_zero = param("p", -1.0, 1.0, 0.0, "");
+    assert!(around_zero.parse_value_text("-0").unwrap().is_sign_positive());
+
+    for text in ["", " ", "-", "k", "abc", "NaN", "inf", "-inf", "Hz", "1 2", "1e99"] {
+        let error = hz.parse_value_text(text).unwrap_err();
+        assert_eq!(error.to_string(), "Not a number in Hz", "{text}");
+    }
+    let plain = param("p", 0.0, 1.0, 0.0, "");
+    assert_eq!(plain.parse_value_text("abc").unwrap_err().to_string(), "Not a number");
+}
+
+/// A readout writes a value by its display range: a number with its unit, a
+/// note name with cents, or a choice name. It never fails on a bad value.
+#[test]
+fn a_readout_writes_its_value_by_format() {
+    let number = DisplayRange {
+        min: -50.0,
+        max: 50.0,
+        unit: "cents",
+        format: DisplayFormat::Number { decimals: 1 },
+    };
+    assert_eq!(number.text(12.54), "12.5 cents");
+    // Around silence the text does not flip between "-0.0" and "0.0".
+    assert_eq!(number.text(-0.04), "0.0 cents");
+    assert_eq!(number.text(-0.0), "0.0 cents");
+    assert_eq!(number.text(-0.06), "-0.1 cents");
+    let plain = DisplayRange {
+        unit: "",
+        format: DisplayFormat::Number { decimals: 0 },
+        ..number
+    };
+    assert_eq!(plain.text(7.0), "7");
+
+    let note = DisplayRange {
+        format: DisplayFormat::Note,
+        ..plain
+    };
+    assert_eq!(note.text(0.0), "C4", "0.0 is middle C");
+    assert_eq!(note.text(0.075), "A4", "9 semitones at 0.1 per octave");
+    assert_eq!(note.text(-0.1), "C3", "an octave down");
+    assert_eq!(note.text(1.0 / 1200.0), "C4 +10¢");
+    assert_eq!(note.text(-1.0 / 1200.0), "C4 -10¢");
+    assert_eq!(note.text(0.1 / 12.0), "C#4");
+
+    let choices = DisplayRange {
+        min: 1.0,
+        format: DisplayFormat::Choices(&["One", "Two"]),
+        ..plain
+    };
+    assert_eq!(choices.text(1.0), "One");
+    assert_eq!(choices.text(2.0), "Two");
+    assert_eq!(choices.text(99.0), "Two", "past the end names the last");
+    assert_eq!(choices.text(-99.0), "One");
+
+    for range in [number, note, choices] {
+        assert_eq!(range.text(f32::NAN), "--");
+        assert_eq!(range.text(f32::INFINITY), "--");
+    }
+}
+
+/// The registry refuses a readout with no display value, on a trigger, or of
+/// another width, and names the widget.
+#[test]
+fn a_readout_needs_a_level_display_and_a_known_width() {
+    static LEVEL: [DisplaySpec; 2] = [
+        DisplaySpec {
+            name: "level",
+            label: "Level",
+            description: "A level.",
+            kind: DisplayKind::Level,
+            range: DisplayRange::UNIT,
+        },
+        DisplaySpec {
+            name: "hit",
+            label: "Hit",
+            description: "A trigger.",
+            kind: DisplayKind::Trigger,
+            range: DisplayRange::UNIT,
+        },
+    ];
+    static GOOD: [Widget; 2] = [Widget::readout(0, 0, 3, "level"), Widget::readout(0, 2, 6, "level")];
+    static MISSING: [Widget; 1] = [Widget::readout(0, 0, 3, "nothing")];
+    static TRIGGER: [Widget; 1] = [Widget::readout(0, 0, 3, "hit")];
+    static WIDTH: [Widget; 1] = [Widget::readout(0, 0, 4, "level")];
+    let descriptor = |widgets| ModuleDescriptor {
+        displays: &LEVEL,
+        panel: Panel::new(6, 4, widgets),
+        ..NAMED
+    };
+    assert!(descriptor(&GOOD).check_panel().is_ok());
+    assert!(!GOOD[0].is_control(), "a readout is a display");
+    for (widgets, why) in [
+        (&MISSING[..], "needs a display value"),
+        (&TRIGGER[..], "cannot show a trigger"),
+        (&WIDTH[..], "3 or 6"),
+    ] {
+        let error = descriptor(widgets).check_panel().unwrap_err();
+        assert!(error.contains(why) && error.contains("Readout"), "{error}");
     }
 }

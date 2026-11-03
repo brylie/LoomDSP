@@ -315,7 +315,7 @@ enum Message {
         then: control::AfterSearch,
     },
     /// Whether a text field has focus, for a `type` command.
-    TextFocus {
+    TypeFocus {
         call: control::Call,
         text: String,
         focused: bool,
@@ -368,6 +368,26 @@ enum Message {
         index: usize,
         value: f32,
     },
+    /// Text typed in an inspector value field (panel-widgets.md, Typing a
+    /// value).
+    ValueText {
+        module: u32,
+        index: usize,
+        text: String,
+    },
+    /// Enter in an inspector value field.
+    ValueSubmit {
+        module: u32,
+        index: usize,
+    },
+    /// Escape with a draft in a value field: it is dropped.
+    ValueDraftClear,
+    /// Something may have moved text focus, such as a press. Ask the widgets.
+    TextFocusCheck,
+    /// Which text field has focus, from the widgets.
+    TextFocus(editing::TextFocus),
+    /// Tab was pressed. It closes a text field on the main view.
+    TextFieldTab,
     /// A choice name was picked in the inspector: value `min + choice` of
     /// the parameter, as one undo step (panels.md, Choice names).
     Choice {
@@ -502,6 +522,8 @@ impl Message {
                 | Self::MidiPoll
                 | Self::BenchDone
                 | Self::UnknownLabelDraft { .. }
+                | Self::TextFocusCheck
+                | Self::TextFocus(_)
         )
     }
 
@@ -522,7 +544,7 @@ impl Message {
             | Self::Control(_)
             | Self::ControlFrame(_)
             | Self::Located { .. }
-            | Self::TextFocus { .. }
+            | Self::TypeFocus { .. }
             | Self::Frame(_)
             | Self::Tick
             | Self::Audio(_)
@@ -532,6 +554,8 @@ impl Message {
             | Self::Telemetry(_)
             | Self::Autosave
             | Self::Midi
+            // The answer to a question asked before this one opened.
+            | Self::TextFocus(_)
             // These say they were ignored, so they must arrive.
             | Self::FileDropped(_)
             | Self::DropsDone => true,
@@ -571,6 +595,11 @@ impl Message {
             | Self::HistoryKey { .. }
             | Self::Redo
             | Self::ParamValue { .. }
+            | Self::ValueText { .. }
+            | Self::ValueSubmit { .. }
+            | Self::ValueDraftClear
+            | Self::TextFocusCheck
+            | Self::TextFieldTab
             | Self::Choice { .. }
             | Self::Range { .. }
             | Self::SliderReleased
@@ -632,6 +661,12 @@ struct App {
     /// Live values of panel controls and lights, apart from the scene so a
     /// knob turn does not rebuild tiles or cables.
     values: PanelValues,
+    /// Text typed in an inspector value field, not committed yet.
+    value_draft: Option<controls::ValueDraft>,
+    /// Which text field has focus. While one does, the canvas leaves the keys
+    /// to it. Kept from the widget tree, because a text field does not say when
+    /// it loses focus.
+    text_focus: editing::TextFocus,
     /// Last brightness of each light, by module and widget.
     lights: BTreeMap<lights::Light, f32>,
     /// True when the last commit had a cable on the Transport's `run`
@@ -1043,7 +1078,7 @@ impl App {
             Message::Tick => FrameCause::Tick,
             Message::LiveFrame => FrameCause::Live,
             Message::Meters(_) | Message::Telemetry(_) | Message::Lights(_) => FrameCause::Meters,
-            Message::Control(_) | Message::ControlFrame(_) | Message::Located { .. } | Message::TextFocus { .. } => {
+            Message::Control(_) | Message::ControlFrame(_) | Message::Located { .. } | Message::TypeFocus { .. } => {
                 FrameCause::Control
             }
             Message::Canvas(_) | Message::Key(_) | Message::File(FileAction::Close) => FrameCause::Input,
@@ -1054,6 +1089,15 @@ impl App {
         if self.question.is_some() && !message.allowed_during_question() {
             return Task::none();
         }
+        // A field can go with the view, so any input while one has focus asks
+        // again. Live readings and frames do not change what the view holds.
+        let ask_focus = matches!(message, Message::TextFocusCheck)
+            || (self.text_focus.any
+                && !matches!(message, Message::TextFocus(_))
+                && !matches!(
+                    cause,
+                    FrameCause::Tick | FrameCause::Live | FrameCause::Meters | FrameCause::Forced
+                ));
         // A mode change the engine's full queue refused goes again now.
         self.send_pending_safety();
         if !message.keeps_patch() {
@@ -1102,14 +1146,17 @@ impl App {
             Message::Matrix(event) => self.matrix_message(event),
             Message::MatrixKey(key) => self.matrix_key_message(key),
             Message::ControlFrame(now) => self.control_frame(now),
+            Message::TextFieldTab => self.text_field_tab(),
+            Message::TextFocus(focus) => self.text_focus_changed(focus),
+            Message::ValueSubmit { module, index } => self.value_submit(module, index),
             Message::Located {
                 call,
                 target,
                 found,
                 then,
             } => self.located(call, &target, &found, then),
-            Message::TextFocus { call, text, focused } => {
-                self.text_focus(call, &text, focused);
+            Message::TypeFocus { call, text, focused } => {
+                self.type_after_focus_check(call, &text, focused);
                 Task::none()
             }
             message if self.clipboard_key(&message).is_some() => self.clipboard_command(&message),
@@ -1120,6 +1167,11 @@ impl App {
         };
         // An undo or redo shortcut asks the window whether a text field has
         // focus first.
+        let task = if ask_focus {
+            Task::batch([task, editing::text_focus().map(Message::TextFocus)])
+        } else {
+            task
+        };
         let task = match self.history_key.take() {
             Some(redo) => Task::batch([
                 task,
@@ -1289,8 +1341,11 @@ impl App {
             Message::Browser(_)
             | Message::Control(_)
             | Message::ControlFrame(_)
+            | Message::TextFieldTab
+            | Message::TextFocus(_)
+            | Message::ValueSubmit { .. }
             | Message::Located { .. }
-            | Message::TextFocus { .. }
+            | Message::TypeFocus { .. }
             | Message::Matrix(_)
             | Message::MatrixKey(_) => {}
             Message::ShowHelp => {
@@ -1470,6 +1525,9 @@ impl App {
                     self.close_slider_gesture();
                 }
             }
+            Message::ValueText { module, index, text } => self.type_value_draft(module, index, text),
+            Message::ValueDraftClear => self.clear_value_draft(),
+            Message::TextFocusCheck => {}
             Message::Range { module, index, range } => self.set_range(module, index, range),
             Message::SliderReleased => self.close_slider_gesture(),
             Message::AddModulation { module, index } => {

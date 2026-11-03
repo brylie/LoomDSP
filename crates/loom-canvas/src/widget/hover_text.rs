@@ -29,7 +29,7 @@ impl<Message> PatchCanvas<'_, Message> {
     /// press, the focused control comes first, until the pointer moves.
     /// Nothing during a drag.
     pub(super) fn hover_target(&self, state: &State) -> Option<HoverTarget> {
-        if state.select_popup.is_some() || !matches!(state.interaction, Interaction::Idle) {
+        if state.select_popup.is_some() || state.typed.is_some() || !matches!(state.interaction, Interaction::Idle) {
             return None;
         }
         let focused = state.focus.filter(|_| state.tab_focus).and_then(|(module, widget)| {
@@ -104,17 +104,17 @@ impl<Message> PatchCanvas<'_, Message> {
         if state.cursor.is_some_and(|point| self.resize_at(point).is_some()) {
             return mouse::Interaction::ResizingDiagonallyDown;
         }
-        let on_ring = state
+        let on_range = state
             .hover
             .zip(state.cursor)
-            .is_some_and(|(hit, world)| self.depth_drag_at(&hit, world).is_some());
-        if on_ring {
-            return mouse::Interaction::ResizingVertically;
+            .and_then(|(hit, world)| self.depth_drag_at(&hit, world));
+        if let Some((module, widget)) = on_range {
+            return self.value_drag(module, widget, state.camera.zoom).cursor();
         }
         match state.hover {
             Some(Hit::Port(_) | Hit::Badge(_)) => mouse::Interaction::Pointer,
             Some(Hit::Widget { module, widget }) => match self.widget_kind(module, widget) {
-                Some(WidgetViewKind::Knob { .. }) => mouse::Interaction::ResizingVertically,
+                Some(kind) if kind.is_one_number() => self.value_drag(module, widget, state.camera.zoom).cursor(),
                 _ => mouse::Interaction::Pointer,
             },
             Some(Hit::Module(_)) => mouse::Interaction::Grab,
@@ -199,7 +199,7 @@ impl<Message> PatchCanvas<'_, Message> {
     where
         Renderer: text::Renderer<Font = Font>,
     {
-        if state.select_popup.is_some() {
+        if state.select_popup.is_some() || state.typed.is_some() {
             return;
         }
         let Some(target) = state.hover_text.shown() else {

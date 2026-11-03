@@ -266,6 +266,7 @@ fn setting_the_same_value_keeps_the_generation() {
 
 #[test]
 fn knob_drag_is_200_pixels_and_fine_with_shift() {
+    let knob_drag = |position, dy: f32, fine| ValueDrag::KNOB.moved(position, -dy, fine);
     // Up is negative screen y.
     assert_eq!(knob_drag(0.0, -100.0, false), 0.5);
     assert!((knob_drag(0.0, -100.0, true) - 0.05).abs() < 1e-6);
@@ -437,4 +438,96 @@ fn a_result_preview_is_one_joined_line() {
     let (from, to) = geometry.lines[1].ends();
     assert!(from.y > to.y + 10.0, "the step rises");
     assert!((to.x - from.x) > 0.0, "the step moves right as it rises");
+}
+
+/// A fader's drag is along its track. Up raises a vertical one and right raises
+/// a horizontal one. The full range is at least 200 screen pixels, so a short
+/// fader at middle zoom is never coarse (panel-widgets.md, Fader).
+#[test]
+fn a_fader_drags_along_its_track_over_at_least_200_pixels() {
+    let tall = Rectangle::new(Point::ORIGIN, Size::new(2.0 * GRID, 6.0 * GRID));
+    let wide = Rectangle::new(Point::ORIGIN, Size::new(6.0 * GRID, 2.0 * GRID));
+    let up = ValueDrag::fader(tall, true, 0.7);
+    let right = ValueDrag::fader(wide, false, 0.7);
+    assert_eq!(up.along(Point::new(9.0, 40.0)), -40.0);
+    assert_eq!(right.along(Point::new(9.0, 40.0)), 9.0);
+    assert_eq!(up.moved(0.0, 100.0, false), 0.5, "200 pixels at middle zoom");
+    assert_eq!(right.moved(0.0, 100.0, false), 0.5);
+    assert!((up.moved(0.0, 100.0, true) - 0.05).abs() < 1e-6, "Shift is finer");
+
+    // Zoomed far in, the track on screen is longer, and it is the full range.
+    let close = ValueDrag::fader(wide, false, 5.0);
+    let length = fader_track(wide, false).width * 5.0;
+    assert!(length > 200.0);
+    assert!((close.moved(0.0, length, false) - 1.0).abs() < 1e-6);
+}
+
+/// The handle follows the value, and stays within the cell. The modulation bar
+/// lies clear of the handle, in the place a press on it is taken as a depth
+/// drag.
+#[test]
+fn a_fader_handle_and_bar_are_where_they_should_be() {
+    for (rect, vertical) in [
+        (Rectangle::new(Point::ORIGIN, Size::new(2.0 * GRID, 6.0 * GRID)), true),
+        (Rectangle::new(Point::ORIGIN, Size::new(6.0 * GRID, 2.0 * GRID)), false),
+    ] {
+        for t in [0.0, 0.5, 1.0] {
+            let handle = fader_handle(rect, vertical, t);
+            assert!(rect.expand(0.01).contains(handle.position()), "{handle:?}");
+            let bar = fader_bar_point(rect, vertical, t);
+            assert!(on_fader_bar(rect, vertical, bar), "{bar:?}");
+            assert!(!handle.contains(bar), "the bar is clear of the handle");
+            assert!(rect.contains(bar), "{bar:?} in {rect:?}");
+        }
+        assert!(!on_fader_bar(rect, vertical, fader_track(rect, vertical).center()));
+        let top = fader_handle(rect, vertical, 1.0).center();
+        let bottom = fader_handle(rect, vertical, 0.0).center();
+        if vertical {
+            assert!(top.y < bottom.y, "up is higher");
+        } else {
+            assert!(top.x > bottom.x, "right is higher");
+        }
+    }
+}
+
+/// A fader shows its reach as a bar and its live value as a dot, and only the
+/// dot when the reach has no length, as a knob does (rule 3).
+#[test]
+fn a_fader_shows_modulation_as_a_bar_with_a_live_dot() {
+    let rect = Rectangle::new(Point::ORIGIN, Size::new(2.0 * GRID, 6.0 * GRID));
+    let palette = Palette::default();
+    let kind = WidgetViewKind::Fader {
+        vertical: true,
+        steps: 0,
+    };
+    let range = ModulationMark::Range { low: 0.2, high: 0.6 };
+    assert!(
+        modulation_dot(&kind, rect, range, &palette).is_none(),
+        "the bar shows it"
+    );
+    assert!(modulation_dot(&kind, rect, ModulationMark::Dot, &palette).is_some());
+    assert!(modulation_dot(&kind, rect, ModulationMark::Ring, &palette).is_some());
+    let bar = fader_bar(rect, true, 0.2, 0.6);
+    let track = fader_track(rect, true);
+    assert!((bar.height - track.height * 0.4).abs() < 1e-3);
+    let live = fader_bar_point(rect, true, 0.5);
+    assert!(bar.expand(0.01).contains(live), "the live dot sits on the bar");
+}
+
+/// A whole-number drag takes 200 pixels over a small range, like a knob, and
+/// never skips a value over a large one. Shift is 10 times finer
+/// (panel-widgets.md, Number).
+#[test]
+fn a_number_drag_steps_by_one() {
+    let small = ValueDrag::number(10);
+    assert_eq!(small.moved(0.0, 20.0, false), 0.1, "20 pixels per value");
+    assert_eq!(small, ValueDrag::KNOB, "a small range feels like a knob");
+
+    let large = ValueDrag::number(1000);
+    assert!(
+        (large.moved(0.0, 4.0, false) - 0.001).abs() < 1e-6,
+        "4 pixels per value"
+    );
+    assert!((large.moved(0.0, 40.0, true) - 0.001).abs() < 1e-6, "40 with Shift");
+    assert_eq!(ValueDrag::number(0), ValueDrag::KNOB, "a smooth value is like a knob");
 }

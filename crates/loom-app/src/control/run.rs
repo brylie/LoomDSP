@@ -221,7 +221,7 @@ impl App {
                 Step::Locate(target) => tasks.push(search(call, target, AfterSearch::Locate)),
                 Step::Type(text) => {
                     tasks.push(
-                        crate::editing::text_field_focused().map(move |focused| Message::TextFocus {
+                        crate::editing::text_field_focused().map(move |focused| Message::TypeFocus {
                             call: call.clone(),
                             text: text.clone(),
                             focused,
@@ -830,12 +830,10 @@ impl App {
         }
     }
 
-    /// Answers a `locate`, or takes a `screenshot` of the area around the
-    /// target, once the window has been searched.
     /// Types the text of a `type` command, now that the window has said
     /// whether a text field has focus. With none, no key is sent: a letter
     /// would reach the app's shortcuts.
-    pub(crate) fn text_focus(&mut self, call: Call, text: &str, focused: bool) {
+    pub(crate) fn type_after_focus_check(&mut self, call: Call, text: &str, focused: bool) {
         if !focused {
             call.answer(Err(
                 "no text field has focus, so nothing was typed; open or click one first".to_string(),
@@ -855,6 +853,8 @@ impl App {
         }
     }
 
+    /// Answers a `locate`, or takes a `screenshot` of the area around the
+    /// target, once the window has been searched.
     pub(crate) fn located(&mut self, call: Call, target: &str, found: &Found, then: AfterSearch) -> Task<Message> {
         let rect = locate(self, target, found);
         match then {

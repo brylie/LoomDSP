@@ -71,3 +71,4 @@ The status line holds one of these values and nothing else. The date line is the
 | [0033](0033-one-scale-and-tuning-per-patch.md) | One scale and tuning per patch, read by modules without cables | Accepted |
 | [0034](0034-controller-flat-api-typed-parts.md) | The controller keeps a flat API over typed internal parts | Accepted |
 | [0035](0035-pure-dsp-algorithms-in-loom-dsp.md) | Pure DSP algorithms live in `loom-dsp`, and modules wrap them | Accepted |
+| [0036](0036-a-seeded-route-keeps-both-sides-together.md) | A seeded module that chooses a route makes the same picks on both sides | Accepted |

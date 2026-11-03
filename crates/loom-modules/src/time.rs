@@ -186,7 +186,7 @@ impl Module for Delay {
             let base_time = time_modulated.at_or(i, spec.denormalize(pos));
             let raw_samples = (f64::from(base_time) + f64::from(time_in[i])) * self.sample_rate;
             // A bad sample must not come out again one delay time later (#127).
-            let x = if input[i].is_finite() { input[i] } else { 0.0 };
+            let x = loom_dsp::guard(input[i]);
             out[i] = self.buffer.tick(x, raw_samples);
         }
     }
@@ -272,7 +272,7 @@ impl Module for Allpass {
             let base_time = time_modulated.at_or(i, time_spec.denormalize(pos));
             let gain = gain_modulated.at_or(i, self.gain.tick()).clamp(-0.95, 0.95);
             let raw_samples = (f64::from(base_time) + f64::from(time_in[i])) * self.sample_rate;
-            out[i] = self.buffer.tick(input[i], raw_samples, gain);
+            out[i] = self.buffer.tick(loom_dsp::guard(input[i]), raw_samples, gain);
         }
     }
 

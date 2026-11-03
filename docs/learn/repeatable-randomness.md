@@ -5,7 +5,7 @@ Why a random part of a patch plays the same each time it loads, and the choices 
 - **Kind:** explainer.
 - **Used by:** [M2 modules specification](../design/p2-modules.md) (Random, Chance), [stereo cables](../design/stereo.md) (rules 15 and 27).
 - **Related:** [Block-size invariance](block-size-invariance.md), [Triggers and gates](triggers-and-gates.md).
-- **Code:** `Rng` in `crates/loom-modules/src/rand.rs`.
+- **Code:** `Rng` in `crates/loom-dsp/src/random.rs`, and `stream`, which numbers the streams, in `crates/loom-modules/src/rand.rs`.
 
 ## Random, but the same each time
 
@@ -57,7 +57,7 @@ Chance sends a trigger to A when the draw is below `chance`, so a chance of 1 mu
 
 ## Stereo
 
-If a module runs as two copies, one per side, with one list, both sides play the same numbers: mono in disguise. So a copy mixes its channel number into the seed. See [stereo cables](stereo-cables.md).
+If a module runs as two copies, one per side, with one list, both sides play the same numbers: mono in disguise. So a copy mixes its channel number into the seed. See [stereo cables](stereo-cables.md). Selector does not: its numbers pick which input to play. Both sides make the same picks unless a stereo modulation source is assigned to a Selector parameter ([ADR-0036](../adr/0036-a-seeded-route-keeps-both-sides-together.md)).
 
 ## How other tools handle it
 

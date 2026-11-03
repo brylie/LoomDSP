@@ -2,6 +2,7 @@
 """Numbers for a UX review, with no dependencies.
 
   measure.py dump FILE...        cut labels and the port hit area in --dump-ui JSON
+  measure.py size FILE           WxH that holds every tile in --dump-ui JSON at zoom 1
   measure.py contrast FG BG ...  WCAG contrast of each pair of #RRGGBB colours
   measure.py pixel FILE X Y      the colour of one pixel in an 8-bit RGB or RGBA PNG
 """
@@ -16,6 +17,8 @@ MIN_TARGET = 24.0
 # Text passes at 4.5:1 (WCAG 1.4.3); large text and graphics at 3:1 (1.4.11).
 TEXT_RATIO = 4.5
 GRAPHIC_RATIO = 3.0
+# Space around a whole-patch image, in pixels at zoom 1.
+IMAGE_MARGIN = 50
 
 
 def dump(paths):
@@ -26,6 +29,15 @@ def dump(paths):
         print(f"== {path}")
         print_cut_labels(ui)
         print_port_size(ui)
+
+
+def image_size(path):
+    """Return the WxH that holds every tile at zoom 1, with a margin on each side."""
+    with open(path) as f:
+        bounds = [tile["bounds"] for tile in json.load(f)["tiles"]]
+    width = max(b["x"] + b["width"] for b in bounds) - min(b["x"] for b in bounds)
+    height = max(b["y"] + b["height"] for b in bounds) - min(b["y"] for b in bounds)
+    return f"{width + 2 * IMAGE_MARGIN:.0f}x{height + 2 * IMAGE_MARGIN:.0f}"
 
 
 def print_cut_labels(ui):
@@ -124,6 +136,8 @@ if __name__ == "__main__":
     command = sys.argv[1] if len(sys.argv) > 1 else ""
     if command == "dump" and len(sys.argv) > 2:
         dump(sys.argv[2:])
+    elif command == "size" and len(sys.argv) == 3:
+        print(image_size(sys.argv[2]))
     elif command == "contrast":
         contrast(sys.argv[2:])
     elif command == "pixel" and len(sys.argv) == 5:

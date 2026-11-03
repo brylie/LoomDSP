@@ -183,21 +183,12 @@ fn a_reset_does_not_cut_a_held_gate() {
 /// for the low seeds a player tries first.
 #[test]
 fn nearby_seeds_start_far_apart() {
-    let first = |seed: u32, channel: usize, stream: u32| Rng::new(seed, channel, stream).draw();
+    let first = |seed: u32, channel: usize, number: u32| stream(seed, channel, number).draw();
     let values = [first(1, 0, 0), first(2, 0, 0), first(1, 1, 0), first(1, 0, 1)];
     for (i, a) in values.iter().enumerate() {
         for b in &values[i + 1..] {
             assert!((a - b).abs() > 0.01, "{values:?}");
         }
-    }
-}
-
-/// A draw is always below 1, also from the largest state.
-#[test]
-fn a_draw_is_below_one() {
-    let mut rng = Rng(u32::MAX);
-    for _ in 0..100_000 {
-        assert!((0.0..1.0).contains(&rng.draw()));
     }
 }
 

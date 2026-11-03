@@ -17,12 +17,14 @@
 pub mod delay;
 pub mod dynamics;
 pub mod envelope;
+pub mod euclid;
 pub mod filter;
 pub mod limiter;
 pub mod loudness;
 pub mod noise;
 pub mod oscillator;
 pub mod phase;
+pub mod random;
 pub mod slew;
 
 mod static_checks;

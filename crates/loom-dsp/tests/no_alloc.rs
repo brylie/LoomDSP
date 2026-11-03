@@ -11,12 +11,14 @@ use assert_no_alloc::{AllocDisabler, assert_no_alloc};
 use loom_dsp::delay::{Allpass, DelayLine};
 use loom_dsp::dynamics::{self, Dynamics};
 use loom_dsp::envelope::{Envelope, Settings, power};
+use loom_dsp::euclid::Pattern;
 use loom_dsp::filter::dc_blocker::DcBlocker;
 use loom_dsp::filter::{crossover, eq, ladder, one_pole, svf};
 use loom_dsp::limiter::{self, Limiter, Mode};
 use loom_dsp::loudness::LevelMatch;
 use loom_dsp::noise::{Colour, Noise};
 use loom_dsp::oscillator::{Pulse, Saw, SlowWave, Triangle};
+use loom_dsp::random::Rng;
 use loom_dsp::slew::Slew;
 
 #[global_allocator]
@@ -104,6 +106,29 @@ fn noise_never_allocates() {
         noise.restart(7);
         noise.restart_keeping_brown(8);
         noise.copy_brown_from(&other);
+    });
+}
+
+/// A Euclidean pattern, made and read.
+#[test]
+fn euclid_never_allocates() {
+    assert_no_alloc(|| {
+        let pattern = Pattern::new(16, 5, 3);
+        for step in 0..FRAMES as u32 {
+            pattern.is_hit(step);
+            pattern.is_first_hit(step);
+        }
+    });
+}
+
+/// The seeded stream, started and drawn from.
+#[test]
+fn rng_never_allocates() {
+    assert_no_alloc(|| {
+        let mut rng = Rng::new(7);
+        for _ in 0..FRAMES {
+            rng.draw();
+        }
     });
 }
 

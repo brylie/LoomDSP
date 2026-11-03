@@ -188,6 +188,9 @@ pub struct Geometry {
     pub port_bars: u32,
     /// Number of title bars.
     pub title_bars: u32,
+    /// Number of bars for the text in a control's box. They come after the
+    /// other bars, because they draw over the box (see [`Geometry::value_bars`]).
+    pub value_bars: u32,
 }
 
 impl Geometry {
@@ -316,7 +319,7 @@ impl Geometry {
         shapes.append(&mut marks);
         shapes.append(&mut dots);
 
-        let (mut captions, mut labels, mut titles) = (Vec::new(), Vec::new(), Vec::new());
+        let (mut captions, mut labels, mut titles, mut values) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
         for module in scene.modules() {
             tile_text::for_each(module, |item| {
                 let bar = item.bar();
@@ -326,6 +329,7 @@ impl Geometry {
                 let (list, colour) = match item.kind {
                     TextKind::Title => (&mut titles, palette.title_bar),
                     TextKind::Port(_) => (&mut labels, palette.text_bar),
+                    TextKind::Value(_) => (&mut values, palette.text_bar),
                     TextKind::Caption(_) | TextKind::Option(..) | TextKind::Unknown => {
                         (&mut captions, palette.text_bar)
                     }
@@ -334,9 +338,11 @@ impl Geometry {
             });
         }
         let (caption_bars, port_bars, title_bars) = (captions.len() as u32, labels.len() as u32, titles.len() as u32);
+        let value_bars = values.len() as u32;
         shapes.append(&mut captions);
         shapes.append(&mut labels);
         shapes.append(&mut titles);
+        shapes.append(&mut values);
         shapes.append(&mut markers);
 
         Self {
@@ -349,12 +355,27 @@ impl Geometry {
             caption_bars,
             port_bars,
             title_bars,
+            value_bars,
         }
     }
 
     /// Index of the first port marker in `shapes`.
     pub fn markers(&self) -> u32 {
-        self.tiles + self.clock_marks + self.clock_dots + self.caption_bars + self.port_bars + self.title_bars
+        self.tiles
+            + self.clock_marks
+            + self.clock_dots
+            + self.caption_bars
+            + self.port_bars
+            + self.title_bars
+            + self.value_bars
+    }
+
+    /// The bars for text in a control's box, or nothing: they show only at
+    /// middle zoom, and draw after the controls, so the box does not hide them.
+    pub fn value_bars(&self, middle: bool) -> std::ops::Range<u32> {
+        let end = self.markers();
+        let start = if middle { end - self.value_bars } else { end };
+        start..end
     }
 
     /// The shapes each zoom level adds to the tiles. Close up (`shown`
@@ -440,6 +461,8 @@ pub struct CanvasPrimitive {
     pub(crate) overlay: Overlay,
     /// The range of `geometry.shapes` that holds the text bars to draw.
     pub(crate) bars: std::ops::Range<u32>,
+    /// The range of `geometry.shapes` that holds the bars drawn over boxes.
+    pub(crate) value_bars: std::ops::Range<u32>,
     pub(crate) camera: Camera,
     /// Opacity of cables that are not in focus.
     pub(crate) cable_dim: f32,
@@ -746,6 +769,7 @@ impl Primitive for CanvasPrimitive {
         let tiles = pipeline.tiles.min(pipeline.scene_shapes.len);
         let markers = pipeline.markers.min(pipeline.scene_shapes.len);
         let bars = self.bars.start.min(markers)..self.bars.end.min(markers);
+        let value_bars = self.value_bars.start.min(markers)..self.value_bars.end.min(markers);
         let (arcs, controls, lines) = if self.controls.is_some() {
             (
                 pipeline.control_arcs.len,
@@ -783,6 +807,7 @@ impl Primitive for CanvasPrimitive {
             ),
             (&pipeline.arcs, &pipeline.control_arcs, 4, 0..arcs),
             (&pipeline.shapes, &pipeline.control_shapes, 4, 0..controls),
+            (&pipeline.shapes, &pipeline.scene_shapes, 4, value_bars),
             (&pipeline.traces, &pipeline.control_lines, 4, 0..lines),
             (&pipeline.traces, &pipeline.trace_segments, 4, 0..traces),
             (

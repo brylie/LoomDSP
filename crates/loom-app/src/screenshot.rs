@@ -560,11 +560,11 @@ fn depth_assignment(
     let (module, widget) = knob;
     let (param, kind, spec) =
         crate::scene::control_param(controller, module, widget).ok_or("not a parameter control")?;
-    // Only a knob has a range arc to drag. Toggles, radio buttons, and
-    // buttons set their depth in the inspector.
-    if kind != loom_core::WidgetKind::Knob {
+    // Only a knob or a fader has a range to drag. Other controls set their
+    // depth in the inspector.
+    if !kind.has_range() {
         return Err(format!(
-            "the control for {module}:{} is not a knob, so it has no range arc to drag",
+            "the control for {module}:{} is not a knob or a fader, so it has no range to drag",
             spec.name
         ));
     }

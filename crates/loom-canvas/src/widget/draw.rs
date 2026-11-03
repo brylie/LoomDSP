@@ -409,6 +409,24 @@ impl<Message> PatchCanvas<'_, Message> {
                 let (size, colour) = match item.kind {
                     TextKind::Title => (title_px, self.palette.text),
                     _ if !show_labels => return,
+                    // A box's live text, cut with "…" and never wrapped. The
+                    // bar at middle zoom stands in for it.
+                    TextKind::Value(widget) => {
+                        let shown = self.box_text(values, module, widget);
+                        let shown = crate::scene::fit_label(shown, item.width, crate::tile_text::LABEL_SIZE);
+                        let align = match item.align {
+                            Align::Left => text::Alignment::Left,
+                            Align::Center => text::Alignment::Center,
+                            Align::Right => text::Alignment::Right,
+                        };
+                        renderer.fill_text(
+                            text(&shown, label_px, item.width * zoom, align),
+                            to_screen(item.anchor),
+                            self.palette.text,
+                            clip,
+                        );
+                        return;
+                    }
                     // The chosen segment is filled with the value colour,
                     // so its name is dark (visual-system.md, contrast).
                     TextKind::Option(widget, option)
@@ -447,7 +465,12 @@ impl<Message> PatchCanvas<'_, Message> {
                     _ if learned.is_some() => learned,
                     TextKind::Caption(widget) if active == Some((module.id, widget)) => values
                         .get(module.id, widget)
-                        .filter(|_| matches!(module.panel.widgets[widget].kind, WidgetViewKind::Knob { .. }))
+                        .filter(|_| {
+                            matches!(
+                                module.panel.widgets[widget].kind,
+                                WidgetViewKind::Knob { .. } | WidgetViewKind::Fader { .. }
+                            )
+                        })
                         .map(|v| v.text.as_str()),
                     _ => None,
                 };
@@ -463,30 +486,6 @@ impl<Message> PatchCanvas<'_, Message> {
                     clip,
                 );
             });
-            if show_labels {
-                for (index, widget) in module.panel.widgets.iter().enumerate() {
-                    let WidgetViewKind::Select { options } = &widget.kind else {
-                        continue;
-                    };
-                    let Some(rect) = module.widget_bounds(index) else {
-                        continue;
-                    };
-                    let box_rect = select_box(rect);
-                    let chosen = values.position(module.id, index).round().max(0.0) as usize;
-                    // Cut to the box with "…", never wrapped; the open list
-                    // shows the whole name. The text starts 7 units in, and
-                    // the arrow takes the last 11.
-                    let room = box_rect.width - 18.0;
-                    let choice = options.get(chosen).map_or("", String::as_str);
-                    let choice = crate::scene::fit_label(choice, room, crate::tile_text::LABEL_SIZE);
-                    renderer.fill_text(
-                        text(&choice, label_px, room * zoom, text::Alignment::Left),
-                        to_screen(Point::new(box_rect.x + 7.0, box_rect.center_y())),
-                        self.palette.text,
-                        clip,
-                    );
-                }
-            }
         }
 
         // Badge numbers usually sit outside their tile, so they are checked
@@ -523,6 +522,17 @@ impl<Message> PatchCanvas<'_, Message> {
         }
     }
 
+    /// The text in a widget's box: a select list's choice, or the value text.
+    fn box_text<'t>(&self, values: &'t PanelValues, module: &'t crate::scene::ModuleView, widget: usize) -> &'t str {
+        match module.panel.widgets.get(widget).map(|w| &w.kind) {
+            Some(WidgetViewKind::Select { options }) => {
+                let chosen = values.position(module.id, widget).round().max(0.0) as usize;
+                options.get(chosen).map_or("", String::as_str)
+            }
+            _ => values.get(module.id, widget).map_or("", |v| v.text.as_str()),
+        }
+    }
+
     /// Draws the open choice list above all tile text, at a fixed screen size.
     pub(super) fn draw_select_popup<Renderer>(&self, state: &State, renderer: &mut Renderer, bounds: Rectangle)
     where
@@ -553,12 +563,14 @@ impl<Message> PatchCanvas<'_, Message> {
                 },
                 self.palette.control_body,
             );
-            for (index, option) in options.iter().enumerate() {
+            let rows = (rect.height / SELECT_ROW_PX).round() as usize;
+            for (index, option) in options.iter().enumerate().skip(popup.scroll).take(rows) {
+                let row = (index - popup.scroll) as f32;
                 if index == popup.highlight {
                     renderer.fill_quad(
                         renderer::Quad {
                             bounds: Rectangle::new(
-                                Point::new(at.x + 2.0, at.y + SELECT_ROW_PX * index as f32 + 1.0),
+                                Point::new(at.x + 2.0, at.y + SELECT_ROW_PX * row + 1.0),
                                 Size::new(rect.width - 4.0, SELECT_ROW_PX - 2.0),
                             ),
                             border: iced::Border {
@@ -588,9 +600,29 @@ impl<Message> PatchCanvas<'_, Message> {
                         shaping: text::Shaping::Advanced,
                         wrapping: text::Wrapping::None,
                     },
-                    Point::new(at.x + 7.0, at.y + SELECT_ROW_PX * (index as f32 + 0.5)),
+                    Point::new(at.x + 7.0, at.y + SELECT_ROW_PX * (row + 0.5)),
                     self.palette.text,
                     bounds,
+                );
+            }
+            // A longer list has a bar at its right edge. Its length and place
+            // show how much is out of view (rule 8: a shape, not a colour).
+            if rows < options.len() {
+                let share = rows as f32 / options.len() as f32;
+                let start = popup.scroll as f32 / options.len() as f32;
+                renderer.fill_quad(
+                    renderer::Quad {
+                        bounds: Rectangle::new(
+                            Point::new(at.x + rect.width - 5.0, at.y + 2.0 + (rect.height - 4.0) * start),
+                            Size::new(3.0, (rect.height - 4.0) * share),
+                        ),
+                        border: iced::Border {
+                            radius: 1.5.into(),
+                            ..iced::Border::default()
+                        },
+                        ..renderer::Quad::default()
+                    },
+                    self.palette.text_dim,
                 );
             }
         });

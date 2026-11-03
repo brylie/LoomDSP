@@ -92,3 +92,36 @@ fn a_wrap_stays_visible_at_the_limit() {
     let phases: Vec<f32> = (0..200).map(|_| phasor.tick(step)).collect();
     assert!(phases.windows(2).any(|w| (w[1] - w[0]).abs() > 0.5));
 }
+
+/// Any value comes to its place in the cycle, including below 0.
+#[test]
+fn wrap_finds_the_place_in_the_cycle() {
+    for (x, expected) in [
+        (-0.25, 0.75),
+        (0.0, 0.0),
+        (0.25, 0.25),
+        (1.0, 0.0),
+        (1.25, 0.25),
+        (-1.0, 0.0),
+    ] {
+        assert_eq!(wrap(x), expected, "{x}");
+    }
+}
+
+/// A tiny negative value rounds up to exactly 1 unless it is caught, and the
+/// result is always below 1, also for the largest values.
+#[test]
+fn wrap_stays_below_one() {
+    assert_eq!(-1e-9f32 - (-1e-9f32).floor(), 1.0, "this is the case the guard is for");
+    assert_eq!(wrap(-1e-9), 0.0);
+    assert_eq!(wrap(f32::MAX), 0.0);
+    assert_eq!(wrap(-f32::MAX), 0.0);
+}
+
+/// A non-finite value gives NaN, as the docs say, for a caller to check.
+#[test]
+fn wrap_gives_nan_for_a_non_finite_value() {
+    for x in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        assert!(wrap(x).is_nan(), "{x}");
+    }
+}

@@ -219,6 +219,7 @@ pub static DYNAMICS: ModuleDescriptor = ModuleDescriptor {
         description: "How far the gain has fallen.",
         kind: DisplayKind::Level,
         range: DisplayRange {
+            format: loom_core::DisplayFormat::Number { decimals: 1 },
             min: -36.0,
             max: 0.0,
             unit: "dB",

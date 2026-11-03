@@ -63,7 +63,7 @@ Any client that can write lines to a Unix socket works, such as `nc -U /tmp/loom
 | `save` | `path` | Saves the patch, as Save As does after the dialog | |
 | `note` | `note`, optional `velocity` (default 100), `on` | A MIDI note on or off on channel 1, as a MIDI port sends it | |
 | `cc` | `controller`, `value`, optional `channel` (1 to 16, default 1) | A MIDI control change. Replies once the engine has taken it and the app has applied it: mapped controls moved, or the armed parameter learned it | |
-| `key` | `key` (a character, or `escape`, `enter`, `tab`, `space`, `delete`, `backspace`, `up`, `down`, `left`, `right`, `home`, `end`, `pageup`, `pagedown`), optional `modifiers` (`cmd`, `ctrl`, `shift`, `alt`) | A key press and release, each on its own frame, sent to the window view at the pointer as a real key is. A widget can take it (the canvas takes Escape while a badge is pinned); what none takes goes to the app as the keyboard listener sends it | |
+| `key` | `key` (a character, or `escape`, `enter`, `tab`, `space`, `delete`, `backspace`, `up`, `down`, `left`, `right`, `home`, `end`, `pageup`, `pagedown`), optional `modifiers` (`cmd`, `ctrl`, `shift`, `alt`) | A key press and release, each on its own frame, sent to the window view at the pointer as a real key is. A character carries its text, unless Command or Ctrl is held. A widget can take it (the canvas takes Escape while a badge is pinned); what none takes goes to the app as the keyboard listener sends it | |
 | `type` | `text` | Types into the text field that has focus, one character at a time, as a keyboard does ([Typing text](#typing-text)). Refused when no text field has focus | |
 | `toolbar` | `button`: `new`, `learn` (MIDI learn), `hold` (Hold note), `panic` (Panic), `undo`, `redo`. While a question is open: its buttons, `save`, `dont-save`, `cancel`, `replace`, or `ok`, and `panic` | Clicks a toolbar button by name, through the message it sends. Refused when the button is disabled, opens a dialog (rule 9), or is Add module (use `add`). Was `press` before [#392](https://github.com/brylie/LoomDSP/issues/392); `press` is now only the mouse button ([Pointer commands](#pointer-commands)) | |
 | `arm` | `target`: a parameter (`"4:cutoff"`) | In MIDI learn mode, arms the parameter, or disarms it if armed, as its inspector row does. Refused when learn mode is off | |
@@ -77,7 +77,7 @@ Any client that can write lines to a Unix socket works, such as `nc -U /tmp/loom
 
 **Status:** Agreed, and built.
 
-`key` sends a key with no text, as a shortcut needs. A text field inserts only the text a key event carries, so it ignored `key`, and the reply still said `ok`. A script could not search the module browser or fill in a patch's tags. `type` fills that gap:
+`key` presses one key wherever the keys go now, and its reply says only that the key was delivered. A letter with no text field in focus reaches the app's shortcuts. `type` is for text: it takes a whole string, and it says when the text has nowhere to go:
 
 ```text
 > {"cmd": "key", "key": "a"}

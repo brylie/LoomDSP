@@ -30,6 +30,39 @@ fn the_panel_has_every_widget_kind() {
     assert!(kinds.contains(&WidgetKind::Light));
     assert!(kinds.contains(&WidgetKind::Meter));
     assert!(kinds.contains(&WidgetKind::Scope));
+    assert!(kinds.contains(&WidgetKind::Select));
+    assert!(kinds.contains(&WidgetKind::Fader { vertical: true }));
+    assert!(kinds.contains(&WidgetKind::Fader { vertical: false }));
+    assert!(kinds.contains(&WidgetKind::Number));
+}
+
+/// `test.readout` publishes what it was set to, and has a readout of each
+/// format and a meter on a value around zero.
+#[test]
+fn the_readout_module_shows_its_parameters() {
+    let factory = match READOUT.role {
+        ModuleRole::Dsp(factory) => factory,
+        _ => unreachable!(),
+    };
+    let mut module = factory(&ModuleConfig {
+        sample_rate: 48_000.0,
+        max_block: 4,
+    });
+    module.set_param(0, 3.0);
+    module.set_param(3, -5.0);
+    let mut values = [0.0; 4];
+    module.displays(&mut values);
+    assert_eq!(values, [3.0, 0.0, 0.0, -5.0]);
+    assert!(READOUT.panel.widgets.iter().any(|w| READOUT.meter_display(w).is_some()));
+    assert_eq!(
+        READOUT
+            .panel
+            .widgets
+            .iter()
+            .filter(|w| matches!(w.kind, WidgetKind::Readout { .. }))
+            .count(),
+        4
+    );
 }
 
 #[test]

@@ -35,8 +35,10 @@ impl App {
                     && self.recent_rows.is_none(),
             )
             .matrix_line(self.matrix_line())
-            .typing(self.pointer.typing())
             .matrix_keyboard(self.matrix.tab == RightTab::Matrix && self.matrix.focused)
+            .text_field_keys(self.text_focus.any)
+            .text_field_keeps_tab(self.tab_moves_between_fields())
+            .typed_check(|module, widget, text| self.typed_check(module, widget, text))
             .matrix_escape(
                 self.matrix.tab == RightTab::Matrix
                     && self.matrix.focused
@@ -125,8 +127,9 @@ impl App {
         let browser_open = self.browser.is_some() && self.help.is_none();
         let patches_open = self.patches.is_some() && self.chooser.is_none();
         let matrix_keys = self.matrix.tab == RightTab::Matrix && self.matrix.focused;
+        let value_draft = self.value_draft.is_some();
         let question_open = self.question.is_some();
-        pointer::Injector::new(layers, self, move |key, status| {
+        let on_key = move |key: iced::keyboard::Event, status| {
             // As the subscriptions do: an open question has the keys, except
             // Panic's. One key must not answer it and also reach what is
             // behind it, once the answer has closed it.
@@ -155,6 +158,16 @@ impl App {
             if let Some(message) = help_key(iced::Event::Keyboard(key.clone()), status, iced::window::Id::unique()) {
                 messages.push(message);
             }
+            let event = iced::Event::Keyboard(key.clone());
+            if value_draft
+                && let Some(message) =
+                    crate::controls::value_draft_event(event.clone(), status, iced::window::Id::unique())
+            {
+                messages.push(message);
+            }
+            if let Some(message) = crate::controls::text_focus_event(event, status, iced::window::Id::unique()) {
+                messages.push(message);
+            }
             if patches_open
                 && let Some(message) =
                     patches::key(iced::Event::Keyboard(key.clone()), status, iced::window::Id::unique())
@@ -167,8 +180,8 @@ impl App {
                 messages.push(message);
             }
             messages
-        })
-        .into()
+        };
+        pointer::Injector::new(layers, self, on_key, || Message::TextFocusCheck).into()
     }
 
     /// The toolbar: the patch name, then buttons in groups (file, add,

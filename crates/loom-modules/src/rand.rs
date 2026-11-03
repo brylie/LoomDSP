@@ -6,47 +6,18 @@ use loom_core::{
     Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, PortDefault, PortIo,
     PortSpec, ProcessContext, SignalType, Widget,
 };
+use loom_dsp::random::Rng;
 use loom_rt::Smoothed;
 
-/// A seeded random stream: xorshift32 (G. Marsaglia, "Xorshift RNGs", Journal
-/// of Statistical Software, 2003), started from a mixed seed.
-///
-/// Xorshift is poor just after a small seed: seeds 1 and 2 begin with small,
-/// similar values. So the start state goes through a finaliser (the mixing
-/// step in G. Steele, D. Lea, and C. Flood, "Fast Splittable Pseudorandom
-/// Number Generators", 2014), which spreads similar seeds apart.
-#[derive(Clone, Copy)]
-struct Rng(u32);
-
-impl Rng {
-    /// A stream from `seed` (1 to 65535), for this stereo `channel` and
-    /// `stream` number. The three fit side by side in one word, so different
-    /// streams never start from the same state.
-    fn new(seed: u32, channel: usize, stream: u32) -> Self {
-        let mut x = seed | (channel as u32) << 16 | stream << 17;
-        x ^= x >> 16;
-        x = x.wrapping_mul(0x85EB_CA6B);
-        x ^= x >> 13;
-        x = x.wrapping_mul(0xC2B2_AE35);
-        x ^= x >> 16;
-        Self(x.max(1))
-    }
-
-    /// The next value, from 0 up to but not including 1. Only the top 24 bits
-    /// are used: an `f32` holds them exactly, so the result cannot round up
-    /// to 1, and a chance of 1 always passes.
-    fn draw(&mut self) -> f32 {
-        let mut x = self.0;
-        x ^= x << 13;
-        x ^= x >> 17;
-        x ^= x << 5;
-        self.0 = x;
-        (x >> 8) as f32 / (1u32 << 24) as f32
-    }
+/// The stream for this seed, stereo `channel`, and stream `number`. Seed is 1
+/// to 65535. The three fit side by side in one word, so different streams never
+/// start from the same state.
+pub(crate) fn stream(seed: u32, channel: usize, number: u32) -> Rng {
+    Rng::new(seed | (channel as u32) << 16 | number << 17)
 }
 
 /// The `seed` parameter of every random module (M2 modules, rule 1).
-const fn seed_param(description: &'static str) -> ParamSpec {
+pub(crate) const fn seed_param(description: &'static str) -> ParamSpec {
     ParamSpec {
         name: "seed",
         label: "Seed",
@@ -61,7 +32,7 @@ const fn seed_param(description: &'static str) -> ParamSpec {
 }
 
 /// A seed value as the whole number the streams start from.
-fn seed_from(value: f32) -> u32 {
+pub(crate) fn seed_from(value: f32) -> u32 {
     value.round().clamp(1.0, 65535.0) as u32
 }
 
@@ -304,7 +275,7 @@ impl Random {
         };
         let mut random = Self {
             voices: std::array::from_fn(|_| Voice {
-                rng: Rng(1),
+                rng: stream(1, 0, 0),
                 position: 0.5,
                 from: 0.5,
                 glide_frames: 0,
@@ -330,7 +301,7 @@ impl Random {
     /// Starts each output's stream again from `seed`. Positions stay.
     fn restart(&mut self, seed: u32) {
         for (number, voice) in self.voices.iter_mut().enumerate() {
-            voice.rng = Rng::new(seed, self.channel, number as u32);
+            voice.rng = stream(seed, self.channel, number as u32);
         }
     }
 }
@@ -612,7 +583,7 @@ impl Chance {
             chances: [0.5; CHANCE_LANES],
             lanes: std::array::from_fn(|_| Lane {
                 edge: EdgeDetector::new(),
-                rng: Rng(1),
+                rng: stream(1, 0, 0),
                 route: Route::Off,
             }),
             reset: EdgeDetector::new(),
@@ -627,7 +598,7 @@ impl Chance {
     /// Starts every lane's stream again from `seed`.
     fn restart(&mut self, seed: u32) {
         for (number, lane) in self.lanes.iter_mut().enumerate() {
-            lane.rng = Rng::new(seed, self.channel, number as u32);
+            lane.rng = stream(seed, self.channel, number as u32);
         }
     }
 }

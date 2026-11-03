@@ -87,6 +87,28 @@ fn constant_source_lands_on_the_midpoint() {
     assert!(left.iter().all(|&sample| sample == 0.5), "{left:?}");
 }
 
+/// One Macro assigned to three parameters moves all three, each by its own
+/// depth (M2 modules, Macro). Each parameter is read from its own engine,
+/// because a capture reads every probe added so far.
+#[test]
+fn a_macro_moves_every_parameter_it_is_assigned_to() {
+    const DEPTHS: [f32; 3] = [0.1, 0.2, 0.4];
+    for (target, depth) in DEPTHS.into_iter().enumerate() {
+        let mut parts = engine();
+        let knob = module(&mut parts.controller, "loom.ui.macro", "value", 1.0);
+        let sinks = DEPTHS.map(|depth| {
+            let sink = parts.controller.add_module("test.linear").unwrap();
+            parts
+                .controller
+                .add_assignment_named(knob, "out", sink, "level", depth)
+                .unwrap();
+            sink
+        });
+        let left = capture(&mut parts, sinks[target], 8, 8);
+        assert!(left.iter().all(|&sample| sample == depth), "{left:?} vs {depth}");
+    }
+}
+
 #[test]
 fn cutoff_depth_moves_a_tenth_of_the_knob() {
     let spec = test_modules::LOG.params[0];

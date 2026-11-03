@@ -3,10 +3,12 @@
 //! module turns stereo, its new right-side copy takes the running left
 //! copy's state, so both sides continue together.
 
-use loom_core::{MidiEvent, ModuleDescriptor, ModuleRole, ParamSpec};
+mod common;
+
+use common::{SEEDED_ROUTES, busy, changed, pulses, selector};
+use loom_core::{MidiEvent, ModuleDescriptor, ModuleRole, TransportSettings};
 use loom_modules::ALL;
-use loom_test::{Harness, Signal};
-use std::f32::consts::TAU;
+use loom_test::Harness;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 /// Frames rendered in each check.
@@ -15,17 +17,6 @@ const FRAMES: usize = 9_600;
 /// The frame where the copy takes the state: in the middle of the MIDI
 /// notes, the gates, and the delay times, so each kind of state is busy.
 const AT: usize = 2_500;
-
-/// A value of `spec` away from its default, so smoothing and settings
-/// differ from the built-in ones.
-fn changed(spec: &ParamSpec) -> f32 {
-    let at = |position: f32| {
-        let value = spec.denormalize(position);
-        if spec.options.integer { value.round() } else { value }
-    };
-    let value = at(0.25);
-    if value == spec.default { at(0.75) } else { value }
-}
 
 /// A harness for `descriptor` with every parameter away from its default,
 /// a busy signal on every input, and notes held across the copy.
@@ -36,12 +27,10 @@ fn harness(descriptor: &'static ModuleDescriptor) -> Harness {
         .fold(Harness::new(descriptor).frames(FRAMES), |h, spec| {
             h.param(spec.name, changed(spec))
         });
-    let harness = descriptor.inputs.iter().fold(harness, |h, port| {
-        h.input(
-            port.name,
-            Signal::from_fn(|frame| 0.75 * (frame as f32 * TAU * 37.0 / 48_000.0).sin()),
-        )
-    });
+    let harness = descriptor
+        .inputs
+        .iter()
+        .fold(harness, |h, port| h.input(port.name, busy(37.0)));
     harness.midi([
         MidiEvent::note_on(100, 0, 60, 100),
         MidiEvent::note_on(1_000, 0, 67, 64),
@@ -52,9 +41,10 @@ fn harness(descriptor: &'static ModuleDescriptor) -> Harness {
 }
 
 /// True for a module with a random generator, which re-derives it when it
-/// copies (rule 27).
+/// copies (rule 27). A seeded route copies it as it is (ADR-0036), so it takes
+/// the strict check, which is what proves both sides match.
 fn seeded(descriptor: &ModuleDescriptor) -> bool {
-    descriptor.param_index("seed").is_some()
+    descriptor.param_index("seed").is_some() && !SEEDED_ROUTES.contains(&descriptor.id)
 }
 
 /// Every DSP module in [`ALL`] except seeded ones continues bit-identically
@@ -97,6 +87,89 @@ fn a_noise_copy_does_not_repeat_the_running_numbers() {
     let message = message.downcast_ref::<String>().expect("the harness reports a String");
     assert!(message.contains("output `out` at frame"), "{message}");
     assert!(message.contains("`copy_state_from` returned true"), "{message}");
+}
+
+/// A harness on a playing transport at 130 BPM. A beat is 22153.8 frames, so the
+/// frame after a boundary has a phase above 0. The wrap detector fires there
+/// only if it remembers the frame before, which is what a dropped detector
+/// loses. At a tempo with whole-frame beats, a new detector fires on the same
+/// frame by its first-frame rule, and the copy would pass without its state.
+fn playing(descriptor: &'static ModuleDescriptor, frames: usize) -> Harness {
+    Harness::new(descriptor).frames(frames).transport(TransportSettings {
+        tempo: 130.0,
+        running: true,
+        ..TransportSettings::default()
+    })
+}
+
+/// Checks a copy taken in the middle of a cycle, on the frame `output` fires
+/// its second time, and on the frame after that, while the light still has the
+/// flash to show. Each copy runs on through the next firing.
+fn check_playing_copy(harness: &Harness, output: &str) {
+    let render = harness.render();
+    let fires: Vec<usize> = (0..render.frames())
+        .filter(|&frame| render.output(output)[frame] > 0.5)
+        .collect();
+    assert!(fires.len() >= 3, "{output} fired on frames {fires:?}");
+    let (second, third) = (fires[1], fires[2]);
+    for at in [second + (third - second) / 2, second, second + 1] {
+        assert!(
+            at < third,
+            "the copy at frame {at} must come before the firing on frame {third}"
+        );
+        assert!(
+            harness.check_copy_state(at),
+            "frame {at}: copy_state_from returned false"
+        );
+    }
+}
+
+/// A Clock copied while the transport plays keeps its wrap detector and its
+/// pending flash, so its triggers land with the running instance's (#417).
+#[test]
+fn a_playing_clock_copies_its_running_state() {
+    check_playing_copy(&playing(&loom_modules::clock::CLOCK, 70_000), "trigger");
+}
+
+/// A Transport copied while it plays keeps its beat detector and its pending
+/// flash (#417).
+#[test]
+fn a_playing_transport_copies_its_beat_state() {
+    check_playing_copy(&playing(&loom_modules::transport::TRANSPORT, 70_000), "beat");
+}
+
+/// A Transport copied while it plays keeps its bar detector. The third bar
+/// starts past frame 177,000.
+#[test]
+fn a_playing_transport_copies_its_bar_state() {
+    check_playing_copy(&playing(&loom_modules::transport::TRANSPORT, 180_000), "bar");
+}
+
+/// A Selector copy takes the whole random stream, so a new right side makes the
+/// left side's picks (ADR-0036), and the wait, so its first step stays on input
+/// 1. It copies at the wait, and in the middle of the picks.
+#[test]
+fn a_selector_copies_its_stream_and_its_wait() {
+    for mode in [0.0, 2.0] {
+        for at in [100, 750] {
+            assert!(selector(mode).check_copy_state(at), "mode {mode}, frame {at}");
+        }
+    }
+}
+
+/// A Euclidean rhythm copy takes the wait, so the next clock still plays the
+/// first step, and the step it is on. It copies at the wait, and mid-pattern.
+#[test]
+fn a_euclidean_rhythm_copies_its_wait_and_its_step() {
+    let harness = Harness::new(&loom_modules::gate::EUCLID)
+        .frames(2_000)
+        .param("source", 1.0)
+        .param("steps", 8.0)
+        .param("hits", 3.0)
+        .input("clock", pulses(500));
+    for at in [100, 750] {
+        assert!(harness.check_copy_state(at), "frame {at}");
+    }
 }
 
 /// A copy takes state only from its own type.

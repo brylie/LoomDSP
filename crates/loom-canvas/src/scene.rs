@@ -148,6 +148,18 @@ pub enum WidgetViewKind {
         /// Option labels.
         options: Vec<String>,
     },
+    /// A straight track with a handle (panel-widgets.md, Fader).
+    Fader {
+        /// True for a vertical track, false for a horizontal one.
+        vertical: bool,
+        /// Whole-number values to step through, or 0, as for a knob.
+        steps: u32,
+    },
+    /// A value shown as text in a box (panel-widgets.md, Number).
+    Number {
+        /// Whole-number values to step through, or 0, as for a knob.
+        steps: u32,
+    },
     /// Compact choice box with a pop-up list.
     Select {
         /// Option labels.
@@ -163,6 +175,11 @@ pub enum WidgetViewKind {
     },
     /// A brightness.
     Light,
+    /// A display value as text, in a box (panel-widgets.md, Readout).
+    Readout {
+        /// Width in panel grid units.
+        width: u8,
+    },
     /// A level meter: an RMS bar and a peak line. The bar starts from `zero`,
     /// from 0 at the bottom to 1 at the top. Above 0, the meter shows a display
     /// value that runs below 0, such as gain reduction, with no peak line.
@@ -180,6 +197,14 @@ pub enum WidgetViewKind {
     },
     /// A large button. Its gesture depends on the mode stored with its value.
     Button,
+}
+
+impl WidgetViewKind {
+    /// True for a one-number control: a knob, a fader, or a number box. Code
+    /// that treats them alike asks this, not a list.
+    pub fn is_one_number(&self) -> bool {
+        matches!(self, Self::Knob { .. } | Self::Fader { .. } | Self::Number { .. })
+    }
 }
 
 /// One widget on a panel, placed in grid units from the panel's corner.
@@ -207,6 +232,10 @@ impl WidgetView {
     pub fn size(&self) -> (u8, u8) {
         match &self.kind {
             WidgetViewKind::Knob { .. } => (3, 3),
+            WidgetViewKind::Fader { vertical: true, .. } => (2, 6),
+            WidgetViewKind::Fader { vertical: false, .. } => (6, 2),
+            WidgetViewKind::Number { .. } => (5, 2),
+            WidgetViewKind::Readout { width } => (*width, 2),
             WidgetViewKind::Meter { .. } => (3, 6),
             WidgetViewKind::Scope => (9, 5),
             WidgetViewKind::Shape { width } => (*width, 5),
@@ -223,8 +252,23 @@ impl WidgetView {
     pub fn is_control(&self) -> bool {
         !matches!(
             self.kind,
-            WidgetViewKind::Light | WidgetViewKind::Meter { .. } | WidgetViewKind::Scope | WidgetViewKind::Shape { .. }
+            WidgetViewKind::Light
+                | WidgetViewKind::Readout { .. }
+                | WidgetViewKind::Meter { .. }
+                | WidgetViewKind::Scope
+                | WidgetViewKind::Shape { .. }
         )
+    }
+
+    /// The whole-number steps of a one-number control (panel-widgets.md, One
+    /// number), or `None` for any other widget. 0 means a smooth value.
+    pub fn number_steps(&self) -> Option<u32> {
+        match self.kind {
+            WidgetViewKind::Knob { steps } | WidgetViewKind::Fader { steps, .. } | WidgetViewKind::Number { steps } => {
+                Some(steps)
+            }
+            _ => None,
+        }
     }
 
     /// True for controls that take a dropped output as a modulation
@@ -234,6 +278,8 @@ impl WidgetView {
         matches!(
             self.kind,
             WidgetViewKind::Knob { .. }
+                | WidgetViewKind::Fader { .. }
+                | WidgetViewKind::Number { .. }
                 | WidgetViewKind::Toggle
                 | WidgetViewKind::Radio { .. }
                 | WidgetViewKind::Select { .. }

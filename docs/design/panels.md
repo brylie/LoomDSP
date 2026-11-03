@@ -48,7 +48,7 @@ Every panel uses the same widget set.
 
 *Why one set:* users learn each control once. A new widget is added to the set, not drawn by one module, so every module and every panel can use it.
 
-The widgets after M1, with their bindings, modulation display, keyboard use, and the catalogue entries that need them, are planned in [Panel widgets](panel-widgets.md) (Draft, [ADR-0024](../adr/0024-widgets-follow-the-kind-of-value.md)). It names the slider "fader", the selector "select list", and the graph "curve", and adds a number, a readout, an XY scope, and a waveform.
+The widgets after M1, with their bindings, modulation display, keyboard use, and the catalogue entries that need them, are specified in [Panel widgets](panel-widgets.md) (Agreed, [ADR-0024](../adr/0024-widgets-follow-the-kind-of-value.md)). It names the slider "fader", the selector "select list", and the graph "curve", and adds a number, a readout, an XY scope, and a waveform.
 
 The [read-only shape preview](panel-widgets.md#read-only-shape-preview) is an agreed first slice of the curve widget. Envelope, LFO, and Ladder place it above their controls. Each puts its choices in a row under the full-width shape ([Panel layout](#panel-layout), principle 2); Envelope's Mode is a segmented control. The preview shows a schematic result from parameters, keeps the tile's drag gesture, and has no editing handles. Built-in tiles use knobs for single ranged parameters by default; a fader needs a specific task such as comparing mixer levels.
 
@@ -668,7 +668,7 @@ What M1 builds. The rest of this spec is M2.
 
 ([#101](https://github.com/brylie/LoomDSP/issues/101).) Closes the gap that nothing selects a module by key. Keys have four owners, tried in this order, and the first one that has a use for the key takes it:
 
-1. **A text field or text box with focus.** The owners below get no key press at all, wherever the pointer is, whether or not the field uses the key. *Why:* a space in an author's name must not stop the music, and a person typing should never change the patch behind the field. Escape leaves the field, and the other owners then have the keys again. Global shortcuts with Ctrl or Cmd still work, as do Panic and help. Where a view has several text fields, Tab and Shift-Tab move between them in reading order and wrap at the ends: Authors and Tags in the patch form, and search and Author in the patch browser. Focus never leaves the view, so it cannot land behind an overlay. A field with no neighbour keeps its focus.
+1. **A text field or text box with focus.** The owners below get no key press, wherever the pointer is, whether or not the field uses the key ([Keys in a text field](panel-widgets.md)). *Why:* a space in an author's name must not stop the music, and a person typing should never change the patch behind the field. Escape leaves the field, and the other owners then have the keys again. Where a view has several text fields, Tab and Shift-Tab move between them in reading order and wrap at the ends: Authors and Tags in the patch form, and search and Author in the patch browser. Focus never leaves the view, so it cannot land behind an overlay. In any other field, Tab closes the field and moves the canvas's focus.
 2. **A focused panel control** (knob, toggle, radio, select list, button).
 3. **The canvas** (selection, movement, clipboard, undo).
 4. **Global keys** (Space for Run).
@@ -678,8 +678,8 @@ The table below applies when no text field has focus.
 | Key | Panel control focused | Module selected | Nothing selected |
 |---|---|---|---|
 | Tab, Shift-Tab | Next or previous control of the module; after the last, the next module | Next or previous module in reading order | Selects the first or last module |
-| Enter | Acts on the control (toggle, press) | Focuses the module's first control | Nothing |
-| Space | Acts on a toggle, radio, or button. A knob does not take it | Toggles Run | Toggles Run |
+| Enter | Acts on the control (toggle, press). On a one-number control, opens the field for [typing a value](panel-widgets.md#typing-a-value). In MIDI learn mode, arms it | Focuses the module's first control | Nothing |
+| Space | Acts on a toggle, radio, or button. A one-number control does not take it | Toggles Run | Toggles Run |
 | Arrow keys | Change the value ([Interaction](#interaction-68)) | Move the selected modules one grid unit; Shift moves 10 | Nothing |
 | Escape | Clears control focus | Clears the selection | Nothing (after the other uses of Escape: a drag, then pinned lines) |
 
@@ -731,7 +731,7 @@ The table below applies when no text field has focus.
 
 ### Acceptance criteria: M1 additions
 
-- [x] Tab and Shift-Tab move between the fields of the patch form and of the patch browser, wrap at the ends, and stay inside the overlay (`tab_moves_between_the_fields_of_one_view`). A field outside those lists keeps its focus.
+- [x] Tab and Shift-Tab move between the fields of the patch form and of the patch browser, wrap at the ends, and stay inside the overlay (`tab_moves_between_the_fields_of_one_view`).
 - [x] With a text box in focus, Space, A, F, Tab, Backspace, Enter, Left, and Cmd+V reach no canvas action, with the pointer over the box or over the canvas (`keys_stay_out_of_the_canvas_while_typing`). After Escape, Space toggles Run again (`escape_from_a_text_box_gives_keys_back_to_the_canvas`).
 - [x] Choice names: the registry refuses a wrong count, an empty name, and names on a continuous parameter. The inspector shows "Toggle" and "Momentary" for Button's `mode` and a slider for a parameter without names. No module hard-codes names in its panel.
 - [x] A one-sample trigger into a Clock Divide or Phase Trigger output light lights it, and it fades in 120 ms. No frames are drawn after the fade.

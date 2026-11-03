@@ -58,8 +58,19 @@ fn pulse_overlap_stays_bounded_with_moving_width() {
     assert!(most <= 1.0, "{most}");
 }
 
+/// The correction works the same on a falling phase: a saw read backward
+/// loses at least 90% of its alias power (#543).
+#[test]
+fn descending_saw_has_far_less_aliasing_than_a_naive_saw() {
+    let backward = |t: f32| wrap(1.0 - t);
+    let naive = alias_share(NOTE, |t| 2.0 * backward(t) - 1.0);
+    let mut saw = Saw::new();
+    let corrected = alias_share(NOTE, |t| saw.tick(backward(t)));
+    assert!(corrected < naive * 0.1, "{corrected} against {naive}");
+}
+
 /// A descending phase reads the ramp backward. This looks only away from the
-/// edge. The saw's edge is band limited for a rising phase only.
+/// edge.
 #[test]
 fn descending_phase_reads_the_ramp_backward() {
     let mut saw = Saw::new();
@@ -88,14 +99,14 @@ fn structs_match_their_functions() {
 }
 
 /// A jump in the phase, as from a reset or a hard sync. The struct reads the
-/// jump as a step of over half a cycle, so it does not correct the new edge. The
-/// function knows the true step and does. This is why both layers exist.
+/// jump as one large step, so its correction has the wrong width. The function
+/// knows the true step and gets it right. This is why both layers exist.
 #[test]
 fn a_known_step_is_not_fooled_by_a_phase_jump() {
     let (step, t) = (0.01, 0.005);
     let mut inferred = Saw::new();
     inferred.tick(0.3);
-    assert_eq!(inferred.tick(t), 2.0 * t - 1.0);
+    assert_ne!(inferred.tick(t), saw(t, step));
     assert_eq!(saw(t, step), 2.0 * t - 1.0 - poly_blep(t, step));
     assert_ne!(poly_blep(t, step), 0.0);
 }

@@ -78,17 +78,26 @@ impl<Message> PatchCanvas<'_, Message> {
             .map(|w| (module.id, w))
     }
 
+    /// How a drag on this control turns pointer movement into a value.
+    pub(super) fn value_drag(&self, module: u32, widget: usize, zoom: f32) -> ValueDrag {
+        let rect = self.scene.module(module).and_then(|m| m.widget_bounds(widget));
+        match (self.widget_kind(module, widget), rect) {
+            (Some(WidgetViewKind::Fader { vertical, .. }), Some(rect)) => ValueDrag::fader(rect, *vertical, zoom),
+            (Some(WidgetViewKind::Number { steps }), _) => ValueDrag::number(*steps),
+            _ => ValueDrag::KNOB,
+        }
+    }
+
     /// True if `world` is on the ring around a knob where its range arc is
-    /// drawn, and the knob has an enabled assignment: there a drag changes
-    /// depth, not the value. This holds when the arc has zero length and
-    /// the knob shows the dot, so depth 0 can be dragged back out of.
+    /// drawn, or on the place of a fader's bar, and the control has an enabled
+    /// assignment: there a drag changes depth, not the value. This holds when
+    /// the range has zero length and the control shows the dot, so depth 0 can
+    /// be dragged back out of.
     pub(super) fn on_range_ring(&self, module: u32, widget: usize, world: Point) -> bool {
         let Some(m) = self.scene.module(module) else {
             return false;
         };
-        let (Some(rect), Some(WidgetViewKind::Knob { .. })) =
-            (m.widget_bounds(widget), self.widget_kind(module, widget))
-        else {
+        let Some(rect) = m.widget_bounds(widget) else {
             return false;
         };
         let modulated = self.values.and_then(|v| v.get(module, widget)).is_some_and(|v| {
@@ -97,9 +106,16 @@ impl<Message> PatchCanvas<'_, Message> {
                 crate::controls::ModulationMark::Range { .. } | crate::controls::ModulationMark::Dot
             )
         });
-        let d = world - crate::controls::knob_centre(rect);
-        let distance = (d.x * d.x + d.y * d.y).sqrt();
-        modulated && (crate::controls::RANGE_RING_INNER..=crate::controls::RANGE_RING_OUTER).contains(&distance)
+        modulated
+            && match self.widget_kind(module, widget) {
+                Some(WidgetViewKind::Knob { .. }) => {
+                    let d = world - crate::controls::knob_centre(rect);
+                    let distance = (d.x * d.x + d.y * d.y).sqrt();
+                    (crate::controls::RANGE_RING_INNER..=crate::controls::RANGE_RING_OUTER).contains(&distance)
+                }
+                Some(WidgetViewKind::Fader { vertical, .. }) => crate::controls::on_fader_bar(rect, *vertical, world),
+                _ => false,
+            }
     }
 
     pub(super) fn position(&self, module: u32, widget: usize) -> f32 {
@@ -282,49 +298,6 @@ impl<Message> PatchCanvas<'_, Message> {
         );
     }
 
-    /// Screen rectangle of the open list, kept readable at any canvas zoom.
-    pub(super) fn select_popup_bounds(&self, state: &State, bounds: Rectangle) -> Option<Rectangle> {
-        let popup = state.select_popup?;
-        self.select_popup_bounds_for(state, bounds, popup)
-    }
-
-    /// Screen rectangle for a specified select popup.
-    pub(super) fn select_popup_bounds_for(
-        &self,
-        state: &State,
-        bounds: Rectangle,
-        popup: SelectPopup,
-    ) -> Option<Rectangle> {
-        let module = self.scene.module(popup.module)?;
-        let rect = module.widget_bounds(popup.widget)?;
-        let WidgetViewKind::Select { options } = &module.panel.widgets.get(popup.widget)?.kind else {
-            return None;
-        };
-        let box_rect = select_box(rect);
-        let anchor = state.camera.to_screen(box_rect.position());
-        let width = (box_rect.width * state.camera.zoom)
-            .max(SELECT_WIDTH_PX)
-            .min(bounds.width);
-        let height = SELECT_ROW_PX * options.len() as f32;
-        let x = anchor.x.clamp(0.0, (bounds.width - width).max(0.0));
-        let below = anchor.y + box_rect.height * state.camera.zoom + 3.0;
-        let y = if below + height <= bounds.height {
-            below
-        } else {
-            (anchor.y - height - 3.0).max(0.0)
-        };
-        Some(Rectangle::new(Point::new(x, y), Size::new(width, height)))
-    }
-
-    /// Opens a select list at its current value.
-    pub(super) fn open_select(&self, state: &mut State, module: u32, widget: usize) {
-        state.select_popup = Some(SelectPopup {
-            module,
-            widget,
-            highlight: self.position(module, widget).round().max(0.0) as usize,
-        });
-    }
-
     /// Pointer down on a button. The tile stays put. Pointer up reports a
     /// release, whichever mode the app has stored.
     pub(super) fn press_button(&self, state: &mut State, module: u32, widget: usize, shell: &mut Shell<'_, Message>) {
@@ -339,8 +312,8 @@ impl<Message> PatchCanvas<'_, Message> {
         state: &mut State,
         key: &keyboard::Key,
         modifiers: keyboard::Modifiers,
+        text: Option<&str>,
         repeat: bool,
-        _over: bool,
         shell: &mut Shell<'_, Message>,
     ) -> bool {
         use keyboard::key::Named;
@@ -377,13 +350,8 @@ impl<Message> PatchCanvas<'_, Message> {
         }) {
             state.focus = None;
         }
-        // A hidden select is not drawn, so its list closes too.
-        if state
-            .select_popup
-            .is_some_and(|popup| hidden(popup.module, popup.widget))
-        {
-            state.select_popup = None;
-        }
+        // A hidden or removed select is not drawn, so its list closes too.
+        self.close_stale_select(state);
         if lost_to_mode
             && matches!(
                 key.as_ref(),
@@ -400,43 +368,18 @@ impl<Message> PatchCanvas<'_, Message> {
             shell.capture_event();
             return true;
         }
-        if let Some(mut popup) = state.select_popup
-            && let Some(WidgetViewKind::Select { options }) = self.widget_kind(popup.module, popup.widget)
-        {
-            let used = match key.as_ref() {
-                keyboard::Key::Named(Named::Escape) => {
-                    state.select_popup = None;
-                    state.last_click = None;
-                    true
-                }
-                keyboard::Key::Named(Named::ArrowUp | Named::ArrowDown) => {
-                    let delta = if matches!(key.as_ref(), keyboard::Key::Named(Named::ArrowUp)) {
-                        -1
-                    } else {
-                        1
-                    };
-                    popup.highlight =
-                        (popup.highlight as isize + delta).clamp(0, options.len().saturating_sub(1) as isize) as usize;
-                    state.select_popup = Some(popup);
-                    true
-                }
-                keyboard::Key::Named(Named::Enter | Named::Space) => {
-                    if !repeat {
-                        self.set_control(shell, popup.module, popup.widget, popup.highlight as f32);
-                        state.select_popup = None;
-                    }
-                    true
-                }
-                keyboard::Key::Named(Named::ArrowLeft | Named::ArrowRight | Named::Tab) => true,
-                _ => false,
-            };
-            if used {
-                shell.request_redraw();
-                shell.capture_event();
-                return true;
-            }
-        } else {
-            state.select_popup = None;
+        // An open list or field comes before every other use of a key.
+        if self.select_popup_key(state, key, modifiers, text, repeat, shell) {
+            return true;
+        }
+        self.close_stale_typed(state);
+        if self.typed_field_key(state, key, modifiers, text, repeat, shell) {
+            return true;
+        }
+        if self.open_typed_field(state, key, modifiers, text, repeat) {
+            shell.request_redraw();
+            shell.capture_event();
+            return true;
         }
         let used = match key.as_ref() {
             // Escape hides pinned lines before it does anything else
@@ -593,7 +536,11 @@ impl<Message> PatchCanvas<'_, Message> {
                 } else {
                     let position = self.position(module, widget);
                     let next = match self.widget_kind(module, widget) {
-                        Some(WidgetViewKind::Knob { steps }) => knob_step(position, up, modifiers.shift(), *steps),
+                        Some(
+                            WidgetViewKind::Knob { steps }
+                            | WidgetViewKind::Fader { steps, .. }
+                            | WidgetViewKind::Number { steps },
+                        ) => knob_step(position, up, modifiers.shift(), *steps),
                         Some(WidgetViewKind::Toggle) => {
                             if up {
                                 1.0
@@ -624,6 +571,9 @@ impl<Message> PatchCanvas<'_, Message> {
             keyboard::Key::Named(named @ (Named::Space | Named::Enter)) => {
                 if let Some((module, widget)) = state.focus {
                     let position = self.position(module, widget);
+                    let one_number = self
+                        .widget_kind(module, widget)
+                        .is_some_and(WidgetViewKind::is_one_number);
                     match self.widget_kind(module, widget) {
                         Some(WidgetViewKind::Toggle) => {
                             self.set_control(shell, module, widget, if position > 0.5 { 0.0 } else { 1.0 })
@@ -639,12 +589,12 @@ impl<Message> PatchCanvas<'_, Message> {
                             self.set_control(shell, module, widget, next as f32);
                         }
                         Some(WidgetViewKind::Select { .. }) if !repeat => self.open_select(state, module, widget),
-                        Some(WidgetViewKind::Knob { .. }) if matches!(named, Named::Space) && !repeat => {
+                        _ if one_number && matches!(named, Named::Space) && !repeat => {
                             self.emit(shell, CanvasEvent::ToggleRun);
                         }
                         _ => {}
                     }
-                    !matches!(self.widget_kind(module, widget), Some(WidgetViewKind::Knob { .. }) if matches!(named, Named::Enter))
+                    !(one_number && matches!(named, Named::Enter))
                 } else if matches!(named, Named::Space) {
                     // Space with nothing focused is the Run shortcut. A
                     // repeat is swallowed so holding the key does not toggle

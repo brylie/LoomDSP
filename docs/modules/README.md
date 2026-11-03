@@ -43,9 +43,12 @@ One page for each built-in module, made from its descriptor. After you change a 
 | [Chance](loom.rand.chance.md) | `loom.rand.chance` | Four lanes that pass each trigger or gate to output A with a set chance, and to output B otherwise. |
 | [Clock](loom.clock.clock.md) | `loom.clock.clock` | A phase, trigger, and gate at a musical rate, locked to the transport's bar 1. |
 | [Clock Divide](loom.logic.divide.md) | `loom.logic.divide` | Fires on every Nth trigger, so a fast clock makes slower rhythms. Offset fires earlier in the count, and Reset starts the count again. |
+| [Euclidean Rhythm](loom.gate.euclid.md) | `loom.gate.euclid` | Spreads a number of hits as evenly as possible over a number of steps, driven by a phase or a clock. |
 | [Phase](loom.phase.generator.md) | `loom.phase.generator` | Ramp from 0 to 1 at the pitch frequency. Drives oscillators and LFOs. |
 | [Phase Reset](loom.phase.reset.md) | `loom.phase.reset` | Restarts a phase at zero on a trigger. After that, the phase moves at the input's speed. |
+| [Phase Reverse](loom.phase.reverse.md) | `loom.phase.reverse` | Runs a phase backward, at the same speed. An input of 0 stays 0, so the cycles still line up. |
 | [Phase Scale](loom.phase.scale.md) | `loom.phase.scale` | Runs a phase at multiply / divide times its speed, locked to the input. Divide counts the input's wraps from the first cycle or the last reset. |
+| [Phase Shift](loom.phase.shift.md) | `loom.phase.shift` | Moves a phase along its cycle, at the same speed. Put it before a Phase Trigger to fire at a chosen point. |
 | [Phase Trigger](loom.phase.trigger.md) | `loom.phase.trigger` | Fires a trigger each time the phase wraps, forward or backward. |
 | [Phase Wrap and Fold](loom.phase.wrap.md) | `loom.phase.wrap` | Brings any signal into the phase range, 0 to 1. Wrap goes round the edge; fold turns back at the edges. |
 | [Transport](loom.clock.transport.md) | `loom.clock.transport` | The patch's tempo, time signature, and play state. Every patch has exactly one. |
@@ -82,6 +85,7 @@ One page for each built-in module, made from its descriptor. After you change a 
 | [Level Constant](loom.level.constant.md) | `loom.level.constant` | Outputs a fixed level, set in decibels. 0 dB is a factor of 1. |
 | [Mixer](loom.mix.mixer.md) | `loom.mix.mixer` | Adds four signals, each with its own level and mute. Two mixers in a row make a bigger mix. |
 | [Scale](loom.level.scale.md) | `loom.level.scale` | Multiplies a signal by a factor and adds an offset. A factor of -1 inverts it; factor 0.5 with offset 0.5 turns bipolar into unipolar. |
+| [Selector](loom.route.selector.md) | `loom.route.selector` | Picks one of up to eight inputs: the next on a trigger, the one a value points at, or one at random. |
 | [Slew](loom.level.slew.md) | `loom.level.slew` | Limits how fast a signal can rise and fall. Times are per 1.0 of change, so a glide takes the same time on any signal. |
 | [Split](loom.mix.split.md) | `loom.mix.split` | Separates a stereo cable into its two sides. |
 
@@ -95,4 +99,5 @@ One page for each built-in module, made from its descriptor. After you change a 
 | [Level Meter](loom.display.meter.md) | `loom.display.meter` | Shows the peak and RMS level of its input. Passes the input through unchanged. |
 | [MIDI Controller](loom.midi.controller.md) | `loom.midi.controller` | Turns a MIDI controller, the pitch bend, or channel aftertouch into a signal. Controllers and aftertouch go from 0 to 1, bend from -1 to 1. |
 | [MIDI Note](loom.midi.note.md) | `loom.midi.note` | Monophonic note input (last-note priority). Pitch includes pitch bend. |
+| [Macro](loom.ui.macro.md) | `loom.ui.macro` | One knob whose value is a signal. Assign it to many parameters, so one knob shapes a whole sound. |
 | [Scope](loom.display.scope.md) | `loom.display.scope` | Shows its input over time. Passes the input through unchanged. |

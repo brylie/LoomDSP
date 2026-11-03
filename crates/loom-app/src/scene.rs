@@ -80,20 +80,26 @@ fn panel_view(d: &ModuleDescriptor) -> PanelView {
         .widgets
         .iter()
         .map(|w| {
+            // Whole-number values a number control steps through, or 0.
+            let steps = || {
+                d.params
+                    .iter()
+                    .find(|p| p.name == w.bind)
+                    .filter(|p| p.options.integer)
+                    .map_or(0, |p| (p.max - p.min) as u32)
+            };
             let kind = match w.kind {
-                WidgetKind::Knob => {
-                    let steps = d
-                        .params
-                        .iter()
-                        .find(|p| p.name == w.bind)
-                        .filter(|p| p.options.integer)
-                        .map_or(0, |p| (p.max - p.min) as u32);
-                    WidgetViewKind::Knob { steps }
-                }
+                WidgetKind::Knob => WidgetViewKind::Knob { steps: steps() },
+                WidgetKind::Number => WidgetViewKind::Number { steps: steps() },
+                WidgetKind::Fader { vertical } => WidgetViewKind::Fader {
+                    vertical,
+                    steps: steps(),
+                },
                 WidgetKind::Toggle => WidgetViewKind::Toggle,
                 WidgetKind::Meter => WidgetViewKind::Meter {
                     zero: d.meter_display(w).map_or(0.0, |display| display.range.zero()),
                 },
+                WidgetKind::Readout { width } => WidgetViewKind::Readout { width },
                 WidgetKind::Scope => WidgetViewKind::Scope,
                 WidgetKind::Shape { width, .. } => WidgetViewKind::Shape { width },
                 // The names come from the parameter (panels.md, Choice names).
@@ -109,7 +115,7 @@ fn panel_view(d: &ModuleDescriptor) -> PanelView {
                         .params
                         .iter()
                         .find(|p| p.name == w.bind)
-                        .map_or_else(Vec::new, |p| p.options.choices.iter().map(|o| o.to_string()).collect()),
+                        .map_or_else(Vec::new, ParamSpec::value_names),
                 },
                 WidgetKind::Segmented { width } => WidgetViewKind::Segmented {
                     options: d
@@ -253,17 +259,19 @@ pub fn mode_key(controller: &Controller) -> Vec<(u32, usize, i64)> {
 /// A control's position for the canvas: the knob position from 0 to 1, the
 /// toggle state, or the radio option index.
 pub fn control_position(kind: WidgetKind, spec: &ParamSpec, value: f32) -> f32 {
-    match kind {
-        WidgetKind::Knob => spec.normalize(value),
-        _ => value - spec.min,
+    if kind.is_one_number() {
+        spec.normalize(value)
+    } else {
+        value - spec.min
     }
 }
 
 /// The parameter value for a control position from the canvas.
 pub fn control_value(kind: WidgetKind, spec: &ParamSpec, position: f32) -> f32 {
-    match kind {
-        WidgetKind::Knob => spec.denormalize(position),
-        _ => spec.clamp(spec.min + position.round()),
+    if kind.is_one_number() {
+        spec.denormalize(position)
+    } else {
+        spec.clamp(spec.min + position.round())
     }
 }
 
@@ -291,7 +299,7 @@ pub fn update_live_values(values: &mut PanelValues, controller: &Controller) {
         let name = d.params[a.param].name;
         let live = controller.modulated(a.target, a.param);
         for (index, w) in d.panel.widgets.iter().enumerate() {
-            if w.kind != WidgetKind::Knob || w.bind != name {
+            if !w.kind.has_range() || w.bind != name {
                 continue;
             }
             if let Some(value) = values.get(a.target.0, index).filter(|v| v.live != live) {
@@ -344,9 +352,10 @@ pub fn update_panel_values_dragging(
                             Some((key, reach)) if *key == (id, p) => std::slice::from_ref(reach),
                             _ => all,
                         };
-                        // Only knobs show the live value, and only while an
-                        // assignment is on (modulation.md, Live value).
-                        let live = (w.kind == WidgetKind::Knob && all.iter().any(|r| r.enabled))
+                        // Only a control with a range shows the live value,
+                        // and only while an assignment is on (modulation.md,
+                        // Live value).
+                        let live = (w.kind.has_range() && all.iter().any(|r| r.enabled))
                             .then(|| controller.modulated(id, p))
                             .flatten();
                         // While a cable drives the Transport's run input, the
@@ -408,6 +417,14 @@ fn driven_run(controller: &Controller, id: ModuleId, w: &loom_core::Widget) -> O
 /// a trigger. A meter shows its RMS level in dB, and a meter on a display value
 /// shows that value. `position` is the value as stored.
 fn display_text(d: &ModuleDescriptor, w: &loom_core::Widget, position: f32, right: Option<(f32, f32)>) -> String {
+    if let WidgetKind::Readout { .. } = w.kind {
+        // A readout's text is what it shows. The registry checked its binding.
+        return d
+            .displays
+            .iter()
+            .find(|display| display.name == w.bind)
+            .map_or_else(String::new, |display| display.range.text(position));
+    }
     if w.kind == WidgetKind::Scope {
         // The trace is the value.
         return String::new();

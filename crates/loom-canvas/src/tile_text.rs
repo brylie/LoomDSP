@@ -8,7 +8,7 @@
 //! Positions are anchors, as Iced reads them: centred text is centred on
 //! its anchor, and right-aligned text ends at it.
 
-use crate::controls::{knob_centre, knob_drawn, light_centre, radio_centre};
+use crate::controls::{fader_drawn, knob_centre, knob_drawn, light_centre, number_box, radio_centre, select_box};
 use crate::scene::{CLOCK_MARK_SPACE, GRID, HEADER, ModuleView, PortRef, WidgetViewKind, fit_label, text_width};
 use iced::{Point, Rectangle, Size};
 use std::borrow::Cow;
@@ -42,6 +42,10 @@ pub enum TextKind {
     Caption(usize),
     /// Option `.1` of the radio group at widget index `.0`.
     Option(usize, usize),
+    /// The live text in the box of the widget at this index: a number, or a
+    /// select list's choice. The content is only a stand-in for the bar drawn
+    /// at middle zoom, because the text lives in the panel values.
+    Value(usize),
 }
 
 /// One piece of text on a tile.
@@ -251,6 +255,16 @@ pub fn for_each<'a>(module: &'a ModuleView, mut f: impl FnMut(TextItem<'a>)) {
             size: LABEL_SIZE,
             width,
         });
+        if let Some((anchor, align, width)) = value_text_place(&widget.kind, rect) {
+            f(TextItem {
+                kind: TextKind::Value(index),
+                content: Cow::Borrowed(VALUE_STAND_IN),
+                anchor,
+                align,
+                size: LABEL_SIZE,
+                width,
+            });
+        }
         if let WidgetViewKind::Segmented { options, .. } = &widget.kind {
             // Each name is centred in its segment, and cut to fit it.
             for (i, option) in options.iter().enumerate() {
@@ -287,6 +301,30 @@ pub fn for_each<'a>(module: &'a ModuleView, mut f: impl FnMut(TextItem<'a>)) {
     }
 }
 
+/// What the bar for a [`TextKind::Value`] measures, at middle zoom.
+const VALUE_STAND_IN: &str = "00000";
+
+/// Where a widget's live text goes, if it has any: the anchor, the alignment,
+/// and the room.
+fn value_text_place(kind: &WidgetViewKind, rect: Rectangle) -> Option<(Point, Align, f32)> {
+    match kind {
+        // The text starts 7 units in, and the arrow takes the last 11.
+        WidgetViewKind::Select { .. } => {
+            let box_rect = select_box(rect);
+            Some((
+                Point::new(box_rect.x + 7.0, box_rect.center_y()),
+                Align::Left,
+                box_rect.width - 18.0,
+            ))
+        }
+        WidgetViewKind::Number { .. } | WidgetViewKind::Readout { .. } => {
+            let box_rect = number_box(rect);
+            Some((box_rect.center(), Align::Center, box_rect.width - 4.0))
+        }
+        _ => None,
+    }
+}
+
 /// Something a panel draws, as text beside it sees it.
 struct PanelBox {
     /// The widget it belongs to, by index.
@@ -309,6 +347,7 @@ fn panel_boxes(module: &ModuleView) -> Vec<PanelBox> {
         };
         let drawn = match &widget.kind {
             WidgetViewKind::Knob { .. } => knob_drawn(rect),
+            WidgetViewKind::Fader { vertical, .. } => fader_drawn(rect, *vertical),
             // The buttons, in a column below the caption row.
             WidgetViewKind::Radio { .. } => {
                 let right = radio_centre(rect, 0).x + 5.0;
@@ -357,13 +396,18 @@ const GAP: f32 = 3.0;
 fn caption_y(kind: &WidgetViewKind, rect: Rectangle) -> f32 {
     match kind {
         WidgetViewKind::Knob { .. } => knob_centre(rect).y + 1.5 * GRID,
+        WidgetViewKind::Fader { vertical: true, .. } => rect.y + rect.height - GRID * 0.5,
+        WidgetViewKind::Fader { vertical: false, .. } => rect.y + GRID * 0.5,
         WidgetViewKind::Meter { .. } | WidgetViewKind::Scope => rect.y + rect.height - GRID * 0.5,
         WidgetViewKind::Shape { .. } => rect.y + rect.height - GRID * 0.5,
         WidgetViewKind::Toggle | WidgetViewKind::Light => light_centre(rect).y + GRID,
         // On the face of the button.
         WidgetViewKind::Button => rect.center_y(),
         WidgetViewKind::Radio { .. } => rect.y + GRID * 0.5,
-        WidgetViewKind::Select { .. } | WidgetViewKind::Segmented { .. } => rect.y + GRID * 0.5,
+        WidgetViewKind::Number { .. }
+        | WidgetViewKind::Readout { .. }
+        | WidgetViewKind::Select { .. }
+        | WidgetViewKind::Segmented { .. } => rect.y + GRID * 0.5,
     }
 }
 

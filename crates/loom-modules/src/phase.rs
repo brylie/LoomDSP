@@ -9,7 +9,8 @@ use loom_core::{
     Channels, DisplayKind, DisplayRange, DisplaySpec, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel,
     ParamOptions, ParamSpec, PortDefault, PortIo, PortSpec, ProcessContext, SignalType, TriggerFlag, Widget,
 };
-use loom_dsp::phase::Phasor;
+use loom_dsp::phase::{Phasor, wrap};
+use loom_rt::Smoothed;
 
 /// `loom.phase.generator`: a ramp from 0 to 1 at the frequency set by pitch.
 pub static PHASE: ModuleDescriptor = ModuleDescriptor {
@@ -267,13 +268,6 @@ struct Wrap {
 impl Wrap {
     const MODE: usize = WRAP.param_index("mode").unwrap();
 
-    /// `x - floor(x)`, always in `[0, 1)`.
-    fn wrap(x: f32) -> f32 {
-        let w = x - x.floor();
-        // A tiny negative `x` can round the result up to exactly 1.
-        if w >= 1.0 { 0.0 } else { w }
-    }
-
     /// A triangle fold into `[0, 1]`: 1 stays 1, 1.25 comes back to 0.75.
     fn fold(x: f32) -> f32 {
         let t = x - 2.0 * (x / 2.0).floor();
@@ -296,7 +290,7 @@ impl Module for Wrap {
             } else if fold {
                 Self::fold(x)
             } else {
-                Self::wrap(x)
+                wrap(x)
             };
         }
     }
@@ -540,17 +534,186 @@ impl Module for PhaseReset {
             // Cables are not limited to 0 to 1. Wrapping first keeps both
             // values small, so a huge input can neither overflow here nor
             // leave an offset so large that later fractions are lost.
-            let phase = Wrap::wrap(phase);
+            let phase = wrap(phase);
             if restart {
                 self.offset = phase;
             }
-            *out = Wrap::wrap(phase - self.offset);
+            *out = wrap(phase - self.offset);
         }
     }
 
     fn reset(&mut self) {
         self.offset = 0.0;
         self.edge.reset();
+    }
+}
+
+/// `loom.phase.shift` (MT-PHASE-05, offset): moves a phase along its cycle, so
+/// a Phase Trigger after it fires at a chosen point of the cycle.
+pub static SHIFT: ModuleDescriptor = ModuleDescriptor {
+    id: "loom.phase.shift",
+    version: 1,
+    name: "Phase Shift",
+    category: "Phase",
+    family: loom_core::Family::TimeAndRhythm,
+    description: "Moves a phase along its cycle, at the same speed. Put it before a Phase Trigger to fire at a chosen point.",
+    inputs: &[
+        PortSpec {
+            name: "phase",
+            label: "Phase",
+            signal: SignalType::Phase,
+            description: "The phase to move. With no cable, it follows the bar.",
+            default: PortDefault::BarPhase,
+            range: loom_core::PortRange::Signal,
+            channels: Channels::Downmix,
+        },
+        PortSpec {
+            name: "offset",
+            label: "Offset",
+            signal: SignalType::Modulation,
+            description: "Added to the Offset knob, in cycles.",
+            default: PortDefault::Value(0.0),
+            range: loom_core::PortRange::Signal,
+            channels: Channels::Downmix,
+        },
+    ],
+    outputs: &[PortSpec {
+        name: "phase",
+        label: "Phase",
+        signal: SignalType::Phase,
+        description: "The input phase, moved by the offset and wrapped to 0 to 1.",
+        default: PortDefault::Value(0.0),
+        range: loom_core::PortRange::Signal,
+        channels: Channels::PerChannel,
+    }],
+    params: &[ParamSpec {
+        name: "offset",
+        label: "Offset",
+        description: "How far to move the phase, in cycles.",
+        min: -1.0,
+        max: 1.0,
+        default: 0.0,
+        unit: "",
+        options: ParamOptions::DEFAULT,
+    }
+    .smooth(0.005)],
+    role: ModuleRole::Dsp(|config| {
+        Box::new(PhaseShift {
+            offset: Smoothed::new(
+                0.0,
+                config.sample_rate,
+                SHIFT.params[PhaseShift::OFFSET].options.smooth_seconds,
+            ),
+        })
+    }),
+    panel: Panel::new(3, 3, &[Widget::knob(0, 0, "offset")]),
+    displays: &[],
+};
+
+/// State for `loom.phase.shift`: only the knob's glide.
+#[derive(Clone)]
+struct PhaseShift {
+    offset: Smoothed,
+}
+
+impl PhaseShift {
+    const OFFSET: usize = SHIFT.param_index("offset").unwrap();
+}
+
+impl Module for PhaseShift {
+    /// Takes the running state of another instance (ADR-0022).
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+
+    fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        let offset_param = io.param(Self::OFFSET);
+        let ([phase, offset_in], [out]) = io.split::<2, 1>();
+        for (i, out) in out.iter_mut().enumerate() {
+            // Tick even when modulated, so removing the assignment continues
+            // the glide from here.
+            let offset = offset_param.at_or(i, self.offset.tick());
+            // A bad offset is no offset. Each term is wrapped first, so huge
+            // values cannot overflow the sum or lose its fraction.
+            let moved = if offset_in[i].is_finite() {
+                wrap(offset_in[i])
+            } else {
+                0.0
+            };
+            *out = if phase[i].is_finite() {
+                wrap(wrap(phase[i]) + offset + moved)
+            } else {
+                0.0
+            };
+        }
+    }
+
+    fn set_param(&mut self, index: usize, value: f32) {
+        if index == Self::OFFSET {
+            self.offset.set_target(value);
+        }
+    }
+
+    fn param_glide(&self, index: usize) -> Option<f32> {
+        if index == Self::OFFSET {
+            self.offset.gliding()
+        } else {
+            None
+        }
+    }
+
+    fn reset(&mut self) {
+        self.offset.reset(self.offset.target());
+    }
+}
+
+/// `loom.phase.reverse` (MT-PHASE-05, reverse): runs a phase backward.
+pub static REVERSE: ModuleDescriptor = ModuleDescriptor {
+    id: "loom.phase.reverse",
+    version: 1,
+    name: "Phase Reverse",
+    category: "Phase",
+    family: loom_core::Family::TimeAndRhythm,
+    description: "Runs a phase backward, at the same speed. An input of 0 stays 0, so the cycles still line up.",
+    inputs: &[PortSpec {
+        name: "phase",
+        label: "Phase",
+        signal: SignalType::Phase,
+        description: "The phase to reverse. With no cable, it follows the bar.",
+        default: PortDefault::BarPhase,
+        range: loom_core::PortRange::Signal,
+        channels: Channels::Downmix,
+    }],
+    outputs: &[PortSpec {
+        name: "phase",
+        label: "Phase",
+        signal: SignalType::Phase,
+        description: "The input phase, running from 1 down to 0.",
+        default: PortDefault::Value(0.0),
+        range: loom_core::PortRange::Signal,
+        channels: Channels::PerChannel,
+    }],
+    params: &[],
+    role: ModuleRole::Dsp(|_| Box::new(PhaseReverse)),
+    panel: Panel::new(2, 2, &[]),
+    displays: &[],
+};
+
+/// `loom.phase.reverse` has no state.
+struct PhaseReverse;
+
+impl Module for PhaseReverse {
+    fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        let ([phase], [out]) = io.split::<1, 1>();
+        for (out, &phase) in out.iter_mut().zip(phase) {
+            // An input of 0 gives 0, so Phase Trigger's first-frame rule keeps
+            // working on a reversed phase.
+            *out = if phase.is_finite() {
+                wrap(1.0 - wrap(phase))
+            } else {
+                0.0
+            };
+        }
     }
 }
 
@@ -565,3 +728,6 @@ mod scale_tests;
 
 #[cfg(test)]
 mod reset_tests;
+
+#[cfg(test)]
+mod shift_tests;

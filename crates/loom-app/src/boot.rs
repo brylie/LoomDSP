@@ -327,6 +327,8 @@ impl App {
             scene,
             gestures: gestures::Gestures::default(),
             values,
+            value_draft: None,
+            text_focus: crate::editing::TextFocus::default(),
             lights: BTreeMap::new(),
             run_driven,
             meter_levels: std::collections::HashMap::new(),

@@ -25,7 +25,7 @@ use iced::{Element, Event, Length, Point, Rectangle, Size, Vector, keyboard, mou
 use loom_canvas::{CanvasPointer, CanvasView, Hit, PointerDrag, PortRef};
 use serde::Serialize;
 use std::any::Any;
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
 use std::time::Instant;
@@ -80,8 +80,6 @@ struct Seen {
 
 #[derive(Debug, Default)]
 struct Inner {
-    /// True while a text field has focus, read on each key press.
-    typing: Rc<Cell<bool>>,
     /// Read the canvas's pointer state for the snapshot. True while the
     /// control channel is on, so an app without it does no extra work.
     record: bool,
@@ -117,11 +115,6 @@ struct Inner {
 pub struct Pointer(Rc<RefCell<Inner>>);
 
 impl Pointer {
-    /// The flag that says a text field has focus, shared with the canvas.
-    pub fn typing(&self) -> Rc<Cell<bool>> {
-        self.0.borrow().typing.clone()
-    }
-
     /// A pointer that reads the canvas's pointer state for the snapshot
     /// when `record` is true.
     pub fn new(record: bool) -> Self {
@@ -310,12 +303,9 @@ pub struct Injector<'a, Message> {
     /// The messages a key event no widget took becomes, as the app's key
     /// subscriptions would send them.
     on_key: KeyHandler<'a, Message>,
-}
-
-/// True for a key press, the one event a text field and the canvas compete
-/// for.
-fn is_key_press(event: &Event) -> bool {
-    matches!(event, Event::Keyboard(keyboard::Event::KeyPressed { .. }))
+    /// The message a press becomes, as the app's event subscription would
+    /// send it. It may have moved text focus.
+    on_press: Box<dyn Fn() -> Message + 'a>,
 }
 
 /// Turns a key event, and whether a widget took it, into app messages.
@@ -327,27 +317,15 @@ impl<'a, Message> Injector<'a, Message> {
         content: impl Into<Element<'a, Message>>,
         app: &'a App,
         on_key: impl Fn(keyboard::Event, iced::event::Status) -> Vec<Message> + 'a,
+        on_press: impl Fn() -> Message + 'a,
     ) -> Self {
         Self {
             content: content.into(),
             pointer: app.pointer.clone(),
             app,
             on_key: Box::new(on_key),
+            on_press: Box::new(on_press),
         }
-    }
-
-    /// Reads whether a text field has focus, for the canvas to see before
-    /// the key reaches it. Focus moves with no message, on a click or by a
-    /// task, so the view cannot know this when it is built.
-    fn note_typing(&mut self, tree: &mut Tree, layout: Layout<'_>, renderer: &iced::Renderer) {
-        let mut focused = crate::editing::AnyFocused(false);
-        {
-            let mut operation = iced::advanced::widget::operation::black_box(&mut focused);
-            self.content
-                .as_widget_mut()
-                .operate(tree, layout, renderer, &mut operation);
-        }
-        self.pointer.typing().set(focused.0);
     }
 
     /// Searches the live view for `text` and the canvas.
@@ -483,9 +461,6 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Injector<'_, Mess
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
-        if is_key_press(event) {
-            self.note_typing(&mut tree.children[0], layout, renderer);
-        }
         let child = &mut tree.children[0];
         if let Event::Mouse(mouse_event) = event {
             {
@@ -522,9 +497,6 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Injector<'_, Mess
                 self.resolve(&mut tree.children[0], layout, renderer, target)
             });
             for (injected, at) in events {
-                if is_key_press(&injected) {
-                    self.note_typing(&mut tree.children[0], layout, renderer);
-                }
                 // A shell of its own, to tell whether a widget took it.
                 let mut messages = Vec::new();
                 let mut own = Shell::new(&mut messages);
@@ -540,6 +512,9 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Injector<'_, Mess
                 );
                 let status = own.event_status();
                 shell.merge(own, |m| m);
+                if matches!(injected, Event::Mouse(mouse::Event::ButtonPressed(_))) {
+                    shell.publish((self.on_press)());
+                }
                 if let Event::Keyboard(
                     key @ (keyboard::Event::KeyPressed { .. } | keyboard::Event::KeyReleased { .. }),
                 ) = injected

@@ -3,7 +3,7 @@
 //! control for MIDI learn (`docs/design/midi-learn.md`,
 //! `docs/design/modulation.md`).
 
-use crate::{App, learn, modulation, scene};
+use crate::{App, Message, learn, modulation, scene};
 use loom_core::{ModuleId, OutputRef};
 
 impl App {
@@ -149,6 +149,153 @@ impl App {
         self.refresh_values();
     }
 
+    /// Sets a parameter from typed text, and returns why not if the text is
+    /// not a value. It parses with the parameter's whole range. A value outside
+    /// the selected control range selects the smallest range that holds it, as
+    /// when a patch loads, or the full range if none does (panel-widgets.md,
+    /// Typing a value). Call it inside one undo step.
+    pub(crate) fn apply_typed_value(&mut self, module: u32, index: usize, text: &str) -> Result<(), String> {
+        let id = ModuleId(module);
+        let node = self.controller.graph().node(id).ok_or("no such module")?;
+        let spec = node.descriptor.params.get(index).ok_or("no such parameter")?;
+        let value = spec.parse_value_text(text).map_err(|why| why.to_string())?;
+        let outside = node
+            .spec(index)
+            .is_some_and(|selected| !(selected.min..=selected.max).contains(&value));
+        let wider = (outside && !spec.options.ranges.is_empty()).then(|| {
+            spec.smallest_range_holding(value)
+                .unwrap_or(loom_core::ParamRange::new(spec.min, spec.max))
+        });
+        if let Some(range) = wider {
+            if let Err(e) = self.controller.set_range(id, index, range) {
+                self.alerts.say(format!("error: {e}"));
+            }
+            self.set_param(module, index, value);
+            // The commit puts the bounds into the schedule (control-ranges.md,
+            // rule 8).
+            self.commit();
+        } else {
+            self.set_param(module, index, value);
+        }
+        Ok(())
+    }
+
+    /// Why text typed on a canvas control is not a value, if it is not.
+    pub(crate) fn typed_check(&self, module: u32, widget: usize, text: &str) -> Result<(), String> {
+        let (index, _, _) = crate::scene::control_param(&self.controller, module, widget).ok_or("no such control")?;
+        let node = self.controller.graph().node(ModuleId(module)).ok_or("no such module")?;
+        let spec = node.descriptor.params.get(index).ok_or("no such parameter")?;
+        spec.parse_value_text(text).map(|_| ()).map_err(|why| why.to_string())
+    }
+
+    /// Drops the inspector value field's draft: Escape, Tab, or focus moved.
+    pub(crate) fn clear_value_draft(&mut self) {
+        self.value_draft = None;
+    }
+
+    /// Records which text field has focus. A draft ends when its own field
+    /// loses focus, even to another field. A value field that has just got
+    /// focus selects its text, so a typed number replaces the value, as Enter
+    /// on a canvas control does (panel-widgets.md, Typing a value).
+    pub(crate) fn text_focus_changed(&mut self, focus: crate::editing::TextFocus) -> iced::Task<Message> {
+        if let Some(draft) = &self.value_draft
+            && focus.field != Some(value_field_id(draft.module, draft.index))
+        {
+            self.value_draft = None;
+        }
+        let gained = focus
+            .field
+            .clone()
+            .filter(|field| self.text_focus.field.as_ref() != Some(field) && self.is_value_field(field));
+        self.text_focus = focus;
+        gained.map_or_else(iced::Task::none, crate::editing::select_all_text)
+    }
+
+    /// True if this widget ID is a value field of the selected module.
+    fn is_value_field(&self, field: &iced::advanced::widget::Id) -> bool {
+        self.selection.iter().any(|&module| {
+            let params = self
+                .controller
+                .graph()
+                .node(ModuleId(module))
+                .map_or(0, |node| node.descriptor.params.len());
+            (0..params).any(|index| value_field_id(module, index) == *field)
+        })
+    }
+
+    /// Enter in an inspector value field. After a commit the field selects its
+    /// new text, so the next number replaces it. Bad text stays as it is, to be
+    /// corrected.
+    pub(crate) fn value_submit(&mut self, module: u32, index: usize) -> iced::Task<Message> {
+        self.submit_value_draft(module, index);
+        if self.value_draft.is_some() {
+            return iced::Task::none();
+        }
+        crate::editing::select_all_text(value_field_id(module, index))
+    }
+
+    /// Tab in a text field on the main view: it closes the field, as on the
+    /// canvas. The canvas has taken the same key and moved its focus. The matrix
+    /// and the windows over the canvas have their own use of the keys.
+    pub(crate) fn text_field_tab(&mut self) -> iced::Task<Message> {
+        let matrix = self.matrix.tab == crate::matrix::Tab::Matrix && self.matrix.focused;
+        if !self.text_focus.any || matrix || !self.no_overlay() || self.tab_moves_between_fields() {
+            return iced::Task::none();
+        }
+        self.text_focus = crate::editing::TextFocus::default();
+        self.value_draft = None;
+        crate::editing::unfocus_text_fields()
+    }
+
+    /// Typing in an inspector value field keeps the text as a draft, with the
+    /// reason if it is not a value yet.
+    pub(crate) fn type_value_draft(&mut self, module: u32, index: usize, text: String) {
+        let error = self
+            .controller
+            .graph()
+            .node(ModuleId(module))
+            .and_then(|node| node.descriptor.params.get(index))
+            .and_then(|spec| spec.parse_value_text(&text).err())
+            .map(|why| why.to_string());
+        self.value_draft = Some(ValueDraft {
+            module,
+            index,
+            text,
+            error,
+        });
+    }
+
+    /// Enter in an inspector value field: commits a draft that is a value, as
+    /// one undo step. With no draft, or the text the field already showed,
+    /// nothing changes, because that text is rounded. Bad text stays.
+    pub(crate) fn submit_value_draft(&mut self, module: u32, index: usize) {
+        let Some(draft) = self
+            .value_draft
+            .clone()
+            .filter(|d| d.module == module && d.index == index)
+        else {
+            return;
+        };
+        let shown = self.controller.graph().node(ModuleId(module)).and_then(|node| {
+            Some(crate::param::format(
+                node.descriptor.params.get(index)?,
+                node.params[index],
+            ))
+        });
+        if shown.as_deref() == Some(draft.text.as_str()) {
+            self.value_draft = None;
+            return;
+        }
+        if draft.error.is_some() {
+            return;
+        }
+        self.close_slider_gesture();
+        self.edit(|app| {
+            let _ = app.apply_typed_value(module, index, &draft.text);
+        });
+        self.value_draft = None;
+    }
+
     /// Sets a parameter from a control on a tile or in the inspector.
     pub(crate) fn set_param(&mut self, module: u32, index: usize, value: f32) {
         if let Err(e) = self.controller.set_param(ModuleId(module), index, value) {
@@ -266,5 +413,61 @@ impl App {
             Err(e) => self.alerts.say(format!("error: {e}")),
         }
         self.refresh_values();
+    }
+}
+
+/// Text typed into an inspector value field that is not committed yet
+/// (panel-widgets.md, Typing a value).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ValueDraft {
+    pub module: u32,
+    pub index: usize,
+    pub text: String,
+    /// Why the text is not a value, if it is not.
+    pub error: Option<String>,
+}
+
+/// The widget ID of an inspector value field. Each parameter has its own, so a
+/// draft can tell its own field from another.
+pub(crate) fn value_field_id(module: u32, index: usize) -> iced::advanced::widget::Id {
+    iced::advanced::widget::Id::from(format!("value-{module}-{index}"))
+}
+
+/// The inspector value field's Escape, heard whichever widget used it. It
+/// drops a draft.
+pub(crate) fn value_draft_event(
+    event: iced::Event,
+    _status: iced::event::Status,
+    _window: iced::window::Id,
+) -> Option<Message> {
+    use iced::keyboard::{self, key::Named};
+    match event {
+        iced::Event::Keyboard(keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(Named::Escape),
+            ..
+        }) => Some(Message::ValueDraftClear),
+        _ => None,
+    }
+}
+
+/// The events that can move text focus, heard whichever widget used them: a
+/// press, Escape, which a text field takes as giving up focus, and Tab.
+pub(crate) fn text_focus_event(
+    event: iced::Event,
+    _status: iced::event::Status,
+    _window: iced::window::Id,
+) -> Option<Message> {
+    use iced::keyboard::{self, key::Named};
+    match event {
+        iced::Event::Keyboard(keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(Named::Tab),
+            ..
+        }) => Some(Message::TextFieldTab),
+        iced::Event::Keyboard(keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(Named::Escape),
+            ..
+        })
+        | iced::Event::Mouse(iced::mouse::Event::ButtonPressed(_)) => Some(Message::TextFocusCheck),
+        _ => None,
     }
 }

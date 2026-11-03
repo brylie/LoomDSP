@@ -87,12 +87,14 @@ An algorithm documents the input it accepts and does not check it in a release b
 |---|---|---|
 | `Svf`, `OnePole` | V. Zavalishin, "The Art of VA Filter Design" | Not checked |
 | `Ladder` | T. Stilson and J. Smith, "Analyzing the Moog VCF", ICMC 1996; Zavalishin | Not checked |
-| `DcBlocker`, `Envelope`, `Slew`, `Phasor` | First principles | Not applicable |
+| `DcBlocker`, `Envelope`, `Slew`, `Phasor`, `phase::wrap` | First principles | Not applicable |
 | `saw`, `pulse`, `triangle` | V. Välimäki and A. Huovilainen, IEEE Signal Processing Magazine, 2007 | Not confirmed |
 | `SlowWave`, `sine` | First principles | Not applicable |
 | `Noise` (pink) | R. F. Voss and J. Clarke, Nature, 1975 | Not confirmed |
 | `Noise` (pink) | M. Gardner, Scientific American, 1978 | Citing source |
-| `Noise` (white) | G. Marsaglia, "Xorshift RNGs", 2003 | Not confirmed |
+| `Noise` (white), `random::xorshift32` | G. Marsaglia, "Xorshift RNGs", Journal of Statistical Software 8(14), 2003 | Confirmed. The text was not compared with the code: a test checks the sequence the 13, 17, 5 shifts give |
+| `random::Rng` (mixing a word) | A. Appleby, MurmurHash3, the 32-bit finaliser | Confirmed against the published source code, including its constants |
+| `euclid::Pattern` | G. Toussaint, "The Euclidean Algorithm Generates Traditional Musical Rhythms", BRIDGES 2005, pages 47 to 56 | Confirmed. The closed form is from first principles, and a test checks it against the paper's patterns and its even spread |
 | `DelayLine` | E. Catmull and R. Rom, 1974 | Citing source |
 | `Allpass` | M. R. Schroeder and B. F. Logan, JAES 9, 1961 | Confirmed |
 | `Limiter` | D. Giannoulis, M. Massberg, and J. D. Reiss, JAES 60, 2012 | Confirmed |

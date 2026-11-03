@@ -164,6 +164,14 @@ impl App {
                     self.set_param(module, index, value);
                 }
             }
+            CanvasEvent::TypedValue { module, widget, text } => {
+                if let Some((index, _, _)) = scene::control_param(&self.controller, module, widget) {
+                    // The canvas checked the text before it sent it.
+                    if let Err(why) = self.apply_typed_value(module, index, &text) {
+                        self.alerts.say(why);
+                    }
+                }
+            }
             CanvasEvent::ButtonPressed { module, widget } => {
                 self.apply_button(module, widget, loom_core::ButtonMode::press);
             }

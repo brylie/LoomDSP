@@ -148,6 +148,7 @@ impl Ui {
         let browser_open = self.app.browser.is_some() && self.app.help.is_none();
         let patches_open = self.app.patches.is_some() && self.app.chooser.is_none();
         let matrix_keys = self.app.matrix.tab == crate::matrix::Tab::Matrix && self.app.matrix.focused;
+        let value_draft_open = self.app.value_draft.is_some();
         let question_open = self.app.question.is_some();
         let mut clipboard = std::mem::take(&mut self.clipboard);
         self.with_ui(|ui, renderer, cursor| {
@@ -181,6 +182,15 @@ impl Ui {
                     messages.push(message);
                 }
                 if let Some(message) = help_key(event.clone(), status, window::Id::unique()) {
+                    messages.push(message);
+                }
+                if value_draft_open
+                    && let Some(message) =
+                        crate::controls::value_draft_event(event.clone(), status, window::Id::unique())
+                {
+                    messages.push(message);
+                }
+                if let Some(message) = crate::controls::text_focus_event(event.clone(), status, window::Id::unique()) {
                     messages.push(message);
                 }
                 // The panic key listens to every key event (panic.md).
@@ -278,15 +288,11 @@ impl Ui {
         self.redraw();
     }
 
-    /// True when a text field has keyboard focus, read from the widgets
-    /// as the `type` command reads them.
+    /// True when a named text field has keyboard focus, read from the
+    /// widgets. `ui.focus` moves focus with no message, so `App::text_focus`
+    /// would not know.
     pub fn text_field_focused(&mut self) -> bool {
-        let mut focused = crate::editing::AnyFocused(false);
-        {
-            let mut operation = iced::advanced::widget::operation::black_box(&mut focused);
-            self.with_ui(|ui, renderer, _| ui.operate(renderer, &mut operation));
-        }
-        focused.0
+        self.focused_field().is_some()
     }
 
     /// The ID of the focused field, if it has one, read as a focus step
@@ -304,26 +310,28 @@ impl Ui {
         }
     }
 
-    /// Runs a focus step as the runtime does: each stage over the whole
-    /// window, then the stage it hands on to.
-    pub fn step_focus(&mut self, fields: &'static [&'static str], backwards: bool) {
-        use iced::advanced::widget::operation::{Operation, Outcome};
-        let mut stage: Box<dyn Operation<()>> = Box::new(crate::editing::StepFocus {
-            fields,
-            backwards,
-            current: None,
-        });
-        loop {
-            {
-                let operation: &mut dyn Operation<()> = stage.as_mut();
-                self.with_ui(|ui, renderer, _| ui.operate(renderer, operation));
+    /// Where the inspector's value field for this parameter is in the window.
+    pub fn value_field(&mut self, module: u32, index: usize) -> Point {
+        use iced::advanced::widget::operation::{Focusable, Outcome};
+        use iced::advanced::widget::{Id, Operation};
+
+        struct Find(Id, Option<Rectangle>);
+        impl Operation for Find {
+            fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
+                operate(self);
             }
-            match stage.finish() {
-                Outcome::Chain(next) => stage = next,
-                _ => break,
+            fn focusable(&mut self, id: Option<&Id>, bounds: Rectangle, _state: &mut dyn Focusable) {
+                if id == Some(&self.0) {
+                    self.1 = Some(bounds);
+                }
+            }
+            fn finish(&self) -> Outcome<()> {
+                Outcome::None
             }
         }
-        self.redraw();
+        let mut find = Find(crate::controls::value_field_id(module, index), None);
+        self.with_ui(|ui, renderer, _| ui.operate(renderer, &mut find));
+        find.1.expect("a value field for that parameter").center()
     }
 
     /// Moves the pointer to a window point.
@@ -1267,7 +1275,42 @@ mod tests {
             range: 0,
         });
         ui.redraw();
-        assert!(ui.text("0.100").is_some(), "clamped into -0.1 to 0.1");
+        let crate::inspector::Inspector::Module(rows) = ui.app.inspector_model() else {
+            panic!("a module row");
+        };
+        assert_eq!(rows.params[0].value, "0.100", "clamped into -0.1 to 0.1");
+        assert_eq!(
+            rows.params[0].field.as_ref().map(|field| field.text.as_str()),
+            Some("0.100"),
+            "the field shows the value"
+        );
+    }
+
+    /// A typed value outside the selected control range selects the smallest
+    /// range that holds it, and one commit is still one undo step
+    /// (panel-widgets.md, Typing a value).
+    #[test]
+    fn a_typed_value_above_the_control_range_selects_a_wider_one() {
+        let mut ui = Ui::open("subtractive.ron");
+        let mul = select_new(&mut ui, "loom.math.mul");
+        let _ = ui.app.update(Message::Range {
+            module: mul.0,
+            index: 0,
+            range: 0,
+        });
+        let module = mul.0;
+        let selected = |ui: &Ui| ui.app.controller.graph().node(mul).unwrap().spec(0).unwrap();
+        assert_eq!(selected(&ui).max, 0.1);
+        let steps = ui.app.edits.history.len();
+        let _ = ui.app.update(Message::ValueText {
+            module,
+            index: 0,
+            text: "0.5".to_string(),
+        });
+        let _ = ui.app.update(Message::ValueSubmit { module, index: 0 });
+        assert_eq!(ui.app.controller.graph().node(mul).unwrap().params[0], 0.5);
+        assert!(selected(&ui).max >= 0.5, "the range widened");
+        assert_eq!(ui.app.edits.history.len(), steps + 1, "one undo step");
     }
 
     /// Subtractive with the filter envelope (module 5) modulating the
@@ -1495,5 +1538,449 @@ mod tests {
             .map(|w| w.label.clone())
             .collect();
         assert_eq!(hidden, ["Sustain", "Release"]);
+    }
+
+    /// An open select list, through the real view: a click opens it, Down and
+    /// Enter pick the next choice once, and Escape closes it with no edit. The
+    /// keys never reach the canvas or the tile behind it (panel-widgets.md,
+    /// Select list).
+    #[test]
+    fn a_select_list_takes_its_keys_through_the_real_view() {
+        use keyboard::key::Named;
+        let mut ui = Ui::open("sine.ron");
+        let lfo = select_new(&mut ui, "loom.mod.lfo");
+        let shape = |ui: &Ui| {
+            let node = ui.app.controller.graph().node(lfo).unwrap();
+            node.params[node.descriptor.param_index("shape").unwrap()]
+        };
+        let before = shape(&ui);
+        let position = ui.app.scene.module(lfo.0).unwrap().position;
+        let at = ui.control(lfo.0, "shape");
+        let none = keyboard::Modifiers::default();
+
+        ui.move_to(at);
+        ui.press();
+        ui.release();
+        ui.tap(keyboard::Key::Named(Named::Escape), none);
+        assert_eq!(shape(&ui), before, "Escape edits nothing");
+
+        ui.press();
+        ui.release();
+        ui.tap(keyboard::Key::Named(Named::ArrowDown), none);
+        assert_eq!(shape(&ui), before, "Down moves only the highlight");
+        ui.tap(keyboard::Key::Named(Named::Enter), none);
+        assert_eq!(shape(&ui), before + 1.0, "Enter commits one choice");
+        assert_eq!(ui.app.scene.module(lfo.0).unwrap().position, position);
+    }
+
+    /// A fader on a float parameter keeps every value in its range: a drag to
+    /// mid-range does not snap through a whole number, and a parameter bound
+    /// only to a fader takes a modulation assignment, in the inspector and the
+    /// matrix (panel-widgets.md, Fader).
+    #[test]
+    fn a_fader_sets_a_float_value_and_takes_an_assignment() {
+        let mut ui = Ui::open("sine.ron");
+        let id = select_new(&mut ui, "test.panel");
+        let param = |ui: &Ui, name: &str| {
+            let node = ui.app.controller.graph().node(id).unwrap();
+            node.params[node.descriptor.param_index(name).unwrap()]
+        };
+        let at = ui.control(id.0, "wide");
+        let zoom = ui.canvas().camera.zoom;
+        let before = param(&ui, "wide");
+        let to = Point::new(at.x + 20.0, at.y);
+        ui.drag(at, to, 4);
+        let moved = param(&ui, "wide") - before;
+        let throw = (loom_canvas::GRID * 6.0 - 8.0) * zoom;
+        assert!(
+            (moved - 20.0 / throw.max(200.0)).abs() < 1e-3,
+            "{moved}: a small drag makes a small change, with no snap"
+        );
+
+        let (_, kind, spec) =
+            crate::scene::control_param(&ui.app.controller, id.0, widget_of(&ui, id, "tall")).unwrap();
+        assert_eq!(kind, loom_core::WidgetKind::Fader { vertical: true });
+        let position = crate::scene::control_position(kind, &spec, 1_000.0);
+        assert!(position > 0.0 && position < 1.0, "through the logarithmic mapping");
+        let value = crate::scene::control_value(kind, &spec, position);
+        assert!((value - 1_000.0).abs() < 0.5, "{value}");
+        assert!(kind.takes_modulation());
+        assert!(kind.has_range());
+        assert!(kind.is_one_number());
+    }
+
+    /// The widget index of the control bound to a parameter.
+    fn widget_of(ui: &Ui, module: ModuleId, param: &str) -> usize {
+        let node = ui.app.controller.graph().node(module).unwrap();
+        node.descriptor
+            .panel
+            .widgets
+            .iter()
+            .position(|w| w.bind == param)
+            .unwrap()
+    }
+
+    /// A number shows the base value as text and steps a whole number by one
+    /// per drag step, even over 1000 values. While modulated, its mark is a dot
+    /// and its text stays the base value (panel-widgets.md, Number).
+    #[test]
+    fn a_number_steps_by_one_and_shows_the_base_value() {
+        let mut ui = Ui::open("sine.ron");
+        let id = select_new(&mut ui, "test.panel");
+        let count = |ui: &Ui| {
+            let node = ui.app.controller.graph().node(id).unwrap();
+            node.params[node.descriptor.param_index("count").unwrap()]
+        };
+        assert_eq!(count(&ui), 7.0);
+        let at = ui.control(id.0, "count");
+        let up = Point::new(at.x, at.y - 40.0);
+        ui.drag(at, up, 8);
+        assert_eq!(count(&ui), 17.0, "40 pixels at 4 pixels per value");
+
+        let widget = widget_of(&ui, id, "tempo");
+        let (_, kind, spec) = crate::scene::control_param(&ui.app.controller, id.0, widget).unwrap();
+        assert_eq!(kind, loom_core::WidgetKind::Number);
+        let value = ui.app.values.get(id.0, widget).unwrap();
+        assert_eq!(value.text, crate::param::format(&spec, 120.0), "the base value");
+        let reach = crate::modulation::Reach {
+            depth: 0.25,
+            enabled: true,
+            polarity: loom_core::Polarity::Unipolar,
+        };
+        assert_eq!(
+            crate::modulation::mark(kind, &spec, 120.0, &[reach]),
+            loom_canvas::ModulationMark::Dot
+        );
+    }
+
+    /// The value of a parameter by name.
+    fn param_value(ui: &Ui, module: ModuleId, name: &str) -> f32 {
+        let node = ui.app.controller.graph().node(module).unwrap();
+        node.params[node.descriptor.param_index(name).unwrap()]
+    }
+
+    /// Focuses a canvas control by clicking it.
+    fn focus_control(ui: &mut Ui, module: ModuleId, name: &str) {
+        let at = ui.control(module.0, name);
+        ui.move_to(at);
+        ui.press();
+        ui.release();
+    }
+
+    /// Typing 128 on a focused Tempo knob sets exactly 128 BPM, as one undo
+    /// step. A drag or an arrow key rarely lands on it (panel-widgets.md,
+    /// Typing a value).
+    #[test]
+    fn typing_on_a_focused_knob_sets_the_exact_value() {
+        use keyboard::key::Named;
+        let mut ui = Ui::open("sine.ron");
+        let transport = ui.app.controller.transport_module().expect("a transport");
+        let _ = ui.app.update(Message::SelectModule(transport.0));
+        ui.redraw();
+        focus_control(&mut ui, transport, "tempo");
+        let steps = ui.app.edits.history.len();
+        ui.typewrite("128");
+        ui.tap(keyboard::Key::Named(Named::Enter), keyboard::Modifiers::default());
+        assert_eq!(param_value(&ui, transport, "tempo"), 128.0);
+        assert_eq!(ui.app.edits.history.len(), steps + 1, "one commit is one undo step");
+    }
+
+    /// "2k" commits 2000, and "abc" leaves the value and blocks Enter. Then
+    /// Backspace corrects it, and the module is still there: Backspace in the
+    /// field never reaches the canvas.
+    #[test]
+    fn typed_text_commits_units_and_bad_text_is_corrected_in_place() {
+        use keyboard::key::Named;
+        let none = keyboard::Modifiers::default();
+        let mut ui = Ui::open("sine.ron");
+        let id = select_new(&mut ui, "test.panel");
+        focus_control(&mut ui, id, "cutoff");
+        ui.typewrite("2k");
+        ui.tap(keyboard::Key::Named(Named::Enter), none);
+        assert_eq!(param_value(&ui, id, "cutoff"), 2000.0);
+
+        focus_control(&mut ui, id, "tempo");
+        ui.typewrite("1");
+        ui.typewrite("abc");
+        let before = param_value(&ui, id, "tempo");
+        ui.tap(keyboard::Key::Named(Named::Enter), none);
+        assert_eq!(param_value(&ui, id, "tempo"), before, "bad text commits nothing");
+        for _ in 0..3 {
+            ui.tap(keyboard::Key::Named(Named::Backspace), none);
+        }
+        ui.typewrite("50");
+        ui.tap(keyboard::Key::Named(Named::Enter), none);
+        assert_eq!(param_value(&ui, id, "tempo"), 150.0);
+        assert!(ui.app.controller.graph().node(id).is_some(), "the module stays");
+    }
+
+    /// Enter then Enter on a value the text rounds keeps the exact value, with
+    /// no undo step (panel-widgets.md, Typing a value, Unchanged text).
+    #[test]
+    fn enter_then_enter_keeps_a_value_the_text_rounds() {
+        use keyboard::key::Named;
+        let none = keyboard::Modifiers::default();
+        let mut ui = Ui::open("sine.ron");
+        let id = select_new(&mut ui, "test.panel");
+        let index = ui
+            .app
+            .controller
+            .graph()
+            .node(id)
+            .unwrap()
+            .descriptor
+            .param_index("tempo")
+            .unwrap();
+        let _ = ui.app.update(Message::ParamValue {
+            module: id.0,
+            index,
+            value: 127.96,
+        });
+        let _ = ui.app.update(Message::SliderReleased);
+        ui.redraw();
+        focus_control(&mut ui, id, "tempo");
+        let steps = ui.app.edits.history.len();
+        ui.tap(keyboard::Key::Named(Named::Enter), none);
+        ui.tap(keyboard::Key::Named(Named::Enter), none);
+        assert_eq!(param_value(&ui, id, "tempo"), 127.96);
+        assert_eq!(ui.app.edits.history.len(), steps, "no undo step");
+    }
+
+    /// The inspector's field: typing is a draft, Enter commits it as one undo
+    /// step, and bad text shows its reason and commits nothing. Escape drops a
+    /// draft, and in MIDI learn mode the row has no field.
+    #[test]
+    fn the_inspector_takes_typed_values() {
+        use keyboard::key::Named;
+        let mut ui = Ui::open("sine.ron");
+        let id = select_new(&mut ui, "test.panel");
+        let node = ui.app.controller.graph().node(id).unwrap();
+        let index = node.descriptor.param_index("cutoff").unwrap();
+        let module = id.0;
+        let text = |text: &str| Message::ValueText {
+            module,
+            index,
+            text: text.to_string(),
+        };
+        let field = |ui: &Ui| {
+            let crate::inspector::Inspector::Module(rows) = ui.app.inspector_model() else {
+                panic!("a module row");
+            };
+            rows.params.into_iter().find(|p| p.index == index).unwrap().field
+        };
+        assert_eq!(field(&ui).unwrap().error, None);
+
+        let steps = ui.app.edits.history.len();
+        let _ = ui.app.update(text("440 hz"));
+        assert_eq!(field(&ui).unwrap().text, "440 hz");
+        let _ = ui.app.update(Message::ValueSubmit { module, index });
+        assert_eq!(param_value(&ui, id, "cutoff"), 440.0);
+        assert_eq!(ui.app.edits.history.len(), steps + 1);
+        assert!(ui.app.value_draft.is_none());
+
+        let _ = ui.app.update(text("abc"));
+        assert_eq!(field(&ui).unwrap().error.as_deref(), Some("Not a number in Hz"));
+        let _ = ui.app.update(Message::ValueSubmit { module, index });
+        assert_eq!(param_value(&ui, id, "cutoff"), 440.0, "bad text commits nothing");
+        assert!(ui.app.value_draft.is_some(), "and stays to be corrected");
+
+        // Escape drops it, through the same listener the app uses.
+        let messages = ui.tap(keyboard::Key::Named(Named::Escape), keyboard::Modifiers::default());
+        assert!(messages.iter().any(|m| matches!(m, Message::ValueDraftClear)));
+        assert!(ui.app.value_draft.is_none());
+
+        // A press with no field focused drops a draft too.
+        let _ = ui.app.update(text("5"));
+        ui.step(&[]);
+        let at = ui.control(module, "level");
+        ui.move_to(at);
+        ui.press();
+        ui.release();
+        assert!(ui.app.value_draft.is_none(), "focus moved away");
+
+        // In learn mode the row is plain text, so a click arms it.
+        let _ = ui.app.update(Message::Learn(crate::learn::Message::Toggle));
+        assert!(field(&ui).is_none());
+    }
+
+    /// Selects a `test.panel` module, and clicks its cutoff value field with a
+    /// real press. Returns the module and the parameter index.
+    fn focus_cutoff_field(ui: &mut Ui) -> (ModuleId, usize) {
+        let id = select_new(ui, "test.panel");
+        let index = ui
+            .app
+            .controller
+            .graph()
+            .node(id)
+            .unwrap()
+            .descriptor
+            .param_index("cutoff")
+            .unwrap();
+        let at = ui.value_field(id.0, index);
+        ui.move_to(at);
+        ui.press();
+        ui.release();
+        assert!(ui.app.text_focus.any, "the app knows the field has focus");
+        (id, index)
+    }
+
+    /// The module's position, to see that a key did not move it.
+    fn tile_position(ui: &Ui, id: ModuleId) -> Point {
+        ui.app.positions[&id.0]
+    }
+
+    /// Enter in an inspector field commits only that parameter. It never
+    /// focuses a control on the tile, so the next number edits nothing else.
+    #[test]
+    fn enter_in_an_inspector_field_leaves_the_canvas_alone() {
+        use keyboard::key::Named;
+        let mut ui = Ui::open("sine.ron");
+        let (id, index) = focus_cutoff_field(&mut ui);
+        let params = |ui: &Ui| ui.app.controller.graph().node(id).unwrap().params.clone();
+        let steps = ui.app.edits.history.len();
+
+        let enter = keyboard::Key::Named(Named::Enter);
+        ui.typewrite("440");
+        ui.tap(enter.clone(), keyboard::Modifiers::default());
+        assert_eq!(param_value(&ui, id, "cutoff"), 440.0);
+        let others = params(&ui);
+
+        // The commit selected the new text, so this number replaces it.
+        ui.typewrite("880");
+        ui.tap(enter, keyboard::Modifiers::default());
+        assert_eq!(param_value(&ui, id, "cutoff"), 880.0);
+        let now = params(&ui);
+        for (i, (before, after)) in others.iter().zip(&now).enumerate() {
+            if i != index {
+                assert_eq!(before, after, "parameter {i} did not change");
+            }
+        }
+        assert_eq!(ui.app.edits.history.len(), steps + 2, "one undo step per commit");
+    }
+
+    /// Keys that edit a text field never act on the canvas behind it: not an
+    /// arrow, Space, Backspace, or a letter with the pointer over the canvas.
+    #[test]
+    fn keys_in_an_inspector_field_do_not_reach_the_canvas() {
+        use keyboard::key::Named;
+        let mut ui = Ui::open("sine.ron");
+        let (id, _) = focus_cutoff_field(&mut ui);
+        let place = tile_position(&ui, id);
+        let running = ui.app.controller.transport().running;
+        let steps = ui.app.edits.history.len();
+
+        let none = keyboard::Modifiers::default();
+        ui.tap(keyboard::Key::Named(Named::ArrowLeft), none);
+        ui.tap(keyboard::Key::Named(Named::ArrowRight), none);
+        assert_eq!(tile_position(&ui, id), place, "an arrow moves the caret, not the tile");
+        ui.tap(keyboard::Key::Named(Named::Space), none);
+        assert_eq!(ui.app.controller.transport().running, running, "Space is not Run");
+
+        // Over the canvas, with the module selected, Backspace would delete it
+        // and `a` would open the browser. The field has the keys all the same.
+        let tile = ui.control(id.0, "level");
+        ui.cursor = mouse::Cursor::Available(tile);
+        ui.tap(keyboard::Key::Named(Named::Backspace), none);
+        assert!(ui.app.controller.graph().node(id).is_some(), "Backspace edits the text");
+        ui.typewrite("a");
+        assert!(ui.app.browser.is_none());
+        assert_eq!(ui.app.edits.history.len(), steps);
+
+        // Escape ends the field's focus and keeps the selection. The next one
+        // reaches the canvas again.
+        ui.tap(keyboard::Key::Named(Named::Escape), none);
+        assert!(
+            ui.app.selection.contains(&id.0),
+            "Escape in a field keeps the selection"
+        );
+        assert!(!ui.app.text_focus.any, "the field gave up focus");
+        ui.tap(keyboard::Key::Named(Named::Escape), none);
+        assert!(ui.app.selection.is_empty());
+    }
+
+    /// Tab closes a field with no change and moves the canvas's focus as usual.
+    #[test]
+    fn tab_closes_an_inspector_field() {
+        use keyboard::key::Named;
+        let mut ui = Ui::open("sine.ron");
+        let (id, _) = focus_cutoff_field(&mut ui);
+        let before = param_value(&ui, id, "cutoff");
+        ui.typewrite("5");
+        assert!(ui.app.value_draft.is_some());
+        ui.tap(keyboard::Key::Named(Named::Tab), keyboard::Modifiers::default());
+        assert!(ui.app.value_draft.is_none());
+        assert!(!ui.app.text_focus.any);
+        assert_eq!(param_value(&ui, id, "cutoff"), before);
+    }
+
+    /// A draft ends when focus moves to another value field, and a new patch
+    /// starts with no draft and no field holding the keys.
+    #[test]
+    fn a_draft_ends_when_focus_moves_or_the_patch_changes() {
+        let mut ui = Ui::open("sine.ron");
+        let (id, _) = focus_cutoff_field(&mut ui);
+        ui.typewrite("abc");
+        assert_eq!(
+            ui.app.value_draft.as_ref().unwrap().text,
+            "abc",
+            "bad text keeps its focus"
+        );
+        assert!(ui.app.text_focus.any);
+
+        let node = ui.app.controller.graph().node(id).unwrap();
+        let other = node.descriptor.param_index("level").unwrap();
+        let at = ui.value_field(id.0, other);
+        ui.move_to(at);
+        ui.press();
+        ui.release();
+        assert!(ui.app.value_draft.is_none(), "the bad text went with the focus");
+        assert!(ui.app.text_focus.any, "the other field has focus now");
+
+        ui.typewrite("5");
+        assert!(ui.app.value_draft.is_some());
+        assert!(ui.app.replace(crate::Source::Empty));
+        ui.step(&[]);
+        assert!(ui.app.value_draft.is_none());
+        assert!(!ui.app.text_focus.any);
+    }
+
+    /// A readout shows its value as text in the snapshot, at its own place,
+    /// and a press on it selects the module and moves nothing. The meter on a
+    /// value around zero starts from zero (panel-widgets.md, Readout, Meter on a
+    /// display value).
+    #[test]
+    fn a_readout_shows_text_and_a_press_selects_its_module() {
+        let mut ui = Ui::open("sine.ron");
+        let id = ui.app.controller.add_module("test.readout").unwrap();
+        ui.app.refresh();
+        ui.step(&[]);
+        ui.app.run_engine(4800);
+        let snapshot = ui.app.ui_snapshot();
+        let tile = snapshot.tiles.iter().find(|tile| tile.id == id.0).expect("the tile");
+        let shown = |label: &str| {
+            let widget = tile.widgets.iter().find(|w| w.label == label).unwrap();
+            (widget.kind, widget.text.clone())
+        };
+        assert_eq!(shown("Count"), ("readout", "7".to_string()));
+        assert_eq!(shown("Pitch"), ("readout", "B4 -20¢".to_string()));
+        assert_eq!(shown("Input"), ("readout", "Second".to_string()));
+        assert_eq!(shown("Cents").1, "12.5 cents");
+        let view = ui.app.scene.module(id.0).unwrap();
+        assert!(
+            view.panel
+                .widgets
+                .iter()
+                .any(|w| matches!(w.kind, loom_canvas::WidgetViewKind::Meter { zero } if zero == 0.5)),
+            "the meter's bar starts from zero, in the middle"
+        );
+
+        let rect = view.widget_bounds(0).unwrap();
+        let at = ui.canvas().to_window(rect.center());
+        ui.move_to(at);
+        ui.press();
+        ui.release();
+        assert_eq!(ui.app.selection, [id.0].into());
+        let node = ui.app.controller.graph().node(id).unwrap();
+        assert_eq!(node.params[0], 7.0, "a press edits nothing");
     }
 }

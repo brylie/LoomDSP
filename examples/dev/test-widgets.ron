@@ -15,12 +15,19 @@ Patch(
         PatchModule(id: 2, kind: "test.panel@1", params: {"level": 0.25, "cutoff": 200.0, "steps": 3.0}),
         // The patch transport: 120 BPM, 4/4, running.
         PatchModule(id: 3, kind: "loom.clock.transport@1"),
+        // A readout of each format, and a meter on a value around zero.
+        PatchModule(id: 4, kind: "test.readout@1"),
     ],
     modulation: [
         // Knobs: a range arc on a linear, a logarithmic, and a whole-number one.
         PatchModulation(source: (1, "uni"), target: (2, "level"), depth: 0.25),
         PatchModulation(source: (1, "bi"), target: (2, "cutoff"), depth: -0.25),
         PatchModulation(source: (1, "uni"), target: (2, "steps"), depth: 0.3),
+        // Faders: a range bar on a logarithmic and a linear one.
+        PatchModulation(source: (1, "uni"), target: (2, "tall"), depth: 0.25),
+        PatchModulation(source: (1, "bi"), target: (2, "wide"), depth: 0.25),
+        // A number shows a dot, and its text keeps the base value.
+        PatchModulation(source: (1, "uni"), target: (2, "tempo"), depth: 0.25),
         // Toggle, radio, and button: the depths a drop gives them (one step).
         PatchModulation(source: (1, "uni"), target: (2, "on"), depth: 1.0),
         PatchModulation(source: (1, "bi"), target: (2, "choice"), depth: 0.5),

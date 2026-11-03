@@ -15,12 +15,16 @@
 
 use iced::futures::Stream;
 use iced::futures::channel::mpsc;
-use loom_core::{DisplayKind, DisplayRange, DisplayReader, DisplaySource, ModuleDescriptor, Widget};
+use loom_core::{DisplayKind, DisplayRange, DisplayReader, DisplaySource, ModuleDescriptor, Widget, WidgetKind};
 use std::hash::{Hash, Hasher};
 use std::time::{Duration, Instant};
 
 /// How often the watcher reads the display table: about 30 times a second.
 pub const INTERVAL: Duration = Duration::from_millis(33);
+
+/// The least time between two changes of a readout's text. Text that changes
+/// faster cannot be read, and each change lays out text again.
+pub const READOUT_INTERVAL: Duration = Duration::from_millis(100);
 
 /// How long a trigger light takes to fade from full to dark.
 pub const FADE: Duration = Duration::from_millis(120);
@@ -33,6 +37,9 @@ pub type Light = (u32, usize);
 pub struct Watch {
     pub reader: DisplayReader,
     pub lights: Vec<(Light, DisplaySource)>,
+    /// The range of each entry in `lights` that is a readout (see [`readout`]):
+    /// it says how the readout writes its value.
+    pub readouts: Vec<Option<DisplayRange>>,
     /// The range of each entry in `lights`, if it has one (see [`range`]). A
     /// meter on a display value may read outside 0 to 1.
     pub ranges: Vec<Option<DisplayRange>>,
@@ -78,6 +85,37 @@ impl Watch {
     }
 }
 
+/// What a readout last showed, so its text changes at most 10 times a second
+/// and only when it would look different (panel-widgets.md, Readout). The
+/// snapshot carries every entry, so a light fading at 30 Hz would otherwise
+/// carry fresh readout values with it.
+#[derive(Debug, Clone, Default)]
+pub struct ReadoutHold {
+    value: f32,
+    text: String,
+    at: Option<Instant>,
+}
+
+impl ReadoutHold {
+    /// The value to show at `now`, after a read of `reading`: the held one
+    /// until the text changes and [`READOUT_INTERVAL`] has passed.
+    pub fn held(&mut self, reading: f32, range: &DisplayRange, now: Instant) -> f32 {
+        let too_soon = self
+            .at
+            .is_some_and(|at| now.saturating_duration_since(at) < READOUT_INTERVAL);
+        if too_soon {
+            return self.value;
+        }
+        let text = range.text(reading);
+        if self.at.is_none() || text != self.text {
+            self.value = reading;
+            self.text = text;
+            self.at = Some(now);
+        }
+        self.value
+    }
+}
+
 /// When a trigger light last flashed, so it can fade over [`FADE`].
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Fade {
@@ -117,6 +155,14 @@ pub fn range(descriptor: &ModuleDescriptor, widget: &Widget) -> Option<DisplayRa
     descriptor.meter_display(widget).map(|display| display.range)
 }
 
+/// The range that says how `widget` writes its value, if it is a readout.
+pub fn readout(descriptor: &ModuleDescriptor, widget: &Widget) -> Option<DisplayRange> {
+    matches!(widget.kind, WidgetKind::Readout { .. })
+        .then(|| descriptor.displays.iter().find(|display| display.name == widget.bind))
+        .flatten()
+        .map(|display| display.range)
+}
+
 /// A reading as a step that shows. A light has 256 levels. A meter has as many
 /// steps across its range, and more past its ends: the bar stops there, but its
 /// text still says the value.
@@ -127,14 +173,42 @@ fn step(reading: f32, range: Option<DisplayRange>) -> i32 {
     }
 }
 
-/// The steps of `readings`, if any differs from `last`.
-pub fn changed(last: &[Option<i32>], readings: &[f32], ranges: &[Option<DisplayRange>]) -> Option<Vec<Option<i32>>> {
+/// The steps of `readings`, if any differs from `last`. A held readout value
+/// only changes when its text does, so any change at all counts for it.
+pub fn changed(
+    last: &[Option<i32>],
+    readings: &[f32],
+    ranges: &[Option<DisplayRange>],
+    readouts: &[Option<DisplayRange>],
+) -> Option<Vec<Option<i32>>> {
     let steps: Vec<Option<i32>> = readings
         .iter()
         .zip(ranges)
-        .map(|(&reading, &range)| Some(step(reading, range)))
+        .zip(readouts)
+        .map(|((&reading, &range), readout)| {
+            Some(if readout.is_some() {
+                reading.to_bits() as i32
+            } else {
+                step(reading, range)
+            })
+        })
         .collect();
     (steps != last).then_some(steps)
+}
+
+/// Holds each readout in a snapshot until its text may change. Pure, with `now`
+/// passed in, so a test can step time.
+pub fn hold_readouts(
+    snapshot: &mut [(Light, f32)],
+    readouts: &[Option<DisplayRange>],
+    holds: &mut [ReadoutHold],
+    now: Instant,
+) {
+    for ((entry, range), hold) in snapshot.iter_mut().zip(readouts).zip(holds) {
+        if let Some(range) = range {
+            entry.1 = hold.held(entry.1, range, now);
+        }
+    }
 }
 
 /// Reads the lights every [`INTERVAL`] and yields their values when one
@@ -146,10 +220,13 @@ pub fn stream(watch: &Watch) -> impl Stream<Item = Vec<(Light, f32)>> + use<> {
     std::thread::spawn(move || {
         let mut last = vec![None; watch.lights.len()];
         let mut fades = vec![Fade::default(); watch.lights.len()];
+        let mut holds = vec![ReadoutHold::default(); watch.lights.len()];
         while !tx.is_closed() {
-            let snapshot = watch.shown(&mut fades, Instant::now());
+            let now = Instant::now();
+            let mut snapshot = watch.shown(&mut fades, now);
+            hold_readouts(&mut snapshot, &watch.readouts, &mut holds, now);
             let readings: Vec<f32> = snapshot.iter().map(|&(_, r)| r).collect();
-            if let Some(levels) = changed(&last, &readings, &watch.ranges) {
+            if let Some(levels) = changed(&last, &readings, &watch.ranges, &watch.readouts) {
                 match tx.try_send(snapshot) {
                     Ok(()) => last = levels,
                     // The UI has not taken the last one yet: try again next

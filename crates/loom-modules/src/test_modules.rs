@@ -8,18 +8,20 @@
 //!
 //! - [`PANEL`] (`test.panel`) has every widget kind on its panel, every
 //!   parameter mapping, and one output of each polarity.
+//! - [`READOUT`] (`test.readout`) has a readout of each format, and a meter on
+//!   a display value that runs below and above zero.
 //! - [`LINEAR`], [`LOG`], [`STEPS`], and [`SMOOTH`] are mirrors: one
 //!   parameter each, and one output that writes what the engine gave that
 //!   parameter, so a test can read it.
 
 use loom_core::{
-    Channels, DisplayKind, DisplayRange, DisplaySpec, LoomError, Module, ModuleConfig, ModuleDescriptor, ModuleRole,
-    Panel, ParamOptions, ParamSpec, Polarity, PortDefault, PortIo, PortSpec, ProcessContext, Registry, SignalType,
-    Widget,
+    Channels, DisplayFormat, DisplayKind, DisplayRange, DisplaySpec, LoomError, Module, ModuleConfig, ModuleDescriptor,
+    ModuleRole, Panel, ParamOptions, ParamSpec, Polarity, PortDefault, PortIo, PortSpec, ProcessContext, Registry,
+    SignalType, Widget,
 };
 
 /// Every test module.
-pub static ALL: &[&ModuleDescriptor] = &[&PANEL, &LINEAR, &LOG, &STEPS, &SMOOTH];
+pub static ALL: &[&ModuleDescriptor] = &[&PANEL, &READOUT, &LINEAR, &LOG, &STEPS, &SMOOTH];
 
 // Every test port and parameter has a label and a description, like the
 // built-ins, or this crate does not compile.
@@ -79,6 +81,12 @@ const ON: usize = 4;
 /// | `gate` | whole-number, 0 to 1 | button |
 /// | `mode` | whole-number, 0 to 1 | none (the button's mode) |
 /// | `held` | whole-number, 0 to 1, transient | none (the button's hold) |
+/// | `long` | whole-number, 0 to 15, named | select list that scrolls |
+/// | `voices` | whole-number, 1 to 16, not named | select list of numbers |
+/// | `tall` | logarithmic, 20 to 20 000 Hz | vertical fader |
+/// | `wide` | linear, 0 to 1 | horizontal fader |
+/// | `count` | whole-number, 0 to 1000 | number |
+/// | `tempo` | linear, 20 to 300 BPM | number |
 ///
 /// Outputs `uni` (unipolar) and `bi` (bipolar) both write `level`. The
 /// light `lit` shows `on`, modulated, as of the last frame of the block.
@@ -102,16 +110,25 @@ pub static PANEL: ModuleDescriptor = ModuleDescriptor {
         param("gate", 0.0, 1.0, 0.0, "").integer(),
         param("mode", 0.0, 1.0, 0.0, "").integer(),
         param("held", 0.0, 1.0, 0.0, "").integer().transient(),
+        param("long", 0.0, 15.0, 0.0, "").integer().choices(&[
+            "Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel", "India", "Juliet", "Kilo",
+            "Lima", "Mike", "November", "Oscar", "Papa",
+        ]),
+        param("voices", 1.0, 16.0, 1.0, "voices").integer(),
+        param("tall", 20.0, 20_000.0, 1_000.0, "Hz").logarithmic(),
+        param("wide", 0.0, 1.0, 0.5, ""),
+        param("count", 0.0, 1000.0, 7.0, "").integer(),
+        param("tempo", 20.0, 300.0, 120.0, "BPM"),
     ],
     role: ModuleRole::Dsp(|_| {
         Box::new(TestPanel {
-            params: [0.0; 9],
+            params: [0.0; 15],
             lit: 0.0,
         })
     }),
     panel: Panel::new(
         18,
-        13,
+        18,
         &[
             Widget::knob(0, 0, "level"),
             Widget::knob(3, 0, "cutoff"),
@@ -123,6 +140,12 @@ pub static PANEL: ModuleDescriptor = ModuleDescriptor {
             Widget::light(9, 3, "lit"),
             Widget::button(9, 5, "gate", "held", "mode"),
             Widget::scope(0, 8, "bi"),
+            Widget::select(9, 8, "long"),
+            Widget::select(9, 10, "voices"),
+            Widget::fader(15, 7, "tall"),
+            Widget::fader_horizontal(9, 12, "wide"),
+            Widget::number(0, 14, "count"),
+            Widget::number(5, 14, "tempo"),
         ],
     ),
     displays: &[DisplaySpec {
@@ -135,7 +158,7 @@ pub static PANEL: ModuleDescriptor = ModuleDescriptor {
 };
 
 struct TestPanel {
-    params: [f32; 9],
+    params: [f32; 15],
     /// `on` at the last frame of the last block, for the light.
     lit: f32,
 }
@@ -163,6 +186,106 @@ impl Module for TestPanel {
 
     fn displays(&self, values: &mut [f32]) {
         values[0] = self.lit;
+    }
+}
+
+/// `test.readout`: one readout of each display format, and a meter on a value
+/// with a range around zero. Each display value shows the parameter of its
+/// name, so a test sets what it reads.
+pub static READOUT: ModuleDescriptor = ModuleDescriptor {
+    id: "test.readout",
+    version: 1,
+    name: "Test Readout",
+    category: "Test",
+    family: loom_core::Family::Interface,
+    description: "A readout of each format and a meter on a display value, for tests.",
+    inputs: &[],
+    outputs: &[],
+    params: &[
+        param("count", 0.0, 100.0, 7.0, "").integer(),
+        param("pitch", -1.0, 1.0, 0.09, ""),
+        param("input", 0.0, 2.0, 1.0, "").integer(),
+        param("cents", -50.0, 50.0, 12.5, "cents"),
+    ],
+    role: ModuleRole::Dsp(|_| Box::new(TestReadout { values: [0.0; 4] })),
+    panel: Panel::new(
+        12,
+        7,
+        &[
+            Widget::readout(0, 0, 3, "count"),
+            Widget::readout(3, 0, 6, "cents"),
+            Widget::readout(0, 2, 6, "pitch"),
+            Widget::readout(0, 4, 6, "input"),
+            Widget::meter(9, 0, "cents"),
+        ],
+    ),
+    displays: &[
+        DisplaySpec {
+            name: "count",
+            label: "Count",
+            description: "A plain number.",
+            kind: DisplayKind::Level,
+            range: DisplayRange {
+                min: 0.0,
+                max: 100.0,
+                unit: "",
+                format: DisplayFormat::Number { decimals: 0 },
+            },
+        },
+        DisplaySpec {
+            name: "pitch",
+            label: "Pitch",
+            description: "A note name with cents.",
+            kind: DisplayKind::Level,
+            range: DisplayRange {
+                min: -1.0,
+                max: 1.0,
+                unit: "",
+                format: DisplayFormat::Note,
+            },
+        },
+        DisplaySpec {
+            name: "input",
+            label: "Input",
+            description: "A choice name.",
+            kind: DisplayKind::Level,
+            range: DisplayRange {
+                min: 0.0,
+                max: 2.0,
+                unit: "",
+                format: DisplayFormat::Choices(&["First", "Second", "Third"]),
+            },
+        },
+        DisplaySpec {
+            name: "cents",
+            label: "Cents",
+            description: "A value that runs below and above zero, with a unit.",
+            kind: DisplayKind::Level,
+            range: DisplayRange {
+                min: -50.0,
+                max: 50.0,
+                unit: "cents",
+                format: DisplayFormat::Number { decimals: 1 },
+            },
+        },
+    ],
+};
+
+struct TestReadout {
+    values: [f32; 4],
+}
+
+impl Module for TestReadout {
+    fn process(&mut self, _ctx: &ProcessContext<'_>, _io: &mut PortIo<'_>) {}
+
+    fn set_param(&mut self, index: usize, value: f32) {
+        if let Some(slot) = self.values.get_mut(index) {
+            *slot = value;
+        }
+    }
+
+    fn displays(&self, values: &mut [f32]) {
+        values.copy_from_slice(&self.values);
     }
 }
 

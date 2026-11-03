@@ -349,7 +349,15 @@ impl Module for Div {
         let ([a, b], [out]) = io.split::<2, 1>();
         for ((out, &a), &b) in out.iter_mut().zip(a).zip(b) {
             let b = if b_connected { b } else { 1.0 };
-            *out = if b.abs() <= DIVISOR_FLOOR { 0.0 } else { a / b };
+            *out = if b.abs() <= DIVISOR_FLOOR {
+                0.0
+            } else if a.is_finite() {
+                // A huge value over a small one overflows. Give the largest
+                // finite value, not infinity. Nothing smaller changes.
+                (a / b).clamp(-f32::MAX, f32::MAX)
+            } else {
+                a / b
+            };
         }
     }
 }
