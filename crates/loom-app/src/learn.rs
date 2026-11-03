@@ -161,7 +161,7 @@ pub fn view(controller: &Controller, armed: Option<Armed>) -> LearnView {
             if !w.is_control() {
                 continue;
             }
-            let Some(param) = d.param_index(w.bind) else {
+            let Some(param) = d.param_index(w.bind()) else {
                 continue;
             };
             if armed.is_some_and(|a| a.param == (id.0, param)) {

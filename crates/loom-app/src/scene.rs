@@ -2,7 +2,7 @@
 
 use iced::{Color, Point};
 use loom_canvas::{
-    CableView, HoverText, ModulationView, ModuleView, PanelValues, PanelView, PortShape, PortView, Scene,
+    CableView, ControlPart, HoverText, ModulationView, ModuleView, PanelValues, PanelView, PortShape, PortView, Scene,
     TransportSignal, WidgetValue, WidgetView, WidgetViewKind,
 };
 use loom_core::{
@@ -84,7 +84,7 @@ fn panel_view(d: &ModuleDescriptor) -> PanelView {
             let steps = || {
                 d.params
                     .iter()
-                    .find(|p| p.name == w.bind)
+                    .find(|p| p.name == w.bind())
                     .filter(|p| p.options.integer)
                     .map_or(0, |p| (p.max - p.min) as u32)
             };
@@ -107,21 +107,21 @@ fn panel_view(d: &ModuleDescriptor) -> PanelView {
                     options: d
                         .params
                         .iter()
-                        .find(|p| p.name == w.bind)
+                        .find(|p| p.name == w.bind())
                         .map_or_else(Vec::new, |p| p.options.choices.iter().map(|o| o.to_string()).collect()),
                 },
                 WidgetKind::Select => WidgetViewKind::Select {
                     options: d
                         .params
                         .iter()
-                        .find(|p| p.name == w.bind)
+                        .find(|p| p.name == w.bind())
                         .map_or_else(Vec::new, ParamSpec::value_names),
                 },
                 WidgetKind::Segmented { width } => WidgetViewKind::Segmented {
                     options: d
                         .params
                         .iter()
-                        .find(|p| p.name == w.bind)
+                        .find(|p| p.name == w.bind())
                         .map_or_else(Vec::new, |p| p.options.choices.iter().map(|o| o.to_string()).collect()),
                     width,
                 },
@@ -130,12 +130,12 @@ fn panel_view(d: &ModuleDescriptor) -> PanelView {
                 _ => WidgetViewKind::Light,
             };
             let (label, hover) = if w.is_control() {
-                let param = d.params.iter().find(|p| p.name == w.bind);
-                param.map_or((w.bind, HoverText::default()), |p| {
+                let param = d.params.iter().find(|p| p.name == w.bind());
+                param.map_or((w.bind(), HoverText::default()), |p| {
                     (p.label, HoverText::new(p.label, p.description, p.name))
                 })
             } else if let WidgetKind::Shape { label, .. } = w.kind {
-                let output = d.outputs.iter().find(|p| p.name == w.bind);
+                let output = d.outputs.iter().find(|p| p.name == w.bind());
                 output.map_or((label, HoverText::default()), |p| {
                     (label, HoverText::new(label, p.description, p.name))
                 })
@@ -143,14 +143,14 @@ fn panel_view(d: &ModuleDescriptor) -> PanelView {
                 // A meter's or scope's text is its output's: two texts for
                 // one signal could disagree. A scope has no caption: its
                 // frame fills the widget.
-                let output = d.outputs.iter().find(|p| p.name == w.bind);
+                let output = d.outputs.iter().find(|p| p.name == w.bind());
                 let caption = |label| if w.kind == WidgetKind::Scope { "" } else { label };
-                output.map_or((caption(w.bind), HoverText::default()), |p| {
+                output.map_or((caption(w.bind()), HoverText::default()), |p| {
                     (caption(p.label), HoverText::new(p.label, p.description, p.name))
                 })
             } else {
-                let display = d.displays.iter().find(|v| v.name == w.bind);
-                display.map_or((w.bind, HoverText::default()), |v| {
+                let display = d.displays.iter().find(|v| v.name == w.bind());
+                display.map_or((w.bind(), HoverText::default()), |v| {
                     (v.label, HoverText::new(v.label, v.description, v.name))
                 })
             };
@@ -182,7 +182,7 @@ pub fn panel_for(d: &ModuleDescriptor, values: &[f32]) -> PanelView {
         .panel
         .widgets
         .iter()
-        .map(|w| w.is_control() && d.param_index(w.bind).is_some_and(|i| !d.is_shown(i, values)))
+        .map(|w| w.is_control() && d.param_index(w.bind()).is_some_and(|i| !d.is_shown(i, values)))
         .collect();
     if hidden.iter().any(|&h| h) {
         close_up(&mut panel, &hidden);
@@ -259,7 +259,7 @@ pub fn mode_key(controller: &Controller) -> Vec<(u32, usize, i64)> {
 /// A control's position for the canvas: the knob position from 0 to 1, the
 /// toggle state, or the radio option index.
 pub fn control_position(kind: WidgetKind, spec: &ParamSpec, value: f32) -> f32 {
-    if kind.is_one_number() {
+    if kind.is_mapped() {
         spec.normalize(value)
     } else {
         value - spec.min
@@ -268,7 +268,7 @@ pub fn control_position(kind: WidgetKind, spec: &ParamSpec, value: f32) -> f32 {
 
 /// The parameter value for a control position from the canvas.
 pub fn control_value(kind: WidgetKind, spec: &ParamSpec, position: f32) -> f32 {
-    if kind.is_one_number() {
+    if kind.is_mapped() {
         spec.denormalize(position)
     } else {
         spec.clamp(spec.min + position.round())
@@ -299,7 +299,7 @@ pub fn update_live_values(values: &mut PanelValues, controller: &Controller) {
         let name = d.params[a.param].name;
         let live = controller.modulated(a.target, a.param);
         for (index, w) in d.panel.widgets.iter().enumerate() {
-            if !w.kind.has_range() || w.bind != name {
+            if !w.kind.has_range() || !w.binds(name) {
                 continue;
             }
             if let Some(value) = values.get(a.target.0, index).filter(|v| v.live != live) {
@@ -397,7 +397,7 @@ pub fn update_panel_values_dragging(
 /// For the Transport's Run toggle while a cable drives its `run` input:
 /// 1 or 0, from the module's `running` display value. `None` otherwise.
 fn driven_run(controller: &Controller, id: ModuleId, w: &loom_core::Widget) -> Option<f32> {
-    if controller.transport_module() != Some(id) || w.bind != "run" {
+    if controller.transport_module() != Some(id) || !w.binds("run") {
         return None;
     }
     let driven = controller
@@ -422,7 +422,7 @@ fn display_text(d: &ModuleDescriptor, w: &loom_core::Widget, position: f32, righ
         return d
             .displays
             .iter()
-            .find(|display| display.name == w.bind)
+            .find(|display| display.name == w.bind())
             .map_or_else(String::new, |display| display.range.text(position));
     }
     if w.kind == WidgetKind::Scope {
@@ -435,7 +435,11 @@ fn display_text(d: &ModuleDescriptor, w: &loom_core::Widget, position: f32, righ
             .to_string();
     }
     if w.kind == WidgetKind::Meter {
-        let label = d.outputs.iter().find(|p| p.name == w.bind).map_or(w.bind, |p| p.label);
+        let label = d
+            .outputs
+            .iter()
+            .find(|p| p.name == w.bind())
+            .map_or(w.bind(), |p| p.label);
         let level = |position| {
             if position > 0.0 {
                 format!("{:.1} dB", crate::live::position_db(position))
@@ -448,7 +452,7 @@ fn display_text(d: &ModuleDescriptor, w: &loom_core::Widget, position: f32, righ
             None => format!("{label}: {}", level(position)),
         };
     }
-    let Some(display) = d.displays.iter().find(|v| v.name == w.bind) else {
+    let Some(display) = d.displays.iter().find(|v| v.name == w.bind()) else {
         return String::new();
     };
     match display.kind {
@@ -471,7 +475,7 @@ pub fn meter_outputs(controller: &Controller, modules: &[u32]) -> Vec<((u32, usi
                 .enumerate()
                 .filter(|(_, w)| w.kind == WidgetKind::Meter)
                 .filter_map(move |(index, w)| {
-                    let port = d.outputs.iter().position(|p| p.name == w.bind)?;
+                    let port = d.outputs.iter().position(|p| p.name == w.bind())?;
                     Some((
                         (id, index),
                         OutputRef {
@@ -513,7 +517,7 @@ pub fn scope_outputs(controller: &Controller, modules: &[u32]) -> Vec<ScopeOutpu
             if w.kind != WidgetKind::Scope {
                 continue;
             }
-            let Some(port) = d.outputs.iter().position(|p| p.name == w.bind) else {
+            let Some(port) = d.outputs.iter().position(|p| p.name == w.bind()) else {
                 continue;
             };
             scopes.push(ScopeOutput {
@@ -542,6 +546,27 @@ pub fn control_param(controller: &Controller, module: u32, widget: usize) -> Opt
     let index = d.control_param(w, &node.params)?;
     // The control spans the selected range (control-ranges.md, rule 4).
     Some((index, w.kind, node.spec(index)?))
+}
+
+/// As [`control_param`], for one value of a control. [`ControlPart::Main`] is
+/// the control's parameter, and [`ControlPart::Second`] the second parameter
+/// of an XY pad or a range. [`ControlPart::Both`] names no one parameter.
+pub fn control_part(
+    controller: &Controller,
+    module: u32,
+    widget: usize,
+    part: ControlPart,
+) -> Option<(usize, WidgetKind, ParamSpec)> {
+    match part {
+        ControlPart::Main => control_param(controller, module, widget),
+        ControlPart::Both => None,
+        ControlPart::Second => {
+            let node = controller.graph().node(ModuleId(module))?;
+            let w = node.descriptor.panel.widgets.get(widget)?;
+            let index = node.descriptor.param_index(w.second()?)?;
+            Some((index, w.kind, node.spec(index)?))
+        }
+    }
 }
 
 /// Builds the scene for the controller's graph. Modules without a position
@@ -675,7 +700,7 @@ pub fn build(controller: &Controller, positions: &BTreeMap<u32, Point>, sizes: &
                 id: id.0,
                 from: (a.source.module.0, a.source.port),
                 to: a.target.0,
-                widget: d.panel.widgets.iter().position(|w| w.is_control() && w.bind == name),
+                widget: d.panel.widgets.iter().position(|w| w.is_control() && w.binds(name)),
                 enabled: a.enabled,
             })
         })

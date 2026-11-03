@@ -327,7 +327,7 @@ impl Sampling {
         let drawn = graph
             .node(ModuleId(self.module))
             .and_then(|node| node.descriptor.panel.widgets.get(self.widget))
-            .is_some_and(|w| w.bind == self.name);
+            .is_some_and(|w| w.binds(&self.name));
         let value = values
             .get(self.module, self.widget)
             .filter(|_| drawn)

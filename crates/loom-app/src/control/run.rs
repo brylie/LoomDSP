@@ -728,7 +728,7 @@ impl App {
             .node(ModuleId(module))
             .ok_or_else(|| format!("no module {module}"))?;
         let widgets = node.descriptor.panel.widgets;
-        let widget = widgets.iter().position(|w| w.bind == name).ok_or_else(|| {
+        let widget = widgets.iter().position(|w| w.binds(name)).ok_or_else(|| {
             format!(
                 "module {module} ({}) has no control, light, or meter `{name}`",
                 node.descriptor.name

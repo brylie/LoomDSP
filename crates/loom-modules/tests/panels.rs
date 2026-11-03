@@ -19,14 +19,14 @@ use loom_core::{EngineParts, ModuleId, ProbeId, ProbeKind};
 fn continuous_panel_controls_are_knobs() {
     for descriptor in loom_modules::ALL {
         for widget in descriptor.panel.widgets.iter().filter(|widget| widget.is_control()) {
-            let param = &descriptor.params[descriptor.param_index(widget.bind).unwrap()];
+            let param = &descriptor.params[descriptor.param_index(widget.bind()).unwrap()];
             if !param.options.integer {
                 assert_eq!(
                     widget.kind,
                     loom_core::WidgetKind::Knob,
                     "{}.{}",
                     descriptor.id,
-                    widget.bind
+                    widget.bind()
                 );
             }
         }

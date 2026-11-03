@@ -15,7 +15,7 @@ fn every_test_module_registers() {
 fn the_panel_has_every_widget_kind() {
     let kinds: Vec<WidgetKind> = PANEL.panel.widgets.iter().map(|w| w.kind).collect();
     let knob = |name: &str| {
-        let w = PANEL.panel.widgets.iter().find(|w| w.bind == name).unwrap();
+        let w = PANEL.panel.widgets.iter().find(|w| w.binds(name)).unwrap();
         assert_eq!(w.kind, WidgetKind::Knob, "{name}");
         PANEL.params[PANEL.param_index(name).unwrap()]
     };

@@ -284,6 +284,7 @@ impl<Message> PatchCanvas<'_, Message> {
             CanvasEvent::SetControl {
                 module,
                 widget,
+                part: ControlPart::Main,
                 position,
             },
         );

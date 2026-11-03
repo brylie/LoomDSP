@@ -305,44 +305,44 @@ fn widget(d: &ModuleDescriptor, w: &Widget) -> String {
             .map_or_else(|| format!("`{bind}`"), |p| name(p.label, p.name))
     };
     match w.kind {
-        WidgetKind::Knob => format!("Knob: {}", param(w.bind)),
-        WidgetKind::Fader { .. } => format!("Fader: {}", param(w.bind)),
-        WidgetKind::Number => format!("Number: {}", param(w.bind)),
-        WidgetKind::Toggle => format!("Toggle: {}", param(w.bind)),
+        WidgetKind::Knob => format!("Knob: {}", param(w.bind())),
+        WidgetKind::Fader { .. } => format!("Fader: {}", param(w.bind())),
+        WidgetKind::Number => format!("Number: {}", param(w.bind())),
+        WidgetKind::Toggle => format!("Toggle: {}", param(w.bind())),
         WidgetKind::Radio => {
             let choices = d
                 .params
                 .iter()
-                .find(|p| p.name == w.bind)
+                .find(|p| p.name == w.bind())
                 .map_or(&[][..], |p| p.options.choices);
-            format!("Radio buttons: {} ({})", param(w.bind), cell(&choices.join(", ")))
+            format!("Radio buttons: {} ({})", param(w.bind()), cell(&choices.join(", ")))
         }
-        WidgetKind::Select => format!("Select: {}", param(w.bind)),
-        WidgetKind::Segmented { .. } => format!("Segmented control: {}", param(w.bind)),
+        WidgetKind::Select => format!("Select: {}", param(w.bind())),
+        WidgetKind::Segmented { .. } => format!("Segmented control: {}", param(w.bind())),
         WidgetKind::Button { mode: "", hold } => format!("Button: {} (momentary)", param(hold)),
         WidgetKind::Button { mode, hold } => format!(
             "Button: {} (toggle), {} (momentary), chosen by {}",
-            param(w.bind),
+            param(w.bind()),
             param(hold),
             param(mode)
         ),
         WidgetKind::Light => {
-            let light = d.displays.iter().find(|v| v.name == w.bind).map_or_else(
-                || format!("`{}`", w.bind),
+            let light = d.displays.iter().find(|v| v.name == w.bind()).map_or_else(
+                || format!("`{}`", w.bind()),
                 |v| format!("{}: {}", name(v.label, v.name), cell(v.description)),
             );
             format!("Light: {light}")
         }
         WidgetKind::Readout { .. } => {
-            let display = d.displays.iter().find(|v| v.name == w.bind).map_or_else(
-                || format!("`{}`", w.bind),
+            let display = d.displays.iter().find(|v| v.name == w.bind()).map_or_else(
+                || format!("`{}`", w.bind()),
                 |v| format!("{}: {}", name(v.label, v.name), cell(v.description)),
             );
             format!("Readout: {display}")
         }
         WidgetKind::Meter if d.meter_display(w).is_some() => {
-            let display = d.displays.iter().find(|v| v.name == w.bind).map_or_else(
-                || format!("`{}`", w.bind),
+            let display = d.displays.iter().find(|v| v.name == w.bind()).map_or_else(
+                || format!("`{}`", w.bind()),
                 |v| format!("{}: {}", name(v.label, v.name), cell(v.description)),
             );
             format!("Meter: {display}")
@@ -351,20 +351,20 @@ fn widget(d: &ModuleDescriptor, w: &Widget) -> String {
             let output = d
                 .outputs
                 .iter()
-                .find(|p| p.name == w.bind)
-                .map_or_else(|| format!("`{}`", w.bind), port_name);
+                .find(|p| p.name == w.bind())
+                .map_or_else(|| format!("`{}`", w.bind()), port_name);
             format!("Level meter: {output}")
         }
         WidgetKind::Scope => {
             let output = d
                 .outputs
                 .iter()
-                .find(|p| p.name == w.bind)
-                .map_or_else(|| format!("`{}`", w.bind), port_name);
+                .find(|p| p.name == w.bind())
+                .map_or_else(|| format!("`{}`", w.bind()), port_name);
             format!("Scope: {output}")
         }
-        WidgetKind::Shape { label, .. } => format!("Shape preview: {} (read-only)", name(label, w.bind)),
-        _ => format!("Widget: `{}`", w.bind),
+        WidgetKind::Shape { label, .. } => format!("Shape preview: {} (read-only)", name(label, w.bind())),
+        _ => format!("Widget: `{}`", w.bind()),
     }
 }
 

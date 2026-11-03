@@ -30,7 +30,7 @@ fn panels_follow_the_spec() {
     for descriptor in super::ALL {
         let panel = &descriptor.panel;
         for param in descriptor.params {
-            let widget = panel.widgets.iter().find(|w| w.bind == param.name);
+            let widget = panel.widgets.iter().find(|w| w.binds(param.name));
             if descriptor.id == "loom.ui.button" && param.name == "on" {
                 assert!(
                     matches!(
@@ -132,7 +132,7 @@ fn panels_follow_the_spec() {
             .widgets
             .iter()
             .filter(|w| w.kind == loom_core::WidgetKind::Light)
-            .map(|w| w.bind)
+            .map(|w| w.bind())
             .collect();
         let expected: &[&str] = match descriptor.id {
             "loom.midi.note" => &["gate"],
@@ -149,7 +149,7 @@ fn panels_follow_the_spec() {
             .widgets
             .iter()
             .filter(|w| w.kind == loom_core::WidgetKind::Meter)
-            .map(|w| w.bind)
+            .map(|w| w.bind())
             .collect();
         let expected: &[&str] = match descriptor.id {
             "loom.display.meter" => &["out"],
@@ -161,7 +161,7 @@ fn panels_follow_the_spec() {
             .widgets
             .iter()
             .filter(|w| w.kind == loom_core::WidgetKind::Scope)
-            .map(|w| w.bind)
+            .map(|w| w.bind())
             .collect();
         let expected: &[&str] = if descriptor.id == "loom.display.scope" {
             &["out"]
@@ -291,7 +291,7 @@ fn panels_put_the_view_first_then_choices_then_knobs() {
             .panel
             .widgets
             .iter()
-            .filter_map(|w| rank(&w.kind).map(|r| (r, w.y, w.bind)))
+            .filter_map(|w| rank(&w.kind).map(|r| (r, w.y, w.bind())))
             .collect();
         for &(ra, ya, a) in &ranked {
             for &(rb, yb, b) in &ranked {
@@ -316,12 +316,12 @@ fn short_choice_lists_are_not_radio_columns() {
             .iter()
             .filter(|w| w.kind == loom_core::WidgetKind::Radio)
         {
-            let choices = d.params[d.param_index(w.bind).unwrap()].options.choices.len();
+            let choices = d.params[d.param_index(w.bind()).unwrap()].options.choices.len();
             assert!(
                 choices > 4,
                 "{}: `{}` has {choices} choices as radio buttons",
                 d.id,
-                w.bind
+                w.bind()
             );
         }
     }

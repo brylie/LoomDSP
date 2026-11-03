@@ -376,6 +376,7 @@ impl<Message> PatchCanvas<'_, Message> {
                             let event = CanvasEvent::SetControl {
                                 module: *module,
                                 widget: *widget,
+                                part: ControlPart::Main,
                                 position: next,
                             };
                             self.emit(shell, event);
@@ -397,6 +398,7 @@ impl<Message> PatchCanvas<'_, Message> {
                             let event = CanvasEvent::DragDepth {
                                 module: *module,
                                 widget: *widget,
+                                part: ControlPart::Main,
                                 pinned: self.pin(state),
                                 delta,
                             };
@@ -491,7 +493,15 @@ impl<Message> PatchCanvas<'_, Message> {
                             Some(Hit::Widget { module, widget })
                                 if !pulled && self.takes_assignment(from, module, widget) =>
                             {
-                                self.emit(shell, CanvasEvent::Assign { from, module, widget });
+                                self.emit(
+                                    shell,
+                                    CanvasEvent::Assign {
+                                        from,
+                                        module,
+                                        widget,
+                                        part: ControlPart::Main,
+                                    },
+                                );
                                 handled = true;
                             }
                             _ => {}
@@ -656,7 +666,14 @@ impl<Message> PatchCanvas<'_, Message> {
                 let button = matches!(self.widget_kind(module, widget), Some(WidgetViewKind::Button));
                 if double && !button {
                     state.last_click = None;
-                    self.emit(shell, CanvasEvent::ResetControl { module, widget });
+                    self.emit(
+                        shell,
+                        CanvasEvent::ResetControl {
+                            module,
+                            widget,
+                            part: ControlPart::Main,
+                        },
+                    );
                     return;
                 }
                 state.last_click = Some((now, module, widget));

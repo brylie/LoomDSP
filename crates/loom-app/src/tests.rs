@@ -322,7 +322,7 @@ fn env_and_filter(app: &mut App) -> (ModuleId, ModuleId, usize, usize) {
     app.commit();
     let d = app.controller.graph().node(filter).unwrap().descriptor;
     let cutoff = d.param_index("cutoff").unwrap();
-    let widget = d.panel.widgets.iter().position(|w| w.bind == "cutoff").unwrap();
+    let widget = d.panel.widgets.iter().position(|w| w.binds("cutoff")).unwrap();
     app.edits.history.clear();
     (env, filter, cutoff, widget)
 }
@@ -337,6 +337,7 @@ fn drop_env(app: &mut App, env: ModuleId, filter: ModuleId, widget: usize) {
         from,
         module: filter.0,
         widget,
+        part: loom_canvas::ControlPart::Main,
     }));
 }
 
@@ -413,7 +414,7 @@ fn a_drop_on_a_toggle_or_radio_moves_one_step() {
     let outputs = [(0, loom_core::Polarity::Unipolar), (1, loom_core::Polarity::Bipolar)];
     for (port, _) in outputs {
         for (bind, _) in cases {
-            let widget = d.panel.widgets.iter().position(|w| w.bind == bind).unwrap();
+            let widget = d.panel.widgets.iter().position(|w| w.binds(bind)).unwrap();
             let _ = app.update(Message::Canvas(CanvasEvent::Assign {
                 from: loom_canvas::PortRef {
                     module: source.0,
@@ -422,6 +423,7 @@ fn a_drop_on_a_toggle_or_radio_moves_one_step() {
                 },
                 module: target.0,
                 widget,
+                part: loom_canvas::ControlPart::Main,
             }));
         }
     }
@@ -681,6 +683,7 @@ fn an_arc_drag_is_one_step_and_shows_only_its_assignment() {
             widget,
             pinned,
             delta,
+            part: loom_canvas::ControlPart::Main,
         })
     };
     let mark = |app: &App| app.values.get(filter.0, widget).unwrap().modulation;
@@ -721,6 +724,7 @@ fn a_selected_source_picks_the_arc_drag() {
         widget,
         pinned: None,
         delta: 0.1,
+        part: loom_canvas::ControlPart::Main,
     }));
     let _ = app.update(Message::Canvas(CanvasEvent::GestureEnd));
     let depth = |source| {
@@ -751,6 +755,7 @@ fn an_arc_drag_with_no_choice_changes_nothing() {
         widget,
         pinned: None,
         delta: 0.2,
+        part: loom_canvas::ControlPart::Main,
     }));
     let _ = app.update(Message::Canvas(CanvasEvent::GestureEnd));
     assert_eq!(assignments(&app), before);
@@ -1188,7 +1193,7 @@ fn a_running_engine_lights_the_envelope() {
     let env = app.controller.add_module("loom.env.envelope").unwrap();
     app.commit();
     let d = app.controller.graph().node(env).unwrap().descriptor;
-    let light = d.panel.widgets.iter().position(|w| w.bind == "level").unwrap();
+    let light = d.panel.widgets.iter().position(|w| w.binds("level")).unwrap();
     let _ = app.update(Message::Canvas(CanvasEvent::VisibleDisplays(vec![env.0])));
     let watch = app.watched_lights().expect("the level light is on screen");
 
@@ -1218,7 +1223,7 @@ fn the_watcher_sends_a_moving_reduction_meter() {
     let dynamics = app.controller.add_module("loom.dyn.dynamics").unwrap();
     app.commit();
     let d = app.controller.graph().node(dynamics).unwrap().descriptor;
-    let meter = d.panel.widgets.iter().position(|w| w.bind == "reduction").unwrap();
+    let meter = d.panel.widgets.iter().position(|w| w.binds("reduction")).unwrap();
     let _ = app.update(Message::Canvas(CanvasEvent::VisibleDisplays(vec![dynamics.0])));
     let watch = app.watched_lights().expect("the meter is on screen");
     let entry = watch
@@ -1254,7 +1259,7 @@ fn a_meter_says_its_value_past_its_range() {
     let dynamics = app.controller.add_module("loom.dyn.dynamics").unwrap();
     app.commit();
     let d = app.controller.graph().node(dynamics).unwrap().descriptor;
-    let meter = d.panel.widgets.iter().position(|w| w.bind == "reduction").unwrap();
+    let meter = d.panel.widgets.iter().position(|w| w.binds("reduction")).unwrap();
     let _ = app.update(Message::Lights(vec![((dynamics.0, meter), -60.0)]));
     let widget = tile_widget(&app, dynamics, meter);
     assert_eq!(widget.position, 0.0);
@@ -1586,7 +1591,7 @@ fn the_inspector_selects_a_control_range() {
         .panel
         .widgets
         .iter()
-        .position(|w| w.bind == "gain")
+        .position(|w| w.binds("gain"))
         .unwrap();
     let (_, _, spec) = scene::control_param(&app.controller, mul.0, widget).unwrap();
     assert_eq!((spec.min, spec.max), (-0.1, 0.1));
@@ -1625,7 +1630,7 @@ fn a_one_sample_trigger_lights_the_divide_light() {
     app.controller.connect_named(gate, "out", divide, "trigger").unwrap();
     app.commit();
     let d = app.controller.graph().node(divide).unwrap().descriptor;
-    let light = d.panel.widgets.iter().position(|w| w.bind == "fired").unwrap();
+    let light = d.panel.widgets.iter().position(|w| w.binds("fired")).unwrap();
     let _ = app.update(Message::Canvas(CanvasEvent::VisibleDisplays(vec![divide.0])));
     let watch = app.watched_lights().expect("the trigger light is on screen");
 
@@ -1660,7 +1665,7 @@ fn a_running_engine_fills_the_meter() {
     app.controller.connect_named(sine, "out", meter, "in").unwrap();
     app.commit();
     let d = app.controller.graph().node(meter).unwrap().descriptor;
-    let widget = d.panel.widgets.iter().position(|w| w.bind == "out").unwrap();
+    let widget = d.panel.widgets.iter().position(|w| w.binds("out")).unwrap();
     // On screen, so the meter gets a probe.
     let _ = app.update(Message::Canvas(CanvasEvent::VisibleDisplays(vec![meter.0])));
     let _ = app.update(Message::Meters(app.monitor.read()));
@@ -2021,7 +2026,7 @@ fn pending_arrow_group_yields_to_undo_and_inspector() {
         .panel
         .widgets
         .iter()
-        .position(|w| w.bind == "cutoff")
+        .position(|w| w.binds("cutoff"))
         .unwrap();
     let original = app.controller.graph().node(ModuleId(module)).unwrap().params[cutoff];
     let set = |app: &mut App, position| {
@@ -2030,6 +2035,7 @@ fn pending_arrow_group_yields_to_undo_and_inspector() {
             module,
             widget,
             position,
+            part: loom_canvas::ControlPart::Main,
         }));
         let _ = app.update(Message::Canvas(CanvasEvent::ArrowGroupPending));
     };
@@ -2074,7 +2080,7 @@ fn arrow_resumed_after_undo_starts_a_new_step() {
         .panel
         .widgets
         .iter()
-        .position(|w| w.bind == "cutoff")
+        .position(|w| w.binds("cutoff"))
         .unwrap();
     let original = app.controller.graph().node(ModuleId(module)).unwrap().params[cutoff];
     for event in [
@@ -2083,6 +2089,7 @@ fn arrow_resumed_after_undo_starts_a_new_step() {
             module,
             widget,
             position: 0.6,
+            part: loom_canvas::ControlPart::Main,
         },
         CanvasEvent::ArrowGroupPending,
     ] {
@@ -2099,6 +2106,7 @@ fn arrow_resumed_after_undo_starts_a_new_step() {
             module,
             widget,
             position: 0.7,
+            part: loom_canvas::ControlPart::Main,
         },
         CanvasEvent::ArrowGroupPending,
         CanvasEvent::ArrowGroupEnd,
@@ -2189,7 +2197,7 @@ fn a_momentary_hold_makes_no_step_and_a_toggle_press_does() {
     let mode = node.descriptor.param_index("mode").unwrap();
     let on = node
         .descriptor
-        .param_index(node.descriptor.panel.widgets[0].bind)
+        .param_index(node.descriptor.panel.widgets[0].bind())
         .unwrap();
     // Momentary mode writes the transient hold, not the latch (#161).
     let hold = node.descriptor.param_index("hold").unwrap();

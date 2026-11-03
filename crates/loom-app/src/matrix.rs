@@ -307,7 +307,7 @@ pub fn targets(graph: &Graph) -> Vec<TargetPick> {
                             .panel
                             .widgets
                             .iter()
-                            .any(|w| w.bind == spec.name && w.kind.takes_modulation());
+                            .any(|w| w.binds(spec.name) && w.kind.takes_modulation());
                     eligible.then(|| TargetPick {
                         module,
                         param,
@@ -607,7 +607,7 @@ impl App {
                 .panel
                 .widgets
                 .iter()
-                .position(|w| w.is_control() && w.bind == name),
+                .position(|w| w.is_control() && w.binds(name)),
             enabled: a.enabled,
         })
     }

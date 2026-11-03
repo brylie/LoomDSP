@@ -3,7 +3,7 @@
 
 use crate::{App, browser, gestures, probe_menu, scene, undo};
 use iced::Point;
-use loom_canvas::CanvasEvent;
+use loom_canvas::{CanvasEvent, ControlPart};
 use loom_core::{InputRef, ModuleId, OutputRef};
 
 impl App {
@@ -130,8 +130,13 @@ impl App {
                     Err(e) => self.alerts.say(format!("error: {e}")),
                 }
             }
-            CanvasEvent::Assign { from, module, widget } => {
-                if let Some((index, _, _)) = scene::control_param(&self.controller, module, widget) {
+            CanvasEvent::Assign {
+                from,
+                module,
+                widget,
+                part,
+            } => {
+                if let Some((index, _, _)) = scene::control_part(&self.controller, module, widget, part) {
                     let source = OutputRef {
                         module: ModuleId(from.module),
                         port: from.index,
@@ -142,9 +147,10 @@ impl App {
             CanvasEvent::DragDepth {
                 module,
                 widget,
+                part,
                 pinned,
                 delta,
-            } => self.drag_depth(module, widget, pinned, delta),
+            } => self.drag_depth(module, widget, part, pinned, delta),
             CanvasEvent::Disconnect(port) => {
                 let input = InputRef {
                     module: ModuleId(port.module),
@@ -157,9 +163,10 @@ impl App {
             CanvasEvent::SetControl {
                 module,
                 widget,
+                part,
                 position,
             } => {
-                if let Some((index, kind, spec)) = scene::control_param(&self.controller, module, widget) {
+                if let Some((index, kind, spec)) = scene::control_part(&self.controller, module, widget, part) {
                     let value = scene::control_value(kind, &spec, position);
                     self.set_param(module, index, value);
                 }
@@ -182,9 +189,16 @@ impl App {
             CanvasEvent::ButtonArrow { module, widget, high } => {
                 self.apply_button(module, widget, |mode, current| mode.arrow(current, high));
             }
-            CanvasEvent::ResetControl { module, widget } => {
-                if let Some((index, _, spec)) = scene::control_param(&self.controller, module, widget) {
-                    self.set_param(module, index, spec.default);
+            CanvasEvent::ResetControl { module, widget, part } => {
+                let parts: &[ControlPart] = if part == ControlPart::Both {
+                    &[ControlPart::Main, ControlPart::Second]
+                } else {
+                    std::slice::from_ref(&part)
+                };
+                for &part in parts {
+                    if let Some((index, _, spec)) = scene::control_part(&self.controller, module, widget, part) {
+                        self.set_param(module, index, spec.default);
+                    }
                 }
             }
             CanvasEvent::Learn { module, widget } => {

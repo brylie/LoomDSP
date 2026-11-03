@@ -377,8 +377,15 @@ impl App {
 
     /// One step of an arc drag. The first picks the assignment, by the
     /// spec's order; the rest of the drag keeps it.
-    pub(crate) fn drag_depth(&mut self, module: u32, widget: usize, pinned: Option<loom_canvas::PortRef>, delta: f32) {
-        let Some((param, _, _)) = scene::control_param(&self.controller, module, widget) else {
+    pub(crate) fn drag_depth(
+        &mut self,
+        module: u32,
+        widget: usize,
+        part: loom_canvas::ControlPart,
+        pinned: Option<loom_canvas::PortRef>,
+        delta: f32,
+    ) {
+        let Some((param, _, _)) = scene::control_part(&self.controller, module, widget, part) else {
             return;
         };
         let graph = self.controller.graph();

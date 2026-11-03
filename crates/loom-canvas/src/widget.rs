@@ -31,7 +31,7 @@ mod panel_input;
 mod select_popup;
 mod typed_field;
 
-pub use event::CanvasEvent;
+pub use event::{CanvasEvent, ControlPart};
 
 /// Two presses on the same control within this time reset it.
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);

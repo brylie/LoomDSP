@@ -781,7 +781,7 @@ fn a_script_drags_a_range_arc() {
         .panel
         .widgets
         .iter()
-        .position(|w| w.bind == "resonance")
+        .position(|w| w.binds("resonance"))
         .unwrap();
     assert_eq!(index, 1);
     let rect = ui.app.scene.module(4).unwrap().widget_bounds(widget).unwrap();
@@ -1142,7 +1142,7 @@ fn locate_finds_lights_and_meters() {
         .panel
         .widgets
         .iter()
-        .position(|w| w.bind == "level")
+        .position(|w| w.binds("level"))
         .unwrap();
     let rect = locate(&ui.app, &format!("{env}:level"), &found).unwrap();
     assert!(near(rect.center(), centre(env, light)));

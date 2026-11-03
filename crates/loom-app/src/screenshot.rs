@@ -478,7 +478,7 @@ fn control_index(descriptor: &loom_core::ModuleDescriptor, param: &str) -> Optio
         .panel
         .widgets
         .iter()
-        .position(|w| w.is_control() && w.bind == param)
+        .position(|w| w.is_control() && w.binds(param))
 }
 
 /// The port with this name. An output wins over an input of the same name.

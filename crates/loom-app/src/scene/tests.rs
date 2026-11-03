@@ -63,7 +63,7 @@ fn modulated_knobs_carry_the_live_value() {
         .add_assignment_named(source, "out", filter, "cutoff", 0.2)
         .unwrap();
     let cutoff = controller.graph().node(filter).unwrap().descriptor;
-    let knob = cutoff.panel.widgets.iter().position(|w| w.bind == "cutoff").unwrap();
+    let knob = cutoff.panel.widgets.iter().position(|w| w.binds("cutoff")).unwrap();
     controller.commit().unwrap();
     let (mut left, mut right) = ([0.0; 64], [0.0; 64]);
     parts.engine.process(&mut left, &mut right);
@@ -93,7 +93,7 @@ fn the_frame_refresh_touches_only_live_dots() {
         .add_assignment_named(source, "out", filter, "cutoff", 0.2)
         .unwrap();
     let d = controller.graph().node(filter).unwrap().descriptor;
-    let knob = d.panel.widgets.iter().position(|w| w.bind == "cutoff").unwrap();
+    let knob = d.panel.widgets.iter().position(|w| w.binds("cutoff")).unwrap();
     controller.commit().unwrap();
 
     let mut values = PanelValues::new();
@@ -127,7 +127,7 @@ fn dragging_an_off_assignment_keeps_the_live_dot() {
         .unwrap();
     controller.set_assignment_enabled(off, false).unwrap();
     let d = controller.graph().node(filter).unwrap().descriptor;
-    let knob = d.panel.widgets.iter().position(|w| w.bind == "cutoff").unwrap();
+    let knob = d.panel.widgets.iter().position(|w| w.binds("cutoff")).unwrap();
     controller.commit().unwrap();
     let (mut left, mut right) = ([0.0; 64], [0.0; 64]);
     parts.engine.process(&mut left, &mut right);
@@ -219,7 +219,7 @@ fn every_select_choice_fits_its_box() {
     let room = 6.0 * loom_canvas::GRID - 4.0 - 18.0;
     for d in loom_modules::registry().iter() {
         for w in d.panel.widgets.iter().filter(|w| w.kind == WidgetKind::Select) {
-            let param = &d.params[d.param_index(w.bind).unwrap()];
+            let param = &d.params[d.param_index(w.bind()).unwrap()];
             for choice in param.options.choices {
                 let shown = loom_canvas::fit_label(choice, room, 9.0);
                 assert_eq!(shown, *choice, "{}: `{choice}` is cut in its select box", d.id);
@@ -370,7 +370,7 @@ fn lights_and_meters_say_their_value() {
         .panel
         .widgets
         .iter()
-        .find(|widget| widget.bind == "level")
+        .find(|widget| widget.binds("level"))
         .unwrap();
     assert_eq!(display_text(envelope, level, 0.5, None), "Level: 0.50");
     let divide = &loom_modules::logic::DIVIDE;
@@ -417,7 +417,7 @@ fn every_built_in_panel_reaches_the_canvas() {
         assert_eq!(view.widgets.len(), d.panel.widgets.len(), "{}", d.id);
         for (w, v) in d.panel.widgets.iter().zip(&view.widgets) {
             // Sizes must agree, or hit-testing would miss the drawing.
-            assert_eq!(d.widget_size(w), v.size(), "{}.{}", d.id, w.bind);
+            assert_eq!(d.widget_size(w), v.size(), "{}.{}", d.id, w.bind());
         }
     }
 }
@@ -573,7 +573,7 @@ fn a_meter_shows_a_display_value_from_its_zero() {
         .panel
         .widgets
         .iter()
-        .position(|w| w.bind == "reduction")
+        .position(|w| w.binds("reduction"))
         .unwrap();
     let view = panel_view(&DYNAMICS);
     let meter = &view.widgets[index];

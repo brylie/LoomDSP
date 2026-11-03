@@ -230,6 +230,7 @@ impl<Message> PatchCanvas<'_, Message> {
                         CanvasEvent::ResetControl {
                             module: popup.module,
                             widget: popup.widget,
+                            part: ControlPart::Main,
                         },
                     );
                 }

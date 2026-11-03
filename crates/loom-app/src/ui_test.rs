@@ -1604,7 +1604,7 @@ mod tests {
                 .panel
                 .widgets
                 .iter()
-                .filter(|w| w.bind == "long")
+                .filter(|w| w.binds("long"))
                 .all(|w| matches!(w.kind, loom_core::WidgetKind::Select)),
             "the test needs a parameter shown only as a select list"
         );
@@ -1659,7 +1659,7 @@ mod tests {
             .panel
             .widgets
             .iter()
-            .position(|w| w.bind == param)
+            .position(|w| w.binds(param))
             .unwrap()
     }
 

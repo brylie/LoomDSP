@@ -1020,8 +1020,10 @@ pub struct Widget {
     /// Row of its top-left corner, in grid units from the panel's top.
     pub y: u8,
     /// What it shows: a parameter name for controls, a display value name
-    /// for lights, an output name for meters and scopes.
-    pub bind: &'static str,
+    /// for lights, an output name for meters and scopes. Private, because a
+    /// widget can bind a second parameter: a lookup by name asks
+    /// [`Widget::binds`], so it cannot miss the second one.
+    bind: &'static str,
     /// The tile's caption, when it differs from the bound item's label,
     /// such as "1" under each mixer strip's level (panels.md, Panel layout,
     /// principle 10). Hover text and the inspector keep the full label.
@@ -1030,6 +1032,36 @@ pub struct Widget {
 }
 
 impl Widget {
+    /// The name this widget shows first: its parameter, or `x` on an XY pad
+    /// and `low` on a range; a display value; or an output.
+    pub const fn bind(&self) -> &'static str {
+        self.bind
+    }
+
+    /// The second parameter of a widget that binds two: `y` on an XY pad and
+    /// `high` on a range (panel-widgets.md, Two numbers).
+    pub const fn second(&self) -> Option<&'static str> {
+        match self.kind {
+            WidgetKind::XyPad { y } => Some(y),
+            WidgetKind::Range { high, .. } => Some(high),
+            _ => None,
+        }
+    }
+
+    /// True if this widget shows the item named `name`, as either of its
+    /// parameters. A button's `mode` and `hold` do not count, because the
+    /// button does not show them.
+    pub fn binds(&self, name: &str) -> bool {
+        self.bind == name || self.second() == Some(name)
+    }
+
+    /// The parameter names of a control: one, or two on an XY pad and a range.
+    /// A button's `mode` and `hold` are left out, as in [`Widget::binds`].
+    pub fn params(&self) -> impl Iterator<Item = &'static str> + use<> {
+        let first = self.is_control().then_some(self.bind);
+        first.into_iter().chain(self.second())
+    }
+
     /// The same widget with its own tile caption (principle 10).
     pub const fn captioned(mut self, caption: &'static str) -> Self {
         self.caption = Some(caption);
@@ -1300,6 +1332,20 @@ pub enum WidgetKind {
         /// to a vertical position.
         sample: fn(&[f32], f32, f32) -> f32,
     },
+    /// A square with a point, for two parameters at once (panel-widgets.md,
+    /// XY pad). The widget's `bind` is the horizontal parameter.
+    XyPad {
+        /// The vertical parameter.
+        y: &'static str,
+    },
+    /// A track with two handles, for a low and a high value on one scale
+    /// (panel-widgets.md, Range). The widget's `bind` is the low parameter.
+    Range {
+        /// The high parameter.
+        high: &'static str,
+        /// True for a vertical track, false for a horizontal one.
+        vertical: bool,
+    },
     /// A large button for whole-number parameters from 0 to 1.
     ///
     /// The widget's `bind` is the toggle latch. `mode` names the parameter
@@ -1330,13 +1376,25 @@ impl WidgetKind {
     /// range, and a live value on it: an arc or a bar (rule 3). Other controls
     /// show a dot.
     pub const fn has_range(&self) -> bool {
-        matches!(self, Self::Knob | Self::Fader { .. })
+        matches!(self, Self::Knob | Self::Fader { .. }) || self.is_two_numbers()
+    }
+
+    /// True for a widget that sets two numbers through their parameters'
+    /// mappings (panel-widgets.md, Two numbers). It takes no typed value.
+    pub const fn is_two_numbers(&self) -> bool {
+        matches!(self, Self::XyPad { .. } | Self::Range { .. })
+    }
+
+    /// True for a widget whose position is a parameter's place along its
+    /// mapping, from 0 to 1, not an index of choices.
+    pub const fn is_mapped(&self) -> bool {
+        self.is_one_number() || self.is_two_numbers()
     }
 
     /// True for a control that takes a dropped output as a modulation
     /// assignment (modulation.md, Making an assignment).
     pub const fn takes_modulation(&self) -> bool {
-        self.is_one_number() || matches!(self, Self::Toggle | Self::Radio | Self::Select | Self::Segmented { .. })
+        self.is_mapped() || matches!(self, Self::Toggle | Self::Radio | Self::Select | Self::Segmented { .. })
     }
 }
 
@@ -1344,6 +1402,8 @@ impl PartialEq for WidgetKind {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Fader { vertical: a }, Self::Fader { vertical: b }) => a == b,
+            (Self::XyPad { y: a }, Self::XyPad { y: b }) => a == b,
+            (Self::Range { high: a, vertical: av }, Self::Range { high: b, vertical: bv }) => a == b && av == bv,
             (Self::Readout { width: a }, Self::Readout { width: b }) => a == b,
             (Self::Knob, Self::Knob)
             | (Self::Number, Self::Number)
@@ -1484,8 +1544,9 @@ impl ModuleDescriptor {
     pub fn widget_size(&self, widget: &Widget) -> (u8, u8) {
         match widget.kind {
             WidgetKind::Knob => (3, 3),
-            WidgetKind::Fader { vertical: true } => (2, 6),
-            WidgetKind::Fader { vertical: false } => (6, 2),
+            WidgetKind::Fader { vertical: true } | WidgetKind::Range { vertical: true, .. } => (2, 6),
+            WidgetKind::Fader { vertical: false } | WidgetKind::Range { vertical: false, .. } => (6, 2),
+            WidgetKind::XyPad { .. } => (6, 6),
             WidgetKind::Number => (5, 2),
             WidgetKind::Readout { width } => (width, 2),
             WidgetKind::Meter => (3, 6),

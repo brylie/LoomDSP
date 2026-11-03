@@ -2,6 +2,19 @@
 
 use super::*;
 
+/// Which value of a control an event is about. Most controls have one
+/// value. An XY pad and a range have two (panel-widgets.md, Two numbers).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
+pub enum ControlPart {
+    /// The control's only value, the XY pad's `x`, or the range's `low`.
+    #[default]
+    Main,
+    /// The XY pad's `y`, or the range's `high`.
+    Second,
+    /// Both values at once.
+    Both,
+}
+
 /// A gesture on the canvas. The application applies it to its model.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CanvasEvent {
@@ -46,6 +59,8 @@ pub enum CanvasEvent {
         pinned: Option<PortRef>,
         /// Change of depth since the last event.
         delta: f32,
+        /// Which of the control's parameters the depth belongs to.
+        part: ControlPart,
     },
     /// An output was dropped on a control that takes modulation: assign the
     /// output to the control's parameter (`docs/design/modulation.md`,
@@ -57,6 +72,8 @@ pub enum CanvasEvent {
         module: u32,
         /// Index in the module's panel widgets.
         widget: usize,
+        /// Which of the control's parameters takes the drop.
+        part: ControlPart,
     },
     /// An output is being dragged at window coordinates. `None` means the
     /// pointer left the window, so a later release cannot make an assignment.
@@ -83,6 +100,8 @@ pub enum CanvasEvent {
         widget: usize,
         /// The new position.
         position: f32,
+        /// Which of the control's values this sets.
+        part: ControlPart,
     },
     /// A typed value was committed. The app parses the text, because it knows
     /// the parameter. One commit is one undo step (panel-widgets.md, Typing a
@@ -131,6 +150,8 @@ pub enum CanvasEvent {
         module: u32,
         /// Index in the module's panel widgets.
         widget: usize,
+        /// Which part to reset. [`ControlPart::Both`] resets both values, as one step.
+        part: ControlPart,
     },
     /// Open the module browser (`docs/design/module-browser.md`): `A` was
     /// pressed with the pointer over the canvas, empty canvas was

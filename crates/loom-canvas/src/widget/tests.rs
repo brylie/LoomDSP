@@ -553,7 +553,8 @@ fn select_popup_preserves_choice_and_tile_gestures() {
     assert!(picked.contains(&CanvasEvent::SetControl {
         module: 1,
         widget: 0,
-        position: 1.0
+        position: 1.0,
+        part: ControlPart::Main
     }));
     assert!(state.select_popup.is_none());
 
@@ -652,7 +653,8 @@ fn select_popup_keyboard_choices_are_explicit() {
         vec![CanvasEvent::SetControl {
             module: 1,
             widget: 0,
-            position: 1.0
+            position: 1.0,
+            part: ControlPart::Main
         }]
     );
     assert!(state.select_popup.is_none());
@@ -805,7 +807,8 @@ fn select_popup_commits_to_its_own_widget_and_closes_with_no_edit() {
         vec![CanvasEvent::SetControl {
             module: 1,
             widget: 0,
-            position: 1.0
+            position: 1.0,
+            part: ControlPart::Main
         }]
     );
 
@@ -904,7 +907,8 @@ fn a_long_select_list_scrolls() {
     assert!(picked.contains(&CanvasEvent::SetControl {
         module: 1,
         widget: 0,
-        position: 5.0
+        position: 5.0,
+        part: ControlPart::Main
     }));
 
     // The keyboard scrolls the highlight into view.
@@ -980,7 +984,8 @@ fn a_list_on_a_grown_canvas_has_no_blank_rows() {
         events.contains(&CanvasEvent::SetControl {
             module: 1,
             widget: 0,
-            position: 29.0
+            position: 29.0,
+            part: ControlPart::Main
         }),
         "{events:?}"
     );
@@ -1110,6 +1115,7 @@ fn a_fader_drags_along_its_track_and_its_bar_drags_depth() {
                 module: 1,
                 widget: 0,
                 position: 0.75,
+                part: ControlPart::Main
             }),
             "100 of 200 pixels adds half the range: {events:?}"
         );
@@ -1167,6 +1173,7 @@ fn a_fader_takes_the_keys_of_a_knob() {
         module: 1,
         widget: 0,
         position: 0.26,
+        part: ControlPart::Main
     }));
     assert_eq!(focusable(&scene.module(1).unwrap().panel), [0]);
     assert_eq!(
@@ -2523,7 +2530,8 @@ fn dropping_an_output_on_a_control_assigns_it() {
             CanvasEvent::Assign {
                 from: OUT,
                 module: 2,
-                widget: 0
+                widget: 0,
+                part: ControlPart::Main
             },
             CanvasEvent::AssignCancel,
             CanvasEvent::GestureEnd
@@ -2533,7 +2541,8 @@ fn dropping_an_output_on_a_control_assigns_it() {
     assert!(events.contains(&CanvasEvent::Assign {
         from: OUT,
         module: 2,
-        widget: 2
+        widget: 2,
+        part: ControlPart::Main
     }));
     let (events, on_light) = drop_on(&canvas, &scene, 1);
     assert_eq!(events, vec![CanvasEvent::AssignCancel, CanvasEvent::GestureEnd]);
@@ -2826,6 +2835,7 @@ fn dragging_the_range_ring_changes_depth() {
             widget: 0,
             pinned: Some(pinned),
             delta,
+            part: ControlPart::Main,
         },
     ] = moved_events.as_slice()
     else {
