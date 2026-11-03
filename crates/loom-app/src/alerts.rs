@@ -91,12 +91,6 @@ impl GrowthAlarm {
         self.count = count;
     }
 
-    /// Starts from `count` with no alarm, for a count that was already
-    /// running when the watcher started.
-    pub fn starting_at(count: u64) -> Self {
-        Self { count, grew: None }
-    }
-
     /// The latest count.
     pub fn count(&self) -> u64 {
         self.count
@@ -232,9 +226,13 @@ impl Alerts {
     }
 
     /// Takes over the kept errors of the app this one replaces: opening a
-    /// patch does not make a lost device come back.
+    /// patch does not make a lost device come back. An error this app already
+    /// raised is newer, so it wins over an old one of the same cause.
     pub fn carry_kept_from(&mut self, old: &mut Self) {
-        self.kept = std::mem::take(&mut old.kept);
+        let mut carried = std::mem::take(&mut old.kept);
+        carried.retain(|kept| !self.kept.iter().any(|fresh| fresh.cause == kept.cause));
+        carried.append(&mut self.kept);
+        self.kept = carried;
     }
 
     /// Adds `more` to the end of the status line. If the line is a kept

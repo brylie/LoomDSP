@@ -623,15 +623,17 @@ fn removing_the_last_audio_in_ends_a_wait_that_began_with_the_output() {
 /// output plays, with no real device named.
 #[test]
 fn the_report_follows_the_stream() {
-    let report = |bench: &Bench, denied| bench.session.stream_report(denied);
+    let report = |bench: &Bench, denied| bench.session.stream_report(bench.wanted, denied);
     let shows = |device: Option<&str>, state| InputReport {
         device: device.map(str::to_string),
         state,
     };
     let mut bench = Bench::new(&["Other", "Mic"]);
     bench.choice = InputChoice::Named("Mic".into());
+    bench.wanted = false;
     assert_eq!(report(&bench, false), shows(None, InputState::Off));
 
+    bench.wanted = true;
     bench.sync();
     assert_eq!(report(&bench, false), shows(Some("Mic"), InputState::Open));
 
@@ -663,4 +665,60 @@ fn the_report_follows_the_stream() {
     *bench.fake.input_error.borrow_mut() = Some(InputError::Other("device busy".into()));
     bench.sync();
     assert_eq!(report(&bench, false), shows(None, InputState::Waiting));
+}
+
+/// A device error the player dismissed does not silence the next Audio In:
+/// removing the last one starts fresh even with nothing left to clear.
+#[test]
+fn a_dismissed_error_is_reported_again_for_a_later_audio_in() {
+    let mut bench = Bench::new(&["Mic"]);
+    *bench.fake.input_error.borrow_mut() = Some(InputError::Other("device busy".into()));
+    bench.sync();
+    bench.alerts.dismiss(Cause::AudioInput);
+    bench.wanted = false;
+    bench.sync();
+    bench.wanted = true;
+    bench.sync();
+    assert_eq!(bench.alerts.kept().len(), 1, "the new Audio In reports it");
+}
+
+/// `--input` matches part of a name, so another device can match too. Once a
+/// stream opened, the wait is for that device, in either order of loss.
+#[test]
+fn a_partial_name_waits_for_the_device_it_opened() {
+    for output_first in [false, true] {
+        let mut bench = Bench::new(&["Mic A", "Mic B"]);
+        bench.flag = Some("Mic");
+        bench.sync();
+        assert_eq!(bench.device().as_deref(), Some("Mic A"));
+        bench.plug(&["Mic B"]);
+        bench.fail_stream();
+        if output_first {
+            bench.session.stream_stopped();
+        }
+        bench.sync();
+        bench.sync();
+        assert_eq!(
+            bench.device(),
+            None,
+            "Mic B does not stand in, output first: {output_first}"
+        );
+        assert!(bench.session.named_lost());
+
+        bench.plug(&["Mic A", "Mic B"]);
+        bench.sync();
+        assert_eq!(bench.device().as_deref(), Some("Mic A"), "output first: {output_first}");
+    }
+}
+
+/// With an Audio In in the patch and the output stopped, the input is still
+/// wanted, so the report says `waiting`, not `off`.
+#[test]
+fn a_stopped_output_reports_waiting_while_an_input_is_wanted() {
+    let mut bench = Bench::new(&["Mic"]);
+    bench.sync();
+    bench.output_playing = false;
+    bench.sync();
+    assert_eq!(bench.session.stream_report(true, false).state, InputState::Waiting);
+    assert_eq!(bench.session.stream_report(false, false).state, InputState::Off);
 }

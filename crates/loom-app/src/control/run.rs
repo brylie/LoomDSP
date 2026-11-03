@@ -611,8 +611,9 @@ impl App {
     /// counts the ones the next `advanced` compares with, as a `snapshot`
     /// does.
     pub(super) fn audio_health(&mut self, remember: bool) -> Value {
-        let denied = self.input_wanted() && self.rig.host.audio_input_permission_denied();
-        let input = self.rig.input.stream_report(denied);
+        let wanted = self.input_wanted();
+        let denied = wanted && self.rig.host.audio_input_permission_denied();
+        let input = self.rig.input.stream_report(wanted, denied);
         let Some(stats) = self.stream.stats().cloned() else {
             return json!({
                 "device": null, "rate": null, "buffer": null, "callbacks": 0,

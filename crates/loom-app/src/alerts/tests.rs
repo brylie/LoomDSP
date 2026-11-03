@@ -137,14 +137,23 @@ fn appending_to_a_kept_error_keeps_them_matched() {
     assert_eq!(alerts.kept()[0].text, "could not load 2 notes");
 }
 
-/// A new app for another patch takes over the kept errors.
+/// A new app for another patch takes over the kept errors. An error it raised
+/// itself while starting stays and wins over an old one of the same cause.
 #[test]
 fn kept_errors_move_to_the_next_app() {
     let mut old = Alerts::default();
     old.error(Cause::AudioOutput, "lost");
+    old.error(Cause::AudioInput, "old input error");
     let mut fresh = Alerts::default();
+    fresh.error(Cause::AudioInput, "new input error");
+    fresh.error(Cause::Other, "the recording stopped");
     fresh.carry_kept_from(&mut old);
-    assert_eq!(fresh.kept().len(), 1);
+    let kept: Vec<_> = fresh.kept().iter().map(|kept| kept.text.as_str()).collect();
+    assert_eq!(
+        kept,
+        ["lost", "new input error", "the recording stopped"],
+        "oldest first"
+    );
     assert!(old.kept().is_empty());
 }
 

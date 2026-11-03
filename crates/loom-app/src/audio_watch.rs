@@ -143,12 +143,6 @@ impl Watcher {
     /// Reads a tick peak taken atomically from all audio callbacks.
     pub fn read_peak(&mut self, stats: &StatsSnapshot, peak: f64, engine: EngineRead, now: Instant) -> Vec<Event> {
         let mut events = Vec::new();
-        // An engine can outlive a stream, and what it counted before this
-        // watcher started is not news.
-        if self.shown.is_none() {
-            self.silenced = GrowthAlarm::starting_at(engine.silenced);
-            self.clipped = GrowthAlarm::starting_at(engine.clipped);
-        }
         self.silenced.update(engine.silenced, now);
         self.clipped.update(engine.clipped, now);
         if stats.is_dead || stats.callbacks == self.callbacks {
@@ -191,8 +185,13 @@ impl Watcher {
         };
         let (silenced, clipped) = (shown.silenced, shown.clipped);
         // The first read only learns what the bar shows: the UI drew it
-        // when it started.
-        if self.shown.as_ref().is_some_and(|old| *old != shown) {
+        // when it started. A warning is the exception. Each stream gets a new
+        // engine, so its counts are new, and the UI cannot know of them yet.
+        let changed = match &self.shown {
+            Some(old) => *old != shown,
+            None => silenced || clipped,
+        };
+        if changed {
             events.push(Event::Stats {
                 dropouts,
                 at: now,

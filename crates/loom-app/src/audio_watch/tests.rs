@@ -262,23 +262,25 @@ fn continuous_bad_samples_keep_the_warning_on() {
     assert!(!ended, "the warning never ended: {sent:?}");
 }
 
-/// A count the engine had before this watcher started raises no warning.
+/// Each stream gets a new engine, so a count already there at the first read
+/// is new. A brief fault before that read still shows, once.
 #[test]
-fn a_new_watcher_does_not_warn_about_old_counts() {
+fn a_fault_before_the_first_read_shows() {
     let start = Instant::now();
     let mut watcher = Watcher::new(start);
-    output(&mut watcher, 500, 500, start);
+    assert_eq!(flags(&output(&mut watcher, 500, 0, start)), Some((true, false)));
     let later = start + Duration::from_secs(1);
-    let (mut silenced, mut clipped) = (false, false);
-    for event in output(&mut watcher, 500, 500, later) {
-        if let Event::Stats {
-            silenced: s,
-            clipped: c,
-            ..
-        } = event
-        {
-            (silenced, clipped) = (s, c);
-        }
-    }
-    assert!(!silenced && !clipped);
+    // This read may carry the load's first tick, with the warning still on.
+    assert_ne!(flags(&output(&mut watcher, 500, 0, later)), Some((false, false)));
+    let end = start + Duration::from_secs(11);
+    assert_eq!(flags(&output(&mut watcher, 500, 0, end)), Some((false, false)));
+}
+
+/// A first read with nothing to warn about sends nothing, as before: the UI
+/// drew the bar when it started.
+#[test]
+fn a_clean_first_read_sends_nothing() {
+    let start = Instant::now();
+    let mut watcher = Watcher::new(start);
+    assert_eq!(flags(&output(&mut watcher, 0, 0, start)), None);
 }

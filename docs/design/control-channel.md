@@ -214,8 +214,8 @@ The `snapshot` reply gets a second field, `audio`, next to `snapshot`. It reads 
 | `failed` | A stream is open but has failed, and the app has not replaced it yet |
 | `denied` | Permission is denied now and no stream is open |
 | `waiting_for_named` | A named input was lost, and the app waits for that device |
-| `waiting` | An input is needed and no stream is open |
-| `off` | The patch or the settings need no input |
+| `waiting` | The patch has an Audio In and the input is not off, and no stream is open. This includes while the output is stopped |
+| `off` | The patch or the settings want no input |
 
 `--dump-ui` stays as it is: it has no stream to read.
 
