@@ -19,7 +19,7 @@ The conventions of `loom-dsp`, the crate of pure algorithms that modules wrap.
 | Several settings of one type | A struct with named fields, as in `envelope::Settings`, `limiter::Settings`, and `ladder::Settings`. | Four `f32` values in a row are easy to swap, and the compiler cannot see it. |
 | A choice | An enum, as in `Colour`, `Slope`, and `limiter::Mode`. | A bad value cannot compile. A `usize` slope could panic at run time. |
 | Units | Plain `f32` with the unit in the name, such as `cutoff_hz`. No newtypes yet. | Nobody needs them yet. |
-| Samples | `f32`. An algorithm may use `f64` inside. | It is what cables carry. `Phasor` and `Slew` need `f64` to avoid rounding. |
+| Samples | `f32`. An algorithm may use `f64` inside. | It is what cables carry. `Phasor`, `Slew`, and `Dynamics` need `f64`: a small step on a large value rounds away in `f32`, and the state stalls. |
 | `new` | The only method that allocates. | The audio thread must never allocate. |
 | `copy_from` | An algorithm with heap memory has one. It returns false, with nothing changed, if the two have different room. It never allocates. | Stereo copies take state on the audio thread (ADR-0022), and a derived `clone_from` allocates. |
 
@@ -31,6 +31,10 @@ A band limit needs the phase step. Each shape has a function that takes it (`saw
 - **The struct** suits a phase from a cable, which can be bent or modulated with nothing to say how fast it moves. This is what the modules use today.
 
 The sync API itself waits for its own specification. See [phase and cycles](../learn/phase-and-cycles.md).
+
+## Keeping coefficients
+
+Coefficients are `Copy`, and their settings can be compared. So a wrapper keeps them until a setting moves (`crates/loom-modules/src/cached.rs`). A tangent per sample costs nothing to skip when no knob moves, and audio-rate modulation still gets a new value each sample.
 
 ## What stays out
 
@@ -93,3 +97,8 @@ An algorithm documents the input it accepts and does not check it in a release b
 | `Allpass` | M. R. Schroeder and B. F. Logan, JAES 9, 1961 | Confirmed |
 | `Limiter` | D. Giannoulis, M. Massberg, and J. D. Reiss, JAES 60, 2012 | Confirmed |
 | `Limiter` (sliding minimum) | D. Lemire, Nordic Journal of Computing, 2006 | Confirmed |
+| `Dynamics` | D. Giannoulis, M. Massberg, and J. D. Reiss, JAES 60, 2012 | Confirmed. The full text was not read: the curves are tested against their formulas |
+| `Dynamics` (two thresholds, hold) | First principles | Not applicable |
+| `eq::Section` | R. Bristow-Johnson, "Audio EQ Cookbook", W3C Working Group Note, 2021 | Confirmed. The bell and shelf formulas were compared with the note, and a test writes them out |
+| `Crossover` | S. H. Linkwitz, JAES 24, 1976 | Confirmed |
+| `KWeighting`, `LevelMatch` | ITU-R BS.1770 | Partly confirmed. The high-pass and part of the shelf were seen in BS.1770-1. The rest of the table a test uses was not |

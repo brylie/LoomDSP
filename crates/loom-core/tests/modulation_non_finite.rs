@@ -98,12 +98,14 @@ static WATCH: ModuleDescriptor = ModuleDescriptor {
             label: "Seen",
             description: "Blocks the module has run.",
             kind: loom_core::DisplayKind::Level,
+            range: loom_core::DisplayRange::UNIT,
         },
         loom_core::DisplaySpec {
             name: "bad",
             label: "Bad",
             description: "Values that were not finite.",
             kind: loom_core::DisplayKind::Level,
+            range: loom_core::DisplayRange::UNIT,
         },
     ],
 };

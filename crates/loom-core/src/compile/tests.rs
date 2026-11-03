@@ -265,6 +265,7 @@ static LIT: crate::ModuleDescriptor = crate::ModuleDescriptor {
         label: "Lit",
         description: "A test light.",
         kind: crate::DisplayKind::Level,
+        range: crate::descriptor::DisplayRange::UNIT,
     }],
     ..FOLLOWER
 };

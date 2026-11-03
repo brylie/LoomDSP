@@ -1,11 +1,12 @@
 //! Filters (FR-LIB-03).
 
+use crate::cached::Cached;
 use loom_core::signal::pitch;
 use loom_core::{
     Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, PortDefault, PortIo,
     PortSpec, ProcessContext, SignalType, Widget,
 };
-use loom_dsp::filter::{ladder, one_pole, svf};
+use loom_dsp::filter::{crossover, ladder, one_pole, svf};
 use loom_rt::Smoothed;
 
 /// `loom.filter.svf`: state variable filter with lowpass, bandpass,
@@ -600,6 +601,184 @@ impl Module for Ladder {
         self.resonance.reset(self.resonance.target());
         self.drive.reset(self.drive.target());
         self.filter.reset(self.slope);
+    }
+}
+
+/// One output of `loom.filter.crossover`.
+const fn crossover_out(name: &'static str, label: &'static str, description: &'static str) -> PortSpec {
+    PortSpec {
+        name,
+        label,
+        signal: SignalType::Audio,
+        description,
+        default: PortDefault::Value(0.0),
+        range: loom_core::PortRange::Signal,
+        channels: Channels::PerChannel,
+    }
+}
+
+/// `loom.filter.crossover`: two or three bands that sum to a flat level
+/// (MT-FILTER-07). The algorithm is in [`crossover`]. Spec:
+/// `docs/design/dynamics-eq-crossover.md`.
+pub static CROSSOVER: ModuleDescriptor = ModuleDescriptor {
+    id: "loom.filter.crossover",
+    version: 1,
+    name: "Crossover",
+    category: "Filter",
+    family: loom_core::Family::FiltersAndEffects,
+    description: "Splits a signal into two or three frequency bands that sum to a flat level.",
+    inputs: &[crossover_out("in", "In", "The signal to split.")],
+    outputs: &[
+        crossover_out("low", "Low", "The frequencies below the lower split."),
+        crossover_out(
+            "mid",
+            "Mid",
+            "The frequencies between the splits. Silent with two bands.",
+        ),
+        crossover_out("high", "High", "The frequencies above the upper split."),
+    ],
+    params: &[
+        ParamSpec {
+            name: "bands",
+            label: "Bands",
+            description: "How many bands it makes.",
+            min: 0.0,
+            max: 1.0,
+            default: 1.0,
+            unit: "",
+            options: ParamOptions::DEFAULT,
+        }
+        .integer()
+        .choices(&["Two", "Three"]),
+        ParamSpec {
+            name: "low_split",
+            label: "Low split",
+            description: "Where the low band ends.",
+            min: 20.0,
+            max: 16_000.0,
+            default: 200.0,
+            unit: "Hz",
+            options: ParamOptions::DEFAULT,
+        }
+        .logarithmic()
+        .smooth(0.005),
+        ParamSpec {
+            name: "high_split",
+            label: "High split",
+            description: "Where the high band starts. It stays at or above the low split.",
+            min: 40.0,
+            max: 20_000.0,
+            default: 2_000.0,
+            unit: "Hz",
+            options: ParamOptions::DEFAULT,
+        }
+        .logarithmic()
+        .smooth(0.005)
+        .shown_when("bands", &[1]),
+    ],
+    role: ModuleRole::Dsp(|config| Box::new(Crossover::new(config))),
+    panel: Panel::new(
+        6,
+        5,
+        &[
+            Widget::segmented(0, 0, 6, "bands"),
+            Widget::knob(0, 2, "low_split"),
+            Widget::knob(3, 2, "high_split"),
+        ],
+    ),
+    displays: &[],
+};
+
+/// State for `loom.filter.crossover`.
+#[derive(Clone)]
+struct Crossover {
+    sample_rate: f32,
+    filter: crossover::Crossover,
+    low_split: Smoothed,
+    high_split: Smoothed,
+    /// The knob's band count, as 0 for two and 1 for three.
+    bands: f32,
+    /// 0 is two bands and 1 is three, so a change does not click.
+    three: Smoothed,
+    coefficients: Cached<(f32, f32), crossover::Coefficients>,
+}
+
+impl Crossover {
+    const BANDS: usize = CROSSOVER.param_index("bands").unwrap();
+    const LOW_SPLIT: usize = CROSSOVER.param_index("low_split").unwrap();
+    const HIGH_SPLIT: usize = CROSSOVER.param_index("high_split").unwrap();
+
+    fn new(config: &ModuleConfig) -> Self {
+        let rate = config.sample_rate;
+        let params = CROSSOVER.params;
+        let (low, high) = (params[Self::LOW_SPLIT].default, params[Self::HIGH_SPLIT].default);
+        let pitch_of = |index: usize| {
+            let param = &params[index];
+            Smoothed::new(pitch::from_hz(param.default), rate, param.options.smooth_seconds)
+        };
+        Self {
+            sample_rate: rate,
+            filter: crossover::Crossover::new(),
+            low_split: pitch_of(Self::LOW_SPLIT),
+            high_split: pitch_of(Self::HIGH_SPLIT),
+            bands: params[Self::BANDS].default,
+            three: Smoothed::new(params[Self::BANDS].default, rate, 0.005),
+            coefficients: Cached::new((low, high), move |(low, high)| {
+                crossover::Coefficients::new(low, high, rate)
+            }),
+        }
+    }
+}
+
+impl Module for Crossover {
+    /// Takes the running state of another instance (ADR-0022).
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+
+    fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        let bands = io.param(Self::BANDS);
+        let low_param = io.param(Self::LOW_SPLIT);
+        let high_param = io.param(Self::HIGH_SPLIT);
+        let top = self.sample_rate * 0.49;
+        let hz_of = |value: f32, fallback: f32| {
+            let hz = pitch::to_hz(value);
+            if hz.is_nan() { fallback } else { hz }.clamp(1.0, top)
+        };
+        let ([input], [low_out, mid_out, high_out]) = io.split::<1, 3>();
+        for i in 0..input.len() {
+            let x = input[i];
+            let x = if x.is_finite() { x } else { 0.0 };
+            let low = hz_of(low_param.map_or(i, self.low_split.tick(), pitch::from_hz), 200.0);
+            let high = hz_of(high_param.map_or(i, self.high_split.tick(), pitch::from_hz), 2_000.0);
+            let rate = self.sample_rate;
+            let coefficients = self
+                .coefficients
+                .get((low, high), |(low, high)| crossover::Coefficients::new(low, high, rate));
+            self.three
+                .set_target(if bands.at_or(i, self.bands) >= 0.5 { 1.0 } else { 0.0 });
+            let three = self.three.tick();
+            let out = self.filter.tick(x, coefficients);
+            low_out[i] = out.lower + three * (out.low - out.lower);
+            mid_out[i] = three * out.mid;
+            high_out[i] = out.upper + three * (out.high - out.upper);
+        }
+    }
+
+    fn set_param(&mut self, index: usize, value: f32) {
+        match index {
+            Self::BANDS => self.bands = value,
+            Self::LOW_SPLIT => self.low_split.set_target(pitch::from_hz(value)),
+            Self::HIGH_SPLIT => self.high_split.set_target(pitch::from_hz(value)),
+            _ => {}
+        }
+    }
+
+    fn reset(&mut self) {
+        self.filter.reset();
+        self.low_split.reset(self.low_split.target());
+        self.high_split.reset(self.high_split.target());
+        self.three.reset(if self.bands >= 0.5 { 1.0 } else { 0.0 });
     }
 }
 

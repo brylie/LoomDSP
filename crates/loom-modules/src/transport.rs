@@ -13,9 +13,9 @@
 
 use loom_core::signal::{EdgeDetector, WrapDetector, gate_is_high, trigger};
 use loom_core::{
-    Channels, DisplayKind, DisplaySpec, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec,
-    PortDefault, PortIo, PortSpec, ProcessContext, SignalType, TRANSPORT_MODULE, TimeSignature, TransportRequest,
-    TriggerFlag, Widget,
+    Channels, DisplayKind, DisplayRange, DisplaySpec, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions,
+    ParamSpec, PortDefault, PortIo, PortSpec, ProcessContext, SignalType, TRANSPORT_MODULE, TimeSignature,
+    TransportRequest, TriggerFlag, Widget,
 };
 
 /// The denominator names, in order from 0: powers of two.
@@ -184,12 +184,14 @@ pub static TRANSPORT: ModuleDescriptor = ModuleDescriptor {
             label: "Running",
             description: "1 while the transport runs. The Run toggle shows it while a cable drives Run.",
             kind: DisplayKind::Level,
+            range: DisplayRange::UNIT,
         },
         DisplaySpec {
             name: "beat",
             label: "Beat",
             description: "Flashes on each beat.",
             kind: DisplayKind::Trigger,
+            range: DisplayRange::UNIT,
         },
     ],
 };

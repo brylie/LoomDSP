@@ -4,8 +4,8 @@
 
 use loom_core::signal::gate_is_high;
 use loom_core::{
-    Channels, DisplayKind, DisplaySpec, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions,
-    ParamSpec, PortDefault, PortIo, PortSpec, ProcessContext, SignalType, Widget,
+    Channels, DisplayKind, DisplayRange, DisplaySpec, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel,
+    ParamOptions, ParamSpec, PortDefault, PortIo, PortSpec, ProcessContext, SignalType, Widget,
 };
 use loom_dsp::envelope::{self, Settings, fall, power};
 
@@ -125,6 +125,7 @@ pub static ENVELOPE: ModuleDescriptor = ModuleDescriptor {
         label: "Level",
         description: "The envelope's level, from dark at 0 to full at 1.",
         kind: DisplayKind::Level,
+        range: DisplayRange::UNIT,
     }],
 };
 

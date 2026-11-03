@@ -52,7 +52,7 @@ Widgets are grouped by the **kind of value** they show or edit, not by the modul
 | | Range | Two parameters on one axis: a low and a high | No | M2 |
 | Module state | Light | A display value | Yes | M1 |
 | | Readout | A display value | No | M2 |
-| | Meter | An output, or a display value | Output only | M1, display value in M2 |
+| | Meter | An output, or a display value | Yes | M1, display value in M2 |
 | Signals | Scope | An output | No ([#62](https://github.com/brylie/LoomDSP/issues/62)) | M1 |
 | | XY scope | Two outputs | No | M2 ([#280](https://github.com/brylie/LoomDSP/issues/280)) |
 | | Spectrum | An output | No ([#109](https://github.com/brylie/LoomDSP/issues/109)) | M2 |

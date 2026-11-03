@@ -163,8 +163,13 @@ pub enum WidgetViewKind {
     },
     /// A brightness.
     Light,
-    /// A level meter: an RMS bar and a peak line.
-    Meter,
+    /// A level meter: an RMS bar and a peak line. The bar starts from `zero`,
+    /// from 0 at the bottom to 1 at the top. Above 0, the meter shows a display
+    /// value that runs below 0, such as gain reduction, with no peak line.
+    Meter {
+        /// Where the bar starts.
+        zero: f32,
+    },
     /// A scope: a frame, and the trace the app sets in
     /// [`crate::ScopeTraces`].
     Scope,
@@ -202,7 +207,7 @@ impl WidgetView {
     pub fn size(&self) -> (u8, u8) {
         match &self.kind {
             WidgetViewKind::Knob { .. } => (3, 3),
-            WidgetViewKind::Meter => (3, 6),
+            WidgetViewKind::Meter { .. } => (3, 6),
             WidgetViewKind::Scope => (9, 5),
             WidgetViewKind::Shape { width } => (*width, 5),
             WidgetViewKind::Toggle | WidgetViewKind::Light => (3, 2),
@@ -218,7 +223,7 @@ impl WidgetView {
     pub fn is_control(&self) -> bool {
         !matches!(
             self.kind,
-            WidgetViewKind::Light | WidgetViewKind::Meter | WidgetViewKind::Scope | WidgetViewKind::Shape { .. }
+            WidgetViewKind::Light | WidgetViewKind::Meter { .. } | WidgetViewKind::Scope | WidgetViewKind::Shape { .. }
         )
     }
 
@@ -295,7 +300,7 @@ impl ModuleView {
         self.panel
             .widgets
             .iter()
-            .any(|w| matches!(w.kind, WidgetViewKind::Scope | WidgetViewKind::Meter))
+            .any(|w| matches!(w.kind, WidgetViewKind::Scope | WidgetViewKind::Meter { .. }))
     }
 
     /// The panel's minimum tile size in world units.
@@ -361,7 +366,7 @@ impl ModuleView {
         let widget = self.panel.widgets.get(index).filter(|w| !w.hidden)?;
         let origin = self.panel_origin();
         let (w, h) = widget.size();
-        let extra = if matches!(widget.kind, WidgetViewKind::Scope | WidgetViewKind::Meter) {
+        let extra = if matches!(widget.kind, WidgetViewKind::Scope | WidgetViewKind::Meter { .. }) {
             self.size() - self.minimum_size()
         } else {
             iced::Size::ZERO

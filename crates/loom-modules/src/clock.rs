@@ -9,8 +9,8 @@
 
 use loom_core::signal::{WrapDetector, trigger};
 use loom_core::{
-    Channels, DisplayKind, DisplaySpec, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec,
-    PortDefault, PortIo, PortSpec, ProcessContext, SignalType, TriggerFlag, Widget,
+    Channels, DisplayKind, DisplayRange, DisplaySpec, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions,
+    ParamSpec, PortDefault, PortIo, PortSpec, ProcessContext, SignalType, TriggerFlag, Widget,
 };
 
 /// The rate names, in order from 0. Each length comes straight, dotted, and
@@ -123,6 +123,7 @@ pub static CLOCK: ModuleDescriptor = ModuleDescriptor {
         label: "Fired",
         description: "Flashes on each trigger.",
         kind: DisplayKind::Trigger,
+        range: DisplayRange::UNIT,
     }],
 };
 

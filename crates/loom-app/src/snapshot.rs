@@ -316,7 +316,7 @@ fn kind_name(kind: &WidgetViewKind) -> &'static str {
         WidgetViewKind::Select { .. } => "select",
         WidgetViewKind::Segmented { .. } => "segmented",
         WidgetViewKind::Light => "light",
-        WidgetViewKind::Meter => "meter",
+        WidgetViewKind::Meter { .. } => "meter",
         WidgetViewKind::Scope => "scope",
         WidgetViewKind::Shape { .. } => "shape",
         WidgetViewKind::Button => "button",

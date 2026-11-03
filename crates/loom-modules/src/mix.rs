@@ -366,7 +366,7 @@ impl Module for Crossfade {
 }
 
 /// A port on the stereo channel tools.
-const fn stereo_port(
+pub(crate) const fn stereo_port(
     name: &'static str,
     label: &'static str,
     description: &'static str,

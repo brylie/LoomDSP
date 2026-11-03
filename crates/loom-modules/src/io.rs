@@ -141,6 +141,7 @@ pub static AUDIO_IN: ModuleDescriptor = ModuleDescriptor {
         label: "Active",
         description: "Lit when the selected input pair carries sound.",
         kind: loom_core::DisplayKind::Level,
+        range: loom_core::DisplayRange::UNIT,
     }],
 };
 

@@ -7,8 +7,8 @@
 use assert_no_alloc::AllocDisabler;
 use assert_no_alloc::assert_no_alloc;
 use loom_core::{
-    Channels, DisplayKind, DisplaySpec, EngineConfig, EngineParts, Module, ModuleDescriptor, ModuleRole, Panel,
-    ParamOptions, ParamSpec, PortDefault, PortIo, PortSpec, ProcessContext, Registry, SignalType, Widget,
+    Channels, DisplayKind, DisplayRange, DisplaySpec, EngineConfig, EngineParts, Module, ModuleDescriptor, ModuleRole,
+    Panel, ParamOptions, ParamSpec, PortDefault, PortIo, PortSpec, ProcessContext, Registry, SignalType, Widget,
     create_engine,
 };
 use std::sync::Arc;
@@ -55,18 +55,21 @@ static LAMP: ModuleDescriptor = ModuleDescriptor {
             label: "Level",
             description: "The level parameter.",
             kind: DisplayKind::Level,
+            range: DisplayRange::UNIT,
         },
         DisplaySpec {
             name: "calls",
             label: "Calls",
             description: "How many blocks the lamp has run.",
             kind: DisplayKind::Level,
+            range: DisplayRange::UNIT,
         },
         DisplaySpec {
             name: "first",
             label: "First",
             description: "Fires in the first block only.",
             kind: DisplayKind::Trigger,
+            range: DisplayRange::UNIT,
         },
     ],
 };

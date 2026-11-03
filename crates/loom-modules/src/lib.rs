@@ -12,9 +12,12 @@
 use loom_core::{LoomError, ModuleDescriptor, Registry};
 use std::sync::Arc;
 
+mod cached;
 pub mod clock;
 pub mod display;
+pub mod dynamics;
 pub mod env;
+pub mod eq;
 pub mod filter;
 pub mod io;
 pub mod level;
@@ -48,6 +51,9 @@ pub static ALL: &[&ModuleDescriptor] = &[
     &filter::SVF,
     &filter::ONEPOLE,
     &filter::LADDER,
+    &filter::CROSSOVER,
+    &eq::EQ,
+    &dynamics::DYNAMICS,
     &env::ENVELOPE,
     &math::ADD,
     &math::MUL,

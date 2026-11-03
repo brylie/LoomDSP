@@ -6,8 +6,8 @@
 
 use loom_core::signal::{EdgeDetector, WrapDetector, pitch, trigger};
 use loom_core::{
-    Channels, DisplayKind, DisplaySpec, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions,
-    ParamSpec, PortDefault, PortIo, PortSpec, ProcessContext, SignalType, TriggerFlag, Widget,
+    Channels, DisplayKind, DisplayRange, DisplaySpec, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel,
+    ParamOptions, ParamSpec, PortDefault, PortIo, PortSpec, ProcessContext, SignalType, TriggerFlag, Widget,
 };
 use loom_dsp::phase::Phasor;
 
@@ -181,6 +181,7 @@ pub static PHASE_TRIGGER: ModuleDescriptor = ModuleDescriptor {
         label: "Fired",
         description: "Flashes each time the phase wraps.",
         kind: DisplayKind::Trigger,
+        range: DisplayRange::UNIT,
     }],
 };
 

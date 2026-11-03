@@ -3,13 +3,13 @@
 Three processors that finish a sound and shape a live vocal or instrument chain, and that show what they are doing.
 
 - **Kind:** living specification.
-- **Status:** Agreed, M2 (2026-11-03). Ready to build.
+- **Status:** Agreed and built, M2 (2026-11-03).
 - **Decision behind it:** [ADR-0035](../adr/0035-pure-dsp-algorithms-in-loom-dsp.md) (algorithms in `loom-dsp`), [ADR-0018](../adr/0018-clean-room-module-development.md) (clean room), [ADR-0020](../adr/0020-inferred-channel-count.md) (stereo ports).
 - **Use case and requirements:** FR-LIB-09, FR-LIB-15, FR-PANEL-02.
-- **Background:** Dynamics detection, a new explainer in `docs/learn/`, written with this work.
+- **Background:** [How a dynamics processor hears a level](../learn/dynamics-detection.md).
 - **Prior art:** none named. Each module is designed from its purpose and the sources under [Sources](#sources).
 - **Issues:** [#541](https://github.com/brylie/LoomDSP/issues/541). Related: [#538](https://github.com/brylie/LoomDSP/issues/538) (latency), [#282](https://github.com/brylie/LoomDSP/issues/282) (read-only curve).
-- **Code:** not built yet. Planned: `crates/loom-dsp/src/dynamics.rs`, `loudness.rs`, `filter/eq.rs`, `filter/crossover.rs`, and `crates/loom-modules/src/dynamics.rs`, `eq.rs`, `filter.rs`.
+- **Code:** `crates/loom-dsp/src/dynamics.rs`, `loudness.rs`, `filter/eq.rs`, `filter/crossover.rs`, and `crates/loom-modules/src/dynamics.rs`, `eq.rs`, `filter.rs`. Tests: `crates/loom-modules/tests/dynamics_eq_crossover.rs`.
 
 ## Goal
 
@@ -34,7 +34,7 @@ The [rules for M1 modules](p1-modules.md#rules-for-all-modules-here) apply.
 | Outputs | `out` (audio, `Stereo`), `gain` (modulation, mono): the gain applied, from 0 to 1, before `output` and `mix` |
 | Parameters | See the table below |
 | Display values | `reduction`: gain change in dB, from -36 to 0 |
-| Panel | Transfer curve at full width. A row with the `mode` control and the `reduction` meter. Knobs for the rest. Controls that do nothing in the current mode are hidden ([ADR-0030](../adr/0030-panels-hide-controls-a-mode-does-not-use.md)). `detect` and `match` are on the tile. |
+| Panel | The transfer curve with the `reduction` meter beside it. A row with `mode`, `detect`, and `match`. Knobs for the rest. Controls that do nothing in the current mode are hidden ([ADR-0030](../adr/0030-panels-hide-controls-a-mode-does-not-use.md)). |
 
 | Parameter | Range | Default | Mapping and notes |
 |---|---|---|---|
@@ -99,13 +99,13 @@ The [rules for M1 modules](p1-modules.md#rules-for-all-modules-here) apply.
 |---|---|
 | Inputs | `in` (audio, `PerChannel`) |
 | Outputs | `out` (audio, `PerChannel`) |
-| Panel | Response curve at full width, then five groups of controls |
+| Panel | Response curve at full width, then the two slopes, then columns of knobs, one for each section |
 
 The signal passes through five sections in this order.
 
 | Section | What it does | Parameters | Range | Default |
 |---|---|---|---|---|
-| Low cut | Removes everything below its frequency. For rumble. | `low_cut`, `low_slope` | 10 Hz to 1 kHz. 0 Off, 1 12 dB per octave, 2 24 dB per octave | 40 Hz, Off |
+| Low cut | Removes everything below its frequency. For rumble. | `low_cut`, `low_slope` | 10 Hz to 1 kHz. 0 Off, 1 12, 2 24, in dB per octave | 40 Hz, Off |
 | Low shelf | Raises or lowers everything below its frequency by the same amount. | `low_freq`, `low_gain` | 20 Hz to 2 kHz. -24 to 24 dB | 120 Hz, 0 dB |
 | Mid band | A bell: a bump or dip centred on its frequency. Q sets how narrow it is. | `mid_freq`, `mid_gain`, `mid_q` | 40 Hz to 16 kHz. -24 to 24 dB. Q 0.1 to 10 | 1 kHz, 0 dB, 1 |
 | High shelf | Raises or lowers everything above its frequency by the same amount. | `high_freq`, `high_gain` | 1 kHz to 20 kHz. -24 to 24 dB | 8 kHz, 0 dB |
@@ -173,12 +173,12 @@ Manual: in the running app with `--fake-audio`, drive each module through the co
 
 ## Sources
 
-Each must be checked before the code cites it ([DSP algorithms](dsp-algorithms.md#adding-an-algorithm)).
+What was checked for each is in [DSP algorithms](dsp-algorithms.md#algorithms-and-sources).
 
 | Subject | Source |
 |---|---|
 | Static curves, smoothing in dB | D. Giannoulis, M. Massberg, and J. D. Reiss, "Digital Dynamic Range Compressor Design: A Tutorial and Analysis", JAES 60, 2012 |
-| Bell and shelf responses | R. Bristow-Johnson, "Audio EQ Cookbook" |
+| Bell and shelf responses | R. Bristow-Johnson, "Audio EQ Cookbook", W3C Working Group Note, 2021 |
 | State variable mixes | V. Zavalishin, "The Art of VA Filter Design" |
 | Crossover | S. H. Linkwitz, "Active Crossover Networks for Noncoincident Drivers", JAES 24, 1976 |
 | Loudness | ITU-R BS.1770, "Algorithms to measure audio programme loudness and true-peak audio level" |

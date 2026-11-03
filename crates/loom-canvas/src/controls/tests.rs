@@ -307,7 +307,7 @@ fn the_peak_line_is_never_below_the_bar() {
                 width: 3,
                 height: 6,
                 widgets: vec![WidgetView {
-                    kind: WidgetViewKind::Meter,
+                    kind: WidgetViewKind::Meter { zero: 0.0 },
                     x: 0,
                     y: 0,
                     label: String::new(),
@@ -358,7 +358,7 @@ fn stereo_meter_draws_two_tracks() {
                 width: 3,
                 height: 6,
                 widgets: vec![WidgetView {
-                    kind: WidgetViewKind::Meter,
+                    kind: WidgetViewKind::Meter { zero: 0.0 },
                     x: 0,
                     y: 0,
                     label: String::new(),

@@ -7,7 +7,8 @@
 
 use loom_core::{MidiEvent, ModuleRole, TransportSettings};
 use loom_modules::{
-    ALL, clock, display, env, filter, io, level, lfo, logic, math, midi, mix, osc, phase, rand, time, transport, ui,
+    ALL, clock, display, dynamics, env, eq, filter, io, level, lfo, logic, math, midi, mix, osc, phase, rand, time,
+    transport, ui,
 };
 use loom_test::{Harness, Signal, reference};
 
@@ -504,6 +505,9 @@ fn every_dsp_module_has_a_reference_test() {
         &mix::CROSSFADE,
         &mix::JOIN,
         &mix::SPLIT,
+        &dynamics::DYNAMICS,
+        &eq::EQ,
+        &filter::CROSSOVER,
         &io::AUDIO_IN,
         &logic::COMPARE,
         &logic::LOGIC,
@@ -802,6 +806,81 @@ fn split() {
         .seconds(0.02)
         .input("in", Signal::from_fn(|frame| (frame as f32 * 0.01).sin()))
         .check(reference!("split"));
+}
+
+/// A decaying tone, loud at the start and quiet at the end, so a curve acts on
+/// both sides of its threshold.
+fn falling_tone(frame: usize) -> f32 {
+    (frame as f32 * 0.05).sin() * (-(frame as f32) / 2_000.0).exp()
+}
+
+/// Every mode of Dynamics, with its own settings.
+#[test]
+fn dynamics() {
+    for (mode, path) in [
+        (0.0, reference!("dynamics_compress")),
+        (1.0, reference!("dynamics_limit")),
+        (2.0, reference!("dynamics_expand")),
+        (3.0, reference!("dynamics_gate")),
+        (4.0, reference!("dynamics_duck")),
+    ] {
+        Harness::new(&dynamics::DYNAMICS)
+            .seconds(0.1)
+            .input("in", Signal::from_fn(falling_tone))
+            .param("mode", mode)
+            .param("threshold", -12.0)
+            .param("attack", 0.001)
+            .param("release", 0.01)
+            .check(path);
+    }
+}
+
+/// Dynamics with a sidechain, RMS detection, level match, and a parallel mix.
+#[test]
+fn dynamics_sidechain_and_match() {
+    Harness::new(&dynamics::DYNAMICS)
+        .seconds(0.1)
+        .input("in", Signal::from_fn(|frame| (frame as f32 * 0.05).sin()))
+        .input("sidechain", Signal::gate(0.02, 0.06))
+        .param("detect", 1.0)
+        .param("match", 1.0)
+        .param("mix", 0.75)
+        .param("output", 3.0)
+        .check(reference!("dynamics_sidechain"));
+}
+
+/// EQ with every section at work, and a slope change partway through from the
+/// knob's value.
+#[test]
+fn eq() {
+    Harness::new(&eq::EQ)
+        .seconds(0.05)
+        .input(
+            "in",
+            Signal::from_fn(|frame| (frame as f32 * 0.05).sin() + 0.5 * (frame as f32 * 0.9).sin()),
+        )
+        .param("low_slope", 2.0)
+        .param("low_cut", 100.0)
+        .param("low_gain", 6.0)
+        .param("mid_gain", -9.0)
+        .param("mid_q", 3.0)
+        .param("high_gain", 4.0)
+        .param("high_slope", 1.0)
+        .check(reference!("eq"));
+}
+
+/// The three bands of a Crossover.
+#[test]
+fn crossover() {
+    Harness::new(&filter::CROSSOVER)
+        .seconds(0.05)
+        .input(
+            "in",
+            Signal::from_fn(|frame| {
+                (frame as f32 * 0.02).sin() + (frame as f32 * 0.3).sin() + (frame as f32 * 1.5).sin()
+            }),
+        )
+        .check(reference!("crossover"));
 }
 
 /// A disconnected audio input is silent.

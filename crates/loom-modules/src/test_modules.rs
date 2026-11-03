@@ -13,8 +13,9 @@
 //!   parameter, so a test can read it.
 
 use loom_core::{
-    Channels, DisplayKind, DisplaySpec, LoomError, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel,
-    ParamOptions, ParamSpec, Polarity, PortDefault, PortIo, PortSpec, ProcessContext, Registry, SignalType, Widget,
+    Channels, DisplayKind, DisplayRange, DisplaySpec, LoomError, Module, ModuleConfig, ModuleDescriptor, ModuleRole,
+    Panel, ParamOptions, ParamSpec, Polarity, PortDefault, PortIo, PortSpec, ProcessContext, Registry, SignalType,
+    Widget,
 };
 
 /// Every test module.
@@ -129,6 +130,7 @@ pub static PANEL: ModuleDescriptor = ModuleDescriptor {
         label: "Lit",
         description: "Shows `on`, modulated, as of the last frame of the block.",
         kind: DisplayKind::Level,
+        range: DisplayRange::UNIT,
     }],
 };
 

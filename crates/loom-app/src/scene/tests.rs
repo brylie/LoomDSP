@@ -540,3 +540,32 @@ fn the_all_modules_patch_has_every_module_without_overlap() {
         }
     }
 }
+
+/// A meter on a display value draws from its range's zero, takes the display
+/// value's text, and shows its place in the range, not the number as stored
+/// (panel-widgets.md, Meter on a display value).
+#[test]
+fn a_meter_shows_a_display_value_from_its_zero() {
+    use loom_modules::dynamics::DYNAMICS;
+    let index = DYNAMICS
+        .panel
+        .widgets
+        .iter()
+        .position(|w| w.bind == "reduction")
+        .unwrap();
+    let view = panel_view(&DYNAMICS);
+    let meter = &view.widgets[index];
+    assert_eq!(meter.kind, WidgetViewKind::Meter { zero: 1.0 });
+    assert_eq!(meter.label, "Reduction");
+    assert_eq!(
+        meter.hover,
+        HoverText::new("Reduction", DYNAMICS.displays[0].description, "reduction")
+    );
+    let range = DYNAMICS.displays[0].range;
+    assert_eq!(range.position(-18.0), 0.5);
+    assert_eq!(range.value(0.5), -18.0);
+    assert_eq!(
+        display_text(&DYNAMICS, &DYNAMICS.panel.widgets[index], 0.5, None),
+        "Reduction: -18.0 dB"
+    );
+}

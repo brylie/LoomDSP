@@ -6,8 +6,8 @@
 
 use loom_core::signal::{EdgeDetector, gate_is_high, trigger};
 use loom_core::{
-    Channels, DisplayKind, DisplaySpec, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec,
-    PortDefault, PortIo, PortSpec, ProcessContext, SignalType, TriggerFlag, Widget,
+    Channels, DisplayKind, DisplayRange, DisplaySpec, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions,
+    ParamSpec, PortDefault, PortIo, PortSpec, ProcessContext, SignalType, TriggerFlag, Widget,
 };
 
 /// `loom.logic.divide`: fires on every Nth incoming trigger.
@@ -91,6 +91,7 @@ pub static DIVIDE: ModuleDescriptor = ModuleDescriptor {
         label: "Fired",
         description: "Flashes each time the output fires.",
         kind: DisplayKind::Trigger,
+        range: DisplayRange::UNIT,
     }],
 };
 
@@ -479,6 +480,7 @@ pub static MEMORY: ModuleDescriptor = ModuleDescriptor {
         label: "State",
         description: "Lit while the remembered gate is high.",
         kind: DisplayKind::Level,
+        range: DisplayRange::UNIT,
     }],
 };
 

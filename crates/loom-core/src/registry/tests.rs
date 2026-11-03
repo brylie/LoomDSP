@@ -34,6 +34,7 @@ const fn display(name: &'static str) -> crate::DisplaySpec {
         label: name,
         description: "A test display value.",
         kind: crate::DisplayKind::Level,
+        range: crate::descriptor::DisplayRange::UNIT,
     }
 }
 
@@ -237,6 +238,7 @@ fn notes_undocumented_display_values() {
             label: " ",
             description: "",
             kind: crate::DisplayKind::Trigger,
+            range: crate::descriptor::DisplayRange::UNIT,
         }],
     };
     let mut registry = Registry::new();

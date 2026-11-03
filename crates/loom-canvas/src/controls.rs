@@ -313,7 +313,21 @@ impl ControlGeometry {
                             Rectangle::new(Point::new(area.x, area.center_y() - 0.5), Size::new(area.width, 1.0));
                         shapes.push(Shape::new(centre, 0.0, palette.tile_border, Color::TRANSPARENT, 0.0));
                     }
-                    WidgetViewKind::Meter => {
+                    WidgetViewKind::Meter { zero } if *zero > 0.0 => {
+                        // A value that runs down from 0 draws from there.
+                        let track = meter_track(rect);
+                        shapes.push(Shape::new(track, 2.0, palette.light_off, palette.tile_border, 1.0));
+                        let (low, high) = (position.clamp(0.0, 1.0).min(*zero), position.clamp(0.0, 1.0).max(*zero));
+                        if high > low {
+                            let bar = Rectangle::new(
+                                Point::new(track.x, track.y + track.height * (1.0 - high)),
+                                Size::new(track.width, track.height * (high - low)),
+                            );
+                            let colour = mix(module.accent, palette.text, 0.55);
+                            shapes.push(Shape::new(bar, 2.0, colour, Color::TRANSPARENT, 0.0));
+                        }
+                    }
+                    WidgetViewKind::Meter { .. } => {
                         let track = meter_track(rect);
                         let right = values.get(module.id, index).and_then(|value| value.right);
                         let left_track = if right.is_some() {
@@ -426,9 +440,10 @@ fn modulation_dot(kind: &WidgetViewKind, rect: Rectangle, mark: ModulationMark, 
     match (kind, mark) {
         (_, ModulationMark::None) | (WidgetViewKind::Knob { .. }, ModulationMark::Range { .. }) => None,
         // Displays have no parameter, so no assignments.
-        (WidgetViewKind::Light | WidgetViewKind::Meter | WidgetViewKind::Scope | WidgetViewKind::Shape { .. }, _) => {
-            None
-        }
+        (
+            WidgetViewKind::Light | WidgetViewKind::Meter { .. } | WidgetViewKind::Scope | WidgetViewKind::Shape { .. },
+            _,
+        ) => None,
         (_, ModulationMark::Ring) => Some(circle(
             centre,
             DOT_RADIUS,
@@ -556,7 +571,7 @@ pub(crate) fn focus_ring(kind: &WidgetViewKind, rect: Rectangle) -> (Rectangle, 
             4.0,
         ),
         // Displays never take focus.
-        WidgetViewKind::Light | WidgetViewKind::Meter | WidgetViewKind::Scope | WidgetViewKind::Shape { .. } => {
+        WidgetViewKind::Light | WidgetViewKind::Meter { .. } | WidgetViewKind::Scope | WidgetViewKind::Shape { .. } => {
             (rect.expand(1.0), 4.0)
         }
     }

@@ -19,7 +19,10 @@ One page for each built-in module, made from its descriptor. After you change a 
 | Module | ID | Description |
 |---|---|---|
 | [All-Pass](loom.time.allpass.md) | `loom.time.allpass` | A delay-based filter that passes every frequency at the same level but smears their timing. Chains of them build reverbs and diffusers. |
+| [Crossover](loom.filter.crossover.md) | `loom.filter.crossover` | Splits a signal into two or three frequency bands that sum to a flat level. |
 | [Delay Line](loom.time.delay.md) | `loom.time.delay` | Plays its input back after a set time, for echoes, chorus, and feedback. The time input adds seconds to the time knob. |
+| [Dynamics](loom.dyn.dynamics.md) | `loom.dyn.dynamics` | Compresses, limits, expands, gates, or ducks a signal, with a sidechain that can come from another signal. |
+| [EQ](loom.eq.eq.md) | `loom.eq.eq` | Shapes the balance of frequencies with two cuts, two shelves, and a mid band. |
 | [Ladder](loom.filter.ladder.md) | `loom.filter.ladder` | A resonant low-pass with a 12, 18, or 24 dB slope; high resonance thins the bass and, at 18 and 24 dB, sings on its own. The cutoff input adds pitch: +0.1 doubles the cutoff. |
 | [One-Pole](loom.filter.onepole.md) | `loom.filter.onepole` | A gentle 6 dB per octave filter with low-pass and high-pass outputs; low cutoffs smooth control signals. The cutoff input adds pitch: +0.1 doubles the cutoff. |
 | [SVF](loom.filter.svf.md) | `loom.filter.svf` | A resonant filter with low-pass, band-pass, high-pass, and notch outputs. The cutoff input adds pitch: +0.1 doubles the cutoff. |

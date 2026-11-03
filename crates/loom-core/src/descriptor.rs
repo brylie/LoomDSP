@@ -764,20 +764,21 @@ pub struct ModuleDescriptor {
 /// is a compile error, as for [`PortSpec`]:
 ///
 /// ```
-/// use loom_core::{DisplayKind, DisplaySpec};
+/// use loom_core::{DisplayKind, DisplayRange, DisplaySpec};
 ///
 /// const GATE: DisplaySpec = DisplaySpec {
 ///     name: "gate",
 ///     label: "Gate",
 ///     description: "Lit while a key is held.",
 ///     kind: DisplayKind::Level,
+///     range: DisplayRange::UNIT,
 /// };
 /// ```
 ///
 /// The name is the stable ID that panels and [`Module::displays`](crate::Module::displays)
 /// use. The label is the light's caption, and the description its hover
 /// text. Spec: `docs/design/port-and-parameter-text.md`, Display values.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DisplaySpec {
     /// Stable name that panel widgets bind to.
     pub name: &'static str,
@@ -787,6 +788,46 @@ pub struct DisplaySpec {
     pub description: &'static str,
     /// How the engine stores it and the UI reads it.
     pub kind: DisplayKind,
+    /// The values it can take, for a meter bound to it.
+    pub range: DisplayRange,
+}
+
+/// The values a display value can take. A meter bound to the value spans this
+/// range. If the range holds 0, the meter's bar starts from there. Spec:
+/// `docs/design/panel-widgets.md`, Meter on a display value.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DisplayRange {
+    /// The lowest value.
+    pub min: f32,
+    /// The highest value.
+    pub max: f32,
+    /// The unit in hover text, such as "dB". May be empty.
+    pub unit: &'static str,
+}
+
+impl DisplayRange {
+    /// From 0 to 1 with no unit: a brightness, or a level as a factor.
+    pub const UNIT: Self = Self {
+        min: 0.0,
+        max: 1.0,
+        unit: "",
+    };
+
+    /// Where `value` falls in the range, from 0 to 1.
+    pub fn position(&self, value: f32) -> f32 {
+        ((value - self.min) / (self.max - self.min)).clamp(0.0, 1.0)
+    }
+
+    /// The value at `position`, the opposite of [`DisplayRange::position`].
+    pub fn value(&self, position: f32) -> f32 {
+        self.min + position * (self.max - self.min)
+    }
+
+    /// Where a meter's bar starts, from 0 to 1: the position of 0, or the
+    /// bottom of the range if the range does not hold 0.
+    pub fn zero(&self) -> f32 {
+        self.position(0.0)
+    }
 }
 
 /// How a display value travels from the engine to a light.
@@ -1006,8 +1047,9 @@ impl Widget {
         )
     }
 
-    /// True for widgets bound to one of the module's outputs, fed by a
-    /// port probe: meters and scopes.
+    /// True for widgets that can be bound to one of the module's outputs, fed
+    /// by a port probe: meters and scopes. A meter can show a display value
+    /// instead: see [`ModuleDescriptor::meter_display`].
     pub const fn shows_output(&self) -> bool {
         matches!(self.kind, WidgetKind::Meter | WidgetKind::Scope)
     }
@@ -1236,6 +1278,15 @@ impl ModuleDescriptor {
         when.choices.iter().any(|&c| c as f32 == choice)
     }
 
+    /// The display value a meter shows, or `None` for any other widget and for
+    /// a meter on an output.
+    pub fn meter_display(&self, widget: &Widget) -> Option<&DisplaySpec> {
+        if widget.kind != WidgetKind::Meter || self.outputs.iter().any(|port| port.name == widget.bind) {
+            return None;
+        }
+        self.displays.iter().find(|display| display.name == widget.bind)
+    }
+
     /// Index of a display value by name.
     pub fn display_index(&self, name: &str) -> Option<usize> {
         self.displays.iter().position(|d| d.name == name)
@@ -1387,6 +1438,8 @@ impl ModuleDescriptor {
                     }
                     _ => {}
                 }
+            } else if self.meter_display(widget).is_some() {
+                // A meter on a display value (panel-widgets.md).
             } else if widget.shows_output() || matches!(widget.kind, WidgetKind::Shape { .. }) {
                 if !self.outputs.iter().any(|port| port.name == widget.bind) {
                     return Err(name("no such output"));

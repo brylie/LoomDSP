@@ -357,7 +357,7 @@ const GAP: f32 = 3.0;
 fn caption_y(kind: &WidgetViewKind, rect: Rectangle) -> f32 {
     match kind {
         WidgetViewKind::Knob { .. } => knob_centre(rect).y + 1.5 * GRID,
-        WidgetViewKind::Meter | WidgetViewKind::Scope => rect.y + rect.height - GRID * 0.5,
+        WidgetViewKind::Meter { .. } | WidgetViewKind::Scope => rect.y + rect.height - GRID * 0.5,
         WidgetViewKind::Shape { .. } => rect.y + rect.height - GRID * 0.5,
         WidgetViewKind::Toggle | WidgetViewKind::Light => light_centre(rect).y + GRID,
         // On the face of the button.
