@@ -75,6 +75,8 @@ Turn on Match to hear the sound of a setting without its change in level. It is 
 
 Its output is always stereo, because both sides get one gain and the stereo image holds still. Limit has no lookahead, so it adds no delay, and a fast peak is turned down on its own sample, which can add some distortion.
 
+Limit's ceiling applies before Match, Output, and Mix, so leave Match off when a ceiling must hold. The ceiling shapes the sound. It does not protect your speakers or ears: output safety does that, at the end of the patch. [What a limiter's ceiling promises](../learn/dynamics-detection.md#what-a-limiters-ceiling-promises) explains why.
+
 ## Example patch
 
 A held saw that ducks on each note, with an envelope as the key.

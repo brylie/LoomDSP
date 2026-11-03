@@ -72,7 +72,7 @@ The [rules for M1 modules](p1-modules.md#rules-for-all-modules-here) apply.
 | Duck | `-range` while the level is above the threshold, otherwise 0. See rule 7. |
 
 7. **Gate and Duck have two thresholds and a hold.** The state changes when the level passes the threshold going one way. It changes back only once the level is 3 dB past it the other way and has stayed there for 20 ms. *Why:* a level close to the threshold would otherwise flip the state on every cycle and chatter.
-8. **Limit holds its ceiling on the detected signal.** With the main input as the detector, no sidechain, and `match` off, no sample leaves above the threshold before `output` and `mix`, within rounding. *Why `match` off:* it runs after the limit and can raise the level by up to 24 dB (rule 11). It is for comparing (rule 14), so a ceiling that must hold leaves it off. There is no lookahead, so a fast peak is turned down on its own sample, which adds some distortion. Lookahead waits for #538.
+8. **Limit holds its ceiling on the detected signal.** With the main input as the detector, no sidechain, and `match` off, no sample leaves above the threshold before `output` and `mix`, within rounding. *Why `match` off:* it runs after the limit and can raise the level by up to 24 dB (rule 11). It is for comparing (rule 14), so a ceiling that must hold leaves it off. Output safety protects speakers and ears, not this ceiling. See [what a limiter's ceiling promises](../learn/dynamics-detection.md#what-a-limiters-ceiling-promises). There is no lookahead, so a fast peak is turned down on its own sample, which adds some distortion. Lookahead waits for #538.
 
 ### Showing the effect
 
@@ -195,3 +195,4 @@ Agreed with the maintainer on 2026-11-03.
 - **EQ sections:** five fixed sections with one mid band, as a second EQ adds another. "Peak" in the catalogue is called the mid band, or a bell, here: the word also means a signal's highest level, as Dynamics uses it.
 - **Gate and Duck timing:** 3 dB and 20 ms are fixed. A knob can be added later, and a removed knob breaks patches once released.
 - **Level match:** K-weighted. It costs more than plain RMS, but it is a published standard, and plain RMS misjudges a change in the low end.
+- **`match` in Limit:** stays available, and Limit's ceiling is promised only with it off. Disabling it would still leave `output` and `mix` able to pass the ceiling, and it would remove the comparison where it helps most. The output stage is what protects speakers and ears. Limiting after `match`, capping its gain, and moving the ceiling after `output` and `mix` were also considered. [The explainer](../learn/dynamics-detection.md#four-ways-to-make-the-ceiling-hold-and-what-each-costs) gives what each costs.
