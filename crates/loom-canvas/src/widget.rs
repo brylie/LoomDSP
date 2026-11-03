@@ -295,15 +295,16 @@ impl<'a, Message> PatchCanvas<'a, Message> {
         self
     }
 
-    /// Says that an app text field has focus. The canvas then leaves every key
-    /// press to it except Tab, which moves focus as usual. The pointer still
-    /// works (panel-widgets.md, Typing a value).
+    /// Says that the focused text field moves to the next field on Tab, so the
+    /// canvas leaves Tab alone too (panels.md, Keyboard without a mouse).
     pub fn text_field_keeps_tab(mut self, enabled: bool) -> Self {
         self.text_field_keeps_tab = enabled;
         self
     }
 
-    /// An app text field has focus, so its keys never act on the canvas.
+    /// Says that an app text field has focus. The canvas then leaves every key
+    /// press to it except Tab, which moves focus as usual. The pointer still
+    /// works (panel-widgets.md, Typing a value).
     pub fn text_field_keys(mut self, enabled: bool) -> Self {
         self.text_field_keys = enabled;
         self
