@@ -33,9 +33,9 @@ pub type Light = (u32, usize);
 pub struct Watch {
     pub reader: DisplayReader,
     pub lights: Vec<(Light, DisplaySource)>,
-    /// The range of each entry in `lights`. A change is measured in it, as a
+    /// The range of each entry in `lights`, if it has one (see [`range`]). A
     /// meter on a display value may read outside 0 to 1.
-    pub ranges: Vec<DisplayRange>,
+    pub ranges: Vec<Option<DisplayRange>>,
     /// Counts the engines the app has built. A new engine numbers its modules
     /// from 1 again, so the same lights can read a different table.
     pub generation: u64,
@@ -110,24 +110,31 @@ pub fn level(value: f32) -> u8 {
     (value.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
-/// The range a change in `widget`'s value is measured in: what it draws. A
-/// meter on a display value draws its place in the value's range. A light
-/// draws its value as brightness, whatever the value's range.
-pub fn range(descriptor: &ModuleDescriptor, widget: &Widget) -> DisplayRange {
-    descriptor
-        .meter_display(widget)
-        .map_or(DisplayRange::UNIT, |display| display.range)
+/// The range a change in `widget`'s value is measured in, if it has one: what
+/// it shows. A meter on a display value shows its place in the value's range. A
+/// light has none, as it draws its value as brightness, whatever the range.
+pub fn range(descriptor: &ModuleDescriptor, widget: &Widget) -> Option<DisplayRange> {
+    descriptor.meter_display(widget).map(|display| display.range)
 }
 
-/// The drawn levels of `readings`, each at its place in its range, if any
-/// differs from `last`.
-pub fn changed(last: &[Option<u8>], readings: &[f32], ranges: &[DisplayRange]) -> Option<Vec<Option<u8>>> {
-    let levels: Vec<Option<u8>> = readings
+/// A reading as a step that shows. A light has 256 levels. A meter has as many
+/// steps across its range, and more past its ends: the bar stops there, but its
+/// text still says the value.
+fn step(reading: f32, range: Option<DisplayRange>) -> i32 {
+    match range {
+        Some(range) => ((reading - range.min) / (range.max - range.min) * 255.0).round() as i32,
+        None => i32::from(level(reading)),
+    }
+}
+
+/// The steps of `readings`, if any differs from `last`.
+pub fn changed(last: &[Option<i32>], readings: &[f32], ranges: &[Option<DisplayRange>]) -> Option<Vec<Option<i32>>> {
+    let steps: Vec<Option<i32>> = readings
         .iter()
         .zip(ranges)
-        .map(|(&r, range)| Some(level(range.position(r))))
+        .map(|(&reading, &range)| Some(step(reading, range)))
         .collect();
-    (levels != last).then_some(levels)
+    (steps != last).then_some(steps)
 }
 
 /// Reads the lights every [`INTERVAL`] and yields their values when one
