@@ -17,7 +17,21 @@
 //! let first = sine(phasor.tick(step));
 //! assert_eq!(first, 0.0);
 //! assert!(phasor.phase() > 0.0);
+//! assert_eq!(loom_dsp::phase::wrap(1.25), 0.25);
 //! ```
+
+/// A value as a place in the cycle: `x - floor(x)`, from 0 up to but not
+/// including 1. NaN and infinity give NaN, so a caller that keeps the result in
+/// its state must check first. An oscillator shape need not: it keeps no value
+/// past the next good phase.
+///
+/// A tiny negative value rounds up to exactly 1, which is not a place in the
+/// cycle, so that gives 0. The two are the same point of the cycle.
+#[inline]
+pub fn wrap(x: f32) -> f32 {
+    let wrapped = x - x.floor();
+    if wrapped >= 1.0 { 0.0 } else { wrapped }
+}
 
 /// The largest phase step per sample: just under half a cycle, the Nyquist
 /// frequency. A frequency above it cannot be heard as itself anyway.

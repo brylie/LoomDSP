@@ -8,11 +8,11 @@ fn wrap_and_fold_values() {
     let wrapped = [0.75, 0.0, 0.25, 0.0, 0.25, 0.0];
     let folded = [0.25, 0.0, 0.25, 1.0, 0.75, 0.0];
     for ((x, w), f) in inputs.iter().zip(wrapped).zip(folded) {
-        assert_eq!(Wrap::wrap(*x), w, "wrap {x}");
+        assert_eq!(wrap(*x), w, "wrap {x}");
         assert_eq!(Wrap::fold(*x), f, "fold {x}");
     }
     // A tiny negative number must not give exactly 1.
-    assert!(Wrap::wrap(-1e-9) < 1.0);
+    assert!(wrap(-1e-9) < 1.0);
 }
 
 /// NaN and infinity give 0 in both modes, through the module.

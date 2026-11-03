@@ -127,7 +127,7 @@ pub static LFO: ModuleDescriptor = ModuleDescriptor {
 /// One cycle of the selected wave for the read-only tile preview.
 fn lfo_preview(params: &[f32], x: f32) -> f32 {
     let shape = params.get(Lfo::SHAPE).copied().unwrap_or_default().round() as u8;
-    (Lfo::wave(shape, f64::from(x.rem_euclid(1.0))) + 1.0) * 0.5
+    (Lfo::wave(shape, f64::from(loom_dsp::phase::wrap(x))) + 1.0) * 0.5
 }
 
 #[cfg(test)]

@@ -87,7 +87,7 @@ An algorithm documents the input it accepts and does not check it in a release b
 |---|---|---|
 | `Svf`, `OnePole` | V. Zavalishin, "The Art of VA Filter Design" | Not checked |
 | `Ladder` | T. Stilson and J. Smith, "Analyzing the Moog VCF", ICMC 1996; Zavalishin | Not checked |
-| `DcBlocker`, `Envelope`, `Slew`, `Phasor` | First principles | Not applicable |
+| `DcBlocker`, `Envelope`, `Slew`, `Phasor`, `phase::wrap` | First principles | Not applicable |
 | `saw`, `pulse`, `triangle` | V. Välimäki and A. Huovilainen, IEEE Signal Processing Magazine, 2007 | Not confirmed |
 | `SlowWave`, `sine` | First principles | Not applicable |
 | `Noise` (pink) | R. F. Voss and J. Clarke, Nature, 1975 | Not confirmed |

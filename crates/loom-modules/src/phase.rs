@@ -9,7 +9,7 @@ use loom_core::{
     Channels, DisplayKind, DisplayRange, DisplaySpec, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel,
     ParamOptions, ParamSpec, PortDefault, PortIo, PortSpec, ProcessContext, SignalType, TriggerFlag, Widget,
 };
-use loom_dsp::phase::Phasor;
+use loom_dsp::phase::{Phasor, wrap};
 use loom_rt::Smoothed;
 
 /// `loom.phase.generator`: a ramp from 0 to 1 at the frequency set by pitch.
@@ -261,19 +261,12 @@ pub static WRAP: ModuleDescriptor = ModuleDescriptor {
     displays: &[],
 };
 
-pub(crate) struct Wrap {
+struct Wrap {
     fold: bool,
 }
 
 impl Wrap {
     const MODE: usize = WRAP.param_index("mode").unwrap();
-
-    /// `x - floor(x)`, always in `[0, 1)`.
-    pub(crate) fn wrap(x: f32) -> f32 {
-        let w = x - x.floor();
-        // A tiny negative `x` can round the result up to exactly 1.
-        if w >= 1.0 { 0.0 } else { w }
-    }
 
     /// A triangle fold into `[0, 1]`: 1 stays 1, 1.25 comes back to 0.75.
     fn fold(x: f32) -> f32 {
@@ -297,7 +290,7 @@ impl Module for Wrap {
             } else if fold {
                 Self::fold(x)
             } else {
-                Self::wrap(x)
+                wrap(x)
             };
         }
     }
@@ -541,11 +534,11 @@ impl Module for PhaseReset {
             // Cables are not limited to 0 to 1. Wrapping first keeps both
             // values small, so a huge input can neither overflow here nor
             // leave an offset so large that later fractions are lost.
-            let phase = Wrap::wrap(phase);
+            let phase = wrap(phase);
             if restart {
                 self.offset = phase;
             }
-            *out = Wrap::wrap(phase - self.offset);
+            *out = wrap(phase - self.offset);
         }
     }
 
@@ -643,12 +636,12 @@ impl Module for PhaseShift {
             // A bad offset is no offset. Each term is wrapped first, so huge
             // values cannot overflow the sum or lose its fraction.
             let moved = if offset_in[i].is_finite() {
-                Wrap::wrap(offset_in[i])
+                wrap(offset_in[i])
             } else {
                 0.0
             };
             *out = if phase[i].is_finite() {
-                Wrap::wrap(Wrap::wrap(phase[i]) + offset + moved)
+                wrap(wrap(phase[i]) + offset + moved)
             } else {
                 0.0
             };
@@ -716,7 +709,7 @@ impl Module for PhaseReverse {
             // An input of 0 gives 0, so Phase Trigger's first-frame rule keeps
             // working on a reversed phase.
             *out = if phase.is_finite() {
-                Wrap::wrap(1.0 - Wrap::wrap(phase))
+                wrap(1.0 - wrap(phase))
             } else {
                 0.0
             };

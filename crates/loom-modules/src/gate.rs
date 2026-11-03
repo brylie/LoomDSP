@@ -1,13 +1,13 @@
 //! Rhythm patterns as gates and triggers (FR-LIB-08). Spec:
 //! `docs/design/p2-modules.md`. Background: `docs/learn/euclidean-rhythms.md`.
 
-use crate::phase::Wrap;
 use loom_core::signal::{EdgeDetector, WrapDetector, trigger};
 use loom_core::{
     Channels, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, PortDefault, PortIo, PortSpec,
     ProcessContext, SignalType, Widget,
 };
 use loom_dsp::euclid::Pattern;
+use loom_dsp::phase::wrap;
 
 /// A gate input of Euclidean rhythm.
 const fn gate_input(name: &'static str, label: &'static str, description: &'static str) -> PortSpec {
@@ -201,7 +201,7 @@ impl Module for Euclid {
             let clock_rose = self.clock.rising(clock[i]);
             let reset_rose = self.reset.rising(reset[i]);
             // A bad phase holds the step, and must not reach the wrap detector.
-            let wrapped_phase = phase[i].is_finite().then(|| Wrap::wrap(phase[i]));
+            let wrapped_phase = phase[i].is_finite().then(|| wrap(phase[i]));
             let wrapped = wrapped_phase.is_some_and(|phase| self.wrap.wrapped(phase));
 
             let enter = if clocked {
