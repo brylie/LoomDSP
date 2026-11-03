@@ -162,10 +162,11 @@ impl Saw {
     pub fn tick(&mut self, phase: f32) -> f32 {
         let t = wrap(phase);
         // The phase step tells us the frequency, so the shaper does not
-        // need a separate frequency input.
+        // need a separate frequency input. A falling phase wraps to a step
+        // near 1, so take the shorter way round the cycle.
         let step = wrap(t - self.previous);
         self.previous = t;
-        saw(t, step)
+        saw(t, step.min(1.0 - step))
     }
 }
 
