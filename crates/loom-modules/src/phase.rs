@@ -12,12 +12,6 @@ use loom_core::{
 use loom_dsp::phase::Phasor;
 use loom_rt::Smoothed;
 
-/// `x - floor(x)`, always in `[0, 1)`, for a module that reads a phase. `x` must
-/// be finite.
-pub(crate) fn wrap_phase(x: f32) -> f32 {
-    Wrap::wrap(x)
-}
-
 /// `loom.phase.generator`: a ramp from 0 to 1 at the frequency set by pitch.
 pub static PHASE: ModuleDescriptor = ModuleDescriptor {
     id: "loom.phase.generator",
@@ -267,7 +261,7 @@ pub static WRAP: ModuleDescriptor = ModuleDescriptor {
     displays: &[],
 };
 
-struct Wrap {
+pub(crate) struct Wrap {
     fold: bool,
 }
 
@@ -275,7 +269,7 @@ impl Wrap {
     const MODE: usize = WRAP.param_index("mode").unwrap();
 
     /// `x - floor(x)`, always in `[0, 1)`.
-    fn wrap(x: f32) -> f32 {
+    pub(crate) fn wrap(x: f32) -> f32 {
         let w = x - x.floor();
         // A tiny negative `x` can round the result up to exactly 1.
         if w >= 1.0 { 0.0 } else { w }

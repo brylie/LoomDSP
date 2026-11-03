@@ -1,7 +1,7 @@
 //! Rhythm patterns as gates and triggers (FR-LIB-08). Spec:
 //! `docs/design/p2-modules.md`. Background: `docs/learn/euclidean-rhythms.md`.
 
-use crate::phase::wrap_phase;
+use crate::phase::Wrap;
 use loom_core::signal::{EdgeDetector, WrapDetector, trigger};
 use loom_core::{
     Channels, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, PortDefault, PortIo, PortSpec,
@@ -144,10 +144,8 @@ struct Euclid {
     /// the first frame. Keeping it in one value means the step number and the
     /// wait cannot disagree.
     step: Option<u32>,
-    /// The pattern taken when the current step was entered, so turning a knob
-    /// never cuts a step in half.
-    pattern: Pattern,
-    /// The steps in `pattern`.
+    /// The steps when the current step was entered. It says when that step
+    /// ends, so turning a knob never cuts it in half.
     entered_steps: u32,
     /// The gate's level, held for the whole step.
     gate: bool,
@@ -170,7 +168,6 @@ impl Euclid {
             hits: 4,
             rotation: 0,
             step: None,
-            pattern: Pattern::new(16, 4, 0),
             entered_steps: 16,
             gate: false,
             clock: EdgeDetector::new(),
@@ -204,7 +201,7 @@ impl Module for Euclid {
             let clock_rose = self.clock.rising(clock[i]);
             let reset_rose = self.reset.rising(reset[i]);
             // A bad phase holds the step, and must not reach the wrap detector.
-            let wrapped_phase = phase[i].is_finite().then(|| wrap_phase(phase[i]));
+            let wrapped_phase = phase[i].is_finite().then(|| Wrap::wrap(phase[i]));
             let wrapped = wrapped_phase.is_some_and(|phase| self.wrap.wrapped(phase));
 
             let enter = if clocked {
@@ -227,16 +224,18 @@ impl Module for Euclid {
 
             let (mut fired, mut accent) = (false, false);
             if let Some(step) = enter {
-                self.pattern = Pattern::new(
+                let pattern = Pattern::new(
                     steps,
                     hits.map_or(i, self.hits, count),
                     rotation.map_or(i, self.rotation, count),
                 );
                 self.entered_steps = steps;
                 self.step = Some(step);
-                self.gate = self.pattern.is_hit(step);
+                // The pattern is read only here, and the gate holds the result,
+                // so a knob changes the next step and not this one.
+                self.gate = pattern.is_hit(step);
                 fired = self.gate;
-                accent = self.pattern.is_first_hit(step);
+                accent = pattern.is_first_hit(step);
             }
             trigger_out[i] = trigger(fired);
             gate_out[i] = trigger(self.gate);
