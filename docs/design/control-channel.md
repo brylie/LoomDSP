@@ -154,6 +154,11 @@ A rectangle is `{x, y, width, height}`, from its top-left corner. `locate` answe
 | `stats.load`, `stats.max_load` | The latest and highest callback load, as a share of the time budget (1.0 is 100%). 0 when nothing plays |
 | `stats.dropouts` | The dropout count the bar shows |
 | `stats.telemetry_dropped` | Meter and scope readings the engine dropped |
+| `stats.output_silenced`, `stats.output_clipped` | True while the bar shows that output warning ([panels.md](panels.md#audio-load-and-dropouts-in-the-stats-bar)) |
+| `status` | The latest status message |
+| `status_severity` | `info`, `warning`, or `error` ([visual system, Status messages](visual-system.md#status-messages)) |
+| `errors` | The kept errors, oldest first: `cause` (`audio_output`, `audio_input`, `file`, or `other`), `text`, and `dismissible` |
+| `learning` | True while MIDI learn mode is on and the bar shows `Learning` |
 | `tiles[].inputs[].shown`, `tiles[].outputs[].shown`, `tiles[].widgets[].shown` | The label as the tile draws it, when it is cut with "…" (`{"label": "Resonance", "shown": "Reson…"}`). Left out when the whole label shows |
 
 `App::stats_bar` draws from the same `stats` model, and `shown` comes from the canvas's own tile text layout, so the snapshot cannot disagree with the window. The frame rate is left out, so two snapshots of an idle app are equal. Titles are not listed: they are clipped at the tile edge, not cut with "…". A mapping label shown in place of a caption in MIDI learn mode is not listed either.
@@ -173,7 +178,7 @@ The [manual check for audio and MIDI devices](../dev/manual-checks/issue-26-devi
 | `midi` | `input`: a MIDI input name, `on`: true or false | Checks or unchecks the input, as its check box does. The choice is saved | `status`, `inputs`: the open inputs |
 | `new` | | Starts an empty patch, as the toolbar New button does after the unsaved-changes dialog | |
 
-`playing` is the line under the audio controls, for example `Playing on "BlackHole 2ch" at 96000 Hz, 64 frames (0.7 ms).` `status` is the status bar text. `audio` is the same object as in the `snapshot` reply.
+`playing` is the line under the audio controls, for example `Playing on "BlackHole 2ch" at 96000 Hz, 64 frames (0.7 ms).` `status` is the latest status message. `audio` is the same object as in the `snapshot` reply.
 
 Example, the rate and buffer steps of Part 2:
 
@@ -201,6 +206,16 @@ The `snapshot` reply gets a second field, `audio`, next to `snapshot`. It reads 
 | `stream_errors` | Errors the backend reported since the stream started, except `start_overloads`. The stats bar counts these as dropouts |
 | `start_overloads` | Overload notices that came before the stream's first callback. They drop no audio and are not dropouts ([panels.md](panels.md#audio-load-and-dropouts-in-the-stats-bar)) |
 | `overruns` | Callbacks that took longer than their buffer |
+| `input` | The audio input stream: `device` (the open stream's name, or `null`) and `state` ([#535](https://github.com/brylie/LoomDSP/issues/535), table below). Present whether or not an output plays |
+
+| `input.state` | What it means |
+|---|---|
+| `open` | A stream is open and live |
+| `failed` | A stream is open but has failed, and the app has not replaced it yet |
+| `denied` | Permission is denied now and no stream is open |
+| `waiting_for_named` | A named input was lost, and the app waits for that device |
+| `waiting` | An input is needed and no stream is open |
+| `off` | The patch or the settings need no input |
 
 `--dump-ui` stays as it is: it has no stream to read.
 

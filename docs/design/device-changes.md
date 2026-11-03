@@ -55,8 +55,8 @@ The fake host has a list of inputs that tests change.
 
 | Chosen device | What the app does |
 |---|---|
-| **System default** | At once, opens the current system default (which the system has probably moved to the speakers). The status bar says `Audio: "<old>" was lost. Now playing on "<new>".` |
-| **Named** | Plays nothing, keeps the engine idle, and the status bar says `Audio: "MOTU M4" was lost. Plug it in again, or choose another device in Preferences.` The app watches the device list once a second. When the device is back, it reopens it with the saved rate and buffer size, and says `Audio: "MOTU M4" is back.` |
+| **System default** | At once, opens the current system default (which the system has probably moved to the speakers). The status bar says `Audio: "<old>" was lost: <reason>. Now playing on "<new>".` as a warning. Sound is back, so it is not kept. |
+| **Named** | Plays nothing, keeps the engine idle, and the status bar says `Audio: "MOTU M4" was lost: <reason>. Plug it in again, or choose another device in Preferences.` The app watches the device list once a second. When the device is back, it reopens it with the saved rate and buffer size, and says `Audio: "MOTU M4" is back.` |
 | No device was playing | Nothing to do. |
 
 - **The patch and every edit are kept.** The controller owns the graph; the engine is only rebuilt. While no audio runs, the engine stays idle exactly as it does with `--no-audio`, and edits still work. *Why:* the player must be able to keep working, or save, after a drop-out.
@@ -64,7 +64,8 @@ The fake host has a list of inputs that tests change.
 - **Choosing another device** in Preferences while the old one is lost works as a normal change, except that there is no old stream to fade out. The saved choice changes to the new device.
 - **No fade-out is possible** for a lost device (there is nothing to play on). The safety stage ([output safety](output-safety.md)) protects the new stream.
 - **Sleep and wake.** On wake, a stream that stalled or errors is treated as lost: with System default, the app reopens it at once; with Named, it finds the device again within a second. If the device is not there, the message from the table is shown. *Why:* the same rule for every cause is easier to test and to explain.
-- **The message stays** in the status bar until the audio is back or the player chooses a device. A lost device is not a quiet event.
+- **The reason** says what the app saw: `the audio device reported an error`, `the device stopped calling back`, or `it was unplugged`. (Agreed, M2, [#493](https://github.com/brylie/LoomDSP/issues/493), 2026-11-03.) *Why:* "was lost" alone does not tell a performer whether to check a cable or the driver.
+- **The message stays** as a kept error ([visual system, Status messages](visual-system.md#status-messages)) until sound plays again or the player chooses a device. It has no dismiss button, and later messages show beside it. A lost device is not a quiet event.
 - **No crash and no modal.** *Why:* a dialog on stage is another thing to dismiss.
 - **A device that fails to reopen** repeats once a second for up to 10 tries, then stops and shows `Audio: could not reopen "<name>": <reason>. Choose a device in Preferences.`
 
@@ -85,6 +86,7 @@ The fake host can emit a `Lost` error for a device (`Fake::emit_lost`), remove a
 - [x] Given a lost Named device, when the player chooses another output, then sound plays there and the saved choice is the new device.
 - [x] Given a stream that stops calling back for more than one second, then it is treated as lost.
 - [x] A second error from the same stream does not rebuild the engine twice.
+- [x] The loss message gives the reason. With System default, moving to the new default leaves no kept error. Choosing another output while lost clears it. An edit while lost shows its compile report beside the kept error.
 - [ ] Manual, on macOS, Windows, and Linux, with the OS version and audio device listed in the pull request: unplug the interface while a patch plays (no crash, a message names the device); plug it in (sound returns); with the device gone choose another output (sound plays there); edits made while it was gone are kept; sleep the computer while playing and wake it (sound returns, or the message says why not).
 
 ## Out of scope
