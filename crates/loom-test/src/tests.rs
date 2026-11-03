@@ -759,7 +759,7 @@ fn a_wrapped_capture_passes_the_extreme_check() {
 #[test]
 #[should_panic(expected = "not finite")]
 fn a_stored_huge_value_that_overflows_fails_the_extreme_check() {
-    on_extreme_busy(&STICKY_OFFSET).check_extreme_stays_bounded();
+    on_extreme_busy(&STICKY_OFFSET).check_extreme_stays_bounded_on("phase");
 }
 
 /// The second bug in Phase Reset (#531): after a huge capture, ordinary inputs
@@ -770,6 +770,20 @@ fn a_stored_huge_value_that_overflows_fails_the_extreme_check() {
 #[should_panic(expected = "after 3.4028235e38 then 3.4028235e38 on input `phase`, output `phase`")]
 fn a_stored_huge_value_that_loses_the_fraction_fails_the_extreme_check() {
     on_extreme_busy(&STICKY_OFFSET).check_extreme_recovery();
+}
+
+/// The check for one input looks at that input only, so a fault on another stays
+/// out of it. The sticky module's faults are on `phase`.
+#[test]
+fn the_check_for_one_input_leaves_the_others_alone() {
+    on_extreme_busy(&STICKY_OFFSET).check_extreme_recovery_on("reset");
+}
+
+/// A name that is no input fails, so a table of exceptions cannot go stale.
+#[test]
+#[should_panic(expected = "test.phase-offset: there is no input `nope`")]
+fn the_check_for_one_input_needs_a_real_input() {
+    on_extreme_busy(&PHASE_OFFSET).check_extreme_recovery_on("nope");
 }
 
 /// A render too short to show the next edge fails, so the check cannot be

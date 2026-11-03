@@ -5,10 +5,10 @@
 
 mod common;
 
-use common::{busy, changed};
+use common::{SEEDED_ROUTES, busy, changed, pulses, selector};
 use loom_core::{MidiEvent, ModuleDescriptor, ModuleRole, TransportSettings};
 use loom_modules::ALL;
-use loom_test::{Harness, Signal};
+use loom_test::Harness;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 /// Frames rendered in each check.
@@ -41,10 +41,10 @@ fn harness(descriptor: &'static ModuleDescriptor) -> Harness {
 }
 
 /// True for a module with a random generator, which re-derives it when it
-/// copies (rule 27). Selector has one too, but it copies it as it is, because
-/// both sides of a stereo signal make the same picks (ADR-0036).
+/// copies (rule 27). A seeded route copies it as it is (ADR-0036), so it takes
+/// the strict check, which is what proves both sides match.
 fn seeded(descriptor: &ModuleDescriptor) -> bool {
-    descriptor.param_index("seed").is_some() && descriptor.id != "loom.route.selector"
+    descriptor.param_index("seed").is_some() && !SEEDED_ROUTES.contains(&descriptor.id)
 }
 
 /// Every DSP module in [`ALL`] except seeded ones continues bit-identically
@@ -143,32 +143,6 @@ fn a_playing_transport_copies_its_beat_state() {
 #[test]
 fn a_playing_transport_copies_its_bar_state() {
     check_playing_copy(&playing(&loom_modules::transport::TRANSPORT, 180_000), "bar");
-}
-
-/// A trigger every 100 frames from frame `first`.
-fn pulses(first: usize) -> Signal {
-    Signal::from_fn(move |frame| {
-        if frame >= first && (frame - first).is_multiple_of(100) {
-            1.0
-        } else {
-            0.0
-        }
-    })
-}
-
-/// A Selector in `mode`, each input holding its own value, stepped from frame
-/// 500. The shared check has one signal on every input, so a wrong pick looks
-/// the same there. Here it shows.
-fn selector(mode: f32) -> Harness {
-    let harness = Harness::new(&loom_modules::route::SELECTOR)
-        .frames(2_000)
-        .param("mode", mode)
-        .param("count", 8.0)
-        .param("fade", 0.0)
-        .input("step", pulses(500));
-    (1..=8).fold(harness, |h, n| {
-        h.input(&format!("in{n}"), Signal::constant(n as f32 / 8.0))
-    })
 }
 
 /// A Selector copy takes the whole random stream, so a new right side makes the

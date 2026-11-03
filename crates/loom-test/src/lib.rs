@@ -620,21 +620,37 @@ impl Harness {
     /// [`Signal::extreme_busy`] or their defaults.
     #[track_caller]
     pub fn check_extreme_recovery(&self) {
-        self.check_extreme(true);
+        self.check_extreme(None, true);
+    }
+
+    /// [`Harness::check_extreme_recovery`] for one input.
+    #[track_caller]
+    pub fn check_extreme_recovery_on(&self, input: &str) {
+        self.check_extreme(Some(self.extreme_port(input)), true);
     }
 
     /// The part of [`Harness::check_extreme_recovery`] that does not compare
-    /// with a clean render, for a module that rightly diverges from one after
-    /// an extra trigger, such as a counter or a seeded stream. Its output must
-    /// still stay finite and return to a normal size.
+    /// with a clean render, for one input. It is for an input where a huge value
+    /// is a real event, so the module rightly diverges from a clean render, such
+    /// as a counter's trigger. The output must still stay finite and return to a
+    /// normal size.
     #[track_caller]
-    pub fn check_extreme_stays_bounded(&self) {
-        self.check_extreme(false);
+    pub fn check_extreme_stays_bounded_on(&self, input: &str) {
+        self.check_extreme(Some(self.extreme_port(input)), false);
     }
 
-    /// Runs the extreme check, comparing with a clean render if `compare`.
+    /// The index of input `name`, for the extreme check.
     #[track_caller]
-    fn check_extreme(&self, compare: bool) {
+    fn extreme_port(&self, name: &str) -> usize {
+        self.descriptor
+            .input_index(name)
+            .unwrap_or_else(|| panic!("{}: there is no input `{name}`", self.descriptor.id))
+    }
+
+    /// Runs the extreme check on input `only`, or on every input, comparing with
+    /// a clean render if `compare`.
+    #[track_caller]
+    fn check_extreme(&self, only: Option<usize>, compare: bool) {
         let id = self.descriptor.id;
         let frames = self.frame_count();
         assert!(
@@ -644,10 +660,17 @@ impl Harness {
         let hold_end = EXTREME_START + EXTREME_FRAMES;
         let compare_from = hold_end + EXTREME_SETTLE;
         let (clean_inputs, connected) = self.input_buffers();
+        let base = self.run(MAX_BLOCK, &clean_inputs, &connected);
         for (port, spec) in self.descriptor.inputs.iter().enumerate() {
+            if only.is_some_and(|only| only != port) {
+                continue;
+            }
+            // A clean render differs only if the check adds a cable to this input.
+            let added = !connected[port];
             let mut connected = connected.clone();
             connected[port] = true;
-            let clean = self.run(MAX_BLOCK, &clean_inputs, &connected);
+            let own = added.then(|| self.run(MAX_BLOCK, &clean_inputs, &connected));
+            let clean = own.as_ref().unwrap_or(&base);
             for (extreme, flipped) in [(f32::MAX, f32::MAX), (-f32::MAX, -f32::MAX), (f32::MAX, -f32::MAX)] {
                 let mut inputs = clean_inputs.clone();
                 inputs[port][EXTREME_START..EXTREME_FLIP].fill(extreme);

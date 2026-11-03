@@ -74,7 +74,7 @@ Every render fails if a port or parameter has an empty label or description, and
 | `.check_copy_state_repeatable(at)` | For a seeded module, which re-derives its random state when it copies (rule 27): two copies taken at frame `at` play the same, and the copy returns `true`. |
 | `.check_non_finite_recovery()` | For each input in turn, and for each of NaN, infinity, and minus infinity, puts that value on the input for 8 frames from frame 1000, as a connected cable. Renders in blocks of 1 frame (as a feedback loop calls the module) and of 512. Fails unless every output is finite again 10 ms after the bad frames (480 frames at 48 kHz, scaled with the sample rate), up to the end of the render. Every other frame and input reads what the render reads without the check. |
 | `.check_extreme_recovery()` | See [Huge finite inputs](#huge-finite-inputs). |
-| `.check_extreme_stays_bounded()` | The same without the comparison, for a module with a stated exception. |
+| `.check_extreme_recovery_on(input)`, `.check_extreme_stays_bounded_on(input)` | The check for one input, and the same without the comparison, for an input with a stated exception. |
 
 `reference!("name")` gives `tests/reference/name.wav` inside the crate that calls it.
 
@@ -132,7 +132,7 @@ Golden-audio tests for whole patches, the other half of NFR-OSS-05 ([#93](https:
 - [x] `check_non_finite_recovery` fails for a module that keeps a NaN in its state, naming the module, input, value, output, and frame, and passes for a module without state. It fails when the render is too short to show recovery.
 - [x] Every built-in DSP module in `loom_modules::ALL` passes `check_non_finite_recovery`.
 - [x] Every built-in DSP module in `loom_modules::ALL` passes `check_reset`.
-- [x] Every built-in DSP module in `loom_modules::ALL` passes `check_extreme_recovery`, or has an exception with its reason and passes `check_extreme_stays_bounded`.
+- [x] Every built-in DSP module in `loom_modules::ALL` passes `check_extreme_recovery` on every input, except inputs with a stated reason, which pass `check_extreme_stays_bounded_on`.
 - [x] `check_extreme_recovery` fails for a module that stores a huge input as it comes, for each of the two faults found in Phase Reset.
 - [x] Every built-in DSP module in `loom_modules::ALL` passes `check_copy_state`, except seeded ones, which pass `check_copy_state_repeatable`. Copying allocates nothing (`no_alloc.rs`).
 
@@ -147,7 +147,7 @@ Cables carry any `f32` and are never clipped ([ADR-0007](../adr/0007-polymorphic
 - **Recovers.** After a settling time of 0.25 s, up to the next rising edge of the busy signal, each output matches a clean render within 0.1% of its peak. A phase output matches by its speed, modulo 1, not its value: a phase captured during the hold rightly has another offset, but it must keep moving at the input's rate. A check on size alone would pass a module whose output is wrong inside 0 to 1, as Phase Reset's was ([#531](https://github.com/brylie/LoomDSP/pull/531)).
 - **Normal size.** After that edge, each output is at most 10 times the clean render's peak.
 - **Why the busy signal is slow.** The test uses `Signal::extreme_busy`, a 2 Hz wave. Its first rising edge comes during the hold, so state captured on a trigger sees the huge value. Its next edge overwrites that state and hides the bug, so it must come after the comparison. At an audio rate the next edge comes within 2 ms, the settling time has not passed, and the check passes a module that keeps a bad value until then. Do not raise the frequency to speed up the test. A test in `loom-test` checks this timing.
-- **Exceptions.** A table in `extreme.rs` names each module that rightly diverges from a clean render, with the reason. Each still runs `.check_extreme_stays_bounded()`, and the test fails if a listed module no longer needs its exception.
+- **Exceptions.** A table in `extreme.rs` names each input where a huge value rightly leaves a module different from a clean render, as module, input, and reason. Every other input of that module gets the full check, so a reason only excuses the input it is about. Each listed input still runs `.check_extreme_stays_bounded_on`, and the test fails if one no longer needs its exception.
 
 ## Reset returns a module to its start
 

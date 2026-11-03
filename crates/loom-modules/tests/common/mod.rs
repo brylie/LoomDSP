@@ -6,7 +6,7 @@ use loom_core::{
     EngineConfig, EngineParts, MeterReading, MidiEvent, ModuleId, OutputSafety, ParamSpec, ProbeId, create_engine,
 };
 use loom_patch::Patch;
-use loom_test::Signal;
+use loom_test::{Harness, Signal};
 use std::f32::consts::TAU;
 use std::path::PathBuf;
 
@@ -28,6 +28,37 @@ pub fn changed(spec: &ParamSpec) -> f32 {
 /// state.
 pub fn busy(hz: f32) -> Signal {
     Signal::from_fn(move |frame| 0.75 * (frame as f32 * TAU * hz / SAMPLE_RATE).sin())
+}
+
+/// Seeded modules whose numbers choose a route, not a signal, so a copy takes the
+/// random stream as it is (ADR-0036). A new one belongs here, or it gets the
+/// check for the other seeded modules.
+pub const SEEDED_ROUTES: &[&str] = &["loom.route.selector"];
+
+/// A trigger every 100 frames from frame `first`.
+pub fn pulses(first: usize) -> Signal {
+    Signal::from_fn(move |frame| {
+        if frame >= first && (frame - first).is_multiple_of(100) {
+            1.0
+        } else {
+            0.0
+        }
+    })
+}
+
+/// A Selector in `mode`, each input holding its own value, stepped from frame
+/// 500. The shared checks have one signal on every input, so a wrong pick looks
+/// the same there. Here it shows.
+pub fn selector(mode: f32) -> Harness {
+    let harness = Harness::new(&loom_modules::route::SELECTOR)
+        .frames(2_000)
+        .param("mode", mode)
+        .param("count", 8.0)
+        .param("fade", 0.0)
+        .input("step", pulses(500));
+    (1..=8).fold(harness, |h, n| {
+        h.input(&format!("in{n}"), Signal::constant(n as f32 / 8.0))
+    })
 }
 
 pub fn patch_path(name: &str) -> PathBuf {

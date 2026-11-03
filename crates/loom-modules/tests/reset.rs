@@ -6,10 +6,10 @@
 
 mod common;
 
-use common::{busy, changed};
+use common::{busy, changed, pulses, selector};
 use loom_core::{MidiEvent, ModuleDescriptor, ModuleRole, TransportSettings};
 use loom_modules::ALL;
-use loom_test::{Harness, Signal};
+use loom_test::Harness;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 /// A one-second harness for `descriptor` with every parameter away from its
@@ -81,34 +81,12 @@ fn reset_clears_every_module_on_default_inputs_when_playing() {
     assert!(failed.is_empty(), "reset() leaves state in: {failed:?}");
 }
 
-/// A trigger every 100 frames from frame 500.
-fn pulses() -> Signal {
-    Signal::from_fn(|frame| {
-        if frame >= 500 && (frame - 500).is_multiple_of(100) {
-            1.0
-        } else {
-            0.0
-        }
-    })
-}
-
-/// A Selector's reset goes back to the wait and the start of the picks. The
-/// shared runs have one signal on every input, so a wrong pick looks the same
-/// there. Here each input holds its own value.
+/// A Selector's reset goes back to the wait and the start of the picks, with a
+/// different value on each input so a wrong pick shows.
 #[test]
 fn reset_clears_selector_picks_and_wait() {
     for mode in [0.0, 2.0] {
-        let harness = Harness::new(&loom_modules::route::SELECTOR)
-            .frames(2_000)
-            .param("mode", mode)
-            .param("count", 8.0)
-            .param("fade", 0.0)
-            .input("step", pulses());
-        (1..=8)
-            .fold(harness, |h, n| {
-                h.input(&format!("in{n}"), Signal::constant(n as f32 / 8.0))
-            })
-            .check_reset();
+        selector(mode).check_reset();
     }
 }
 
@@ -121,6 +99,6 @@ fn reset_clears_a_clocked_euclidean_rhythm() {
         .param("source", 1.0)
         .param("steps", 8.0)
         .param("hits", 3.0)
-        .input("clock", pulses())
+        .input("clock", pulses(500))
         .check_reset();
 }
