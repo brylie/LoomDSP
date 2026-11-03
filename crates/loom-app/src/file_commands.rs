@@ -234,7 +234,10 @@ impl App {
             }
             AfterDiscard::OpenDialog => {
                 let current = self.document.file().map(Path::to_path_buf);
-                let fallback = self.dialog_folder();
+                // Only if the current file has no folder to start in: looking
+                // up the library folder makes it.
+                let has_folder = current.as_deref().and_then(Path::parent).is_some_and(Path::is_dir);
+                let fallback = if has_folder { None } else { self.dialog_folder() };
                 if let Some(path) = files::pick_open(current.as_deref(), fallback.as_deref()) {
                     self.used_folder_of(&path);
                     self.open_path(&path);
@@ -254,20 +257,21 @@ impl App {
     /// Handles a question message. An answer closes the question first, so
     /// that what it starts can ask another.
     pub(crate) fn question_message(&mut self, message: QuestionMessage) {
-        let Some(question) = self.question.as_mut() else {
+        if let QuestionMessage::Move(by) = message {
+            if let Some(question) = self.question.as_mut() {
+                question.step(by);
+            }
+            return;
+        }
+        let Some(question) = self.question.take() else {
             return;
         };
         let answer = match message {
             QuestionMessage::Answer(answer) => answer,
-            QuestionMessage::Move(by) => {
-                question.step(by);
-                return;
-            }
             QuestionMessage::Activate => question.highlighted(),
-            QuestionMessage::Escape => question.safe_answer(),
+            QuestionMessage::Escape | QuestionMessage::Move(_) => question.safe_answer(),
         };
-        let kind = question.clone().into_kind();
-        self.question = None;
+        let kind = question.into_kind();
         match (kind, answer) {
             (Kind::Discard { next, .. }, Answer::Save) => {
                 self.save_then(Some(next));
@@ -437,10 +441,14 @@ impl App {
         }
     }
 
-    /// Opens the recent list, if it has anything to show. Whether a file is missing is looked
-    /// up here, not on every frame.
+    /// Opens the recent list, if it has anything to show. Whether a file is
+    /// missing is looked up here, not on every frame. The matrix gives up the
+    /// keys, or Delete would remove an assignment behind the list.
     pub(crate) fn open_recent_list(&mut self) {
         self.recent_rows = (!self.rig.recent.files().is_empty()).then(|| crate::recent::rows(self.rig.recent.files()));
+        if self.recent_rows.is_some() {
+            self.matrix.focused = false;
+        }
     }
 
     /// Handles a message for the open list.

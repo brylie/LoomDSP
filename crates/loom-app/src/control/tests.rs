@@ -1580,3 +1580,25 @@ fn a_scripted_save_answer_opens_no_picker() {
         app.alerts.status()
     );
 }
+
+/// The Panic key works over a question from a script, as it does from a real
+/// keyboard, and so do the question's own keys. Other keys stay refused.
+#[test]
+fn a_scripted_panic_key_works_over_a_question() {
+    use crate::question::{AfterDiscard, Question};
+    let question = Question::discard("a".into(), AfterDiscard::New);
+    let cmd = keyboard::Modifiers::COMMAND;
+    let refused = |key: keyboard::Key, m| refuse_while_asking(Some(&question), &key, m).is_err();
+    assert!(!refused(keyboard::Key::Character(".".into()), cmd), "Panic");
+    assert!(!refused(
+        keyboard::Key::Named(keyboard::key::Named::Tab),
+        keyboard::Modifiers::default()
+    ));
+    assert!(refused(keyboard::Key::Character("z".into()), cmd));
+    assert!(refused(
+        keyboard::Key::Character(".".into()),
+        keyboard::Modifiers::default()
+    ));
+    // With no question open, nothing is refused here.
+    assert!(refuse_while_asking(None, &keyboard::Key::Character("z".into()), cmd).is_ok());
+}

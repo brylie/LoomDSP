@@ -283,10 +283,18 @@ pub(super) fn question_open_error(question: &crate::question::Question) -> Strin
     )
 }
 
-/// True for the keys an open question uses. It blocks every other key press.
-pub(super) fn question_uses_key(key: &keyboard::Key) -> bool {
+/// Refuses a key an open question would block: anything but its own keys and
+/// the Panic key, which works whatever is open (panic.md).
+pub(super) fn refuse_while_asking(
+    question: Option<&crate::question::Question>,
+    key: &keyboard::Key,
+    modifiers: keyboard::Modifiers,
+) -> Result<(), String> {
     use keyboard::key::Named;
-    matches!(
+    let Some(question) = question else {
+        return Ok(());
+    };
+    let its_own = matches!(
         key,
         keyboard::Key::Named(
             Named::Tab
@@ -297,7 +305,12 @@ pub(super) fn question_uses_key(key: &keyboard::Key) -> bool {
                 | Named::ArrowUp
                 | Named::ArrowDown
         )
-    )
+    );
+    if its_own || crate::panic::is_panic_key(key, modifiers) {
+        Ok(())
+    } else {
+        Err(question_open_error(question))
+    }
 }
 
 /// The key press and release, as the keyboard listener sends them.

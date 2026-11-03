@@ -85,6 +85,9 @@ pub struct Question {
     kind: Kind,
     /// Which answer Enter would give, by index into [`Self::answers`].
     highlight: usize,
+    /// The answer it starts on, which also has the primary style. *Why:* the
+    /// strongest colour must not point at overwriting a file.
+    primary: Answer,
 }
 
 /// A question message.
@@ -109,6 +112,8 @@ pub struct Model {
     pub buttons: Vec<&'static str>,
     /// The button Enter would press.
     pub highlight: &'static str,
+    /// The button with the primary style: the safe answer.
+    pub primary: &'static str,
 }
 
 impl Question {
@@ -130,7 +135,11 @@ impl Question {
     /// A question whose highlight starts on the safe answer. *Why:* a stray
     /// Enter must never lose work or overwrite a file.
     fn starting_on(kind: Kind, safe: Answer) -> Self {
-        let mut question = Self { kind, highlight: 0 };
+        let mut question = Self {
+            kind,
+            highlight: 0,
+            primary: safe,
+        };
         question.highlight = question.answers().iter().position(|&a| a == safe).unwrap_or(0);
         question
     }
@@ -191,6 +200,7 @@ impl Question {
             text,
             buttons: self.answers().iter().map(|a| a.name()).collect(),
             highlight: self.highlighted().name(),
+            primary: self.primary.name(),
         }
     }
 
@@ -201,7 +211,11 @@ impl Question {
         let mut buttons = row![space::horizontal()].spacing(8);
         for (i, &answer) in self.answers().iter().enumerate() {
             let press = button(text(answer.label()).size(style::CONTROL)).on_press(Message::Answer(answer));
-            let press = if i == 0 { press.style(style::primary) } else { press };
+            let press = if answer == self.primary {
+                press.style(style::primary)
+            } else {
+                press
+            };
             buttons = buttons.push(container(press).padding(2).style(style::card(i == self.highlight)));
         }
         let panel = column![

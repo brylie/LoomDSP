@@ -26,7 +26,7 @@ fn library(name: &str) -> PathBuf {
 /// A browser that has read every file in `dir`, as the thread would.
 fn browser(dir: &Path) -> PatchBrowser {
     let mut browser = PatchBrowser::new(1, dir.to_path_buf());
-    for path in patch_files(dir) {
+    for path in patch_files(dir, &AtomicBool::new(false)) {
         let rows = vec![Row::read(&path)];
         let _ = browser.update(Message::Found { open: 1, rows });
     }
@@ -124,7 +124,7 @@ fn browse_opens_patches_in_the_app() {
     let _ = app.rig.store.save(preferences);
     let _ = app.update(AppMessage::File(FileAction::Browse));
     assert!(app.patches.is_some());
-    for path in patch_files(&dir) {
+    for path in patch_files(&dir, &AtomicBool::new(false)) {
         let rows = vec![Row::read(&path)];
         let _ = app.update(AppMessage::Patches(Message::Found {
             open: app.patches_open,
@@ -174,7 +174,7 @@ fn the_library_folder_is_made_when_first_needed() {
 #[test]
 fn the_reader_stops_within_one_file() {
     let dir = library("stop");
-    let total = patch_files(&dir).len();
+    let total = patch_files(&dir, &AtomicBool::new(false)).len();
     assert!(total > 2, "the folder must have files left to skip");
     let stop = AtomicBool::new(false);
     let mut reads = 0;
@@ -188,7 +188,6 @@ fn the_reader_stops_within_one_file() {
             }
             Row::read(path)
         },
-        Instant::now,
         |_| true,
     );
     assert_eq!(reads, 2, "of {total} files");
@@ -207,17 +206,19 @@ fn the_reader_stops_when_nobody_listens() {
             reads += 1;
             Row::read(path)
         },
-        // A batch goes with every row, so the first send finds no listener.
-        {
-            let mut time = Instant::now();
-            move || {
-                time += BATCH_WAIT;
-                time
-            }
-        },
         |_| false,
     );
-    assert_eq!(reads, 2, "the second row fills the time, and nobody listens");
+    assert_eq!(reads, 1);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// With the flag set, the walk finds nothing, so a closed browser does not go
+/// on through a large library.
+#[test]
+fn the_walk_stops_when_the_flag_is_set() {
+    let dir = library("walk");
+    assert!(patch_files(&dir, &AtomicBool::new(true)).is_empty());
+    assert!(!patch_files(&dir, &AtomicBool::new(false)).is_empty());
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -297,11 +298,14 @@ fn refilters_grow_with_batches_not_files() {
     const FILES: usize = 300;
     let dir = generated("batches", FILES);
     let still = Instant::now();
+    let (rows_in, rows_out) = mpsc::channel();
+    read_rows(&dir, &AtomicBool::new(false), Row::read, |row| {
+        rows_in.send(row).is_ok()
+    });
+    drop(rows_in);
     let mut batches = Vec::new();
-    read_rows(
-        &dir,
-        &AtomicBool::new(false),
-        Row::read,
+    send_batches(
+        &rows_out,
         || still,
         |rows| {
             batches.push(rows);
@@ -335,6 +339,27 @@ fn a_slow_row_is_not_kept_waiting() {
     assert_eq!(sent.len(), 3);
     // The wait starts again with the next row.
     assert_eq!(batch.push(row(), start + BATCH_WAIT * 10), None);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A row read before a slow one is not held back by it. The next row never
+/// comes here, as on a drive that has stalled, and the first still arrives.
+#[test]
+fn a_stalled_read_does_not_hold_back_earlier_rows() {
+    let dir = library("stalled");
+    let (rows_in, rows_out) = mpsc::channel();
+    let (sent_in, sent_out) = mpsc::channel();
+    let batcher = std::thread::spawn(move || {
+        send_batches(&rows_out, Instant::now, |rows| sent_in.send(rows).is_ok());
+    });
+    rows_in.send(Row::read(&dir.join("pad.ron"))).unwrap();
+    let sent = sent_out
+        .recv_timeout(Duration::from_secs(30))
+        .expect("the row must not wait for the next one");
+    assert_eq!(sent.len(), 1);
+    // The reader finishing ends the batcher.
+    drop(rows_in);
+    batcher.join().unwrap();
     let _ = std::fs::remove_dir_all(dir);
 }
 

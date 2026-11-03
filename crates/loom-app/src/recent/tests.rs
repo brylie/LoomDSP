@@ -458,3 +458,62 @@ fn overlays_stay_open_until_the_patch_opens() {
     let _ = app.update(AppMessage::Question(QuestionMessage::Answer(Answer::DontSave)));
     assert!(app.rig.window.is_none());
 }
+
+/// With the list open, the clipboard shortcuts reach nothing behind it. Cut
+/// would remove the selected modules.
+#[test]
+fn clipboard_keys_do_nothing_behind_the_list() {
+    let dir = TempDir::new("recent-clipboard");
+    let files = patches(&dir.0, 1);
+    let mut ui = Ui::with_app(app());
+    ui.app.rig.recent.remember(&files[0]).unwrap();
+    let (id, _) = ui.app.controller.graph().nodes().next().expect("a module");
+    ui.send(AppMessage::Canvas(loom_canvas::CanvasEvent::Select(vec![id.0])));
+    ui.redraw();
+    let count = ui.app.controller.graph().nodes().count();
+    ui.send(AppMessage::OpenRecent);
+    ui.redraw();
+    for key in ["x", "d"] {
+        ui.tap(Key::Character(key.into()), Modifiers::COMMAND);
+        assert_eq!(ui.app.controller.graph().nodes().count(), count, "{key}");
+    }
+    assert!(ui.app.recent_rows.is_some(), "the list stays open");
+}
+
+/// Opening the list takes the keys from a focused matrix, so Delete removes
+/// no assignment behind it, and one Escape closes the list.
+#[test]
+fn the_list_takes_the_keys_from_a_focused_matrix() {
+    let dir = TempDir::new("recent-matrix");
+    let files = patches(&dir.0, 1);
+    let mut ui = Ui::with_app(app());
+    ui.app.rig.recent.remember(&files[0]).unwrap();
+    ui.app.matrix.tab = crate::matrix::Tab::Matrix;
+    ui.app.matrix.focused = true;
+    ui.redraw();
+    ui.send(AppMessage::OpenRecent);
+    ui.redraw();
+    assert!(!ui.app.matrix.focused);
+    let messages = ui.tap(Key::Named(Named::Delete), Modifiers::empty());
+    assert!(
+        !messages.iter().any(|m| matches!(m, AppMessage::MatrixKey(_))),
+        "{messages:?}"
+    );
+    ui.tap(Key::Named(Named::Escape), Modifiers::empty());
+    assert!(ui.app.recent_rows.is_none(), "one Escape closes it");
+}
+
+/// Open with a current file starts in its folder, and does not make the
+/// library folder it does not need.
+#[test]
+fn open_makes_no_library_folder_it_does_not_need() {
+    let dir = TempDir::new("recent-no-library");
+    let library = dir.0.join("library");
+    let mine = patches(&dir.0, 1).remove(0);
+    let mut app = app_with_library(&library);
+    assert!(app.open_path(&mine));
+    let _ = fake::asked();
+    let _ = app.update(AppMessage::File(FileAction::Open));
+    assert_eq!(fake::asked(), [Asked::Open(Some(dir.0.clone()))]);
+    assert!(!library.exists());
+}

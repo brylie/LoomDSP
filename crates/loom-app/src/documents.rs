@@ -8,7 +8,9 @@
 //! The answer may not exist yet, because the library folder makes its
 //! parents. A caller that needs a folder to exist checks for itself.
 
-use std::path::{Path, PathBuf};
+#[cfg(not(windows))]
+use std::path::Path;
+use std::path::PathBuf;
 
 /// The user's Documents folder. Tests never look in the real one: they name
 /// a library folder.
@@ -48,7 +50,7 @@ fn system_folder() -> Option<PathBuf> {
 /// Where `user-dirs.dirs` is: in `XDG_CONFIG_HOME`, or else in `~/.config`.
 /// An empty or relative `XDG_CONFIG_HOME` counts as unset, as the XDG base
 /// directory rules say.
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg(not(windows))]
 fn user_dirs_file(config_home: Option<&Path>, home: &Path) -> PathBuf {
     config_home
         .filter(|dir| dir.is_absolute())
@@ -60,7 +62,7 @@ fn user_dirs_file(config_home: Option<&Path>, home: &Path) -> PathBuf {
 /// looks like `XDG_DOCUMENTS_DIR="$HOME/Dokumente"`, and its path is either
 /// absolute or starts with `$HOME/`. A folder set to `$HOME` itself means the
 /// user turned it off, so it gives `None`, as does a line that is neither.
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg(not(windows))]
 fn from_user_dirs(text: &str, home: &Path) -> Option<PathBuf> {
     let value = text
         .lines()

@@ -347,10 +347,8 @@ impl App {
                 let then = match key(&name)
                     .and_then(|k| Ok((k, modifiers(&names)?)))
                     .and_then(|(k, m)| refuse_dialog_keys(&k, m).map(|()| (k, m)))
-                    .and_then(|(k, m)| match &self.question {
-                        Some(question) if !question_uses_key(&k) => Err(question_open_error(question)),
-                        _ => Ok((k, m)),
-                    }) {
+                    .and_then(|(k, m)| refuse_while_asking(self.question.as_ref(), &k, m).map(|()| (k, m)))
+                {
                     Ok((k, m)) => {
                         let steps = key_events(k, m).into_iter().map(PointerStep::Key).collect();
                         Then::AfterDraw(Step::Pointer(self.pointer.push(steps), false))

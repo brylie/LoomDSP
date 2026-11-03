@@ -404,3 +404,15 @@ fn rows_still_reach_a_browser_under_the_question() {
     let browser = app.patches.as_ref().expect("the browser is still open");
     assert_eq!(browser.shown().count(), 1);
 }
+
+/// The strongest colour is on the safe answer, where Enter starts, and never
+/// on overwriting a file.
+#[test]
+fn the_primary_style_is_on_the_safe_answer() {
+    let path = PathBuf::from("foo.ron");
+    assert_eq!(Question::discard("a".into(), AfterDiscard::New).model().primary, "save");
+    let replace = Question::replace(path, None).model();
+    assert_eq!(replace.primary, "cancel");
+    assert_eq!(replace.primary, replace.highlight);
+    assert_eq!(Question::error("no".into()).model().primary, "ok");
+}

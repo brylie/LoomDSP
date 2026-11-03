@@ -537,12 +537,11 @@ impl Message {
                     | CanvasEvent::ArrowGroupEnd
                     | CanvasEvent::AssignCancel
             ),
-            // Only key presses act. A release ends what a press began.
-            Self::Key(event) => !matches!(event, iced::keyboard::Event::KeyPressed { .. }),
             // A close asks over the browser, and Cancel returns to it: rows
             // read meanwhile must not go missing.
             Self::Patches(message) => matches!(message, patches::Message::Found { .. }),
-            Self::DropRow(_)
+            Self::Key(_)
+            | Self::DropRow(_)
             | Self::Param { .. }
             | Self::OpenBrowser
             | Self::ShowHelp

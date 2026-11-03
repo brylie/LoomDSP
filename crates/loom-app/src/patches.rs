@@ -16,6 +16,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::{Duration, Instant, SystemTime};
 
 /// The search field's widget ID: typing goes there when the browser opens.
@@ -97,10 +98,15 @@ fn details(info: Option<&Metadata>, changed: Option<SystemTime>) -> String {
 
 /// Every patch file in `folder` and its subfolders, in no set order.
 /// Hidden files and folders, such as a save's temporary file, are skipped.
-pub fn patch_files(folder: &Path) -> Vec<PathBuf> {
+/// Stops at the next folder once `stop` is set, so a closed browser does not
+/// go on walking a large library on a slow drive.
+pub fn patch_files(folder: &Path, stop: &AtomicBool) -> Vec<PathBuf> {
     let mut found = Vec::new();
     let mut folders = vec![folder.to_path_buf()];
     while let Some(dir) = folders.pop() {
+        if stop.load(Ordering::Relaxed) {
+            return Vec::new();
+        }
         let Ok(entries) = std::fs::read_dir(&dir) else { continue };
         for entry in entries.flatten() {
             let path = entry.path();
@@ -134,6 +140,11 @@ impl Batch {
         (self.rows.len() >= BATCH_ROWS || now.duration_since(since) >= BATCH_WAIT).then(|| self.take())
     }
 
+    /// When the oldest waiting row has waited long enough, if one is waiting.
+    fn deadline(&self) -> Option<Instant> {
+        self.since.map(|since| since + BATCH_WAIT)
+    }
+
     /// The waiting rows, which are then forgotten.
     fn take(&mut self) -> Vec<Row> {
         self.since = None;
@@ -141,43 +152,69 @@ impl Batch {
     }
 }
 
-/// Reads each patch file in `folder` with `read_row`, and gives the rows to
-/// `send` in batches. Stops within one file of `stop` being set, or when
-/// `send` says nobody is listening. `now` tells the time.
+/// Reads each patch file in `folder` with `read_row`, and gives each row to
+/// `send`. Stops within one file of `stop` being set, or when `send` says
+/// nobody is listening.
 fn read_rows(
     folder: &Path,
     stop: &AtomicBool,
     mut read_row: impl FnMut(&Path) -> Row,
-    mut now: impl FnMut() -> Instant,
-    mut send: impl FnMut(Vec<Row>) -> bool,
+    mut send: impl FnMut(Row) -> bool,
 ) {
-    let mut batch = Batch::default();
-    for path in patch_files(folder) {
+    for path in patch_files(folder, stop) {
         if stop.load(Ordering::Relaxed) {
             return;
         }
-        let row = read_row(&path);
-        if let Some(rows) = batch.push(row, now())
+        if !send(read_row(&path)) {
+            return;
+        }
+    }
+}
+
+/// Gathers the rows that come from `rows` into batches for `send`, until the
+/// reader has finished or nobody is listening. It waits for a row only as
+/// long as the oldest waiting row may wait. *Why not in the reader:* a read
+/// from a slow drive would hold back the rows read before it.
+fn send_batches(rows: &mpsc::Receiver<Row>, mut now: impl FnMut() -> Instant, mut send: impl FnMut(Vec<Row>) -> bool) {
+    let mut batch = Batch::default();
+    loop {
+        let received = match batch.deadline() {
+            Some(deadline) => rows.recv_timeout(deadline.saturating_duration_since(now())),
+            None => rows.recv().map_err(|_| RecvTimeoutError::Disconnected),
+        };
+        let ready = match received {
+            Ok(row) => batch.push(row, now()),
+            Err(RecvTimeoutError::Timeout) => Some(batch.take()),
+            Err(RecvTimeoutError::Disconnected) => {
+                let rows = batch.take();
+                if !rows.is_empty() {
+                    send(rows);
+                }
+                return;
+            }
+        };
+        if let Some(rows) = ready
             && !send(rows)
         {
             return;
         }
     }
-    let rows = batch.take();
-    if !rows.is_empty() && !stop.load(Ordering::Relaxed) {
-        send(rows);
-    }
 }
 
-/// Reads the patch files in `folder` on a thread, sending the rows in
-/// batches, so the window never waits for the disk. The thread ends when
-/// `stop` is set, so a closed browser does not go on reading a large or slow
-/// library. Its sender then drops, which ends the task too.
+/// Reads the patch files in `folder` on one thread and sends the rows in
+/// batches from another, so the window never waits for the disk. The reader
+/// ends when `stop` is set, so a closed browser does not go on reading a large
+/// or slow library. The batcher then ends too, which ends the task. If the
+/// task goes first, the batcher ends, and then the reader.
 #[cfg(not(test))]
 fn read(open: u64, folder: PathBuf, stop: Arc<AtomicBool>) -> Task<Message> {
     let (sender, receiver) = iced::futures::channel::mpsc::unbounded();
+    let (rows_in, rows_out) = mpsc::channel();
     std::thread::spawn(move || {
-        read_rows(&folder, &stop, Row::read, Instant::now, |rows| {
+        read_rows(&folder, &stop, Row::read, |row| rows_in.send(row).is_ok());
+    });
+    std::thread::spawn(move || {
+        send_batches(&rows_out, Instant::now, |rows| {
             sender.unbounded_send(Message::Found { open, rows }).is_ok()
         });
     });
@@ -188,8 +225,11 @@ fn read(open: u64, folder: PathBuf, stop: Arc<AtomicBool>) -> Task<Message> {
 /// to its end and cannot wait for a thread.
 #[cfg(test)]
 fn read(open: u64, folder: PathBuf, stop: Arc<AtomicBool>) -> Task<Message> {
+    let (rows_in, rows_out) = mpsc::channel();
+    read_rows(&folder, &stop, Row::read, |row| rows_in.send(row).is_ok());
+    drop(rows_in);
     let mut tasks = Vec::new();
-    read_rows(&folder, &stop, Row::read, Instant::now, |rows| {
+    send_batches(&rows_out, Instant::now, |rows| {
         tasks.push(Task::done(Message::Found { open, rows }));
         true
     });
