@@ -99,6 +99,13 @@ impl<Message> PatchCanvas<'_, Message> {
             }
         }
 
+        // An open list comes before every other use of the pointer. A stale
+        // one is closed first, so the event still does its normal work.
+        self.close_stale_select(state);
+        if self.select_popup_event(state, event, bounds, over, screen, shell) {
+            return;
+        }
+
         match event {
             Event::Keyboard(keyboard::Event::KeyPressed {
                 key: keyboard::Key::Named(keyboard::key::Named::Escape),
@@ -229,12 +236,6 @@ impl<Message> PatchCanvas<'_, Message> {
             }
             Event::Mouse(mouse::Event::WheelScrolled { delta }) if over => {
                 let Some(screen) = screen else { return };
-                if state.select_popup.take().is_some() {
-                    state.last_click = None;
-                    shell.request_redraw();
-                    shell.capture_event();
-                    return;
-                }
                 match *delta {
                     // A mouse wheel zooms.
                     mouse::ScrollDelta::Lines { y, .. } => {
@@ -257,43 +258,8 @@ impl<Message> PatchCanvas<'_, Message> {
                 shell.request_redraw();
                 shell.capture_event();
             }
-            Event::Mouse(mouse::Event::ButtonPressed(_)) if !over && state.select_popup.is_some() => {
-                state.select_popup = None;
-                state.last_click = None;
-                shell.request_redraw();
-            }
             Event::Mouse(mouse::Event::ButtonPressed(button)) if over => {
                 let Some(screen) = screen else { return };
-                if let Some(popup) = state.select_popup.take() {
-                    let double = *button == mouse::Button::Left
-                        && self.scene.hit(state.camera.to_world(screen), state.hit_radius())
-                            == Hit::Widget {
-                                module: popup.module,
-                                widget: popup.widget,
-                            }
-                        && state.last_click.is_some_and(|(at, module, widget)| {
-                            module == popup.module && widget == popup.widget && Instant::now() - at < DOUBLE_CLICK
-                        });
-                    state.last_click = None;
-                    if double {
-                        self.emit(
-                            shell,
-                            CanvasEvent::ResetControl {
-                                module: popup.module,
-                                widget: popup.widget,
-                            },
-                        );
-                    } else if *button == mouse::Button::Left
-                        && let Some(rect) = self.select_popup_bounds_for(state, bounds, popup)
-                        && rect.contains(screen)
-                    {
-                        let index = ((screen.y - rect.y) / SELECT_ROW_PX).floor() as usize;
-                        self.set_control(shell, popup.module, popup.widget, index as f32);
-                    }
-                    shell.request_redraw();
-                    shell.capture_event();
-                    return;
-                }
                 if self.matrix_keyboard {
                     self.emit(shell, CanvasEvent::PointerDown);
                 }
@@ -573,7 +539,6 @@ impl<Message> PatchCanvas<'_, Message> {
                 }
             }
             Event::Window(window::Event::Unfocused) => {
-                state.select_popup = None;
                 // A key release never arrives if the window loses focus
                 // while Space or Enter is held. End every hold here.
                 self.release_pointer_hold(state, shell);

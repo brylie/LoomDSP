@@ -28,6 +28,7 @@ mod event;
 mod hover_text;
 mod input;
 mod panel_input;
+mod select_popup;
 
 pub use event::CanvasEvent;
 

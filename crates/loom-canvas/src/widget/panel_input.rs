@@ -273,49 +273,6 @@ impl<Message> PatchCanvas<'_, Message> {
         );
     }
 
-    /// Screen rectangle of the open list, kept readable at any canvas zoom.
-    pub(super) fn select_popup_bounds(&self, state: &State, bounds: Rectangle) -> Option<Rectangle> {
-        let popup = state.select_popup?;
-        self.select_popup_bounds_for(state, bounds, popup)
-    }
-
-    /// Screen rectangle for a specified select popup.
-    pub(super) fn select_popup_bounds_for(
-        &self,
-        state: &State,
-        bounds: Rectangle,
-        popup: SelectPopup,
-    ) -> Option<Rectangle> {
-        let module = self.scene.module(popup.module)?;
-        let rect = module.widget_bounds(popup.widget)?;
-        let WidgetViewKind::Select { options } = &module.panel.widgets.get(popup.widget)?.kind else {
-            return None;
-        };
-        let box_rect = select_box(rect);
-        let anchor = state.camera.to_screen(box_rect.position());
-        let width = (box_rect.width * state.camera.zoom)
-            .max(SELECT_WIDTH_PX)
-            .min(bounds.width);
-        let height = SELECT_ROW_PX * options.len() as f32;
-        let x = anchor.x.clamp(0.0, (bounds.width - width).max(0.0));
-        let below = anchor.y + box_rect.height * state.camera.zoom + 3.0;
-        let y = if below + height <= bounds.height {
-            below
-        } else {
-            (anchor.y - height - 3.0).max(0.0)
-        };
-        Some(Rectangle::new(Point::new(x, y), Size::new(width, height)))
-    }
-
-    /// Opens a select list at its current value.
-    pub(super) fn open_select(&self, state: &mut State, module: u32, widget: usize) {
-        state.select_popup = Some(SelectPopup {
-            module,
-            widget,
-            highlight: self.position(module, widget).round().max(0.0) as usize,
-        });
-    }
-
     /// Pointer down on a button. The tile stays put. Pointer up reports a
     /// release, whichever mode the app has stored.
     pub(super) fn press_button(&self, state: &mut State, module: u32, widget: usize, shell: &mut Shell<'_, Message>) {
@@ -368,13 +325,8 @@ impl<Message> PatchCanvas<'_, Message> {
         }) {
             state.focus = None;
         }
-        // A hidden select is not drawn, so its list closes too.
-        if state
-            .select_popup
-            .is_some_and(|popup| hidden(popup.module, popup.widget))
-        {
-            state.select_popup = None;
-        }
+        // A hidden or removed select is not drawn, so its list closes too.
+        self.close_stale_select(state);
         if lost_to_mode
             && matches!(
                 key.as_ref(),
@@ -391,43 +343,9 @@ impl<Message> PatchCanvas<'_, Message> {
             shell.capture_event();
             return true;
         }
-        if let Some(mut popup) = state.select_popup
-            && let Some(WidgetViewKind::Select { options }) = self.widget_kind(popup.module, popup.widget)
-        {
-            let used = match key.as_ref() {
-                keyboard::Key::Named(Named::Escape) => {
-                    state.select_popup = None;
-                    state.last_click = None;
-                    true
-                }
-                keyboard::Key::Named(Named::ArrowUp | Named::ArrowDown) => {
-                    let delta = if matches!(key.as_ref(), keyboard::Key::Named(Named::ArrowUp)) {
-                        -1
-                    } else {
-                        1
-                    };
-                    popup.highlight =
-                        (popup.highlight as isize + delta).clamp(0, options.len().saturating_sub(1) as isize) as usize;
-                    state.select_popup = Some(popup);
-                    true
-                }
-                keyboard::Key::Named(Named::Enter | Named::Space) => {
-                    if !repeat {
-                        self.set_control(shell, popup.module, popup.widget, popup.highlight as f32);
-                        state.select_popup = None;
-                    }
-                    true
-                }
-                keyboard::Key::Named(Named::ArrowLeft | Named::ArrowRight | Named::Tab) => true,
-                _ => false,
-            };
-            if used {
-                shell.request_redraw();
-                shell.capture_event();
-                return true;
-            }
-        } else {
-            state.select_popup = None;
+        // An open list comes before every other use of a key.
+        if self.select_popup_key(state, key, repeat, shell) {
+            return true;
         }
         let used = match key.as_ref() {
             // Escape hides pinned lines before it does anything else

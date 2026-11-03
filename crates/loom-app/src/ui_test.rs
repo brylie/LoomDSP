@@ -1440,4 +1440,37 @@ mod tests {
             .collect();
         assert_eq!(hidden, ["Sustain", "Release"]);
     }
+
+    /// An open select list, through the real view: a click opens it, Down and
+    /// Enter pick the next choice once, and Escape closes it with no edit. The
+    /// keys never reach the canvas or the tile behind it (panel-widgets.md,
+    /// Select list).
+    #[test]
+    fn a_select_list_takes_its_keys_through_the_real_view() {
+        use keyboard::key::Named;
+        let mut ui = Ui::open("sine.ron");
+        let lfo = select_new(&mut ui, "loom.mod.lfo");
+        let shape = |ui: &Ui| {
+            let node = ui.app.controller.graph().node(lfo).unwrap();
+            node.params[node.descriptor.param_index("shape").unwrap()]
+        };
+        let before = shape(&ui);
+        let position = ui.app.scene.module(lfo.0).unwrap().position;
+        let at = ui.control(lfo.0, "shape");
+        let none = keyboard::Modifiers::default();
+
+        ui.move_to(at);
+        ui.press();
+        ui.release();
+        ui.tap(keyboard::Key::Named(Named::Escape), none);
+        assert_eq!(shape(&ui), before, "Escape edits nothing");
+
+        ui.press();
+        ui.release();
+        ui.tap(keyboard::Key::Named(Named::ArrowDown), none);
+        assert_eq!(shape(&ui), before, "Down moves only the highlight");
+        ui.tap(keyboard::Key::Named(Named::Enter), none);
+        assert_eq!(shape(&ui), before + 1.0, "Enter commits one choice");
+        assert_eq!(ui.app.scene.module(lfo.0).unwrap().position, position);
+    }
 }

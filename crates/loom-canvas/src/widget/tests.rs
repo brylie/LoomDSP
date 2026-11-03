@@ -720,6 +720,95 @@ fn stale_select_popup_passes_escape_to_normal_key_handling() {
     }
 }
 
+/// A press on empty canvas with a stale list goes on to normal handling, so
+/// the removed widget's list cannot swallow it. The same holds for the wheel,
+/// which then zooms.
+#[test]
+fn stale_select_popup_passes_the_pointer_to_normal_handling() {
+    let scene = chain();
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |event| event);
+    let stale = || {
+        Some(SelectPopup {
+            module: 999,
+            widget: 0,
+            highlight: 0,
+        })
+    };
+    let empty = Point::new(790.0, 590.0);
+    let mut state = State {
+        select_popup: stale(),
+        ..State::default()
+    };
+    drive(&canvas, &mut state, &click(mouse::Button::Left), empty);
+    assert!(state.select_popup.is_none());
+    assert!(matches!(state.interaction, Interaction::Selecting { .. }));
+
+    let mut state = State {
+        select_popup: stale(),
+        ..State::default()
+    };
+    let zoom = state.camera.zoom;
+    drive(
+        &canvas,
+        &mut state,
+        &Event::Mouse(mouse::Event::WheelScrolled {
+            delta: mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 },
+        }),
+        empty,
+    );
+    assert_ne!(state.camera.zoom, zoom, "the wheel zooms again");
+}
+
+/// An open list commits to its own widget, even when keyboard focus has moved
+/// to another control. A press outside the canvas, or the window losing focus,
+/// closes it with no edit.
+#[test]
+fn select_popup_commits_to_its_own_widget_and_closes_with_no_edit() {
+    let select = || WidgetViewKind::Select {
+        options: vec!["ADSR".into(), "AD".into()],
+    };
+    let mut view = module(1, 0.0);
+    view.panel = PanelView {
+        width: 12,
+        height: 2,
+        widgets: vec![widget(select(), 0), widget(select(), 6)],
+    };
+    let scene = Scene::new(vec![view], Vec::new());
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |event| event);
+    let at = scene.module(1).unwrap().widget_bounds(1).unwrap().center();
+    let open = || {
+        Some(SelectPopup {
+            module: 1,
+            widget: 0,
+            highlight: 1,
+        })
+    };
+    let mut state = State {
+        focus: Some((1, 1)),
+        select_popup: open(),
+        ..State::default()
+    };
+    let chosen = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Enter, true), at);
+    assert_eq!(
+        chosen,
+        vec![CanvasEvent::SetControl {
+            module: 1,
+            widget: 0,
+            position: 1.0
+        }]
+    );
+
+    let mut state = State {
+        select_popup: open(),
+        ..State::default()
+    };
+    let unfocused = drive(&canvas, &mut state, &Event::Window(window::Event::Unfocused), at);
+    assert!(state.select_popup.is_none());
+    assert!(!unfocused.iter().any(|e| matches!(e, CanvasEvent::SetControl { .. })));
+}
+
 /// A drag in progress when a pop-up opens ends at the next redraw,
 /// which reaches the canvas even when the pop-up takes every pointer
 /// and key event. A button held by the pointer is released too.
