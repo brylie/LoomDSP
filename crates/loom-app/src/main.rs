@@ -306,6 +306,12 @@ enum Message {
         found: control::Found,
         then: control::AfterSearch,
     },
+    /// Whether a text field has focus, for a `type` command.
+    TextFocus {
+        call: control::Call,
+        text: String,
+        focused: bool,
+    },
     Animate(bool),
     Frame(Instant),
     /// A slow tick while a recording runs, to notice a write error.
@@ -923,7 +929,9 @@ impl App {
             Message::Tick => FrameCause::Tick,
             Message::LiveFrame => FrameCause::Live,
             Message::Meters(_) | Message::Telemetry(_) | Message::Lights(_) => FrameCause::Meters,
-            Message::Control(_) | Message::ControlFrame(_) | Message::Located { .. } => FrameCause::Control,
+            Message::Control(_) | Message::ControlFrame(_) | Message::Located { .. } | Message::TextFocus { .. } => {
+                FrameCause::Control
+            }
             Message::Canvas(_) | Message::Key(_) | Message::File(FileAction::Close) => FrameCause::Input,
             Message::Frame(_) => FrameCause::Forced,
             _ => FrameCause::Other,
@@ -967,6 +975,10 @@ impl App {
                 found,
                 then,
             } => self.located(call, &target, &found, then),
+            Message::TextFocus { call, text, focused } => {
+                self.text_focus(call, &text, focused);
+                Task::none()
+            }
             message if self.clipboard_key(&message).is_some() => self.clipboard_command(&message),
             message => {
                 self.handle(message);
@@ -1145,6 +1157,7 @@ impl App {
             | Message::Control(_)
             | Message::ControlFrame(_)
             | Message::Located { .. }
+            | Message::TextFocus { .. }
             | Message::Matrix(_)
             | Message::MatrixKey(_) => {}
             Message::ShowHelp => {

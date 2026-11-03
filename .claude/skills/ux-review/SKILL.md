@@ -51,6 +51,7 @@ It defaults to `examples/patches/subtractive.ron` and module 4. `MODULE` is the 
 | `09-playing.png` | A held note, with live meters and scope |
 | `10-first-launch.png` | The app started with no patch, as a new user meets it |
 | `11-first-browser.png` | The module browser opened from the toolbar on that first launch |
+| `12-browser-search.png` | The same browser after typing a search |
 | `gallery.png` | Every built-in module at 100% zoom |
 | `gallery.json`, `patch.json` | What the UI shows, as JSON (`--dump-ui`) |
 | `measures.txt` | Cut labels and the port hit area (from `measure.py`) |
@@ -70,7 +71,7 @@ Each of these has misled a review, or would have:
 - **Prefer live captures to judge chrome.** `--screenshot-window` does not always open the patch as the app does. Use the control channel's `screenshot` for anything about the whole window.
 - **The tour's patch is not the only state.** Check large (`--generate 300`), and error states when they matter to the scope. Polish problems tend to live there. The first-launch images cover the empty state.
 - **`ok:true` means the command was delivered, not that it did anything.** `key a` with no pointer and a `scroll` that misses the panel both reply `ok:true`. After any step you rely on, compare the images (`shasum` finds identical ones quickly). A missed scroll is your script's error, not a bug in the app.
-- **`key` cannot type text.** It sends no text with the key, so a text field ignores it: letters sent to a search field reply `ok:true` and change nothing. Searching, tags, and other typed input cannot be driven. Read them from the code and tests, label them as not seen, and never report them as broken from this evidence.
+- **`key` does not type text.** It sends no text with the key, so a text field ignores it, and the reply is still `ok:true`. Use `type`, which is refused when no text field has focus. A placeholder is not text that `locate` can find, so aim at an empty field with `x` and `y`.
 - **`add` is not the browser.** It places a module below the patch, while a real add goes at the pointer or a default spot. Use `add` to build a patch for a test. Never use it to judge placement: click Add module, or press A, instead.
 - **Not everything is in the snapshot.** The module browser's results, for example, are not, so read those from images. Do not take an absence from the snapshot to mean an absence from the window.
 - **Hover text from a script is not reliable.** The spec says pop-ups get the real cursor, but a trial saw a button's tooltip appear after a scripted `press`. Draw no conclusion from a tooltip showing or not showing in a live capture. Use `--hover-text` for the image, and the snapshot's `text` fields for a tile's words. Panels drawn in the window view, such as the module browser, do get scripted pointer commands.

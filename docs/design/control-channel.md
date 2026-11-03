@@ -64,6 +64,7 @@ Any client that can write lines to a Unix socket works, such as `nc -U /tmp/loom
 | `note` | `note`, optional `velocity` (default 100), `on` | A MIDI note on or off on channel 1, as a MIDI port sends it | |
 | `cc` | `controller`, `value`, optional `channel` (1 to 16, default 1) | A MIDI control change. Replies once the engine has taken it and the app has applied it: mapped controls moved, or the armed parameter learned it | |
 | `key` | `key` (a character, or `escape`, `enter`, `tab`, `space`, `delete`, `backspace`, `up`, `down`, `left`, `right`, `home`, `end`, `pageup`, `pagedown`), optional `modifiers` (`cmd`, `ctrl`, `shift`, `alt`) | A key press and release, each on its own frame, sent to the window view at the pointer as a real key is. A widget can take it (the canvas takes Escape while a badge is pinned); what none takes goes to the app as the keyboard listener sends it | |
+| `type` | `text` | Types into the text field that has focus, one character at a time, as a keyboard does ([Typing text](#typing-text)). Refused when no text field has focus | |
 | `toolbar` | `button`: `learn` (MIDI learn), `hold` (Hold note), `panic` (Panic), `undo`, `redo` | Clicks a toolbar button by name, through the message it sends. Refused when the button is disabled, opens a dialog (rule 9), or is Add module (use `add`). Was `press` before [#392](https://github.com/brylie/LoomDSP/issues/392); `press` is now only the mouse button ([Pointer commands](#pointer-commands)) | |
 | `arm` | `target`: a parameter (`"4:cutoff"`) | In MIDI learn mode, arms the parameter, or disarms it if armed, as its inspector row does. Refused when learn mode is off | |
 | `locate` | `target`: a module (`"4"`), a control, port, light, or meter by name (`"4:cutoff"`, `"3:out"`, `"5:level"`, rule 10), with `display:`, `input:`, `output:`, or `badge:` to name a light or meter, a port, or an output's badge directly (`"11:display:out"`, `"4:input:cutoff"`, `"5:badge:out"`), or any other text shown in the window (`"Cutoff"`) | Nothing | The centre and size, in logical window pixels |
@@ -71,6 +72,27 @@ Any client that can write lines to a Unix socket works, such as `nc -U /tmp/loom
 | `sample` | `target`: a control, light, or meter by the name it is bound to (`"4:resonance"`), `ms` (1 to 30000) | Records what the canvas draws for this widget, once per frame, for this long | `frames`: one entry per drawn frame. `t`: milliseconds since the first entry. `position`: the knob position, light brightness, or meter level, from 0 to 1. `live`: a knob's live modulated value, as a position, while its dot is drawn. `peak`: a meter's peak level |
 | `wait` | `ms` | Replies after this long, with the app running | |
 | `quit` | | Closes the app, without asking to save | |
+
+### Typing text
+
+**Status:** Agreed, and built.
+
+`key` sends a key with no text, as a shortcut needs. A text field inserts only the text a key event carries, so it ignored `key`, and the reply still said `ok`. A script could not search the module browser or fill in a patch's tags. `type` fills that gap:
+
+```text
+> {"cmd": "key", "key": "a"}
+< {"ok": true}
+> {"cmd": "type", "text": "saw"}
+< {"ok": true}
+> {"cmd": "key", "key": "enter"}
+< {"ok": true}
+```
+
+- **One key per character.** Each character is a key press carrying that text and a release, each on its own frame, sent to the window view as `key` is. *Why:* a text field builds its next value from the value the view last gave it, so two characters in one frame would lose the first. This is also the path a keyboard takes (rule 3).
+- **Refused with no text field in focus.** The reply is `ok: false`, and no key is sent. *Why:* otherwise `a` would reach the app's shortcuts and open the module browser, and a script could not tell that its text went nowhere. Focus is checked after the two frames of rule 5, so a field that an earlier command focused counts.
+- **Text only.** A control character, such as a newline or a tab, is refused, and the error points to `key`. Empty text is refused too. *Why:* Enter and Tab act on the field or the window. A script should say that on purpose.
+- **At most 500 characters.** *Why:* each character takes two frames, so 500 takes about 17 seconds at 60 frames per second, well inside the time a listener waits for an answer.
+- **The reply says the keys went in.** It does not read the field back. A script checks the result as it would for a person: `screenshot`, or the snapshot where the field's view is in it.
 
 ### Pointer commands
 
@@ -224,6 +246,8 @@ The fake host in `crates/loom-app/src/devices.rs` gets a device that starts, mak
 - [x] A `drag` from an output to a tile control makes an assignment, and one undo step undoes it. App test `a_script_drags_an_output_onto_a_control`. An inspector row as the drop target is not tested yet.
 - [x] `--measure-idle` still counts no frames when no command arrives.
 
+- [x] `type` into the open module browser filters its list, one character per frame, keeping case and spaces, and only text reaches the field (`type_filters_the_open_browser`).
+- [x] `type` with no text field in focus is refused, sends no key, and opens no browser (`type_is_refused_with_no_text_field_in_focus`). Control characters, empty text, and text over the limit are refused (`typed_text_becomes_one_key_per_character`).
 - [x] App tests, through the control harness and the fake host: `output_safety`, `audio` (device, rate, buffer, and `"default"`), `midi`, and `new` change what the Preferences window shows, and replies give `playing` and `status`.
 - [x] A refused name, rate, or buffer gets `ok: false` with the offered values.
 - [x] With the stalling fake device, `advanced` is true and then false, and `callbacks` stops growing.

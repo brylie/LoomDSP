@@ -3,4 +3,6 @@
 {"cmd":"press","target":"Add module"}
 {"cmd":"release","target":"Add module"}
 {"cmd":"screenshot","path":"${LOOM_UX_OUT}/11-first-browser.png"}
+{"cmd":"type","text":"filter"}
+{"cmd":"screenshot","path":"${LOOM_UX_OUT}/12-browser-search.png"}
 {"cmd":"quit"}

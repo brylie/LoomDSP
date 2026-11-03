@@ -270,6 +270,17 @@ impl Ui {
         self.redraw();
     }
 
+    /// True when a text field has keyboard focus, read from the widgets
+    /// as the `type` command reads them.
+    pub fn text_field_focused(&mut self) -> bool {
+        let mut focused = crate::editing::AnyFocused(false);
+        {
+            let mut operation = iced::advanced::widget::operation::black_box(&mut focused);
+            self.with_ui(|ui, renderer, _| ui.operate(renderer, &mut operation));
+        }
+        focused.0
+    }
+
     /// Moves the pointer to a window point.
     pub fn move_to(&mut self, p: Point) -> Vec<Message> {
         self.cursor = mouse::Cursor::Available(p);

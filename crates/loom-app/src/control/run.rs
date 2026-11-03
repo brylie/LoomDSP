@@ -174,6 +174,15 @@ impl App {
                     call.answer(answer);
                 }
                 Step::Locate(target) => tasks.push(search(call, target, AfterSearch::Locate)),
+                Step::Type(text) => {
+                    tasks.push(
+                        crate::editing::text_field_focused().map(move |focused| Message::TextFocus {
+                            call: call.clone(),
+                            text: text.clone(),
+                            focused,
+                        }),
+                    )
+                }
                 Step::Screenshot(path, Area::Target { target, margin }) => {
                     tasks.push(search(call, target, AfterSearch::Screenshot { path, margin }));
                 }
@@ -303,6 +312,13 @@ impl App {
                         let steps = key_events(k, m).into_iter().map(PointerStep::Key).collect();
                         Then::AfterDraw(Step::Pointer(self.pointer.push(steps), false))
                     }
+                    Err(error) => Then::Now(Err(error)),
+                };
+                return (then, Task::batch(tasks));
+            }
+            Command::Type { text } => {
+                let then = match type_events(&text) {
+                    Ok(_) => Then::AfterDraw(Step::Type(text)),
                     Err(error) => Then::Now(Err(error)),
                 };
                 return (then, Task::batch(tasks));
@@ -755,6 +771,29 @@ impl App {
 
     /// Answers a `locate`, or takes a `screenshot` of the area around the
     /// target, once the window has been searched.
+    /// Types the text of a `type` command, now that the window has said
+    /// whether a text field has focus. With none, no key is sent: a letter
+    /// would reach the app's shortcuts.
+    pub(crate) fn text_focus(&mut self, call: Call, text: &str, focused: bool) {
+        if !focused {
+            call.answer(Err(
+                "no text field has focus, so nothing was typed; open or click one first".to_string(),
+            ));
+            return;
+        }
+        match type_events(text) {
+            Ok(events) => {
+                let steps = events.into_iter().map(PointerStep::Key).collect();
+                self.control_pending.push(Pending {
+                    frames: FRAMES_BEFORE_ANSWER,
+                    call,
+                    step: Step::Pointer(self.pointer.push(steps), false),
+                });
+            }
+            Err(error) => call.answer(Err(error)),
+        }
+    }
+
     pub(crate) fn located(&mut self, call: Call, target: &str, found: &Found, then: AfterSearch) -> Task<Message> {
         let rect = locate(self, target, found);
         match then {

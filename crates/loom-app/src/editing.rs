@@ -2,6 +2,8 @@
 //! the engine, and the clipboard commands (`docs/design/undo.md`).
 
 use crate::{App, Message, browser, clipboard, undo};
+use iced::advanced::widget::operation::{Focusable, Outcome};
+use iced::advanced::widget::{Id, Operation};
 use iced::{Point, Task};
 use loom_core::{LoomError, ModuleId};
 use std::collections::BTreeSet;
@@ -11,28 +13,25 @@ use std::collections::BTreeSet;
 /// undo shortcuts do nothing rather than change the patch behind it
 /// (undo.md, Gestures).
 pub(crate) fn text_field_focused() -> Task<bool> {
-    use iced::advanced::widget::operation::{Focusable, Outcome};
-    use iced::advanced::widget::{Id, Operation};
+    iced::advanced::widget::operate(AnyFocused(false))
+}
 
-    /// Records whether any focusable widget, with or without an ID, has
-    /// focus. Only text fields and text boxes are focusable in this app.
-    struct AnyFocused(bool);
+/// Records whether any focusable widget, with or without an ID, has focus.
+/// Only text fields and text boxes are focusable in this app.
+pub(crate) struct AnyFocused(pub(crate) bool);
 
-    impl Operation<bool> for AnyFocused {
-        fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation<bool>)) {
-            operate(self);
-        }
-
-        fn focusable(&mut self, _id: Option<&Id>, _bounds: iced::Rectangle, state: &mut dyn Focusable) {
-            self.0 |= state.is_focused();
-        }
-
-        fn finish(&self) -> Outcome<bool> {
-            Outcome::Some(self.0)
-        }
+impl Operation<bool> for AnyFocused {
+    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation<bool>)) {
+        operate(self);
     }
 
-    iced::advanced::widget::operate(AnyFocused(false))
+    fn focusable(&mut self, _id: Option<&Id>, _bounds: iced::Rectangle, state: &mut dyn Focusable) {
+        self.0 |= state.is_focused();
+    }
+
+    fn finish(&self) -> Outcome<bool> {
+        Outcome::Some(self.0)
+    }
 }
 
 impl App {
