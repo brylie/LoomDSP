@@ -1682,3 +1682,28 @@ fn a_scripted_panic_key_works_over_a_question() {
     // With no question open, nothing is refused here.
     assert!(refuse_while_asking(None, &keyboard::Key::Character("z".into()), cmd).is_ok());
 }
+
+/// `open` works as File > Open does, so a patch that loads differently from
+/// how it was saved names its load notes in the status line.
+#[test]
+fn open_keeps_load_notes_in_the_status_line() {
+    let mut app = crate::tests::app();
+    let dir = std::env::temp_dir().join(format!("loom-control-open-note-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let noted = dir.join("noted.ron");
+    std::fs::write(
+        &noted,
+        r#"Patch(version: 1, modules: [(id: 1, kind: "loom.math.mul@1", params: {"gain": 5.0}, ranges: {"gain": (-0.1, 0.1)})])"#,
+    )
+    .unwrap();
+    let line = serde_json::json!({ "cmd": "open", "path": noted }).to_string();
+    run(&mut app, &line).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(
+        app.alerts
+            .status()
+            .starts_with(&format!("opened {}: module 1", noted.display())),
+        "{}",
+        app.alerts.status()
+    );
+}
