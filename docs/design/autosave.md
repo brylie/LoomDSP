@@ -142,7 +142,7 @@ For a patch never saved, the name is `Untitled`. The time is `written`, in local
 
 *Why before the window:* the window then opens on the patch the player chose, never first on an empty or older one.
 
-If the window is closed or the dialog cannot be shown, the result is **Not Now**. On Linux without `zenity` or `kdialog` (see [files.md](files.md#asking-before-losing-work)), the status bar says: `Unsaved changes from a crash were kept. Install zenity or kdialog to restore them, or open <path to patch.ron>.` *Why:* nothing is ever deleted without the user's choice.
+If the window is closed or the dialog cannot be shown, the result is **Not Now**. On Linux without `zenity` or `kdialog` (see [files.md](files.md#dialog-crate)), the status bar says: `Unsaved changes from a crash were kept. Install zenity or kdialog to restore them, or open <path to patch.ron>.` *Why:* nothing is ever deleted without the user's choice.
 
 **Several orphans** (two instances crashed, or the user chose Not Now before): the app asks about the newest one only. The others stay for later starts. *Why:* one window holds one patch, so one restore per start is all the app can do. A list would be a larger design (see Later).
 

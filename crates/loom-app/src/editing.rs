@@ -251,7 +251,12 @@ impl App {
         else {
             return None;
         };
-        if !modifiers.command() || self.browser.is_some() || self.probe_menu.is_some() || self.rig.window.is_some() {
+        if !modifiers.command()
+            || self.browser.is_some()
+            || self.probe_menu.is_some()
+            || self.rig.window.is_some()
+            || self.recent_rows.is_some()
+        {
             return None;
         }
         ['c', 'x', 'd']

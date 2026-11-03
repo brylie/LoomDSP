@@ -57,11 +57,22 @@ fn examples_follow_the_executable() {
     assert_eq!(examples_for_executable(Some(&external), &checkout), Some(checkout));
 }
 
-/// A suggested file name with no folder starts the Save dialog where an
-/// untitled patch starts it: in the Documents folder.
+/// A dialog starts in the current file's folder, then the fallback, and a
+/// suggested file name with no folder counts as no file.
 #[test]
-fn a_bare_file_name_starts_in_the_documents_folder() {
-    assert_eq!(start_dir(Some(Path::new("bass.ron"))), start_dir(None));
+fn a_dialog_starts_in_the_files_folder_then_the_fallback() {
+    let here = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let src = here.join("src");
+    let file = src.join("main.rs");
+    assert_eq!(start_dir(Some(&file), Some(here)), Some(src.clone()));
+    assert_eq!(start_dir(None, Some(here)), Some(here.to_path_buf()));
+    assert_eq!(
+        start_dir(Some(Path::new("bass.ron")), Some(here)),
+        Some(here.to_path_buf())
+    );
+    // A folder that went away counts as none, and tests see no Documents.
+    assert_eq!(start_dir(None, Some(&here.join("no-such-folder"))), None);
+    assert_eq!(start_dir(None, None), None);
 }
 
 /// Run from the checkout, the bundled examples folder is its

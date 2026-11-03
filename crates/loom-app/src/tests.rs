@@ -2234,26 +2234,6 @@ fn new_says_it_started_an_empty_patch() {
     assert_eq!(filters.count(), 0, "module {id} went with the old patch");
 }
 
-/// With unsaved changes and no dialog program, New keeps the patch and
-/// says how to save first.
-#[test]
-fn new_without_a_dialog_program_keeps_the_patch() {
-    let (mut app, id, cutoff) = app_with_filter();
-    app.edit(|app| {
-        app.controller.set_param(ModuleId(id), cutoff, 0.5).unwrap();
-        app.commit();
-    });
-    assert!(app.unsaved());
-    files::fake::answer_discard(files::Choice::Unavailable);
-    let _ = app.update(Message::File(FileAction::New));
-    assert!(app.controller.graph().node(ModuleId(id)).is_some(), "the patch stays");
-    assert!(
-        app.alerts.status().starts_with("Unsaved changes."),
-        "{}",
-        app.alerts.status()
-    );
-}
-
 /// A help link to a document that is not bundled leaves the help as it is
 /// and says so.
 #[test]

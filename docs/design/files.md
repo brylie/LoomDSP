@@ -8,8 +8,8 @@ How a user opens, saves, and closes patch files in the desktop app, and how the 
 - **Use case and requirements:** FR-FILE-01, FR-APP-01.
 - **Background:** none.
 - **Prior art:** every desktop editor has these commands. We use only the common conventions: shortcuts, a dot or star for unsaved work, and a three-button question.
-- **Issues:** [#14](https://github.com/brylie/LoomDSP/issues/14), [#182](https://github.com/brylie/LoomDSP/issues/182) (examples open as copies: Implemented). Follow-ups this spec absorbs: the lights watcher and telemetry monitor must follow a new engine; `*.saved.ron` files next to examples; Open clears the undo history ([undo](undo.md#commands)).
-- **Code:** `crates/loom-app/src/files.rs` (dialogs, title, extension, `bundled_examples`, `is_example`), `App::session` in `boot.rs`, `App::replace`, `App::save`, and `App::can_discard` in `file_commands.rs`, and `Document::copy_if_example` in `document.rs`; tests in `example_tests.rs`. `History::mark_saved` and `is_saved` in `undo.rs`. `Patch::save` in `loom-patch` writes through a temporary file. The lights, telemetry, and MIDI watchers take an engine generation in their subscription identity.
+- **Issues:** [#14](https://github.com/brylie/LoomDSP/issues/14), [#182](https://github.com/brylie/LoomDSP/issues/182) (examples open as copies: Implemented), [#183](https://github.com/brylie/LoomDSP/issues/183) (questions inside the window: Implemented). Follow-ups this spec absorbs: the lights watcher and telemetry monitor must follow a new engine; `*.saved.ron` files next to examples; Open clears the undo history ([undo](undo.md#commands)).
+- **Code:** `crates/loom-app/src/files.rs` (dialogs, title, extension, `bundled_examples`, `is_example`), `App::session` in `boot.rs`, `App::replace`, `App::save_then`, and `App::after_discard` in `file_commands.rs`, the in-app questions in `question.rs`, the recent list in `recent.rs`, the Documents folder in `documents.rs`, and `Document::copy_if_example` in `document.rs`; tests in `example_tests.rs`. `History::mark_saved` and `is_saved` in `undo.rs`. `Patch::save` in `loom-patch` writes through a temporary file. The lights, telemetry, and MIDI watchers take an engine generation in their subscription identity.
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
      built. See README.md in this folder. -->
@@ -63,7 +63,11 @@ New, Open, closing the window, and quitting from the OS menu all ask when there 
 - **Don't Save:** continues without saving.
 - **Cancel:** stops the command.
 
-Quit from the OS menu is the same as closing the window. The app handles the window's close request. A quit that does not reach the app as a close request (for example Cmd+Q on macOS, if the window system skips it) cannot ask: check this by hand. On Linux the question needs `zenity` or `kdialog` (the portal backend does not draw message boxes). Without one, the app does not continue: it keeps the patch and the status bar says to save first. A crash or a forced kill cannot ask; [autosave and crash recovery](autosave.md) cover that case.
+The question is drawn inside the window, so it needs no other program. **Tab** and the arrow keys move a highlight, **Enter** activates it, and **Escape** is Cancel. The highlight starts on the safe answer: **Save** here, **Cancel** in the Replace question, **OK** in an error. *Why:* a stray Enter must never lose work.
+
+While a question is open, nothing behind it reacts: not typing, not the shortcuts, not a second close request. Audio keeps playing, and MIDI controllers keep working. The Panic key and MIDI trigger still work. The Panic button is behind the question's scrim, as with other overlays. *Why:* a native dialog stopped the app while it was open. An in-app one does not, so the app has to block input on purpose, and it must not block the music.
+
+Quit from the OS menu is the same as closing the window. The app handles the window's close request. A quit that does not reach the app as a close request (for example Cmd+Q on macOS, if the window system skips it) cannot ask: check this by hand. A crash or a forced kill cannot ask; [autosave and crash recovery](autosave.md) cover that case.
 
 ### Open replaces the patch
 
@@ -82,14 +86,14 @@ If loading fails, the old patch stays running and untouched. The new engine is b
 ### Defaults for the dialogs
 
 - **Extension:** `.ron`. Save As adds it if the user omits it. The filter shows `.ron` files.
-- **Starting folder:** the folder of the current file; otherwise the user's Documents folder. The app does not remember a folder across runs in this version. From M2, the fallback is the library folder instead ([your patches browser](patch-metadata.md#your-patches-browser)).
-- Save As to an existing file uses the dialog's own overwrite confirmation.
+- **Starting folder:** see [the last folder](#recent-files-the-last-folder-and-dropping-a-file). The Documents folder is the real one the system reports, which may have moved or have a translated name. It is where the default library folder lives.
+- Save As to an existing file uses the dialog's own overwrite confirmation. If Save As adds the extension and that makes the name of another existing file, the app asks in the window: **Replace "<file name>"?** with **[Replace] [Cancel]**. Cancel stops the command that asked, and nothing is written.
 - Save writes the patch where it was opened, except for examples (next).
-- **Examples open as copies** ([#182](https://github.com/brylie/LoomDSP/issues/182)). A file inside the app's **bundled examples folder** opens as an untitled patch with that content, named "<name> (example)" in the title. The app uses `examples/patches` beside the release executable (or beside `LoomDSP.app` on macOS) when that folder contains patches. Otherwise it uses the checkout's `examples/patches`. The release package puts a `.loomdsp-bundled-examples` marker in its patch folder. This identifies examples opened from the download folder even when macOS runs the app from a translocated copy. A file anywhere else is the player's own, even in a folder called `examples`, and Save writes it as usual. The app finds the folder once at start, and tests give it a temporary one. The copy is clean until edited. Save asks for a place, as Save As does, starting in the Documents folder. This applies to File > Open, a path given on the command line, and the control channel's `open`. *Why:* examples are templates. Saving over one rewrites the file as canonical RON, which drops its comments (`Patch::to_ron` does not keep them) and leaves a diff in the repository. Matching the bundled folder, and not any folder name, keeps a player's own `~/Music/examples/set.ron` working with plain Save. Keeping comments would need a comment-preserving RON editor, which is out of scope. To change an example on purpose, use Save As and choose the same path. The `<name>.saved.ron` behaviour went away earlier.
+- **Examples open as copies** ([#182](https://github.com/brylie/LoomDSP/issues/182)). A file inside the app's **bundled examples folder** opens as an untitled patch with that content, named "<name> (example)" in the title. The app uses `examples/patches` beside the release executable (or beside `LoomDSP.app` on macOS) when that folder contains patches. Otherwise it uses the checkout's `examples/patches`. The release package puts a `.loomdsp-bundled-examples` marker in its patch folder. This identifies examples opened from the download folder even when macOS runs the app from a translocated copy. A file anywhere else is the player's own, even in a folder called `examples`, and Save writes it as usual. The app finds the folder once at start, and tests give it a temporary one. The copy is clean until edited. Save asks for a place, as Save As does, starting in the last folder used in a dialog, or otherwise the library folder. This applies to File > Open, a path given on the command line, and the control channel's `open`. *Why:* examples are templates. Saving over one rewrites the file as canonical RON, which drops its comments (`Patch::to_ron` does not keep them) and leaves a diff in the repository. Matching the bundled folder, and not any folder name, keeps a player's own `~/Music/examples/set.ron` working with plain Save. Keeping comments would need a comment-preserving RON editor, which is out of scope. To change an example on purpose, use Save As and choose the same path. The `<name>.saved.ron` behaviour went away earlier.
 
 ### When something fails
 
-Failures show in a modal message with the reason and one **OK** button, and the status bar repeats it.
+Failures show in a message inside the window with the reason and one **OK** button, and the status bar repeats it.
 
 | Failure | Message |
 |---|---|
@@ -101,7 +105,7 @@ A failed save keeps the unsaved mark. A save writes to a temporary file in the s
 
 ### Dialog crate
 
-[`rfd`](https://crates.io/crates/rfd) (MIT or Apache-2.0). It supports macOS, Windows, and Linux (portal or GTK). To check before building: `cargo deny check` on all three platforms, and that the Linux backend does not pull in a GPL or LGPL crate (GTK3 is a system library, loaded at run time, not linked source; confirm with deny). Dialogs are the blocking `rfd` calls, run on the UI thread as the operating systems expect. Audio runs on its own thread and keeps playing while a dialog is open.
+[`rfd`](https://crates.io/crates/rfd) (MIT or Apache-2.0). It supports macOS, Windows, and Linux (portal or GTK). To check before building: `cargo deny check` on all three platforms, and that the Linux backend does not pull in a GPL or LGPL crate (GTK3 is a system library, loaded at run time, not linked source; confirm with deny). The file pickers are the blocking `rfd` calls, run on the UI thread as the operating systems expect. Audio runs on its own thread and keeps playing while one is open. Two message boxes stay native: the credit question ([patch metadata](patch-metadata.md)), which is skipped when it cannot be shown, and the crash recovery question ([autosave](autosave.md)), which runs before the window exists. On Linux those two need `zenity` or `kdialog`.
 
 ## Rules
 
@@ -126,12 +130,13 @@ A failed save keeps the unsaved mark. A save writes to a temporary file in the s
 
 ## Recent files, the last folder, and dropping a file
 
-**Status:** Agreed, M2 ([#184](https://github.com/brylie/LoomDSP/issues/184), 2026-11-01).
+**Status:** Implemented ([#184](https://github.com/brylie/LoomDSP/issues/184)), except that nobody has dropped a file on a real window yet.
 
-- **File > Open Recent** lists the last 10 patches opened or saved, newest first, by file name with the folder as hover text. Choosing one opens it, asking first about unsaved changes, as Open does. A missing file is shown dimmed; choosing it removes it from the list, with a status message. Examples opened as copies are not listed.
-- **The last folder.** Open and Save dialogs start in the current file's folder; otherwise in the last folder used in a dialog; otherwise in the library folder ([your patches browser](patch-metadata.md#your-patches-browser)).
-- **Where they live:** `recent.ron` beside `preferences.ron` ([preferences](preferences.md)), written through a temporary file and a rename. *Why not the preferences file:* that file is written only when the player changes a preference, and the recent list changes with every open.
-- **Dropping files on the window.** One `.ron` file opens, with the unsaved-changes question. Several files open the first and say `Opened "<name>". Drop one patch at a time.` Any other file says `Only LoomDSP patches (.ron) can be opened here.` *Why open and not insert:* inserting is the module browser's job ([sub-patches](sub-patches.md#library)).
+- **Recent** is a toolbar button beside Browse, disabled when the list is empty. It opens a list of the last 10 patches opened or saved, newest first, by file name with the folder as hover text. Escape or a click outside closes it. Choosing one opens it, asking first about unsaved changes, as Open does. A missing file is shown dimmed; choosing it removes it from the list, with a status message, before any question. Whether a file is missing is checked when the list opens and again when one is chosen.
+- **What is listed:** patches opened with Open, Your patches, a drop, or this list, patches saved, and a path on the command line in a normal windowed run, made absolute. Not examples opened as copies, not a failed open, and nothing done by a control channel script or a run with `--screenshot`, `--dump-ui`, or `--measure`. *Why:* the list is the player's own history, and a script must not change it.
+- **The last folder.** Open and Save dialogs start in the current file's folder; otherwise in the last folder used in a dialog; otherwise in the library folder ([your patches browser](patch-metadata.md#your-patches-browser)). This holds for Save As on a patch with no file and on a copy of an example, with a free name from the patch name in that folder. A recovered copy still starts next to its file. *Why:* a player who keeps a project in one folder saves the next patch there. A patch saved outside the library does not show in Your patches.
+- **Where they live:** `recent.ron` beside `preferences.ron` ([preferences](preferences.md)), written through a temporary file and a rename. It holds the list and the last folder. A file that does not read gives an empty list and a status line, and a failed write never stops an open or a save. *Why not the preferences file:* that file is written only when the player changes a preference, and the recent list changes with every open.
+- **Dropping files on the window.** One `.ron` file opens, with the unsaved-changes question. Several files open the first `.ron` among them, whatever comes before it, and say `Opened "<name>". Drop one patch at a time.`, keeping any notes about what loaded differently. When no file is `.ron`, the app says `Only LoomDSP patches (.ron) can be opened here.` A drop while a question is open is ignored, with a status line. Other overlays close only after a successful open, so Cancel changes nothing. *Why open and not insert:* inserting is the module browser's job ([sub-patches](sub-patches.md#library)). On Wayland, the window system library does not report dropped files yet ([#572](https://github.com/brylie/LoomDSP/issues/572)), so use Open or Recent there.
 - **Acceptance:** the list holds 10, newest first, and survives a restart; a missing file is dimmed and removed when chosen; the dialog starts in the remembered folder; dropping one file opens it after the question, several open the first, others show the message (tests, and a manual check of dropping on each platform).
 
 ## Out of scope
@@ -139,10 +144,11 @@ A failed save keeps the unsaved mark. A save writes to a temporary file in the s
 - Several patches in several windows (later; needs one engine per window).
 - Autosave and crash recovery have their own spec: [autosave.md](autosave.md).
 - Embedded assets (FR-FILE-06) and migrations (FR-FILE-02, from the first release).
+- Dropping a file on the window on Wayland, until the window system library reports it ([#572](https://github.com/brylie/LoomDSP/issues/572)).
 
-## Open points
+## Settled
 
-1. **Mark on moves.** *Leaning:* count them, as above. The alternative is to save positions without raising the mark.
-2. **Open in the same window or a new one.** *Leaning:* same window.
+1. **Mark on moves.** Moves count, as above.
+2. **Open in the same window or a new one.** The same window.
 3. **Linux dialog backend.** *Leaning:* `rfd` with the XDG portal backend, to avoid linking GTK. Confirm with `cargo deny` and a test on a Linux desktop.
 4. **Reuse the engine on Open.** Rebuilding the engine is simple; reusing it with a cleared graph keeps the audio stream running. *Leaning:* rebuild and hand the new engine to the stream, if the audio host allows swapping an engine; otherwise reopen the stream.

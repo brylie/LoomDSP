@@ -96,7 +96,7 @@ Click a tile to select it. The inspector shows its parameters. Frequencies and t
 
 ## Saving
 
-**New**, **Open**, **Save**, and **Save As** (Ctrl or Cmd with N, O, S, and Shift+S) work on `.ron` patch files, including module positions. The window title shows the file name, with a `*` in front when you have unsaved changes. The app asks before it throws changes away. Save writes to the file you opened, so use Save As to keep an example as it is. On Linux the question and error boxes need `zenity` or `kdialog`; without one, the app tells you in the status bar to save first. Patch files are plain text in [RON](../adr/0008-patch-format-ron.md), so you can read them, edit them, and keep them in git.
+**New**, **Open**, **Save**, and **Save As** (Ctrl or Cmd with N, O, S, and Shift+S) work on `.ron` patch files, including module positions. The window title shows the file name, with a `*` in front when you have unsaved changes. The app asks before it throws changes away. Save writes to the file you opened, so use Save As to keep an example as it is. **Recent** lists the last 10 patches. You can also drag one patch onto the window to open it, except on Wayland, where the window system does not report dropped files yet: use Open or Recent there. Patch files are plain text in [RON](../adr/0008-patch-format-ron.md), so you can read them, edit them, and keep them in git.
 
 ## What is not there yet
 

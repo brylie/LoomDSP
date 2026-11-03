@@ -2,6 +2,50 @@
 
 use super::*;
 
+/// True for a command that works through what an open question blocks. It is
+/// refused with an error, because its reply would otherwise say it worked
+/// when nothing happened (rule 9).
+///
+/// No wildcard, on purpose: a new command must choose a side. `new`, `open`,
+/// and `save` act directly, and a pointer goes through the view, where the
+/// question's scrim takes it as it would a real pointer.
+fn blocked_by_question(command: &Command) -> bool {
+    match command {
+        Command::Select { .. }
+        | Command::Set { .. }
+        | Command::Add { .. }
+        | Command::Remove { .. }
+        | Command::Connect { .. }
+        | Command::Disconnect { .. }
+        | Command::Probe { .. }
+        | Command::Undo
+        | Command::Redo
+        | Command::Arm { .. }
+        | Command::OutputSafety { .. }
+        | Command::Audio { .. }
+        | Command::Midi { .. } => true,
+        Command::Snapshot
+        | Command::Panic
+        | Command::Open { .. }
+        | Command::Save { .. }
+        | Command::Note { .. }
+        | Command::Cc { .. }
+        | Command::Key { .. }
+        | Command::Toolbar { .. }
+        | Command::Press { .. }
+        | Command::Release { .. }
+        | Command::Hover { .. }
+        | Command::Drag { .. }
+        | Command::Scroll { .. }
+        | Command::Locate { .. }
+        | Command::Screenshot { .. }
+        | Command::Sample { .. }
+        | Command::Wait { .. }
+        | Command::Quit
+        | Command::New => false,
+    }
+}
+
 /// Searches the live window for a target, then does `then` with what it
 /// found.
 pub(super) fn search(call: Call, target: String, then: AfterSearch) -> Task<Message> {
@@ -193,6 +237,11 @@ impl App {
     /// What to answer, now or after drawing, and the tasks the UI messages
     /// returned.
     pub(super) fn run_command(&mut self, call: &Call) -> (Then, Task<Message>) {
+        if let Some(question) = &self.question
+            && blocked_by_question(&call.command)
+        {
+            return (Then::Now(Err(question_open_error(question))), Task::none());
+        }
         let mut tasks = Vec::new();
         let mut send = |app: &mut App, message: Message| tasks.push(app.update(message));
         let answer = match call.command.clone() {
@@ -298,6 +347,7 @@ impl App {
                 let then = match key(&name)
                     .and_then(|k| Ok((k, modifiers(&names)?)))
                     .and_then(|(k, m)| refuse_dialog_keys(&k, m).map(|()| (k, m)))
+                    .and_then(|(k, m)| refuse_while_asking(self.question.as_ref(), &k, m).map(|()| (k, m)))
                 {
                     Ok((k, m)) => {
                         let steps = key_events(k, m).into_iter().map(PointerStep::Key).collect();
@@ -307,9 +357,19 @@ impl App {
                 };
                 return (then, Task::batch(tasks));
             }
-            Command::Toolbar { button } => press_message(self, &button).map(|message| {
-                send(self, message);
-                Map::new()
+            Command::Toolbar { button } => press_message(self, &button).and_then(|message| {
+                // An answer that wrote nothing is an error, because the step
+                // after it was dropped too (rule 9). `update` cannot say so,
+                // and a field would not survive the patch being replaced.
+                if let Message::Question(answer) = message {
+                    self.document.may_have_changed();
+                    if !self.question_message(answer) {
+                        return Err(self.alerts.status().to_string());
+                    }
+                } else {
+                    send(self, message);
+                }
+                Ok(Map::new())
             }),
             Command::Press {
                 button,

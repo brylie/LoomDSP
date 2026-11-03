@@ -61,18 +61,8 @@ impl Preferences {
     pub fn library_folder(&self) -> Option<PathBuf> {
         self.library
             .clone()
-            .or_else(|| documents_folder().map(|docs| docs.join("LoomDSP").join("Library")))
+            .or_else(|| crate::documents::folder().map(|docs| docs.join("LoomDSP").join("Library")))
     }
-}
-
-/// The user's Documents folder, from the environment, as the file dialogs
-/// find it. Tests never look in the real one: they name a library folder.
-fn documents_folder() -> Option<PathBuf> {
-    if cfg!(test) {
-        return None;
-    }
-    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
-    Some(PathBuf::from(home).join("Documents"))
 }
 
 /// The panic trigger as the file writes it: `Cc(channel, controller)` or
@@ -483,6 +473,11 @@ impl Store {
             saved: Preferences::default(),
             broken: false,
         }
+    }
+
+    /// The file this store reads and writes, if any.
+    pub fn path(&self) -> Option<&Path> {
+        self.path.as_deref()
     }
 
     /// The saved values. When a write fails, they are still the values the

@@ -283,8 +283,6 @@ fn the_window_shows_patch_info_the_chooser_and_the_browser() {
     ui.send(AppMessage::Preferences(crate::settings::Message::Close));
     assert_eq!(ui.app.rig.store.saved().author, "Sam");
 
-    // Unsaved changes are discarded when asked, so Enter opens the patch.
-    dialogs::answer_discard(crate::files::Choice::DontSave);
     ui.tap(Key::Character("o".into()), Modifiers::COMMAND | Modifiers::SHIFT);
     ui.redraw();
     assert!(ui.app.patches.is_some(), "Ctrl+Shift+O opens the browser");
@@ -295,6 +293,10 @@ fn the_window_shows_patch_info_the_chooser_and_the_browser() {
     ui.tap(Key::Named(Named::Enter), Modifiers::empty());
     ui.redraw();
     assert!(ui.app.patches.is_none());
+    // Unsaved changes are asked about first.
+    ui.send(AppMessage::Question(crate::question::Message::Answer(
+        crate::question::Answer::DontSave,
+    )));
     assert_eq!(ui.app.document.name(), "Low Drone");
     let _ = std::fs::remove_dir_all(dir);
 }

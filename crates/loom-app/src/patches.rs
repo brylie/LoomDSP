@@ -11,9 +11,13 @@ use crate::{DIM, files, recovery};
 use iced::widget::{checkbox, column, container, mouse_area, opaque, row, scrollable, space, text, text_input};
 use iced::{Element, Length, Task, Theme};
 use loom_patch::Metadata;
-use loom_patch::metadata::{Filter, Licence, LicenceFilter, tidy_tag};
+use loom_patch::metadata::{Filter, Licence, LicenceFilter, Prepared};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::time::{Duration, Instant, SystemTime};
 
 /// The search field's widget ID: typing goes there when the browser opens.
 const SEARCH: &str = "patch-browser-search";
@@ -23,6 +27,12 @@ const LIST: &str = "patch-browser-list";
 const ROW_HEIGHT: f32 = 46.0;
 /// Height of the list.
 const LIST_HEIGHT: f32 = 10.0 * ROW_HEIGHT;
+/// Most rows sent to the UI at once. Each batch sorts the whole list again,
+/// so sending rows one by one costs more with every file in the folder.
+const BATCH_ROWS: usize = 32;
+/// Longest a read row waits for its batch, so a slow drive still shows rows
+/// as they are read (Your patches browser, Reading files).
+const BATCH_WAIT: Duration = Duration::from_millis(50);
 
 /// One file in the library folder.
 #[derive(Debug, Clone, PartialEq)]
@@ -34,6 +44,12 @@ pub struct Row {
     /// Its metadata, or `None` when it does not read as a patch: the row
     /// shows "Could not read" and cannot be opened.
     pub info: Option<Metadata>,
+    /// What the filters compare, worked out once. `None` when it does not
+    /// read.
+    prepared: Option<Prepared>,
+    /// The line under the name, worked out once, because the list builds
+    /// every row on every frame.
+    details: String,
 }
 
 impl Row {
@@ -42,9 +58,12 @@ impl Row {
         let info = std::fs::read_to_string(path)
             .ok()
             .and_then(|text| Metadata::from_ron(&text).ok());
+        let changed = std::fs::metadata(path).and_then(|m| m.modified()).ok();
         Self {
             path: path.to_path_buf(),
-            changed: std::fs::metadata(path).and_then(|m| m.modified()).ok(),
+            changed,
+            prepared: info.as_ref().map(Prepared::of),
+            details: details(info.as_ref(), changed),
             info,
         }
     }
@@ -60,12 +79,34 @@ impl Row {
     }
 }
 
+/// The line under a row's name: authors, tags, licence, and date.
+fn details(info: Option<&Metadata>, changed: Option<SystemTime>) -> String {
+    let Some(info) = info else {
+        return "Could not read".to_string();
+    };
+    let when = changed.map(recovery::local_time).unwrap_or_default();
+    let licence = match Licence::of(info.license.as_deref()) {
+        Licence::None => String::new(),
+        other => other.short(),
+    };
+    let parts: Vec<String> = [info.authors.join(", "), info.tags.join(" · "), licence, when]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect();
+    parts.join("   ")
+}
+
 /// Every patch file in `folder` and its subfolders, in no set order.
 /// Hidden files and folders, such as a save's temporary file, are skipped.
-pub fn patch_files(folder: &Path) -> Vec<PathBuf> {
+/// Stops at the next folder once `stop` is set, so a closed browser does not
+/// go on walking a large library on a slow drive.
+pub fn patch_files(folder: &Path, stop: &AtomicBool) -> Vec<PathBuf> {
     let mut found = Vec::new();
     let mut folders = vec![folder.to_path_buf()];
     while let Some(dir) = folders.pop() {
+        if stop.load(Ordering::Relaxed) {
+            return Vec::new();
+        }
         let Ok(entries) = std::fs::read_dir(&dir) else { continue };
         for entry in entries.flatten() {
             let path = entry.path();
@@ -82,18 +123,100 @@ pub fn patch_files(folder: &Path) -> Vec<PathBuf> {
     found
 }
 
-/// Reads the patch files in `folder` on a thread, one message per file,
-/// so the window never waits for the disk.
-#[cfg(not(test))]
-fn read(open: u64, folder: PathBuf) -> Task<Message> {
-    let (sender, receiver) = iced::futures::channel::mpsc::unbounded();
-    std::thread::spawn(move || {
-        for path in patch_files(&folder) {
-            let row = Box::new(Row::read(&path));
-            if sender.unbounded_send(Message::Found { open, row }).is_err() {
+/// Rows waiting to be sent. Pure, with the time passed in, so a test can say
+/// exactly when a batch goes.
+#[derive(Default)]
+struct Batch {
+    rows: Vec<Row>,
+    /// When the first waiting row arrived.
+    since: Option<Instant>,
+}
+
+impl Batch {
+    /// Adds a row read at `now`, and returns the rows to send, if it is time.
+    fn push(&mut self, row: Row, now: Instant) -> Option<Vec<Row>> {
+        let since = *self.since.get_or_insert(now);
+        self.rows.push(row);
+        (self.rows.len() >= BATCH_ROWS || now.duration_since(since) >= BATCH_WAIT).then(|| self.take())
+    }
+
+    /// When the oldest waiting row has waited long enough, if one is waiting.
+    fn deadline(&self) -> Option<Instant> {
+        self.since.map(|since| since + BATCH_WAIT)
+    }
+
+    /// The waiting rows, which are then forgotten.
+    fn take(&mut self) -> Vec<Row> {
+        self.since = None;
+        std::mem::take(&mut self.rows)
+    }
+}
+
+/// Reads each patch file in `folder` with `read_row`, and gives each row to
+/// `send`. Stops within one file of `stop` being set, or when `send` says
+/// nobody is listening.
+fn read_rows(
+    folder: &Path,
+    stop: &AtomicBool,
+    mut read_row: impl FnMut(&Path) -> Row,
+    mut send: impl FnMut(Row) -> bool,
+) {
+    for path in patch_files(folder, stop) {
+        if stop.load(Ordering::Relaxed) {
+            return;
+        }
+        if !send(read_row(&path)) {
+            return;
+        }
+    }
+}
+
+/// Gathers the rows that come from `rows` into batches for `send`, until the
+/// reader has finished or nobody is listening. It waits for a row only as
+/// long as the oldest waiting row may wait. *Why not in the reader:* a read
+/// from a slow drive would hold back the rows read before it.
+fn send_batches(rows: &mpsc::Receiver<Row>, mut now: impl FnMut() -> Instant, mut send: impl FnMut(Vec<Row>) -> bool) {
+    let mut batch = Batch::default();
+    loop {
+        let received = match batch.deadline() {
+            Some(deadline) => rows.recv_timeout(deadline.saturating_duration_since(now())),
+            None => rows.recv().map_err(|_| RecvTimeoutError::Disconnected),
+        };
+        let ready = match received {
+            Ok(row) => batch.push(row, now()),
+            Err(RecvTimeoutError::Timeout) => Some(batch.take()),
+            Err(RecvTimeoutError::Disconnected) => {
+                let rows = batch.take();
+                if !rows.is_empty() {
+                    send(rows);
+                }
                 return;
             }
+        };
+        if let Some(rows) = ready
+            && !send(rows)
+        {
+            return;
         }
+    }
+}
+
+/// Reads the patch files in `folder` on one thread and sends the rows in
+/// batches from another, so the window never waits for the disk. The reader
+/// ends when `stop` is set, so a closed browser does not go on reading a large
+/// or slow library. The batcher then ends too, which ends the task. If the
+/// task goes first, the batcher ends, and then the reader.
+#[cfg(not(test))]
+fn read(open: u64, folder: PathBuf, stop: Arc<AtomicBool>) -> Task<Message> {
+    let (sender, receiver) = iced::futures::channel::mpsc::unbounded();
+    let (rows_in, rows_out) = mpsc::channel();
+    std::thread::spawn(move || {
+        read_rows(&folder, &stop, Row::read, |row| rows_in.send(row).is_ok());
+    });
+    std::thread::spawn(move || {
+        send_batches(&rows_out, Instant::now, |rows| {
+            sender.unbounded_send(Message::Found { open, rows }).is_ok()
+        });
     });
     Task::run(receiver, |message| message)
 }
@@ -101,21 +224,23 @@ fn read(open: u64, folder: PathBuf) -> Task<Message> {
 /// Reads the patch files at once: the headless test harness runs a task
 /// to its end and cannot wait for a thread.
 #[cfg(test)]
-fn read(open: u64, folder: PathBuf) -> Task<Message> {
-    let rows = patch_files(&folder).into_iter().map(|path| {
-        Task::done(Message::Found {
-            open,
-            row: Box::new(Row::read(&path)),
-        })
+fn read(open: u64, folder: PathBuf, stop: Arc<AtomicBool>) -> Task<Message> {
+    let (rows_in, rows_out) = mpsc::channel();
+    read_rows(&folder, &stop, Row::read, |row| rows_in.send(row).is_ok());
+    drop(rows_in);
+    let mut tasks = Vec::new();
+    send_batches(&rows_out, Instant::now, |rows| {
+        tasks.push(Task::done(Message::Found { open, rows }));
+        true
     });
-    Task::batch(rows)
+    Task::batch(tasks)
 }
 
 /// A browser message.
 #[derive(Debug, Clone)]
 pub enum Message {
-    /// A file was read, for the browser opened as `open`.
-    Found { open: u64, row: Box<Row> },
+    /// Files were read, for the browser opened as `open`.
+    Found { open: u64, rows: Vec<Row> },
     /// The search field changed.
     Search(String),
     /// The author filter changed.
@@ -157,6 +282,12 @@ pub struct PatchBrowser {
     folder: PathBuf,
     /// Every file read so far.
     rows: Vec<Row>,
+    /// Every tag in those files, tidied. A set that grows as rows arrive,
+    /// because the tag filter draws it on every frame.
+    tags: BTreeSet<String>,
+    /// How many times the list was worked out, so a test can count.
+    #[cfg(test)]
+    refilters: usize,
     /// The search and the filters.
     filter: Filter,
     /// The rows that match, by index into `rows`, newest first.
@@ -165,6 +296,17 @@ pub struct PatchBrowser {
     highlight: usize,
     /// The list's scroll offset.
     scroll: f32,
+    /// Set when this browser goes, to stop the thread reading its folder.
+    stop: Arc<AtomicBool>,
+}
+
+/// However a browser goes (Close, opening a patch, opening it again, or the
+/// app replacing its patch), its reader stops. *Why here:* no way of closing
+/// it can forget to.
+impl Drop for PatchBrowser {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
 }
 
 impl PatchBrowser {
@@ -174,18 +316,23 @@ impl PatchBrowser {
             open,
             folder,
             rows: Vec::new(),
+            tags: BTreeSet::new(),
+            #[cfg(test)]
+            refilters: 0,
             filter: Filter::default(),
             shown: Vec::new(),
             highlight: 0,
             scroll: 0.0,
+            stop: Arc::new(AtomicBool::new(false)),
         }
     }
 
     /// Opens a browser over `folder` and the task that reads it on a
     /// thread, one message per file.
     pub fn open(open: u64, folder: PathBuf) -> (Self, Task<Message>) {
-        let task = Task::batch([read(open, folder.clone()), iced::widget::operation::focus(SEARCH)]);
-        (Self::new(open, folder), task)
+        let browser = Self::new(open, folder.clone());
+        let reader = read(open, folder, browser.stop.clone());
+        (browser, Task::batch([reader, iced::widget::operation::focus(SEARCH)]))
     }
 
     /// The rows the list shows, in order.
@@ -200,16 +347,8 @@ impl PatchBrowser {
 
     /// Every tag in the folder, tidied, sorted, each once, for the tag
     /// filter.
-    pub fn tags(&self) -> Vec<String> {
-        let mut tags: Vec<String> = self
-            .rows
-            .iter()
-            .filter_map(|row| row.info.as_ref())
-            .flat_map(|info| info.tags.iter().filter_map(|t| tidy_tag(t)))
-            .collect();
-        tags.sort();
-        tags.dedup();
-        tags
+    pub fn tags(&self) -> impl Iterator<Item = &str> {
+        self.tags.iter().map(String::as_str)
     }
 
     /// Handles a message, and returns what the app should do and a task
@@ -217,9 +356,15 @@ impl PatchBrowser {
     pub fn update(&mut self, message: Message) -> (Outcome, Task<Message>) {
         let follow = matches!(message, Message::Step(_));
         let outcome = match message {
-            Message::Found { open, row } => {
+            Message::Found { open, rows } => {
                 if open == self.open {
-                    self.rows.push(*row);
+                    self.tags.extend(
+                        rows.iter()
+                            .flat_map(|row| row.prepared.iter())
+                            .flat_map(|p| p.tags())
+                            .cloned(),
+                    );
+                    self.rows.extend(rows);
                     self.refilter();
                 }
                 Outcome::Stay
@@ -293,11 +438,16 @@ impl PatchBrowser {
     /// Works out which rows match, newest first. A file that does not read
     /// matches only an empty search and no filters, so it is still listed.
     fn refilter(&mut self) {
+        #[cfg(test)]
+        {
+            self.refilters += 1;
+        }
         let empty = self.filter == Filter::default();
+        let matcher = self.filter.matcher();
         let highlighted = self.highlighted().map(|row| row.path.clone());
         let mut shown: Vec<usize> = (0..self.rows.len())
-            .filter(|&i| match &self.rows[i].info {
-                Some(info) => self.filter.matches(info),
+            .filter(|&i| match &self.rows[i].prepared {
+                Some(prepared) => matcher.matches(prepared),
                 None => empty,
             })
             .collect();
@@ -351,7 +501,8 @@ impl PatchBrowser {
                     .on_toggle(move |on| Message::Licence(filter, on)),
             );
         }
-        let chips = self.tags().into_iter().map(|tag| {
+        let chips = self.tags().map(|tag| {
+            let tag = tag.to_string();
             let picked = self.filter.tags.contains(&tag);
             button(text(tag.clone()).size(style::SMALL))
                 .padding([2, 8])
@@ -365,25 +516,10 @@ impl PatchBrowser {
 
         let rows = self.shown().enumerate().map(|(i, r)| {
             let highlighted = i == self.highlight;
-            let details = match &r.info {
-                Some(info) => {
-                    let when = r.changed.map(recovery::local_time).unwrap_or_default();
-                    let licence = match Licence::of(info.license.as_deref()) {
-                        Licence::None => String::new(),
-                        other => other.short(),
-                    };
-                    let parts: Vec<String> = [info.authors.join(", "), info.tags.join(" · "), licence, when]
-                        .into_iter()
-                        .filter(|part| !part.is_empty())
-                        .collect();
-                    parts.join("   ")
-                }
-                None => "Could not read".to_string(),
-            };
             let cell = container(
                 column![
                     text(r.name()).size(style::CONTROL),
-                    text(details).size(style::SMALL).color(style::QUIET),
+                    text(&r.details).size(style::SMALL).color(style::QUIET),
                 ]
                 .spacing(2),
             )

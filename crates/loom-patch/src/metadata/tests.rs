@@ -237,3 +237,68 @@ fn browser_filters_combine() {
     assert!(licence.matches(&bass));
     assert!(!licence.matches(&drone));
 }
+
+/// The prepared form gives the same answers as the filter itself, for every
+/// mix of search, author, tag, and licence. Case and untidy text count.
+#[test]
+fn prepared_matching_agrees_with_the_filter() {
+    let patches = [
+        Metadata {
+            name: "Low Drone".into(),
+            description: "Slow FILTER".into(),
+            authors: vec!["Ada Lovelace".into()],
+            tags: vec!["Drone".into(), " FM ".into()],
+            license: Some("CC-BY-NC-4.0".into()),
+        },
+        Metadata {
+            name: "Bass".into(),
+            authors: vec!["Sam Rivera".into()],
+            license: Some("MIT".into()),
+            ..Metadata::default()
+        },
+        Metadata::default(),
+    ];
+    let filters = [
+        Filter::default(),
+        Filter {
+            search: " slow  low ".into(),
+            ..Filter::default()
+        },
+        Filter {
+            author: " ADA ".into(),
+            ..Filter::default()
+        },
+        Filter {
+            tags: vec!["DRONE".into(), "fm".into()],
+            ..Filter::default()
+        },
+        Filter {
+            licence: vec![LicenceFilter::AllowsCommercialUse],
+            ..Filter::default()
+        },
+        Filter {
+            licence: vec![LicenceFilter::LetsMeChange, LicenceFilter::NoLicenceStated],
+            ..Filter::default()
+        },
+    ];
+    let mut matched = 0;
+    for filter in &filters {
+        for patch in &patches {
+            let direct = filter.matches(patch);
+            assert_eq!(
+                direct,
+                filter.matcher().matches(&Prepared::of(patch)),
+                "{filter:?} {patch:?}"
+            );
+            matched += usize::from(direct);
+        }
+    }
+    assert!(matched > 3, "the cases must not all fail");
+    // Spelled out, so this test cannot pass by both sides being wrong.
+    assert!(filters[1].matches(&patches[0]));
+    assert!(!filters[1].matches(&patches[1]));
+    assert!(filters[3].matches(&patches[0]));
+    assert!(filters[4].matches(&patches[1]));
+    assert!(!filters[4].matches(&patches[0]));
+    assert_eq!(Prepared::of(&patches[0]).tags(), ["drone", "fm"]);
+}

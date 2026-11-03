@@ -405,21 +405,80 @@ pub struct Filter {
 impl Filter {
     /// True when `metadata` passes the search and every filter.
     pub fn matches(&self, metadata: &Metadata) -> bool {
+        self.matcher().matches(&Prepared::of(metadata))
+    }
+
+    /// This filter in the form that compares quickly with [`Prepared`] rows,
+    /// for checking many patches at once.
+    pub fn matcher(&self) -> Matcher<'_> {
+        Matcher {
+            words: self.search.split_whitespace().map(str::to_lowercase).collect(),
+            author: self.author.trim().to_lowercase(),
+            tags: self.tags.iter().filter_map(|t| tidy_tag(t)).collect(),
+            licence: &self.licence,
+        }
+    }
+}
+
+/// What [`Filter`] compares in one patch, worked out once. A browser keeps
+/// one per row, so that typing in the search does not lowercase every name
+/// or parse every licence again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Prepared {
+    /// The name, description, and tidy tags, in lowercase.
+    text: String,
+    /// The authors, in lowercase.
+    authors: Vec<String>,
+    /// The tags in their tidy form.
+    tags: Vec<String>,
+    /// What [`LicenceFilter::ALL`] says about this patch's licence, in the
+    /// same order.
+    licence: [bool; LicenceFilter::ALL.len()],
+}
+
+impl Prepared {
+    /// Works out what the filters compare in `metadata`.
+    pub fn of(metadata: &Metadata) -> Self {
         let tags: Vec<String> = metadata.tags.iter().filter_map(|t| tidy_tag(t)).collect();
-        let text = format!("{} {} {}", metadata.name, metadata.description, tags.join(" ")).to_lowercase();
-        let search = self.search.to_lowercase();
-        let author = self.author.trim().to_lowercase();
-        search.split_whitespace().all(|word| text.contains(word))
-            && (author.is_empty() || metadata.authors.iter().any(|a| a.to_lowercase().contains(&author)))
-            && self
-                .tags
-                .iter()
-                .filter_map(|t| tidy_tag(t))
-                .all(|wanted| tags.contains(&wanted))
-            && self
-                .licence
-                .iter()
-                .all(|filter| filter.matches(metadata.license.as_deref()))
+        Self {
+            text: format!("{} {} {}", metadata.name, metadata.description, tags.join(" ")).to_lowercase(),
+            authors: metadata.authors.iter().map(|a| a.to_lowercase()).collect(),
+            tags,
+            licence: LicenceFilter::ALL.map(|filter| filter.matches(metadata.license.as_deref())),
+        }
+    }
+
+    /// The patch's tags in their tidy form.
+    pub fn tags(&self) -> &[String] {
+        &self.tags
+    }
+}
+
+/// A [`Filter`] ready to compare with [`Prepared`] rows.
+#[derive(Debug, Clone)]
+pub struct Matcher<'a> {
+    /// The search's words, in lowercase.
+    words: Vec<String>,
+    /// The author text, trimmed and in lowercase.
+    author: String,
+    /// The wanted tags, in their tidy form.
+    tags: Vec<String>,
+    /// The licence filters a patch must all pass.
+    licence: &'a [LicenceFilter],
+}
+
+impl Matcher<'_> {
+    /// True when the patch passes the search and every filter.
+    pub fn matches(&self, patch: &Prepared) -> bool {
+        self.words.iter().all(|word| patch.text.contains(word))
+            && (self.author.is_empty() || patch.authors.iter().any(|a| a.contains(&self.author)))
+            && self.tags.iter().all(|wanted| patch.tags.contains(wanted))
+            && self.licence.iter().all(|filter| {
+                LicenceFilter::ALL
+                    .iter()
+                    .position(|known| known == filter)
+                    .is_some_and(|at| patch.licence[at])
+            })
     }
 }
 
