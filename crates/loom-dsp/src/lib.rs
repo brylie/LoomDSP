@@ -23,6 +23,7 @@ pub mod loudness;
 pub mod noise;
 pub mod oscillator;
 pub mod phase;
+pub mod random;
 pub mod slew;
 
 mod static_checks;

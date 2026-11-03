@@ -3,7 +3,7 @@
 //! each sample, so each must be `Copy`. Adding a field that breaks either fails
 //! the build here.
 
-use crate::{delay, dynamics, envelope, filter, limiter, loudness, noise, oscillator, phase, slew};
+use crate::{delay, dynamics, envelope, filter, limiter, loudness, noise, oscillator, phase, random, slew};
 
 const fn is_send<T: Send>() {}
 const fn is_copy<T: Copy>() {}
@@ -27,6 +27,7 @@ const _: () = {
     is_send::<oscillator::Saw>();
     is_send::<oscillator::Triangle>();
     is_send::<phase::Phasor>();
+    is_send::<random::Rng>();
     is_send::<slew::Slew>();
 
     is_copy::<dynamics::Coefficients>();
@@ -37,4 +38,5 @@ const _: () = {
     is_copy::<filter::ladder::Coefficients>();
     is_copy::<filter::one_pole::Coefficients>();
     is_copy::<filter::svf::Coefficients>();
+    is_copy::<random::Rng>();
 };

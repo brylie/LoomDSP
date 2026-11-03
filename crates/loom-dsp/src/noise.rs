@@ -22,6 +22,7 @@
 //! assert_eq!(noise.tick(Colour::Pink), first);
 //! ```
 
+use crate::random::xorshift32;
 use std::f32::consts::TAU;
 
 /// Rows in the pink noise generator. Row `k` changes every `2^k` samples, so
@@ -48,12 +49,7 @@ pub enum Colour {
 /// xorshift32 is fast and deterministic, and good enough for audio noise.
 #[inline]
 pub fn next_white(state: &mut u32) -> f32 {
-    let mut x = *state;
-    x ^= x << 13;
-    x ^= x >> 17;
-    x ^= x << 5;
-    *state = x;
-    (x as f32 / u32::MAX as f32) * 2.0 - 1.0
+    (xorshift32(state) as f32 / u32::MAX as f32) * 2.0 - 1.0
 }
 
 /// A noise generator. The same seed gives the same numbers.

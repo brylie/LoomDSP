@@ -17,6 +17,7 @@ use loom_dsp::limiter::{self, Limiter, Mode};
 use loom_dsp::loudness::LevelMatch;
 use loom_dsp::noise::{Colour, Noise};
 use loom_dsp::oscillator::{Pulse, Saw, SlowWave, Triangle};
+use loom_dsp::random::Rng;
 use loom_dsp::slew::Slew;
 
 #[global_allocator]
@@ -104,6 +105,17 @@ fn noise_never_allocates() {
         noise.restart(7);
         noise.restart_keeping_brown(8);
         noise.copy_brown_from(&other);
+    });
+}
+
+/// The seeded stream, started and drawn from.
+#[test]
+fn rng_never_allocates() {
+    assert_no_alloc(|| {
+        let mut rng = Rng::new(7);
+        for _ in 0..FRAMES {
+            rng.draw();
+        }
     });
 }
 
