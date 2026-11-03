@@ -69,7 +69,7 @@ Every render fails if a port or parameter has an empty label or description, and
 | `.check_block_sizes()` | Renders with block sizes 1, 77, and 512 and fails unless all three are bit-identical. |
 | `.check_reference(path)` | Renders in blocks of 512 and compares with the reference file. |
 | `.check(path)` | Both checks. This is what most tests call. |
-| `.check_reset_snaps_smoothing()` | Renders a new instance, and a second one that held its values for 1 s on silent inputs before `reset()`. Fails unless both are bit-identical from the first frame: `reset()` must snap smoothing to its targets and clear the state `process` changes ([live patching](live-patching.md), rule 7). `crates/loom-modules/tests/reset.rs` runs it on every built-in DSP module, with every parameter away from its default. |
+| `.check_reset()` | Renders a new instance, calls `reset()`, renders again with the same inputs, MIDI, and transport, and fails unless the second render is bit-identical to the first. `reset()` must snap smoothing to its targets and clear the state `process` changes ([live patching](live-patching.md), rule 7). `crates/loom-modules/tests/reset.rs` runs it on every built-in DSP module for 1 s, with every parameter away from its default and a note held across the reset, on busy inputs and on port defaults, with the transport stopped and running. |
 | `.check_copy_state(at)` | Runs a new instance for `at` frames, copies its state into a second new instance with `Module::copy_state_from`, runs both to the end, and fails unless they are bit-identical from frame `at` ([stereo](stereo.md), rules 25 and 26). A module with no state passes without copying. `crates/loom-modules/tests/copy_state.rs` runs it on every built-in DSP module, with busy inputs, held notes, and every parameter away from its default. |
 | `.check_copy_state_repeatable(at)` | For a seeded module, which re-derives its random state when it copies (rule 27): two copies taken at frame `at` play the same, and the copy returns `true`. |
 | `.check_non_finite_recovery()` | For each input in turn, and for each of NaN, infinity, and minus infinity, puts that value on the input for 8 frames from frame 1000, as a connected cable. Renders in blocks of 1 frame (as a feedback loop calls the module) and of 512. Fails unless every output is finite again 10 ms after the bad frames (480 frames at 48 kHz, scaled with the sample rate), up to the end of the render. Every other frame and input reads what the render reads without the check. |
@@ -129,18 +129,18 @@ Golden-audio tests for whole patches, the other half of NFR-OSS-05 ([#93](https:
 - [x] The module checklist in CONTRIBUTING.md points to the harness.
 - [x] `check_non_finite_recovery` fails for a module that keeps a NaN in its state, naming the module, input, value, output, and frame, and passes for a module without state. It fails when the render is too short to show recovery.
 - [x] Every built-in DSP module in `loom_modules::ALL` passes `check_non_finite_recovery`.
-- [x] Every built-in DSP module in `loom_modules::ALL` passes `check_reset_snaps_smoothing`.
+- [x] Every built-in DSP module in `loom_modules::ALL` passes `check_reset`.
 - [x] Every built-in DSP module in `loom_modules::ALL` passes `check_copy_state`, except seeded ones, which pass `check_copy_state_repeatable`. Copying allocates nothing (`no_alloc.rs`).
 
 ## Reset returns a module to its start
 
-**Status:** Agreed, M2 ([#108](https://github.com/brylie/LoomDSP/issues/108), 2026-11-01).
+**Status:** Implemented ([#108](https://github.com/brylie/LoomDSP/issues/108)).
 
 - **The rule:** after `reset()`, a module renders bit-identical to a new instance given the current parameters and `reset()` once. That is how the Controller starts every module ([live patching](live-patching.md), rule 7). So nothing glides after a reset, and state such as MIDI Note's last note and velocity is cleared (its gate is low).
-- **`Harness::check_reset()`** renders a module for 1 s with the test's inputs, calls `reset()`, renders again, and compares the second render with the first render of a new instance. It fails unless both are bit-identical.
-- `crates/loom-modules/tests/reset.rs` runs it on every built-in module. A module that cannot pass lists its exception here, with a reason; there are none yet.
+- **`Harness::check_reset()`** renders a module with the test's inputs, calls `reset()`, renders again, and compares the second render with the first render of a new instance. It fails unless both are bit-identical. It replaces an earlier check that held a module on silent inputs before the reset: the runs on port defaults cover the same ground.
+- `crates/loom-modules/tests/reset.rs` runs it on every built-in module, on busy inputs and on port defaults, with the transport stopped and running. A note stays held across the reset, or MIDI Note's state would not be tested. A module that cannot pass lists its exception here, with a reason; there are none.
 - *Why:* Panic ([panic](panic.md)) and a transport reset rely on `reset()`, and a module that keeps hidden state across it would play differently after a panic than after a load.
-- **Acceptance:** every built-in module passes `check_reset`, including MIDI Note and the seeded modules (test).
+- [x] **Acceptance:** every built-in module passes `check_reset`, including MIDI Note and the seeded modules (test).
 
 ## Out of scope
 

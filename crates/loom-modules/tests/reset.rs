@@ -1,9 +1,10 @@
-//! `reset()` snaps smoothing to its targets, for every module (live
-//! patching spec, rule 7). The `Controller` and the harness call it once
-//! after a module's first values are set, so a module made with values
-//! other than its built-in ones does not glide to them.
+//! `reset()` returns a module to its start, for every module (module test
+//! harness, Reset returns a module to its start). Panic and a transport reset
+//! rely on it, and the `Controller` calls it once after a module's first values
+//! are set, so a module made with values other than its built-in ones does not
+//! glide to them (live patching spec, rule 7).
 
-use loom_core::{ModuleDescriptor, ModuleRole, ParamSpec};
+use loom_core::{MidiEvent, ModuleDescriptor, ModuleRole, ParamSpec, TransportSettings};
 use loom_modules::ALL;
 use loom_test::{Harness, Signal};
 use std::f32::consts::TAU;
@@ -20,15 +21,25 @@ fn changed(spec: &ParamSpec) -> f32 {
     if value == spec.default { at(0.75) } else { value }
 }
 
-/// A harness for `descriptor` with every parameter away from its default
-/// and a busy signal on every input.
-fn harness(descriptor: &'static ModuleDescriptor) -> Harness {
-    let harness = descriptor
+/// A one-second harness for `descriptor` with every parameter away from its
+/// default and a note left held across `reset()`, so MIDI Note's state is
+/// tested.
+fn harness(descriptor: &'static ModuleDescriptor, running: bool) -> Harness {
+    descriptor
         .params
         .iter()
-        .fold(Harness::new(descriptor).frames(4_800), |h, spec| {
+        .fold(Harness::new(descriptor).seconds(1.0), |h, spec| {
             h.param(spec.name, changed(spec))
-        });
+        })
+        .midi([MidiEvent::note_on(100, 0, 60, 100)])
+        .transport(TransportSettings {
+            running,
+            ..TransportSettings::default()
+        })
+}
+
+/// A busy signal on every input.
+fn busy(harness: Harness, descriptor: &'static ModuleDescriptor) -> Harness {
     descriptor.inputs.iter().fold(harness, |h, port| {
         h.input(
             port.name,
@@ -37,22 +48,46 @@ fn harness(descriptor: &'static ModuleDescriptor) -> Harness {
     })
 }
 
-/// Every DSP module in [`ALL`], built with values away from its defaults,
-/// plays from its first frame as one that held those values for a long
-/// time. Panics with the IDs of all that fail.
-#[test]
-fn every_module_starts_at_its_values() {
-    let failed: Vec<&str> = ALL
-        .iter()
+/// The DSP modules in [`ALL`] that fail `check_reset` on the harness `build`
+/// makes.
+fn failing(build: impl Fn(&'static ModuleDescriptor) -> Harness) -> Vec<&'static str> {
+    ALL.iter()
         .filter(|descriptor| matches!(descriptor.role, ModuleRole::Dsp(_)))
         .filter(|descriptor| {
-            let harness = harness(descriptor);
-            catch_unwind(AssertUnwindSafe(|| harness.check_reset_snaps_smoothing())).is_err()
+            let harness = build(descriptor);
+            catch_unwind(AssertUnwindSafe(|| harness.check_reset())).is_err()
         })
         .map(|descriptor| descriptor.id)
-        .collect();
-    assert!(
-        failed.is_empty(),
-        "these modules glide or keep state after reset(): {failed:?}"
-    );
+        .collect()
+}
+
+/// With a busy signal on every input, on a stopped transport. Panics with the
+/// IDs of all that fail.
+#[test]
+fn reset_clears_every_module_on_busy_inputs_when_stopped() {
+    let failed = failing(|d| busy(harness(d, false), d));
+    assert!(failed.is_empty(), "reset() leaves state in: {failed:?}");
+}
+
+/// With a busy signal on every input, on a running transport, so state that
+/// only moves during playback is covered too.
+#[test]
+fn reset_clears_every_module_on_busy_inputs_when_playing() {
+    let failed = failing(|d| busy(harness(d, true), d));
+    assert!(failed.is_empty(), "reset() leaves state in: {failed:?}");
+}
+
+/// With every input on its port default, on a stopped transport.
+#[test]
+fn reset_clears_every_module_on_default_inputs_when_stopped() {
+    let failed = failing(|d| harness(d, false));
+    assert!(failed.is_empty(), "reset() leaves state in: {failed:?}");
+}
+
+/// With every input on its port default, on a running transport, so a module
+/// also clears what it gathers from the bar phase and the play state.
+#[test]
+fn reset_clears_every_module_on_default_inputs_when_playing() {
+    let failed = failing(|d| harness(d, true));
+    assert!(failed.is_empty(), "reset() leaves state in: {failed:?}");
 }

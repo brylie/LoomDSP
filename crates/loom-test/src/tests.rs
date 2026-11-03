@@ -564,17 +564,19 @@ struct Count {
     target: f32,
     copies: bool,
     snaps: bool,
+    clears: bool,
 }
 
 impl Count {
     /// A count at 0 with gain 1.
-    fn new(copies: bool, snaps: bool) -> Self {
+    fn new(copies: bool, snaps: bool, clears: bool) -> Self {
         Self {
             frames: 0.0,
             gain: 1.0,
             target: 1.0,
             copies,
             snaps,
+            clears,
         }
     }
 }
@@ -593,7 +595,9 @@ impl Module for Count {
     }
 
     fn reset(&mut self) {
-        self.frames = 0.0;
+        if self.clears {
+            self.frames = 0.0;
+        }
         if self.snaps {
             self.gain = self.target;
         }
@@ -604,9 +608,9 @@ impl Module for Count {
     }
 }
 
-/// A [`Count`] descriptor with the given copying and snapping.
+/// A [`Count`] descriptor with the given copying, snapping, and clearing.
 macro_rules! count {
-    ($name:ident, $id:literal, $copies:literal, $snaps:literal) => {
+    ($name:ident, $id:literal, $copies:literal, $snaps:literal, $clears:literal) => {
         static $name: ModuleDescriptor = ModuleDescriptor {
             id: $id,
             version: 1,
@@ -617,16 +621,17 @@ macro_rules! count {
             inputs: &[],
             outputs: &[port("out", SignalType::Modulation)],
             params: &[param("gain", 0.0, 4.0, 1.0, "")],
-            role: ModuleRole::Dsp(|_| Box::new(Count::new($copies, $snaps))),
+            role: ModuleRole::Dsp(|_| Box::new(Count::new($copies, $snaps, $clears))),
             panel: loom_core::Panel::EMPTY,
             displays: &[],
         };
     };
 }
 
-count!(COUNT, "test.count", true, true);
-count!(COUNT_NO_COPY, "test.count-no-copy", false, true);
-count!(COUNT_NO_SNAP, "test.count-no-snap", true, false);
+count!(COUNT, "test.count", true, true, true);
+count!(COUNT_NO_COPY, "test.count-no-copy", false, true, true);
+count!(COUNT_NO_SNAP, "test.count-no-snap", true, false, true);
+count!(COUNT_NO_CLEAR, "test.count-no-clear", true, true, false);
 
 /// A module that hands over all its state passes the copy check and says
 /// it copied.
@@ -647,13 +652,10 @@ fn a_module_that_keeps_its_state_fails_the_copy_check() {
     Harness::new(&COUNT_NO_COPY).frames(200).check_copy_state(100);
 }
 
-/// A module whose `reset` snaps its glide passes the reset check.
+/// A module whose `reset` clears its count and snaps its glide passes.
 #[test]
-fn a_reset_that_snaps_passes() {
-    Harness::new(&COUNT)
-        .frames(200)
-        .param("gain", 2.0)
-        .check_reset_snaps_smoothing();
+fn a_reset_that_clears_and_snaps_passes() {
+    Harness::new(&COUNT).frames(200).param("gain", 2.0).check_reset();
 }
 
 /// A module that still glides after `reset` fails the reset check.
@@ -663,7 +665,15 @@ fn a_reset_that_leaves_a_glide_fails() {
     Harness::new(&COUNT_NO_SNAP)
         .frames(200)
         .param("gain", 2.0)
-        .check_reset_snaps_smoothing();
+        .check_reset();
+}
+
+/// A module that keeps what `process` changed fails the reset check, on the
+/// first frame, which is what a player would hear after a panic.
+#[test]
+#[should_panic(expected = "test.count-no-clear: output `out` at frame 0")]
+fn a_reset_that_keeps_state_fails() {
+    Harness::new(&COUNT_NO_CLEAR).frames(200).check_reset();
 }
 
 /// The repeatable check passes for a module that copies the same way twice.

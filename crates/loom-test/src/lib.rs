@@ -69,10 +69,6 @@ pub const RECOVERY_SECONDS: f64 = 0.010;
 /// Default sample rate, in Hz.
 pub const DEFAULT_SAMPLE_RATE: f32 = 48_000.0;
 
-/// How long [`Harness::check_reset_snaps_smoothing`] holds the values
-/// before `reset()`: much longer than any smoothing time.
-pub const SETTLE_SECONDS: f64 = 1.0;
-
 /// Path of the reference file `name` in the calling crate:
 /// `tests/reference/<name>.wav`.
 #[macro_export]
@@ -286,49 +282,25 @@ impl Harness {
         module
     }
 
-    /// Checks that `reset()` snaps smoothing to the values set before it
-    /// (live patching spec, rule 7). It renders a new instance, built as
-    /// [`Harness::render`] builds one, and a second instance that held its
-    /// values for [`SETTLE_SECONDS`] on silent, unconnected inputs before
-    /// its `reset()`. It panics unless both renders are bit-identical from
-    /// the first frame. A module fails when `reset()` leaves a parameter
-    /// gliding, or when it keeps state that `reset()` should clear.
+    /// Checks that `reset()` returns a module to its start (module test
+    /// harness, Reset returns a module to its start). It renders a new
+    /// instance, calls `reset()`, renders again with the same inputs, MIDI, and
+    /// transport, and panics unless the second render is bit-identical to the
+    /// first. A module fails when `reset()` leaves a parameter gliding, or
+    /// keeps state that `process` changed.
     #[track_caller]
-    pub fn check_reset_snaps_smoothing(&self) {
+    pub fn check_reset(&self) {
         let (inputs, connected) = self.input_buffers();
-        let fresh = self.run_module(self.build(), MAX_BLOCK, &inputs, &connected);
-
-        let mut held = self.build();
-        let settle = (SETTLE_SECONDS * f64::from(self.sample_rate)) as usize;
-        let silent = vec![vec![0.0; MAX_BLOCK]; self.descriptor.inputs.len()];
-        let unconnected = vec![false; self.descriptor.inputs.len()];
-        let mut outputs = vec![vec![0.0; MAX_BLOCK]; self.descriptor.outputs.len()];
-        let transport = TransportInfo::new(self.sample_rate, self.transport, 0.0);
-        let mut start = 0;
-        while start < settle {
-            let len = MAX_BLOCK.min(settle - start);
-            let block_inputs: Vec<&[f32]> = silent.iter().map(|input| &input[..len]).collect();
-            let mut block_outputs: Vec<&mut [f32]> = outputs.iter_mut().map(|output| &mut output[..len]).collect();
-            testing::run_with_transport(
-                held.as_mut(),
-                self.sample_rate,
-                transport.later(start),
-                &block_inputs,
-                &unconnected,
-                &mut block_outputs,
-                &[],
-            );
-            start += len;
-        }
-        held.reset();
-        let held = self.run_module(held, MAX_BLOCK, &inputs, &connected);
-
-        for (port, (a, b)) in fresh.outputs.iter().zip(&held.outputs).enumerate() {
+        let mut module = self.build();
+        let first = self.run_module_ref(module.as_mut(), MAX_BLOCK, &inputs, &connected);
+        module.reset();
+        let second = self.run_module_ref(module.as_mut(), MAX_BLOCK, &inputs, &connected);
+        for (port, (a, b)) in first.outputs.iter().zip(&second.outputs).enumerate() {
             if let Some(frame) = a.iter().zip(b).position(|(a, b)| a.to_bits() != b.to_bits()) {
                 panic!(
-                    "{}: output `{}` at frame {frame} is {} on a new instance, but {} on one that held its values \
-                     before `reset()`. `reset()` must snap smoothing to its targets and clear the state that \
-                     `process` changes (docs/design/live-patching.md, rule 7).",
+                    "{}: output `{}` at frame {frame} is {} on a new instance, but {} after a render and `reset()`. \
+                     `reset()` must snap smoothing to its targets and clear the state that `process` changes \
+                     (docs/design/module-test-harness.md, Reset returns a module to its start).",
                     self.descriptor.id, self.descriptor.outputs[port].name, a[frame], b[frame],
                 );
             }
@@ -345,6 +317,13 @@ impl Harness {
     /// Runs `module` over `inputs` in blocks of `block` frames.
     #[track_caller]
     fn run_module(&self, mut module: Box<dyn Module>, block: usize, inputs: &[Vec<f32>], connected: &[bool]) -> Render {
+        self.run_module_ref(module.as_mut(), block, inputs, connected)
+    }
+
+    /// Runs `module`, which the caller keeps, over `inputs` in blocks of
+    /// `block` frames.
+    #[track_caller]
+    fn run_module_ref(&self, module: &mut dyn Module, block: usize, inputs: &[Vec<f32>], connected: &[bool]) -> Render {
         let descriptor = self.descriptor;
         let frames = self.frame_count();
         for event in &self.midi {
@@ -356,7 +335,7 @@ impl Harness {
             );
         }
         let mut outputs = vec![vec![0.0; frames]; descriptor.outputs.len()];
-        self.run_span(module.as_mut(), block, inputs, connected, 0..frames, &mut outputs);
+        self.run_span(module, block, inputs, connected, 0..frames, &mut outputs);
         Render {
             descriptor,
             sample_rate: self.sample_rate,
