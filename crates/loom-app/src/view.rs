@@ -38,6 +38,7 @@ impl App {
             .matrix_line(self.matrix_line())
             .matrix_keyboard(self.matrix.tab == RightTab::Matrix && self.matrix.focused)
             .text_field_keys(self.text_focus.any)
+            .text_field_keeps_tab(self.tab_moves_between_fields())
             .typed_check(|module, widget, text| self.typed_check(module, widget, text))
             .matrix_escape(
                 self.matrix.tab == RightTab::Matrix

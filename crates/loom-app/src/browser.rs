@@ -23,7 +23,7 @@ const INPUT_HEIGHT: f32 = 30.0;
 pub const HEIGHT: f32 = 2.0 * PADDING + INPUT_HEIGHT + LIST_HEIGHT + DESCRIPTION_HEIGHT + 2.0 * SPACING;
 const LIST_HEIGHT: f32 = ROWS as f32 * ROW_HEIGHT;
 
-const INPUT: &str = "module-browser-search";
+pub(crate) const INPUT: &str = "module-browser-search";
 const LIST: &str = "module-browser-list";
 
 /// What the browser asks of the app.

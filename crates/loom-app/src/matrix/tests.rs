@@ -599,3 +599,29 @@ fn cards_fit_the_column() {
         assert!(ui.text(gone).is_none(), "`{gone}` is still shown");
     }
 }
+
+/// Cmd+V in a depth field opened by keyboard pastes into the field only. The
+/// field takes focus by a task, which sends no message, so the app must ask
+/// about focus afterwards, or the canvas also pastes (clipboard.md, rule 7).
+#[test]
+fn cmd_v_in_a_depth_field_stays_out_of_the_canvas() {
+    let mut ui = Ui::open("modulation.ron");
+    ui.app.matrix_event(Event::Tab(Tab::Matrix));
+    let key = |ui: &mut Ui, named| {
+        ui.tap(keyboard::Key::Named(named), keyboard::Modifiers::default());
+    };
+    key(&mut ui, Named::ArrowDown);
+    for _ in 0..4 {
+        key(&mut ui, Named::ArrowRight);
+    }
+    key(&mut ui, Named::Enter);
+    assert_eq!(ui.app.matrix.edit.as_ref().map(|e| e.column), Some(Column::Depth));
+
+    let messages = ui.tap(keyboard::Key::Character("v".into()), keyboard::Modifiers::COMMAND);
+    assert!(
+        !messages
+            .iter()
+            .any(|m| matches!(m, Message::Canvas(loom_canvas::CanvasEvent::Paste { .. }))),
+        "the canvas took the paste: {messages:?}"
+    );
+}

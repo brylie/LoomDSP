@@ -153,6 +153,15 @@ impl<Message> PatchCanvas<'_, Message> {
         }
     }
 
+    /// Ends what keys are doing on the canvas, because something else now
+    /// takes them: no button stays held, and an arrow-key edit closes.
+    pub(super) fn leave_keys(&self, state: &mut State, shell: &mut Shell<'_, Message>) {
+        self.release_every_key_hold(state, shell);
+        if std::mem::take(&mut state.arrow_gesture) {
+            self.emit(shell, CanvasEvent::GestureEnd);
+        }
+    }
+
     /// Space or Enter, the keys that hold a button.
     pub(super) fn button_key(key: &keyboard::Key) -> Option<keyboard::key::Named> {
         use keyboard::key::Named;
