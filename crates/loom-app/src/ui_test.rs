@@ -1913,6 +1913,22 @@ mod tests {
         assert_eq!(param_value(&ui, id, "cutoff"), before);
     }
 
+    /// Tab in a value field also moves the canvas's focus, so a keyboard user
+    /// keeps their place. Only a field in a view's list keeps Tab for itself.
+    #[test]
+    fn tab_from_a_value_field_moves_the_canvas() {
+        use keyboard::key::Named;
+        let mut ui = Ui::open("sine.ron");
+        let (id, _) = focus_cutoff_field(&mut ui);
+        assert!(!ui.app.tab_moves_between_fields(), "a value field is in no list");
+        let messages = ui.tap(keyboard::Key::Named(Named::Tab), keyboard::Modifiers::default());
+        assert!(
+            messages.iter().any(|m| matches!(m, Message::Canvas(_))),
+            "the canvas took Tab: {messages:?}"
+        );
+        assert_ne!(ui.app.selection.iter().copied().next(), Some(id.0), "focus moved on");
+    }
+
     /// A draft ends when focus moves to another value field, and a new patch
     /// starts with no draft and no field holding the keys.
     #[test]

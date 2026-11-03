@@ -75,7 +75,7 @@ Any client that can write lines to a Unix socket works, such as `nc -U /tmp/loom
 
 ### Typing text
 
-**Status:** Agreed, and built.
+**Status:** Proposed, and built. Waiting for approval in [#589](https://github.com/brylie/LoomDSP/pull/589).
 
 `key` presses one key wherever the keys go now, and its reply says only that the key was delivered. A letter with no text field in focus reaches the app's shortcuts. `type` is for text: it takes a whole string, and it says when the text has nowhere to go:
 
