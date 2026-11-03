@@ -2391,3 +2391,87 @@ fn a_panic_that_cannot_be_sent_says_so() {
         app.alerts.status()
     );
 }
+
+/// The bar shows a kept error beside a later message, each with its word, and
+/// the snapshot reports both. The same text never shows twice.
+#[test]
+fn the_status_bar_shows_a_kept_error_beside_later_messages() {
+    let mut ui = crate::ui_test::Ui::with_app(app());
+    ui.app.alerts.error(alerts::Cause::File, "save failed");
+    ui.redraw();
+    assert!(ui.text("Error: save failed").is_some());
+    assert_eq!(
+        ui.app.ui_snapshot().status_severity,
+        alerts::Severity::Alarm,
+        "the latest message is the error"
+    );
+    assert!(ui.text("×").is_some(), "the latest message can be dismissed too");
+
+    ui.app.alerts.say("saved");
+    ui.redraw();
+    assert!(ui.text("Error: save failed").is_some(), "it stays after info");
+    assert!(ui.text("saved").is_some());
+    let snapshot = ui.app.ui_snapshot();
+    assert_eq!(snapshot.status, "saved");
+    assert_eq!(snapshot.status_severity, alerts::Severity::Normal);
+    assert_eq!(snapshot.errors.len(), 1);
+    assert_eq!(snapshot.errors[0].text, "save failed");
+
+    ui.app.alerts.warn("refused");
+    ui.redraw();
+    assert!(ui.text("Warning: refused").is_some());
+    assert_eq!(ui.app.ui_snapshot().status_severity, alerts::Severity::Warning);
+}
+
+/// The × takes a kept error off the bar. A lost output has no ×, and its
+/// severity is in the snapshot's words.
+#[test]
+fn pressing_x_dismisses_a_kept_error_but_a_lost_output_has_none() {
+    let mut ui = crate::ui_test::Ui::with_app(app());
+    ui.app.alerts.error(alerts::Cause::Other, "the recording stopped");
+    ui.app.alerts.say("saved");
+    ui.redraw();
+    let x = ui.text("×").expect("a kept error can be dismissed").center();
+    ui.move_to(x);
+    ui.press();
+    ui.release();
+    assert!(ui.app.alerts.kept().is_empty());
+    assert!(ui.text("Error: the recording stopped").is_none());
+
+    ui.app.alerts.error(alerts::Cause::AudioOutput, "Audio: lost");
+    ui.redraw();
+    assert!(ui.text("Error: Audio: lost").is_some());
+    assert!(ui.text("×").is_none(), "only sound or a choice ends a lost output");
+    let json = serde_json::to_value(ui.app.ui_snapshot()).unwrap();
+    assert_eq!(json["status_severity"], "error");
+    assert_eq!(json["errors"][0]["cause"], "audio_output");
+    assert_eq!(json["errors"][0]["dismissible"], false);
+}
+
+/// Learn mode shows its word for as long as it is on, whatever the status
+/// message says.
+#[test]
+fn the_status_bar_says_learning_while_learn_mode_is_on() {
+    let mut ui = crate::ui_test::Ui::with_app(app());
+    assert!(ui.text("Learning").is_none());
+    assert!(!ui.app.ui_snapshot().learning);
+    ui.send(Message::Learn(learn::Message::Toggle));
+    ui.app.alerts.say("Mapped CC 74 to SVF Cutoff");
+    ui.redraw();
+    assert!(ui.text("Learning").is_some(), "the next message does not hide it");
+    assert!(ui.app.ui_snapshot().learning);
+    ui.send(Message::Learn(learn::Message::Toggle));
+    ui.redraw();
+    assert!(ui.text("Learning").is_none());
+}
+
+/// A disabled toolbar button says why in its hover text. The harness does
+/// not reach tooltips, so this reads what the view passes to them.
+#[test]
+fn disabled_toolbar_buttons_say_why_in_hover_text() {
+    let app = app();
+    assert!(app.midi.is_none(), "no audio in this test");
+    assert_eq!(app.hold_hover(), Some(crate::view::HOLD_DISABLED));
+    assert!(app.rig.recent.files().is_empty());
+    assert!(app.recent_hover().contains("disabled"), "{}", app.recent_hover());
+}

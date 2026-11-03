@@ -146,7 +146,7 @@ The rest:
 - [x] An error stays visible after a later info message, and the snapshot reports the status severity (`App::ui_snapshot()` tests).
 - [x] Each row of the kept error table has a test. The same text never shows twice.
 - [x] With four MIDI inputs, input drift, `Learning`, a long kept error, a long status message, and both output warnings, every item fits at 1280 px wide (headless `Ui` test).
-- [x] Disabled Hold note and Recent have hover text that says why (headless `Ui` test).
+- [x] Disabled Hold note and Recent have hover text that says why (test on what the view passes to its tooltips, because the `Ui` harness does not reach them).
 
 ## Out of scope
 

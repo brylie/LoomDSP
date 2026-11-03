@@ -223,9 +223,7 @@ pub(super) fn press_message(app: &App, name: &str) -> Result<Message, String> {
         "learn" => (Message::Learn(crate::learn::Message::Toggle), None),
         "hold" => (
             Message::HoldNote,
-            app.midi
-                .is_none()
-                .then_some("Hold note is disabled: no audio is playing the engine"),
+            app.midi.is_none().then_some(crate::view::HOLD_DISABLED),
         ),
         "panic" => (Message::Panic, None),
         "undo" => (

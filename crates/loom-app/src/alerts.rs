@@ -209,6 +209,16 @@ impl Alerts {
             .filter(|kept| self.severity != Severity::Alarm || kept.text != self.status)
     }
 
+    /// All the kept errors, newest first, for hover text.
+    pub fn kept_hover(&self) -> String {
+        self.kept
+            .iter()
+            .rev()
+            .map(|kept| labelled(Severity::Alarm, &kept.text))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     /// Takes over the kept errors of the app this one replaces: opening a
     /// patch does not make a lost device come back.
     pub fn carry_kept_from(&mut self, old: &mut Self) {

@@ -27,6 +27,10 @@ pub const SWITCH: f32 = 14.0;
 /// secondary text colour is 4.27:1 on the panels, under the 4.5:1 that
 /// WCAG asks for, so the app uses this instead (a test checks it).
 pub const QUIET: iced::Color = iced::Color::from_rgb(0.66, 0.69, 0.75);
+/// Status bar text for a warning, with the word `Warning:` beside it.
+pub const WARNING_TEXT: iced::Color = iced::Color::from_rgb8(0xF5, 0xA6, 0x23);
+/// Status bar text for an error, with the word `Error:` beside it.
+pub const ERROR_TEXT: iced::Color = iced::Color::from_rgb8(0xEB, 0x6B, 0x6B);
 
 /// A button in the default role, secondary: quiet, so the patch and its
 /// values stand out. Give it another role with `.style(style::primary)`,
