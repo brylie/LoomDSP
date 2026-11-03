@@ -144,6 +144,66 @@ fn every_module_recovers_from_bad_input() {
     }
 }
 
+/// A sine of 0.1, with a few huge samples at the start, as a feedback patch can
+/// send: cables are never clipped (ADR-0007).
+fn huge_then_sine(huge: f32) -> Signal {
+    Signal::from_fn(move |frame| {
+        if frame < 8 {
+            if frame % 2 == 0 { huge } else { -huge }
+        } else {
+            0.1 * (frame as f32 * 0.05).sin()
+        }
+    })
+}
+
+/// Huge finite samples leave no bad state: the output stays finite, and comes
+/// back to a normal level. Spec, rule 3 of all three modules.
+#[test]
+fn every_module_recovers_from_huge_samples() {
+    let check = |name: String, render: &loom_test::Render, ports: &[&str], most: f32| {
+        for port in ports {
+            let out = render.output(port);
+            assert!(out.iter().all(|x| x.is_finite()), "{name} {port}: not finite");
+            let top = peak(out, 4_800);
+            assert!(top <= most, "{name} {port}: still {top}");
+        }
+    };
+    for huge in [1e20, f32::MAX] {
+        for mode in 0..5 {
+            for detect in [0.0, 1.0] {
+                for level_match in [0.0, 1.0] {
+                    let render = Harness::new(&DYNAMICS)
+                        .seconds(4.0)
+                        .input("in", huge_then_sine(huge))
+                        .param("mode", mode as f32)
+                        .param("detect", detect)
+                        .param("match", level_match)
+                        .render();
+                    let name = format!("{huge} mode {mode} detect {detect} match {level_match}");
+                    check(name.clone(), &render, &["out", "gain"], 1.0);
+                    // Quiet input, below the default threshold: it passes
+                    // unless Expand or Gate has closed. Either way the gain is
+                    // not stuck at nothing or at a bad value.
+                    let gain = *render.output("gain").last().unwrap();
+                    assert!((0.0..=1.0).contains(&gain), "{name}: gain {gain}");
+                }
+            }
+        }
+        let eq = Harness::new(&EQ)
+            .seconds(4.0)
+            .input("in", huge_then_sine(huge))
+            .param("mid_gain", 12.0)
+            .param("low_cut", 100.0)
+            .render();
+        check(format!("EQ {huge}"), &eq, &["out"], 1.0);
+        let crossover = Harness::new(&CROSSOVER)
+            .seconds(4.0)
+            .input("in", huge_then_sine(huge))
+            .render();
+        check(format!("Crossover {huge}"), &crossover, &["low", "mid", "high"], 1.0);
+    }
+}
+
 /// With every gain at 0 and both cuts off, the EQ leaves the input bit for bit.
 #[test]
 fn a_flat_eq_leaves_the_input_untouched() {

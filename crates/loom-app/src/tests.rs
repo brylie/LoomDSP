@@ -1239,6 +1239,21 @@ fn the_watcher_sends_a_moving_reduction_meter() {
     assert!(loud[entry] < quiet[entry], "the bar moved down: {:?}", loud[entry]);
 }
 
+/// Past the end of its range, a meter's bar stops, but its text still says the
+/// value: a closed Gate can fall further than the meter's range.
+#[test]
+fn a_meter_says_its_value_past_its_range() {
+    let mut app = app();
+    let dynamics = app.controller.add_module("loom.dyn.dynamics").unwrap();
+    app.commit();
+    let d = app.controller.graph().node(dynamics).unwrap().descriptor;
+    let meter = d.panel.widgets.iter().position(|w| w.bind == "reduction").unwrap();
+    let _ = app.update(Message::Lights(vec![((dynamics.0, meter), -60.0)]));
+    let widget = tile_widget(&app, dynamics, meter);
+    assert_eq!(widget.position, 0.0);
+    assert_eq!(widget.text, "Reduction: -60.0 dB");
+}
+
 /// Saved tile dimensions survive session loading and patch creation.
 #[test]
 fn session_keeps_saved_tile_dimensions() {

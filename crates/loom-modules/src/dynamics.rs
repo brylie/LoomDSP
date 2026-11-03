@@ -43,7 +43,7 @@ pub static DYNAMICS: ModuleDescriptor = ModuleDescriptor {
             name: "gain",
             label: "Gain",
             signal: SignalType::Modulation,
-            description: "The gain it applies, from 0 to 1, to drive anything else.",
+            description: "The gain from the threshold and ratio, from 0 to 1, to drive anything else. It leaves out match, output, and mix.",
             default: PortDefault::Value(0.0),
             range: loom_core::PortRange::Span(0.0, 1.0),
             channels: Channels::PerChannel,
@@ -263,6 +263,8 @@ struct Dynamics {
     release: f32,
     detect: f32,
     match_on: bool,
+    /// Whether the matcher has run since its last reset.
+    match_used: bool,
     /// The lowest gain in dB in the last call.
     reduction: f32,
 }
@@ -318,6 +320,7 @@ impl Dynamics {
             release: params[Self::RELEASE].default,
             detect: params[Self::DETECT].default,
             match_on: false,
+            match_used: false,
             reduction: 0.0,
         }
     }
@@ -368,11 +371,10 @@ impl Module for Dynamics {
                 sample_rate: self.sample_rate,
             };
             let coefficients = self.coefficients.get(settings, Coefficients::new);
-            // A bad sample is 0 for this frame, so it cannot reach the state.
-            let finite = |x: f32| if x.is_finite() { x } else { 0.0 };
-            let (left, right) = (finite(left_in[i]), finite(right_in[i]));
+            // A bad sample cannot reach the state.
+            let (left, right) = (loom_dsp::guard(left_in[i]), loom_dsp::guard(right_in[i]));
             let key = if sidechained {
-                finite(sidechain[i]).abs()
+                loom_dsp::guard(sidechain[i]).abs()
             } else {
                 left.abs().max(right.abs())
             };
@@ -385,9 +387,13 @@ impl Module for Dynamics {
             let amount = self.match_amount.tick();
             // A matcher that was off has nothing to say yet.
             let matched = if amount > 0.0 {
+                self.match_used = true;
                 1.0 + amount * (self.level_match.tick([left, right], [wet_left, wet_right]) - 1.0)
             } else {
-                self.level_match.reset();
+                if self.match_used {
+                    self.level_match.reset();
+                    self.match_used = false;
+                }
                 1.0
             };
 
@@ -423,6 +429,7 @@ impl Module for Dynamics {
     fn reset(&mut self) {
         self.algorithm.reset();
         self.level_match.reset();
+        self.match_used = false;
         self.threshold.reset(self.threshold.target());
         self.output.reset(self.output.target());
         self.mix.reset(self.mix.target());

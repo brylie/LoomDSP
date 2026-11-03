@@ -387,7 +387,7 @@ impl Module for Eq {
         };
         let ([input], [out]) = io.split::<1, 1>();
         for (i, (out, &x)) in out.iter_mut().zip(input).enumerate() {
-            let x = if x.is_finite() { x } else { 0.0 };
+            let x = loom_dsp::guard(x);
             let glide = |param: &loom_core::Param<'_>, smoothed: &mut Smoothed, index: usize| {
                 hz_of(index, param.map_or(i, smoothed.tick(), pitch::from_hz))
             };

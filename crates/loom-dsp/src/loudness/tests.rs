@@ -107,3 +107,22 @@ fn reset_returns_to_new() {
     level_match.reset();
     assert_eq!(level_match, LevelMatch::new(RATE));
 }
+
+/// The two signals are compared after K-weighting, not as plain power: a low
+/// tone and a high tone of the same amplitude do not read the same. The high
+/// tone reads about 5 dB louder, mostly from the shelf, so the gain turns it
+/// down. Plain power would give 0 dB.
+#[test]
+fn the_comparison_is_weighted() {
+    let sine = |i: usize, hz: f32, amplitude: f32| {
+        let x = amplitude * (std::f32::consts::TAU * hz * i as f32 / RATE).sin();
+        [x, x]
+    };
+    let mut level_match = LevelMatch::new(RATE);
+    let mut gain = 0.0;
+    for i in 0..RATE as usize * 5 {
+        gain = level_match.tick(sine(i, 100.0, 0.5), sine(i, 5_000.0, 0.5));
+    }
+    let db = 20.0 * gain.log10();
+    assert!((-6.0..-4.0).contains(&db), "{db} dB");
+}

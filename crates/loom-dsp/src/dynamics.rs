@@ -43,6 +43,10 @@ const RMS_SECONDS: f32 = 0.01;
 /// The level that reads as silence. The logarithm of 0 is not finite.
 const FLOOR_DB: f32 = -120.0;
 
+/// The most power the RMS detector takes in one sample: 380 dB, far above any
+/// real signal, and small enough that the filter's sums stay finite.
+const MOST_POWER: f32 = 1e38;
+
 /// A gain this close to its target has arrived. Without this, a gain falling
 /// toward 0 dB would become a denormal.
 const SETTLED_DB: f64 = 1e-6;
@@ -246,21 +250,21 @@ impl Dynamics {
     /// The level in dB for one sample of the detector's signal.
     #[inline]
     fn detect(&mut self, key: f32, detection: Detection) -> f32 {
-        let squared = key * key;
+        let peak = key.abs();
+        // A finite sample can still overflow when squared, and an infinite
+        // power would stay in the filter.
+        let squared = (peak * peak).min(MOST_POWER);
         self.power = squared + self.rms_pole * (self.power - squared);
         // The power of a falling signal would become a denormal.
         if self.power < 1e-30 {
             self.power = 0.0;
         }
-        let power = match detection {
-            Detection::Peak => squared,
-            Detection::Rms => self.power,
+        let level_db = match detection {
+            Detection::Peak if peak > 0.0 => 20.0 * peak.log10(),
+            Detection::Rms if self.power > 0.0 => 10.0 * self.power.log10(),
+            _ => FLOOR_DB,
         };
-        if power > 0.0 {
-            (10.0 * power.log10()).max(FLOOR_DB)
-        } else {
-            FLOOR_DB
-        }
+        level_db.max(FLOOR_DB)
     }
 
     /// Moves the two-threshold state of a gate or a duck on by one frame.

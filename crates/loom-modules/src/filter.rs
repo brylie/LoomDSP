@@ -737,6 +737,8 @@ impl Module for Crossover {
 
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let bands = io.param(Self::BANDS);
+        let low_default = CROSSOVER.params[Self::LOW_SPLIT].default;
+        let high_default = CROSSOVER.params[Self::HIGH_SPLIT].default;
         let low_param = io.param(Self::LOW_SPLIT);
         let high_param = io.param(Self::HIGH_SPLIT);
         let top = self.sample_rate * 0.49;
@@ -746,10 +748,12 @@ impl Module for Crossover {
         };
         let ([input], [low_out, mid_out, high_out]) = io.split::<1, 3>();
         for i in 0..input.len() {
-            let x = input[i];
-            let x = if x.is_finite() { x } else { 0.0 };
-            let low = hz_of(low_param.map_or(i, self.low_split.tick(), pitch::from_hz), 200.0);
-            let high = hz_of(high_param.map_or(i, self.high_split.tick(), pitch::from_hz), 2_000.0);
+            let x = loom_dsp::guard(input[i]);
+            let low = hz_of(low_param.map_or(i, self.low_split.tick(), pitch::from_hz), low_default);
+            let high = hz_of(
+                high_param.map_or(i, self.high_split.tick(), pitch::from_hz),
+                high_default,
+            );
             let rate = self.sample_rate;
             let coefficients = self
                 .coefficients

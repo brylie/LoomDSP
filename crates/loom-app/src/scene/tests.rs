@@ -565,7 +565,7 @@ fn a_meter_shows_a_display_value_from_its_zero() {
     assert_eq!(range.position(-18.0), 0.5);
     assert_eq!(range.value(0.5), -18.0);
     assert_eq!(
-        display_text(&DYNAMICS, &DYNAMICS.panel.widgets[index], 0.5, None),
+        display_text(&DYNAMICS, &DYNAMICS.panel.widgets[index], -18.0, None),
         "Reduction: -18.0 dB"
     );
 }

@@ -330,3 +330,34 @@ fn reset_returns_to_new() {
     dynamics.reset();
     assert_eq!(dynamics, Dynamics::new(RATE));
 }
+
+/// A huge finite sample leaves no bad state, in any mode and with either
+/// detector: squaring it must not overflow into the detector or the gain. The
+/// detector still works afterwards.
+#[test]
+fn a_huge_sample_leaves_no_bad_state() {
+    for huge in [1e20, f32::MAX] {
+        for mode in [Mode::Compress, Mode::Limit, Mode::Expand, Mode::Gate, Mode::Duck] {
+            for detection in [Detection::Peak, Detection::Rms] {
+                let coefficients = fast(curve(mode), detection);
+                let mut dynamics = Dynamics::new(RATE);
+                for _ in 0..8 {
+                    let gain = dynamics.tick(huge, coefficients);
+                    assert!(gain.is_finite(), "{mode:?} {detection:?} {huge}: gain {gain}");
+                }
+                assert!(dynamics.power.is_finite(), "{mode:?} {detection:?} {huge}");
+                // A steady level gives what a new processor gives.
+                let mut new = Dynamics::new(RATE);
+                let (mut after, mut expected) = (0.0, 0.0);
+                for _ in 0..RATE as usize {
+                    after = dynamics.tick(0.5, coefficients);
+                    expected = new.tick(0.5, coefficients);
+                }
+                assert!(
+                    (after - expected).abs() < 1e-3,
+                    "{mode:?} {detection:?} {huge}: {after} against {expected}"
+                );
+            }
+        }
+    }
+}

@@ -22,6 +22,9 @@ const WINDOW_SECONDS: f32 = 0.4;
 /// The largest change of level, as a factor: 24 dB.
 const MOST_GAIN: f32 = 15.848_932;
 
+/// The largest sample the meters read, as a factor: 40 dB over full scale.
+const MOST_MEASURED: f32 = 100.0;
+
 /// Below this power, about -70 dB, the ratio of two powers means nothing.
 const SILENCE: f32 = 1e-7;
 
@@ -81,7 +84,9 @@ impl Meter {
     /// Moves on by one frame.
     #[inline]
     fn tick(&mut self, input: [f32; 2], pole: f32) -> f32 {
-        let [left, right] = input;
+        // A huge sample would otherwise fill the slow power filter, and hold the
+        // gain at its limit long after the signal returned to normal.
+        let [left, right] = input.map(|x| x.clamp(-MOST_MEASURED, MOST_MEASURED));
         let left = self.filters[0].tick(left);
         let right = self.filters[1].tick(right);
         let power = left * left + right * right;

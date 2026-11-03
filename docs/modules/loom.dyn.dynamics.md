@@ -23,7 +23,7 @@ Compresses, limits, expands, gates, or ducks a signal, with a sidechain that can
 | Port | Signal | Polarity | Description |
 |---|---|---|---|
 | **Out** (`out`) | audio, stereo | bipolar | The processed signal. |
-| **Gain** (`gain`) | modulation | unipolar | The gain it applies, from 0 to 1, to drive anything else. |
+| **Gain** (`gain`) | modulation | unipolar | The gain from the threshold and ratio, from 0 to 1, to drive anything else. It leaves out match, output, and mix. |
 
 ## Parameters
 

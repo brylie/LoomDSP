@@ -21,7 +21,7 @@ The [rules for M1 modules](p1-modules.md#rules-for-all-modules-here) apply.
 
 1. **Zero latency.** None of the three delays its signal. *Why:* [#538](https://github.com/brylie/LoomDSP/issues/538) is not built, so a delayed branch would comb-filter against a parallel one.
 2. **Algorithms live in `loom-dsp`,** following [DSP algorithms](dsp-algorithms.md). The curve on a panel calls the same function as the audio. *Why:* a preview that shares the math cannot disagree with the sound.
-3. **A bad input is 0 for that frame,** and bad state cannot stay. The wrapper guards, as `dsp-algorithms.md` says.
+3. **A bad input is 0 for that frame,** a finite input past 1e15 (300 dB) is held there, and bad state cannot stay. The wrapper guards, as `dsp-algorithms.md` says. *Why the limit:* filters in series can overflow on a huge sample that is itself finite, and infinity then stays in the next filter's memory.
 4. **Every parameter can be modulated at audio rate** and stays stable. *Why:* every cable is a signal (ADR-0007), and the trapezoidal filter keeps its stability when its cutoff moves.
 
 ## Dynamics (MT-DYN-01)
@@ -72,7 +72,7 @@ The [rules for M1 modules](p1-modules.md#rules-for-all-modules-here) apply.
 | Duck | `-range` while the level is above the threshold, otherwise 0. See rule 7. |
 
 7. **Gate and Duck have two thresholds and a hold.** The state changes when the level passes the threshold going one way. It changes back only once the level is 3 dB past it the other way and has stayed there for 20 ms. *Why:* a level close to the threshold would otherwise flip the state on every cycle and chatter.
-8. **Limit holds its ceiling on the detected signal.** With the main input as the detector and no sidechain, no sample leaves above the threshold before `output` and `mix`, within rounding. There is no lookahead, so a fast peak is turned down on its own sample, which adds some distortion. Lookahead waits for #538.
+8. **Limit holds its ceiling on the detected signal.** With the main input as the detector, no sidechain, and `match` off, no sample leaves above the threshold before `output` and `mix`, within rounding. *Why `match` off:* it runs after the limit and can raise the level by up to 24 dB (rule 11). It is for comparing (rule 14), so a ceiling that must hold leaves it off. There is no lookahead, so a fast peak is turned down on its own sample, which adds some distortion. Lookahead waits for #538.
 
 ### Showing the effect
 
@@ -82,7 +82,7 @@ The [rules for M1 modules](p1-modules.md#rules-for-all-modules-here) apply.
 ### Level match
 
 11. **`match` compares the loudness of the input and the processed signal, and turns the processed signal to match.** It runs before `output` and `mix`. *Why:* TR-10 says a louder setting must not seem better only for being louder.
-12. **How it is measured.** Each signal goes through the K-weighting filter of ITU-R BS.1770, then a one-pole power filter with a 400 ms time constant. The gain is the square root of the ratio of the two powers, limited to ±24 dB. Both sides are summed in power, as the standard does.
+12. **How it is measured.** Each signal goes through the K-weighting filter of ITU-R BS.1770, then a one-pole power filter with a 400 ms time constant. The gain is the square root of the ratio of the two powers, limited to ±24 dB. Both sides are summed in power, as the standard does. Samples are read up to 40 dB over full scale. *Why:* one huge sample would otherwise fill the slow power filter, and hold the gain at its limit for many seconds.
 13. **It holds still in silence.** While the input reads below -70 dB, the gain does not change. *Why:* the ratio means nothing there, and a jump at the next note would be heard.
 14. **It is for comparing, not for mastering.** It is slow on purpose, and it undoes some of what a compressor does to long-term level. It is off by default.
 
@@ -156,6 +156,7 @@ The signal passes through five sections in this order.
 - [x] Each EQ section's measured response matches its analogue response within 0.1 dB, away from the top of the range where warping applies.
 - [x] The Crossover's sum is flat within 0.01 dB from 20 Hz to 20 kHz, with two and with three bands.
 - [x] Each Crossover band falls at 24 dB per octave well past its split.
+- [x] Huge finite samples leave no bad state in any of the three: the output stays finite and comes back to normal.
 - [x] `docs/learn/` has an explainer on dynamics detection.
 - [x] A gain reduction meter works on a display value, in the app, and in `--dump-ui`.
 
