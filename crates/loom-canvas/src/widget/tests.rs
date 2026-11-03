@@ -3450,3 +3450,76 @@ fn right_click_elsewhere_opens_no_menu() {
     ));
     assert!(events.is_empty(), "{events:?}");
 }
+
+/// Each edge of an XY pad and each handle of a range has its own parameter's
+/// hover text (panel-widgets.md, XY pad, and Range).
+#[test]
+fn hover_text_follows_the_part_under_the_pointer() {
+    let parts = || {
+        Box::new([
+            crate::scene::PartText {
+                label: "First".to_string(),
+                hover: HoverText::new("First", "The first value.", "first"),
+            },
+            crate::scene::PartText {
+                label: "Second".to_string(),
+                hover: HoverText::new("Second", "The second value.", "second"),
+            },
+        ])
+    };
+    let mut pad = module(1, 0.0);
+    pad.panel = PanelView {
+        width: 6,
+        height: 6,
+        widgets: vec![widget(WidgetViewKind::XyPad { parts: parts() }, 0)],
+    };
+    let mut range = module(2, 600.0);
+    range.panel = PanelView {
+        width: 6,
+        height: 2,
+        widgets: vec![widget(
+            WidgetViewKind::Range {
+                vertical: false,
+                parts: parts(),
+            },
+            0,
+        )],
+    };
+    let scene = Scene::new(vec![pad, range], Vec::new());
+    let mut values = PanelValues::new();
+    values.set(
+        2,
+        0,
+        WidgetValue {
+            position: 0.1,
+            second: Some(crate::controls::PartValue {
+                position: 0.9,
+                ..Default::default()
+            }),
+            ..WidgetValue::default()
+        },
+    );
+    let none = BTreeSet::new();
+    let canvas = PatchCanvas::new(&scene, &none, |e| e).values(&values);
+    let at = |point: Point| State {
+        hover: Some(scene.hit(point, 8.0)),
+        cursor: Some(point),
+        ..State::default()
+    };
+
+    let area = xy_area(scene.module(1).unwrap().widget_bounds(0).unwrap());
+    let bottom = at(Point::new(area.center_x(), area.y + area.height - 2.0));
+    assert_eq!(canvas.hover_target(&bottom), Some(HoverTarget::Control(1, 0)));
+    let left = at(Point::new(area.x + 2.0, area.center_y()));
+    assert_eq!(canvas.hover_target(&left), Some(HoverTarget::Second(1, 0)));
+    let (label, hover, _, _) = canvas.hover_content(HoverTarget::Second(1, 0)).unwrap();
+    assert_eq!((label, hover.description.as_str()), ("Second", "The second value."));
+    let (label, _, _, _) = canvas.hover_content(HoverTarget::Control(1, 0)).unwrap();
+    assert_eq!(label, "First");
+
+    let rect = scene.module(2).unwrap().widget_bounds(0).unwrap();
+    let low = at(crate::controls::range_point(rect, false, 0.1));
+    assert_eq!(canvas.hover_target(&low), Some(HoverTarget::Control(2, 0)));
+    let high = at(crate::controls::range_point(rect, false, 0.9));
+    assert_eq!(canvas.hover_target(&high), Some(HoverTarget::Second(2, 0)));
+}

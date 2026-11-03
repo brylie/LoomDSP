@@ -2076,6 +2076,18 @@ mod tests {
         assert_eq!(position_of(&ui, id, "span_low"), after, "the grab ended");
     }
 
+    /// Nothing redraws while nothing a pad or a range shows changes: refreshing
+    /// the same values keeps the panel generation (panel-widgets.md, rule 7).
+    #[test]
+    fn two_value_widgets_do_not_redraw_when_nothing_changes() {
+        let mut ui = Ui::open("sine.ron");
+        select_new(&mut ui, "test.panel");
+        let generation = ui.app.values.generation();
+        ui.app.refresh_values();
+        crate::scene::update_live_values(&mut ui.app.values, &ui.app.controller);
+        assert_eq!(ui.app.values.generation(), generation);
+    }
+
     /// Transport's Tempo is a number that an arrow moves by 1 BPM, or 0.1 BPM
     /// with Shift. A number with no declared step keeps 1% of its range
     /// (panel-widgets.md, Number).
