@@ -42,6 +42,10 @@ enum Phase {
         port: Box<dyn InputPort>,
         /// Drift warning history, shared with the input watcher.
         tracker: Arc<Tracker>,
+        /// The stream was opened by name, not through the fallback or as the
+        /// system default. If it stops and the device is gone, the session
+        /// waits for that device.
+        named: bool,
     },
 }
 
@@ -97,7 +101,7 @@ impl InputSession {
     /// The open stream and its drift tracker, for the input watcher.
     pub(crate) fn open(&self) -> Option<(&dyn InputPort, &Arc<Tracker>)> {
         match &self.phase {
-            Phase::Open { port, tracker } => Some((port.as_ref(), tracker)),
+            Phase::Open { port, tracker, .. } => Some((port.as_ref(), tracker)),
             _ => None,
         }
     }
@@ -132,7 +136,9 @@ impl InputSession {
     }
 
     /// The output stream stopped, and its engine with it, so no command is
-    /// sent. A lost named input is still waited for on the next stream.
+    /// sent. A named input is waited for on the next stream if it is gone by
+    /// then. That does not depend on the stream's failure flag, which is set
+    /// from other threads and may not be set yet.
     pub(crate) fn stream_stopped(&mut self) {
         self.phase = match self.phase {
             Phase::Off => Phase::Off,
@@ -140,9 +146,9 @@ impl InputSession {
                 last_attempt: None,
                 named_lost,
             },
-            Phase::Open { .. } => Phase::Waiting {
+            Phase::Open { named, .. } => Phase::Waiting {
                 last_attempt: None,
-                named_lost: false,
+                named_lost: named,
             },
         };
     }
@@ -204,12 +210,12 @@ impl InputSession {
             return;
         }
         let (last_attempt, named_lost) = match std::mem::replace(&mut self.phase, Phase::Off) {
-            Phase::Open { port, tracker } if port.is_live() => {
-                self.phase = Phase::Open { port, tracker };
+            Phase::Open { port, tracker, named } if port.is_live() => {
+                self.phase = Phase::Open { port, tracker, named };
                 self.warn_about_feedback(controller, alerts);
                 return;
             }
-            Phase::Open { port, .. } => {
+            Phase::Open { port, named, .. } => {
                 let name = port.name().to_string();
                 drop(port);
                 alerts.set_input_drift(None);
@@ -221,10 +227,7 @@ impl InputSession {
                     );
                     self.error_reported = true;
                 }
-                (
-                    None,
-                    demand.flag.is_some() || matches!(demand.choice, InputChoice::Named(_)),
-                )
+                (None, named)
             }
             Phase::Waiting {
                 last_attempt,
@@ -258,6 +261,15 @@ impl InputSession {
         } else if let InputChoice::Named(name) = demand.choice {
             if host.audio_inputs().is_ok_and(|inputs| !inputs.devices.contains(name)) {
                 if named_lost {
+                    // The output's loss may have been handled first, so this
+                    // can be the first the session knows of it.
+                    if !self.error_reported {
+                        self.report(
+                            alerts,
+                            format!("Audio input: \"{name}\" was lost. Trying to reopen it."),
+                        );
+                        self.error_reported = true;
+                    }
                     return;
                 }
                 fallback = Some(name.clone());
@@ -266,6 +278,7 @@ impl InputSession {
                 options.exact = true;
             }
         }
+        let named = options.device.is_some();
         match host.open_audio_input(&options, buffer as usize) {
             Ok((port, reader)) => match controller.set_audio_input(Some(reader)) {
                 Ok(()) => {
@@ -278,6 +291,7 @@ impl InputSession {
                     self.phase = Phase::Open {
                         port,
                         tracker: Arc::new(Tracker::new(counts)),
+                        named,
                     };
                     self.error_reported = false;
                     // A dismissed error gets no "is back" message.

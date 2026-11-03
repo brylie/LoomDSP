@@ -515,3 +515,106 @@ fn an_input_error_clears_when_its_cause_is_gone() {
     bench.sync();
     assert_eq!(bench.alerts.kept().len(), 1, "a later Audio In reports it again");
 }
+
+/// A lost named input is waited for whichever loss is seen first, and the
+/// player is told once. One interface often carries both directions, so the
+/// output's loss can be handled before the session sees the input's.
+#[test]
+fn a_lost_named_input_is_waited_for_in_either_order() {
+    for output_first in [false, true] {
+        let mut bench = Bench::new(&["Other", "Mic"]);
+        bench.choice = InputChoice::Named("Mic".into());
+        bench.sync();
+        assert_eq!(bench.device().as_deref(), Some("Mic"));
+        bench.plug(&["Other"]);
+        bench.fail_stream();
+        if output_first {
+            bench.session.stream_stopped();
+        } else {
+            bench.sync();
+            bench.session.stream_stopped();
+        }
+        assert!(bench.session.named_lost(), "output first: {output_first}");
+        bench.alerts.say("newer");
+        bench.sync();
+        assert_eq!(bench.device(), None, "the default does not stand in");
+        assert!(bench.session.named_lost());
+        let kept = bench.alerts.newest_kept().expect("the loss stays on screen");
+        assert_eq!(kept.text, "Audio input: \"Mic\" was lost. Trying to reopen it.");
+        bench.alerts.say("newer");
+        bench.sync();
+        assert_eq!(bench.status(), "newer", "told once");
+
+        bench.plug(&["Other", "Mic"]);
+        bench.session.forget_attempt();
+        bench.sync();
+        assert_eq!(bench.device().as_deref(), Some("Mic"), "it comes back");
+        assert!(bench.alerts.kept().is_empty());
+    }
+}
+
+/// The failure flag is set from other threads, so it may not be set yet when
+/// the output's loss is handled. The wait does not depend on it.
+#[test]
+fn the_wait_holds_before_the_failure_flag_is_set() {
+    let mut bench = Bench::new(&["Other", "Mic"]);
+    bench.choice = InputChoice::Named("Mic".into());
+    bench.sync();
+    bench.plug(&["Other"]);
+    bench.session.stream_stopped();
+    assert!(bench.session.named_lost());
+    bench.sync();
+    assert_eq!(bench.device(), None, "the default does not stand in");
+}
+
+/// A stopped output with the named input still there just reopens it, so a
+/// device change keeps working.
+#[test]
+fn a_deliberate_stop_reopens_a_named_input_that_is_still_there() {
+    let mut bench = Bench::new(&["Other", "Mic"]);
+    bench.choice = InputChoice::Named("Mic".into());
+    bench.sync();
+    bench.session.stream_stopped();
+    bench.sync();
+    assert_eq!(bench.device().as_deref(), Some("Mic"));
+    assert!(bench.alerts.kept().is_empty(), "nothing was lost");
+}
+
+/// A stream that opened through the fallback was not opened by name, so
+/// losing it may fall back again.
+#[test]
+fn a_fallback_stream_may_fall_back_again() {
+    let mut bench = Bench::new(&["Other"]);
+    bench.choice = InputChoice::Named("Mic".into());
+    bench.sync();
+    assert_eq!(bench.device().as_deref(), Some("Other"), "missing at start falls back");
+    bench.session.stream_stopped();
+    assert!(!bench.session.named_lost());
+    bench.sync();
+    assert_eq!(bench.device().as_deref(), Some("Other"));
+}
+
+/// Removing the last Audio In also ends a wait that began with the output's
+/// loss.
+#[test]
+fn removing_the_last_audio_in_ends_a_wait_that_began_with_the_output() {
+    let mut bench = Bench::new(&["Other", "Mic"]);
+    bench.choice = InputChoice::Named("Mic".into());
+    bench.sync();
+    bench.plug(&["Other"]);
+    bench.session.stream_stopped();
+    bench.output_playing = false;
+    bench.sync();
+    assert!(bench.session.named_lost(), "the audio poll does not end the wait");
+    bench.wanted = false;
+    bench.sync();
+    assert!(!bench.session.named_lost());
+    bench.wanted = true;
+    bench.output_playing = true;
+    bench.sync();
+    assert_eq!(
+        bench.device().as_deref(),
+        Some("Other"),
+        "a later Audio In starts fresh"
+    );
+}
