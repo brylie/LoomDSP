@@ -197,24 +197,25 @@ impl App {
     /// there are none.
     pub(crate) fn watched_lights(&self) -> Option<lights::Watch> {
         let graph = self.controller.graph();
-        let watched: Vec<_> = self
+        let (lights, ranges): (Vec<_>, Vec<_>) = self
             .visible_displays
             .iter()
             .filter_map(|&id| Some((id, graph.node(ModuleId(id))?.descriptor)))
             .flat_map(|(id, d)| {
                 d.panel.widgets.iter().enumerate().filter_map(move |(index, w)| {
                     let display = (!w.is_control()).then(|| d.display_index(w.bind))??;
-                    Some(((id, index), display))
+                    Some(((id, index), display, d.displays[display].range))
                 })
             })
-            .filter_map(|(light, display)| {
+            .filter_map(|(light, display, range)| {
                 let source = self.controller.display_source(ModuleId(light.0), display)?;
-                Some((light, source))
+                Some(((light, source), range))
             })
-            .collect();
-        (!watched.is_empty()).then(|| lights::Watch {
+            .unzip();
+        (!lights.is_empty()).then(|| lights::Watch {
             reader: self.controller.display_reader(),
-            lights: watched,
+            lights,
+            ranges,
             generation: self.generation,
         })
     }

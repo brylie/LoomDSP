@@ -1206,6 +1206,39 @@ fn a_running_engine_lights_the_envelope() {
     assert!(level > 0.5, "the gate is held: {level}");
 }
 
+/// The watcher wakes the UI when a meter on a display value moves. Dynamics
+/// reads below 0 dB when it turns a signal down, so this fails if the watcher
+/// compares those values as brightness (panel-widgets.md, Meter on a display
+/// value).
+#[test]
+fn the_watcher_sends_a_moving_reduction_meter() {
+    let mut app = app();
+    let source = app.controller.add_module("loom.math.constant").unwrap();
+    app.controller.set_param_named(source, "value", 1.0).unwrap();
+    let dynamics = app.controller.add_module("loom.dyn.dynamics").unwrap();
+    app.commit();
+    let d = app.controller.graph().node(dynamics).unwrap().descriptor;
+    let meter = d.panel.widgets.iter().position(|w| w.bind == "reduction").unwrap();
+    let _ = app.update(Message::Canvas(CanvasEvent::VisibleDisplays(vec![dynamics.0])));
+    let watch = app.watched_lights().expect("the meter is on screen");
+    let entry = watch
+        .lights
+        .iter()
+        .position(|(light, _)| *light == (dynamics.0, meter))
+        .unwrap();
+    let readings = |watch: &lights::Watch| watch.read().iter().map(|&(_, r)| r).collect::<Vec<f32>>();
+
+    app.process(480);
+    let quiet = lights::changed(&vec![None; watch.lights.len()], &readings(&watch), &watch.ranges).unwrap();
+    assert_eq!(quiet[entry], Some(255), "no signal, no reduction");
+
+    app.controller.connect_named(source, "out", dynamics, "in").unwrap();
+    app.commit();
+    app.process(4_800);
+    let loud = lights::changed(&quiet, &readings(&watch), &watch.ranges).expect("the meter moved, so it is sent");
+    assert!(loud[entry] < quiet[entry], "the bar moved down: {:?}", loud[entry]);
+}
+
 /// Saved tile dimensions survive session loading and patch creation.
 #[test]
 fn session_keeps_saved_tile_dimensions() {

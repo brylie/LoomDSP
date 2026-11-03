@@ -159,7 +159,7 @@ The signal passes through five sections in this order.
 - [x] `docs/learn/` has an explainer on dynamics detection.
 - [x] A gain reduction meter works on a display value, in the app, and in `--dump-ui`.
 
-Manual, done: `--screenshot-window`, `--screenshot`, and `--dump-ui --frames` on a patch that chains all three, in Compress and Limit. The curves follow their settings, hidden controls close up, and the meter text read `Reduction: -22.0 dB`. Not done: listening, and driving it on a live audio device.
+Manual, done: `--screenshot-window`, `--screenshot`, and `--dump-ui --frames` on a patch that chains all three, in Compress and Limit. The curves follow their settings, hidden controls close up, and the meter text read `Reduction: -22.0 dB`. With `--fake-audio` and the control channel, the meter text followed the threshold. Not done: listening, and driving it on a live audio device.
 
 ## Out of scope
 
