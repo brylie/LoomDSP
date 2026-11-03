@@ -11,7 +11,9 @@ use crate::input_session::{Demand, InputSession};
 use crate::preferences::{AudioPrefs, BufferChoice, DeviceChoice, InputChoice, Preferences, RateChoice, Store};
 use crate::style::{self, button};
 use crate::{App, undo};
-use iced::widget::{checkbox, column, container, opaque, pick_list, radio, row, rule, scrollable, space, text};
+use iced::widget::{
+    checkbox, column, container, opaque, pick_list, radio, row, rule, scrollable, space, text, text_input,
+};
 use iced::{Element, Length};
 use loom_core::{EngineConfig, EngineParts, MidiInputId, OutputSafety, create_engine};
 use loom_host_desktop::{AudioOutput, MidiInputInfo, Outputs, Recorder, STOP_LIMIT, SharedMidi};
@@ -39,6 +41,12 @@ pub enum Message {
     PanicLearn,
     /// Remove the panic trigger.
     PanicClear,
+    /// The **Your name** field's text, not yet saved.
+    Author(String),
+    /// Save the **Your name** field: Enter, or closing the window.
+    SaveAuthor,
+    /// Open the licence chooser for the default licence.
+    ChooseLicence,
 }
 
 /// A change to one audio setting.
@@ -127,14 +135,17 @@ pub struct Window {
     outputs: Result<Outputs, String>,
     inputs: Result<devices::Inputs, String>,
     midi: Result<Vec<String>, String>,
+    /// The **Your name** field as typed, saved on Enter or on close.
+    author: String,
 }
 
 impl Window {
-    fn read(host: &dyn Host) -> Self {
+    fn read(host: &dyn Host, author: String) -> Self {
         Self {
             outputs: host.outputs(),
             inputs: host.audio_inputs(),
             midi: host.midi_inputs(),
+            author,
         }
     }
 }
@@ -310,19 +321,34 @@ impl App {
     pub(crate) fn preferences(&mut self, message: Message) {
         match message {
             Message::Open => {
-                self.rig.window = Some(Window::read(&*self.rig.host));
+                let author = self.rig.store.saved().author.clone();
+                self.rig.window = Some(Window::read(&*self.rig.host, author));
                 self.browser = None;
             }
             Message::Close => {
+                self.save_author();
                 self.rig.window = None;
                 // Learning a panic trigger needs the window open to show
                 // "Waiting for MIDI...", so closing it cancels the learn.
                 self.rig.panic_learn = None;
             }
             Message::Refresh => {
-                if self.rig.window.is_some() {
-                    self.rig.window = Some(Window::read(&*self.rig.host));
+                if let Some(old) = self.rig.window.take() {
+                    self.rig.window = Some(Window::read(&*self.rig.host, old.author));
                 }
+            }
+            Message::Author(text) => {
+                if let Some(window) = &mut self.rig.window {
+                    window.author = text;
+                }
+            }
+            Message::SaveAuthor => self.save_author(),
+            Message::ChooseLicence => {
+                let current = self.rig.store.saved().licence.clone();
+                self.chooser = Some(crate::licence_chooser::Chooser::open(
+                    crate::licence_chooser::Target::Default,
+                    current.as_deref(),
+                ));
             }
             Message::Safety(mode) => self.choose_output_safety(mode),
             Message::Activity(on) => self.choose_activity(on),
@@ -356,7 +382,7 @@ impl App {
         let window = match &self.rig.window {
             Some(window) => window,
             None => {
-                read = Window::read(&*self.rig.host);
+                read = Window::read(&*self.rig.host, String::new());
                 &read
             }
         };
@@ -416,7 +442,8 @@ impl App {
         if self.rig.window.is_some() {
             return false;
         }
-        self.rig.window = Some(Window::read(&*self.rig.host));
+        let author = self.rig.store.saved().author.clone();
+        self.rig.window = Some(Window::read(&*self.rig.host, author));
         true
     }
 
@@ -468,6 +495,34 @@ impl App {
         if self.stream.is_playing() {
             self.rig.safety_pending = Some(mode);
             self.send_pending_safety();
+        }
+    }
+
+    /// Saves the **Your name** field, trimmed, when it changed
+    /// (patch-metadata.md, Defaults). Only the name is stored, never other
+    /// contact details (rule 4).
+    fn save_author(&mut self) {
+        let Some(window) = &self.rig.window else { return };
+        let author = window.author.trim().to_string();
+        if self.rig.store.saved().author == author {
+            return;
+        }
+        let mut preferences = self.rig.store.saved().clone();
+        preferences.author = author;
+        if let Some(error) = self.rig.save(preferences) {
+            self.alerts.say(error);
+        }
+    }
+
+    /// Saves the default licence for new patches, or "No default".
+    pub(crate) fn set_default_licence(&mut self, licence: Option<String>) {
+        if self.rig.store.saved().licence == licence {
+            return;
+        }
+        let mut preferences = self.rig.store.saved().clone();
+        preferences.licence = licence;
+        if let Some(error) = self.rig.save(preferences) {
+            self.alerts.say(error);
         }
     }
 
@@ -1282,6 +1337,37 @@ impl App {
         ]
         .spacing(6);
 
+        let licence = loom_patch::metadata::Licence::of(self.rig.store.saved().licence.as_deref());
+        let patches = column![
+            labelled(
+                "Your name",
+                text_input("Added as author of new patches", &window.author)
+                    .on_input(|t| crate::Message::Preferences(Message::Author(t)))
+                    .on_submit(crate::Message::Preferences(Message::SaveAuthor))
+                    .size(style::CONTROL)
+                    .into(),
+            ),
+            note("Only the name is added to patches you share. Add more by hand if you want to.".into()),
+            labelled(
+                "Licence",
+                row![
+                    text(match licence {
+                        loom_patch::metadata::Licence::None => "No default".to_string(),
+                        other => other.short(),
+                    })
+                    .size(style::CONTROL)
+                    .width(Length::Fill),
+                    button(text("Choose").size(style::CONTROL))
+                        .on_press(crate::Message::Preferences(Message::ChooseLicence)),
+                ]
+                .spacing(8)
+                .align_y(iced::Alignment::Center)
+                .into(),
+            ),
+            note("New patches start with this licence. You can change it for each patch.".into()),
+        ]
+        .spacing(6);
+
         let panel = column![
             row![
                 text("Preferences").size(style::TITLE),
@@ -1304,7 +1390,10 @@ impl App {
                     midi,
                     rule::horizontal(1),
                     heading("Panic"),
-                    panic
+                    panic,
+                    rule::horizontal(1),
+                    heading("New patches"),
+                    patches
                 ]
                 .spacing(12)
                 .padding([0, 12])

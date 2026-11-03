@@ -13,13 +13,15 @@ impl App {
     }
 
     /// True when the patch differs from the file (`docs/design/files.md`).
+    /// An edit in patch info counts too (patch-metadata.md).
     pub(crate) fn unsaved(&self) -> bool {
-        !self.edits.history.is_saved()
+        !self.edits.history.is_saved() || self.document.info_unsaved()
     }
 
     /// Writes the patch to `path`. On success the path becomes the current
     /// file and the unsaved mark clears.
     pub(crate) fn write_to(&mut self, path: PathBuf) -> bool {
+        self.offer_credit();
         let patch = self.current_patch();
         match patch.save(&path) {
             Ok(()) => {
@@ -42,6 +44,21 @@ impl App {
         }
     }
 
+    /// Offers once per patch to add the user's name to its authors, before
+    /// the first Save (patch-metadata.md, rule 3). Never with the control
+    /// channel on, where nobody could answer a dialog.
+    fn offer_credit(&mut self) {
+        let name = self.rig.store.saved().author.trim().to_string();
+        if !self.control.is_empty() || !self.document.should_offer_credit(&name) {
+            return;
+        }
+        match files::confirm_add_author(&name, &self.document.info().authors) {
+            Some(true) => self.document.edit_info(|info| info.authors.push(name)),
+            Some(false) => {}
+            None => self.document.credit_not_asked(),
+        }
+    }
+
     /// Save: to the current file, or Save As when there is none. Returns
     /// false if nothing was saved.
     pub(crate) fn save(&mut self) -> bool {
@@ -54,7 +71,16 @@ impl App {
 
     pub(crate) fn save_as(&mut self) -> bool {
         self.finish_edits();
-        match files::pick_save(self.document.save_start()) {
+        // A patch with no file yet starts in the library folder, when it
+        // is there (patch-metadata.md, Your patches browser).
+        let library = self
+            .rig
+            .store
+            .saved()
+            .library_folder()
+            .filter(|dir| dir.is_dir())
+            .map(|dir| dir.join(format!("{}.{}", files::display_name(None), files::EXTENSION)));
+        match files::pick_save(self.document.save_start().or(library.as_deref())) {
             Some(path) => self.write_to(path),
             None => false,
         }
@@ -172,6 +198,7 @@ impl App {
         // keys with the ones it saw: they must keep counting up. A new frame
         // key also resets pan and zoom to show the whole patch.
         fresh.browser_key = self.browser_key;
+        fresh.patches_open = self.patches_open;
         fresh.frame_key = self.frame_key + 1;
         *self = fresh;
         // The new patch has no unsaved changes: the copy goes.
@@ -199,6 +226,9 @@ impl App {
             FileAction::SaveAs => {
                 self.save_as();
             }
+            // Opening the browser starts a task, so `App::update` handles
+            // it before it reaches here.
+            FileAction::Browse => {}
             FileAction::Close => {
                 if self.can_discard() {
                     self.quit = true;

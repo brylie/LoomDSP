@@ -26,9 +26,17 @@ impl Drop for Folder {
     }
 }
 
+/// Metadata with only a name.
+fn named(name: &str) -> Metadata {
+    Metadata {
+        name: name.to_string(),
+        ..Metadata::default()
+    }
+}
+
 /// A document with no file and no notes.
 fn untitled() -> Document {
-    Document::new("Patch".to_string(), None, None, Vec::new())
+    Document::new(named("Patch"), None, None, Vec::new())
 }
 
 /// A patch opened from the examples folder becomes an untitled copy: no
@@ -37,7 +45,7 @@ fn untitled() -> Document {
 fn an_example_opens_as_an_untitled_copy() {
     let folder = Folder::new("example");
     let path = folder.file("drone.ron");
-    let mut document = Document::new("Drone".to_string(), Some(path), None, Vec::new());
+    let mut document = Document::new(named("Drone"), Some(path), None, Vec::new());
     document.set_examples(Some(folder.0.clone()));
     document.copy_if_example();
     assert_eq!(document.file(), None);
@@ -51,7 +59,7 @@ fn a_plain_file_is_not_an_example() {
     let examples = Folder::new("examples-elsewhere");
     let mine = Folder::new("mine");
     let path = mine.file("song.ron");
-    let mut document = Document::new("Song".to_string(), Some(path.clone()), None, Vec::new());
+    let mut document = Document::new(named("Song"), Some(path.clone()), None, Vec::new());
     document.set_examples(Some(examples.0.clone()));
     document.copy_if_example();
     assert_eq!(document.file(), Some(path.as_path()));
@@ -100,8 +108,42 @@ fn the_next_patch_carries_on_the_run() {
     let mut old = untitled();
     old.set_examples(Some(folder.0.clone()));
     let path = folder.file("pad.ron");
-    let mut next = Document::new("Pad".to_string(), Some(path), None, Vec::new());
+    let mut next = Document::new(named("Pad"), Some(path), None, Vec::new());
     next.carry_on_from(&mut old);
     assert_eq!(next.file(), None, "the example rule applied");
     assert_eq!(next.title_name(), "pad (example)");
+}
+
+/// patch-metadata.md, Defaults: a new patch starts with the user's name
+/// and default licence, and that is not unsaved work. An edit is.
+#[test]
+fn a_new_patch_takes_the_defaults_and_edits_show_as_unsaved() {
+    let mut document = untitled();
+    document.start_new("  Ada Lovelace ", Some("CC-BY-4.0"));
+    assert_eq!(document.info().authors, ["Ada Lovelace"]);
+    assert_eq!(document.info().license.as_deref(), Some("CC-BY-4.0"));
+    assert!(!document.info_unsaved());
+    document.start_new("", None);
+    assert!(document.info().authors.is_empty());
+    assert_eq!(document.info().license, None);
+    document.edit_info(|info| info.tags.push("drone".into()));
+    assert!(document.info_unsaved());
+    let mut patch = Patch::new("Patch");
+    patch.tags = vec!["drone".into()];
+    document.saved(PathBuf::from("drone.ron"), patch);
+    assert!(!document.info_unsaved());
+}
+
+/// Rule 3: Save offers to add the user's name once per patch, only when
+/// a name is set and the patch does not credit it yet.
+#[test]
+fn credit_is_offered_once_per_patch() {
+    let mut document = untitled();
+    assert!(!document.should_offer_credit("  "));
+    document.edit_info(|info| info.authors = vec!["Ada Lovelace".into()]);
+    assert!(!document.should_offer_credit("ada lovelace"));
+    assert!(document.should_offer_credit("Sam Rivera"));
+    assert!(!document.should_offer_credit("Sam Rivera"));
+    document.credit_not_asked();
+    assert!(document.should_offer_credit("Sam Rivera"));
 }

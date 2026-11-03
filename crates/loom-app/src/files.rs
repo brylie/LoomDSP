@@ -186,6 +186,41 @@ pub fn confirm_discard(name: &str) -> Choice {
     }
 }
 
+/// Asks whether to add the user's name to the authors of a patch made by
+/// others (patch-metadata.md, rule 3). `None` when no dialog can be shown:
+/// then nothing is added, and the question is asked again next time.
+pub fn confirm_add_author(name: &str, authors: &[String]) -> Option<bool> {
+    #[cfg(test)]
+    if let Some(answer) = fake::confirm_add_author(name) {
+        return answer;
+    }
+    if !dialogs_available() {
+        return None;
+    }
+    let by = if authors.is_empty() {
+        "This patch lists no authors.".to_string()
+    } else {
+        format!("This patch is by {}.", authors.join(", "))
+    };
+    let result = MessageDialog::new()
+        .set_level(MessageLevel::Info)
+        .set_title(format!("Add \"{name}\" as an author?"))
+        .set_description(format!(
+            "{by} Adding your name credits your changes. Every author stays in the list."
+        ))
+        .set_buttons(MessageButtons::YesNoCancelCustom(
+            "Add my name".to_string(),
+            "Not for this patch".to_string(),
+            "Cancel".to_string(),
+        ))
+        .show();
+    match result {
+        MessageDialogResult::Custom(label) if label == "Add my name" => Some(true),
+        MessageDialogResult::Yes => Some(true),
+        _ => Some(false),
+    }
+}
+
 /// False on Linux when no program that draws message boxes is installed.
 /// Then the dialog would return "cancel" without showing anything.
 pub fn dialogs_available() -> bool {

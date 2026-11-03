@@ -74,7 +74,7 @@ fn writes_after_two_quiet_seconds() {
     let p = Some(patch("a"));
     assert_eq!(s.tick(t0, p.clone()), None);
     assert_eq!(s.tick(t0 + Duration::from_millis(1500), p.clone()), None);
-    assert_eq!(s.tick(t0 + QUIET, p.clone()), Some(Action::Write(patch("a"))));
+    assert_eq!(s.tick(t0 + QUIET, p.clone()), Some(Action::Write(Box::new(patch("a")))));
 }
 
 /// The schedule is settled, so the app's autosave timer can stop, only
@@ -136,7 +136,7 @@ fn a_long_gesture_writes_every_ten_seconds() {
         let now = t0 + TICK * i;
         if let Some(Action::Write(p)) = s.tick(now, Some(patch(&format!("v{i}")))) {
             writes.push(now - t0);
-            s.sent(i.into(), Some(p));
+            s.sent(i.into(), Some(*p));
             s.done(i.into(), true, now);
         }
     }
@@ -166,7 +166,10 @@ fn after_a_failure_the_folder_is_not_trusted() {
     // Undo back to a: the copy is written again, not taken as on disk.
     let after = t1 + QUIET + RETRY;
     s.tick(after, Some(patch("a")));
-    assert_eq!(s.tick(after + QUIET, Some(patch("a"))), Some(Action::Write(patch("a"))));
+    assert_eq!(
+        s.tick(after + QUIET, Some(patch("a"))),
+        Some(Action::Write(Box::new(patch("a"))))
+    );
 }
 
 /// Nothing to keep and nothing on disk: nothing to do.

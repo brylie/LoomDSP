@@ -21,8 +21,8 @@ use serde::Serialize;
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Inspector {
-    /// Nothing selected: a title and help text.
-    Help,
+    /// Nothing selected: patch info, then help text.
+    Patch(crate::patch_info::PatchRows),
     /// Several modules selected: how many.
     Several(usize),
     /// One module selected.
@@ -247,7 +247,7 @@ impl App {
         let graph = self.controller.graph();
         let mut selected = self.selection.iter();
         let id = match (selected.next(), selected.next()) {
-            (None, _) => return Inspector::Help,
+            (None, _) => return Inspector::Patch(self.patch_rows()),
             (Some(&id), None) => id,
             (Some(_), Some(_)) => return Inspector::Several(self.selection.len()),
         };
@@ -477,10 +477,17 @@ impl App {
 }
 
 /// The inspector's widgets.
-pub fn view<'a>(model: Inspector, drop_row: Option<(u32, usize)>, dragging: bool) -> Element<'a, Message> {
+pub fn view<'a>(
+    model: Inspector,
+    authors: &'a iced::widget::text_editor::Content,
+    drop_row: Option<(u32, usize)>,
+    dragging: bool,
+) -> Element<'a, Message> {
     let content: Element<'a, Message> = match model {
         // Short, with the full list one click away (visual-system.md).
-        Inspector::Help => column![
+        Inspector::Patch(rows) => column![
+            crate::patch_info::view(rows, authors),
+            iced::widget::rule::horizontal(1),
             text("Select a module to edit it.").size(style::BODY).color(DIM),
             text("Press A over the canvas to add one.").size(style::BODY).color(DIM),
             button(text("Keyboard shortcuts").size(style::CONTROL)).on_press(Message::ShowShortcuts),

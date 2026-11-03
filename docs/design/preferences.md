@@ -60,6 +60,11 @@ RON, like patches (ADR-0008):
 | `version` | `1` | `1` |
 | `output_safety` | `"low-latency"`, `"clean"`, `"off"` | `"low-latency"` |
 | `show_activity` | `true`, `false` | `true` |
+| `author` | Your name, as text, for example `"Ada Lovelace"` | `""` (not set) |
+| `default_license` | `Some("<SPDX expression>")`, or `None` | `None` (no default) |
+| `library` | `Some("<folder>")`, or `None` | `None`: `LoomDSP/Library` in your Documents folder |
+
+`author`, `default_license`, and `library` are described in [patch metadata](patch-metadata.md#defaults-preferences). A `default_license` that is not a valid SPDX expression falls back to no default, with the usual note, so the app never starts a patch with a licence the player did not choose.
 
 Values use the same spelling as the `--output-safety` flag. *Why:* one name for each mode in the docs, the flag, and the file, so a player who edits the file by hand does not have to learn a second spelling.
 
@@ -115,7 +120,7 @@ If the player changes the setting in the Preferences window during a run started
 
 It opens as a modal panel over the canvas, like the app's other dialogs. Esc or a **Close** button closes it. Audio keeps playing while it is open.
 
-The panel has two sections: Output safety, described here, and [Audio and MIDI devices](#audio-and-midi-devices).
+The panel has two sections: Output safety, described here, and [Audio and MIDI devices](#audio-and-midi-devices). A **New patches** section at the end holds **Your name** (saved on Enter or when the window closes) and the **Licence** default, with a **Choose** button that opens the [licence chooser](patch-metadata.md#licence-chooser).
 
 **Output safety.** Three choices, one selected:
 

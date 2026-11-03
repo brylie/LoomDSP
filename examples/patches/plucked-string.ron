@@ -6,6 +6,7 @@
 Patch(
     version: 1,
     name: "Plucked string",
+    license: "CC0-1.0",
     modules: [
         // Tuned to A3 (220 Hz at 48 kHz, period 218.18 samples):
         // 212.88 samples (0.004435 s) + 1 sample from delay1 + 4.28 samples

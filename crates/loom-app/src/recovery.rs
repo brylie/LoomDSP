@@ -555,7 +555,8 @@ impl Drop for Writer {
 /// What the schedule asks the writer to do.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Action {
-    Write(Patch),
+    /// Boxed: a patch is much larger than the other variant.
+    Write(Box<Patch>),
     Delete,
 }
 
@@ -612,7 +613,7 @@ impl Schedule {
                     // Changes made from here on wait at most another 10 s,
                     // so a long gesture writes every 10 s, not every tick.
                     self.first_unwritten = Some(now);
-                    Action::Write(patch)
+                    Action::Write(Box::new(patch))
                 })
             }
         }
@@ -727,7 +728,7 @@ impl Session {
         }
         if let Some(action) = self.schedule.tick(now, target.clone()) {
             let job = match action {
-                Action::Write(patch) => Job::Write(Box::new(patch), info()),
+                Action::Write(patch) => Job::Write(patch, info()),
                 Action::Delete => Job::Delete,
             };
             let id = self.writer.send(job);

@@ -7,14 +7,21 @@
 //! and the status bar stay with the app.
 
 use crate::{files, recovery};
-use loom_patch::Patch;
+use loom_patch::{Metadata, Patch};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 /// The open patch's file and recovery state.
 pub struct Document {
-    /// The name saved inside the patch.
-    name: String,
+    /// The name, description, authors, tags, and licence saved inside the
+    /// patch (`docs/design/patch-metadata.md`).
+    info: Metadata,
+    /// The metadata as it was last opened or saved, so an edit in patch
+    /// info marks the patch unsaved. Undo does not cover these edits.
+    saved_info: Metadata,
+    /// True once the first Save has offered to add the user's name, so it
+    /// is offered once per opened patch (patch-metadata.md, rule 3).
+    credit_offered: bool,
     /// The file the patch was opened from or saved to.
     file: Option<PathBuf>,
     /// The file's time and size when it was last opened or saved.
@@ -44,9 +51,11 @@ pub struct Document {
 impl Document {
     /// A patch just loaded from `file`, or with no file. Autosave is off
     /// until [`start_autosave`](Self::start_autosave).
-    pub fn new(name: String, file: Option<PathBuf>, stamp: Option<recovery::Stamp>, load_notes: Vec<String>) -> Self {
+    pub fn new(info: Metadata, file: Option<PathBuf>, stamp: Option<recovery::Stamp>, load_notes: Vec<String>) -> Self {
         Self {
-            name,
+            saved_info: info.clone(),
+            info,
+            credit_offered: false,
             file,
             stamp,
             shown_name: None,
@@ -61,7 +70,50 @@ impl Document {
 
     /// The name saved inside the patch.
     pub fn name(&self) -> &str {
-        &self.name
+        &self.info.name
+    }
+
+    /// The patch's metadata.
+    pub fn info(&self) -> &Metadata {
+        &self.info
+    }
+
+    /// Changes the patch's metadata. The change shows as unsaved work.
+    pub fn edit_info(&mut self, edit: impl FnOnce(&mut Metadata)) {
+        edit(&mut self.info);
+        self.settled = false;
+    }
+
+    /// True when the metadata differs from the file.
+    pub fn info_unsaved(&self) -> bool {
+        self.info != self.saved_info
+    }
+
+    /// Starts a new patch with the user's defaults (patch-metadata.md,
+    /// Defaults): their name as the only author and their default licence,
+    /// when set. A new patch is not unsaved work, so this is its saved
+    /// state too.
+    pub fn start_new(&mut self, author: &str, licence: Option<&str>) {
+        self.info.authors = loom_patch::metadata::tidy_authors([author]);
+        self.info.license = licence.map(str::to_string);
+        self.saved_info = self.info.clone();
+    }
+
+    /// True when Save should offer to add `name` to the authors: it is
+    /// set, not in the list, and not offered yet for this patch (rule 3).
+    /// Asking marks it offered.
+    pub fn should_offer_credit(&mut self, name: &str) -> bool {
+        if self.credit_offered || name.trim().is_empty() || loom_patch::metadata::has_author(&self.info.authors, name) {
+            return false;
+        }
+        self.credit_offered = true;
+        true
+    }
+
+    /// Forgets that credit was offered, when no dialog could ask: the next
+    /// Save asks again.
+    pub fn credit_not_asked(&mut self) {
+        self.credit_offered = false;
     }
 
     /// The current file, if the patch has one.
@@ -114,6 +166,7 @@ impl Document {
 
     /// Notes that `patch` is what the file holds now, as after a load.
     pub fn mark_loaded(&mut self, patch: Patch) {
+        self.saved_info = patch.metadata();
         self.saved_content = Some(patch);
     }
 
@@ -124,6 +177,7 @@ impl Document {
         self.file = Some(path);
         self.shown_name = None;
         self.save_hint = None;
+        self.saved_info = patch.metadata();
         self.saved_content = Some(patch);
     }
 

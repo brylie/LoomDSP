@@ -171,6 +171,9 @@ impl App {
         // to keys whether or not a widget used them.
         let browser = (self.browser.is_some() && self.help.is_none()).then(|| iced::event::listen_with(browser_key));
         let help_keys = Some(iced::event::listen_with(help_key));
+        // The patches browser hears Up, Down, and Escape over its fields.
+        let patches_keys =
+            (self.patches.is_some() && self.chooser.is_none()).then(|| iced::event::listen_with(crate::patches::key));
         // The panic key works whatever has focus (panic.md).
         let panic = Some(iced::event::listen_with(panic::key));
         Subscription::batch(
@@ -180,6 +183,7 @@ impl App {
                 .chain(matrix_keys)
                 .chain(browser)
                 .chain(help_keys)
+                .chain(patches_keys)
                 .chain(panic),
         )
     }

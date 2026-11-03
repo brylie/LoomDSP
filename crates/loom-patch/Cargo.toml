@@ -15,6 +15,7 @@ categories = ["multimedia::audio", "encoding"]
 loom-core.workspace = true
 serde.workspace = true
 ron.workspace = true
+spdx.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
