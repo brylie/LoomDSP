@@ -173,7 +173,7 @@ Manual, done: `--screenshot-window`, `--screenshot`, and `--dump-ui --frames` on
 - **EQ presets.** The catalogue names a one-knob tilt and a three-band cut. Modules have no preset system, so these wait for one.
 - **Multiband dynamics** (MT-DYN-03), an abstraction for M4.
 - **A live dot on the curve,** which is [#282](https://github.com/brylie/LoomDSP/issues/282).
-- **A Range widget for the two splits.** Two knobs until the [range](panel-widgets.md#range) widget exists.
+- **A Range widget for the two splits.** Crossover keeps two knobs. Its splits have different ranges (20 Hz to 16 kHz, and 40 Hz to 20 kHz), `high_split` hides with the band count while `low_split` does not, and its rule for crossed splits differs from a range's. The [range](panel-widgets.md#range) widget refuses the first two.
 - **Oversampling** (TR-06). Limit's distortion could use it, and it brings latency, so it waits as well.
 
 ## Sources

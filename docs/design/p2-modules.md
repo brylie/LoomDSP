@@ -32,10 +32,10 @@ The [rules for M1 modules](p1-modules.md#rules-for-all-modules-here) apply: IDs 
 | Inputs | `trigger` (trigger, default 0), `reset` (trigger, default 0) |
 | Outputs | `out`, `out2` |
 | Parameters | `mode`: 0 Step (default), 1 Walk. `low`: −10 to 10, default 0. `high`: −10 to 10, default 1. `shape`: 0 Uniform (default), 1 Centred. `step`: 0 to 1, default 0.1. `glide`: 0 to 5 s, default 0. `seed` (rule 1) |
-| Panel | `low` and `high` on one [range](panel-widgets.md#range) widget; until it exists, two knobs. Segmented controls for `mode` and `shape`. Knobs for `step` and `glide`. `seed` in the inspector only. |
+| Panel | `low` and `high` on one [range](panel-widgets.md#range) widget. Segmented controls for `mode` and `shape`. Knobs for `step` and `glide`. `seed` in the inspector only. |
 
 - **Position inside the range.** The module keeps each output's position `u` from 0 to 1, and outputs `low + u × (high − low)`. If `low` is above `high`, the two are swapped. *Why:* a moved or modulated range rescales the output at once, and a walk can never leave it.
-- `low` and `high` have the [control ranges](control-ranges.md) −1 to 1 (default) and −10 to 10.
+- `low` and `high` have the [control ranges](control-ranges.md) −1 to 1 (default) and −10 to 10, and [share one selected range](control-ranges.md#ranges-on-a-range-widget).
 - **Two independent outputs.** `out` and `out2` each have their own stream and position, and both move on every trigger. *Why two outputs:* one clock often needs two unrelated random values, such as a pitch and a velocity. To send one value to several places, drag several cables from one output.
 - **Step mode:** on each trigger, `u` gets a new draw.
 - **Walk mode:** on each trigger, `u` moves by a draw from −`step` to +`step`. `step` is a fraction of the range. *Why no shared two-dimensional step:* it would change how `out` moves depending on whether `out2` is used, and a module cannot see its output cables. A cable must not change another output's sound ([#529](https://github.com/brylie/LoomDSP/issues/529)). Two independent walks still draw a path on an XY scope.

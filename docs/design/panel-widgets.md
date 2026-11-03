@@ -118,13 +118,13 @@ These rules hold for every widget. Each widget section below says only what diff
    |---|---|---|---|
    | One number (knob, fader, number) | Arc or bar beside the control | Dot on the arc or bar | Hollow ring, no range |
    | One choice (toggle, radio, select list, button) | None. A filled dot beside the control. | None | Hollow ring |
-   | Two numbers (XY pad) | A bar along each axis | A hollow point in the pad | Hollow ring, no bars |
-   | Two numbers on one axis (range) | A bar beside the track for each handle | A thin line at each handle's live value | Hollow ring, no bars |
+   | Two numbers (XY pad) | A bar along each axis | A hollow point in the pad | Hollow ring at that axis's edge, no bar for it |
+   | Two numbers on one axis (range) | A bar beside the track for each handle | A thin line at each handle's live value | Hollow ring at that handle, no bar for it |
    | Marker on a data view | A band along the marker's axis | A thin line | Hollow ring on the marker |
    | Data (curve points, steps, buffer) | Not modulated. Modulate the module's parameters instead. | | |
 
-   *Why:* the rules for knobs, toggles, and radio buttons are Agreed in [modulation.md](modulation.md#seeing-assignments). Every new control reuses the rule of the closest existing one. *Why data is not modulated:* a curve point or a step is not a parameter, so it has no cell for an assignment. A module that reads data has parameters, such as a curve reader's offset and scale, and those can be modulated.
-4. **Composite widgets have an inside.** A widget with more than one editable part (XY pad, range, curve, step grid, waveform) takes focus as one control. Enter goes inside. Inside, the arrow keys move between parts, Space or Enter grabs a part, the arrows then change it, and Enter or Escape lets it go. Escape again leaves the widget. *Why:* without an inside, Tab would have to visit every step of a 64-step pattern before reaching the next control. A grab step means the arrows never both move focus and change a value, so a keyboard user always knows which one they do.
+   *Why:* the rules for knobs, toggles, and radio buttons are Agreed in [modulation.md](modulation.md#seeing-assignments). Every new control reuses the rule of the closest existing one. On a two-number widget each parameter has its own mark, so one axis can show a bar while the other shows a ring. *Why:* the two assignments are separate, and one mark would hide which one is off. *Why data is not modulated:* a curve point or a step is not a parameter, so it has no cell for an assignment. A module that reads data has parameters, such as a curve reader's offset and scale, and those can be modulated.
+4. **Composite widgets have an inside.** A widget with more than one editable part (range, curve, step grid, waveform) takes focus as one control. The XY pad has one point, so it has no inside. Enter goes inside. Inside, the arrow keys move between parts and stop at the ends without wrapping, Space or Enter grabs a part, the arrows then change it, and Enter or Escape lets it go and keeps the change. Escape again leaves the widget. Tab always leaves the widget and moves focus as usual, from any state. A grab counts as a drag in progress, so Escape lets go before it hides pinned lines. Leaving focus, deselecting the module, or hiding or removing the widget ends the inside and any grab. Arrow presses during a grab join one undo step within 500 ms, as on a knob. *Why Tab leaves:* a keyboard user must never be trapped in a control. *Why:* without an inside, Tab would have to visit every step of a 64-step pattern before reaching the next control. A grab step means the arrows never both move focus and change a value, so a keyboard user always knows which one they do.
 5. **Text comes from the descriptor.** Captions are labels. Hover text is the label and description. Choice names come from the parameter, display units from the display value, data slot labels from the slot. A screen reader gets the widget's label, its kind, and its value as text (NFR-UX-02). *Why:* the same rule as ADR-0016. Text written in the descriptor reaches the tile, the inspector, hover text, and screen readers alike.
 6. **Displays never change the sound.** Reading display values, probes, or data never changes output (AGENTS.md rule 3). Editors change the sound only through parameters and module data, and every edit is one undo step per gesture.
 7. **Draw only what changes, only when seen.** Live widgets (lights, readouts, meters, scopes, playheads) get data only while on screen at a zoom where they are drawn, and wake the UI only when what they draw changes. Data views (curve, step grid, waveform) build their GPU data when the data changes, never per frame (ADR-0010, panels.md, Redraw).
@@ -259,12 +259,13 @@ Implemented ([panels.md](panels.md#interaction-68), [clock.md](clock.md#button-d
 
 A square area with a point. The point's horizontal position is one parameter, its vertical position another.
 
-- **Binds to:** two parameters, `x` and `y`. They may have different mappings. The registry refuses a pad whose two names are the same.
+- **Binds to:** two parameters, `x` and `y`. They may have different mappings. The registry refuses a pad whose two names are the same, and a pad whose two parameters are not `shown_when` the same choices. *Why:* half a pad cannot be hidden. The pad's caption is written on the widget, because neither parameter's label names the pair.
 - **Drag:** moves the point by the pointer's movement, relative, like a knob in both directions at once. With Alt held, pressing jumps the point to the pointer. *Why relative by default:* rule 2. *Why a jump at all:* a pad played like a touch surface wants to jump; the modifier keeps it a choice, not an accident.
 - **Shift-drag:** 10 times finer. **Double-click:** resets both parameters to their defaults.
-- **Modulation:** a bar along the bottom edge for `x` and along the left edge for `y`, each like a fader's bar. The live value is a hollow point inside the pad.
-- **Keyboard:** one point, so no inside (rule 4) is needed. Left and Right change `x`, Up and Down change `y`, in 1% steps, 0.1% with Shift.
-- **MIDI learn and hover text:** per axis. Each edge of the pad has the hover text of its parameter. Learn for each axis is set in the inspector.
+- **Modulation:** a bar along the bottom edge for `x` and along the left edge for `y`, each like a fader's bar. Dragging a bar changes the depth of one assignment, as on a fader. The live value is a hollow point inside the pad.
+- **Dropping a cable:** the drop goes to the nearest edge, bottom for `x` and left for `y`. That edge is highlighted during the drag, so the player can see which parameter will get it.
+- **Keyboard:** one point, so no inside (rule 4) is needed. Left and Right change `x`, Up and Down change `y`, in 1% steps, 0.1% with Shift. Enter does nothing. There is no typed value: each parameter's inspector row has its own field.
+- **MIDI learn and hover text:** per axis. Each edge of the pad has the hover text of its parameter, which names a mapped controller. Learn for each axis is set in the inspector. In learn mode a click, Space, or Enter on the pad arms nothing, and the status line says to use the inspector. *Why:* one press cannot say which axis the player means, and arming only `x` would be a silent surprise.
 - **Middle zoom:** the square and the point.
 - **Size (starting size):** 6 × 6, resizable once tiles are ([#61](https://github.com/brylie/LoomDSP/issues/61)).
 
@@ -272,16 +273,18 @@ A square area with a point. The point's horizontal position is one parameter, it
 
 A track with two handles, for a low and a high value on the same scale. The band between the handles is filled.
 
-- **Binds to:** two parameters, `low` and `high`, with the same range and mapping. The registry refuses a range whose two parameters differ in either. *Why:* both handles sit on one track, so one position must mean one value for both.
+- **Binds to:** two parameters, `low` and `high`, with the same range, mapping, offered [control ranges](control-ranges.md#ranges-on-a-range-widget), default control range, and `shown_when`. The registry refuses a range whose two parameters differ in any of these. *Why:* both handles sit on one track, so one position must mean one value for both. The range's caption is written on the widget, because neither parameter's label names the pair.
 - **Drag a handle:** moves it, relative, like a fader. A handle stops at the other handle and cannot pass it. *Why stop and not push:* pushing would change a value the user is not touching.
+- **Handles that overlap:** when a press could take either handle, the first movement decides. It takes the handle on that side of the other: toward the low end of the track, the one drawn lower, and toward the high end, the one drawn higher. *Why:* otherwise a press at the top of the track could take the handle that cannot move up, and the pair would look stuck.
 - **Drag the band:** moves both handles together and keeps the width. It stops when either handle reaches the end of the track.
 - **Drag on the track outside the band:** moves the tile, as on empty space in a curve. *Why:* a press there must never jump a handle to the pointer (rule 2).
-- **Shift-drag:** 10 times finer. **Double-click:** on a handle, resets that parameter. On the band, resets both.
-- **Low above high:** modulation, a MIDI controller, or a typed value can put `low` above `high`. The widget draws each handle where its value is, and the module reads the lower value as the low end. *Why:* a module must never fail or go silent because of a modulation setting.
-- **Modulation:** each handle has its own bar beside the track and a thin line at its live value (rule 3).
-- **Keyboard (rule 4):** Enter goes inside. Left and Right (Up and Down on a vertical range) pick the low handle, the band, or the high handle. Space or Enter grabs. The arrows then move it in 1% steps, or 0.1% with Shift. Enter or Escape lets go.
+- **Shift-drag:** 10 times finer. **Double-click:** on a handle, resets that parameter. On the band, or where the handles overlap, resets both, as one undo step. On the track outside the band, it only selects the module.
+- **Low above high:** modulation, a MIDI controller, or a typed value can put `low` above `high`. The widget draws each handle where its value is, and the module reads the lower value as the low end. A drag moves a crossed handle freely away from the other, and stops on reaching it. It never jumps. *Why:* a module must never fail or go silent because of a modulation setting.
+- **Modulation:** each handle has its own bar and a thin line at its live value (rule 3). `low`'s bar is on one side of the track and `high`'s on the other, so they never overlap. Dragging a bar changes the depth of one assignment, as on a fader.
+- **Dropping a cable:** the drop goes to the nearest handle, which is highlighted during the drag.
+- **Keyboard (rule 4):** Enter goes inside, on the low handle. Left and Right (Up and Down on a vertical range) pick the low handle, the band, or the high handle. Space or Enter grabs. The arrows then move it in 1% steps, or 0.1% with Shift. A handle stops at the other handle, and the band stops at the ends, as with the pointer. Enter or Escape lets go. When focused but not inside, Space does what it does on a knob. There is no typed value: each parameter's inspector row has its own field.
 - **Screen reader:** the label and both values in the parameter's units, such as "Range, 0.20 to 0.70".
-- **MIDI learn and hover text:** per handle, as on the XY pad.
+- **MIDI learn and hover text:** per handle, as on the XY pad. In learn mode a click, Space, or Enter on the range arms nothing, and the status line says to use the inspector.
 - **Middle zoom:** the track and the band.
 - **Size (starting size):** 6 × 2 horizontal, or 2 × 6 vertical.
 - *Why one widget and not two knobs:* the band shows the span at a glance, and a drag can never cross the two ends.
