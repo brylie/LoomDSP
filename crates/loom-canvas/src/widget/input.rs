@@ -51,6 +51,14 @@ impl<Message> PatchCanvas<'_, Message> {
         let over = cursor.is_over(bounds);
         let screen = relative(cursor, bounds);
 
+        // A text field keeps every key, whichever the canvas would have used.
+        // Iced offers an event to every sibling, even after one has taken it
+        // (clipboard.md, rule 7).
+        if self.typing.get() && matches!(event, Event::Keyboard(keyboard::Event::KeyPressed { .. })) {
+            self.leave_keys(state, shell);
+            return;
+        }
+
         if self.matrix_escape
             && matches!(
                 event,
@@ -73,10 +81,7 @@ impl<Message> PatchCanvas<'_, Message> {
                 Event::Keyboard(keyboard::Event::KeyPressed { modifiers, .. }) if !modifiers.command()
             )
         {
-            self.release_every_key_hold(state, shell);
-            if std::mem::take(&mut state.arrow_gesture) {
-                self.emit(shell, CanvasEvent::GestureEnd);
-            }
+            self.leave_keys(state, shell);
             return;
         }
 

@@ -18,8 +18,9 @@ use iced::advanced::widget::tree::{self, Tree};
 use iced::advanced::{Clipboard, Shell, Widget};
 use iced::{Color, Element, Event, Font, Length, Pixels, Point, Rectangle, Size, Vector};
 use iced::{alignment, keyboard, mouse, window};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -92,6 +93,9 @@ pub struct PatchCanvas<'a, Message> {
     matrix_escape: bool,
     /// Leaves unmodified keys to the focused matrix while keeping pointer input active.
     matrix_keyboard: bool,
+    /// True while a text field in the window has focus. Set by the app on
+    /// each key press, because clicking a field sends no message.
+    typing: Rc<Cell<bool>>,
     still: Option<Still>,
     window_drag_line: bool,
 }
@@ -239,6 +243,7 @@ impl<'a, Message> PatchCanvas<'a, Message> {
             matrix_line: None,
             matrix_escape: false,
             matrix_keyboard: false,
+            typing: Rc::default(),
             still: None,
             window_drag_line: false,
         }
@@ -270,6 +275,13 @@ impl<'a, Message> PatchCanvas<'a, Message> {
     /// editor has closed.
     pub fn matrix_escape(mut self, enabled: bool) -> Self {
         self.matrix_escape = enabled;
+        self
+    }
+
+    /// Shares the flag that says a text field has focus. While it is set, the
+    /// canvas leaves every key press to the field, and the pointer still works.
+    pub fn typing(mut self, typing: Rc<Cell<bool>>) -> Self {
+        self.typing = typing;
         self
     }
 

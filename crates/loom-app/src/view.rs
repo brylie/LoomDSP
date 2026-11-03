@@ -33,6 +33,7 @@ impl App {
                     && self.patches.is_none(),
             )
             .matrix_line(self.matrix_line())
+            .typing(self.pointer.typing())
             .matrix_keyboard(self.matrix.tab == RightTab::Matrix && self.matrix.focused)
             .matrix_escape(
                 self.matrix.tab == RightTab::Matrix

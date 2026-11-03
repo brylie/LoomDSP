@@ -666,11 +666,14 @@ What M1 builds. The rest of this spec is M2.
 
 ### Keyboard without a mouse
 
-([#101](https://github.com/brylie/LoomDSP/issues/101).) Closes the gap that nothing selects a module by key. Keys have three owners, tried in this order, and the first one that has a use for the key takes it:
+([#101](https://github.com/brylie/LoomDSP/issues/101).) Closes the gap that nothing selects a module by key. Keys have four owners, tried in this order, and the first one that has a use for the key takes it:
 
-1. **A focused panel control** (knob, toggle, radio, select list, button).
-2. **The canvas** (selection, movement, clipboard, undo).
-3. **Global keys** (Space for Run).
+1. **A text field or text box with focus.** The owners below get no key press at all, wherever the pointer is, whether or not the field uses the key. *Why:* a space in an author's name must not stop the music, and a person typing should never change the patch behind the field. Escape leaves the field, and the other owners then have the keys again. Global shortcuts with Ctrl or Cmd still work, as do Panic and help.
+2. **A focused panel control** (knob, toggle, radio, select list, button).
+3. **The canvas** (selection, movement, clipboard, undo).
+4. **Global keys** (Space for Run).
+
+The table below applies when no text field has focus.
 
 | Key | Panel control focused | Module selected | Nothing selected |
 |---|---|---|---|
@@ -728,6 +731,7 @@ What M1 builds. The rest of this spec is M2.
 
 ### Acceptance criteria: M1 additions
 
+- [x] With a text box in focus, Space, A, F, Tab, Backspace, Enter, Left, and Cmd+V reach no canvas action, with the pointer over the box or over the canvas (`keys_stay_out_of_the_canvas_while_typing`). After Escape, Space toggles Run again (`escape_from_a_text_box_gives_keys_back_to_the_canvas`).
 - [x] Choice names: the registry refuses a wrong count, an empty name, and names on a continuous parameter. The inspector shows "Toggle" and "Momentary" for Button's `mode` and a slider for a parameter without names. No module hard-codes names in its panel.
 - [x] A one-sample trigger into a Clock Divide or Phase Trigger output light lights it, and it fades in 120 ms. No frames are drawn after the fade.
 - [x] A transport-following input shows the clock mark with no cable, loses it when a cable is connected, and has it back when the cable is removed.
