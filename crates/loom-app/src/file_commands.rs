@@ -95,13 +95,20 @@ impl App {
         // A patch with no file yet starts in the library folder, made when
         // it is missing, under a free name taken from the patch name
         // (patch-metadata.md, Your patches browser).
-        let library = match self.document.save_start() {
-            Some(_) => None,
-            None => self
-                .library_folder()
-                .map(|dir| files::free_path(&dir, self.document.name())),
+        // A start with a folder (the current file, or a recovered copy's
+        // folder) wins. A bare file name, as an example copy suggests,
+        // goes in the library like a new patch, keeping its name.
+        let start = match self.document.save_start().map(Path::to_path_buf) {
+            Some(path) if path.parent().is_some_and(|dir| !dir.as_os_str().is_empty()) => Some(path),
+            hint => {
+                let name = hint.as_deref().and_then(Path::file_stem).map_or_else(
+                    || self.document.name().to_string(),
+                    |stem| stem.to_string_lossy().into_owned(),
+                );
+                self.library_folder().map(|dir| files::free_path(&dir, &name)).or(hint)
+            }
         };
-        match files::pick_save(self.document.save_start().or(library.as_deref())) {
+        match files::pick_save(start.as_deref()) {
             Some(path) => self.write_to(path),
             None => false,
         }

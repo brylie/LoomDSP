@@ -177,3 +177,22 @@ fn a_folder_named_examples_elsewhere_is_not_a_copy() {
         "saved in place"
     );
 }
+
+/// patch-metadata.md, Your patches browser: Save As for an example copy
+/// starts in the library folder, under the example's file name, so the
+/// saved copy shows in Your patches. A recovered copy, whose hint has a
+/// folder, still starts next to its file.
+#[test]
+fn an_example_copy_saves_into_the_library() {
+    let examples = Examples::new("example-library");
+    let library = examples.tmp.0.join("Library");
+    let mut app = app_with(examples.example());
+    let mut preferences = app.rig.store.saved().clone();
+    preferences.library = Some(library.clone());
+    let _ = app.rig.store.save(preferences);
+    let _ = fake::asked();
+    fake::answer_save(None);
+    assert!(!app.save_as());
+    assert_eq!(fake::asked(), [Asked::Save(Some(library.join("subtractive.ron")))]);
+    fake::use_examples(None);
+}
