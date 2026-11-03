@@ -233,3 +233,48 @@ fn a_clock_mark_shows_close_up_and_as_a_dot_at_middle_zoom() {
     let [x, _, w, _] = ring.rect();
     assert!(x > PORT_RADIUS && x + w < 9.0 + crate::scene::CLOCK_MARK_SPACE);
 }
+
+/// A number's text bar shows only at middle zoom, and sits in its own range,
+/// drawn after the controls, so the number's box does not hide it. It is not
+/// among the caption bars, which draw under the controls (panel-widgets.md,
+/// Number, Middle zoom).
+#[test]
+fn a_box_text_bar_has_its_own_range() {
+    let mut view = crate::scene::ModuleView {
+        size: None,
+        unknown: false,
+        id: 1,
+        title: "M".into(),
+        hover: crate::scene::HoverText::default(),
+        accent: Color::BLACK,
+        position: Point::ORIGIN,
+        inputs: Vec::new(),
+        outputs: Vec::new(),
+        panel: crate::scene::PanelView::default(),
+    };
+    let widget = |kind| crate::scene::WidgetView {
+        kind,
+        x: 0,
+        y: 0,
+        label: "n".into(),
+        hover: crate::scene::HoverText::default(),
+        hidden: false,
+    };
+    view.panel = crate::scene::PanelView {
+        width: 5,
+        height: 2,
+        widgets: vec![widget(crate::scene::WidgetViewKind::Number { steps: 0 })],
+    };
+    let scene = Scene::new(vec![view], Vec::new());
+    let geometry = Geometry::build(&scene, &Palette::default());
+    assert_eq!(geometry.value_bars, 1);
+    assert_eq!(geometry.caption_bars, 1, "the caption has its own");
+    let middle = geometry.value_bars(true);
+    assert_eq!(middle.len(), 1);
+    assert_eq!(middle.end, geometry.markers());
+    assert!(geometry.value_bars(false).is_empty());
+    assert!(
+        geometry.bars(true, false).end <= middle.start,
+        "the other bars come first"
+    );
+}

@@ -310,6 +310,16 @@ impl ControlGeometry {
                             1.0,
                         ));
                     }
+                    // A surface that reads as a display, not an editable box.
+                    WidgetViewKind::Readout { .. } => {
+                        shapes.push(Shape::new(
+                            number_box(rect),
+                            3.0,
+                            palette.tile,
+                            palette.tile_border,
+                            1.0,
+                        ));
+                    }
                     WidgetViewKind::Select { .. } => {
                         let box_rect = select_box(rect);
                         shapes.push(Shape::new(
@@ -488,7 +498,11 @@ fn modulation_dot(kind: &WidgetViewKind, rect: Rectangle, mark: ModulationMark, 
         | (WidgetViewKind::Knob { .. } | WidgetViewKind::Fader { .. }, ModulationMark::Range { .. }) => None,
         // Displays have no parameter, so no assignments.
         (
-            WidgetViewKind::Light | WidgetViewKind::Meter { .. } | WidgetViewKind::Scope | WidgetViewKind::Shape { .. },
+            WidgetViewKind::Light
+            | WidgetViewKind::Readout { .. }
+            | WidgetViewKind::Meter { .. }
+            | WidgetViewKind::Scope
+            | WidgetViewKind::Shape { .. },
             _,
         ) => None,
         (_, ModulationMark::Ring) => Some(circle(
@@ -622,9 +636,11 @@ pub(crate) fn focus_ring(kind: &WidgetViewKind, rect: Rectangle) -> (Rectangle, 
             4.0,
         ),
         // Displays never take focus.
-        WidgetViewKind::Light | WidgetViewKind::Meter { .. } | WidgetViewKind::Scope | WidgetViewKind::Shape { .. } => {
-            (rect.expand(1.0), 4.0)
-        }
+        WidgetViewKind::Light
+        | WidgetViewKind::Readout { .. }
+        | WidgetViewKind::Meter { .. }
+        | WidgetViewKind::Scope
+        | WidgetViewKind::Shape { .. } => (rect.expand(1.0), 4.0),
     }
 }
 

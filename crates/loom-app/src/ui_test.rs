@@ -1745,4 +1745,44 @@ mod tests {
         let _ = ui.app.update(Message::Learn(crate::learn::Message::Toggle));
         assert!(field(&ui).is_none());
     }
+
+    /// A readout shows its value as text in the snapshot, at its own place,
+    /// and a press on it selects the module and moves nothing. The meter on a
+    /// value around zero starts from zero (panel-widgets.md, Readout, Meter on a
+    /// display value).
+    #[test]
+    fn a_readout_shows_text_and_a_press_selects_its_module() {
+        let mut ui = Ui::open("sine.ron");
+        let id = ui.app.controller.add_module("test.readout").unwrap();
+        ui.app.refresh();
+        ui.step(&[]);
+        ui.app.run_engine(4800);
+        let snapshot = ui.app.ui_snapshot();
+        let tile = snapshot.tiles.iter().find(|tile| tile.id == id.0).expect("the tile");
+        let shown = |label: &str| {
+            let widget = tile.widgets.iter().find(|w| w.label == label).unwrap();
+            (widget.kind, widget.text.clone())
+        };
+        assert_eq!(shown("Count"), ("readout", "7".to_string()));
+        assert_eq!(shown("Pitch"), ("readout", "B4 -20¢".to_string()));
+        assert_eq!(shown("Input"), ("readout", "Second".to_string()));
+        assert_eq!(shown("Cents").1, "12.5 cents");
+        let view = ui.app.scene.module(id.0).unwrap();
+        assert!(
+            view.panel
+                .widgets
+                .iter()
+                .any(|w| matches!(w.kind, loom_canvas::WidgetViewKind::Meter { zero } if zero == 0.5)),
+            "the meter's bar starts from zero, in the middle"
+        );
+
+        let rect = view.widget_bounds(0).unwrap();
+        let at = ui.canvas().to_window(rect.center());
+        ui.move_to(at);
+        ui.press();
+        ui.release();
+        assert_eq!(ui.app.selection, [id.0].into());
+        let node = ui.app.controller.graph().node(id).unwrap();
+        assert_eq!(node.params[0], 7.0, "a press edits nothing");
+    }
 }

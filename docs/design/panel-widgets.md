@@ -51,7 +51,7 @@ Widgets are grouped by the **kind of value** they show or edit, not by the modul
 | Two numbers | XY pad | Two parameters | No | M2 |
 | | Range | Two parameters on one axis: a low and a high | No | M2 |
 | Module state | Light | A display value | Yes | M1 |
-| | Readout | A display value | No | M2 |
+| | Readout | A display value | Yes | M2 |
 | | Meter | An output, or a display value | Yes | M1, display value in M2 |
 | Signals | Scope | An output | No ([#62](https://github.com/brylie/LoomDSP/issues/62)) | M1 |
 | | XY scope | Two outputs | No | M2 ([#280](https://github.com/brylie/LoomDSP/issues/280)) |
@@ -291,16 +291,20 @@ Implemented. Lights for one-sample triggers are [#114](https://github.com/brylie
 
 ### Readout
 
+**Status:** Implemented on the test modules.
+
 A display value shown as text: a count, a current step, a detected pitch, a position in bars and beats.
 
-- **Binds to:** a display value. Its format comes from the display value's unit: a plain number with a set number of decimals, a note name with cents, or choice names (for example, which input a selector passes). Needs display values to carry text and a unit ([#118](https://github.com/brylie/LoomDSP/issues/118)).
-- **Update rate:** at most 10 times a second, and only when the shown text changes. *Why:* text that changes faster cannot be read, and each change lays out text again.
+- **Binds to:** a display value of the Level kind. Its format comes from the display value's range: a plain number with a set number of decimals and the unit, a note name with cents, such as "A4 +12¢", or choice names (for example, which input a selector passes). A value that is not finite reads "--". The registry refuses a Trigger display value. *Why:* reading a trigger takes it, and the watcher is its only reader ([Lights for one-sample triggers](panels.md#lights-for-one-sample-triggers)).
+- **Update rate:** at most 10 times a second, and only when the shown text changes, even while a light on the same screen fades at 30 Hz. *Why:* text that changes faster cannot be read, and each change lays out text again.
 - **Pointer:** a display. Pressing or dragging selects or moves the tile.
 - **Screen reader:** reads the text, but does not announce each change. *Why:* a value read out 10 times a second would drown everything else.
 - **Middle zoom:** a bar for the text.
 - **Size (starting size):** 3 × 2, or 6 × 2 for longer text.
 
 ### Meter on a display value
+
+**Status:** Implemented.
 
 The meter exists for outputs. The baseline also lets it bind to a display value, scaled by the display value's range. *Why:* gain reduction in a dynamics module, or an envelope follower's level, is module state, not an output level in decibels. One meter shape keeps "how much" looking the same everywhere.
 

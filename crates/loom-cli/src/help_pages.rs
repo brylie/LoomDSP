@@ -333,6 +333,13 @@ fn widget(d: &ModuleDescriptor, w: &Widget) -> String {
             );
             format!("Light: {light}")
         }
+        WidgetKind::Readout { .. } => {
+            let display = d.displays.iter().find(|v| v.name == w.bind).map_or_else(
+                || format!("`{}`", w.bind),
+                |v| format!("{}: {}", name(v.label, v.name), cell(v.description)),
+            );
+            format!("Readout: {display}")
+        }
         WidgetKind::Meter if d.meter_display(w).is_some() => {
             let display = d.displays.iter().find(|v| v.name == w.bind).map_or_else(
                 || format!("`{}`", w.bind),

@@ -767,6 +767,8 @@ where
             Detail::Middle => geometry.bars(true, false),
             Detail::Far => geometry.bars(true, true),
         };
+        // A box's text bar draws over the box, and only at middle zoom.
+        let value_bars = geometry.value_bars(detail(state.camera.zoom) == Detail::Middle);
 
         renderer.fill_quad(
             renderer::Quad {
@@ -783,6 +785,7 @@ where
                 traces,
                 overlay: self.overlay_in(state, state.camera.visible(bounds.size())),
                 bars,
+                value_bars,
                 camera: state.camera,
                 cable_dim: CABLE_OPACITY,
             },

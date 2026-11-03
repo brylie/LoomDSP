@@ -389,8 +389,8 @@ fn test_modules_are_listed_only_with_the_flag() {
         test_modules: true,
         ..app_args()
     });
-    // The two test modules and the patch's Transport.
-    assert_eq!(app.controller.graph().nodes().count(), 3, "{}", app.alerts.status());
+    // The three test modules and the patch's Transport.
+    assert_eq!(app.controller.graph().nodes().count(), 4, "{}", app.alerts.status());
     assert_eq!(app.controller.graph().assignments().count(), 10);
     assert!(app.modules.iter().any(|d| d.id == "test.panel"));
 
@@ -1229,13 +1229,20 @@ fn the_watcher_sends_a_moving_reduction_meter() {
     let readings = |watch: &lights::Watch| watch.read().iter().map(|&(_, r)| r).collect::<Vec<f32>>();
 
     app.process(480);
-    let quiet = lights::changed(&vec![None; watch.lights.len()], &readings(&watch), &watch.ranges).unwrap();
+    let quiet = lights::changed(
+        &vec![None; watch.lights.len()],
+        &readings(&watch),
+        &watch.ranges,
+        &watch.readouts,
+    )
+    .unwrap();
     assert_eq!(quiet[entry], Some(255), "no signal, no reduction");
 
     app.controller.connect_named(source, "out", dynamics, "in").unwrap();
     app.commit();
     app.process(4_800);
-    let loud = lights::changed(&quiet, &readings(&watch), &watch.ranges).expect("the meter moved, so it is sent");
+    let loud = lights::changed(&quiet, &readings(&watch), &watch.ranges, &watch.readouts)
+        .expect("the meter moved, so it is sent");
     assert!(loud[entry] < quiet[entry], "the bar moved down: {:?}", loud[entry]);
 }
 

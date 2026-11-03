@@ -8,18 +8,20 @@
 //!
 //! - [`PANEL`] (`test.panel`) has every widget kind on its panel, every
 //!   parameter mapping, and one output of each polarity.
+//! - [`READOUT`] (`test.readout`) has a readout of each format, and a meter on
+//!   a display value that runs below and above zero.
 //! - [`LINEAR`], [`LOG`], [`STEPS`], and [`SMOOTH`] are mirrors: one
 //!   parameter each, and one output that writes what the engine gave that
 //!   parameter, so a test can read it.
 
 use loom_core::{
-    Channels, DisplayKind, DisplayRange, DisplaySpec, LoomError, Module, ModuleConfig, ModuleDescriptor, ModuleRole,
-    Panel, ParamOptions, ParamSpec, Polarity, PortDefault, PortIo, PortSpec, ProcessContext, Registry, SignalType,
-    Widget,
+    Channels, DisplayFormat, DisplayKind, DisplayRange, DisplaySpec, LoomError, Module, ModuleConfig, ModuleDescriptor,
+    ModuleRole, Panel, ParamOptions, ParamSpec, Polarity, PortDefault, PortIo, PortSpec, ProcessContext, Registry,
+    SignalType, Widget,
 };
 
 /// Every test module.
-pub static ALL: &[&ModuleDescriptor] = &[&PANEL, &LINEAR, &LOG, &STEPS, &SMOOTH];
+pub static ALL: &[&ModuleDescriptor] = &[&PANEL, &READOUT, &LINEAR, &LOG, &STEPS, &SMOOTH];
 
 // Every test port and parameter has a label and a description, like the
 // built-ins, or this crate does not compile.
@@ -184,6 +186,106 @@ impl Module for TestPanel {
 
     fn displays(&self, values: &mut [f32]) {
         values[0] = self.lit;
+    }
+}
+
+/// `test.readout`: one readout of each display format, and a meter on a value
+/// with a range around zero. Each display value shows the parameter of its
+/// name, so a test sets what it reads.
+pub static READOUT: ModuleDescriptor = ModuleDescriptor {
+    id: "test.readout",
+    version: 1,
+    name: "Test Readout",
+    category: "Test",
+    family: loom_core::Family::Interface,
+    description: "A readout of each format and a meter on a display value, for tests.",
+    inputs: &[],
+    outputs: &[],
+    params: &[
+        param("count", 0.0, 100.0, 7.0, "").integer(),
+        param("pitch", -1.0, 1.0, 0.09, ""),
+        param("input", 0.0, 2.0, 1.0, "").integer(),
+        param("cents", -50.0, 50.0, 12.5, "cents"),
+    ],
+    role: ModuleRole::Dsp(|_| Box::new(TestReadout { values: [0.0; 4] })),
+    panel: Panel::new(
+        12,
+        7,
+        &[
+            Widget::readout(0, 0, 3, "count"),
+            Widget::readout(3, 0, 6, "cents"),
+            Widget::readout(0, 2, 6, "pitch"),
+            Widget::readout(0, 4, 6, "input"),
+            Widget::meter(9, 0, "cents"),
+        ],
+    ),
+    displays: &[
+        DisplaySpec {
+            name: "count",
+            label: "Count",
+            description: "A plain number.",
+            kind: DisplayKind::Level,
+            range: DisplayRange {
+                min: 0.0,
+                max: 100.0,
+                unit: "",
+                format: DisplayFormat::Number { decimals: 0 },
+            },
+        },
+        DisplaySpec {
+            name: "pitch",
+            label: "Pitch",
+            description: "A note name with cents.",
+            kind: DisplayKind::Level,
+            range: DisplayRange {
+                min: -1.0,
+                max: 1.0,
+                unit: "",
+                format: DisplayFormat::Note,
+            },
+        },
+        DisplaySpec {
+            name: "input",
+            label: "Input",
+            description: "A choice name.",
+            kind: DisplayKind::Level,
+            range: DisplayRange {
+                min: 0.0,
+                max: 2.0,
+                unit: "",
+                format: DisplayFormat::Choices(&["First", "Second", "Third"]),
+            },
+        },
+        DisplaySpec {
+            name: "cents",
+            label: "Cents",
+            description: "A value that runs below and above zero, with a unit.",
+            kind: DisplayKind::Level,
+            range: DisplayRange {
+                min: -50.0,
+                max: 50.0,
+                unit: "cents",
+                format: DisplayFormat::Number { decimals: 1 },
+            },
+        },
+    ],
+};
+
+struct TestReadout {
+    values: [f32; 4],
+}
+
+impl Module for TestReadout {
+    fn process(&mut self, _ctx: &ProcessContext<'_>, _io: &mut PortIo<'_>) {}
+
+    fn set_param(&mut self, index: usize, value: f32) {
+        if let Some(slot) = self.values.get_mut(index) {
+            *slot = value;
+        }
+    }
+
+    fn displays(&self, values: &mut [f32]) {
+        values.copy_from_slice(&self.values);
     }
 }
 

@@ -317,7 +317,7 @@ fn value_text_place(kind: &WidgetViewKind, rect: Rectangle) -> Option<(Point, Al
                 box_rect.width - 18.0,
             ))
         }
-        WidgetViewKind::Number { .. } => {
+        WidgetViewKind::Number { .. } | WidgetViewKind::Readout { .. } => {
             let box_rect = number_box(rect);
             Some((box_rect.center(), Align::Center, box_rect.width - 4.0))
         }
@@ -404,9 +404,10 @@ fn caption_y(kind: &WidgetViewKind, rect: Rectangle) -> f32 {
         // On the face of the button.
         WidgetViewKind::Button => rect.center_y(),
         WidgetViewKind::Radio { .. } => rect.y + GRID * 0.5,
-        WidgetViewKind::Number { .. } | WidgetViewKind::Select { .. } | WidgetViewKind::Segmented { .. } => {
-            rect.y + GRID * 0.5
-        }
+        WidgetViewKind::Number { .. }
+        | WidgetViewKind::Readout { .. }
+        | WidgetViewKind::Select { .. }
+        | WidgetViewKind::Segmented { .. } => rect.y + GRID * 0.5,
     }
 }
 

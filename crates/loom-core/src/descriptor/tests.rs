@@ -505,3 +505,89 @@ fn typed_values_read_units_k_and_commas() {
     let plain = param("p", 0.0, 1.0, 0.0, "");
     assert_eq!(plain.parse_value_text("abc").unwrap_err().to_string(), "Not a number");
 }
+
+/// A readout writes a value by its display range: a number with its unit, a
+/// note name with cents, or a choice name. It never fails on a bad value.
+#[test]
+fn a_readout_writes_its_value_by_format() {
+    let number = DisplayRange {
+        min: -50.0,
+        max: 50.0,
+        unit: "cents",
+        format: DisplayFormat::Number { decimals: 1 },
+    };
+    assert_eq!(number.text(12.54), "12.5 cents");
+    let plain = DisplayRange {
+        unit: "",
+        format: DisplayFormat::Number { decimals: 0 },
+        ..number
+    };
+    assert_eq!(plain.text(7.0), "7");
+
+    let note = DisplayRange {
+        format: DisplayFormat::Note,
+        ..plain
+    };
+    assert_eq!(note.text(0.0), "C4", "0.0 is middle C");
+    assert_eq!(note.text(0.075), "A4", "9 semitones at 0.1 per octave");
+    assert_eq!(note.text(-0.1), "C3", "an octave down");
+    assert_eq!(note.text(1.0 / 1200.0), "C4 +10¢");
+    assert_eq!(note.text(-1.0 / 1200.0), "C4 -10¢");
+    assert_eq!(note.text(0.1 / 12.0), "C#4");
+
+    let choices = DisplayRange {
+        min: 1.0,
+        format: DisplayFormat::Choices(&["One", "Two"]),
+        ..plain
+    };
+    assert_eq!(choices.text(1.0), "One");
+    assert_eq!(choices.text(2.0), "Two");
+    assert_eq!(choices.text(99.0), "Two", "past the end names the last");
+    assert_eq!(choices.text(-99.0), "One");
+
+    for range in [number, note, choices] {
+        assert_eq!(range.text(f32::NAN), "--");
+        assert_eq!(range.text(f32::INFINITY), "--");
+    }
+}
+
+/// The registry refuses a readout with no display value, on a trigger, or of
+/// another width, and names the widget.
+#[test]
+fn a_readout_needs_a_level_display_and_a_known_width() {
+    static LEVEL: [DisplaySpec; 2] = [
+        DisplaySpec {
+            name: "level",
+            label: "Level",
+            description: "A level.",
+            kind: DisplayKind::Level,
+            range: DisplayRange::UNIT,
+        },
+        DisplaySpec {
+            name: "hit",
+            label: "Hit",
+            description: "A trigger.",
+            kind: DisplayKind::Trigger,
+            range: DisplayRange::UNIT,
+        },
+    ];
+    static GOOD: [Widget; 2] = [Widget::readout(0, 0, 3, "level"), Widget::readout(0, 2, 6, "level")];
+    static MISSING: [Widget; 1] = [Widget::readout(0, 0, 3, "nothing")];
+    static TRIGGER: [Widget; 1] = [Widget::readout(0, 0, 3, "hit")];
+    static WIDTH: [Widget; 1] = [Widget::readout(0, 0, 4, "level")];
+    let descriptor = |widgets| ModuleDescriptor {
+        displays: &LEVEL,
+        panel: Panel::new(6, 4, widgets),
+        ..NAMED
+    };
+    assert!(descriptor(&GOOD).check_panel().is_ok());
+    assert!(!GOOD[0].is_control(), "a readout is a display");
+    for (widgets, why) in [
+        (&MISSING[..], "needs a display value"),
+        (&TRIGGER[..], "cannot show a trigger"),
+        (&WIDTH[..], "3 or 6"),
+    ] {
+        let error = descriptor(widgets).check_panel().unwrap_err();
+        assert!(error.contains(why) && error.contains("Readout"), "{error}");
+    }
+}

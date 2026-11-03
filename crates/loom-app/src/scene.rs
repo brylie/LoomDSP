@@ -99,6 +99,7 @@ fn panel_view(d: &ModuleDescriptor) -> PanelView {
                 WidgetKind::Meter => WidgetViewKind::Meter {
                     zero: d.meter_display(w).map_or(0.0, |display| display.range.zero()),
                 },
+                WidgetKind::Readout { width } => WidgetViewKind::Readout { width },
                 WidgetKind::Scope => WidgetViewKind::Scope,
                 WidgetKind::Shape { width, .. } => WidgetViewKind::Shape { width },
                 // The names come from the parameter (panels.md, Choice names).
@@ -416,6 +417,14 @@ fn driven_run(controller: &Controller, id: ModuleId, w: &loom_core::Widget) -> O
 /// a trigger. A meter shows its RMS level in dB, and a meter on a display value
 /// shows that value. `position` is the value as stored.
 fn display_text(d: &ModuleDescriptor, w: &loom_core::Widget, position: f32, right: Option<(f32, f32)>) -> String {
+    if let WidgetKind::Readout { .. } = w.kind {
+        // A readout's text is what it shows. The registry checked its binding.
+        return d
+            .displays
+            .iter()
+            .find(|display| display.name == w.bind)
+            .map_or_else(String::new, |display| display.range.text(position));
+    }
     if w.kind == WidgetKind::Scope {
         // The trace is the value.
         return String::new();
