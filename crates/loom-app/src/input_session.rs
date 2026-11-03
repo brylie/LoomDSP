@@ -12,6 +12,7 @@ use crate::input_watch::Tracker;
 use crate::preferences::InputChoice;
 use loom_core::Controller;
 use loom_host_desktop::{AudioOptions, InputError};
+use serde::Serialize;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
@@ -66,6 +67,34 @@ pub(crate) struct Demand<'a> {
     pub sample_rate: u32,
 }
 
+/// Where the input stream is, as the control channel reports it
+/// (`docs/design/control-channel.md`, The `audio` field).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum InputState {
+    /// The patch or the settings need no input.
+    Off,
+    /// An input is needed and no stream is open.
+    Waiting,
+    /// A named input was lost, and the session waits for that device.
+    WaitingForNamed,
+    /// A stream is open and live.
+    Open,
+    /// A stream is open but has failed, and the next sync replaces it.
+    Failed,
+    /// Permission is denied now and no stream is open.
+    Denied,
+}
+
+/// The input stream as a script sees it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct InputReport {
+    /// The open stream's device name.
+    pub device: Option<String>,
+    /// Where the stream is.
+    pub state: InputState,
+}
+
 /// Owns the input stream, its retry and recovery state, and which of its
 /// messages have been shown.
 ///
@@ -104,6 +133,22 @@ impl InputSession {
             Phase::Open { port, tracker, .. } => Some((port.as_ref(), tracker)),
             _ => None,
         }
+    }
+
+    /// What a script may read about the stream. `denied` says the input is
+    /// wanted and permission is refused now. The refusal is not a phase,
+    /// because it is checked again at each sync, and the message's latch stays
+    /// set after the refusal ends.
+    pub(crate) fn stream_report(&self, denied: bool) -> InputReport {
+        let (device, state) = match &self.phase {
+            Phase::Open { port, .. } if port.is_live() => (Some(port.name().to_string()), InputState::Open),
+            Phase::Open { port, .. } => (Some(port.name().to_string()), InputState::Failed),
+            _ if denied => (None, InputState::Denied),
+            Phase::Waiting { named_lost: true, .. } => (None, InputState::WaitingForNamed),
+            Phase::Waiting { .. } => (None, InputState::Waiting),
+            Phase::Off => (None, InputState::Off),
+        };
+        InputReport { device, state }
     }
 
     /// Whether a lost named input is being waited for.

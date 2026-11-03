@@ -618,3 +618,49 @@ fn removing_the_last_audio_in_ends_a_wait_that_began_with_the_output() {
         "a later Audio In starts fresh"
     );
 }
+
+/// The report follows the stream through each state, whether or not an
+/// output plays, with no real device named.
+#[test]
+fn the_report_follows_the_stream() {
+    let report = |bench: &Bench, denied| bench.session.stream_report(denied);
+    let shows = |device: Option<&str>, state| InputReport {
+        device: device.map(str::to_string),
+        state,
+    };
+    let mut bench = Bench::new(&["Other", "Mic"]);
+    bench.choice = InputChoice::Named("Mic".into());
+    assert_eq!(report(&bench, false), shows(None, InputState::Off));
+
+    bench.sync();
+    assert_eq!(report(&bench, false), shows(Some("Mic"), InputState::Open));
+
+    bench.plug(&["Other"]);
+    bench.fail_stream();
+    assert_eq!(report(&bench, false), shows(Some("Mic"), InputState::Failed));
+
+    bench.sync();
+    assert_eq!(report(&bench, false), shows(None, InputState::WaitingForNamed));
+
+    bench.output_playing = false;
+    bench.sync();
+    assert_eq!(
+        report(&bench, false),
+        shows(None, InputState::WaitingForNamed),
+        "the wait goes on with the output stopped"
+    );
+    assert_eq!(report(&bench, true), shows(None, InputState::Denied));
+
+    bench.wanted = false;
+    bench.sync();
+    assert_eq!(
+        report(&bench, false),
+        shows(None, InputState::Off),
+        "the last Audio In went"
+    );
+
+    let mut bench = Bench::new(&["Mic"]);
+    *bench.fake.input_error.borrow_mut() = Some(InputError::Other("device busy".into()));
+    bench.sync();
+    assert_eq!(report(&bench, false), shows(None, InputState::Waiting));
+}

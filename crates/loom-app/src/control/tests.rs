@@ -1707,3 +1707,34 @@ fn open_keeps_load_notes_in_the_status_line() {
         app.alerts.status()
     );
 }
+
+/// The `audio` field says where the input stream is, as a script needs when
+/// it adds and removes an Audio In. Removing the last one is visible too.
+#[test]
+fn the_audio_field_reports_the_input_stream() {
+    use crate::devices::fake::{self, Fake};
+    let fake = std::rc::Rc::new(Fake::new(&[fake::device("Fake A")], &[]));
+    *fake.audio_inputs.borrow_mut() = crate::devices::Inputs {
+        default: Some("Fake Mic".into()),
+        devices: vec!["Fake Mic".into()],
+    };
+    let mut app = on_fake_devices("input-report", &fake);
+    let input = |app: &mut App| run(app, r#"{"cmd": "snapshot"}"#).unwrap()["audio"]["input"].clone();
+    assert_eq!(input(&mut app), json!({"device": null, "state": "off"}));
+
+    let module = app.controller.add_module("loom.io.audio-in").unwrap();
+    assert!(app.commit());
+    app.sync_audio_input();
+    assert_eq!(input(&mut app), json!({"device": "Fake Mic", "state": "open"}));
+
+    fake.input_permission_denied.set(true);
+    app.sync_audio_input();
+    assert_eq!(input(&mut app), json!({"device": null, "state": "denied"}));
+    fake.input_permission_denied.set(false);
+    app.sync_audio_input();
+
+    app.controller.remove_module(module).unwrap();
+    assert!(app.commit());
+    app.sync_audio_input();
+    assert_eq!(input(&mut app), json!({"device": null, "state": "off"}));
+}
