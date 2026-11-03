@@ -131,6 +131,17 @@ pub struct PortView {
     pub follows_transport: Option<TransportSignal>,
 }
 
+/// The label and hover text of one value of a widget that binds two. Each
+/// edge of an XY pad and each handle of a range has its parameter's text
+/// (panel-widgets.md, XY pad).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct PartText {
+    /// The parameter's label.
+    pub label: String,
+    /// The parameter's hover text.
+    pub hover: HoverText,
+}
+
 /// What a widget on a panel is. Mirrors `loom_core::WidgetKind`, so the
 /// canvas does not depend on the engine.
 #[derive(Debug, Clone, PartialEq)]
@@ -154,6 +165,11 @@ pub enum WidgetViewKind {
         vertical: bool,
         /// Whole-number values to step through, or 0, as for a knob.
         steps: u32,
+    },
+    /// A square with a point (panel-widgets.md, XY pad).
+    XyPad {
+        /// The text of `x`, then of `y`.
+        parts: Box<[PartText; 2]>,
     },
     /// A value shown as text in a box (panel-widgets.md, Number).
     Number {
@@ -205,6 +221,19 @@ impl WidgetViewKind {
     pub fn is_one_number(&self) -> bool {
         matches!(self, Self::Knob { .. } | Self::Fader { .. } | Self::Number { .. })
     }
+
+    /// The text of each value of a widget that binds two, or `None`.
+    pub fn parts(&self) -> Option<&[PartText; 2]> {
+        match self {
+            Self::XyPad { parts } => Some(parts),
+            _ => None,
+        }
+    }
+
+    /// True for a widget that binds two values.
+    pub fn is_two_numbers(&self) -> bool {
+        self.parts().is_some()
+    }
 }
 
 /// One widget on a panel, placed in grid units from the panel's corner.
@@ -234,6 +263,7 @@ impl WidgetView {
             WidgetViewKind::Knob { .. } => (3, 3),
             WidgetViewKind::Fader { vertical: true, .. } => (2, 6),
             WidgetViewKind::Fader { vertical: false, .. } => (6, 2),
+            WidgetViewKind::XyPad { .. } => (6, 6),
             WidgetViewKind::Number { .. } => (5, 2),
             WidgetViewKind::Readout { width } => (*width, 2),
             WidgetViewKind::Meter { .. } => (3, 6),
@@ -279,6 +309,7 @@ impl WidgetView {
             self.kind,
             WidgetViewKind::Knob { .. }
                 | WidgetViewKind::Fader { .. }
+                | WidgetViewKind::XyPad { .. }
                 | WidgetViewKind::Number { .. }
                 | WidgetViewKind::Toggle
                 | WidgetViewKind::Radio { .. }

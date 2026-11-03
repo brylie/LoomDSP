@@ -4,7 +4,7 @@ use super::*;
 
 /// Which value of a control an event is about. Most controls have one
 /// value. An XY pad and a range have two (panel-widgets.md, Two numbers).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Hash)]
 pub enum ControlPart {
     /// The control's only value, the XY pad's `x`, or the range's `low`.
     #[default]

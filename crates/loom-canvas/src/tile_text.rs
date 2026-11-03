@@ -348,6 +348,7 @@ fn panel_boxes(module: &ModuleView) -> Vec<PanelBox> {
         let drawn = match &widget.kind {
             WidgetViewKind::Knob { .. } => knob_drawn(rect),
             WidgetViewKind::Fader { vertical, .. } => fader_drawn(rect, *vertical),
+            WidgetViewKind::XyPad { .. } => fader_drawn(rect, true),
             // The buttons, in a column below the caption row.
             WidgetViewKind::Radio { .. } => {
                 let right = radio_centre(rect, 0).x + 5.0;
@@ -398,7 +399,9 @@ fn caption_y(kind: &WidgetViewKind, rect: Rectangle) -> f32 {
         WidgetViewKind::Knob { .. } => knob_centre(rect).y + 1.5 * GRID,
         WidgetViewKind::Fader { vertical: true, .. } => rect.y + rect.height - GRID * 0.5,
         WidgetViewKind::Fader { vertical: false, .. } => rect.y + GRID * 0.5,
-        WidgetViewKind::Meter { .. } | WidgetViewKind::Scope => rect.y + rect.height - GRID * 0.5,
+        WidgetViewKind::Meter { .. } | WidgetViewKind::Scope | WidgetViewKind::XyPad { .. } => {
+            rect.y + rect.height - GRID * 0.5
+        }
         WidgetViewKind::Shape { .. } => rect.y + rect.height - GRID * 0.5,
         WidgetViewKind::Toggle | WidgetViewKind::Light => light_centre(rect).y + GRID,
         // On the face of the button.

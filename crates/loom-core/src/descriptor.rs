@@ -1068,6 +1068,19 @@ impl Widget {
         self
     }
 
+    /// An XY pad: `horizontal` follows the point left and right, and `vertical`
+    /// up and down. Neither parameter's label names the pair, so it takes its
+    /// own caption (panel-widgets.md, XY pad).
+    pub const fn xy_pad(x: u8, y: u8, horizontal: &'static str, vertical: &'static str, caption: &'static str) -> Self {
+        Self {
+            kind: WidgetKind::XyPad { y: vertical },
+            x,
+            y,
+            bind: horizontal,
+            caption: Some(caption),
+        }
+    }
+
     /// A knob for parameter `param`.
     pub const fn knob(x: u8, y: u8, param: &'static str) -> Self {
         Self {
@@ -1716,6 +1729,20 @@ impl ModuleDescriptor {
                 }
                 let param = &self.params[index];
                 let integer = param.options.integer;
+                if let Some(second) = widget.second() {
+                    let Some(other) = self.params.iter().find(|p| p.name == second) else {
+                        return Err(name("no such second parameter"));
+                    };
+                    if second == widget.bind {
+                        return Err(name("a widget with two values needs two different parameters"));
+                    }
+                    if widget.caption.is_none_or(|caption| caption.trim().is_empty()) {
+                        return Err(name("a widget with two values needs its own caption"));
+                    }
+                    if param.options.shown_when != other.options.shown_when {
+                        return Err(name("its two parameters must be shown for the same choices"));
+                    }
+                }
                 match widget.kind {
                     WidgetKind::Toggle if !(integer && param.min == 0.0 && param.max == 1.0) => {
                         return Err(name("a toggle needs a whole-number parameter from 0 to 1"));

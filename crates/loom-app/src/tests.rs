@@ -392,7 +392,7 @@ fn test_modules_are_listed_only_with_the_flag() {
     });
     // The three test modules and the patch's Transport.
     assert_eq!(app.controller.graph().nodes().count(), 4, "{}", app.alerts.status());
-    assert_eq!(app.controller.graph().assignments().count(), 10);
+    assert_eq!(app.controller.graph().assignments().count(), 12);
     assert!(app.modules.iter().any(|d| d.id == "test.panel"));
 
     let app = self::app();

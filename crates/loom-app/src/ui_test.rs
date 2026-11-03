@@ -1652,6 +1652,215 @@ mod tests {
         assert_eq!(mark(&ui), Mark::Ring, "a hollow ring while the assignment is off");
     }
 
+    /// The square of the XY pad on a new `test.panel`, in world units.
+    fn pad_area(ui: &mut Ui, id: ModuleId) -> Rectangle {
+        loom_canvas::xy_area(ui.control_bounds(id.0, "pad_x"))
+    }
+
+    /// A parameter's position on its control.
+    fn position_of(ui: &Ui, module: ModuleId, name: &str) -> f32 {
+        let node = ui.app.controller.graph().node(module).unwrap();
+        let spec = node.spec(node.descriptor.param_index(name).unwrap()).unwrap();
+        spec.normalize(param_value(ui, module, name))
+    }
+
+    /// A press on an XY pad moves nothing, and a drag moves the point by the
+    /// pointer's movement, on both axes at once, as one undo step. Shift is
+    /// 10 times finer (panel-widgets.md, XY pad, and rule 2).
+    #[test]
+    fn an_xy_pad_drags_relatively_on_both_axes() {
+        let mut ui = Ui::open("sine.ron");
+        let id = select_new(&mut ui, "test.panel");
+        let before = (position_of(&ui, id, "pad_x"), position_of(&ui, id, "pad_y"));
+        let at = ui.control(id.0, "pad_x");
+        ui.move_to(at);
+        ui.press();
+        assert_eq!(position_of(&ui, id, "pad_x"), before.0, "a plain press moves nothing");
+        assert_eq!(position_of(&ui, id, "pad_y"), before.1, "a plain press moves nothing");
+        let steps = ui.app.edits.history.len();
+        ui.move_to(Point::new(at.x + 20.0, at.y - 20.0));
+        ui.release();
+        assert_eq!(ui.app.edits.history.len(), steps + 1, "one undo step");
+        let moved = position_of(&ui, id, "pad_x") - before.0;
+        assert!((moved - 0.1).abs() < 1e-3, "{moved}");
+        let moved = position_of(&ui, id, "pad_y") - before.1;
+        assert!((moved - 0.1).abs() < 1e-3, "up raises y: {moved}");
+
+        // Long enough after the last click not to be a double-click.
+        std::thread::sleep(std::time::Duration::from_millis(450));
+        let coarse = position_of(&ui, id, "pad_x");
+        ui.hold(keyboard::Modifiers::SHIFT);
+        ui.drag(at, Point::new(at.x + 20.0, at.y), 4);
+        ui.hold(keyboard::Modifiers::default());
+        let moved = position_of(&ui, id, "pad_x") - coarse;
+        assert!((moved - 0.01).abs() < 1e-3, "Shift is finer: {moved}");
+    }
+
+    /// With Alt held, a press jumps the point to the pointer. A double-click
+    /// resets both parameters as one undo step (panel-widgets.md, XY pad).
+    #[test]
+    fn an_xy_pad_jumps_with_alt_and_resets_both() {
+        let mut ui = Ui::open("sine.ron");
+        let id = select_new(&mut ui, "test.panel");
+        let area = pad_area(&mut ui, id);
+        let world = Point::new(area.x + area.width * 0.25, area.y + area.height * 0.25);
+        let at = ui.canvas().to_window(world);
+        ui.hold(keyboard::Modifiers::ALT);
+        ui.move_to(at);
+        ui.press();
+        ui.release();
+        ui.hold(keyboard::Modifiers::default());
+        let (x, y) = (position_of(&ui, id, "pad_x"), position_of(&ui, id, "pad_y"));
+        assert!((x - 0.25).abs() < 1e-3, "x follows the pointer: {x}");
+        assert!((y - 0.75).abs() < 1e-3, "y follows the pointer: {y}");
+
+        std::thread::sleep(std::time::Duration::from_millis(450));
+        let steps = ui.app.edits.history.len();
+        ui.move_to(at);
+        ui.press();
+        ui.release();
+        ui.press();
+        ui.release();
+        assert_eq!(param_value(&ui, id, "pad_x"), 0.5, "reset to the default");
+        assert_eq!(param_value(&ui, id, "pad_y"), 1_000.0, "reset to the default");
+        assert_eq!(ui.app.edits.history.len(), steps + 1, "one undo step for both");
+    }
+
+    /// Left and Right change `x`, and Up and Down change `y`, by 1%, or 0.1%
+    /// with Shift. Enter does nothing, and digits open no field: a pad takes
+    /// no typed value (panel-widgets.md, XY pad).
+    #[test]
+    fn an_xy_pad_takes_its_keys_by_axis() {
+        use keyboard::key::Named;
+        let mut ui = Ui::open("sine.ron");
+        let id = select_new(&mut ui, "test.panel");
+        focus_control(&mut ui, id, "pad_x");
+        let none = keyboard::Modifiers::default();
+        let start = (position_of(&ui, id, "pad_x"), position_of(&ui, id, "pad_y"));
+
+        ui.tap(keyboard::Key::Named(Named::ArrowRight), none);
+        assert!((position_of(&ui, id, "pad_x") - start.0 - 0.01).abs() < 1e-4);
+        assert!((position_of(&ui, id, "pad_y") - start.1).abs() < 1e-4, "y stays");
+        ui.tap(keyboard::Key::Named(Named::ArrowLeft), keyboard::Modifiers::SHIFT);
+        assert!(
+            (position_of(&ui, id, "pad_x") - start.0 - 0.009).abs() < 1e-4,
+            "Shift is finer"
+        );
+        ui.tap(keyboard::Key::Named(Named::ArrowUp), none);
+        assert!((position_of(&ui, id, "pad_y") - start.1 - 0.01).abs() < 1e-4);
+        ui.tap(keyboard::Key::Named(Named::ArrowDown), none);
+        assert!((position_of(&ui, id, "pad_y") - start.1).abs() < 1e-4);
+
+        let before = (param_value(&ui, id, "pad_x"), param_value(&ui, id, "pad_y"));
+        ui.tap(keyboard::Key::Named(Named::Enter), none);
+        ui.typewrite("7");
+        ui.tap(keyboard::Key::Named(Named::Enter), none);
+        assert_eq!((param_value(&ui, id, "pad_x"), param_value(&ui, id, "pad_y")), before);
+    }
+
+    /// In learn mode a click, Space, or Enter on a pad arms nothing, and the
+    /// status line says to use the inspector. The tile shows no mapping label
+    /// (midi-learn.md, Making a mapping).
+    #[test]
+    fn learn_mode_arms_nothing_on_an_xy_pad() {
+        use keyboard::key::Named;
+        let mut ui = Ui::open("sine.ron");
+        let id = select_new(&mut ui, "test.panel");
+        let _ = ui.app.update(Message::Learn(crate::learn::Message::Toggle));
+        ui.redraw();
+        focus_control(&mut ui, id, "pad_x");
+        assert!(ui.app.learn.armed().is_none(), "a click arms nothing");
+        assert!(ui.app.ui_snapshot().status.contains("inspector"));
+        for key in [Named::Space, Named::Enter] {
+            ui.app.alerts.say(String::new());
+            ui.tap(keyboard::Key::Named(key), keyboard::Modifiers::default());
+            assert!(ui.app.learn.armed().is_none(), "{key:?} arms nothing");
+            assert!(ui.app.ui_snapshot().status.contains("inspector"), "{key:?} says why");
+        }
+        let widget = widget_of(&ui, id, "pad_x");
+        let view = crate::learn::view(&ui.app.controller, ui.app.learn.armed());
+        assert!(!view.labels.contains_key(&(id.0, widget)));
+    }
+
+    /// A cable dropped on a pad goes to the nearest edge, and each parameter
+    /// shows its own mark: a bar for one, and a ring for one whose assignment
+    /// is off. A press on the bar drags depth, not the value
+    /// (panel-widgets.md, XY pad, and rule 3).
+    #[test]
+    fn an_xy_pad_takes_a_drop_at_its_nearest_edge_and_marks_each_axis() {
+        use crate::snapshot::Mark;
+        let mut ui = Ui::open("sine.ron");
+        let id = select_new(&mut ui, "test.panel");
+        let area = pad_area(&mut ui, id);
+        let node = ui.app.controller.graph().node(id).unwrap();
+        let (x, y) = (
+            node.descriptor.param_index("pad_x").unwrap(),
+            node.descriptor.param_index("pad_y").unwrap(),
+        );
+        let target = |ui: &Ui, param: usize| {
+            let graph = ui.app.controller.graph();
+            let found = graph.assignments().find(|(_, a)| a.target == id && a.param == param);
+            found.map(|(assignment, _)| assignment)
+        };
+        let from = ui.output(id.0, "uni");
+        let bottom = ui
+            .canvas()
+            .to_window(Point::new(area.center_x(), area.y + area.height - 2.0));
+        ui.drag(from, bottom, 12);
+        assert!(target(&ui, x).is_some(), "the bottom edge is x");
+        assert!(target(&ui, y).is_none());
+        let from = ui.output(id.0, "bi");
+        let left = ui.canvas().to_window(Point::new(area.x + 2.0, area.center_y()));
+        ui.drag(from, left, 12);
+        let off = target(&ui, y).expect("the left edge is y");
+
+        let _ = ui.app.update(Message::Enabled {
+            id: off,
+            enabled: false,
+        });
+        ui.redraw();
+        let widget = widget_of(&ui, id, "pad_x");
+        let snapshot = ui.app.ui_snapshot();
+        let tile = snapshot.tiles.iter().find(|t| t.id == id.0).unwrap();
+        let shown = &tile.widgets[widget];
+        assert_eq!(shown.kind, "xy_pad");
+        assert!(matches!(shown.modulation, Mark::Range { .. }), "x shows a bar");
+        let second = shown.second.as_ref().expect("the pad reports y");
+        assert_eq!(second.modulation, Mark::Ring, "y shows a ring");
+        assert!(shown.text.contains(", "), "the text says both values: {}", shown.text);
+
+        let depth = |ui: &Ui| {
+            ui.app
+                .controller
+                .graph()
+                .assignment(target(ui, x).unwrap())
+                .unwrap()
+                .depth
+        };
+        let before = (depth(&ui), param_value(&ui, id, "pad_x"));
+        let at = ui
+            .canvas()
+            .to_window(loom_canvas::xy_edge_point(area, loom_canvas::ControlPart::Main, 0.5));
+        ui.drag(at, Point::new(at.x + 20.0, at.y), 4);
+        assert!(depth(&ui) > before.0, "the bar changes the depth");
+        assert_eq!(param_value(&ui, id, "pad_x"), before.1, "and not the value");
+    }
+
+    /// Each edge of a pad has its parameter's own label and description
+    /// (panel-widgets.md, XY pad).
+    #[test]
+    fn each_axis_of_an_xy_pad_has_its_own_text() {
+        let mut ui = Ui::open("sine.ron");
+        let id = select_new(&mut ui, "test.panel");
+        let widget = widget_of(&ui, id, "pad_x");
+        let tile = ui.app.scene.module(id.0).unwrap();
+        let view = &tile.panel.widgets[widget];
+        let parts = view.kind.parts().expect("a pad has two parts");
+        assert_eq!(view.label, "Position", "the caption names the pair");
+        assert_eq!(parts[0].label, "pad_x");
+        assert_eq!(parts[1].label, "pad_y");
+    }
+
     /// The widget index of the control bound to a parameter.
     fn widget_of(ui: &Ui, module: ModuleId, param: &str) -> usize {
         let node = ui.app.controller.graph().node(module).unwrap();

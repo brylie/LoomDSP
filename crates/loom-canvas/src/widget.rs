@@ -1,7 +1,10 @@
 //! The patch canvas widget: input handling and drawing.
 
 use crate::camera::Camera;
-use crate::controls::{ControlGeometry, PanelValues, ValueDrag, focus_ring, knob_step, radio_option, select_box};
+use crate::controls::{
+    ControlGeometry, PanelValues, ValueDrag, focus_ring, knob_step, radio_option, select_box, xy_area, xy_bar_at,
+    xy_edge_ring, xy_nearest_edge, xy_position, xy_throw,
+};
 use crate::gpu::{Cable, CanvasPrimitive, Geometry, Overlay, Shape};
 use crate::hover::{HOVER_PADDING, HOVER_TEXT_PX, HoverTarget, HoverTimer};
 use crate::scene::{
@@ -70,6 +73,10 @@ pub struct LearnView {
     /// Mapping labels, such as `CC 74`, by module ID and widget index. They
     /// show in place of the control's caption.
     pub labels: BTreeMap<(u32, usize), String>,
+    /// Mapping labels of the values of a widget that binds two, by module ID,
+    /// widget index, and part. They show in that part's hover text
+    /// (midi-learn.md, Making a mapping).
+    pub part_labels: BTreeMap<(u32, usize, ControlPart), String>,
 }
 
 /// Says why typed text is not a value of a control: module, widget, text.
@@ -210,7 +217,9 @@ impl PointerDrag {
             Interaction::Panning { .. } => Self::Pan,
             Interaction::Moving { ids, .. } => Self::Move(ids.clone()),
             Interaction::Resizing { module, .. } => Self::Resize(*module),
-            Interaction::Turning { module, widget, .. } => Self::Knob(*module, *widget),
+            Interaction::Turning { module, widget, .. } | Interaction::Pad { module, widget, .. } => {
+                Self::Knob(*module, *widget)
+            }
             Interaction::Holding { module, widget } => Self::Button(*module, *widget),
             Interaction::Wiring { from, pulled } => Self::Wire {
                 from: *from,
@@ -434,6 +443,7 @@ impl<'a, Message> PatchCanvas<'a, Message> {
             Interaction::Moving { .. }
                 | Interaction::Resizing { .. }
                 | Interaction::Turning { .. }
+                | Interaction::Pad { .. }
                 | Interaction::Wiring { .. }
                 | Interaction::Depth { .. }
         ) {
@@ -506,10 +516,23 @@ enum Interaction {
         /// cable (modulation.md, Making an assignment).
         pulled: bool,
     },
+    /// Dragging the point of an XY pad.
+    Pad {
+        module: u32,
+        widget: usize,
+        /// Screen pixels for the full range.
+        throw: f32,
+        /// Where the pointer was at the last move.
+        last: Point,
+        /// The positions last sent.
+        position: (f32, f32),
+    },
     /// Dragging a knob's range arc or a fader's bar: its depth, not its value.
     Depth {
         module: u32,
         widget: usize,
+        /// Which of the control's values the depth belongs to.
+        part: ControlPart,
         /// How pointer movement changes the depth.
         drag: ValueDrag,
         /// Where the pointer was along the drag at the last move.
@@ -532,7 +555,7 @@ impl Interaction {
             Self::Resizing { .. } => mouse::Interaction::ResizingDiagonallyDown,
             Self::Turning { drag, .. } | Self::Depth { drag, .. } => drag.cursor(),
             Self::Holding { .. } => mouse::Interaction::Pointer,
-            Self::Wiring { .. } | Self::Selecting { .. } => mouse::Interaction::Crosshair,
+            Self::Pad { .. } | Self::Wiring { .. } | Self::Selecting { .. } => mouse::Interaction::Crosshair,
             Self::Idle => return None,
         })
     }

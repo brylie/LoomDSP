@@ -202,7 +202,14 @@ impl App {
                 }
             }
             CanvasEvent::Learn { module, widget } => {
-                if let Some((index, _, _)) = scene::control_param(&self.controller, module, widget) {
+                // One press cannot say which of two values the player means
+                // (midi-learn.md, Making a mapping).
+                let two = scene::control_param(&self.controller, module, widget)
+                    .is_some_and(|(_, kind, _)| kind.is_two_numbers());
+                if two {
+                    self.alerts
+                        .say("This control has two values. Arm each one in the inspector.".to_string());
+                } else if let Some((index, _, _)) = scene::control_param(&self.controller, module, widget) {
                     self.arm((module, index));
                 }
             }

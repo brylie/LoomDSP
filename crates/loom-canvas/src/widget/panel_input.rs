@@ -63,7 +63,7 @@ impl<Message> PatchCanvas<'_, Message> {
     /// depth, given what the hit test found there. Not in MIDI learn mode.
     /// `press` and the hover cursor both ask this one method, so the cursor
     /// always tells the truth about the press (#198 was the two disagreeing).
-    pub(super) fn depth_drag_at(&self, hit: &Hit, world: Point) -> Option<(u32, usize)> {
+    pub(super) fn depth_drag_at(&self, hit: &Hit, world: Point) -> Option<(u32, usize, ControlPart)> {
         if self.learn.is_some() || !matches!(hit, Hit::Widget { .. } | Hit::Module(_)) {
             return None;
         }
@@ -71,11 +71,59 @@ impl<Message> PatchCanvas<'_, Message> {
     }
 
     /// The modulated knob whose range ring is under `world`, if any.
-    pub(super) fn range_ring_at(&self, world: Point) -> Option<(u32, usize)> {
+    pub(super) fn range_ring_at(&self, world: Point) -> Option<(u32, usize, ControlPart)> {
         let module = self.scene.modules().iter().rev().find(|m| m.bounds().contains(world))?;
-        (0..module.panel.widgets.len())
-            .find(|&w| self.on_range_ring(module.id, w, world))
-            .map(|w| (module.id, w))
+        (0..module.panel.widgets.len()).find_map(|w| Some((module.id, w, self.range_ring_part(module.id, w, world)?)))
+    }
+
+    /// The scale of a depth drag: an XY pad's bar moves along its own axis.
+    pub(super) fn depth_scale(&self, module: u32, widget: usize, part: ControlPart, zoom: f32) -> ValueDrag {
+        let rect = self.scene.module(module).and_then(|m| m.widget_bounds(widget));
+        match (self.widget_kind(module, widget), rect) {
+            (Some(WidgetViewKind::XyPad { .. }), Some(rect)) => ValueDrag::xy_axis(xy_area(rect), part, zoom),
+            _ => self.value_drag(module, widget, zoom),
+        }
+    }
+
+    /// The value of a control that takes a cable dropped at `world`: the
+    /// nearest edge of an XY pad (panel-widgets.md, XY pad).
+    pub(super) fn drop_part(&self, module: u32, widget: usize, world: Point) -> ControlPart {
+        let rect = self.scene.module(module).and_then(|m| m.widget_bounds(widget));
+        match (self.widget_kind(module, widget), rect) {
+            (Some(WidgetViewKind::XyPad { .. }), Some(rect)) => xy_nearest_edge(xy_area(rect), world),
+            _ => ControlPart::Main,
+        }
+    }
+
+    /// What a double-click resets: both values of an XY pad, or the
+    /// control's one value.
+    pub(super) fn reset_part(&self, module: u32, widget: usize) -> ControlPart {
+        match self.widget_kind(module, widget) {
+            Some(WidgetViewKind::XyPad { .. }) => ControlPart::Both,
+            _ => ControlPart::Main,
+        }
+    }
+
+    /// Sends the values of an XY pad that changed.
+    pub(super) fn set_pad(
+        &self,
+        shell: &mut Shell<'_, Message>,
+        module: u32,
+        widget: usize,
+        before: (f32, f32),
+        next: (f32, f32),
+    ) {
+        if next.0 != before.0 {
+            self.set_part(shell, module, widget, ControlPart::Main, next.0);
+        }
+        if next.1 != before.1 {
+            self.set_part(shell, module, widget, ControlPart::Second, next.1);
+        }
+    }
+
+    /// The position of one value of a control.
+    pub(super) fn part_position(&self, module: u32, widget: usize, part: ControlPart) -> f32 {
+        self.values.map_or(0.0, |v| v.part_position(module, widget, part))
     }
 
     /// How a drag on this control turns pointer movement into a value.
@@ -88,34 +136,33 @@ impl<Message> PatchCanvas<'_, Message> {
         }
     }
 
-    /// True if `world` is on the ring around a knob where its range arc is
-    /// drawn, or on the place of a fader's bar, and the control has an enabled
-    /// assignment: there a drag changes depth, not the value. This holds when
-    /// the range has zero length and the control shows the dot, so depth 0 can
-    /// be dragged back out of.
-    pub(super) fn on_range_ring(&self, module: u32, widget: usize, world: Point) -> bool {
-        let Some(m) = self.scene.module(module) else {
-            return false;
-        };
-        let Some(rect) = m.widget_bounds(widget) else {
-            return false;
-        };
-        let modulated = self.values.and_then(|v| v.get(module, widget)).is_some_and(|v| {
-            matches!(
-                v.modulation,
-                crate::controls::ModulationMark::Range { .. } | crate::controls::ModulationMark::Dot
-            )
-        });
-        modulated
-            && match self.widget_kind(module, widget) {
-                Some(WidgetViewKind::Knob { .. }) => {
-                    let d = world - crate::controls::knob_centre(rect);
-                    let distance = (d.x * d.x + d.y * d.y).sqrt();
-                    (crate::controls::RANGE_RING_INNER..=crate::controls::RANGE_RING_OUTER).contains(&distance)
-                }
-                Some(WidgetViewKind::Fader { vertical, .. }) => crate::controls::on_fader_bar(rect, *vertical, world),
-                _ => false,
+    /// The value whose depth a press at `world` would drag: when `world` is on
+    /// the ring around a knob where its range arc is drawn, or on the place of
+    /// a bar beside a fader or an XY pad, and that value has an enabled
+    /// assignment. This holds when the range has zero length and the control
+    /// shows the dot, so depth 0 can be dragged back out of.
+    pub(super) fn range_ring_part(&self, module: u32, widget: usize, world: Point) -> Option<ControlPart> {
+        let rect = self.scene.module(module)?.widget_bounds(widget)?;
+        let part = match self.widget_kind(module, widget)? {
+            WidgetViewKind::Knob { .. } => {
+                let d = world - crate::controls::knob_centre(rect);
+                let distance = (d.x * d.x + d.y * d.y).sqrt();
+                (crate::controls::RANGE_RING_INNER..=crate::controls::RANGE_RING_OUTER)
+                    .contains(&distance)
+                    .then_some(ControlPart::Main)
             }
+            WidgetViewKind::Fader { vertical, .. } => {
+                crate::controls::on_fader_bar(rect, *vertical, world).then_some(ControlPart::Main)
+            }
+            WidgetViewKind::XyPad { .. } => xy_bar_at(xy_area(rect), world),
+            _ => None,
+        }?;
+        let mark = self.values?.part_mark(module, widget, part);
+        matches!(
+            mark,
+            crate::controls::ModulationMark::Range { .. } | crate::controls::ModulationMark::Dot
+        )
+        .then_some(part)
     }
 
     pub(super) fn position(&self, module: u32, widget: usize) -> f32 {
@@ -279,12 +326,24 @@ impl<Message> PatchCanvas<'_, Message> {
     }
 
     pub(super) fn set_control(&self, shell: &mut Shell<'_, Message>, module: u32, widget: usize, position: f32) {
+        self.set_part(shell, module, widget, ControlPart::Main, position);
+    }
+
+    /// Sets one value of a control.
+    pub(super) fn set_part(
+        &self,
+        shell: &mut Shell<'_, Message>,
+        module: u32,
+        widget: usize,
+        part: ControlPart,
+        position: f32,
+    ) {
         self.emit(
             shell,
             CanvasEvent::SetControl {
                 module,
                 widget,
-                part: ControlPart::Main,
+                part,
                 position,
             },
         );
@@ -516,7 +575,24 @@ impl<Message> PatchCanvas<'_, Message> {
                     return true;
                 };
                 let up = matches!(named, Named::ArrowUp | Named::ArrowRight);
-                if matches!(self.widget_kind(module, widget), Some(WidgetViewKind::Button)) {
+                if matches!(self.widget_kind(module, widget), Some(WidgetViewKind::XyPad { .. })) {
+                    // Left and Right change `x`, Up and Down change `y`
+                    // (panel-widgets.md, XY pad).
+                    let part = if matches!(named, Named::ArrowLeft | Named::ArrowRight) {
+                        ControlPart::Main
+                    } else {
+                        ControlPart::Second
+                    };
+                    let position = self.part_position(module, widget, part);
+                    let next = knob_step(position, up, modifiers.shift(), 0);
+                    if !state.arrow_gesture {
+                        state.arrow_gesture = true;
+                        self.emit(shell, CanvasEvent::GestureStart);
+                    }
+                    if next != position {
+                        self.set_part(shell, module, widget, part, next);
+                    }
+                } else if matches!(self.widget_kind(module, widget), Some(WidgetViewKind::Button)) {
                     self.emit(
                         shell,
                         CanvasEvent::ButtonArrow {
@@ -566,6 +642,9 @@ impl<Message> PatchCanvas<'_, Message> {
                     let one_number = self
                         .widget_kind(module, widget)
                         .is_some_and(WidgetViewKind::is_one_number);
+                    let two_numbers = self
+                        .widget_kind(module, widget)
+                        .is_some_and(WidgetViewKind::is_two_numbers);
                     match self.widget_kind(module, widget) {
                         Some(WidgetViewKind::Toggle) => {
                             self.set_control(shell, module, widget, if position > 0.5 { 0.0 } else { 1.0 })
@@ -581,7 +660,7 @@ impl<Message> PatchCanvas<'_, Message> {
                             self.set_control(shell, module, widget, next as f32);
                         }
                         Some(WidgetViewKind::Select { .. }) if !repeat => self.open_select(state, module, widget),
-                        _ if one_number && matches!(named, Named::Space) && !repeat => {
+                        _ if (one_number || two_numbers) && matches!(named, Named::Space) && !repeat => {
                             self.emit(shell, CanvasEvent::ToggleRun);
                         }
                         _ => {}

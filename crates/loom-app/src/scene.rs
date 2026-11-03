@@ -2,8 +2,8 @@
 
 use iced::{Color, Point};
 use loom_canvas::{
-    CableView, ControlPart, HoverText, ModulationView, ModuleView, PanelValues, PanelView, PortShape, PortView, Scene,
-    TransportSignal, WidgetValue, WidgetView, WidgetViewKind,
+    CableView, ControlPart, HoverText, ModulationView, ModuleView, PanelValues, PanelView, PartText, PartValue,
+    PortShape, PortView, Scene, TransportSignal, WidgetValue, WidgetView, WidgetViewKind,
 };
 use loom_core::{
     Controller, DisplayKind, InputRef, ModuleDescriptor, ModuleId, OutputRef, ParamSpec, PortDefault, PortSpec,
@@ -95,6 +95,20 @@ fn panel_view(d: &ModuleDescriptor) -> PanelView {
                     vertical,
                     steps: steps(),
                 },
+                WidgetKind::XyPad { y } => {
+                    let text = |name: &str| {
+                        d.params
+                            .iter()
+                            .find(|p| p.name == name)
+                            .map_or_else(PartText::default, |p| PartText {
+                                label: p.label.to_string(),
+                                hover: HoverText::new(p.label, p.description, p.name),
+                            })
+                    };
+                    WidgetViewKind::XyPad {
+                        parts: Box::new([text(w.bind()), text(y)]),
+                    }
+                }
                 WidgetKind::Toggle => WidgetViewKind::Toggle,
                 WidgetKind::Meter => WidgetViewKind::Meter {
                     zero: d.meter_display(w).map_or(0.0, |display| display.range.zero()),
@@ -302,9 +316,16 @@ pub fn update_live_values(values: &mut PanelValues, controller: &Controller) {
             if !w.kind.has_range() || !w.binds(name) {
                 continue;
             }
-            if let Some(value) = values.get(a.target.0, index).filter(|v| v.live != live) {
-                let value = WidgetValue { live, ..value.clone() };
-                values.set(a.target.0, index, value);
+            let Some(value) = values.get(a.target.0, index) else {
+                continue;
+            };
+            let mut next = value.clone();
+            match next.second.as_mut().filter(|_| w.second() == Some(name)) {
+                Some(second) => second.live = live,
+                None => next.live = live,
+            }
+            if &next != value {
+                values.set(a.target.0, index, next);
             }
         }
     }
@@ -358,6 +379,27 @@ pub fn update_panel_values_dragging(
                         let live = (w.kind.has_range() && all.iter().any(|r| r.enabled))
                             .then(|| controller.modulated(id, p))
                             .flatten();
+                        // The second value of an XY pad or a range, worked out
+                        // the same way from its own parameter.
+                        let second = w.second().and_then(|name| d.param_index(name)).and_then(|q| {
+                            let spec = node.spec(q)?;
+                            let all = reaches.get(&(id, q)).map_or(&[][..], Vec::as_slice);
+                            let assigned = match &dragged {
+                                Some((key, reach)) if *key == (id, q) => std::slice::from_ref(reach),
+                                _ => all,
+                            };
+                            let value = node.params[q];
+                            Some(PartValue {
+                                position: control_position(w.kind, &spec, value),
+                                text: crate::param::format(&spec, value),
+                                modulation: crate::modulation::mark(w.kind, &spec, value, assigned),
+                                live: all
+                                    .iter()
+                                    .any(|r| r.enabled)
+                                    .then(|| controller.modulated(id, q))
+                                    .flatten(),
+                            })
+                        });
                         // While a cable drives the Transport's run input, the
                         // Run toggle shows the state it sets (clock.md).
                         let value = driven_run(controller, id, w).unwrap_or(value);
@@ -365,10 +407,11 @@ pub fn update_panel_values_dragging(
                             position: control_position(w.kind, spec, value),
                             peak: 0.0,
                             right: None,
-                            text: crate::param::format(spec, value),
+                            text: both_values_text(w.kind, crate::param::format(spec, value), second.as_ref()),
                             modulation: crate::modulation::mark(w.kind, spec, value, assigned),
                             live,
                             shape: Vec::new(),
+                            second,
                         }
                     }
                     _ => {
@@ -391,6 +434,16 @@ pub fn update_panel_values_dragging(
             };
             values.set(id.0, index, value);
         }
+    }
+}
+
+/// A control's value as text. A widget that binds two says both, as a screen
+/// reader reads them: "0.20 to 0.70" on a range, and "0.20, 0.70" on an XY pad.
+fn both_values_text(kind: WidgetKind, first: String, second: Option<&PartValue>) -> String {
+    match (second, kind) {
+        (Some(second), WidgetKind::Range { .. }) => format!("{first} to {}", second.text),
+        (Some(second), _) => format!("{first}, {}", second.text),
+        (None, _) => first,
     }
 }
 

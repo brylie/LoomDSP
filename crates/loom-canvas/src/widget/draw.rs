@@ -19,7 +19,9 @@ impl<Message> PatchCanvas<'_, Message> {
                 .filter(|module| module.bounds().intersects(&visible));
             for module in visible_modules {
                 for (index, view) in module.panel.widgets.iter().enumerate() {
-                    if !view.is_control() {
+                    // A widget with two values is armed in the inspector
+                    // (midi-learn.md, Making a mapping).
+                    if !view.is_control() || view.kind.is_two_numbers() {
                         continue;
                     }
                     let Some(rect) = module.widget_bounds(index) else {
@@ -184,7 +186,11 @@ impl<Message> PatchCanvas<'_, Message> {
                     && let Some(m) = self.scene.module(module)
                     && let (Some(rect), Some(view)) = (m.widget_bounds(widget), m.panel.widgets.get(widget))
                 {
-                    let (ring, radius) = focus_ring(&view.kind, rect);
+                    let part = state.cursor.map(|world| self.drop_part(module, widget, world));
+                    let (ring, radius) = match (&view.kind, part) {
+                        (WidgetViewKind::XyPad { .. }, Some(part)) => (xy_edge_ring(xy_area(rect), part), 2.0),
+                        _ => focus_ring(&view.kind, rect),
+                    };
                     overlay
                         .shapes
                         .push(Shape::new(ring, radius, Color::TRANSPARENT, p.hover, 1.5));
@@ -468,7 +474,9 @@ impl<Message> PatchCanvas<'_, Message> {
                         .filter(|_| {
                             matches!(
                                 module.panel.widgets[widget].kind,
-                                WidgetViewKind::Knob { .. } | WidgetViewKind::Fader { .. }
+                                WidgetViewKind::Knob { .. }
+                                    | WidgetViewKind::Fader { .. }
+                                    | WidgetViewKind::XyPad { .. }
                             )
                         })
                         .map(|v| v.text.as_str()),

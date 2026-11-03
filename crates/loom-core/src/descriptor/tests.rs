@@ -469,6 +469,50 @@ fn a_fader_needs_a_parameter_and_room() {
     assert!(descriptor(&MISSING, 2, 6).check_panel().is_err());
 }
 
+/// An XY pad needs two different parameters that exist and hide together, and
+/// its own caption. Its parameters may have different mappings
+/// (panel-widgets.md, XY pad).
+#[test]
+fn an_xy_pad_needs_two_parameters_that_hide_together() {
+    const MODE: ParamSpec = param("mode", 0.0, 1.0, 0.0, "").integer();
+    static PARAMS: [ParamSpec; 4] = [
+        CUTOFF,
+        GAIN,
+        MODE,
+        param("hidden", 0.0, 1.0, 0.0, "").shown_when("mode", &[1]),
+    ];
+    static GOOD: [Widget; 1] = [Widget::xy_pad(0, 0, "cutoff", "gain", "Place")];
+    static SAME: [Widget; 1] = [Widget::xy_pad(0, 0, "gain", "gain", "Place")];
+    static MISSING: [Widget; 1] = [Widget::xy_pad(0, 0, "gain", "nothing", "Place")];
+    static BLANK: [Widget; 1] = [Widget::xy_pad(0, 0, "cutoff", "gain", " ")];
+    static HALF: [Widget; 1] = [Widget::xy_pad(0, 0, "gain", "hidden", "Place")];
+    let check = |widgets, size| {
+        ModuleDescriptor {
+            params: &PARAMS,
+            panel: Panel::new(size, size, widgets),
+            ..NAMED
+        }
+        .check_panel()
+    };
+    assert!(check(&GOOD, 6).is_ok());
+    assert!(check(&GOOD, 5).unwrap_err().contains("outside"));
+    assert!(check(&SAME, 6).unwrap_err().contains("different"));
+    assert!(check(&MISSING, 6).unwrap_err().contains("second parameter"));
+    assert!(check(&BLANK, 6).unwrap_err().contains("caption"));
+    assert!(check(&HALF, 6).unwrap_err().contains("same choices"));
+    assert!(GOOD[0].binds("cutoff") && GOOD[0].binds("gain") && !GOOD[0].binds("mode"));
+    assert_eq!(GOOD[0].params().collect::<Vec<_>>(), ["cutoff", "gain"]);
+}
+
+/// A button shows one parameter. Its mode and hold do not count as bound, so a
+/// lookup by name finds what it found before widgets could bind two.
+#[test]
+fn a_button_binds_only_its_own_parameter() {
+    let button = Widget::button(0, 0, "gate", "held", "mode");
+    assert!(button.binds("gate") && !button.binds("held") && !button.binds("mode"));
+    assert_eq!(button.params().collect::<Vec<_>>(), ["gate"]);
+}
+
 /// A typed value takes its unit and `k` in the forms players type, reads a
 /// comma as a decimal point, rounds whole numbers, and clamps. Anything else is
 /// refused by name (panel-widgets.md, Typing a value).

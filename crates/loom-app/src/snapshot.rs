@@ -228,11 +228,27 @@ pub struct Widget {
     pub modulation: Mark,
     /// A knob's live modulated value, as a position.
     pub live: Option<f32>,
+    /// The second value of an XY pad or a range. `position`, `modulation`,
+    /// and `live` above hold the first, and `text` says both.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub second: Option<SecondShown>,
     /// A scope's trace: how many points it draws, and the lowest and
     /// highest, from -1 at the bottom of the frame to 1 at the top. Left
     /// out for other widgets, and for a scope with no trace yet.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trace: Option<TraceShown>,
+}
+
+/// The second value of an XY pad or a range, for the snapshot.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SecondShown {
+    /// Position from 0 to 1.
+    pub position: f32,
+    /// The value as text, with its unit.
+    pub text: String,
+    pub modulation: Mark,
+    /// The live modulated value, as a position.
+    pub live: Option<f32>,
 }
 
 /// What a scope's trace shows, for the snapshot.
@@ -316,6 +332,7 @@ fn kind_name(kind: &WidgetViewKind) -> &'static str {
     match kind {
         WidgetViewKind::Knob { .. } => "knob",
         WidgetViewKind::Fader { .. } => "fader",
+        WidgetViewKind::XyPad { .. } => "xy_pad",
         WidgetViewKind::Number { .. } => "number",
         WidgetViewKind::Toggle => "toggle",
         WidgetViewKind::Radio { .. } => "radio",
@@ -507,6 +524,12 @@ impl App {
                                 text: value.text,
                                 modulation: value.modulation.into(),
                                 live: value.live,
+                                second: value.second.map(|second| SecondShown {
+                                    position: second.position,
+                                    text: second.text,
+                                    modulation: second.modulation.into(),
+                                    live: second.live,
+                                }),
                                 trace: self.traces.get(m.id, index).map(TraceShown::from),
                             }
                         })

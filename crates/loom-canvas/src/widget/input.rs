@@ -27,6 +27,7 @@ impl<Message> PatchCanvas<'_, Message> {
                 Interaction::Depth {
                     module,
                     widget,
+                    part: ControlPart::Main,
                     drag,
                     last: still.pointer.map_or(0.0, |p| drag.along(state.camera.to_screen(p))),
                 }
@@ -382,9 +383,28 @@ impl<Message> PatchCanvas<'_, Message> {
                             self.emit(shell, event);
                         }
                     }
+                    Interaction::Pad {
+                        module,
+                        widget,
+                        throw,
+                        last,
+                        position,
+                    } => {
+                        let scale = if state.modifiers.shift() { 0.1 } else { 1.0 } / *throw;
+                        let moved = screen - *last;
+                        *last = screen;
+                        let next = (
+                            (position.0 + moved.x * scale).clamp(0.0, 1.0),
+                            (position.1 - moved.y * scale).clamp(0.0, 1.0),
+                        );
+                        let (module, widget, before) = (*module, *widget, *position);
+                        *position = next;
+                        self.set_pad(shell, module, widget, before, next);
+                    }
                     Interaction::Depth {
                         module,
                         widget,
+                        part,
                         drag,
                         last,
                     } => {
@@ -398,7 +418,7 @@ impl<Message> PatchCanvas<'_, Message> {
                             let event = CanvasEvent::DragDepth {
                                 module: *module,
                                 widget: *widget,
-                                part: ControlPart::Main,
+                                part: *part,
                                 pinned: self.pin(state),
                                 delta,
                             };
@@ -453,6 +473,7 @@ impl<Message> PatchCanvas<'_, Message> {
                     Interaction::Moving { .. }
                         | Interaction::Resizing { .. }
                         | Interaction::Turning { .. }
+                        | Interaction::Pad { .. }
                         | Interaction::Wiring { .. }
                         | Interaction::Depth { .. }
                 );
@@ -499,7 +520,7 @@ impl<Message> PatchCanvas<'_, Message> {
                                         from,
                                         module,
                                         widget,
-                                        part: ControlPart::Main,
+                                        part: world.map_or(ControlPart::Main, |w| self.drop_part(module, widget, w)),
                                     },
                                 );
                                 handled = true;
@@ -553,6 +574,7 @@ impl<Message> PatchCanvas<'_, Message> {
                     | Interaction::Panning { .. }
                     | Interaction::Moving { .. }
                     | Interaction::Turning { .. }
+                    | Interaction::Pad { .. }
                     | Interaction::Depth { .. } => {}
                 }
                 if gesture {
@@ -622,15 +644,16 @@ impl<Message> PatchCanvas<'_, Message> {
         state.focus_first = false;
         // The ring of a modulated knob reaches a little past the knob's
         // cell, so it is found before the hit test's answer is used.
-        if let Some((module, widget)) = self.depth_drag_at(&hit, world) {
+        if let Some((module, widget, part)) = self.depth_drag_at(&hit, world) {
             // The selection stays as it is: a selected source module is one
             // way the drag picks its assignment (modulation.md, Arc drag).
-            let drag = self.value_drag(module, widget, state.camera.zoom);
+            let drag = self.depth_scale(module, widget, part, state.camera.zoom);
             self.begin(
                 state,
                 Interaction::Depth {
                     module,
                     widget,
+                    part,
                     drag,
                     last: drag.along(screen),
                 },
@@ -671,7 +694,7 @@ impl<Message> PatchCanvas<'_, Message> {
                         CanvasEvent::ResetControl {
                             module,
                             widget,
-                            part: ControlPart::Main,
+                            part: self.reset_part(module, widget),
                         },
                     );
                     return;
@@ -683,6 +706,35 @@ impl<Message> PatchCanvas<'_, Message> {
                 }
                 let position = self.position(module, widget);
                 let click = match self.widget_kind(module, widget) {
+                    Some(WidgetViewKind::XyPad { .. }) => {
+                        let Some(area) = self
+                            .scene
+                            .module(module)
+                            .and_then(|m| m.widget_bounds(widget))
+                            .map(xy_area)
+                        else {
+                            return;
+                        };
+                        let before = (position, self.part_position(module, widget, ControlPart::Second));
+                        // Only with Alt held does a press move the point
+                        // (panel-widgets.md, rule 2).
+                        let jump = state.modifiers.alt().then(|| xy_position(area, world));
+                        self.begin(
+                            state,
+                            Interaction::Pad {
+                                module,
+                                widget,
+                                throw: xy_throw(area, state.camera.zoom),
+                                last: screen,
+                                position: jump.unwrap_or(before),
+                            },
+                            shell,
+                        );
+                        if let Some(jump) = jump {
+                            self.set_pad(shell, module, widget, before, jump);
+                        }
+                        return;
+                    }
                     Some(kind) if kind.is_one_number() => {
                         let drag = self.value_drag(module, widget, state.camera.zoom);
                         self.begin(
