@@ -107,6 +107,44 @@ fn a_meter_does_not_grow_over_a_widget() {
     assert_eq!(grown.width - meter.width, m.bounds().width - initial.width);
 }
 
+/// A control below a scope moves down as the scope grows, so it stays clear of
+/// the scope and inside the tile. A control above the scope stays put.
+#[test]
+fn a_growing_scope_moves_the_controls_below_it_down() {
+    let mut m = module(1, 0.0, 0.0);
+    m.panel = PanelView {
+        width: 9,
+        height: 11,
+        widgets: vec![
+            knob(0, 0),
+            WidgetView {
+                kind: WidgetViewKind::Scope,
+                x: 0,
+                y: 3,
+                label: String::new(),
+                hover: HoverText::default(),
+                hidden: false,
+            },
+            knob(0, 8),
+        ],
+    };
+    let above = m.widget_bounds(0).unwrap();
+    let below = m.widget_bounds(2).unwrap();
+    let initial = m.bounds();
+    m.size = Some((40, 40));
+    let grown = m.bounds().height - initial.height;
+    assert!(grown > 0.0);
+
+    assert_eq!(m.widget_bounds(0).unwrap(), above);
+    let scope = m.widget_bounds(1).unwrap();
+    let moved = m.widget_bounds(2).unwrap();
+    assert_eq!(moved.y - below.y, grown);
+    assert_eq!(moved.x, below.x);
+    assert_eq!(moved.size(), below.size());
+    assert!(scope.intersection(&moved).is_none());
+    assert!(moved.y + moved.height <= m.bounds().y + m.bounds().height);
+}
+
 /// A saved size grows displays, ports, and hit bounds while controls stay put.
 #[test]
 fn growable_tiles_use_saved_dimensions() {

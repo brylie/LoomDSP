@@ -374,10 +374,25 @@ impl ModuleView {
         Some(Rectangle::new(
             Point::new(
                 origin.x + f32::from(widget.x) * GRID,
-                origin.y + f32::from(widget.y) * GRID,
+                origin.y + f32::from(widget.y) * GRID + self.scope_push(widget),
             ),
             iced::Size::new(f32::from(w) * GRID + extra.width, f32::from(h) * GRID + extra.height),
         ))
+    }
+
+    /// How far a growing scope above `widget` moves it down, so the scope does
+    /// not cover it (`docs/design/panels.md`, Resizable tiles).
+    fn scope_push(&self, widget: &WidgetView) -> f32 {
+        let below_a_scope = self
+            .panel
+            .widgets
+            .iter()
+            .any(|w| matches!(w.kind, WidgetViewKind::Scope) && widget.y >= w.y + w.size().1);
+        if below_a_scope {
+            (self.size() - self.minimum_size()).height
+        } else {
+            0.0
+        }
     }
 
     /// The tile's extra size that `meter` can take without covering another

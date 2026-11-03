@@ -290,7 +290,7 @@ The first display module that shows a signal over time.
 | `level` | Level | -10 to 10 | 0 | The trigger level while `auto` is off. [Control ranges](control-ranges.md) -1 to 1 (default) and -10 to 10, like the scope's vertical ranges ([#329](https://github.com/brylie/LoomDSP/issues/329)). |
 | `slope` | Slope | 0 Rising, 1 Falling | 0 | Which edge starts the trace ([#329](https://github.com/brylie/LoomDSP/issues/329)). |
 
-- Its panel: a knob for `window`, a toggle for `auto`, and a knob for `level`, and below them the scope widget (9 by 5 grid units, bound to `out`, no caption), added in #62. Code: `SCOPE` in `loom-modules/src/display.rs`, `Trigger` in `loom-app/src/live.rs`, and `loom-app/src/probe_menu.rs`.
+- Its panel: the scope widget at the top (9 by 5 grid units, bound to `out`, no caption), added in #62, and below it a knob for `window`, a toggle for `auto`, and a knob for `level`. Code: `SCOPE` in `loom-modules/src/display.rs`, `Trigger` in `loom-app/src/live.rs`, and `loom-app/src/probe_menu.rs`.
 - The parameters never change the audio. They tell the app how to draw the trace.
 - *Why an auto toggle:* most signals trigger well at their midpoint, including envelopes and pitch with an offset, which never cross 0. A fixed level is for picking one edge of a complex wave. A toggle keeps both without a knob that means two things.
 
@@ -719,7 +719,7 @@ What M1 builds. The rest of this spec is M2.
 
 - **The handle.** A small grip at the bottom-right corner of a tile that has a **growable** widget (a scope, a meter, an XY scope, later a spectrum or curve). Other tiles have no handle. Dragging it changes the tile's size and snaps to the grid. The cursor shows a resize cursor over it.
 - **Minimum and maximum.** The minimum is the size the panel declares (the tile cannot be smaller than its layout). The maximum is 64 by 64 grid units.
-- **What grows.** Only growable widgets. They take all extra width and height. Other widgets keep their size and position, top left. A meter does not grow over a widget: with one below it, it keeps its height, and with one to its right or past its lower right corner, it keeps its width. *Why:* a panel can place a meter above a control, as Dynamics does, and a covered control cannot be read or reached.
+- **What grows.** Only growable widgets. They take all extra width and height. Other widgets keep their size and position, top left, except that a widget below a scope moves down with the scope's bottom edge. *Why:* the scope sits at the top of its panel, so the controls under it would otherwise be covered, and a tall scope is the reason to resize one. A meter does not grow over a widget: with one below it, it keeps its height, and with one to its right or past its lower right corner, it keeps its width. *Why:* a panel can place a meter above a control, as Dynamics does, and a covered control cannot be read or reached.
 - **Ports.** Inputs stay on the left edge and outputs on the right, spread evenly over the new height, in port order. Cable ends, hit-testing, and hover follow the new size.
 - **Saved.** The patch file gets an optional `size: (w, h)` next to the position, in grid units. A tile without one has its declared size. Files without the field load unchanged (ADR-0008).
 - **Undo.** One resize drag is one undo step. The size is part of the clipboard: paste keeps it.
