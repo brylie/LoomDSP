@@ -355,7 +355,9 @@ impl PatchBrowser {
             let picked = self.filter.tags.contains(&tag);
             button(text(tag.clone()).size(style::SMALL))
                 .padding([2, 8])
-                .style(if picked { style::primary } else { style::secondary })
+                // A picked tag looks like an open tab: filled and outlined.
+                // The primary role is kept for one main action per view.
+                .style(style::tab(picked))
                 .on_press(Message::Tag(tag))
                 .into()
         });

@@ -150,7 +150,7 @@ With `--no-audio`, there is no engine to tell. The choice is saved and used by t
 
 ## Rules
 
-1. **Preferences belong to the machine, never the patch.** Opening, saving, or creating a patch never reads or writes preferences, and a patch cannot hold one. *Why:* ADR-0019, rule 2. A patch from someone else must not change the player's protection.
+1. **Preferences belong to the machine, never the patch.** Opening, saving, or creating a patch never writes preferences, and a patch cannot hold one. Opening a patch never reads them. Only the [patch metadata](patch-metadata.md#defaults-preferences) preferences are read for a patch: a new patch copies `author` and `default_license` into its own fields once, Save reads `author` to offer credit, and Save As starts in `library`. The patch keeps the copied values, not a link to the preferences. *Why:* ADR-0019, rule 2. A patch from someone else must not change the player's protection.
 2. **The preferences store lives in `loom-app`.** No engine crate reads or writes the file. *Why:* hard rule 6. The engine crates stay portable and file-free. The app reads the file and passes plain values into `EngineConfig` and the `Controller`.
 3. **A problem with the file never blocks start and never turns protection off.** A file that cannot be read or parsed gives the defaults for every field. A field with a value the app does not know falls back to its default alone, and the other fields keep their values. Defaults are the safe choice. *Why:* see Reading the file.
 4. **The app writes only on a change, atomically.** *Why:* see Writing the file.
