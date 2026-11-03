@@ -5,7 +5,7 @@ Why a random part of a patch plays the same each time it loads, and the choices 
 - **Kind:** explainer.
 - **Used by:** [M2 modules specification](../design/p2-modules.md) (Random, Chance), [stereo cables](../design/stereo.md) (rules 15 and 27).
 - **Related:** [Block-size invariance](block-size-invariance.md), [Triggers and gates](triggers-and-gates.md).
-- **Code:** `Rng` in `crates/loom-modules/src/rand.rs`.
+- **Code:** `Rng` in `crates/loom-dsp/src/random.rs`, and `stream`, which numbers the streams, in `crates/loom-modules/src/rand.rs`.
 
 ## Random, but the same each time
 
