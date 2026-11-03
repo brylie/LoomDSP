@@ -1470,3 +1470,24 @@ fn open_and_save_failures_answer_with_the_reason() {
         "no dialog while the channel is on"
     );
 }
+
+/// `key` sends a character's text, as a real keyboard does, so a script can
+/// type an exact value on a focused control (panel-widgets.md, Typing a value).
+#[test]
+fn a_script_types_an_exact_value() {
+    let mut ui = crate::ui_test::Ui::open("sine.ron");
+    let id = ui.app.controller.add_module("test.panel").unwrap();
+    ui.app.refresh();
+    ui.step(&[]);
+    let _ = ui.app.update(Message::SelectModule(id.0));
+    ui.redraw();
+    let target = format!("{}:cutoff", id.0);
+    run_ui(&mut ui, &format!(r#"{{"cmd": "hover", "target": "{target}"}}"#)).unwrap();
+    run_ui(&mut ui, r#"{"cmd": "press"}"#).unwrap();
+    run_ui(&mut ui, r#"{"cmd": "release"}"#).unwrap();
+    for key in ["4", "4", "0", "enter"] {
+        run_ui(&mut ui, &format!(r#"{{"cmd": "key", "key": "{key}"}}"#)).unwrap();
+    }
+    let node = ui.app.controller.graph().node(id).unwrap();
+    assert_eq!(node.params[node.descriptor.param_index("cutoff").unwrap()], 440.0);
+}

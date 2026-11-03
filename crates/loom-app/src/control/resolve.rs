@@ -263,7 +263,12 @@ pub(super) fn key_events(key: keyboard::Key, modifiers: keyboard::Modifiers) -> 
             physical_key: physical,
             location: keyboard::Location::Standard,
             modifiers,
-            text: None,
+            // A real keyboard sends a character's text, unless Command or Ctrl
+            // makes it a shortcut. The typed field and type-ahead read it.
+            text: match key.as_ref() {
+                keyboard::Key::Character(c) if !modifiers.command() && !modifiers.control() => Some(c.into()),
+                _ => None,
+            },
             repeat: false,
         },
         keyboard::Event::KeyReleased {

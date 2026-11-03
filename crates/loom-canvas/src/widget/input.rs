@@ -190,7 +190,7 @@ impl<Message> PatchCanvas<'_, Message> {
                 repeat,
                 text,
                 ..
-            }) if self.focus_keys(state, key, *modifiers, text.as_deref(), *repeat, over, shell) => {}
+            }) if self.focus_keys(state, key, *modifiers, text.as_deref(), *repeat, shell) => {}
             Event::Keyboard(keyboard::Event::KeyReleased { key, .. }) => {
                 self.release_key(state, key, shell);
             }

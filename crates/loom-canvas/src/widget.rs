@@ -72,6 +72,9 @@ pub struct LearnView {
     pub labels: BTreeMap<(u32, usize), String>,
 }
 
+/// Says why typed text is not a value of a control: module, widget, text.
+type TypedCheck<'a> = Box<dyn Fn(u32, usize, &str) -> Result<(), String> + 'a>;
+
 /// The patch canvas. Draws a [`Scene`] and reports gestures as
 /// [`CanvasEvent`]s.
 pub struct PatchCanvas<'a, Message> {
@@ -94,8 +97,8 @@ pub struct PatchCanvas<'a, Message> {
     matrix_escape: bool,
     /// Leaves unmodified keys to the focused matrix while keeping pointer input active.
     matrix_keyboard: bool,
-    /// Says why typed text is not a value of a control: module, widget, text.
-    typed_check: Option<Box<dyn Fn(u32, usize, &str) -> Result<(), String> + 'a>>,
+    /// The check for typed values. See [`PatchCanvas::typed_check`].
+    typed_check: Option<TypedCheck<'a>>,
     still: Option<Still>,
     window_drag_line: bool,
 }

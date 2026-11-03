@@ -305,7 +305,6 @@ impl<Message> PatchCanvas<'_, Message> {
         modifiers: keyboard::Modifiers,
         text: Option<&str>,
         repeat: bool,
-        _over: bool,
         shell: &mut Shell<'_, Message>,
     ) -> bool {
         use keyboard::key::Named;
