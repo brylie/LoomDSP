@@ -3,7 +3,7 @@
 Three processors that finish a sound and shape a live vocal or instrument chain, and that show what they are doing.
 
 - **Kind:** living specification.
-- **Status:** Draft. Not ready to build until the maintainer agrees it.
+- **Status:** Agreed, M2 (2026-11-03). Ready to build.
 - **Decision behind it:** [ADR-0035](../adr/0035-pure-dsp-algorithms-in-loom-dsp.md) (algorithms in `loom-dsp`), [ADR-0018](../adr/0018-clean-room-module-development.md) (clean room), [ADR-0020](../adr/0020-inferred-channel-count.md) (stereo ports).
 - **Use case and requirements:** FR-LIB-09, FR-LIB-15, FR-PANEL-02.
 - **Background:** Dynamics detection, a new explainer in `docs/learn/`, written with this work.
@@ -103,21 +103,21 @@ The [rules for M1 modules](p1-modules.md#rules-for-all-modules-here) apply.
 
 The signal passes through five sections in this order.
 
-| Section | Parameters | Range | Default |
-|---|---|---|---|
-| Low cut | `low_cut`, `low_slope` | 10 Hz to 1 kHz. 0 Off, 1 12 dB per octave, 2 24 dB per octave | 40 Hz, Off |
-| Low shelf | `low_freq`, `low_gain` | 20 Hz to 2 kHz. -24 to 24 dB | 120 Hz, 0 dB |
-| Peak | `mid_freq`, `mid_gain`, `mid_q` | 40 Hz to 16 kHz. -24 to 24 dB. Q 0.1 to 10 | 1 kHz, 0 dB, 1 |
-| High shelf | `high_freq`, `high_gain` | 1 kHz to 20 kHz. -24 to 24 dB | 8 kHz, 0 dB |
-| High cut | `high_cut`, `high_slope` | 1 kHz to 22 kHz. Same choices as low cut | 16 kHz, Off |
+| Section | What it does | Parameters | Range | Default |
+|---|---|---|---|---|
+| Low cut | Removes everything below its frequency. For rumble. | `low_cut`, `low_slope` | 10 Hz to 1 kHz. 0 Off, 1 12 dB per octave, 2 24 dB per octave | 40 Hz, Off |
+| Low shelf | Raises or lowers everything below its frequency by the same amount. | `low_freq`, `low_gain` | 20 Hz to 2 kHz. -24 to 24 dB | 120 Hz, 0 dB |
+| Mid band | A bell: a bump or dip centred on its frequency. Q sets how narrow it is. | `mid_freq`, `mid_gain`, `mid_q` | 40 Hz to 16 kHz. -24 to 24 dB. Q 0.1 to 10 | 1 kHz, 0 dB, 1 |
+| High shelf | Raises or lowers everything above its frequency by the same amount. | `high_freq`, `high_gain` | 1 kHz to 20 kHz. -24 to 24 dB | 8 kHz, 0 dB |
+| High cut | Removes everything above its frequency. For hiss and harshness. | `high_cut`, `high_slope` | 1 kHz to 22 kHz. Same choices as low cut | 16 kHz, Off |
 
 ### EQ rules
 
 1. **Runs per channel.** Stereo runs two copies, and mono stays mono. *Why:* a filter has no reason to link its sides, unlike a level detector.
-2. **Five sections, not a list of bands.** A second peak is a second EQ. *Why:* parameters are static in a descriptor, and the Mixer uses the same reasoning: a bigger one is two in a row.
-3. **All built on the state variable filter.** Peak and shelves are mixes of its outputs, cuts are one or two of them in series. *Why:* it stays stable under audio-rate modulation, and a coefficient table of direct-form filters does not promise that.
+2. **Five fixed sections, with one mid band.** A second mid band is a second EQ. *Why:* parameters are static in a descriptor, and the Mixer uses the same reasoning: a bigger one is two in a row.
+3. **All built on the state variable filter.** The mid band and shelves are mixes of its outputs, and the cuts are one or two of them in series. *Why:* it stays stable under audio-rate modulation, and a coefficient table of direct-form filters does not promise that.
 4. **Flat means untouched.** With every gain at 0 and both cuts Off, the output equals the input exactly. *Why:* a user who bypasses by zeroing knobs must not get a changed signal.
-5. **Peak gain is the gain at its centre.** Shelves reach half their gain in dB at their set frequency. *Why:* it is what the knob's name says.
+5. **The mid band's gain is the gain at its centre.** Shelves reach half their gain in dB at their set frequency. *Why:* it is what the knob's name says.
 6. **A cut switched On or Off crossfades over 5 ms,** with its filters always running. *Why:* no click, and the filter is already settled.
 7. **The curve** shows 20 Hz to 20 kHz across on a logarithmic scale, and -24 to 24 dB up. It computes the analogue response of the same five sections.
 
@@ -183,11 +183,14 @@ Each must be checked before the code cites it ([DSP algorithms](dsp-algorithms.m
 | Crossover | S. H. Linkwitz, "Active Crossover Networks for Noncoincident Drivers", JAES 24, 1976 |
 | Loudness | ITU-R BS.1770, "Algorithms to measure audio programme loudness and true-peak audio level" |
 
-## Open points
+## Settled in review
 
-For the maintainer, each with the current leaning.
+Agreed with the maintainer on 2026-11-03.
 
-1. **The `gain` output on Dynamics.** Not asked for by the catalogue. Leaning yes: one detector can then drive anything else in a patch, which suits a modular tool, and it costs one buffer.
-2. **EQ sections.** Five fixed sections with one peak. Leaning yes, as a second EQ adds another. Two peaks would make a larger tile.
-3. **Gate and Duck timing.** 3 dB and 20 ms are fixed. Leaning fixed for now, as a knob can be added and a removed knob breaks patches once released.
-4. **K-weighting for level match.** Heavier than plain RMS, but it is a published standard, and plain RMS misjudges a change in the low end. Leaning yes.
+- **Stereo:** Dynamics is linked, with `Stereo` ports.
+- **Crossover:** Linkwitz-Riley. The bands sum to a flat level and do not null against the dry signal.
+- **Lookahead:** none now, so no dependency on #538.
+- **The `gain` output on Dynamics:** included. One detector can drive anything else in a patch, which suits a modular tool, and it costs one buffer.
+- **EQ sections:** five fixed sections with one mid band, as a second EQ adds another. "Peak" in the catalogue is called the mid band, or a bell, here: the word also means a signal's highest level, as Dynamics uses it.
+- **Gate and Duck timing:** 3 dB and 20 ms are fixed. A knob can be added later, and a removed knob breaks patches once released.
+- **Level match:** K-weighted. It costs more than plain RMS, but it is a published standard, and plain RMS misjudges a change in the low end.

@@ -96,7 +96,7 @@ Sampling is built from small parts, so one set of primitives covers one-shot pla
 | MT-FILTER-04 | Slope filter | Low-pass, high-pass, or all-pass with a selectable steepness. | | M2 | FR-LIB-03 | Planned |
 | MT-FILTER-05 | Comb filter | A tuned delay with feedback that boosts or cuts a harmonic series. | | M2 | FR-LIB-15 | Planned |
 | MT-FILTER-06 | Low-pass gate | A filter and an amplifier closed together by one control, for plucked and percussive tones. | Character | M2 | New | Planned |
-| MT-FILTER-07 | Crossover | Splits a signal into two or three frequency bands that sum back to the original. | | M2 | New | Planned |
+| MT-FILTER-07 | Crossover | Splits a signal into two or three frequency bands that sum to a flat level. | | M2 | New | Planned |
 | MT-FILTER-08 | Formant filter | Shapes a sound toward vowel sounds, with a morph between vowels. | | M4 | New | Planned |
 | MT-FILTER-09 | Filter bank | Many band-pass filters in parallel, fixed or tuned. With high resonance it is a resonator bank. | | M4 | FR-LIB-15 | Planned |
 | MT-FILTER-10 | Hilbert pair | Splits a signal into two outputs 90 degrees apart, for frequency shifting and envelope detection. | Quality | M4 | New | Planned |
@@ -254,7 +254,7 @@ These depend on how notes travel on cables (OQ-16).
 | MT-DYN-01 | Dynamics | Compresses, limits, gates, expands, or ducks, with a sidechain input that can come from another signal. | Sidechain, Mix and output | M2 | FR-LIB-09 | Planned |
 | MT-DYN-02 | Transient shaper | Raises or lowers the attack and sustain of hits. | Mix and output | M4 | FR-LIB-15 | Planned |
 | MT-DYN-03 | Multiband dynamics (abstraction) | A crossover with a dynamics slot on each band. | | M4 | FR-LIB-15 | Planned |
-| MT-EQ-01 | EQ | Bands of peak, shelf, and cut filters. Presets give a one-knob tilt and a three-band cut. | | M2 | FR-LIB-15 | Planned |
+| MT-EQ-01 | EQ | A bell, two shelves, and two cuts. Presets give a one-knob tilt and a three-band cut. | | M2 | FR-LIB-15 | Planned |
 | MT-SPEC-01 | Spectral filter | Filters and reshapes sound in the frequency domain. | Quality, Mix and output | M4 | FR-LIB-10 | Planned |
 | MT-SPEC-02 | Spectral freeze and blur | Holds or smears spectral frames over time. | Mix and output | M4 | FR-LIB-10 | Planned |
 | MT-SPEC-03 | Spectral split | Separates tonal from noisy parts, or attacks from sustain. | | M4 | FR-LIB-15 | Planned |
