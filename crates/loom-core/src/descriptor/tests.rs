@@ -497,6 +497,10 @@ fn typed_values_read_units_k_and_commas() {
         param("n", 0.0, 10.0, 0.0, "").integer().parse_value_text("3.6"),
         Ok(4.0)
     );
+    let whole = param("n", 0.0, 10.0, 0.0, "").integer();
+    assert!(whole.parse_value_text("-0.4").unwrap().is_sign_positive(), "never -0");
+    let around_zero = param("p", -1.0, 1.0, 0.0, "");
+    assert!(around_zero.parse_value_text("-0").unwrap().is_sign_positive());
 
     for text in ["", " ", "-", "k", "abc", "NaN", "inf", "-inf", "Hz", "1 2", "1e99"] {
         let error = hz.parse_value_text(text).unwrap_err();
@@ -517,6 +521,10 @@ fn a_readout_writes_its_value_by_format() {
         format: DisplayFormat::Number { decimals: 1 },
     };
     assert_eq!(number.text(12.54), "12.5 cents");
+    // Around silence the text does not flip between "-0.0" and "0.0".
+    assert_eq!(number.text(-0.04), "0.0 cents");
+    assert_eq!(number.text(-0.0), "0.0 cents");
+    assert_eq!(number.text(-0.06), "-0.1 cents");
     let plain = DisplayRange {
         unit: "",
         format: DisplayFormat::Number { decimals: 0 },

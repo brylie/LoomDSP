@@ -97,6 +97,8 @@ pub struct PatchCanvas<'a, Message> {
     matrix_escape: bool,
     /// Leaves unmodified keys to the focused matrix while keeping pointer input active.
     matrix_keyboard: bool,
+    /// An app text field has focus, so its keys never act on the canvas.
+    text_field_keys: bool,
     /// The check for typed values. See [`PatchCanvas::typed_check`].
     typed_check: Option<TypedCheck<'a>>,
     still: Option<Still>,
@@ -247,6 +249,7 @@ impl<'a, Message> PatchCanvas<'a, Message> {
             matrix_line: None,
             matrix_escape: false,
             matrix_keyboard: false,
+            text_field_keys: false,
             typed_check: None,
             still: None,
             window_drag_line: false,
@@ -285,6 +288,14 @@ impl<'a, Message> PatchCanvas<'a, Message> {
     /// Leaves unmodified keyboard input to the matrix without blocking the pointer.
     pub fn matrix_keyboard(mut self, enabled: bool) -> Self {
         self.matrix_keyboard = enabled;
+        self
+    }
+
+    /// Says that an app text field has focus. The canvas then leaves every key
+    /// press to it except Tab, which moves focus as usual. The pointer still
+    /// works (panel-widgets.md, Typing a value).
+    pub fn text_field_keys(mut self, enabled: bool) -> Self {
+        self.text_field_keys = enabled;
         self
     }
 

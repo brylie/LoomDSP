@@ -413,7 +413,7 @@ impl<Message> PatchCanvas<'_, Message> {
                     // bar at middle zoom stands in for it.
                     TextKind::Value(widget) => {
                         let shown = self.box_text(values, module, widget);
-                        let shown = crate::scene::fit_label(&shown, item.width, crate::tile_text::LABEL_SIZE);
+                        let shown = crate::scene::fit_label(shown, item.width, crate::tile_text::LABEL_SIZE);
                         let align = match item.align {
                             Align::Left => text::Alignment::Left,
                             Align::Center => text::Alignment::Center,
@@ -523,15 +523,13 @@ impl<Message> PatchCanvas<'_, Message> {
     }
 
     /// The text in a widget's box: a select list's choice, or the value text.
-    fn box_text(&self, values: &PanelValues, module: &crate::scene::ModuleView, widget: usize) -> String {
+    fn box_text<'t>(&self, values: &'t PanelValues, module: &'t crate::scene::ModuleView, widget: usize) -> &'t str {
         match module.panel.widgets.get(widget).map(|w| &w.kind) {
             Some(WidgetViewKind::Select { options }) => {
                 let chosen = values.position(module.id, widget).round().max(0.0) as usize;
-                options.get(chosen).cloned().unwrap_or_default()
+                options.get(chosen).map_or("", String::as_str)
             }
-            _ => values
-                .get(module.id, widget)
-                .map_or_else(String::new, |v| v.text.clone()),
+            _ => values.get(module.id, widget).map_or("", |v| v.text.as_str()),
         }
     }
 

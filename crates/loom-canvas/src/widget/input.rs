@@ -72,12 +72,14 @@ impl<Message> PatchCanvas<'_, Message> {
             return;
         }
 
-        if self.matrix_keyboard
-            && matches!(
-                event,
-                Event::Keyboard(keyboard::Event::KeyPressed { modifiers, .. }) if !modifiers.command()
-            )
-        {
+        let keys_elsewhere = match event {
+            Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
+                (self.matrix_keyboard && !modifiers.command())
+                    || (self.text_field_keys && !matches!(key, keyboard::Key::Named(keyboard::key::Named::Tab)))
+            }
+            _ => false,
+        };
+        if keys_elsewhere {
             self.release_every_key_hold(state, shell);
             if std::mem::take(&mut state.arrow_gesture) {
                 self.emit(shell, CanvasEvent::GestureEnd);
@@ -664,9 +666,7 @@ impl<Message> PatchCanvas<'_, Message> {
                 }
                 let position = self.position(module, widget);
                 let click = match self.widget_kind(module, widget) {
-                    Some(
-                        WidgetViewKind::Knob { .. } | WidgetViewKind::Fader { .. } | WidgetViewKind::Number { .. },
-                    ) => {
+                    Some(kind) if kind.is_one_number() => {
                         let drag = self.value_drag(module, widget, state.camera.zoom);
                         self.begin(
                             state,

@@ -1175,6 +1175,128 @@ fn type_text(canvas: &PatchCanvas<'_, CanvasEvent>, state: &mut State, text: &st
     events
 }
 
+/// While an app text field has focus the canvas takes no key press, so a key
+/// that edits the text never moves, deletes, or runs anything. Tab still moves
+/// focus, and the pointer still works.
+#[test]
+fn a_focused_text_field_keeps_keys_from_the_canvas() {
+    use keyboard::key::Named;
+    let (scene, values) = typed_scene();
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |event| event)
+        .values(&values)
+        .text_field_keys(true);
+    let at = scene.module(1).unwrap().bounds().center();
+    let mut state = State::default();
+    for key in [
+        Named::Enter,
+        Named::ArrowLeft,
+        Named::Space,
+        Named::Escape,
+        Named::Backspace,
+    ] {
+        let events = drive(&canvas, &mut state, &key_event(key, true), at);
+        assert!(events.is_empty(), "{key:?} did nothing, but sent {events:?}");
+    }
+    assert_eq!(state.focus, None, "Enter did not focus a control");
+
+    let paste = typed_key(
+        keyboard::Key::Character("v".into()),
+        None,
+        keyboard::Modifiers::COMMAND,
+        false,
+    );
+    assert!(drive(&canvas, &mut state, &paste, at).is_empty(), "the field pastes");
+
+    let events = drive(&canvas, &mut state, &key_event(Named::Tab, true), at);
+    assert!(!events.is_empty(), "Tab still moves focus");
+    assert!(!drive(&canvas, &mut state, &click(mouse::Button::Left), at).is_empty());
+}
+
+/// A press outside the canvas with a list open also takes the keys from the
+/// canvas, as it does with no list open.
+#[test]
+fn a_press_outside_closes_a_select_list_and_clears_focus() {
+    let scene = long_list(3);
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |event| event);
+    let mut state = State {
+        focus: Some((1, 0)),
+        size: Size::new(800.0, 600.0),
+        ..State::default()
+    };
+    canvas.open_select(&mut state, 1, 0);
+    let events = drive(
+        &canvas,
+        &mut state,
+        &click(mouse::Button::Left),
+        Point::new(-10.0, -10.0),
+    );
+    assert!(events.is_empty());
+    assert!(state.select_popup.is_none());
+    assert_eq!(state.focus, None);
+}
+
+/// A select list stays inside the canvas with its box panned off either edge.
+#[test]
+fn a_select_list_stays_in_the_canvas_when_its_box_is_off_an_edge() {
+    let scene = long_list(5);
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |event| event);
+    let area = Rectangle::new(Point::ORIGIN, Size::new(400.0, 300.0));
+    for pan in [-5000.0, 5000.0] {
+        let mut state = State {
+            size: area.size(),
+            ..State::default()
+        };
+        state.camera.pan(Vector::new(0.0, pan));
+        canvas.open_select(&mut state, 1, 0);
+        let list = canvas.select_popup_bounds(&state, area).unwrap();
+        assert!(list.y >= 0.0 && list.y + list.height <= area.height, "{pan}: {list:?}");
+    }
+}
+
+/// During a drag no field opens: the drag's next move would overwrite the
+/// typed value, and the commit would join the drag's undo step.
+#[test]
+fn no_typed_field_opens_during_a_drag() {
+    let (scene, values) = typed_scene();
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |event| event).values(&values);
+    let at = scene.module(1).unwrap().bounds().center();
+    let mut state = State {
+        focus: Some((1, 0)),
+        interaction: Interaction::Panning {
+            last: Point::ORIGIN,
+            click: None,
+        },
+        ..State::default()
+    };
+    type_text(&canvas, &mut state, "5", at);
+    assert!(state.typed.is_none());
+}
+
+/// The reason for bad text goes below the field, above it at the canvas's
+/// bottom edge, and never past the right edge.
+#[test]
+fn the_reason_for_bad_text_stays_in_the_canvas() {
+    let canvas = Rectangle::new(Point::new(10.0, 20.0), Size::new(400.0, 300.0));
+    let field = |x, y| Rectangle::new(Point::new(x, y), Size::new(110.0, 23.0));
+
+    let middle = typed_field::typed_reason_bounds(field(50.0, 100.0), 120.0, canvas);
+    assert!(middle.y > 100.0, "below");
+    assert_eq!(middle.x, 50.0);
+
+    let bottom = typed_field::typed_reason_bounds(field(50.0, 297.0), 120.0, canvas);
+    assert!(bottom.y < 297.0, "above");
+
+    let right = typed_field::typed_reason_bounds(field(300.0, 100.0), 200.0, canvas);
+    assert!(right.x + right.width <= canvas.x + canvas.width);
+
+    let wide = typed_field::typed_reason_bounds(field(300.0, 100.0), 900.0, canvas);
+    assert_eq!((wide.x, wide.width), (canvas.x, canvas.width), "a long reason is cut");
+}
+
 /// A digit opens the field holding it, and Enter commits what was typed. Left,
 /// Right, Backspace, and Delete edit at the caret.
 #[test]

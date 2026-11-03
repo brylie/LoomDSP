@@ -11,28 +11,61 @@ use std::collections::BTreeSet;
 /// undo shortcuts do nothing rather than change the patch behind it
 /// (undo.md, Gestures).
 pub(crate) fn text_field_focused() -> Task<bool> {
+    text_focus().map(|focus| focus.any)
+}
+
+/// Which text field has focus, as the widget tree knows it.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct TextFocus {
+    /// A text field or text box has focus.
+    pub any: bool,
+    /// The ID of the one that has it, if it has one.
+    pub field: Option<iced::advanced::widget::Id>,
+}
+
+/// Asks the widget tree which text field has focus. Iced's text fields do not
+/// say when focus moves, and a press can move it, so the app asks after the
+/// press has reached the widgets.
+pub(crate) fn text_focus() -> Task<TextFocus> {
     use iced::advanced::widget::operation::{Focusable, Outcome};
     use iced::advanced::widget::{Id, Operation};
 
-    /// Records whether any focusable widget, with or without an ID, has
-    /// focus. Only text fields and text boxes are focusable in this app.
-    struct AnyFocused(bool);
+    /// Records the focused widget. Only text fields and text boxes are
+    /// focusable in this app.
+    struct Find(TextFocus);
 
-    impl Operation<bool> for AnyFocused {
-        fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation<bool>)) {
+    impl Operation<TextFocus> for Find {
+        fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation<TextFocus>)) {
             operate(self);
         }
 
-        fn focusable(&mut self, _id: Option<&Id>, _bounds: iced::Rectangle, state: &mut dyn Focusable) {
-            self.0 |= state.is_focused();
+        fn focusable(&mut self, id: Option<&Id>, _bounds: iced::Rectangle, state: &mut dyn Focusable) {
+            if state.is_focused() {
+                self.0 = TextFocus {
+                    any: true,
+                    field: id.cloned(),
+                };
+            }
         }
 
-        fn finish(&self) -> Outcome<bool> {
-            Outcome::Some(self.0)
+        fn finish(&self) -> Outcome<TextFocus> {
+            Outcome::Some(self.0.clone())
         }
     }
 
-    iced::advanced::widget::operate(AnyFocused(false))
+    iced::advanced::widget::operate(Find(TextFocus::default()))
+}
+
+/// Selects all the text in a field, so what is typed next replaces it.
+pub(crate) fn select_all_text(id: iced::advanced::widget::Id) -> Task<crate::Message> {
+    iced::advanced::widget::operate(iced::advanced::widget::operation::text_input::select_all(id))
+}
+
+/// Takes focus from every text field.
+pub(crate) fn unfocus_text_fields() -> Task<crate::Message> {
+    iced::advanced::widget::operate(iced::advanced::widget::operation::focusable::focus(
+        iced::advanced::widget::Id::unique(),
+    ))
 }
 
 impl App {

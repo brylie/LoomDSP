@@ -199,6 +199,14 @@ pub enum WidgetViewKind {
     Button,
 }
 
+impl WidgetViewKind {
+    /// True for a one-number control: a knob, a fader, or a number box. Code
+    /// that treats them alike asks this, not a list.
+    pub fn is_one_number(&self) -> bool {
+        matches!(self, Self::Knob { .. } | Self::Fader { .. } | Self::Number { .. })
+    }
+}
+
 /// One widget on a panel, placed in grid units from the panel's corner.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WidgetView {

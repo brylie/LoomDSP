@@ -701,6 +701,7 @@ fn value_field<'a>(module: u32, index: usize, field: Option<ValueField>, value: 
     };
     let bad = field.error.is_some();
     let input = text_input(&value, &field.text)
+        .id(crate::controls::value_field_id(module, index))
         .on_input(move |text| Message::ValueText { module, index, text })
         .on_submit(Message::ValueSubmit { module, index })
         .size(style::BODY)
@@ -714,17 +715,17 @@ fn value_field<'a>(module: u32, index: usize, field: Option<ValueField>, value: 
             }
             style
         });
-    match field.error {
-        Some(reason) => tooltip(
-            input,
-            container(text(reason).size(style::BODY))
-                .padding(6)
-                .style(container::rounded_box),
-            tooltip::Position::Top,
-        )
-        .into(),
-        None => input.into(),
-    }
+    // The tooltip stays when the text is good, with nothing in it. Without it
+    // the field would sit at another place in the widget tree once the text
+    // turned bad, and lose its focus and caret on that character.
+    let reason: Element<'a, Message> = match field.error {
+        Some(reason) => container(text(reason).size(style::BODY))
+            .padding(6)
+            .style(container::rounded_box)
+            .into(),
+        None => iced::widget::space().into(),
+    };
+    tooltip(input, reason, tooltip::Position::Top).into()
 }
 
 /// The slider of a parameter, or its choice names as radio buttons or a

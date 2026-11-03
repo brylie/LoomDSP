@@ -366,12 +366,14 @@ enum Message {
         module: u32,
         index: usize,
     },
-    /// Escape or Tab with a draft in a value field: it is dropped.
+    /// Escape with a draft in a value field: it is dropped.
     ValueDraftClear,
-    /// A press anywhere with a draft in a value field. It may have moved focus.
-    ValueDraftPress,
-    /// Whether a text field still has focus after that press.
-    ValueDraftFocus(bool),
+    /// Something may have moved text focus, such as a press. Ask the widgets.
+    TextFocusCheck,
+    /// Which text field has focus, from the widgets.
+    TextFocus(editing::TextFocus),
+    /// Tab was pressed. It closes a text field on the main view.
+    TextFieldTab,
     /// A choice name was picked in the inspector: value `min + choice` of
     /// the parameter, as one undo step (panels.md, Choice names).
     Choice {
@@ -496,6 +498,8 @@ impl Message {
                 | Self::MidiPoll
                 | Self::BenchDone
                 | Self::UnknownLabelDraft { .. }
+                | Self::TextFocusCheck
+                | Self::TextFocus(_)
         )
     }
 }
@@ -539,6 +543,10 @@ struct App {
     values: PanelValues,
     /// Text typed in an inspector value field, not committed yet.
     value_draft: Option<controls::ValueDraft>,
+    /// Which text field has focus. While one does, the canvas leaves the keys
+    /// to it. Kept from the widget tree, because a text field does not say when
+    /// it loses focus.
+    text_focus: editing::TextFocus,
     /// Last brightness of each light, by module and widget.
     lights: BTreeMap<lights::Light, f32>,
     /// True when the last commit had a cable on the Transport's `run`
@@ -949,7 +957,15 @@ impl App {
             _ => FrameCause::Other,
         };
         loom_canvas::stats::request_frame(cause);
-        let value_press = matches!(message, Message::ValueDraftPress);
+        // A field can go with the view, so any input while one has focus asks
+        // again. Live readings and frames do not change what the view holds.
+        let ask_focus = matches!(message, Message::TextFocusCheck)
+            || (self.text_focus.any
+                && !matches!(message, Message::TextFocus(_))
+                && !matches!(
+                    cause,
+                    FrameCause::Tick | FrameCause::Live | FrameCause::Meters | FrameCause::Forced
+                ));
         // A mode change the engine's full queue refused goes again now.
         self.send_pending_safety();
         if !message.keeps_patch() {
@@ -982,6 +998,9 @@ impl App {
             Message::Matrix(event) => self.matrix_message(event),
             Message::MatrixKey(key) => self.matrix_key_message(key),
             Message::ControlFrame(now) => self.control_frame(now),
+            Message::TextFieldTab => self.text_field_tab(),
+            Message::TextFocus(focus) => self.text_focus_changed(focus),
+            Message::ValueSubmit { module, index } => self.value_submit(module, index),
             Message::Located {
                 call,
                 target,
@@ -996,10 +1015,8 @@ impl App {
         };
         // An undo or redo shortcut asks the window whether a text field has
         // focus first.
-        // A press elsewhere takes focus from the field. Only the widget tree
-        // knows, so ask it after the press has reached the widgets.
-        let task = if value_press {
-            Task::batch([task, editing::text_field_focused().map(Message::ValueDraftFocus)])
+        let task = if ask_focus {
+            Task::batch([task, editing::text_focus().map(Message::TextFocus)])
         } else {
             task
         };
@@ -1172,6 +1189,9 @@ impl App {
             Message::Browser(_)
             | Message::Control(_)
             | Message::ControlFrame(_)
+            | Message::TextFieldTab
+            | Message::TextFocus(_)
+            | Message::ValueSubmit { .. }
             | Message::Located { .. }
             | Message::Matrix(_)
             | Message::MatrixKey(_) => {}
@@ -1346,14 +1366,8 @@ impl App {
                 }
             }
             Message::ValueText { module, index, text } => self.type_value_draft(module, index, text),
-            Message::ValueSubmit { module, index } => self.submit_value_draft(module, index),
             Message::ValueDraftClear => self.clear_value_draft(),
-            Message::ValueDraftPress => {}
-            Message::ValueDraftFocus(focused) => {
-                if !focused {
-                    self.clear_value_draft();
-                }
-            }
+            Message::TextFocusCheck => {}
             Message::Range { module, index, range } => self.set_range(module, index, range),
             Message::SliderReleased => self.close_slider_gesture(),
             Message::AddModulation { module, index } => {

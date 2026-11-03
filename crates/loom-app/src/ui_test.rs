@@ -182,6 +182,9 @@ impl Ui {
                 {
                     messages.push(message);
                 }
+                if let Some(message) = crate::controls::text_focus_event(event.clone(), status, window::Id::unique()) {
+                    messages.push(message);
+                }
                 // The panic key listens to every key event (panic.md).
                 if let Some(message) = crate::panic::key(event.clone(), status, window::Id::unique()) {
                     messages.push(message);
@@ -275,6 +278,30 @@ impl Ui {
             iced::advanced::widget::operation::focusable::focus::<()>(iced::advanced::widget::Id::new(id));
         self.with_ui(|ui, renderer, _| ui.operate(renderer, &mut operation));
         self.redraw();
+    }
+
+    /// Where the inspector's value field for this parameter is in the window.
+    pub fn value_field(&mut self, module: u32, index: usize) -> Point {
+        use iced::advanced::widget::operation::{Focusable, Outcome};
+        use iced::advanced::widget::{Id, Operation};
+
+        struct Find(Id, Option<Rectangle>);
+        impl Operation for Find {
+            fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
+                operate(self);
+            }
+            fn focusable(&mut self, id: Option<&Id>, bounds: Rectangle, _state: &mut dyn Focusable) {
+                if id == Some(&self.0) {
+                    self.1 = Some(bounds);
+                }
+            }
+            fn finish(&self) -> Outcome<()> {
+                Outcome::None
+            }
+        }
+        let mut find = Find(crate::controls::value_field_id(module, index), None);
+        self.with_ui(|ui, renderer, _| ui.operate(renderer, &mut find));
+        find.1.expect("a value field for that parameter").center()
     }
 
     /// Moves the pointer to a window point.
@@ -1744,6 +1771,147 @@ mod tests {
         // In learn mode the row is plain text, so a click arms it.
         let _ = ui.app.update(Message::Learn(crate::learn::Message::Toggle));
         assert!(field(&ui).is_none());
+    }
+
+    /// Selects a `test.panel` module, and clicks its cutoff value field with a
+    /// real press. Returns the module and the parameter index.
+    fn focus_cutoff_field(ui: &mut Ui) -> (ModuleId, usize) {
+        let id = select_new(ui, "test.panel");
+        let index = ui
+            .app
+            .controller
+            .graph()
+            .node(id)
+            .unwrap()
+            .descriptor
+            .param_index("cutoff")
+            .unwrap();
+        let at = ui.value_field(id.0, index);
+        ui.move_to(at);
+        ui.press();
+        ui.release();
+        assert!(ui.app.text_focus.any, "the app knows the field has focus");
+        (id, index)
+    }
+
+    /// The module's position, to see that a key did not move it.
+    fn tile_position(ui: &Ui, id: ModuleId) -> Point {
+        ui.app.positions[&id.0]
+    }
+
+    /// Enter in an inspector field commits only that parameter. It never
+    /// focuses a control on the tile, so the next number edits nothing else.
+    #[test]
+    fn enter_in_an_inspector_field_leaves_the_canvas_alone() {
+        use keyboard::key::Named;
+        let mut ui = Ui::open("sine.ron");
+        let (id, index) = focus_cutoff_field(&mut ui);
+        let params = |ui: &Ui| ui.app.controller.graph().node(id).unwrap().params.clone();
+        let steps = ui.app.edits.history.len();
+
+        let enter = keyboard::Key::Named(Named::Enter);
+        ui.typewrite("440");
+        ui.tap(enter.clone(), keyboard::Modifiers::default());
+        assert_eq!(param_value(&ui, id, "cutoff"), 440.0);
+        let others = params(&ui);
+
+        // The commit selected the new text, so this number replaces it.
+        ui.typewrite("880");
+        ui.tap(enter, keyboard::Modifiers::default());
+        assert_eq!(param_value(&ui, id, "cutoff"), 880.0);
+        let now = params(&ui);
+        for (i, (before, after)) in others.iter().zip(&now).enumerate() {
+            if i != index {
+                assert_eq!(before, after, "parameter {i} did not change");
+            }
+        }
+        assert_eq!(ui.app.edits.history.len(), steps + 2, "one undo step per commit");
+    }
+
+    /// Keys that edit a text field never act on the canvas behind it: not an
+    /// arrow, Space, Backspace, or a letter with the pointer over the canvas.
+    #[test]
+    fn keys_in_an_inspector_field_do_not_reach_the_canvas() {
+        use keyboard::key::Named;
+        let mut ui = Ui::open("sine.ron");
+        let (id, _) = focus_cutoff_field(&mut ui);
+        let place = tile_position(&ui, id);
+        let running = ui.app.controller.transport().running;
+        let steps = ui.app.edits.history.len();
+
+        let none = keyboard::Modifiers::default();
+        ui.tap(keyboard::Key::Named(Named::ArrowLeft), none);
+        ui.tap(keyboard::Key::Named(Named::ArrowRight), none);
+        assert_eq!(tile_position(&ui, id), place, "an arrow moves the caret, not the tile");
+        ui.tap(keyboard::Key::Named(Named::Space), none);
+        assert_eq!(ui.app.controller.transport().running, running, "Space is not Run");
+
+        // Over the canvas, with the module selected, Backspace would delete it
+        // and `a` would open the browser. The field has the keys all the same.
+        let tile = ui.control(id.0, "level");
+        ui.cursor = mouse::Cursor::Available(tile);
+        ui.tap(keyboard::Key::Named(Named::Backspace), none);
+        assert!(ui.app.controller.graph().node(id).is_some(), "Backspace edits the text");
+        ui.typewrite("a");
+        assert!(ui.app.browser.is_none());
+        assert_eq!(ui.app.edits.history.len(), steps);
+
+        // Escape ends the field's focus and keeps the selection. The next one
+        // reaches the canvas again.
+        ui.tap(keyboard::Key::Named(Named::Escape), none);
+        assert!(
+            ui.app.selection.contains(&id.0),
+            "Escape in a field keeps the selection"
+        );
+        assert!(!ui.app.text_focus.any, "the field gave up focus");
+        ui.tap(keyboard::Key::Named(Named::Escape), none);
+        assert!(ui.app.selection.is_empty());
+    }
+
+    /// Tab closes a field with no change and moves the canvas's focus as usual.
+    #[test]
+    fn tab_closes_an_inspector_field() {
+        use keyboard::key::Named;
+        let mut ui = Ui::open("sine.ron");
+        let (id, _) = focus_cutoff_field(&mut ui);
+        let before = param_value(&ui, id, "cutoff");
+        ui.typewrite("5");
+        assert!(ui.app.value_draft.is_some());
+        ui.tap(keyboard::Key::Named(Named::Tab), keyboard::Modifiers::default());
+        assert!(ui.app.value_draft.is_none());
+        assert!(!ui.app.text_focus.any);
+        assert_eq!(param_value(&ui, id, "cutoff"), before);
+    }
+
+    /// A draft ends when focus moves to another value field, and a new patch
+    /// starts with no draft and no field holding the keys.
+    #[test]
+    fn a_draft_ends_when_focus_moves_or_the_patch_changes() {
+        let mut ui = Ui::open("sine.ron");
+        let (id, _) = focus_cutoff_field(&mut ui);
+        ui.typewrite("abc");
+        assert_eq!(
+            ui.app.value_draft.as_ref().unwrap().text,
+            "abc",
+            "bad text keeps its focus"
+        );
+        assert!(ui.app.text_focus.any);
+
+        let node = ui.app.controller.graph().node(id).unwrap();
+        let other = node.descriptor.param_index("level").unwrap();
+        let at = ui.value_field(id.0, other);
+        ui.move_to(at);
+        ui.press();
+        ui.release();
+        assert!(ui.app.value_draft.is_none(), "the bad text went with the focus");
+        assert!(ui.app.text_focus.any, "the other field has focus now");
+
+        ui.typewrite("5");
+        assert!(ui.app.value_draft.is_some());
+        assert!(ui.app.replace(crate::Source::Empty));
+        ui.step(&[]);
+        assert!(ui.app.value_draft.is_none());
+        assert!(!ui.app.text_focus.any);
     }
 
     /// A readout shows its value as text in the snapshot, at its own place,

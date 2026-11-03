@@ -35,8 +35,10 @@ impl<Message> PatchCanvas<'_, Message> {
         let y = if below + height <= bounds.height {
             below
         } else {
-            (anchor.y - height - 3.0).max(0.0)
+            anchor.y - height - 3.0
         };
+        // The box can be panned off either edge. The list stays in the canvas.
+        let y = y.clamp(0.0, (bounds.height - height).max(0.0));
         Some(Rectangle::new(Point::new(x, y), Size::new(width, height)))
     }
 
@@ -182,6 +184,9 @@ impl<Message> PatchCanvas<'_, Message> {
             Event::Mouse(mouse::Event::ButtonPressed(_)) if !over => {
                 state.select_popup = None;
                 state.last_click = None;
+                // The press took the keys from the canvas, as it does with no
+                // list open.
+                state.focus = None;
                 shell.request_redraw();
                 true
             }

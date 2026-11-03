@@ -34,6 +34,7 @@ impl App {
             )
             .matrix_line(self.matrix_line())
             .matrix_keyboard(self.matrix.tab == RightTab::Matrix && self.matrix.focused)
+            .text_field_keys(self.text_focus.any)
             .typed_check(|module, widget, text| self.typed_check(module, widget, text))
             .matrix_escape(
                 self.matrix.tab == RightTab::Matrix
@@ -110,7 +111,8 @@ impl App {
         let browser_open = self.browser.is_some() && self.help.is_none();
         let patches_open = self.patches.is_some() && self.chooser.is_none();
         let matrix_keys = self.matrix.tab == RightTab::Matrix && self.matrix.focused;
-        pointer::Injector::new(layers, self, move |key, status| {
+        let value_draft = self.value_draft.is_some();
+        let on_key = move |key: iced::keyboard::Event, status| {
             // As the subscriptions do: `keyboard::listen` passes on what no
             // widget took, and the open browser hears every key.
             let mut messages = Vec::new();
@@ -126,6 +128,16 @@ impl App {
             if let Some(message) = help_key(iced::Event::Keyboard(key.clone()), status, iced::window::Id::unique()) {
                 messages.push(message);
             }
+            let event = iced::Event::Keyboard(key.clone());
+            if value_draft
+                && let Some(message) =
+                    crate::controls::value_draft_event(event.clone(), status, iced::window::Id::unique())
+            {
+                messages.push(message);
+            }
+            if let Some(message) = crate::controls::text_focus_event(event, status, iced::window::Id::unique()) {
+                messages.push(message);
+            }
             if patches_open
                 && let Some(message) =
                     patches::key(iced::Event::Keyboard(key.clone()), status, iced::window::Id::unique())
@@ -138,8 +150,8 @@ impl App {
                 messages.push(message);
             }
             messages
-        })
-        .into()
+        };
+        pointer::Injector::new(layers, self, on_key, || Message::TextFocusCheck).into()
     }
 
     /// The toolbar: the patch name, then buttons in groups (file, add,

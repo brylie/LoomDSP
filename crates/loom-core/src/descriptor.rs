@@ -428,7 +428,9 @@ impl ParamSpec {
         let value = digits.parse::<f32>().map_err(|_| bad)? * scale;
         // Rust reads "NaN" and "inf" as numbers. A player never means them.
         if value.is_finite() {
-            Ok(self.clamp(value))
+            // Adding zero turns -0.0, from "-0.4" on a whole number, into 0.0,
+            // so the control never shows "-0".
+            Ok(self.clamp(value) + 0.0)
         } else {
             Err(bad)
         }
@@ -907,10 +909,17 @@ impl DisplayRange {
         match self.format {
             DisplayFormat::Number { decimals } => {
                 let digits = usize::from(decimals);
+                let number = format!("{value:.digits$}");
+                // A small negative value rounds to "-0.0". Around silence the
+                // text would flip between that and "0.0".
+                let number = match number.strip_prefix('-') {
+                    Some(rest) if !rest.contains(|c: char| matches!(c, '1'..='9')) => rest,
+                    _ => number.as_str(),
+                };
                 if self.unit.is_empty() {
-                    format!("{value:.digits$}")
+                    number.to_string()
                 } else {
-                    format!("{value:.digits$} {}", self.unit)
+                    format!("{number} {}", self.unit)
                 }
             }
             DisplayFormat::Note => note_text(value),

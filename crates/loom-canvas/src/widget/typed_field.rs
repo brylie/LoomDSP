@@ -75,6 +75,21 @@ fn starts_a_number(text: &str) -> bool {
         .is_some_and(|c| c.is_ascii_digit() || matches!(c, '-' | '.' | ','))
 }
 
+/// Where the line with the reason for bad text goes: below the field, or above
+/// it when there is no room below, and inside the canvas. `width` is what the
+/// reason needs. A wider reason than the canvas is cut at its edge.
+pub(super) fn typed_reason_bounds(field: Rectangle, width: f32, bounds: Rectangle) -> Rectangle {
+    let width = width.min(bounds.width);
+    let below = field.y + FIELD_HEIGHT_PX + 2.0;
+    let y = if below + FIELD_HEIGHT_PX <= bounds.y + bounds.height {
+        below
+    } else {
+        field.y - FIELD_HEIGHT_PX - 2.0
+    };
+    let x = field.x.clamp(bounds.x, (bounds.x + bounds.width - width).max(bounds.x));
+    Rectangle::new(Point::new(x, y), Size::new(width, FIELD_HEIGHT_PX))
+}
+
 impl<Message> PatchCanvas<'_, Message> {
     /// Why the text cannot be committed, or `None` if it can.
     pub(super) fn typed_error(&self, field: &TypedField) -> Option<String> {
@@ -116,9 +131,10 @@ impl<Message> PatchCanvas<'_, Message> {
 
     /// Opens the field if this key starts one on the focused control: Enter,
     /// holding the value text, or the first character of a number. Not in MIDI
-    /// learn mode, where digits do nothing and Enter arms, and not with
-    /// Command, Ctrl, or Alt, so those shortcuts keep their meaning. Returns
-    /// true if the key was used.
+    /// learn mode, where digits do nothing and Enter arms, not with Command,
+    /// Ctrl, or Alt, so those shortcuts keep their meaning, and not during a
+    /// drag, whose next move would overwrite the typed value. Returns true if
+    /// the key was used.
     pub(super) fn open_typed_field(
         &self,
         state: &mut State,
@@ -128,7 +144,12 @@ impl<Message> PatchCanvas<'_, Message> {
         repeat: bool,
     ) -> bool {
         use keyboard::key::Named;
-        if self.learn.is_some() || modifiers.command() || modifiers.control() || modifiers.alt() {
+        if self.learn.is_some()
+            || modifiers.command()
+            || modifiers.control()
+            || modifiers.alt()
+            || !matches!(state.interaction, Interaction::Idle)
+        {
             return false;
         }
         let Some((module, widget)) = state.focus else {
@@ -387,14 +408,10 @@ impl<Message> PatchCanvas<'_, Message> {
                 );
             }
             if let Some(reason) = error {
-                let width = width_of(&reason) + 2.0 * FIELD_PADDING_PX;
-                let below = Rectangle::new(
-                    Point::new(area.x, area.y + FIELD_HEIGHT_PX + 2.0),
-                    Size::new(width, FIELD_HEIGHT_PX),
-                );
+                let place = typed_reason_bounds(area, width_of(&reason) + 2.0 * FIELD_PADDING_PX, bounds);
                 renderer.fill_quad(
                     renderer::Quad {
-                        bounds: below,
+                        bounds: place,
                         border: iced::Border {
                             color: self.palette.tile_border,
                             width: 1.0,
@@ -405,8 +422,8 @@ impl<Message> PatchCanvas<'_, Message> {
                     self.palette.control_body,
                 );
                 renderer.fill_text(
-                    line(reason, width),
-                    Point::new(below.x + FIELD_PADDING_PX, below.center_y()),
+                    line(reason, place.width),
+                    Point::new(place.x + FIELD_PADDING_PX, place.center_y()),
                     self.palette.text,
                     bounds,
                 );

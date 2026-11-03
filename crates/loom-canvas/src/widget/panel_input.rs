@@ -562,6 +562,9 @@ impl<Message> PatchCanvas<'_, Message> {
             keyboard::Key::Named(named @ (Named::Space | Named::Enter)) => {
                 if let Some((module, widget)) = state.focus {
                     let position = self.position(module, widget);
+                    let one_number = self
+                        .widget_kind(module, widget)
+                        .is_some_and(WidgetViewKind::is_one_number);
                     match self.widget_kind(module, widget) {
                         Some(WidgetViewKind::Toggle) => {
                             self.set_control(shell, module, widget, if position > 0.5 { 0.0 } else { 1.0 })
@@ -577,17 +580,12 @@ impl<Message> PatchCanvas<'_, Message> {
                             self.set_control(shell, module, widget, next as f32);
                         }
                         Some(WidgetViewKind::Select { .. }) if !repeat => self.open_select(state, module, widget),
-                        Some(
-                            WidgetViewKind::Knob { .. } | WidgetViewKind::Fader { .. } | WidgetViewKind::Number { .. },
-                        ) if matches!(named, Named::Space) && !repeat => {
+                        _ if one_number && matches!(named, Named::Space) && !repeat => {
                             self.emit(shell, CanvasEvent::ToggleRun);
                         }
                         _ => {}
                     }
-                    !matches!(
-                        self.widget_kind(module, widget),
-                        Some(WidgetViewKind::Knob { .. } | WidgetViewKind::Fader { .. } | WidgetViewKind::Number { .. }) if matches!(named, Named::Enter)
-                    )
+                    !(one_number && matches!(named, Named::Enter))
                 } else if matches!(named, Named::Space) {
                     // Space with nothing focused is the Run shortcut. A
                     // repeat is swallowed so holding the key does not toggle

@@ -171,7 +171,9 @@ impl App {
         // to keys whether or not a widget used them.
         let browser = (self.browser.is_some() && self.help.is_none()).then(|| iced::event::listen_with(browser_key));
         let help_keys = Some(iced::event::listen_with(help_key));
-        // A draft in a value field ends on Escape or Tab, or when focus moves.
+        // A draft in a value field ends on Escape, and the app has to know
+        // when text focus may have moved (panel-widgets.md, Typing a value).
+        let text_focus = Some(iced::event::listen_with(crate::controls::text_focus_event));
         let value_draft = self
             .value_draft
             .is_some()
@@ -190,6 +192,7 @@ impl App {
                 .chain(help_keys)
                 .chain(patches_keys)
                 .chain(value_draft)
+                .chain(text_focus)
                 .chain(panic),
         )
     }

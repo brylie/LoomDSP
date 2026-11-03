@@ -303,6 +303,9 @@ pub struct Injector<'a, Message> {
     /// The messages a key event no widget took becomes, as the app's key
     /// subscriptions would send them.
     on_key: KeyHandler<'a, Message>,
+    /// The message a press becomes, as the app's event subscription would
+    /// send it. It may have moved text focus.
+    on_press: Box<dyn Fn() -> Message + 'a>,
 }
 
 /// Turns a key event, and whether a widget took it, into app messages.
@@ -314,12 +317,14 @@ impl<'a, Message> Injector<'a, Message> {
         content: impl Into<Element<'a, Message>>,
         app: &'a App,
         on_key: impl Fn(keyboard::Event, iced::event::Status) -> Vec<Message> + 'a,
+        on_press: impl Fn() -> Message + 'a,
     ) -> Self {
         Self {
             content: content.into(),
             pointer: app.pointer.clone(),
             app,
             on_key: Box::new(on_key),
+            on_press: Box::new(on_press),
         }
     }
 
@@ -507,6 +512,9 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Injector<'_, Mess
                 );
                 let status = own.event_status();
                 shell.merge(own, |m| m);
+                if matches!(injected, Event::Mouse(mouse::Event::ButtonPressed(_))) {
+                    shell.publish((self.on_press)());
+                }
                 if let Event::Keyboard(
                     key @ (keyboard::Event::KeyPressed { .. } | keyboard::Event::KeyReleased { .. }),
                 ) = injected

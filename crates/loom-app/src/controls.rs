@@ -193,6 +193,60 @@ impl App {
         self.value_draft = None;
     }
 
+    /// Records which text field has focus. A draft ends when its own field
+    /// loses focus, even to another field. A value field that has just got
+    /// focus selects its text, so a typed number replaces the value, as Enter
+    /// on a canvas control does (panel-widgets.md, Typing a value).
+    pub(crate) fn text_focus_changed(&mut self, focus: crate::editing::TextFocus) -> iced::Task<Message> {
+        if let Some(draft) = &self.value_draft
+            && focus.field != Some(value_field_id(draft.module, draft.index))
+        {
+            self.value_draft = None;
+        }
+        let gained = focus
+            .field
+            .clone()
+            .filter(|field| self.text_focus.field.as_ref() != Some(field) && self.is_value_field(field));
+        self.text_focus = focus;
+        gained.map_or_else(iced::Task::none, crate::editing::select_all_text)
+    }
+
+    /// True if this widget ID is a value field of the selected module.
+    fn is_value_field(&self, field: &iced::advanced::widget::Id) -> bool {
+        self.selection.iter().any(|&module| {
+            let params = self
+                .controller
+                .graph()
+                .node(ModuleId(module))
+                .map_or(0, |node| node.descriptor.params.len());
+            (0..params).any(|index| value_field_id(module, index) == *field)
+        })
+    }
+
+    /// Enter in an inspector value field. After a commit the field selects its
+    /// new text, so the next number replaces it. Bad text stays as it is, to be
+    /// corrected.
+    pub(crate) fn value_submit(&mut self, module: u32, index: usize) -> iced::Task<Message> {
+        self.submit_value_draft(module, index);
+        if self.value_draft.is_some() {
+            return iced::Task::none();
+        }
+        crate::editing::select_all_text(value_field_id(module, index))
+    }
+
+    /// Tab in a text field on the main view: it closes the field, as on the
+    /// canvas. The canvas has taken the same key and moved its focus. The matrix
+    /// and the windows over the canvas have their own use of the keys.
+    pub(crate) fn text_field_tab(&mut self) -> iced::Task<Message> {
+        let matrix = self.matrix.tab == crate::matrix::Tab::Matrix && self.matrix.focused;
+        if !self.text_focus.any || matrix || !self.no_overlay() {
+            return iced::Task::none();
+        }
+        self.text_focus = crate::editing::TextFocus::default();
+        self.value_draft = None;
+        crate::editing::unfocus_text_fields()
+    }
+
     /// Typing in an inspector value field keeps the text as a draft, with the
     /// reason if it is not a value yet.
     pub(crate) fn type_value_draft(&mut self, module: u32, index: usize, text: String) {
@@ -373,8 +427,14 @@ pub(crate) struct ValueDraft {
     pub error: Option<String>,
 }
 
-/// The inspector value field's keys and presses, heard whichever widget used
-/// them. Escape and Tab drop a draft. A press may have moved focus away.
+/// The widget ID of an inspector value field. Each parameter has its own, so a
+/// draft can tell its own field from another.
+pub(crate) fn value_field_id(module: u32, index: usize) -> iced::advanced::widget::Id {
+    iced::advanced::widget::Id::from(format!("value-{module}-{index}"))
+}
+
+/// The inspector value field's Escape, heard whichever widget used it. It
+/// drops a draft.
 pub(crate) fn value_draft_event(
     event: iced::Event,
     _status: iced::event::Status,
@@ -383,10 +443,31 @@ pub(crate) fn value_draft_event(
     use iced::keyboard::{self, key::Named};
     match event {
         iced::Event::Keyboard(keyboard::Event::KeyPressed {
-            key: keyboard::Key::Named(Named::Escape | Named::Tab),
+            key: keyboard::Key::Named(Named::Escape),
             ..
         }) => Some(Message::ValueDraftClear),
-        iced::Event::Mouse(iced::mouse::Event::ButtonPressed(_)) => Some(Message::ValueDraftPress),
+        _ => None,
+    }
+}
+
+/// The events that can move text focus, heard whichever widget used them: a
+/// press, Escape, which a text field takes as giving up focus, and Tab.
+pub(crate) fn text_focus_event(
+    event: iced::Event,
+    _status: iced::event::Status,
+    _window: iced::window::Id,
+) -> Option<Message> {
+    use iced::keyboard::{self, key::Named};
+    match event {
+        iced::Event::Keyboard(keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(Named::Tab),
+            ..
+        }) => Some(Message::TextFieldTab),
+        iced::Event::Keyboard(keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(Named::Escape),
+            ..
+        })
+        | iced::Event::Mouse(iced::mouse::Event::ButtonPressed(_)) => Some(Message::TextFocusCheck),
         _ => None,
     }
 }
