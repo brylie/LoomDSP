@@ -284,3 +284,21 @@ fn a_clean_first_read_sends_nothing() {
     let mut watcher = Watcher::new(start);
     assert_eq!(flags(&output(&mut watcher, 0, 0, start)), None);
 }
+
+/// A `Stats` event the UI was too busy to take is sent again by the next read,
+/// and only that one. Without this, a dropped "warning ended" on an idle patch
+/// would leave the warning on for good.
+#[test]
+fn a_dropped_event_is_sent_again() {
+    let start = Instant::now();
+    let mut watcher = Watcher::new(start);
+    let at = |seconds: u64| start + Duration::from_secs(seconds);
+    output(&mut watcher, 0, 0, at(0));
+    output(&mut watcher, 0, 0, at(1));
+    assert_eq!(flags(&output(&mut watcher, 0, 0, at(2))), None, "settled");
+
+    assert_eq!(flags(&output(&mut watcher, 7, 0, at(3))), Some((true, false)));
+    watcher.stats_not_sent();
+    assert_eq!(flags(&output(&mut watcher, 7, 0, at(4))), Some((true, false)), "again");
+    assert_eq!(flags(&output(&mut watcher, 7, 0, at(5))), None, "once");
+}

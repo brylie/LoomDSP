@@ -221,10 +221,7 @@ pub(super) fn press_message(app: &App, name: &str) -> Result<Message, String> {
     let (message, disabled) = match name {
         "new" => (Message::File(crate::FileAction::New), None),
         "learn" => (Message::Learn(crate::learn::Message::Toggle), None),
-        "hold" => (
-            Message::HoldNote,
-            app.midi.is_none().then_some(crate::view::HOLD_DISABLED),
-        ),
+        "hold" => (Message::HoldNote, app.hold_hover()),
         "panic" => (Message::Panic, None),
         "undo" => (
             Message::Undo,

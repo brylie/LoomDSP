@@ -106,6 +106,8 @@ pub struct Watcher {
     silenced: GrowthAlarm,
     clipped: GrowthAlarm,
     shown: Option<Shown>,
+    /// The last `Stats` event was dropped, so the next read sends again.
+    unsent: bool,
     reads: u32,
     peaks: VecDeque<(Instant, f64)>,
     current_peak: f64,
@@ -122,11 +124,18 @@ impl Watcher {
             silenced: GrowthAlarm::default(),
             clipped: GrowthAlarm::default(),
             shown: None,
+            unsent: false,
             reads: 0,
             peaks: VecDeque::new(),
             current_peak: 0.0,
             current_max: 0.0,
         }
+    }
+
+    /// A `Stats` event could not reach the UI. The output warnings live only
+    /// in these events, so the next read must send again.
+    pub fn stats_not_sent(&mut self) {
+        self.unsent = true;
     }
 
     /// Takes one read of the stats and returns what the UI must hear.
@@ -191,7 +200,8 @@ impl Watcher {
             Some(old) => *old != shown,
             None => silenced || clipped,
         };
-        if changed {
+        if changed || self.unsent {
+            self.unsent = false;
             events.push(Event::Stats {
                 dropouts,
                 at: now,
@@ -245,11 +255,16 @@ pub fn stream(watch: &Watch) -> impl Stream<Item = Event> + use<> {
                 EngineRead::of(&watch.engine),
                 Instant::now(),
             ) {
+                let stats = matches!(event, Event::Stats { .. });
                 match tx.try_send(event) {
-                    // The UI is busy: it reads the stats itself when it
-                    // draws, and the next read sends again.
                     Ok(()) => {}
-                    Err(e) if e.is_full() => {}
+                    // The UI is busy. The output warnings reach it only
+                    // through these events, so the next read sends again.
+                    Err(e) if e.is_full() => {
+                        if stats {
+                            watcher.stats_not_sent();
+                        }
+                    }
                     Err(_) => return,
                 }
             }

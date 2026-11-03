@@ -954,3 +954,52 @@ fn a_later_save_clears_a_failed_save() {
     assert!(app.alerts.kept().is_empty());
     assert_eq!(app.alerts.severity(), alerts::Severity::Normal);
 }
+
+/// With a named output lost, a new patch stays idle and the wait goes on: the
+/// session does not move to the system default, and the bar stays true.
+#[test]
+fn a_new_patch_stays_idle_while_a_named_output_is_lost() {
+    let mut run = Setup {
+        preferences: Some("Preferences(version: 1, audio: (device: Named(\"Fake B\")))"),
+        ..Setup::new("lost-then-new", PatchFrom::Example("sine.ron"))
+    }
+    .start();
+    run.host.remove_device("Fake B");
+    run.app.check_audio(Instant::now());
+    assert!(run.app.rig.lost_audio.is_some());
+    let starts = run.tape.stream_starts().len();
+
+    assert!(run.app.replace(Source::Empty));
+    assert!(!run.app.stream.is_playing(), "Fake A does not stand in");
+    assert!(run.app.rig.lost_audio.is_some(), "still waiting");
+    assert_eq!(run.app.alerts.newest_kept().unwrap().cause, alerts::Cause::AudioOutput);
+    assert_eq!(run.tape.stream_starts().len(), starts);
+
+    run.host.add_device(fake::device("Fake B"));
+    run.app.check_audio(Instant::now() + Duration::from_secs(2));
+    assert!(run.app.stream.is_playing(), "it comes back on the new patch");
+    assert_eq!(run.app.rig.playing.as_ref().unwrap().device, "Fake B");
+    assert!(run.app.alerts.kept().is_empty());
+}
+
+/// With a system default lost and a new default present, opening a patch plays
+/// there. That ends the loss, so the next poll does not restart the stream.
+#[test]
+fn a_new_patch_ends_the_loss_of_a_system_default() {
+    let mut run = Setup::new("lost-default-then-new", PatchFrom::Example("sine.ron")).start();
+    run.host.remove_device("Fake A");
+    run.host.remove_device("Fake B");
+    run.app.check_audio(Instant::now());
+    assert!(run.app.rig.lost_audio.is_some());
+    run.host.add_device(fake::device("USB DAC"));
+
+    assert!(run.app.replace(Source::Empty));
+    assert!(run.app.stream.is_playing());
+    assert!(run.app.rig.lost_audio.is_none());
+    assert!(run.app.alerts.kept().is_empty());
+    let starts = run.tape.stream_starts().len();
+    // A stepped output calls back only when played, or this would be a stall.
+    run.play(0.1);
+    run.app.check_audio(Instant::now() + Duration::from_secs(2));
+    assert_eq!(run.tape.stream_starts().len(), starts, "no second restart");
+}

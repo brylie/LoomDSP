@@ -889,7 +889,8 @@ impl App {
     /// was lost or disconnected (device-changes.md, Audio device loss).
     pub(crate) fn stop_audio_immediate(&mut self) {
         self.alerts.set_input_drift(None);
-        // A new stream gets a new watcher, whose first read sends nothing.
+        // A new stream gets a new watcher, and a clean first read sends
+        // nothing, so nothing else would turn these off.
         self.alerts.set_output_warnings(false, false);
         if let Some(audio) = self.stream.take_running() {
             audio.stop_immediate();
@@ -989,7 +990,7 @@ impl App {
     }
 
     /// Sound plays again, or the player chose a device.
-    fn audio_back(&mut self) {
+    pub(crate) fn audio_back(&mut self) {
         self.rig.lost_audio = None;
         self.alerts.clear(alerts::Cause::AudioOutput);
     }
@@ -1158,7 +1159,8 @@ impl App {
     /// longer for large buffers; output safety, rule 14). Used by Open, New, quit, and device changes.
     pub(crate) fn stop_audio(&mut self) {
         self.alerts.set_input_drift(None);
-        // A new stream gets a new watcher, whose first read sends nothing.
+        // A new stream gets a new watcher, and a clean first read sends
+        // nothing, so nothing else would turn these off.
         self.alerts.set_output_warnings(false, false);
         if let Some(audio) = self.stream.take_running() {
             // A full queue cannot fade: the limit then stops the stream.

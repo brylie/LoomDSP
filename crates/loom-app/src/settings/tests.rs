@@ -1644,8 +1644,8 @@ fn failed_saves_say_why_and_keep_the_choice() {
 }
 
 /// The stats bar shows the watcher's output warnings while a device plays,
-/// and they end with the stream: a new stream's watcher sends nothing at
-/// first, so the app must not hold on to them.
+/// and they end with the stream: a new stream's watcher sends nothing on a
+/// clean first read, so the app must not hold on to them.
 #[test]
 fn output_warnings_show_until_the_stream_stops() {
     let dir = folder("output-warnings");
@@ -1710,4 +1710,33 @@ fn the_status_bar_fits_with_everything_on() {
     }
     assert!(ui.text(&format!("Error: kept {long}")).is_some(), "the kept error");
     assert!(ui.text(&format!("latest {long}")).is_some(), "the latest message");
+}
+
+/// An input error is over if the new patch's stream opened, so opening a patch
+/// does not carry it across. Nothing later would clear it.
+#[test]
+fn opening_a_patch_drops_an_input_error_that_is_over() {
+    let dir = folder("input-error-over");
+    let fake = two_devices();
+    *fake.audio_inputs.borrow_mut() = devices::Inputs {
+        default: Some("Microphone".into()),
+        devices: vec!["Microphone".into()],
+    };
+    *fake.input_error.borrow_mut() = Some(InputError::Other("device busy".into()));
+    let mut app = start(args(&dir), &fake);
+    app.controller.add_module("loom.io.audio-in").unwrap();
+    assert!(app.commit());
+    app.sync_audio_input();
+    assert_eq!(app.alerts.kept().len(), 1);
+
+    let patch = dir.join("input.ron");
+    std::fs::write(
+        &patch,
+        r#"Patch(version: 1, modules: [(id: 1, kind: "loom.io.audio-in@1")])"#,
+    )
+    .unwrap();
+    *fake.input_error.borrow_mut() = None;
+    assert!(app.replace(Source::File(&patch)));
+    assert!(app.rig.input.port().is_some(), "the stream opened");
+    assert!(app.alerts.kept().is_empty(), "{:?}", app.alerts.kept());
 }

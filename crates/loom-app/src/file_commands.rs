@@ -294,7 +294,12 @@ impl App {
         // play it.
         // A recording goes on into the same file (rig.recorder).
         let playback = self.stream.playback();
-        let (output, _) = settings::open_output(&self.rig, playback.is_off(), playback.is_fake());
+        // A lost named device is being waited for, so the new patch stays idle
+        // too, rather than coming out of other speakers (device-changes.md).
+        let (output, _) = match self.rig.lost_audio.as_ref().filter(|lost| !lost.was_system_default) {
+            Some(lost) => (Err(format!("waiting for \"{}\"", lost.device)), Vec::new()),
+            None => settings::open_output(&self.rig, playback.is_off(), playback.is_fake()),
+        };
         // Playing now and no device to play on afterwards: keep what plays.
         if let (Err(e), true) = (&output, self.stream.is_playing()) {
             let message = format!(
@@ -372,6 +377,14 @@ impl App {
         fresh.alerts.carry_kept_from(&mut self.alerts);
         // The file that could not be read or written no longer matters.
         fresh.alerts.clear(alerts::Cause::File);
+        // The new app's first look at the devices came before the carry, so
+        // it could not clear what it found to be over.
+        if fresh.stream.is_playing() {
+            fresh.audio_back();
+        }
+        if fresh.rig.input.open().is_some() || !fresh.input_wanted() {
+            fresh.alerts.clear(alerts::Cause::AudioInput);
+        }
         *self = fresh;
         // The new patch has no unsaved changes: the copy goes.
         self.autosave(Instant::now());

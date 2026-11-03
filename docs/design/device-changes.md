@@ -61,6 +61,7 @@ The fake host has a list of inputs that tests change.
 
 - **The patch and every edit are kept.** The controller owns the graph; the engine is only rebuilt. While no audio runs, the engine stays idle exactly as it does with `--no-audio`, and edits still work. *Why:* the player must be able to keep working, or save, after a drop-out.
 - **A new engine starts fresh,** as in [restarting audio](preferences.md#what-a-change-does): module state resets, the transport keeps its settings and starts at beat 0, and the engine fades in over 10 ms. *Why:* the old engine's last block never finished.
+- **Opening a patch or pressing New while lost.** (Agreed, M2, 2026-11-03.) With a lost Named device, the new patch stays idle, and the app goes on waiting for that device. It does not play on the system default. With a lost System default and a new default present, the new patch plays there, and that ends the loss. *Why:* sound suddenly coming out of laptop speakers on stage is worse than silence the bar already explains.
 - **Choosing another device** in Preferences while the old one is lost works as a normal change, except that there is no old stream to fade out. The saved choice changes to the new device.
 - **No fade-out is possible** for a lost device (there is nothing to play on). The safety stage ([output safety](output-safety.md)) protects the new stream.
 - **Sleep and wake.** On wake, a stream that stalled or errors is treated as lost: with System default, the app reopens it at once; with Named, it finds the device again within a second. If the device is not there, the message from the table is shown. *Why:* the same rule for every cause is easier to test and to explain.
@@ -86,6 +87,8 @@ The fake host can emit a `Lost` error for a device (`Fake::emit_lost`), remove a
 - [x] Given a lost Named device, when the player chooses another output, then sound plays there and the saved choice is the new device.
 - [x] Given a stream that stops calling back for more than one second, then it is treated as lost.
 - [x] A second error from the same stream does not rebuild the engine twice.
+- [x] Given a lost Named device, when the player opens a patch or presses New, then nothing plays, the app goes on waiting, and sound returns on that device when it is back (`a_new_patch_stays_idle_while_a_named_output_is_lost`).
+- [x] Given a lost System default with a new default present, when the player opens a patch, then it plays there, no kept error stays, and the next poll does not restart it (`a_new_patch_ends_the_loss_of_a_system_default`).
 - [x] The loss message gives the reason. With System default, moving to the new default leaves no kept error. Choosing another output while lost clears it. An edit while lost shows its compile report beside the kept error.
 - [ ] Manual, on macOS, Windows, and Linux, with the OS version and audio device listed in the pull request: unplug the interface while a patch plays (no crash, a message names the device); plug it in (sound returns); with the device gone choose another output (sound plays there); edits made while it was gone are kept; sleep the computer while playing and wake it (sound returns, or the message says why not).
 
