@@ -357,9 +357,19 @@ impl App {
                 };
                 return (then, Task::batch(tasks));
             }
-            Command::Toolbar { button } => press_message(self, &button).map(|message| {
-                send(self, message);
-                Map::new()
+            Command::Toolbar { button } => press_message(self, &button).and_then(|message| {
+                // An answer that wrote nothing is an error, because the step
+                // after it was dropped too (rule 9). `update` cannot say so,
+                // and a field would not survive the patch being replaced.
+                if let Message::Question(answer) = message {
+                    self.document.may_have_changed();
+                    if !self.question_message(answer) {
+                        return Err(self.alerts.status().to_string());
+                    }
+                } else {
+                    send(self, message);
+                }
+                Ok(Map::new())
             }),
             Command::Press {
                 button,

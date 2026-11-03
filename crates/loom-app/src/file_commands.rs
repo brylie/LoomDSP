@@ -255,16 +255,18 @@ impl App {
     }
 
     /// Handles a question message. An answer closes the question first, so
-    /// that what it starts can ask another.
-    pub(crate) fn question_message(&mut self, message: QuestionMessage) {
+    /// that what it starts can ask another. Returns false when a Save or
+    /// Replace answer wrote nothing: the status bar says why, and the control
+    /// channel's reply says so too (control-channel.md, rule 9).
+    pub(crate) fn question_message(&mut self, message: QuestionMessage) -> bool {
         if let QuestionMessage::Move(by) = message {
             if let Some(question) = self.question.as_mut() {
                 question.step(by);
             }
-            return;
+            return true;
         }
         let Some(question) = self.question.take() else {
-            return;
+            return true;
         };
         let answer = match message {
             QuestionMessage::Answer(answer) => answer,
@@ -273,14 +275,13 @@ impl App {
         };
         let kind = question.into_kind();
         match (kind, answer) {
-            (Kind::Discard { next, .. }, Answer::Save) => {
-                self.save_then(Some(next));
+            (Kind::Discard { next, .. }, Answer::Save) => self.save_then(Some(next)),
+            (Kind::Discard { next, .. }, Answer::DontSave) => {
+                self.proceed(next);
+                true
             }
-            (Kind::Discard { next, .. }, Answer::DontSave) => self.proceed(next),
-            (Kind::Replace { path, next }, Answer::Replace) => {
-                self.write_then(path, next);
-            }
-            _ => {}
+            (Kind::Replace { path, next }, Answer::Replace) => self.write_then(path, next),
+            _ => true,
         }
     }
 

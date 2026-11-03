@@ -1565,20 +1565,79 @@ fn what_a_question_blocks_is_refused() {
 }
 
 /// Rule 9: answering Save on a patch with no file cannot open a native
-/// picker with nobody to close it. It stops, and nothing is lost.
+/// picker with nobody to close it. It stops, nothing is lost, and the reply
+/// says so, because the step after it did not run.
 #[test]
 fn a_scripted_save_answer_opens_no_picker() {
     let mut app = scripted_with_changes();
     let _ = crate::files::fake::asked();
     run(&mut app, r#"{"cmd": "toolbar", "button": "new"}"#).unwrap();
-    run(&mut app, r#"{"cmd": "toolbar", "button": "save"}"#).unwrap();
+    let error = run(&mut app, r#"{"cmd": "toolbar", "button": "save"}"#).unwrap_err();
+    assert!(error.contains("use the `save` command"), "{error}");
+    assert_eq!(error, app.alerts.status());
     assert_eq!(crate::files::fake::asked(), Vec::new(), "no dialog");
     assert!(app.unsaved(), "nothing is lost");
-    assert!(
-        app.alerts.status().contains("use the `save` command"),
-        "{}",
-        app.alerts.status()
+    assert!(app.question.is_none());
+}
+
+/// An app with the control channel on and a file in a folder of its own, and
+/// that folder. Removing the folder makes the next write to the file fail.
+fn scripted_with_a_file(name: &str) -> (App, crate::recovery::tests::TempDir, PathBuf) {
+    let dir = crate::recovery::tests::TempDir::new(name);
+    let folder = dir.0.join("folder");
+    std::fs::create_dir_all(&folder).unwrap();
+    let file = folder.join("mine.ron");
+    std::fs::write(&file, "Patch(version: 1)").unwrap();
+    let mut app = scripted_with_changes();
+    let line = serde_json::json!({ "cmd": "open", "path": file }).to_string();
+    run(&mut app, &line).unwrap();
+    app.edit(|app| {
+        app.controller.add_module("loom.osc.sine").unwrap();
+        app.commit();
+    });
+    (app, dir, folder)
+}
+
+/// A Save answer whose write fails replies with the reason. New does not run.
+#[test]
+fn a_failed_scripted_save_answer_is_an_error() {
+    let (mut app, _dir, folder) = scripted_with_a_file("control-answer-save");
+    std::fs::remove_dir_all(&folder).unwrap();
+    run(&mut app, r#"{"cmd": "toolbar", "button": "new"}"#).unwrap();
+    let error = run(&mut app, r#"{"cmd": "toolbar", "button": "save"}"#).unwrap_err();
+    assert!(error.starts_with("Could not save"), "{error}");
+    assert_eq!(error, app.alerts.status());
+    assert!(app.unsaved());
+    assert!(app.document.file().is_some(), "New did not run");
+}
+
+/// A Replace answer whose write fails replies with the reason too, and its
+/// next step does not run.
+#[test]
+fn a_failed_scripted_replace_answer_is_an_error() {
+    use crate::question::{AfterDiscard, Question};
+    let (mut app, _dir, folder) = scripted_with_a_file("control-answer-replace");
+    let path = folder.join("mine.ron");
+    std::fs::remove_dir_all(&folder).unwrap();
+    app.question = Some(Question::replace(path, Some(AfterDiscard::Close)));
+    let error = run(&mut app, r#"{"cmd": "toolbar", "button": "replace"}"#).unwrap_err();
+    assert!(error.starts_with("Could not save"), "{error}");
+    assert!(!app.quit, "the next step did not run");
+    assert!(app.unsaved());
+}
+
+/// An answer that writes replies `ok`, and the next step runs.
+#[test]
+fn a_scripted_save_answer_that_writes_replies_ok() {
+    let (mut app, _dir, folder) = scripted_with_a_file("control-answer-ok");
+    run(&mut app, r#"{"cmd": "toolbar", "button": "new"}"#).unwrap();
+    run(&mut app, r#"{"cmd": "toolbar", "button": "save"}"#).unwrap();
+    assert_ne!(
+        std::fs::read_to_string(folder.join("mine.ron")).unwrap(),
+        "Patch(version: 1)"
     );
+    assert_eq!(app.document.file(), None, "New ran");
+    assert!(!app.unsaved());
 }
 
 /// The Panic key works over a question from a script, as it does from a real
