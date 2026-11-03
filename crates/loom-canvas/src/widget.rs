@@ -522,6 +522,22 @@ enum Interaction {
     },
 }
 
+impl Interaction {
+    /// The cursor during this gesture, or `None` with no gesture. A value drag
+    /// shows its own direction, so a horizontal fader keeps the cursor it had
+    /// on hover.
+    fn cursor(&self) -> Option<mouse::Interaction> {
+        Some(match self {
+            Self::Panning { .. } | Self::Moving { .. } => mouse::Interaction::Grabbing,
+            Self::Resizing { .. } => mouse::Interaction::ResizingDiagonallyDown,
+            Self::Turning { drag, .. } | Self::Depth { drag, .. } => drag.cursor(),
+            Self::Holding { .. } => mouse::Interaction::Pointer,
+            Self::Wiring { .. } | Self::Selecting { .. } => mouse::Interaction::Crosshair,
+            Self::Idle => return None,
+        })
+    }
+}
+
 /// What a stationary click on a choice control does.
 #[derive(Debug, Clone)]
 enum ChoiceClick {
@@ -702,15 +718,10 @@ where
         _renderer: &Renderer,
     ) -> mouse::Interaction {
         let state = tree.state.downcast_ref::<State>();
-        match state.interaction {
-            Interaction::Panning { .. } | Interaction::Moving { .. } => mouse::Interaction::Grabbing,
-            Interaction::Resizing { .. } => mouse::Interaction::ResizingDiagonallyDown,
-            Interaction::Turning { .. } | Interaction::Depth { .. } => mouse::Interaction::ResizingVertically,
-            Interaction::Holding { .. } => mouse::Interaction::Pointer,
-            Interaction::Wiring { .. } => mouse::Interaction::Crosshair,
-            Interaction::Selecting { .. } => mouse::Interaction::Crosshair,
-            Interaction::Idle if cursor.is_over(layout.bounds()) => self.hover_interaction(state),
-            Interaction::Idle => mouse::Interaction::default(),
+        match state.interaction.cursor() {
+            Some(gesture) => gesture,
+            None if cursor.is_over(layout.bounds()) => self.hover_interaction(state),
+            None => mouse::Interaction::default(),
         }
     }
 

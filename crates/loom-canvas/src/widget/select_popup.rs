@@ -66,7 +66,9 @@ impl<Message> PatchCanvas<'_, Message> {
 
     /// Closes a list whose module or widget has gone, or that a mode now
     /// hides. The event that found it goes on to normal handling, so a stale
-    /// list never swallows it.
+    /// list never swallows it. A canvas that has grown can show more rows, so
+    /// the scroll comes back too, or the list would end in blank rows that
+    /// pick a wrong value.
     pub(super) fn close_stale_select(&self, state: &mut State) {
         let live = state.select_popup.is_some_and(|popup| {
             self.scene
@@ -76,6 +78,13 @@ impl<Message> PatchCanvas<'_, Message> {
         });
         if !live {
             state.select_popup = None;
+        }
+        let height = state.size.height;
+        if let Some(popup) = &mut state.select_popup {
+            let count = self
+                .select_options(popup.module, popup.widget)
+                .map_or(0, <[String]>::len);
+            popup.scroll = popup.scroll.min(count.saturating_sub(select_rows(height, count)));
         }
     }
 

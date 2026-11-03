@@ -955,6 +955,37 @@ fn a_select_list_fits_the_canvas_and_a_short_one_keeps_the_wheel() {
     assert_eq!(popup.scroll, 0);
 }
 
+/// When the canvas grows with a scrolled list open, the scroll comes back, so
+/// the list has no blank rows and a press on its last row picks the last value.
+#[test]
+fn a_list_on_a_grown_canvas_has_no_blank_rows() {
+    let scene = long_list(30);
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |event| event);
+    let area = Rectangle::new(Point::ORIGIN, Size::new(800.0, 600.0));
+    // Scrolled to the end on a canvas 4 rows tall.
+    let mut state = State {
+        size: Size::new(800.0, 4.0 * SELECT_ROW_PX),
+        ..State::default()
+    };
+    canvas.open_select(&mut state, 1, 0);
+    state.select_popup.as_mut().unwrap().scroll = 26;
+
+    // Then `drive` gives it a canvas with room for all 12 rows.
+    state.size = area.size();
+    let list = canvas.select_popup_bounds(&state, area).unwrap();
+    let last = Point::new(list.x + 20.0, list.y + list.height - 1.0);
+    let events = drive(&canvas, &mut state, &click(mouse::Button::Left), last);
+    assert!(
+        events.contains(&CanvasEvent::SetControl {
+            module: 1,
+            widget: 0,
+            position: 29.0
+        }),
+        "{events:?}"
+    );
+}
+
 /// Typing jumps to the next choice that starts with the text, ignoring case
 /// and wrapping round. A key that matches nothing is used up, so `a` does not
 /// open the browser behind the list, and a key with Command still passes.
@@ -1024,6 +1055,26 @@ fn fader_scene(vertical: bool) -> (Scene, PanelValues) {
         },
     );
     (Scene::new(vec![view], Vec::new()), values)
+}
+
+/// During a drag the cursor shows the drag's own direction, as it did on hover.
+#[test]
+fn a_fader_drag_keeps_its_cursor() {
+    for (vertical, expected) in [
+        (true, mouse::Interaction::ResizingVertically),
+        (false, mouse::Interaction::ResizingHorizontally),
+    ] {
+        let (scene, values) = fader_scene(vertical);
+        let selected = BTreeSet::from([1]);
+        let canvas = PatchCanvas::new(&scene, &selected, |event| event).values(&values);
+        let rect = scene.module(1).unwrap().widget_bounds(0).unwrap();
+        let at = crate::controls::fader_track(rect, vertical).center();
+        let mut state = State::default();
+        drive(&canvas, &mut state, &click(mouse::Button::Left), at);
+        assert!(matches!(state.interaction, Interaction::Turning { .. }));
+        assert_eq!(state.interaction.cursor(), Some(expected));
+    }
+    assert_eq!(Interaction::Idle.cursor(), None);
 }
 
 /// Both faders change their value along the track, relative: pressing moves
