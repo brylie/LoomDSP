@@ -48,6 +48,8 @@ pub struct UiSnapshot {
     pub inspector: Inspector,
     /// The open module help view, if any.
     pub help: Option<crate::help::Model>,
+    /// The rows of the recent list, while it is open.
+    pub recent: Option<Vec<crate::recent::Row>>,
     /// The open question, if any (`docs/design/files.md`).
     pub question: Option<crate::question::Model>,
     /// The active right-hand tab and visible modulation matrix rows.
@@ -540,6 +542,7 @@ impl App {
             cables,
             inspector: self.inspector_model(),
             help: self.help.as_ref().map(|help| help.model.clone()),
+            recent: self.recent_rows.clone(),
             question: self.question.as_ref().map(crate::question::Question::model),
             matrix: self.matrix.model(self.controller.graph(), &self.selection),
             stats: self.stats_model(),

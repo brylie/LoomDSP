@@ -7,7 +7,7 @@ use crate::style::button;
 use crate::subscriptions::{browser_key, help_key};
 use crate::{
     App, DIM, FileAction, Message, alerts, browser, inspector, learn, matrix, panic, patches, pointer, probe_menu,
-    question, settings, style, undo,
+    question, recent, settings, style, undo,
 };
 use iced::widget::{column, container, mouse_area, row, rule, space, stack, text, toggler, tooltip};
 use iced::{Color, Element, Length};
@@ -31,7 +31,8 @@ impl App {
                     && self.rig.window.is_none()
                     && self.chooser.is_none()
                     && self.patches.is_none()
-                    && self.question.is_none(),
+                    && self.question.is_none()
+                    && self.recent_rows.is_none(),
             )
             .matrix_line(self.matrix_line())
             .matrix_keyboard(self.matrix.tab == RightTab::Matrix && self.matrix.focused)
@@ -91,6 +92,15 @@ impl App {
             layers = layers
                 .push(outside)
                 .push(iced::widget::pin(iced::widget::opaque(menu)).position(at));
+        }
+        if let Some(rows) = &self.recent_rows {
+            let outside = mouse_area(space::horizontal().width(Length::Fill).height(Length::Fill))
+                .on_press(Message::Recent(recent::Message::Close))
+                .on_right_press(Message::Recent(recent::Message::Close));
+            layers = layers.push(outside).push(
+                iced::widget::pin(iced::widget::opaque(recent::view(rows).map(Message::Recent)))
+                    .position(recent::LIST_AT),
+            );
         }
         if let Some(help) = &self.help {
             layers = layers.push(iced::widget::opaque(help.view(self.theme())));
@@ -187,6 +197,11 @@ impl App {
                 } else {
                     "Your patches: Ctrl+Shift+O"
                 },
+            ),
+            tip(
+                button(label("Recent"))
+                    .on_press_maybe((!self.rig.recent.files().is_empty()).then_some(Message::OpenRecent)),
+                "The last patches you opened or saved",
             ),
         ];
         let add = tip(

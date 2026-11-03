@@ -29,6 +29,7 @@ impl App {
                 self.alerts.say(format!("saved {}", path.display()));
                 self.document.saved(path, patch);
                 self.edits.history.mark_saved();
+                self.remember_current();
                 // The file holds the work now: the copy goes.
                 self.autosave(Instant::now());
                 true
@@ -60,6 +61,42 @@ impl App {
         }
     }
 
+    /// Where a dialog starts with no current file: the last folder used in
+    /// one, or else the library folder (files.md, The last folder).
+    fn dialog_folder(&mut self) -> Option<PathBuf> {
+        match self.rig.recent.last_folder() {
+            Some(dir) => Some(dir.to_path_buf()),
+            None => self.library_folder(),
+        }
+    }
+
+    /// Notes the folder of a file picked in a dialog. A failed write costs
+    /// only the convenience, so it is only said.
+    fn used_folder_of(&mut self, path: &Path) {
+        if let Err(e) = self.rig.recent.used_folder_of(path) {
+            self.alerts.say(format!("Could not keep the last folder: {e}."));
+        }
+    }
+
+    /// Puts the current file at the top of the recent list. It reads the
+    /// document, so a copy of an example and a failed open never get there.
+    /// Not with the control channel on: a script must not change the
+    /// player's list (files.md, What is listed).
+    pub(crate) fn remember_current(&mut self) {
+        if !self.control.is_empty() {
+            return;
+        }
+        let Some(file) = self.document.file() else {
+            return;
+        };
+        // Absolute, so a relative path from the command line still opens
+        // from another folder, and the same file is listed once.
+        let path = std::path::absolute(file).unwrap_or_else(|_| file.to_path_buf());
+        if let Err(e) = self.rig.recent.remember(&path) {
+            self.alerts.say(format!("Could not keep the recent patches: {e}."));
+        }
+    }
+
     /// Offers once per patch to add the user's name to its authors, before
     /// the first Save (patch-metadata.md, rule 3). Never with the control
     /// channel on, where nobody could answer a dialog.
@@ -78,6 +115,15 @@ impl App {
             }
             Some(false) => {}
             None => self.document.credit_not_asked(),
+        }
+    }
+
+    /// Lists a patch given on the command line, in a normal windowed run.
+    /// Not in a run that only measures or is driven by a script.
+    pub(crate) fn remember_opened_at_start(&mut self, args: &Args) {
+        let measuring = args.bench.bench || args.bench.measure || args.bench.measure_idle;
+        if !measuring && args.patch.is_some() {
+            self.remember_current();
         }
     }
 
@@ -113,9 +159,9 @@ impl App {
                 .say("Save As opens a file dialog; use the `save` command instead.".to_string());
             return false;
         }
-        // A patch with no file yet starts in the library folder, made when
-        // it is missing, under a free name taken from the patch name
-        // (patch-metadata.md, Your patches browser).
+        // A patch with no file yet starts in the last folder used, or else
+        // the library folder, made when it is missing, under a free name
+        // taken from the patch name (files.md, The last folder).
         // The current file wins, then a hint with a folder (a recovered
         // copy's). A bare hint, as an example copy suggests, goes in the
         // library like a new patch, keeping its name.
@@ -131,13 +177,17 @@ impl App {
                     || self.document.name().to_string(),
                     |stem| stem.to_string_lossy().into_owned(),
                 );
-                self.library_folder().map(|dir| files::free_path(&dir, &name)).or(hint)
+                self.dialog_folder().map(|dir| files::free_path(&dir, &name)).or(hint)
             }
         };
         match files::pick_save(start.as_deref()) {
             files::Saving::Cancelled => false,
-            files::Saving::Chosen(path) => self.write_then(path, next),
+            files::Saving::Chosen(path) => {
+                self.used_folder_of(&path);
+                self.write_then(path, next)
+            }
             files::Saving::Confirm(path) => {
+                self.used_folder_of(&path);
                 self.question = Some(Question::replace(path, next));
                 false
             }
@@ -183,11 +233,17 @@ impl App {
                 }
             }
             AfterDiscard::OpenDialog => {
-                if let Some(path) = files::pick_open(self.document.file()) {
+                let current = self.document.file().map(Path::to_path_buf);
+                let fallback = self.dialog_folder();
+                if let Some(path) = files::pick_open(current.as_deref(), fallback.as_deref()) {
+                    self.used_folder_of(&path);
                     self.open_path(&path);
                 }
             }
-            AfterDiscard::OpenPath(path) => self.open_path(&path),
+            AfterDiscard::OpenPath(path) => {
+                self.open_path(&path);
+            }
+            AfterDiscard::OpenDropped { path, several } => self.open_dropped(&path, several),
             AfterDiscard::Close => self.quit = true,
             AfterDiscard::Example(patch) => {
                 self.replace(Source::Recovered(patch));
@@ -351,9 +407,97 @@ impl App {
 
     /// Opens the patch at `path` in place of this one, and says so in the
     /// status bar, with any notes about what loaded differently.
-    pub(crate) fn open_path(&mut self, path: &std::path::Path) {
-        if self.replace(Source::File(path)) {
+    pub(crate) fn open_path(&mut self, path: &std::path::Path) -> bool {
+        let opened = self.replace(Source::File(path));
+        if opened {
             self.alerts.say(opened_status(path, self.document.load_notes()));
+            self.remember_current();
+        }
+        opened
+    }
+
+    /// Opens a dropped patch. Overlays close only once it has opened, so
+    /// Cancel changes nothing. When others came with it, the status says so
+    /// and keeps any notes about what loaded differently.
+    fn open_dropped(&mut self, path: &Path, several: bool) {
+        if !self.open_path(path) {
+            return;
+        }
+        self.rig.window = None;
+        if several {
+            let notes = self.document.load_notes().join("; ");
+            let name = files::display_name(Some(path));
+            let notes = if notes.is_empty() {
+                notes
+            } else {
+                format!(" Note: {notes}.")
+            };
+            self.alerts
+                .say(format!("Opened \"{name}\". Drop one patch at a time.{notes}"));
+        }
+    }
+
+    /// Opens the recent list, if it has anything to show. Whether a file is missing is looked
+    /// up here, not on every frame.
+    pub(crate) fn open_recent_list(&mut self) {
+        self.recent_rows = (!self.rig.recent.files().is_empty()).then(|| crate::recent::rows(self.rig.recent.files()));
+    }
+
+    /// Handles a message for the open list.
+    pub(crate) fn recent_message(&mut self, message: crate::recent::Message) {
+        let rows = self.recent_rows.take();
+        let crate::recent::Message::Pick(index) = message else {
+            return;
+        };
+        let Some(path) = rows.and_then(|rows| rows.into_iter().nth(index)).map(|row| row.path) else {
+            return;
+        };
+        // Looked up again: it may have gone since the list opened. It goes
+        // before any question, so there is nothing to answer for a file that
+        // cannot open.
+        if !path.is_file() {
+            if let Err(e) = self.rig.recent.forget(&path) {
+                self.alerts.say(format!("Could not keep the recent patches: {e}."));
+                return;
+            }
+            let name = files::display_name(Some(&path));
+            self.alerts
+                .say(format!("\"{name}\" is no longer there, so it is off the list."));
+            return;
+        }
+        self.after_discard(AfterDiscard::OpenPath(path));
+    }
+
+    /// Adds a file to the drop being collected. A drop while a question is
+    /// open is ignored, because the question must be answered first.
+    pub(crate) fn file_dropped(&mut self, path: PathBuf) {
+        if self.question.is_some() {
+            self.alerts
+                .say("The dropped file was not opened: answer the question first.".to_string());
+        } else {
+            self.drops.push(path);
+        }
+    }
+
+    /// The moment for collecting a drop is over: acts on what came.
+    pub(crate) fn drops_done(&mut self) {
+        let drops = std::mem::take(&mut self.drops);
+        if drops.is_empty() {
+            return;
+        }
+        if self.question.is_some() {
+            self.alerts
+                .say("The dropped file was not opened: answer the question first.".to_string());
+            return;
+        }
+        match crate::recent::dropped(&drops) {
+            crate::recent::Dropped::Open { path, several } => {
+                self.after_discard(AfterDiscard::OpenDropped { path, several });
+            }
+            crate::recent::Dropped::NoPatch => {
+                self.alerts
+                    .say("Only LoomDSP patches (.ron) can be opened here.".to_string());
+            }
         }
     }
 }

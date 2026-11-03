@@ -24,6 +24,9 @@ pub enum AfterDiscard {
     OpenDialog,
     /// Open this patch file.
     OpenPath(PathBuf),
+    /// Open this patch file, dropped on the window. `several` says other
+    /// files came with it.
+    OpenDropped { path: PathBuf, several: bool },
     /// Quit.
     Close,
     /// Open this patch from module help, as an untitled copy.

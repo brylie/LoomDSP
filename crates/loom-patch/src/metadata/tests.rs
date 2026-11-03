@@ -249,7 +249,6 @@ fn prepared_matching_agrees_with_the_filter() {
             authors: vec!["Ada Lovelace".into()],
             tags: vec!["Drone".into(), " FM ".into()],
             license: Some("CC-BY-NC-4.0".into()),
-            ..Metadata::default()
         },
         Metadata {
             name: "Bass".into(),

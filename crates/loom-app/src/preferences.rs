@@ -475,6 +475,11 @@ impl Store {
         }
     }
 
+    /// The file this store reads and writes, if any.
+    pub fn path(&self) -> Option<&Path> {
+        self.path.as_deref()
+    }
+
     /// The saved values. When a write fails, they are still the values the
     /// player chose: the change applies until quit.
     pub fn saved(&self) -> &Preferences {

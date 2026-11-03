@@ -71,6 +71,9 @@ impl Change {
 pub struct Rig {
     pub host: Rc<dyn Host>,
     pub store: Store,
+    /// The recent patches and the last folder. It outlives each engine,
+    /// because every Open and New replaces the rest of the app.
+    pub recent: crate::recent::RecentList,
     /// Device flags for this run. A flag is cleared when the window changes
     /// its setting: the window's choice is newer.
     pub flags: devices::Options,
@@ -153,6 +156,7 @@ impl Window {
 impl Rig {
     pub fn new(host: Rc<dyn Host>, store: Store, flags: devices::Options, safety_flag: bool) -> Self {
         Self {
+            recent: crate::recent::RecentList::in_memory(),
             host,
             store,
             flags,

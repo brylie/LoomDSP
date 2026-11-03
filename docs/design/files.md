@@ -8,7 +8,7 @@ How a user opens, saves, and closes patch files in the desktop app, and how the 
 - **Use case and requirements:** FR-FILE-01, FR-APP-01.
 - **Background:** none.
 - **Prior art:** every desktop editor has these commands. We use only the common conventions: shortcuts, a dot or star for unsaved work, and a three-button question.
-- **Issues:** [#14](https://github.com/brylie/LoomDSP/issues/14), [#182](https://github.com/brylie/LoomDSP/issues/182) (examples open as copies: Implemented). Follow-ups this spec absorbs: the lights watcher and telemetry monitor must follow a new engine; `*.saved.ron` files next to examples; Open clears the undo history ([undo](undo.md#commands)).
+- **Issues:** [#14](https://github.com/brylie/LoomDSP/issues/14), [#182](https://github.com/brylie/LoomDSP/issues/182) (examples open as copies: Implemented), [#183](https://github.com/brylie/LoomDSP/issues/183) (questions inside the window: Implemented). Follow-ups this spec absorbs: the lights watcher and telemetry monitor must follow a new engine; `*.saved.ron` files next to examples; Open clears the undo history ([undo](undo.md#commands)).
 - **Code:** `crates/loom-app/src/files.rs` (dialogs, title, extension, `bundled_examples`, `is_example`), `App::session` in `boot.rs`, `App::replace`, `App::save_then`, and `App::after_discard` in `file_commands.rs`, the in-app questions in `question.rs`, the recent list in `recent.rs`, the Documents folder in `documents.rs`, and `Document::copy_if_example` in `document.rs`; tests in `example_tests.rs`. `History::mark_saved` and `is_saved` in `undo.rs`. `Patch::save` in `loom-patch` writes through a temporary file. The lights, telemetry, and MIDI watchers take an engine generation in their subscription identity.
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
@@ -130,7 +130,7 @@ A failed save keeps the unsaved mark. A save writes to a temporary file in the s
 
 ## Recent files, the last folder, and dropping a file
 
-**Status:** Agreed, M2 ([#184](https://github.com/brylie/LoomDSP/issues/184), 2026-11-01).
+**Status:** Implemented ([#184](https://github.com/brylie/LoomDSP/issues/184)), except that nobody has dropped a file on a real window yet.
 
 - **Recent** is a toolbar button beside Browse, disabled when the list is empty. It opens a list of the last 10 patches opened or saved, newest first, by file name with the folder as hover text. Escape or a click outside closes it. Choosing one opens it, asking first about unsaved changes, as Open does. A missing file is shown dimmed; choosing it removes it from the list, with a status message, before any question. Whether a file is missing is checked when the list opens and again when one is chosen.
 - **What is listed:** patches opened with Open, Your patches, a drop, or this list, patches saved, and a path on the command line in a normal windowed run, made absolute. Not examples opened as copies, not a failed open, and nothing done by a control channel script or a run with `--screenshot`, `--dump-ui`, or `--measure`. *Why:* the list is the player's own history, and a script must not change it.

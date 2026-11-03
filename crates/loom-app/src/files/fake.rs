@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 pub enum Asked {
     /// The Save dialog, with the path it was given to start from.
     Save(Option<PathBuf>),
-    /// The Open dialog, with the path it was given to start from.
+    /// The Open dialog, with the folder it would start in.
     Open(Option<PathBuf>),
     /// An error message, with the text it showed.
     Error(String),
@@ -62,8 +62,8 @@ pub(super) fn pick_save(current: Option<&Path>) -> Option<Option<PathBuf>> {
     Some(SAVE_ANSWER.with(|answer| answer.borrow().clone()))
 }
 
-pub(super) fn pick_open(current: Option<&Path>) -> Option<Option<PathBuf>> {
-    ASKED.with(|asked| asked.borrow_mut().push(Asked::Open(current.map(Path::to_path_buf))));
+pub(super) fn pick_open(start: Option<PathBuf>) -> Option<Option<PathBuf>> {
+    ASKED.with(|asked| asked.borrow_mut().push(Asked::Open(start)));
     Some(OPEN_ANSWER.with(|answer| answer.borrow().clone()))
 }
 

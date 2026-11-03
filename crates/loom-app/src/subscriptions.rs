@@ -182,6 +182,11 @@ impl App {
         let question_keys = (!open).then(|| iced::event::listen_with(crate::question::key));
         // The panic key works whatever has focus (panic.md).
         let panic = Some(iced::event::listen_with(panic::key));
+        // Files dropped on the window. The timer runs only while a drop is
+        // being collected, so an idle app stays idle.
+        let drops = Some(iced::event::listen_with(crate::recent::drop_event));
+        let drops_done = (!self.drops.is_empty())
+            .then(|| iced::time::every(std::time::Duration::from_millis(100)).map(|_| Message::DropsDone));
         Subscription::batch(
             watch
                 .into_iter()
@@ -191,7 +196,9 @@ impl App {
                 .chain(help_keys)
                 .chain(patches_keys)
                 .chain(question_keys)
-                .chain(panic),
+                .chain(panic)
+                .chain(drops)
+                .chain(drops_done),
         )
     }
 

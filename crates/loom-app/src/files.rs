@@ -131,30 +131,33 @@ pub fn is_example(path: &Path, examples: Option<&Path>) -> bool {
         .any(|dir| dir.ends_with("examples/patches") && dir.join(BUNDLED_MARKER).is_file())
 }
 
-/// Where a dialog starts: the folder of the current file, otherwise the
+/// Where a dialog starts: the folder of the current file, otherwise
+/// `fallback`, the last folder used or the library folder, otherwise the
 /// Documents folder. `None` lets the system choose.
-fn start_dir(file: Option<&Path>) -> Option<PathBuf> {
-    if let Some(dir) = file.and_then(Path::parent).filter(|d| d.is_dir()) {
-        return Some(dir.to_path_buf());
-    }
-    crate::documents::folder().filter(|d| d.is_dir())
+fn start_dir(file: Option<&Path>, fallback: Option<&Path>) -> Option<PathBuf> {
+    // A bare file name has an empty parent, which is not a folder.
+    file.and_then(Path::parent)
+        .filter(|dir| dir.is_dir())
+        .or(fallback.filter(|dir| dir.is_dir()))
+        .map(Path::to_path_buf)
+        .or_else(|| crate::documents::folder().filter(|dir| dir.is_dir()))
 }
 
-fn dialog(file: Option<&Path>) -> FileDialog {
+fn dialog(file: Option<&Path>, fallback: Option<&Path>) -> FileDialog {
     let dialog = FileDialog::new().add_filter("LoomDSP patch", &[EXTENSION]);
-    match start_dir(file) {
+    match start_dir(file, fallback) {
         Some(dir) => dialog.set_directory(dir),
         None => dialog,
     }
 }
 
 /// Asks for a patch to open.
-pub fn pick_open(current: Option<&Path>) -> Option<PathBuf> {
+pub fn pick_open(current: Option<&Path>, fallback: Option<&Path>) -> Option<PathBuf> {
     #[cfg(test)]
-    if let Some(answer) = fake::pick_open(current) {
+    if let Some(answer) = fake::pick_open(start_dir(current, fallback)) {
         return answer;
     }
-    dialog(current).set_title("Open patch").pick_file()
+    dialog(current, fallback).set_title("Open patch").pick_file()
 }
 
 /// What the Save dialog picked, starting at `current`.
@@ -163,7 +166,7 @@ fn picked_save(current: Option<&Path>) -> Option<PathBuf> {
     if let Some(answer) = fake::pick_save(current) {
         return answer;
     }
-    dialog(current)
+    dialog(current, None)
         .set_title("Save patch")
         .set_file_name(display_name(current))
         .save_file()

@@ -47,6 +47,7 @@ mod probe_menu;
 #[cfg(test)]
 mod qa_tests;
 mod question;
+mod recent;
 mod recovery;
 mod scene;
 mod screenshot;
@@ -224,7 +225,12 @@ fn main() -> iced::Result {
         }
         return Ok(());
     }
-    let result = iced::application(move || App::new(args.clone()), App::update, App::view)
+    let start = move || {
+        let mut app = App::new(args.clone());
+        app.remember_opened_at_start(&args);
+        app
+    };
+    let result = iced::application(start, App::update, App::view)
         .title(App::title)
         .theme(App::theme)
         .subscription(App::subscription)
@@ -425,6 +431,14 @@ enum Message {
     Patches(patches::Message),
     /// An answer or a key for the open question (`docs/design/files.md`).
     Question(question::Message),
+    /// The toolbar's **Recent** button.
+    OpenRecent,
+    /// A message for the open recent list.
+    Recent(recent::Message),
+    /// A file was dropped on the window. The window sends one per file.
+    FileDropped(PathBuf),
+    /// The moment for collecting a drop is over.
+    DropsDone,
     /// The clipboard was read for a paste at a world point, not yet snapped
     /// (`docs/design/clipboard.md`).
     /// `generation` is the engine's when the read began: a result that
@@ -510,7 +524,10 @@ impl Message {
             | Self::Meters(_)
             | Self::Telemetry(_)
             | Self::Autosave
-            | Self::Midi => true,
+            | Self::Midi
+            // These say they were ignored, so they must arrive.
+            | Self::FileDropped(_)
+            | Self::DropsDone => true,
             // The canvas ends what it was doing when it loses input. Those
             // must land, or a button stays held behind the question.
             Self::Canvas(event) => matches!(
@@ -565,6 +582,8 @@ impl Message {
             | Self::Preferences(_)
             | Self::PatchInfo(_)
             | Self::Licence(_)
+            | Self::OpenRecent
+            | Self::Recent(_)
             | Self::Pasted { .. } => false,
         }
     }
@@ -660,6 +679,10 @@ struct App {
     chooser: Option<licence_chooser::Chooser>,
     /// Your patches browser, while it is open.
     patches: Option<patches::PatchBrowser>,
+    /// The rows of the recent list, while it is open. Read when it opens.
+    recent_rows: Option<Vec<recent::Row>>,
+    /// Files of a drop being collected, for a moment after the first.
+    drops: Vec<PathBuf>,
     /// The question over everything else, while one is open. While it is,
     /// most messages are dropped (`Message::allowed_during_question`).
     question: Option<question::Question>,
@@ -1112,6 +1135,7 @@ impl App {
             && self.chooser.is_none()
             && self.patches.is_none()
             && self.question.is_none()
+            && self.recent_rows.is_none()
     }
 
     /// Opens your patches browser over the library folder, which is read
@@ -1314,6 +1338,10 @@ impl App {
             }
             Message::Licence(message) => self.licence_message(message),
             Message::Patches(_) | Message::Question(_) => {}
+            Message::OpenRecent => self.open_recent_list(),
+            Message::Recent(message) => self.recent_message(message),
+            Message::FileDropped(path) => self.file_dropped(path),
+            Message::DropsDone => self.drops_done(),
             Message::Key(iced::keyboard::Event::KeyPressed { key, .. }) if self.chooser.is_some() => {
                 // The chooser takes Escape and keeps other keys from the
                 // canvas and the windows behind it.
@@ -1351,6 +1379,12 @@ impl App {
                 }
             }
             Message::Key(_) if self.tile_menu.is_some() => {}
+            Message::Key(iced::keyboard::Event::KeyPressed { key, .. }) if self.recent_rows.is_some() => {
+                if key == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) {
+                    self.recent_rows = None;
+                }
+            }
+            Message::Key(_) if self.recent_rows.is_some() => {}
             Message::ProbeMenu(message) => {
                 if let (Some(menu), probe_menu::Message::Pick(probe)) = (self.probe_menu.take(), message) {
                     self.add_probe(probe, menu.output, menu.world);
