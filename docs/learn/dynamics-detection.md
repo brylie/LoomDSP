@@ -80,7 +80,7 @@ This looks like a bug in a safety feature. It is not, because Limit is not the s
 
 Only the [output stage](output-safety.md) can protect speakers and ears, because nothing but the final clip follows it. It holds every sample at -1 dBFS in the Low latency and Clean modes, whatever Dynamics does. In Off mode, the user has chosen to give that limiter up. Dynamics also sets the level of the signal, so its ceiling is a choice about sound.
 
-Limit's ceiling is still useful. A following effect can rely on it when Match is off, Output is at 0 dB, Mix is fully processed, and there is no sidechain. A sidechain breaks the promise too, because the limiter then listens to a different signal.
+Limit's ceiling is still useful. A following effect can rely on it when Match is off, Output is at 0 dB, Mix is fully processed, and there is no sidechain. A sidechain breaks the promise too, because the limiter then listens to a different signal. Match also needs time to leave: it fades out so that switching it off does not click, and the ceiling holds exactly once the fade ends, in about 21 ms.
 
 ### Two common limiter designs
 
