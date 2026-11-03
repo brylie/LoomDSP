@@ -148,10 +148,18 @@ impl Ui {
         let browser_open = self.app.browser.is_some() && self.app.help.is_none();
         let patches_open = self.app.patches.is_some() && self.app.chooser.is_none();
         let matrix_keys = self.app.matrix.tab == crate::matrix::Tab::Matrix && self.app.matrix.focused;
+        let question_open = self.app.question.is_some();
         let mut clipboard = std::mem::take(&mut self.clipboard);
         self.with_ui(|ui, renderer, cursor| {
             let (_, statuses) = ui.update(events, cursor, renderer, &mut clipboard, &mut messages);
             for (event, status) in events.iter().zip(statuses) {
+                // As the subscriptions do: an open question has the keys,
+                // except Panic's.
+                if question_open {
+                    messages.extend(crate::question::key(event.clone(), status, window::Id::unique()));
+                    messages.extend(crate::panic::key(event.clone(), status, window::Id::unique()));
+                    continue;
+                }
                 // `keyboard::listen` passes on the key events no widget
                 // captured.
                 if let (Event::Keyboard(key), event::Status::Ignored) = (event, status) {

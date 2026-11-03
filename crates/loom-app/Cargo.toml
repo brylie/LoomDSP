@@ -39,6 +39,8 @@ iced_runtime.workspace = true
 libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
+# Where Documents really is: OneDrive or the user can move it (#556).
+known-folders = "1"
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
 
 [dev-dependencies]

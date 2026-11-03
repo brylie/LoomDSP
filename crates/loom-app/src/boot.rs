@@ -36,7 +36,10 @@ impl App {
     /// devices (`docs/design/autosave.md`, `docs/design/preferences.md`).
     pub(crate) fn boot_with(args: Args, prompt: &mut dyn recovery::Prompt, host: Rc<dyn devices::Host>) -> Self {
         let (store, mut notes) = settings::open_store(&args.devices);
+        let (recent, recent_note) = crate::recent::RecentList::open(store.path());
+        notes.extend(recent_note);
         let mut rig = settings::Rig::new(host, store, args.devices.clone(), args.output_safety.is_some());
+        rig.recent = recent;
         let mut session_folder = None;
         let mut restore = None;
         if let Some(root) = args.recovery_root() {
@@ -375,6 +378,9 @@ impl App {
             patch_info: crate::patch_info::State::new(&Metadata::default()),
             chooser: None,
             patches: None,
+            question: None,
+            recent_rows: None,
+            drops: Vec::new(),
             patches_open: 0,
             help: None,
             tile_menu: None,
