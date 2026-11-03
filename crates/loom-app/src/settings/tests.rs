@@ -1642,3 +1642,72 @@ fn failed_saves_say_why_and_keep_the_choice() {
     assert!(unsaved(&app), "{}", app.alerts.status());
     assert!(!fake.is_open("Pad"), "closed for this run");
 }
+
+/// The stats bar shows the watcher's output warnings while a device plays,
+/// and they end with the stream: a new stream's watcher sends nothing at
+/// first, so the app must not hold on to them.
+#[test]
+fn output_warnings_show_until_the_stream_stops() {
+    let dir = folder("output-warnings");
+    let fake = Rc::new(Fake::new(&[fake::device("Fake A")], &[]));
+    let mut app = start(args(&dir), &fake);
+    assert!(app.stats_model().playing);
+    let _ = app.update(crate::Message::Audio(crate::audio_watch::Event::Stats {
+        dropouts: 0,
+        at: Instant::now(),
+        peak: 0.0,
+        max: 0.0,
+        silenced: true,
+        clipped: true,
+    }));
+    let stats = app.ui_snapshot().stats;
+    assert!(stats.output_silenced && stats.output_clipped);
+    let mut ui = crate::ui_test::Ui::with_app(app);
+    assert!(ui.text("Output: bad samples silenced").is_some());
+    assert!(ui.text("Output clipped").is_some());
+
+    ui.app.stop_audio();
+    let stats = ui.app.ui_snapshot().stats;
+    assert!(!stats.output_silenced && !stats.output_clipped);
+}
+
+/// With everything on at once, every fixed item still fits at 1280 px, and
+/// the two messages share what is left instead of pushing anything off
+/// (visual-system.md, rule 7).
+#[test]
+fn the_status_bar_fits_with_everything_on() {
+    let dir = folder("status-everything");
+    let fake = Rc::new(Fake::new(
+        &[fake::device("Fake A")],
+        &[
+            "Long Keyboard Name MIDI 1",
+            "Long Keyboard Name DAW",
+            "Pad Controller Port",
+            "Pedal Board",
+        ],
+    ));
+    let mut app = start(args(&dir), &fake);
+    let _ = app.update(crate::Message::Learn(crate::learn::Message::Toggle));
+    app.alerts.set_input_drift(Some((12, 34)));
+    app.alerts.set_output_warnings(true, true);
+    let long = "a message long enough to fill the whole window ".repeat(8);
+    app.alerts.error(crate::alerts::Cause::Other, format!("kept {long}"));
+    app.alerts.say(format!("latest {long}"));
+    let mut ui = crate::ui_test::Ui::with_app(app);
+    for item in [
+        "MIDI: 4 inputs",
+        "Learning",
+        "Output: bad samples silenced",
+        "Output clipped",
+        "input underruns 12, overruns 34",
+    ] {
+        let bounds = ui.text(item).unwrap_or_else(|| panic!("{item}"));
+        assert!(
+            bounds.x + bounds.width <= 1280.0,
+            "{item} ends at {}",
+            bounds.x + bounds.width
+        );
+    }
+    assert!(ui.text(&format!("Error: kept {long}")).is_some(), "the kept error");
+    assert!(ui.text(&format!("latest {long}")).is_some(), "the latest message");
+}

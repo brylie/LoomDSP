@@ -1632,9 +1632,12 @@ impl App {
                 at,
                 peak,
                 max,
+                silenced,
+                clipped,
             }) => {
                 self.stream.set_load(peak, max);
                 self.alerts.note_dropouts(dropouts, at);
+                self.alerts.set_output_warnings(silenced, clipped);
             }
             Message::Audio(audio_watch::Event::Stalled { callbacks, advanced }) => {
                 // Time the stall from when the watcher last saw a callback,

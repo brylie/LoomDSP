@@ -89,6 +89,10 @@ pub struct Stats {
     pub telemetry_dropped: u64,
     /// Recent input underrun and overrun corrections.
     pub input_alert: Option<(u64, u64)>,
+    /// The bar says the output silenced bad samples.
+    pub output_silenced: bool,
+    /// The bar says the output clipped.
+    pub output_clipped: bool,
 }
 
 impl Stats {
@@ -439,6 +443,8 @@ impl App {
             dropouts: self.alerts.dropout_count(),
             telemetry_dropped,
             input_alert: self.alerts.input_drift(),
+            output_silenced: self.alerts.output_silenced(),
+            output_clipped: self.alerts.output_clipped(),
         }
     }
 

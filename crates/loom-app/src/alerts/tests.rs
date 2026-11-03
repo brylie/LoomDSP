@@ -13,7 +13,7 @@ fn load_thresholds() {
 #[test]
 fn dropouts_are_red_for_ten_seconds_after_they_grow() {
     let start = Instant::now();
-    let mut dropouts = Dropouts::default();
+    let mut dropouts = GrowthAlarm::default();
     dropouts.update(0, start);
     assert_eq!(dropouts.severity(start), Severity::Normal);
     dropouts.update(2, start);

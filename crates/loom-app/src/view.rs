@@ -12,6 +12,7 @@ use crate::{
 use iced::widget::{column, container, mouse_area, row, rule, space, stack, text, toggler, tooltip};
 use iced::{Color, Element, Length};
 use loom_canvas::{DragLine, PatchCanvas};
+use std::sync::atomic::Ordering;
 use std::time::Instant;
 
 impl App {
@@ -369,6 +370,27 @@ impl App {
                         .color(severity_colour(alerts::Severity::Warning)),
                 );
             }
+            let engine = self.controller.stats();
+            if stats.output_silenced {
+                items = items.push(output_warning(
+                    "Output: bad samples silenced",
+                    alerts::Severity::Alarm,
+                    format!(
+                        "{} samples since the engine started",
+                        engine.output_silenced.load(Ordering::Relaxed)
+                    ),
+                ));
+            }
+            if stats.output_clipped {
+                items = items.push(output_warning(
+                    "Output clipped",
+                    alerts::Severity::Warning,
+                    format!(
+                        "{} samples since the engine started",
+                        engine.output_clipped.load(Ordering::Relaxed)
+                    ),
+                ));
+            }
             if stats.telemetry_dropped > 0 {
                 items = items.push(bar_text(format!("telemetry dropped {}", stats.telemetry_dropped)).color(DIM));
             }
@@ -458,6 +480,18 @@ pub(crate) const HOLD_DISABLED: &str = "Hold note is disabled: no audio is playi
 
 /// Recent's hover text while it is disabled.
 const RECENT_DISABLED: &str = "Recent is disabled: no patches opened or saved yet";
+
+/// A stats bar warning about the output, with its counts in hover text.
+fn output_warning<'a>(label: &'a str, severity: alerts::Severity, hover: String) -> Element<'a, Message> {
+    tooltip(
+        bar_text(label).color(severity_colour(severity)),
+        container(text(hover).size(style::BODY))
+            .padding(6)
+            .style(container::rounded_box),
+        tooltip::Position::Top,
+    )
+    .into()
+}
 
 /// One message in the status bar: cut to its share of the width, all of it in
 /// hover text, with a × if the player may dismiss it.

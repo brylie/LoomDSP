@@ -8,7 +8,7 @@
 //! show something new, or when the audio callbacks stop
 //! (`docs/design/device-changes.md`, Audio device loss).
 
-use crate::alerts::{Dropouts, Severity};
+use crate::alerts::{GrowthAlarm, Severity};
 use iced::futures::Stream;
 use iced::futures::channel::mpsc;
 use loom_core::EngineStats;
@@ -43,6 +43,12 @@ pub enum Event {
         peak: f64,
         /// Highest tick peak in the last ten seconds.
         max: f64,
+        /// The bar says the output silenced bad samples. The watcher owns
+        /// this timing: it wakes the UI only when the bar changes, so a timer
+        /// in the UI would end the warning while bad samples continue.
+        silenced: bool,
+        /// The bar says the output clipped.
+        clipped: bool,
     },
     /// The callbacks did not advance since the last read, or the stream
     /// reported an error. The UI checks for device loss.
@@ -64,6 +70,31 @@ struct Shown {
     dropouts: u64,
     alarm: bool,
     telemetry_dropped: u64,
+    silenced: bool,
+    clipped: bool,
+}
+
+/// What the watcher reads from the engine's stats.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct EngineRead {
+    /// Meter and scope readings dropped.
+    pub telemetry_dropped: u64,
+    /// Output samples silenced so far.
+    pub silenced: u64,
+    /// Output samples clipped so far.
+    pub clipped: u64,
+}
+
+impl EngineRead {
+    /// Reads the engine's stats.
+    fn of(engine: &EngineStats) -> Self {
+        Self {
+            telemetry_dropped: engine.dropped_meters.load(Ordering::Relaxed)
+                + engine.dropped_scope.load(Ordering::Relaxed),
+            silenced: engine.output_silenced.load(Ordering::Relaxed),
+            clipped: engine.output_clipped.load(Ordering::Relaxed),
+        }
+    }
 }
 
 /// The watcher's state between reads. Plain data with the time passed in,
@@ -71,7 +102,9 @@ struct Shown {
 pub struct Watcher {
     callbacks: u64,
     advanced: Instant,
-    dropouts: Dropouts,
+    dropouts: GrowthAlarm,
+    silenced: GrowthAlarm,
+    clipped: GrowthAlarm,
     shown: Option<Shown>,
     reads: u32,
     peaks: VecDeque<(Instant, f64)>,
@@ -85,7 +118,9 @@ impl Watcher {
         Self {
             callbacks: 0,
             advanced: now,
-            dropouts: Dropouts::default(),
+            dropouts: GrowthAlarm::default(),
+            silenced: GrowthAlarm::default(),
+            clipped: GrowthAlarm::default(),
             shown: None,
             reads: 0,
             peaks: VecDeque::new(),
@@ -98,12 +133,24 @@ impl Watcher {
     /// `telemetry_dropped` is the engine's count of dropped telemetry.
     #[cfg(test)]
     pub fn read(&mut self, stats: &StatsSnapshot, telemetry_dropped: u64, now: Instant) -> Vec<Event> {
-        self.read_peak(stats, stats.last_load, telemetry_dropped, now)
+        let engine = EngineRead {
+            telemetry_dropped,
+            ..EngineRead::default()
+        };
+        self.read_peak(stats, stats.last_load, engine, now)
     }
 
     /// Reads a tick peak taken atomically from all audio callbacks.
-    pub fn read_peak(&mut self, stats: &StatsSnapshot, peak: f64, telemetry_dropped: u64, now: Instant) -> Vec<Event> {
+    pub fn read_peak(&mut self, stats: &StatsSnapshot, peak: f64, engine: EngineRead, now: Instant) -> Vec<Event> {
         let mut events = Vec::new();
+        // An engine can outlive a stream, and what it counted before this
+        // watcher started is not news.
+        if self.shown.is_none() {
+            self.silenced = GrowthAlarm::starting_at(engine.silenced);
+            self.clipped = GrowthAlarm::starting_at(engine.clipped);
+        }
+        self.silenced.update(engine.silenced, now);
+        self.clipped.update(engine.clipped, now);
         if stats.is_dead || stats.callbacks == self.callbacks {
             events.push(Event::Stalled {
                 callbacks: stats.callbacks,
@@ -138,8 +185,11 @@ impl Watcher {
             severity: crate::alerts::load_severity(self.current_peak),
             dropouts,
             alarm: self.dropouts.severity(now) == Severity::Alarm,
-            telemetry_dropped,
+            telemetry_dropped: engine.telemetry_dropped,
+            silenced: self.silenced.severity(now) == Severity::Alarm,
+            clipped: self.clipped.severity(now) == Severity::Alarm,
         };
+        let (silenced, clipped) = (shown.silenced, shown.clipped);
         // The first read only learns what the bar shows: the UI drew it
         // when it started.
         if self.shown.as_ref().is_some_and(|old| *old != shown) {
@@ -148,6 +198,8 @@ impl Watcher {
                 at: now,
                 peak: self.current_peak,
                 max: self.current_max,
+                silenced,
+                clipped,
             });
         }
         self.shown = Some(shown);
@@ -183,14 +235,17 @@ pub fn stream(watch: &Watch) -> impl Stream<Item = Event> + use<> {
     std::thread::spawn(move || {
         let mut watcher = Watcher::new(Instant::now());
         while !tx.is_closed() {
-            let dropped = watch.engine.dropped_meters.load(Ordering::Relaxed)
-                + watch.engine.dropped_scope.load(Ordering::Relaxed);
             let peak = if (watcher.reads + 1).is_multiple_of(LOAD_EVERY) {
                 watch.stats.take_peak_since_read()
             } else {
                 0.0
             };
-            for event in watcher.read_peak(&watch.stats.snapshot(), peak, dropped, Instant::now()) {
+            for event in watcher.read_peak(
+                &watch.stats.snapshot(),
+                peak,
+                EngineRead::of(&watch.engine),
+                Instant::now(),
+            ) {
                 match tx.try_send(event) {
                     // The UI is busy: it reads the stats itself when it
                     // draws, and the next read sends again.

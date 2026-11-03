@@ -187,9 +187,12 @@ impl SafetyStage {
         self.silent
     }
 
-    /// Runs the stage over a block, in place.
-    pub(crate) fn process(&mut self, left: &mut [f32], right: &mut [f32]) {
+    /// Runs the stage over a block, in place, and says what it silenced and
+    /// clipped.
+    pub(crate) fn process(&mut self, left: &mut [f32], right: &mut [f32]) -> OutputCounts {
+        let mut counts = OutputCounts::default();
         for (l, r) in left.iter_mut().zip(right.iter_mut()) {
+            counts.silenced += u64::from(!l.is_finite()) + u64::from(!r.is_finite());
             let (mut a, mut b) = (sanitize(*l), sanitize(*r));
             if self.mode != OutputSafety::Off {
                 a = self.dc[0].tick(a);
@@ -197,8 +200,10 @@ impl SafetyStage {
                 (a, b) = self.limiter.tick(a, b);
             }
             let gain = self.fade.tick();
-            *l = (a * gain).clamp(-1.0, 1.0);
-            *r = (b * gain).clamp(-1.0, 1.0);
+            let (a, b) = (a * gain, b * gain);
+            counts.clipped += u64::from(a.abs() > 1.0) + u64::from(b.abs() > 1.0);
+            *l = a.clamp(-1.0, 1.0);
+            *r = b.clamp(-1.0, 1.0);
             self.silent = self.stopping && gain == 0.0;
             if gain == 0.0
                 && let Some(mode) = self.pending.take()
@@ -209,7 +214,17 @@ impl SafetyStage {
                 self.fade_in();
             }
         }
+        counts
     }
+}
+
+/// What the stage did to one block.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct OutputCounts {
+    /// Samples that were NaN or infinity, now 0.
+    pub silenced: u64,
+    /// Samples beyond -1 to 1, now at the limit.
+    pub clipped: u64,
 }
 
 /// NaN and infinity become 0 (ADR-0007). Other values are clamped to

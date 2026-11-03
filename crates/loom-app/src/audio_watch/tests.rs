@@ -76,13 +76,17 @@ fn a_load_change_is_sent_once() {
                 dropouts: 0,
                 at: start + INTERVAL,
                 peak: 0.02,
-                max: 0.02
+                max: 0.02,
+                silenced: false,
+                clipped: false,
             },
             Event::Stats {
                 dropouts: 0,
                 at: start + INTERVAL * 5,
                 peak: 0.05,
-                max: 0.05
+                max: 0.05,
+                silenced: false,
+                clipped: false,
             },
         ]
     );
@@ -94,8 +98,8 @@ fn callback_spike_is_visible_then_expires() {
     let start = Instant::now();
     let mut watcher = Watcher::new(start);
     let low = stats(1, 0.2, 0);
-    let _ = watcher.read_peak(&low, 0.2, 0, start);
-    let spike = watcher.read_peak(&low, 0.95, 0, start + INTERVAL);
+    let _ = watcher.read_peak(&low, 0.2, EngineRead::default(), start);
+    let spike = watcher.read_peak(&low, 0.95, EngineRead::default(), start + INTERVAL);
     assert!(spike.iter().any(|event| matches!(
         event,
         Event::Stats {
@@ -106,7 +110,7 @@ fn callback_spike_is_visible_then_expires() {
     )));
     let mut expired = false;
     for read in 2..44 {
-        let events = watcher.read_peak(&low, 0.2, 0, start + INTERVAL * read);
+        let events = watcher.read_peak(&low, 0.2, EngineRead::default(), start + INTERVAL * read);
         expired |= events
             .iter()
             .any(|event| matches!(event, Event::Stats { max: 0.2, .. }));
@@ -138,7 +142,9 @@ fn dropouts_and_the_end_of_their_alarm_are_sent() {
                     dropouts: 0,
                     at: at(1),
                     peak: 0.02,
-                    max: 0.02
+                    max: 0.02,
+                    silenced: false,
+                    clipped: false,
                 }
             ),
             (
@@ -147,7 +153,9 @@ fn dropouts_and_the_end_of_their_alarm_are_sent() {
                     dropouts: 1,
                     at: at(4),
                     peak: 0.02,
-                    max: 0.02
+                    max: 0.02,
+                    silenced: false,
+                    clipped: false,
                 }
             ),
             // Red for ten seconds from read 4: off at read 44.
@@ -158,6 +166,8 @@ fn dropouts_and_the_end_of_their_alarm_are_sent() {
                     at: at(44),
                     peak: 0.02,
                     max: 0.02,
+                    silenced: false,
+                    clipped: false,
                 }
             ),
         ]
@@ -183,7 +193,9 @@ fn a_stall_is_reported_with_the_last_advance() {
                 dropouts: 0,
                 at: later,
                 peak: 0.02,
-                max: 0.02
+                max: 0.02,
+                silenced: false,
+                clipped: false,
             },
         ]
     );
@@ -195,4 +207,78 @@ fn a_stall_is_reported_with_the_last_advance() {
         watcher.read(&dead, 0, later + INTERVAL)[..],
         [Event::Stalled { callbacks: 9, .. }, ..]
     ));
+}
+
+/// A read with these output counts.
+fn output(watcher: &mut Watcher, silenced: u64, clipped: u64, now: Instant) -> Vec<Event> {
+    let engine = EngineRead {
+        silenced,
+        clipped,
+        ..EngineRead::default()
+    };
+    watcher.read_peak(&stats(1, 0.02, 0), 0.02, engine, now)
+}
+
+/// The two flags in the events among `events`, if any.
+fn flags(events: &[Event]) -> Option<(bool, bool)> {
+    events.iter().rev().find_map(|event| match event {
+        Event::Stats { silenced, clipped, .. } => Some((*silenced, *clipped)),
+        Event::Stalled { .. } => None,
+    })
+}
+
+/// A warning starts when its count grows and ends ten seconds after the last
+/// growth. Nothing is sent in between, so an idle patch stays idle.
+#[test]
+fn an_output_warning_starts_and_ends_with_one_event_each() {
+    let start = Instant::now();
+    let mut watcher = Watcher::new(start);
+    output(&mut watcher, 0, 0, start);
+    let at = |seconds: u32| start + Duration::from_secs(u64::from(seconds));
+
+    assert_eq!(flags(&output(&mut watcher, 7, 0, at(1))), Some((true, false)));
+    assert_eq!(flags(&output(&mut watcher, 7, 0, at(5))), None, "no change");
+    assert_eq!(flags(&output(&mut watcher, 7, 0, at(12))), Some((false, false)));
+
+    assert_eq!(flags(&output(&mut watcher, 7, 3, at(13))), Some((false, true)));
+}
+
+/// Bad samples that keep coming keep the warning on past ten seconds. The
+/// watcher owns the time, so no second clock can end it early.
+#[test]
+fn continuous_bad_samples_keep_the_warning_on() {
+    let start = Instant::now();
+    let mut watcher = Watcher::new(start);
+    output(&mut watcher, 0, 0, start);
+    let mut sent = Vec::new();
+    for second in 1..=30u64 {
+        let now = start + Duration::from_secs(second);
+        sent.extend(output(&mut watcher, second * 100, 0, now));
+    }
+    assert_eq!(flags(&sent), Some((true, false)));
+    let ended = sent
+        .iter()
+        .any(|event| matches!(event, Event::Stats { silenced: false, .. }));
+    assert!(!ended, "the warning never ended: {sent:?}");
+}
+
+/// A count the engine had before this watcher started raises no warning.
+#[test]
+fn a_new_watcher_does_not_warn_about_old_counts() {
+    let start = Instant::now();
+    let mut watcher = Watcher::new(start);
+    output(&mut watcher, 500, 500, start);
+    let later = start + Duration::from_secs(1);
+    let (mut silenced, mut clipped) = (false, false);
+    for event in output(&mut watcher, 500, 500, later) {
+        if let Event::Stats {
+            silenced: s,
+            clipped: c,
+            ..
+        } = event
+        {
+            (silenced, clipped) = (s, c);
+        }
+    }
+    assert!(!silenced && !clipped);
 }

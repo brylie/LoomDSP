@@ -77,6 +77,8 @@ fn audio_watcher_events_update_the_stats_model() {
         at: now,
         peak: 0.95,
         max: 0.95,
+        silenced: false,
+        clipped: false,
     }));
     assert_eq!(app.stream.load().0, 0.95);
     assert_eq!(app.stream.load().1, 0.95);

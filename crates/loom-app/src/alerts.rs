@@ -74,20 +74,27 @@ pub fn load_severity(load: f64) -> Severity {
     }
 }
 
-/// Remembers when the dropout count last grew.
+/// Remembers when a count last grew: the dropouts, and the output samples
+/// silenced or clipped.
 #[derive(Debug, Default)]
-pub struct Dropouts {
+pub struct GrowthAlarm {
     count: u64,
     grew: Option<Instant>,
 }
 
-impl Dropouts {
+impl GrowthAlarm {
     /// Takes the latest count.
     pub fn update(&mut self, count: u64, now: Instant) {
         if count > self.count {
             self.grew = Some(now);
         }
         self.count = count;
+    }
+
+    /// Starts from `count` with no alarm, for a count that was already
+    /// running when the watcher started.
+    pub fn starting_at(count: u64) -> Self {
+        Self { count, grew: None }
     }
 
     /// The latest count.
@@ -116,9 +123,14 @@ pub struct Alerts {
     /// The problems kept on screen, one per cause, oldest first.
     kept: Vec<KeptError>,
     /// When the dropout count last grew.
-    dropouts: Dropouts,
+    dropouts: GrowthAlarm,
     /// Input drift counts (underruns, overruns) while recently active.
     input_drift: Option<(u64, u64)>,
+    /// The stats bar says the output silenced bad samples. The audio watcher
+    /// owns the timing, so this holds no clock of its own.
+    output_silenced: bool,
+    /// The stats bar says the output clipped.
+    output_clipped: bool,
     /// True while the live-value table is full and that was reported.
     live_values_full: bool,
     /// True once a recording that stopped early was reported.
@@ -266,6 +278,22 @@ impl Alerts {
     /// Shows or hides the input drift warning.
     pub fn set_input_drift(&mut self, drift: Option<(u64, u64)>) {
         self.input_drift = drift;
+    }
+
+    /// Whether the stats bar says the output silenced bad samples.
+    pub fn output_silenced(&self) -> bool {
+        self.output_silenced
+    }
+
+    /// Whether the stats bar says the output clipped.
+    pub fn output_clipped(&self) -> bool {
+        self.output_clipped
+    }
+
+    /// Takes what the audio watcher last said about the output.
+    pub fn set_output_warnings(&mut self, silenced: bool, clipped: bool) {
+        self.output_silenced = silenced;
+        self.output_clipped = clipped;
     }
 
     /// Notes whether the live-value table is full after a compile. Returns
