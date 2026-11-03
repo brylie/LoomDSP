@@ -29,7 +29,7 @@ impl<Message> PatchCanvas<'_, Message> {
     /// press, the focused control comes first, until the pointer moves.
     /// Nothing during a drag.
     pub(super) fn hover_target(&self, state: &State) -> Option<HoverTarget> {
-        if state.select_popup.is_some() || !matches!(state.interaction, Interaction::Idle) {
+        if state.select_popup.is_some() || state.typed.is_some() || !matches!(state.interaction, Interaction::Idle) {
             return None;
         }
         let focused = state.focus.filter(|_| state.tab_focus).and_then(|(module, widget)| {
@@ -201,7 +201,7 @@ impl<Message> PatchCanvas<'_, Message> {
     where
         Renderer: text::Renderer<Font = Font>,
     {
-        if state.select_popup.is_some() {
+        if state.select_popup.is_some() || state.typed.is_some() {
             return;
         }
         let Some(target) = state.hover_text.shown() else {

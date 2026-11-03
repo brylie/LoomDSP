@@ -354,6 +354,24 @@ enum Message {
         index: usize,
         value: f32,
     },
+    /// Text typed in an inspector value field (panel-widgets.md, Typing a
+    /// value).
+    ValueText {
+        module: u32,
+        index: usize,
+        text: String,
+    },
+    /// Enter in an inspector value field.
+    ValueSubmit {
+        module: u32,
+        index: usize,
+    },
+    /// Escape or Tab with a draft in a value field: it is dropped.
+    ValueDraftClear,
+    /// A press anywhere with a draft in a value field. It may have moved focus.
+    ValueDraftPress,
+    /// Whether a text field still has focus after that press.
+    ValueDraftFocus(bool),
     /// A choice name was picked in the inspector: value `min + choice` of
     /// the parameter, as one undo step (panels.md, Choice names).
     Choice {
@@ -519,6 +537,8 @@ struct App {
     /// Live values of panel controls and lights, apart from the scene so a
     /// knob turn does not rebuild tiles or cables.
     values: PanelValues,
+    /// Text typed in an inspector value field, not committed yet.
+    value_draft: Option<controls::ValueDraft>,
     /// Last brightness of each light, by module and widget.
     lights: BTreeMap<lights::Light, f32>,
     /// True when the last commit had a cable on the Transport's `run`
@@ -929,6 +949,7 @@ impl App {
             _ => FrameCause::Other,
         };
         loom_canvas::stats::request_frame(cause);
+        let value_press = matches!(message, Message::ValueDraftPress);
         // A mode change the engine's full queue refused goes again now.
         self.send_pending_safety();
         if !message.keeps_patch() {
@@ -975,6 +996,13 @@ impl App {
         };
         // An undo or redo shortcut asks the window whether a text field has
         // focus first.
+        // A press elsewhere takes focus from the field. Only the widget tree
+        // knows, so ask it after the press has reached the widgets.
+        let task = if value_press {
+            Task::batch([task, editing::text_field_focused().map(Message::ValueDraftFocus)])
+        } else {
+            task
+        };
         let task = match self.history_key.take() {
             Some(redo) => Task::batch([
                 task,
@@ -1315,6 +1343,15 @@ impl App {
                 if let Some(value) = value {
                     self.turn_param(module, index, value);
                     self.close_slider_gesture();
+                }
+            }
+            Message::ValueText { module, index, text } => self.type_value_draft(module, index, text),
+            Message::ValueSubmit { module, index } => self.submit_value_draft(module, index),
+            Message::ValueDraftClear => self.clear_value_draft(),
+            Message::ValueDraftPress => {}
+            Message::ValueDraftFocus(focused) => {
+                if !focused {
+                    self.clear_value_draft();
                 }
             }
             Message::Range { module, index, range } => self.set_range(module, index, range),

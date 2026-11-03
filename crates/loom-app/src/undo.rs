@@ -146,6 +146,7 @@ pub fn is_edit(controller: &Controller, event: &CanvasEvent) -> bool {
         | CanvasEvent::DragDepth { .. }
         | CanvasEvent::Delete(_)
         | CanvasEvent::SetControl { .. }
+        | CanvasEvent::TypedValue { .. }
         | CanvasEvent::ResetControl { .. } => true,
         // Space flips the Transport's Run toggle, an edit like a click.
         CanvasEvent::ToggleRun => controller.transport_module().is_some(),

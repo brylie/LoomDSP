@@ -1125,6 +1125,398 @@ fn a_fader_takes_the_keys_of_a_knob() {
     );
 }
 
+/// A selected tile with one knob, focused, with its value text set.
+fn typed_scene() -> (Scene, PanelValues) {
+    let mut view = module(1, 0.0);
+    view.panel = PanelView {
+        width: 3,
+        height: 3,
+        widgets: vec![widget(WidgetViewKind::Knob { steps: 0 }, 0)],
+    };
+    let mut values = PanelValues::new();
+    values.set(
+        1,
+        0,
+        WidgetValue {
+            position: 0.5,
+            text: "128.0 BPM".into(),
+            ..WidgetValue::default()
+        },
+    );
+    (Scene::new(vec![view], Vec::new()), values)
+}
+
+/// A key press with `key` and `text` set apart, and modifiers held. On a layout
+/// such as AZERTY a digit's key is not the digit.
+fn typed_key(key: keyboard::Key, text: Option<&str>, modifiers: keyboard::Modifiers, repeat: bool) -> Event {
+    Event::Keyboard(keyboard::Event::KeyPressed {
+        key: key.clone(),
+        modified_key: key,
+        physical_key: keyboard::key::Physical::Unidentified(keyboard::key::NativeCode::Unidentified),
+        location: keyboard::Location::Standard,
+        modifiers,
+        text: text.map(Into::into),
+        repeat,
+    })
+}
+
+/// Types text into the canvas, one character per key press.
+fn type_text(canvas: &PatchCanvas<'_, CanvasEvent>, state: &mut State, text: &str, at: Point) -> Vec<CanvasEvent> {
+    let mut events = Vec::new();
+    for c in text.chars() {
+        let c = c.to_string();
+        events.extend(drive(
+            canvas,
+            state,
+            &typed(keyboard::Key::Character(c.as_str().into()), &c),
+            at,
+        ));
+    }
+    events
+}
+
+/// A digit opens the field holding it, and Enter commits what was typed. Left,
+/// Right, Backspace, and Delete edit at the caret.
+#[test]
+fn a_digit_opens_the_typed_field_and_enter_commits() {
+    let (scene, values) = typed_scene();
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |event| event).values(&values);
+    let at = scene.module(1).unwrap().bounds().center();
+    let mut state = State {
+        focus: Some((1, 0)),
+        ..State::default()
+    };
+    assert!(type_text(&canvas, &mut state, "129", at).is_empty());
+    assert_eq!(state.typed.as_ref().unwrap().text, "129");
+
+    let named = |key| key_event(key, true);
+    use keyboard::key::Named;
+    drive(&canvas, &mut state, &named(Named::ArrowLeft), at);
+    drive(&canvas, &mut state, &named(Named::Backspace), at);
+    assert_eq!(state.typed.as_ref().unwrap().text, "19", "Backspace takes the 2");
+    drive(&canvas, &mut state, &named(Named::Home), at);
+    drive(&canvas, &mut state, &named(Named::Delete), at);
+    assert_eq!(state.typed.as_ref().unwrap().text, "9", "Delete takes the 1");
+    drive(
+        &canvas,
+        &mut state,
+        &typed(keyboard::Key::Character("1".into()), "1"),
+        at,
+    );
+    drive(&canvas, &mut state, &named(Named::End), at);
+    drive(
+        &canvas,
+        &mut state,
+        &typed(keyboard::Key::Character("0".into()), "0"),
+        at,
+    );
+    assert_eq!(state.typed.as_ref().unwrap().text, "190");
+
+    let committed = drive(&canvas, &mut state, &named(Named::Enter), at);
+    assert_eq!(
+        committed,
+        vec![CanvasEvent::TypedValue {
+            module: 1,
+            widget: 0,
+            text: "190".into()
+        }]
+    );
+    assert!(state.typed.is_none());
+    assert_eq!(state.focus, Some((1, 0)), "focus stays on the control");
+}
+
+/// The first key reads the typed text, not the key, so a layout where a digit
+/// needs Shift still opens the field. A minus sign, a decimal point, and a comma
+/// each start a number. Letters do not.
+#[test]
+fn the_field_opens_on_what_was_typed_not_on_the_key() {
+    let (scene, values) = typed_scene();
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |event| event).values(&values);
+    let at = scene.module(1).unwrap().bounds().center();
+    let none = keyboard::Modifiers::default();
+    for (key, text, opens) in [
+        ("&", "1", true),
+        ("-", "-", true),
+        (".", ".", true),
+        (",", ",", true),
+        ("1", "&", false),
+        ("x", "x", false),
+    ] {
+        let mut state = State {
+            focus: Some((1, 0)),
+            ..State::default()
+        };
+        let event = typed_key(keyboard::Key::Character(key.into()), Some(text), none, false);
+        drive(&canvas, &mut state, &event, at);
+        assert_eq!(state.typed.is_some(), opens, "{key} {text}");
+        if opens {
+            assert_eq!(state.typed.unwrap().text, text);
+        }
+    }
+    // With Command, a digit or a dot stays a shortcut, so Cmd+. can panic.
+    let mut state = State {
+        focus: Some((1, 0)),
+        ..State::default()
+    };
+    let event = typed_key(
+        keyboard::Key::Character(".".into()),
+        Some("."),
+        keyboard::Modifiers::COMMAND,
+        false,
+    );
+    drive(&canvas, &mut state, &event, at);
+    assert!(state.typed.is_none());
+    // A control that does not take numbers ignores a digit.
+    let mut state = State::default();
+    drive(
+        &canvas,
+        &mut state,
+        &typed(keyboard::Key::Character("1".into()), "1"),
+        at,
+    );
+    assert!(state.typed.is_none(), "no focus, no field");
+}
+
+/// While the field is open it takes every key: Backspace does not delete the
+/// module, and `f` does not frame the view. A held Enter does nothing, so it
+/// cannot commit and open again. Tab closes it, and then moves on as usual.
+#[test]
+fn the_open_field_takes_every_key() {
+    let (scene, values) = typed_scene();
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |event| event).values(&values);
+    let at = scene.module(1).unwrap().bounds().center();
+    let mut state = State {
+        focus: Some((1, 0)),
+        ..State::default()
+    };
+    use keyboard::key::Named;
+    type_text(&canvas, &mut state, "1", at);
+    let camera = state.camera;
+    for event in [
+        key_event(Named::Backspace, true),
+        key_event(Named::Delete, true),
+        typed(keyboard::Key::Character("f".into()), "f"),
+        typed(keyboard::Key::Character("a".into()), "a"),
+        typed_key(
+            keyboard::Key::Character("v".into()),
+            Some("v"),
+            keyboard::Modifiers::COMMAND,
+            false,
+        ),
+        key_event(Named::ArrowUp, true),
+    ] {
+        let events = drive(&canvas, &mut state, &event, at);
+        assert!(events.is_empty(), "{event:?}: {events:?}");
+    }
+    assert_eq!(state.camera, camera);
+    assert_eq!(
+        state.typed.as_ref().unwrap().text,
+        "fa",
+        "letters are text; Cmd+V is not"
+    );
+
+    let held = typed_key(
+        keyboard::Key::Named(Named::Enter),
+        None,
+        keyboard::Modifiers::default(),
+        true,
+    );
+    assert!(drive(&canvas, &mut state, &held, at).is_empty());
+    assert!(state.typed.is_some(), "a repeat does not commit");
+
+    let tabbed = drive(&canvas, &mut state, &key_event(Named::Tab, true), at);
+    assert!(state.typed.is_none());
+    assert_eq!(tabbed, vec![CanvasEvent::Select(vec![1])], "Tab moves on as usual");
+}
+
+/// Enter opens the field with the value text selected, and Enter again closes
+/// it with no event: the text is rounded, so committing it would change the
+/// value. A character replaces the selection. Escape cancels.
+#[test]
+fn enter_on_unchanged_text_commits_nothing() {
+    let (scene, values) = typed_scene();
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |event| event).values(&values);
+    let at = scene.module(1).unwrap().bounds().center();
+    let mut state = State {
+        focus: Some((1, 0)),
+        ..State::default()
+    };
+    use keyboard::key::Named;
+    assert!(drive(&canvas, &mut state, &key_event(Named::Enter, true), at).is_empty());
+    assert_eq!(state.typed.as_ref().unwrap().text, "128.0 BPM");
+    assert!(drive(&canvas, &mut state, &key_event(Named::Enter, true), at).is_empty());
+    assert!(state.typed.is_none(), "closed, with no edit");
+
+    drive(&canvas, &mut state, &key_event(Named::Enter, true), at);
+    type_text(&canvas, &mut state, "9", at);
+    assert_eq!(state.typed.as_ref().unwrap().text, "9", "the selection is replaced");
+    assert!(drive(&canvas, &mut state, &key_event(Named::Escape, true), at).is_empty());
+    assert!(state.typed.is_none());
+    assert_eq!(state.focus, Some((1, 0)), "Escape closes only the field");
+
+    // Selected text and Backspace leave an empty field, and the next character
+    // goes in it.
+    drive(&canvas, &mut state, &key_event(Named::Enter, true), at);
+    drive(&canvas, &mut state, &key_event(Named::Backspace, true), at);
+    assert_eq!(state.typed.as_ref().unwrap().text, "");
+}
+
+/// Bad text stays open and Enter does nothing. It can be corrected, and then
+/// Enter commits.
+#[test]
+fn bad_typed_text_blocks_enter_until_it_is_corrected() {
+    let (scene, values) = typed_scene();
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |event| event)
+        .values(&values)
+        .typed_check(|_, _, text| {
+            text.parse::<f32>()
+                .map(|_| ())
+                .map_err(|_| "Not a number in Hz".to_string())
+        });
+    let at = scene.module(1).unwrap().bounds().center();
+    let mut state = State {
+        focus: Some((1, 0)),
+        ..State::default()
+    };
+    use keyboard::key::Named;
+    type_text(&canvas, &mut state, "1a", at);
+    assert_eq!(
+        canvas.typed_error(state.typed.as_ref().unwrap()),
+        Some("Not a number in Hz".to_string())
+    );
+    assert!(drive(&canvas, &mut state, &key_event(Named::Enter, true), at).is_empty());
+    assert!(state.typed.is_some(), "bad text keeps the field open");
+    drive(&canvas, &mut state, &key_event(Named::Backspace, true), at);
+    assert!(canvas.typed_error(state.typed.as_ref().unwrap()).is_none());
+    assert_eq!(drive(&canvas, &mut state, &key_event(Named::Enter, true), at).len(), 1);
+}
+
+/// A press outside, the wheel, the window losing focus, or the widget going
+/// each close the field with no value, and the event still does its work. A
+/// press on the field is used up, and stays open.
+#[test]
+fn moving_focus_away_closes_the_field_with_no_change() {
+    let (scene, values) = typed_scene();
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |event| event).values(&values);
+    let at = scene.module(1).unwrap().bounds().center();
+    let opened = || {
+        let mut state = State {
+            focus: Some((1, 0)),
+            ..State::default()
+        };
+        type_text(&canvas, &mut state, "5", at);
+        state
+    };
+    let edits = |events: &[CanvasEvent]| {
+        events
+            .iter()
+            .any(|e| matches!(e, CanvasEvent::TypedValue { .. } | CanvasEvent::SetControl { .. }))
+    };
+
+    let mut state = opened();
+    let area = Rectangle::new(Point::ORIGIN, Size::new(800.0, 600.0));
+    let on_field = canvas
+        .typed_field_bounds(&state, area, state.typed.as_ref().unwrap())
+        .unwrap()
+        .center();
+    assert!(!edits(&drive(
+        &canvas,
+        &mut state,
+        &click(mouse::Button::Left),
+        on_field
+    )));
+    assert!(state.typed.is_some(), "a press on the field stays");
+    assert!(matches!(state.interaction, Interaction::Idle));
+
+    let mut state = opened();
+    let empty = Point::new(790.0, 590.0);
+    assert!(!edits(&drive(&canvas, &mut state, &click(mouse::Button::Left), empty)));
+    assert!(state.typed.is_none());
+    assert!(
+        matches!(state.interaction, Interaction::Selecting { .. }),
+        "the press still works"
+    );
+
+    let mut state = opened();
+    let zoom = state.camera.zoom;
+    let wheel = Event::Mouse(mouse::Event::WheelScrolled {
+        delta: mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 },
+    });
+    assert!(!edits(&drive(&canvas, &mut state, &wheel, at)));
+    assert!(state.typed.is_none());
+    assert_ne!(state.camera.zoom, zoom, "the wheel still zooms");
+
+    let mut state = opened();
+    assert!(!edits(&drive(
+        &canvas,
+        &mut state,
+        &Event::Window(window::Event::Unfocused),
+        at
+    )));
+    assert!(state.typed.is_none());
+
+    // The module has gone from the selection.
+    let mut state = opened();
+    let none = BTreeSet::new();
+    let unselected = PatchCanvas::new(&scene, &none, |event| event).values(&values);
+    assert!(!edits(&drive(
+        &unselected,
+        &mut state,
+        &key_event(keyboard::key::Named::Enter, true),
+        at
+    )));
+    assert!(state.typed.is_none());
+}
+
+/// A press elsewhere in the window takes the keys from the canvas, so a digit
+/// typed in an inspector field cannot open a field on the tile as well.
+#[test]
+fn a_press_outside_the_canvas_takes_its_focus() {
+    let (scene, values) = typed_scene();
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |event| event).values(&values);
+    let mut state = State {
+        focus: Some((1, 0)),
+        ..State::default()
+    };
+    drive(
+        &canvas,
+        &mut state,
+        &click(mouse::Button::Left),
+        Point::new(5_000.0, 10.0),
+    );
+    assert_eq!(state.focus, None);
+    type_text(&canvas, &mut state, "5", Point::new(5_000.0, 10.0));
+    assert!(state.typed.is_none());
+}
+
+/// In MIDI learn mode no field opens: a digit does nothing, and Enter arms.
+#[test]
+fn no_field_opens_in_midi_learn_mode() {
+    let (scene, values) = typed_scene();
+    let selected = BTreeSet::from([1]);
+    let learn = LearnView::default();
+    let canvas = PatchCanvas::new(&scene, &selected, |event| event)
+        .values(&values)
+        .learn(Some(&learn));
+    let at = scene.module(1).unwrap().bounds().center();
+    let mut state = State {
+        focus: Some((1, 0)),
+        ..State::default()
+    };
+    assert!(type_text(&canvas, &mut state, "5", at).is_empty());
+    assert!(state.typed.is_none());
+    let armed = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Enter, true), at);
+    assert_eq!(armed, vec![CanvasEvent::Learn { module: 1, widget: 0 }]);
+    assert!(state.typed.is_none());
+}
+
 /// A drag in progress when a pop-up opens ends at the next redraw,
 /// which reaches the canvas even when the pop-up takes every pointer
 /// and key event. A button held by the pointer is released too.

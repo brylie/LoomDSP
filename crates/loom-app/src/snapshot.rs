@@ -204,8 +204,8 @@ pub struct Widget {
     /// `Reson…` for `Resonance`. Left out when the whole label shows.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shown: Option<String>,
-    /// knob, toggle, radio, segmented, select, button, light, meter, or
-    /// scope.
+    /// knob, fader, number, toggle, radio, segmented, select, button, light,
+    /// meter, or scope.
     pub kind: &'static str,
     /// Where the widget is drawn. Left out while it is hidden.
     #[serde(skip_serializing_if = "Option::is_none")]

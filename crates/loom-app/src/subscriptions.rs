@@ -171,6 +171,11 @@ impl App {
         // to keys whether or not a widget used them.
         let browser = (self.browser.is_some() && self.help.is_none()).then(|| iced::event::listen_with(browser_key));
         let help_keys = Some(iced::event::listen_with(help_key));
+        // A draft in a value field ends on Escape or Tab, or when focus moves.
+        let value_draft = self
+            .value_draft
+            .is_some()
+            .then(|| iced::event::listen_with(crate::controls::value_draft_event));
         // The patches browser hears Up, Down, and Escape over its fields.
         let patches_keys =
             (self.patches.is_some() && self.chooser.is_none()).then(|| iced::event::listen_with(crate::patches::key));
@@ -184,6 +189,7 @@ impl App {
                 .chain(browser)
                 .chain(help_keys)
                 .chain(patches_keys)
+                .chain(value_draft)
                 .chain(panic),
         )
     }

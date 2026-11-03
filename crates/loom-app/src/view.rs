@@ -34,6 +34,7 @@ impl App {
             )
             .matrix_line(self.matrix_line())
             .matrix_keyboard(self.matrix.tab == RightTab::Matrix && self.matrix.focused)
+            .typed_check(|module, widget, text| self.typed_check(module, widget, text))
             .matrix_escape(
                 self.matrix.tab == RightTab::Matrix
                     && self.matrix.focused

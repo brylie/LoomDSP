@@ -29,6 +29,7 @@ mod hover_text;
 mod input;
 mod panel_input;
 mod select_popup;
+mod typed_field;
 
 pub use event::CanvasEvent;
 
@@ -93,6 +94,8 @@ pub struct PatchCanvas<'a, Message> {
     matrix_escape: bool,
     /// Leaves unmodified keys to the focused matrix while keeping pointer input active.
     matrix_keyboard: bool,
+    /// Says why typed text is not a value of a control: module, widget, text.
+    typed_check: Option<Box<dyn Fn(u32, usize, &str) -> Result<(), String> + 'a>>,
     still: Option<Still>,
     window_drag_line: bool,
 }
@@ -241,6 +244,7 @@ impl<'a, Message> PatchCanvas<'a, Message> {
             matrix_line: None,
             matrix_escape: false,
             matrix_keyboard: false,
+            typed_check: None,
             still: None,
             window_drag_line: false,
         }
@@ -278,6 +282,15 @@ impl<'a, Message> PatchCanvas<'a, Message> {
     /// Leaves unmodified keyboard input to the matrix without blocking the pointer.
     pub fn matrix_keyboard(mut self, enabled: bool) -> Self {
         self.matrix_keyboard = enabled;
+        self
+    }
+
+    /// Sets the check for typed values: given a module, a widget, and the
+    /// text, why it is not a value. The field shows the reason and Enter does
+    /// nothing (panel-widgets.md, Typing a value). Only the app knows the
+    /// parameter, so the canvas asks.
+    pub fn typed_check(mut self, check: impl Fn(u32, usize, &str) -> Result<(), String> + 'a) -> Self {
+        self.typed_check = Some(Box::new(check));
         self
     }
 
@@ -538,6 +551,8 @@ struct State {
     focus: Option<(u32, usize)>,
     /// Open select list, if any.
     select_popup: Option<SelectPopup>,
+    /// The open field for a typed value, if any.
+    typed: Option<typed_field::TypedField>,
     /// True when the focus came from Tab, so its hover text shows. A click
     /// also focuses a control, but the pointer is on it then.
     tab_focus: bool,
@@ -774,6 +789,7 @@ where
         );
         self.draw_text(state, values, renderer, bounds);
         self.draw_select_popup(state, renderer, bounds);
+        self.draw_typed_field(state, renderer, bounds);
         self.draw_hover_text(state, renderer, bounds);
     }
 }

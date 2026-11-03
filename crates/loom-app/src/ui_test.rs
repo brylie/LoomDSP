@@ -148,6 +148,7 @@ impl Ui {
         let browser_open = self.app.browser.is_some() && self.app.help.is_none();
         let patches_open = self.app.patches.is_some() && self.app.chooser.is_none();
         let matrix_keys = self.app.matrix.tab == crate::matrix::Tab::Matrix && self.app.matrix.focused;
+        let value_draft_open = self.app.value_draft.is_some();
         let mut clipboard = std::mem::take(&mut self.clipboard);
         self.with_ui(|ui, renderer, cursor| {
             let (_, statuses) = ui.update(events, cursor, renderer, &mut clipboard, &mut messages);
@@ -173,6 +174,12 @@ impl Ui {
                     messages.push(message);
                 }
                 if let Some(message) = help_key(event.clone(), status, window::Id::unique()) {
+                    messages.push(message);
+                }
+                if value_draft_open
+                    && let Some(message) =
+                        crate::controls::value_draft_event(event.clone(), status, window::Id::unique())
+                {
                     messages.push(message);
                 }
                 // The panic key listens to every key event (panic.md).
@@ -1211,7 +1218,42 @@ mod tests {
             range: 0,
         });
         ui.redraw();
-        assert!(ui.text("0.100").is_some(), "clamped into -0.1 to 0.1");
+        let crate::inspector::Inspector::Module(rows) = ui.app.inspector_model() else {
+            panic!("a module row");
+        };
+        assert_eq!(rows.params[0].value, "0.100", "clamped into -0.1 to 0.1");
+        assert_eq!(
+            rows.params[0].field.as_ref().map(|field| field.text.as_str()),
+            Some("0.100"),
+            "the field shows the value"
+        );
+    }
+
+    /// A typed value outside the selected control range selects the smallest
+    /// range that holds it, and one commit is still one undo step
+    /// (panel-widgets.md, Typing a value).
+    #[test]
+    fn a_typed_value_above_the_control_range_selects_a_wider_one() {
+        let mut ui = Ui::open("subtractive.ron");
+        let mul = select_new(&mut ui, "loom.math.mul");
+        let _ = ui.app.update(Message::Range {
+            module: mul.0,
+            index: 0,
+            range: 0,
+        });
+        let module = mul.0;
+        let selected = |ui: &Ui| ui.app.controller.graph().node(mul).unwrap().spec(0).unwrap();
+        assert_eq!(selected(&ui).max, 0.1);
+        let steps = ui.app.edits.history.len();
+        let _ = ui.app.update(Message::ValueText {
+            module,
+            index: 0,
+            text: "0.5".to_string(),
+        });
+        let _ = ui.app.update(Message::ValueSubmit { module, index: 0 });
+        assert_eq!(ui.app.controller.graph().node(mul).unwrap().params[0], 0.5);
+        assert!(selected(&ui).max >= 0.5, "the range widened");
+        assert_eq!(ui.app.edits.history.len(), steps + 1, "one undo step");
     }
 
     /// Subtractive with the filter envelope (module 5) modulating the
@@ -1552,5 +1594,155 @@ mod tests {
             crate::modulation::mark(kind, &spec, 120.0, &[reach]),
             loom_canvas::ModulationMark::Dot
         );
+    }
+
+    /// The value of a parameter by name.
+    fn param_value(ui: &Ui, module: ModuleId, name: &str) -> f32 {
+        let node = ui.app.controller.graph().node(module).unwrap();
+        node.params[node.descriptor.param_index(name).unwrap()]
+    }
+
+    /// Focuses a canvas control by clicking it.
+    fn focus_control(ui: &mut Ui, module: ModuleId, name: &str) {
+        let at = ui.control(module.0, name);
+        ui.move_to(at);
+        ui.press();
+        ui.release();
+    }
+
+    /// Typing 128 on a focused Tempo knob sets exactly 128 BPM, as one undo
+    /// step. A drag or an arrow key rarely lands on it (panel-widgets.md,
+    /// Typing a value).
+    #[test]
+    fn typing_on_a_focused_knob_sets_the_exact_value() {
+        use keyboard::key::Named;
+        let mut ui = Ui::open("sine.ron");
+        let transport = ui.app.controller.transport_module().expect("a transport");
+        let _ = ui.app.update(Message::SelectModule(transport.0));
+        ui.redraw();
+        focus_control(&mut ui, transport, "tempo");
+        let steps = ui.app.edits.history.len();
+        ui.typewrite("128");
+        ui.tap(keyboard::Key::Named(Named::Enter), keyboard::Modifiers::default());
+        assert_eq!(param_value(&ui, transport, "tempo"), 128.0);
+        assert_eq!(ui.app.edits.history.len(), steps + 1, "one commit is one undo step");
+    }
+
+    /// "2k" commits 2000, and "abc" leaves the value and blocks Enter. Then
+    /// Backspace corrects it, and the module is still there: Backspace in the
+    /// field never reaches the canvas.
+    #[test]
+    fn typed_text_commits_units_and_bad_text_is_corrected_in_place() {
+        use keyboard::key::Named;
+        let none = keyboard::Modifiers::default();
+        let mut ui = Ui::open("sine.ron");
+        let id = select_new(&mut ui, "test.panel");
+        focus_control(&mut ui, id, "cutoff");
+        ui.typewrite("2k");
+        ui.tap(keyboard::Key::Named(Named::Enter), none);
+        assert_eq!(param_value(&ui, id, "cutoff"), 2000.0);
+
+        focus_control(&mut ui, id, "tempo");
+        ui.typewrite("1");
+        ui.typewrite("abc");
+        let before = param_value(&ui, id, "tempo");
+        ui.tap(keyboard::Key::Named(Named::Enter), none);
+        assert_eq!(param_value(&ui, id, "tempo"), before, "bad text commits nothing");
+        for _ in 0..3 {
+            ui.tap(keyboard::Key::Named(Named::Backspace), none);
+        }
+        ui.typewrite("50");
+        ui.tap(keyboard::Key::Named(Named::Enter), none);
+        assert_eq!(param_value(&ui, id, "tempo"), 150.0);
+        assert!(ui.app.controller.graph().node(id).is_some(), "the module stays");
+    }
+
+    /// Enter then Enter on a value the text rounds keeps the exact value, with
+    /// no undo step (panel-widgets.md, Typing a value, Unchanged text).
+    #[test]
+    fn enter_then_enter_keeps_a_value_the_text_rounds() {
+        use keyboard::key::Named;
+        let none = keyboard::Modifiers::default();
+        let mut ui = Ui::open("sine.ron");
+        let id = select_new(&mut ui, "test.panel");
+        let index = ui
+            .app
+            .controller
+            .graph()
+            .node(id)
+            .unwrap()
+            .descriptor
+            .param_index("tempo")
+            .unwrap();
+        let _ = ui.app.update(Message::ParamValue {
+            module: id.0,
+            index,
+            value: 127.96,
+        });
+        let _ = ui.app.update(Message::SliderReleased);
+        ui.redraw();
+        focus_control(&mut ui, id, "tempo");
+        let steps = ui.app.edits.history.len();
+        ui.tap(keyboard::Key::Named(Named::Enter), none);
+        ui.tap(keyboard::Key::Named(Named::Enter), none);
+        assert_eq!(param_value(&ui, id, "tempo"), 127.96);
+        assert_eq!(ui.app.edits.history.len(), steps, "no undo step");
+    }
+
+    /// The inspector's field: typing is a draft, Enter commits it as one undo
+    /// step, and bad text shows its reason and commits nothing. Escape drops a
+    /// draft, and in MIDI learn mode the row has no field.
+    #[test]
+    fn the_inspector_takes_typed_values() {
+        use keyboard::key::Named;
+        let mut ui = Ui::open("sine.ron");
+        let id = select_new(&mut ui, "test.panel");
+        let node = ui.app.controller.graph().node(id).unwrap();
+        let index = node.descriptor.param_index("cutoff").unwrap();
+        let module = id.0;
+        let text = |text: &str| Message::ValueText {
+            module,
+            index,
+            text: text.to_string(),
+        };
+        let field = |ui: &Ui| {
+            let crate::inspector::Inspector::Module(rows) = ui.app.inspector_model() else {
+                panic!("a module row");
+            };
+            rows.params.into_iter().find(|p| p.index == index).unwrap().field
+        };
+        assert_eq!(field(&ui).unwrap().error, None);
+
+        let steps = ui.app.edits.history.len();
+        let _ = ui.app.update(text("440 hz"));
+        assert_eq!(field(&ui).unwrap().text, "440 hz");
+        let _ = ui.app.update(Message::ValueSubmit { module, index });
+        assert_eq!(param_value(&ui, id, "cutoff"), 440.0);
+        assert_eq!(ui.app.edits.history.len(), steps + 1);
+        assert!(ui.app.value_draft.is_none());
+
+        let _ = ui.app.update(text("abc"));
+        assert_eq!(field(&ui).unwrap().error.as_deref(), Some("Not a number in Hz"));
+        let _ = ui.app.update(Message::ValueSubmit { module, index });
+        assert_eq!(param_value(&ui, id, "cutoff"), 440.0, "bad text commits nothing");
+        assert!(ui.app.value_draft.is_some(), "and stays to be corrected");
+
+        // Escape drops it, through the same listener the app uses.
+        let messages = ui.tap(keyboard::Key::Named(Named::Escape), keyboard::Modifiers::default());
+        assert!(messages.iter().any(|m| matches!(m, Message::ValueDraftClear)));
+        assert!(ui.app.value_draft.is_none());
+
+        // A press with no field focused drops a draft too.
+        let _ = ui.app.update(text("5"));
+        ui.step(&[]);
+        let at = ui.control(module, "level");
+        ui.move_to(at);
+        ui.press();
+        ui.release();
+        assert!(ui.app.value_draft.is_none(), "focus moved away");
+
+        // In learn mode the row is plain text, so a click arms it.
+        let _ = ui.app.update(Message::Learn(crate::learn::Message::Toggle));
+        assert!(field(&ui).is_none());
     }
 }

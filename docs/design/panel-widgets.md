@@ -135,15 +135,19 @@ These rules hold for every widget. Each widget section below says only what diff
 
 ### Typing a value
 
-**Settled:** every one-number widget (knob, fader, number) takes a typed value when it has keyboard focus. *Why:* an exact value, such as a tempo of 128 or a cutoff of 440 Hz, is faster to type than to drag.
+**Status:** Implemented. **Settled:** every one-number widget (knob, fader, number) takes a typed value when it has keyboard focus. *Why:* an exact value, such as a tempo of 128 or a cutoff of 440 Hz, is faster to type than to drag.
 
-- **Start:** with the widget focused, typing a digit, a minus sign, or a decimal point opens a small text field over the widget, holding that character. Enter on a focused one-number widget opens the field holding the current value, selected. Clicking does not open it. *Why:* double-click already resets, and a drag must stay a drag. Keyboard focus comes from Tab or from clicking the widget.
-- **What it accepts:** a number in the parameter's display unit, optionally followed by that unit ("440", "440 Hz", "-6 dB"). A `k` after the number multiplies by 1000 ("2k" for 2000 Hz). A comma is read as a decimal point. *Why:* players type what the label shows, in their own locale's habit.
+- **Start:** with the widget focused, typing a digit, a minus sign, or a decimal point (or a comma, read as one) opens a small text field over the widget, holding that character. Enter on a focused one-number widget opens the field holding the current value, selected. Clicking does not open it. *Why:* double-click already resets, and a drag must stay a drag. Keyboard focus comes from Tab or from clicking the widget.
+- **What it accepts:** a number in the parameter's display unit, optionally followed by that unit, in any case and with or without a space ("440", "440 Hz", "440hz", "-6 dB"). A `k` after the number multiplies by 1000 ("2k" and "2 kHz" for 2000 Hz). A comma is read as a decimal point. *Why:* players type what the label shows, in their own locale's habit.
 - **Commit:** Enter commits. The value is rounded for a whole-number parameter and clamped to the parameter's range. If it is outside the selected [control range](control-ranges.md), the smallest range that holds it is selected, as when a patch loads. One commit is one undo step.
 - **Cancel:** Escape closes the field and changes nothing. So does moving focus away.
-- **Bad text:** text that is not a number in that unit gives the field an outline in the warning style with a short reason in its hover text ("Not a number in Hz"). Enter then does nothing. *Why:* a typo must never become a value.
+- **Bad text:** text that is not a number in that unit gives the field an outline in the warning style with a short reason on a line below it ("Not a number in Hz"). Enter then does nothing, and the text stays to be corrected. *Why:* a typo must never become a value.
 - **MIDI learn and modulation** are unchanged. A typed value sets the base value, as a drag does.
-- The inspector's value field, when it is built, follows the same rules.
+- **The field:** the canvas draws it at a fixed screen size. It has a caret, with Left, Right, Backspace, and Delete. There is no paste. While it is open it takes every key except the panic shortcut. The caret does not blink, because a blink would wake the UI (rule 7).
+- **Moving focus away:** Tab, a press outside, a pan, a zoom, the window losing focus, or the widget being removed or hidden closes the field with no change. Tab then moves focus as usual.
+- **Unchanged text:** Enter closes the field with no edit and no undo step. *Why:* the text shown is rounded, so committing it would change the value.
+- **MIDI learn:** no field opens. Digits do nothing, and Enter arms the control.
+- **Inspector:** a one-number parameter has an always-visible field beside its slider, with the same rules. In learn mode it is plain text, so a click arms the row. Text that is not a number gets the warning outline, with the reason in hover text.
 
 ### Larger view
 

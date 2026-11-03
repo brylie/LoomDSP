@@ -366,6 +366,23 @@ pub enum ParamMapping {
     Logarithmic,
 }
 
+/// Why typed text is not a value of a parameter. Its text is what the field
+/// shows, such as "Not a number in Hz".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NotANumber {
+    unit: &'static str,
+}
+
+impl std::fmt::Display for NotANumber {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.unit.is_empty() {
+            write!(f, "Not a number")
+        } else {
+            write!(f, "Not a number in {}", self.unit)
+        }
+    }
+}
+
 impl ParamSpec {
     /// How many values a whole-number parameter can take: its names, or the
     /// numbers in its range.
@@ -387,6 +404,33 @@ impl ParamSpec {
                 .collect()
         } else {
             self.options.choices.iter().map(ToString::to_string).collect()
+        }
+    }
+
+    /// A typed value: a number in this parameter's unit, optionally followed
+    /// by that unit, in any case and with or without a space. A `k` after the
+    /// number multiplies by 1000, and a comma is read as a decimal point. The
+    /// result is rounded for a whole-number parameter and clamped to this
+    /// spec's range, so parse with the descriptor's spec to reach the whole
+    /// range. Spec: `docs/design/panel-widgets.md`, Typing a value.
+    pub fn parse_value_text(&self, text: &str) -> Result<f32, NotANumber> {
+        let bad = NotANumber { unit: self.unit };
+        let text = text.trim().replace(',', ".").to_lowercase();
+        let unit = self.unit.to_lowercase();
+        let number = match text.strip_suffix(unit.as_str()) {
+            Some(rest) if !unit.is_empty() => rest.trim_end(),
+            _ => text.as_str(),
+        };
+        let (digits, scale) = match number.strip_suffix('k') {
+            Some(rest) => (rest.trim_end(), 1000.0),
+            None => (number, 1.0),
+        };
+        let value = digits.parse::<f32>().map_err(|_| bad)? * scale;
+        // Rust reads "NaN" and "inf" as numbers. A player never means them.
+        if value.is_finite() {
+            Ok(self.clamp(value))
+        } else {
+            Err(bad)
         }
     }
 

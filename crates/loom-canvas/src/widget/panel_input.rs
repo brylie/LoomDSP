@@ -360,8 +360,17 @@ impl<Message> PatchCanvas<'_, Message> {
             shell.capture_event();
             return true;
         }
-        // An open list comes before every other use of a key.
+        // An open list or field comes before every other use of a key.
         if self.select_popup_key(state, key, modifiers, text, repeat, shell) {
+            return true;
+        }
+        self.close_stale_typed(state);
+        if self.typed_field_key(state, key, modifiers, text, repeat, shell) {
+            return true;
+        }
+        if self.open_typed_field(state, key, modifiers, text, repeat) {
+            shell.request_redraw();
+            shell.capture_event();
             return true;
         }
         let used = match key.as_ref() {

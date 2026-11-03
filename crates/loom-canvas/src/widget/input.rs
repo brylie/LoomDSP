@@ -99,6 +99,7 @@ impl<Message> PatchCanvas<'_, Message> {
             self.release_every_key_hold(state, shell);
             self.end_gestures(state, shell);
             state.interaction = Interaction::Idle;
+            state.typed = None;
             if !matches!(event, Event::Window(_)) {
                 return;
             }
@@ -108,6 +109,10 @@ impl<Message> PatchCanvas<'_, Message> {
         // one is closed first, so the event still does its normal work.
         self.close_stale_select(state);
         if self.select_popup_event(state, event, bounds, over, screen, shell) {
+            return;
+        }
+        self.close_stale_typed(state);
+        if self.typed_field_event(state, event, bounds, screen, shell) {
             return;
         }
 
@@ -147,6 +152,7 @@ impl<Message> PatchCanvas<'_, Message> {
                         state.camera.frame_readable(world, bounds.size(), READABLE_ZOOM);
                     }
                     state.framed_key = Some(self.frame_key);
+                    state.typed = None;
                     // A new frame key means a new patch: its lights have to
                     // be reported again, even if the list looks the same.
                     state.reported_lights = None;
@@ -266,6 +272,12 @@ impl<Message> PatchCanvas<'_, Message> {
                 state.hover = Some(self.scene.hit(state.camera.to_world(screen), state.hit_radius()));
                 shell.request_redraw();
                 shell.capture_event();
+            }
+            // A press elsewhere in the window, such as an inspector field,
+            // takes the keys from the canvas, so a digit never opens a field
+            // on a control the player has left.
+            Event::Mouse(mouse::Event::ButtonPressed(_)) if !over => {
+                state.focus = None;
             }
             Event::Mouse(mouse::Event::ButtonPressed(button)) if over => {
                 let Some(screen) = screen else { return };

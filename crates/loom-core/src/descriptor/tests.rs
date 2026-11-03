@@ -468,3 +468,40 @@ fn a_fader_needs_a_parameter_and_room() {
     assert!(descriptor(&WIDE, 5, 2).check_panel().unwrap_err().contains("outside"));
     assert!(descriptor(&MISSING, 2, 6).check_panel().is_err());
 }
+
+/// A typed value takes its unit and `k` in the forms players type, reads a
+/// comma as a decimal point, rounds whole numbers, and clamps. Anything else is
+/// refused by name (panel-widgets.md, Typing a value).
+#[test]
+fn typed_values_read_units_k_and_commas() {
+    let hz = param("f", 20.0, 20_000.0, 1_000.0, "Hz");
+    for (text, value) in [
+        ("440", 440.0),
+        ("440 Hz", 440.0),
+        ("440Hz", 440.0),
+        ("440 hz", 440.0),
+        ("  440  ", 440.0),
+        ("2k", 2000.0),
+        ("2K", 2000.0),
+        ("2k Hz", 2000.0),
+        ("2kHz", 2000.0),
+        ("2 kHz", 2000.0),
+        ("1,5k", 1500.0),
+        ("1000000", 20_000.0),
+        ("-5", 20.0),
+    ] {
+        assert_eq!(hz.parse_value_text(text), Ok(value), "{text}");
+    }
+    assert_eq!(param("g", -60.0, 6.0, 0.0, "dB").parse_value_text("-6 dB"), Ok(-6.0));
+    assert_eq!(
+        param("n", 0.0, 10.0, 0.0, "").integer().parse_value_text("3.6"),
+        Ok(4.0)
+    );
+
+    for text in ["", " ", "-", "k", "abc", "NaN", "inf", "-inf", "Hz", "1 2", "1e99"] {
+        let error = hz.parse_value_text(text).unwrap_err();
+        assert_eq!(error.to_string(), "Not a number in Hz", "{text}");
+    }
+    let plain = param("p", 0.0, 1.0, 0.0, "");
+    assert_eq!(plain.parse_value_text("abc").unwrap_err().to_string(), "Not a number");
+}
