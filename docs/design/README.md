@@ -55,7 +55,7 @@ Copy [template.md](template.md). Keep it to one feature. Link the ADR, requireme
 | Specification | Decision | Status |
 |---|---|---|
 | [Arrangement](arrangement.md) | [ADR-0012](../adr/0012-arrangement-from-phase-driven-primitives.md) | Draft, M3 |
-| [Dynamics, EQ, and Crossover](dynamics-eq-crossover.md) | [ADR-0035](../adr/0035-pure-dsp-algorithms-in-loom-dsp.md) | Agreed, M2 |
+| [Dynamics, EQ, and Crossover](dynamics-eq-crossover.md) | [ADR-0035](../adr/0035-pure-dsp-algorithms-in-loom-dsp.md) | Implemented, M2 |
 | [Telemetry](telemetry.md) | [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md) | Implemented, M1 |
 | [Panels](panels.md) | [ADR-0013](../adr/0013-modules-carry-their-own-panel.md), [ADR-0025](../adr/0025-one-design-language-and-derived-panels.md) | Module panels on tiles, level meters, and audio load Implemented (M1); labels and hover text Implemented; M1 additions (choice names, trigger lights, clock mark, load colour, keyboard, activity, scope trace, resizable tiles) Agreed; panel editor, exposed controls, context menu, scope slope, meter clip and hold, output warnings Agreed (M2); rest Draft |
 | [Panel widgets](panel-widgets.md) | [ADR-0024](../adr/0024-widgets-follow-the-kind-of-value.md) | Agreed, M2; shape preview and compact select list Implemented |

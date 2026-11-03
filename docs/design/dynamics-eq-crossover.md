@@ -3,7 +3,7 @@
 Three processors that finish a sound and shape a live vocal or instrument chain, and that show what they are doing.
 
 - **Kind:** living specification.
-- **Status:** Agreed and built, M2 (2026-11-03).
+- **Status:** Implemented, M2 (2026-11-03).
 - **Decision behind it:** [ADR-0035](../adr/0035-pure-dsp-algorithms-in-loom-dsp.md) (algorithms in `loom-dsp`), [ADR-0018](../adr/0018-clean-room-module-development.md) (clean room), [ADR-0020](../adr/0020-inferred-channel-count.md) (stereo ports).
 - **Use case and requirements:** FR-LIB-09, FR-LIB-15, FR-PANEL-02.
 - **Background:** [How a dynamics processor hears a level](../learn/dynamics-detection.md).
