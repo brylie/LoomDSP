@@ -110,6 +110,6 @@ Each of these looks like an obvious fix.
 
 **Put the ceiling after Output and Mix.** The module's output now really is limited, but the Output knob stops raising a limited signal, and the dry path in Mix gets limited too. This is a different tool: a final limiter for a chain. The next module can still raise the level, so it would not make a patch safe either.
 
-**Use a fixed ceiling and a drive knob in Limit.** Matching then turns the signal down, and the ceiling holds with Match on, as in the first design above. Output above 0 dB and Mix can still pass it. Limit would also stop sharing the threshold and the curve with the other modes, and moving between modes would change what the main knob means. An Amp module before a threshold limiter already gives the same result in a patch.
+**Use a fixed ceiling and a drive knob in Limit.** Matching then turns the signal down, and the ceiling holds with Match on, as in the first design above. Output above 0 dB and Mix can still pass it. Limit would also stop sharing the threshold and the curve with the other modes, and moving between modes would change what the main knob means. An Amplifier before a threshold limiter already gives the same result in a patch.
 
 So Match stays available in Limit, and the rule is plain: when a ceiling must hold, leave Match off. When you want to protect your ears, leave output safety on.
