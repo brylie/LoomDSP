@@ -188,14 +188,15 @@ pub(super) fn modifiers(names: &[String]) -> Result<keyboard::Modifiers, String>
     })
 }
 
-/// Refuses the file shortcuts (New, Open, Save, Save As): they open a file
-/// dialog or ask to save, which would stop the app with nobody to answer
-/// (rule 9). The `open` and `save` commands do the same without a dialog.
+/// Refuses the shortcuts for the file pickers (Open, Save, Save As): they are
+/// native, and would stop the app with nobody to answer (rule 9). The `open`
+/// and `save` commands do the same without a dialog. New raises the in-app
+/// question, which a script can answer.
 pub(super) fn refuse_dialog_keys(key: &keyboard::Key, modifiers: keyboard::Modifiers) -> Result<(), String> {
     let keyboard::Key::Character(c) = key else {
         return Ok(());
     };
-    if modifiers.command() && matches!(c.as_str(), "n" | "o" | "s") {
+    if modifiers.command() && matches!(c.as_str(), "o" | "s") {
         Err(format!(
             "the {c} shortcut opens a dialog; use the `open` or `save` command instead"
         ))
@@ -207,14 +208,18 @@ pub(super) fn refuse_dialog_keys(key: &keyboard::Key, modifiers: keyboard::Modif
 /// The toolbar buttons `toolbar` clicks, by stable name. Labels are not
 /// used: they change while the app runs ("Hold note" becomes "Release
 /// note") and may be reworded.
-pub(super) const BUTTONS: [&str; 5] = ["learn", "hold", "panic", "undo", "redo"];
+pub(super) const BUTTONS: [&str; 6] = ["new", "learn", "hold", "panic", "undo", "redo"];
 
 /// The message a toolbar button sends, or why it cannot be pressed: it
 /// opens a dialog (rule 9), it is disabled, or there is no such button.
 /// Add module is left out: it opens the browser at the pointer, which a
 /// script does not have, and the `add` command adds a module directly.
 pub(super) fn press_message(app: &App, name: &str) -> Result<Message, String> {
+    if let Some(question) = &app.question {
+        return question_press(question, name);
+    }
     let (message, disabled) = match name {
+        "new" => (Message::File(crate::FileAction::New), None),
         "learn" => (Message::Learn(crate::learn::Message::Toggle), None),
         "hold" => (
             Message::HoldNote,
@@ -239,9 +244,9 @@ pub(super) fn press_message(app: &App, name: &str) -> Result<Message, String> {
                 .is_none()
                 .then_some("Redo is disabled: nothing to redo"),
         ),
-        "new" | "open" | "save" | "save-as" => {
+        "open" | "save" | "save-as" => {
             return Err(format!(
-                "the {name} button opens a dialog; use the `new`, `open`, or `save` command instead"
+                "the {name} button opens a dialog; use the `open` or `save` command instead"
             ));
         }
         "add" => return Err("use the `add` command to add a module".to_string()),
@@ -251,6 +256,48 @@ pub(super) fn press_message(app: &App, name: &str) -> Result<Message, String> {
         Some(reason) => Err(reason.to_string()),
         None => Ok(message),
     }
+}
+
+/// A button of the open question, or Panic, which still works. Anything else
+/// would be blocked by the question, so it is refused and not lost in silence
+/// (rule 9).
+fn question_press(question: &crate::question::Question, name: &str) -> Result<Message, String> {
+    if name == "panic" {
+        return Ok(Message::Panic);
+    }
+    question
+        .answers()
+        .iter()
+        .find(|answer| answer.name() == name)
+        .map(|&answer| Message::Question(crate::question::Message::Answer(answer)))
+        .ok_or_else(|| question_open_error(question))
+}
+
+/// The refusal for what an open question blocks. It says how to go on.
+pub(super) fn question_open_error(question: &crate::question::Question) -> String {
+    let model = question.model();
+    format!(
+        "a question is open (\"{}\"); answer it first with `toolbar`: {}",
+        model.title,
+        model.buttons.join(", ")
+    )
+}
+
+/// True for the keys an open question uses. It blocks every other key press.
+pub(super) fn question_uses_key(key: &keyboard::Key) -> bool {
+    use keyboard::key::Named;
+    matches!(
+        key,
+        keyboard::Key::Named(
+            Named::Tab
+                | Named::Enter
+                | Named::Escape
+                | Named::ArrowLeft
+                | Named::ArrowRight
+                | Named::ArrowUp
+                | Named::ArrowDown
+        )
+    )
 }
 
 /// The key press and release, as the keyboard listener sends them.

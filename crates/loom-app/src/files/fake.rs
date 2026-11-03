@@ -1,4 +1,3 @@
-use super::Choice;
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
@@ -7,8 +6,8 @@ use std::path::{Path, PathBuf};
 pub enum Asked {
     /// The Save dialog, with the path it was given to start from.
     Save(Option<PathBuf>),
-    /// The unsaved changes question, with the patch name it showed.
-    Discard(String),
+    /// The Open dialog, with the path it was given to start from.
+    Open(Option<PathBuf>),
     /// An error message, with the text it showed.
     Error(String),
     /// The question to add the user's name to the authors, with the name.
@@ -18,7 +17,7 @@ pub enum Asked {
 thread_local! {
     static ASKED: RefCell<Vec<Asked>> = const { RefCell::new(Vec::new()) };
     static SAVE_ANSWER: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
-    static DISCARD_ANSWER: RefCell<Choice> = const { RefCell::new(Choice::Cancel) };
+    static OPEN_ANSWER: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
     static EXAMPLES: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
     static ADD_AUTHOR_ANSWER: RefCell<Option<bool>> = const { RefCell::new(Some(false)) };
 }
@@ -40,9 +39,10 @@ pub fn answer_save(path: Option<PathBuf>) {
     SAVE_ANSWER.with(|answer| *answer.borrow_mut() = path);
 }
 
-/// Answers the next unsaved-changes question, then returns to Cancel.
-pub fn answer_discard(choice: Choice) {
-    DISCARD_ANSWER.with(|answer| *answer.borrow_mut() = choice);
+/// The Open dialog picks `path` from now on. Without a call it is
+/// cancelled.
+pub fn answer_open(path: Option<PathBuf>) {
+    OPEN_ANSWER.with(|answer| *answer.borrow_mut() = path);
 }
 
 /// Answers the questions to add the user's name from now on: `Some(true)`
@@ -62,10 +62,9 @@ pub(super) fn pick_save(current: Option<&Path>) -> Option<Option<PathBuf>> {
     Some(SAVE_ANSWER.with(|answer| answer.borrow().clone()))
 }
 
-/// Answers the configured choice, defaulting to Cancel.
-pub(super) fn confirm_discard(name: &str) -> Option<Choice> {
-    ASKED.with(|asked| asked.borrow_mut().push(Asked::Discard(name.to_string())));
-    Some(DISCARD_ANSWER.with(|answer| answer.replace(Choice::Cancel)))
+pub(super) fn pick_open(current: Option<&Path>) -> Option<Option<PathBuf>> {
+    ASKED.with(|asked| asked.borrow_mut().push(Asked::Open(current.map(Path::to_path_buf))));
+    Some(OPEN_ANSWER.with(|answer| answer.borrow().clone()))
 }
 
 /// Records the error message in place of the dialog.

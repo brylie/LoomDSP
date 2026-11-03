@@ -286,7 +286,11 @@ fn prepared_matching_agrees_with_the_filter() {
     for filter in &filters {
         for patch in &patches {
             let direct = filter.matches(patch);
-            assert_eq!(direct, filter.matcher().matches(&Prepared::of(patch)), "{filter:?} {patch:?}");
+            assert_eq!(
+                direct,
+                filter.matcher().matches(&Prepared::of(patch)),
+                "{filter:?} {patch:?}"
+            );
             matched += usize::from(direct);
         }
     }

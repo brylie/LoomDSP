@@ -318,8 +318,12 @@ impl PatchBrowser {
         let outcome = match message {
             Message::Found { open, rows } => {
                 if open == self.open {
-                    self.tags
-                        .extend(rows.iter().flat_map(|row| row.prepared.iter()).flat_map(|p| p.tags()).cloned());
+                    self.tags.extend(
+                        rows.iter()
+                            .flat_map(|row| row.prepared.iter())
+                            .flat_map(|p| p.tags())
+                            .cloned(),
+                    );
                     self.rows.extend(rows);
                     self.refilter();
                 }

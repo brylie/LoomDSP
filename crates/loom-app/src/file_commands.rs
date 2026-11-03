@@ -1,6 +1,7 @@
 //! File commands: the patch name and unsaved mark, Save, Save As, New,
 //! Open, and replacing the patch with another (`docs/design/files.md`).
 
+use crate::question::{AfterDiscard, Answer, Kind, Message as QuestionMessage, Question};
 use crate::{App, Args, FileAction, Source, bench, control, devices, files, screenshot, settings};
 use loom_core::EngineConfig;
 use std::path::{Path, PathBuf};
@@ -81,17 +82,37 @@ impl App {
     }
 
     /// Save: to the current file, or Save As when there is none. Returns
-    /// false if nothing was saved.
+    /// true if the patch was written by the time this returns.
     pub(crate) fn save(&mut self) -> bool {
+        self.save_then(None)
+    }
+
+    /// Saves, then runs `next`. If the save fails or its dialog is cancelled,
+    /// `next` never runs, so nothing is lost. A Replace question waits for
+    /// its answer and carries `next` with it (files.md, Asking before losing
+    /// work).
+    pub(crate) fn save_then(&mut self, next: Option<AfterDiscard>) -> bool {
         self.finish_edits();
         match self.document.file().map(Path::to_path_buf) {
-            Some(path) => self.write_to(path),
-            None => self.save_as(),
+            Some(path) => self.write_then(path, next),
+            None => self.save_as_then(next),
         }
     }
 
     pub(crate) fn save_as(&mut self) -> bool {
+        self.save_as_then(None)
+    }
+
+    /// Asks where to save, saves there, then runs `next`. With the control
+    /// channel on it stops, because a native picker would stop the app with
+    /// nobody to close it (control-channel.md, rule 9).
+    fn save_as_then(&mut self, next: Option<AfterDiscard>) -> bool {
         self.finish_edits();
+        if !self.control.is_empty() {
+            self.alerts
+                .say("Save As opens a file dialog; use the `save` command instead.".to_string());
+            return false;
+        }
         // A patch with no file yet starts in the library folder, made when
         // it is missing, under a free name taken from the patch name
         // (patch-metadata.md, Your patches browser).
@@ -114,9 +135,22 @@ impl App {
             }
         };
         match files::pick_save(start.as_deref()) {
-            Some(path) => self.write_to(path),
-            None => false,
+            files::Saving::Cancelled => false,
+            files::Saving::Chosen(path) => self.write_then(path, next),
+            files::Saving::Confirm(path) => {
+                self.question = Some(Question::replace(path, next));
+                false
+            }
         }
+    }
+
+    /// Writes the patch to `path`. If that worked, runs `next`.
+    fn write_then(&mut self, path: PathBuf, next: Option<AfterDiscard>) -> bool {
+        let written = self.write_to(path);
+        if written && let Some(next) = next {
+            self.proceed(next);
+        }
+        written
     }
 
     /// Ends any edit in progress, so the history and the saved mark see it.
@@ -129,24 +163,64 @@ impl App {
         }
     }
 
-    /// Asks what to do with unsaved changes. Returns true if the caller may
-    /// go on and drop them.
-    pub(crate) fn can_discard(&mut self) -> bool {
+    /// Runs `next`, which would drop the patch, asking first if it has
+    /// unsaved changes (files.md, Asking before losing work).
+    pub(crate) fn after_discard(&mut self, next: AfterDiscard) {
         self.finish_edits();
-        if !self.unsaved() {
-            return true;
+        if self.unsaved() {
+            self.question = Some(Question::discard(self.patch_name(), next));
+        } else {
+            self.proceed(next);
         }
-        match files::confirm_discard(&self.patch_name()) {
-            files::Choice::Save => self.save(),
-            files::Choice::DontSave => true,
-            files::Choice::Cancel => false,
-            files::Choice::Unavailable => {
-                self.alerts.say(
-                    "Unsaved changes. No dialog program (zenity or kdialog) is installed: save with Ctrl+S first."
-                        .to_string(),
-                );
-                false
+    }
+
+    /// Does what was asked for, now that unsaved changes are dealt with.
+    fn proceed(&mut self, next: AfterDiscard) {
+        match next {
+            AfterDiscard::New => {
+                if self.replace(Source::Empty) {
+                    self.alerts.say("new patch".to_string());
+                }
             }
+            AfterDiscard::OpenDialog => {
+                if let Some(path) = files::pick_open(self.document.file()) {
+                    self.open_path(&path);
+                }
+            }
+            AfterDiscard::OpenPath(path) => self.open_path(&path),
+            AfterDiscard::Close => self.quit = true,
+            AfterDiscard::Example(patch) => {
+                self.replace(Source::Recovered(patch));
+            }
+        }
+    }
+
+    /// Handles a question message. An answer closes the question first, so
+    /// that what it starts can ask another.
+    pub(crate) fn question_message(&mut self, message: QuestionMessage) {
+        let Some(question) = self.question.as_mut() else {
+            return;
+        };
+        let answer = match message {
+            QuestionMessage::Answer(answer) => answer,
+            QuestionMessage::Move(by) => {
+                question.step(by);
+                return;
+            }
+            QuestionMessage::Activate => question.highlighted(),
+            QuestionMessage::Escape => question.safe_answer(),
+        };
+        let kind = question.clone().into_kind();
+        self.question = None;
+        match (kind, answer) {
+            (Kind::Discard { next, .. }, Answer::Save) => {
+                self.save_then(Some(next));
+            }
+            (Kind::Discard { next, .. }, Answer::DontSave) => self.proceed(next),
+            (Kind::Replace { path, next }, Answer::Replace) => {
+                self.write_then(path, next);
+            }
+            _ => {}
         }
     }
 
@@ -239,12 +313,13 @@ impl App {
         true
     }
 
-    /// Tells the user that something failed, in a dialog, unless the
-    /// control channel is on: a dialog would stop the app with nobody to
-    /// close it (`docs/design/control-channel.md`, rule 9).
-    pub(crate) fn show_error(&self, message: &str) {
-        if self.control.is_empty() {
-            files::show_error(message);
+    /// Tells the user that something failed, in the window, unless the
+    /// control channel is on: the reply says so, and a question left open
+    /// would block every later command (`docs/design/control-channel.md`,
+    /// rule 9). A question already open stays: the status bar has this too.
+    pub(crate) fn show_error(&mut self, message: &str) {
+        if self.control.is_empty() && self.question.is_none() {
+            self.question = Some(Question::error(message.to_string()));
         }
     }
 
@@ -262,28 +337,16 @@ impl App {
             // Opening the browser starts a task, so `App::update` handles
             // it before it reaches here.
             FileAction::Browse => {}
-            FileAction::Close => {
-                if self.can_discard() {
-                    self.quit = true;
-                }
-            }
+            FileAction::Close => self.after_discard(AfterDiscard::Close),
         }
     }
 
     pub(crate) fn new_patch(&mut self) {
-        if self.can_discard() && self.replace(Source::Empty) {
-            self.alerts.say("new patch".to_string());
-        }
+        self.after_discard(AfterDiscard::New);
     }
 
     pub(crate) fn open(&mut self) {
-        if !self.can_discard() {
-            return;
-        }
-        let Some(path) = files::pick_open(self.document.file()) else {
-            return;
-        };
-        self.open_path(&path);
+        self.after_discard(AfterDiscard::OpenDialog);
     }
 
     /// Opens the patch at `path` in place of this one, and says so in the

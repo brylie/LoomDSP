@@ -14,14 +14,16 @@ pub const EXTENSION: &str = "ron";
 /// when macOS runs the app from a translocated copy.
 const BUNDLED_MARKER: &str = ".loomdsp-bundled-examples";
 
-/// What the user chose when asked about unsaved changes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Choice {
-    Save,
-    DontSave,
-    Cancel,
-    /// No dialog could be shown (Linux without `zenity` or `kdialog`).
-    Unavailable,
+/// What came of asking where to save.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Saving {
+    /// The dialog was cancelled.
+    Cancelled,
+    /// Save here. The dialog confirmed the name if it had to.
+    Chosen(PathBuf),
+    /// Save here only if the player agrees: adding the extension made the
+    /// name of another file, which the dialog did not ask about.
+    Confirm(PathBuf),
 }
 
 /// The name shown for a patch: its file name, or "Untitled" before it has one.
@@ -148,70 +150,38 @@ fn dialog(file: Option<&Path>) -> FileDialog {
 
 /// Asks for a patch to open.
 pub fn pick_open(current: Option<&Path>) -> Option<PathBuf> {
+    #[cfg(test)]
+    if let Some(answer) = fake::pick_open(current) {
+        return answer;
+    }
     dialog(current).set_title("Open patch").pick_file()
 }
 
-/// Asks where to save, starting at `current`: the current file, or a file
-/// name to suggest. The result always has an extension.
-pub fn pick_save(current: Option<&Path>) -> Option<PathBuf> {
+/// What the Save dialog picked, starting at `current`.
+fn picked_save(current: Option<&Path>) -> Option<PathBuf> {
     #[cfg(test)]
     if let Some(answer) = fake::pick_save(current) {
         return answer;
     }
-    let picked = dialog(current)
+    dialog(current)
         .set_title("Save patch")
         .set_file_name(display_name(current))
-        .save_file()?;
+        .save_file()
+}
+
+/// Asks where to save, starting at `current`: the current file, or a file
+/// name to suggest. The result always has an extension.
+pub fn pick_save(current: Option<&Path>) -> Saving {
+    let Some(picked) = picked_save(current) else {
+        return Saving::Cancelled;
+    };
     let path = with_extension(picked.clone());
     // The dialog checked the name it returned. If adding the extension made
     // a different file, that one needs its own confirmation.
     if path != picked && path.exists() {
-        // With no way to ask, keep the name the dialog confirmed.
-        if !dialogs_available() {
-            return Some(picked);
-        }
-        if !confirm_replace(&path) {
-            return None;
-        }
-    }
-    Some(path)
-}
-
-fn confirm_replace(path: &Path) -> bool {
-    let result = MessageDialog::new()
-        .set_level(MessageLevel::Warning)
-        .set_title(format!("Replace \"{}\"?", display_name(Some(path))))
-        .set_description("A file with this name already exists. Saving replaces it.")
-        .set_buttons(MessageButtons::YesNo)
-        .show();
-    result == MessageDialogResult::Yes
-}
-
-/// Asks what to do with unsaved changes.
-pub fn confirm_discard(name: &str) -> Choice {
-    #[cfg(test)]
-    if let Some(choice) = fake::confirm_discard(name) {
-        return choice;
-    }
-    if !dialogs_available() {
-        return Choice::Unavailable;
-    }
-    let result = MessageDialog::new()
-        .set_level(MessageLevel::Warning)
-        .set_title(format!("Save changes to \"{name}\"?"))
-        .set_description("Your changes will be lost if you do not save them.")
-        .set_buttons(MessageButtons::YesNoCancelCustom(
-            "Save".to_string(),
-            "Don't Save".to_string(),
-            "Cancel".to_string(),
-        ))
-        .show();
-    match result {
-        MessageDialogResult::Custom(label) if label == "Save" => Choice::Save,
-        MessageDialogResult::Custom(label) if label == "Don't Save" => Choice::DontSave,
-        MessageDialogResult::Yes => Choice::Save,
-        MessageDialogResult::No => Choice::DontSave,
-        _ => Choice::Cancel,
+        Saving::Confirm(path)
+    } else {
+        Saving::Chosen(path)
     }
 }
 
@@ -252,7 +222,8 @@ pub fn confirm_add_author(name: &str, authors: &[String]) -> Option<bool> {
 }
 
 /// False on Linux when no program that draws message boxes is installed.
-/// Then the dialog would return "cancel" without showing anything.
+/// Then the dialog would return "cancel" without showing anything. Only the
+/// credit and crash recovery questions are still native.
 pub fn dialogs_available() -> bool {
     if !cfg!(target_os = "linux") {
         return true;
@@ -263,8 +234,9 @@ pub fn dialogs_available() -> bool {
     std::env::split_paths(&path).any(|dir| ["zenity", "kdialog"].iter().any(|p| dir.join(p).is_file()))
 }
 
-/// Tells the user that something failed. One button, so it cannot be a
-/// question.
+/// Tells the user that something failed before the window exists. Once it
+/// does, the app says so in the window (`App::show_error`). One button, so
+/// it cannot be a question.
 pub fn show_error(message: &str) {
     // Tests record the message: a native dialog would stop them.
     #[cfg(test)]
@@ -278,8 +250,8 @@ pub fn show_error(message: &str) {
         .show();
 }
 
-/// Stand-ins for the Save dialog, the unsaved changes question, and error
-/// messages in tests, which must not stop at a native dialog. Each test
+/// Stand-ins for the Open and Save dialogs, and native questions and error
+/// messages, in tests, which must not stop at a native dialog. Each test
 /// runs on its own thread, so each has its own record.
 #[cfg(test)]
 pub mod fake;

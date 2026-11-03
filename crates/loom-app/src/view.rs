@@ -7,7 +7,7 @@ use crate::style::button;
 use crate::subscriptions::{browser_key, help_key};
 use crate::{
     App, DIM, FileAction, Message, alerts, browser, inspector, learn, matrix, panic, patches, pointer, probe_menu,
-    settings, style, undo,
+    question, settings, style, undo,
 };
 use iced::widget::{column, container, mouse_area, row, rule, space, stack, text, toggler, tooltip};
 use iced::{Color, Element, Length};
@@ -30,7 +30,8 @@ impl App {
                     && self.help.is_none()
                     && self.rig.window.is_none()
                     && self.chooser.is_none()
-                    && self.patches.is_none(),
+                    && self.patches.is_none()
+                    && self.question.is_none(),
             )
             .matrix_line(self.matrix_line())
             .matrix_keyboard(self.matrix.tab == RightTab::Matrix && self.matrix.focused)
@@ -104,14 +105,32 @@ impl App {
         if let Some(chooser) = &self.chooser {
             layers = layers.push(chooser.view());
         }
+        // Over everything: a question must be answered first.
+        if let Some(question) = &self.question {
+            layers = layers.push(question.view().map(Message::Question));
+        }
         // The control channel's pointer events go in here, as a real
         // pointer's would (control-channel.md, Pointer commands).
         let browser_open = self.browser.is_some() && self.help.is_none();
         let patches_open = self.patches.is_some() && self.chooser.is_none();
         let matrix_keys = self.matrix.tab == RightTab::Matrix && self.matrix.focused;
+        let question_open = self.question.is_some();
         pointer::Injector::new(layers, self, move |key, status| {
-            // As the subscriptions do: `keyboard::listen` passes on what no
-            // widget took, and the open browser hears every key.
+            // As the subscriptions do: an open question has the keys, except
+            // Panic's. One key must not answer it and also reach what is
+            // behind it, once the answer has closed it.
+            if question_open {
+                let event = iced::Event::Keyboard(key);
+                return [
+                    question::key(event.clone(), status, iced::window::Id::unique()),
+                    panic::key(event, status, iced::window::Id::unique()),
+                ]
+                .into_iter()
+                .flatten()
+                .collect();
+            }
+            // `keyboard::listen` passes on what no widget took, and the open
+            // browser hears every key.
             let mut messages = Vec::new();
             if status == iced::event::Status::Ignored {
                 messages.push(Message::Key(key.clone()));

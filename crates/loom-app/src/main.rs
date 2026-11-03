@@ -46,6 +46,7 @@ mod preferences;
 mod probe_menu;
 #[cfg(test)]
 mod qa_tests;
+mod question;
 mod recovery;
 mod scene;
 mod screenshot;
@@ -422,6 +423,8 @@ enum Message {
     Licence(licence_chooser::Message),
     /// A message for the open patches browser.
     Patches(patches::Message),
+    /// An answer or a key for the open question (`docs/design/files.md`).
+    Question(question::Message),
     /// The clipboard was read for a paste at a world point, not yet snapped
     /// (`docs/design/clipboard.md`).
     /// `generation` is the engine's when the read began: a result that
@@ -480,6 +483,90 @@ impl Message {
                 | Self::BenchDone
                 | Self::UnknownLabelDraft { .. }
         )
+    }
+
+    /// True for what still runs while a question is open: the question
+    /// itself, and everything that keeps the music going and the screen
+    /// honest. A hardware knob keeps working, and a stray click or key does
+    /// not reach the patch (files.md, Asking before losing work).
+    ///
+    /// No wildcard, on purpose: a new message must choose a side.
+    fn allowed_during_question(&self) -> bool {
+        match self {
+            Self::Question(_)
+            | Self::Panic
+            | Self::MidiPoll
+            | Self::AudioPoll
+            | Self::InputAudio(_)
+            | Self::BenchDone
+            | Self::Control(_)
+            | Self::ControlFrame(_)
+            | Self::Located { .. }
+            | Self::Frame(_)
+            | Self::Tick
+            | Self::Audio(_)
+            | Self::LiveFrame
+            | Self::Lights(_)
+            | Self::Meters(_)
+            | Self::Telemetry(_)
+            | Self::Autosave
+            | Self::Midi => true,
+            // The canvas ends what it was doing when it loses input. Those
+            // must land, or a button stays held behind the question.
+            Self::Canvas(event) => matches!(
+                event,
+                CanvasEvent::ButtonReleased { .. }
+                    | CanvasEvent::GestureEnd
+                    | CanvasEvent::ArrowGroupEnd
+                    | CanvasEvent::AssignCancel
+            ),
+            // Only key presses act. A release ends what a press began.
+            Self::Key(event) => !matches!(event, iced::keyboard::Event::KeyPressed { .. }),
+            // A close asks over the browser, and Cancel returns to it: rows
+            // read meanwhile must not go missing.
+            Self::Patches(message) => matches!(message, patches::Message::Found { .. }),
+            Self::DropRow(_)
+            | Self::Param { .. }
+            | Self::OpenBrowser
+            | Self::ShowHelp
+            | Self::ShowShortcuts
+            | Self::ShowModuleHelp(_)
+            | Self::CloseHelp
+            | Self::HelpExample
+            | Self::HelpLink(_)
+            | Self::CloseTileMenu
+            | Self::Browser(_)
+            | Self::ProbeMenu(_)
+            | Self::AddProbe { .. }
+            | Self::HoldNote
+            | Self::File(_)
+            | Self::Measure(_)
+            | Self::Animate(_)
+            | Self::Learn(_)
+            | Self::Unmap { .. }
+            | Self::Undo
+            | Self::HistoryKey { .. }
+            | Self::Redo
+            | Self::ParamValue { .. }
+            | Self::Choice { .. }
+            | Self::Range { .. }
+            | Self::SliderReleased
+            | Self::AddModulation { .. }
+            | Self::Assign { .. }
+            | Self::Depth { .. }
+            | Self::Polarity { .. }
+            | Self::Enabled { .. }
+            | Self::Unassign(_)
+            | Self::UnknownLabelDraft { .. }
+            | Self::UnknownLabelApply { .. }
+            | Self::Matrix(_)
+            | Self::MatrixKey(_)
+            | Self::SelectModule(_)
+            | Self::Preferences(_)
+            | Self::PatchInfo(_)
+            | Self::Licence(_)
+            | Self::Pasted { .. } => false,
+        }
     }
 }
 
@@ -573,6 +660,9 @@ struct App {
     chooser: Option<licence_chooser::Chooser>,
     /// Your patches browser, while it is open.
     patches: Option<patches::PatchBrowser>,
+    /// The question over everything else, while one is open. While it is,
+    /// most messages are dropped (`Message::allowed_during_question`).
+    question: Option<question::Question>,
     /// Counts openings of the patches browser, so files read for an
     /// earlier one are dropped.
     patches_open: u64,
@@ -930,6 +1020,9 @@ impl App {
             _ => FrameCause::Other,
         };
         loom_canvas::stats::request_frame(cause);
+        if self.question.is_some() && !message.allowed_during_question() {
+            return Task::none();
+        }
         // A mode change the engine's full queue refused goes again now.
         self.send_pending_safety();
         if !message.keeps_patch() {
@@ -941,6 +1034,10 @@ impl App {
         let task = match message {
             Message::Browser(message) => self.browser_message(message),
             Message::Patches(message) => self.patches_message(message),
+            Message::Question(message) => {
+                self.question_message(message);
+                Task::none()
+            }
             Message::File(FileAction::Browse) => self.open_patches(),
             Message::Key(iced::keyboard::Event::KeyPressed { key, modifiers, .. })
                 if modifiers.command()
@@ -1014,6 +1111,7 @@ impl App {
             && self.rig.window.is_none()
             && self.chooser.is_none()
             && self.patches.is_none()
+            && self.question.is_none()
     }
 
     /// Opens your patches browser over the library folder, which is read
@@ -1047,9 +1145,7 @@ impl App {
             patches::Outcome::Close => self.patches = None,
             patches::Outcome::Open(path) => {
                 self.patches = None;
-                if self.can_discard() {
-                    self.open_path(&path);
-                }
+                self.after_discard(question::AfterDiscard::OpenPath(path));
             }
         }
         task.map(Message::Patches)
@@ -1187,10 +1283,7 @@ impl App {
                 let example = self.help.as_ref().and_then(|help| help.model.example.clone());
                 if let Some(example) = example {
                     match Patch::from_ron(&example) {
-                        Ok(patch) if self.can_discard() => {
-                            self.replace(Source::Recovered(Box::new(patch)));
-                        }
-                        Ok(_) => {}
+                        Ok(patch) => self.after_discard(question::AfterDiscard::Example(Box::new(patch))),
                         Err(error) => self.alerts.say(format!("Could not open example: {error}")),
                     }
                 }
@@ -1220,7 +1313,7 @@ impl App {
                 }
             }
             Message::Licence(message) => self.licence_message(message),
-            Message::Patches(_) => {}
+            Message::Patches(_) | Message::Question(_) => {}
             Message::Key(iced::keyboard::Event::KeyPressed { key, .. }) if self.chooser.is_some() => {
                 // The chooser takes Escape and keeps other keys from the
                 // canvas and the windows behind it.

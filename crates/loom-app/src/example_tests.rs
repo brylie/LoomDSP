@@ -149,8 +149,11 @@ fn opening_an_example_from_a_file_gives_a_copy() {
 
     turn_knob(&mut app);
     let _ = app.update(Message::File(crate::FileAction::Close));
-    assert_eq!(fake::asked(), vec![Asked::Discard("subtractive (example)".to_string())]);
-    assert!(!app.quit, "the fake answers Cancel");
+    assert_eq!(
+        app.ui_snapshot().question.unwrap().title,
+        "Save changes to \"subtractive (example)\"?"
+    );
+    assert!(!app.quit, "it waits for the answer");
 }
 
 /// A folder that is only named `examples`, outside the bundled one, holds

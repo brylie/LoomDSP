@@ -375,6 +375,7 @@ impl App {
             patch_info: crate::patch_info::State::new(&Metadata::default()),
             chooser: None,
             patches: None,
+            question: None,
             patches_open: 0,
             help: None,
             tile_menu: None,

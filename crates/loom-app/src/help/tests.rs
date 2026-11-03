@@ -1,4 +1,5 @@
 use super::*;
+use crate::question::{Answer, Message as QuestionMessage};
 use crate::{CanvasEvent, Message, files, tests, ui_test::Ui};
 use iced::{
     Point,
@@ -143,16 +144,19 @@ fn example_button_honors_unsaved_changes() {
     ui.move_to(at);
     ui.press();
     ui.release();
+    assert!(ui.app.question.is_some(), "it asks first");
+    let _ = ui
+        .app
+        .update(Message::Question(QuestionMessage::Answer(Answer::Cancel)));
     assert!(ui.app.help.is_some(), "cancellation keeps the help open");
     assert!(ui.app.unsaved());
-    assert!(matches!(
-        files::fake::asked().as_slice(),
-        [files::fake::Asked::Discard(_)]
-    ));
 
-    files::fake::answer_discard(files::Choice::DontSave);
     ui.press();
     ui.release();
+    assert!(ui.app.question.is_some(), "it asks again");
+    let _ = ui
+        .app
+        .update(Message::Question(QuestionMessage::Answer(Answer::DontSave)));
     assert!(ui.app.help.is_none());
     assert!(!ui.app.unsaved());
     assert!(ui.app.document.file().is_none());
@@ -165,10 +169,6 @@ fn example_button_honors_unsaved_changes() {
             .count(),
         1
     );
-    assert!(matches!(
-        files::fake::asked().as_slice(),
-        [files::fake::Asked::Discard(_)]
-    ));
 }
 
 /// Saving from the unsaved-changes dialog writes the old patch first.
@@ -190,20 +190,17 @@ fn example_button_saves_the_old_patch_when_requested() {
     ui.tap(Key::Named(Named::F1), Modifiers::default());
     let _ = files::fake::asked();
     files::fake::answer_save(Some(destination.clone()));
-    files::fake::answer_discard(files::Choice::Save);
     let at = ui.text("Open example").expect("example button").center();
     ui.move_to(at);
     ui.press();
     ui.release();
+    let _ = ui.app.update(Message::Question(QuestionMessage::Answer(Answer::Save)));
     let saved = loom_patch::Patch::load(&destination).expect("old patch was saved");
     let gain = saved.modules.iter().find(|module| module.id == 5).unwrap().params["gain"];
     assert_eq!(gain, value);
     assert!(ui.app.document.file().is_none(), "the example is an untitled copy");
     assert!(!ui.app.unsaved());
-    assert!(matches!(
-        files::fake::asked().as_slice(),
-        [files::fake::Asked::Discard(_), files::fake::Asked::Save(_)]
-    ));
+    assert!(matches!(files::fake::asked().as_slice(), [files::fake::Asked::Save(_)]));
     files::fake::answer_save(None);
 }
 
@@ -223,10 +220,7 @@ fn example_uses_existing_unsaved_changes_flow() {
     let _ = files::fake::asked();
     let _ = ui.app.update(Message::HelpExample);
     assert!(ui.app.help.is_some());
-    assert!(matches!(
-        files::fake::asked().as_slice(),
-        [files::fake::Asked::Discard(_)]
-    ));
+    assert!(ui.app.question.is_some());
     let mut clean = Ui::open("subtractive.ron");
     let _ = clean.app.update(Message::Canvas(CanvasEvent::Select(vec![4])));
     let _ = clean.app.update(Message::ShowHelp);

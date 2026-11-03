@@ -39,7 +39,7 @@ fn parses_commands_and_rejects_unknown_ones() {
 #[test]
 fn file_shortcuts_are_refused() {
     let cmd = keyboard::Modifiers::COMMAND;
-    for c in ["n", "o", "s"] {
+    for c in ["o", "s"] {
         let key = keyboard::Key::Character(c.into());
         assert!(refuse_dialog_keys(&key, cmd).is_err(), "{c}");
         assert!(
@@ -594,7 +594,7 @@ fn toolbar_refuses_dialogs_disabled_buttons_and_unknown_names() {
     // No audio: Hold note is disabled. Nothing done yet: nor are Undo
     // and Redo.
     let mut app = App::new(crate::tests::app_args());
-    for name in ["new", "open", "save", "save-as"] {
+    for name in ["open", "save", "save-as"] {
         let error = run(&mut app, &format!(r#"{{"cmd": "toolbar", "button": "{name}"}}"#)).unwrap_err();
         assert!(error.contains("opens a dialog"), "{name}: {error}");
     }
@@ -607,7 +607,10 @@ fn toolbar_refuses_dialogs_disabled_buttons_and_unknown_names() {
         assert!(error.contains(reason), "{name}: {error}");
     }
     let error = run(&mut app, r#"{"cmd": "toolbar", "button": "MIDI learn"}"#).unwrap_err();
-    assert!(error.contains("buttons: learn, hold, panic, undo, redo"), "{error}");
+    assert!(
+        error.contains("buttons: new, learn, hold, panic, undo, redo"),
+        "{error}"
+    );
     let error = run(&mut app, r#"{"cmd": "toolbar", "button": "add"}"#).unwrap_err();
     assert!(error.contains("`add` command"), "{error}");
 }
@@ -1468,5 +1471,112 @@ fn open_and_save_failures_answer_with_the_reason() {
         crate::files::fake::asked(),
         Vec::new(),
         "no dialog while the channel is on"
+    );
+}
+
+/// An app with the control channel on and unsaved changes.
+fn scripted_with_changes() -> App {
+    let mut app = App::new(crate::tests::app_args());
+    app.control.push(Listener::Script(PathBuf::from("unused")));
+    app.edit(|app| {
+        app.controller.add_module("loom.osc.sine").unwrap();
+        app.commit();
+    });
+    assert!(app.unsaved());
+    app
+}
+
+/// Rule 9: the `new`, `open`, and `quit` commands never ask. They drop
+/// unsaved changes (S5).
+#[test]
+fn commands_never_raise_the_question() {
+    let mut app = scripted_with_changes();
+    run(&mut app, r#"{"cmd": "new"}"#).unwrap();
+    assert!(app.question.is_none());
+    assert!(!app.unsaved());
+
+    let mut app = scripted_with_changes();
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches/sine.ron");
+    run(
+        &mut app,
+        &serde_json::json!({ "cmd": "open", "path": path }).to_string(),
+    )
+    .unwrap();
+    assert!(app.question.is_none());
+
+    let mut app = scripted_with_changes();
+    run(&mut app, r#"{"cmd": "quit"}"#).unwrap();
+    assert!(app.question.is_none());
+    assert!(app.quit);
+}
+
+/// A failed scripted `open` answers with the reason, and leaves no question
+/// that would block every later command.
+#[test]
+fn a_failed_open_leaves_no_question() {
+    let mut app = scripted_with_changes();
+    let line = serde_json::json!({ "cmd": "open", "path": "/nowhere/missing.ron" }).to_string();
+    let error = run(&mut app, &line).unwrap_err();
+    assert!(error.starts_with("Could not open the patch"), "{error}");
+    assert!(app.question.is_none());
+}
+
+/// Rule 9: the New button raises the question, the snapshot shows it, and a
+/// script can answer it by the buttons' names.
+#[test]
+fn a_script_can_raise_and_answer_the_question() {
+    let mut app = scripted_with_changes();
+    run(&mut app, r#"{"cmd": "toolbar", "button": "new"}"#).unwrap();
+    let snapshot = run(&mut app, r#"{"cmd": "snapshot"}"#).unwrap();
+    let question = &snapshot["snapshot"]["question"];
+    assert_eq!(question["buttons"], serde_json::json!(["save", "dont-save", "cancel"]));
+    assert_eq!(question["highlight"], "save");
+    assert!(app.unsaved(), "it waits for the answer");
+
+    run(&mut app, r#"{"cmd": "toolbar", "button": "cancel"}"#).unwrap();
+    assert!(app.question.is_none());
+    assert!(app.unsaved(), "Cancel changes nothing");
+
+    run(&mut app, r#"{"cmd": "toolbar", "button": "new"}"#).unwrap();
+    run(&mut app, r#"{"cmd": "toolbar", "button": "dont-save"}"#).unwrap();
+    assert!(app.question.is_none());
+    assert!(!app.unsaved());
+}
+
+/// Rule 9: what an open question blocks is refused with an error, so a reply
+/// never says that something worked when nothing happened. Panic still works.
+#[test]
+fn what_a_question_blocks_is_refused() {
+    let mut app = scripted_with_changes();
+    run(&mut app, r#"{"cmd": "toolbar", "button": "new"}"#).unwrap();
+    for line in [
+        r#"{"cmd": "toolbar", "button": "undo"}"#,
+        r#"{"cmd": "undo"}"#,
+        r#"{"cmd": "select", "modules": []}"#,
+        r#"{"cmd": "key", "key": "z", "modifiers": ["cmd"]}"#,
+    ] {
+        let error = run(&mut app, line).unwrap_err();
+        assert!(error.contains("a question is open"), "{line}: {error}");
+        assert!(error.contains("dont-save"), "{line}: {error}");
+    }
+    run(&mut app, r#"{"cmd": "panic"}"#).unwrap();
+    run(&mut app, r#"{"cmd": "toolbar", "button": "panic"}"#).unwrap();
+    assert!(app.question.is_some());
+}
+
+/// Rule 9: answering Save on a patch with no file cannot open a native
+/// picker with nobody to close it. It stops, and nothing is lost.
+#[test]
+fn a_scripted_save_answer_opens_no_picker() {
+    let mut app = scripted_with_changes();
+    let _ = crate::files::fake::asked();
+    run(&mut app, r#"{"cmd": "toolbar", "button": "new"}"#).unwrap();
+    run(&mut app, r#"{"cmd": "toolbar", "button": "save"}"#).unwrap();
+    assert_eq!(crate::files::fake::asked(), Vec::new(), "no dialog");
+    assert!(app.unsaved(), "nothing is lost");
+    assert!(
+        app.alerts.status().contains("use the `save` command"),
+        "{}",
+        app.alerts.status()
     );
 }

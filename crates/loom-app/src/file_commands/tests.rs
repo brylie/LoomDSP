@@ -5,10 +5,10 @@ use crate::tests::app;
 use crate::ui_test::Ui;
 use iced::keyboard::{Key, Modifiers};
 
-/// A patch that does not load opens an error dialog, and the status line
-/// says the same. The running patch stays.
+/// A patch that does not load shows the reason in the window, and the status
+/// line says the same. The running patch stays.
 #[test]
-fn a_failed_open_shows_the_reason_in_a_dialog() {
+fn a_failed_open_shows_the_reason_in_the_window() {
     let tmp = TempDir::new("open-fails");
     let mut app = app();
     let _ = fake::asked();
@@ -19,14 +19,14 @@ fn a_failed_open_shows_the_reason_in_a_dialog() {
     let status = app.alerts.status().to_string();
     assert!(status.starts_with("Could not open the patch"), "{status}");
     assert!(status.ends_with("The current patch is unchanged."), "{status}");
-    assert_eq!(fake::asked(), vec![Asked::Error(status)]);
+    assert_eq!(app.ui_snapshot().question.unwrap().text, status);
     assert_eq!(app.generation, generation, "the engine was not rebuilt");
 }
 
-/// A save that cannot be written opens an error dialog after Save As,
+/// A save that cannot be written shows the reason in the window after Save As,
 /// and the patch stays untitled.
 #[test]
-fn a_failed_save_shows_the_reason_in_a_dialog() {
+fn a_failed_save_shows_the_reason_in_the_window() {
     let tmp = TempDir::new("save-fails");
     // A file where the folder should be: the save cannot be written.
     std::fs::write(tmp.0.join("blocked"), "").unwrap();
@@ -40,10 +40,7 @@ fn a_failed_save_shows_the_reason_in_a_dialog() {
     assert!(status.starts_with("Could not save \"patch.ron\""), "{status}");
     assert!(status.ends_with("Your changes are not saved."), "{status}");
     let asked = fake::asked();
-    assert!(
-        matches!(asked.as_slice(), [Asked::Save(_), Asked::Error(_)]),
-        "{asked:?}"
-    );
-    assert_eq!(asked[1], Asked::Error(status));
+    assert!(matches!(asked.as_slice(), [Asked::Save(_)]), "{asked:?}");
+    assert_eq!(ui.app.ui_snapshot().question.unwrap().text, status);
     assert_eq!(ui.app.document.file(), None);
 }

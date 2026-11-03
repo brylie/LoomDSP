@@ -298,10 +298,16 @@ fn refilters_grow_with_batches_not_files() {
     let dir = generated("batches", FILES);
     let still = Instant::now();
     let mut batches = Vec::new();
-    read_rows(&dir, &AtomicBool::new(false), Row::read, || still, |rows| {
-        batches.push(rows);
-        true
-    });
+    read_rows(
+        &dir,
+        &AtomicBool::new(false),
+        Row::read,
+        || still,
+        |rows| {
+            batches.push(rows);
+            true
+        },
+    );
     assert_eq!(batches.len(), FILES.div_ceil(BATCH_ROWS));
 
     let mut browser = PatchBrowser::new(1, dir.clone());

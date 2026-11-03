@@ -48,6 +48,8 @@ pub struct UiSnapshot {
     pub inspector: Inspector,
     /// The open module help view, if any.
     pub help: Option<crate::help::Model>,
+    /// The open question, if any (`docs/design/files.md`).
+    pub question: Option<crate::question::Model>,
     /// The active right-hand tab and visible modulation matrix rows.
     pub matrix: MatrixModel,
     /// The stats bar's audio numbers.
@@ -538,6 +540,7 @@ impl App {
             cables,
             inspector: self.inspector_model(),
             help: self.help.as_ref().map(|help| help.model.clone()),
+            question: self.question.as_ref().map(crate::question::Question::model),
             matrix: self.matrix.model(self.controller.graph(), &self.selection),
             stats: self.stats_model(),
             pointer: self.pointer_state(),
