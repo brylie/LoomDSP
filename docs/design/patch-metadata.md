@@ -124,7 +124,7 @@ FR-SHARE-06, [#246](https://github.com/brylie/LoomDSP/issues/246).
 - **Opening:** File > Browse patches, or **Ctrl+Shift+O** (Cmd+Shift+O), opens an overlay over the canvas, like the [module browser](module-browser.md).
 - **What it shows:** a search field, the author, tag, and licence filters above, and a list. Each row shows the name, authors, tags as chips, the licence's short name, and the date changed. Newest first. A file that does not load shows its file name and "Could not read", and cannot be opened from here.
 - **Search** matches the name, description, and tags, ignoring case. It combines with the filters (all must match).
-- **Keys:** typing goes to the search field. Up and Down move in the list. Enter opens the highlighted patch, asking first about unsaved changes as Open does. Escape closes the overlay. Tab reaches the filters (NFR-UX-01).
+- **Keys:** typing goes to the search field. Up and Down move in the list. Enter opens the highlighted patch, asking first about unsaved changes as Open does. Escape closes the overlay. Tab should reach the filters (NFR-UX-01), but this is not built: see **Tab to the filters** below.
 - **Reading files:** the folder is read on a thread off the UI thread when the overlay opens; rows appear as files are read. Only the metadata fields are kept. *Why:* a folder of hundreds of patches must not freeze the window.
 - Inserting a patch as a sub-patch is done from the module browser ([sub-patches](sub-patches.md#library)), not here. *Why:* this browser opens patches; the module browser adds things to the canvas.
 
@@ -184,7 +184,7 @@ Points the spec left open, settled while building (M2). Each is small; say so in
 - **"Your name"** is saved on Enter or when the Preferences window closes, so a New made with the window still open uses the name saved before.
 - **Deprecated SPDX identifiers**, such as `GPL-3.0` (now `GPL-3.0-only`), are read strictly: they show as "Unrecognised licence" and **Other** refuses them. Identifiers newer than the `spdx` crate's list do too, until the crate is updated.
 - **Browser rows** show tags as text joined by dots, not as chips, to keep rows one line high. The browser opens from a **Browse** toolbar button (the app has no menu bar) and Ctrl+Shift+O.
-- **Tab to the filters** relies on Iced's own focus order; it has no test yet.
+- **Tab to the filters** does not work yet. Iced moves focus only when the app asks it to, and the app does not, so Tab stays in the search field (checked in the running app, 2026-11-03). The Author filter and the licence check boxes need a pointer today. Iced's check boxes cannot take focus at all, so those need more than a Tab handler.
 - **The description** is kept on save but not shown or edited in patch info yet (#512).
 - **Credit for parts** shows nothing until sub-patches exist (#51). The inspector already has the **Includes parts by** line, empty.
 
