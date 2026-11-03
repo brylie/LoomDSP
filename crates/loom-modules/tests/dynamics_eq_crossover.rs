@@ -2,6 +2,7 @@
 //! module API and the engine (`docs/design/dynamics-eq-crossover.md`). The
 //! algorithms have their own tests against theory in `loom-dsp`.
 
+use loom_core::{EngineConfig, ProbeKind, create_engine};
 use loom_modules::{dynamics::DYNAMICS, eq::EQ, filter::CROSSOVER};
 use loom_test::{Harness, Signal};
 
@@ -267,4 +268,61 @@ fn two_bands_silence_the_mid() {
         .param("bands", 0.0)
         .render();
     assert!(render.output("mid").iter().all(|&x| x == 0.0));
+}
+
+/// One gain for both sides: a loud left turns a quiet right down by the same
+/// amount, through the real engine. This is why the ports are `Stereo`.
+#[test]
+fn a_loud_side_turns_both_sides_down() {
+    for block in [1, 77, 512] {
+        let config = EngineConfig {
+            max_block: 512,
+            ..EngineConfig::with_sample_rate(RATE)
+        };
+        let mut parts = create_engine(loom_modules::registry(), config);
+        let c = &mut parts.controller;
+        let left = c.add_module("loom.math.constant").unwrap();
+        let right = c.add_module("loom.math.constant").unwrap();
+        let join = c.add_module("loom.mix.join").unwrap();
+        let dynamics = c.add_module("loom.dyn.dynamics").unwrap();
+        let split = c.add_module("loom.mix.split").unwrap();
+        c.set_param_named(left, "value", 1.0).unwrap();
+        c.set_param_named(right, "value", 0.01).unwrap();
+        c.set_param_named(dynamics, "threshold", -20.0).unwrap();
+        c.set_param_named(dynamics, "knee", 0.0).unwrap();
+        c.set_param_named(dynamics, "attack", 0.000_1).unwrap();
+        c.connect_named(left, "out", join, "left").unwrap();
+        c.connect_named(right, "out", join, "right").unwrap();
+        c.connect_named(join, "out", dynamics, "in").unwrap();
+        c.connect_named(dynamics, "out", split, "in").unwrap();
+        let left_out = c.output_ref(split, "left").unwrap();
+        let right_out = c.output_ref(split, "right").unwrap();
+        let left_probe = c.add_probe(left_out, ProbeKind::Scope).unwrap();
+        let right_probe = c.add_probe(right_out, ProbeKind::Scope).unwrap();
+        c.commit().unwrap();
+        let (mut out_left, mut out_right) = (vec![0.0; block], vec![0.0; block]);
+        let (mut last_left, mut last_right) = (0.0, 0.0);
+        for _ in 0..RATE as usize / block {
+            parts.engine.process(&mut out_left, &mut out_right);
+            for chunk in parts.telemetry.scope() {
+                let Some(&last) = chunk.samples().last() else {
+                    continue;
+                };
+                if chunk.probe == left_probe {
+                    last_left = last;
+                } else if chunk.probe == right_probe {
+                    last_right = last;
+                }
+            }
+        }
+        // 20 dB over at a ratio of 4 is 15 dB down.
+        let expected = -15.0;
+        assert!(
+            (db(last_left) - expected).abs() < 0.1,
+            "block {block}: left {}",
+            db(last_left)
+        );
+        let right_gain = db(last_right / 0.01);
+        assert!((right_gain - expected).abs() < 0.1, "block {block}: right {right_gain}");
+    }
 }

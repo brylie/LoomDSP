@@ -143,23 +143,23 @@ The signal passes through five sections in this order.
 
 ## Acceptance criteria
 
-- [ ] All three pass the harness at block sizes 1, 77, and 512, with reference renders.
-- [ ] Each algorithm has direct tests against theory, and is added to `no_alloc.rs` and `static_checks.rs`.
-- [ ] Given Compress at any tested threshold and ratio and a steady tone, the settled output level matches the static curve within 0.1 dB.
-- [ ] Given Limit and a signal far above the threshold, no output sample passes the threshold, at any block size.
-- [ ] Given a signal that sits at the threshold of Gate or Duck, the state does not chatter.
-- [ ] Given a stereo input with a hit on one side only, the two sides get the same gain.
-- [ ] Given a cable on `sidechain`, the gain follows it and not `in`.
-- [ ] The curve's function and the audio agree: the settled gain equals the curve within 0.1 dB, across the modes.
-- [ ] With `match` on, a compressed steady signal settles within 0.5 dB of the input's weighted loudness, and the filter matches the BS.1770 response.
-- [ ] Given EQ with every gain at 0 and both cuts Off, the output equals the input bit for bit.
-- [ ] Each EQ section's measured response matches its analogue response within 0.1 dB, away from the top of the range where warping applies.
-- [ ] The Crossover's sum is flat within 0.01 dB from 20 Hz to 20 kHz, with two and with three bands.
-- [ ] Each Crossover band falls at 24 dB per octave well past its split.
-- [ ] `docs/learn/` has an explainer on dynamics detection.
-- [ ] A gain reduction meter works on a display value, in the app, and in `--dump-ui`.
+- [x] All three pass the harness at block sizes 1, 77, and 512, with reference renders.
+- [x] Each algorithm has direct tests against theory, and is added to `no_alloc.rs` and `static_checks.rs`.
+- [x] Given Compress at any tested threshold and ratio and a steady tone, the settled output level matches the static curve within 0.1 dB.
+- [x] Given Limit and a signal far above the threshold, no output sample passes the threshold, at any block size.
+- [x] Given a signal that sits at the threshold of Gate or Duck, the state does not chatter.
+- [x] Given a stereo input with a hit on one side only, the two sides get the same gain.
+- [x] Given a cable on `sidechain`, the gain follows it and not `in`.
+- [x] The curve's function and the audio agree: the settled gain equals the curve within 0.1 dB, across the modes.
+- [x] With `match` on, a compressed steady signal settles within 0.5 dB of the input's weighted loudness, and the filter matches the BS.1770 response.
+- [x] Given EQ with every gain at 0 and both cuts Off, the output equals the input bit for bit.
+- [x] Each EQ section's measured response matches its analogue response within 0.1 dB, away from the top of the range where warping applies.
+- [x] The Crossover's sum is flat within 0.01 dB from 20 Hz to 20 kHz, with two and with three bands.
+- [x] Each Crossover band falls at 24 dB per octave well past its split.
+- [x] `docs/learn/` has an explainer on dynamics detection.
+- [x] A gain reduction meter works on a display value, in the app, and in `--dump-ui`.
 
-Manual: in the running app with `--fake-audio`, drive each module through the control channel and check the curve and the meter in a screenshot.
+Manual, done: `--screenshot-window`, `--screenshot`, and `--dump-ui --frames` on a patch that chains all three, in Compress and Limit. The curves follow their settings, hidden controls close up, and the meter text read `Reduction: -22.0 dB`. Not done: listening, and driving it on a live audio device.
 
 ## Out of scope
 
