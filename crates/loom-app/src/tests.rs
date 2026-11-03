@@ -23,12 +23,13 @@ fn a_full_queue_retries_staged_modules() {
     assert_eq!(app.controller.last_report().modules, 4);
 }
 
-/// A full queue fixes itself, so it is a warning and the commit retries. A
-/// commit that cannot retry leaves the graph ahead of the engine, with the
-/// undo history gone, so it stays on screen.
+/// A full queue fixes itself, so with no undo history to lose it is a warning
+/// and the commit retries. A commit that cannot retry leaves the graph ahead
+/// of the engine, so it stays on screen.
 #[test]
 fn a_commit_that_cannot_retry_is_kept() {
     let mut app = app();
+    assert!(app.edits.history.undo_step().is_none());
     app.commit_failed(&LoomError::QueueFull);
     assert!(app.retry_commit);
     assert_eq!(app.alerts.severity(), alerts::Severity::Warning);
@@ -40,6 +41,39 @@ fn a_commit_that_cannot_retry_is_kept() {
     assert_eq!(app.alerts.newest_kept().unwrap().cause, alerts::Cause::Other);
     app.alerts.say("saved");
     assert!(app.alerts.kept_field().is_some(), "a later message does not hide it");
+}
+
+/// A full queue clears the undo history, and a retry that works does not bring
+/// it back. So the loss stays on screen after the retry's own message.
+#[test]
+fn a_full_queue_keeps_the_loss_of_the_undo_history_on_screen() {
+    let mut app = app_with_engine(EngineConfig {
+        command_capacity: 8,
+        ..EngineConfig::default()
+    });
+    let module = app.controller.add_module("loom.osc.sine").unwrap();
+    app.edit(|app| {
+        app.controller.remove_module(module).unwrap();
+        assert!(app.commit());
+    });
+    assert!(app.edits.history.undo_step().is_some(), "there is history to lose");
+    for _ in 0..8 {
+        app.controller.add_module("loom.osc.sine").unwrap();
+    }
+    assert!(!app.commit());
+    assert!(app.retry_commit, "it still retries");
+    assert!(app.edits.history.undo_step().is_none());
+    assert!(
+        app.alerts.status().contains("undo history cleared"),
+        "{}",
+        app.alerts.status()
+    );
+
+    let _ = app.update(Message::Tick);
+    assert!(!app.retry_commit, "the retry worked");
+    let kept = app.alerts.kept_field().expect("the loss stays on screen");
+    assert!(kept.text.contains("undo history cleared"), "{}", kept.text);
+    assert!(kept.dismissible);
 }
 
 pub(crate) fn app() -> App {

@@ -259,10 +259,7 @@ impl App {
                     // history is already cleared by `commit`.
                     self.alerts.error(
                         alerts::Cause::Other,
-                        format!(
-                            "{verb} could not reach the engine ({}); undo history cleared",
-                            self.alerts.status()
-                        ),
+                        format!("{verb} could not reach the engine: {}", self.alerts.status()),
                     );
                 }
             }
@@ -303,15 +300,24 @@ impl App {
         sent
     }
 
-    /// Says a commit failed. A full queue drains and the commit is retried, so
-    /// that is a warning. Anything else stays true: the graph differs from
-    /// what the engine plays, and the undo history is gone, so it is kept.
+    /// Says a commit failed, before the undo history is cleared. A full queue
+    /// drains and the commit is retried, so with no history to lose that is a
+    /// warning. Anything else stays true (the graph differs from what the
+    /// engine plays), and lost history stays lost after a retry works, so
+    /// those are kept.
     pub(crate) fn commit_failed(&mut self, error: &LoomError) {
         self.retry_commit = matches!(error, LoomError::QueueFull);
-        if self.retry_commit {
-            self.alerts.warn(error.to_string());
+        let history = &self.edits.history;
+        let lost_history = history.undo_step().is_some() || history.redo_step().is_some();
+        let message = if lost_history {
+            format!("{error}; undo history cleared")
         } else {
-            self.alerts.error(alerts::Cause::Other, error.to_string());
+            error.to_string()
+        };
+        if self.retry_commit && !lost_history {
+            self.alerts.warn(message);
+        } else {
+            self.alerts.error(alerts::Cause::Other, message);
         }
     }
 
