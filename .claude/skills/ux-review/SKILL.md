@@ -79,6 +79,7 @@ Each of these has misled a review, or would have:
 - **Dialogs are not reachable.** The control channel never opens a file dialog. Say that they were not seen.
 - **A right-click on a tile's centre may hit a control.** After a right-click, check that the menu is in the image. `locate` finds the first match for its text, so "Help" can resolve to the inspector's button.
 - **A widget's `bounds` in the JSON is its grid cell, not its target.** A segment is 11 px high inside a 24 px cell. Do not measure targets from `bounds`. See the target question in the accessibility lens.
+- **A real pointer can interfere with a live run.** The window opens on the user's screen, and a real pointer event takes over from the script. A wheel or a click there can pan, zoom, or select. If a capture shows a change your script did not ask for, read `pointer` in the snapshot: a position you did not send means a real pointer. Run it again before reporting a finding.
 - **Preferences shows the machine's real device names.** Do not commit these captures, and do not treat your own device list as the only case.
 
 ## 2. First look

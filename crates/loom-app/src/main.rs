@@ -957,6 +957,18 @@ impl App {
             {
                 self.open_patches()
             }
+            Message::Key(iced::keyboard::Event::KeyPressed {
+                key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab),
+                modifiers,
+                ..
+            }) if !modifiers.command() && !modifiers.alt() && !self.tab_fields().is_empty() => {
+                iced::advanced::widget::operate(editing::StepFocus {
+                    fields: self.tab_fields(),
+                    backwards: modifiers.shift(),
+                    current: None,
+                })
+                .discard()
+            }
             Message::Canvas(CanvasEvent::Paste { world }) => {
                 let generation = self.generation;
                 iced::clipboard::read().map(move |text| Message::Pasted {

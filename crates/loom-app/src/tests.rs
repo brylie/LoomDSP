@@ -2503,3 +2503,53 @@ fn escape_from_a_text_box_gives_keys_back_to_the_canvas() {
         "Space toggles Run again: {after:?}"
     );
 }
+
+/// Tab moves through one view's text fields and wraps. It stays inside the
+/// patch browser, so focus cannot land on the form behind it, and a field
+/// outside the list keeps its focus.
+#[test]
+fn tab_moves_between_the_fields_of_one_view() {
+    use iced::advanced::widget::Id;
+    let [authors, tags] = crate::patch_info::TEXT_FIELDS;
+    let mut ui = typing_in_authors(false);
+    assert_eq!(ui.app.tab_fields(), &crate::patch_info::TEXT_FIELDS);
+    assert_eq!(ui.focused_field(), Some(Id::new(authors)), "the click focused Authors");
+
+    ui.step_focus(ui.app.tab_fields(), false);
+    assert_eq!(ui.focused_field(), Some(Id::new(tags)), "Tab goes to Tags");
+    ui.step_focus(ui.app.tab_fields(), false);
+    assert_eq!(ui.focused_field(), Some(Id::new(authors)), "Tab wraps to Authors");
+    ui.step_focus(ui.app.tab_fields(), true);
+    assert_eq!(ui.focused_field(), Some(Id::new(tags)), "Shift-Tab wraps back to Tags");
+
+    // In the patch browser the list is the browser's own, so Tab never goes
+    // to Authors behind it, even from its last field.
+    ui.app.patches = Some(crate::patches::PatchBrowser::new(1, PathBuf::from("unread")));
+    ui.redraw();
+    let [search, author] = crate::patches::TEXT_FIELDS;
+    ui.focus(search);
+    assert_eq!(ui.app.tab_fields(), &crate::patches::TEXT_FIELDS);
+    ui.step_focus(ui.app.tab_fields(), false);
+    assert_eq!(ui.focused_field(), Some(Id::new(author)));
+    ui.step_focus(ui.app.tab_fields(), false);
+    assert_eq!(ui.focused_field(), Some(Id::new(search)), "wrapped inside the browser");
+
+    // A named field that is not in the list keeps its focus.
+    ui.step_focus(&crate::patch_info::TEXT_FIELDS, false);
+    assert_eq!(ui.focused_field(), Some(Id::new(search)));
+}
+
+/// Tab goes forward and Shift-Tab back, wrapping at both ends. It takes three
+/// fields to see this: with two, both directions land on the same one.
+#[test]
+fn tab_steps_forward_and_shift_tab_back() {
+    use crate::editing::field_after;
+    use iced::advanced::widget::Id;
+    let fields = ["one", "two", "three"];
+    let step = |from: &'static str, backwards| field_after(&fields, Id::new(from), backwards);
+    assert_eq!(step("one", false), Id::new("two"));
+    assert_eq!(step("three", false), Id::new("one"), "forward wraps");
+    assert_eq!(step("two", true), Id::new("one"));
+    assert_eq!(step("one", true), Id::new("three"), "backward wraps");
+    assert_eq!(step("other", false), Id::new("other"), "a field not listed stays");
+}

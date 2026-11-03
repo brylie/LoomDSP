@@ -281,6 +281,43 @@ impl Ui {
         focused.0
     }
 
+    /// The ID of the focused field, if it has one, read as a focus step
+    /// reads it.
+    pub fn focused_field(&mut self) -> Option<iced::advanced::widget::Id> {
+        use iced::advanced::widget::operation::{self, Operation, Outcome};
+        let mut find = operation::focusable::find_focused();
+        {
+            let mut operation = operation::black_box(&mut find);
+            self.with_ui(|ui, renderer, _| ui.operate(renderer, &mut operation));
+        }
+        match Operation::finish(&find) {
+            Outcome::Some(id) => Some(id),
+            _ => None,
+        }
+    }
+
+    /// Runs a focus step as the runtime does: each stage over the whole
+    /// window, then the stage it hands on to.
+    pub fn step_focus(&mut self, fields: &'static [&'static str], backwards: bool) {
+        use iced::advanced::widget::operation::{Operation, Outcome};
+        let mut stage: Box<dyn Operation<()>> = Box::new(crate::editing::StepFocus {
+            fields,
+            backwards,
+            current: None,
+        });
+        loop {
+            {
+                let operation: &mut dyn Operation<()> = stage.as_mut();
+                self.with_ui(|ui, renderer, _| ui.operate(renderer, operation));
+            }
+            match stage.finish() {
+                Outcome::Chain(next) => stage = next,
+                _ => break,
+            }
+        }
+        self.redraw();
+    }
+
     /// Moves the pointer to a window point.
     pub fn move_to(&mut self, p: Point) -> Vec<Message> {
         self.cursor = mouse::Cursor::Available(p);

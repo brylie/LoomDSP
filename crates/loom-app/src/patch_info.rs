@@ -18,6 +18,10 @@ use serde::Serialize;
 
 /// The tag field's widget ID, so a test or a script can find it.
 pub const TAG_INPUT: &str = "patch-info-tag";
+/// The Authors box.
+const AUTHORS_INPUT: &str = "patch-info-authors";
+/// The form's text fields, in the order Tab moves between them.
+pub(crate) const TEXT_FIELDS: [&str; 2] = [AUTHORS_INPUT, TAG_INPUT];
 
 /// A patch info edit.
 #[derive(Debug, Clone)]
@@ -194,6 +198,7 @@ pub fn view<'a>(rows: PatchRows, authors: &'a text_editor::Content) -> Element<'
         text(rows.name).size(style::HEADING),
         label("Authors, one per line"),
         text_editor(authors)
+            .id(AUTHORS_INPUT)
             .placeholder("Your name")
             .on_action(move |action| msg(Message::Authors(action)))
             .size(style::CONTROL)

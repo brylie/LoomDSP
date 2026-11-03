@@ -1,8 +1,8 @@
 //! Edits and undo: grouping changes into undo steps, committing them to
 //! the engine, and the clipboard commands (`docs/design/undo.md`).
 
-use crate::{App, Message, browser, clipboard, undo};
-use iced::advanced::widget::operation::{Focusable, Outcome};
+use crate::{App, Message, RightTab, browser, clipboard, undo};
+use iced::advanced::widget::operation::{self, Focusable, Outcome};
 use iced::advanced::widget::{Id, Operation};
 use iced::{Point, Task};
 use loom_core::{LoomError, ModuleId};
@@ -14,6 +14,51 @@ use std::collections::BTreeSet;
 /// (undo.md, Gestures).
 pub(crate) fn text_field_focused() -> Task<bool> {
     iced::advanced::widget::operate(AnyFocused(false))
+}
+
+/// The field Tab moves to from `current`, wrapping at the ends, or `current`
+/// when it is not one of `fields`.
+pub(crate) fn field_after(fields: &[&'static str], current: Id, backwards: bool) -> Id {
+    let at = fields.iter().copied().position(|field| Id::new(field) == current);
+    match at {
+        Some(at) => {
+            let step = if backwards { fields.len() - 1 } else { 1 };
+            Id::new(fields[(at + step) % fields.len()])
+        }
+        None => current,
+    }
+}
+
+/// Moves focus to the next or previous of `fields`. With no named field in
+/// focus it changes nothing. Iced's own `focus_next` walks every field in the
+/// window, so it would go behind an open overlay (panels.md).
+pub(crate) struct StepFocus {
+    pub(crate) fields: &'static [&'static str],
+    pub(crate) backwards: bool,
+    pub(crate) current: Option<Id>,
+}
+
+impl Operation for StepFocus {
+    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
+        operate(self);
+    }
+
+    fn focusable(&mut self, id: Option<&Id>, _bounds: iced::Rectangle, state: &mut dyn Focusable) {
+        if state.is_focused() {
+            self.current = id.cloned();
+        }
+    }
+
+    fn finish(&self) -> Outcome<()> {
+        match &self.current {
+            Some(current) => Outcome::Chain(Box::new(operation::focusable::focus(field_after(
+                self.fields,
+                current.clone(),
+                self.backwards,
+            )))),
+            None => Outcome::None,
+        }
+    }
 }
 
 /// Records whether any focusable widget, with or without an ID, has focus.
@@ -35,6 +80,18 @@ impl Operation<bool> for AnyFocused {
 }
 
 impl App {
+    /// The text fields Tab moves between in the view on top now. None when
+    /// that view has fewer than two.
+    pub(crate) fn tab_fields(&self) -> &'static [&'static str] {
+        if self.patches.is_some() && self.chooser.is_none() {
+            &crate::patches::TEXT_FIELDS
+        } else if self.no_overlay() && self.matrix.tab == RightTab::Inspector && self.selection.is_empty() {
+            &crate::patch_info::TEXT_FIELDS
+        } else {
+            &[]
+        }
+    }
+
     /// Starts recording an edit: keeps the patch as it is now. Does nothing
     /// if one is already open, so a gesture's first call is the one that
     /// counts.

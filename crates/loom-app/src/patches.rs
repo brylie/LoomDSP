@@ -17,6 +17,10 @@ use std::time::SystemTime;
 
 /// The search field's widget ID: typing goes there when the browser opens.
 const SEARCH: &str = "patch-browser-search";
+/// The Author filter's field.
+const AUTHOR: &str = "patch-browser-author";
+/// The browser's text fields, in the order Tab moves between them.
+pub(crate) const TEXT_FIELDS: [&str; 2] = [SEARCH, AUTHOR];
 /// The list's widget ID, for keeping the highlight in view.
 const LIST: &str = "patch-browser-list";
 /// Height of one row. Fixed, so the list can scroll to a row.
@@ -337,6 +341,7 @@ impl PatchBrowser {
             .size(style::CONTROL)
             .padding(6);
         let author = text_input("Author", &self.filter.author)
+            .id(AUTHOR)
             .on_input(Message::Author)
             .on_submit(Message::Submit)
             .size(style::CONTROL)
