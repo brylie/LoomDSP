@@ -194,5 +194,11 @@ fn an_example_copy_saves_into_the_library() {
     fake::answer_save(None);
     assert!(!app.save_as());
     assert_eq!(fake::asked(), [Asked::Save(Some(library.join("subtractive.ron")))]);
+    // A current file named without a folder, as `loom-app foo.ron` gives,
+    // still starts at that file, not in the library.
+    app.document
+        .saved(PathBuf::from("foo.ron"), loom_patch::Patch::new("Foo"));
+    assert!(!app.save_as());
+    assert_eq!(fake::asked(), [Asked::Save(Some(PathBuf::from("foo.ron")))]);
     fake::use_examples(None);
 }

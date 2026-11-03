@@ -95,12 +95,17 @@ impl App {
         // A patch with no file yet starts in the library folder, made when
         // it is missing, under a free name taken from the patch name
         // (patch-metadata.md, Your patches browser).
-        // A start with a folder (the current file, or a recovered copy's
-        // folder) wins. A bare file name, as an example copy suggests,
-        // goes in the library like a new patch, keeping its name.
-        let start = match self.document.save_start().map(Path::to_path_buf) {
-            Some(path) if path.parent().is_some_and(|dir| !dir.as_os_str().is_empty()) => Some(path),
-            hint => {
+        // The current file wins, then a hint with a folder (a recovered
+        // copy's). A bare hint, as an example copy suggests, goes in the
+        // library like a new patch, keeping its name.
+        let start = match (
+            self.document.file().map(Path::to_path_buf),
+            self.document.save_start().map(Path::to_path_buf),
+        ) {
+            // The current file always wins, even one opened by a bare name.
+            (Some(file), _) => Some(file),
+            (None, Some(path)) if path.parent().is_some_and(|dir| !dir.as_os_str().is_empty()) => Some(path),
+            (None, hint) => {
                 let name = hint.as_deref().and_then(Path::file_stem).map_or_else(
                     || self.document.name().to_string(),
                     |stem| stem.to_string_lossy().into_owned(),
