@@ -1,6 +1,6 @@
 # loom-dsp
 
-Pure DSP algorithms from [LoomDSP](https://github.com/brylie/LoomDSP): filters, oscillator shapes, a phase generator, noise, a seeded random stream, an envelope, a slew limiter, a delay line, an all-pass, and a limiter. There are no ports, no graph, and no real-time host, and the crate has no dependencies. Not published yet, and the API can change until it is.
+Pure DSP algorithms from [LoomDSP](https://github.com/brylie/LoomDSP): filters, oscillator shapes, a phase generator, noise, a seeded random stream, Euclidean rhythms, an envelope, a slew limiter, a delay line, an all-pass, and a limiter. There are no ports, no graph, and no real-time host, and the crate has no dependencies. Not published yet, and the API can change until it is.
 
 An algorithm is a plain struct that holds state. Usually `tick` processes one sample and `reset` clears it. Coefficients are a separate small `Copy` type, so you decide how often to compute them. Audio-rate modulation computes them each sample, and a fixed filter computes them once.
 

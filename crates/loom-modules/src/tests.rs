@@ -76,6 +76,7 @@ fn panels_follow_the_spec() {
             let non_knob = [
                 ("loom.io.audio-in", "pair"),
                 ("loom.io.audio-in", "mute"),
+                ("loom.gate.euclid", "source"),
                 ("loom.phase.wrap", "mode"),
                 ("loom.mix.crossfade", "law"),
                 ("loom.mix.mixer", "mute1"),

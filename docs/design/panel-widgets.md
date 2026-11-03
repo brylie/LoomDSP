@@ -456,7 +456,7 @@ The catalogue entries that would use each new widget. The knob is used by nearly
 |---|---|
 | Fader | MT-MIX-01 levels, MT-MIX-02, MT-UI-02, MT-EQ-01 band gains, MT-ARR-06, MT-SRC-03 group levels |
 | Number | MT-CLOCK-01 tempo, MT-CLOCK-03 division, MT-PHASE-02 ratio, MT-PHASE-06, MT-GATE-02 hits, steps, and rotation, MT-LOGIC-04 count, MT-PITCH-01 offsets, MT-IO-04 controller number, MT-ARR-01 and MT-ARR-02 length in bars, TR-07 seed |
-| Radio buttons | MT-FILTER-04 slope, MT-MIX-02 law, MT-LEVEL-02 response, MT-PHASE-08 wrap or fold, MT-ROUTE-01 and MT-ROUTE-02 how to choose, MT-DELAY-04 time change, MT-LOGIC-01 mode, TR-02 timebase, TR-03 retrigger |
+| Radio buttons | MT-FILTER-04 slope, MT-MIX-02 law, MT-LEVEL-02 response, MT-PHASE-08 wrap or fold, MT-ROUTE-02 how to choose, MT-DELAY-04 time change, MT-LOGIC-01 mode, TR-02 timebase, TR-03 retrigger |
 | Select list | MT-SRC-08 and MT-VOICE-04 unison voices, MT-SRC-02 colour, MT-LEVEL-01 unit, MT-MATH-02 function, MT-MATH-03 conversion, MT-LOGIC-02 operation, MT-VOICE-01 merge mode, MT-SHAPE-01 curve, MT-DYN-01 mode, MT-FX-01 space, MT-SEQ-04 algorithm, MT-PITCH-02 and MT-PITCH-03 scale, MT-ENV-01 mode, TR-01 basic shape, TR-02 musical division, TR-05 character, TR-06 quality |
 | Toggle | MT-MIX-01 mute, MT-ENV-01 loop, MT-DELAY-04 ping-pong, MT-SRC-01 sync |
 | XY pad | MT-UI-03, MT-STATE-02, MT-FX-10 position |

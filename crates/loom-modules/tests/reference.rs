@@ -7,8 +7,8 @@
 
 use loom_core::{MidiEvent, ModuleRole, TransportSettings};
 use loom_modules::{
-    ALL, clock, display, dynamics, env, eq, filter, io, level, lfo, logic, math, midi, mix, osc, phase, rand, time,
-    transport, ui,
+    ALL, clock, display, dynamics, env, eq, filter, gate, io, level, lfo, logic, math, midi, mix, osc, phase, rand,
+    time, transport, ui,
 };
 use loom_test::{Harness, Signal, reference};
 
@@ -468,6 +468,18 @@ fn macro_value() {
     assert!(render.output("out").iter().all(|&value| value == 0.6));
 }
 
+/// Reference render for `loom.gate.euclid`, driven by a phase: each hit lands on
+/// the same sample at every block size (the harness compares them).
+#[test]
+fn euclid_phase() {
+    Harness::new(&gate::EUCLID)
+        .seconds(0.1)
+        .param("steps", 8.0)
+        .param("hits", 3.0)
+        .input("phase", Signal::phase(20.0))
+        .check(reference!("euclid_phase"));
+}
+
 /// Reference render for `loom.rand.chance`: one clock into lane 1 drives all
 /// four lanes, each with its own chance. Every lane fires on the same frames
 /// at every block size, and the same seed gives the same choices.
@@ -569,6 +581,7 @@ fn every_dsp_module_has_a_reference_test() {
         &logic::DIVIDE,
         &ui::BUTTON,
         &ui::MACRO,
+        &gate::EUCLID,
         &phase::SHIFT,
         &phase::REVERSE,
         &time::DELAY,

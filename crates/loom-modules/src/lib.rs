@@ -19,6 +19,7 @@ pub mod dynamics;
 pub mod env;
 pub mod eq;
 pub mod filter;
+pub mod gate;
 pub mod io;
 pub mod level;
 pub mod lfo;
@@ -81,6 +82,7 @@ pub static ALL: &[&ModuleDescriptor] = &[
     &display::SCOPE,
     &clock::CLOCK,
     &transport::TRANSPORT,
+    &gate::EUCLID,
     &logic::DIVIDE,
     &logic::COMPARE,
     &logic::LOGIC,

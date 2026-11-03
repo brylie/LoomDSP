@@ -188,7 +188,7 @@ All random modules take a seed, so a patch sounds the same each time it loads (N
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
 | MT-GATE-01 | Gate shaper | Sets the length of a gate, delays it, or turns its start or end into a trigger. | Timebase | M2 | New | Planned |
-| MT-GATE-02 | Euclidean rhythm | Spreads N hits as evenly as possible over M steps, with rotation. | | M2 | FR-LIB-08 | Specified ([M2 modules](../design/p2-modules.md)) |
+| MT-GATE-02 | Euclidean rhythm | Spreads N hits as evenly as possible over M steps, with rotation. | | M2 | FR-LIB-08 | Built (`loom.gate.euclid`) |
 | MT-GATE-03 | Repeater | Repeats a gate at a rate while it is high, or fires a quick burst of N triggers from one trigger. | Timebase | M3 | New | Planned |
 
 ## Pitch and scale

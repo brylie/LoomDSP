@@ -12,6 +12,12 @@ use loom_core::{
 use loom_dsp::phase::Phasor;
 use loom_rt::Smoothed;
 
+/// `x - floor(x)`, always in `[0, 1)`, for a module that reads a phase. `x` must
+/// be finite.
+pub(crate) fn wrap_phase(x: f32) -> f32 {
+    Wrap::wrap(x)
+}
+
 /// `loom.phase.generator`: a ramp from 0 to 1 at the frequency set by pitch.
 pub static PHASE: ModuleDescriptor = ModuleDescriptor {
     id: "loom.phase.generator",
