@@ -82,7 +82,23 @@ Only the [output stage](output-safety.md) can protect speakers and ears, because
 
 Limit's ceiling is still useful. A following effect can rely on it when Match is off, Output is at 0 dB, Mix is fully processed, and there is no sidechain. A sidechain breaks the promise too, because the limiter then listens to a different signal.
 
-### Four ways to make the ceiling hold, and what each costs
+### Two common limiter designs
+
+Both of these are normal in professional and research tools. They limit in the same way, and they differ in where the level is set, so level matching moves in opposite directions.
+
+| | Drive into a fixed ceiling | Threshold, with make-up gain after it |
+|---|---|---|
+| How you limit harder | Raise the input gain | Lower the threshold |
+| Result compared with the input | Usually louder | Quieter |
+| To compare at equal level | Turn the output down | Turn the output up |
+| Can the result pass the setting? | No, when the output is turned down | Yes, by the make-up gain |
+| Examples | [FabFilter Pro-L 2](https://www.fabfilter.com/help/pro-l/using/outputoptions), whose Unity Gain button sets the output to the inverse of the gain. Bitwig's Peak Limiter, as a [community guide](https://polarity.me/posts/bitwig-guides/2023-04-03-peak-limiter-bitwig-audio-fx-guide/) describes it. | The [MATLAB Audio Toolbox limiter](https://www.mathworks.com/help/audio/ref/limiter.html), which cites the same Giannoulis paper as this module. [Beutl](https://docs.beutl.beditor.net/reference/library/audio-effects/limiter), whose documentation gives the final peak as threshold plus make-up gain. |
+
+The two are the same limiter at different levels. A threshold of -12 dB with +12 dB of output limits like +12 dB of drive into a ceiling at 0 dB.
+
+Dynamics uses a threshold, because all of its modes share one curve and one threshold. So Match has to turn a limited signal up. Match is not quite make-up gain, though. The MATLAB limiter's automatic make-up gain is fixed by the threshold and the knee, so a steady 0 dB input gives a 0 dB output. Match measures the loudness of both signals and follows them.
+
+### Five ways to make the ceiling hold, and what each costs
 
 Each of these looks like an obvious fix.
 
@@ -93,5 +109,7 @@ Each of these looks like an obvious fix.
 **Keep Match's gain below what would pass the ceiling.** A limited signal already sits at the ceiling, so Match could never raise it. This is Match switched off without saying so, and a control that silently does nothing teaches the wrong thing.
 
 **Put the ceiling after Output and Mix.** The module's output now really is limited, but the Output knob stops raising a limited signal, and the dry path in Mix gets limited too. This is a different tool: a final limiter for a chain. The next module can still raise the level, so it would not make a patch safe either.
+
+**Use a fixed ceiling and a drive knob in Limit.** Matching then turns the signal down, and the ceiling holds with Match on, as in the first design above. Output above 0 dB and Mix can still pass it. Limit would also stop sharing the threshold and the curve with the other modes, and moving between modes would change what the main knob means. An Amp module before a threshold limiter already gives the same result in a patch.
 
 So Match stays available in Limit, and the rule is plain: when a ceiling must hold, leave Match off. When you want to protect your ears, leave output safety on.
