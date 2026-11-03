@@ -3,13 +3,13 @@
 The ports, parameters, ranges, defaults, and behaviour of the M2 modules that bring no new engine rules, so each can be built from its catalogue entry without guessing.
 
 - **Kind:** living specification.
-- **Status:** Implemented for Random, Chance, Phase reset, Phase shift and reverse, Macro, and Euclidean rhythm. Agreed for Selector, Pitch quantiser, Multi-lane sequencer, and Spectrum (2026-11-01). Each of those sections is ready to build. Other M2 modules are added here as they are agreed.
-- **Decision behind it:** none. It follows [ADR-0007](../adr/0007-polymorphic-signal-model.md) (signals), [ADR-0014](../adr/0014-modulation-without-cables.md) (modulation without cables), [ADR-0016](../adr/0016-ports-and-parameters-carry-their-own-text.md) (port and parameter text), and [ADR-0018](../adr/0018-clean-room-module-development.md) (clean room).
+- **Status:** Implemented for Random, Chance, Phase reset, Phase shift and reverse, Macro, Euclidean rhythm, and Selector. Agreed for Pitch quantiser, Multi-lane sequencer, and Spectrum (2026-11-01). Each of those sections is ready to build. Other M2 modules are added here as they are agreed.
+- **Decision behind it:** [ADR-0036](../adr/0036-a-seeded-route-keeps-both-sides-together.md) for Selector on a stereo cable. Otherwise none. It follows [ADR-0007](../adr/0007-polymorphic-signal-model.md) (signals), [ADR-0014](../adr/0014-modulation-without-cables.md) (modulation without cables), [ADR-0016](../adr/0016-ports-and-parameters-carry-their-own-text.md) (port and parameter text), and [ADR-0018](../adr/0018-clean-room-module-development.md) (clean room).
 - **Use case and requirements:** FR-LIB-01, FR-LIB-08, FR-LIB-12, FR-LIB-14, FR-LIB-19, FR-LIB-22, FR-LIB-29, FR-LIB-30, NFR-SND-04.
 - **Background:** [Phase and cycles](../learn/phase-and-cycles.md), [Repeatable randomness](../learn/repeatable-randomness.md), [Euclidean rhythms](../learn/euclidean-rhythms.md).
 - **Prior art:** none named. Every module is designed from its purpose. The Euclidean rhythm follows published theory: G. Toussaint, "The Euclidean Algorithm Generates Traditional Musical Rhythms", BRIDGES 2005, pages 47 to 56. The random streams are xorshift (G. Marsaglia, "Xorshift RNGs", 2003), started through the 32-bit finaliser of MurmurHash3 (A. Appleby).
 - **Issues:** [#304](https://github.com/brylie/LoomDSP/issues/304) (Random), [#305](https://github.com/brylie/LoomDSP/issues/305) (Chance), [#174](https://github.com/brylie/LoomDSP/issues/174) (Phase reset), [#306](https://github.com/brylie/LoomDSP/issues/306) (Euclidean rhythm), [#310](https://github.com/brylie/LoomDSP/issues/310) (Selector), [#111](https://github.com/brylie/LoomDSP/issues/111) (Phase shift and reverse), [#78](https://github.com/brylie/LoomDSP/issues/78) (Macro), [#308](https://github.com/brylie/LoomDSP/issues/308) (Pitch quantiser), [#307](https://github.com/brylie/LoomDSP/issues/307) (Multi-lane sequencer), [#109](https://github.com/brylie/LoomDSP/issues/109) (Spectrum). Pitch modules follow [Scale and tuning](scale-and-tuning.md).
-- **Code:** `crates/loom-modules/src/rand.rs`, `phase.rs`, `ui.rs`, and `gate.rs` for the modules built so far.
+- **Code:** `crates/loom-modules/src/rand.rs`, `phase.rs`, `ui.rs`, `gate.rs`, and `route.rs` for the modules built so far.
 
 ## Goal
 
@@ -19,7 +19,7 @@ The ports, parameters, ranges, defaults, and behaviour of the M2 modules that br
 
 The [rules for M1 modules](p1-modules.md#rules-for-all-modules-here) apply: IDs by category, a label and description for every port and parameter, 5 ms smoothing for parameters that change a value over time, starting at non-default values, choices with names, and the module checklist with reference tests at block sizes 1, 77, and 512. In addition:
 
-1. **Random modules are seeded** (TR-07). A `seed` parameter, a whole number from 1 to 65535, default 1, is kept in the inspector, as on Noise. The same seed gives the same output on every load and at every block size (NFR-SND-04). A right-hand stereo copy mixes its channel into the seed, as Noise does ([stereo](stereo.md), rule 27). *Why:* a patch varies while it plays, but sounds the same each time it loads.
+1. **Random modules are seeded** (TR-07). A `seed` parameter, a whole number from 1 to 65535, default 1, is kept in the inspector, as on Noise. The same seed gives the same output on every load and at every block size (NFR-SND-04). A right-hand stereo copy mixes its channel into the seed, as Noise does ([stereo](stereo.md), rule 27). Selector is the exception (see [Selector](#selector-mt-route-01)). *Why:* a patch varies while it plays, but sounds the same each time it loads.
 2. **A `reset` trigger restarts the random sequence from the seed.** A reset and a trigger on the same frame act in that order: reset first, so the trigger gets the first value of the sequence. *Why:* a bar or phrase clock on `reset` makes a random phrase repeat every N bars.
 3. **Triggers count rising edges** ([OQ-19](../product/open-questions.md#resolved)): above 0.5 after a frame at or below it. The first frame counts as following a low one.
 
@@ -114,10 +114,13 @@ The [rules for M1 modules](p1-modules.md#rules-for-all-modules-here) apply: IDs 
 | Panel | A segmented control for `mode` ([panels](panels.md), rule 6), knobs for `count` and `fade`. `repeats` and `seed` in the inspector only. |
 
 - **Mode** is a setting, not chosen by which input has a cable ([M1 modules, Sample and hold](p1-modules.md#sample-and-hold-loomrandsample-hold)).
-- **Step:** each `step` trigger moves to the next input, wrapping after `count`. **Select:** the input is `floor(select × count)`, with `select` clamped to 0 to 1 and the result to `count − 1`; so 0.6 with 4 inputs picks the third. **Random:** each `step` trigger picks an input at random from the first `count`. With `repeats` set to Avoid, it never picks the current one again.
-- `reset` goes to input 1 and restarts the random sequence (rule 2). The module starts on input 1.
+- **Step:** the module starts on input 1 and passes it through. After start or `reset`, the first `step` stays on input 1, and later ones move to the next input, wrapping after `count`. A `reset` and a `step` on the same frame give input 1. *Why:* a bar clock on `reset` and a beat clock on `step` then start each bar on input 1, as on [Euclidean rhythm](#euclidean-rhythm-mt-gate-02).
+- **Select:** the input is `floor(select × count)`, with `select` clamped to 0 to 1 and the result to `count − 1`; so 0.6 with 4 inputs picks the third. A non-finite `select` holds the current input. A `step` is ignored, and does not change the wait.
+- **Random:** each `step` trigger picks an input at random from the first `count`. With `repeats` set to Avoid, it never picks the current one again. `reset` restarts the sequence and goes to input 1. The next `step` takes the first draw and can move, because waiting only applies to Step mode. A `reset` and a `step` on the same frame also take that first draw. Only a pick in Random mode draws a number, so Step and Select do not use them up.
+- `reset` goes to input 1 and restarts the random sequence in every mode (rule 2), so a later switch to Random is repeatable. A modulated `seed` restarts the sequence too. The module starts on input 1. A change of `mode` keeps the current input and the wait.
+- **Stereo.** Both sides make the same picks unless a stereo modulation source is assigned to a Selector parameter. Its channel stays out of its seed, and a new right side copies the left side's random stream ([ADR-0036](../adr/0036-a-seeded-route-keeps-both-sides-together.md)). `step`, `select`, and `reset` downmix, so a stereo cable on them cannot part the sides. A stereo modulation source can, because each copy gets its own side ([stereo](stereo.md), rule 17).
 - Lowering `count` below the current input moves to the last input in use.
-- **Fade.** Each input has a gain that moves in a straight line toward 1 (the chosen input) or 0 (the others) over `fade` seconds. The output is the sum of each input times its gain, divided by the sum of the gains. At 0 the switch is instant. *Why:* an instant switch clicks on audio; a straight line never overshoots, so the output stays between the inputs, and dividing by the sum keeps the level steady when switches come faster than the fade.
+- **Fade.** Each input has a gain that moves in a straight line toward 1 (the chosen input) or 0 (the others) over `fade` seconds. The output is the sum of each input times its gain over the sum of the gains. An input at gain 0 is left out, so an infinite one not in use cannot make NaN. At 0 the switch is instant. *Why:* an instant switch clicks on audio; a straight line never overshoots, so the output stays between the inputs, and dividing by the sum keeps the level steady when switches come faster than the fade.
 
 ## Phase shift and Phase reverse (MT-PHASE-05)
 
@@ -265,10 +268,12 @@ Euclidean rhythm:
 
 Selector:
 
-- [ ] With 4 inputs in Select mode, 0.6 picks the third input; −1 and 2 clamp to the first and fourth (test).
-- [ ] With a fade, no step in the output is larger than the step between the inputs at that moment (test).
-- [ ] Random with Avoid never picks the current input twice in a row over 10,000 steps (test).
-- [ ] Stepping and random picks are the same at block sizes 1, 77, and 512 (reference test).
+- [x] With 4 inputs in Select mode, 0.6 picks the third input; −1 and 2 clamp to the first and fourth (test).
+- [x] With a fade, no step in the output is larger than the step between the inputs at that moment (test).
+- [x] Random with Avoid never picks the current input twice in a row over 10,000 steps (test).
+- [x] Stepping and random picks are the same at block sizes 1, 77, and 512 (reference test).
+- [x] The first `step` after start or reset stays on input 1, and the second moves to input 2 (test).
+- [x] Both sides of a stereo signal make the same picks, loaded as stereo and turning stereo during playback (engine test).
 
 Phase shift and reverse:
 

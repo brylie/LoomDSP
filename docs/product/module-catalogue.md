@@ -126,7 +126,7 @@ Modulation assignments already scale and offset any parameter (ADR-0014), so the
 | MT-MIX-01 | Mixer | Sums several inputs, with level, pan, and mute per channel. At unity gain it is a quick merge. M1 builds level and mute. Pan comes later, with stereo signals. | | M1 | FR-LIB-05 | Built (`loom.mix.mixer`) |
 | MT-MIX-02 | Crossfade | Blends two signals by a control, with an equal-power or linear law. | | M1 | FR-LIB-05 | Built (`loom.mix.crossfade`) |
 | MT-MIX-03 | Stereo tool | Pans, sets width, converts between left/right and mid/side, and splits or joins channels. M1 builds join and split. Pan, width, and mid/side come later. | | M1 | FR-SIG-07 | Planned |
-| MT-ROUTE-01 | Selector | Picks one of N inputs. It steps to the next on a trigger, jumps to the input a control value points at, or picks at random. | Seed, Smoothing | M2 | FR-LIB-30 | Specified ([M2 modules](../design/p2-modules.md)) |
+| MT-ROUTE-01 | Selector | Picks one of N inputs. It steps to the next on a trigger, jumps to the input a control value points at, or picks at random. | Seed, Smoothing | M2 | FR-LIB-30 | Built (`loom.route.selector`) |
 | MT-ROUTE-02 | Distributor | Sends one input to one of N outputs, with the same three ways to choose. | Seed | M2 | FR-LIB-30 | Planned |
 | MT-ROUTE-03 | Mute | Silences a signal on a button or gate, with a short fade so it never clicks. | | M2 | New | Planned |
 | MT-ROUTE-04 | Matrix | Connects N inputs to M outputs with a level and a mute at each crossing. Presets cover a plain multiple, a mutable multiple, and a router that rotates by one place on each trigger. | | M3 | New | Planned |

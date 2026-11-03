@@ -8,7 +8,7 @@ mod common;
 use common::{busy, changed};
 use loom_core::{MidiEvent, ModuleDescriptor, ModuleRole, TransportSettings};
 use loom_modules::ALL;
-use loom_test::Harness;
+use loom_test::{Harness, Signal};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 /// Frames rendered in each check.
@@ -41,9 +41,10 @@ fn harness(descriptor: &'static ModuleDescriptor) -> Harness {
 }
 
 /// True for a module with a random generator, which re-derives it when it
-/// copies (rule 27).
+/// copies (rule 27). Selector has one too, but it copies it as it is, because
+/// both sides of a stereo signal make the same picks (ADR-0036).
 fn seeded(descriptor: &ModuleDescriptor) -> bool {
-    descriptor.param_index("seed").is_some()
+    descriptor.param_index("seed").is_some() && descriptor.id != "loom.route.selector"
 }
 
 /// Every DSP module in [`ALL`] except seeded ones continues bit-identically
@@ -142,6 +143,59 @@ fn a_playing_transport_copies_its_beat_state() {
 #[test]
 fn a_playing_transport_copies_its_bar_state() {
     check_playing_copy(&playing(&loom_modules::transport::TRANSPORT, 180_000), "bar");
+}
+
+/// A trigger every 100 frames from frame `first`.
+fn pulses(first: usize) -> Signal {
+    Signal::from_fn(move |frame| {
+        if frame >= first && (frame - first).is_multiple_of(100) {
+            1.0
+        } else {
+            0.0
+        }
+    })
+}
+
+/// A Selector in `mode`, each input holding its own value, stepped from frame
+/// 500. The shared check has one signal on every input, so a wrong pick looks
+/// the same there. Here it shows.
+fn selector(mode: f32) -> Harness {
+    let harness = Harness::new(&loom_modules::route::SELECTOR)
+        .frames(2_000)
+        .param("mode", mode)
+        .param("count", 8.0)
+        .param("fade", 0.0)
+        .input("step", pulses(500));
+    (1..=8).fold(harness, |h, n| {
+        h.input(&format!("in{n}"), Signal::constant(n as f32 / 8.0))
+    })
+}
+
+/// A Selector copy takes the whole random stream, so a new right side makes the
+/// left side's picks (ADR-0036), and the wait, so its first step stays on input
+/// 1. It copies at the wait, and in the middle of the picks.
+#[test]
+fn a_selector_copies_its_stream_and_its_wait() {
+    for mode in [0.0, 2.0] {
+        for at in [100, 750] {
+            assert!(selector(mode).check_copy_state(at), "mode {mode}, frame {at}");
+        }
+    }
+}
+
+/// A Euclidean rhythm copy takes the wait, so the next clock still plays the
+/// first step, and the step it is on. It copies at the wait, and mid-pattern.
+#[test]
+fn a_euclidean_rhythm_copies_its_wait_and_its_step() {
+    let harness = Harness::new(&loom_modules::gate::EUCLID)
+        .frames(2_000)
+        .param("source", 1.0)
+        .param("steps", 8.0)
+        .param("hits", 3.0)
+        .input("clock", pulses(500));
+    for at in [100, 750] {
+        assert!(harness.check_copy_state(at), "frame {at}");
+    }
 }
 
 /// A copy takes state only from its own type.

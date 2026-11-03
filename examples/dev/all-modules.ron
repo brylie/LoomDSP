@@ -62,6 +62,7 @@ Patch(
         PatchModule(id: 54, kind: "loom.phase.reverse@1", position: Some((320.0, 2400.0))),
         PatchModule(id: 55, kind: "loom.ui.macro@1", position: Some((640.0, 2400.0))),
         PatchModule(id: 56, kind: "loom.gate.euclid@1", position: Some((960.0, 2400.0))),
+        PatchModule(id: 57, kind: "loom.route.selector@1", position: Some((1280.0, 2400.0))),
         PatchModule(id: 99, kind: "loom.clock.transport@1", position: Some((1920.0, 0.0))),
     ],
     cables: [],

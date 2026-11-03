@@ -85,6 +85,7 @@ One page for each built-in module, made from its descriptor. After you change a 
 | [Level Constant](loom.level.constant.md) | `loom.level.constant` | Outputs a fixed level, set in decibels. 0 dB is a factor of 1. |
 | [Mixer](loom.mix.mixer.md) | `loom.mix.mixer` | Adds four signals, each with its own level and mute. Two mixers in a row make a bigger mix. |
 | [Scale](loom.level.scale.md) | `loom.level.scale` | Multiplies a signal by a factor and adds an offset. A factor of -1 inverts it; factor 0.5 with offset 0.5 turns bipolar into unipolar. |
+| [Selector](loom.route.selector.md) | `loom.route.selector` | Picks one of up to eight inputs: the next on a trigger, the one a value points at, or one at random. |
 | [Slew](loom.level.slew.md) | `loom.level.slew` | Limits how fast a signal can rise and fall. Times are per 1.0 of change, so a glide takes the same time on any signal. |
 | [Split](loom.mix.split.md) | `loom.mix.split` | Separates a stereo cable into its two sides. |
 

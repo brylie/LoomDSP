@@ -102,7 +102,7 @@ A module author never picks the method. They declare an input `Downmix`, and its
 
 ## Copies of random things
 
-Two copies of a noise source with the same seed give the same numbers on both sides. That is mono that only looks like stereo. So a copy can ask which channel it is, and a module with a seed mixes the channel into it. The left and right sides then differ, and the patch still gives the same result every time it runs.
+Two copies of a noise source with the same seed give the same numbers on both sides. That is mono that only looks like stereo. So a copy can ask which channel it is, and a module with a seed mixes the channel into it. The left and right sides then differ, and the patch still gives the same result every time it runs. Selector is the exception: its numbers choose a route, not a signal, so both sides use the same ones, or a stereo signal would come apart ([ADR-0036](../adr/0036-a-seeded-route-keeps-both-sides-together.md)).
 
 ## How other systems do it
 

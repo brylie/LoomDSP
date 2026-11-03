@@ -100,7 +100,7 @@ How the canvas shows a stereo cable is FR-CANVAS-12 (M2). See Open points.
 
 14. **Both copies get every `set_param` call.** Each copy keeps its own parameter smoothing. *Why:* a module has one set of controls, whatever its width.
 
-15. **A copy can ask which channel it is.** `ProcessContext::channel()` returns 0 for a module that runs as one, or for copy 0, and 1 for copy 1. A module with a seed (the Seed trait) must mix the channel into its seed, also when it takes copy 0's state (rule 27). *Why:* without it, a copied noise source or random step generator gives the same values on both sides, which is mono in disguise.
+15. **A copy can ask which channel it is.** `ProcessContext::channel()` returns 0 for a module that runs as one, or for copy 0, and 1 for copy 1. A module with a seed (the Seed trait) must mix the channel into its seed, also when it takes copy 0's state (rule 27). *Why:* without it, a copied noise source or random step generator gives the same values on both sides, which is mono in disguise. *The exception:* a module whose randomness chooses a route, not a signal, leaves the channel out, so a stereo signal stays a matched pair. Selector is the only one so far ([ADR-0036](../adr/0036-a-seeded-route-keeps-both-sides-together.md)).
 
 16. **Displays and modulation live values come from copy 0.** *Why:* the module has one panel. Copy 0 always exists, so lights do not jump when the module changes width.
 
@@ -134,7 +134,7 @@ How the canvas shows a stereo cable is FR-CANVAS-12 (M2). See Open points.
 
 26. **`copy_state_from` follows the rules for `process`:** no allocation, no locks, no waiting. Buffers are copied into the ones copy 1 already has, which have the same size because both copies were built with the same `ModuleConfig`. Copy 1 starts from reset only when the method returns `false`. Every built-in module with state implements it. *Why:* it runs on the audio thread (hard rule 1). A module that skips it still works, with a cold right side.
 
-27. **A seeded module re-derives its random state when it copies.** It copies everything else, then sets its random generator from its seed mixed with its channel (rule 15), as `reset` would. *Why:* a copied generator would play the left side's numbers on the right, which is mono in disguise. The result is still deterministic, because the swap lands on a known frame.
+27. **A seeded module re-derives its random state when it copies.** It copies everything else, then sets its random generator from its seed mixed with its channel (rule 15), as `reset` would. *Why:* a copied generator would play the left side's numbers on the right, which is mono in disguise. The result is still deterministic, because the swap lands on a known frame. *The exception:* Selector copies its generator as it is, so a new right side carries on making the left side's picks (rule 15).
 
 ## Acceptance criteria
 
@@ -150,7 +150,8 @@ How the canvas shows a stereo cable is FR-CANVAS-12 (M2). See Open points.
 - [x] Given a long chain built so that stereo reaches modules in the reverse of the order they are stored, then inference visits each module and cable at most once.
 - [x] Given a stereo chain, when the stereo cable is removed and the patch recompiles, then copy 1 of each module is freed on the control thread, copy 0 keeps its state, and the `no_alloc` tests pass.
 - [x] Given a copied module, when it is run through the module test harness, then its output is identical at block sizes 1, 77, and 512.
-- [x] Given a copied seeded module, then its left and right outputs differ, and both are the same on every run.
+- [x] Given a copied seeded module, except Selector (rule 15), then its left and right outputs differ, and both are the same on every run.
+- [x] Given a Selector on a stereo signal, loaded as stereo or turning stereo while it plays, then both sides make the same picks, unless a stereo modulation source is assigned to one of its parameters.
 - [x] Given each example patch, updated to Audio Out's `in` port, when it loads, then it gives bit-identical output to the patch before this change.
 - [x] Given a mono cable into Audio Out, then both sides of the device output carry it.
 - [x] Given two mono signals through Join and then Split, then each Split output is bit-identical to the signal that went in on that side.
@@ -158,8 +159,8 @@ How the canvas shows a stereo cable is FR-CANVAS-12 (M2). See Open points.
 - [x] Given a stereo cable into a port, when the player hovers it, then the hover text says "Stereo". (Manual check.)
 - [x] Given a descriptor with `Downmix` on an output, or a module with a `Stereo` port and a `PerChannel` input, then the registry rejects it.
 - [x] (Rules 25 to 27.) Given a running SVF that turns stereo, with the same signal on both sides, then its right output is bit-identical to its left from the first frame after the swap, and the `no_alloc` tests pass.
-- [x] (Rules 25 and 26.) Given each built-in module with state, except seeded modules covered by rule 27, when the harness runs it for N frames, copies its state into a new instance, and runs both on, then both outputs are bit-identical from frame N. (`Harness::check_copy_state`, `loom-modules/tests/copy_state.rs`; no allocation in `no_alloc.rs`. The engine calls it at the schedule swap.)
-- [x] (Rule 27.) Given a seeded module that turns stereo, then its left and right outputs differ after the swap, and are the same on every run.
+- [x] (Rules 25 and 26.) Given each built-in module with state, except seeded modules covered by rule 27 (Selector is covered here), when the harness runs it for N frames, copies its state into a new instance, and runs both on, then both outputs are bit-identical from frame N. (`Harness::check_copy_state`, `loom-modules/tests/copy_state.rs`; no allocation in `no_alloc.rs`. The engine calls it at the schedule swap.)
+- [x] (Rule 27.) Given a seeded module that turns stereo, except Selector (rule 15), then its left and right outputs differ after the swap, and are the same on every run.
 
 ### Verification notes
 

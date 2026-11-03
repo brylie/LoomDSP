@@ -30,6 +30,7 @@ pub mod mix;
 pub mod osc;
 pub mod phase;
 pub mod rand;
+pub mod route;
 #[cfg(feature = "test-modules")]
 pub mod test_modules;
 pub mod time;
@@ -73,6 +74,7 @@ pub static ALL: &[&ModuleDescriptor] = &[
     &mix::CROSSFADE,
     &mix::JOIN,
     &mix::SPLIT,
+    &route::SELECTOR,
     &io::UNIT_DELAY,
     &io::AUDIO_OUT,
     &io::AUDIO_IN,

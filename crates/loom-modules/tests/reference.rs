@@ -8,7 +8,7 @@
 use loom_core::{MidiEvent, ModuleRole, TransportSettings};
 use loom_modules::{
     ALL, clock, display, dynamics, env, eq, filter, gate, io, level, lfo, logic, math, midi, mix, osc, phase, rand,
-    time, transport, ui,
+    route, time, transport, ui,
 };
 use loom_test::{Harness, Signal, reference};
 
@@ -480,6 +480,37 @@ fn euclid_phase() {
         .check(reference!("euclid_phase"));
 }
 
+/// A harness for `loom.route.selector`: eight tones, one per input, and a step
+/// every 100 frames.
+fn selector_harness() -> Harness {
+    let harness = Harness::new(&route::SELECTOR).seconds(0.1).param("count", 8.0).input(
+        "step",
+        Signal::from_fn(|frame| if frame % 100 == 50 { 1.0 } else { 0.0 }),
+    );
+    (1..=8).fold(harness, |harness, n| {
+        harness.input(
+            &format!("in{n}"),
+            Signal::from_fn(move |frame| (frame as f32 * n as f32 * 0.03).sin() * 0.5),
+        )
+    })
+}
+
+/// Reference render for `loom.route.selector` in Step mode: each step lands on
+/// the same sample at every block size (the harness compares them).
+#[test]
+fn selector_step() {
+    selector_harness().check(reference!("selector_step"));
+}
+
+/// Reference render for `loom.route.selector` in Random mode: the picks are the
+/// same at every block size.
+#[test]
+fn selector_random() {
+    selector_harness()
+        .param("mode", 2.0)
+        .check(reference!("selector_random"));
+}
+
 /// Reference render for `loom.rand.chance`: one clock into lane 1 drives all
 /// four lanes, each with its own chance. Every lane fires on the same frames
 /// at every block size, and the same seed gives the same choices.
@@ -582,6 +613,7 @@ fn every_dsp_module_has_a_reference_test() {
         &ui::BUTTON,
         &ui::MACRO,
         &gate::EUCLID,
+        &route::SELECTOR,
         &phase::SHIFT,
         &phase::REVERSE,
         &time::DELAY,
