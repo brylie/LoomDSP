@@ -1587,6 +1587,71 @@ mod tests {
         assert!(kind.is_one_number());
     }
 
+    /// A parameter whose only widget is a select list takes a modulation
+    /// assignment everywhere: its inspector row accepts a drop, the matrix
+    /// offers it, a cable dragged onto the box on the canvas assigns it, and
+    /// the box shows a dot, or a hollow ring when the assignment is off
+    /// (panel-widgets.md, rule 3; #567).
+    #[test]
+    fn a_select_only_parameter_is_a_modulation_target() {
+        use crate::snapshot::Mark;
+        let mut ui = Ui::open("sine.ron");
+        let id = select_new(&mut ui, "test.panel");
+        let node = ui.app.controller.graph().node(id).unwrap();
+        let long = node.descriptor.param_index("long").unwrap();
+        assert!(
+            node.descriptor
+                .panel
+                .widgets
+                .iter()
+                .filter(|w| w.bind == "long")
+                .all(|w| matches!(w.kind, loom_core::WidgetKind::Select)),
+            "the test needs a parameter shown only as a select list"
+        );
+
+        let crate::inspector::Inspector::Module(rows) = ui.app.inspector_model() else {
+            panic!("the inspector shows the selected module");
+        };
+        assert!(rows.params[long].accepts_drop, "its row accepts a drop");
+        assert!(
+            crate::matrix::targets(ui.app.controller.graph())
+                .iter()
+                .any(|t| t.module == id && t.param == long),
+            "the matrix offers it as a target"
+        );
+
+        let widget = widget_of(&ui, id, "long");
+        let mark = |ui: &Ui| {
+            let snapshot = ui.app.ui_snapshot();
+            let tile = snapshot.tiles.iter().find(|t| t.id == id.0).expect("the tile");
+            assert_eq!(tile.widgets[widget].kind, "select");
+            tile.widgets[widget].modulation
+        };
+        assert_eq!(mark(&ui), Mark::None);
+
+        let from = ui.output(id.0, "uni");
+        let to = ui.control(id.0, "long");
+        ui.drag(from, to, 12);
+        let assignments: Vec<_> = ui
+            .app
+            .controller
+            .graph()
+            .assignments()
+            .filter(|(_, a)| a.target == id && a.param == long)
+            .map(|(assignment, _)| assignment)
+            .collect();
+        assert_eq!(assignments.len(), 1, "the drop on the box made an assignment");
+        ui.redraw();
+        assert_eq!(mark(&ui), Mark::Dot);
+
+        let _ = ui.app.update(Message::Enabled {
+            id: assignments[0],
+            enabled: false,
+        });
+        ui.redraw();
+        assert_eq!(mark(&ui), Mark::Ring, "a hollow ring while the assignment is off");
+    }
+
     /// The widget index of the control bound to a parameter.
     fn widget_of(ui: &Ui, module: ModuleId, param: &str) -> usize {
         let node = ui.app.controller.graph().node(module).unwrap();
