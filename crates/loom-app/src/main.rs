@@ -250,6 +250,8 @@ const WINDOW: Size = Size::new(1440.0, 900.0);
 
 #[derive(Debug, Clone)]
 enum Message {
+    /// The player pressed × on a kept error.
+    DismissError(alerts::Cause),
     Canvas(CanvasEvent),
     /// The eligible inspector parameter currently under an output drag.
     DropRow(Option<(u32, usize)>),
@@ -612,6 +614,7 @@ impl Message {
             | Self::Licence(_)
             | Self::OpenRecent
             | Self::Recent(_)
+            | Self::DismissError(_)
             | Self::Pasted { .. } => false,
         }
     }
@@ -925,7 +928,8 @@ impl App {
         if let Some(error) = self.rig.recorder.as_ref().and_then(loom_host_desktop::Recorder::error)
             && self.alerts.recording_stopped()
         {
-            self.alerts.say(format!("The recording stopped: {error}"));
+            self.alerts
+                .error(alerts::Cause::Other, format!("The recording stopped: {error}"));
             eprintln!("loom-app: {}", self.alerts.status());
         }
     }
@@ -1022,10 +1026,6 @@ impl App {
     }
 
     fn report(&mut self) {
-        if let Some(lost) = &self.rig.lost_audio {
-            self.alerts.say(lost.message.clone());
-            return;
-        }
         let report = self.controller.last_report();
         let inserted = report.inserted_delays().count();
         self.alerts.say(match report.loops.len() {
@@ -1039,7 +1039,7 @@ impl App {
         // Warn only on entry into the overflow state, including after a
         // patch has returned below the table limit.
         if self.alerts.live_values_full(report.without_live_value > 0) {
-            self.alerts.append(&format!(
+            self.alerts.append_warning(&format!(
                 "; {} modulated {} show no live value (table full)",
                 report.without_live_value,
                 if report.without_live_value == 1 {
@@ -1567,6 +1567,7 @@ impl App {
             Message::Redo => self.redo(),
             Message::OpenBrowser => self.browser_key += 1,
             Message::Panic => self.panic(),
+            Message::DismissError(cause) => self.alerts.dismiss(cause),
             Message::MidiPoll => self.poll_midi(),
             Message::HoldNote => {
                 if let Some(midi) = &self.midi {

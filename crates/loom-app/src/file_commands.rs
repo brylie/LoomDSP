@@ -2,7 +2,7 @@
 //! Open, and replacing the patch with another (`docs/design/files.md`).
 
 use crate::question::{AfterDiscard, Answer, Kind, Message as QuestionMessage, Question};
-use crate::{App, Args, FileAction, Source, bench, control, devices, files, screenshot, settings};
+use crate::{App, Args, FileAction, Source, alerts, bench, control, devices, files, screenshot, settings};
 use loom_core::EngineConfig;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -26,6 +26,7 @@ impl App {
         let patch = self.current_patch();
         match patch.save(&path) {
             Ok(()) => {
+                self.alerts.clear(alerts::Cause::File);
                 self.alerts.say(format!("saved {}", path.display()));
                 self.document.saved(path, patch);
                 self.edits.history.mark_saved();
@@ -40,7 +41,7 @@ impl App {
                     files::display_name(Some(&path))
                 );
                 self.show_error(&message);
-                self.alerts.say(message);
+                self.alerts.error(alerts::Cause::File, message);
                 false
             }
         }
@@ -300,7 +301,7 @@ impl App {
                 "Could not open the patch: the audio device is not available ({e}). The current patch is unchanged."
             );
             self.show_error(&message);
-            self.alerts.say(message);
+            self.alerts.error(alerts::Cause::File, message);
             return false;
         }
         let sample_rate = output
@@ -316,7 +317,7 @@ impl App {
             Err(e) => {
                 let message = format!("Could not open the patch: {e}. The current patch is unchanged.");
                 self.show_error(&message);
-                self.alerts.say(message);
+                self.alerts.error(alerts::Cause::File, message);
                 return false;
             }
         };
@@ -368,6 +369,9 @@ impl App {
         fresh.browser_key = self.browser_key;
         fresh.patches_open = self.patches_open;
         fresh.frame_key = self.frame_key + 1;
+        fresh.alerts.carry_kept_from(&mut self.alerts);
+        // The file that could not be read or written no longer matters.
+        fresh.alerts.clear(alerts::Cause::File);
         *self = fresh;
         // The new patch has no unsaved changes: the copy goes.
         self.autosave(Instant::now());
@@ -415,7 +419,7 @@ impl App {
     pub(crate) fn open_path(&mut self, path: &std::path::Path) -> bool {
         let opened = self.replace(Source::File(path));
         if opened {
-            self.alerts.say(opened_status(path, self.document.load_notes()));
+            self.say_opened(path);
             self.remember_current();
         }
         opened
@@ -507,6 +511,19 @@ impl App {
                 self.alerts
                     .say("Only LoomDSP patches (.ron) can be opened here.".to_string());
             }
+        }
+    }
+}
+
+impl App {
+    /// Says a patch opened: info, or a warning when it loaded differently
+    /// from how it was saved. Shared with the control channel's `open`.
+    pub(crate) fn say_opened(&mut self, path: &std::path::Path) {
+        let status = opened_status(path, self.document.load_notes());
+        if self.document.load_notes().is_empty() {
+            self.alerts.say(status);
+        } else {
+            self.alerts.warn(status);
         }
     }
 }

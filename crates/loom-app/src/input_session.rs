@@ -6,7 +6,7 @@
 //! only on the control thread. The stream's own callbacks reach it through
 //! the failure flag in the port's `InputStatus`.
 
-use crate::alerts::Alerts;
+use crate::alerts::{Alerts, Cause};
 use crate::devices::{Host, InputPort};
 use crate::input_watch::Tracker;
 use crate::preferences::InputChoice;
@@ -74,9 +74,6 @@ pub struct InputSession {
     error_reported: bool,
     /// The refused permission has been reported in this run.
     permission_reported: bool,
-    /// The text of the last input error, so recovery replaces only that
-    /// message and never a newer one.
-    shown_error: Option<String>,
     /// The live-input feedback warning has been shown in this run.
     feedback_warned: bool,
 }
@@ -88,7 +85,6 @@ impl InputSession {
             phase: Phase::Off,
             error_reported: false,
             permission_reported: false,
-            shown_error: None,
             feedback_warned: false,
         }
     }
@@ -153,17 +149,16 @@ impl InputSession {
 
     /// The player chose an input: start again, so a refusal or device error
     /// can show again for it. The feedback warning stays once per run.
-    pub(crate) fn choose(&mut self, controller: &mut Controller) {
+    pub(crate) fn choose(&mut self, controller: &mut Controller, alerts: &mut Alerts) {
         self.close(controller);
+        alerts.clear(Cause::AudioInput);
         self.error_reported = false;
         self.permission_reported = false;
-        self.shown_error = None;
     }
 
-    /// Reports a problem and remembers its text for recovery.
+    /// Reports a problem, and keeps it on screen until its cause is gone.
     fn report(&mut self, alerts: &mut Alerts, message: String) {
-        alerts.say(message);
-        self.shown_error = Some(alerts.status().to_string());
+        alerts.error(Cause::AudioInput, message);
     }
 
     /// Keeps the stream in step with what is needed now. A failure leaves the
@@ -182,6 +177,11 @@ impl InputSession {
             // would come back on the default microphone. Once the input is
             // no longer wanted, a later Audio In starts fresh.
             let keep_waiting = demand.wanted && self.named_lost();
+            // With no input wanted, its error no longer matters, and a later
+            // Audio In may report one again.
+            if !demand.wanted && alerts.clear(Cause::AudioInput) {
+                self.error_reported = false;
+            }
             self.close(controller);
             if keep_waiting {
                 self.phase = Phase::Waiting {
@@ -280,16 +280,17 @@ impl InputSession {
                         tracker: Arc::new(Tracker::new(counts)),
                     };
                     self.error_reported = false;
-                    let error_was_shown = self.shown_error.take().is_some_and(|status| status == alerts.status());
+                    // A dismissed error gets no "is back" message.
+                    let error_was_kept = alerts.clear(Cause::AudioInput);
                     if let Some(wanted) = fallback {
-                        alerts.say(format!(
+                        alerts.warn(format!(
                             "Audio input: \"{wanted}\" is not available. Using the system default."
                         ));
-                    } else if error_was_shown {
+                    } else if error_was_kept {
                         alerts.say(format!("Audio input: \"{name}\" is back."));
                     }
                 }
-                Err(error) => alerts.say(format!("Audio input: {error}.")),
+                Err(error) => alerts.warn(format!("Audio input: {error}.")),
             },
             Err(error) => {
                 let reported = if matches!(error, InputError::PermissionDenied) {
@@ -323,7 +324,7 @@ impl InputSession {
                 && controller.display(id, 0).is_some_and(|active| active >= 0.5)
         });
         if live {
-            alerts.say("Audio input is live. Use headphones, or keep the gain low, to avoid feedback.");
+            alerts.warn("Audio input is live. Use headphones, or keep the gain low, to avoid feedback.");
             self.feedback_warned = true;
         }
     }

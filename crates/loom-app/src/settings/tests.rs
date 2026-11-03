@@ -205,7 +205,7 @@ fn failed_audio_input_reopens() {
     assert!(app.alerts.status().contains("microphone was denied"));
 }
 
-/// Recovery preserves newer messages, and permission denial stays once per run.
+/// Recovery says the input is back, and permission denial stays once per run.
 #[test]
 fn input_recovery_preserves_other_status_and_permission_latch() {
     let dir = folder("audio-input-recovery-status");
@@ -223,7 +223,8 @@ fn input_recovery_preserves_other_status_and_permission_latch() {
     fake.input_permission_denied.set(false);
     app.sync_audio_input();
     assert!(app.rig.input.port().is_some());
-    assert_eq!(app.alerts.status(), "newer message");
+    assert_eq!(app.alerts.status(), "Audio input: \"Microphone\" is back.");
+    app.alerts.say("newer message");
     fake.input_permission_denied.set(true);
     app.sync_audio_input();
     assert!(app.rig.input.port().is_none());

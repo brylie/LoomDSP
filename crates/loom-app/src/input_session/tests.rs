@@ -151,6 +151,7 @@ fn a_failed_open_is_reported_once_and_retried_after_a_wait() {
 }
 
 /// Every failed attempt after the first is quiet, so newer messages stay.
+/// The kept error stays beside them, and recovery says the input is back.
 #[test]
 fn repeated_failures_keep_newer_messages() {
     let mut bench = Bench::new(&["Mic"]);
@@ -159,10 +160,12 @@ fn repeated_failures_keep_newer_messages() {
     bench.alerts.say("Mapped CC 74");
     bench.sync();
     assert_eq!(bench.status(), "Mapped CC 74");
+    assert_eq!(bench.alerts.kept().len(), 1, "the error stays beside it");
     *bench.fake.input_error.borrow_mut() = None;
     bench.sync();
     assert!(bench.device().is_some());
-    assert_eq!(bench.status(), "Mapped CC 74", "recovery replaces only its own error");
+    assert_eq!(bench.status(), "Audio input: \"Mic\" is back.");
+    assert!(bench.alerts.kept().is_empty());
 }
 
 /// Each loss in a run is reported, and each recovery replaces only its error.
@@ -268,14 +271,16 @@ fn a_refusal_shows_once_until_an_input_is_chosen() {
     bench.fake.input_permission_denied.set(false);
     bench.sync();
     assert!(bench.device().is_some(), "access came back");
-    assert_eq!(bench.status(), "newer");
+    assert!(bench.alerts.kept().is_empty());
 
+    bench.alerts.say("newer");
     bench.fake.input_permission_denied.set(true);
     bench.sync();
     assert_eq!(bench.device(), None);
     assert_eq!(bench.status(), "newer", "once per run");
+    assert!(bench.alerts.kept().is_empty(), "once per run");
 
-    bench.session.choose(&mut bench.parts.controller);
+    bench.session.choose(&mut bench.parts.controller, &mut bench.alerts);
     bench.sync();
     assert!(bench.status().contains("microphone was denied"));
 }
@@ -319,7 +324,7 @@ fn a_stopped_output_keeps_the_wait_for_a_named_input() {
     bench.sync();
     assert_eq!(bench.device(), None, "the default does not stand in");
 
-    bench.session.choose(&mut bench.parts.controller);
+    bench.session.choose(&mut bench.parts.controller, &mut bench.alerts);
     assert!(!bench.session.named_lost());
     bench.sync();
     assert_eq!(bench.device().as_deref(), Some("Other"), "the fallback applies again");
@@ -461,4 +466,52 @@ fn input_error_categories_have_their_own_status() {
         assert!(input_error_message(&error).contains(text), "{error:?}");
     }
     assert!(!input_error_message(&InputError::Other("permission denied".into())).contains("was denied"));
+}
+
+/// A device error the player dismissed gets no "is back" message.
+#[test]
+fn a_dismissed_error_gets_no_back_message() {
+    let mut bench = Bench::new(&["Mic"]);
+    *bench.fake.input_error.borrow_mut() = Some(InputError::Other("device busy".into()));
+    bench.sync();
+    bench.alerts.say("newer");
+    bench.alerts.dismiss(Cause::AudioInput);
+    *bench.fake.input_error.borrow_mut() = None;
+    bench.sync();
+    assert!(bench.device().is_some());
+    assert_eq!(bench.status(), "newer");
+}
+
+/// An input error clears when the stream opens, when the player chooses an
+/// input, and when no input is wanted, so none stays on screen after its
+/// cause is gone. A later Audio In can report the same problem again.
+#[test]
+fn an_input_error_clears_when_its_cause_is_gone() {
+    let fail = |bench: &mut Bench| {
+        *bench.fake.input_error.borrow_mut() = Some(InputError::Other("device busy".into()));
+        bench.sync();
+        assert_eq!(bench.alerts.kept().len(), 1);
+    };
+
+    let mut bench = Bench::new(&["Mic"]);
+    fail(&mut bench);
+    *bench.fake.input_error.borrow_mut() = None;
+    bench.sync();
+    assert!(bench.alerts.kept().is_empty(), "the stream opened");
+
+    let mut bench = Bench::new(&["Mic"]);
+    fail(&mut bench);
+    bench.session.choose(&mut bench.parts.controller, &mut bench.alerts);
+    assert!(bench.alerts.kept().is_empty(), "the player chose an input");
+
+    let mut bench = Bench::new(&["Mic"]);
+    fail(&mut bench);
+    bench.wanted = false;
+    bench.sync();
+    assert!(bench.alerts.kept().is_empty(), "no input is wanted");
+    assert_eq!(bench.status(), "", "it does not go on saying `Error:`");
+
+    bench.wanted = true;
+    bench.sync();
+    assert_eq!(bench.alerts.kept().len(), 1, "a later Audio In reports it again");
 }

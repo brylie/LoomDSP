@@ -292,8 +292,7 @@ impl App {
             }
             Command::Open { path, .. } => {
                 if self.replace(crate::Source::File(&path)) {
-                    self.alerts
-                        .say(crate::file_commands::opened_status(&path, self.document.load_notes()));
+                    self.say_opened(&path);
                     Ok(Map::new())
                 } else {
                     Err(self.alerts.status().to_string())
