@@ -135,8 +135,7 @@ fn start_dir(file: Option<&Path>) -> Option<PathBuf> {
     if let Some(dir) = file.and_then(Path::parent).filter(|d| d.is_dir()) {
         return Some(dir.to_path_buf());
     }
-    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
-    Some(PathBuf::from(home).join("Documents")).filter(|d| d.is_dir())
+    crate::documents::folder().filter(|d| d.is_dir())
 }
 
 fn dialog(file: Option<&Path>) -> FileDialog {

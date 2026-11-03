@@ -17,6 +17,7 @@ mod control;
 mod controls;
 mod devices;
 mod document;
+mod documents;
 mod editing;
 mod edits;
 #[cfg(test)]
