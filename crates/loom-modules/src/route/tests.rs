@@ -128,6 +128,20 @@ fn lowering_the_count_moves_to_the_last_input() {
     assert_eq!(process(m.as_mut(), &numbered(1), &[0.0], &[0.0], &[0.0])[0], 2.0);
 }
 
+/// A step on the frame `count` drops goes from the last input now in use, so it
+/// wraps to input 1, not to a place worked out from the old input.
+#[test]
+fn a_step_as_the_count_drops_goes_from_the_last_input() {
+    let mut m = selector(&[(Selector::COUNT, 8.0)]);
+    let step = edges(12, &[0, 2, 4, 6, 8, 10]);
+    assert_eq!(
+        process(m.as_mut(), &numbered(12), &step, &[0.0; 12], &[0.0; 12])[11],
+        6.0
+    );
+    m.set_param(Selector::COUNT, 4.0);
+    assert_eq!(process(m.as_mut(), &numbered(1), &[1.0], &[0.0], &[0.0])[0], 1.0);
+}
+
 /// The picks of a Random selector over `steps` steps, with `params`.
 fn picks(steps: usize, params: &[(usize, f32)]) -> Vec<usize> {
     let mut all = vec![(Selector::MODE, 2.0)];
@@ -247,15 +261,32 @@ fn an_unused_bad_input_stays_out() {
     assert_eq!(out, [1.0; 4]);
 }
 
-/// Large inputs fading into each other stay finite, because each gain is shared
-/// out before the sum.
+/// The largest inputs fading into each other stay finite on every frame. The
+/// shares of a fade can round to a sum just above 1, which would pass `f32::MAX`.
 #[test]
-fn large_inputs_stay_finite_in_a_fade() {
-    let mut m = selector(&[(Selector::FADE, 0.01), (Selector::COUNT, 2.0)]);
-    let step = edges(960, &[0, 10]);
-    let signals = vec![vec![f32::MAX / 2.0 * 1.5; 960]; INPUTS];
-    let out = process(m.as_mut(), &signals, &step, &[0.0; 960], &[0.0; 960]);
-    assert!(out.iter().all(|value| value.is_finite()));
+fn the_largest_inputs_stay_finite_in_a_fade() {
+    for (fade, frames) in [(0.005, 480), (1.0, 96_000)] {
+        for value in [f32::MAX, -f32::MAX] {
+            let mut m = selector(&[(Selector::FADE, fade), (Selector::COUNT, 2.0)]);
+            let signals = vec![vec![value; frames]; INPUTS];
+            let (mut step, silent) = (vec![0.0; frames], vec![0.0; frames]);
+            step[0] = 1.0;
+            step[2] = 1.0;
+            let out = process(m.as_mut(), &signals, &step, &silent, &silent);
+            let bad = out.iter().filter(|sample| !sample.is_finite()).count();
+            assert_eq!(bad, 0, "fade {fade}, input {value}");
+        }
+    }
+}
+
+/// An infinite input in use still passes as infinity, so the safety of the fade
+/// does not hide a real one from a later module.
+#[test]
+fn an_infinite_input_in_use_stays_infinite() {
+    let mut m = selector(&[]);
+    let mut signals = numbered(1);
+    signals[0] = vec![f32::INFINITY];
+    assert_eq!(process(m.as_mut(), &signals, &[0.0], &[0.0], &[0.0])[0], f32::INFINITY);
 }
 
 /// A copy keeps the wait, and the stream, so it makes the same next pick.

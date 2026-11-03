@@ -271,6 +271,9 @@ impl Module for Selector {
                 self.current = 0;
                 self.waiting = true;
             }
+            // Before the step, so a step on the frame `count` drops goes from the
+            // last input now in use.
+            self.current = self.current.min(count - 1);
             if self.step.rising(step[i]) {
                 match mode {
                     Mode::Step if self.waiting => self.waiting = false,
@@ -297,16 +300,18 @@ impl Module for Selector {
                 *gain += (target - *gain).clamp(-most, most);
                 total += *gain;
             }
-            // Dividing each gain first means large inputs cannot overflow while
-            // they are summed. An input at gain 0 is skipped, so an infinite one
-            // that is not in use cannot make NaN.
-            out[i] = self
-                .gains
-                .iter()
-                .zip(&inputs)
-                .filter(|(gain, _)| **gain > 0.0)
-                .map(|(gain, input)| input[i] * (gain / total))
-                .sum();
+            // Sharing out each gain first keeps large inputs from overflowing
+            // on the way, and an input at gain 0 is skipped, so an infinite one
+            // not in use cannot make NaN. The shares can round to a sum just above
+            // 1, so a sum of finite inputs is held at the largest finite value.
+            let (mut sum, mut finite) = (0.0f32, true);
+            for (gain, input) in self.gains.iter().zip(&inputs) {
+                if *gain > 0.0 {
+                    sum += input[i] * (gain / total);
+                    finite &= input[i].is_finite();
+                }
+            }
+            out[i] = if finite { sum.clamp(-f32::MAX, f32::MAX) } else { sum };
         }
     }
 

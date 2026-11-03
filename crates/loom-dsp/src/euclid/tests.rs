@@ -95,3 +95,14 @@ fn a_step_goes_round() {
     assert_eq!(pattern.is_hit(8), pattern.is_hit(0));
     assert_eq!(pattern.is_hit(11), pattern.is_hit(3));
 }
+
+/// A very large pattern is still right: the sums and products do not overflow.
+#[test]
+fn a_very_large_pattern_does_not_overflow() {
+    let pattern = Pattern::new(3_000_000_000, 5, 0);
+    assert!(!pattern.is_hit(2_000_000_000));
+    assert!(pattern.is_hit(0));
+    assert!(pattern.is_hit(600_000_000));
+    assert!(pattern.is_first_hit(0));
+    assert!(!pattern.is_first_hit(2_000_000_000));
+}

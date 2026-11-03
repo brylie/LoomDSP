@@ -16,8 +16,8 @@
 //! assert_eq!(shown, "x..x..x.");
 //! ```
 
-/// One Euclidean pattern. It is small and `Copy`, so a caller can keep the one
-/// that applies to the current step while the settings move.
+/// One Euclidean pattern. It is small and `Copy`, and making one costs little,
+/// so a caller can make a new one whenever the settings move.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Pattern {
     steps: u32,
@@ -42,14 +42,14 @@ impl Pattern {
     /// The step of the unrotated pattern that plays at `step`.
     #[inline]
     fn source(&self, step: u32) -> u32 {
-        (step + self.steps - self.rotation) % self.steps
+        // In a `u64`, like the product in `is_hit`, so a large pattern cannot
+        // overflow.
+        ((u64::from(step) + u64::from(self.steps) - u64::from(self.rotation)) % u64::from(self.steps)) as u32
     }
 
     /// True when `step`, from 0, is a hit. `step` goes round the pattern.
     #[inline]
     pub fn is_hit(&self, step: u32) -> bool {
-        // Steps and hits are small in real use. A `u64` keeps a large pattern
-        // from overflowing the product.
         u64::from(self.source(step % self.steps)) * u64::from(self.hits) % u64::from(self.steps) < u64::from(self.hits)
     }
 
