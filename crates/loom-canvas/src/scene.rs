@@ -390,8 +390,11 @@ impl ModuleView {
         let others = || self.panel.widgets.iter().map(|other| (other, other.size()));
         let below = others().any(|(o, (w, _))| o.y >= bottom && o.x < right && o.x + w > meter.x);
         let beside = others().any(|(o, (_, h))| o.x >= right && o.y < bottom && o.y + h > meter.y);
+        // Growing both ways would reach a widget past the corner. A meter's
+        // bar is tall, so it keeps its height and gives up the width.
+        let past_corner = !below && others().any(|(o, _)| o.x >= right && o.y >= bottom);
         iced::Size::new(
-            if beside { 0.0 } else { extra.width },
+            if beside || past_corner { 0.0 } else { extra.width },
             if below { 0.0 } else { extra.height },
         )
     }

@@ -15,7 +15,7 @@
 
 use iced::futures::Stream;
 use iced::futures::channel::mpsc;
-use loom_core::{DisplayKind, DisplayRange, DisplayReader, DisplaySource};
+use loom_core::{DisplayKind, DisplayRange, DisplayReader, DisplaySource, ModuleDescriptor, Widget};
 use std::hash::{Hash, Hasher};
 use std::time::{Duration, Instant};
 
@@ -108,6 +108,15 @@ impl Fade {
 /// Brightness as drawn: 256 levels.
 pub fn level(value: f32) -> u8 {
     (value.clamp(0.0, 1.0) * 255.0).round() as u8
+}
+
+/// The range a change in `widget`'s value is measured in: what it draws. A
+/// meter on a display value draws its place in the value's range. A light
+/// draws its value as brightness, whatever the value's range.
+pub fn range(descriptor: &ModuleDescriptor, widget: &Widget) -> DisplayRange {
+    descriptor
+        .meter_display(widget)
+        .map_or(DisplayRange::UNIT, |display| display.range)
 }
 
 /// The drawn levels of `readings`, each at its place in its range, if any

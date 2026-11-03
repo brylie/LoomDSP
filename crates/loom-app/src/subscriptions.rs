@@ -204,7 +204,7 @@ impl App {
             .flat_map(|(id, d)| {
                 d.panel.widgets.iter().enumerate().filter_map(move |(index, w)| {
                     let display = (!w.is_control()).then(|| d.display_index(w.bind))??;
-                    Some(((id, index), display, d.displays[display].range))
+                    Some(((id, index), display, lights::range(d, w)))
                 })
             })
             .filter_map(|(light, display, range)| {

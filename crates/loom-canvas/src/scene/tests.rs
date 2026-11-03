@@ -81,9 +81,23 @@ fn a_meter_does_not_grow_over_a_widget() {
     assert_eq!(grown.width, meter.width, "the toggle is beside it");
     assert_eq!(grown.height - meter.height, m.bounds().height - initial.height);
 
+    // Past the corner, growing both ways would reach the toggle: it grows down.
+    m.size = None;
+    m.panel.height = 8;
+    m.panel.widgets[1] = widget(WidgetViewKind::Toggle, 3, 6);
+    let meter = m.widget_bounds(0).unwrap();
+    let toggle = m.widget_bounds(1).unwrap();
+    let initial = m.bounds();
+    m.size = Some((40, 40));
+    let grown = m.widget_bounds(0).unwrap();
+    assert_eq!(grown.width, meter.width, "the toggle is past the corner");
+    assert_eq!(grown.height - meter.height, m.bounds().height - initial.height);
+    assert!(grown.intersection(&toggle).is_none());
+
     // Alone, it takes all of it.
     m.size = None;
     m.panel.width = 3;
+    m.panel.height = 6;
     m.panel.widgets.truncate(1);
     let meter = m.widget_bounds(0).unwrap();
     let initial = m.bounds();

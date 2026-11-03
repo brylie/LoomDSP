@@ -28,6 +28,15 @@ fn a_change_is_measured_in_the_range_of_the_value() {
     assert_eq!(changed(&first, &[-0.01], &ranges), None);
 }
 
+/// A meter measures a change in the display value's range. A light on the same
+/// value measures it as brightness, because that is what it draws.
+#[test]
+fn a_light_compares_brightness_and_a_meter_its_range() {
+    let d = &loom_modules::dynamics::DYNAMICS;
+    assert_eq!(range(d, &Widget::meter(0, 0, "reduction")).min, -36.0);
+    assert_eq!(range(d, &Widget::light(0, 0, "reduction")), DisplayRange::UNIT);
+}
+
 /// A flash starts at full and is dark 120 ms later. A new flash starts
 /// over at full.
 #[test]
