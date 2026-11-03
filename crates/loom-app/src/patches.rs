@@ -13,6 +13,8 @@ use iced::{Element, Length, Task, Theme};
 use loom_patch::Metadata;
 use loom_patch::metadata::{Filter, Licence, LicenceFilter, tidy_tag};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
 
 /// The search field's widget ID: typing goes there when the browser opens.
@@ -82,18 +84,37 @@ pub fn patch_files(folder: &Path) -> Vec<PathBuf> {
     found
 }
 
+/// Reads each patch file in `folder` with `read_row` and gives the row to
+/// `send`. Stops within one file of `stop` being set, or when `send` says
+/// nobody is listening.
+fn read_rows(
+    folder: &Path,
+    stop: &AtomicBool,
+    mut read_row: impl FnMut(&Path) -> Row,
+    mut send: impl FnMut(Row) -> bool,
+) {
+    for path in patch_files(folder) {
+        if stop.load(Ordering::Relaxed) {
+            return;
+        }
+        if !send(read_row(&path)) {
+            return;
+        }
+    }
+}
+
 /// Reads the patch files in `folder` on a thread, one message per file,
-/// so the window never waits for the disk.
+/// so the window never waits for the disk. The thread ends when `stop` is
+/// set, so a closed browser does not go on reading a large or slow library.
+/// Its sender then drops, which ends the task too.
 #[cfg(not(test))]
-fn read(open: u64, folder: PathBuf) -> Task<Message> {
+fn read(open: u64, folder: PathBuf, stop: Arc<AtomicBool>) -> Task<Message> {
     let (sender, receiver) = iced::futures::channel::mpsc::unbounded();
     std::thread::spawn(move || {
-        for path in patch_files(&folder) {
-            let row = Box::new(Row::read(&path));
-            if sender.unbounded_send(Message::Found { open, row }).is_err() {
-                return;
-            }
-        }
+        read_rows(&folder, &stop, Row::read, |row| {
+            let row = Box::new(row);
+            sender.unbounded_send(Message::Found { open, row }).is_ok()
+        });
     });
     Task::run(receiver, |message| message)
 }
@@ -101,12 +122,14 @@ fn read(open: u64, folder: PathBuf) -> Task<Message> {
 /// Reads the patch files at once: the headless test harness runs a task
 /// to its end and cannot wait for a thread.
 #[cfg(test)]
-fn read(open: u64, folder: PathBuf) -> Task<Message> {
-    let rows = patch_files(&folder).into_iter().map(|path| {
-        Task::done(Message::Found {
+fn read(open: u64, folder: PathBuf, stop: Arc<AtomicBool>) -> Task<Message> {
+    let mut rows = Vec::new();
+    read_rows(&folder, &stop, Row::read, |row| {
+        rows.push(Task::done(Message::Found {
             open,
-            row: Box::new(Row::read(&path)),
-        })
+            row: Box::new(row),
+        }));
+        true
     });
     Task::batch(rows)
 }
@@ -165,6 +188,17 @@ pub struct PatchBrowser {
     highlight: usize,
     /// The list's scroll offset.
     scroll: f32,
+    /// Set when this browser goes, to stop the thread reading its folder.
+    stop: Arc<AtomicBool>,
+}
+
+/// However a browser goes (Close, opening a patch, opening it again, or the
+/// app replacing its patch), its reader stops. *Why here:* no way of closing
+/// it can forget to.
+impl Drop for PatchBrowser {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
 }
 
 impl PatchBrowser {
@@ -178,14 +212,16 @@ impl PatchBrowser {
             shown: Vec::new(),
             highlight: 0,
             scroll: 0.0,
+            stop: Arc::new(AtomicBool::new(false)),
         }
     }
 
     /// Opens a browser over `folder` and the task that reads it on a
     /// thread, one message per file.
     pub fn open(open: u64, folder: PathBuf) -> (Self, Task<Message>) {
-        let task = Task::batch([read(open, folder.clone()), iced::widget::operation::focus(SEARCH)]);
-        (Self::new(open, folder), task)
+        let browser = Self::new(open, folder.clone());
+        let reader = read(open, folder, browser.stop.clone());
+        (browser, Task::batch([reader, iced::widget::operation::focus(SEARCH)]))
     }
 
     /// The rows the list shows, in order.

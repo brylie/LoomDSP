@@ -168,3 +168,102 @@ fn the_library_folder_is_made_when_first_needed() {
     assert!(app.patches.is_some());
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// The reader stops within one file of the flag being set, wherever in the
+/// folder that falls: it reads no file after the one it was on.
+#[test]
+fn the_reader_stops_within_one_file() {
+    let dir = library("stop");
+    let total = patch_files(&dir).len();
+    assert!(total > 2, "the folder must have files left to skip");
+    let stop = AtomicBool::new(false);
+    let mut reads = 0;
+    read_rows(
+        &dir,
+        &stop,
+        |path| {
+            reads += 1;
+            if reads == 2 {
+                stop.store(true, Ordering::Relaxed);
+            }
+            Row::read(path)
+        },
+        |_| true,
+    );
+    assert_eq!(reads, 2, "of {total} files");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// With nobody listening, the reader stops too.
+#[test]
+fn the_reader_stops_when_nobody_listens() {
+    let dir = library("listen");
+    let mut reads = 0;
+    read_rows(
+        &dir,
+        &AtomicBool::new(false),
+        |path| {
+            reads += 1;
+            Row::read(path)
+        },
+        |_| false,
+    );
+    assert_eq!(reads, 1);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// An app with its library at `dir` and the browser open, and the flag that
+/// stops that browser's reader, not yet set.
+fn app_browsing(dir: &Path) -> (App, Arc<AtomicBool>) {
+    let mut app = App::new(crate::tests::app_args());
+    let mut preferences = app.rig.store.saved().clone();
+    preferences.library = Some(dir.to_path_buf());
+    let _ = app.rig.store.save(preferences);
+    let _ = app.update(AppMessage::File(FileAction::Browse));
+    let stop = app.patches.as_ref().expect("the browser is open").stop.clone();
+    assert!(!stop.load(Ordering::Relaxed));
+    (app, stop)
+}
+
+/// Close stops the reader.
+#[test]
+fn closing_the_browser_stops_its_reader() {
+    let dir = library("close");
+    let (mut app, stop) = app_browsing(&dir);
+    let _ = app.update(AppMessage::Patches(Message::Close));
+    assert!(app.patches.is_none());
+    assert!(stop.load(Ordering::Relaxed));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Opening a patch from the browser stops the reader, and so does replacing
+/// the patch some other way while the browser is open.
+#[test]
+fn opening_a_patch_stops_the_reader() {
+    let dir = library("opened");
+    let (mut app, stop) = app_browsing(&dir);
+    let _ = app.update(AppMessage::Patches(Message::Found {
+        open: app.patches_open,
+        row: Box::new(Row::read(&dir.join("pad.ron"))),
+    }));
+    let _ = app.update(AppMessage::Patches(Message::Submit));
+    assert!(app.patches.is_none());
+    assert!(stop.load(Ordering::Relaxed));
+
+    let (mut app, stop) = app_browsing(&dir);
+    assert!(app.replace(crate::Source::Empty));
+    assert!(stop.load(Ordering::Relaxed));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Opening the browser again stops the earlier reader and starts a new one.
+#[test]
+fn opening_the_browser_again_stops_the_earlier_reader() {
+    let dir = library("again");
+    let (mut app, first) = app_browsing(&dir);
+    let _ = app.update(AppMessage::File(FileAction::Browse));
+    let second = app.patches.as_ref().expect("the browser is open").stop.clone();
+    assert!(first.load(Ordering::Relaxed), "the earlier reader stops");
+    assert!(!second.load(Ordering::Relaxed), "the new one keeps reading");
+    let _ = std::fs::remove_dir_all(dir);
+}
