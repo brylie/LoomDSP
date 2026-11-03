@@ -11,7 +11,7 @@ use iced::{Color, Point, Theme};
 use loom_canvas::PanelValues;
 use loom_core::{Controller, EngineConfig, EngineParts, ModuleId, TRANSPORT_MODULE, create_engine};
 use loom_host_desktop::AudioOutput;
-use loom_patch::Patch;
+use loom_patch::{Metadata, Patch};
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::time::Instant;
@@ -180,7 +180,7 @@ impl App {
         let mut sizes = BTreeMap::new();
         let mut original_unknown_positions = BTreeMap::new();
         let mut notes = Vec::new();
-        let mut load = |patch: &Patch, controller: &mut Controller| -> Result<String, String> {
+        let mut load = |patch: &Patch, controller: &mut Controller| -> Result<Metadata, String> {
             notes = patch.load_into(controller).map_err(|e| e.to_string())?;
             for m in &patch.modules {
                 if controller
@@ -197,23 +197,28 @@ impl App {
                     sizes.insert(m.id, size);
                 }
             }
-            Ok(patch.name.clone())
+            Ok(patch.metadata())
         };
-        let (name, file, stamp) = match source {
+        let named = |name: String| Metadata {
+            name,
+            ..Metadata::default()
+        };
+        let fresh = matches!(source, Source::Empty);
+        let (info, file, stamp) = match source {
             Source::Generated(n) => {
                 layout::generate(&mut controller, n).map_err(|e| format!("generate failed: {e}"))?;
                 layout::generated_layout(&controller, &mut positions);
-                (format!("Generated ({n} modules)"), None, None)
+                (named(format!("Generated ({n} modules)")), None, None)
             }
             Source::File(path) => {
                 // Stamped before reading: a change after this shows as a change.
                 let stamp = recovery::Stamp::of(path);
                 let patch = Patch::load(path).map_err(|e| e.to_string())?;
-                let name = load(&patch, &mut controller)?;
-                (name, Some(path.to_path_buf()), stamp)
+                let info = load(&patch, &mut controller)?;
+                (info, Some(path.to_path_buf()), stamp)
             }
             Source::Recovered(patch) => (load(&patch, &mut controller)?, None, None),
-            Source::Empty => ("Untitled".to_string(), None, None),
+            Source::Empty => (named("Untitled".to_string()), None, None),
         };
         // Every patch has one Transport (clock.md). A loaded file gets one
         // in `load_into`; a new or generated patch gets it here.
@@ -237,7 +242,8 @@ impl App {
             positions,
             unknown_positions,
             sizes,
-            name,
+            info,
+            fresh,
             file,
             stamp,
             notes,
@@ -265,7 +271,8 @@ impl App {
             positions,
             unknown_positions,
             sizes,
-            name,
+            info,
+            fresh,
             file,
             stamp,
             notes,
@@ -325,7 +332,7 @@ impl App {
             full_traces: true,
             visible_displays: Vec::new(),
             selection: BTreeSet::new(),
-            document: document::Document::new(name, file, stamp, load_notes),
+            document: document::Document::new(info, file, stamp, load_notes),
             generation,
             stream: stream::Stream::new(
                 audio,
@@ -365,6 +372,10 @@ impl App {
                 loom_modules::registry().iter().collect()
             },
             browser: None,
+            patch_info: crate::patch_info::State::new(&Metadata::default()),
+            chooser: None,
+            patches: None,
+            patches_open: 0,
             help: None,
             tile_menu: None,
             browser_key: 0,
@@ -386,6 +397,7 @@ impl App {
             matrix: matrix::State::default(),
             still: None,
             step_name: None,
+            history_key: None,
         };
         // A stream that failed to start took the engine with it.
         app.keep_engine_idle();
@@ -394,6 +406,14 @@ impl App {
         if let Some(error) = app.connect_midi(first_midi, connect_midi) {
             app.alerts.say(error);
         }
+        // A new patch credits the user and takes their default licence
+        // (patch-metadata.md, Defaults).
+        if fresh {
+            let saved = app.rig.store.saved();
+            let (author, licence) = (saved.author.clone(), saved.licence.clone());
+            app.document.start_new(&author, licence.as_deref());
+        }
+        app.patch_info = crate::patch_info::State::new(app.document.info());
         // A patch just loaded is the one on disk.
         app.edits.history.mark_saved();
         app.document.mark_loaded(app.current_patch());

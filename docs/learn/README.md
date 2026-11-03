@@ -24,6 +24,7 @@ LoomDSP is also a way to learn modular sound design, for musicians and for the p
 | [How a ladder filter sings](ladder-filter.md) | Why inverted feedback through stages makes a peak, why four stages sing at the cutoff and two never do, how a loop runs with no unit delay, and how to change the slope without a burst. |
 | [Delays and interpolation](delays-and-interpolation.md) | How a circular buffer works, why linear interpolation dulls sweeps and loops, why the all-pass needs two samples of delay, and how to tune a loop. |
 | [Filters near half the sample rate](filters-near-half-the-sample-rate.md) | Why a digital bell gets narrower near the top of the range, why a filter's curve depends on the sample rate, and what can fix it. |
+| [Licences for shared patches](patch-licences.md) | What a licence on a patch says, why two questions pick a Creative Commons licence, how SPDX expressions combine, and why the licence filters treat unknown terms as no. |
 | [Repeatable randomness](repeatable-randomness.md) | Why a random part plays the same after a reload, why a small seed needs mixing, why each lane has its own stream, and why a walk bounces. |
 
 ## Writing one

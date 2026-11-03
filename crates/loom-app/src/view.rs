@@ -6,8 +6,8 @@ use crate::matrix::{Event as MatrixEvent, Tab as RightTab};
 use crate::style::button;
 use crate::subscriptions::{browser_key, help_key};
 use crate::{
-    App, DIM, FileAction, Message, alerts, browser, inspector, learn, matrix, panic, pointer, probe_menu, settings,
-    style, undo,
+    App, DIM, FileAction, Message, alerts, browser, inspector, learn, matrix, panic, patches, pointer, probe_menu,
+    settings, style, undo,
 };
 use iced::widget::{column, container, mouse_area, row, rule, space, stack, text, toggler, tooltip};
 use iced::{Color, Element, Length};
@@ -28,7 +28,9 @@ impl App {
                     && self.probe_menu.is_none()
                     && self.tile_menu.is_none()
                     && self.help.is_none()
-                    && self.rig.window.is_none(),
+                    && self.rig.window.is_none()
+                    && self.chooser.is_none()
+                    && self.patches.is_none(),
             )
             .matrix_line(self.matrix_line())
             .matrix_keyboard(self.matrix.tab == RightTab::Matrix && self.matrix.focused)
@@ -95,9 +97,17 @@ impl App {
         if let Some(window) = self.preferences_view() {
             layers = layers.push(window);
         }
+        if let Some(open) = &self.patches {
+            layers = layers.push(open.view().map(Message::Patches));
+        }
+        // Over the Preferences window, which also opens it.
+        if let Some(chooser) = &self.chooser {
+            layers = layers.push(chooser.view());
+        }
         // The control channel's pointer events go in here, as a real
         // pointer's would (control-channel.md, Pointer commands).
         let browser_open = self.browser.is_some() && self.help.is_none();
+        let patches_open = self.patches.is_some() && self.chooser.is_none();
         let matrix_keys = self.matrix.tab == RightTab::Matrix && self.matrix.focused;
         pointer::Injector::new(layers, self, move |key, status| {
             // As the subscriptions do: `keyboard::listen` passes on what no
@@ -113,6 +123,12 @@ impl App {
                 messages.push(message);
             }
             if let Some(message) = help_key(iced::Event::Keyboard(key.clone()), status, iced::window::Id::unique()) {
+                messages.push(message);
+            }
+            if patches_open
+                && let Some(message) =
+                    patches::key(iced::Event::Keyboard(key.clone()), status, iced::window::Id::unique())
+            {
                 messages.push(message);
             }
             if browser_open
@@ -145,6 +161,14 @@ impl App {
             button(label("Open")).on_press(Message::File(FileAction::Open)),
             button(label("Save")).on_press(Message::File(FileAction::Save)),
             button(label("Save As")).on_press(Message::File(FileAction::SaveAs)),
+            tip(
+                button(label("Browse")).on_press(Message::File(FileAction::Browse)),
+                if cfg!(target_os = "macos") {
+                    "Your patches: Cmd+Shift+O"
+                } else {
+                    "Your patches: Ctrl+Shift+O"
+                },
+            ),
         ];
         let add = tip(
             button(label("Add module")).on_press(Message::OpenBrowser),
@@ -227,6 +251,7 @@ impl App {
     pub(crate) fn inspector(&self) -> Element<'_, Message> {
         inspector::view(
             self.inspector_model(),
+            &self.patch_info.authors,
             self.gestures.drop_row(),
             self.gestures.assign_drag().is_some() && !self.learn.is_on(),
         )
@@ -349,13 +374,13 @@ impl App {
 /// The inspector's remove button for an item in a list, such as a MIDI
 /// mapping or a modulation assignment: a small × at the end of its row,
 /// with hover text that names what it removes (panels.md, The inspector).
-pub(crate) fn remove_button<'a>(what: &'a str, on_press: Message) -> Element<'a, Message> {
+pub(crate) fn remove_button<'a>(what: impl Into<String>, on_press: Message) -> Element<'a, Message> {
     tooltip(
         button(text("×").size(style::CONTROL))
             .padding([0, 6])
             .style(style::plain)
             .on_press(on_press),
-        container(text(what).size(style::BODY))
+        container(text(what.into()).size(style::BODY))
             .padding(6)
             .style(container::rounded_box),
         tooltip::Position::Top,

@@ -13,13 +13,15 @@ impl App {
     }
 
     /// True when the patch differs from the file (`docs/design/files.md`).
+    /// An edit in patch info counts too (patch-metadata.md).
     pub(crate) fn unsaved(&self) -> bool {
-        !self.edits.history.is_saved()
+        !self.edits.history.is_saved() || self.document.info_unsaved()
     }
 
     /// Writes the patch to `path`. On success the path becomes the current
     /// file and the unsaved mark clears.
     pub(crate) fn write_to(&mut self, path: PathBuf) -> bool {
+        self.offer_credit();
         let patch = self.current_patch();
         match patch.save(&path) {
             Ok(()) => {
@@ -42,6 +44,42 @@ impl App {
         }
     }
 
+    /// The library folder, made if it is missing. `None`, with a status
+    /// line, when there is none or it cannot be made: Save As then starts
+    /// where the system chooses.
+    pub(crate) fn library_folder(&mut self) -> Option<PathBuf> {
+        let dir = self.rig.store.saved().library_folder()?;
+        match std::fs::create_dir_all(&dir) {
+            Ok(()) => Some(dir),
+            Err(e) => {
+                self.alerts
+                    .say(format!("Could not make the library folder \"{}\": {e}.", dir.display()));
+                None
+            }
+        }
+    }
+
+    /// Offers once per patch to add the user's name to its authors, before
+    /// the first Save (patch-metadata.md, rule 3). Never with the control
+    /// channel on, where nobody could answer a dialog.
+    fn offer_credit(&mut self) {
+        let name = self.rig.store.saved().author.trim().to_string();
+        if !self.control.is_empty() || !self.document.should_offer_credit(&name) {
+            return;
+        }
+        match files::confirm_add_author(&name, &self.document.info().authors) {
+            Some(true) => {
+                self.document.edit_info(|info| info.authors.push(name));
+                // The authors box shows the new name, so its next edit
+                // keeps it.
+                // Only the authors box: a tag being typed stays.
+                self.patch_info.authors = crate::patch_info::State::new(self.document.info()).authors;
+            }
+            Some(false) => {}
+            None => self.document.credit_not_asked(),
+        }
+    }
+
     /// Save: to the current file, or Save As when there is none. Returns
     /// false if nothing was saved.
     pub(crate) fn save(&mut self) -> bool {
@@ -54,7 +92,28 @@ impl App {
 
     pub(crate) fn save_as(&mut self) -> bool {
         self.finish_edits();
-        match files::pick_save(self.document.save_start()) {
+        // A patch with no file yet starts in the library folder, made when
+        // it is missing, under a free name taken from the patch name
+        // (patch-metadata.md, Your patches browser).
+        // The current file wins, then a hint with a folder (a recovered
+        // copy's). A bare hint, as an example copy suggests, goes in the
+        // library like a new patch, keeping its name.
+        let start = match (
+            self.document.file().map(Path::to_path_buf),
+            self.document.save_start().map(Path::to_path_buf),
+        ) {
+            // The current file always wins, even one opened by a bare name.
+            (Some(file), _) => Some(file),
+            (None, Some(path)) if path.parent().is_some_and(|dir| !dir.as_os_str().is_empty()) => Some(path),
+            (None, hint) => {
+                let name = hint.as_deref().and_then(Path::file_stem).map_or_else(
+                    || self.document.name().to_string(),
+                    |stem| stem.to_string_lossy().into_owned(),
+                );
+                self.library_folder().map(|dir| files::free_path(&dir, &name)).or(hint)
+            }
+        };
+        match files::pick_save(start.as_deref()) {
             Some(path) => self.write_to(path),
             None => false,
         }
@@ -172,6 +231,7 @@ impl App {
         // keys with the ones it saw: they must keep counting up. A new frame
         // key also resets pan and zoom to show the whole patch.
         fresh.browser_key = self.browser_key;
+        fresh.patches_open = self.patches_open;
         fresh.frame_key = self.frame_key + 1;
         *self = fresh;
         // The new patch has no unsaved changes: the copy goes.
@@ -199,6 +259,9 @@ impl App {
             FileAction::SaveAs => {
                 self.save_as();
             }
+            // Opening the browser starts a task, so `App::update` handles
+            // it before it reaches here.
+            FileAction::Browse => {}
             FileAction::Close => {
                 if self.can_discard() {
                     self.quit = true;

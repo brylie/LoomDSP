@@ -146,6 +146,7 @@ impl Ui {
     pub fn step(&mut self, events: &[Event]) -> Vec<Message> {
         let mut messages = Vec::new();
         let browser_open = self.app.browser.is_some() && self.app.help.is_none();
+        let patches_open = self.app.patches.is_some() && self.app.chooser.is_none();
         let matrix_keys = self.app.matrix.tab == crate::matrix::Tab::Matrix && self.app.matrix.focused;
         let mut clipboard = std::mem::take(&mut self.clipboard);
         self.with_ui(|ui, renderer, cursor| {
@@ -165,6 +166,10 @@ impl Ui {
                 // The open browser listens to keys whether or not a widget
                 // used them.
                 if browser_open && let Some(message) = browser_key(event.clone(), status, window::Id::unique()) {
+                    messages.push(message);
+                }
+                if patches_open && let Some(message) = crate::patches::key(event.clone(), status, window::Id::unique())
+                {
                     messages.push(message);
                 }
                 if let Some(message) = help_key(event.clone(), status, window::Id::unique()) {
@@ -254,6 +259,15 @@ impl Ui {
     pub(crate) fn send(&mut self, message: Message) {
         let task = self.app.update(message);
         self.run(task, &mut VecDeque::new(), &mut Vec::new());
+    }
+
+    /// Gives keyboard focus to the widget with this ID, as a click on it
+    /// would, and draws the frame.
+    pub fn focus(&mut self, id: &'static str) {
+        let mut operation =
+            iced::advanced::widget::operation::focusable::focus::<()>(iced::advanced::widget::Id::new(id));
+        self.with_ui(|ui, renderer, _| ui.operate(renderer, &mut operation));
+        self.redraw();
     }
 
     /// Moves the pointer to a window point.

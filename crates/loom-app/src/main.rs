@@ -30,6 +30,7 @@ mod input_watch;
 mod inspector;
 mod layout;
 mod learn;
+mod licence_chooser;
 mod lights;
 mod live;
 mod matrix;
@@ -37,6 +38,8 @@ mod modulation;
 mod monitor;
 mod panic;
 mod param;
+mod patch_info;
+mod patches;
 mod pointer;
 mod preferences;
 mod probe_menu;
@@ -334,6 +337,13 @@ enum Message {
     Key(iced::keyboard::Event),
     /// Take back the last step (`docs/design/undo.md`).
     Undo,
+    /// An undo or redo shortcut, after checking whether a text field has
+    /// focus. While one has, the shortcut does nothing: the field is
+    /// being edited, and undo would change the patch behind it.
+    HistoryKey {
+        redo: bool,
+        typing: bool,
+    },
     /// Replay the step undo took back.
     Redo,
     /// An exact parameter value, in the parameter's units, sent as a knob
@@ -405,6 +415,12 @@ enum Message {
     SelectModule(u32),
     /// A message for the Preferences window (`docs/design/preferences.md`).
     Preferences(settings::Message),
+    /// An edit in patch info (`docs/design/patch-metadata.md`).
+    PatchInfo(patch_info::Message),
+    /// A message for the open licence chooser.
+    Licence(licence_chooser::Message),
+    /// A message for the open patches browser.
+    Patches(patches::Message),
     /// The clipboard was read for a paste at a world point, not yet snapped
     /// (`docs/design/clipboard.md`).
     /// `generation` is the engine's when the read began: a result that
@@ -478,6 +494,8 @@ pub(crate) enum FileAction {
     Save,
     /// Ask for a file and save to it.
     SaveAs,
+    /// Open your patches browser (`docs/design/patch-metadata.md`).
+    Browse,
     /// The window asked to close: quit, unless the player keeps the patch.
     Close,
 }
@@ -548,6 +566,15 @@ struct App {
     modules: Vec<&'static ModuleDescriptor>,
     /// The module browser, while it is open.
     browser: Option<browser::Browser>,
+    /// Patch info's fields being typed in (`docs/design/patch-metadata.md`).
+    patch_info: patch_info::State,
+    /// The licence chooser, while it is open.
+    chooser: Option<licence_chooser::Chooser>,
+    /// Your patches browser, while it is open.
+    patches: Option<patches::PatchBrowser>,
+    /// Counts openings of the patches browser, so files read for an
+    /// earlier one are dropped.
+    patches_open: u64,
     /// Open module help.
     help: Option<help::Help>,
     /// Right-clicked tile and its menu position.
@@ -595,6 +622,9 @@ struct App {
     /// The name for the step the edit in progress makes, when a command
     /// names it (cut, paste, duplicate) rather than what changed.
     step_name: Option<String>,
+    /// An undo (`false`) or redo (`true`) shortcut waiting for the check
+    /// that no text field has focus.
+    history_key: Option<bool>,
 }
 
 /// Where a patch comes from.
@@ -617,7 +647,10 @@ struct Session {
     unknown_positions: BTreeMap<u32, (Option<(f32, f32)>, Point)>,
     /// Tile dimensions carried with the patch between sessions.
     sizes: BTreeMap<u32, (u8, u8)>,
-    name: String,
+    /// The patch's name and metadata (patch-metadata.md).
+    info: loom_patch::Metadata,
+    /// True for a new, empty patch, which takes the user's defaults.
+    fresh: bool,
     file: Option<PathBuf>,
     stamp: Option<recovery::Stamp>,
     /// What loaded differently from the file, such as a saved control
@@ -629,6 +662,7 @@ impl App {
     /// The patch as it would be saved now.
     fn current_patch(&self) -> Patch {
         let mut patch = Patch::from_graph(self.document.name(), self.controller.graph());
+        patch.set_metadata(self.document.info().clone());
         for m in &mut patch.modules {
             m.position = self.positions.get(&m.id).map(|p| (p.x.round(), p.y.round()));
             if let Some((original, initial)) = self.unknown_positions.get(&m.id)
@@ -905,6 +939,16 @@ impl App {
         let was_help_open = self.help.is_some();
         let task = match message {
             Message::Browser(message) => self.browser_message(message),
+            Message::Patches(message) => self.patches_message(message),
+            Message::File(FileAction::Browse) => self.open_patches(),
+            Message::Key(iced::keyboard::Event::KeyPressed { key, modifiers, .. })
+                if modifiers.command()
+                    && modifiers.shift()
+                    && matches!(key.as_ref(), iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("o"))
+                    && self.no_overlay() =>
+            {
+                self.open_patches()
+            }
             Message::Canvas(CanvasEvent::Paste { world }) => {
                 let generation = self.generation;
                 iced::clipboard::read().map(move |text| Message::Pasted {
@@ -929,6 +973,15 @@ impl App {
                 Task::none()
             }
         };
+        // An undo or redo shortcut asks the window whether a text field has
+        // focus first.
+        let task = match self.history_key.take() {
+            Some(redo) => Task::batch([
+                task,
+                editing::text_field_focused().map(move |typing| Message::HistoryKey { redo, typing }),
+            ]),
+            None => task,
+        };
         self.drain_idle_engine();
         // The audio callback, or the idle engine above, makes room for the
         // staged modules. Tick messages keep this retry moving even without
@@ -951,6 +1004,54 @@ impl App {
         } else {
             task
         }
+    }
+
+    /// True when no overlay or dialog panel is open over the canvas.
+    fn no_overlay(&self) -> bool {
+        self.browser.is_none()
+            && self.help.is_none()
+            && self.rig.window.is_none()
+            && self.chooser.is_none()
+            && self.patches.is_none()
+    }
+
+    /// Opens your patches browser over the library folder, which is read
+    /// on a thread (patch-metadata.md, Your patches browser).
+    fn open_patches(&mut self) -> Task<Message> {
+        // The folder is made on first use, so a new player's library
+        // starts empty rather than missing.
+        let Some(folder) = self.library_folder() else {
+            if self.rig.store.saved().library_folder().is_none() {
+                self.alerts
+                    .say("No library folder: set `library` in the preferences file.".to_string());
+            }
+            return Task::none();
+        };
+        self.browser = None;
+        self.patches_open += 1;
+        let (browser, task) = patches::PatchBrowser::open(self.patches_open, folder);
+        self.patches = Some(browser);
+        task.map(Message::Patches)
+    }
+
+    /// Handles a patches browser message: keep it open, close it, or open
+    /// a patch, asking about unsaved changes first.
+    fn patches_message(&mut self, message: patches::Message) -> Task<Message> {
+        let Some(open) = self.patches.as_mut() else {
+            return Task::none();
+        };
+        let (outcome, task) = open.update(message);
+        match outcome {
+            patches::Outcome::Stay => {}
+            patches::Outcome::Close => self.patches = None,
+            patches::Outcome::Open(path) => {
+                self.patches = None;
+                if self.can_discard() {
+                    self.open_path(&path);
+                }
+            }
+        }
+        task.map(Message::Patches)
     }
 
     /// Handles a browser message: keep it open, close it, or add a module.
@@ -1107,6 +1208,26 @@ impl App {
             Message::CloseTileMenu => self.tile_menu = None,
             Message::Key(_) if self.help.is_some() => {}
             Message::Preferences(message) => self.preferences(message),
+            Message::PatchInfo(message) => self.patch_info_message(message),
+            Message::HistoryKey { redo, typing } => {
+                if !typing {
+                    if redo {
+                        self.redo();
+                    } else {
+                        self.undo();
+                    }
+                }
+            }
+            Message::Licence(message) => self.licence_message(message),
+            Message::Patches(_) => {}
+            Message::Key(iced::keyboard::Event::KeyPressed { key, .. }) if self.chooser.is_some() => {
+                // The chooser takes Escape and keeps other keys from the
+                // canvas and the windows behind it.
+                if key == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) {
+                    self.chooser = None;
+                }
+            }
+            Message::Key(_) if self.chooser.is_some() || self.patches.is_some() => {}
             Message::Key(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) if self.rig.window.is_some() => {
                 // The window takes Escape and its own shortcut, and keeps
                 // other keys from the canvas behind it.
@@ -1396,10 +1517,12 @@ impl App {
                 // Ctrl+Z or Cmd+Z undoes; adding Shift redoes. Ctrl+Y also
                 // redoes, except on macOS.
                 match key.as_ref() {
+                    // Undo and redo wait for a focus check: a text field
+                    // being edited keeps them (undo.md, Gestures).
                     iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("z") && modifiers.shift() => {
-                        self.redo()
+                        self.history_key = Some(true)
                     }
-                    iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("z") => self.undo(),
+                    iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("z") => self.history_key = Some(false),
                     iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("n") => {
                         self.file_action(FileAction::New)
                     }
@@ -1413,7 +1536,7 @@ impl App {
                         self.file_action(FileAction::Save);
                     }
                     iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("y") && !cfg!(target_os = "macos") => {
-                        self.redo()
+                        self.history_key = Some(true)
                     }
                     iced::keyboard::Key::Character(",") => self.toggle_preferences(),
                     _ => {}

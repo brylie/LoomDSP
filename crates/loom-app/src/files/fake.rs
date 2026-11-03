@@ -11,6 +11,8 @@ pub enum Asked {
     Discard(String),
     /// An error message, with the text it showed.
     Error(String),
+    /// The question to add the user's name to the authors, with the name.
+    AddAuthor(String),
 }
 
 thread_local! {
@@ -18,6 +20,7 @@ thread_local! {
     static SAVE_ANSWER: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
     static DISCARD_ANSWER: RefCell<Choice> = const { RefCell::new(Choice::Cancel) };
     static EXAMPLES: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+    static ADD_AUTHOR_ANSWER: RefCell<Option<bool>> = const { RefCell::new(Some(false)) };
 }
 
 /// Apps built on this thread from now on find `dir` as their bundled
@@ -42,6 +45,13 @@ pub fn answer_discard(choice: Choice) {
     DISCARD_ANSWER.with(|answer| *answer.borrow_mut() = choice);
 }
 
+/// Answers the questions to add the user's name from now on: `Some(true)`
+/// adds it, `Some(false)` declines, `None` acts as if no dialog could be
+/// shown. Without a call they are declined.
+pub fn answer_add_author(answer: Option<bool>) {
+    ADD_AUTHOR_ANSWER.with(|a| *a.borrow_mut() = answer);
+}
+
 /// The dialogs asked on this thread so far, which are then forgotten.
 pub fn asked() -> Vec<Asked> {
     ASKED.with(|asked| std::mem::take(&mut *asked.borrow_mut()))
@@ -61,4 +71,10 @@ pub(super) fn confirm_discard(name: &str) -> Option<Choice> {
 /// Records the error message in place of the dialog.
 pub(super) fn show_error(message: &str) {
     ASKED.with(|asked| asked.borrow_mut().push(Asked::Error(message.to_string())));
+}
+
+/// Records the question and gives the configured answer.
+pub(super) fn confirm_add_author(name: &str) -> Option<Option<bool>> {
+    ASKED.with(|asked| asked.borrow_mut().push(Asked::AddAuthor(name.to_string())));
+    Some(ADD_AUTHOR_ANSWER.with(|answer| *answer.borrow()))
 }

@@ -40,7 +40,7 @@ How a user takes back and replays edits on the canvas, the inspector, and the pa
 | Press undo or redo while a gesture is in progress | Nothing happens. The gesture finishes first. |
 | Open a patch, or start a new one | The history is cleared. |
 
-The shortcuts work anywhere in the window, except while a text field is being edited. A text field has its own undo. *Why not only when the canvas has focus:* the app has no focus for the canvas or the inspector as a whole, and the user expects undo to work wherever they last clicked.
+The shortcuts work anywhere in the window, except while a text field or text box has keyboard focus: then they do nothing. The text widgets have no undo of their own, and undoing a canvas edit behind the field would surprise the user. *Why not only when the canvas has focus:* the app has no focus for the canvas or the inspector as a whole, and the user expects undo to work wherever they last clicked.
 
 ### After an undo or redo
 
@@ -98,6 +98,7 @@ The exact wording can change while building. Each step must have a name.
 | Transport: tempo, time signature, start and stop, position | Performance controls that the user changes while playing. Tempo and time signature are saved in the patch, but in the first version they stay out of the history. *Why:* the user changes them to play, often while the transport runs, and undoing a knob turn should never jump the tempo back. Revisit if users expect them in the history. |
 | Parameter changes that come from a hardware MIDI control | The hardware control is its own undo: move it back. Undo cannot move a physical knob, so taking back a fader move would leave the sound and the fader apart, and the next touch would jump. It would also bury the user's own edits and drop their redo steps. See [Mapped parameters](#mapped-parameters). Revisit when pickup modes (FR-MIDI-09) remove the jump. |
 | Saving | Writes the file; the patch does not change. |
+| Patch info: authors, tags, and licence ([patch metadata](patch-metadata.md#patch-info)) | Typed text and small picks that are easy to redo by hand. The edit marks the patch unsaved and is saved with it. While the authors box or tag field has focus, the undo shortcuts do nothing (see above). Revisit if users expect patch info in the history. |
 | Learn mode on or off, and arming a parameter | A mode, not an edit. Undo while a parameter is armed disarms it first, then undoes. |
 
 ### Mapped parameters

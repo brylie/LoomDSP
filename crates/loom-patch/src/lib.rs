@@ -37,6 +37,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::Path;
 
+pub mod metadata;
+pub use metadata::Metadata;
+
 /// The patch format version this build writes.
 pub const CURRENT_VERSION: u32 = 1;
 
@@ -52,6 +55,23 @@ pub struct Patch {
     /// Free text for the patch author.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description: String,
+    /// Who made it, in credit order (`docs/design/patch-metadata.md`).
+    /// Omitted when empty, like the other metadata fields.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub authors: Vec<String>,
+    /// Tags for finding the patch again. Kept as written; filters compare
+    /// their tidy form ([`metadata::tidy_tag`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+    /// An SPDX licence expression, kept as written even when it is not
+    /// valid (patch-metadata.md, rule 1). Spelled as SPDX spells it.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "metadata::serialize_licence",
+        deserialize_with = "metadata::deserialize_licence"
+    )]
+    pub license: Option<String>,
     /// Modules.
     #[serde(default)]
     pub modules: Vec<PatchModule>,
@@ -271,11 +291,41 @@ impl Patch {
             version: CURRENT_VERSION,
             name: name.into(),
             description: String::new(),
+            authors: Vec::new(),
+            tags: Vec::new(),
+            license: None,
             modules: Vec::new(),
             cables: Vec::new(),
             modulation: Vec::new(),
             midi: Vec::new(),
         }
+    }
+
+    /// The patch's metadata: name, description, authors, tags, licence.
+    pub fn metadata(&self) -> Metadata {
+        Metadata {
+            name: self.name.clone(),
+            description: self.description.clone(),
+            authors: self.authors.clone(),
+            tags: self.tags.clone(),
+            license: self.license.clone(),
+        }
+    }
+
+    /// Replaces the patch's metadata, name included.
+    pub fn set_metadata(&mut self, metadata: Metadata) {
+        let Metadata {
+            name,
+            description,
+            authors,
+            tags,
+            license,
+        } = metadata;
+        self.name = name;
+        self.description = description;
+        self.authors = authors;
+        self.tags = tags;
+        self.license = license;
     }
 
     /// Parses RON text and migrates it to the current version.

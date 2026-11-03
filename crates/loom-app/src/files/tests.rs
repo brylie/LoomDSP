@@ -121,3 +121,17 @@ fn save_adds_the_extension_only_when_missing() {
     assert_eq!(with_extension(PathBuf::from("a/bass.ron")), PathBuf::from("a/bass.ron"));
     assert_eq!(with_extension(PathBuf::from("a/bass.txt")), PathBuf::from("a/bass.txt"));
 }
+
+/// Save As in the library: the suggested name comes from the patch name,
+/// without characters file systems refuse, and never names an existing file.
+#[test]
+fn save_as_suggests_a_free_name_from_the_patch_name() {
+    assert_eq!(file_stem("Low Drone"), "Low Drone");
+    assert_eq!(file_stem(" a/b:c*?.  "), "abc");
+    assert_eq!(file_stem("..."), "Untitled");
+    let tmp = TempDir::new("free-path");
+    assert_eq!(free_path(&tmp.0, "Low Drone"), tmp.0.join("Low Drone.ron"));
+    std::fs::write(tmp.0.join("Low Drone.ron"), "").unwrap();
+    std::fs::write(tmp.0.join("Low Drone 2.ron"), "").unwrap();
+    assert_eq!(free_path(&tmp.0, "Low Drone"), tmp.0.join("Low Drone 3.ron"));
+}

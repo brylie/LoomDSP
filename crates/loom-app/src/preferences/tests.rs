@@ -22,6 +22,9 @@ fn a_full_file_reads_back() {
         midi: MidiPrefs {
             off: vec!["Pad Controller MIDI 1".into()],
         },
+        author: "Ada Lovelace".into(),
+        licence: Some("CC-BY-SA-4.0".into()),
+        library: Some(PathBuf::from("/music/Library")),
     };
     let text = to_text(&preferences);
     assert_eq!(
@@ -42,10 +45,32 @@ fn a_full_file_reads_back() {
         ],
     ),
     panic: Some(Cc(0, 123)),
+    author: "Ada Lovelace",
+    default_license: Some("CC-BY-SA-4.0"),
+    library: Some("/music/Library"),
 )
 "#
     );
     assert_eq!(parse(&text).unwrap(), (preferences, Vec::new()));
+}
+
+/// patch-metadata.md, Defaults: a default licence that is not SPDX falls
+/// back to "No default" with a note, so the app never picks a licence the
+/// user did not choose. A missing library uses the default folder.
+#[test]
+fn a_bad_default_licence_falls_back_to_no_default() {
+    let (preferences, notes) = parse(r#"(default_license: Some("my terms"), author: "Sam")"#).unwrap();
+    assert_eq!(preferences.licence, None);
+    assert_eq!(preferences.author, "Sam");
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert!(notes[0].contains("default_license"), "{notes:?}");
+    assert_eq!(
+        Preferences::default().library_folder(),
+        None,
+        "tests never see the real Documents"
+    );
+    let (preferences, _) = parse(r#"(library: Some("/music"))"#).unwrap();
+    assert_eq!(preferences.library_folder(), Some(PathBuf::from("/music")));
 }
 
 #[test]
