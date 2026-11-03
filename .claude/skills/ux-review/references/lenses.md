@@ -13,12 +13,12 @@ Can a person with a disability, or in a hard setting such as a dark stage, do th
 - Can focus get stuck, or leave a dialog behind it? (2.1.2)
 - Does every drag have another way? (2.5.7) Cables are the hard case.
 - Do timed gestures have another way? A double-click within 400 ms and 4 px does not suit a tremor or a switch.
-- Are targets at least 24 by 24 px? (2.5.8) `measures.txt` gives the port hit area. For a widget, the control channel's `locate` replies with a size in window pixels, and hit tests are in `crates/loom-canvas/src/controls.rs`. Stage use needs more: a trackpad in the dark is not a precise tool.
+- Are targets at least 24 by 24 px? (2.5.8) A smaller target still passes if a 24 px circle centred on it touches no other target, if another control on the same page does the same job at full size, if it sits inside a line of text, or if its small size is essential. So check the space around it before reporting a failure. `measures.txt` gives the port hit area. For a widget, the control channel's `locate` replies with a size in window pixels, and hit tests are in `crates/loom-canvas/src/controls.rs`. Stage use needs more: a trackpad in the dark is not a precise tool.
 - Can a stray key do something costly? Stopping the transport on stage is costly.
 
 **Vision**
 
-- Does text have 4.5:1 contrast, or 3:1 at 18 px and above? (1.4.3) Do controls, focus rings, and meaningful graphics have 3:1? (1.4.11) Measure with `measure.py contrast`. Disabled controls are exempt, but must still read as present.
+- Does text have 4.5:1 contrast, or 3:1 for large text, which starts at 24 px, or 18.66 px bold? (1.4.3) The largest app text token is 18 px, so all app text needs 4.5:1. Do controls, focus rings, and meaningful graphics have 3:1? (1.4.11) Measure with `measure.py contrast`. Disabled controls are exempt, but must still read as present.
 - Take colours from `crates/loom-app/src/style.rs` and `crates/loom-canvas/src/theme.rs`, not by eye. Chrome fills come from Iced's palette and are in neither file, so sample those from a capture with `measure.py pixel`. Text drawn over a fill needs a check against that fill.
 - Is colour ever the only signal? (1.4.1, NFR-UX-03) Ports, signal types, on and off, errors. Look at the image and ask what would remain in greyscale.
 - Do colour pairs survive colour blindness? Family colours are tested in `theme.rs`. Anything new is not. The method is Machado 2009 with CIE76 ΔE, as in `visual-system.md`.
