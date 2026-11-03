@@ -53,7 +53,12 @@ impl App {
             return;
         }
         match files::confirm_add_author(&name, &self.document.info().authors) {
-            Some(true) => self.document.edit_info(|info| info.authors.push(name)),
+            Some(true) => {
+                self.document.edit_info(|info| info.authors.push(name));
+                // The authors box shows the new name, so its next edit
+                // keeps it.
+                self.patch_info = crate::patch_info::State::new(self.document.info());
+            }
             Some(false) => {}
             None => self.document.credit_not_asked(),
         }

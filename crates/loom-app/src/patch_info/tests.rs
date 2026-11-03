@@ -181,6 +181,23 @@ fn saving_someone_elses_patch_keeps_credit_and_offers_once() {
         ["Ada Lovelace", "Sam Rivera"]
     );
     assert!(!app.unsaved());
+    // The authors box shows the added name, and editing it keeps it.
+    assert_eq!(
+        app.patch_info.authors.text().lines().collect::<Vec<_>>(),
+        ["Ada Lovelace", "Sam Rivera"]
+    );
+    send(
+        &mut app,
+        Message::Authors(text_editor::Action::Move(text_editor::Motion::DocumentEnd)),
+    );
+    send(
+        &mut app,
+        Message::Authors(text_editor::Action::Edit(text_editor::Edit::Paste(Arc::new(
+            "\nLin".to_string(),
+        )))),
+    );
+    assert_eq!(app.document.info().authors, ["Ada Lovelace", "Sam Rivera", "Lin"]);
+    assert!(app.save());
 
     // With no dialog to ask, nothing is added, and the next Save asks.
     app.open_path(&patch);
