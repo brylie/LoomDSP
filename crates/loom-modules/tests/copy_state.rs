@@ -3,10 +3,12 @@
 //! module turns stereo, its new right-side copy takes the running left
 //! copy's state, so both sides continue together.
 
-use loom_core::{MidiEvent, ModuleDescriptor, ModuleRole, ParamSpec, TransportSettings};
+mod common;
+
+use common::{busy, changed};
+use loom_core::{MidiEvent, ModuleDescriptor, ModuleRole, TransportSettings};
 use loom_modules::ALL;
-use loom_test::{Harness, Signal};
-use std::f32::consts::TAU;
+use loom_test::Harness;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 /// Frames rendered in each check.
@@ -15,17 +17,6 @@ const FRAMES: usize = 9_600;
 /// The frame where the copy takes the state: in the middle of the MIDI
 /// notes, the gates, and the delay times, so each kind of state is busy.
 const AT: usize = 2_500;
-
-/// A value of `spec` away from its default, so smoothing and settings
-/// differ from the built-in ones.
-fn changed(spec: &ParamSpec) -> f32 {
-    let at = |position: f32| {
-        let value = spec.denormalize(position);
-        if spec.options.integer { value.round() } else { value }
-    };
-    let value = at(0.25);
-    if value == spec.default { at(0.75) } else { value }
-}
 
 /// A harness for `descriptor` with every parameter away from its default,
 /// a busy signal on every input, and notes held across the copy.
@@ -36,12 +27,10 @@ fn harness(descriptor: &'static ModuleDescriptor) -> Harness {
         .fold(Harness::new(descriptor).frames(FRAMES), |h, spec| {
             h.param(spec.name, changed(spec))
         });
-    let harness = descriptor.inputs.iter().fold(harness, |h, port| {
-        h.input(
-            port.name,
-            Signal::from_fn(|frame| 0.75 * (frame as f32 * TAU * 37.0 / 48_000.0).sin()),
-        )
-    });
+    let harness = descriptor
+        .inputs
+        .iter()
+        .fold(harness, |h, port| h.input(port.name, busy(37.0)));
     harness.midi([
         MidiEvent::note_on(100, 0, 60, 100),
         MidiEvent::note_on(1_000, 0, 67, 64),

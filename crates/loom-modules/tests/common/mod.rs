@@ -2,11 +2,33 @@
 
 #![allow(dead_code)]
 
-use loom_core::{EngineConfig, EngineParts, MeterReading, MidiEvent, ModuleId, OutputSafety, ProbeId, create_engine};
+use loom_core::{
+    EngineConfig, EngineParts, MeterReading, MidiEvent, ModuleId, OutputSafety, ParamSpec, ProbeId, create_engine,
+};
 use loom_patch::Patch;
+use loom_test::Signal;
+use std::f32::consts::TAU;
 use std::path::PathBuf;
 
 pub const SAMPLE_RATE: f32 = 48_000.0;
+
+/// A value of `spec` away from its default: a quarter of the way along the
+/// control, or three quarters when that is the default.
+pub fn changed(spec: &ParamSpec) -> f32 {
+    let at = |position: f32| {
+        let value = spec.denormalize(position);
+        if spec.options.integer { value.round() } else { value }
+    };
+    let value = at(0.25);
+    if value == spec.default { at(0.75) } else { value }
+}
+
+/// A wave at `hz` from -0.75 to 0.75. On a gate input it crosses the 0.5
+/// threshold, on an audio input it is a tone, so most modules have active
+/// state.
+pub fn busy(hz: f32) -> Signal {
+    Signal::from_fn(move |frame| 0.75 * (frame as f32 * TAU * hz / SAMPLE_RATE).sin())
+}
 
 pub fn patch_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

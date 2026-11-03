@@ -684,6 +684,119 @@ fn the_copy_check_runs_at_block_size_one() {
     Harness::new(&COUNT_NO_COPY).frames(200).check_copy_state(100);
 }
 
+/// A phase counted from its value at the last rising edge of `reset`. With
+/// `wraps` off, it stores the input as it comes, as Phase Reset once did: a huge
+/// stored value leaves no fraction in later ones (#552).
+#[derive(Clone)]
+struct PhaseOffset {
+    wraps: bool,
+    offset: f32,
+    high: bool,
+}
+
+impl Module for PhaseOffset {
+    fn process(&mut self, _: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        let ([phase, reset], [out]) = io.split::<2, 1>();
+        for ((out, &phase), &reset) in out.iter_mut().zip(phase).zip(reset) {
+            let phase = if self.wraps { phase - phase.floor() } else { phase };
+            if reset > 0.5 && !self.high {
+                self.offset = phase;
+            }
+            self.high = reset > 0.5;
+            let x = phase - self.offset;
+            *out = x - x.floor();
+        }
+    }
+}
+
+/// A [`PhaseOffset`] descriptor that wraps its input or not.
+macro_rules! phase_offset {
+    ($name:ident, $id:literal, $wraps:literal) => {
+        static $name: ModuleDescriptor = ModuleDescriptor {
+            id: $id,
+            version: 1,
+            name: "Phase Offset",
+            category: "Test",
+            family: loom_core::Family::Interface,
+            description: "Counts a phase from the last reset.",
+            inputs: &[port("phase", SignalType::Phase), port("reset", SignalType::Gate)],
+            outputs: &[port("phase", SignalType::Phase)],
+            params: &[],
+            role: ModuleRole::Dsp(|_| {
+                Box::new(PhaseOffset {
+                    wraps: $wraps,
+                    offset: 0.0,
+                    high: false,
+                })
+            }),
+            panel: loom_core::Panel::EMPTY,
+            displays: &[],
+        };
+    };
+}
+
+phase_offset!(PHASE_OFFSET, "test.phase-offset", true);
+phase_offset!(STICKY_OFFSET, "test.sticky-offset", false);
+
+/// A harness for a phase offset module on the extreme check's slow signal.
+fn on_extreme_busy(descriptor: &'static ModuleDescriptor) -> Harness {
+    Harness::new(descriptor)
+        .frames(EXTREME_RENDER)
+        .input("phase", Signal::extreme_busy())
+        .input("reset", Signal::extreme_busy())
+}
+
+/// A module that keeps a captured phase small passes, though its offset differs
+/// from a clean render's: the phase moves at the same speed.
+#[test]
+fn a_wrapped_capture_passes_the_extreme_check() {
+    on_extreme_busy(&PHASE_OFFSET).check_extreme_recovery();
+}
+
+/// The first bug in Phase Reset (#531): subtracting a huge value of the other
+/// sign overflows, and wrapping it gives NaN. A hold of one sign misses this,
+/// because the stored value and the input cancel.
+#[test]
+#[should_panic(expected = "not finite")]
+fn a_stored_huge_value_that_overflows_fails_the_extreme_check() {
+    on_extreme_busy(&STICKY_OFFSET).check_extreme_stays_bounded();
+}
+
+/// The second bug in Phase Reset (#531): after a huge capture, ordinary inputs
+/// lose their fraction, so the output stops moving. Its values stay inside 0 to
+/// 1, so only the comparison sees this, which needs the next edge to come after
+/// it. The stored `f32::MAX` is held for the first pass, which has no overflow.
+#[test]
+#[should_panic(expected = "after 3.4028235e38 then 3.4028235e38 on input `phase`, output `phase`")]
+fn a_stored_huge_value_that_loses_the_fraction_fails_the_extreme_check() {
+    on_extreme_busy(&STICKY_OFFSET).check_extreme_recovery();
+}
+
+/// A render too short to show the next edge fails, so the check cannot be
+/// shortened by accident.
+#[test]
+#[should_panic(expected = "the extreme check needs 48000")]
+fn the_extreme_check_needs_its_whole_render() {
+    Harness::new(&PHASE_OFFSET).frames(1_000).check_extreme_recovery();
+}
+
+// The settling time ends before the next edge, or nothing is compared.
+const _: () = assert!(EXTREME_START + EXTREME_FRAMES + EXTREME_SETTLE < EXTREME_NEXT_EDGE);
+
+/// Holding the value across the edge is what makes a capture see it: the wave
+/// must rise inside the hold, and the second rise must come after the settling.
+#[test]
+fn the_extreme_timing_covers_the_edges() {
+    let wave = Signal::extreme_busy().render(EXTREME_RENDER, DEFAULT_SAMPLE_RATE);
+    let edges: Vec<usize> = (1..wave.len())
+        .filter(|&i| wave[i] > 0.5 && wave[i - 1] <= 0.5)
+        .collect();
+    assert_eq!(edges.len(), 2, "{edges:?}");
+    assert!((EXTREME_START..EXTREME_FLIP).contains(&edges[0]), "{edges:?}");
+    assert!(wave[EXTREME_START] <= 0.5);
+    assert_eq!(edges[1], EXTREME_NEXT_EDGE);
+}
+
 /// The repeatable check passes for a module that copies the same way twice.
 #[test]
 fn a_repeatable_copy_passes() {

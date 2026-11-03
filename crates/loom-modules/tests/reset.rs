@@ -4,22 +4,13 @@
 //! are set, so a module made with values other than its built-in ones does not
 //! glide to them (live patching spec, rule 7).
 
-use loom_core::{MidiEvent, ModuleDescriptor, ModuleRole, ParamSpec, TransportSettings};
-use loom_modules::ALL;
-use loom_test::{Harness, Signal};
-use std::f32::consts::TAU;
-use std::panic::{AssertUnwindSafe, catch_unwind};
+mod common;
 
-/// A value of `spec` away from its default: a quarter of the way along the
-/// control, or three quarters when that is the default.
-fn changed(spec: &ParamSpec) -> f32 {
-    let at = |position: f32| {
-        let value = spec.denormalize(position);
-        if spec.options.integer { value.round() } else { value }
-    };
-    let value = at(0.25);
-    if value == spec.default { at(0.75) } else { value }
-}
+use common::{busy, changed};
+use loom_core::{MidiEvent, ModuleDescriptor, ModuleRole, TransportSettings};
+use loom_modules::ALL;
+use loom_test::Harness;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 
 /// A one-second harness for `descriptor` with every parameter away from its
 /// default and a note left held across `reset()`, so MIDI Note's state is
@@ -39,13 +30,11 @@ fn harness(descriptor: &'static ModuleDescriptor, running: bool) -> Harness {
 }
 
 /// A busy signal on every input.
-fn busy(harness: Harness, descriptor: &'static ModuleDescriptor) -> Harness {
-    descriptor.inputs.iter().fold(harness, |h, port| {
-        h.input(
-            port.name,
-            Signal::from_fn(|frame| 0.75 * (frame as f32 * TAU * 50.0 / 48_000.0).sin()),
-        )
-    })
+fn on_busy_inputs(harness: Harness, descriptor: &'static ModuleDescriptor) -> Harness {
+    descriptor
+        .inputs
+        .iter()
+        .fold(harness, |h, port| h.input(port.name, busy(50.0)))
 }
 
 /// The DSP modules in [`ALL`] that fail `check_reset` on the harness `build`
@@ -65,7 +54,7 @@ fn failing(build: impl Fn(&'static ModuleDescriptor) -> Harness) -> Vec<&'static
 /// IDs of all that fail.
 #[test]
 fn reset_clears_every_module_on_busy_inputs_when_stopped() {
-    let failed = failing(|d| busy(harness(d, false), d));
+    let failed = failing(|d| on_busy_inputs(harness(d, false), d));
     assert!(failed.is_empty(), "reset() leaves state in: {failed:?}");
 }
 
@@ -73,7 +62,7 @@ fn reset_clears_every_module_on_busy_inputs_when_stopped() {
 /// only moves during playback is covered too.
 #[test]
 fn reset_clears_every_module_on_busy_inputs_when_playing() {
-    let failed = failing(|d| busy(harness(d, true), d));
+    let failed = failing(|d| on_busy_inputs(harness(d, true), d));
     assert!(failed.is_empty(), "reset() leaves state in: {failed:?}");
 }
 

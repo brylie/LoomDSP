@@ -38,6 +38,18 @@ impl Signal {
         Self(Source::Gate { on, off })
     }
 
+    /// A 2 Hz wave from -0.75 to 0.75, for `Harness::check_extreme_recovery`. On
+    /// a gate input it crosses the 0.5 threshold, at 48 kHz on frames 2788 and
+    /// 26788.
+    ///
+    /// It is slow on purpose. The next rising edge overwrites bad state that
+    /// the first one captured, so it must come after the comparison. At an
+    /// audio rate it comes first, and the check passes a module that keeps a
+    /// bad value for a whole cycle.
+    pub fn extreme_busy() -> Self {
+        Self::from_fn(|frame| 0.75 * (frame as f64 * std::f64::consts::TAU * 2.0 / 48_000.0).sin() as f32)
+    }
+
     /// The signal's first `frames` frames.
     #[track_caller]
     pub(crate) fn render(&self, frames: usize, sample_rate: f32) -> Vec<f32> {

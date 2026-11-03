@@ -36,8 +36,8 @@ pub use reference::{UPDATE_VAR, check_channels};
 pub use signal::Signal;
 
 use loom_core::{
-    MidiEvent, Module, ModuleConfig, ModuleDescriptor, ModuleRole, PortDefault, TransportInfo, TransportSettings,
-    testing,
+    MidiEvent, Module, ModuleConfig, ModuleDescriptor, ModuleRole, PortDefault, SignalType, TransportInfo,
+    TransportSettings, testing,
 };
 use std::path::Path;
 
@@ -65,6 +65,34 @@ pub const BAD_FRAMES: usize = 8;
 /// seconds. The check turns it into frames at the harness's sample rate, so
 /// the rule is the same 10 ms at any rate (480 frames at 48 kHz).
 pub const RECOVERY_SECONDS: f64 = 0.010;
+
+/// Frame where [`Harness::check_extreme_recovery`] starts to hold the extreme
+/// value. It holds across the first rising edge of [`Signal::extreme_busy`], so
+/// state captured on a trigger sees the value.
+pub const EXTREME_START: usize = 2_300;
+
+/// How long [`Harness::check_extreme_recovery`] holds the extreme value, in
+/// frames.
+pub const EXTREME_FRAMES: usize = 960;
+
+/// Frame where one pass of [`Harness::check_extreme_recovery`] flips the sign,
+/// after the first rising edge. Subtracting a new huge value from a stored one
+/// of the other sign overflows, which holding one sign never shows.
+pub const EXTREME_FLIP: usize = 2_900;
+
+/// Frames from the end of the hold until output must match a clean render, in
+/// [`Harness::check_extreme_recovery`]. A huge value takes time to leave a slow
+/// filter or envelope.
+pub const EXTREME_SETTLE: usize = 12_000;
+
+/// The second rising edge of [`Signal::extreme_busy`]. That edge overwrites bad
+/// state captured on the first one, so the comparison must end here, or it
+/// would pass a module that kept the bad value until then.
+pub const EXTREME_NEXT_EDGE: usize = 26_788;
+
+/// The shortest render for [`Harness::check_extreme_recovery`]: two periods of
+/// [`Signal::extreme_busy`].
+pub const EXTREME_RENDER: usize = 48_000;
 
 /// Default sample rate, in Hz.
 pub const DEFAULT_SAMPLE_RATE: f32 = 48_000.0;
@@ -573,6 +601,99 @@ impl Harness {
                                 samples[frame],
                             );
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Checks that a module survives huge finite inputs (#552). Cables are never
+    /// clipped (ADR-0007), so a feedback patch can send these. For each input in
+    /// turn, it holds `f32::MAX`, then `-f32::MAX`, then one flipping to the other
+    /// at [`EXTREME_FLIP`], from [`EXTREME_START`] for [`EXTREME_FRAMES`]
+    /// frames. It panics unless every output is finite for
+    /// the whole render, matches a clean render from the end of the settling
+    /// time up to [`EXTREME_NEXT_EDGE`], and has a normal size after that. A
+    /// phase output matches by its speed, not its value.
+    ///
+    /// The render must last [`EXTREME_RENDER`] frames at 48 kHz, on inputs of
+    /// [`Signal::extreme_busy`] or their defaults.
+    #[track_caller]
+    pub fn check_extreme_recovery(&self) {
+        self.check_extreme(true);
+    }
+
+    /// The part of [`Harness::check_extreme_recovery`] that does not compare
+    /// with a clean render, for a module that rightly diverges from one after
+    /// an extra trigger, such as a counter or a seeded stream. Its output must
+    /// still stay finite and return to a normal size.
+    #[track_caller]
+    pub fn check_extreme_stays_bounded(&self) {
+        self.check_extreme(false);
+    }
+
+    /// Runs the extreme check, comparing with a clean render if `compare`.
+    #[track_caller]
+    fn check_extreme(&self, compare: bool) {
+        let id = self.descriptor.id;
+        let frames = self.frame_count();
+        assert!(
+            frames >= EXTREME_RENDER,
+            "{id}: the render is {frames} frames long, but the extreme check needs {EXTREME_RENDER}"
+        );
+        let hold_end = EXTREME_START + EXTREME_FRAMES;
+        let compare_from = hold_end + EXTREME_SETTLE;
+        let (clean_inputs, connected) = self.input_buffers();
+        for (port, spec) in self.descriptor.inputs.iter().enumerate() {
+            let mut connected = connected.clone();
+            connected[port] = true;
+            let clean = self.run(MAX_BLOCK, &clean_inputs, &connected);
+            for (extreme, flipped) in [(f32::MAX, f32::MAX), (-f32::MAX, -f32::MAX), (f32::MAX, -f32::MAX)] {
+                let mut inputs = clean_inputs.clone();
+                inputs[port][EXTREME_START..EXTREME_FLIP].fill(extreme);
+                inputs[port][EXTREME_FLIP..hold_end].fill(flipped);
+                let render = self.run(MAX_BLOCK, &inputs, &connected);
+                let what = |output: usize| {
+                    format!(
+                        "{id}: after {extreme:e} then {flipped:e} on input `{}`, output `{}`",
+                        spec.name, self.descriptor.outputs[output].name
+                    )
+                };
+                for (output, (samples, clean)) in render.outputs.iter().zip(&clean.outputs).enumerate() {
+                    if let Some(frame) = samples.iter().position(|value| !value.is_finite()) {
+                        panic!("{} is {} at frame {frame}: not finite", what(output), samples[frame]);
+                    }
+                    let peak = clean.iter().fold(1.0f32, |peak, value| peak.max(value.abs()));
+                    if compare {
+                        let phase = self.descriptor.outputs[output].signal == SignalType::Phase;
+                        let frame = (compare_from..EXTREME_NEXT_EDGE).find(|&frame| {
+                            if phase {
+                                // A captured value may rightly leave a phase at
+                                // another offset, but it must move at the same
+                                // speed, the shorter way round the cycle.
+                                let step = |s: &[f32]| s[frame] - s[frame - 1];
+                                let gap = step(samples) - step(clean);
+                                (gap - gap.round()).abs() > 1e-6
+                            } else {
+                                (samples[frame] - clean[frame]).abs() > peak * 1e-3
+                            }
+                        });
+                        if let Some(frame) = frame {
+                            panic!(
+                                "{} is {} at frame {frame}, but {} on a clean render: it did not recover",
+                                what(output),
+                                samples[frame],
+                                clean[frame]
+                            );
+                        }
+                    }
+                    if let Some(frame) = samples[EXTREME_NEXT_EDGE..].iter().position(|v| v.abs() > peak * 10.0) {
+                        let frame = EXTREME_NEXT_EDGE + frame;
+                        panic!(
+                            "{} is {} at frame {frame}, but a clean render peaks at {peak}: it stayed huge",
+                            what(output),
+                            samples[frame]
+                        );
                     }
                 }
             }
