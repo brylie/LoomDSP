@@ -676,6 +676,14 @@ fn a_reset_that_keeps_state_fails() {
     Harness::new(&COUNT_NO_CLEAR).frames(200).check_reset();
 }
 
+/// The copy check names the block size, so a failure at one size is easy to
+/// reproduce. Block size 1 runs first.
+#[test]
+#[should_panic(expected = "(block size 1, `copy_state_from` returned false)")]
+fn the_copy_check_runs_at_block_size_one() {
+    Harness::new(&COUNT_NO_COPY).frames(200).check_copy_state(100);
+}
+
 /// The repeatable check passes for a module that copies the same way twice.
 #[test]
 fn a_repeatable_copy_passes() {

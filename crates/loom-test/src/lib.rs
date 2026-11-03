@@ -389,9 +389,10 @@ impl Harness {
 
     /// Runs a new instance for the first `at` frames, then a second new
     /// instance takes its state with [`Module::copy_state_from`], and both
-    /// run on to the end. Returns whether the copy took the state, and the
-    /// two outputs from frame `at`: the running instance's first.
-    fn copied_at(&self, at: usize) -> (bool, Vec<Vec<f32>>, Vec<Vec<f32>>) {
+    /// run on to the end, in blocks of `block` frames. Returns whether the copy
+    /// took the state, and the two outputs from frame `at`: the running
+    /// instance's first.
+    fn copied_at(&self, at: usize, block: usize) -> (bool, Vec<Vec<f32>>, Vec<Vec<f32>>) {
         let frames = self.frame_count();
         assert!(
             at < frames,
@@ -402,39 +403,57 @@ impl Harness {
         let outputs = || vec![vec![0.0; frames]; self.descriptor.outputs.len()];
         let mut running = self.build();
         let mut first = outputs();
-        self.run_span(running.as_mut(), MAX_BLOCK, &inputs, &connected, 0..at, &mut first);
+        self.run_span(running.as_mut(), block, &inputs, &connected, 0..at, &mut first);
         let mut copy = self.build();
         let copied = copy.copy_state_from(&*running);
+        // Display values are state too: a light must not lose a pending flash.
+        let displays = self.descriptor.displays.len();
+        let (mut shown, mut shown_copy) = (vec![0.0; displays], vec![0.0; displays]);
+        running.displays(&mut shown);
+        copy.displays(&mut shown_copy);
+        for (index, (a, b)) in shown.iter().zip(&shown_copy).enumerate() {
+            assert!(
+                a.to_bits() == b.to_bits(),
+                "{}: display `{}` is {a} on the running instance, but {b} on the copy that took its state (frame {at}, \
+                 block size {block}, `copy_state_from` returned {copied}).",
+                self.descriptor.id,
+                self.descriptor.displays[index].name,
+            );
+        }
         let mut second = outputs();
-        self.run_span(running.as_mut(), MAX_BLOCK, &inputs, &connected, at..frames, &mut first);
-        self.run_span(copy.as_mut(), MAX_BLOCK, &inputs, &connected, at..frames, &mut second);
+        self.run_span(running.as_mut(), block, &inputs, &connected, at..frames, &mut first);
+        self.run_span(copy.as_mut(), block, &inputs, &connected, at..frames, &mut second);
         let from = |outputs: Vec<Vec<f32>>| outputs.into_iter().map(|o| o[at..].to_vec()).collect();
         (copied, from(first), from(second))
     }
 
     /// Checks [`Module::copy_state_from`] (ADR-0022, stereo spec rules 25
-    /// and 26). It runs a new instance for `at` frames, copies its state
-    /// into a second new instance, runs both on to the end of the render,
-    /// and panics unless their outputs are bit-identical from frame `at`.
-    /// Returns whether the module copied its state. A module with no state
-    /// passes without copying; a module with state that does not copy it
-    /// fails. Not for seeded modules: see
+    /// and 26). At each of [`BLOCK_SIZES`], it runs a new instance for `at`
+    /// frames, copies its state into a second new instance, runs both on to
+    /// the end of the render, and panics unless their outputs are bit-identical
+    /// from frame `at`. Returns whether the module copied its state. A module
+    /// with no state passes without copying; a module with state that does not
+    /// copy it fails. Not for seeded modules: see
     /// [`Harness::check_copy_state_repeatable`].
     #[track_caller]
     pub fn check_copy_state(&self, at: usize) -> bool {
-        let (copied, running, copy) = self.copied_at(at);
-        for (port, (a, b)) in running.iter().zip(&copy).enumerate() {
-            if let Some(frame) = a.iter().zip(b).position(|(a, b)| a.to_bits() != b.to_bits()) {
-                panic!(
-                    "{}: output `{}` at frame {} is {} on the running instance, but {} on the copy that took its \
-                     state (`copy_state_from` returned {copied}). A module with state must copy all of it \
-                     (docs/design/stereo.md, rules 25 and 26).",
-                    self.descriptor.id,
-                    self.descriptor.outputs[port].name,
-                    at + frame,
-                    a[frame],
-                    b[frame],
-                );
+        let mut copied = false;
+        for block in BLOCK_SIZES {
+            let (took, running, copy) = self.copied_at(at, block);
+            copied = took;
+            for (port, (a, b)) in running.iter().zip(&copy).enumerate() {
+                if let Some(frame) = a.iter().zip(b).position(|(a, b)| a.to_bits() != b.to_bits()) {
+                    panic!(
+                        "{}: output `{}` at frame {} is {} on the running instance, but {} on the copy that took its \
+                         state (block size {block}, `copy_state_from` returned {copied}). A module with state must \
+                         copy all of it (docs/design/stereo.md, rules 25 and 26).",
+                        self.descriptor.id,
+                        self.descriptor.outputs[port].name,
+                        at + frame,
+                        a[frame],
+                        b[frame],
+                    );
+                }
             }
         }
         copied
@@ -445,8 +464,8 @@ impl Harness {
     /// with bit-identical outputs, and `copy_state_from` returns `true`.
     #[track_caller]
     pub fn check_copy_state_repeatable(&self, at: usize) {
-        let (copied, _, first) = self.copied_at(at);
-        let (_, _, second) = self.copied_at(at);
+        let (copied, _, first) = self.copied_at(at, MAX_BLOCK);
+        let (_, _, second) = self.copied_at(at, MAX_BLOCK);
         assert!(copied, "{}: `copy_state_from` returned false", self.descriptor.id);
         assert!(
             first == second,
