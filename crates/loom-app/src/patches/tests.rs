@@ -27,8 +27,8 @@ fn library(name: &str) -> PathBuf {
 fn browser(dir: &Path) -> PatchBrowser {
     let mut browser = PatchBrowser::new(1, dir.to_path_buf());
     for path in patch_files(dir) {
-        let row = Box::new(Row::read(&path));
-        let _ = browser.update(Message::Found { open: 1, row });
+        let rows = vec![Row::read(&path)];
+        let _ = browser.update(Message::Found { open: 1, rows });
     }
     browser
 }
@@ -50,11 +50,11 @@ fn the_library_folder_is_listed() {
     assert_eq!(names(&browser), ["Bass", "Low Drone", "Pad", "broken.ron"]);
     let broken = browser.shown().find(|r| r.info.is_none()).unwrap();
     assert_eq!(broken.name(), "broken.ron");
-    assert_eq!(browser.tags(), ["drone", "fm"]);
+    assert_eq!(browser.tags().collect::<Vec<_>>(), ["drone", "fm"]);
     // Rows for an earlier opening are dropped.
     let mut browser = browser;
-    let row = Box::new(Row::read(&dir.join("pad.ron")));
-    let _ = browser.update(Message::Found { open: 7, row });
+    let rows = vec![Row::read(&dir.join("pad.ron"))];
+    let _ = browser.update(Message::Found { open: 7, rows });
     assert_eq!(names(&browser).len(), 4);
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -125,10 +125,10 @@ fn browse_opens_patches_in_the_app() {
     let _ = app.update(AppMessage::File(FileAction::Browse));
     assert!(app.patches.is_some());
     for path in patch_files(&dir) {
-        let row = Box::new(Row::read(&path));
+        let rows = vec![Row::read(&path)];
         let _ = app.update(AppMessage::Patches(Message::Found {
             open: app.patches_open,
-            row,
+            rows,
         }));
     }
     let _ = app.update(AppMessage::Patches(Message::Search("bass".into())));
@@ -188,6 +188,7 @@ fn the_reader_stops_within_one_file() {
             }
             Row::read(path)
         },
+        Instant::now,
         |_| true,
     );
     assert_eq!(reads, 2, "of {total} files");
@@ -206,9 +207,17 @@ fn the_reader_stops_when_nobody_listens() {
             reads += 1;
             Row::read(path)
         },
+        // A batch goes with every row, so the first send finds no listener.
+        {
+            let mut time = Instant::now();
+            move || {
+                time += BATCH_WAIT;
+                time
+            }
+        },
         |_| false,
     );
-    assert_eq!(reads, 1);
+    assert_eq!(reads, 2, "the second row fills the time, and nobody listens");
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -244,7 +253,7 @@ fn opening_a_patch_stops_the_reader() {
     let (mut app, stop) = app_browsing(&dir);
     let _ = app.update(AppMessage::Patches(Message::Found {
         open: app.patches_open,
-        row: Box::new(Row::read(&dir.join("pad.ron"))),
+        rows: vec![Row::read(&dir.join("pad.ron"))],
     }));
     let _ = app.update(AppMessage::Patches(Message::Submit));
     assert!(app.patches.is_none());
@@ -265,5 +274,73 @@ fn opening_the_browser_again_stops_the_earlier_reader() {
     let second = app.patches.as_ref().expect("the browser is open").stop.clone();
     assert!(first.load(Ordering::Relaxed), "the earlier reader stops");
     assert!(!second.load(Ordering::Relaxed), "the new one keeps reading");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A folder of `count` generated patches for one test.
+fn generated(name: &str, count: usize) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("loom-patches-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    for i in 0..count {
+        let text = format!(r#"Patch(version: 1, name: "Patch {i}", tags: ["tag-{}"])"#, i % 7);
+        std::fs::write(dir.join(format!("{i}.ron")), text).unwrap();
+    }
+    dir
+}
+
+/// A folder of hundreds of patches is worked out once per batch, not once
+/// per file. The clock stands still, so the count does not depend on how
+/// fast the disk is.
+#[test]
+fn refilters_grow_with_batches_not_files() {
+    const FILES: usize = 300;
+    let dir = generated("batches", FILES);
+    let still = Instant::now();
+    let mut batches = Vec::new();
+    read_rows(&dir, &AtomicBool::new(false), Row::read, || still, |rows| {
+        batches.push(rows);
+        true
+    });
+    assert_eq!(batches.len(), FILES.div_ceil(BATCH_ROWS));
+
+    let mut browser = PatchBrowser::new(1, dir.clone());
+    let count = batches.len();
+    for rows in batches {
+        let _ = browser.update(Message::Found { open: 1, rows });
+    }
+    assert_eq!(browser.refilters, count);
+    assert_eq!(browser.shown().count(), FILES);
+    assert_eq!(browser.tags().count(), 7);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A row that waits long enough goes without filling its batch, so a slow
+/// drive still shows rows as they are read.
+#[test]
+fn a_slow_row_is_not_kept_waiting() {
+    let dir = library("slow");
+    let row = || Row::read(&dir.join("pad.ron"));
+    let start = Instant::now();
+    let mut batch = Batch::default();
+    assert_eq!(batch.push(row(), start), None);
+    assert_eq!(batch.push(row(), start + BATCH_WAIT / 2), None);
+    let sent = batch.push(row(), start + BATCH_WAIT).expect("the wait is over");
+    assert_eq!(sent.len(), 3);
+    // The wait starts again with the next row.
+    assert_eq!(batch.push(row(), start + BATCH_WAIT * 10), None);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A row works out what it shows when it is read, including the row for a
+/// file that does not read.
+#[test]
+fn a_row_shows_what_it_read() {
+    let dir = library("details");
+    let row = Row::read(&dir.join("live/bass.ron"));
+    for part in ["Sam Rivera", "drone", "MIT"] {
+        assert!(row.details.contains(part), "{}", row.details);
+    }
+    assert_eq!(Row::read(&dir.join("broken.ron")).details, "Could not read");
     let _ = std::fs::remove_dir_all(dir);
 }
