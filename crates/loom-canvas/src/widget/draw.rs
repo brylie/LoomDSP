@@ -409,6 +409,24 @@ impl<Message> PatchCanvas<'_, Message> {
                 let (size, colour) = match item.kind {
                     TextKind::Title => (title_px, self.palette.text),
                     _ if !show_labels => return,
+                    // A box's live text, cut with "…" and never wrapped. The
+                    // bar at middle zoom stands in for it.
+                    TextKind::Value(widget) => {
+                        let shown = self.box_text(values, module, widget);
+                        let shown = crate::scene::fit_label(&shown, item.width, crate::tile_text::LABEL_SIZE);
+                        let align = match item.align {
+                            Align::Left => text::Alignment::Left,
+                            Align::Center => text::Alignment::Center,
+                            Align::Right => text::Alignment::Right,
+                        };
+                        renderer.fill_text(
+                            text(&shown, label_px, item.width * zoom, align),
+                            to_screen(item.anchor),
+                            self.palette.text,
+                            clip,
+                        );
+                        return;
+                    }
                     // The chosen segment is filled with the value colour,
                     // so its name is dark (visual-system.md, contrast).
                     TextKind::Option(widget, option)
@@ -447,7 +465,12 @@ impl<Message> PatchCanvas<'_, Message> {
                     _ if learned.is_some() => learned,
                     TextKind::Caption(widget) if active == Some((module.id, widget)) => values
                         .get(module.id, widget)
-                        .filter(|_| module.panel.widgets[widget].number_steps().is_some())
+                        .filter(|_| {
+                            matches!(
+                                module.panel.widgets[widget].kind,
+                                WidgetViewKind::Knob { .. } | WidgetViewKind::Fader { .. }
+                            )
+                        })
                         .map(|v| v.text.as_str()),
                     _ => None,
                 };
@@ -463,30 +486,6 @@ impl<Message> PatchCanvas<'_, Message> {
                     clip,
                 );
             });
-            if show_labels {
-                for (index, widget) in module.panel.widgets.iter().enumerate() {
-                    let WidgetViewKind::Select { options } = &widget.kind else {
-                        continue;
-                    };
-                    let Some(rect) = module.widget_bounds(index) else {
-                        continue;
-                    };
-                    let box_rect = select_box(rect);
-                    let chosen = values.position(module.id, index).round().max(0.0) as usize;
-                    // Cut to the box with "…", never wrapped; the open list
-                    // shows the whole name. The text starts 7 units in, and
-                    // the arrow takes the last 11.
-                    let room = box_rect.width - 18.0;
-                    let choice = options.get(chosen).map_or("", String::as_str);
-                    let choice = crate::scene::fit_label(choice, room, crate::tile_text::LABEL_SIZE);
-                    renderer.fill_text(
-                        text(&choice, label_px, room * zoom, text::Alignment::Left),
-                        to_screen(Point::new(box_rect.x + 7.0, box_rect.center_y())),
-                        self.palette.text,
-                        clip,
-                    );
-                }
-            }
         }
 
         // Badge numbers usually sit outside their tile, so they are checked
@@ -520,6 +519,19 @@ impl<Message> PatchCanvas<'_, Message> {
                     );
                 }
             }
+        }
+    }
+
+    /// The text in a widget's box: a select list's choice, or the value text.
+    fn box_text(&self, values: &PanelValues, module: &crate::scene::ModuleView, widget: usize) -> String {
+        match module.panel.widgets.get(widget).map(|w| &w.kind) {
+            Some(WidgetViewKind::Select { options }) => {
+                let chosen = values.position(module.id, widget).round().max(0.0) as usize;
+                options.get(chosen).cloned().unwrap_or_default()
+            }
+            _ => values
+                .get(module.id, widget)
+                .map_or_else(String::new, |v| v.text.clone()),
         }
     }
 

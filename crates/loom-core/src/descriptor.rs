@@ -955,6 +955,18 @@ impl Widget {
         }
     }
 
+    /// A number shown as text, dragged like a knob, for any parameter
+    /// (panel-widgets.md, Number).
+    pub const fn number(x: u8, y: u8, param: &'static str) -> Self {
+        Self {
+            kind: WidgetKind::Number,
+            x,
+            y,
+            bind: param,
+            caption: None,
+        }
+    }
+
     /// A toggle for a whole-number parameter from 0 to 1.
     pub const fn toggle(x: u8, y: u8, param: &'static str) -> Self {
         Self {
@@ -1118,6 +1130,8 @@ pub enum WidgetKind {
         /// True for a vertical track, false for a horizontal one.
         vertical: bool,
     },
+    /// A value shown as text, dragged like a knob, for any parameter.
+    Number,
     /// Off or on, for a whole-number parameter from 0 to 1.
     Toggle,
     /// One button per choice name, for a whole-number parameter that names
@@ -1172,7 +1186,7 @@ impl WidgetKind {
     /// `WidgetKind` is `non_exhaustive`, so a new kind compiles at every
     /// `_` arm. Code that treats number controls alike asks this, not a list.
     pub const fn is_one_number(&self) -> bool {
-        matches!(self, Self::Knob | Self::Fader { .. })
+        matches!(self, Self::Knob | Self::Fader { .. } | Self::Number)
     }
 
     /// True for a widget that draws a modulation assignment's reach as a
@@ -1194,6 +1208,7 @@ impl PartialEq for WidgetKind {
         match (self, other) {
             (Self::Fader { vertical: a }, Self::Fader { vertical: b }) => a == b,
             (Self::Knob, Self::Knob)
+            | (Self::Number, Self::Number)
             | (Self::Toggle, Self::Toggle)
             | (Self::Radio, Self::Radio)
             | (Self::Select, Self::Select)
@@ -1333,6 +1348,7 @@ impl ModuleDescriptor {
             WidgetKind::Knob => (3, 3),
             WidgetKind::Fader { vertical: true } => (2, 6),
             WidgetKind::Fader { vertical: false } => (6, 2),
+            WidgetKind::Number => (5, 2),
             WidgetKind::Meter => (3, 6),
             WidgetKind::Scope => (9, 5),
             WidgetKind::Shape { width, .. } => (width, 5),

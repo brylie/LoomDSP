@@ -1520,4 +1520,37 @@ mod tests {
             .position(|w| w.bind == param)
             .unwrap()
     }
+
+    /// A number shows the base value as text and steps a whole number by one
+    /// per drag step, even over 1000 values. While modulated, its mark is a dot
+    /// and its text stays the base value (panel-widgets.md, Number).
+    #[test]
+    fn a_number_steps_by_one_and_shows_the_base_value() {
+        let mut ui = Ui::open("sine.ron");
+        let id = select_new(&mut ui, "test.panel");
+        let count = |ui: &Ui| {
+            let node = ui.app.controller.graph().node(id).unwrap();
+            node.params[node.descriptor.param_index("count").unwrap()]
+        };
+        assert_eq!(count(&ui), 7.0);
+        let at = ui.control(id.0, "count");
+        let up = Point::new(at.x, at.y - 40.0);
+        ui.drag(at, up, 8);
+        assert_eq!(count(&ui), 17.0, "40 pixels at 4 pixels per value");
+
+        let widget = widget_of(&ui, id, "tempo");
+        let (_, kind, spec) = crate::scene::control_param(&ui.app.controller, id.0, widget).unwrap();
+        assert_eq!(kind, loom_core::WidgetKind::Number);
+        let value = ui.app.values.get(id.0, widget).unwrap();
+        assert_eq!(value.text, crate::param::format(&spec, 120.0), "the base value");
+        let reach = crate::modulation::Reach {
+            depth: 0.25,
+            enabled: true,
+            polarity: loom_core::Polarity::Unipolar,
+        };
+        assert_eq!(
+            crate::modulation::mark(kind, &spec, 120.0, &[reach]),
+            loom_canvas::ModulationMark::Dot
+        );
+    }
 }

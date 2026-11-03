@@ -652,7 +652,9 @@ impl<Message> PatchCanvas<'_, Message> {
                 }
                 let position = self.position(module, widget);
                 let click = match self.widget_kind(module, widget) {
-                    Some(WidgetViewKind::Knob { .. } | WidgetViewKind::Fader { .. }) => {
+                    Some(
+                        WidgetViewKind::Knob { .. } | WidgetViewKind::Fader { .. } | WidgetViewKind::Number { .. },
+                    ) => {
                         let drag = self.value_drag(module, widget, state.camera.zoom);
                         self.begin(
                             state,

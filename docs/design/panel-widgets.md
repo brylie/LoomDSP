@@ -43,7 +43,7 @@ Widgets are grouped by the **kind of value** they show or edit, not by the modul
 |---|---|---|---|---|
 | One number | Knob | A parameter | Yes | M1 |
 | | Fader | A parameter | Yes | M2 |
-| | Number | A parameter | No | M2 |
+| | Number | A parameter | Yes | M2 |
 | One choice | Toggle | A whole-number parameter, 0 to 1 | Yes | M1 |
 | | Radio buttons | A whole-number parameter | Yes | M1 |
 | | Select list | A whole-number parameter | Yes | M2 |
@@ -176,14 +176,16 @@ A straight track with a handle, vertical or horizontal. Same binding, mapping, a
 
 ### Number
 
+**Status:** Implemented on the test modules. Typed values are in [Typing a value](#typing-a-value).
+
 A value shown as text, such as "120.0 BPM" or "7". For parameters where the exact number matters more than a position.
 
 - **Binds to:** any parameter. Most useful for whole numbers with many values, such as a division, a step count, or a seed, and for tempo.
-- **Drag:** vertical, relative, through the parameter's mapping, like a knob. Whole-number parameters step by one.
+- **Drag:** vertical, relative, through the parameter's mapping, like a knob. Whole-number parameters step by one: each value takes `max(4, 200 / steps)` pixels, and 10 times that with Shift. *Why:* a small range then feels like a knob, and a large range, such as a seed, never skips a value.
 - **Modulation:** a dot, as on a toggle. The text shows the base value. *Why not the live value:* text that changes every frame cannot be read. The inspector and a readout can show it.
 - **Keyboard:** as a knob, and takes typed values ([Typing a value](#typing-a-value)).
 - **Middle zoom:** a box with a bar for the text.
-- **Size (starting size):** 3 × 2.
+- **Size (starting size):** 5 × 2. The caption is above the box. *Why not 3 × 2:* "120.0 BPM" needs 5 units to show whole.
 
 ## One choice
 
@@ -504,7 +506,7 @@ Widget-specific checks:
 | Widget | Checks |
 |---|---|
 | Fader | A 6-unit fader at middle zoom still needs 200 screen pixels for its full range. Dragging the modulation bar changes one assignment's depth. |
-| Number | A whole-number parameter steps by one per drag step. The text shows the base value while modulated. |
+| Number | A whole-number parameter steps by one per drag step, also with at least 1000 values. The text shows the base value while modulated. |
 | Typing a value | "2k" on a Hz parameter commits 2000; "abc" leaves the value and blocks Enter; Escape cancels; a value above the selected control range selects a wider range; one commit is one undo step. |
 | Select list | Over 12 choices the list scrolls; type-ahead jumps to the next match; a parameter without names shows its numbers with the unit. |
 | XY pad | Alt-press jumps the point; a plain press does not. Each axis shows its own modulation bar. |

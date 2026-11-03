@@ -513,3 +513,21 @@ fn a_fader_shows_modulation_as_a_bar_with_a_live_dot() {
     let live = fader_bar_point(rect, true, 0.5);
     assert!(bar.expand(0.01).contains(live), "the live dot sits on the bar");
 }
+
+/// A whole-number drag takes 200 pixels over a small range, like a knob, and
+/// never skips a value over a large one. Shift is 10 times finer
+/// (panel-widgets.md, Number).
+#[test]
+fn a_number_drag_steps_by_one() {
+    let small = ValueDrag::number(10);
+    assert_eq!(small.moved(0.0, 20.0, false), 0.1, "20 pixels per value");
+    assert_eq!(small, ValueDrag::KNOB, "a small range feels like a knob");
+
+    let large = ValueDrag::number(1000);
+    assert!(
+        (large.moved(0.0, 4.0, false) - 0.001).abs() < 1e-6,
+        "4 pixels per value"
+    );
+    assert!((large.moved(0.0, 40.0, true) - 0.001).abs() < 1e-6, "40 with Shift");
+    assert_eq!(ValueDrag::number(0), ValueDrag::KNOB, "a smooth value is like a knob");
+}

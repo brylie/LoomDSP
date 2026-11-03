@@ -83,6 +83,7 @@ impl<Message> PatchCanvas<'_, Message> {
         let rect = self.scene.module(module).and_then(|m| m.widget_bounds(widget));
         match (self.widget_kind(module, widget), rect) {
             (Some(WidgetViewKind::Fader { vertical, .. }), Some(rect)) => ValueDrag::fader(rect, *vertical, zoom),
+            (Some(WidgetViewKind::Number { steps }), _) => ValueDrag::number(*steps),
             _ => ValueDrag::KNOB,
         }
     }
@@ -518,9 +519,11 @@ impl<Message> PatchCanvas<'_, Message> {
                 } else {
                     let position = self.position(module, widget);
                     let next = match self.widget_kind(module, widget) {
-                        Some(WidgetViewKind::Knob { steps } | WidgetViewKind::Fader { steps, .. }) => {
-                            knob_step(position, up, modifiers.shift(), *steps)
-                        }
+                        Some(
+                            WidgetViewKind::Knob { steps }
+                            | WidgetViewKind::Fader { steps, .. }
+                            | WidgetViewKind::Number { steps },
+                        ) => knob_step(position, up, modifiers.shift(), *steps),
                         Some(WidgetViewKind::Toggle) => {
                             if up {
                                 1.0
@@ -566,16 +569,16 @@ impl<Message> PatchCanvas<'_, Message> {
                             self.set_control(shell, module, widget, next as f32);
                         }
                         Some(WidgetViewKind::Select { .. }) if !repeat => self.open_select(state, module, widget),
-                        Some(WidgetViewKind::Knob { .. } | WidgetViewKind::Fader { .. })
-                            if matches!(named, Named::Space) && !repeat =>
-                        {
+                        Some(
+                            WidgetViewKind::Knob { .. } | WidgetViewKind::Fader { .. } | WidgetViewKind::Number { .. },
+                        ) if matches!(named, Named::Space) && !repeat => {
                             self.emit(shell, CanvasEvent::ToggleRun);
                         }
                         _ => {}
                     }
                     !matches!(
                         self.widget_kind(module, widget),
-                        Some(WidgetViewKind::Knob { .. } | WidgetViewKind::Fader { .. }) if matches!(named, Named::Enter)
+                        Some(WidgetViewKind::Knob { .. } | WidgetViewKind::Fader { .. } | WidgetViewKind::Number { .. }) if matches!(named, Named::Enter)
                     )
                 } else if matches!(named, Named::Space) {
                     // Space with nothing focused is the Run shortcut. A

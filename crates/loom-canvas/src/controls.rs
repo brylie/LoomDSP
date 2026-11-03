@@ -48,6 +48,8 @@ const RING_WIDTH: f32 = 1.0;
 
 /// The fewest screen pixels for a number control's full range.
 const MIN_THROW: f32 = 200.0;
+/// The fewest screen pixels per whole value on a number.
+const MIN_PIXELS_PER_STEP: f32 = 4.0;
 /// A horizontal fader's track centre, below the top of its second row.
 const FADER_ACROSS: f32 = 3.0;
 /// How far a fader's modulation bar sits from the centre of its track: clear
@@ -298,6 +300,15 @@ impl ControlGeometry {
                                 1.0,
                             ));
                         }
+                    }
+                    WidgetViewKind::Number { .. } => {
+                        shapes.push(Shape::new(
+                            number_box(rect),
+                            4.0,
+                            palette.control_body,
+                            palette.control_track,
+                            1.0,
+                        ));
                     }
                     WidgetViewKind::Select { .. } => {
                         let box_rect = select_box(rect);
@@ -592,6 +603,7 @@ pub(crate) fn focus_ring(kind: &WidgetViewKind, rect: Rectangle) -> (Rectangle, 
         }
         WidgetViewKind::Fader { vertical, .. } => (fader_drawn(rect, *vertical), 4.0),
         WidgetViewKind::Toggle => (toggle_track(rect).expand(2.5), 8.0),
+        WidgetViewKind::Number { .. } => (number_box(rect).expand(2.0), 5.0),
         WidgetViewKind::Select { .. } => (select_box(rect).expand(2.0), 5.0),
         // The segments, below the caption row.
         WidgetViewKind::Segmented { options, .. } => {
@@ -726,6 +738,11 @@ pub(crate) fn fader_drawn(rect: Rectangle, vertical: bool) -> Rectangle {
     }
 }
 
+/// A number's box, leaving a caption row above it.
+pub(crate) fn number_box(rect: Rectangle) -> Rectangle {
+    select_box(rect)
+}
+
 /// The closed select box, leaving a caption row above it.
 pub(crate) fn select_box(rect: Rectangle) -> Rectangle {
     Rectangle::new(
@@ -823,6 +840,17 @@ impl ValueDrag {
         Self {
             horizontal: !vertical,
             throw: (length * zoom).max(MIN_THROW),
+        }
+    }
+
+    /// A number: up raises. A whole number takes `200 / steps` pixels per
+    /// value, and at least 4, so a small range feels like a knob and a large
+    /// range never skips a value (panel-widgets.md, Number).
+    pub fn number(steps: u32) -> Self {
+        let steps = steps as f32;
+        Self {
+            horizontal: false,
+            throw: (steps * (MIN_THROW / steps.max(1.0)).max(MIN_PIXELS_PER_STEP)).max(MIN_THROW),
         }
     }
 

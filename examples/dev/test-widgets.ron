@@ -24,6 +24,8 @@ Patch(
         // Faders: a range bar on a logarithmic and a linear one.
         PatchModulation(source: (1, "uni"), target: (2, "tall"), depth: 0.25),
         PatchModulation(source: (1, "bi"), target: (2, "wide"), depth: 0.25),
+        // A number shows a dot, and its text keeps the base value.
+        PatchModulation(source: (1, "uni"), target: (2, "tempo"), depth: 0.25),
         // Toggle, radio, and button: the depths a drop gives them (one step).
         PatchModulation(source: (1, "uni"), target: (2, "on"), depth: 1.0),
         PatchModulation(source: (1, "bi"), target: (2, "choice"), depth: 0.5),

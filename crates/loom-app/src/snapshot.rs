@@ -299,7 +299,7 @@ fn cut_labels(module: &ModuleView) -> Cut {
             TextKind::Port(port) if port.output => module.outputs.get(port.index).map(|p| &p.label),
             TextKind::Port(port) => module.inputs.get(port.index).map(|p| &p.label),
             TextKind::Caption(index) => module.panel.widgets.get(index).map(|w| &w.label),
-            TextKind::Title | TextKind::Unknown | TextKind::Option(..) => None,
+            TextKind::Title | TextKind::Unknown | TextKind::Option(..) | TextKind::Value(..) => None,
         };
         if label.is_some_and(|label| *label != item.content) {
             cut.0.push((item.kind, item.content.into_owned()));
@@ -312,6 +312,7 @@ fn kind_name(kind: &WidgetViewKind) -> &'static str {
     match kind {
         WidgetViewKind::Knob { .. } => "knob",
         WidgetViewKind::Fader { .. } => "fader",
+        WidgetViewKind::Number { .. } => "number",
         WidgetViewKind::Toggle => "toggle",
         WidgetViewKind::Radio { .. } => "radio",
         WidgetViewKind::Select { .. } => "select",

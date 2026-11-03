@@ -298,3 +298,14 @@ fn a_clock_mark_moves_the_input_label_clear_of_it() {
     assert_eq!(label(&marked, 0), label(&plain, 0));
     assert_eq!(marked.clock_mark_centre(0), None);
 }
+
+/// A number's text item sits in its box and leaves room for the spec's example
+/// value, so "120.0 BPM" is not cut (panel-widgets.md, Number).
+#[test]
+fn a_number_box_holds_a_tempo_whole() {
+    let rect = Rectangle::new(Point::ORIGIN, Size::new(5.0 * GRID, 2.0 * GRID));
+    let (anchor, _, width) = value_text_place(&WidgetViewKind::Number { steps: 0 }, rect).unwrap();
+    assert!(number_box(rect).contains(anchor));
+    assert_eq!(fit_label("120.0 BPM", width, LABEL_SIZE), "120.0 BPM");
+    assert_eq!(value_text_place(&WidgetViewKind::Toggle, rect), None);
+}

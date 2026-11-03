@@ -114,7 +114,7 @@ impl<Message> PatchCanvas<'_, Message> {
         match state.hover {
             Some(Hit::Port(_) | Hit::Badge(_)) => mouse::Interaction::Pointer,
             Some(Hit::Widget { module, widget }) => match self.widget_kind(module, widget) {
-                Some(WidgetViewKind::Knob { .. } | WidgetViewKind::Fader { .. }) => {
+                Some(WidgetViewKind::Knob { .. } | WidgetViewKind::Fader { .. } | WidgetViewKind::Number { .. }) => {
                     self.value_drag(module, widget, state.camera.zoom).cursor()
                 }
                 _ => mouse::Interaction::Pointer,

@@ -326,7 +326,7 @@ impl Geometry {
                 let (list, colour) = match item.kind {
                     TextKind::Title => (&mut titles, palette.title_bar),
                     TextKind::Port(_) => (&mut labels, palette.text_bar),
-                    TextKind::Caption(_) | TextKind::Option(..) | TextKind::Unknown => {
+                    TextKind::Caption(_) | TextKind::Option(..) | TextKind::Value(_) | TextKind::Unknown => {
                         (&mut captions, palette.text_bar)
                     }
                 };

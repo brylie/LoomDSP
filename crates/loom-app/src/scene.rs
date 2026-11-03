@@ -90,6 +90,7 @@ fn panel_view(d: &ModuleDescriptor) -> PanelView {
             };
             let kind = match w.kind {
                 WidgetKind::Knob => WidgetViewKind::Knob { steps: steps() },
+                WidgetKind::Number => WidgetViewKind::Number { steps: steps() },
                 WidgetKind::Fader { vertical } => WidgetViewKind::Fader {
                     vertical,
                     steps: steps(),

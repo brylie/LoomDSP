@@ -83,6 +83,8 @@ const ON: usize = 4;
 /// | `voices` | whole-number, 1 to 16, not named | select list of numbers |
 /// | `tall` | logarithmic, 20 to 20 000 Hz | vertical fader |
 /// | `wide` | linear, 0 to 1 | horizontal fader |
+/// | `count` | whole-number, 0 to 1000 | number |
+/// | `tempo` | linear, 20 to 300 BPM | number |
 ///
 /// Outputs `uni` (unipolar) and `bi` (bipolar) both write `level`. The
 /// light `lit` shows `on`, modulated, as of the last frame of the block.
@@ -113,10 +115,12 @@ pub static PANEL: ModuleDescriptor = ModuleDescriptor {
         param("voices", 1.0, 16.0, 1.0, "voices").integer(),
         param("tall", 20.0, 20_000.0, 1_000.0, "Hz").logarithmic(),
         param("wide", 0.0, 1.0, 0.5, ""),
+        param("count", 0.0, 1000.0, 7.0, "").integer(),
+        param("tempo", 20.0, 300.0, 120.0, "BPM"),
     ],
     role: ModuleRole::Dsp(|_| {
         Box::new(TestPanel {
-            params: [0.0; 13],
+            params: [0.0; 15],
             lit: 0.0,
         })
     }),
@@ -138,6 +142,8 @@ pub static PANEL: ModuleDescriptor = ModuleDescriptor {
             Widget::select(9, 10, "voices"),
             Widget::fader(15, 7, "tall"),
             Widget::fader_horizontal(9, 12, "wide"),
+            Widget::number(0, 14, "count"),
+            Widget::number(5, 14, "tempo"),
         ],
     ),
     displays: &[DisplaySpec {
@@ -150,7 +156,7 @@ pub static PANEL: ModuleDescriptor = ModuleDescriptor {
 };
 
 struct TestPanel {
-    params: [f32; 13],
+    params: [f32; 15],
     /// `on` at the last frame of the last block, for the light.
     lit: f32,
 }

@@ -155,6 +155,11 @@ pub enum WidgetViewKind {
         /// Whole-number values to step through, or 0, as for a knob.
         steps: u32,
     },
+    /// A value shown as text in a box (panel-widgets.md, Number).
+    Number {
+        /// Whole-number values to step through, or 0, as for a knob.
+        steps: u32,
+    },
     /// Compact choice box with a pop-up list.
     Select {
         /// Option labels.
@@ -216,6 +221,7 @@ impl WidgetView {
             WidgetViewKind::Knob { .. } => (3, 3),
             WidgetViewKind::Fader { vertical: true, .. } => (2, 6),
             WidgetViewKind::Fader { vertical: false, .. } => (6, 2),
+            WidgetViewKind::Number { .. } => (5, 2),
             WidgetViewKind::Meter { .. } => (3, 6),
             WidgetViewKind::Scope => (9, 5),
             WidgetViewKind::Shape { width } => (*width, 5),
@@ -240,7 +246,9 @@ impl WidgetView {
     /// number), or `None` for any other widget. 0 means a smooth value.
     pub fn number_steps(&self) -> Option<u32> {
         match self.kind {
-            WidgetViewKind::Knob { steps } | WidgetViewKind::Fader { steps, .. } => Some(steps),
+            WidgetViewKind::Knob { steps } | WidgetViewKind::Fader { steps, .. } | WidgetViewKind::Number { steps } => {
+                Some(steps)
+            }
             _ => None,
         }
     }
@@ -253,6 +261,7 @@ impl WidgetView {
             self.kind,
             WidgetViewKind::Knob { .. }
                 | WidgetViewKind::Fader { .. }
+                | WidgetViewKind::Number { .. }
                 | WidgetViewKind::Toggle
                 | WidgetViewKind::Radio { .. }
                 | WidgetViewKind::Select { .. }
