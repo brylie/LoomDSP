@@ -433,6 +433,30 @@ fn phase_reset() {
     }
 }
 
+/// Reference render for `loom.phase.shift`: a phase moved by the knob and by a
+/// slow wave on the offset input.
+#[test]
+fn phase_shift() {
+    Harness::new(&phase::SHIFT)
+        .seconds(0.1)
+        .param("offset", 0.25)
+        .input("phase", Signal::phase(40.0))
+        .input(
+            "offset",
+            Signal::from_fn(|frame| 0.1 * (frame as f32 * std::f32::consts::TAU * 15.0 / 48_000.0).sin()),
+        )
+        .check(reference!("phase_shift"));
+}
+
+/// Reference render for `loom.phase.reverse`: a phase run backward.
+#[test]
+fn phase_reverse() {
+    Harness::new(&phase::REVERSE)
+        .seconds(0.1)
+        .input("phase", Signal::phase(40.0))
+        .check(reference!("phase_reverse"));
+}
+
 /// Reference render for `loom.rand.chance`: one clock into lane 1 drives all
 /// four lanes, each with its own chance. Every lane fires on the same frames
 /// at every block size, and the same seed gives the same choices.

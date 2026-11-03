@@ -42,14 +42,16 @@ fn family_and_category_names_both_match() {
 #[test]
 fn a_name_that_starts_with_the_query_comes_first() {
     assert_eq!(search(&modules(), "saw")[0].id, "loom.osc.saw");
-    // "Phase" starts with "phase"; so do "Phase Reset", "Phase Scale", and
-    // "Phase Trigger", and they sort after it by name.
+    // "Phase" starts with "phase"; so do "Phase Reset", "Phase Reverse", "Phase
+    // Scale", "Phase Shift", and "Phase Trigger", and they sort after it by name.
     assert_eq!(
-        ids(&search(&modules(), "phase"))[..4],
+        ids(&search(&modules(), "phase"))[..6],
         [
             "loom.phase.generator",
             "loom.phase.reset",
+            "loom.phase.reverse",
             "loom.phase.scale",
+            "loom.phase.shift",
             "loom.phase.trigger"
         ]
     );
