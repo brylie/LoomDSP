@@ -263,7 +263,10 @@ fn a_box_text_bar_has_its_own_range() {
     view.panel = crate::scene::PanelView {
         width: 5,
         height: 2,
-        widgets: vec![widget(crate::scene::WidgetViewKind::Number { steps: 0 })],
+        widgets: vec![widget(crate::scene::WidgetViewKind::Number {
+            key_step: 0.0,
+            steps: 0,
+        })],
     };
     let scene = Scene::new(vec![view], Vec::new());
     let geometry = Geometry::build(&scene, &Palette::default());

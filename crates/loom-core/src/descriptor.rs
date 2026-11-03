@@ -285,6 +285,11 @@ pub struct ParamOptions {
     /// choice parameter holds one of the listed choices, or always when
     /// `None`. Set with [`ParamSpec::shown_when`]. ADR-0030.
     pub shown_when: Option<ShownWhen>,
+    /// What one arrow key press adds on a number widget, in the parameter's
+    /// unit, for a value whose useful step is a whole unit, not 1% of its
+    /// range. Shift is 10 times finer. Set with [`ParamSpec::key_step`]
+    /// (panel-widgets.md, Number).
+    pub key_step: Option<f32>,
 }
 
 /// A condition on one choice parameter of the same module (ADR-0030).
@@ -338,6 +343,7 @@ impl ParamOptions {
         ranges: &[],
         default_range: None,
         shown_when: None,
+        key_step: None,
         transient: false,
     };
 }
@@ -530,6 +536,14 @@ impl ParamSpec {
     /// has no choice names, and a choice it does not have.
     pub const fn shown_when(mut self, param: &'static str, choices: &'static [u32]) -> Self {
         self.options.shown_when = Some(ShownWhen { param, choices });
+        self
+    }
+
+    /// Makes one arrow key press on a number widget add `step`, in the
+    /// parameter's unit. The registry refuses it on a whole-number or
+    /// logarithmic parameter.
+    pub const fn key_step(mut self, step: f32) -> Self {
+        self.options.key_step = Some(step);
         self
     }
 
@@ -1758,6 +1772,16 @@ impl ModuleDescriptor {
                 if when.choices.is_empty() || when.choices.iter().any(|&c| c as usize >= count) {
                     return problem("names a choice the parameter does not have");
                 }
+            }
+        }
+        for param in self.params {
+            if let Some(step) = param.options.key_step
+                && (step <= 0.0 || param.options.integer || param.options.mapping != ParamMapping::Linear)
+            {
+                return Err(format!(
+                    "parameter `{}`: a key step needs a linear parameter that is not a whole number, and a size above 0",
+                    param.name
+                ));
             }
         }
         let panel = &self.panel;

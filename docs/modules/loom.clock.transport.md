@@ -41,12 +41,12 @@ The patch's tempo, time signature, and play state. Every patch has exactly one.
 
 ## Panel
 
-15 by 5 grid units.
+12 by 5 grid units.
 
 - Toggle: **Run** (`run`)
 - Light: **Beat** (`beat`): Flashes on each beat.
 - Button: **Reset** (`reset`) (momentary)
-- Knob: **Tempo** (`tempo`)
+- Number: **Tempo** (`tempo`)
 - Knob: **Beats** (`numerator`)
 - Knob: **Note** (`denominator`)
 

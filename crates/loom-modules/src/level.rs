@@ -269,6 +269,7 @@ pub static CLAMP: ModuleDescriptor = ModuleDescriptor {
             unit: "",
             options: ParamOptions::DEFAULT,
         }
+        .ranges(crate::math::WIDE_RANGES, crate::math::DEFAULT_RANGE)
         .smooth(0.005),
         ParamSpec {
             name: "high",
@@ -280,6 +281,7 @@ pub static CLAMP: ModuleDescriptor = ModuleDescriptor {
             unit: "",
             options: ParamOptions::DEFAULT,
         }
+        .ranges(crate::math::WIDE_RANGES, crate::math::DEFAULT_RANGE)
         .smooth(0.005),
     ],
     role: ModuleRole::Dsp(|config| {
@@ -296,7 +298,7 @@ pub static CLAMP: ModuleDescriptor = ModuleDescriptor {
             ),
         })
     }),
-    panel: Panel::new(6, 3, &[Widget::knob(0, 0, "low"), Widget::knob(3, 0, "high")]),
+    panel: Panel::new(6, 2, &[Widget::range(0, 0, "low", "high", "Limits")]),
     displays: &[],
 };
 

@@ -182,6 +182,9 @@ pub enum WidgetViewKind {
     Number {
         /// Whole-number values to step through, or 0, as for a knob.
         steps: u32,
+        /// What one arrow key press adds, as a share of the range, when the
+        /// parameter declares its own step. Otherwise 0, as for a knob.
+        key_step: f32,
     },
     /// Compact choice box with a pop-up list.
     Select {
@@ -301,9 +304,9 @@ impl WidgetView {
     /// number), or `None` for any other widget. 0 means a smooth value.
     pub fn number_steps(&self) -> Option<u32> {
         match self.kind {
-            WidgetViewKind::Knob { steps } | WidgetViewKind::Fader { steps, .. } | WidgetViewKind::Number { steps } => {
-                Some(steps)
-            }
+            WidgetViewKind::Knob { steps }
+            | WidgetViewKind::Fader { steps, .. }
+            | WidgetViewKind::Number { steps, .. } => Some(steps),
             _ => None,
         }
     }

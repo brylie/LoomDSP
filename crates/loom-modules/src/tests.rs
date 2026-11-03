@@ -124,6 +124,27 @@ fn panels_follow_the_spec() {
                 );
                 continue;
             }
+            // The controls that panel-widgets.md, Which modules use which
+            // widget, moves off a knob.
+            use loom_core::WidgetKind::{Fader, Number, Range};
+            let moved = match (descriptor.id, param.name) {
+                ("loom.clock.transport", "tempo")
+                | ("loom.gate.euclid", "steps" | "hits" | "rotation")
+                | ("loom.midi.controller", "controller")
+                | ("loom.logic.divide", "n" | "offset")
+                | ("loom.phase.scale", "multiply" | "divide") => Some(Number),
+                ("loom.mix.mixer", "level1" | "level2" | "level3" | "level4") => Some(Fader { vertical: true }),
+                ("loom.mix.crossfade", "mix") => Some(Fader { vertical: false }),
+                ("loom.rand.random" | "loom.level.clamp", "low" | "high") => Some(Range {
+                    high: "high",
+                    vertical: false,
+                }),
+                _ => None,
+            };
+            if let Some(kind) = moved {
+                assert_eq!(widget.map(|w| w.kind), Some(kind), "{}.{}", descriptor.id, param.name);
+                continue;
+            }
             let knob = widget.is_some_and(|w| w.kind == loom_core::WidgetKind::Knob);
             let expected = !inspector_only.contains(&(descriptor.id, param.name));
             assert_eq!(knob, expected, "{}.{}", descriptor.id, param.name);

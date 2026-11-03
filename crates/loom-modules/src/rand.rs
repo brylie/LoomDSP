@@ -164,8 +164,7 @@ pub static RANDOM: ModuleDescriptor = ModuleDescriptor {
         &[
             Widget::segmented(0, 0, 12, "mode"),
             Widget::segmented(0, 2, 12, "shape"),
-            Widget::knob(0, 4, "low"),
-            Widget::knob(3, 4, "high"),
+            Widget::range(0, 4, "low", "high", "Range"),
             Widget::knob(6, 4, "step"),
             Widget::knob(9, 4, "glide"),
         ],

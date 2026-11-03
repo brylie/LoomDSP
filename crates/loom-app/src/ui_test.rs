@@ -2076,6 +2076,32 @@ mod tests {
         assert_eq!(position_of(&ui, id, "span_low"), after, "the grab ended");
     }
 
+    /// Transport's Tempo is a number that an arrow moves by 1 BPM, or 0.1 BPM
+    /// with Shift. A number with no declared step keeps 1% of its range
+    /// (panel-widgets.md, Number).
+    #[test]
+    fn the_tempo_number_steps_by_whole_beats_per_minute() {
+        use keyboard::key::Named;
+        let mut ui = Ui::open("sine.ron");
+        let transport = ui.app.controller.transport_module().expect("a transport");
+        let _ = ui.app.update(Message::SelectModule(transport.0));
+        ui.redraw();
+        focus_control(&mut ui, transport, "tempo");
+        let tempo = |ui: &Ui| param_value(ui, transport, "tempo");
+        let start = tempo(&ui);
+        let up = keyboard::Key::Named(Named::ArrowUp);
+        ui.tap(up.clone(), keyboard::Modifiers::default());
+        assert!((tempo(&ui) - start - 1.0).abs() < 1e-2, "{}", tempo(&ui));
+        ui.tap(up.clone(), keyboard::Modifiers::SHIFT);
+        assert!((tempo(&ui) - start - 1.1).abs() < 1e-2, "{}", tempo(&ui));
+
+        let id = select_new(&mut ui, "test.panel");
+        focus_control(&mut ui, id, "tempo");
+        let before = position_of(&ui, id, "tempo");
+        ui.tap(up, keyboard::Modifiers::default());
+        assert!((position_of(&ui, id, "tempo") - before - 0.01).abs() < 1e-4);
+    }
+
     /// A press ends a grab: back on the same range, the arrows change nothing
     /// until the keyboard goes inside again (panel-widgets.md, rule 4).
     #[test]

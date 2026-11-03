@@ -121,7 +121,7 @@ What the inputs mean depends on the mode:
 | Inputs | `in1` to `in4` (default 0) |
 | Output | `out` |
 | Parameters | `level1` to `level4`: 0 to 2, default 1. `mute1` to `mute4`: 0 or 1, default 0 |
-| Panel | Four columns, each a knob over a toggle |
+| Panel | Four columns, each a fader over a toggle |
 
 - `out = sum(in_n × level_n × (1 - mute_n))`. Level and mute are smoothed together over 5 ms, so a mute fades. *Why:* a hard mute clicks on stage.
 - Four inputs, as the tile stays small. A bigger mix is two mixers in a row. Pan comes with stereo (the [catalogue](../product/module-catalogue.md) entry stays as it is).

@@ -33,10 +33,10 @@ Runs a phase at multiply / divide times its speed, locked to the input. Divide c
 
 ## Panel
 
-6 by 3 grid units.
+10 by 2 grid units.
 
-- Knob: **Multiply** (`multiply`)
-- Knob: **Divide** (`divide`)
+- Number: **Multiply** (`multiply`)
+- Number: **Divide** (`divide`)
 
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->
 

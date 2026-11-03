@@ -117,7 +117,8 @@ pub static TRANSPORT: ModuleDescriptor = ModuleDescriptor {
             default: 120.0,
             unit: "BPM",
             options: ParamOptions::DEFAULT,
-        },
+        }
+        .key_step(1.0),
         ParamSpec {
             name: "numerator",
             label: "Beats",
@@ -167,15 +168,15 @@ pub static TRANSPORT: ModuleDescriptor = ModuleDescriptor {
     ],
     role: ModuleRole::Dsp(|_| Box::new(Transport::new())),
     panel: Panel::new(
-        15,
+        12,
         5,
         &[
             Widget::toggle(0, 0, "run"),
             Widget::light(3, 0, "beat"),
             Widget::momentary(0, 2, "reset"),
-            Widget::knob(6, 0, "tempo"),
-            Widget::knob(9, 0, "numerator"),
-            Widget::knob(12, 0, "denominator"),
+            Widget::number(6, 0, "tempo"),
+            Widget::knob(6, 2, "numerator"),
+            Widget::knob(9, 2, "denominator"),
         ],
     ),
     displays: &[

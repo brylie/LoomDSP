@@ -367,7 +367,11 @@ pub static SCALE: ModuleDescriptor = ModuleDescriptor {
         .integer(),
     ],
     role: ModuleRole::Dsp(|_| Box::new(PhaseScale::new())),
-    panel: Panel::new(6, 3, &[Widget::knob(0, 0, "multiply"), Widget::knob(3, 0, "divide")]),
+    panel: Panel::new(
+        10,
+        2,
+        &[Widget::number(0, 0, "multiply"), Widget::number(5, 0, "divide")],
+    ),
     displays: &[],
 };
 

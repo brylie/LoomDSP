@@ -262,7 +262,7 @@ impl<Message> PatchCanvas<'_, Message> {
         match (self.widget_kind(module, widget), rect) {
             (Some(WidgetViewKind::Fader { vertical, .. }), Some(rect)) => ValueDrag::fader(rect, *vertical, zoom),
             (Some(WidgetViewKind::Range { vertical, .. }), Some(rect)) => ValueDrag::range(rect, *vertical, zoom),
-            (Some(WidgetViewKind::Number { steps }), _) => ValueDrag::number(*steps),
+            (Some(WidgetViewKind::Number { steps, .. }), _) => ValueDrag::number(*steps),
             _ => ValueDrag::KNOB,
         }
     }
@@ -741,10 +741,16 @@ impl<Message> PatchCanvas<'_, Message> {
                 } else {
                     let position = self.position(module, widget);
                     let next = match self.widget_kind(module, widget) {
+                        // A parameter can declare its own step (panel-widgets.md,
+                        // Number).
+                        Some(WidgetViewKind::Number { key_step, .. }) if *key_step > 0.0 => {
+                            let step = key_step * if modifiers.shift() { 0.1 } else { 1.0 };
+                            (position + if up { step } else { -step }).clamp(0.0, 1.0)
+                        }
                         Some(
                             WidgetViewKind::Knob { steps }
                             | WidgetViewKind::Fader { steps, .. }
-                            | WidgetViewKind::Number { steps },
+                            | WidgetViewKind::Number { steps, .. },
                         ) => knob_step(position, up, modifiers.shift(), *steps),
                         Some(WidgetViewKind::Toggle) => {
                             if up {

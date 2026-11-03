@@ -89,7 +89,7 @@ The [rules for M1 modules](p1-modules.md#rules-for-all-modules-here) apply: IDs 
 | Inputs | `phase` (phase, default **bar phase**), `clock` (trigger, default 0), `reset` (trigger, default 0) |
 | Outputs | `trigger`, `gate`, `accent` |
 | Parameters | `source`: 0 Phase (default), 1 Clock. `steps`: whole number 1 to 32, default 16. `hits`: whole number 0 to 32, default 4. `rotation`: whole number 0 to 31, default 0 |
-| Panel | A segmented control for `source` ([panels](panels.md), rule 6), knobs for `steps`, `hits`, and `rotation`. A read-only [step grid](panel-widgets.md#step-grid) in the ring layout shows the pattern and the current step, once that widget exists. |
+| Panel | A segmented control for `source` ([panels](panels.md), rule 6), numbers for `steps`, `hits`, and `rotation`. A read-only [step grid](panel-widgets.md#step-grid) in the ring layout shows the pattern and the current step, once that widget exists. |
 
 - **The pattern.** Step `i` (from 0) of the unrotated pattern is a hit when `(i × hits) mod steps < hits`. `hits` above `steps` counts as `steps`. Rotation moves the pattern later: step `i` plays pattern step `(i − rotation) mod steps`. *Why this rule:* it is a closed form of the Euclidean spread. It gives the published patterns up to rotation (3 in 8 is `x..x..x.`), and it fixes which rotation is 0, so tests are exact.
 - **Source** is a setting, not chosen by a cable. *Why:* the `phase` input has a default, so a cable cannot be the switch, as on the LFO ([M1 modules](p1-modules.md#lfo-mt-mod-01)).

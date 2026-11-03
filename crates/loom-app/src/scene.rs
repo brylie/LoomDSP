@@ -101,7 +101,15 @@ fn panel_view(d: &ModuleDescriptor) -> PanelView {
             };
             let kind = match w.kind {
                 WidgetKind::Knob => WidgetViewKind::Knob { steps: steps() },
-                WidgetKind::Number => WidgetViewKind::Number { steps: steps() },
+                WidgetKind::Number => WidgetViewKind::Number {
+                    steps: steps(),
+                    key_step: d
+                        .params
+                        .iter()
+                        .find(|p| p.name == w.bind())
+                        .and_then(|p| Some(p.options.key_step? / (p.max - p.min)))
+                        .unwrap_or(0.0),
+                },
                 WidgetKind::Fader { vertical } => WidgetViewKind::Fader {
                     vertical,
                     steps: steps(),

@@ -78,12 +78,12 @@ pub static DIVIDE: ModuleDescriptor = ModuleDescriptor {
     ],
     role: ModuleRole::Dsp(|_| Box::new(Divide::new())),
     panel: Panel::new(
-        9,
-        3,
+        13,
+        2,
         &[
-            Widget::knob(0, 0, "n"),
-            Widget::knob(3, 0, "offset"),
-            Widget::light(6, 0, "fired"),
+            Widget::number(0, 0, "n"),
+            Widget::number(5, 0, "offset"),
+            Widget::light(10, 0, "fired"),
         ],
     ),
     displays: &[DisplaySpec {

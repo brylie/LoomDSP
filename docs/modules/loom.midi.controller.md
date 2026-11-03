@@ -32,10 +32,10 @@ None.
 
 ## Panel
 
-9 by 5 grid units.
+11 by 5 grid units.
 
 - Select: **Source** (`source`)
-- Knob: **Controller** (`controller`)
+- Number: **Controller** (`controller`)
 - Knob: **Channel** (`channel`)
 - Knob: **Smoothing** (`smoothing`)
 

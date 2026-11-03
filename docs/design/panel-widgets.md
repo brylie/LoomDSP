@@ -48,8 +48,8 @@ Widgets are grouped by the **kind of value** they show or edit, not by the modul
 | | Radio buttons | A whole-number parameter | Yes | M1 |
 | | Select list | A whole-number parameter | Yes | M2 |
 | Action | Button | A whole-number parameter, 0 to 1, and a mode parameter | Yes | M1 |
-| Two numbers | XY pad | Two parameters | No | M2 |
-| | Range | Two parameters on one axis: a low and a high | No | M2 |
+| Two numbers | XY pad | Two parameters | Yes | M2 |
+| | Range | Two parameters on one axis: a low and a high | Yes | M2 |
 | Module state | Light | A display value | Yes | M1 |
 | | Readout | A display value | Yes | M2 |
 | | Meter | An output, or a display value | Yes | M1, display value in M2 |
@@ -190,7 +190,7 @@ A value shown as text, such as "120.0 BPM" or "7". For parameters where the exac
 - **Binds to:** any parameter. Most useful for whole numbers with many values, such as a division, a step count, or a seed, and for tempo.
 - **Drag:** vertical, relative, through the parameter's mapping, like a knob. Whole-number parameters step by one: each value takes `max(4, 200 / steps)` pixels, and 10 times that with Shift. *Why:* a small range then feels like a knob, and a large range, such as a seed, never skips a value.
 - **Modulation:** a dot, as on a toggle. The text shows the base value. *Why not the live value:* text that changes every frame cannot be read. The inspector and a readout can show it.
-- **Keyboard:** as a knob, and takes typed values ([Typing a value](#typing-a-value)).
+- **Keyboard:** as a knob, and takes typed values ([Typing a value](#typing-a-value)). A parameter whose useful step is a whole unit can declare its own arrow step, with Shift 10 times finer: Transport's Tempo moves 1 BPM, or 0.1 BPM with Shift. *Why:* on 20 to 300 BPM, 1% of the range is 2.8 BPM, so an arrow could never land on a chosen tempo.
 - **Middle zoom:** a box with a bar for the text.
 - **Size (starting size):** 5 × 2. The caption is above the box. *Why not 3 × 2:* "120.0 BPM" needs 5 units to show whole.
 
@@ -257,6 +257,8 @@ Implemented ([panels.md](panels.md#interaction-68), [clock.md](clock.md#button-d
 
 ### XY pad
 
+**Status:** Implemented on the test modules.
+
 A square area with a point. The point's horizontal position is one parameter, its vertical position another.
 
 - **Binds to:** two parameters, `x` and `y`. They may have different mappings. The registry refuses a pad whose two names are the same, and a pad whose two parameters are not `shown_when` the same choices. *Why:* half a pad cannot be hidden. The pad's caption is written on the widget, because neither parameter's label names the pair.
@@ -270,6 +272,8 @@ A square area with a point. The point's horizontal position is one parameter, it
 - **Size (starting size):** 6 × 6, resizable once tiles are ([#61](https://github.com/brylie/LoomDSP/issues/61)).
 
 ### Range
+
+**Status:** Implemented, on Random and Clamp.
 
 A track with two handles, for a low and a high value on the same scale. The band between the handles is filled.
 
@@ -476,8 +480,9 @@ The catalogue entries that would use each new widget. The knob is used by nearly
 |---|---|
 | Fader | MT-MIX-01 levels, MT-MIX-02, MT-UI-02, MT-EQ-01 band gains, MT-ARR-06, MT-SRC-03 group levels |
 | Number | MT-CLOCK-01 tempo, MT-CLOCK-03 division, MT-PHASE-02 ratio, MT-PHASE-06, MT-GATE-02 hits, steps, and rotation, MT-LOGIC-04 count, MT-PITCH-01 offsets, MT-IO-04 controller number, MT-ARR-01 and MT-ARR-02 length in bars, TR-07 seed |
-| Radio buttons | MT-FILTER-04 slope, MT-MIX-02 law, MT-LEVEL-02 response, MT-PHASE-08 wrap or fold, MT-ROUTE-02 how to choose, MT-DELAY-04 time change, MT-LOGIC-01 mode, TR-02 timebase, TR-03 retrigger |
-| Select list | MT-SRC-08 and MT-VOICE-04 unison voices, MT-SRC-02 colour, MT-LEVEL-01 unit, MT-MATH-02 function, MT-MATH-03 conversion, MT-LOGIC-02 operation, MT-VOICE-01 merge mode, MT-SHAPE-01 curve, MT-DYN-01 mode, MT-FX-01 space, MT-SEQ-04 algorithm, MT-PITCH-02 and MT-PITCH-03 scale, MT-ENV-01 mode, TR-01 basic shape, TR-02 musical division, TR-05 character, TR-06 quality |
+| Segmented control | MT-FILTER-04 slope, MT-MIX-02 law, MT-LEVEL-02 response, MT-PHASE-08 wrap or fold, MT-ROUTE-02 how to choose, MT-ENV-01 mode, MT-GATE-02 source, MT-RAND-01 mode and shape, MT-DYN-01 detect, MT-EQ-01 slopes |
+| Radio buttons | MT-DELAY-04 time change, MT-LOGIC-01 mode, TR-02 timebase, TR-03 retrigger |
+| Select list | MT-SRC-08 and MT-VOICE-04 unison voices, MT-SRC-02 colour, MT-LEVEL-01 unit, MT-MATH-02 function, MT-MATH-03 conversion, MT-LOGIC-02 operation, MT-VOICE-01 merge mode, MT-SHAPE-01 curve, MT-DYN-01 mode, MT-FX-01 space, MT-SEQ-04 algorithm, MT-PITCH-02 and MT-PITCH-03 scale, TR-01 basic shape, TR-02 musical division, TR-05 character, TR-06 quality |
 | Toggle | MT-MIX-01 mute, MT-ENV-01 loop, MT-DELAY-04 ping-pong, MT-SRC-01 sync |
 | XY pad | MT-UI-03, MT-STATE-02, MT-FX-10 position |
 | Range | MT-RAND-01 range, MT-LEVEL-05 limits, MT-LEVEL-03 range map, MT-LOGIC-01 window, MT-NOTE-07 pitch and velocity ranges, MT-SAMPLE-05 zones, MT-SEQ-04 note range |
@@ -492,6 +497,18 @@ The catalogue entries that would use each new widget. The knob is used by nearly
 | Step grid, keys layout | MT-PITCH-02, MT-PITCH-03, MT-NOTE-02, MT-MOD-03 (read-only: one gate per pitch class) |
 | Waveform | MT-SAMPLE-01, MT-SAMPLE-02, MT-SAMPLE-03, MT-SAMPLE-04, MT-SAMPLE-06, MT-SAMPLE-08, MT-ARR-02, MT-FX-04 |
 | Waveform, frames | TR-01 wavetable shapes (so MT-SRC-01 and MT-MOD-01), and the wavetable reader in FR-LIB-02 |
+
+**Modules that exist today and keep another control, with the reason:**
+
+| Module | Table says | Today | Why |
+|---|---|---|---|
+| EQ (MT-EQ-01) band gains | Fader | Knobs | Knobs are the default on a tile. Its gains sit under their frequencies in columns of knobs, and a fader would break those columns without a task that needs it. |
+| Macro (MT-UI-02) | Fader | Knob | One value has nothing to compare, so a fader has no task here. |
+| Compare (MT-LOGIC-01) | Range for a window | No such parameter | It has `mode` and `hysteresis`. A window waits for a module that compares against one. |
+| Scale (MT-LEVEL-03) | Range for a range map | Knobs | It has `factor` and `offset`, not two ends of a range. |
+| Crossover (MT-FILTER-07) splits | Range | Knobs | [Its splits](dynamics-eq-crossover.md) have different ranges and hide differently, which the range widget refuses. |
+| Transport (MT-CLOCK-01) position | Readout | None | The module publishes no position display value. It needs one first. |
+| Selector (MT-ROUTE-01) current input | Readout | None | The module has no display values. It needs one first. |
 
 **Not in the baseline.** These catalogue entries need a view of their own. Each gets its own spec when its module is designed, and joins the set then if a second module needs it.
 
@@ -523,8 +540,8 @@ Widget-specific checks:
 | Number | A whole-number parameter steps by one per drag step, also with at least 1000 values. The text shows the base value while modulated. |
 | Typing a value | "2k" on a Hz parameter commits 2000; "abc" leaves the value and blocks Enter; Escape cancels; a value above the selected control range selects a wider range; one commit is one undo step. |
 | Select list | Over 12 choices the list scrolls; type-ahead jumps to the next match; a parameter without names shows its numbers with the unit. |
-| XY pad | Alt-press jumps the point; a plain press does not. Each axis shows its own modulation bar. |
-| Range | The two handles cannot cross. Each has its own modulation bar and live line. |
+| XY pad | Alt-press jumps the point; a plain press does not. Each axis shows its own modulation bar. Each axis has its own arrow keys, and Enter does nothing. |
+| Range | The two handles cannot cross. Each has its own modulation bar and live line. Overlapping handles follow the first movement. The two parameters share one control range. |
 | Readout, meter on a display value | Text uses the display value's unit; the meter follows the display value at rule 7's rate. |
 | Level history | A tone that stops shows RMS falling to the floor over the window; a silent input sends the UI nothing. |
 | Spectrum | A 1 kHz sine peaks in the column holding 1 kHz, within one bin; hold keeps the peak for 2 s; a silent input sends the UI nothing. |
