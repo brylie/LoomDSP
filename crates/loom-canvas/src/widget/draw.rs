@@ -553,12 +553,14 @@ impl<Message> PatchCanvas<'_, Message> {
                 },
                 self.palette.control_body,
             );
-            for (index, option) in options.iter().enumerate() {
+            let rows = (rect.height / SELECT_ROW_PX).round() as usize;
+            for (index, option) in options.iter().enumerate().skip(popup.scroll).take(rows) {
+                let row = (index - popup.scroll) as f32;
                 if index == popup.highlight {
                     renderer.fill_quad(
                         renderer::Quad {
                             bounds: Rectangle::new(
-                                Point::new(at.x + 2.0, at.y + SELECT_ROW_PX * index as f32 + 1.0),
+                                Point::new(at.x + 2.0, at.y + SELECT_ROW_PX * row + 1.0),
                                 Size::new(rect.width - 4.0, SELECT_ROW_PX - 2.0),
                             ),
                             border: iced::Border {
@@ -588,9 +590,29 @@ impl<Message> PatchCanvas<'_, Message> {
                         shaping: text::Shaping::Advanced,
                         wrapping: text::Wrapping::None,
                     },
-                    Point::new(at.x + 7.0, at.y + SELECT_ROW_PX * (index as f32 + 0.5)),
+                    Point::new(at.x + 7.0, at.y + SELECT_ROW_PX * (row + 0.5)),
                     self.palette.text,
                     bounds,
+                );
+            }
+            // A longer list has a bar at its right edge. Its length and place
+            // show how much is out of view (rule 8: a shape, not a colour).
+            if rows < options.len() {
+                let share = rows as f32 / options.len() as f32;
+                let start = popup.scroll as f32 / options.len() as f32;
+                renderer.fill_quad(
+                    renderer::Quad {
+                        bounds: Rectangle::new(
+                            Point::new(at.x + rect.width - 5.0, at.y + 2.0 + (rect.height - 4.0) * start),
+                            Size::new(3.0, (rect.height - 4.0) * share),
+                        ),
+                        border: iced::Border {
+                            radius: 1.5.into(),
+                            ..iced::Border::default()
+                        },
+                        ..renderer::Quad::default()
+                    },
+                    self.palette.text_dim,
                 );
             }
         });

@@ -367,6 +367,29 @@ pub enum ParamMapping {
 }
 
 impl ParamSpec {
+    /// How many values a whole-number parameter can take: its names, or the
+    /// numbers in its range.
+    pub fn value_count(&self) -> usize {
+        if self.options.choices.is_empty() {
+            (self.max - self.min).max(0.0) as usize + 1
+        } else {
+            self.options.choices.len()
+        }
+    }
+
+    /// What a select list shows for each value of a whole-number parameter:
+    /// its names, or its numbers with the unit, such as "4 voices"
+    /// (panel-widgets.md, Select list).
+    pub fn value_names(&self) -> Vec<String> {
+        if self.options.choices.is_empty() {
+            (0..self.value_count())
+                .map(|i| self.value_text(self.min + i as f32))
+                .collect()
+        } else {
+            self.options.choices.iter().map(ToString::to_string).collect()
+        }
+    }
+
     /// A value of this parameter with its unit, such as "1000 Hz", for help
     /// text. The in-app help and the generated pages share it.
     pub fn value_text(&self, value: f32) -> String {
@@ -841,6 +864,10 @@ pub enum DisplayKind {
     /// one-sample trigger between two frames still lights the light.
     Trigger,
 }
+
+/// Most values a select list can offer. A list this long still scrolls and
+/// types ahead in reasonable time, and a larger range belongs on a number.
+pub const MAX_SELECT_VALUES: usize = 128;
 
 /// Most display values one module can publish.
 pub const MAX_DISPLAYS: usize = 4;
@@ -1431,10 +1458,10 @@ impl ModuleDescriptor {
                             "a segmented control needs a width and 2 to 4 named whole-number choices",
                         ));
                     }
-                    WidgetKind::Select
-                        if !integer || param.options.choices.is_empty() || param.options.choices.len() > 12 =>
-                    {
-                        return Err(name("a select list needs 1 to 12 named whole-number choices"));
+                    WidgetKind::Select if !integer || !(1..=MAX_SELECT_VALUES).contains(&param.value_count()) => {
+                        return Err(name(
+                            "a select list needs a whole-number parameter with 1 to 128 values",
+                        ));
                     }
                     WidgetKind::Button { .. } if !(integer && param.min == 0.0 && param.max == 1.0) => {
                         return Err(name("a button needs a whole-number parameter from 0 to 1"));

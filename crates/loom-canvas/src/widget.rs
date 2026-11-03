@@ -503,11 +503,17 @@ struct SelectPopup {
     module: u32,
     widget: usize,
     highlight: usize,
+    /// The first row that shows, for a list longer than it can show.
+    scroll: usize,
+    /// Wheel movement that has not yet made a whole row.
+    wheel: f32,
 }
 
 #[derive(Default)]
 struct State {
     camera: Camera,
+    /// The canvas size at the last event, for key handling that needs it.
+    size: Size,
     framed_key: Option<u64>,
     interaction: Interaction,
     /// A release after CursorLeft cannot target the inspector until the

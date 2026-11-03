@@ -322,7 +322,7 @@ fn select_and_shape_panel_bindings_are_checked() {
         channels: Channels::PerChannel,
     }];
     static PARAMS: [ParamSpec; 1] = [param("mode", 0.0, 1.0, 0.0, "").integer().choices(&["First", "Second"])];
-    static NO_CHOICES: [ParamSpec; 1] = [param("mode", 0.0, 1.0, 0.0, "").integer()];
+    static NOT_WHOLE: [ParamSpec; 1] = [param("mode", 0.0, 1.0, 0.0, "")];
     static VALID: [Widget; 2] = [
         Widget::shape(0, 0, 6, "out", "Result", sample),
         Widget::select(0, 5, "mode"),
@@ -351,7 +351,7 @@ fn select_and_shape_panel_bindings_are_checked() {
     assert_eq!(Widget::shape(0, 0, 6, "out", "Result", sample), VALID[0]);
 
     assert!(
-        descriptor(&VALID, &NO_CHOICES)
+        descriptor(&VALID, &NOT_WHOLE)
             .check_panel()
             .unwrap_err()
             .contains("select list")
@@ -417,4 +417,34 @@ fn only_the_exact_name_matches() {
         assert_eq!(NAMED.param_index(name), None, "{name:?}");
         assert_eq!(NAMED.input_index(name), None, "{name:?}");
     }
+}
+
+/// A select list takes names or numbers, up to 128 values, and only on a
+/// whole-number parameter (panel-widgets.md, Select list).
+#[test]
+fn a_select_list_needs_a_whole_number_with_at_most_128_values() {
+    static SELECT: [Widget; 1] = [Widget::select(0, 0, "p")];
+    let spec = |min, max| param("p", min, max, min, "voices");
+    assert_eq!(spec(1.0, 4.0).integer().value_count(), 4);
+    assert_eq!(
+        spec(1.0, 2.0).integer().value_names(),
+        ["1 voices", "2 voices"],
+        "numbers with the unit"
+    );
+    let named = spec(0.0, 1.0).integer().choices(&["Off", "On"]);
+    assert_eq!(named.value_names(), ["Off", "On"]);
+
+    let check = |param: ParamSpec| -> Result<(), String> {
+        let params: &'static [ParamSpec] = Box::leak(Box::new([param]));
+        let descriptor = ModuleDescriptor {
+            params,
+            panel: Panel::new(6, 2, &SELECT),
+            ..NAMED
+        };
+        descriptor.check_panel().map_err(|error| error.to_string())
+    };
+    assert!(check(spec(1.0, 128.0).integer()).is_ok());
+    let too_long = check(spec(1.0, 129.0).integer()).unwrap_err();
+    assert!(too_long.contains("select list"), "{too_long}");
+    assert!(check(spec(1.0, 4.0)).is_err(), "not a whole number");
 }

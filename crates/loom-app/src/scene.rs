@@ -109,7 +109,7 @@ fn panel_view(d: &ModuleDescriptor) -> PanelView {
                         .params
                         .iter()
                         .find(|p| p.name == w.bind)
-                        .map_or_else(Vec::new, |p| p.options.choices.iter().map(|o| o.to_string()).collect()),
+                        .map_or_else(Vec::new, ParamSpec::value_names),
                 },
                 WidgetKind::Segmented { width } => WidgetViewKind::Segmented {
                     options: d

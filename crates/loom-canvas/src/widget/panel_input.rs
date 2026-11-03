@@ -287,6 +287,7 @@ impl<Message> PatchCanvas<'_, Message> {
         state: &mut State,
         key: &keyboard::Key,
         modifiers: keyboard::Modifiers,
+        text: Option<&str>,
         repeat: bool,
         _over: bool,
         shell: &mut Shell<'_, Message>,
@@ -344,7 +345,7 @@ impl<Message> PatchCanvas<'_, Message> {
             return true;
         }
         // An open list comes before every other use of a key.
-        if self.select_popup_key(state, key, repeat, shell) {
+        if self.select_popup_key(state, key, modifiers, text, repeat, shell) {
             return true;
         }
         let used = match key.as_ref() {

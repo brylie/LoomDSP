@@ -30,6 +30,7 @@ fn the_panel_has_every_widget_kind() {
     assert!(kinds.contains(&WidgetKind::Light));
     assert!(kinds.contains(&WidgetKind::Meter));
     assert!(kinds.contains(&WidgetKind::Scope));
+    assert!(kinds.contains(&WidgetKind::Select));
 }
 
 #[test]

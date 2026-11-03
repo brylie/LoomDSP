@@ -3,7 +3,7 @@
 The baseline set of panel widgets that LoomDSP modules, sub-patches, and front panels share, so each kind of interaction has one common way to work.
 
 - **Kind:** living specification.
-- **Status:** Agreed, M2. The plan and its open points were settled with the maintainer on 2026-11-01 ([#278](https://github.com/brylie/LoomDSP/issues/278)); see [Settled in review](#settled-in-review). The [read-only shape preview](#read-only-shape-preview) and the compact [select list](#select-list) are Implemented. The widgets that exist today (knob, toggle, radio buttons, button, light, meter) are specified and Implemented in [panels.md](panels.md#module-panels-on-tiles-m1). Sizes marked "starting size" may be tuned while building, against the estimated label widths ([#120](https://github.com/brylie/LoomDSP/issues/120)), without a spec change.
+- **Status:** Agreed, M2. The plan and its open points were settled with the maintainer on 2026-11-01 ([#278](https://github.com/brylie/LoomDSP/issues/278)); see [Settled in review](#settled-in-review). The [read-only shape preview](#read-only-shape-preview) and the [select list](#select-list) are Implemented. The widgets that exist today (knob, toggle, radio buttons, button, light, meter) are specified and Implemented in [panels.md](panels.md#module-panels-on-tiles-m1). Sizes marked "starting size" may be tuned while building, against the estimated label widths ([#120](https://github.com/brylie/LoomDSP/issues/120)), without a spec change.
 - **Decision behind it:** [ADR-0024](../adr/0024-widgets-follow-the-kind-of-value.md) (widgets follow the kind of value, and structured data has shared kinds with one editor each). Builds on [ADR-0013](../adr/0013-modules-carry-their-own-panel.md) (modules carry their own panel).
 - **Use case and requirements:** UC2, UC3. FR-PANEL-02, FR-PANEL-03, FR-PANEL-04, FR-LIB-02, FR-LIB-12, FR-LIB-16, FR-LIB-17, FR-LIB-18, FR-LIB-19, FR-LIB-29, FR-MOD-04, FR-VIS-02, FR-VIS-03, NFR-UX-01, NFR-UX-02, NFR-UX-03.
 - **Builds on:** [panels.md](panels.md) (widgets, layout, interaction, level of detail, redraw), [modulation.md](modulation.md) (range arcs, dots, live value), [telemetry.md](telemetry.md) (probes), [port and parameter text](port-and-parameter-text.md) (labels and descriptions).
@@ -46,7 +46,7 @@ Widgets are grouped by the **kind of value** they show or edit, not by the modul
 | | Number | A parameter | No | M2 |
 | One choice | Toggle | A whole-number parameter, 0 to 1 | Yes | M1 |
 | | Radio buttons | A whole-number parameter | Yes | M1 |
-| | Select list | A whole-number parameter | Yes, named choices up to 12 | M2 |
+| | Select list | A whole-number parameter | Yes | M2 |
 | Action | Button | A whole-number parameter, 0 to 1, and a mode parameter | Yes | M1 |
 | Two numbers | XY pad | Two parameters | No | M2 |
 | | Range | Two parameters on one axis: a low and a high | No | M2 |
@@ -193,14 +193,16 @@ A whole-number parameter can name its values, such as "6 dB", "12 dB", "18 dB", 
 
 ### Select list
 
-**Status:** Agreed for named whole-number choices on a tile. It is for choice lists too long or too wordy for a [segmented control](#segmented-control), such as LFO Shape. The closed selector sits in the choices row, under the module's result view when it has one. The list opens at a readable screen size above or below the box, stays inside the canvas, and marks the current choice. Click, keyboard, drag, reset, modulation, and MIDI learn follow the rules below. Lists longer than 12 choices scroll, and in an open list, typing a letter jumps to the next choice that starts with it (type-ahead).
+**Status:** Implemented. It is for choice lists too long or too wordy for a [segmented control](#segmented-control), such as LFO Shape. The closed selector sits in the choices row, under the module's result view when it has one. The list opens at a readable screen size above or below the box, stays inside the canvas, and marks the current choice. Click, keyboard, drag, reset, modulation, and MIDI learn follow the rules below. Lists longer than 12 choices scroll, and in any open list, typing a character jumps to the next choice that starts with it (type-ahead).
 
 The current choice is shown as text. Clicking it shows the other choices in a list.
 
-- **Binds to:** a whole-number parameter. Its choice names, or its numbers with the unit.
+- **Binds to:** a whole-number parameter with up to 128 values. Its choice names, or its numbers with the unit. The registry refuses more. *Why:* a longer range is faster to reach on a [number](#number).
 - **Closed:** a box with the current choice and a small down-pointing mark at the right end, which says "there is a list here" without colour.
 - **Click:** opens the list. The list shows every choice, the current one marked by a tick and a filled row. It opens below the box, or above when there is no room below, and always inside the canvas. Clicking a choice picks it and closes the list: one undo step. Clicking outside the list, pressing Escape, panning, or zooming closes it without a change.
-- **List size:** fixed screen size with 12 px text, whatever the zoom. Up to 12 rows show at once; a longer list scrolls inside that size. *Why fixed size:* the list is for reading and picking, so it must be readable at middle zoom.
+- **List size:** fixed screen size with 12 px text, whatever the zoom. Up to 12 rows show at once, and fewer on a canvas too short for them. A longer list scrolls inside that size, with the mouse wheel or the keyboard, and a bar at its right edge shows how much is out of view. *Why fixed size:* the list is for reading and picking, so it must be readable at middle zoom.
+- **Wheel:** over an open list it scrolls the list, and a list too short to scroll stays open. Elsewhere it closes the list, as rule 1 says for the canvas.
+- **Type-ahead:** in an open list, typing a character jumps to the next choice that starts with it, ignoring case and wrapping round. Any character counts, so "1/16" can be found. A key that matches nothing is used up. *Why:* a letter must not reach the canvas behind the list, where `a` opens the module browser.
 - **Drag on the closed box:** moves the tile, as on toggles and radio buttons (rule 1). *Why not step through the choices:* a select list is a choice control, and choice controls do not change on a drag. A performer sweeps through choices with a MIDI controller or the arrow keys instead.
 - **Double-click:** resets to the default.
 - **Modulation:** a dot, as on radio buttons. The box shows the base choice.
@@ -502,7 +504,7 @@ Widget-specific checks:
 | Fader | A 6-unit fader at middle zoom still needs 200 screen pixels for its full range. Dragging the modulation bar changes one assignment's depth. |
 | Number | A whole-number parameter steps by one per drag step. The text shows the base value while modulated. |
 | Typing a value | "2k" on a Hz parameter commits 2000; "abc" leaves the value and blocks Enter; Escape cancels; a value above the selected control range selects a wider range; one commit is one undo step. |
-| Select list | Over 12 choices the list scrolls; type-ahead jumps to the next match. |
+| Select list | Over 12 choices the list scrolls; type-ahead jumps to the next match; a parameter without names shows its numbers with the unit. |
 | XY pad | Alt-press jumps the point; a plain press does not. Each axis shows its own modulation bar. |
 | Range | The two handles cannot cross. Each has its own modulation bar and live line. |
 | Readout, meter on a display value | Text uses the display value's unit; the meter follows the display value at rule 7's rate. |
@@ -528,7 +530,7 @@ Settled with the maintainer on 2026-11-01 ([#278](https://github.com/brylie/Loom
 - **Typing a value:** on every one-number widget ([Typing a value](#typing-a-value)).
 - **Snap on a curve:** hold Ctrl (Cmd); the module sets the grid, which follows the bar for curves over bars ([Curve](#curve)).
 - **Live shape under modulation:** drawn as a dashed line ([Curve](#curve)).
-- **Select list type-ahead:** yes, for lists that scroll ([Select list](#select-list)).
+- **Select list type-ahead:** yes, in every open list, so a short list behaves like a long one ([Select list](#select-list)). Corrected on 2026-11-03 from "for lists that scroll".
 - **Keys layout:** cell names are display texts the module publishes; the root is a bar under the key ([Step grid](#step-grid)).
 - **Widget sizes:** the listed sizes are starting sizes, tuned with [#120](https://github.com/brylie/LoomDSP/issues/120).
 - **Slow history of a display value:** a long time window on the scope, fed by display values instead of audio samples, specified when a module first needs it. The RMS history of a signal is the [level history](#level-history).

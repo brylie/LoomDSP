@@ -79,6 +79,8 @@ const ON: usize = 4;
 /// | `gate` | whole-number, 0 to 1 | button |
 /// | `mode` | whole-number, 0 to 1 | none (the button's mode) |
 /// | `held` | whole-number, 0 to 1, transient | none (the button's hold) |
+/// | `long` | whole-number, 0 to 15, named | select list that scrolls |
+/// | `voices` | whole-number, 1 to 16, not named | select list of numbers |
 ///
 /// Outputs `uni` (unipolar) and `bi` (bipolar) both write `level`. The
 /// light `lit` shows `on`, modulated, as of the last frame of the block.
@@ -102,10 +104,15 @@ pub static PANEL: ModuleDescriptor = ModuleDescriptor {
         param("gate", 0.0, 1.0, 0.0, "").integer(),
         param("mode", 0.0, 1.0, 0.0, "").integer(),
         param("held", 0.0, 1.0, 0.0, "").integer().transient(),
+        param("long", 0.0, 15.0, 0.0, "").integer().choices(&[
+            "Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel", "India", "Juliet", "Kilo",
+            "Lima", "Mike", "November", "Oscar", "Papa",
+        ]),
+        param("voices", 1.0, 16.0, 1.0, "voices").integer(),
     ],
     role: ModuleRole::Dsp(|_| {
         Box::new(TestPanel {
-            params: [0.0; 9],
+            params: [0.0; 11],
             lit: 0.0,
         })
     }),
@@ -123,6 +130,8 @@ pub static PANEL: ModuleDescriptor = ModuleDescriptor {
             Widget::light(9, 3, "lit"),
             Widget::button(9, 5, "gate", "held", "mode"),
             Widget::scope(0, 8, "bi"),
+            Widget::select(9, 8, "long"),
+            Widget::select(9, 10, "voices"),
         ],
     ),
     displays: &[DisplaySpec {
@@ -135,7 +144,7 @@ pub static PANEL: ModuleDescriptor = ModuleDescriptor {
 };
 
 struct TestPanel {
-    params: [f32; 9],
+    params: [f32; 11],
     /// `on` at the last frame of the last block, for the light.
     lit: f32,
 }

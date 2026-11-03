@@ -689,6 +689,8 @@ fn hiding_the_focused_select_closes_it_and_uses_up_the_key() {
                 module: 1,
                 widget: 0,
                 highlight: 1,
+                scroll: 0,
+                wheel: 0.0,
             }),
             ..State::default()
         };
@@ -711,6 +713,8 @@ fn stale_select_popup_passes_escape_to_normal_key_handling() {
                 module,
                 widget: 999,
                 highlight: 0,
+                scroll: 0,
+                wheel: 0.0,
             }),
             ..State::default()
         };
@@ -733,6 +737,8 @@ fn stale_select_popup_passes_the_pointer_to_normal_handling() {
             module: 999,
             widget: 0,
             highlight: 0,
+            scroll: 0,
+            wheel: 0.0,
         })
     };
     let empty = Point::new(790.0, 590.0);
@@ -783,6 +789,8 @@ fn select_popup_commits_to_its_own_widget_and_closes_with_no_edit() {
             module: 1,
             widget: 0,
             highlight: 1,
+            scroll: 0,
+            wheel: 0.0,
         })
     };
     let mut state = State {
@@ -807,6 +815,193 @@ fn select_popup_commits_to_its_own_widget_and_closes_with_no_edit() {
     let unfocused = drive(&canvas, &mut state, &Event::Window(window::Event::Unfocused), at);
     assert!(state.select_popup.is_none());
     assert!(!unfocused.iter().any(|e| matches!(e, CanvasEvent::SetControl { .. })));
+}
+
+/// A canvas with one open select list of `count` choices named `c0`, `c1`,
+/// and so on.
+fn long_list(count: usize) -> Scene {
+    let mut view = module(1, 0.0);
+    view.panel = PanelView {
+        width: 6,
+        height: 2,
+        widgets: vec![widget(
+            WidgetViewKind::Select {
+                options: (0..count).map(|i| format!("c{i}")).collect(),
+            },
+            0,
+        )],
+    };
+    Scene::new(vec![view], Vec::new())
+}
+
+/// A key press that carries typed text, as a real keyboard sends it.
+fn typed(key: keyboard::Key, text: &str) -> Event {
+    Event::Keyboard(keyboard::Event::KeyPressed {
+        key: key.clone(),
+        modified_key: key,
+        physical_key: keyboard::key::Physical::Unidentified(keyboard::key::NativeCode::Unidentified),
+        location: keyboard::Location::Standard,
+        modifiers: keyboard::Modifiers::default(),
+        text: Some(text.into()),
+        repeat: false,
+    })
+}
+
+/// Over 12 choices the list shows 12 rows and scrolls: the wheel moves it,
+/// a press picks the row under the pointer, and Down keeps the highlight in
+/// view.
+#[test]
+fn a_long_select_list_scrolls() {
+    let scene = long_list(30);
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |event| event);
+    let canvas_area = Rectangle::new(Point::ORIGIN, Size::new(800.0, 600.0));
+    let box_at = scene.module(1).unwrap().widget_bounds(0).unwrap().center();
+    let mut state = State::default();
+    drive(&canvas, &mut state, &click(mouse::Button::Left), box_at);
+    drive(
+        &canvas,
+        &mut state,
+        &Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+        box_at,
+    );
+    let list = canvas.select_popup_bounds(&state, canvas_area).unwrap();
+    assert_eq!(list.height, SELECT_ROW_PX * 12.0, "12 rows show");
+
+    let inside = Point::new(list.x + 20.0, list.y + SELECT_ROW_PX * 0.5);
+    let wheel = |y| {
+        Event::Mouse(mouse::Event::WheelScrolled {
+            delta: mouse::ScrollDelta::Lines { x: 0.0, y },
+        })
+    };
+    let zoom = state.camera.zoom;
+    drive(&canvas, &mut state, &wheel(-3.0), inside);
+    assert_eq!(state.select_popup.unwrap().scroll, 3);
+    assert_eq!(state.camera.zoom, zoom, "the wheel does not zoom over a list");
+
+    // Small trackpad steps add up to a whole row.
+    let pixels = Event::Mouse(mouse::Event::WheelScrolled {
+        delta: mouse::ScrollDelta::Pixels {
+            x: 0.0,
+            y: -SELECT_ROW_PX * 0.6,
+        },
+    });
+    drive(&canvas, &mut state, &pixels, inside);
+    assert_eq!(state.select_popup.unwrap().scroll, 3);
+    drive(&canvas, &mut state, &pixels, inside);
+    assert_eq!(state.select_popup.unwrap().scroll, 4);
+
+    // It stops at either end.
+    drive(&canvas, &mut state, &wheel(-100.0), inside);
+    assert_eq!(state.select_popup.unwrap().scroll, 18);
+    drive(&canvas, &mut state, &wheel(100.0), inside);
+    assert_eq!(state.select_popup.unwrap().scroll, 0);
+
+    // A press picks the row it is on, counting what has scrolled away.
+    drive(&canvas, &mut state, &wheel(-5.0), inside);
+    let picked = drive(&canvas, &mut state, &click(mouse::Button::Left), inside);
+    assert!(picked.contains(&CanvasEvent::SetControl {
+        module: 1,
+        widget: 0,
+        position: 5.0
+    }));
+
+    // The keyboard scrolls the highlight into view.
+    let mut state = State::default();
+    drive(&canvas, &mut state, &Event::Window(window::Event::Focused), box_at);
+    canvas.open_select(&mut state, 1, 0);
+    for _ in 0..15 {
+        drive(
+            &canvas,
+            &mut state,
+            &key_event(keyboard::key::Named::ArrowDown, true),
+            box_at,
+        );
+    }
+    let popup = state.select_popup.unwrap();
+    assert_eq!((popup.highlight, popup.scroll), (15, 4));
+}
+
+/// The list stays inside a short canvas, and a list that is too short to
+/// scroll takes the wheel and stays open.
+#[test]
+fn a_select_list_fits_the_canvas_and_a_short_one_keeps_the_wheel() {
+    assert_eq!(select_popup::select_rows(100.0, 30), 4);
+    assert_eq!(select_popup::select_rows(5.0, 30), 1, "always one row");
+    assert_eq!(select_popup::select_rows(600.0, 3), 3);
+
+    let scene = long_list(3);
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |event| event);
+    let mut state = State {
+        size: Size::new(800.0, 600.0),
+        ..State::default()
+    };
+    canvas.open_select(&mut state, 1, 0);
+    let list = canvas
+        .select_popup_bounds(&state, Rectangle::new(Point::ORIGIN, Size::new(800.0, 600.0)))
+        .unwrap();
+    let inside = Point::new(list.x + 20.0, list.y + 5.0);
+    drive(
+        &canvas,
+        &mut state,
+        &Event::Mouse(mouse::Event::WheelScrolled {
+            delta: mouse::ScrollDelta::Lines { x: 0.0, y: -1.0 },
+        }),
+        inside,
+    );
+    let popup = state.select_popup.expect("stays open");
+    assert_eq!(popup.scroll, 0);
+}
+
+/// Typing jumps to the next choice that starts with the text, ignoring case
+/// and wrapping round. A key that matches nothing is used up, so `a` does not
+/// open the browser behind the list, and a key with Command still passes.
+#[test]
+fn typing_in_an_open_list_jumps_to_the_next_match() {
+    let mut view = module(1, 0.0);
+    view.panel = PanelView {
+        width: 6,
+        height: 2,
+        widgets: vec![widget(
+            WidgetViewKind::Select {
+                options: vec!["Sine".into(), "Saw".into(), "Tri".into(), "1/16".into()],
+            },
+            0,
+        )],
+    };
+    let scene = Scene::new(vec![view], Vec::new());
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |event| event);
+    let at = scene.module(1).unwrap().bounds().center();
+    let mut state = State {
+        focus: Some((1, 0)),
+        ..State::default()
+    };
+    canvas.open_select(&mut state, 1, 0);
+    let letter = |c: &str| typed(keyboard::Key::Character(c.into()), c);
+    let highlight = |state: &State| state.select_popup.unwrap().highlight;
+
+    drive(&canvas, &mut state, &letter("s"), at);
+    assert_eq!(highlight(&state), 1, "searches from after the highlight");
+    drive(&canvas, &mut state, &letter("S"), at);
+    assert_eq!(highlight(&state), 0, "ignores case and wraps round");
+    drive(&canvas, &mut state, &letter("1"), at);
+    assert_eq!(highlight(&state), 3, "any character, so 1/16 can be found");
+
+    let events = drive(&canvas, &mut state, &letter("a"), at);
+    assert!(events.is_empty(), "no match edits nothing: {events:?}");
+    assert_eq!(highlight(&state), 3);
+    assert!(state.select_popup.is_some());
+
+    // Backspace sends a control character, and must not delete the module.
+    let events = drive(
+        &canvas,
+        &mut state,
+        &typed(keyboard::Key::Named(keyboard::key::Named::Backspace), "\u{8}"),
+        at,
+    );
+    assert!(events.is_empty(), "{events:?}");
 }
 
 /// A drag in progress when a pop-up opens ends at the next redraw,

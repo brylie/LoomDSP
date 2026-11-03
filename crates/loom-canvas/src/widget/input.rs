@@ -50,6 +50,7 @@ impl<Message> PatchCanvas<'_, Message> {
     ) {
         let over = cursor.is_over(bounds);
         let screen = relative(cursor, bounds);
+        state.size = bounds.size();
 
         if self.matrix_escape
             && matches!(
@@ -174,8 +175,12 @@ impl<Message> PatchCanvas<'_, Message> {
                 state.modifiers = *modifiers;
             }
             Event::Keyboard(keyboard::Event::KeyPressed {
-                key, modifiers, repeat, ..
-            }) if self.focus_keys(state, key, *modifiers, *repeat, over, shell) => {}
+                key,
+                modifiers,
+                repeat,
+                text,
+                ..
+            }) if self.focus_keys(state, key, *modifiers, text.as_deref(), *repeat, over, shell) => {}
             Event::Keyboard(keyboard::Event::KeyReleased { key, .. }) => {
                 self.release_key(state, key, shell);
             }
