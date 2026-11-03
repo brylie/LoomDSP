@@ -8,7 +8,9 @@
 //! assert!((prewarp(12_000.0, 48_000.0) - 1.0).abs() < 1e-6);
 //! ```
 
+pub mod crossover;
 pub mod dc_blocker;
+pub mod eq;
 pub mod ladder;
 pub mod one_pole;
 pub mod svf;

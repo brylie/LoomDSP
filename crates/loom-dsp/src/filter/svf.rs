@@ -35,8 +35,15 @@ impl Coefficients {
     /// must be above 0. It is `1 / Q`: 2 is a Q of 0.5, and small values ring.
     #[inline]
     pub fn new(cutoff_hz: f32, damping: f32, sample_rate: f32) -> Self {
+        Self::from_gain(prewarp(cutoff_hz, sample_rate), damping)
+    }
+
+    /// Computes the settings from an integrator gain, as [`prewarp`] gives. A
+    /// shelf needs this: it scales the gain after the warp, and scaling the
+    /// cutoff first would warp to a different place.
+    #[inline]
+    pub fn from_gain(g: f32, damping: f32) -> Self {
         debug_assert!(damping > 0.0, "damping {damping}");
-        let g = prewarp(cutoff_hz, sample_rate);
         let a1 = 1.0 / (1.0 + g * (g + damping));
         let a2 = g * a1;
         let a3 = g * a2;

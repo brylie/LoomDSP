@@ -72,12 +72,12 @@ The [rules for M1 modules](p1-modules.md#rules-for-all-modules-here) apply.
 | Duck | `-range` while the level is above the threshold, otherwise 0. See rule 7. |
 
 7. **Gate and Duck have two thresholds and a hold.** The state changes when the level passes the threshold going one way. It changes back only once the level is 3 dB past it the other way and has stayed there for 20 ms. *Why:* a level close to the threshold would otherwise flip the state on every cycle and chatter.
-8. **Limit holds its ceiling on the detected signal.** With the main input as the detector and no sidechain, no sample leaves above the threshold before `output` and `mix`. There is no lookahead, so a fast peak is turned down on its own sample, which adds some distortion. Lookahead waits for #538.
+8. **Limit holds its ceiling on the detected signal.** With the main input as the detector and no sidechain, no sample leaves above the threshold before `output` and `mix`, within rounding. There is no lookahead, so a fast peak is turned down on its own sample, which adds some distortion. Lookahead waits for #538.
 
 ### Showing the effect
 
 9. **The curve** shows the input level from -60 to 0 dB across and the output level from -60 to 0 dB up. It comes from the static curve function, and it uses the parameters with no modulation. *Why:* this is the shape preview that exists for Envelope, LFO, and Ladder. The live dot belongs to #282.
-10. **The meter** shows `reduction`. It is the [meter on a display value](panel-widgets.md#meter-on-a-display-value), which this work builds. Each block publishes the largest change in that block, so a short hit is seen. It draws down from 0. `DisplaySpec` gains the range that spec already calls for.
+10. **The meter** shows `reduction`. It is the [meter on a display value](panel-widgets.md#meter-on-a-display-value), which this work builds. Each call to the module publishes the largest change in that call, so a short hit is seen. Inside a feedback loop a call is one frame, so there it shows the latest frame. It draws down from 0. `DisplaySpec` gains the range that spec already calls for.
 
 ### Level match
 
@@ -137,7 +137,7 @@ The signal passes through five sections in this order.
 1. **Linkwitz-Riley, 24 dB per octave.** Each split is two second-order Butterworth low-passes in series, and two high-passes in series. *Why:* the bands are steep enough for multiband dynamics (MT-DYN-03), and they sum to a flat level.
 2. **The bands sum to a flat level, not the same waveform.** The sum has the same level as the input at every frequency, within 0.01 dB, and its phase is rotated. It does not null against the dry signal. *Why:* a steep crossover cannot rebuild the exact waveform with no latency. This changes the catalogue's wording: "sum back to the original" becomes "sum to a flat level".
 3. **Three bands stay aligned.** The low band also passes through an all-pass at `high_split`, the sum of that split's low and high parts. *Why:* the mid and high bands have been through that split, so without this the bands would sum with a dip.
-4. **The splits stay in order.** While `high_split` is below `low_split`, the module uses `low_split` for both. *Why:* a modulated split must not swap the bands. The mid band is then silent.
+4. **The splits stay in order.** While `high_split` is below `low_split`, the module uses `low_split` for both. *Why:* a modulated split must not swap the bands. The mid band is then a narrow band around that split, and the sum stays flat.
 5. **With two bands,** only `low_split` acts: `low` and `high` carry the bands, and `mid` is silent. A change of `bands` crossfades over 5 ms. *Why:* no click. The level during the crossfade is not held flat, as it lasts only 5 ms.
 6. **All filters always run.** *Why:* a change finds them already settled.
 

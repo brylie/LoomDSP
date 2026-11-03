@@ -9,10 +9,12 @@
 
 use assert_no_alloc::{AllocDisabler, assert_no_alloc};
 use loom_dsp::delay::{Allpass, DelayLine};
+use loom_dsp::dynamics::{self, Dynamics};
 use loom_dsp::envelope::{Envelope, Settings, power};
 use loom_dsp::filter::dc_blocker::DcBlocker;
-use loom_dsp::filter::{ladder, one_pole, svf};
+use loom_dsp::filter::{crossover, eq, ladder, one_pole, svf};
 use loom_dsp::limiter::{self, Limiter, Mode};
+use loom_dsp::loudness::LevelMatch;
 use loom_dsp::noise::{Colour, Noise};
 use loom_dsp::oscillator::{Pulse, Saw, SlowWave, Triangle};
 use loom_dsp::slew::Slew;
@@ -174,5 +176,66 @@ fn the_limiter_never_allocates() {
             copy.tick(1.0, 1.0);
             limiter.reset();
         }
+    });
+}
+
+/// The equaliser sections and the crossover.
+#[test]
+fn eq_and_crossover_never_allocate() {
+    let mut section = eq::Section::new();
+    let mut cut = eq::Cut::new();
+    let mut crossover = crossover::Crossover::new();
+    assert_no_alloc(|| {
+        for i in 0..FRAMES {
+            let x = falling_peaks(i);
+            let shape = eq::Shape::Bell {
+                hz: 1_000.0,
+                gain_db: 6.0,
+                q: 1.0,
+            };
+            section.tick(x, eq::Coefficients::new(shape, RATE));
+            cut.tick(x, eq::CutCoefficients::new(eq::CutSide::Low, 100.0, RATE));
+            crossover.tick(x, crossover::Coefficients::new(200.0, 2_000.0, RATE));
+        }
+        section.reset();
+        cut.reset();
+        crossover.reset();
+    });
+}
+
+/// Every mode of the dynamics processor, and the level match.
+#[test]
+fn dynamics_and_loudness_never_allocate() {
+    let mut dynamics = Dynamics::new(RATE);
+    let mut level_match = LevelMatch::new(RATE);
+    assert_no_alloc(|| {
+        for mode in [
+            dynamics::Mode::Compress,
+            dynamics::Mode::Limit,
+            dynamics::Mode::Expand,
+            dynamics::Mode::Gate,
+            dynamics::Mode::Duck,
+        ] {
+            let coefficients = dynamics::Coefficients::new(dynamics::Settings {
+                curve: dynamics::Curve {
+                    mode,
+                    threshold_db: -20.0,
+                    ratio: 4.0,
+                    knee_db: 6.0,
+                    range_db: 40.0,
+                },
+                detection: dynamics::Detection::Rms,
+                attack_seconds: 0.01,
+                release_seconds: 0.1,
+                sample_rate: RATE,
+            });
+            for i in 0..FRAMES {
+                let x = falling_peaks(i);
+                let gain = dynamics.tick(x, coefficients);
+                level_match.tick([x, x], [x * gain, x * gain]);
+            }
+        }
+        dynamics.reset();
+        level_match.reset();
     });
 }

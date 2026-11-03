@@ -15,9 +15,11 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
 pub mod delay;
+pub mod dynamics;
 pub mod envelope;
 pub mod filter;
 pub mod limiter;
+pub mod loudness;
 pub mod noise;
 pub mod oscillator;
 pub mod phase;
