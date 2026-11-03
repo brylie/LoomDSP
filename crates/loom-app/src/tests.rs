@@ -1,7 +1,7 @@
 use super::*;
 use crate::view::severity_colour;
 use iced::Rectangle;
-use loom_core::{EngineConfig, TRANSPORT_MODULE, create_engine};
+use loom_core::{EngineConfig, LoomError, TRANSPORT_MODULE, create_engine};
 use std::time::Duration;
 
 /// A full queue stages fresh modules until the idle engine drains it;
@@ -21,6 +21,25 @@ fn a_full_queue_retries_staged_modules() {
     assert!(!app.retry_commit);
     assert!(!app.controller.has_uncommitted_changes());
     assert_eq!(app.controller.last_report().modules, 4);
+}
+
+/// A full queue fixes itself, so it is a warning and the commit retries. A
+/// commit that cannot retry leaves the graph ahead of the engine, with the
+/// undo history gone, so it stays on screen.
+#[test]
+fn a_commit_that_cannot_retry_is_kept() {
+    let mut app = app();
+    app.commit_failed(&LoomError::QueueFull);
+    assert!(app.retry_commit);
+    assert_eq!(app.alerts.severity(), alerts::Severity::Warning);
+    assert!(app.alerts.kept().is_empty());
+
+    app.commit_failed(&LoomError::TooManyModules(4));
+    assert!(!app.retry_commit);
+    assert_eq!(app.alerts.severity(), alerts::Severity::Alarm);
+    assert_eq!(app.alerts.newest_kept().unwrap().cause, alerts::Cause::Other);
+    app.alerts.say("saved");
+    assert!(app.alerts.kept_field().is_some(), "a later message does not hide it");
 }
 
 pub(crate) fn app() -> App {

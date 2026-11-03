@@ -291,8 +291,7 @@ impl App {
                 true
             }
             Err(e) => {
-                self.retry_commit = matches!(&e, LoomError::QueueFull);
-                self.alerts.warn(e.to_string());
+                self.commit_failed(&e);
                 // The controller stays dirty, so the next commit retries the
                 // change; until then the history cannot be trusted.
                 self.edits.committed(false);
@@ -302,6 +301,18 @@ impl App {
         self.sync_audio_input();
         self.refresh();
         sent
+    }
+
+    /// Says a commit failed. A full queue drains and the commit is retried, so
+    /// that is a warning. Anything else stays true: the graph differs from
+    /// what the engine plays, and the undo history is gone, so it is kept.
+    pub(crate) fn commit_failed(&mut self, error: &LoomError) {
+        self.retry_commit = matches!(error, LoomError::QueueFull);
+        if self.retry_commit {
+            self.alerts.warn(error.to_string());
+        } else {
+            self.alerts.error(alerts::Cause::Other, error.to_string());
+        }
     }
 
     /// Removes modules and commits. Returns false if the commit failed; the
