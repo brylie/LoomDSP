@@ -1,0 +1,6 @@
+{"cmd":"wait","ms":300}
+{"cmd":"screenshot","path":"${LOOM_UX_OUT}/10-first-launch.png"}
+{"cmd":"press","target":"Add module"}
+{"cmd":"release","target":"Add module"}
+{"cmd":"screenshot","path":"${LOOM_UX_OUT}/11-first-browser.png"}
+{"cmd":"quit"}
