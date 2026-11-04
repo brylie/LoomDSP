@@ -329,14 +329,20 @@ fn every_all_input_exception_is_needed() {
             .iter()
             .find(|descriptor| descriptor.id == *id)
             .unwrap_or_else(|| panic!("{id} is not a module"));
-        let needed = RUNS.into_iter().any(|(running, busy)| {
-            let harness = harness(descriptor, running, busy);
-            let harness = match option {
-                Some((name, value)) => harness.param(name, *value),
-                None => harness,
-            };
-            failure(id, || harness.check_extreme_recovery_all()).is_some()
-        });
+        // Only the runs where this table applies count. On port defaults, a module
+        // in `HOLDS_UNTIL_NEXT_TRIGGER` takes the other check, and always fails this.
+        let applies = |busy: bool| busy || !HOLDS_UNTIL_NEXT_TRIGGER.contains(id);
+        let needed = RUNS
+            .into_iter()
+            .filter(|(_, busy)| applies(*busy))
+            .any(|(running, busy)| {
+                let harness = harness(descriptor, running, busy);
+                let harness = match option {
+                    Some((name, value)) => harness.param(name, *value),
+                    None => harness,
+                };
+                failure(id, || harness.check_extreme_recovery_all()).is_some()
+            });
         assert!(
             needed,
             "{id} {option:?} passes the full check with every input huge, so it needs no exception"
