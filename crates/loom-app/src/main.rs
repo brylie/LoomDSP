@@ -534,7 +534,6 @@ impl Message {
                 | Self::MidiPoll
                 | Self::BenchDone
                 | Self::UnknownLabelDraft { .. }
-                | Self::Input { .. }
                 | Self::TextFocusCheck
                 | Self::TextFocus(_)
         )
@@ -549,7 +548,8 @@ impl Message {
     fn allowed_during_question(&self) -> bool {
         match self {
             Self::Question(_)
-            // Each message it routes to is checked on its own.
+            // Never asked: `update` routes it before this check, and each
+            // message it becomes is checked on its own.
             | Self::Input { .. }
             | Self::Panic
             | Self::MidiPoll

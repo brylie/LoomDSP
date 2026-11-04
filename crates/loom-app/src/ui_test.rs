@@ -149,8 +149,7 @@ impl Ui {
         self.with_ui(|ui, renderer, cursor| {
             let (_, statuses) = ui.update(events, cursor, renderer, &mut clipboard, &mut messages);
             for (event, status) in events.iter().zip(statuses) {
-                let heard = crate::input_owner::input_event(event.clone(), status, window::Id::unique());
-                messages.extend(heard.map(|heard| heard.message(listening)));
+                messages.extend(crate::input_owner::heard_messages(event, status, listening));
             }
         });
         self.clipboard = clipboard;
@@ -185,8 +184,9 @@ impl Ui {
         log
     }
 
-    /// Applies queued messages until none is left. Messages that tasks produce
-    /// go to `log`, and so do the messages an input message routes to.
+    /// Applies queued messages until none is left, through `App::update`, as
+    /// the runtime does. Messages that tasks produce go to `log`, and so do the
+    /// messages an input message routes to.
     fn drain(&mut self, mut queue: VecDeque<Message>, log: &mut Vec<Message>) {
         while let Some(message) = queue.pop_front() {
             if let Message::Input {
@@ -195,14 +195,9 @@ impl Ui {
                 listening,
             } = &message
             {
-                let routed = listening.route(event.clone(), *status);
-                if !routed.is_empty() {
-                    log.extend(routed.iter().cloned());
-                    for message in routed.into_iter().rev() {
-                        queue.push_front(message);
-                    }
-                    continue;
-                }
+                // Logged for the test to read. `update` applies them all, and
+                // only then do their tasks run, as in the app.
+                log.extend(listening.route(event.clone(), *status));
             }
             let task = self.app.update(message);
             self.run(task, &mut queue, log);

@@ -306,8 +306,8 @@ pub struct Injector<'a, Message> {
     content: Element<'a, Message>,
     pointer: Pointer,
     app: &'a App,
-    /// What an injected event becomes, as the app's input listener hears it.
-    on_input: Box<dyn Fn(Event, iced::event::Status) -> Option<Message> + 'a>,
+    /// What an injected event becomes, as the app's input listeners hear it.
+    on_input: Box<dyn Fn(Event, iced::event::Status) -> Vec<Message> + 'a>,
 }
 
 impl<'a, Message> Injector<'a, Message> {
@@ -315,7 +315,7 @@ impl<'a, Message> Injector<'a, Message> {
     pub(crate) fn new(
         content: impl Into<Element<'a, Message>>,
         app: &'a App,
-        on_input: impl Fn(Event, iced::event::Status) -> Option<Message> + 'a,
+        on_input: impl Fn(Event, iced::event::Status) -> Vec<Message> + 'a,
     ) -> Self {
         Self {
             content: content.into(),
@@ -512,10 +512,10 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Injector<'_, Mess
                 shell.merge(own, |m| m);
                 // Modifier changes reach the view only (control-channel.md,
                 // Pointer commands).
-                if !matches!(injected, Event::Keyboard(keyboard::Event::ModifiersChanged(_)))
-                    && let Some(message) = (self.on_input)(injected, status)
-                {
-                    shell.publish(message);
+                if !matches!(injected, Event::Keyboard(keyboard::Event::ModifiersChanged(_))) {
+                    for message in (self.on_input)(injected, status) {
+                        shell.publish(message);
+                    }
                 }
             }
             // Draw this event, then send the next one.

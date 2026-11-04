@@ -90,9 +90,6 @@ impl App {
                     .position(recent::LIST_AT),
             );
         }
-        if let Some(help) = &self.help {
-            layers = layers.push(iced::widget::opaque(help.view(self.theme())));
-        }
         if let Some(window) = self.preferences_view() {
             layers = layers.push(window);
         }
@@ -103,6 +100,10 @@ impl App {
         if let Some(chooser) = &self.chooser {
             layers = layers.push(chooser.view());
         }
+        // Over the dialogs, because F1 opens it from them (help-pages.md).
+        if let Some(help) = &self.help {
+            layers = layers.push(iced::widget::opaque(help.view(self.theme())));
+        }
         // Over everything: a question must be answered first.
         if let Some(question) = &self.question {
             layers = layers.push(question.view().map(Message::Question));
@@ -110,10 +111,7 @@ impl App {
         // The control channel's pointer events go in here, as a real
         // pointer's would (control-channel.md, Pointer commands).
         let listening = self.listening();
-        let on_input = move |event, status| {
-            crate::input_owner::input_event(event, status, iced::window::Id::unique())
-                .map(|heard| heard.message(listening))
-        };
+        let on_input = move |event: iced::Event, status| crate::input_owner::heard_messages(&event, status, listening);
         pointer::Injector::new(layers, self, on_input).into()
     }
 

@@ -86,7 +86,7 @@ fn the_listener_passes_only_what_a_row_can_use() {
     assert!(hears(iced::Event::Mouse(mouse::Event::ButtonPressed(
         mouse::Button::Left
     ))));
-    assert!(hears(iced::Event::Window(window::Event::FileDropped("a.ron".into()))));
+    assert!(!hears(iced::Event::Window(window::Event::FileDropped("a.ron".into()))));
     assert!(!hears(iced::Event::Mouse(mouse::Event::CursorMoved {
         position: Point::ORIGIN
     })));
@@ -185,19 +185,92 @@ fn a_route_reads_who_was_listening_before_the_event() {
     assert!(app.question.is_some(), "the question is still waiting for its answer");
 }
 
-/// With `Key` first, one Escape closes help and leaves the window under it. The
-/// toolbar can open Preferences while help is open.
+/// The panic key and dropped files go through the listener that never restarts.
 #[test]
-fn one_escape_closes_help_over_preferences() {
+fn panic_and_drops_are_heard_whoever_has_the_input() {
+    let hears = |event| always_event(event, Status::Captured, window::Id::unique());
+    let panic = iced::Event::Keyboard(keyboard::Event::KeyPressed {
+        key: Key::Character(".".into()),
+        modified_key: Key::Character(".".into()),
+        physical_key: keyboard::key::Physical::Unidentified(keyboard::key::NativeCode::Unidentified),
+        location: keyboard::Location::Standard,
+        modifiers: Modifiers::COMMAND,
+        text: None,
+        repeat: false,
+    });
+    assert!(matches!(hears(panic), Some(Message::Panic)));
+    assert!(matches!(
+        hears(iced::Event::Window(window::Event::FileDropped("a.ron".into()))),
+        Some(Message::FileDropped(_))
+    ));
+    assert!(
+        hears(iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))).is_none(),
+        "nothing else"
+    );
+}
+
+/// The hash Iced keeps a subscription under. A new hash restarts it, and an
+/// event queued for the old one is lost.
+fn identity(subscription: iced::Subscription<Message>) -> u64 {
+    use std::hash::Hasher as _;
+    let recipes = iced_runtime::futures::subscription::into_recipes(subscription);
+    assert_eq!(recipes.len(), 1, "one listener");
+    let mut hasher = iced_runtime::futures::subscription::Hasher::default();
+    recipes[0].hash(&mut hasher);
+    hasher.finish()
+}
+
+/// When who is listening changes, the input listener restarts, and the one for
+/// the panic key and dropped files does not. So Escape that closes the browser
+/// cannot take a Panic pressed straight after it down with it.
+#[test]
+fn only_the_input_listener_restarts_when_who_is_listening_changes() {
     let mut ui = Ui::open("subtractive.ron");
-    select_first_module(&mut ui);
-    open_overlay(&mut ui, InputOwner::Help);
-    ui.send(Message::Preferences(settings::Message::Open));
-    ui.redraw();
-    assert!(ui.app.help.is_some() && ui.app.rig.window.is_some());
-    ui.tap(Key::Named(Named::Escape), Modifiers::empty());
-    assert!(ui.app.help.is_none(), "help closed");
-    assert!(ui.app.rig.window.is_some(), "Preferences stayed open");
+    let input = identity(ui.app.input_subscription());
+    let always = identity(crate::subscriptions::always_subscription());
+    open_overlay(&mut ui, InputOwner::Browser);
+    assert_ne!(identity(ui.app.input_subscription()), input);
+    assert_eq!(identity(crate::subscriptions::always_subscription()), always);
+}
+
+/// Help opens on top of Your patches and the chooser (help-pages.md, Help in the
+/// app), and has the input there: a click on its backdrop closes it, and one
+/// Escape closes it and nothing else.
+#[test]
+fn help_is_on_top_of_a_dialog_and_closes_alone() {
+    for (owner, close) in [(InputOwner::Patches, "escape"), (InputOwner::Chooser, "escape")]
+        .into_iter()
+        .chain([(InputOwner::Patches, "click"), (InputOwner::Chooser, "click")])
+    {
+        let mut ui = Ui::open("subtractive.ron");
+        open_overlay(&mut ui, owner);
+        ui.tap(Key::Named(Named::F1), Modifiers::empty());
+        assert_eq!(ui.app.input_owner(), InputOwner::Help, "{owner:?}: F1 opened help");
+        if close == "escape" {
+            ui.tap(Key::Named(Named::Escape), Modifiers::empty());
+        } else {
+            ui.move_to(Point::new(5.0, 5.0));
+            ui.press();
+            ui.release();
+        }
+        assert!(ui.app.help.is_none(), "{owner:?}, {close}: help closed");
+        assert_eq!(ui.app.input_owner(), owner, "{owner:?}, {close}: the dialog stayed");
+    }
+}
+
+/// While help is on top, the patch list behind it hears no keys.
+#[test]
+fn up_and_down_leave_the_patch_list_alone_behind_help() {
+    let mut ui = Ui::open("subtractive.ron");
+    open_overlay(&mut ui, InputOwner::Patches);
+    ui.tap(Key::Named(Named::F1), Modifiers::empty());
+    for named in [Named::ArrowUp, Named::ArrowDown] {
+        let messages = ui.tap(Key::Named(named), Modifiers::empty());
+        assert!(
+            !messages.iter().any(|m| matches!(m, Message::Patches(_))),
+            "{named:?}: {messages:?}"
+        );
+    }
 }
 
 /// Taps Cmd with a character, and returns the number of modules after it.
@@ -291,7 +364,7 @@ fn the_subscription_sends_what_it_hears_with_who_was_listening() {
         interaction(escape, Status::Ignored),
     ];
     let mut recipes = into_recipes(ui.app.input_subscription());
-    assert_eq!(recipes.len(), 1, "one listener");
+    assert_eq!(recipes.len(), 1, "one recipe for the input listener");
     let recipe = recipes.remove(0);
     let messages: Vec<Message> = block_on(recipe.stream(stream::iter(events).boxed()).collect());
     let [

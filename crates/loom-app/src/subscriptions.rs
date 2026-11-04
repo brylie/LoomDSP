@@ -151,7 +151,7 @@ impl App {
 
     /// Wakes the UI when control changes arrive, while there is something to
     /// update: mapped parameters to follow, or learn mode waiting for MIDI.
-    /// Also the app's one input listener.
+    /// Also the app's input listeners.
     pub(crate) fn midi_watch(&self) -> Subscription<Message> {
         let mapped = self.controller.graph().midi_mappings().next().is_some();
         let watch = (mapped || self.learn.is_on() || self.rig.panic_learn.is_some()).then(|| {
@@ -161,7 +161,7 @@ impl App {
             };
             Subscription::run_with(watch, learn::stream).map(|_| Message::Midi)
         });
-        let input = Some(self.input_subscription());
+        let input = [self.input_subscription(), always_subscription()];
         // The timer runs only while a drop is being collected, so an idle
         // app stays idle.
         let drops_done = (!self.drops.is_empty())
@@ -169,8 +169,8 @@ impl App {
         Subscription::batch(watch.into_iter().chain(input).chain(drops_done))
     }
 
-    /// The one listener that hears every input event. Its messages say who was
-    /// listening before the event (input_owner.rs).
+    /// The listener for input that depends on who has it. Its messages say who
+    /// was listening before the event (input_owner.rs).
     pub(crate) fn input_subscription(&self) -> Subscription<Message> {
         iced::event::listen_with(crate::input_owner::input_event)
             .with(self.listening())
@@ -213,6 +213,12 @@ impl App {
             generation: self.generation,
         })
     }
+}
+
+/// The listener for input that works whoever has it. It reads no app state, so
+/// its identity never changes and it never restarts (input_owner.rs).
+pub(crate) fn always_subscription() -> Subscription<Message> {
+    iced::event::listen_with(crate::input_owner::always_event)
 }
 
 /// F1 and Escape reach help even while a text field has focus.

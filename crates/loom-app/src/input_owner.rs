@@ -1,11 +1,12 @@
 //! Who has the input, and which messages a window event becomes.
 //!
 //! Iced keeps subscriptions in a hash map, so several listeners that hear one
-//! event send their messages in no set order. So the app has one listener,
-//! [`input_event`], and [`Listening::route`] turns what it hears into messages
-//! in one fixed order. The real window, the control channel's `pointer::Injector`,
-//! and the headless `Ui` all go through this route, so a test sees what the
-//! app does.
+//! event send their messages in no set order. So one listener, [`input_event`],
+//! hears what depends on who has the input, and [`Listening::route`] turns that
+//! into messages in one fixed order. A second listener, [`always_event`], hears
+//! what does not. The real window, the control channel's `pointer::Injector`, and
+//! the headless `Ui` all go through [`heard_messages`] or the same two listeners,
+//! so a test sees what the app does.
 
 use crate::{App, Message, panic, patches, question, recent, settings};
 use crate::{controls, matrix, subscriptions};
@@ -14,8 +15,10 @@ use iced::event::Status;
 use iced::keyboard::{self, Key, key::Named};
 use iced::{mouse, window};
 
-/// Who the keys and clicks over the window belong to. Listed from the top
-/// layer down: when two are open, the earlier one has the input.
+/// Who the keys and clicks over the window belong to. When two are open, the
+/// earlier one has the input. From `Question` down to `Preferences` this is the
+/// order the view draws them, top layer first. The rest are small and open
+/// over the canvas, and do not normally share the screen.
 ///
 /// To add an overlay, add it here and to [`App::input_owner`]. The canvas, the
 /// clipboard keys, and key handling then follow, and the compiler points to
@@ -58,9 +61,9 @@ pub(crate) struct Listening {
     open: bool,
     /// The matrix table has the keyboard.
     matrix: bool,
-    /// The module browser is on top of what it shares a layer with.
+    /// The module browser has the input.
     browser: bool,
-    /// The patches browser is on top of what it shares a layer with.
+    /// The patches browser has the input.
     patches: bool,
     /// An inspector value field has a draft.
     value_draft: bool,
@@ -84,24 +87,44 @@ impl Heard {
     }
 }
 
-/// The app's one input listener. It lets through only what a row of
-/// [`Listening::rows`] can use, so moving the pointer and redrawing send no
-/// message and an idle app stays idle.
+/// The input listener. It lets through only what a row of [`Listening::rows`]
+/// can use, so moving the pointer and redrawing send no message and an idle app
+/// stays idle.
+///
+/// Its subscription restarts when [`Listening`] changes, and an event still
+/// queued for the old one is lost. That is rare, and a person just presses the
+/// key again. What must never be lost goes through [`always_event`].
 pub(crate) fn input_event(event: iced::Event, status: Status, _window: window::Id) -> Option<Heard> {
     let used = matches!(
         event,
-        iced::Event::Keyboard(_)
-            | iced::Event::Mouse(mouse::Event::ButtonPressed(_))
-            | iced::Event::Window(window::Event::FileDropped(_))
+        iced::Event::Keyboard(_) | iced::Event::Mouse(mouse::Event::ButtonPressed(_))
     );
     used.then_some(Heard { event, status })
+}
+
+/// The listener for what works whoever has the input: the panic key
+/// (panic.md), and files dropped on the window. Its subscription never restarts,
+/// so it never loses one of these.
+pub(crate) fn always_event(event: iced::Event, status: Status, window: window::Id) -> Option<Message> {
+    panic::key(event.clone(), status, window).or_else(|| recent::drop_event(event, status, window))
+}
+
+/// What the two listeners send for an event, for the paths that hand events on
+/// themselves: `pointer::Injector` and the headless `Ui`.
+pub(crate) fn heard_messages(event: &iced::Event, status: Status, listening: Listening) -> Vec<Message> {
+    let window = window::Id::unique();
+    input_event(event.clone(), status, window)
+        .map(|heard| heard.message(listening))
+        .into_iter()
+        .chain(always_event(event.clone(), status, window))
+        .collect()
 }
 
 impl Listening {
     /// The listeners, each with whether it hears events, in the order their
     /// messages are applied. `Key` comes first, so a key no widget used
     /// reaches the overlay that has it before anything closes that overlay.
-    fn rows(self) -> [(bool, Listener); 10] {
+    fn rows(self) -> [(bool, Listener); 8] {
         // An open question has the keys, except Panic's. One key must not
         // answer it and also reach what is behind it, once the answer has
         // closed it (files.md, Asking before losing work).
@@ -121,10 +144,6 @@ impl Listening {
             (self.open && self.value_draft, controls::value_draft_event),
             (self.open, controls::text_focus_event),
             (!self.open, question::key),
-            // The panic key works whatever has focus (panic.md).
-            (true, panic::key),
-            // Files dropped on the window.
-            (true, recent::drop_event),
         ]
     }
 
@@ -187,8 +206,8 @@ impl App {
         Listening {
             open: self.question.is_none(),
             matrix: self.matrix_has_keys(),
-            browser: self.browser.is_some() && self.help.is_none(),
-            patches: self.patches.is_some() && self.chooser.is_none(),
+            browser: self.input_owner() == InputOwner::Browser,
+            patches: self.input_owner() == InputOwner::Patches,
             value_draft: self.value_draft.is_some(),
         }
     }
