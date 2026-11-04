@@ -51,7 +51,15 @@ fn module() -> ModuleView {
                     3,
                     "Slope",
                 ),
-                widget(WidgetViewKind::Meter { zero: 0.0 }, 9, 2, "Out"),
+                widget(
+                    WidgetViewKind::Meter {
+                        zero: 0.0,
+                        clips: false,
+                    },
+                    9,
+                    2,
+                    "Out",
+                ),
             ],
         },
     }

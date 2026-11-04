@@ -339,6 +339,7 @@ impl App {
             lights: BTreeMap::new(),
             run_driven,
             meter_levels: std::collections::HashMap::new(),
+            clip_holds: crate::clip::ClipHolds::default(),
             traces: loom_canvas::ScopeTraces::new(),
             carrying: BTreeSet::new(),
             full_traces: true,

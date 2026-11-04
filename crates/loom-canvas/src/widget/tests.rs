@@ -252,7 +252,13 @@ fn a_light_shows_its_description_and_value() {
     meter.panel = PanelView {
         width: 3,
         height: 6,
-        widgets: vec![widget(WidgetViewKind::Meter { zero: 0.0 }, 0)],
+        widgets: vec![widget(
+            WidgetViewKind::Meter {
+                zero: 0.0,
+                clips: false,
+            },
+            0,
+        )],
     };
     meter.panel.widgets[0].hover = HoverText::new("Out", "The signal.", "out");
     let mut values = PanelValues::new();

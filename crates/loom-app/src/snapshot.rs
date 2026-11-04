@@ -233,6 +233,12 @@ pub struct Widget {
     pub peak: f32,
     /// RMS and peak for a stereo meter's right channel.
     pub right: Option<(f32, f32)>,
+    /// True while a meter's clip light is on.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub clip: bool,
+    /// A meter's peak hold readout. Empty for other widgets.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub hold: String,
     /// The value as text, for controls.
     pub text: String,
     pub modulation: Mark,
@@ -401,12 +407,14 @@ impl App {
             .keys()
             .map(|&probe| (probe, crate::spectrum::SpectrumAnalyser::new(rate)))
             .collect();
+        let mut peaks = crate::clip::Peaks::default();
         let mut readings = Vec::new();
         let mut remaining = window;
         while remaining > 0 {
             let n = remaining.min(block);
             self.process(n);
             let (meters, chunks) = self.monitor.take_telemetry();
+            peaks.note(watch.peak_epoch, &watch.meters, &meters);
             for reading in &meters {
                 if let Some(history) = histories.get_mut(&reading.probe) {
                     history.push(reading);
@@ -463,6 +471,8 @@ impl App {
                     (probe, spectrum.trace(want.tilt, want.hold))
                 })
                 .collect(),
+            peaks: peaks.news(),
+            peak_epoch: watch.peak_epoch,
             activity,
         }));
         let _ = self.update(crate::Message::LiveFrame);
@@ -565,6 +575,8 @@ impl App {
                                 position: value.position,
                                 peak: value.peak,
                                 right: value.right,
+                                clip: value.clip,
+                                hold: value.hold,
                                 text: value.text,
                                 modulation: value.modulation.into(),
                                 live: value.live,

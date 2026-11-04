@@ -308,7 +308,10 @@ fn the_peak_line_is_never_below_the_bar() {
                 width: 3,
                 height: 6,
                 widgets: vec![WidgetView {
-                    kind: WidgetViewKind::Meter { zero: 0.0 },
+                    kind: WidgetViewKind::Meter {
+                        zero: 0.0,
+                        clips: false,
+                    },
                     x: 0,
                     y: 0,
                     label: String::new(),
@@ -359,7 +362,10 @@ fn stereo_meter_draws_two_tracks() {
                 width: 3,
                 height: 6,
                 widgets: vec![WidgetView {
-                    kind: WidgetViewKind::Meter { zero: 0.0 },
+                    kind: WidgetViewKind::Meter {
+                        zero: 0.0,
+                        clips: false,
+                    },
                     x: 0,
                     y: 0,
                     label: String::new(),
@@ -672,4 +678,16 @@ fn a_drag_delta_is_not_capped() {
     assert!((ValueDrag::KNOB.delta(180.0, false) - 0.9).abs() < 1e-6);
     assert!((ValueDrag::KNOB.delta(-180.0, false) + 0.9).abs() < 1e-6);
     assert!((ValueDrag::KNOB.delta(180.0, true) - 0.09).abs() < 1e-6);
+}
+
+/// A clip light leaves the bar shorter than a meter without one, and a meter's
+/// bar stays clear of the readout's row.
+#[test]
+fn a_clip_light_shortens_the_bar() {
+    let rect = Rectangle::new(Point::ORIGIN, Size::new(36.0, 72.0));
+    let plain = meter_track(rect, false);
+    let with_light = meter_track(rect, true);
+    assert!(with_light.height < plain.height);
+    assert!(with_light.y > plain.y);
+    assert!(with_light.y + with_light.height < meter_hold_centre(rect).y);
 }

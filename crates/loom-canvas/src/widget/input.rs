@@ -577,6 +577,9 @@ impl<Message> PatchCanvas<'_, Message> {
                     } if applied == Vector::ZERO => match action {
                         ChoiceClick::Set(module, widget, position) => self.set_control(shell, module, widget, position),
                         ChoiceClick::Open(module, widget) => self.open_select(state, module, widget),
+                        ChoiceClick::ClearClip(module, widget) => {
+                            self.emit(shell, CanvasEvent::ClearClip { module, widget });
+                        }
                     },
                     Interaction::Holding { module, widget } => {
                         if !Self::key_holds_button(state, module, widget) {
@@ -898,6 +901,26 @@ impl<Message> PatchCanvas<'_, Message> {
                 if &selection != self.selection {
                     self.emit(shell, CanvasEvent::Select(selection.iter().copied().collect()));
                 }
+                // A meter's clip light clears on release, so a drag from it
+                // moves the tile and leaves it lit. A second press on the
+                // meter resets it (panels.md, Meter widget).
+                let module = self.scene.module(id);
+                let meter = module.and_then(|m| m.clip_meter_at(world));
+                let last = state.last_meter_click.take();
+                let again = meter.filter(|&widget| {
+                    last.is_some_and(|(at, m, w, point)| {
+                        m == id && w == widget && double_click(Some((at, point)), screen)
+                    })
+                });
+                let click = if let Some(widget) = again {
+                    self.emit(shell, CanvasEvent::ResetMeter { module: id, widget });
+                    None
+                } else {
+                    state.last_meter_click = meter.map(|widget| (Instant::now(), id, widget, screen));
+                    module
+                        .and_then(|m| m.clip_light_at(world))
+                        .map(|widget| ChoiceClick::ClearClip(id, widget))
+                };
                 if selection.contains(&id) {
                     self.begin(
                         state,
@@ -905,7 +928,7 @@ impl<Message> PatchCanvas<'_, Message> {
                             ids: selection.into_iter().collect(),
                             start: world,
                             applied: Vector::ZERO,
-                            click: None,
+                            click,
                         },
                         shell,
                     );

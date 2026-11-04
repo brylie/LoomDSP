@@ -80,6 +80,10 @@ pub struct WidgetValue {
     pub peak: f32,
     /// Meter: right-channel RMS and peak, when the source is stereo.
     pub right: Option<(f32, f32)>,
+    /// Meter on an output: true while its clip light is on.
+    pub clip: bool,
+    /// Meter on an output: the peak hold readout.
+    pub hold: String,
     /// The value as text, with its unit, shown while a knob is dragged or
     /// focused.
     pub text: String,
@@ -547,9 +551,9 @@ impl ControlGeometry {
                         let area = crate::trace::trace_area(rect);
                         shapes.push(Shape::new(area, 3.0, palette.background, palette.tile_border, 1.0));
                     }
-                    WidgetViewKind::Meter { zero } if *zero > 0.0 => {
+                    WidgetViewKind::Meter { zero, .. } if *zero > 0.0 => {
                         // A value that runs down from 0 draws from there.
-                        let track = meter_track(rect);
+                        let track = meter_track(rect, false);
                         shapes.push(Shape::new(track, 2.0, palette.light_off, palette.tile_border, 1.0));
                         let (low, high) = (position.clamp(0.0, 1.0).min(*zero), position.clamp(0.0, 1.0).max(*zero));
                         if high > low {
@@ -561,8 +565,20 @@ impl ControlGeometry {
                             shapes.push(Shape::new(bar, 2.0, colour, Color::TRANSPARENT, 0.0));
                         }
                     }
-                    WidgetViewKind::Meter { .. } => {
-                        let track = meter_track(rect);
+                    WidgetViewKind::Meter { clips, .. } => {
+                        let track = meter_track(rect, *clips);
+                        if *clips {
+                            // A ring when off and a filled square when on, so
+                            // shape says it as well as colour (NFR-UX-03).
+                            let centre = Point::new(rect.center_x(), rect.y + CLIP_ROW * 0.5);
+                            if values.get(module.id, index).is_some_and(|value| value.clip) {
+                                let lit =
+                                    Rectangle::new(Point::new(centre.x - 4.0, centre.y - 4.0), Size::new(8.0, 8.0));
+                                shapes.push(Shape::new(lit, 1.0, palette.warning, Color::TRANSPARENT, 0.0));
+                            } else {
+                                shapes.push(circle(centre, 3.5, Color::TRANSPARENT, palette.tile_border, 1.0));
+                            }
+                        }
                         let right = values.get(module.id, index).and_then(|value| value.right);
                         let left_track = if right.is_some() {
                             Rectangle::new(Point::new(track.x - 2.0, track.y), Size::new(5.0, track.height))
@@ -754,12 +770,21 @@ pub(crate) fn light_centre(rect: Rectangle) -> Point {
 
 /// The bar of a meter: a narrow column in its 3 × 6 cell, above the label
 /// row.
-pub(crate) fn meter_track(rect: Rectangle) -> Rectangle {
+pub(crate) fn meter_track(rect: Rectangle, clips: bool) -> Rectangle {
+    let top = if clips { CLIP_ROW } else { 0.0 };
     Rectangle::new(
-        Point::new(rect.x + rect.width * 0.5 - 4.0, rect.y + 1.0),
-        Size::new(8.0, rect.height - GRID - 2.0),
+        Point::new(rect.x + rect.width * 0.5 - 4.0, rect.y + top + 1.0),
+        Size::new(8.0, rect.height - top - GRID - 2.0),
     )
 }
+
+/// Where a meter's peak hold readout is centred: the row below its bar.
+pub(crate) fn meter_hold_centre(rect: Rectangle) -> Point {
+    Point::new(rect.center_x(), rect.y + rect.height - GRID * 0.5)
+}
+
+/// The height of the row that holds a meter's clip light.
+pub(crate) const CLIP_ROW: f32 = GRID;
 
 /// Meter level, from 0 to 1, for a decibel value (-60 dB to 0 dB).
 fn level_of_db(db: f32) -> f32 {

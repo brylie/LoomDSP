@@ -1,5 +1,6 @@
 //! Builds the canvas scene from the engine graph.
 
+use crate::clip::ClipHolds;
 use iced::{Color, Point};
 use loom_canvas::{
     CableView, ControlPart, HoverText, ModulationView, ModuleView, PanelValues, PanelView, PartText, PartValue,
@@ -124,6 +125,7 @@ fn panel_view(d: &ModuleDescriptor) -> PanelView {
                 WidgetKind::Toggle => WidgetViewKind::Toggle,
                 WidgetKind::Meter => WidgetViewKind::Meter {
                     zero: d.meter_display(w).map_or(0.0, |display| display.range.zero()),
+                    clips: d.meter_display(w).is_none(),
                 },
                 WidgetKind::Readout { width } => WidgetViewKind::Readout { width },
                 WidgetKind::Scope => WidgetViewKind::Scope,
@@ -187,8 +189,13 @@ fn panel_view(d: &ModuleDescriptor) -> PanelView {
                 x: w.x,
                 y: w.y,
                 // A widget can caption itself, such as "1" under a mixer
-                // strip; the hover text keeps the full label.
-                label: w.caption.unwrap_or(label).to_string(),
+                // strip; the hover text keeps the full label. A meter's peak
+                // hold readout takes its caption's row.
+                label: if w.kind == WidgetKind::Meter && d.meter_display(w).is_none() {
+                    String::new()
+                } else {
+                    w.caption.unwrap_or(label).to_string()
+                },
                 hover,
                 hidden: false,
             }
@@ -375,7 +382,7 @@ pub fn control_value(kind: WidgetKind, spec: &ParamSpec, position: f32) -> f32 {
 /// and widget) for lights and meters. Values that did not change keep the generation, so the
 /// canvas uploads nothing new.
 pub fn update_panel_values(values: &mut PanelValues, controller: &Controller, shown: &ShownValues) {
-    update_panel_values_dragging(values, controller, shown, None);
+    update_panel_values_dragging(values, controller, shown, &ClipHolds::default(), None);
 }
 
 /// Updates only the live dots, for the refresh on every frame: the knobs
@@ -419,6 +426,7 @@ pub fn update_panel_values_dragging(
     values: &mut PanelValues,
     controller: &Controller,
     shown: &ShownValues,
+    holds: &ClipHolds,
     dragging: Option<loom_core::AssignmentId>,
 ) {
     let reaches = crate::modulation::reaches(controller.graph());
@@ -493,6 +501,7 @@ pub fn update_panel_values_dragging(
                             live,
                             shape: Vec::new(),
                             second,
+                            ..WidgetValue::default()
                         }
                     }
                     _ => {
@@ -503,11 +512,19 @@ pub fn update_panel_values_dragging(
                         let position = d
                             .meter_display(w)
                             .map_or(stored, |display| display.range.position(stored));
+                        let mut text = display_text(d, w, stored, right);
+                        let clips = w.kind == WidgetKind::Meter && d.meter_display(w).is_none();
+                        let hold = holds.get((id.0, index));
+                        if clips && hold.lit {
+                            text.push_str(". Would clip at the output");
+                        }
                         WidgetValue {
                             position,
                             peak,
                             right,
-                            text: display_text(d, w, stored, right),
+                            text,
+                            clip: clips && hold.lit,
+                            hold: if clips { hold.text() } else { String::new() },
                             ..WidgetValue::default()
                         }
                     }

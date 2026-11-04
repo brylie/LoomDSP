@@ -14,7 +14,7 @@ use iced::widget::{
     tooltip,
 };
 use iced::{Element, Length, Theme};
-use loom_core::{AssignmentId, ModuleId, OutputRef};
+use loom_core::{AssignmentId, ModuleId, OutputRef, WidgetKind};
 use serde::Serialize;
 
 /// Width of a parameter's value field, in pixels.
@@ -77,6 +77,10 @@ pub struct ModuleRows {
     /// **Drives**: one group per output that drives at least one
     /// assignment. Empty shows no **Drives** section.
     pub drives: Vec<DrivesGroup>,
+    /// True for a module with a meter on an output, which shows a **Reset
+    /// clip** button: a display takes no keyboard focus (panels.md, Meter
+    /// widget).
+    pub resets_clip: bool,
 }
 
 /// One port shown in the inspector.
@@ -406,6 +410,11 @@ impl App {
             name: d.name,
             kind: format!("{} #{id}", d.kind()),
             description: d.description,
+            resets_clip: d
+                .panel
+                .widgets
+                .iter()
+                .any(|w| w.kind == WidgetKind::Meter && d.meter_display(w).is_none()),
             ports: d
                 .inputs
                 .iter()
@@ -569,6 +578,9 @@ fn module_view<'a>(m: ModuleRows, drop_row: Option<(u32, usize)>, dragging: bool
         text(m.description).size(style::BODY),
     ]
     .spacing(6);
+    if m.resets_clip {
+        items = items.push(button(text("Reset clip").size(style::CONTROL)).on_press(Message::ResetClip(id)));
+    }
     if m.params.is_empty() {
         items = items.push(text("No parameters.").size(style::BODY).color(DIM));
     }

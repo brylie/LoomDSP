@@ -12,6 +12,7 @@ mod bench;
 mod boot;
 mod browser;
 mod canvas_events;
+mod clip;
 mod clipboard;
 mod control;
 mod controls;
@@ -270,6 +271,8 @@ enum Message {
     ShowShortcuts,
     /// Open help for a specific tile.
     ShowModuleHelp(u32),
+    /// Reset every clip light and peak hold on a module, from the inspector.
+    ResetClip(u32),
     /// Close module help.
     CloseHelp,
     /// Open the current help example as a patch.
@@ -582,6 +585,7 @@ impl Message {
             | Self::ShowHelp
             | Self::ShowShortcuts
             | Self::ShowModuleHelp(_)
+            | Self::ResetClip(_)
             | Self::CloseHelp
             | Self::HelpExample
             | Self::HelpLink(_)
@@ -680,6 +684,9 @@ struct App {
     run_driven: bool,
     /// Latest level of each meter probe.
     meter_levels: std::collections::HashMap<ProbeId, live::Level>,
+    /// Each meter's clip light and peak hold. By widget, not by probe, because
+    /// a probe goes away with the meter on screen (`clip.rs`).
+    clip_holds: clip::ClipHolds,
     /// The traces of the scopes on screen (`docs/design/panels.md`, Drawing
     /// the scope trace).
     traces: loom_canvas::ScopeTraces,
@@ -935,7 +942,7 @@ impl App {
             shown.insert(widget, (level.rms, level.peak, level.right));
         }
         let dragging = self.gestures.depth_target();
-        scene::update_panel_values_dragging(&mut self.values, &self.controller, &shown, dragging);
+        scene::update_panel_values_dragging(&mut self.values, &self.controller, &shown, &self.clip_holds, dragging);
         // A scope's window or trigger may have changed.
         self.publish_watch();
     }
@@ -975,6 +982,9 @@ impl App {
     /// displays on screen, and tells the telemetry thread what to read.
     /// Call it before a commit.
     fn sync_live(&mut self) {
+        let graph = self.controller.graph();
+        self.clip_holds
+            .retain(|module, _| graph.node(ModuleId(module)).is_some());
         let wanted = self.metered_outputs();
         self.live.sync(&mut self.controller, &wanted);
         let scopes: BTreeSet<OutputRef> = scene::scope_outputs(&self.controller, &self.visible_displays)
@@ -1034,6 +1044,7 @@ impl App {
             scopes,
             histories,
             spectra,
+            peak_epoch: self.clip_holds.epoch(),
             full_traces: self.full_traces,
         };
         if self.monitor.watched() != list {
@@ -1074,6 +1085,40 @@ impl App {
                 }
             }
         }
+    }
+
+    /// Takes raw peaks from the telemetry thread into the clip lights and peak
+    /// holds of the meters that show their probes. Peaks from before the
+    /// latest reset are dropped, so a reset is not undone by a message that
+    /// was already on its way.
+    fn take_peaks(&mut self, epoch: u64, peaks: Vec<(ProbeId, clip::PeakNews)>) {
+        if peaks.is_empty() || epoch != self.clip_holds.epoch() {
+            return;
+        }
+        let meters = scene::meter_outputs(&self.controller, &self.visible_displays);
+        let mut changed = false;
+        for (probe, news) in peaks {
+            for &(widget, output) in &meters {
+                if self.live.probe(output) == Some(probe) {
+                    changed |= self.clip_holds.take(widget, news);
+                }
+            }
+        }
+        if changed {
+            self.refresh_values();
+        }
+    }
+
+    /// Clears a meter's clip light, or also its peak hold, and tells the
+    /// telemetry thread to report peaks again from here.
+    pub(crate) fn reset_clip(&mut self, meter: (u32, usize), hold_too: bool) {
+        if hold_too {
+            self.clip_holds.reset(meter);
+        } else {
+            self.clip_holds.clear_light(meter);
+        }
+        self.publish_watch();
+        self.refresh_values();
     }
 
     /// Takes new level histories from the telemetry thread and gives each to
@@ -1462,6 +1507,12 @@ impl App {
                     self.help = Some(help::Help::shortcuts());
                 }
             }
+            Message::ResetClip(id) => {
+                let meters = scene::meter_outputs(&self.controller, &[id]);
+                for (meter, _) in meters {
+                    self.reset_clip(meter, true);
+                }
+            }
             Message::ShowModuleHelp(id) => {
                 self.tile_menu = None;
                 self.help = self
@@ -1766,6 +1817,7 @@ impl App {
                 self.take_traces(update.traces);
                 self.take_histories(update.histories);
                 self.take_spectra(update.spectra);
+                self.take_peaks(update.peak_epoch, update.peaks);
                 for (probe, carrying) in update.activity {
                     if let Some(output) = self.live.output_of(probe) {
                         if carrying {

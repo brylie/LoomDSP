@@ -321,7 +321,13 @@ pub fn run(args: &crate::Args, path: &Path) -> Result<(), String> {
         logical,
     )?;
     let mut values = PanelValues::new();
-    crate::scene::update_panel_values_dragging(&mut values, &session.controller, &BTreeMap::new(), shown.dragging);
+    crate::scene::update_panel_values_dragging(
+        &mut values,
+        &session.controller,
+        &BTreeMap::new(),
+        &crate::clip::ClipHolds::default(),
+        shown.dragging,
+    );
     let physical = physical_size(logical, options.scale)?;
     let selection = shown.selected.into_iter().collect();
     let pixels = render(&scene, &values, &selection, shown.still, physical, options.scale)?;

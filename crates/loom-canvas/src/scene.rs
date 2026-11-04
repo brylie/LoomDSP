@@ -212,6 +212,9 @@ pub enum WidgetViewKind {
     Meter {
         /// Where the bar starts.
         zero: f32,
+        /// True for a meter on an output, with a clip light above the bar and
+        /// a peak hold readout below it (`docs/design/panels.md`, Meter widget).
+        clips: bool,
     },
     /// A scope: a frame, and the trace the app sets in
     /// [`crate::ScopeTraces`].
@@ -470,6 +473,21 @@ impl ModuleView {
     pub fn display_at(&self, point: Point) -> Option<usize> {
         (0..self.panel.widgets.len())
             .find(|&i| !self.panel.widgets[i].is_control() && self.widget_bounds(i).is_some_and(|b| b.contains(point)))
+    }
+
+    /// The meter with a clip light under a world point, by widget index.
+    pub fn clip_meter_at(&self, point: Point) -> Option<usize> {
+        self.display_at(point)
+            .filter(|&i| matches!(self.panel.widgets[i].kind, WidgetViewKind::Meter { clips: true, .. }))
+    }
+
+    /// The meter whose clip light is under a world point, by widget index. The
+    /// light takes the top grid row, so it is an easy target.
+    pub fn clip_light_at(&self, point: Point) -> Option<usize> {
+        self.clip_meter_at(point).filter(|&i| {
+            self.widget_bounds(i)
+                .is_some_and(|rect| point.y < rect.y + crate::controls::CLIP_ROW)
+        })
     }
 
     /// The world bounds of panel widget `index`.

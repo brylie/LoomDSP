@@ -6,6 +6,7 @@
 //! Every message to the app redraws the window, so draining telemetry on a
 //! UI timer would draw frames even when every meter is silent.
 
+use crate::clip::{PeakNews, Peaks};
 use crate::history::LevelHistory;
 use crate::live::{Level, Levels, ScopeTrace, Slope, Trigger};
 use crate::spectrum::SpectrumAnalyser;
@@ -56,6 +57,9 @@ pub struct WatchList {
     pub histories: HashMap<ProbeId, f32>,
     /// Scope probes whose spectrum is drawn, with how each draws.
     pub spectra: HashMap<ProbeId, SpectrumWant>,
+    /// Counts the UI's resets of clip lights and peak holds, so the thread
+    /// reports peaks again from there.
+    pub peak_epoch: u64,
     /// True when scopes draw full traces (close zoom), false for a flat
     /// line at their level (middle zoom).
     pub full_traces: bool,
@@ -94,6 +98,11 @@ pub struct Update {
     /// Spectra that moved, apart from `traces`, because a scope and a spectrum
     /// on one output share a probe.
     pub spectra: Vec<(ProbeId, loom_canvas::Trace)>,
+    /// Raw peaks that could change a clip light or a peak hold.
+    pub peaks: Vec<(ProbeId, PeakNews)>,
+    /// The reset count `peaks` came after. The UI drops peaks from before its
+    /// latest reset, which were on their way when it happened.
+    pub peak_epoch: u64,
     /// Activity probes whose state changed: true for carrying.
     pub activity: Vec<(ProbeId, bool)>,
 }
@@ -105,6 +114,7 @@ impl Update {
             && self.traces.is_empty()
             && self.histories.is_empty()
             && self.spectra.is_empty()
+            && self.peaks.is_empty()
             && self.activity.is_empty()
     }
 }
@@ -133,6 +143,7 @@ pub struct Watcher {
     shown_histories: HashMap<ProbeId, loom_canvas::Trace>,
     spectra: HashMap<ProbeId, SpectrumAnalyser>,
     shown_spectra: HashMap<ProbeId, loom_canvas::Trace>,
+    peaks: Peaks,
     activity: HashMap<ProbeId, Activity>,
     shown_activity: HashMap<ProbeId, bool>,
     last_activity_read: Option<Instant>,
@@ -152,6 +163,7 @@ impl Watcher {
         now: Instant,
     ) -> Update {
         self.levels.update(readings, now);
+        self.peaks.note(watch.peak_epoch, &watch.meters, readings);
         let current: Vec<(ProbeId, Level)> = self
             .levels
             .all()
@@ -205,6 +217,8 @@ impl Watcher {
             traces,
             histories,
             spectra,
+            peaks: self.peaks.news(),
+            peak_epoch: self.peaks.epoch(),
             activity,
         }
     }
@@ -297,6 +311,7 @@ impl Watcher {
         for (probe, trace) in &update.spectra {
             self.shown_spectra.insert(*probe, trace.clone());
         }
+        self.peaks.sent(&update.peaks);
         for (probe, carrying) in &update.activity {
             self.shown_activity.insert(*probe, *carrying);
         }

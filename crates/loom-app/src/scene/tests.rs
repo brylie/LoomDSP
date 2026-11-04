@@ -133,7 +133,13 @@ fn dragging_an_off_assignment_keeps_the_live_dot() {
     parts.engine.process(&mut left, &mut right);
 
     let mut values = PanelValues::new();
-    update_panel_values_dragging(&mut values, &parts.controller, &BTreeMap::new(), Some(off));
+    update_panel_values_dragging(
+        &mut values,
+        &parts.controller,
+        &BTreeMap::new(),
+        &ClipHolds::default(),
+        Some(off),
+    );
     let value = values.get(filter.0, knob).unwrap();
     assert!(value.live.is_some());
     assert_eq!(
@@ -577,7 +583,13 @@ fn a_meter_shows_a_display_value_from_its_zero() {
         .unwrap();
     let view = panel_view(&DYNAMICS);
     let meter = &view.widgets[index];
-    assert_eq!(meter.kind, WidgetViewKind::Meter { zero: 1.0 });
+    assert_eq!(
+        meter.kind,
+        WidgetViewKind::Meter {
+            zero: 1.0,
+            clips: false
+        }
+    );
     assert_eq!(meter.label, "Reduction");
     assert_eq!(
         meter.hover,

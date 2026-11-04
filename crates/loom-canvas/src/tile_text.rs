@@ -321,6 +321,9 @@ fn value_text_place(kind: &WidgetViewKind, rect: Rectangle) -> Option<(Point, Al
             let box_rect = number_box(rect);
             Some((box_rect.center(), Align::Center, box_rect.width - 4.0))
         }
+        WidgetViewKind::Meter { clips: true, .. } => {
+            Some((crate::controls::meter_hold_centre(rect), Align::Center, rect.width))
+        }
         _ => None,
     }
 }
