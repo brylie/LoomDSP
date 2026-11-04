@@ -6,15 +6,35 @@
 
 mod common;
 
-use common::busy;
+use common::{WRAP_FRAME, playing_short_bar};
 use loom_core::{ModuleDescriptor, ModuleRole};
 use loom_modules::{ALL, time};
-use loom_test::Harness;
+use loom_test::{Harness, Signal};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 /// Long enough for the default delay time (0.2 s) to pass after the bad
 /// frames, so a bad value kept in a delay line would come out again.
 const SECONDS: f64 = 0.25;
+
+/// Frames in a playing render, long enough to pass the bar wrap, so a module has
+/// run through it after the bad frames.
+const PLAYING_FRAMES: usize = WRAP_FRAME + 1_846;
+
+/// A harness for `descriptor` on the playing transport.
+fn playing(descriptor: &'static ModuleDescriptor) -> Harness {
+    Harness::new(descriptor)
+        .frames(PLAYING_FRAMES)
+        .transport(playing_short_bar())
+}
+
+/// The check's busy signal on every input. All inputs move together, so each
+/// rising edge falls inside the bad frames.
+fn on_busy_inputs(harness: Harness, descriptor: &'static ModuleDescriptor) -> Harness {
+    descriptor
+        .inputs
+        .iter()
+        .fold(harness, |harness, port| harness.input(port.name, Signal::non_finite_busy()))
+}
 
 /// Runs the check on a harness for every DSP module in [`ALL`] and panics
 /// with the IDs of all that fail, not only the first.
@@ -44,14 +64,21 @@ fn every_module_recovers_with_default_inputs() {
 /// Every DSP module, with each input on a busy signal.
 #[test]
 fn every_module_recovers_with_busy_inputs() {
-    check_all(|descriptor| {
-        descriptor
-            .inputs
-            .iter()
-            .fold(Harness::new(descriptor).seconds(SECONDS), |harness, port| {
-                harness.input(port.name, busy(50.0))
-            })
-    });
+    check_all(|descriptor| on_busy_inputs(Harness::new(descriptor).seconds(SECONDS), descriptor));
+}
+
+/// Every DSP module, with each input on its port default, on a playing
+/// transport. Only here do modules that follow the bar through a port default see
+/// it move.
+#[test]
+fn every_module_recovers_with_default_inputs_when_playing() {
+    check_all(playing);
+}
+
+/// Every DSP module, with each input on a busy signal, on a playing transport.
+#[test]
+fn every_module_recovers_with_busy_inputs_when_playing() {
+    check_all(|descriptor| on_busy_inputs(playing(descriptor), descriptor));
 }
 
 /// The delay lines with short times, so a bad value kept in the line would
@@ -61,12 +88,12 @@ fn delay_lines_do_not_keep_bad_values() {
     Harness::new(&time::DELAY)
         .seconds(SECONDS)
         .param("time", 0.01)
-        .input("in", busy(50.0))
+        .input("in", Signal::non_finite_busy())
         .check_non_finite_recovery();
     Harness::new(&time::ALLPASS)
         .seconds(SECONDS)
         .param("time", 0.001)
         .param("gain", 0.9)
-        .input("in", busy(50.0))
+        .input("in", Signal::non_finite_busy())
         .check_non_finite_recovery();
 }

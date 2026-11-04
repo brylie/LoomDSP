@@ -53,12 +53,22 @@ pub const DEFAULT_TOLERANCE: f32 = 1e-5;
 
 /// First frame of the non-finite input in
 /// [`Harness::check_non_finite_recovery`]. The module runs normally before
-/// it, so it has state to lose.
-pub const BAD_START: usize = 1_000;
+/// it, so it has state to lose. The bad frames cover [`BAD_EDGE`].
+pub const BAD_START: usize = 1_068;
 
 /// How many frames the non-finite input lasts in
 /// [`Harness::check_non_finite_recovery`].
 pub const BAD_FRAMES: usize = 8;
+
+/// The rising edge of [`Signal::non_finite_busy`] inside the bad frames. A
+/// module that stores an input on a trigger on another input takes the bad
+/// value here.
+pub const BAD_EDGE: usize = 1_072;
+
+/// The next rising edge of [`Signal::non_finite_busy`]. It overwrites bad state
+/// that [`BAD_EDGE`] captured, so the recovery time must end before it, or the
+/// check would pass a module that kept the bad value until then.
+pub const BAD_NEXT_EDGE: usize = 2_032;
 
 /// Time a module may take to give finite output again after the
 /// non-finite input ends, in [`Harness::check_non_finite_recovery`], in

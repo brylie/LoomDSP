@@ -479,7 +479,7 @@ impl Module for Sum {
 /// A module that keeps a NaN in its state fails, naming the input, the
 /// value, and the output.
 #[test]
-#[should_panic(expected = "test.sum: after NaN on input `in` (frames 1000 to 1007), output `out` is still NaN")]
+#[should_panic(expected = "test.sum: after NaN on input `in` (frames 1068 to 1075), output `out` is still NaN")]
 fn a_module_that_keeps_a_non_finite_input_fails() {
     Harness::new(&SUM).frames(2_000).check_non_finite_recovery();
 }
@@ -494,7 +494,7 @@ fn a_module_without_state_recovers() {
 
 /// The render must be long enough to show recovery.
 #[test]
-#[should_panic(expected = "but the non-finite check needs more than 1488")]
+#[should_panic(expected = "but the non-finite check needs more than 1556")]
 fn a_short_render_cannot_show_recovery() {
     Harness::new(&ECHO).frames(1_000).check_non_finite_recovery();
 }
@@ -502,7 +502,7 @@ fn a_short_render_cannot_show_recovery() {
 /// The recovery window is 10 ms at any sample rate, so a render at 96 kHz
 /// needs 960 recovery frames, not 480.
 #[test]
-#[should_panic(expected = "but the non-finite check needs more than 1968")]
+#[should_panic(expected = "but the non-finite check needs more than 2036")]
 fn the_recovery_window_scales_with_the_sample_rate() {
     Harness::new(&ECHO)
         .sample_rate(96_000.0)
@@ -792,6 +792,94 @@ fn the_check_for_one_input_needs_a_real_input() {
 #[should_panic(expected = "the extreme check needs 48000")]
 fn the_extreme_check_needs_its_whole_render() {
     Harness::new(&PHASE_OFFSET).frames(1_000).check_extreme_recovery();
+}
+
+/// Stores `in` on each rising edge of `trigger`, with or without a guard against
+/// a non-finite value, as Sample and Hold does.
+#[derive(Clone)]
+struct Capture {
+    guarded: bool,
+    held: f32,
+    high: bool,
+}
+
+impl Module for Capture {
+    fn process(&mut self, _: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        let ([input, trigger], [out]) = io.split::<2, 1>();
+        for ((out, &input), &trigger) in out.iter_mut().zip(input).zip(trigger) {
+            if trigger > 0.5 && !self.high && (!self.guarded || input.is_finite()) {
+                self.held = input;
+            }
+            self.high = trigger > 0.5;
+            *out = self.held;
+        }
+    }
+}
+
+/// A [`Capture`] descriptor, guarded or not.
+macro_rules! capture {
+    ($name:ident, $id:literal, $guarded:literal) => {
+        static $name: ModuleDescriptor = ModuleDescriptor {
+            id: $id,
+            version: 1,
+            name: "Capture",
+            category: "Test",
+            family: loom_core::Family::Interface,
+            description: "Stores its input on a trigger.",
+            inputs: &[port("in", SignalType::Modulation), port("trigger", SignalType::Gate)],
+            outputs: &[port("out", SignalType::Modulation)],
+            params: &[],
+            role: ModuleRole::Dsp(|_| {
+                Box::new(Capture {
+                    guarded: $guarded,
+                    held: 0.0,
+                    high: false,
+                })
+            }),
+            panel: loom_core::Panel::EMPTY,
+            displays: &[],
+        };
+    };
+}
+
+capture!(GUARDED_CAPTURE, "test.guarded-capture", true);
+capture!(UNGUARDED_CAPTURE, "test.unguarded-capture", false);
+
+/// A harness for a capture module on the non-finite check's signal.
+fn on_non_finite_busy(descriptor: &'static ModuleDescriptor) -> Harness {
+    Harness::new(descriptor)
+        .frames(4_000)
+        .input("in", Signal::non_finite_busy())
+        .input("trigger", Signal::non_finite_busy())
+}
+
+/// A module that stores a bad input on another input's edge fails, which is the
+/// gap #564 closes. The bad frames must cover the edge for this to show.
+#[test]
+#[should_panic(expected = "test.unguarded-capture: after NaN on input `in`")]
+fn a_module_that_stores_a_bad_input_on_a_trigger_fails() {
+    on_non_finite_busy(&UNGUARDED_CAPTURE).check_non_finite_recovery();
+}
+
+/// With the guard, the same module passes.
+#[test]
+fn a_module_that_guards_what_it_stores_passes() {
+    on_non_finite_busy(&GUARDED_CAPTURE).check_non_finite_recovery();
+}
+
+// The recovery time ends before the next edge, or the edge could hide a bad
+// value. 480 frames is RECOVERY_SECONDS at 48 kHz.
+const _: () = assert!(BAD_START <= BAD_EDGE && BAD_EDGE < BAD_START + BAD_FRAMES);
+const _: () = assert!(BAD_START + BAD_FRAMES + 480 < BAD_NEXT_EDGE);
+
+/// The wave must rise inside the bad frames, and rise again after the recovery.
+#[test]
+fn the_non_finite_timing_covers_the_edges() {
+    let wave = Signal::non_finite_busy().render(BAD_NEXT_EDGE + 1, DEFAULT_SAMPLE_RATE);
+    let edges: Vec<usize> = (1..wave.len())
+        .filter(|&i| wave[i] > 0.5 && wave[i - 1] <= 0.5)
+        .collect();
+    assert_eq!(edges, [112, BAD_EDGE, BAD_NEXT_EDGE]);
 }
 
 // The settling time ends before the next edge, or nothing is compared.
