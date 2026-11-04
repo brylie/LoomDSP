@@ -60,7 +60,7 @@ A step is named by a verb and what it acted on, in the same words the user sees 
 | Connect, disconnect | **connect cable**, **remove cable** |
 | Change a parameter | **change Filter Cutoff** |
 | Assignment add, remove, change | **add modulation**, **remove modulation**, **change modulation depth** |
-| MIDI mapping | **learn CC 74**, **remove MIDI mapping**, **move MIDI mapping** |
+| MIDI mapping | **learn CC 74**, **remove MIDI mapping**, **move MIDI mapping**, **change MIDI mapping** |
 | Cut, paste, duplicate | **cut Filter**, **paste 3 modules**, **duplicate Filter** ([copy, paste, and duplicate](clipboard.md)) |
 
 The exact wording can change while building. Each step must have a name.
@@ -84,6 +84,7 @@ The exact wording can change while building. Each step must have a name.
 | Map a MIDI control by learning | The new mapping, **and** the parameter value the control change set, together. If the mapping replaced another mapping on the same parameter or the same control, undo brings the old one back. |
 | Move a mapping to another parameter | The move. |
 | Remove a MIDI mapping (the small × button) | The removal. |
+| Change a mapping's mode, range, invert, or encoding | The change. Switching to Relative resets range and invert in the same step. Undo and redo keep a mapping's options wherever a step brings the mapping back. |
 | "Add scope" on a cable | The new scope module and its cable together. |
 | Cut, paste, or duplicate | The whole group: its modules, cables, and assignments ([copy, paste, and duplicate](clipboard.md)). Copy is not a step. |
 | A button press whose saved value is toggle | The toggle. |
@@ -96,7 +97,7 @@ The exact wording can change while building. Each step must have a name.
 | Probes and scopes the UI attaches for display | View state, not part of the patch. |
 | A momentary button hold | A performance action, not an edit. Its value is never saved. |
 | Transport: tempo, time signature, start and stop, position | Performance controls that the user changes while playing. Tempo and time signature are saved in the patch, but in the first version they stay out of the history. *Why:* the user changes them to play, often while the transport runs, and undoing a knob turn should never jump the tempo back. Revisit if users expect them in the history. |
-| Parameter changes that come from a hardware MIDI control | The hardware control is its own undo: move it back. Undo cannot move a physical knob, so taking back a fader move would leave the sound and the fader apart, and the next touch would jump. It would also bury the user's own edits and drop their redo steps. See [Mapped parameters](#mapped-parameters). Revisit when pickup modes (FR-MIDI-09) remove the jump. |
+| Parameter changes that come from a hardware MIDI control | The hardware control is its own undo: move it back. Undo cannot move a physical knob, so taking back a fader move would leave the sound and the fader apart, and the next touch would jump. It would also bury the user's own edits and drop their redo steps. See [Mapped parameters](#mapped-parameters). Pickup (FR-MIDI-09) removes the jump but not the rest of the reason, so hardware moves stay out of undo. |
 | Saving | Writes the file; the patch does not change. |
 | Patch info: authors, tags, and licence ([patch metadata](patch-metadata.md#patch-info)) | Typed text and small picks that are easy to redo by hand. The edit marks the patch unsaved and is saved with it. While the authors box or tag field has focus, the undo shortcuts do nothing (see above). Revisit if users expect patch info in the history. |
 | Learn mode on or off, and arming a parameter | A mode, not an edit. Undo while a parameter is armed disarms it first, then undoes. |
@@ -106,7 +107,7 @@ The exact wording can change while building. Each step must have a name.
 A parameter with a MIDI mapping can change both from the screen and from the hardware.
 
 - A screen edit on it is a step like any other. The step stores the value at the gesture start and at the gesture end.
-- Undo sets the stored start value, and redo the stored end value, even if the hardware moved the parameter since. The hardware takes over again at its next move, and the value can jump, as after any screen edit on a mapped parameter ([MIDI learn](midi-learn.md#playing)). *Why:* undo must give a known result. Skipping the step, or keeping the hardware value, would make undo depend on a fader the user may not remember touching.
+- Undo sets the stored start value, and redo the stored end value, even if the hardware moved the parameter since. The hardware takes over again at its next move. On an Absolute mapping the value can jump, as after any screen edit on a mapped parameter ([MIDI learn](midi-learn.md#playing)). A Pickup mapping waits to catch it, and a Relative one steps from the restored value. *Why:* undo must give a known result. Skipping the step, or keeping the hardware value, would make undo depend on a fader the user may not remember touching.
 - Hardware moves never become steps, and they never drop the redo steps.
 
 ### Gestures
@@ -188,7 +189,6 @@ The edit log itself lives in `loom-app` and knows nothing about the audio thread
 - **Module data** (patterns, samples). It joins when it exists (FR-LIB-19, OQ-17). Large data may need steps that share storage.
 - **Undo of arrangement part swaps** (open question on swaps). A swap is one step when it exists.
 - **Reset of a whole module.** There is no such command yet. When it exists, it is one step with every parameter it changed.
-- **Undo of hardware MIDI moves.** Revisit when pickup modes (FR-MIDI-09) land (see [What is not undoable](#what-is-not-undoable)).
 - **Tempo and time signature in the history** (see [What is not undoable](#what-is-not-undoable)).
 - **Merging separate key presses** made close together into one step. One key press is one step until users ask for more. A held key is already one gesture. This answers the question left in [#12](https://github.com/brylie/LoomDSP/issues/12) from [#68](https://github.com/brylie/LoomDSP/issues/68).
 - **A history panel** that lists steps, or branching history.

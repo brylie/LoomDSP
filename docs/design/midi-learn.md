@@ -47,14 +47,15 @@ The user touches the control on screen, then moves the hardware control. Learn m
 - **Outside learn mode, touching a control only changes its value,** as today. *Why:* moving a hardware control after touching a screen knob is normal in play. It must never remap anything by accident.
 - **Only one parameter is armed at a time.** *Why:* the next control change must have exactly one target, so the result is never a surprise.
 - **One hardware control drives one parameter, and a parameter has one hardware control.** Learning a parameter that already has a mapping replaces it. Learning a hardware control that already has a mapping moves it to the new parameter, and the status bar names the parameter it left. *Why:* this is the least confusing rule. What a hardware knob does is always one thing, and the label on screen tells the whole story. Two hardware controls on one parameter would fight and make the value jump. One knob that drives many parameters is a job for the Macro module (MT-UI-02, M2): map the hardware to the macro, and the macro drives many parameters through modulation, where depth and the modulation views show the fan-out.
-- **The control change that makes a mapping also sets the value.** *Why:* the user sees and hears at once that the link works.
+- **The control change that makes a mapping also sets the value, as that mapping's mode would.** Absolute and Pickup set the position through their range and invert, and a Pickup starts caught. Relative applies its step from the current position. *Why:* the user sees and hears at once that the link works, and an encoder's byte is a step, not a position, so reading it as a position would make the value jump.
+- **Learning keeps options with the hardware.** Moving a control to another parameter keeps its mode, range, invert, and encoding, because they describe the hardware. A new control on a parameter starts at the defaults.
 
 ### Playing
 
 - A mapped control change sets the parameter's **base value**, the same value the knob on the tile sets. Modulation still adds on top of it ([modulation](modulation.md), rule 2).
 - The value 0 to 127 becomes a position from 0 to 1 (`value / 127`), and then a value with `ParamSpec::denormalize`. So 0 is the minimum, 127 is the maximum, and a logarithmic parameter feels the same on hardware as on screen. Whole-number parameters round, as `denormalize` already does.
 - The tile knob and the inspector follow the hardware, so the screen always shows the value that plays.
-- Moving the knob on screen still works. The last change wins, from either side. A mapped parameter can jump when the hardware control moves after a screen change. Pickup modes that prevent the jump are FR-MIDI-09, M2.
+- Moving the knob on screen still works. The last change wins, from either side. An Absolute mapping can jump when the hardware control moves after a screen change. [Pickup](#mapping-modes-fr-midi-09) prevents the jump.
 - A parameter with smoothing (`smooth_seconds`) glides to the new value as it does for a screen knob. *Why:* a 7-bit control change moves in steps of about 0.8 %. Without smoothing, a step on a cutoff or a level can be heard as a click.
 
 ### Seeing and removing mappings
@@ -66,10 +67,10 @@ The user touches the control on screen, then moves the hardware control. Learn m
 ## Rules
 
 1. **Mappings run in the engine.** The controller compiles the patch's mappings into a table and sends it to the audio thread with the schedule. The engine reads each incoming control change, looks it up, and sets the base value. *Why:* the same patch must respond to the same controller in the desktop app, in `loom play`, and in an exported plugin (ADR-0004), none of which can rely on the app's UI thread. It also adds no latency beyond the audio buffer.
-2. **The engine reports values back to the controller.** When a mapped control change arrives, the engine writes it into a latest-value table: one entry per control (16 channels × 128 controller numbers), holding the mapping's id, a sequence number, and the 7-bit value. The controller reads the table, turns the value into a parameter value with the same mapping, and updates its graph. Three ordering rules keep the graph and the engine in step:
+2. **The engine reports values back to the controller.** When a mapped control change arrives, the engine writes it into a latest-value table: one entry per control (16 channels × 128 controller numbers), holding the mapping's id, a sequence number, the 7-bit value, and whether a [pickup](#mapping-modes-fr-midi-09) is waiting. A second table holds the exact parameter value the control change set. The engine stores the value first, then the entry, so a reader never sees a new sequence with an old value. The controller copies that value into its graph and maps nothing itself. *Why:* an encoder's byte is a step, so the value cannot be worked out again from the byte. A waiting entry only moves the ghost mark: it set nothing, so the controller and the engine never apply it. Three ordering rules keep the graph and the engine in step:
    - The controller reads the table before it compiles, because compiled base values come from the graph.
    - A screen edit on a mapped parameter carries a token. When the engine applies it, it stores the token with a sequence number that it shares with control changes. Until then, the controller ignores control changes for that parameter, and after it, applies only those the engine applied later. So an older control change never overwrites a newer edit, and a newer one always wins.
-   - A control change that reaches the engine between a compile and the schedule swap is applied again to the new schedule. Screen edits made in that time are queued after the swap, so they still win.
+   - A control change that reaches the engine between a compile and the schedule swap has its value set again on the new schedule. The step is not taken twice. Screen edits made in that time are queued after the swap, so they still win.
 
    *Why:* the graph is what the UI draws and what is saved. A latest-value table loses nothing that matters if the UI is slow, and never makes the audio thread wait. The id says which mapping wrote an entry, so a write from a mapping that no longer exists is ignored. The sequence number shows the same value sent twice.
 3. **Learn reads control changes from the engine, too.** The engine records the last control change it received (channel, controller number, and a counter that goes up with each one). The controller reads it while a parameter is armed. *Why:* every host sends MIDI to the engine already. Learn then works the same way in every host, with no second MIDI path.
@@ -103,7 +104,7 @@ midi: [
 - [x] Clicking an armed control disarms it. Escape or a second press of **MIDI learn** ends learn mode with no change.
 - [x] The status bar shows `Learning` for as long as learn mode is on, whatever the status message says (`App::ui_snapshot()` test).
 - [ ] In learn mode, every mapped control in view shows its `CC` label.
-- [ ] The tile knob and the inspector show the value set by the hardware within one UI frame.
+- [ ] The tile knob and the inspector show the value set by the hardware at the first redraw after the watcher's next poll: at most one audio buffer, plus 15 ms, plus one frame. *Why not one frame:* a faster poll buys nothing a player would notice on a knob.
 - [x] A mapped control change still reaches a MIDI input module.
 - [x] A patch with mappings saves and loads with the same mappings. A patch without a `midi` list loads with none. A patch with two mappings on one parameter, or on one channel and controller number, fails to load with a clear error.
 - [x] Removing a mapping in the inspector stops the control from moving the parameter. Deleting a module removes its mappings.
@@ -192,6 +193,7 @@ Controller(
 - [ ] A patch with no front panel ignores device mappings and shows the status message once (test).
 - [ ] A broken device file gives no mappings and a message; the next write keeps it as `.broken.ron` (test).
 - [ ] Removing a slot mapping in Preferences stops it at once (test).
+- [ ] Modes, ranges, invert, and encodings save and load in device files (test).
 - [ ] Processing a device-mapped control change does not allocate (`tests/no_alloc.rs`).
 
 ### Mapping modes (FR-MIDI-09)
@@ -206,11 +208,12 @@ Controller(
 | **Pickup** | Ignored until the control's position crosses the parameter's current position, or comes within one step (1/127) of it. Then it follows, as Absolute, until the parameter changes from somewhere else. |
 | **Relative** | Reads the value as a step up or down, and moves the position by 1/128 per step. |
 
-- **The default stays Absolute** (settled). The mode is chosen on the mapping's row in the inspector, in a small menu with Mode, Range, Invert, and Encoding. *Why:* a new learner sees the knob work at once; a player who wants pickup sets it once per mapping, and device mappings keep it in their file.
-- **Range and invert** (Absolute and Pickup): `low` and `high` from 0 to 1 of the parameter's position, default 0 and 1. The control's 0 to 127 maps onto that span, through `denormalize` as before. **Invert** swaps the ends.
-- **Encoding** (Relative): **Offset 64** (default; 65 and up is up by value − 64, 63 and below is down by 64 − value), **Two's complement** (1 to 63 up, 127 down to 65 is −1 to −63), or **Sign bit** (1 to 63 up, 65 to 127 down by value − 64). A relative move is clamped to the parameter's range.
-- **Pickup lives in the engine.** The engine already holds each parameter's base value and orders screen edits and control changes (rule 2), so it knows the current position. A screen edit, a preset change, an undo, or a patch load makes a pickup mapping wait again. *Why in the engine:* the comparison must use the value that plays, in the order rule 2 already defines.
-- **Seeing a waiting pickup.** While a pickup mapping waits and its hardware moves, a hollow ghost mark at the hardware's position is drawn on the control, on the tile and in the inspector, for one second after the last move. The engine reports the waiting position in the latest-value table (rule 2). *Why:* the player sees which way to turn, without a mode to enter.
+- **The default stays Absolute** (settled). The mode is chosen on the mapping's row in the inspector: a small button beside the × opens rows with Mode, Range, Invert, and Encoding under the mapping, also in learn mode. Whether they are open is app state, not saved in the patch. Range is two typed fields from 0 to 1. *Why:* a new learner sees the knob work at once; a player who wants pickup sets it once per mapping, and device mappings keep it in their file.
+- **Range and invert** (Absolute and Pickup): `low` and `high` from 0 to 1 of the parameter's position, default 0 and 1, with `low` below `high`. Position here is within the parameter's selected [control range](control-ranges.md). The control's 0 to 127 maps onto that span, through `denormalize` as before. **Invert** swaps the ends. Switching a mapping to Relative resets its range and invert, in the same undo step. A patch with a bad range, or with a range or invert on a Relative mapping, fails to load with a clear error. *Why reset:* otherwise an edit could make a patch that cannot load.
+- **Encoding** (Relative): **Offset 64** (default; 65 and up is up by value − 64, 63 and below is down by 64 − value), **Two's complement** (1 to 63 up, 127 down to 65 is −1 to −63), or **Sign bit** (1 to 63 up, 65 to 127 down by value − 64). In Two's complement and Sign bit, 0 and 64 mean no step. A relative move is clamped to the parameter's range. The engine keeps the unrounded position, so a whole-number parameter moves after enough steps. *Why:* `denormalize` rounds a whole number, so a small step from the rounded value would land on the same value and an encoder would stay stuck.
+- **Pickup lives in the engine.** The engine keeps each mapped control's current position in a fixed table. It seeds the table from the compiled base value at each swap, and updates it on each screen edit and applied control change. A screen edit, a preset change, an undo, a patch load, a change to the mapping's options, or a change to the parameter's selected control range makes a pickup mapping wait again. *Why in the engine:* the comparison must use the value that plays, in the order rule 2 already defines.
+- **Catching a pickup.** The first control change after a reset has no earlier hardware position to compare, so it catches only within one step. One step stays 1/127 of position, even on a narrow range. If the parameter sits outside the mapping's range, the hardware can never cross it, so the pickup catches when the hardware reaches the nearest end of its span.
+- **Seeing a waiting pickup.** While a pickup mapping waits and its hardware moves, a hollow ghost mark at the hardware's position is drawn on the control, on the tile (knob and fader) and on the inspector's slider, for one second after the last move. Toggle, radio, select list, number, XY pad, and range tiles show none, because they have no single travel to mark; their inspector rows still do. The engine reports the waiting position in the latest-value table (rule 2). *Why:* the player sees which way to turn, without a mode to enter.
 - **Patch format:** optional fields on each mapping, written only when not the default:
 
   ```ron
@@ -226,7 +229,7 @@ Controller(
 - [ ] Pickup ignores a control above the current position until it comes down past it, then follows; a screen edit makes it wait again (engine test).
 - [ ] Relative in each encoding moves by the right number of steps in each direction, and stops at the range ends (engine test).
 - [ ] A waiting pickup shows its ghost mark while the hardware moves, and not after it catches (UI snapshot).
-- [ ] Modes, ranges, invert, and encodings save and load in patches and device files; a mapping with none writes no new fields (test).
+- [ ] Modes, ranges, invert, and encodings save and load in patches; a mapping with none writes no new fields (test). Device files are in the [device mapping criteria](#acceptance-criteria-device-mappings).
 - [ ] Manual check with a hardware knob and an endless encoder.
 
 ## Out of scope: device mappings
