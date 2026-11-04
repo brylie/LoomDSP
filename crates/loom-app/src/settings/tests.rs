@@ -205,7 +205,7 @@ fn failed_audio_input_reopens() {
     assert!(app.alerts.status().contains("microphone was denied"));
 }
 
-/// Recovery preserves newer messages, and permission denial stays once per run.
+/// Recovery says the input is back, and permission denial stays once per run.
 #[test]
 fn input_recovery_preserves_other_status_and_permission_latch() {
     let dir = folder("audio-input-recovery-status");
@@ -223,7 +223,8 @@ fn input_recovery_preserves_other_status_and_permission_latch() {
     fake.input_permission_denied.set(false);
     app.sync_audio_input();
     assert!(app.rig.input.port().is_some());
-    assert_eq!(app.alerts.status(), "newer message");
+    assert_eq!(app.alerts.status(), "Audio input: \"Microphone\" is back.");
+    app.alerts.say("newer message");
     fake.input_permission_denied.set(true);
     app.sync_audio_input();
     assert!(app.rig.input.port().is_none());
@@ -1640,4 +1641,102 @@ fn failed_saves_say_why_and_keep_the_choice() {
     app.preferences(Message::Midi("Pad".to_string(), false));
     assert!(unsaved(&app), "{}", app.alerts.status());
     assert!(!fake.is_open("Pad"), "closed for this run");
+}
+
+/// The stats bar shows the watcher's output warnings while a device plays,
+/// and they end with the stream: a new stream's watcher sends nothing on a
+/// clean first read, so the app must not hold on to them.
+#[test]
+fn output_warnings_show_until_the_stream_stops() {
+    let dir = folder("output-warnings");
+    let fake = Rc::new(Fake::new(&[fake::device("Fake A")], &[]));
+    let mut app = start(args(&dir), &fake);
+    assert!(app.stats_model().playing);
+    let _ = app.update(crate::Message::Audio(crate::audio_watch::Event::Stats {
+        dropouts: 0,
+        at: Instant::now(),
+        peak: 0.0,
+        max: 0.0,
+        silenced: true,
+        clipped: true,
+    }));
+    let stats = app.ui_snapshot().stats;
+    assert!(stats.output_silenced && stats.output_clipped);
+    let mut ui = crate::ui_test::Ui::with_app(app);
+    assert!(ui.text("Output: bad samples silenced").is_some());
+    assert!(ui.text("Output clipped").is_some());
+
+    ui.app.stop_audio();
+    let stats = ui.app.ui_snapshot().stats;
+    assert!(!stats.output_silenced && !stats.output_clipped);
+}
+
+/// With everything on at once, every fixed item still fits at 1280 px, and
+/// the two messages share what is left instead of pushing anything off
+/// (visual-system.md, rule 7).
+#[test]
+fn the_status_bar_fits_with_everything_on() {
+    let dir = folder("status-everything");
+    let fake = Rc::new(Fake::new(
+        &[fake::device("Fake A")],
+        &[
+            "Long Keyboard Name MIDI 1",
+            "Long Keyboard Name DAW",
+            "Pad Controller Port",
+            "Pedal Board",
+        ],
+    ));
+    let mut app = start(args(&dir), &fake);
+    let _ = app.update(crate::Message::Learn(crate::learn::Message::Toggle));
+    app.alerts.set_input_drift(Some((12, 34)));
+    app.alerts.set_output_warnings(true, true);
+    let long = "a message long enough to fill the whole window ".repeat(8);
+    app.alerts.error(crate::alerts::Cause::Other, format!("kept {long}"));
+    app.alerts.say(format!("latest {long}"));
+    let mut ui = crate::ui_test::Ui::with_app(app);
+    for item in [
+        "MIDI: 4 inputs",
+        "Learning",
+        "Output: bad samples silenced",
+        "Output clipped",
+        "input underruns 12, overruns 34",
+    ] {
+        let bounds = ui.text(item).unwrap_or_else(|| panic!("{item}"));
+        assert!(
+            bounds.x + bounds.width <= 1280.0,
+            "{item} ends at {}",
+            bounds.x + bounds.width
+        );
+    }
+    assert!(ui.text(&format!("Error: kept {long}")).is_some(), "the kept error");
+    assert!(ui.text(&format!("latest {long}")).is_some(), "the latest message");
+}
+
+/// An input error is over if the new patch's stream opened, so opening a patch
+/// does not carry it across. Nothing later would clear it.
+#[test]
+fn opening_a_patch_drops_an_input_error_that_is_over() {
+    let dir = folder("input-error-over");
+    let fake = two_devices();
+    *fake.audio_inputs.borrow_mut() = devices::Inputs {
+        default: Some("Microphone".into()),
+        devices: vec!["Microphone".into()],
+    };
+    *fake.input_error.borrow_mut() = Some(InputError::Other("device busy".into()));
+    let mut app = start(args(&dir), &fake);
+    app.controller.add_module("loom.io.audio-in").unwrap();
+    assert!(app.commit());
+    app.sync_audio_input();
+    assert_eq!(app.alerts.kept().len(), 1);
+
+    let patch = dir.join("input.ron");
+    std::fs::write(
+        &patch,
+        r#"Patch(version: 1, modules: [(id: 1, kind: "loom.io.audio-in@1")])"#,
+    )
+    .unwrap();
+    *fake.input_error.borrow_mut() = None;
+    assert!(app.replace(Source::File(&patch)));
+    assert!(app.rig.input.port().is_some(), "the stream opened");
+    assert!(app.alerts.kept().is_empty(), "{:?}", app.alerts.kept());
 }

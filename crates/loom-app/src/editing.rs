@@ -1,7 +1,7 @@
 //! Edits and undo: grouping changes into undo steps, committing them to
 //! the engine, and the clipboard commands (`docs/design/undo.md`).
 
-use crate::{App, Message, RightTab, browser, clipboard, undo};
+use crate::{App, Message, RightTab, alerts, browser, clipboard, undo};
 use iced::advanced::widget::operation::{self, Focusable, Outcome};
 use iced::advanced::widget::{Id, Operation};
 use iced::{Point, Task};
@@ -223,7 +223,7 @@ impl App {
         let verb = if forward { "Redo" } else { "Undo" };
         if let Err(why) = undo::check(&step, forward, &self.controller) {
             self.alerts
-                .say(format!("Cannot {} {}: {why}", verb.to_lowercase(), step.name()));
+                .warn(format!("Cannot {} {}: {why}", verb.to_lowercase(), step.name()));
             return;
         }
         // An armed parameter is a mode, not an edit: undo disarms it first.
@@ -257,16 +257,19 @@ impl App {
                 } else {
                     // The graph has the change but the engine does not. The
                     // history is already cleared by `commit`.
-                    self.alerts.say(format!(
-                        "{verb} could not reach the engine ({}); undo history cleared",
-                        self.alerts.status()
-                    ));
+                    self.alerts.error(
+                        alerts::Cause::Other,
+                        format!("{verb} could not reach the engine: {}", self.alerts.status()),
+                    );
                 }
             }
             Err(e) => {
                 self.edits.history.clear();
                 self.commit();
-                self.alerts.say(format!("{verb} failed ({e}); undo history cleared"));
+                self.alerts.error(
+                    alerts::Cause::Other,
+                    format!("{verb} failed ({e}); undo history cleared"),
+                );
             }
         }
     }
@@ -285,8 +288,7 @@ impl App {
                 true
             }
             Err(e) => {
-                self.retry_commit = matches!(&e, LoomError::QueueFull);
-                self.alerts.say(format!("error: {e}"));
+                self.commit_failed(&e);
                 // The controller stays dirty, so the next commit retries the
                 // change; until then the history cannot be trusted.
                 self.edits.committed(false);
@@ -296,6 +298,27 @@ impl App {
         self.sync_audio_input();
         self.refresh();
         sent
+    }
+
+    /// Says a commit failed, before the undo history is cleared. A full queue
+    /// drains and the commit is retried, so with no history to lose that is a
+    /// warning. Anything else stays true (the graph differs from what the
+    /// engine plays), and lost history stays lost after a retry works, so
+    /// those are kept.
+    pub(crate) fn commit_failed(&mut self, error: &LoomError) {
+        self.retry_commit = matches!(error, LoomError::QueueFull);
+        let history = &self.edits.history;
+        let lost_history = history.undo_step().is_some() || history.redo_step().is_some();
+        let message = if lost_history {
+            format!("{error}; undo history cleared")
+        } else {
+            error.to_string()
+        };
+        if self.retry_commit && !lost_history {
+            self.alerts.warn(message);
+        } else {
+            self.alerts.error(alerts::Cause::Other, message);
+        }
     }
 
     /// Removes modules and commits. Returns false if the commit failed; the
@@ -355,7 +378,7 @@ impl App {
             clipboard::Group::from_selection(self.controller.graph(), &self.positions, &self.selection, incoming)
                 .with_sizes(&self.sizes);
         if group.is_empty() {
-            self.alerts.say(format!("Nothing selected to {verb}"));
+            self.alerts.warn(format!("Nothing selected to {verb}"));
             return None;
         }
         Some(group)
@@ -393,12 +416,12 @@ impl App {
             return;
         }
         let Some(text) = text else {
-            self.alerts.say(clipboard::NOTHING_TO_PASTE.to_string());
+            self.alerts.warn(clipboard::NOTHING_TO_PASTE.to_string());
             return;
         };
         match clipboard::Group::from_text(&text, self.controller.registry()) {
             Ok(group) => self.add_group(&group, browser::snap(world), "paste", "Pasted"),
-            Err(why) => self.alerts.say(why),
+            Err(why) => self.alerts.warn(why),
         }
     }
 
@@ -426,7 +449,7 @@ impl App {
     /// why.
     pub(crate) fn add_group(&mut self, group: &clipboard::Group, origin: Point, verb: &str, done: &str) {
         if let Err(why) = group.check(&self.controller) {
-            self.alerts.say(format!("Cannot {verb}: {why}"));
+            self.alerts.warn(format!("Cannot {verb}: {why}"));
             return;
         }
         self.step_name = Some(format!("{verb} {}", group.describe()));
@@ -442,7 +465,7 @@ impl App {
                 // The rollback freed the new modules' slots. Only a commit
                 // hands them back, so the next paste has room.
                 app.commit();
-                app.alerts.say(format!("Cannot {verb}: {e}"));
+                app.alerts.warn(format!("Cannot {verb}: {e}"));
             }
         });
         // `record` clears it, but an edit inside a gesture does not record.

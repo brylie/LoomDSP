@@ -129,7 +129,7 @@ impl App {
         // The compile report gives way to anything that needs reading.
         let mut keep = !status.is_empty();
         if keep {
-            app.alerts.say(status);
+            app.alerts.error(alerts::Cause::File, status);
         }
         app.document.start_autosave(session_folder);
         if let Some((state, orphan, _)) = recovered {
@@ -137,10 +137,12 @@ impl App {
             keep = true;
         }
         if !notes.is_empty() {
+            let notes = notes.join(" ");
             if keep {
-                notes.insert(0, app.alerts.take_status());
+                app.alerts.append_warning(&format!(" {notes}"));
+            } else {
+                app.alerts.warn(notes);
             }
-            app.alerts.say(notes.join(" "));
         }
         app
     }
@@ -161,8 +163,7 @@ impl App {
         });
         for note in self.document.load_notes() {
             if note.contains("not in this version:") {
-                self.alerts.append(" ");
-                self.alerts.append(note);
+                self.alerts.append_warning(&format!(" {note}"));
             }
         }
         self.document.adopt(orphan);
@@ -280,7 +281,8 @@ impl App {
             stamp,
             notes,
         } = session;
-        let mut status = notes.join("; ");
+        let status = notes.join("; ");
+        let mut recording_stopped = None;
         let load_notes = notes;
 
         // Every MIDI input plays the patch, and the "Hold note" button works
@@ -297,7 +299,7 @@ impl App {
                 match output.start(engine) {
                     Ok(audio) => {
                         if let Some(e) = refused {
-                            status = rig.end_recording(&e);
+                            recording_stopped = Some(rig.end_recording(&e));
                         }
                         (Some(audio), Some(midi), label, None)
                     }
@@ -369,7 +371,7 @@ impl App {
             rig,
             midi,
             holding: false,
-            alerts: alerts::Alerts::new(status),
+            alerts: alerts::Alerts::with_notes(status),
             // The app's tests load the test modules but never list them.
             modules: if args.test_modules {
                 registry(true).iter().collect()
@@ -407,12 +409,15 @@ impl App {
             step_name: None,
             history_key: None,
         };
+        if let Some(stopped) = recording_stopped {
+            app.alerts.error(alerts::Cause::Other, stopped);
+        }
         // A stream that failed to start took the engine with it.
         app.keep_engine_idle();
         app.sync_audio_input();
         app.send_panic_trigger();
         if let Some(error) = app.connect_midi(first_midi, connect_midi) {
-            app.alerts.say(error);
+            app.alerts.warn(error);
         }
         // A new patch credits the user and takes their default licence
         // (patch-metadata.md, Defaults).

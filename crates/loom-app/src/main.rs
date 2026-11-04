@@ -250,6 +250,8 @@ const WINDOW: Size = Size::new(1440.0, 900.0);
 
 #[derive(Debug, Clone)]
 enum Message {
+    /// The player pressed × on a kept error.
+    DismissError(alerts::Cause),
     Canvas(CanvasEvent),
     /// The eligible inspector parameter currently under an output drag.
     DropRow(Option<(u32, usize)>),
@@ -619,6 +621,7 @@ impl Message {
             | Self::Licence(_)
             | Self::OpenRecent
             | Self::Recent(_)
+            | Self::DismissError(_)
             | Self::Pasted { .. } => false,
         }
     }
@@ -839,7 +842,11 @@ impl App {
         }
         let current = self.current_patch();
         if let Some(line) = self.document.autosave(now, current) {
-            self.alerts.say(line);
+            if line == recovery::AUTOSAVE_WORKS {
+                self.alerts.say(line);
+            } else {
+                self.alerts.warn(line);
+            }
         }
     }
 
@@ -932,7 +939,8 @@ impl App {
         if let Some(error) = self.rig.recorder.as_ref().and_then(loom_host_desktop::Recorder::error)
             && self.alerts.recording_stopped()
         {
-            self.alerts.say(format!("The recording stopped: {error}"));
+            self.alerts
+                .error(alerts::Cause::Other, format!("The recording stopped: {error}"));
             eprintln!("loom-app: {}", self.alerts.status());
         }
     }
@@ -1024,15 +1032,11 @@ impl App {
         let live: std::collections::HashSet<ProbeId> = self.live.probes().collect();
         self.meter_levels.retain(|probe, _| live.contains(probe));
         if let Err(e) = self.controller.commit() {
-            self.alerts.say(format!("error: {e}"));
+            self.alerts.warn(e.to_string());
         }
     }
 
     fn report(&mut self) {
-        if let Some(lost) = &self.rig.lost_audio {
-            self.alerts.say(lost.message.clone());
-            return;
-        }
         let report = self.controller.last_report();
         let inserted = report.inserted_delays().count();
         self.alerts.say(match report.loops.len() {
@@ -1046,7 +1050,7 @@ impl App {
         // Warn only on entry into the overflow state, including after a
         // patch has returned below the table limit.
         if self.alerts.live_values_full(report.without_live_value > 0) {
-            self.alerts.append(&format!(
+            self.alerts.append_warning(&format!(
                 "; {} modulated {} show no live value (table full)",
                 report.without_live_value,
                 if report.without_live_value == 1 {
@@ -1222,7 +1226,7 @@ impl App {
         let Some(folder) = self.library_folder() else {
             if self.rig.store.saved().library_folder().is_none() {
                 self.alerts
-                    .say("No library folder: set `library` in the preferences file.".to_string());
+                    .warn("No library folder: set `library` in the preferences file.".to_string());
             }
             return Task::none();
         };
@@ -1278,7 +1282,7 @@ impl App {
                 app.selection = BTreeSet::from([id.0]);
                 app.commit();
             }
-            Err(e) => app.alerts.say(format!("Could not add {}: {e}", descriptor.name)),
+            Err(e) => app.alerts.warn(format!("Could not add {}: {e}", descriptor.name)),
         });
     }
 
@@ -1287,7 +1291,7 @@ impl App {
     fn add_probe(&mut self, probe: probe_menu::Probe, output: loom_canvas::PortRef, world: Point) {
         let Some(descriptor) = self.modules.iter().copied().find(|d| d.id == probe.id()) else {
             self.alerts
-                .say(format!("Cannot {}: no module `{}`", probe.verb(), probe.id()));
+                .warn(format!("Cannot {}: no module `{}`", probe.verb(), probe.id()));
             return;
         };
         let tiles: Vec<iced::Rectangle> = self.scene.modules().iter().map(|m| m.bounds()).collect();
@@ -1304,7 +1308,7 @@ impl App {
             .node(source.module)
             .is_some_and(|node| source.port < node.descriptor.outputs.len());
         if !exists {
-            self.alerts.say(format!("Cannot {}: the output is gone", probe.verb()));
+            self.alerts.warn(format!("Cannot {}: the output is gone", probe.verb()));
             return;
         }
         self.close_slider_gesture();
@@ -1313,7 +1317,7 @@ impl App {
             let id = match app.controller.add_module(descriptor.id) {
                 Ok(id) => id,
                 Err(e) => {
-                    app.alerts.say(format!("Cannot {}: {e}", probe.verb()));
+                    app.alerts.warn(format!("Cannot {}: {e}", probe.verb()));
                     return;
                 }
             };
@@ -1322,7 +1326,7 @@ impl App {
                 // so the edit makes no step.
                 let _ = app.controller.remove_module(id);
                 app.commit();
-                app.alerts.say(format!("Cannot {}: {e}", probe.verb()));
+                app.alerts.warn(format!("Cannot {}: {e}", probe.verb()));
                 return;
             }
             app.positions.insert(id.0, corner);
@@ -1388,7 +1392,7 @@ impl App {
                 if let Some(example) = example {
                     match Patch::from_ron(&example) {
                         Ok(patch) => self.after_discard(question::AfterDiscard::Example(Box::new(patch))),
-                        Err(error) => self.alerts.say(format!("Could not open example: {error}")),
+                        Err(error) => self.alerts.warn(format!("Could not open example: {error}")),
                     }
                 }
             }
@@ -1400,7 +1404,7 @@ impl App {
                 if let Some(descriptor) = descriptor {
                     self.help = Some(help::Help::new(descriptor));
                 } else {
-                    self.alerts.say(format!("Linked document is not bundled: {link}"));
+                    self.alerts.warn(format!("Linked document is not bundled: {link}"));
                 }
             }
             Message::CloseTileMenu => self.tile_menu = None,
@@ -1545,7 +1549,7 @@ impl App {
                 self.edits.start_slider_gesture();
                 self.begin_edit();
                 if let Err(e) = self.controller.set_assignment_depth(id, depth) {
-                    self.alerts.say(format!("error: {e}"));
+                    self.alerts.warn(e.to_string());
                 }
                 self.refresh_values();
             }
@@ -1553,7 +1557,7 @@ impl App {
                 self.close_slider_gesture();
                 self.edit(|app| {
                     if let Err(e) = app.controller.set_assignment_polarity(id, choice.polarity()) {
-                        app.alerts.say(format!("error: {e}"));
+                        app.alerts.warn(e.to_string());
                     }
                     app.refresh_values();
                 });
@@ -1562,7 +1566,7 @@ impl App {
                 self.close_slider_gesture();
                 self.edit(|app| {
                     if let Err(e) = app.controller.set_assignment_enabled(id, enabled) {
-                        app.alerts.say(format!("error: {e}"));
+                        app.alerts.warn(e.to_string());
                     } else {
                         app.scene.set_modulation_enabled(id.0, enabled);
                     }
@@ -1581,7 +1585,7 @@ impl App {
                             modulation::target_name(graph, removed.target, removed.param)
                         ));
                     }
-                    Err(e) => app.alerts.say(format!("error: {e}")),
+                    Err(e) => app.alerts.warn(e.to_string()),
                 });
             }
             Message::SelectModule(id) => {
@@ -1593,6 +1597,7 @@ impl App {
             Message::Redo => self.redo(),
             Message::OpenBrowser => self.browser_key += 1,
             Message::Panic => self.panic(),
+            Message::DismissError(cause) => self.alerts.dismiss(cause),
             Message::MidiPoll => self.poll_midi(),
             Message::HoldNote => {
                 if let Some(midi) = &self.midi {
@@ -1653,9 +1658,12 @@ impl App {
                 at,
                 peak,
                 max,
+                silenced,
+                clipped,
             }) => {
                 self.stream.set_load(peak, max);
                 self.alerts.note_dropouts(dropouts, at);
+                self.alerts.set_output_warnings(silenced, clipped);
             }
             Message::Audio(audio_watch::Event::Stalled { callbacks, advanced }) => {
                 // Time the stall from when the watcher last saw a callback,
@@ -1703,7 +1711,7 @@ impl App {
                         ));
                     }
                     Ok(None) => {}
-                    Err(e) => app.alerts.say(format!("error: {e}")),
+                    Err(e) => app.alerts.warn(e.to_string()),
                 });
             }
             Message::Midi => {
@@ -1765,13 +1773,13 @@ impl App {
         let Some((transport, index)) = transport_run(&self.controller) else {
             let running = !self.controller.transport().running;
             if let Err(e) = self.controller.set_running(running) {
-                self.alerts.say(format!("error: {e}"));
+                self.alerts.warn(e.to_string());
             }
             return;
         };
         if run_is_driven(&self.controller) {
             self.alerts
-                .say("Run follows the cable on the Transport's run input".to_string());
+                .warn("Run follows the cable on the Transport's run input".to_string());
             return;
         }
         let on = self

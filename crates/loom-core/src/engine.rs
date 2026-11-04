@@ -111,6 +111,10 @@ pub struct EngineStats {
     pub input_underruns: AtomicU64,
     /// Input overrun corrections.
     pub input_overruns: AtomicU64,
+    /// Output samples that were NaN or infinity, and became silence.
+    pub output_silenced: AtomicU64,
+    /// Output samples clipped to -1 to 1.
+    pub output_clipped: AtomicU64,
 }
 
 pub(crate) enum Command {
@@ -1036,7 +1040,14 @@ impl Engine {
                 *out += value;
             }
         }
-        self.safety.process(left, right);
+        let counts = self.safety.process(left, right);
+        // One add per block, only when there is something to add.
+        if counts.silenced > 0 {
+            self.stats.output_silenced.fetch_add(counts.silenced, Ordering::Relaxed);
+        }
+        if counts.clipped > 0 {
+            self.stats.output_clipped.fetch_add(counts.clipped, Ordering::Relaxed);
+        }
 
         self.transport.end_block();
     }

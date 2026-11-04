@@ -1821,3 +1821,59 @@ fn a_scripted_panic_key_works_over_a_question() {
     // With no question open, nothing is refused here.
     assert!(refuse_while_asking(None, &keyboard::Key::Character("z".into()), cmd).is_ok());
 }
+
+/// `open` works as File > Open does, so a patch that loads differently from
+/// how it was saved names its load notes in the status line.
+#[test]
+fn open_keeps_load_notes_in_the_status_line() {
+    let mut app = crate::tests::app();
+    let dir = std::env::temp_dir().join(format!("loom-control-open-note-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let noted = dir.join("noted.ron");
+    std::fs::write(
+        &noted,
+        r#"Patch(version: 1, modules: [(id: 1, kind: "loom.math.mul@1", params: {"gain": 5.0}, ranges: {"gain": (-0.1, 0.1)})])"#,
+    )
+    .unwrap();
+    let line = serde_json::json!({ "cmd": "open", "path": noted }).to_string();
+    run(&mut app, &line).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(
+        app.alerts
+            .status()
+            .starts_with(&format!("opened {}: module 1", noted.display())),
+        "{}",
+        app.alerts.status()
+    );
+}
+
+/// The `audio` field says where the input stream is, as a script needs when
+/// it adds and removes an Audio In. Removing the last one is visible too.
+#[test]
+fn the_audio_field_reports_the_input_stream() {
+    use crate::devices::fake::{self, Fake};
+    let fake = std::rc::Rc::new(Fake::new(&[fake::device("Fake A")], &[]));
+    *fake.audio_inputs.borrow_mut() = crate::devices::Inputs {
+        default: Some("Fake Mic".into()),
+        devices: vec!["Fake Mic".into()],
+    };
+    let mut app = on_fake_devices("input-report", &fake);
+    let input = |app: &mut App| run(app, r#"{"cmd": "snapshot"}"#).unwrap()["audio"]["input"].clone();
+    assert_eq!(input(&mut app), json!({"device": null, "state": "off"}));
+
+    let module = app.controller.add_module("loom.io.audio-in").unwrap();
+    assert!(app.commit());
+    app.sync_audio_input();
+    assert_eq!(input(&mut app), json!({"device": "Fake Mic", "state": "open"}));
+
+    fake.input_permission_denied.set(true);
+    app.sync_audio_input();
+    assert_eq!(input(&mut app), json!({"device": null, "state": "denied"}));
+    fake.input_permission_denied.set(false);
+    app.sync_audio_input();
+
+    app.controller.remove_module(module).unwrap();
+    assert!(app.commit());
+    app.sync_audio_input();
+    assert_eq!(input(&mut app), json!({"device": null, "state": "off"}));
+}

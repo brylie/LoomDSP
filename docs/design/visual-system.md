@@ -85,10 +85,32 @@ Every module belongs to one of eight families ([ADR-0029](../adr/0029-module-fam
 
 | Shown | When |
 |---|---|
-| Module and cable count, audio device and rate, load, dropouts, input alerts, MIDI, the last status message | Always |
+| Module and cable count, audio device and rate, load, dropouts, input alerts, output warnings, MIDI, the last status message | Always |
+| `Learning` | While MIDI learn mode is on ([MIDI learn](midi-learn.md)) |
+| The kept error | While there is one, and it is not the last status message |
 | Measure and Move camera switches, the frame summary | Only with `--dev`, `--measure`, `--measure-idle`, or `--bench` |
 
-MIDI shows a count, such as "MIDI: 2 inputs" or "MIDI: no inputs". Its hover text lists the input names. The status message takes the remaining width and is cut, not wrapped; its hover text shows all of it.
+MIDI shows a count, such as "MIDI: 2 inputs" or "MIDI: no inputs". Its hover text lists the input names. The fixed items come first. The kept error and the status message share the remaining width. Each is cut, not wrapped, and its hover text shows all of it.
+
+### Status messages
+
+**Status:** Agreed, M2 ([#493](https://github.com/brylie/LoomDSP/issues/493), 2026-11-03). Severity follows NFR-UX-03: a word as well as a colour.
+
+- **Three severities.** Info has no label. A warning shows `Warning:` and an error shows `Error:`, each in its own colour. The snapshot reports them as `info`, `warning`, and `error`.
+- **What each one means.** A kept error is a problem that stays true after the moment passes and that the player must act on, or that lost their work. A refused gesture or a problem that fixed itself is a warning. Warnings and info are the latest message only, and are never kept. *Why:* if every failed gesture stayed until dismissed, a performer would be clicking × on stage.
+- **An error is also the latest message.** So `status` always holds what happened last, and a failed control command replies with its own text. The kept error field appears only when the newest kept error is not the latest message, so the same text never shows twice.
+- **One kept error per cause.** The bar shows the newest. Its hover text lists the others. *Why:* with one slot, a failed save could hide a lost device.
+
+| Cause | Cleared by |
+|---|---|
+| Audio output | Sound is playing again, or the player chooses a device. No × button ([device changes](device-changes.md)). |
+| Audio input | The stream opens, the player chooses an input, or an input is no longer wanted. × allowed. |
+| File | A later successful save, open, or new patch. × allowed. |
+| Other | × or a newer error of this kind. |
+
+Kept errors survive opening another patch, except as the table says.
+
+- **Disabled toolbar buttons say why.** Hold note and Recent have hover text with the reason while disabled, as Undo and Redo do.
 
 ## Rules
 
@@ -121,6 +143,10 @@ The rest:
 - [x] Without `--dev` or a measuring flag, the status bar has no developer tools; with `--dev` it has them (headless `Ui` test).
 - [x] With four MIDI inputs, the status bar shows "MIDI: 4 inputs" and every item fits at 1280 px wide (headless `Ui` test).
 - [x] AGENTS.md links this spec from its architecture list.
+- [x] An error stays visible after a later info message, and the snapshot reports the status severity (`App::ui_snapshot()` tests).
+- [x] Each row of the kept error table has a test. The same text never shows twice.
+- [x] With four MIDI inputs, input drift, `Learning`, a long kept error, a long status message, and both output warnings, every item fits at 1280 px wide (headless `Ui` test).
+- [x] Disabled Hold note and Recent have hover text that says why (test on what the view passes to its tooltips, because the `Ui` harness does not reach them).
 
 ## Out of scope
 

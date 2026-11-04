@@ -302,7 +302,7 @@ impl App {
             }
             Command::Open { path, .. } => {
                 if self.replace(crate::Source::File(&path)) {
-                    self.alerts.say(format!("opened {}", path.display()));
+                    self.say_opened(&path);
                     Ok(Map::new())
                 } else {
                     Err(self.alerts.status().to_string())
@@ -628,10 +628,14 @@ impl App {
     /// counts the ones the next `advanced` compares with, as a `snapshot`
     /// does.
     pub(super) fn audio_health(&mut self, remember: bool) -> Value {
+        let wanted = self.input_wanted();
+        let denied = wanted && self.rig.host.audio_input_permission_denied();
+        let input = self.rig.input.stream_report(wanted, denied);
         let Some(stats) = self.stream.stats().cloned() else {
             return json!({
                 "device": null, "rate": null, "buffer": null, "callbacks": 0,
                 "advanced": null, "stream_errors": 0, "start_overloads": 0, "overruns": 0,
+                "input": input,
             });
         };
         let now = stats.snapshot();
@@ -653,6 +657,7 @@ impl App {
             "stream_errors": now.stream_errors,
             "start_overloads": now.start_overloads,
             "overruns": now.overruns,
+            "input": input,
         })
     }
 

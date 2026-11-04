@@ -7,6 +7,7 @@
 //! `Args` and a preferences file, and the messages the window sends.
 
 use super::*;
+use crate::alerts;
 use crate::devices::fake::{self, Fake};
 use crate::preferences::DeviceChoice;
 use crate::settings::{Change, Message as Prefs};
@@ -516,7 +517,7 @@ fn a_lost_named_device_survives_takes_edits_and_reconnects_when_back() {
     assert!(run.app.stream.is_idle(), "engine preserved on idle");
     assert_eq!(
         run.app.alerts.status(),
-        "Audio: \"Fake B\" was lost. Plug it in again, or choose another device in Preferences."
+        "Audio: \"Fake B\" was lost: it was unplugged. Plug it in again, or choose another device in Preferences."
     );
 
     // 2. Edits made while lost are kept and status bar continues to display the lost device message
@@ -526,8 +527,13 @@ fn a_lost_named_device_survives_takes_edits_and_reconnects_when_back() {
     assert_eq!(run.app.controller.graph().len(), initial_modules + 1);
     assert_eq!(
         run.app.alerts.status(),
-        "Audio: \"Fake B\" was lost. Plug it in again, or choose another device in Preferences."
+        "no feedback loops",
+        "the compile report shows beside the loss"
     );
+    let kept = run.app.alerts.kept_field().expect("the loss stays on screen");
+    assert_eq!(kept.cause, alerts::Cause::AudioOutput);
+    assert!(kept.text.contains("was lost: it was unplugged"), "{}", kept.text);
+    assert!(!kept.dismissible, "only sound or a choice ends it");
 
     // 3. Device returns after 1 second
     run.host.add_device(fake::device("Fake B"));
@@ -537,6 +543,7 @@ fn a_lost_named_device_survives_takes_edits_and_reconnects_when_back() {
     assert!(run.app.stream.is_playing(), "reconnected to Fake B");
     assert_eq!(run.app.rig.playing.as_ref().unwrap().device, "Fake B");
     assert_eq!(run.app.alerts.status(), "Audio: \"Fake B\" is back.");
+    assert!(run.app.alerts.kept().is_empty(), "sound is back");
 
     // The newly added module is present and engine plays
     run.play(0.1);
@@ -563,8 +570,10 @@ fn a_lost_system_default_switches_to_the_new_default_immediately() {
     assert_eq!(run.app.rig.playing.as_ref().unwrap().device, "Fake B");
     assert_eq!(
         run.app.alerts.status(),
-        "Audio: \"Fake A\" was lost. Now playing on \"Fake B\"."
+        "Audio: \"Fake A\" was lost: it was unplugged. Now playing on \"Fake B\"."
     );
+    assert_eq!(run.app.alerts.severity(), alerts::Severity::Warning);
+    assert!(run.app.alerts.kept().is_empty(), "sound is back, so nothing stays");
 }
 
 /// Choosing another device in Preferences while a Named device is lost
@@ -591,6 +600,7 @@ fn choosing_another_device_in_preferences_while_lost_switches_and_saves() {
     assert!(run.app.stream.is_playing(), "now playing on Fake A");
     assert_eq!(run.app.rig.playing.as_ref().unwrap().device, "Fake A");
     assert!(run.app.rig.lost_audio.is_none(), "lost audio state cleared");
+    assert!(run.app.alerts.kept().is_empty(), "the player chose a device");
     assert_eq!(
         run.app.rig.store.saved().audio.device,
         DeviceChoice::Named("Fake A".into())
@@ -616,7 +626,7 @@ fn a_silent_stall_is_treated_as_audio_device_loss() {
     assert!(run.app.stream.is_idle(), "engine preserved on idle");
     assert_eq!(
         run.app.alerts.status(),
-        "Audio: \"Fake B\" was lost. Plug it in again, or choose another device in Preferences."
+        "Audio: \"Fake B\" was lost: the device stopped calling back. Plug it in again, or choose another device in Preferences."
     );
 }
 
@@ -809,8 +819,9 @@ fn lost_system_default_with_no_devices_continues_watching() {
     assert!(run.app.rig.lost_audio.is_none());
     assert_eq!(
         run.app.alerts.status(),
-        "Audio: \"Fake A\" was lost. Now playing on \"USB DAC\"."
+        "Audio: \"Fake A\" was lost: it was unplugged. Now playing on \"USB DAC\"."
     );
+    assert!(run.app.alerts.kept().is_empty(), "sound is back, so nothing stays");
 }
 
 /// When SystemDefault retry repeatedly fails to reopen, retries stop after 10 attempts.
@@ -865,8 +876,9 @@ fn lost_system_default_reconnects_when_device_appears() {
     assert!(run.app.rig.lost_audio.is_none());
     assert_eq!(
         run.app.alerts.status(),
-        "Audio: \"Fake A\" was lost. Now playing on \"USB DAC\"."
+        "Audio: \"Fake A\" was lost: it was unplugged. Now playing on \"USB DAC\"."
     );
+    assert!(run.app.alerts.kept().is_empty(), "sound is back, so nothing stays");
 }
 
 /// When SystemDefault retry encounters a broken device open, attempts increment with error.
@@ -913,4 +925,81 @@ fn change_audio_keeps_lost_audio_when_restart_fails() {
         "lost_audio must be preserved when restart fails"
     );
     assert!(run.app.alerts.status().contains("the stream did not start"));
+}
+
+/// A lost output stays on screen across opening another patch, because
+/// opening a patch does not bring the device back.
+#[test]
+fn a_lost_output_stays_on_screen_after_opening_another_patch() {
+    let mut app = crate::tests::app();
+    app.alerts.error(alerts::Cause::AudioOutput, "Audio: lost");
+    app.alerts.error(alerts::Cause::File, "Could not save");
+    let clean = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches/subtractive.ron");
+    app.open_path(&clean);
+    let kept: Vec<_> = app.alerts.kept().iter().map(|kept| kept.cause).collect();
+    assert_eq!(kept, [alerts::Cause::AudioOutput], "an open clears only file errors");
+}
+
+/// A failed save stays on screen until a later save works.
+#[test]
+fn a_later_save_clears_a_failed_save() {
+    let mut app = crate::tests::app();
+    let dir = std::env::temp_dir().join(format!("loom-app-failed-save-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    assert!(!app.write_to(dir.join("no-such-folder").join("patch.ron")));
+    assert_eq!(app.alerts.newest_kept().unwrap().cause, alerts::Cause::File);
+    assert_eq!(app.alerts.severity(), alerts::Severity::Alarm);
+    assert!(app.write_to(dir.join("patch.ron")));
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(app.alerts.kept().is_empty());
+    assert_eq!(app.alerts.severity(), alerts::Severity::Normal);
+}
+
+/// With a named output lost, a new patch stays idle and the wait goes on: the
+/// session does not move to the system default, and the bar stays true.
+#[test]
+fn a_new_patch_stays_idle_while_a_named_output_is_lost() {
+    let mut run = Setup {
+        preferences: Some("Preferences(version: 1, audio: (device: Named(\"Fake B\")))"),
+        ..Setup::new("lost-then-new", PatchFrom::Example("sine.ron"))
+    }
+    .start();
+    run.host.remove_device("Fake B");
+    run.app.check_audio(Instant::now());
+    assert!(run.app.rig.lost_audio.is_some());
+    let starts = run.tape.stream_starts().len();
+
+    assert!(run.app.replace(Source::Empty));
+    assert!(!run.app.stream.is_playing(), "Fake A does not stand in");
+    assert!(run.app.rig.lost_audio.is_some(), "still waiting");
+    assert_eq!(run.app.alerts.newest_kept().unwrap().cause, alerts::Cause::AudioOutput);
+    assert_eq!(run.tape.stream_starts().len(), starts);
+
+    run.host.add_device(fake::device("Fake B"));
+    run.app.check_audio(Instant::now() + Duration::from_secs(2));
+    assert!(run.app.stream.is_playing(), "it comes back on the new patch");
+    assert_eq!(run.app.rig.playing.as_ref().unwrap().device, "Fake B");
+    assert!(run.app.alerts.kept().is_empty());
+}
+
+/// With a system default lost and a new default present, opening a patch plays
+/// there. That ends the loss, so the next poll does not restart the stream.
+#[test]
+fn a_new_patch_ends_the_loss_of_a_system_default() {
+    let mut run = Setup::new("lost-default-then-new", PatchFrom::Example("sine.ron")).start();
+    run.host.remove_device("Fake A");
+    run.host.remove_device("Fake B");
+    run.app.check_audio(Instant::now());
+    assert!(run.app.rig.lost_audio.is_some());
+    run.host.add_device(fake::device("USB DAC"));
+
+    assert!(run.app.replace(Source::Empty));
+    assert!(run.app.stream.is_playing());
+    assert!(run.app.rig.lost_audio.is_none());
+    assert!(run.app.alerts.kept().is_empty());
+    let starts = run.tape.stream_starts().len();
+    // A stepped output calls back only when played, or this would be a stall.
+    run.play(0.1);
+    run.app.check_audio(Instant::now() + Duration::from_secs(2));
+    assert_eq!(run.tape.stream_starts().len(), starts, "no second restart");
 }

@@ -12,6 +12,7 @@ use crate::{
 use iced::widget::{column, container, mouse_area, row, rule, space, stack, text, toggler, tooltip};
 use iced::{Color, Element, Length};
 use loom_canvas::{DragLine, PatchCanvas};
+use std::sync::atomic::Ordering;
 use std::time::Instant;
 
 impl App {
@@ -215,16 +216,22 @@ impl App {
             tip(
                 button(label("Recent"))
                     .on_press_maybe((!self.rig.recent.files().is_empty()).then_some(Message::OpenRecent)),
-                "The last patches you opened or saved",
+                self.recent_hover(),
             ),
         ];
         let add = tip(
             button(label("Add module")).on_press(Message::OpenBrowser),
             "Or press A over the canvas, or double-click empty canvas",
         );
+        let hold = button(label(if self.holding { "Release note" } else { "Hold note" }))
+            .on_press_maybe(self.midi.as_ref().map(|_| Message::HoldNote));
+        // Disabled controls say why (visual-system.md, Status messages).
+        let hold: Element<'static, Message> = match self.hold_hover() {
+            Some(reason) => tip(hold, reason),
+            None => hold.into(),
+        };
         let play = row![
-            button(label(if self.holding { "Release note" } else { "Hold note" }))
-                .on_press_maybe(self.midi.as_ref().map(|_| Message::HoldNote)),
+            hold,
             tip(
                 button(label("Panic")).on_press(Message::Panic).style(style::danger),
                 if cfg!(target_os = "macos") {
@@ -271,6 +278,20 @@ impl App {
         .padding([6, 10])
         .align_y(iced::Alignment::Center)
         .into()
+    }
+
+    /// Hold note's hover text: why it is disabled, if it is.
+    pub(crate) fn hold_hover(&self) -> Option<&'static str> {
+        self.midi.is_none().then_some(HOLD_DISABLED)
+    }
+
+    /// Recent's hover text, which says why while it is disabled.
+    pub(crate) fn recent_hover(&self) -> &'static str {
+        if self.rig.recent.files().is_empty() {
+            RECENT_DISABLED
+        } else {
+            "The last patches you opened or saved"
+        }
     }
 
     /// An Undo or Redo button. It is disabled with nothing to do, and its
@@ -350,6 +371,27 @@ impl App {
                         .color(severity_colour(alerts::Severity::Warning)),
                 );
             }
+            let engine = self.controller.stats();
+            if stats.output_silenced {
+                items = items.push(output_warning(
+                    "Output: bad samples silenced",
+                    alerts::Severity::Alarm,
+                    format!(
+                        "{} samples since the engine started",
+                        engine.output_silenced.load(Ordering::Relaxed)
+                    ),
+                ));
+            }
+            if stats.output_clipped {
+                items = items.push(output_warning(
+                    "Output clipped",
+                    alerts::Severity::Warning,
+                    format!(
+                        "{} samples since the engine started",
+                        engine.output_clipped.load(Ordering::Relaxed)
+                    ),
+                ));
+            }
             if stats.telemetry_dropped > 0 {
                 items = items.push(bar_text(format!("telemetry dropped {}", stats.telemetry_dropped)).color(DIM));
             }
@@ -374,6 +416,9 @@ impl App {
             )
             .into(),
         };
+        // A word, so it reads without colour, and it stays whatever the
+        // status says: in learn mode screen controls do not change values.
+        let learning = self.learn.is_on().then(|| bar_text("Learning"));
         let mut bar = row![].spacing(16).align_y(iced::Alignment::Center);
         if self.dev_tools {
             bar = bar
@@ -400,23 +445,79 @@ impl App {
         )))
         .push(audio)
         .push(midi)
-        // The status takes the remaining width and is cut off rather
-        // than wrapped, so the bar stays one line high. Hover shows all
-        // of it.
-        .push(tooltip(
-            container(bar_text(self.alerts.status()).color(DIM))
-                .width(Length::Fill)
-                .align_x(iced::Alignment::End)
-                .clip(true),
-            container(text(self.alerts.status()).size(style::BODY))
-                .padding(6)
-                .max_width(480)
-                .style(container::rounded_box),
-            tooltip::Position::Top,
+        .extend(learning.map(Element::from))
+        // The fixed items come first. The kept error and the status share
+        // the remaining width, and are cut off rather than wrapped, so the
+        // bar stays one line high. Hover shows all of it.
+        .extend(self.alerts.kept_field().map(|kept| {
+            status_field(
+                alerts::labelled(alerts::Severity::Alarm, &kept.text),
+                self.alerts.kept_hover(),
+                alerts::Severity::Alarm,
+                kept.dismissible.then_some(kept.cause),
+            )
+        }))
+        .push(status_field(
+            alerts::labelled(self.alerts.severity(), self.alerts.status()),
+            if self.alerts.severity() == alerts::Severity::Alarm {
+                self.alerts.kept_hover()
+            } else {
+                alerts::labelled(self.alerts.severity(), self.alerts.status())
+            },
+            self.alerts.severity(),
+            self.alerts
+                .newest_kept()
+                .filter(|kept| kept.dismissible && self.alerts.kept_field().is_none())
+                .map(|kept| kept.cause),
         ))
         .padding([4, 10])
         .into()
     }
+}
+
+/// Hold note's hover text while it is disabled. The control channel refuses
+/// the press with the same words.
+pub(crate) const HOLD_DISABLED: &str = "Hold note is disabled: no audio is playing the engine";
+
+/// Recent's hover text while it is disabled.
+const RECENT_DISABLED: &str = "Recent is disabled: no patches opened or saved yet";
+
+/// A stats bar warning about the output, with its counts in hover text.
+fn output_warning<'a>(label: &'a str, severity: alerts::Severity, hover: String) -> Element<'a, Message> {
+    tooltip(
+        bar_text(label).color(severity_colour(severity)),
+        container(text(hover).size(style::BODY))
+            .padding(6)
+            .style(container::rounded_box),
+        tooltip::Position::Top,
+    )
+    .into()
+}
+
+/// One message in the status bar: cut to its share of the width, all of it in
+/// hover text, with a × if the player may dismiss it.
+fn status_field<'a>(
+    shown: String,
+    hover: String,
+    severity: alerts::Severity,
+    dismiss: Option<alerts::Cause>,
+) -> Element<'a, Message> {
+    row![tooltip(
+        container(bar_text(shown).color(severity_colour(severity)))
+            .width(Length::Fill)
+            .align_x(iced::Alignment::End)
+            .clip(true),
+        container(text(hover).size(style::BODY))
+            .padding(6)
+            .max_width(480)
+            .style(container::rounded_box),
+        tooltip::Position::Top,
+    )]
+    .extend(dismiss.map(|cause| remove_button("Dismiss this error", Message::DismissError(cause))))
+    .width(Length::Fill)
+    .spacing(4)
+    .align_y(iced::Alignment::Center)
+    .into()
 }
 
 /// The inspector's remove button for an item in a list, such as a MIDI
@@ -445,7 +546,7 @@ pub(crate) fn bar_text<'a>(content: impl text::IntoFragment<'a>) -> iced::widget
 pub(crate) fn severity_colour(severity: alerts::Severity) -> Color {
     match severity {
         alerts::Severity::Normal => DIM,
-        alerts::Severity::Warning => Color::from_rgb8(0xF5, 0xA6, 0x23),
-        alerts::Severity::Alarm => Color::from_rgb8(0xEB, 0x6B, 0x6B),
+        alerts::Severity::Warning => style::WARNING_TEXT,
+        alerts::Severity::Alarm => style::ERROR_TEXT,
     }
 }

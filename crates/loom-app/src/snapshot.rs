@@ -30,8 +30,14 @@ const SCOPE_WINDOW: usize = 48_000;
 pub struct UiSnapshot {
     /// The window title.
     pub title: String,
-    /// The status bar message.
+    /// The latest status message.
     pub status: String,
+    /// How the latest status message reads: `info`, `warning`, or `error`.
+    pub status_severity: crate::alerts::Severity,
+    /// The problems kept on screen, oldest first.
+    pub errors: Vec<crate::alerts::KeptError>,
+    /// True while MIDI learn mode is on and the status bar says so.
+    pub learning: bool,
     /// The step Undo would take back, by name.
     pub undo: Option<String>,
     /// The step Redo would replay, by name.
@@ -83,6 +89,10 @@ pub struct Stats {
     pub telemetry_dropped: u64,
     /// Recent input underrun and overrun corrections.
     pub input_alert: Option<(u64, u64)>,
+    /// The bar says the output silenced bad samples.
+    pub output_silenced: bool,
+    /// The bar says the output clipped.
+    pub output_clipped: bool,
 }
 
 impl Stats {
@@ -451,6 +461,8 @@ impl App {
             dropouts: self.alerts.dropout_count(),
             telemetry_dropped,
             input_alert: self.alerts.input_drift(),
+            output_silenced: self.alerts.output_silenced(),
+            output_clipped: self.alerts.output_clipped(),
         }
     }
 
@@ -561,6 +573,9 @@ impl App {
         UiSnapshot {
             title: self.title(),
             status: self.alerts.status().to_string(),
+            status_severity: self.alerts.severity(),
+            errors: self.alerts.kept().to_vec(),
+            learning: self.learn.is_on(),
             undo: self.edits.history.undo_step().map(|s| s.name().to_string()),
             redo: self.edits.history.redo_step().map(|s| s.name().to_string()),
             selection: self.selection.iter().copied().collect(),

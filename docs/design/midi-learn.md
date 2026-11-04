@@ -34,7 +34,7 @@ The user touches the control on screen, then moves the hardware control. Learn m
 
 | Action | Result |
 |---|---|
-| Press **MIDI learn** in the toolbar | Learn mode starts. The button stays lit. Every control bound to a parameter, on tiles and in the inspector, gets a learn outline. Mapped controls show their mapping as a small label, for example `CC 74`. |
+| Press **MIDI learn** in the toolbar | Learn mode starts. The button stays lit. The status bar shows the word `Learning` for as long as learn mode is on, whatever the status message says (Agreed, M2, [#493](https://github.com/brylie/LoomDSP/issues/493), 2026-11-03). *Why:* in learn mode screen controls do not change values, so a performer who forgot sees dead knobs. Every control bound to a parameter, on tiles and in the inspector, gets a learn outline. Mapped controls show their mapping as a small label, for example `CC 74`. |
 | In learn mode, click a knob, toggle, or radio button on a tile, or a parameter row in the inspector | That parameter is armed. The control is highlighted and the status bar says **Move a MIDI control to map it to <module> <parameter>**. The value does not change. Any parameter armed before is disarmed. |
 | Move a hardware knob or fader while a parameter is armed | A mapping is made from that control change (channel and controller number) to the armed parameter. The status bar says which control was mapped. Nothing is armed now, and learn mode stays on, so the next control can be mapped at once. |
 | In learn mode, click an armed control again | It is disarmed. |
@@ -101,6 +101,7 @@ midi: [
 - [x] A control change on another channel or controller number does not move the parameter.
 - [x] Learning a mapped parameter replaces its mapping. Learning a hardware control that is already mapped moves the mapping to the new parameter, and the status bar names the old one.
 - [x] Clicking an armed control disarms it. Escape or a second press of **MIDI learn** ends learn mode with no change.
+- [x] The status bar shows `Learning` for as long as learn mode is on, whatever the status message says (`App::ui_snapshot()` test).
 - [ ] In learn mode, every mapped control in view shows its `CC` label.
 - [ ] The tile knob and the inspector show the value set by the hardware within one UI frame.
 - [x] A mapped control change still reaches a MIDI input module.

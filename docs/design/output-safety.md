@@ -101,7 +101,7 @@ Five further rate-switch capture attempts on the same setup each observed the ou
 
 - A preferences store and a preferences window for the app. This spec only says the mode is a per-machine preference. The store and window are specified in [App preferences](preferences.md).
 - A user-facing master volume.
-- Showing limiter activity in the stats bar. That belongs to [#130](https://github.com/brylie/LoomDSP/issues/130), which can count limited samples the same way it counts silenced ones.
+- Showing limiter activity in the stats bar. That belongs to [#590](https://github.com/brylie/LoomDSP/issues/590), which can count limited samples the same way [#130](https://github.com/brylie/LoomDSP/issues/130) counts silenced ones.
 - Per-channel modes, for DC-coupled multi-channel interfaces. This waits for outputs beyond stereo.
 - True-peak (oversampled) limiting, and a configurable ceiling.
 - Exposing the mode in exported plugins, and reporting Clean mode's latency to a host (FR-NATIVE-03).

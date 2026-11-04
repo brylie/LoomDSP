@@ -140,3 +140,24 @@ fn a_fade_out_while_clean_waits_for_its_first_sample_is_silent_at_once() {
     assert_eq!(out, [0.0; 4]);
     assert!(stage.is_silent());
 }
+
+/// The stage counts what it turned to silence and what it clipped.
+#[test]
+fn process_counts_silenced_and_clipped_samples() {
+    let mut stage = SafetyStage::new(OutputSafety::Off, RATE);
+    let frames = (RATE * 0.02) as usize;
+    let mut left = vec![0.0; frames];
+    let mut right = vec![0.0; frames];
+    stage.process(&mut left, &mut right);
+
+    let mut left = [f32::NAN, 2.0, 0.5, -3.0];
+    let mut right = [f32::INFINITY, 0.5, f32::NEG_INFINITY, 0.5];
+    let counts = stage.process(&mut left, &mut right);
+    assert_eq!(
+        counts,
+        OutputCounts {
+            silenced: 3,
+            clipped: 2
+        }
+    );
+}

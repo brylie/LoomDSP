@@ -1,7 +1,7 @@
 use super::*;
 use crate::view::severity_colour;
 use iced::Rectangle;
-use loom_core::{EngineConfig, TRANSPORT_MODULE, create_engine};
+use loom_core::{EngineConfig, LoomError, TRANSPORT_MODULE, create_engine};
 use std::time::Duration;
 
 /// A full queue stages fresh modules until the idle engine drains it;
@@ -21,6 +21,59 @@ fn a_full_queue_retries_staged_modules() {
     assert!(!app.retry_commit);
     assert!(!app.controller.has_uncommitted_changes());
     assert_eq!(app.controller.last_report().modules, 4);
+}
+
+/// A full queue fixes itself, so with no undo history to lose it is a warning
+/// and the commit retries. A commit that cannot retry leaves the graph ahead
+/// of the engine, so it stays on screen.
+#[test]
+fn a_commit_that_cannot_retry_is_kept() {
+    let mut app = app();
+    assert!(app.edits.history.undo_step().is_none());
+    app.commit_failed(&LoomError::QueueFull);
+    assert!(app.retry_commit);
+    assert_eq!(app.alerts.severity(), alerts::Severity::Warning);
+    assert!(app.alerts.kept().is_empty());
+
+    app.commit_failed(&LoomError::TooManyModules(4));
+    assert!(!app.retry_commit);
+    assert_eq!(app.alerts.severity(), alerts::Severity::Alarm);
+    assert_eq!(app.alerts.newest_kept().unwrap().cause, alerts::Cause::Other);
+    app.alerts.say("saved");
+    assert!(app.alerts.kept_field().is_some(), "a later message does not hide it");
+}
+
+/// A full queue clears the undo history, and a retry that works does not bring
+/// it back. So the loss stays on screen after the retry's own message.
+#[test]
+fn a_full_queue_keeps_the_loss_of_the_undo_history_on_screen() {
+    let mut app = app_with_engine(EngineConfig {
+        command_capacity: 8,
+        ..EngineConfig::default()
+    });
+    let module = app.controller.add_module("loom.osc.sine").unwrap();
+    app.edit(|app| {
+        app.controller.remove_module(module).unwrap();
+        assert!(app.commit());
+    });
+    assert!(app.edits.history.undo_step().is_some(), "there is history to lose");
+    for _ in 0..8 {
+        app.controller.add_module("loom.osc.sine").unwrap();
+    }
+    assert!(!app.commit());
+    assert!(app.retry_commit, "it still retries");
+    assert!(app.edits.history.undo_step().is_none());
+    assert!(
+        app.alerts.status().contains("undo history cleared"),
+        "{}",
+        app.alerts.status()
+    );
+
+    let _ = app.update(Message::Tick);
+    assert!(!app.retry_commit, "the retry worked");
+    let kept = app.alerts.kept_field().expect("the loss stays on screen");
+    assert!(kept.text.contains("undo history cleared"), "{}", kept.text);
+    assert!(kept.dismissible);
 }
 
 pub(crate) fn app() -> App {
@@ -77,6 +130,8 @@ fn audio_watcher_events_update_the_stats_model() {
         at: now,
         peak: 0.95,
         max: 0.95,
+        silenced: false,
+        clipped: false,
     }));
     assert_eq!(app.stream.load().0, 0.95);
     assert_eq!(app.stream.load().1, 0.95);
@@ -2265,7 +2320,12 @@ fn learn_disarms_on_a_second_click_and_bad_params_say_why() {
     assert_eq!(app.alerts.status(), "MIDI learn: click a control to map it");
 
     app.set_param(id, 999, 0.5);
-    assert!(app.alerts.status().starts_with("error: "), "{}", app.alerts.status());
+    assert_eq!(
+        app.alerts.severity(),
+        alerts::Severity::Warning,
+        "{}",
+        app.alerts.status()
+    );
 }
 
 /// The matrix Add form needs both ends before it adds anything.
@@ -2393,6 +2453,90 @@ fn a_panic_that_cannot_be_sent_says_so() {
         "{}",
         app.alerts.status()
     );
+}
+
+/// The bar shows a kept error beside a later message, each with its word, and
+/// the snapshot reports both. The same text never shows twice.
+#[test]
+fn the_status_bar_shows_a_kept_error_beside_later_messages() {
+    let mut ui = crate::ui_test::Ui::with_app(app());
+    ui.app.alerts.error(alerts::Cause::File, "save failed");
+    ui.redraw();
+    assert!(ui.text("Error: save failed").is_some());
+    assert_eq!(
+        ui.app.ui_snapshot().status_severity,
+        alerts::Severity::Alarm,
+        "the latest message is the error"
+    );
+    assert!(ui.text("×").is_some(), "the latest message can be dismissed too");
+
+    ui.app.alerts.say("saved");
+    ui.redraw();
+    assert!(ui.text("Error: save failed").is_some(), "it stays after info");
+    assert!(ui.text("saved").is_some());
+    let snapshot = ui.app.ui_snapshot();
+    assert_eq!(snapshot.status, "saved");
+    assert_eq!(snapshot.status_severity, alerts::Severity::Normal);
+    assert_eq!(snapshot.errors.len(), 1);
+    assert_eq!(snapshot.errors[0].text, "save failed");
+
+    ui.app.alerts.warn("refused");
+    ui.redraw();
+    assert!(ui.text("Warning: refused").is_some());
+    assert_eq!(ui.app.ui_snapshot().status_severity, alerts::Severity::Warning);
+}
+
+/// The × takes a kept error off the bar. A lost output has no ×, and its
+/// severity is in the snapshot's words.
+#[test]
+fn pressing_x_dismisses_a_kept_error_but_a_lost_output_has_none() {
+    let mut ui = crate::ui_test::Ui::with_app(app());
+    ui.app.alerts.error(alerts::Cause::Other, "the recording stopped");
+    ui.app.alerts.say("saved");
+    ui.redraw();
+    let x = ui.text("×").expect("a kept error can be dismissed").center();
+    ui.move_to(x);
+    ui.press();
+    ui.release();
+    assert!(ui.app.alerts.kept().is_empty());
+    assert!(ui.text("Error: the recording stopped").is_none());
+
+    ui.app.alerts.error(alerts::Cause::AudioOutput, "Audio: lost");
+    ui.redraw();
+    assert!(ui.text("Error: Audio: lost").is_some());
+    assert!(ui.text("×").is_none(), "only sound or a choice ends a lost output");
+    let json = serde_json::to_value(ui.app.ui_snapshot()).unwrap();
+    assert_eq!(json["status_severity"], "error");
+    assert_eq!(json["errors"][0]["cause"], "audio_output");
+    assert_eq!(json["errors"][0]["dismissible"], false);
+}
+
+/// Learn mode shows its word for as long as it is on, whatever the status
+/// message says.
+#[test]
+fn the_status_bar_says_learning_while_learn_mode_is_on() {
+    let mut ui = crate::ui_test::Ui::with_app(app());
+    assert!(ui.text("Learning").is_none());
+    assert!(!ui.app.ui_snapshot().learning);
+    ui.send(Message::Learn(learn::Message::Toggle));
+    ui.app.alerts.say("Mapped CC 74 to SVF Cutoff");
+    ui.redraw();
+    assert!(ui.text("Learning").is_some(), "the next message does not hide it");
+    assert!(ui.app.ui_snapshot().learning);
+    ui.send(Message::Learn(learn::Message::Toggle));
+    ui.redraw();
+    assert!(ui.text("Learning").is_none());
+}
+
+/// A disabled toolbar button says why in its hover text. The harness does
+/// not reach tooltips, so this reads what the view passes to them.
+#[test]
+fn disabled_toolbar_buttons_say_why_in_hover_text() {
+    let app = app();
+    assert!(app.midi.is_none(), "no audio in this test");
+    assert_eq!(app.hold_hover(), Some(crate::view::HOLD_DISABLED));
+    assert!(app.rig.recent.files().is_empty());
+    assert!(app.recent_hover().contains("disabled"), "{}", app.recent_hover());
 }
 
 /// Presses a key as a real keyboard does, with its text, and returns the

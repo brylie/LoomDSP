@@ -6,12 +6,13 @@
 //! only on the control thread. The stream's own callbacks reach it through
 //! the failure flag in the port's `InputStatus`.
 
-use crate::alerts::Alerts;
+use crate::alerts::{Alerts, Cause};
 use crate::devices::{Host, InputPort};
 use crate::input_watch::Tracker;
 use crate::preferences::InputChoice;
 use loom_core::Controller;
 use loom_host_desktop::{AudioOptions, InputError};
+use serde::Serialize;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
@@ -32,9 +33,11 @@ enum Phase {
     Waiting {
         /// The last attempt to open, to avoid repeated device opens.
         last_attempt: Option<Instant>,
-        /// A named input was lost while playing: wait for that device to
-        /// return, rather than falling back to the system default.
-        named_lost: bool,
+        /// A stream opened by name stopped: its device, to wait for if it is
+        /// gone, rather than falling back to the system default. This is the
+        /// device that opened, because `--input` matches part of a name and
+        /// another device could match too.
+        lost_named: Option<String>,
     },
     /// A stream is open.
     Open {
@@ -42,6 +45,10 @@ enum Phase {
         port: Box<dyn InputPort>,
         /// Drift warning history, shared with the input watcher.
         tracker: Arc<Tracker>,
+        /// The stream was opened by name, not through the fallback or as the
+        /// system default. If it stops and the device is gone, the session
+        /// waits for that device.
+        named: bool,
     },
 }
 
@@ -62,6 +69,34 @@ pub(crate) struct Demand<'a> {
     pub sample_rate: u32,
 }
 
+/// Where the input stream is, as the control channel reports it
+/// (`docs/design/control-channel.md`, The `audio` field).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum InputState {
+    /// The patch or the settings need no input.
+    Off,
+    /// An input is wanted and no stream is open.
+    Waiting,
+    /// A named input was lost, and the session waits for that device.
+    WaitingForNamed,
+    /// A stream is open and live.
+    Open,
+    /// A stream is open but has failed, and the next sync replaces it.
+    Failed,
+    /// Permission is denied now and no stream is open.
+    Denied,
+}
+
+/// The input stream as a script sees it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct InputReport {
+    /// The open stream's device name.
+    pub device: Option<String>,
+    /// Where the stream is.
+    pub state: InputState,
+}
+
 /// Owns the input stream, its retry and recovery state, and which of its
 /// messages have been shown.
 ///
@@ -74,9 +109,6 @@ pub struct InputSession {
     error_reported: bool,
     /// The refused permission has been reported in this run.
     permission_reported: bool,
-    /// The text of the last input error, so recovery replaces only that
-    /// message and never a newer one.
-    shown_error: Option<String>,
     /// The live-input feedback warning has been shown in this run.
     feedback_warned: bool,
 }
@@ -88,7 +120,6 @@ impl InputSession {
             phase: Phase::Off,
             error_reported: false,
             permission_reported: false,
-            shown_error: None,
             feedback_warned: false,
         }
     }
@@ -101,14 +132,41 @@ impl InputSession {
     /// The open stream and its drift tracker, for the input watcher.
     pub(crate) fn open(&self) -> Option<(&dyn InputPort, &Arc<Tracker>)> {
         match &self.phase {
-            Phase::Open { port, tracker } => Some((port.as_ref(), tracker)),
+            Phase::Open { port, tracker, .. } => Some((port.as_ref(), tracker)),
             _ => None,
         }
     }
 
+    /// What a script may read about the stream. `wanted` says the patch has
+    /// an Audio In and the input is not off, which the phase cannot say while
+    /// the output is stopped. `denied` says the input is wanted and permission
+    /// is refused now. The refusal is not a phase,
+    /// because it is checked again at each sync, and the message's latch stays
+    /// set after the refusal ends.
+    pub(crate) fn stream_report(&self, wanted: bool, denied: bool) -> InputReport {
+        let (device, state) = match &self.phase {
+            Phase::Open { port, .. } if port.is_live() => (Some(port.name().to_string()), InputState::Open),
+            Phase::Open { port, .. } => (Some(port.name().to_string()), InputState::Failed),
+            _ if denied => (None, InputState::Denied),
+            Phase::Waiting {
+                lost_named: Some(_), ..
+            } => (None, InputState::WaitingForNamed),
+            Phase::Waiting { .. } => (None, InputState::Waiting),
+            Phase::Off if wanted => (None, InputState::Waiting),
+            Phase::Off => (None, InputState::Off),
+        };
+        InputReport { device, state }
+    }
+
     /// Whether a lost named input is being waited for.
     pub(crate) fn named_lost(&self) -> bool {
-        matches!(self.phase, Phase::Waiting { named_lost: true, .. })
+        matches!(
+            self.phase,
+            Phase::Waiting {
+                lost_named: Some(_),
+                ..
+            }
+        )
     }
 
     /// Whether the feedback warning has been shown in this run.
@@ -136,34 +194,35 @@ impl InputSession {
     }
 
     /// The output stream stopped, and its engine with it, so no command is
-    /// sent. A lost named input is still waited for on the next stream.
+    /// sent. A named input is waited for on the next stream if it is gone by
+    /// then. That does not depend on the stream's failure flag, which is set
+    /// from other threads and may not be set yet.
     pub(crate) fn stream_stopped(&mut self) {
-        self.phase = match self.phase {
+        self.phase = match std::mem::replace(&mut self.phase, Phase::Off) {
             Phase::Off => Phase::Off,
-            Phase::Waiting { named_lost, .. } => Phase::Waiting {
+            Phase::Waiting { lost_named, .. } => Phase::Waiting {
                 last_attempt: None,
-                named_lost,
+                lost_named,
             },
-            Phase::Open { .. } => Phase::Waiting {
+            Phase::Open { port, named, .. } => Phase::Waiting {
                 last_attempt: None,
-                named_lost: false,
+                lost_named: named.then(|| port.name().to_string()),
             },
         };
     }
 
     /// The player chose an input: start again, so a refusal or device error
     /// can show again for it. The feedback warning stays once per run.
-    pub(crate) fn choose(&mut self, controller: &mut Controller) {
+    pub(crate) fn choose(&mut self, controller: &mut Controller, alerts: &mut Alerts) {
         self.close(controller);
+        alerts.clear(Cause::AudioInput);
         self.error_reported = false;
         self.permission_reported = false;
-        self.shown_error = None;
     }
 
-    /// Reports a problem and remembers its text for recovery.
+    /// Reports a problem, and keeps it on screen until its cause is gone.
     fn report(&mut self, alerts: &mut Alerts, message: String) {
-        alerts.say(message);
-        self.shown_error = Some(alerts.status().to_string());
+        alerts.error(Cause::AudioInput, message);
     }
 
     /// Keeps the stream in step with what is needed now. A failure leaves the
@@ -181,12 +240,21 @@ impl InputSession {
             // output is stopped, and that must not end the wait: the patch
             // would come back on the default microphone. Once the input is
             // no longer wanted, a later Audio In starts fresh.
-            let keep_waiting = demand.wanted && self.named_lost();
+            let keep_waiting = match &self.phase {
+                Phase::Waiting { lost_named, .. } if demand.wanted => lost_named.clone(),
+                _ => None,
+            };
+            // With no input wanted, its error no longer matters, and a later
+            // Audio In may report one again, even if this one was dismissed.
+            if !demand.wanted {
+                alerts.clear(Cause::AudioInput);
+                self.error_reported = false;
+            }
             self.close(controller);
-            if keep_waiting {
+            if keep_waiting.is_some() {
                 self.phase = Phase::Waiting {
                     last_attempt: None,
-                    named_lost: true,
+                    lost_named: keep_waiting,
                 };
             }
             alerts.set_input_drift(None);
@@ -203,13 +271,13 @@ impl InputSession {
             }
             return;
         }
-        let (last_attempt, named_lost) = match std::mem::replace(&mut self.phase, Phase::Off) {
-            Phase::Open { port, tracker } if port.is_live() => {
-                self.phase = Phase::Open { port, tracker };
+        let (last_attempt, lost_named) = match std::mem::replace(&mut self.phase, Phase::Off) {
+            Phase::Open { port, tracker, named } if port.is_live() => {
+                self.phase = Phase::Open { port, tracker, named };
                 self.warn_about_feedback(controller, alerts);
                 return;
             }
-            Phase::Open { port, .. } => {
+            Phase::Open { port, named, .. } => {
                 let name = port.name().to_string();
                 drop(port);
                 alerts.set_input_drift(None);
@@ -221,20 +289,17 @@ impl InputSession {
                     );
                     self.error_reported = true;
                 }
-                (
-                    None,
-                    demand.flag.is_some() || matches!(demand.choice, InputChoice::Named(_)),
-                )
+                (None, named.then_some(name))
             }
             Phase::Waiting {
                 last_attempt,
-                named_lost,
-            } => (last_attempt, named_lost),
-            Phase::Off => (None, false),
+                lost_named,
+            } => (last_attempt, lost_named),
+            Phase::Off => (None, None),
         };
         self.phase = Phase::Waiting {
             last_attempt,
-            named_lost,
+            lost_named: lost_named.clone(),
         };
         let now = Instant::now();
         if last_attempt.is_some_and(|at| now.duration_since(at) < RETRY_EVERY) {
@@ -245,7 +310,7 @@ impl InputSession {
         let Some(buffer) = demand.buffer else { return };
         self.phase = Phase::Waiting {
             last_attempt: Some(now),
-            named_lost,
+            lost_named: lost_named.clone(),
         };
         let mut options = AudioOptions {
             sample_rate: Some(demand.sample_rate),
@@ -253,19 +318,35 @@ impl InputSession {
             ..Default::default()
         };
         let mut fallback = None;
-        if let Some(wanted) = demand.flag {
+        if let Some(device) = lost_named {
+            if host
+                .audio_inputs()
+                .is_ok_and(|inputs| !inputs.devices.contains(&device))
+            {
+                // The output's loss may have been handled first, so this can
+                // be the first the session knows of it.
+                if !self.error_reported {
+                    self.report(
+                        alerts,
+                        format!("Audio input: \"{device}\" was lost. Trying to reopen it."),
+                    );
+                    self.error_reported = true;
+                }
+                return;
+            }
+            options.device = Some(device);
+            options.exact = true;
+        } else if let Some(wanted) = demand.flag {
             options.device = Some(wanted.to_string());
         } else if let InputChoice::Named(name) = demand.choice {
             if host.audio_inputs().is_ok_and(|inputs| !inputs.devices.contains(name)) {
-                if named_lost {
-                    return;
-                }
                 fallback = Some(name.clone());
             } else {
                 options.device = Some(name.clone());
                 options.exact = true;
             }
         }
+        let named = options.device.is_some();
         match host.open_audio_input(&options, buffer as usize) {
             Ok((port, reader)) => match controller.set_audio_input(Some(reader)) {
                 Ok(()) => {
@@ -278,18 +359,20 @@ impl InputSession {
                     self.phase = Phase::Open {
                         port,
                         tracker: Arc::new(Tracker::new(counts)),
+                        named,
                     };
                     self.error_reported = false;
-                    let error_was_shown = self.shown_error.take().is_some_and(|status| status == alerts.status());
+                    // A dismissed error gets no "is back" message.
+                    let error_was_kept = alerts.clear(Cause::AudioInput);
                     if let Some(wanted) = fallback {
-                        alerts.say(format!(
+                        alerts.warn(format!(
                             "Audio input: \"{wanted}\" is not available. Using the system default."
                         ));
-                    } else if error_was_shown {
+                    } else if error_was_kept {
                         alerts.say(format!("Audio input: \"{name}\" is back."));
                     }
                 }
-                Err(error) => alerts.say(format!("Audio input: {error}.")),
+                Err(error) => alerts.warn(format!("Audio input: {error}.")),
             },
             Err(error) => {
                 let reported = if matches!(error, InputError::PermissionDenied) {
@@ -323,7 +406,7 @@ impl InputSession {
                 && controller.display(id, 0).is_some_and(|active| active >= 0.5)
         });
         if live {
-            alerts.say("Audio input is live. Use headphones, or keep the gain low, to avoid feedback.");
+            alerts.warn("Audio input is live. Use headphones, or keep the gain low, to avoid feedback.");
             self.feedback_warned = true;
         }
     }

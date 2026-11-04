@@ -27,7 +27,7 @@ impl App {
             _ => false,
         };
         if forbidden {
-            self.alerts.say("Cannot connect to an unknown module");
+            self.alerts.warn("Cannot connect to an unknown module");
             self.gestures.cancel_drag();
             return;
         }
@@ -127,7 +127,7 @@ impl App {
                     Ok(_) => {
                         self.commit();
                     }
-                    Err(e) => self.alerts.say(format!("error: {e}")),
+                    Err(e) => self.alerts.warn(e.to_string()),
                 }
             }
             CanvasEvent::Assign {
@@ -175,7 +175,7 @@ impl App {
                 if let Some((index, _, _)) = scene::control_param(&self.controller, module, widget) {
                     // The canvas checked the text before it sent it.
                     if let Err(why) = self.apply_typed_value(module, index, &text) {
-                        self.alerts.say(why);
+                        self.alerts.warn(why);
                     }
                 }
             }

@@ -151,6 +151,7 @@ fn a_failed_open_is_reported_once_and_retried_after_a_wait() {
 }
 
 /// Every failed attempt after the first is quiet, so newer messages stay.
+/// The kept error stays beside them, and recovery says the input is back.
 #[test]
 fn repeated_failures_keep_newer_messages() {
     let mut bench = Bench::new(&["Mic"]);
@@ -159,10 +160,12 @@ fn repeated_failures_keep_newer_messages() {
     bench.alerts.say("Mapped CC 74");
     bench.sync();
     assert_eq!(bench.status(), "Mapped CC 74");
+    assert_eq!(bench.alerts.kept().len(), 1, "the error stays beside it");
     *bench.fake.input_error.borrow_mut() = None;
     bench.sync();
     assert!(bench.device().is_some());
-    assert_eq!(bench.status(), "Mapped CC 74", "recovery replaces only its own error");
+    assert_eq!(bench.status(), "Audio input: \"Mic\" is back.");
+    assert!(bench.alerts.kept().is_empty());
 }
 
 /// Each loss in a run is reported, and each recovery replaces only its error.
@@ -268,14 +271,16 @@ fn a_refusal_shows_once_until_an_input_is_chosen() {
     bench.fake.input_permission_denied.set(false);
     bench.sync();
     assert!(bench.device().is_some(), "access came back");
-    assert_eq!(bench.status(), "newer");
+    assert!(bench.alerts.kept().is_empty());
 
+    bench.alerts.say("newer");
     bench.fake.input_permission_denied.set(true);
     bench.sync();
     assert_eq!(bench.device(), None);
     assert_eq!(bench.status(), "newer", "once per run");
+    assert!(bench.alerts.kept().is_empty(), "once per run");
 
-    bench.session.choose(&mut bench.parts.controller);
+    bench.session.choose(&mut bench.parts.controller, &mut bench.alerts);
     bench.sync();
     assert!(bench.status().contains("microphone was denied"));
 }
@@ -319,7 +324,7 @@ fn a_stopped_output_keeps_the_wait_for_a_named_input() {
     bench.sync();
     assert_eq!(bench.device(), None, "the default does not stand in");
 
-    bench.session.choose(&mut bench.parts.controller);
+    bench.session.choose(&mut bench.parts.controller, &mut bench.alerts);
     assert!(!bench.session.named_lost());
     bench.sync();
     assert_eq!(bench.device().as_deref(), Some("Other"), "the fallback applies again");
@@ -461,4 +466,259 @@ fn input_error_categories_have_their_own_status() {
         assert!(input_error_message(&error).contains(text), "{error:?}");
     }
     assert!(!input_error_message(&InputError::Other("permission denied".into())).contains("was denied"));
+}
+
+/// A device error the player dismissed gets no "is back" message.
+#[test]
+fn a_dismissed_error_gets_no_back_message() {
+    let mut bench = Bench::new(&["Mic"]);
+    *bench.fake.input_error.borrow_mut() = Some(InputError::Other("device busy".into()));
+    bench.sync();
+    bench.alerts.say("newer");
+    bench.alerts.dismiss(Cause::AudioInput);
+    *bench.fake.input_error.borrow_mut() = None;
+    bench.sync();
+    assert!(bench.device().is_some());
+    assert_eq!(bench.status(), "newer");
+}
+
+/// An input error clears when the stream opens, when the player chooses an
+/// input, and when no input is wanted, so none stays on screen after its
+/// cause is gone. A later Audio In can report the same problem again.
+#[test]
+fn an_input_error_clears_when_its_cause_is_gone() {
+    let fail = |bench: &mut Bench| {
+        *bench.fake.input_error.borrow_mut() = Some(InputError::Other("device busy".into()));
+        bench.sync();
+        assert_eq!(bench.alerts.kept().len(), 1);
+    };
+
+    let mut bench = Bench::new(&["Mic"]);
+    fail(&mut bench);
+    *bench.fake.input_error.borrow_mut() = None;
+    bench.sync();
+    assert!(bench.alerts.kept().is_empty(), "the stream opened");
+
+    let mut bench = Bench::new(&["Mic"]);
+    fail(&mut bench);
+    bench.session.choose(&mut bench.parts.controller, &mut bench.alerts);
+    assert!(bench.alerts.kept().is_empty(), "the player chose an input");
+
+    let mut bench = Bench::new(&["Mic"]);
+    fail(&mut bench);
+    bench.wanted = false;
+    bench.sync();
+    assert!(bench.alerts.kept().is_empty(), "no input is wanted");
+    assert_eq!(bench.status(), "", "it does not go on saying `Error:`");
+
+    bench.wanted = true;
+    bench.sync();
+    assert_eq!(bench.alerts.kept().len(), 1, "a later Audio In reports it again");
+}
+
+/// A lost named input is waited for whichever loss is seen first, and the
+/// player is told once. One interface often carries both directions, so the
+/// output's loss can be handled before the session sees the input's.
+#[test]
+fn a_lost_named_input_is_waited_for_in_either_order() {
+    for output_first in [false, true] {
+        let mut bench = Bench::new(&["Other", "Mic"]);
+        bench.choice = InputChoice::Named("Mic".into());
+        bench.sync();
+        assert_eq!(bench.device().as_deref(), Some("Mic"));
+        bench.plug(&["Other"]);
+        bench.fail_stream();
+        if output_first {
+            bench.session.stream_stopped();
+        } else {
+            bench.sync();
+            bench.session.stream_stopped();
+        }
+        assert!(bench.session.named_lost(), "output first: {output_first}");
+        bench.alerts.say("newer");
+        bench.sync();
+        assert_eq!(bench.device(), None, "the default does not stand in");
+        assert!(bench.session.named_lost());
+        let kept = bench.alerts.newest_kept().expect("the loss stays on screen");
+        assert_eq!(kept.text, "Audio input: \"Mic\" was lost. Trying to reopen it.");
+        bench.alerts.say("newer");
+        bench.sync();
+        assert_eq!(bench.status(), "newer", "told once");
+
+        bench.plug(&["Other", "Mic"]);
+        bench.session.forget_attempt();
+        bench.sync();
+        assert_eq!(bench.device().as_deref(), Some("Mic"), "it comes back");
+        assert!(bench.alerts.kept().is_empty());
+    }
+}
+
+/// The failure flag is set from other threads, so it may not be set yet when
+/// the output's loss is handled. The wait does not depend on it.
+#[test]
+fn the_wait_holds_before_the_failure_flag_is_set() {
+    let mut bench = Bench::new(&["Other", "Mic"]);
+    bench.choice = InputChoice::Named("Mic".into());
+    bench.sync();
+    bench.plug(&["Other"]);
+    bench.session.stream_stopped();
+    assert!(bench.session.named_lost());
+    bench.sync();
+    assert_eq!(bench.device(), None, "the default does not stand in");
+}
+
+/// A stopped output with the named input still there just reopens it, so a
+/// device change keeps working.
+#[test]
+fn a_deliberate_stop_reopens_a_named_input_that_is_still_there() {
+    let mut bench = Bench::new(&["Other", "Mic"]);
+    bench.choice = InputChoice::Named("Mic".into());
+    bench.sync();
+    bench.session.stream_stopped();
+    bench.sync();
+    assert_eq!(bench.device().as_deref(), Some("Mic"));
+    assert!(bench.alerts.kept().is_empty(), "nothing was lost");
+}
+
+/// A stream that opened through the fallback was not opened by name, so
+/// losing it may fall back again.
+#[test]
+fn a_fallback_stream_may_fall_back_again() {
+    let mut bench = Bench::new(&["Other"]);
+    bench.choice = InputChoice::Named("Mic".into());
+    bench.sync();
+    assert_eq!(bench.device().as_deref(), Some("Other"), "missing at start falls back");
+    bench.session.stream_stopped();
+    assert!(!bench.session.named_lost());
+    bench.sync();
+    assert_eq!(bench.device().as_deref(), Some("Other"));
+}
+
+/// Removing the last Audio In also ends a wait that began with the output's
+/// loss.
+#[test]
+fn removing_the_last_audio_in_ends_a_wait_that_began_with_the_output() {
+    let mut bench = Bench::new(&["Other", "Mic"]);
+    bench.choice = InputChoice::Named("Mic".into());
+    bench.sync();
+    bench.plug(&["Other"]);
+    bench.session.stream_stopped();
+    bench.output_playing = false;
+    bench.sync();
+    assert!(bench.session.named_lost(), "the audio poll does not end the wait");
+    bench.wanted = false;
+    bench.sync();
+    assert!(!bench.session.named_lost());
+    bench.wanted = true;
+    bench.output_playing = true;
+    bench.sync();
+    assert_eq!(
+        bench.device().as_deref(),
+        Some("Other"),
+        "a later Audio In starts fresh"
+    );
+}
+
+/// The report follows the stream through each state, whether or not an
+/// output plays, with no real device named.
+#[test]
+fn the_report_follows_the_stream() {
+    let report = |bench: &Bench, denied| bench.session.stream_report(bench.wanted, denied);
+    let shows = |device: Option<&str>, state| InputReport {
+        device: device.map(str::to_string),
+        state,
+    };
+    let mut bench = Bench::new(&["Other", "Mic"]);
+    bench.choice = InputChoice::Named("Mic".into());
+    bench.wanted = false;
+    assert_eq!(report(&bench, false), shows(None, InputState::Off));
+
+    bench.wanted = true;
+    bench.sync();
+    assert_eq!(report(&bench, false), shows(Some("Mic"), InputState::Open));
+
+    bench.plug(&["Other"]);
+    bench.fail_stream();
+    assert_eq!(report(&bench, false), shows(Some("Mic"), InputState::Failed));
+
+    bench.sync();
+    assert_eq!(report(&bench, false), shows(None, InputState::WaitingForNamed));
+
+    bench.output_playing = false;
+    bench.sync();
+    assert_eq!(
+        report(&bench, false),
+        shows(None, InputState::WaitingForNamed),
+        "the wait goes on with the output stopped"
+    );
+    assert_eq!(report(&bench, true), shows(None, InputState::Denied));
+
+    bench.wanted = false;
+    bench.sync();
+    assert_eq!(
+        report(&bench, false),
+        shows(None, InputState::Off),
+        "the last Audio In went"
+    );
+
+    let mut bench = Bench::new(&["Mic"]);
+    *bench.fake.input_error.borrow_mut() = Some(InputError::Other("device busy".into()));
+    bench.sync();
+    assert_eq!(report(&bench, false), shows(None, InputState::Waiting));
+}
+
+/// A device error the player dismissed does not silence the next Audio In:
+/// removing the last one starts fresh even with nothing left to clear.
+#[test]
+fn a_dismissed_error_is_reported_again_for_a_later_audio_in() {
+    let mut bench = Bench::new(&["Mic"]);
+    *bench.fake.input_error.borrow_mut() = Some(InputError::Other("device busy".into()));
+    bench.sync();
+    bench.alerts.dismiss(Cause::AudioInput);
+    bench.wanted = false;
+    bench.sync();
+    bench.wanted = true;
+    bench.sync();
+    assert_eq!(bench.alerts.kept().len(), 1, "the new Audio In reports it");
+}
+
+/// `--input` matches part of a name, so another device can match too. Once a
+/// stream opened, the wait is for that device, in either order of loss.
+#[test]
+fn a_partial_name_waits_for_the_device_it_opened() {
+    for output_first in [false, true] {
+        let mut bench = Bench::new(&["Mic A", "Mic B"]);
+        bench.flag = Some("Mic");
+        bench.sync();
+        assert_eq!(bench.device().as_deref(), Some("Mic A"));
+        bench.plug(&["Mic B"]);
+        bench.fail_stream();
+        if output_first {
+            bench.session.stream_stopped();
+        }
+        bench.sync();
+        bench.sync();
+        assert_eq!(
+            bench.device(),
+            None,
+            "Mic B does not stand in, output first: {output_first}"
+        );
+        assert!(bench.session.named_lost());
+
+        bench.plug(&["Mic A", "Mic B"]);
+        bench.sync();
+        assert_eq!(bench.device().as_deref(), Some("Mic A"), "output first: {output_first}");
+    }
+}
+
+/// With an Audio In in the patch and the output stopped, the input is still
+/// wanted, so the report says `waiting`, not `off`.
+#[test]
+fn a_stopped_output_reports_waiting_while_an_input_is_wanted() {
+    let mut bench = Bench::new(&["Mic"]);
+    bench.sync();
+    bench.output_playing = false;
+    bench.sync();
+    assert_eq!(bench.session.stream_report(true, false).state, InputState::Waiting);
+    assert_eq!(bench.session.stream_report(false, false).state, InputState::Off);
 }

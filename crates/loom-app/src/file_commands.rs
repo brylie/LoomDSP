@@ -2,7 +2,7 @@
 //! Open, and replacing the patch with another (`docs/design/files.md`).
 
 use crate::question::{AfterDiscard, Answer, Kind, Message as QuestionMessage, Question};
-use crate::{App, Args, FileAction, Source, bench, control, devices, files, screenshot, settings};
+use crate::{App, Args, FileAction, Source, alerts, bench, control, devices, files, screenshot, settings};
 use loom_core::EngineConfig;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -26,6 +26,7 @@ impl App {
         let patch = self.current_patch();
         match patch.save(&path) {
             Ok(()) => {
+                self.alerts.clear(alerts::Cause::File);
                 self.alerts.say(format!("saved {}", path.display()));
                 self.document.saved(path, patch);
                 self.edits.history.mark_saved();
@@ -40,7 +41,7 @@ impl App {
                     files::display_name(Some(&path))
                 );
                 self.show_error(&message);
-                self.alerts.say(message);
+                self.alerts.error(alerts::Cause::File, message);
                 false
             }
         }
@@ -55,7 +56,7 @@ impl App {
             Ok(()) => Some(dir),
             Err(e) => {
                 self.alerts
-                    .say(format!("Could not make the library folder \"{}\": {e}.", dir.display()));
+                    .warn(format!("Could not make the library folder \"{}\": {e}.", dir.display()));
                 None
             }
         }
@@ -74,7 +75,7 @@ impl App {
     /// only the convenience, so it is only said.
     fn used_folder_of(&mut self, path: &Path) {
         if let Err(e) = self.rig.recent.used_folder_of(path) {
-            self.alerts.say(format!("Could not keep the last folder: {e}."));
+            self.alerts.warn(format!("Could not keep the last folder: {e}."));
         }
     }
 
@@ -93,7 +94,7 @@ impl App {
         // from another folder, and the same file is listed once.
         let path = std::path::absolute(file).unwrap_or_else(|_| file.to_path_buf());
         if let Err(e) = self.rig.recent.remember(&path) {
-            self.alerts.say(format!("Could not keep the recent patches: {e}."));
+            self.alerts.warn(format!("Could not keep the recent patches: {e}."));
         }
     }
 
@@ -156,7 +157,7 @@ impl App {
         self.finish_edits();
         if !self.control.is_empty() {
             self.alerts
-                .say("Save As opens a file dialog; use the `save` command instead.".to_string());
+                .warn("Save As opens a file dialog; use the `save` command instead.".to_string());
             return false;
         }
         // A patch with no file yet starts in the last folder used, or else
@@ -293,14 +294,19 @@ impl App {
         // play it.
         // A recording goes on into the same file (rig.recorder).
         let playback = self.stream.playback();
-        let (output, _) = settings::open_output(&self.rig, playback.is_off(), playback.is_fake());
+        // A lost named device is being waited for, so the new patch stays idle
+        // too, rather than coming out of other speakers (device-changes.md).
+        let (output, _) = match self.rig.lost_audio.as_ref().filter(|lost| !lost.was_system_default) {
+            Some(lost) => (Err(format!("waiting for \"{}\"", lost.device)), Vec::new()),
+            None => settings::open_output(&self.rig, playback.is_off(), playback.is_fake()),
+        };
         // Playing now and no device to play on afterwards: keep what plays.
         if let (Err(e), true) = (&output, self.stream.is_playing()) {
             let message = format!(
                 "Could not open the patch: the audio device is not available ({e}). The current patch is unchanged."
             );
             self.show_error(&message);
-            self.alerts.say(message);
+            self.alerts.error(alerts::Cause::File, message);
             return false;
         }
         let sample_rate = output
@@ -316,7 +322,7 @@ impl App {
             Err(e) => {
                 let message = format!("Could not open the patch: {e}. The current patch is unchanged.");
                 self.show_error(&message);
-                self.alerts.say(message);
+                self.alerts.error(alerts::Cause::File, message);
                 return false;
             }
         };
@@ -368,6 +374,17 @@ impl App {
         fresh.browser_key = self.browser_key;
         fresh.patches_open = self.patches_open;
         fresh.frame_key = self.frame_key + 1;
+        fresh.alerts.carry_kept_from(&mut self.alerts);
+        // The file that could not be read or written no longer matters.
+        fresh.alerts.clear(alerts::Cause::File);
+        // The new app's first look at the devices came before the carry, so
+        // it could not clear what it found to be over.
+        if fresh.stream.is_playing() {
+            fresh.audio_back();
+        }
+        if fresh.rig.input.open().is_some() || !fresh.input_wanted() {
+            fresh.alerts.clear(alerts::Cause::AudioInput);
+        }
         *self = fresh;
         // The new patch has no unsaved changes: the copy goes.
         self.autosave(Instant::now());
@@ -415,7 +432,7 @@ impl App {
     pub(crate) fn open_path(&mut self, path: &std::path::Path) -> bool {
         let opened = self.replace(Source::File(path));
         if opened {
-            self.alerts.say(opened_status(path, self.document.load_notes()));
+            self.say_opened(path);
             self.remember_current();
         }
         opened
@@ -438,7 +455,7 @@ impl App {
                 format!(" Note: {notes}.")
             };
             self.alerts
-                .say(format!("Opened \"{name}\". Drop one patch at a time.{notes}"));
+                .warn(format!("Opened \"{name}\". Drop one patch at a time.{notes}"));
         }
     }
 
@@ -466,12 +483,12 @@ impl App {
         // cannot open.
         if !path.is_file() {
             if let Err(e) = self.rig.recent.forget(&path) {
-                self.alerts.say(format!("Could not keep the recent patches: {e}."));
+                self.alerts.warn(format!("Could not keep the recent patches: {e}."));
                 return;
             }
             let name = files::display_name(Some(&path));
             self.alerts
-                .say(format!("\"{name}\" is no longer there, so it is off the list."));
+                .warn(format!("\"{name}\" is no longer there, so it is off the list."));
             return;
         }
         self.after_discard(AfterDiscard::OpenPath(path));
@@ -482,7 +499,7 @@ impl App {
     pub(crate) fn file_dropped(&mut self, path: PathBuf) {
         if self.question.is_some() {
             self.alerts
-                .say("The dropped file was not opened: answer the question first.".to_string());
+                .warn("The dropped file was not opened: answer the question first.".to_string());
         } else {
             self.drops.push(path);
         }
@@ -496,7 +513,7 @@ impl App {
         }
         if self.question.is_some() {
             self.alerts
-                .say("The dropped file was not opened: answer the question first.".to_string());
+                .warn("The dropped file was not opened: answer the question first.".to_string());
             return;
         }
         match crate::recent::dropped(&drops) {
@@ -505,8 +522,21 @@ impl App {
             }
             crate::recent::Dropped::NoPatch => {
                 self.alerts
-                    .say("Only LoomDSP patches (.ron) can be opened here.".to_string());
+                    .warn("Only LoomDSP patches (.ron) can be opened here.".to_string());
             }
+        }
+    }
+}
+
+impl App {
+    /// Says a patch opened: info, or a warning when it loaded differently
+    /// from how it was saved. Shared with the control channel's `open`.
+    pub(crate) fn say_opened(&mut self, path: &std::path::Path) {
+        let status = opened_status(path, self.document.load_notes());
+        if self.document.load_notes().is_empty() {
+            self.alerts.say(status);
+        } else {
+            self.alerts.warn(status);
         }
     }
 }
