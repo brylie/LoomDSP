@@ -150,8 +150,9 @@ Keep taste apart from defects. "I would prefer more space here" is a suggestion:
 
 ## 6. After the report
 
-Ask which findings to act on, then do only what the user chooses. Before filing issues, show the list. When filing:
+Ask which findings to act on, then do only what the user chooses. Before filing issues, show the list. File through `/retro` with the snapshot as its source, because its script knows the labels, the milestone, and the project board, and sets Priority and Size on every issue: an issue without them sinks to the bottom of the board, and batching needs Size. When filing:
 
 - Group findings by what would be fixed together, as the earlier audits did. A backlog of forty small issues helps nobody.
 - Label with `area:ui`, one of `must`, `should`, or `could`, `accessibility` when it applies, and `needs spec agreed` when behaviour must be settled first.
+- Give each issue a Priority (an accessibility barrier or a blocked task is P1 in the current milestone) and a Size.
 - Link the snapshot, and list the issue numbers in its "Used by" line while it is still a draft.
