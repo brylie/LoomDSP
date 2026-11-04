@@ -161,18 +161,20 @@ impl App {
             };
             Subscription::run_with(watch, learn::stream).map(|_| Message::Midi)
         });
-        // One listener hears every input event, and its messages say who was
-        // listening before the event (input_owner.rs).
-        let input = Some(
-            iced::event::listen_with(crate::input_owner::input_event)
-                .with(self.listening())
-                .map(|(listening, heard)| heard.message(listening)),
-        );
+        let input = Some(self.input_subscription());
         // The timer runs only while a drop is being collected, so an idle
         // app stays idle.
         let drops_done = (!self.drops.is_empty())
             .then(|| iced::time::every(std::time::Duration::from_millis(100)).map(|_| Message::DropsDone));
         Subscription::batch(watch.into_iter().chain(input).chain(drops_done))
+    }
+
+    /// The one listener that hears every input event. Its messages say who was
+    /// listening before the event (input_owner.rs).
+    pub(crate) fn input_subscription(&self) -> Subscription<Message> {
+        iced::event::listen_with(crate::input_owner::input_event)
+            .with(self.listening())
+            .map(|(listening, heard)| heard.message(listening))
     }
 
     /// Watches the lights on screen, and sends a message only when one

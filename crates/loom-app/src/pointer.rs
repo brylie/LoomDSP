@@ -59,7 +59,7 @@ pub enum Step {
     /// on a frame of its own.
     Modifiers(keyboard::Modifiers),
     /// A key press or release, at the pointer. What no widget takes goes to
-    /// the app as the keyboard listener would send it.
+    /// the app as the input listener would send it.
     Key(keyboard::Event),
 }
 

@@ -257,3 +257,60 @@ fn clipboard_keys_work_with_no_overlay() {
     let before = ui.app.controller.graph().nodes().count();
     assert!(tap_command(&mut ui, "x") < before, "Cmd+X cuts");
 }
+
+/// The real window's path: events go into the app's subscription as the runtime
+/// sends them, and the messages that come out route as the other paths do. A
+/// redraw sends nothing, so an idle app stays idle.
+#[test]
+fn the_subscription_sends_what_it_hears_with_who_was_listening() {
+    use iced_runtime::futures::futures::{StreamExt, executor::block_on, stream};
+    use iced_runtime::futures::subscription::{Event as Runtime, into_recipes};
+    let ui = Ui::open("subtractive.ron");
+    let window = window::Id::unique();
+    let interaction = |event, status| Runtime::Interaction { window, event, status };
+    let escape = iced::Event::Keyboard(keyboard::Event::KeyPressed {
+        key: Key::Named(Named::Escape),
+        modified_key: Key::Named(Named::Escape),
+        physical_key: keyboard::key::Physical::Unidentified(keyboard::key::NativeCode::Unidentified),
+        location: keyboard::Location::Standard,
+        modifiers: Modifiers::empty(),
+        text: None,
+        repeat: false,
+    });
+    let events = vec![
+        interaction(
+            iced::Event::Window(window::Event::RedrawRequested(std::time::Instant::now())),
+            Status::Ignored,
+        ),
+        interaction(
+            iced::Event::Mouse(mouse::Event::CursorMoved {
+                position: Point::ORIGIN,
+            }),
+            Status::Ignored,
+        ),
+        interaction(escape, Status::Ignored),
+    ];
+    let mut recipes = into_recipes(ui.app.input_subscription());
+    assert_eq!(recipes.len(), 1, "one listener");
+    let recipe = recipes.remove(0);
+    let messages: Vec<Message> = block_on(recipe.stream(stream::iter(events).boxed()).collect());
+    let [
+        Message::Input {
+            event,
+            status,
+            listening,
+        },
+    ] = messages.as_slice()
+    else {
+        panic!("only the key comes out: {messages:?}");
+    };
+    assert_eq!(*listening, ui.app.listening());
+    let routed = listening.route(event.clone(), *status);
+    assert!(
+        matches!(
+            routed.as_slice(),
+            [Message::Key(_), Message::CloseHelp, Message::TextFocusCheck]
+        ),
+        "{routed:?}"
+    );
+}

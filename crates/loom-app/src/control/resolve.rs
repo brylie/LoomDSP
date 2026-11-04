@@ -308,7 +308,7 @@ pub(super) fn refuse_while_asking(
     }
 }
 
-/// The key press and release, as the keyboard listener sends them.
+/// The key press and release, as the input listener sends them.
 pub(super) fn key_events(key: keyboard::Key, modifiers: keyboard::Modifiers) -> [keyboard::Event; 2] {
     let physical = keyboard::key::Physical::Unidentified(keyboard::key::NativeCode::Unidentified);
     [
