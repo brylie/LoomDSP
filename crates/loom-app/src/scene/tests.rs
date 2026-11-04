@@ -724,3 +724,20 @@ fn an_xy_scope_reads_its_parameters_and_says_its_inputs() {
     update_panel_values(&mut values, c, &BTreeMap::new());
     assert_eq!(values.get(xy.0, 0).unwrap().text, "XY scope of X and Y");
 }
+
+/// A display drawn in a frame has no caption, even with no `captioned("")`,
+/// because the frame fills the widget. Its hover text keeps the label.
+#[test]
+fn framed_displays_have_no_caption() {
+    let d = &loom_modules::test_modules::PANEL;
+    let panel = panel_view(d);
+    for (widget, view) in d.panel.widgets.iter().zip(&panel.widgets) {
+        if matches!(
+            widget.kind,
+            WidgetKind::Scope | WidgetKind::LevelHistory | WidgetKind::Spectrum | WidgetKind::XyScope { .. }
+        ) {
+            assert_eq!(view.label, "", "{:?}", widget.kind);
+            assert!(!view.hover.description.is_empty(), "{:?}", widget.kind);
+        }
+    }
+}

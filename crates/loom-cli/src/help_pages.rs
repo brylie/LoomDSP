@@ -357,21 +357,18 @@ fn widget(d: &ModuleDescriptor, w: &Widget) -> String {
                 .map_or_else(|| format!("`{}`", w.bind()), port_name);
             format!("Level meter: {output}")
         }
-        WidgetKind::Scope => {
+        WidgetKind::Scope | WidgetKind::LevelHistory | WidgetKind::Spectrum => {
             let output = d
                 .outputs
                 .iter()
                 .find(|p| p.name == w.bind())
                 .map_or_else(|| format!("`{}`", w.bind()), port_name);
-            format!("Scope: {output}")
-        }
-        WidgetKind::LevelHistory => {
-            let output = d
-                .outputs
-                .iter()
-                .find(|p| p.name == w.bind())
-                .map_or_else(|| format!("`{}`", w.bind()), port_name);
-            format!("Level history: {output}")
+            let display = match w.kind {
+                WidgetKind::Scope => "Scope",
+                WidgetKind::LevelHistory => "Level history",
+                _ => "Spectrum",
+            };
+            format!("{display}: {output}")
         }
         WidgetKind::XyScope { y } => {
             let output = |bound: &str| {
@@ -381,14 +378,6 @@ fn widget(d: &ModuleDescriptor, w: &Widget) -> String {
                     .map_or_else(|| format!("`{bound}`"), port_name)
             };
             format!("XY scope: {} across, {} up", output(w.bind()), output(y))
-        }
-        WidgetKind::Spectrum => {
-            let output = d
-                .outputs
-                .iter()
-                .find(|p| p.name == w.bind())
-                .map_or_else(|| format!("`{}`", w.bind()), port_name);
-            format!("Spectrum: {output}")
         }
         WidgetKind::Shape { label, .. } => format!("Shape preview: {} (read-only)", name(label, w.bind())),
         _ => format!("Widget: `{}`", w.bind()),

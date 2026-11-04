@@ -1075,7 +1075,7 @@ impl App {
             histories,
             spectra,
             xy,
-            peak_epoch: self.clip_holds.epoch(),
+            peak_resets: self.peak_resets(),
             full_traces: self.full_traces,
         };
         if self.monitor.watched() != list {
@@ -1108,33 +1108,54 @@ impl App {
         self.traces.retain(|module, widget| shown.contains(&(module, widget)));
     }
 
-    /// Takes new scope traces from the telemetry thread and gives each to
-    /// the scopes that show its probe.
-    fn take_traces(&mut self, traces: Vec<(ProbeId, loom_canvas::Trace)>) {
-        if traces.is_empty() {
-            return;
-        }
-        let scopes = scene::scope_outputs(&self.controller, &self.visible_displays);
+    /// Gives each new trace from the telemetry thread to the widgets that show
+    /// its probe. `shown` is each widget with its probe, if it has one.
+    fn give_traces(&mut self, traces: Vec<(ProbeId, loom_canvas::Trace)>, shown: &[((u32, usize), Option<ProbeId>)]) {
         for (probe, trace) in traces {
-            for scope in &scopes {
-                if self.live.scope_probe(scope.output) == Some(probe) {
-                    self.traces.set(scope.widget.0, scope.widget.1, trace.clone());
+            for &((module, widget), showing) in shown {
+                if showing == Some(probe) {
+                    self.traces.set(module, widget, trace.clone());
                 }
             }
         }
     }
 
+    /// Takes new scope traces from the telemetry thread.
+    fn take_traces(&mut self, traces: Vec<(ProbeId, loom_canvas::Trace)>) {
+        let shown: Vec<_> = scene::scope_outputs(&self.controller, &self.visible_displays)
+            .iter()
+            .map(|scope| (scope.widget, self.live.scope_probe(scope.output)))
+            .collect();
+        self.give_traces(traces, &shown);
+    }
+
+    /// The reset count of each meter probe: the sum of the counts of the
+    /// meters that show it, so it changes with any reset of one of them.
+    fn peak_resets(&self) -> std::collections::HashMap<ProbeId, u64> {
+        let mut resets = std::collections::HashMap::new();
+        for (widget, output) in scene::meter_outputs(&self.controller, &self.visible_displays) {
+            if let Some(probe) = self.live.probe(output) {
+                *resets.entry(probe).or_default() += self.clip_holds.resets(widget);
+            }
+        }
+        resets
+    }
+
     /// Takes raw peaks from the telemetry thread into the clip lights and peak
-    /// holds of the meters that show their probes. Peaks from before the
-    /// latest reset are dropped, so a reset is not undone by a message that
-    /// was already on its way.
-    fn take_peaks(&mut self, epoch: u64, peaks: Vec<(ProbeId, clip::PeakNews)>) {
-        if peaks.is_empty() || epoch != self.clip_holds.epoch() {
+    /// holds of the meters that show their probes. A peak from before its own
+    /// meter's latest reset is dropped, so a reset is not undone by a message
+    /// that was already on its way. Other meters' peaks still count.
+    fn take_peaks(&mut self, peaks: Vec<(ProbeId, clip::PeakNews)>) {
+        if peaks.is_empty() {
             return;
         }
+        let resets = self.peak_resets();
         let meters = scene::meter_outputs(&self.controller, &self.visible_displays);
         let mut changed = false;
         for (probe, news) in peaks {
+            if resets.get(&probe).copied().unwrap_or(0) != news.after {
+                continue;
+            }
             for &(widget, output) in &meters {
                 if self.live.probe(output) == Some(probe) {
                     changed |= self.clip_holds.take(widget, news);
@@ -1158,52 +1179,32 @@ impl App {
         self.refresh_values();
     }
 
-    /// Takes new level histories from the telemetry thread and gives each to
-    /// the widgets that show its probe.
+    /// Takes new level histories from the telemetry thread.
     fn take_histories(&mut self, histories: Vec<(ProbeId, loom_canvas::Trace)>) {
-        if histories.is_empty() {
-            return;
-        }
-        let shown = scene::history_outputs(&self.controller, &self.visible_displays);
-        for (probe, trace) in histories {
-            for history in &shown {
-                if self.live.probe(history.output) == Some(probe) {
-                    self.traces.set(history.widget.0, history.widget.1, trace.clone());
-                }
-            }
-        }
+        let shown: Vec<_> = scene::history_outputs(&self.controller, &self.visible_displays)
+            .iter()
+            .map(|history| (history.widget, self.live.probe(history.output)))
+            .collect();
+        self.give_traces(histories, &shown);
     }
 
-    /// Takes new XY traces from the telemetry thread and gives each to the XY
-    /// scope that shows its pair.
+    /// Takes new XY traces from the telemetry thread.
     fn take_xy(&mut self, traces: Vec<(ProbeId, loom_canvas::Trace)>) {
-        if traces.is_empty() {
-            return;
-        }
-        let shown = scene::xy_outputs(&self.controller, &self.visible_displays);
-        for (probe, trace) in traces {
-            for scope in &shown {
-                if self.live.pair_probe(scope.x, scope.y) == Some(probe) {
-                    self.traces.set(scope.widget.0, scope.widget.1, trace.clone());
-                }
-            }
-        }
+        let shown: Vec<_> = scene::xy_outputs(&self.controller, &self.visible_displays)
+            .iter()
+            .map(|scope| (scope.widget, self.live.pair_probe(scope.x, scope.y)))
+            .collect();
+        self.give_traces(traces, &shown);
     }
 
-    /// Takes new spectra from the telemetry thread and gives each to the
-    /// widgets that show its probe. A scope on the same probe keeps its trace.
+    /// Takes new spectra from the telemetry thread. A scope on the same probe
+    /// keeps its trace.
     fn take_spectra(&mut self, spectra: Vec<(ProbeId, loom_canvas::Trace)>) {
-        if spectra.is_empty() {
-            return;
-        }
-        let shown = scene::spectrum_outputs(&self.controller, &self.visible_displays);
-        for (probe, trace) in spectra {
-            for spectrum in &shown {
-                if self.live.scope_probe(spectrum.output) == Some(probe) {
-                    self.traces.set(spectrum.widget.0, spectrum.widget.1, trace.clone());
-                }
-            }
-        }
+        let shown: Vec<_> = scene::spectrum_outputs(&self.controller, &self.visible_displays)
+            .iter()
+            .map(|spectrum| (spectrum.widget, self.live.scope_probe(spectrum.output)))
+            .collect();
+        self.give_traces(spectra, &shown);
     }
 
     /// Adds probes for meters that came on screen and removes those that
@@ -1834,7 +1835,7 @@ impl App {
                 self.take_histories(update.histories);
                 self.take_spectra(update.spectra);
                 self.take_xy(update.xy);
-                self.take_peaks(update.peak_epoch, update.peaks);
+                self.take_peaks(update.peaks);
                 for (probe, carrying) in update.activity {
                     if let Some(output) = self.live.output_of(probe) {
                         if carrying {

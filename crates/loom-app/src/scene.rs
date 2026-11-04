@@ -171,11 +171,15 @@ fn panel_view(d: &ModuleDescriptor) -> PanelView {
                     (label, HoverText::new(label, p.description, p.name))
                 })
             } else if w.shows_output() && d.meter_display(w).is_none() {
-                // A meter's or scope's text is its output's: two texts for
-                // one signal could disagree. A scope has no caption: its
-                // frame fills the widget.
+                // A display's text is its output's: two texts for one signal
+                // could disagree. A display drawn in a frame has no caption:
+                // the frame fills the widget.
                 let output = d.outputs.iter().find(|p| p.name == w.bind());
-                let caption = |label| if w.kind == WidgetKind::Scope { "" } else { label };
+                let framed = matches!(
+                    w.kind,
+                    WidgetKind::Scope | WidgetKind::LevelHistory | WidgetKind::Spectrum | WidgetKind::XyScope { .. }
+                );
+                let caption = |label| if framed { "" } else { label };
                 output.map_or((caption(w.bind()), HoverText::default()), |p| {
                     (caption(p.label), HoverText::new(p.label, p.description, p.name))
                 })

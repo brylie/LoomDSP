@@ -430,7 +430,7 @@ impl App {
                     trace.push(&chunk);
                 }
             }
-            peaks.note(watch.peak_epoch, &watch.meters, &meters);
+            peaks.note(&watch.peak_resets, &watch.meters, &meters);
             for reading in &meters {
                 if let Some(history) = histories.get_mut(&reading.probe) {
                     history.push(reading);
@@ -498,7 +498,6 @@ impl App {
                 })
                 .collect(),
             peaks: peaks.news(),
-            peak_epoch: watch.peak_epoch,
             activity,
         }));
         let _ = self.update(crate::Message::LiveFrame);

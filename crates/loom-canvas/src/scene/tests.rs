@@ -524,6 +524,54 @@ fn every_growing_display_takes_the_room() {
     }
 }
 
+/// A widget below a level history or a spectrum moves down on a resize, so
+/// the display does not cover it.
+#[test]
+fn a_widget_below_any_trace_display_moves_down() {
+    for kind in [
+        WidgetViewKind::Scope,
+        WidgetViewKind::LevelHistory,
+        WidgetViewKind::Spectrum,
+        WidgetViewKind::XyScope,
+    ] {
+        let mut tile = tile_with(kind.clone(), 9, 9);
+        tile.panel.widgets.push(WidgetView {
+            kind: WidgetViewKind::Toggle,
+            x: 0,
+            y: 6,
+            label: String::new(),
+            hover: HoverText::default(),
+            hidden: false,
+        });
+        tile.size = Some((40, 40));
+        let display = tile.widget_bounds(0).unwrap();
+        let below = tile.widget_bounds(1).unwrap();
+        assert!(below.y >= display.y + display.height, "{kind:?}");
+    }
+}
+
+/// With two trace displays in one column, the lower takes the extra height,
+/// and the upper keeps its own, so neither covers the other.
+#[test]
+fn stacked_displays_never_cover_each_other() {
+    let mut tile = tile_with(WidgetViewKind::LevelHistory, 9, 12);
+    tile.panel.widgets.push(WidgetView {
+        kind: WidgetViewKind::Spectrum,
+        x: 0,
+        y: 7,
+        label: String::new(),
+        hover: HoverText::default(),
+        hidden: false,
+    });
+    tile.size = Some((40, 60));
+    let upper = tile.widget_bounds(0).unwrap();
+    let lower = tile.widget_bounds(1).unwrap();
+    assert_eq!(upper.height, 6.0 * GRID, "the upper keeps its height");
+    assert!(lower.height > 5.0 * GRID, "the lower grows");
+    assert!(upper.y + upper.height <= lower.y);
+    assert!(lower.y + lower.height <= tile.bounds().y + tile.bounds().height);
+}
+
 /// A growing XY scope moves the controls below it down, so it does not cover
 /// them (`docs/design/panels.md`, Resizable tiles).
 #[test]
