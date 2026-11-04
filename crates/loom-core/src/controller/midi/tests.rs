@@ -42,6 +42,8 @@ fn mapped(id: MidiMappingId) -> Graph {
             control: KNOB,
             target: ModuleId(1),
             param: 0,
+            options: crate::MidiMappingOptions::DEFAULT,
+            learned: false,
         },
     );
     graph

@@ -209,6 +209,17 @@ impl Controller {
             }
             return Err(error);
         }
+        // The same value now sits at another position under the hardware, so
+        // a mapping on it starts again, and a Pickup waits (midi-learn.md).
+        if previous != Some(range)
+            && let Some((id, mapping)) = self.graph.midi_mapping_of(module, index)
+        {
+            let mapping = MidiMapping {
+                learned: false,
+                ..*mapping
+            };
+            self.renew_midi_mapping(id, mapping);
+        }
         self.dirty = true;
         Ok(())
     }

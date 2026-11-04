@@ -14,10 +14,13 @@
 use iced::Point;
 use loom_canvas::CanvasEvent;
 use loom_core::{
-    Assignment, AssignmentId, ButtonMode, Controller, InputRef, LoomError, MidiControl, ModuleDescriptor, ModuleId,
-    ModuleRole, OutputRef, ParamRange,
+    Assignment, AssignmentId, ButtonMode, Controller, InputRef, LoomError, MidiControl, MidiMappingOptions,
+    ModuleDescriptor, ModuleId, ModuleRole, OutputRef, ParamRange,
 };
 use std::collections::{BTreeMap, BTreeSet};
+
+/// What a mapping is, leaving out its session id: the control and its options.
+type MidiLink = (MidiControl, MidiMappingOptions);
 
 /// The history keeps this many steps. The oldest is dropped first.
 pub const LIMIT: usize = 200;
@@ -53,9 +56,9 @@ pub struct Snapshot {
     modules: BTreeMap<u32, ModuleState>,
     cables: BTreeMap<InputRef, OutputRef>,
     assignments: BTreeMap<AssignmentId, Assignment>,
-    /// The control mapped to each parameter, by module and parameter.
-    /// Mapping IDs are left out: no step refers to them.
-    midi: BTreeMap<(u32, usize), MidiControl>,
+    /// The control mapped to each parameter and its options, by module and
+    /// parameter. Mapping IDs are left out: no step refers to them.
+    midi: BTreeMap<(u32, usize), MidiLink>,
 }
 
 impl Snapshot {
@@ -95,7 +98,7 @@ impl Snapshot {
             assignments: graph.assignments().map(|(id, a)| (id, *a)).collect(),
             midi: graph
                 .midi_mappings()
-                .map(|(_, m)| ((m.target.0, m.param), m.control))
+                .map(|(_, m)| ((m.target.0, m.param), (m.control, m.options)))
                 .collect(),
         }
     }
@@ -110,7 +113,7 @@ pub struct Step {
     modules: BTreeMap<u32, Pair<ModuleState>>,
     cables: BTreeMap<InputRef, Pair<OutputRef>>,
     assignments: BTreeMap<AssignmentId, Pair<Assignment>>,
-    midi: BTreeMap<(u32, usize), Pair<MidiControl>>,
+    midi: BTreeMap<(u32, usize), Pair<MidiLink>>,
 }
 
 impl Step {
@@ -257,14 +260,22 @@ fn name(step: &Step) -> String {
             count(added.len(), added[0].descriptor.name.to_string(), "modules")
         );
     }
-    if let Some(control) = step.midi.values().find_map(|(_, new)| *new) {
+    if let Some((control, _)) = step.midi.values().find_map(|(_, new)| *new) {
         // The control left another parameter: the mapping moved.
         if step
             .midi
             .values()
-            .any(|(old, new)| *old == Some(control) && new.is_none())
+            .any(|(old, new)| old.is_some_and(|(left, _)| left == control) && new.is_none())
         {
             return "move MIDI mapping".to_string();
+        }
+        // The same control on the same parameter: only its options changed.
+        if step
+            .midi
+            .values()
+            .any(|(old, new)| matches!((old, new), (Some((a, _)), Some((b, _))) if a == b))
+        {
+            return "change MIDI mapping".to_string();
         }
         return format!("learn {control}");
     }
@@ -491,10 +502,10 @@ pub fn apply_with_sizes(
     }
     for (&(module, param), pair) in &step.midi {
         let (have, want) = sides(pair, forward);
-        if let Some(control) = want
+        if let Some((control, options)) = want
             && have != want
         {
-            controller.map_midi(*control, ModuleId(module), param)?;
+            controller.map_midi_with(*control, ModuleId(module), param, *options)?;
         }
     }
     Ok(())

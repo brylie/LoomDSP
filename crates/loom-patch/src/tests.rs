@@ -539,3 +539,73 @@ fn rejects_unknown_params() {
         Err(PatchError::UnknownParam { module: 2, .. })
     ));
 }
+
+/// An engine with the built-in modules.
+fn engine() -> loom_core::EngineParts {
+    create_engine(loom_modules::registry(), EngineConfig::default())
+}
+
+/// A patch with a mapping in each mode, as `midi-learn.md` writes them.
+const MAPPING_MODES: &str = r#"Patch(
+    version: 1,
+    modules: [(id: 1, kind: "loom.filter.svf@1")],
+    midi: [
+        (target: (1, "cutoff"), channel: 0, controller: 74, mode: Pickup, range: (0.2, 0.8), invert: true),
+        (target: (1, "resonance"), channel: 0, controller: 20, mode: Relative(Offset64)),
+    ],
+)"#;
+
+/// Modes, ranges, and invert save and load, and a mapping with none writes
+/// no new fields (midi-learn.md, Acceptance criteria: mapping modes).
+#[test]
+fn mapping_modes_round_trip() {
+    let patch = Patch::from_ron(MAPPING_MODES).unwrap();
+    let mut parts = engine();
+    patch.load_into(&mut parts.controller).unwrap();
+    let graph = parts.controller.graph();
+    let cutoff = graph.midi_mapping_on(MidiControl { channel: 0, controller: 74 }).unwrap().1;
+    assert_eq!(cutoff.options.mode, MidiMode::Pickup);
+    assert_eq!((cutoff.options.low, cutoff.options.high, cutoff.options.invert), (0.2, 0.8, true));
+    let resonance = graph.midi_mapping_on(MidiControl { channel: 0, controller: 20 }).unwrap().1;
+    assert_eq!(resonance.options.mode, MidiMode::Relative(MidiEncoding::Offset64));
+    let text = Patch::from_graph("t", graph).to_ron().unwrap();
+    assert!(text.contains("mode: Pickup"), "{text}");
+    assert!(text.contains("range: (0.2, 0.8)"), "{text}");
+    assert!(text.contains("invert: true"), "{text}");
+    assert!(text.contains("mode: Relative(Offset64)"), "{text}");
+
+    let plain = Patch::from_ron(
+        r#"Patch(version: 1, modules: [(id: 1, kind: "loom.filter.svf@1")],
+           midi: [(target: (1, "cutoff"), channel: 0, controller: 74)])"#,
+    )
+    .unwrap();
+    let mut parts = engine();
+    plain.load_into(&mut parts.controller).unwrap();
+    let text = Patch::from_graph("t", parts.controller.graph()).to_ron().unwrap();
+    assert!(!text.contains("mode:"), "{text}");
+    assert!(!text.contains("range:"), "{text}");
+    assert!(!text.contains("invert:"), "{text}");
+}
+
+/// A bad range, or a range or invert on Relative, is a load error that names
+/// the mapping (midi-learn.md, Mapping modes).
+#[test]
+fn bad_mapping_options_do_not_load() {
+    for fields in [
+        "range: (0.8, 0.2)",
+        "range: (0.5, 0.5)",
+        "range: (-0.5, 0.5)",
+        "mode: Relative(SignBit), range: (0.2, 0.8)",
+        "mode: Relative(SignBit), invert: true",
+    ] {
+        let text = format!(
+            r#"Patch(version: 1, modules: [(id: 1, kind: "loom.filter.svf@1")],
+               midi: [(target: (1, "cutoff"), channel: 0, controller: 74, {fields})])"#
+        );
+        let patch = Patch::from_ron(&text).unwrap();
+        let mut parts = engine();
+        let error = patch.load_into(&mut parts.controller).unwrap_err();
+        assert!(matches!(error, PatchError::InvalidMidiMapping { .. }), "{fields}: {error}");
+        assert!(error.to_string().contains("cutoff"), "{error}");
+    }
+}

@@ -93,6 +93,9 @@ pub enum LoomError {
     /// A MIDI channel or controller number is out of range.
     #[error("invalid MIDI control: channel {} and controller {} (channels are 0 to 15, controllers 0 to 127)", .0.channel, .0.controller)]
     InvalidMidiControl(MidiControl),
+    /// A MIDI mapping's options cannot be used. The text says why.
+    #[error("invalid MIDI mapping: {0}")]
+    InvalidMidiOptions(&'static str),
     /// The patch has more modules than the engine was configured for.
     #[error("too many modules (limit is {0})")]
     TooManyModules(usize),

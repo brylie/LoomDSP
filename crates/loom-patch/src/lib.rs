@@ -30,7 +30,7 @@
 #![warn(missing_docs)]
 
 use loom_core::{
-    Controller, Graph, InputRef, LoomError, MidiControl, ModuleId, OutputRef, ParamRange, Polarity, Registry,
+    Controller, Graph, InputRef, LoomError, MidiControl, MidiEncoding, MidiMappingOptions, MidiMode, ModuleId, OutputRef, ParamRange, Polarity, Registry,
     TRANSPORT_MODULE,
 };
 use serde::{Deserialize, Serialize};
@@ -176,6 +176,79 @@ pub struct PatchMidiMapping {
     pub channel: u8,
     /// Controller number, 0 to 127.
     pub controller: u8,
+    /// What a control change does. Omitted for Absolute.
+    #[serde(default, skip_serializing_if = "is_default_mode")]
+    pub mode: PatchMidiMode,
+    /// The span of the parameter's position the control covers, as
+    /// `(low, high)`. Omitted for the whole travel.
+    #[serde(default = "whole_travel", skip_serializing_if = "is_whole_travel")]
+    pub range: (f32, f32),
+    /// Swaps the ends of the span. Omitted when off.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub invert: bool,
+}
+
+/// A MIDI mapping's mode in a patch file. Matches [`MidiMode`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum PatchMidiMode {
+    /// Sets the position.
+    #[default]
+    Absolute,
+    /// Waits for the control to reach the parameter, then follows it.
+    Pickup,
+    /// Reads the value as a step up or down.
+    Relative(PatchMidiEncoding),
+}
+
+/// A relative encoding in a patch file. Matches [`MidiEncoding`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PatchMidiEncoding {
+    /// 64 is no step, and steps count from it.
+    Offset64,
+    /// Down steps count back from 128.
+    TwosComplement,
+    /// The top bit says down.
+    SignBit,
+}
+
+/// True for the mode a mapping has when the file does not name one.
+fn is_default_mode(mode: &PatchMidiMode) -> bool {
+    *mode == PatchMidiMode::Absolute
+}
+
+/// The range a mapping has when the file does not name one.
+fn whole_travel() -> (f32, f32) {
+    (0.0, 1.0)
+}
+
+/// True when a flag has its default, off.
+fn is_false(flag: &bool) -> bool {
+    !*flag
+}
+
+/// True for [`whole_travel`].
+fn is_whole_travel(range: &(f32, f32)) -> bool {
+    *range == whole_travel()
+}
+
+impl PatchMidiMapping {
+    /// The options this entry names, as the controller takes them.
+    fn options(&self) -> MidiMappingOptions {
+        MidiMappingOptions {
+            mode: match self.mode {
+                PatchMidiMode::Absolute => MidiMode::Absolute,
+                PatchMidiMode::Pickup => MidiMode::Pickup,
+                PatchMidiMode::Relative(encoding) => MidiMode::Relative(match encoding {
+                    PatchMidiEncoding::Offset64 => MidiEncoding::Offset64,
+                    PatchMidiEncoding::TwosComplement => MidiEncoding::TwosComplement,
+                    PatchMidiEncoding::SignBit => MidiEncoding::SignBit,
+                }),
+            },
+            low: self.range.0,
+            high: self.range.1,
+            invert: self.invert,
+        }
+    }
 }
 
 /// Polarity stored in a patch file. Matches [`Polarity`].
@@ -264,6 +337,17 @@ pub enum PatchError {
     DuplicateMidiMapping {
         /// The shared parameter or control.
         what: String,
+    },
+    /// A MIDI mapping's options cannot be used, so the file was edited by
+    /// hand: edits in the app always give options that load.
+    #[error("the MIDI mapping on parameter `{param}` of module {module} is invalid: {reason}")]
+    InvalidMidiMapping {
+        /// The mapped module's ID.
+        module: u32,
+        /// The mapped parameter.
+        param: String,
+        /// What is wrong with it.
+        reason: &'static str,
     },
     /// The patch has more than one Transport module. A patch has exactly
     /// one (`docs/design/clock.md`).
@@ -608,11 +692,21 @@ impl Patch {
                 controller: mapping.controller,
             };
             controller
-                .map_midi_named(control, ModuleId(mapping.target.0), &mapping.target.1)
+                .map_midi_named_with(
+                    control,
+                    ModuleId(mapping.target.0),
+                    &mapping.target.1,
+                    mapping.options(),
+                )
                 .map_err(|error| match error {
                     LoomError::NoSuchParam { .. } => PatchError::UnknownParam {
                         module: mapping.target.0,
                         param: mapping.target.1.clone(),
+                    },
+                    LoomError::InvalidMidiOptions(reason) => PatchError::InvalidMidiMapping {
+                        module: mapping.target.0,
+                        param: mapping.target.1.clone(),
+                        reason,
                     },
                     other => PatchError::Engine(other),
                 })?;
@@ -793,6 +887,17 @@ impl Patch {
                 target: (mapping.target.0, param_name(graph, mapping.target, mapping.param)),
                 channel: mapping.control.channel,
                 controller: mapping.control.controller,
+                mode: match mapping.options.mode {
+                    MidiMode::Absolute => PatchMidiMode::Absolute,
+                    MidiMode::Pickup => PatchMidiMode::Pickup,
+                    MidiMode::Relative(encoding) => PatchMidiMode::Relative(match encoding {
+                        MidiEncoding::Offset64 => PatchMidiEncoding::Offset64,
+                        MidiEncoding::TwosComplement => PatchMidiEncoding::TwosComplement,
+                        MidiEncoding::SignBit => PatchMidiEncoding::SignBit,
+                    }),
+                },
+                range: (mapping.options.low, mapping.options.high),
+                invert: mapping.options.invert,
             });
         }
         patch.canonicalise();

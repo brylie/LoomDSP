@@ -62,8 +62,119 @@ impl fmt::Display for MidiControl {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct MidiMappingId(pub u32);
 
+/// How a relative encoder writes a step in its 7-bit value (spec, Mapping
+/// modes).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MidiEncoding {
+    /// 65 and up is up by value − 64, 63 and below is down by 64 − value.
+    #[default]
+    Offset64,
+    /// 1 to 63 is up, 127 down to 65 is −1 to −63. 0 and 64 are no step.
+    TwosComplement,
+    /// 1 to 63 is up, 65 to 127 is down by value − 64. 0 and 64 are no step.
+    SignBit,
+}
+
+impl MidiEncoding {
+    /// The step a control change's value stands for, in steps up or down.
+    pub fn step(self, value: u8) -> i32 {
+        let value = i32::from(value & 0x7F);
+        match self {
+            Self::Offset64 => value - 64,
+            Self::TwosComplement => match value {
+                0 | 64 => 0,
+                1..=63 => value,
+                _ => value - 128,
+            },
+            Self::SignBit => match value {
+                0 | 64 => 0,
+                1..=63 => value,
+                _ => 64 - value,
+            },
+        }
+    }
+}
+
+/// What a control change does to its parameter (spec, Mapping modes).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MidiMode {
+    /// Sets the position.
+    #[default]
+    Absolute,
+    /// Ignored until the control reaches the parameter's position, then as
+    /// Absolute until the parameter changes from somewhere else.
+    Pickup,
+    /// Reads the value as a step up or down.
+    Relative(MidiEncoding),
+}
+
+/// The options of one mapping: its mode, and the span of the parameter's
+/// position that the control's 0 to 127 covers. `low` and `high` are in the
+/// parameter's selected control range.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MidiMappingOptions {
+    /// What a control change does.
+    pub mode: MidiMode,
+    /// The position at the control's 0, before [`Self::invert`].
+    pub low: f32,
+    /// The position at the control's 127, before [`Self::invert`].
+    pub high: f32,
+    /// Swaps the ends of the span.
+    pub invert: bool,
+}
+
+impl MidiMappingOptions {
+    /// Absolute, over the whole travel, not inverted.
+    pub const DEFAULT: Self = Self {
+        mode: MidiMode::Absolute,
+        low: 0.0,
+        high: 1.0,
+        invert: false,
+    };
+
+    /// These options in another mode. Relative has no range or invert, so
+    /// moving to it resets them, and the result always passes
+    /// [`check`](Self::check) if these do.
+    pub fn with_mode(self, mode: MidiMode) -> Self {
+        match mode {
+            MidiMode::Relative(_) => Self { mode, ..Self::DEFAULT },
+            _ => Self { mode, ..self },
+        }
+    }
+
+    /// Why these options cannot be used, if they cannot. The one check for
+    /// edits and for loading a patch, so an edit can never make a patch that
+    /// does not load.
+    pub fn check(&self) -> Result<(), &'static str> {
+        // Written so that NaN fails too.
+        if !(self.low >= 0.0 && self.high <= 1.0) {
+            return Err("its range must be from 0 to 1");
+        }
+        if !(self.low < self.high) {
+            return Err("the low end of its range must be below the high end");
+        }
+        if matches!(self.mode, MidiMode::Relative(_)) && (self.low != 0.0 || self.high != 1.0 || self.invert) {
+            return Err("a Relative mapping has no range or invert");
+        }
+        Ok(())
+    }
+
+    /// The position a control's value stands for in Absolute and Pickup.
+    pub fn position(&self, value: u8) -> f32 {
+        let t = f32::from(value.min(127)) / 127.0;
+        let t = if self.invert { 1.0 - t } else { t };
+        self.low + t * (self.high - self.low)
+    }
+}
+
+impl Default for MidiMappingOptions {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
 /// One link from a hardware control to a parameter.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MidiMapping {
     /// The hardware control.
     pub control: MidiControl,
@@ -71,6 +182,12 @@ pub struct MidiMapping {
     pub target: ModuleId,
     /// Parameter index on [`Self::target`].
     pub param: usize,
+    /// Its mode and range.
+    pub options: MidiMappingOptions,
+    /// True for a mapping made by learning: a Pickup then starts caught,
+    /// because the control change that made it set the value. For this
+    /// session only, so it is not saved.
+    pub(crate) learned: bool,
 }
 
 /// The last control change the engine received, for learning.

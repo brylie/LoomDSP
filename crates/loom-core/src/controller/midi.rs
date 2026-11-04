@@ -7,6 +7,17 @@ use super::*;
 /// MIDI mappings and learn (`docs/design/midi-learn.md`), and the MIDI
 /// inputs the engine listens to.
 impl Controller {
+    /// Maps a hardware control to a parameter, with the default options. See
+    /// [`Controller::map_midi_with`].
+    pub fn map_midi(
+        &mut self,
+        control: MidiControl,
+        target: ModuleId,
+        param: usize,
+    ) -> Result<(MidiMappingId, Vec<MidiMapping>), LoomError> {
+        self.map_midi_with(control, target, param, MidiMappingOptions::DEFAULT)
+    }
+
     /// Maps a hardware control to a parameter. Takes effect on the next
     /// [`Controller::commit`].
     ///
@@ -14,15 +25,17 @@ impl Controller {
     /// removes any mapping on the parameter and any mapping on the control.
     /// Those are returned, at most two, so the UI can say what moved.
     /// Spec: `docs/design/midi-learn.md`.
-    pub fn map_midi(
+    pub fn map_midi_with(
         &mut self,
         control: MidiControl,
         target: ModuleId,
         param: usize,
+        options: MidiMappingOptions,
     ) -> Result<(MidiMappingId, Vec<MidiMapping>), LoomError> {
         if !control.is_valid() {
             return Err(LoomError::InvalidMidiControl(control));
         }
+        options.check().map_err(LoomError::InvalidMidiOptions)?;
         self.check_target(target, param)?;
         let replaced: Vec<MidiMappingId> = self
             .graph
@@ -38,22 +51,79 @@ impl Controller {
             })
             .collect();
         let id = self.midi.new_mapping();
-        self.graph
-            .midi_mappings
-            .insert(id, MidiMapping { control, target, param });
+        self.graph.midi_mappings.insert(
+            id,
+            MidiMapping {
+                control,
+                target,
+                param,
+                options,
+                learned: false,
+            },
+        );
         self.dirty = true;
         Ok((id, removed))
     }
 
-    /// Maps a hardware control to a parameter by name.
+    /// Maps a hardware control to a parameter by name, with the default
+    /// options.
     pub fn map_midi_named(
         &mut self,
         control: MidiControl,
         target: ModuleId,
         param: &str,
     ) -> Result<(MidiMappingId, Vec<MidiMapping>), LoomError> {
+        self.map_midi_named_with(control, target, param, MidiMappingOptions::DEFAULT)
+    }
+
+    /// Maps a hardware control to a parameter by name.
+    pub fn map_midi_named_with(
+        &mut self,
+        control: MidiControl,
+        target: ModuleId,
+        param: &str,
+        options: MidiMappingOptions,
+    ) -> Result<(MidiMappingId, Vec<MidiMapping>), LoomError> {
         let param = self.param_index(target, param)?;
-        self.map_midi(control, target, param)
+        self.map_midi_with(control, target, param, options)
+    }
+
+    /// Changes the options of the mapping on a parameter, and returns its new
+    /// id, or `None` if the parameter has no mapping. Takes effect on the next
+    /// [`Controller::commit`].
+    ///
+    /// New options make a new mapping for the engine, so its state starts
+    /// again and a Pickup waits (spec, Mapping modes).
+    pub fn set_midi_options(
+        &mut self,
+        target: ModuleId,
+        param: usize,
+        options: MidiMappingOptions,
+    ) -> Result<Option<MidiMappingId>, LoomError> {
+        options.check().map_err(LoomError::InvalidMidiOptions)?;
+        self.check_param(target, param)?;
+        let Some((id, mapping)) = self.graph.midi_mapping_of(target, param) else {
+            return Ok(None);
+        };
+        if mapping.options == options {
+            return Ok(Some(id));
+        }
+        let mapping = MidiMapping {
+            options,
+            learned: false,
+            ..*mapping
+        };
+        Ok(Some(self.renew_midi_mapping(id, mapping)))
+    }
+
+    /// Gives a mapping a new id, so the engine starts its state again.
+    pub(super) fn renew_midi_mapping(&mut self, id: MidiMappingId, mapping: MidiMapping) -> MidiMappingId {
+        self.midi.forget(id);
+        self.graph.midi_mappings.remove(&id);
+        let id = self.midi.new_mapping();
+        self.graph.midi_mappings.insert(id, mapping);
+        self.dirty = true;
+        id
     }
 
     /// Finishes MIDI learn: maps the control that moved to a parameter, and

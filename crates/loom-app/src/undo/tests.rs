@@ -443,3 +443,96 @@ fn a_trimmed_history_loses_the_saved_state() {
     }
     assert!(!history.is_saved(), "the saved state fell off the start");
 }
+
+/// Options that differ from the default on every field Absolute and Pickup
+/// have.
+fn pickup_options() -> loom_core::MidiMappingOptions {
+    loom_core::MidiMappingOptions {
+        mode: loom_core::MidiMode::Pickup,
+        low: 0.25,
+        high: 0.75,
+        invert: true,
+    }
+}
+
+/// The options on a parameter's mapping, if it has one.
+fn options_of(c: &Controller, id: ModuleId, param: usize) -> Option<loom_core::MidiMappingOptions> {
+    c.graph().midi_mapping_of(id, param).map(|(_, m)| m.options)
+}
+
+/// The controller on a new SVF with a mapping on its first parameter.
+fn mapped_svf(options: loom_core::MidiMappingOptions) -> (Controller, ModuleId, MidiControl) {
+    let mut c = parts().controller;
+    let id = c.add_module("loom.filter.svf").unwrap();
+    let control = MidiControl {
+        channel: 0,
+        controller: 74,
+    };
+    c.map_midi_with(control, id, 0, options).unwrap();
+    c.commit().unwrap();
+    (c, id, control)
+}
+
+/// Changing a mapping's options is one step of its own, and undo and redo
+/// bring back the exact options (undo.md).
+#[test]
+fn a_change_of_midi_options_is_one_step() {
+    let (mut c, id, _) = mapped_svf(loom_core::MidiMappingOptions::DEFAULT);
+    let mut positions = BTreeMap::new();
+    let step = record(&mut c, &mut positions, |c| {
+        c.set_midi_options(id, 0, pickup_options()).unwrap();
+    });
+    assert_eq!(step.name(), "change MIDI mapping");
+    undo(&step, &mut c, &mut positions);
+    assert_eq!(options_of(&c, id, 0), Some(loom_core::MidiMappingOptions::DEFAULT));
+    redo(&step, &mut c, &mut positions);
+    assert_eq!(options_of(&c, id, 0), Some(pickup_options()));
+}
+
+/// Every step that brings a mapping back brings its options too: the ×, a
+/// deleted module, learning over a mapping, and moving a control.
+#[test]
+fn undo_keeps_midi_options() {
+    let mut positions = BTreeMap::new();
+
+    // Remove with the ×.
+    let (mut c, id, _) = mapped_svf(pickup_options());
+    let step = record(&mut c, &mut positions, |c| {
+        c.unmap_midi(id, 0).unwrap();
+    });
+    undo(&step, &mut c, &mut positions);
+    assert_eq!(options_of(&c, id, 0), Some(pickup_options()));
+
+    // Delete the module.
+    let (mut c, id, _) = mapped_svf(pickup_options());
+    let step = record(&mut c, &mut positions, |c| {
+        c.remove_module(id).unwrap();
+    });
+    undo(&step, &mut c, &mut positions);
+    assert_eq!(options_of(&c, id, 0), Some(pickup_options()));
+
+    // A new control learned over the mapping starts at the defaults, and
+    // undo brings back the old options.
+    let (mut c, id, control) = mapped_svf(pickup_options());
+    let other = MidiControl {
+        controller: 75,
+        ..control
+    };
+    let step = record(&mut c, &mut positions, |c| {
+        c.map_midi(other, id, 0).unwrap();
+    });
+    undo(&step, &mut c, &mut positions);
+    assert_eq!(options_of(&c, id, 0), Some(pickup_options()));
+
+    // Moving a control to another parameter, and back with undo.
+    let (mut c, id, control) = mapped_svf(pickup_options());
+    let step = record(&mut c, &mut positions, |c| {
+        c.map_midi_with(control, id, 1, pickup_options()).unwrap();
+    });
+    assert_eq!(step.name(), "move MIDI mapping");
+    undo(&step, &mut c, &mut positions);
+    assert_eq!(options_of(&c, id, 0), Some(pickup_options()));
+    assert_eq!(options_of(&c, id, 1), None);
+    redo(&step, &mut c, &mut positions);
+    assert_eq!(options_of(&c, id, 1), Some(pickup_options()));
+}

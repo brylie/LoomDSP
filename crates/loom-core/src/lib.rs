@@ -49,7 +49,10 @@ pub use engine::{Engine, EngineConfig, EngineStats, RestartFadeSender};
 pub use error::LoomError;
 pub use graph::{Assignment, AssignmentId, Graph, InputRef, ModuleId, Node, OutputRef, UnknownModule};
 pub use midi::{MAX_MIDI_INPUTS, MidiEvent, MidiInputId, MidiMessage};
-pub use midi_map::{ControlChangeSeen, MidiControl, MidiMapping, MidiMappingId, MidiReader, NoteOnSeen, control_value};
+pub use midi_map::{
+    ControlChangeSeen, MidiControl, MidiEncoding, MidiMapping, MidiMappingId, MidiMappingOptions, MidiMode, MidiReader,
+    NoteOnSeen, control_value,
+};
 pub use module::{AsAny, Module, Param, PortIo, ProcessContext, copy_state, testing};
 pub use panic::PanicTrigger;
 pub use registry::{ModuleKind, Registry, RegistryNote};
