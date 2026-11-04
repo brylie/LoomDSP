@@ -115,11 +115,17 @@ def shapes(files: list[Path]) -> dict:
                 impl_files[m.group(1)].add(rel)
             m = FN_RE.match(line)
             if m and not is_test_file(path):
-                opens_here = "{" in line.split("//", 1)[0]
-                opens_next = i + 1 < len(lines) and "{" in lines[i + 1].split("//", 1)[0]
-                if opens_here or opens_next:
-                    end = block_end(lines, i)
-                    functions.append((end - i + 1, m.group(2), f"{rel}:{i + 1}"))
+                # rustfmt wraps a long signature one parameter per line, so the
+                # body's `{` can come several lines later. A `;` first means a
+                # declaration with no body, as in a trait.
+                for j in range(i, min(i + 40, len(lines))):
+                    sig = lines[j].split("//", 1)[0]
+                    if "{" in sig:
+                        end = block_end(lines, j)
+                        functions.append((end - i + 1, m.group(2), f"{rel}:{i + 1}"))
+                        break
+                    if sig.rstrip().endswith(";"):
+                        break
     spread = sorted(((len(v), k, sorted(v)) for k, v in impl_files.items() if len(v) >= 3), reverse=True)
     return {
         "structs": sorted(structs, reverse=True)[:TOP],
@@ -257,7 +263,9 @@ def crate_graph() -> dict:
     graph = {}
     for p in meta["packages"]:
         deps = [d["name"] for d in p["dependencies"] if d["name"] in names and d["name"] != p["name"]]
-        dev = [d["name"] for d in p["dependencies"] if d["name"] in names and d.get("kind") == "dev"]
+        dev = [
+            d["name"] for d in p["dependencies"] if d["name"] in names and d["name"] != p["name"] and d.get("kind") == "dev"
+        ]
         graph[p["name"]] = {"deps": sorted(set(deps) - set(dev)), "dev": sorted(set(dev))}
     return {"available": True, "crates": graph}
 
