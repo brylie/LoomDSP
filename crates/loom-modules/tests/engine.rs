@@ -92,9 +92,9 @@ fn feedback_fm_recovers_after_extreme_settings() {
 
 #[test]
 fn final_output_is_clipped_and_never_non_finite() {
-    // ADR-0007: audio is clipped only at the final output, to -1 to 1.
-    // NaN and infinity become silence there (#121). With the safety stage
-    // off, that is all that happens (ADR-0019).
+    // ADR-0007: audio is clipped only at the final output, to -1 to 1. With the
+    // safety stage off, that is all that happens (ADR-0019). NaN and infinity
+    // becoming silence there (#121) is `infinity_becomes_silence_at_the_output` in `loom-core`.
     let mut parts = load_raw("sine.ron");
     let c = &mut parts.controller;
     let constant = c.add_module("loom.math.constant").unwrap();
@@ -115,7 +115,7 @@ fn final_output_is_clipped_and_never_non_finite() {
     let (left, _) = render(&mut parts, 2_048, 128, &[]);
     assert!(left[1_024..].iter().all(|&x| x == -1.0), "-5 clips to -1");
 
-    // x = 10 * (x + 1) each sample: past f32's range in about 40 samples.
+    // x = 10 * (x + 1) each sample: it would pass f32's range in about 40 samples.
     let c = &mut parts.controller;
     c.remove_module(constant).unwrap();
     let add = c.add_module("loom.math.add").unwrap();
@@ -129,8 +129,19 @@ fn final_output_is_clipped_and_never_non_finite() {
     c.commit().unwrap();
     let (left, _) = render(&mut parts, 256, 128, &[]);
     assert!(left.iter().all(|x| x.is_finite()));
-    assert!(left.contains(&1.0), "the loop clips at 1 before it overflows");
-    assert!(left[100..].iter().all(|&x| x == 0.0), "infinity becomes silence");
+    // Multiply and Add hold an overflow at the largest finite value (module test
+    // harness, All inputs at once), so the loop stays at full scale. It does not
+    // reach infinity, which would be stuck there for good.
+    assert!(
+        left[100..].iter().all(|&x| x == 1.0),
+        "the loop clips at 1 and stays there"
+    );
+
+    // The loop recovers when its gain falls: x = 0.1 * (x + 1) settles at 1/9.
+    parts.controller.set_param_named(mul, "gain", 0.1).unwrap();
+    let (left, _) = render(&mut parts, 4_800, 128, &[]);
+    let settled = left[4_799];
+    assert!((settled - 1.0 / 9.0).abs() < 1e-4, "the loop recovers: {settled}");
 }
 
 #[test]
