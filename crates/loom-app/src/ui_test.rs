@@ -36,7 +36,6 @@
 //! Not covered: what the operating system and winit deliver, for example
 //! events while the pointer is outside the window.
 
-use crate::subscriptions::{browser_key, help_key};
 use crate::{App, Args, Message, screenshot};
 use iced::advanced::Clipboard;
 use iced::advanced::clipboard::Kind;
@@ -44,7 +43,7 @@ use iced::advanced::renderer::{Headless, Style};
 use iced::advanced::widget::Id;
 use iced::advanced::widget::Operation;
 use iced::advanced::widget::operation::Outcome;
-use iced::{Event, Point, Rectangle, Size, Task, event, keyboard, mouse, window};
+use iced::{Event, Point, Rectangle, Size, Task, keyboard, mouse, window};
 use iced_runtime::Action;
 use iced_runtime::futures::futures::{FutureExt, StreamExt};
 use iced_runtime::user_interface::{Cache, UserInterface};
@@ -145,72 +144,55 @@ impl Ui {
     /// is drawn. Returns every message, including those tasks produced.
     pub fn step(&mut self, events: &[Event]) -> Vec<Message> {
         let mut messages = Vec::new();
-        let browser_open = self.app.browser.is_some() && self.app.help.is_none();
-        let patches_open = self.app.patches.is_some() && self.app.chooser.is_none();
-        let matrix_keys = self.app.matrix.tab == crate::matrix::Tab::Matrix && self.app.matrix.focused;
-        let value_draft_open = self.app.value_draft.is_some();
-        let question_open = self.app.question.is_some();
+        let listening = self.app.listening();
         let mut clipboard = std::mem::take(&mut self.clipboard);
         self.with_ui(|ui, renderer, cursor| {
             let (_, statuses) = ui.update(events, cursor, renderer, &mut clipboard, &mut messages);
             for (event, status) in events.iter().zip(statuses) {
-                // As the subscriptions do: an open question has the keys,
-                // except Panic's.
-                if question_open {
-                    messages.extend(crate::question::key(event.clone(), status, window::Id::unique()));
-                    messages.extend(crate::panic::key(event.clone(), status, window::Id::unique()));
-                    continue;
-                }
-                // `keyboard::listen` passes on the key events no widget
-                // captured.
-                if let (Event::Keyboard(key), event::Status::Ignored) = (event, status) {
-                    messages.push(Message::Key(key.clone()));
-                }
-                if matrix_keys
-                    && let Event::Keyboard(key) = event
-                    && let Some(message) = crate::matrix::key_message(key.clone(), status)
-                {
-                    messages.push(message);
-                }
-                // The open browser listens to keys whether or not a widget
-                // used them.
-                if browser_open && let Some(message) = browser_key(event.clone(), status, window::Id::unique()) {
-                    messages.push(message);
-                }
-                if patches_open && let Some(message) = crate::patches::key(event.clone(), status, window::Id::unique())
-                {
-                    messages.push(message);
-                }
-                if let Some(message) = help_key(event.clone(), status, window::Id::unique()) {
-                    messages.push(message);
-                }
-                if value_draft_open
-                    && let Some(message) =
-                        crate::controls::value_draft_event(event.clone(), status, window::Id::unique())
-                {
-                    messages.push(message);
-                }
-                if let Some(message) = crate::controls::text_focus_event(event.clone(), status, window::Id::unique()) {
-                    messages.push(message);
-                }
-                // The panic key listens to every key event (panic.md).
-                if let Some(message) = crate::panic::key(event.clone(), status, window::Id::unique()) {
-                    messages.push(message);
-                }
+                let heard = crate::input_owner::input_event(event.clone(), status, window::Id::unique());
+                messages.extend(heard.map(|heard| heard.message(listening)));
             }
         });
         self.clipboard = clipboard;
-        let mut queue: VecDeque<Message> = messages.iter().cloned().collect();
-        while let Some(message) = queue.pop_front() {
-            let task = self.app.update(message);
-            self.run(task, &mut queue, &mut messages);
-        }
+        let messages = self.apply(messages);
         let theme = self.app.theme();
         let style = Style {
             text_color: theme.palette().text,
         };
         self.with_ui(|ui, renderer, cursor| ui.draw(renderer, &theme, &style, cursor));
         messages
+    }
+
+    /// Applies messages as the runtime does, with what their tasks produce,
+    /// and returns them all. An input message is logged as the messages it
+    /// routes to, which are what a test looks for.
+    fn apply(&mut self, messages: Vec<Message>) -> Vec<Message> {
+        let mut log: Vec<Message> = messages
+            .iter()
+            .filter(|m| !matches!(m, Message::Input { .. }))
+            .cloned()
+            .collect();
+        let mut queue: VecDeque<Message> = messages.into();
+        while let Some(message) = queue.pop_front() {
+            if let Message::Input {
+                event,
+                status,
+                listening,
+            } = &message
+            {
+                let routed = listening.route(event.clone(), *status);
+                if !routed.is_empty() {
+                    log.extend(routed.iter().cloned());
+                    for message in routed.into_iter().rev() {
+                        queue.push_front(message);
+                    }
+                    continue;
+                }
+            }
+            let task = self.app.update(message);
+            self.run(task, &mut queue, &mut log);
+        }
+        log
     }
 
     /// Runs a task to the end. Messages it produces go to `queue` and to

@@ -1092,6 +1092,100 @@ fn typing_ui() -> crate::ui_test::Ui {
     ui
 }
 
+/// The variant names of the messages an input became. The channel's own
+/// messages are left out, and so are text focus answers, which come from tasks,
+/// and a list reporting where it scrolled, which comes from a frame.
+fn routed_names(messages: Vec<Message>) -> Vec<String> {
+    messages
+        .iter()
+        .filter(|message| !matches!(message, Message::Browser(crate::browser::Message::Scrolled(_))))
+        .map(|message| {
+            let debug = format!("{message:?}");
+            debug
+                .split(|c: char| !c.is_alphanumeric())
+                .next()
+                .unwrap_or_default()
+                .to_string()
+        })
+        .filter(|name| !["Control", "ControlFrame", "Located", "TextFocus", "Telemetry"].contains(&name.as_str()))
+        .collect()
+}
+
+/// Runs a command through the channel, and returns what the frames applied.
+fn channel_messages(ui: &mut crate::ui_test::Ui, line: &str) -> Vec<Message> {
+    let command: Command = serde_json::from_str(line).unwrap();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let call = Call {
+        command,
+        reply: Reply(Arc::new(Mutex::new(Some(sender)))),
+    };
+    let _ = ui.app.control(call);
+    let mut messages = Vec::new();
+    for _ in 0..200 {
+        if receiver.try_recv().is_ok() {
+            return messages;
+        }
+        messages.extend(ui.redraw());
+        let _ = ui.app.update(Message::ControlFrame(Instant::now()));
+    }
+    panic!("no answer to {line}");
+}
+
+/// A fresh app with an overlay open, ready for the same event by either path.
+fn with_overlay(owner: crate::input_owner::InputOwner) -> crate::ui_test::Ui {
+    let mut ui = typing_ui();
+    crate::input_owner::tests::select_first_module(&mut ui);
+    crate::input_owner::tests::open_overlay(&mut ui, owner);
+    ui
+}
+
+/// #569: for each overlay, a key sent by a script and the same key in the
+/// headless path become the same messages, in the same order. The real window's
+/// listener shares the filter and the route with both.
+#[test]
+fn a_scripted_key_routes_as_a_real_one_for_each_overlay() {
+    use crate::input_owner::tests::OWNERS;
+    use iced::keyboard::{Key, Modifiers, key::Named};
+    for owner in OWNERS {
+        for (name, key) in [
+            ("escape", Key::Named(Named::Escape)),
+            ("tab", Key::Named(Named::Tab)),
+            ("up", Key::Named(Named::ArrowUp)),
+        ] {
+            let mut scripted = with_overlay(owner);
+            let line = format!(r#"{{"cmd": "key", "key": "{name}"}}"#);
+            let by_script = routed_names(channel_messages(&mut scripted, &line));
+            let mut direct = with_overlay(owner);
+            let by_step = routed_names(direct.tap(key, Modifiers::empty()));
+            assert_eq!(by_script, by_step, "{owner:?}, {name}");
+        }
+        // A character carries its text, so a focused field can use it.
+        let mut scripted = with_overlay(owner);
+        let by_script = routed_names(channel_messages(&mut scripted, r#"{"cmd": "key", "key": "q"}"#));
+        let mut direct = with_overlay(owner);
+        let by_step = routed_names(direct.typewrite("q"));
+        assert_eq!(by_script, by_step, "{owner:?}, q");
+    }
+}
+
+/// #569: and the same for a press and a release, at one point in the window.
+#[test]
+fn a_scripted_press_routes_as_a_real_one_for_each_overlay() {
+    use crate::input_owner::tests::OWNERS;
+    let at = iced::Point::new(5.0, 5.0);
+    for owner in OWNERS {
+        let mut scripted = with_overlay(owner);
+        channel_messages(&mut scripted, r#"{"cmd": "hover", "x": 5.0, "y": 5.0}"#);
+        let mut by_script = routed_names(channel_messages(&mut scripted, r#"{"cmd": "press"}"#));
+        by_script.extend(routed_names(channel_messages(&mut scripted, r#"{"cmd": "release"}"#)));
+        let mut direct = with_overlay(owner);
+        direct.move_to(at);
+        let mut by_step = routed_names(direct.press());
+        by_step.extend(routed_names(direct.release()));
+        assert_eq!(by_script, by_step, "{owner:?}");
+    }
+}
+
 /// Every character reaches the search field, so the list filters as a person
 /// typing would see it. One frame per character keeps them all.
 #[test]

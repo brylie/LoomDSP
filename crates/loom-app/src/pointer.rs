@@ -300,31 +300,22 @@ pub struct Injector<'a, Message> {
     content: Element<'a, Message>,
     pointer: Pointer,
     app: &'a App,
-    /// The messages a key event no widget took becomes, as the app's key
-    /// subscriptions would send them.
-    on_key: KeyHandler<'a, Message>,
-    /// The message a press becomes, as the app's event subscription would
-    /// send it. It may have moved text focus.
-    on_press: Box<dyn Fn() -> Message + 'a>,
+    /// What an injected event becomes, as the app's input listener hears it.
+    on_input: Box<dyn Fn(Event, iced::event::Status) -> Option<Message> + 'a>,
 }
-
-/// Turns a key event, and whether a widget took it, into app messages.
-type KeyHandler<'a, Message> = Box<dyn Fn(keyboard::Event, iced::event::Status) -> Vec<Message> + 'a>;
 
 impl<'a, Message> Injector<'a, Message> {
     /// Wraps `content`, the whole window view of `app`.
     pub(crate) fn new(
         content: impl Into<Element<'a, Message>>,
         app: &'a App,
-        on_key: impl Fn(keyboard::Event, iced::event::Status) -> Vec<Message> + 'a,
-        on_press: impl Fn() -> Message + 'a,
+        on_input: impl Fn(Event, iced::event::Status) -> Option<Message> + 'a,
     ) -> Self {
         Self {
             content: content.into(),
             pointer: app.pointer.clone(),
             app,
-            on_key: Box::new(on_key),
-            on_press: Box::new(on_press),
+            on_input: Box::new(on_input),
         }
     }
 
@@ -512,16 +503,12 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Injector<'_, Mess
                 );
                 let status = own.event_status();
                 shell.merge(own, |m| m);
-                if matches!(injected, Event::Mouse(mouse::Event::ButtonPressed(_))) {
-                    shell.publish((self.on_press)());
-                }
-                if let Event::Keyboard(
-                    key @ (keyboard::Event::KeyPressed { .. } | keyboard::Event::KeyReleased { .. }),
-                ) = injected
+                // Modifier changes reach the view only (control-channel.md,
+                // Pointer commands).
+                if !matches!(injected, Event::Keyboard(keyboard::Event::ModifiersChanged(_)))
+                    && let Some(message) = (self.on_input)(injected, status)
                 {
-                    for message in (self.on_key)(key, status) {
-                        shell.publish(message);
-                    }
+                    shell.publish(message);
                 }
             }
             // Draw this event, then send the next one.

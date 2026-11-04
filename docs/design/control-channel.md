@@ -116,7 +116,7 @@ Commands for the checks that need a hand today: hover lines, pinning a badge and
 - **Still no dialogs** (rule 9), and no events outside the window.
 - **Idle.** A pointer command wakes the app and asks for frames until it is drawn. `--measure-idle` counts no frames when no command arrives (rule 7).
 
-How it is built: `pointer::Injector` wraps the whole window view. A command's events wait in a queue. On each redraw the injector sends the next one to the view, with the script's pointer as the cursor, and asks for another frame. The runtime can send one redraw to the view up to three times; only the first takes an event. Answers come two frames after the last event, as for other commands (rule 5). An injected event then goes through the same filter and the same route as a real one (`input_event` and `App::route_input`), so a script's key reaches the same messages, in the same order, as a person's. Modifier changes reach the view only.
+How it is built: `pointer::Injector` wraps the whole window view. A command's events wait in a queue. On each redraw the injector sends the next one to the view, with the script's pointer as the cursor, and asks for another frame. The runtime can send one redraw to the view up to three times; only the first takes an event. Answers come two frames after the last event, as for other commands (rule 5). An injected event then goes through the same filter and the same route as a real one (`input_event` and `Listening::route`), so a script's key reaches the same messages, in the same order, as a person's. Modifier changes reach the view only.
 
 Points settled while building, agreed in [#392](https://github.com/brylie/LoomDSP/issues/392) (2026-10-28):
 

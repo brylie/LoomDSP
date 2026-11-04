@@ -1,10 +1,9 @@
 //! What the app listens to: timers, keys, MIDI, the control channel, and
 //! the watcher threads that wake it.
 
-use crate::matrix::Tab as RightTab;
 use crate::{
-    App, FileAction, Message, audio_watch, bench, browser, control, devices, input_watch, learn, lights, matrix,
-    monitor, panic, preferences, recovery,
+    App, FileAction, Message, audio_watch, bench, browser, control, devices, input_watch, learn, lights, monitor,
+    preferences, recovery,
 };
 use iced::Subscription;
 use loom_core::ModuleId;
@@ -152,7 +151,7 @@ impl App {
 
     /// Wakes the UI when control changes arrive, while there is something to
     /// update: mapped parameters to follow, or learn mode waiting for MIDI.
-    /// In learn mode, it also listens for Escape.
+    /// Also the app's one input listener.
     pub(crate) fn midi_watch(&self) -> Subscription<Message> {
         let mapped = self.controller.graph().midi_mappings().next().is_some();
         let watch = (mapped || self.learn.is_on() || self.rig.panic_learn.is_some()).then(|| {
@@ -162,51 +161,18 @@ impl App {
             };
             Subscription::run_with(watch, learn::stream).map(|_| Message::Midi)
         });
-        // An open question has the keys, except Panic's. One key must not
-        // answer it and also reach what is behind it, once the answer has
-        // closed it (files.md, Asking before losing work).
-        let open = self.question.is_none();
-        let keys = open.then(|| iced::keyboard::listen().map(Message::Key));
-        // The matrix owns arrows and Escape even when a child widget uses
-        // the key. Its handler ignores them outside table focus.
-        let matrix_keys = (open && self.matrix.tab == RightTab::Matrix && self.matrix.focused)
-            .then(|| iced::event::listen_with(matrix::key_listener));
-        // The search field takes Escape for itself, so the browser listens
-        // to keys whether or not a widget used them.
-        let browser =
-            (open && self.browser.is_some() && self.help.is_none()).then(|| iced::event::listen_with(browser_key));
-        let help_keys = open.then(|| iced::event::listen_with(help_key));
-        // A draft in a value field ends on Escape, and the app has to know
-        // when text focus may have moved (panel-widgets.md, Typing a value).
-        let text_focus = open.then(|| iced::event::listen_with(crate::controls::text_focus_event));
-        let value_draft =
-            (open && self.value_draft.is_some()).then(|| iced::event::listen_with(crate::controls::value_draft_event));
-        // The patches browser hears Up, Down, and Escape over its fields.
-        let patches_keys = (open && self.patches.is_some() && self.chooser.is_none())
-            .then(|| iced::event::listen_with(crate::patches::key));
-        let question_keys = (!open).then(|| iced::event::listen_with(crate::question::key));
-        // The panic key works whatever has focus (panic.md).
-        let panic = Some(iced::event::listen_with(panic::key));
-        // Files dropped on the window. The timer runs only while a drop is
-        // being collected, so an idle app stays idle.
-        let drops = Some(iced::event::listen_with(crate::recent::drop_event));
+        // One listener hears every input event, and its messages say who was
+        // listening before the event (input_owner.rs).
+        let input = Some(
+            iced::event::listen_with(crate::input_owner::input_event)
+                .with(self.listening())
+                .map(|(listening, heard)| heard.message(listening)),
+        );
+        // The timer runs only while a drop is being collected, so an idle
+        // app stays idle.
         let drops_done = (!self.drops.is_empty())
             .then(|| iced::time::every(std::time::Duration::from_millis(100)).map(|_| Message::DropsDone));
-        Subscription::batch(
-            watch
-                .into_iter()
-                .chain(keys)
-                .chain(matrix_keys)
-                .chain(browser)
-                .chain(help_keys)
-                .chain(patches_keys)
-                .chain(value_draft)
-                .chain(text_focus)
-                .chain(question_keys)
-                .chain(panic)
-                .chain(drops)
-                .chain(drops_done),
-        )
+        Subscription::batch(watch.into_iter().chain(input).chain(drops_done))
     }
 
     /// Watches the lights on screen, and sends a message only when one
