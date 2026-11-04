@@ -20,7 +20,7 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::{Duration, Instant, SystemTime};
 
 /// The search field's widget ID: typing goes there when the browser opens.
-const SEARCH: &str = "patch-browser-search";
+pub(crate) const SEARCH: &str = "patch-browser-search";
 /// The Author filter's field.
 const AUTHOR: &str = "patch-browser-author";
 /// The browser's text fields, in the order Tab moves between them.

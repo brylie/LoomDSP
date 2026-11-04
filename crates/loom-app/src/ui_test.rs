@@ -172,7 +172,22 @@ impl Ui {
             .filter(|m| !matches!(m, Message::Input { .. }))
             .cloned()
             .collect();
-        let mut queue: VecDeque<Message> = messages.into();
+        self.drain(messages.into(), &mut log);
+        log
+    }
+
+    /// Runs a task as the runtime does, with the messages it produces and what
+    /// their tasks produce in turn, and returns them all.
+    pub(crate) fn run_task(&mut self, task: Task<Message>) -> Vec<Message> {
+        let (mut queue, mut log) = (VecDeque::new(), Vec::new());
+        self.run(task, &mut queue, &mut log);
+        self.drain(queue, &mut log);
+        log
+    }
+
+    /// Applies queued messages until none is left. Messages that tasks produce
+    /// go to `log`, and so do the messages an input message routes to.
+    fn drain(&mut self, mut queue: VecDeque<Message>, log: &mut Vec<Message>) {
         while let Some(message) = queue.pop_front() {
             if let Message::Input {
                 event,
@@ -190,9 +205,8 @@ impl Ui {
                 }
             }
             let task = self.app.update(message);
-            self.run(task, &mut queue, &mut log);
+            self.run(task, &mut queue, log);
         }
-        log
     }
 
     /// Runs a task to the end. Messages it produces go to `queue` and to

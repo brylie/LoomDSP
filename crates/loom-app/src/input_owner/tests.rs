@@ -199,3 +199,61 @@ fn one_escape_closes_help_over_preferences() {
     assert!(ui.app.help.is_none(), "help closed");
     assert!(ui.app.rig.window.is_some(), "Preferences stayed open");
 }
+
+/// Taps Cmd with a character, and returns the number of modules after it.
+fn tap_command(ui: &mut Ui, c: &str) -> usize {
+    ui.tap(Key::Character(c.into()), Modifiers::COMMAND);
+    ui.app.controller.graph().nodes().count()
+}
+
+/// #581: with an overlay open and no text field in focus, Cmd+X and Cmd+D leave
+/// the patch alone, and Cmd+C leaves the clipboard alone. With no field in
+/// focus the key reaches the app, which is where it used to leak.
+#[test]
+fn clipboard_keys_do_nothing_behind_an_overlay() {
+    let mut leaks = Vec::new();
+    for owner in OWNERS.into_iter().filter(|owner| *owner != InputOwner::Canvas) {
+        for c in ["x", "d", "c"] {
+            let mut ui = Ui::open("subtractive.ron");
+            select_first_module(&mut ui);
+            open_overlay(&mut ui, owner);
+            let modules = ui.app.controller.graph().nodes().count();
+            ui.run_task(crate::editing::unfocus_text_fields());
+            ui.redraw();
+            assert!(!ui.text_field_focused(), "{owner:?}: a field would take the key");
+            ui.clipboard.0 = Some("before".to_string());
+            let after = tap_command(&mut ui, c);
+            if after != modules || ui.clipboard.0.as_deref() != Some("before") {
+                leaks.push(format!("{owner:?} Cmd+{c}"));
+            }
+        }
+    }
+    assert!(leaks.is_empty(), "these keys acted behind the overlay: {leaks:?}");
+}
+
+/// #581: a focused search field takes Cmd+X and Cmd+C but not Cmd+D, so Cmd+D
+/// is the key that could leak past one.
+#[test]
+fn duplicate_does_nothing_from_a_focused_search_field() {
+    let mut ui = Ui::open("subtractive.ron");
+    select_first_module(&mut ui);
+    let modules = ui.app.controller.graph().nodes().count();
+    open_overlay(&mut ui, InputOwner::Patches);
+    ui.focus(patches::SEARCH);
+    assert!(ui.text_field_focused());
+    assert_eq!(tap_command(&mut ui, "d"), modules);
+}
+
+/// #581: with nothing open, the same keys still work.
+#[test]
+fn clipboard_keys_work_with_no_overlay() {
+    let mut ui = Ui::open("subtractive.ron");
+    select_first_module(&mut ui);
+    let modules = ui.app.controller.graph().nodes().count();
+    assert_eq!(tap_command(&mut ui, "d"), modules + 1, "Cmd+D duplicates");
+    ui.clipboard.0 = None;
+    ui.tap(Key::Character("c".into()), Modifiers::COMMAND);
+    assert!(ui.clipboard.0.is_some(), "Cmd+C copies");
+    let before = ui.app.controller.graph().nodes().count();
+    assert!(tap_command(&mut ui, "x") < before, "Cmd+X cuts");
+}

@@ -335,7 +335,8 @@ impl App {
 
     /// The clipboard command a message asks for: `'c'`, `'x'`, or `'d'`
     /// with Ctrl or Cmd. Paste comes from the canvas instead, which knows
-    /// where the pointer is. Keys go to the browser while it is open.
+    /// where the pointer is. They act on the patch, so they work only while the
+    /// canvas has the input.
     pub(crate) fn clipboard_key(&self, message: &Message) -> Option<char> {
         let Message::Key(iced::keyboard::Event::KeyPressed {
             key: iced::keyboard::Key::Character(c),
@@ -345,12 +346,7 @@ impl App {
         else {
             return None;
         };
-        if !modifiers.command()
-            || self.browser.is_some()
-            || self.probe_menu.is_some()
-            || self.rig.window.is_some()
-            || self.recent_rows.is_some()
-        {
+        if !modifiers.command() || self.input_owner() != crate::input_owner::InputOwner::Canvas {
             return None;
         }
         ['c', 'x', 'd']
