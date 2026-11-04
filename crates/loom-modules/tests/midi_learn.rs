@@ -627,11 +627,21 @@ fn a_range_change_makes_a_pickup_wait() {
     let ranges: &[ParamRange] = spec.options.ranges;
     assert!(ranges.len() > 1, "constant offers ranges");
     parts.controller.set_range(id, index, ranges[0]).unwrap();
+    parts.controller.set_param(id, index, 0.05).unwrap();
     parts
         .controller
         .map_midi_with(CC74, id, index, in_mode(MidiMode::Pickup))
         .unwrap();
     parts.controller.commit().unwrap();
+    step_silently(&mut parts);
+    // CC 96 is within one step of 0.05 in this range, so it catches.
+    send_cc(&mut parts, CC74, 96);
+    step_silently(&mut parts);
+    parts.controller.sync_midi();
+    assert!(parts.controller.midi_waiting().is_empty(), "caught");
+    let value = |parts: &EngineParts| parts.controller.graph().node(id).unwrap().params[index];
+    let caught = value(&parts);
+
     let (old, _) = parts.controller.graph().midi_mapping_of(id, index).unwrap();
     parts.controller.set_range(id, index, ranges[1]).unwrap();
     let (new, mapping) = parts.controller.graph().midi_mapping_of(id, index).unwrap();
@@ -640,6 +650,50 @@ fn a_range_change_makes_a_pickup_wait() {
     // Selecting the same range again changes nothing.
     parts.controller.set_range(id, index, ranges[1]).unwrap();
     assert_eq!(parts.controller.graph().midi_mapping_of(id, index).unwrap().0, new);
+
+    // A caught mapping would jump to the top of the new range. This one waits.
+    parts.controller.commit().unwrap();
+    step_silently(&mut parts);
+    send_cc(&mut parts, CC74, 127);
+    step_silently(&mut parts);
+    parts.controller.sync_midi();
+    assert_eq!(value(&parts), caught, "the value does not move");
+    assert_eq!(
+        parts.controller.midi_waiting().len(),
+        1,
+        "the engine reports it waiting"
+    );
+}
+
+/// A relative step after a range change starts from the value's position in
+/// the new range, not the position it had in the old one.
+#[test]
+fn a_relative_step_after_a_range_change_uses_the_new_range() {
+    let mut parts = engine();
+    let id = parts.controller.add_module("loom.math.constant").unwrap();
+    let index = 0;
+    let ranges = parts.controller.graph().node(id).unwrap().descriptor.params[index]
+        .options
+        .ranges;
+    parts.controller.set_range(id, index, ranges[0]).unwrap();
+    parts.controller.set_param(id, index, 0.05).unwrap();
+    parts
+        .controller
+        .map_midi_with(CC74, id, index, in_mode(MidiMode::Relative(MidiEncoding::Offset64)))
+        .unwrap();
+    parts.controller.commit().unwrap();
+    step_silently(&mut parts);
+
+    parts.controller.set_range(id, index, ranges[1]).unwrap();
+    parts.controller.commit().unwrap();
+    step_silently(&mut parts);
+    send_cc(&mut parts, CC74, 65);
+    step_silently(&mut parts);
+    parts.controller.sync_midi();
+    let node = parts.controller.graph().node(id).unwrap();
+    let spec = node.spec(index).unwrap();
+    let expected = spec.denormalize(spec.normalize(0.05) + 1.0 / 128.0);
+    assert_eq!(node.params[index], expected);
 }
 
 /// What a learning control change does for each mode on a moved mapping: it

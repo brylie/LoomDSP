@@ -523,6 +523,77 @@ fn a_waiting_pickup_shows_a_ghost_until_it_catches() {
     );
 }
 
+/// A row with choice names has no travel, so a waiting pickup draws no ghost
+/// on it. Neither does a learn mode row, which has no slider (midi-learn.md,
+/// Mapping modes).
+#[test]
+fn a_row_with_no_slider_shows_no_ghost() {
+    let mut app = app_with_mapped_cutoff();
+    let ok = Ok(Map::new());
+    let (module, index) = app
+        .controller
+        .graph()
+        .nodes()
+        .find_map(|(id, node)| {
+            let index = node
+                .descriptor
+                .params
+                .iter()
+                .position(|spec| !spec.options.choices.is_empty() && !spec.is_transient())?;
+            (node.descriptor.params[index].normalize(node.params[index]) < 0.5).then_some((id, index))
+        })
+        .expect("a parameter with choice names, in its lower half");
+    app.controller
+        .map_midi_with(
+            loom_core::MidiControl {
+                channel: 0,
+                controller: 22,
+            },
+            module,
+            index,
+            loom_core::MidiMappingOptions {
+                mode: loom_core::MidiMode::Pickup,
+                ..loom_core::MidiMappingOptions::DEFAULT
+            },
+        )
+        .unwrap();
+    app.commit();
+    let select = format!(r#"{{"cmd": "select", "modules": [{}]}}"#, module.0);
+    assert_eq!(run(&mut app, &select), ok);
+    // One buffer for the engine to take the new mapping, as `cc` waits for.
+    assert_eq!(run(&mut app, r#"{"cmd": "cc", "controller": 22, "value": 127}"#), ok);
+    assert!(
+        app.learn.ghosts().shown().contains_key(&(module.0, index)),
+        "the pickup is waiting and its hardware moved"
+    );
+    let row =
+        run(&mut app, r#"{"cmd": "snapshot"}"#).unwrap()["snapshot"]["inspector"]["module"]["params"][index].clone();
+    assert_eq!(row["mapping_options"]["mode"], json!("Pickup"), "{row}");
+    assert!(row["mapping_options"]["ghost"].is_null(), "{row}");
+
+    // A slider row loses its mark in learn mode too.
+    let mut app = app_with_mapped_cutoff();
+    assert_eq!(
+        run(
+            &mut app,
+            r#"{"cmd": "midi_options", "target": "4:cutoff", "mode": "pickup"}"#
+        ),
+        ok
+    );
+    let start = cutoff_row(&mut app)["mode"]["edit"]["position"].as_f64().unwrap();
+    let far = if start < 0.5 { 127 } else { 0 };
+    assert_eq!(
+        run(
+            &mut app,
+            &format!(r#"{{"cmd": "cc", "controller": 21, "value": {far}}}"#)
+        ),
+        ok
+    );
+    assert!(!cutoff_row(&mut app)["mapping_options"]["ghost"].is_null());
+    assert_eq!(run(&mut app, r#"{"cmd": "toolbar", "button": "learn"}"#), ok);
+    assert!(cutoff_row(&mut app)["mapping_options"]["ghost"].is_null());
+}
+
 /// `sample` records a knob's live value once per frame (#255): with a
 /// held envelope modulating a filter's Resonance, the live dot moves.
 /// Then the app asks for no more frames (rule 7).

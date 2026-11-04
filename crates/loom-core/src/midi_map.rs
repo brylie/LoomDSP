@@ -238,8 +238,8 @@ pub struct NoteOnSeen {
 
 /// What the engine knows about one mapped control between control changes.
 /// One per control, in a table allocated once with the engine, so it never
-/// allocates. Read and written on the audio thread, except that learning
-/// starts a fresh one on the control thread.
+/// allocates. The table belongs to the audio thread. `learn_midi` runs the
+/// same steps on a temporary copy of its own, so nothing is shared.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct ControlState {
     /// The mapping this state belongs to. A new id starts the state again.

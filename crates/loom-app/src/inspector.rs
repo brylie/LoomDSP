@@ -142,7 +142,7 @@ pub struct MappingRow {
     /// Whether the rows are open.
     pub open: bool,
     /// Where a waiting pickup's hardware stands, from 0 to 1, while its
-    /// ghost mark shows.
+    /// ghost mark shows on this row's slider. `None` on a row with no slider.
     pub ghost: Option<f32>,
     /// The options as the controller holds them, for the messages that
     /// change one field.
@@ -375,7 +375,15 @@ impl App {
                         range_error: draft.and_then(|d| d.error.clone()),
                         invert: m.options.invert,
                         open: self.learn.options_open((id, index)),
-                        ghost: self.learn.ghosts().shown().get(&(id, index)).copied(),
+                        // Only a slider has a travel to mark, and a learn
+                        // mode row has no slider (midi-learn.md, Mapping modes).
+                        ghost: self
+                            .learn
+                            .ghosts()
+                            .shown()
+                            .get(&(id, index))
+                            .copied()
+                            .filter(|_| spec.options.choices.is_empty() && !self.learn.is_on()),
                         options: m.options,
                     }
                 });
@@ -823,7 +831,7 @@ fn mapping_rows<'a>(module: u32, index: usize, row_data: MappingRow) -> Element<
             text_input("", shown)
                 .on_submit(Message::MidiRangeSubmit { module, index })
                 .size(style::SMALL)
-                .width(48)
+                .width(72)
                 .padding(1)
                 .style(move |theme: &Theme, status| {
                     let mut style = text_input::default(theme, status);
