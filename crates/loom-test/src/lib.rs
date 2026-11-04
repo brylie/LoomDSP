@@ -154,8 +154,29 @@ pub struct Harness {
     params: Vec<(usize, f32)>,
     midi: Vec<MidiEvent>,
     transport: TransportSettings,
+    /// Parameter changes during the render: `(seconds, index, value)`.
+    param_changes: Vec<(f64, usize, f32)>,
+    /// Transport changes during the render: `(seconds, settings)`.
+    transport_changes: Vec<(f64, TransportSettings)>,
     tolerance: f32,
     allow_undocumented: bool,
+}
+
+/// The transport from one frame of a render until the next change.
+#[derive(Clone, Copy)]
+struct TransportSpan {
+    /// The frame where this transport takes effect.
+    start: usize,
+    /// The settings in force, so the next change can tell what it changed.
+    settings: TransportSettings,
+    /// The transport at `start`.
+    info: TransportInfo,
+}
+
+/// The transport in force at `frame`, for a call that starts there.
+fn transport_at_frame(spans: &[TransportSpan], frame: usize) -> TransportInfo {
+    let span = spans[spans.partition_point(|span| span.start <= frame) - 1];
+    span.info.later(frame - span.start)
 }
 
 impl Harness {
@@ -179,6 +200,8 @@ impl Harness {
                 running: false,
                 ..TransportSettings::default()
             },
+            param_changes: Vec::new(),
+            transport_changes: Vec::new(),
             tolerance: DEFAULT_TOLERANCE,
             allow_undocumented: false,
         }
@@ -221,7 +244,26 @@ impl Harness {
     /// `Controller::set_param` clamps it.
     #[track_caller]
     pub fn param(mut self, name: &str, value: f32) -> Self {
-        let Some(index) = self.descriptor.param_index(name) else {
+        let index = self.param_named(name);
+        self.params.push((index, self.descriptor.params[index].clamp(value)));
+        self
+    }
+
+    /// Changes parameter `name` at `seconds` into the render, clamped as
+    /// [`Harness::param`] clamps it. The harness ends a block there, so the
+    /// change lands on the same frame at every block size.
+    #[track_caller]
+    pub fn param_at(mut self, seconds: f64, name: &str, value: f32) -> Self {
+        let index = self.param_named(name);
+        self.param_changes
+            .push((seconds, index, self.descriptor.params[index].clamp(value)));
+        self
+    }
+
+    /// The index of parameter `name`. Panics with the names it has.
+    #[track_caller]
+    fn param_named(&self, name: &str) -> usize {
+        self.descriptor.param_index(name).unwrap_or_else(|| {
             panic!(
                 "{}: no parameter `{name}`; it has {:?}",
                 self.descriptor.id,
@@ -230,10 +272,8 @@ impl Harness {
                     .iter()
                     .map(|param| param.name)
                     .collect::<Vec<_>>()
-            );
-        };
-        self.params.push((index, self.descriptor.params[index].clamp(value)));
-        self
+            )
+        })
     }
 
     /// MIDI events. Each event's `frame` counts from the start of the render.
@@ -246,6 +286,15 @@ impl Harness {
     /// stopped, at 120 BPM, in 4/4.
     pub fn transport(mut self, settings: TransportSettings) -> Self {
         self.transport = settings;
+        self
+    }
+
+    /// Changes the transport at `seconds` into the render. The position stays
+    /// where it is. A tempo or running change is not a jump, and a time signature
+    /// change is a jump for one call (clock spec, rule 10). The harness ends a
+    /// block there, so the change lands on the same frame at every block size.
+    pub fn transport_at(mut self, seconds: f64, settings: TransportSettings) -> Self {
+        self.transport_changes.push((seconds, settings));
         self
     }
 
@@ -306,7 +355,7 @@ impl Harness {
     /// cable. An unconnected input reads its port default.
     fn input_buffers(&self) -> (Vec<Vec<f32>>, Vec<bool>) {
         let frames = self.frame_count();
-        let transport = TransportInfo::new(self.sample_rate, self.transport, 0.0);
+        let transport = self.transport_spans();
         let inputs = self
             .descriptor
             .inputs
@@ -319,6 +368,64 @@ impl Harness {
             .collect();
         let connected = self.inputs.iter().map(Option::is_some).collect();
         (inputs, connected)
+    }
+
+    /// The frame of a change at `seconds`, rounded as [`Harness::seconds`] is.
+    fn frame_at(&self, seconds: f64) -> usize {
+        (seconds * f64::from(self.sample_rate)).round() as usize
+    }
+
+    /// The parameter changes as `(frame, index, value)`, by frame, and in the
+    /// order they were added on one frame.
+    fn scheduled_params(&self) -> Vec<(usize, usize, f32)> {
+        let mut changes: Vec<_> = self
+            .param_changes
+            .iter()
+            .map(|&(seconds, index, value)| (self.frame_at(seconds), index, value))
+            .collect();
+        changes.sort_by_key(|&(frame, ..)| frame);
+        changes
+    }
+
+    /// The transport over the render, in frame order: the first span from frame
+    /// 0, and one for each frame with a change.
+    fn transport_spans(&self) -> Vec<TransportSpan> {
+        let mut spans = vec![TransportSpan {
+            start: 0,
+            settings: self.transport,
+            info: TransportInfo::new(self.sample_rate, self.transport, 0.0),
+        }];
+        let mut changes: Vec<_> = self
+            .transport_changes
+            .iter()
+            .map(|&(seconds, settings)| (self.frame_at(seconds), settings))
+            .collect();
+        changes.sort_by_key(|&(frame, _)| frame);
+        for (start, settings) in changes {
+            let last = spans[spans.len() - 1];
+            let before = last.info.later(start - last.start);
+            let moved = settings.time_signature != last.settings.time_signature;
+            // Two changes on one frame are one change, so the jump stays.
+            let jump = moved || (start == last.start && last.info.jumped());
+            let info = TransportInfo::new(self.sample_rate, settings, before.position()).with_jump(jump);
+            if start == last.start {
+                spans.pop();
+            }
+            spans.push(TransportSpan { start, settings, info });
+        }
+        spans
+    }
+
+    /// Panics if the harness has scheduled changes. A reset or a new copy cannot
+    /// replay a schedule that has already run.
+    #[track_caller]
+    fn refuse_scheduled_changes(&self, check: &str) {
+        assert!(
+            self.param_changes.is_empty() && self.transport_changes.is_empty(),
+            "{}: `{check}` does not support `.param_at` or `.transport_at`: a reset or a new copy cannot replay a \
+             schedule that has already run",
+            self.descriptor.id
+        );
     }
 
     /// A new instance with the harness's parameter values, set up as the
@@ -351,6 +458,7 @@ impl Harness {
     /// keeps state that `process` changed.
     #[track_caller]
     pub fn check_reset(&self) {
+        self.refuse_scheduled_changes("check_reset");
         let (inputs, connected) = self.input_buffers();
         let mut module = self.build();
         let first = self.run_module_ref(module.as_mut(), MAX_BLOCK, &inputs, &connected);
@@ -395,6 +503,20 @@ impl Harness {
                 event.frame
             );
         }
+        let last_change = self
+            .param_changes
+            .iter()
+            .map(|&(seconds, ..)| seconds)
+            .chain(self.transport_changes.iter().map(|&(seconds, _)| seconds))
+            .map(|seconds| self.frame_at(seconds))
+            .max();
+        if let Some(frame) = last_change {
+            assert!(
+                frame < frames,
+                "{}: a scheduled change at frame {frame} is past the end of the render ({frames} frames)",
+                descriptor.id
+            );
+        }
         let mut outputs = vec![vec![0.0; frames]; descriptor.outputs.len()];
         self.run_span(module, block, inputs, connected, 0..frames, &mut outputs);
         Render {
@@ -416,12 +538,25 @@ impl Harness {
         span: std::ops::Range<usize>,
         outputs: &mut [Vec<f32>],
     ) {
-        let transport = TransportInfo::new(self.sample_rate, self.transport, 0.0);
+        let transport = self.transport_spans();
+        let params = self.scheduled_params();
         let frames = span.end;
         let mut block_midi = Vec::with_capacity(self.midi.len());
         let mut start = span.start;
         while start < frames {
-            let len = block.min(frames - start);
+            for &(_, index, value) in params.iter().filter(|&&(frame, ..)| frame == start) {
+                module.set_param(index, value);
+            }
+            // A block ends at the next change, so the change lands on its frame
+            // at every block size.
+            let next_change = params
+                .iter()
+                .map(|&(frame, ..)| frame)
+                .chain(transport.iter().map(|span| span.start))
+                .filter(|&frame| frame > start)
+                .min()
+                .unwrap_or(frames);
+            let len = block.min(next_change.min(frames) - start);
             let end = start + len;
             block_midi.clear();
             block_midi.extend(
@@ -438,7 +573,7 @@ impl Harness {
             testing::run_with_transport(
                 module,
                 self.sample_rate,
-                transport.later(start),
+                transport_at_frame(&transport, start),
                 &block_inputs,
                 connected,
                 &mut block_outputs,
@@ -453,7 +588,9 @@ impl Harness {
     /// run on to the end, in blocks of `block` frames. Returns whether the copy
     /// took the state, and the two outputs from frame `at`: the running
     /// instance's first.
+    #[track_caller]
     fn copied_at(&self, at: usize, block: usize) -> (bool, Vec<Vec<f32>>, Vec<Vec<f32>>) {
+        self.refuse_scheduled_changes("check_copy_state");
         let frames = self.frame_count();
         assert!(
             at < frames,
@@ -815,12 +952,15 @@ impl Harness {
 /// What an unconnected input reads, for the whole render. Computed from the
 /// same anchor as the engine's shared buffers, so it is the same value, bit
 /// for bit.
-fn default_signal(default: PortDefault, transport: &TransportInfo, frames: usize) -> Vec<f32> {
+fn default_signal(default: PortDefault, transport: &[TransportSpan], frames: usize) -> Vec<f32> {
+    let at = |frame: usize| transport_at_frame(transport, frame);
     match default {
         PortDefault::Value(value) => vec![value; frames],
-        PortDefault::BarPhase => (0..frames).map(|frame| transport.bar_phase_at(frame)).collect(),
-        PortDefault::BeatPhase => (0..frames).map(|frame| transport.beat_phase_at(frame)).collect(),
-        PortDefault::Playing => vec![if transport.playing() { 1.0 } else { 0.0 }; frames],
+        PortDefault::BarPhase => (0..frames).map(|frame| at(frame).bar_phase_at(0)).collect(),
+        PortDefault::BeatPhase => (0..frames).map(|frame| at(frame).beat_phase_at(0)).collect(),
+        PortDefault::Playing => (0..frames)
+            .map(|frame| if at(frame).playing() { 1.0 } else { 0.0 })
+            .collect(),
     }
 }
 

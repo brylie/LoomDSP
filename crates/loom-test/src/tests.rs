@@ -1,5 +1,7 @@
 use super::*;
-use loom_core::{Channels, Module, ParamOptions, ParamSpec, PortIo, PortSpec, ProcessContext, SignalType};
+use loom_core::{
+    Channels, Module, ParamOptions, ParamSpec, PortIo, PortSpec, ProcessContext, SignalType, TransportSettings,
+};
 use std::path::PathBuf;
 
 /// A port for test descriptors.
@@ -850,7 +852,10 @@ macro_rules! capture {
             category: "Test",
             family: loom_core::Family::Interface,
             description: "Stores its input on a trigger.",
-            inputs: &[port("in", SignalType::Modulation), port("trigger", SignalType::Gate)],
+            inputs: &[
+                port("in", SignalType::Modulation),
+                port("trigger", SignalType::Gate),
+            ],
             outputs: &[port("out", SignalType::Modulation)],
             params: &[],
             role: ModuleRole::Dsp(|_| {
@@ -958,7 +963,9 @@ fn the_bounded_level_sees_an_overflow_with_every_input_huge() {
 /// A module with no inputs has nothing to send a huge value to, so it passes.
 #[test]
 fn the_all_input_check_passes_a_module_with_no_inputs() {
-    Harness::new(&NO_INPUTS).frames(EXTREME_RENDER).check_extreme_recovery_all();
+    Harness::new(&NO_INPUTS)
+        .frames(EXTREME_RENDER)
+        .check_extreme_recovery_all();
 }
 
 /// A harness that stores a huge input on one edge, and never again.
@@ -1038,6 +1045,112 @@ fn each_input_at_its_own_frequency_shows_a_wrong_route() {
         .input("a", Signal::phase(100.0))
         .input("b", Signal::phase(130.0))
         .check_copy_state(100);
+}
+
+/// Seconds for frame `frame` at the default sample rate. Frame 5003 is one no block
+/// size lands on.
+fn at(frame: usize) -> f64 {
+    frame as f64 / f64::from(DEFAULT_SAMPLE_RATE)
+}
+
+/// A parameter change lands on its frame at every block size.
+#[test]
+fn a_parameter_change_lands_on_its_frame() {
+    let render = Harness::new(&ECHO)
+        .frames(6_000)
+        .param_at(at(5_003), "gain", 2.0)
+        .check_block_sizes();
+    let gain = render.output("gain");
+    assert_ne!(gain[5_002], gain[5_003]);
+    assert_eq!(gain[5_003], 2.0);
+}
+
+/// Changes on one frame apply in the order they were added.
+#[test]
+fn the_last_change_on_a_frame_wins() {
+    let render = Harness::new(&ECHO)
+        .frames(6_000)
+        .param_at(at(5_003), "gain", 2.0)
+        .param_at(at(5_003), "gain", 1.5)
+        .check_block_sizes();
+    assert_eq!(render.output("gain")[5_003], 1.5);
+}
+
+/// A change past the end of the render fails, so a test cannot lose one.
+#[test]
+#[should_panic(expected = "test.echo: a scheduled change at frame 6000 is past the end of the render (6000 frames)")]
+fn a_change_past_the_end_fails() {
+    Harness::new(&ECHO)
+        .frames(6_000)
+        .param_at(at(6_000), "gain", 2.0)
+        .render();
+}
+
+/// An unknown name fails as `.param` does.
+#[test]
+#[should_panic(expected = "test.echo: no parameter `nope`")]
+fn a_change_needs_a_real_parameter() {
+    let _ = Harness::new(&ECHO).param_at(0.0, "nope", 1.0);
+}
+
+/// A reset cannot replay a schedule, so the check says so.
+#[test]
+#[should_panic(expected = "`check_reset` does not support")]
+fn the_reset_check_refuses_scheduled_changes() {
+    Harness::new(&ECHO)
+        .frames(200)
+        .param_at(at(100), "gain", 2.0)
+        .check_reset();
+}
+
+/// A copy cannot replay a schedule, so the check says so.
+#[test]
+#[should_panic(expected = "`check_copy_state` does not support")]
+fn the_copy_check_refuses_scheduled_changes() {
+    Harness::new(&ECHO)
+        .frames(200)
+        .transport_at(at(50), TransportSettings::default())
+        .check_copy_state(100);
+}
+
+/// A playing transport at `tempo`, in 4/4.
+fn at_tempo(tempo: f64) -> TransportSettings {
+    TransportSettings {
+        tempo,
+        ..TransportSettings::default()
+    }
+}
+
+/// A tempo change keeps the position: the beat phase moves on from where it was,
+/// at the new speed. The unconnected input follows the same timeline.
+#[test]
+fn a_tempo_change_keeps_the_position() {
+    let render = Harness::new(&ECHO)
+        .frames(6_000)
+        .transport(at_tempo(120.0))
+        .transport_at(at(5_003), at_tempo(60.0))
+        .check_block_sizes();
+    let beat = render.output("beat");
+    let (before, after) = (beat[5_002] - beat[5_001], beat[5_004] - beat[5_003]);
+    assert!((before / after - 2.0).abs() < 1e-2, "{before} then {after}");
+    assert!((beat[5_003] - beat[5_002]).abs() < 1e-3);
+}
+
+/// Stopping holds the position, and the playing input follows.
+#[test]
+fn a_stop_holds_the_position() {
+    let stopped = TransportSettings {
+        running: false,
+        ..TransportSettings::default()
+    };
+    let render = Harness::new(&ECHO)
+        .frames(6_000)
+        .transport(TransportSettings::default())
+        .transport_at(at(5_003), stopped)
+        .check_block_sizes();
+    let (beat, play) = (render.output("beat"), render.output("play"));
+    assert_eq!((play[5_002], play[5_003]), (1.0, 0.0));
+    assert_eq!(beat[5_003], beat[5_999]);
 }
 
 // The recovery time ends before the next edge, or the edge could hide a bad

@@ -30,10 +30,9 @@ fn playing(descriptor: &'static ModuleDescriptor) -> Harness {
 /// The check's busy signal on every input. All inputs move together, so each
 /// rising edge falls inside the bad frames.
 fn on_busy_inputs(harness: Harness, descriptor: &'static ModuleDescriptor) -> Harness {
-    descriptor
-        .inputs
-        .iter()
-        .fold(harness, |harness, port| harness.input(port.name, Signal::non_finite_busy()))
+    descriptor.inputs.iter().fold(harness, |harness, port| {
+        harness.input(port.name, Signal::non_finite_busy())
+    })
 }
 
 /// Runs the check on a harness for every DSP module in [`ALL`] and panics

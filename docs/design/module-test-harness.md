@@ -3,7 +3,7 @@
 A test harness for module authors: render one module with given inputs and parameters, check it against a stored reference render, and check that block size does not change its output.
 
 - **Kind:** living specification.
-- **Status:** Implemented, M1. [Blind spots in the shared checks](#blind-spots-in-the-shared-checks), [All inputs at once](#all-inputs-at-once), and [Changes during a render](#changes-during-a-render) Agreed, M2 (2026-11-04, [#564](https://github.com/brylie/LoomDSP/issues/564), [#575](https://github.com/brylie/LoomDSP/issues/575), [#96](https://github.com/brylie/LoomDSP/issues/96)).
+- **Status:** Implemented, M1. [Blind spots in the shared checks](#blind-spots-in-the-shared-checks), [All inputs at once](#all-inputs-at-once), and [Changes during a render](#changes-during-a-render) Implemented, M2 (2026-11-04, [#564](https://github.com/brylie/LoomDSP/issues/564), [#575](https://github.com/brylie/LoomDSP/issues/575), [#96](https://github.com/brylie/LoomDSP/issues/96)).
 - **Decision behind it:** [ADR-0002](../adr/0002-graph-execution-and-feedback.md) ("The SDK harness must cover this").
 - **Background:** [Block-size invariance](../learn/block-size-invariance.md): why a module must sound the same at any block size, and what breaks it.
 - **Use case and requirements:** FR-SDK-02, NFR-OSS-05.
@@ -141,13 +141,13 @@ Golden-audio tests for whole patches, the other half of NFR-OSS-05 ([#93](https:
 - [x] Every built-in DSP module in `loom_modules::ALL` passes `check_extreme_recovery` on every input, except inputs with a stated reason, which pass `check_extreme_stays_bounded_on`.
 - [x] `check_extreme_recovery` fails for a module that stores a huge input as it comes, for each of the two faults found in Phase Reset.
 - [x] Every built-in DSP module in `loom_modules::ALL` passes `check_copy_state`, except seeded ones, which pass `check_copy_state_repeatable`. Copying allocates nothing (`no_alloc.rs`).
-- [ ] `check_non_finite_recovery` fails for a module that stores a bad input on another input's rising edge, on `Signal::non_finite_busy` (test).
-- [ ] Every built-in DSP module passes `check_non_finite_recovery` with the transport playing, on port defaults and on busy inputs.
-- [ ] Every built-in DSP module passes `check_copy_state` on port defaults with the transport playing, copied mid-cycle, on the bar wrap, and on the frame after it, except seeded ones and modules with a stated exception.
-- [ ] Every built-in DSP module passes the all-input extreme check at its defaults and in each option of each choice parameter, except modules with a stated exception, which stay bounded.
-- [ ] Every built-in DSP module stays finite with its continuous parameters at their maximum, each input in turn and all inputs at once.
-- [ ] A parameter change and a transport change land on the same frame at block sizes 1, 77, and 512, for every built-in DSP module.
-- [ ] A scheduled time signature change is a jump for one call, and a tempo or running change is not (test).
+- [x] `check_non_finite_recovery` fails for a module that stores a bad input on another input's rising edge, on `Signal::non_finite_busy` (test).
+- [x] Every built-in DSP module passes `check_non_finite_recovery` with the transport playing, on port defaults and on busy inputs.
+- [x] Every built-in DSP module passes `check_copy_state` on port defaults with the transport playing, copied mid-cycle, on the bar wrap, and on the frame after it, except seeded ones.
+- [x] Every built-in DSP module passes the all-input extreme check at its defaults and in each option of each choice parameter, except modules with a stated exception, which stay bounded.
+- [x] Every built-in DSP module stays finite with its continuous parameters at their maximum, each input in turn and all inputs at once.
+- [x] A parameter change and a transport change land on the same frame at block sizes 1, 77, and 512, for every built-in DSP module.
+- [x] A scheduled time signature change is a jump for one call, and a tempo or running change is not (test).
 
 ## Huge finite inputs
 
@@ -164,7 +164,7 @@ Cables carry any `f32` and are never clipped ([ADR-0007](../adr/0007-polymorphic
 
 ## All inputs at once
 
-**Status:** Agreed, M2 ([#575](https://github.com/brylie/LoomDSP/issues/575)).
+**Status:** Implemented, M2 ([#575](https://github.com/brylie/LoomDSP/issues/575)).
 
 The check for one input cannot see a bug that needs two huge inputs together. Two inputs at `f32::MAX` overflow when they are multiplied, or summed, even though each is finite.
 
@@ -176,7 +176,7 @@ The check for one input cannot see a bug that needs two huge inputs together. Tw
 
 ## Blind spots in the shared checks
 
-**Status:** Agreed, M2 ([#564](https://github.com/brylie/LoomDSP/issues/564)).
+**Status:** Implemented, M2 ([#564](https://github.com/brylie/LoomDSP/issues/564)).
 
 The checks over every module in `ALL` must reach the state they claim to test. These rules exist because a timing gap passes silently.
 
@@ -191,10 +191,11 @@ Known limits, so nobody assumes more than these runs show:
 - The bad frames do not overlap the bar wrap, so a module that stores a bad value only on a wrap is not covered.
 - Clock has no inputs, so `check_non_finite_recovery` has nothing to send it, and passes without testing anything.
 - `changed()` puts Selector in Select mode, which never draws from its random stream. So the shared copy check does not cover that stream. A focused test in `copy_state.rs` does.
+- A lost wrap detector does not show on Euclidean rhythm at more than one step, because the step changes on a wrap anyway. It shows on Phase Trigger, so the run can see this kind of bug.
 
 ## Changes during a render
 
-**Status:** Agreed, M2 ([#96](https://github.com/brylie/LoomDSP/issues/96)).
+**Status:** Implemented, M2 ([#96](https://github.com/brylie/LoomDSP/issues/96)).
 
 Modules that smooth parameters, or follow tempo and play state, must sound the same at every block size when something changes during a render.
 

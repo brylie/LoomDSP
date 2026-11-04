@@ -311,14 +311,19 @@ fn every_all_input_exception_is_needed() {
                         failure(id, || harness.check_extreme_recovery_all()).is_some()
                     })
             });
-        assert!(needed, "{id} passes the full check with every input huge, so it needs no exception");
+        assert!(
+            needed,
+            "{id} passes the full check with every input huge, so it needs no exception"
+        );
     }
 }
 
 /// The DSP modules in [`ALL`]. Unit delays and audio outputs are run by the
 /// engine, not by `process`.
 fn dsp_modules() -> impl Iterator<Item = &'static ModuleDescriptor> {
-    ALL.iter().copied().filter(|descriptor| matches!(descriptor.role, ModuleRole::Dsp(_)))
+    ALL.iter()
+        .copied()
+        .filter(|descriptor| matches!(descriptor.role, ModuleRole::Dsp(_)))
 }
 
 /// Each exception is still needed for its own input, so the table cannot go
@@ -420,7 +425,12 @@ fn the_amplifier_holds_an_overflow() {
 fn a_non_finite_input_still_passes_through() {
     let infinity = || Signal::constant(f32::INFINITY);
     assert_eq!(
-        last(Harness::new(&math::MUL).frames(8).input("a", infinity()).input("b", Signal::constant(2.0))),
+        last(
+            Harness::new(&math::MUL)
+                .frames(8)
+                .input("a", infinity())
+                .input("b", Signal::constant(2.0))
+        ),
         f32::INFINITY
     );
     assert_eq!(
