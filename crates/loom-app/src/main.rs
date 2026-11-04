@@ -994,6 +994,7 @@ impl App {
                 let want = monitor::ScopeWant {
                     window: (scope.window * rate).round().max(1.0) as usize,
                     trigger: scope.trigger,
+                    slope: scope.slope,
                 };
                 Some((probe, want))
             })

@@ -341,10 +341,10 @@ A right-click opens a menu for what is under the pointer. Right-clicking a tile 
 ### Acceptance criteria: scope module
 
 - [x] The scope module passes its input through, bit for bit. It has a reference test and a block-size check.
-- [ ] A falling slope starts the trace on a falling edge, and a fixed level of 3 triggers on a signal between 2 and 5 (tests in `crates/loom-app/src/live/tests.rs`).
+- [x] A falling slope starts the trace on a falling edge, and a fixed level of 3 triggers on a signal between 2 and 5 (tests in `crates/loom-app/src/live/tests.rs`).
 - [ ] Level meter: a peak of 1.0 lights the clip light until it is clicked; the peak hold shows the highest peak in dB; a double-click resets both (`Ui` harness).
 - [x] A patch that makes infinity at the output counts silenced samples and shows the error message for 10 seconds after the last one; clipping with safety Off shows the warning (test).
-- [x] Its parameters are `window`, `auto`, and `level`, with the ranges above, and its panel has a knob, a toggle, and a knob for them.
+- [x] Its parameters are `window`, `auto`, `level`, and `slope`, with the ranges above. Its panel has a knob, a toggle, and a knob for the first three, and `slope` is in the inspector.
 - [x] `ScopeTrace` with a fixed level triggers on that level, and runs free when nothing crosses it. With `auto` on it behaves as before.
 - [x] Right-clicking an output or a cable opens the menu. A right-drag pans and opens no menu. Right-clicking a tile, an input, or empty canvas opens none.
 - [x] Add scope and Add meter, on an output and on a cable, place a module whose `in` is connected to that output, next to it and overlapping no tile. The cable that was clicked stays. The new module is selected.

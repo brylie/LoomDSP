@@ -29,7 +29,8 @@ Shows its input over time. Passes the input through unchanged.
 |---|---|---|---|
 | **Window** (`window`) | 0.001 to 1 s, logarithmic | 0.02 s | The time shown across the display. |
 | **Auto** (`auto`) | 0 to 1, whole numbers | 1 | Triggers halfway between the signal's lowest and highest values. |
-| **Level** (`level`) | -1 to 1 | 0 | The trigger level while Auto is off. |
+| **Level** (`level`) | -10 to 10. Control ranges -1 to 1, -10 to 10 (default -1 to 1) | 0 | The trigger level while Auto is off. |
+| **Slope** (`slope`) | Rising or Falling | Rising | Which edge starts the trace. |
 
 ## Panel
 

@@ -2,8 +2,8 @@
 //! (FR-LIB-17, ADR-0013).
 
 use loom_core::{
-    Channels, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, PortDefault, PortIo, PortSpec,
-    ProcessContext, SignalType, Widget,
+    Channels, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamRange, ParamSpec, PortDefault, PortIo,
+    PortSpec, ProcessContext, SignalType, Widget,
 };
 
 /// `loom.display.meter`: a mono level meter. Passes its input through, so it
@@ -108,13 +108,29 @@ pub static SCOPE: ModuleDescriptor = ModuleDescriptor {
             name: "level",
             label: "Level",
             description: "The trigger level while Auto is off.",
-            min: -1.0,
+            min: -10.0,
+            max: 10.0,
+            default: 0.0,
+            unit: "",
+            options: ParamOptions::DEFAULT,
+        }
+        .ranges(
+            &[ParamRange::new(-1.0, 1.0), ParamRange::new(-10.0, 10.0)],
+            ParamRange::new(-1.0, 1.0),
+        )
+        .shown_when("auto", &[0]),
+        ParamSpec {
+            name: "slope",
+            label: "Slope",
+            description: "Which edge starts the trace.",
+            min: 0.0,
             max: 1.0,
             default: 0.0,
             unit: "",
             options: ParamOptions::DEFAULT,
         }
-        .shown_when("auto", &[0]),
+        .integer()
+        .choices(&["Rising", "Falling"]),
     ],
     role: ModuleRole::Dsp(|_| Box::new(Meter)),
     panel: Panel::new(

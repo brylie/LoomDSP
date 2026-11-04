@@ -100,6 +100,7 @@ fn scope_watch(probe: ProbeId, full: bool) -> WatchList {
             ScopeWant {
                 window: 480,
                 trigger: Trigger::Auto,
+                slope: Slope::Rising,
             },
         )]),
         full_traces: full,

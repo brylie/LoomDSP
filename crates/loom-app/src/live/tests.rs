@@ -75,7 +75,7 @@ fn engine_telemetry_reaches_levels_and_traces() {
     );
     assert_eq!(level(env), Level::default(), "no note, so the envelope is silent");
 
-    trace.update(960, Trigger::Auto);
+    trace.update(960, Trigger::Auto, Slope::Rising);
     assert!(trace.triggered);
     assert_eq!(trace.trace.len(), 961, "20 ms at 48 kHz, plus one sample");
     assert_eq!(trace.range, 1.0);
@@ -99,10 +99,10 @@ fn engine_telemetry_reaches_levels_and_traces() {
 #[test]
 fn flat_trace_runs_free() {
     let mut trace = ScopeTrace::new(48_000.0);
-    trace.update(100, Trigger::Auto);
+    trace.update(100, Trigger::Auto, Slope::Rising);
     assert!(trace.trace.is_empty() && !trace.triggered);
     trace.history.push(0, &[0.25; 500]);
-    trace.update(100, Trigger::Auto);
+    trace.update(100, Trigger::Auto, Slope::Rising);
     assert!(!trace.triggered);
     assert_eq!(trace.trace.len(), 101);
     assert_eq!(trace.range, 0.5);
@@ -247,7 +247,7 @@ fn trigger_finds_rising_zero_crossing() {
     // A sine starting at a quarter cycle: first rising crossing at one
     // period, 48 samples in.
     let samples = sine(1000.0, 48_000.0, 4800, 0.25);
-    let position = find_trigger(&samples, 480, Trigger::Auto).unwrap();
+    let position = find_trigger(&samples, 480, Trigger::Auto, Slope::Rising).unwrap();
     let start = position.floor() as usize;
     let fraction = position - start as f32;
     let level = samples[start] + (samples[start + 1] - samples[start]) * fraction;
@@ -267,7 +267,7 @@ fn trigger_is_stable_across_frames() {
     let mut phases = Vec::new();
     for end in (8000..all.len()).step_by(800) {
         let samples = &all[end - 8000..end];
-        let position = find_trigger(samples, 960, Trigger::Auto).unwrap();
+        let position = find_trigger(samples, 960, Trigger::Auto, Slope::Rising).unwrap();
         let absolute = (end - 8000) as f32 + position;
         phases.push((absolute * 440.0 / 48_000.0 + 0.1).fract());
     }
@@ -282,7 +282,7 @@ fn trigger_is_stable_across_frames() {
 fn trigger_works_with_offset() {
     // An envelope-like signal from 2.0 to 3.0.
     let samples: Vec<f32> = sine(100.0, 48_000.0, 4800, 0.0).iter().map(|x| 2.5 + 0.5 * x).collect();
-    let position = find_trigger(&samples, 480, Trigger::Auto).unwrap();
+    let position = find_trigger(&samples, 480, Trigger::Auto, Slope::Rising).unwrap();
     let i = position.floor() as usize;
     let value = samples[i] + (samples[i + 1] - samples[i]) * (position - i as f32);
     assert!((value - 2.5).abs() < 1e-3, "trigger at {value}");
@@ -298,7 +298,7 @@ fn trigger_ignores_noise_on_the_edge() {
     samples[205] = -0.01;
     samples.extend(std::iter::repeat_n(1.0, 300));
     samples.extend((0..400).map(|i| 1.0 - i as f32 / 200.0));
-    let position = find_trigger(&samples, 600, Trigger::Auto).unwrap();
+    let position = find_trigger(&samples, 600, Trigger::Auto, Slope::Rising).unwrap();
     assert!((199.0..201.0).contains(&position), "position {position}");
 }
 
@@ -307,7 +307,7 @@ fn trigger_at_a_fixed_level() {
     // A sine from -1 to 1, triggered at 0.5: the trace starts where the
     // rising wave crosses 0.5, not at the midpoint.
     let samples = sine(1000.0, 48_000.0, 4800, 0.0);
-    let position = find_trigger(&samples, 480, Trigger::Level(0.5)).unwrap();
+    let position = find_trigger(&samples, 480, Trigger::Level(0.5), Slope::Rising).unwrap();
     let i = position.floor() as usize;
     let value = samples[i] + (samples[i + 1] - samples[i]) * (position - i as f32);
     assert!((value - 0.5).abs() < 1e-3, "trigger at {value}");
@@ -319,7 +319,7 @@ fn fixed_level_near_the_bottom_still_triggers() {
     // At -0.95 a tenth of the swing would arm at -1.15, below the
     // lowest sample, so no edge would ever count.
     let samples = sine(1000.0, 48_000.0, 4800, 0.0);
-    let position = find_trigger(&samples, 480, Trigger::Level(-0.95)).unwrap();
+    let position = find_trigger(&samples, 480, Trigger::Level(-0.95), Slope::Rising).unwrap();
     let i = position.floor() as usize;
     let value = samples[i] + (samples[i + 1] - samples[i]) * (position - i as f32);
     assert!((value + 0.95).abs() < 1e-3, "trigger at {value}");
@@ -331,10 +331,10 @@ fn fixed_level_out_of_reach_runs_free() {
     // The sine never reaches 2.0, so there is no trigger, and the trace
     // shows the latest window.
     let samples = sine(1000.0, 48_000.0, 4800, 0.0);
-    assert_eq!(find_trigger(&samples, 480, Trigger::Level(2.0)), None);
+    assert_eq!(find_trigger(&samples, 480, Trigger::Level(2.0), Slope::Rising), None);
     let mut trace = ScopeTrace::new(48_000.0);
     trace.history.push(0, &samples);
-    trace.update(480, Trigger::Level(2.0));
+    trace.update(480, Trigger::Level(2.0), Slope::Rising);
     assert!(!trace.triggered);
     assert_eq!(trace.trace.as_slice(), &samples[samples.len() - 481..]);
 }
@@ -347,8 +347,8 @@ fn trigger_follows_the_scope_parameters() {
 
 #[test]
 fn flat_signal_does_not_trigger() {
-    assert_eq!(find_trigger(&[0.5; 4096], 480, Trigger::Auto), None);
-    assert_eq!(find_trigger(&[0.5; 10], 480, Trigger::Auto), None);
+    assert_eq!(find_trigger(&[0.5; 4096], 480, Trigger::Auto, Slope::Rising), None);
+    assert_eq!(find_trigger(&[0.5; 10], 480, Trigger::Auto, Slope::Rising), None);
 }
 
 #[test]
@@ -370,4 +370,51 @@ fn range_grows_at_once_and_shrinks_with_margin() {
     assert_eq!(pick_range(1.0, 0.6), 1.0);
     assert_eq!(pick_range(1.0, 0.3), 0.5);
     assert_eq!(pick_range(1.0, 50.0), 10.0);
+}
+
+/// A falling slope starts the trace on a falling edge: the trace goes down
+/// from its first sample (`docs/design/panels.md`, Trigger).
+#[test]
+fn a_falling_slope_starts_on_a_falling_edge() {
+    let samples: Vec<f32> = (0..48_000)
+        .map(|i| (i as f32 * std::f32::consts::TAU / 480.0).sin())
+        .collect();
+    let mut trace = ScopeTrace::new(48_000.0);
+    trace.history.push(0, &samples);
+    trace.update(480, Trigger::Auto, Slope::Falling);
+    assert!(trace.triggered);
+    assert!(trace.trace[1] < trace.trace[0], "falling at the start");
+    assert!(trace.trace[0].abs() < 0.05, "at the level");
+    trace.update(480, Trigger::Auto, Slope::Rising);
+    assert!(trace.trace[1] > trace.trace[0], "a rising slope still rises");
+}
+
+/// A fixed level of 3 triggers on a signal between 2 and 5, on either slope.
+/// Cables are never clipped, so a trigger beyond ±1 must work.
+#[test]
+fn a_fixed_level_of_three_triggers_between_two_and_five() {
+    let samples: Vec<f32> = (0..48_000)
+        .map(|i| 3.5 + 1.5 * (i as f32 * std::f32::consts::TAU / 480.0).sin())
+        .collect();
+    for (slope, rising) in [(Slope::Rising, true), (Slope::Falling, false)] {
+        let mut trace = ScopeTrace::new(48_000.0);
+        trace.history.push(0, &samples);
+        trace.update(480, Trigger::Level(3.0), slope);
+        assert!(trace.triggered, "{slope:?}");
+        assert!((trace.trace[0] - 3.0).abs() < 0.1, "{slope:?} starts at the level");
+        assert_eq!(trace.trace[1] > trace.trace[0], rising, "{slope:?}");
+    }
+}
+
+/// A fixed level near the far end of the signal still arms on a falling edge:
+/// the hysteresis never reaches above the highest sample (`panels.md`, Trigger).
+#[test]
+fn a_falling_edge_near_the_top_still_arms() {
+    let samples: Vec<f32> = (0..48_000)
+        .map(|i| (i as f32 * std::f32::consts::TAU / 480.0).sin())
+        .collect();
+    let mut trace = ScopeTrace::new(48_000.0);
+    trace.history.push(0, &samples);
+    trace.update(480, Trigger::Level(0.99), Slope::Falling);
+    assert!(trace.triggered);
 }

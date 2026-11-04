@@ -6,7 +6,7 @@
 //! Every message to the app redraws the window, so draining telemetry on a
 //! UI timer would draw frames even when every meter is silent.
 
-use crate::live::{Level, Levels, ScopeTrace, Trigger};
+use crate::live::{Level, Levels, ScopeTrace, Slope, Trigger};
 use iced::futures::Stream;
 use iced::futures::channel::mpsc;
 use loom_core::{MeterReading, ProbeId, ScopeChunk, Telemetry};
@@ -51,8 +51,10 @@ pub struct WatchList {
 pub struct ScopeWant {
     /// Samples across the frame: the module's `window` at the sample rate.
     pub window: usize,
-    /// Where the trace starts.
+    /// The level where the trace starts.
     pub trigger: Trigger,
+    /// The edge that starts it.
+    pub slope: Slope,
 }
 
 /// What the thread found that the UI draws.
@@ -137,7 +139,7 @@ impl Watcher {
             let Some(scope) = self.scopes.get_mut(probe) else {
                 continue;
             };
-            scope.update(want.window, want.trigger);
+            scope.update(want.window, want.trigger, want.slope);
             let trace = scope.canvas_trace(watch.full_traces);
             if self.shown_traces.get(probe) != Some(&trace) {
                 traces.push((*probe, trace));

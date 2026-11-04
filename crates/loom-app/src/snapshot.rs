@@ -409,7 +409,7 @@ impl App {
             .into_iter()
             .map(|(probe, mut scope)| {
                 let want = watch.scopes[&probe];
-                scope.update(want.window, want.trigger);
+                scope.update(want.window, want.trigger, want.slope);
                 (probe, scope.canvas_trace(watch.full_traces))
             })
             .collect();

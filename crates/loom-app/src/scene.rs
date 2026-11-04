@@ -575,11 +575,13 @@ pub struct ScopeOutput {
     /// Where the trace starts: from the module's `auto` and `level`, or
     /// automatic.
     pub trigger: crate::live::Trigger,
+    /// The edge that starts the trace: from the module's `slope`, or rising.
+    pub slope: crate::live::Slope,
 }
 
 /// The scopes on these modules (`docs/design/panels.md`, Scope module).
-/// The window and trigger come from the module's `window`, `auto`, and
-/// `level` parameters, when it has them.
+/// The window and trigger come from the module's `window`, `auto`, `level`,
+/// and `slope` parameters, when it has them.
 pub fn scope_outputs(controller: &Controller, modules: &[u32]) -> Vec<ScopeOutput> {
     let mut scopes = Vec::new();
     for &id in modules {
@@ -603,6 +605,7 @@ pub fn scope_outputs(controller: &Controller, modules: &[u32]) -> Vec<ScopeOutpu
                 },
                 window: param("window", 0.02),
                 trigger: crate::live::Trigger::from_params(param("auto", 1.0), param("level", 0.0)),
+                slope: crate::live::Slope::from_param(param("slope", 0.0)),
             });
         }
     }
