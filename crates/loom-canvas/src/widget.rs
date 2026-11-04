@@ -186,6 +186,20 @@ pub struct CanvasPointer {
     pub drag: Option<PointerDrag>,
 }
 
+/// The text field the canvas draws for a typed value, while one is open. The
+/// canvas reports it to widget operations as custom state, as it does
+/// [`CanvasPointer`], so a script can see it. The app works out the reason for
+/// bad text itself, so it cannot differ from what the field shows.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CanvasTyped {
+    /// The module the field is over.
+    pub module: u32,
+    /// The widget the field is over, as an index into the panel.
+    pub widget: usize,
+    /// The text in the field.
+    pub text: String,
+}
+
 /// A drag in progress on the canvas. See [`CanvasPointer::drag`].
 #[derive(Debug, Clone, PartialEq)]
 pub enum PointerDrag {
@@ -775,6 +789,15 @@ where
             drag: PointerDrag::of(&state.interaction),
         };
         operation.custom(None, layout.bounds(), &mut pointer);
+        // The open typed field, for the same snapshot.
+        if let Some(field) = &state.typed {
+            let mut typed = CanvasTyped {
+                module: field.module,
+                widget: field.widget,
+                text: field.text.clone(),
+            };
+            operation.custom(None, layout.bounds(), &mut typed);
+        }
     }
 
     fn mouse_interaction(

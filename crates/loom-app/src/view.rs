@@ -4,10 +4,9 @@
 
 use crate::matrix::{Event as MatrixEvent, Tab as RightTab};
 use crate::style::button;
-use crate::subscriptions::{browser_key, help_key};
 use crate::{
-    App, DIM, FileAction, Message, alerts, browser, inspector, learn, matrix, panic, patches, pointer, probe_menu,
-    question, recent, settings, style, undo,
+    App, DIM, FileAction, Message, alerts, browser, inspector, learn, matrix, pointer, probe_menu, recent, settings,
+    style, undo,
 };
 use iced::widget::{column, container, mouse_area, row, rule, space, stack, text, toggler, tooltip};
 use iced::{Color, Element, Length};
@@ -24,28 +23,13 @@ impl App {
             .activity(self.carrying.iter().map(|output| (output.module.0, output.port)))
             .frame_key(self.frame_key)
             .browser_key(self.browser_key)
-            .interactive(
-                self.browser.is_none()
-                    && self.probe_menu.is_none()
-                    && self.tile_menu.is_none()
-                    && self.help.is_none()
-                    && self.rig.window.is_none()
-                    && self.chooser.is_none()
-                    && self.patches.is_none()
-                    && self.question.is_none()
-                    && self.recent_rows.is_none(),
-            )
+            .interactive(self.input_owner() == crate::input_owner::InputOwner::Canvas)
             .matrix_line(self.matrix_line())
-            .matrix_keyboard(self.matrix.tab == RightTab::Matrix && self.matrix.focused)
+            .matrix_keyboard(self.matrix_has_keys())
             .text_field_keys(self.text_focus.any)
             .text_field_keeps_tab(self.tab_moves_between_fields())
             .typed_check(|module, widget, text| self.typed_check(module, widget, text))
-            .matrix_escape(
-                self.matrix.tab == RightTab::Matrix
-                    && self.matrix.focused
-                    && self.matrix.edit.is_none()
-                    && self.matrix.add.is_none(),
-            )
+            .matrix_escape(self.matrix_has_keys() && self.matrix.edit.is_none() && self.matrix.add.is_none())
             .animate(self.animating)
             .learn(self.learn.shown());
         if let Some(still) = self.still {
@@ -106,9 +90,6 @@ impl App {
                     .position(recent::LIST_AT),
             );
         }
-        if let Some(help) = &self.help {
-            layers = layers.push(iced::widget::opaque(help.view(self.theme())));
-        }
         if let Some(window) = self.preferences_view() {
             layers = layers.push(window);
         }
@@ -119,70 +100,19 @@ impl App {
         if let Some(chooser) = &self.chooser {
             layers = layers.push(chooser.view());
         }
+        // Over the dialogs, because F1 opens it from them (help-pages.md).
+        if let Some(help) = &self.help {
+            layers = layers.push(iced::widget::opaque(help.view(self.theme())));
+        }
         // Over everything: a question must be answered first.
         if let Some(question) = &self.question {
             layers = layers.push(question.view().map(Message::Question));
         }
         // The control channel's pointer events go in here, as a real
         // pointer's would (control-channel.md, Pointer commands).
-        let browser_open = self.browser.is_some() && self.help.is_none();
-        let patches_open = self.patches.is_some() && self.chooser.is_none();
-        let matrix_keys = self.matrix.tab == RightTab::Matrix && self.matrix.focused;
-        let value_draft = self.value_draft.is_some();
-        let question_open = self.question.is_some();
-        let on_key = move |key: iced::keyboard::Event, status| {
-            // As the subscriptions do: an open question has the keys, except
-            // Panic's. One key must not answer it and also reach what is
-            // behind it, once the answer has closed it.
-            if question_open {
-                let event = iced::Event::Keyboard(key);
-                return [
-                    question::key(event.clone(), status, iced::window::Id::unique()),
-                    panic::key(event, status, iced::window::Id::unique()),
-                ]
-                .into_iter()
-                .flatten()
-                .collect();
-            }
-            // `keyboard::listen` passes on what no widget took, and the open
-            // browser hears every key.
-            let mut messages = Vec::new();
-            if status == iced::event::Status::Ignored {
-                messages.push(Message::Key(key.clone()));
-            }
-            if matrix_keys && let Some(message) = matrix::key_message(key.clone(), status) {
-                messages.push(message);
-            }
-            if let Some(message) = panic::key(iced::Event::Keyboard(key.clone()), status, iced::window::Id::unique()) {
-                messages.push(message);
-            }
-            if let Some(message) = help_key(iced::Event::Keyboard(key.clone()), status, iced::window::Id::unique()) {
-                messages.push(message);
-            }
-            let event = iced::Event::Keyboard(key.clone());
-            if value_draft
-                && let Some(message) =
-                    crate::controls::value_draft_event(event.clone(), status, iced::window::Id::unique())
-            {
-                messages.push(message);
-            }
-            if let Some(message) = crate::controls::text_focus_event(event, status, iced::window::Id::unique()) {
-                messages.push(message);
-            }
-            if patches_open
-                && let Some(message) =
-                    patches::key(iced::Event::Keyboard(key.clone()), status, iced::window::Id::unique())
-            {
-                messages.push(message);
-            }
-            if browser_open
-                && let Some(message) = browser_key(iced::Event::Keyboard(key), status, iced::window::Id::unique())
-            {
-                messages.push(message);
-            }
-            messages
-        };
-        pointer::Injector::new(layers, self, on_key, || Message::TextFocusCheck).into()
+        let listening = self.listening();
+        let on_input = move |event: iced::Event, status| crate::input_owner::heard_messages(&event, status, listening);
+        pointer::Injector::new(layers, self, on_input).into()
     }
 
     /// The toolbar: the patch name, then buttons in groups (file, add,

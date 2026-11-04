@@ -739,21 +739,49 @@ fn pointer_ui() -> crate::ui_test::Ui {
 /// redraws the view, where pointer and key events go in, then counts a
 /// control frame.
 fn run_ui(ui: &mut crate::ui_test::Ui, line: &str) -> Answer {
+    drive(ui, line).0
+}
+
+/// Runs a command as the app does: its tasks run, and so do the tasks of each
+/// frame, where a step can start. Returns the answer and every message applied.
+fn drive(ui: &mut crate::ui_test::Ui, line: &str) -> (Answer, Vec<Message>) {
     let command: Command = serde_json::from_str(line).unwrap();
     let (sender, receiver) = std::sync::mpsc::channel();
     let call = Call {
         command,
         reply: Reply(Arc::new(Mutex::new(Some(sender)))),
     };
-    let _ = ui.app.control(call);
+    let task = ui.app.control(call);
+    let mut messages = ui.run_task(task);
     for _ in 0..200 {
         if let Ok(answer) = receiver.try_recv() {
-            return answer;
+            return (answer, messages);
         }
-        ui.redraw();
-        let _ = ui.app.update(Message::ControlFrame(Instant::now()));
+        messages.extend(ui.redraw());
+        let task = ui.app.update(Message::ControlFrame(Instant::now()));
+        messages.extend(ui.run_task(task));
     }
-    receiver.try_recv().expect("answered after drawing")
+    (receiver.try_recv().expect("answered after drawing"), messages)
+}
+
+/// #579: a script reads the typed field from the `snapshot` reply.
+#[test]
+fn a_script_reads_the_typed_field_from_the_snapshot() {
+    let mut ui = typing_ui();
+    let id = ui.app.controller.add_module("loom.filter.svf").unwrap();
+    ui.app.commit();
+    let _ = ui.app.update(Message::SelectModule(id.0));
+    ui.redraw();
+    let at = ui.control(id.0, "cutoff");
+    ui.move_to(at);
+    ui.press();
+    ui.release();
+    run_ui(&mut ui, r#"{"cmd": "key", "key": "4"}"#).unwrap();
+    let snapshot = run_ui(&mut ui, r#"{"cmd": "snapshot"}"#).unwrap();
+    let field = &snapshot["snapshot"]["typed_field"];
+    assert_eq!(field["target"], format!("{}:cutoff", id.0));
+    assert_eq!(field["text"], "4");
+    assert!(field["reason"].is_null());
 }
 
 /// The snapshot's `pointer` field.
@@ -1108,25 +1136,8 @@ fn keys_reach_the_open_browser_and_the_bar_draws_the_clock() {
 /// Runs a `type` command as the app does: the window reports whether a text
 /// field has focus, and then the keys go in, one frame at a time.
 fn run_type(ui: &mut crate::ui_test::Ui, text: &str) -> Answer {
-    let (sender, receiver) = std::sync::mpsc::channel();
-    let call = Call {
-        command: Command::Type { text: text.to_string() },
-        reply: Reply(Arc::new(Mutex::new(Some(sender)))),
-    };
-    let focused = ui.text_field_focused();
-    let _ = ui.app.update(Message::TypeFocus {
-        call,
-        text: text.to_string(),
-        focused,
-    });
-    for _ in 0..200 {
-        if let Ok(answer) = receiver.try_recv() {
-            return answer;
-        }
-        ui.redraw();
-        let _ = ui.app.update(Message::ControlFrame(Instant::now()));
-    }
-    receiver.try_recv().expect("answered after drawing")
+    let line = serde_json::json!({"cmd": "type", "text": text}).to_string();
+    run_ui(ui, &line)
 }
 
 /// An app with the script's pointer on, for typing tests.
@@ -1134,6 +1145,95 @@ fn typing_ui() -> crate::ui_test::Ui {
     let mut ui = crate::ui_test::Ui::open("subtractive.ron");
     ui.app.pointer = crate::pointer::Pointer::new(true);
     ui
+}
+
+/// The variant names of the messages an input became. The channel's own
+/// messages are left out, and so are text focus answers, which come from tasks,
+/// and a list reporting where it scrolled, which comes from a frame.
+fn routed_names(messages: Vec<Message>) -> Vec<String> {
+    messages
+        .iter()
+        .filter(|message| !matches!(message, Message::Browser(crate::browser::Message::Scrolled(_))))
+        .map(|message| {
+            let debug = format!("{message:?}");
+            debug
+                .split(|c: char| !c.is_alphanumeric())
+                .next()
+                .unwrap_or_default()
+                .to_string()
+        })
+        .filter(|name| {
+            ![
+                "Control",
+                "ControlFrame",
+                "Located",
+                "TextFocus",
+                "TypeFocus",
+                "Telemetry",
+            ]
+            .contains(&name.as_str())
+        })
+        .collect()
+}
+
+/// Runs a command through the channel, and returns what it applied.
+fn channel_messages(ui: &mut crate::ui_test::Ui, line: &str) -> Vec<Message> {
+    drive(ui, line).1
+}
+
+/// A fresh app with an overlay open, ready for the same event by either path.
+fn with_overlay(owner: crate::input_owner::InputOwner) -> crate::ui_test::Ui {
+    let mut ui = typing_ui();
+    crate::input_owner::tests::select_first_module(&mut ui);
+    crate::input_owner::tests::open_overlay(&mut ui, owner);
+    ui
+}
+
+/// #569: for each overlay, a key sent by a script and the same key in the
+/// headless path become the same messages, in the same order. The real window's
+/// listener shares the filter and the route with both.
+#[test]
+fn a_scripted_key_routes_as_a_real_one_for_each_overlay() {
+    use crate::input_owner::tests::OWNERS;
+    use iced::keyboard::{Key, Modifiers, key::Named};
+    for owner in OWNERS {
+        for (name, key) in [
+            ("escape", Key::Named(Named::Escape)),
+            ("tab", Key::Named(Named::Tab)),
+            ("up", Key::Named(Named::ArrowUp)),
+        ] {
+            let mut scripted = with_overlay(owner);
+            let line = format!(r#"{{"cmd": "key", "key": "{name}"}}"#);
+            let by_script = routed_names(channel_messages(&mut scripted, &line));
+            let mut direct = with_overlay(owner);
+            let by_step = routed_names(direct.tap(key, Modifiers::empty()));
+            assert_eq!(by_script, by_step, "{owner:?}, {name}");
+        }
+        // A character carries its text, so a focused field can use it.
+        let mut scripted = with_overlay(owner);
+        let by_script = routed_names(channel_messages(&mut scripted, r#"{"cmd": "key", "key": "q"}"#));
+        let mut direct = with_overlay(owner);
+        let by_step = routed_names(direct.typewrite("q"));
+        assert_eq!(by_script, by_step, "{owner:?}, q");
+    }
+}
+
+/// #569: and the same for a press and a release, at one point in the window.
+#[test]
+fn a_scripted_press_routes_as_a_real_one_for_each_overlay() {
+    use crate::input_owner::tests::OWNERS;
+    let at = iced::Point::new(5.0, 5.0);
+    for owner in OWNERS {
+        let mut scripted = with_overlay(owner);
+        channel_messages(&mut scripted, r#"{"cmd": "hover", "x": 5.0, "y": 5.0}"#);
+        let mut by_script = routed_names(channel_messages(&mut scripted, r#"{"cmd": "press"}"#));
+        by_script.extend(routed_names(channel_messages(&mut scripted, r#"{"cmd": "release"}"#)));
+        let mut direct = with_overlay(owner);
+        direct.move_to(at);
+        let mut by_step = routed_names(direct.press());
+        by_step.extend(routed_names(direct.release()));
+        assert_eq!(by_script, by_step, "{owner:?}");
+    }
 }
 
 /// Every character reaches the search field, so the list filters as a person

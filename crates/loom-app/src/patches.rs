@@ -20,7 +20,7 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::{Duration, Instant, SystemTime};
 
 /// The search field's widget ID: typing goes there when the browser opens.
-const SEARCH: &str = "patch-browser-search";
+pub(crate) const SEARCH: &str = "patch-browser-search";
 /// The Author filter's field.
 const AUTHOR: &str = "patch-browser-author";
 /// The browser's text fields, in the order Tab moves between them.
@@ -332,11 +332,11 @@ impl PatchBrowser {
     }
 
     /// Opens a browser over `folder` and the task that reads it on a
-    /// thread, one message per file.
+    /// thread, one message per file. The caller focuses [`SEARCH`].
     pub fn open(open: u64, folder: PathBuf) -> (Self, Task<Message>) {
         let browser = Self::new(open, folder.clone());
         let reader = read(open, folder, browser.stop.clone());
-        (browser, Task::batch([reader, iced::widget::operation::focus(SEARCH)]))
+        (browser, reader)
     }
 
     /// The rows the list shows, in order.

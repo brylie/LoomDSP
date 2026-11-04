@@ -341,6 +341,35 @@ fn captured_filter_keys_do_not_reach_matrix() {
     assert!(key_message(pressed(Named::Delete), iced::event::Status::Ignored).is_some());
 }
 
+/// #597: the same for a depth field opened with the pointer. The click goes
+/// through the depth cell, so the field still takes focus by a task.
+#[test]
+fn cmd_v_in_a_depth_field_opened_by_pointer_stays_out_of_the_canvas() {
+    let mut ui = Ui::open("modulation.ron");
+    ui.app.matrix_event(Event::Tab(Tab::Matrix));
+    ui.redraw();
+    let id = ui.app.controller.graph().assignments().next().expect("an assignment").0;
+    ui.app.matrix_event(Event::Select(id, Column::Depth));
+    ui.redraw();
+    let depth = {
+        let assignment = ui.app.controller.graph().assignment(id).unwrap();
+        crate::modulation::depth_text(assignment.depth)
+    };
+    let cell = ui.text(&depth).expect("the depth cell shows its value");
+    ui.move_to(cell.center());
+    ui.press();
+    ui.release();
+    assert_eq!(ui.app.matrix.edit.as_ref().map(|e| e.column), Some(Column::Depth));
+
+    let messages = ui.tap(keyboard::Key::Character("v".into()), keyboard::Modifiers::COMMAND);
+    assert!(
+        !messages
+            .iter()
+            .any(|m| matches!(m, Message::Canvas(loom_canvas::CanvasEvent::Paste { .. }))),
+        "the canvas took the paste: {messages:?}"
+    );
+}
+
 /// A canvas click returns keyboard control to the canvas before Delete.
 #[test]
 fn canvas_click_then_delete_removes_the_module_not_a_matrix_row() {
@@ -624,4 +653,179 @@ fn cmd_v_in_a_depth_field_stays_out_of_the_canvas() {
             .any(|m| matches!(m, Message::Canvas(loom_canvas::CanvasEvent::Paste { .. }))),
         "the canvas took the paste: {messages:?}"
     );
+}
+
+/// An app with the matrix open and a row selected, ready for keys.
+fn matrix_with_a_row() -> Ui {
+    let mut ui = Ui::open("modulation.ron");
+    ui.app.matrix_event(Event::Tab(Tab::Matrix));
+    ui.app.matrix_event(Event::Select(AssignmentId(1), Column::On));
+    ui.redraw();
+    assert!(ui.app.matrix.focused);
+    ui
+}
+
+/// Clicks the filter, as a person would.
+fn click_filter(ui: &mut Ui) {
+    let at = ui.field(FILTER);
+    ui.move_to(at);
+    ui.press();
+    ui.release();
+    assert_eq!(
+        ui.focused_field(),
+        Some(iced::advanced::widget::Id::new(FILTER)),
+        "the click focused the filter"
+    );
+}
+
+/// What a key must not change: the row, the cell, any edit, and the patch.
+fn rows_and_cells(ui: &Ui) -> (Option<AssignmentId>, Column, bool, usize) {
+    (
+        ui.app.matrix.selected,
+        ui.app.matrix.cell,
+        ui.app.matrix.edit.is_some(),
+        ui.app.controller.graph().assignments().count(),
+    )
+}
+
+/// #435, modulation.md, Filter focus: keys in an empty filter leave the rows,
+/// the cells, and the assignments alone, whether or not the field used them.
+#[test]
+fn keys_in_an_empty_filter_leave_rows_alone() {
+    // A fresh app per key: Delete and Backspace send an empty filter, which
+    // takes the table's focus, and the next key would then prove nothing.
+    for named in [
+        Named::Delete,
+        Named::Backspace,
+        Named::ArrowUp,
+        Named::ArrowDown,
+        Named::ArrowRight,
+        Named::Enter,
+    ] {
+        let mut ui = matrix_with_a_row();
+        click_filter(&mut ui);
+        assert!(ui.app.matrix.focused, "the click left the table focused");
+        let before = rows_and_cells(&ui);
+        ui.tap(keyboard::Key::Named(named), keyboard::Modifiers::default());
+        assert_eq!(rows_and_cells(&ui), before, "{named:?}");
+        assert!(ui.text_field_focused(), "{named:?}: the field keeps focus");
+    }
+}
+
+/// #435: typing and clearing changes the filter only.
+#[test]
+fn typing_and_clearing_a_filter_changes_only_the_filter() {
+    let mut ui = matrix_with_a_row();
+    let count = ui.app.controller.graph().assignments().count();
+    let undo = ui.app.edits.history.undo_step().map(|s| s.name().to_string());
+    click_filter(&mut ui);
+    ui.typewrite("zz");
+    assert_eq!(ui.app.matrix.filter, "zz");
+    ui.tap(keyboard::Key::Named(Named::Backspace), keyboard::Modifiers::default());
+    ui.tap(keyboard::Key::Named(Named::Backspace), keyboard::Modifiers::default());
+    assert_eq!(ui.app.matrix.filter, "");
+    assert_eq!(ui.app.controller.graph().assignments().count(), count);
+    assert_eq!(ui.app.edits.history.undo_step().map(|s| s.name().to_string()), undo);
+}
+
+/// #435, modulation.md, Filter focus: Escape and Tab each end the field's focus
+/// and leave the table, in one press. Tab depends on the order of the route:
+/// the matrix lets go before the text field rule looks.
+#[test]
+fn escape_and_tab_leave_the_filter_and_the_table_in_one_press() {
+    for named in [Named::Escape, Named::Tab] {
+        let mut ui = matrix_with_a_row();
+        click_filter(&mut ui);
+        ui.tap(keyboard::Key::Named(named), keyboard::Modifiers::default());
+        ui.redraw();
+        assert!(!ui.app.matrix.focused, "{named:?} left the table");
+        assert!(!ui.text_field_focused(), "{named:?} ended the field's focus");
+    }
+}
+
+/// #435: the app's shortcuts still work while the filter has focus.
+#[test]
+fn command_shortcuts_work_from_the_filter() {
+    let mut ui = matrix_with_a_row();
+    let id = AssignmentId(1);
+    let original = ui.app.controller.graph().assignment(id).expect("assignment").enabled;
+    ui.app.matrix_event(Event::Enabled(id, !original));
+    ui.app.commit();
+    ui.redraw();
+    click_filter(&mut ui);
+    let messages = ui.tap(keyboard::Key::Character("z".into()), keyboard::Modifiers::COMMAND);
+    assert!(
+        messages.iter().any(|m| matches!(m, Message::Key(_))),
+        "the shortcut reached the app: {messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| matches!(m, Message::HistoryKey { typing: true, .. })),
+        "it asked about typing, and undoes nothing behind the field: {messages:?}"
+    );
+}
+
+/// #435: a cell editor keeps the keys it uses, and they do not reach the rows.
+#[test]
+fn a_cell_editor_keeps_its_captured_keys() {
+    let mut ui = matrix_with_a_row();
+    ui.app.matrix_event(Event::Select(AssignmentId(1), Column::Depth));
+    ui.tap(keyboard::Key::Named(Named::Enter), keyboard::Modifiers::default());
+    assert_eq!(ui.app.matrix.edit.as_ref().map(|e| e.column), Some(Column::Depth));
+    let before = ui.app.matrix.selected;
+    let count = ui.app.controller.graph().assignments().count();
+    for named in [Named::Delete, Named::Backspace, Named::ArrowLeft] {
+        ui.tap(keyboard::Key::Named(named), keyboard::Modifiers::default());
+        assert!(ui.app.matrix.edit.is_some(), "{named:?} stayed in the edit");
+        assert_eq!(ui.app.matrix.selected, before, "{named:?}");
+        assert_eq!(ui.app.controller.graph().assignments().count(), count, "{named:?}");
+    }
+    ui.tap(keyboard::Key::Named(Named::Escape), keyboard::Modifiers::default());
+    assert!(ui.app.matrix.edit.is_none(), "Escape left the edit");
+    assert!(ui.app.matrix.focused, "and stayed in the table");
+}
+
+/// #435: arrows no longer move rows behind an overlay. They used to, behind
+/// help and every overlay but the browser and Preferences. The row comes back
+/// to the keyboard when the overlay closes, and none of it is an undo step.
+#[test]
+fn the_matrix_has_no_keys_behind_an_overlay() {
+    use crate::input_owner::{InputOwner, tests::open_overlay};
+    for owner in [
+        InputOwner::Help,
+        InputOwner::Chooser,
+        InputOwner::Patches,
+        InputOwner::Preferences,
+        InputOwner::Browser,
+        InputOwner::RecentList,
+    ] {
+        let mut ui = matrix_with_a_row();
+        let undo = ui.app.edits.history.undo_step().map(|s| s.name().to_string());
+        open_overlay(&mut ui, owner);
+        let before = ui.app.matrix.selected;
+        ui.tap(keyboard::Key::Named(Named::ArrowDown), keyboard::Modifiers::default());
+        assert_eq!(ui.app.matrix.selected, before, "{owner:?}");
+        assert_eq!(
+            ui.app.edits.history.undo_step().map(|s| s.name().to_string()),
+            undo,
+            "{owner:?}"
+        );
+    }
+}
+
+/// #435: closing the browser or Preferences gives the keys back to the table.
+#[test]
+fn the_table_has_the_keys_again_after_an_overlay_closes() {
+    use crate::input_owner::{InputOwner, tests::open_overlay};
+    for owner in [InputOwner::Browser, InputOwner::Preferences] {
+        let mut ui = matrix_with_a_row();
+        let before = ui.app.matrix.selected;
+        open_overlay(&mut ui, owner);
+        ui.tap(keyboard::Key::Named(Named::Escape), keyboard::Modifiers::default());
+        ui.redraw();
+        assert_eq!(ui.app.input_owner(), InputOwner::Canvas, "{owner:?} closed");
+        ui.tap(keyboard::Key::Named(Named::ArrowDown), keyboard::Modifiers::default());
+        assert_ne!(ui.app.matrix.selected, before, "{owner:?}: Down moved the row");
+    }
 }

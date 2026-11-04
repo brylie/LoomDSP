@@ -36,7 +36,6 @@
 //! Not covered: what the operating system and winit deliver, for example
 //! events while the pointer is outside the window.
 
-use crate::subscriptions::{browser_key, help_key};
 use crate::{App, Args, Message, screenshot};
 use iced::advanced::Clipboard;
 use iced::advanced::clipboard::Kind;
@@ -44,7 +43,7 @@ use iced::advanced::renderer::{Headless, Style};
 use iced::advanced::widget::Id;
 use iced::advanced::widget::Operation;
 use iced::advanced::widget::operation::Outcome;
-use iced::{Event, Point, Rectangle, Size, Task, event, keyboard, mouse, window};
+use iced::{Event, Point, Rectangle, Size, Task, keyboard, mouse, window};
 use iced_runtime::Action;
 use iced_runtime::futures::futures::{FutureExt, StreamExt};
 use iced_runtime::user_interface::{Cache, UserInterface};
@@ -145,72 +144,64 @@ impl Ui {
     /// is drawn. Returns every message, including those tasks produced.
     pub fn step(&mut self, events: &[Event]) -> Vec<Message> {
         let mut messages = Vec::new();
-        let browser_open = self.app.browser.is_some() && self.app.help.is_none();
-        let patches_open = self.app.patches.is_some() && self.app.chooser.is_none();
-        let matrix_keys = self.app.matrix.tab == crate::matrix::Tab::Matrix && self.app.matrix.focused;
-        let value_draft_open = self.app.value_draft.is_some();
-        let question_open = self.app.question.is_some();
+        let listening = self.app.listening();
         let mut clipboard = std::mem::take(&mut self.clipboard);
         self.with_ui(|ui, renderer, cursor| {
             let (_, statuses) = ui.update(events, cursor, renderer, &mut clipboard, &mut messages);
             for (event, status) in events.iter().zip(statuses) {
-                // As the subscriptions do: an open question has the keys,
-                // except Panic's.
-                if question_open {
-                    messages.extend(crate::question::key(event.clone(), status, window::Id::unique()));
-                    messages.extend(crate::panic::key(event.clone(), status, window::Id::unique()));
-                    continue;
-                }
-                // `keyboard::listen` passes on the key events no widget
-                // captured.
-                if let (Event::Keyboard(key), event::Status::Ignored) = (event, status) {
-                    messages.push(Message::Key(key.clone()));
-                }
-                if matrix_keys
-                    && let Event::Keyboard(key) = event
-                    && let Some(message) = crate::matrix::key_message(key.clone(), status)
-                {
-                    messages.push(message);
-                }
-                // The open browser listens to keys whether or not a widget
-                // used them.
-                if browser_open && let Some(message) = browser_key(event.clone(), status, window::Id::unique()) {
-                    messages.push(message);
-                }
-                if patches_open && let Some(message) = crate::patches::key(event.clone(), status, window::Id::unique())
-                {
-                    messages.push(message);
-                }
-                if let Some(message) = help_key(event.clone(), status, window::Id::unique()) {
-                    messages.push(message);
-                }
-                if value_draft_open
-                    && let Some(message) =
-                        crate::controls::value_draft_event(event.clone(), status, window::Id::unique())
-                {
-                    messages.push(message);
-                }
-                if let Some(message) = crate::controls::text_focus_event(event.clone(), status, window::Id::unique()) {
-                    messages.push(message);
-                }
-                // The panic key listens to every key event (panic.md).
-                if let Some(message) = crate::panic::key(event.clone(), status, window::Id::unique()) {
-                    messages.push(message);
-                }
+                messages.extend(crate::input_owner::heard_messages(event, status, listening));
             }
         });
         self.clipboard = clipboard;
-        let mut queue: VecDeque<Message> = messages.iter().cloned().collect();
-        while let Some(message) = queue.pop_front() {
-            let task = self.app.update(message);
-            self.run(task, &mut queue, &mut messages);
-        }
+        let messages = self.apply(messages);
         let theme = self.app.theme();
         let style = Style {
             text_color: theme.palette().text,
         };
         self.with_ui(|ui, renderer, cursor| ui.draw(renderer, &theme, &style, cursor));
         messages
+    }
+
+    /// Applies messages as the runtime does, with what their tasks produce,
+    /// and returns them all. An input message is logged as the messages it
+    /// routes to, which are what a test looks for.
+    fn apply(&mut self, messages: Vec<Message>) -> Vec<Message> {
+        let mut log: Vec<Message> = messages
+            .iter()
+            .filter(|m| !matches!(m, Message::Input { .. }))
+            .cloned()
+            .collect();
+        self.drain(messages.into(), &mut log);
+        log
+    }
+
+    /// Runs a task as the runtime does, with the messages it produces and what
+    /// their tasks produce in turn, and returns them all.
+    pub(crate) fn run_task(&mut self, task: Task<Message>) -> Vec<Message> {
+        let (mut queue, mut log) = (VecDeque::new(), Vec::new());
+        self.run(task, &mut queue, &mut log);
+        self.drain(queue, &mut log);
+        log
+    }
+
+    /// Applies queued messages until none is left, through `App::update`, as
+    /// the runtime does. Messages that tasks produce go to `log`, and so do the
+    /// messages an input message routes to.
+    fn drain(&mut self, mut queue: VecDeque<Message>, log: &mut Vec<Message>) {
+        while let Some(message) = queue.pop_front() {
+            if let Message::Input {
+                event,
+                status,
+                listening,
+            } = &message
+            {
+                // Logged for the test to read. `update` applies them all, and
+                // only then do their tasks run, as in the app.
+                log.extend(listening.route(event.clone(), *status));
+            }
+            let task = self.app.update(message);
+            self.run(task, &mut queue, log);
+        }
     }
 
     /// Runs a task to the end. Messages it produces go to `queue` and to
@@ -312,6 +303,16 @@ impl Ui {
 
     /// Where the inspector's value field for this parameter is in the window.
     pub fn value_field(&mut self, module: u32, index: usize) -> Point {
+        self.field_by_id(crate::controls::value_field_id(module, index))
+    }
+
+    /// Where the text field with this ID is in the window, to click on it.
+    pub fn field(&mut self, id: &'static str) -> Point {
+        self.field_by_id(iced::advanced::widget::Id::new(id))
+    }
+
+    /// The centre of the focusable widget with this ID.
+    fn field_by_id(&mut self, id: iced::advanced::widget::Id) -> Point {
         use iced::advanced::widget::operation::{Focusable, Outcome};
         use iced::advanced::widget::{Id, Operation};
 
@@ -329,9 +330,9 @@ impl Ui {
                 Outcome::None
             }
         }
-        let mut find = Find(crate::controls::value_field_id(module, index), None);
+        let mut find = Find(id, None);
         self.with_ui(|ui, renderer, _| ui.operate(renderer, &mut find));
-        find.1.expect("a value field for that parameter").center()
+        find.1.expect("a field with that ID is on screen").center()
     }
 
     /// Moves the pointer to a window point.
@@ -2354,6 +2355,49 @@ mod tests {
         ui.move_to(at);
         ui.press();
         ui.release();
+    }
+
+    /// #579: the snapshot shows the canvas's typed field: which control it is
+    /// on, its text, and the reason bad text gives. It opens with real keys, and
+    /// goes when Escape closes it.
+    #[test]
+    fn the_snapshot_shows_the_typed_field() {
+        use keyboard::key::Named;
+        let mut ui = Ui::open("subtractive.ron");
+        ui.app.pointer = crate::pointer::Pointer::new(true);
+        let id = select_new(&mut ui, "loom.filter.svf");
+        focus_control(&mut ui, id, "cutoff");
+        ui.redraw();
+        assert_eq!(ui.app.ui_snapshot().typed_field, None, "a click opens no field");
+
+        ui.typewrite("4");
+        ui.redraw();
+        let typed = ui.app.ui_snapshot().typed_field.expect("the digit opened the field");
+        assert_eq!(typed.target, format!("{}:cutoff", id.0));
+        assert_eq!(typed.text, "4");
+        assert_eq!(typed.reason, None);
+
+        ui.typewrite("x");
+        ui.redraw();
+        let typed = ui.app.ui_snapshot().typed_field.expect("the field is still open");
+        assert_eq!(typed.text, "4x");
+        assert!(typed.reason.is_some(), "bad text gives its reason");
+
+        ui.tap(keyboard::Key::Named(Named::Escape), keyboard::Modifiers::empty());
+        ui.redraw();
+        assert_eq!(ui.app.ui_snapshot().typed_field, None, "Escape closed it");
+    }
+
+    /// Without the control channel's pointer state, the field is not reported,
+    /// as with `pointer` (control-channel.md).
+    #[test]
+    fn the_typed_field_is_null_without_the_control_channel() {
+        let mut ui = Ui::open("subtractive.ron");
+        let id = select_new(&mut ui, "loom.filter.svf");
+        focus_control(&mut ui, id, "cutoff");
+        ui.typewrite("4");
+        ui.redraw();
+        assert_eq!(ui.app.ui_snapshot().typed_field, None);
     }
 
     /// Typing 128 on a focused Tempo knob sets exactly 128 BPM, as one undo
