@@ -134,7 +134,7 @@ What the inputs mean depends on the mode:
 | Inputs | `a`, `b` (default 0) |
 | Output | `out` |
 | Parameters | `mix`: 0 to 1, default 0.5. `law`: 0 Equal power (default), 1 Linear |
-| Panel | A knob, two radio buttons |
+| Panel | A horizontal fader, and a segmented control for `law` |
 
 - `mix` 0 is all `a`, 1 is all `b`. A [modulation assignment](modulation.md) can drive `mix`, so there is no `mix` input.
 - **Equal power:** `out = a × cos(mix × π/2) + b × sin(mix × π/2)`. **Linear:** `a × (1 - mix) + b × mix`.

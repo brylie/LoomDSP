@@ -61,7 +61,7 @@ PatchModule(id: 5, kind: "loom.math.mul@1", params: {"gain": 0.08}, ranges: {"ga
 Two parameters on one [range widget](panel-widgets.md#range) share one selected control range.
 
 - Selecting a range on either parameter selects it for both, as one undo step. Rule 6 applies to both values.
-- On load, and after a typed value, both use the smallest listed range that holds both values. Rule 7 still holds: no saved value changes. A saved pair of different ranges is reported as a note, as a saved range that does not hold its value is.
+- On load, the pair keeps a saved range they share, if it is listed and holds both values. With no saved range, it uses the default range if that holds both values. Otherwise both use the smallest listed range that holds both values. A typed value outside the selected range also selects the smallest listed range that holds both values. Rule 7 still holds: no saved value changes. A saved pair of different ranges is reported as a note, as a saved range that does not hold its value is.
 - A mapped controller or a modulation assignment on either parameter uses the shared range.
 - *Why:* both handles sit on one track, so one position must mean one value. With separate ranges, a handle would stop partway along the track with nothing on screen to explain it, and the two modulation bars would use different scales.
 

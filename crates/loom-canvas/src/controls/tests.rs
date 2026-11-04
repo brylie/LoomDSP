@@ -664,3 +664,12 @@ fn a_range_has_a_bar_on_each_side() {
         assert_eq!(range_bar_at(rect, vertical, range_point(rect, vertical, 0.5)), None);
     }
 }
+
+/// A drag's change is the whole move, not capped by a position's 0 to 1, so a
+/// range's band and a depth keep up with a fast pointer.
+#[test]
+fn a_drag_delta_is_not_capped() {
+    assert!((ValueDrag::KNOB.delta(180.0, false) - 0.9).abs() < 1e-6);
+    assert!((ValueDrag::KNOB.delta(-180.0, false) + 0.9).abs() < 1e-6);
+    assert!((ValueDrag::KNOB.delta(180.0, true) - 0.09).abs() < 1e-6);
+}

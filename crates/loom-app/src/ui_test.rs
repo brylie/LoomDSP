@@ -1941,6 +1941,31 @@ mod tests {
         );
     }
 
+    /// One large pointer move goes all the way: a handle does not lag behind a
+    /// fast pointer (panel-widgets.md, Range).
+    #[test]
+    fn a_fast_move_takes_a_range_handle_all_the_way() {
+        let mut ui = Ui::open("sine.ron");
+        let id = select_new(&mut ui, "test.panel");
+        let widget = widget_of(&ui, id, "tall_low");
+        for (part, position) in [
+            (loom_canvas::ControlPart::Main, 0.0),
+            (loom_canvas::ControlPart::Second, 1.0),
+        ] {
+            let _ = ui.app.update(Message::Canvas(CanvasEvent::SetControl {
+                module: id.0,
+                widget,
+                part,
+                position,
+            }));
+        }
+        ui.redraw();
+        let at = handle(&mut ui, id, "tall_high");
+        ui.drag(at, Point::new(at.x, at.y + 180.0), 1);
+        let high = param_value(&ui, id, "tall_high");
+        assert!((high - 0.1).abs() < 0.01, "{high}");
+    }
+
     /// Dragging the band moves both as one undo step, and keeps the width. A
     /// double-click on a handle resets it, and on the band resets both as one
     /// undo step. Two quick clicks on different handles reset nothing

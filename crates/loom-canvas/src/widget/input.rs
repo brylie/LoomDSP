@@ -410,7 +410,7 @@ impl<Message> PatchCanvas<'_, Message> {
                         position,
                     } => {
                         let along = drag.along(screen);
-                        let delta = drag.moved(0.5, along - *last, state.modifiers.shift()) - 0.5;
+                        let delta = drag.delta(along - *last, state.modifiers.shift());
                         *last = along;
                         let (next_grab, low, high) = grab.moved(position.0, position.1, delta);
                         *grab = next_grab;
@@ -430,7 +430,7 @@ impl<Message> PatchCanvas<'_, Message> {
                         *last = along;
                         // The control's own drag scale: the way that raises
                         // the value raises the depth.
-                        let delta = drag.moved(0.5, moved, state.modifiers.shift()) - 0.5;
+                        let delta = drag.delta(moved, state.modifiers.shift());
                         if delta != 0.0 {
                             let event = CanvasEvent::DragDepth {
                                 module: *module,

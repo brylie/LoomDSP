@@ -1401,8 +1401,14 @@ impl ValueDrag {
     /// A new position after the pointer moved `moved` pixels along the drag.
     /// Shift is 10 times finer.
     pub fn moved(&self, position: f32, moved: f32, fine: bool) -> f32 {
+        (position + self.delta(moved, fine)).clamp(0.0, 1.0)
+    }
+
+    /// How far `moved` pixels go, as a share of the full range. Not clamped:
+    /// a change that is not one value's position can be as large as the move.
+    pub fn delta(&self, moved: f32, fine: bool) -> f32 {
         let scale = if fine { 0.1 } else { 1.0 };
-        (position + moved / self.throw * scale).clamp(0.0, 1.0)
+        moved / self.throw * scale
     }
 
     /// The cursor that says which way this drag goes.
