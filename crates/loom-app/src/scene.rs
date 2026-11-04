@@ -294,10 +294,20 @@ pub fn control_position(kind: WidgetKind, spec: &ParamSpec, value: f32) -> f32 {
 
 /// The parameter value for a control position from the canvas.
 pub fn control_value(kind: WidgetKind, spec: &ParamSpec, position: f32) -> f32 {
-    if kind.is_mapped() {
-        spec.denormalize(position)
-    } else {
-        spec.clamp(spec.min + position.round())
+    if !kind.is_mapped() {
+        return spec.clamp(spec.min + position.round());
+    }
+    let value = spec.denormalize(position);
+    // A declared step lands on tenths of itself, because adding steps as
+    // positions leaves rounding errors: 121 BPM would become 120.99998
+    // (panel-widgets.md, Number). Multiplying and then dividing keeps tenths
+    // exact where a multiply by 0.1 would not.
+    match spec.options.key_step {
+        Some(step) => {
+            let per_unit = 10.0 / step;
+            spec.clamp((value * per_unit).round() / per_unit)
+        }
+        None => value,
     }
 }
 

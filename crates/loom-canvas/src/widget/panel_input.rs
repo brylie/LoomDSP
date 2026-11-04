@@ -118,6 +118,25 @@ impl<Message> PatchCanvas<'_, Message> {
         }
     }
 
+    /// Ends the keyboard's inside of a range that has gone, been hidden, or
+    /// lost its selection (panel-widgets.md, rule 4). This runs on every event,
+    /// redraws too, so a range hidden and shown again between two key presses
+    /// does not keep its grab.
+    pub(super) fn close_stale_inside(&self, state: &mut State) {
+        let live = state.inside.is_some_and(|inside| {
+            self.selection.len() == 1
+                && self.selection.contains(&inside.module)
+                && self
+                    .scene
+                    .module(inside.module)
+                    .and_then(|module| module.panel.widgets.get(inside.widget))
+                    .is_some_and(|widget| matches!(widget.kind, WidgetViewKind::Range { .. }) && !widget.hidden)
+        });
+        if !live {
+            state.inside = None;
+        }
+    }
+
     /// The keyboard on a range: going inside, picking a part, grabbing it, and
     /// moving it (panel-widgets.md, rule 4). Returns true if the key was used.
     /// Learn mode has its own keys, and Tab always leaves.

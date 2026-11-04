@@ -504,6 +504,49 @@ fn an_xy_pad_needs_two_parameters_that_hide_together() {
     assert_eq!(GOOD[0].params().collect::<Vec<_>>(), ["cutoff", "gain"]);
 }
 
+/// A pad or a range cannot bind a whole number, because its arrows move by a
+/// share of the track (panel-widgets.md, XY pad, and Range).
+#[test]
+fn a_widget_with_two_values_refuses_whole_numbers() {
+    static PARAMS: [ParamSpec; 3] = [
+        param("low", 0.0, 127.0, 0.0, "").integer(),
+        param("high", 0.0, 127.0, 127.0, "").integer(),
+        param("free", 0.0, 127.0, 0.0, ""),
+    ];
+    static RANGE: [Widget; 1] = [Widget::range(0, 0, "low", "high", "Notes")];
+    static PAD: [Widget; 1] = [Widget::xy_pad(0, 0, "free", "high", "Notes")];
+    for (widgets, width, height) in [(&RANGE, 6, 2), (&PAD, 6, 6)] {
+        let problem = ModuleDescriptor {
+            params: &PARAMS,
+            panel: Panel::new(width, height, widgets),
+            ..NAMED
+        }
+        .check_panel()
+        .unwrap_err();
+        assert!(problem.contains("whole-number"), "{problem}");
+    }
+}
+
+/// A key step is a size in the parameter's units, and a control's position is
+/// a share of the selected control range, so the two cannot be combined
+/// (panel-widgets.md, Number).
+#[test]
+fn a_key_step_refuses_control_ranges() {
+    const OFFERED: &[ParamRange] = &[ParamRange::new(-1.0, 1.0), ParamRange::new(-10.0, 10.0)];
+    static PARAMS: [ParamSpec; 1] = [param("level", -10.0, 10.0, 0.0, "")
+        .ranges(OFFERED, ParamRange::new(-1.0, 1.0))
+        .key_step(1.0)];
+    static WIDGETS: [Widget; 1] = [Widget::number(0, 0, "level")];
+    let problem = ModuleDescriptor {
+        params: &PARAMS,
+        panel: Panel::new(6, 2, &WIDGETS),
+        ..NAMED
+    }
+    .check_panel()
+    .unwrap_err();
+    assert!(problem.contains("key step"), "{problem}");
+}
+
 /// A range needs two parameters with the same range, mapping, and control
 /// ranges, because both handles sit on one track (panel-widgets.md, Range).
 #[test]

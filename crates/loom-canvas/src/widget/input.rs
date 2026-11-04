@@ -107,6 +107,7 @@ impl<Message> PatchCanvas<'_, Message> {
             }
         }
 
+        self.close_stale_inside(state);
         // An open list comes before every other use of the pointer. A stale
         // one is closed first, so the event still does its normal work.
         self.close_stale_select(state);

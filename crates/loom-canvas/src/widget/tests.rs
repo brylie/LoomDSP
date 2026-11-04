@@ -3523,3 +3523,62 @@ fn hover_text_follows_the_part_under_the_pointer() {
     let high = at(crate::controls::range_point(rect, false, 0.9));
     assert_eq!(canvas.hover_target(&high), Some(HoverTarget::Second(2, 0)));
 }
+
+/// Hiding a range ends the keyboard's inside and any grab at once, even if it
+/// is shown again before the next key press (panel-widgets.md, rule 4).
+#[test]
+fn hiding_a_range_ends_the_inside() {
+    let tile = |hidden: bool| {
+        let mut range = widget(
+            WidgetViewKind::Range {
+                vertical: false,
+                parts: Box::default(),
+            },
+            0,
+        );
+        range.hidden = hidden;
+        let mut view = module(1, 0.0);
+        view.panel = PanelView {
+            width: 6,
+            height: 2,
+            widgets: vec![range],
+        };
+        Scene::new(vec![view], Vec::new())
+    };
+    let (shown, hidden) = (tile(false), tile(true));
+    let selected = BTreeSet::from([1]);
+    let at = shown.module(1).unwrap().bounds().center();
+    let moved = Event::Mouse(mouse::Event::CursorMoved { position: at });
+    let mut state = State {
+        focus: Some((1, 0)),
+        inside: Some(Inside {
+            module: 1,
+            widget: 0,
+            part: 0,
+            grab: Some(RangeGrab::Band),
+        }),
+        ..State::default()
+    };
+
+    let canvas = PatchCanvas::new(&shown, &selected, |event| event);
+    drive(&canvas, &mut state, &moved, at);
+    assert!(state.inside.is_some(), "a shown range keeps its grab");
+
+    let canvas = PatchCanvas::new(&hidden, &selected, |event| event);
+    drive(&canvas, &mut state, &moved, at);
+    assert!(state.inside.is_none(), "hiding ends it");
+
+    let canvas = PatchCanvas::new(&shown, &selected, |event| event);
+    let events = drive(
+        &canvas,
+        &mut state,
+        &key_event(keyboard::key::Named::ArrowRight, true),
+        at,
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, CanvasEvent::SetControl { .. })),
+        "{events:?}"
+    );
+}

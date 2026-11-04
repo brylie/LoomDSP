@@ -17,7 +17,7 @@ use iced::futures::channel::mpsc;
 use iced::futures::{SinkExt, Stream};
 use iced::{Point, Rectangle, keyboard};
 use loom_canvas::PanelValues;
-use loom_canvas::{CanvasEvent, CanvasView, PortRef};
+use loom_canvas::{CanvasEvent, CanvasView, ControlPart, PortRef};
 use loom_core::{Graph, MidiControl, MidiEvent, ModuleId, OutputSafety, WidgetKind};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
@@ -314,6 +314,8 @@ pub(crate) struct Sampling {
     widget: usize,
     /// The name the widget is bound to, to tell that it is still there.
     name: String,
+    /// Which value of the widget that name is: an XY pad and a range have two.
+    part: ControlPart,
     meter: bool,
     ms: u64,
     start: Option<Instant>,
@@ -339,12 +341,16 @@ impl Sampling {
             .get(self.module, self.widget)
             .filter(|_| drawn)
             .ok_or_else(|| format!("module {} was removed while sampling", self.module))?;
+        let (position, live) = match (self.part, &value.second) {
+            (ControlPart::Second, Some(second)) => (second.position, second.live),
+            _ => (value.position, value.live),
+        };
         // Milliseconds, to the microsecond.
         let mut entry = fields(json!({
             "t": elapsed.as_micros() as f64 / 1000.0,
-            "position": value.position,
+            "position": position,
         }));
-        if let Some(live) = value.live {
+        if let Some(live) = live {
             entry.insert("live".to_string(), json!(live));
         }
         if self.meter {

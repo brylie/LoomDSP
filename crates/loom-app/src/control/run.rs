@@ -755,6 +755,11 @@ impl App {
             module,
             widget,
             name: name.to_string(),
+            part: if widgets[widget].second() == Some(name) {
+                ControlPart::Second
+            } else {
+                ControlPart::Main
+            },
             meter: widgets[widget].kind == WidgetKind::Meter,
             ms,
             start: None,

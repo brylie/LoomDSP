@@ -1776,10 +1776,13 @@ impl ModuleDescriptor {
         }
         for param in self.params {
             if let Some(step) = param.options.key_step
-                && (step <= 0.0 || param.options.integer || param.options.mapping != ParamMapping::Linear)
+                && (step <= 0.0
+                    || param.options.integer
+                    || param.options.mapping != ParamMapping::Linear
+                    || !param.options.ranges.is_empty())
             {
                 return Err(format!(
-                    "parameter `{}`: a key step needs a linear parameter that is not a whole number, and a size above 0",
+                    "parameter `{}`: a key step needs a linear parameter that is not a whole number and offers no control ranges, and a size above 0",
                     param.name
                 ));
             }
@@ -1836,13 +1839,17 @@ impl ModuleDescriptor {
                     if param.options.shown_when != other.options.shown_when {
                         return Err(name("its two parameters must be shown for the same choices"));
                     }
+                    // Its arrows move by a share of the track, which would skip
+                    // whole numbers or never reach the next one.
+                    if param.options.integer || other.options.integer {
+                        return Err(name("a widget with two values cannot bind a whole-number parameter"));
+                    }
                     // Both handles sit on one track, so one position must mean
                     // one value for both (panel-widgets.md, Range).
                     if matches!(widget.kind, WidgetKind::Range { .. })
                         && (param.min != other.min
                             || param.max != other.max
                             || param.options.mapping != other.options.mapping
-                            || param.options.integer != other.options.integer
                             || param.options.ranges != other.options.ranges
                             || param.options.default_range != other.options.default_range)
                     {

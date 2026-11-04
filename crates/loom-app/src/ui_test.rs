@@ -2129,6 +2129,19 @@ mod tests {
         ui.tap(up.clone(), keyboard::Modifiers::SHIFT);
         assert!((tempo(&ui) - start - 1.1).abs() < 1e-2, "{}", tempo(&ui));
 
+        // Steps land exactly, however many there are, and walk back to the start.
+        let down = keyboard::Key::Named(Named::ArrowDown);
+        ui.tap(down.clone(), keyboard::Modifiers::SHIFT);
+        assert_eq!(tempo(&ui), 121.0);
+        for _ in 0..100 {
+            ui.tap(up.clone(), keyboard::Modifiers::default());
+        }
+        assert_eq!(tempo(&ui), 221.0);
+        for _ in 0..101 {
+            ui.tap(down.clone(), keyboard::Modifiers::default());
+        }
+        assert_eq!(tempo(&ui), 120.0);
+
         let id = select_new(&mut ui, "test.panel");
         focus_control(&mut ui, id, "tempo");
         let before = position_of(&ui, id, "tempo");
