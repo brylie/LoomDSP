@@ -64,7 +64,7 @@ Before judging, read what the project has already decided, so you do not re-argu
 - The ADR index: `ls docs/adr/`, and the ADRs for the area in scope. The ones most often relevant to structure are ADR-0001 (two threads), ADR-0006 (licences), ADR-0010 (canvas), ADR-0013 (panels), ADR-0018 (clean room), ADR-0021 (plain-data view models), ADR-0034 (flat API over typed parts), and ADR-0035 (pure algorithms in `loom-dsp`).
 - Earlier snapshots: `ls docs/research/ | grep -i architecture`. Read the most recent one's "Deliberate" and "Stale" sections, because they save you repeating work.
 - The backlog for the area: `gh issue list --state open --label chore --limit 300`, the same for each `area:*` label in scope, and `gh issue list --search "KEYWORD" --state all` for each finding before you call it new. Closed issues matter as much as open ones: a closed issue often records why something is the way it is. For a pasted review, one keyword search per claim is enough.
-- The area labels by crate: `area:engine` is `loom-core` and `loom-rt`; `area:modules` is `loom-modules`; `area:ui` is `loom-canvas` and `loom-app`; `area:crates` is `loom-dsp`, `loom-patch`, `loom-analysis`, `loom-test`, and `loom-host-desktop`; `area:midi` and `area:infra` cut across.
+- The area labels by crate: `area:engine` is `loom-core` and `loom-rt`; `area:modules` is `loom-modules`; `area:ui` is `loom-canvas` and `loom-app`; `area:crates` is `loom-dsp`, `loom-patch`, `loom-analysis`, `loom-test`, `loom-host-desktop`, and `loom-cli`; `area:midi` covers the MIDI parts of `loom-host-desktop` and the app; `area:infra` is CI and the repository.
 - The first architecture review (November 2026) has no snapshot. Its record is issues #614 to #630 and [references/lenses.md](references/lenses.md), so for anything it covered, the backlog is the place to look before the code.
 
 ## 3. Look through the lenses
@@ -163,7 +163,7 @@ Then one paragraph on what was reviewed and why, then Method (what you ran and r
 
 ## 7. After the report
 
-Ask which findings to act on, and do only what the user chooses. Filing is `/retro` with the snapshot as its source: it knows the labels, milestones, and project fields. Before it files, make sure that:
+Ask which findings to act on, and do only what the user chooses. In a run with nobody to ask, such as a subagent or a scripted check, the work ends with section 6, and its "What to do next" section stands in for this one. Filing is `/retro` with the snapshot as its source: it knows the labels, milestones, and project fields. Before it files, make sure that:
 
 - Findings that would be fixed together are one issue with a checklist, and an umbrella with a per-file checklist is better than six issues for six file splits.
 - Bugs and rule breaks are P1 in the current milestone. Costs in quiet areas go to Later.
