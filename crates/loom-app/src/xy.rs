@@ -66,7 +66,11 @@ impl XyTrace {
     pub fn trace(&self, frames: usize, range: f32, rotate: bool, full: bool) -> loom_canvas::Trace {
         let frames = frames.max(1) as u64;
         let every = frames.div_ceil(MAX_POINTS as u64);
-        let since = self.next.unwrap_or(0).saturating_sub(frames);
+        // Counted back from the newest kept frame, so a window always holds the
+        // same number of points. A count that changed as frames arrive would
+        // wake the UI for a still signal.
+        let newest = self.next.unwrap_or(0).saturating_sub(1) / every * every;
+        let since = newest.saturating_sub((frames / every - 1) * every);
         let recent = || self.pairs.iter().filter(|(frame, _)| *frame >= since);
         if recent().all(|(_, pair)| *pair == [0.0, 0.0]) {
             return loom_canvas::Trace::default();

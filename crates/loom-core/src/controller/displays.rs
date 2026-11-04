@@ -56,7 +56,8 @@ impl Controller {
     /// paired with a sample of `y_output` from another block
     /// (`docs/design/telemetry.md`, Paired probes). `y_input` is the input that
     /// feeds `y_output`, if there is one: with no cable in it and a stereo
-    /// `x_output`, the pair reads the two sides of `x_output`.
+    /// `x_output`, the pair reads the two sides of `x_output`. It must be an
+    /// input of the module `y_output` belongs to, so it cannot outlive the pair.
     ///
     /// Remove it with [`Controller::remove_probe`].
     pub fn add_probe_pair(
@@ -67,6 +68,18 @@ impl Controller {
     ) -> Result<ProbeId, LoomError> {
         self.check_output(x_output)?;
         self.check_output(y_output)?;
+        // A wrong input would read as one with no cable, and the pair would
+        // silently draw the two sides of `x_output`.
+        if let Some(input) = y_input {
+            self.check_input(input)?;
+            if input.module != y_output.module {
+                return Err(LoomError::NoSuchPort {
+                    module: y_output.module,
+                    direction: "input",
+                    port: input.port.to_string(),
+                });
+            }
+        }
         let id = self.probes.add_pair(PairProbe {
             x: x_output,
             y: y_output,

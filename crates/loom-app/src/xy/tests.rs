@@ -150,3 +150,24 @@ fn silent_and_still_signals() {
     feed(&mut still, frame, &[[0.25, 0.5]; 256]);
     assert_eq!(still.trace(100, 1.0, false, true), before);
 }
+
+/// A still signal gives the same trace at every step, also when `time` holds a
+/// number of frames that does not divide by the kept step N. Otherwise the point
+/// count changes as frames arrive, and each change wakes the UI (rule 7).
+#[test]
+fn a_still_signal_keeps_one_trace_when_every_nth_pair_is_kept() {
+    for (rate, frames) in [(48_000.0, 4181), (96_000.0, 8362), (44_100.0, 4300), (48_000.0, 4800)] {
+        let mut trace = XyTrace::new(rate);
+        let mut frame = feed(&mut trace, 0, &vec![[0.25, 0.5]; 2 * rate as usize / 10]);
+        let first = trace.trace(frames, 1.0, false, true);
+        assert!(!first.points.is_empty());
+        for _ in 0..19 {
+            frame = feed(&mut trace, frame, &[[0.25, 0.5]; 128]);
+            assert_eq!(
+                trace.trace(frames, 1.0, false, true),
+                first,
+                "{rate} Hz, {frames} frames"
+            );
+        }
+    }
+}

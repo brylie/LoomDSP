@@ -5,7 +5,7 @@
 mod common;
 
 use common::*;
-use loom_core::{EngineConfig, EngineParts, ModuleId, OutputRef, PairChunk, ProbeKind, Telemetry};
+use loom_core::{EngineConfig, EngineParts, LoomError, ModuleId, OutputRef, PairChunk, ProbeKind, Telemetry};
 use std::sync::atomic::Ordering;
 
 /// An engine with two free-running oscillators at different pitches, and
@@ -193,4 +193,29 @@ fn a_pair_goes_with_its_module() {
     let pair = parts.controller.add_probe_pair(x, y, None).unwrap();
     parts.controller.remove_module(y.module).unwrap();
     assert!(!parts.controller.has_probe_pair(pair));
+}
+
+/// The controller refuses an input that does not exist, or one on another
+/// module, because either would read as having no cable and silently change
+/// what the pair draws.
+#[test]
+fn a_pair_refuses_a_wrong_input() {
+    let (mut parts, x, y) = two_oscillators(EngineConfig::with_sample_rate(SAMPLE_RATE));
+    let c = &mut parts.controller;
+    let missing = loom_core::InputRef {
+        module: y.module,
+        port: 99,
+    };
+    assert!(matches!(
+        c.add_probe_pair(x, y, Some(missing)),
+        Err(LoomError::NoSuchPort { .. })
+    ));
+    let elsewhere = c.input_ref(x.module, "phase").unwrap();
+    assert!(matches!(
+        c.add_probe_pair(x, y, Some(elsewhere)),
+        Err(LoomError::NoSuchPort { .. })
+    ));
+    let own = c.input_ref(y.module, "phase").unwrap();
+    assert!(c.add_probe_pair(x, y, Some(own)).is_ok());
+    assert_eq!(c.probes().count(), 0, "a pair is not a port probe");
 }
