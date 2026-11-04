@@ -127,6 +127,7 @@ fn panel_view(d: &ModuleDescriptor) -> PanelView {
                 },
                 WidgetKind::Readout { width } => WidgetViewKind::Readout { width },
                 WidgetKind::Scope => WidgetViewKind::Scope,
+                WidgetKind::LevelHistory => WidgetViewKind::LevelHistory,
                 WidgetKind::Shape { width, .. } => WidgetViewKind::Shape { width },
                 // The names come from the parameter (panels.md, Choice names).
                 WidgetKind::Radio => WidgetViewKind::Radio {
@@ -204,6 +205,15 @@ fn panel_view(d: &ModuleDescriptor) -> PanelView {
 /// (ADR-0030, panels.md, Panel layout, principle 5).
 pub fn panel_for(d: &ModuleDescriptor, values: &[f32]) -> PanelView {
     let mut panel = panel_view(d);
+    let displays: Vec<bool> = d
+        .panel
+        .widgets
+        .iter()
+        .map(|w| !w.is_control() && !d.is_widget_shown(w, values))
+        .collect();
+    if displays.iter().any(|&h| h) {
+        close_up_columns(&mut panel, &displays);
+    }
     let hidden: Vec<bool> = d
         .panel
         .widgets
@@ -216,17 +226,57 @@ pub fn panel_for(d: &ModuleDescriptor, values: &[f32]) -> PanelView {
     panel
 }
 
+/// Hides the marked displays and removes the grid columns only they used, so
+/// the panel gets narrower (panel-widgets.md, Level history). A hidden
+/// display stays in the list, past the panel's new edge.
+fn close_up_columns(panel: &mut PanelView, hidden: &[bool]) {
+    for (widget, &h) in panel.widgets.iter_mut().zip(hidden) {
+        widget.hidden = h;
+    }
+    let covers = |w: &WidgetView, c: u8| w.x <= c && c < w.x + w.size().0;
+    let mut removed = 0;
+    for c in (0..panel.width).rev() {
+        let by_hidden = panel.widgets.iter().any(|w| w.hidden && covers(w, c));
+        let by_shown = panel.widgets.iter().any(|w| !w.hidden && covers(w, c));
+        if by_hidden && !by_shown {
+            for w in panel.widgets.iter_mut().filter(|w| !w.hidden && w.x > c) {
+                w.x -= 1;
+            }
+            removed += 1;
+        }
+    }
+    panel.width -= removed;
+    // Past the new edge, so nothing takes it for a widget beside another.
+    for widget in panel.widgets.iter_mut().filter(|w| w.hidden) {
+        widget.x = widget.x.max(panel.width);
+    }
+}
+
+/// The width and height of a module's panel at its default values, in grid
+/// units, which is the size a new tile gets.
+pub fn default_panel_size(d: &ModuleDescriptor) -> (u8, u8) {
+    let values: Vec<f32> = d.params.iter().map(|p| p.default).collect();
+    let panel = panel_for(d, &values);
+    (panel.width, panel.height)
+}
+
 /// Hides the marked widgets and closes the panel up around them, keeping
 /// its width (ADR-0030). A row that loses a widget closes its gap and is
 /// centred again in the space the row had. Grid rows that only hidden
 /// widgets used are removed, so the panel gets shorter.
 pub fn close_up(panel: &mut PanelView, hidden: &[bool]) {
     for (widget, &h) in panel.widgets.iter_mut().zip(hidden) {
-        widget.hidden = h;
+        widget.hidden |= h;
     }
     // Close up each row that lost a widget: rows are the widgets that start
     // on the same grid row.
-    let rows: std::collections::BTreeSet<u8> = panel.widgets.iter().filter(|w| w.hidden).map(|w| w.y).collect();
+    let rows: std::collections::BTreeSet<u8> = panel
+        .widgets
+        .iter()
+        .zip(hidden)
+        .filter(|(_, h)| **h)
+        .map(|(w, _)| w.y)
+        .collect();
     for row in rows {
         let all: Vec<usize> = (0..panel.widgets.len())
             .filter(|&i| panel.widgets[i].y == row)
@@ -271,6 +321,14 @@ pub fn mode_key(controller: &Controller) -> Vec<(u32, usize, i64)> {
         let d = node.descriptor;
         for p in d.params {
             if let Some(when) = p.options.shown_when
+                && let Some(mode) = d.param_index(when.param)
+            {
+                let value = node.params.get(mode).copied().unwrap_or(d.params[mode].default);
+                key.push((id.0, mode, value.round() as i64));
+            }
+        }
+        for w in d.panel.widgets {
+            if let Some(when) = w.shown_when
                 && let Some(mode) = d.param_index(when.param)
             {
                 let value = node.params.get(mode).copied().unwrap_or(d.params[mode].default);
@@ -500,7 +558,7 @@ fn display_text(d: &ModuleDescriptor, w: &loom_core::Widget, position: f32, righ
             .find(|display| display.name == w.bind())
             .map_or_else(String::new, |display| display.range.text(position));
     }
-    if w.kind == WidgetKind::Scope {
+    if matches!(w.kind, WidgetKind::Scope | WidgetKind::LevelHistory) {
         // The trace is the value.
         return String::new();
     }
@@ -561,6 +619,52 @@ pub fn meter_outputs(controller: &Controller, modules: &[u32]) -> Vec<((u32, usi
                 })
         })
         .collect()
+}
+
+/// The time a level history shows, by its `window` choice
+/// (panel-widgets.md, Level history).
+const HISTORY_WINDOWS: [f32; 3] = [1.0, 5.0, 30.0];
+
+/// A level history on screen and what it shows.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HistoryOutput {
+    /// Module ID and widget index.
+    pub widget: (u32, usize),
+    /// The output it shows.
+    pub output: OutputRef,
+    /// Seconds across the frame.
+    pub window: f32,
+}
+
+/// The level histories these modules show now: a hidden one needs no probe.
+pub fn history_outputs(controller: &Controller, modules: &[u32]) -> Vec<HistoryOutput> {
+    let mut histories = Vec::new();
+    for &id in modules {
+        let Some(node) = controller.graph().node(ModuleId(id)) else {
+            continue;
+        };
+        let d = node.descriptor;
+        let window = d.param_index("window").map_or(HISTORY_WINDOWS[1], |i| {
+            HISTORY_WINDOWS[(node.params[i].round().max(0.0) as usize).min(HISTORY_WINDOWS.len() - 1)]
+        });
+        for (index, w) in d.panel.widgets.iter().enumerate() {
+            if w.kind != WidgetKind::LevelHistory || !d.is_widget_shown(w, &node.params) {
+                continue;
+            }
+            let Some(port) = d.outputs.iter().position(|p| p.name == w.bind()) else {
+                continue;
+            };
+            histories.push(HistoryOutput {
+                widget: (id, index),
+                output: OutputRef {
+                    module: ModuleId(id),
+                    port,
+                },
+                window,
+            });
+        }
+    }
+    histories
 }
 
 /// A scope widget on screen and what it shows.

@@ -406,8 +406,8 @@ impl ScopeTrace {
         let level = (normalise(peak) * 255.0).round() / 255.0;
         if !full {
             return loom_canvas::Trace {
-                points: Vec::new(),
                 level,
+                ..loom_canvas::Trace::default()
             };
         }
         let point = |i: usize| {
@@ -437,7 +437,11 @@ impl ScopeTrace {
             }
             points
         };
-        loom_canvas::Trace { points, level }
+        loom_canvas::Trace {
+            points,
+            second: Vec::new(),
+            level,
+        }
     }
 }
 

@@ -542,6 +542,11 @@ impl ControlGeometry {
                             Rectangle::new(Point::new(area.x, area.center_y() - 0.5), Size::new(area.width, 1.0));
                         shapes.push(Shape::new(centre, 0.0, palette.tile_border, Color::TRANSPARENT, 0.0));
                     }
+                    WidgetViewKind::LevelHistory => {
+                        // The frame. The columns have their own buffer.
+                        let area = crate::trace::trace_area(rect);
+                        shapes.push(Shape::new(area, 3.0, palette.background, palette.tile_border, 1.0));
+                    }
                     WidgetViewKind::Meter { zero } if *zero > 0.0 => {
                         // A value that runs down from 0 draws from there.
                         let track = meter_track(rect);
@@ -677,6 +682,7 @@ fn modulation_dot(kind: &WidgetViewKind, rect: Rectangle, mark: ModulationMark, 
             | WidgetViewKind::Readout { .. }
             | WidgetViewKind::Meter { .. }
             | WidgetViewKind::Scope
+            | WidgetViewKind::LevelHistory
             | WidgetViewKind::Shape { .. },
             _,
         ) => None,
@@ -817,6 +823,7 @@ pub(crate) fn focus_ring(kind: &WidgetViewKind, rect: Rectangle) -> (Rectangle, 
         | WidgetViewKind::Readout { .. }
         | WidgetViewKind::Meter { .. }
         | WidgetViewKind::Scope
+        | WidgetViewKind::LevelHistory
         | WidgetViewKind::Shape { .. } => (rect.expand(1.0), 4.0),
     }
 }

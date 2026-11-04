@@ -365,6 +365,14 @@ fn widget(d: &ModuleDescriptor, w: &Widget) -> String {
                 .map_or_else(|| format!("`{}`", w.bind()), port_name);
             format!("Scope: {output}")
         }
+        WidgetKind::LevelHistory => {
+            let output = d
+                .outputs
+                .iter()
+                .find(|p| p.name == w.bind())
+                .map_or_else(|| format!("`{}`", w.bind()), port_name);
+            format!("Level history: {output}")
+        }
         WidgetKind::Shape { label, .. } => format!("Shape preview: {} (read-only)", name(label, w.bind())),
         _ => format!("Widget: `{}`", w.bind()),
     }

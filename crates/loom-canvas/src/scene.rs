@@ -216,6 +216,9 @@ pub enum WidgetViewKind {
     /// A scope: a frame, and the trace the app sets in
     /// [`crate::ScopeTraces`].
     Scope,
+    /// A level history: a frame, and the columns the app sets in
+    /// [`crate::ScopeTraces`] (panel-widgets.md, Level history).
+    LevelHistory,
     /// Read-only result shape sampled from parameters.
     Shape {
         /// Width in panel grid units.
@@ -243,6 +246,19 @@ impl WidgetViewKind {
     /// True for a widget that binds two values.
     pub fn is_two_numbers(&self) -> bool {
         self.parts().is_some()
+    }
+
+    /// True for a display that takes a resized tile's extra size. A new kind
+    /// that grows belongs here, so its tile gets a handle and the widget
+    /// fills the room (`docs/design/panels.md`, Resizable tiles).
+    pub fn is_growable(&self) -> bool {
+        matches!(self, Self::Scope | Self::LevelHistory | Self::Meter { .. })
+    }
+
+    /// True for a display drawn from [`crate::ScopeTraces`], in its own
+    /// buffer.
+    pub fn draws_a_trace(&self) -> bool {
+        matches!(self, Self::Scope | Self::LevelHistory)
     }
 }
 
@@ -278,6 +294,7 @@ impl WidgetView {
             WidgetViewKind::Readout { width } => (*width, 2),
             WidgetViewKind::Meter { .. } => (3, 6),
             WidgetViewKind::Scope => (9, 5),
+            WidgetViewKind::LevelHistory => (9, 6),
             WidgetViewKind::Shape { width } => (*width, 5),
             WidgetViewKind::Toggle | WidgetViewKind::Light => (3, 2),
             WidgetViewKind::Button => (6, 3),
@@ -296,6 +313,7 @@ impl WidgetView {
                 | WidgetViewKind::Readout { .. }
                 | WidgetViewKind::Meter { .. }
                 | WidgetViewKind::Scope
+                | WidgetViewKind::LevelHistory
                 | WidgetViewKind::Shape { .. }
         )
     }
@@ -385,10 +403,7 @@ pub struct ModuleView {
 impl ModuleView {
     /// Whether the panel contains a display that can grow.
     pub fn is_growable(&self) -> bool {
-        self.panel
-            .widgets
-            .iter()
-            .any(|w| matches!(w.kind, WidgetViewKind::Scope | WidgetViewKind::Meter { .. }))
+        self.panel.widgets.iter().any(|w| !w.hidden && w.kind.is_growable())
     }
 
     /// The panel's minimum tile size in world units.
@@ -455,7 +470,7 @@ impl ModuleView {
         let origin = self.panel_origin();
         let (w, h) = widget.size();
         let extra = match widget.kind {
-            WidgetViewKind::Scope => self.size() - self.minimum_size(),
+            WidgetViewKind::Scope | WidgetViewKind::LevelHistory => self.size() - self.minimum_size(),
             WidgetViewKind::Meter { .. } => self.meter_growth(widget),
             _ => iced::Size::ZERO,
         };
@@ -485,12 +500,19 @@ impl ModuleView {
 
     /// The tile's extra size that `meter` can take without covering another
     /// widget. A hidden widget counts, so a meter does not jump when a setting
-    /// shows or hides one (`docs/design/panels.md`, Resizable tiles).
+    /// shows or hides one, unless its columns closed up and it lies past the
+    /// panel's edge (`docs/design/panels.md`, Resizable tiles).
     fn meter_growth(&self, meter: &WidgetView) -> iced::Size {
         let extra = self.size() - self.minimum_size();
         let (width, height) = meter.size();
         let (right, bottom) = (meter.x + width, meter.y + height);
-        let others = || self.panel.widgets.iter().map(|other| (other, other.size()));
+        let others = || {
+            self.panel
+                .widgets
+                .iter()
+                .filter(|other| !other.hidden || other.x < self.panel.width)
+                .map(|other| (other, other.size()))
+        };
         let below = others().any(|(o, (w, _))| o.y >= bottom && o.x < right && o.x + w > meter.x);
         let beside = others().any(|(o, (_, h))| o.x >= right && o.y < bottom && o.y + h > meter.y);
         // Growing both ways would reach a widget past the corner. A meter's

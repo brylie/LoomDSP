@@ -61,6 +61,8 @@ The app hands the `Telemetry` handle from `create_engine` to a telemetry thread 
   3. It finds the crossing to a fraction of a sample (`offset`). *Why:* a period is rarely a whole number of samples. Drawing shifted by the fraction keeps the wave still instead of jittering by up to one sample per frame.
   4. It picks a vertical range from 0.01, 0.02, 0.05, ... 10. The range grows at once and shrinks only when the trace uses less than 40% of it, so it does not flicker.
 
+- **`LevelHistory`** (`crates/loom-app/src/history.rs`) files a meter probe's readings into columns by their frame stamps, for a level history on screen ([panel widgets](panel-widgets.md#level-history)).
+
 The planned direction for displays: signal displays are modules in the grid, not views laid over the canvas (ADR-0011, everything is a module). A scope module saves with the patch, sits next to the signal it shows, travels inside sub-patches, and can go on a front panel. It animates only while its tile is visible and large enough to read.
 
 Module display values, such as the brightness of a light, do not use these queues. Only the latest value matters for them, so they use a latest-value table instead ([panels](panels.md#display-values-69)).

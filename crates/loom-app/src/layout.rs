@@ -18,7 +18,8 @@ fn size_of(node: &Node) -> iced::Size {
     if node.unknown.is_some() {
         tile_size(node.input_count(), node.output_count(), 10, 4)
     } else {
-        tile_size(d.inputs.len(), d.outputs.len(), d.panel.width, d.panel.height)
+        let panel = crate::scene::panel_for(d, &node.params);
+        tile_size(d.inputs.len(), d.outputs.len(), panel.width, panel.height)
     }
 }
 

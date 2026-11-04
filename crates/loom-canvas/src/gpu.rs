@@ -546,6 +546,9 @@ pub struct CanvasPipeline {
     control_lines: InstanceBuffer,
     /// Scope trace pieces: the one buffer a moving scope uploads.
     trace_segments: InstanceBuffer,
+    /// Filled shapes under the traces: the other buffer a moving display
+    /// uploads, never the controls.
+    trace_fills: InstanceBuffer,
     uploaded: u64,
     controls_uploaded: (u64, u64),
     traces_uploaded: (u64, u64, bool),
@@ -675,6 +678,7 @@ impl Pipeline for CanvasPipeline {
             control_shapes: InstanceBuffer::new(device, "loom-canvas control shapes"),
             control_lines: InstanceBuffer::new(device, "loom-canvas control lines"),
             trace_segments: InstanceBuffer::new(device, "loom-canvas trace segments"),
+            trace_fills: InstanceBuffer::new(device, "loom-canvas trace fills"),
             uploaded: 0,
             controls_uploaded: (0, 0),
             traces_uploaded: (0, 0, false),
@@ -734,6 +738,7 @@ impl Primitive for CanvasPrimitive {
             && pipeline.traces_uploaded != traces.key
         {
             pipeline.trace_segments.upload(device, queue, &traces.segments);
+            pipeline.trace_fills.upload(device, queue, &traces.fills);
             stats::count(Counter::TraceUploads);
             pipeline.traces_uploaded = traces.key;
         }
@@ -779,10 +784,10 @@ impl Primitive for CanvasPrimitive {
         } else {
             (0, 0, 0)
         };
-        let traces = if self.traces.is_some() {
-            pipeline.trace_segments.len
+        let (traces, fills) = if self.traces.is_some() {
+            (pipeline.trace_segments.len, pipeline.trace_fills.len)
         } else {
-            0
+            (0, 0)
         };
         let layers = [
             (
@@ -809,6 +814,7 @@ impl Primitive for CanvasPrimitive {
             (&pipeline.shapes, &pipeline.control_shapes, 4, 0..controls),
             (&pipeline.shapes, &pipeline.scene_shapes, 4, value_bars),
             (&pipeline.traces, &pipeline.control_lines, 4, 0..lines),
+            (&pipeline.shapes, &pipeline.trace_fills, 4, 0..fills),
             (&pipeline.traces, &pipeline.trace_segments, 4, 0..traces),
             (
                 &pipeline.shapes,

@@ -35,6 +35,7 @@ fn the_generation_changes_only_with_the_traces() {
     let mut traces = ScopeTraces::new();
     let trace = Trace {
         points: vec![[0.0, 0.0], [1.0, 0.5]],
+        second: Vec::new(),
         level: 0.5,
     };
     traces.set(7, 0, trace.clone());
@@ -61,6 +62,7 @@ fn traces_fill_the_frame_close_up_and_flatten_further_out() {
         0,
         Trace {
             points: vec![[0.0, -1.0], [0.5, 1.0], [1.0, 3.0]],
+            second: Vec::new(),
             level: 0.25,
         },
     );
@@ -87,4 +89,49 @@ fn traces_fill_the_frame_close_up_and_flatten_further_out() {
             .segments
             .is_empty()
     );
+}
+
+/// A scene with one tile holding only a level history.
+fn history_scene() -> Scene {
+    let panel = PanelView {
+        width: 9,
+        height: 6,
+        widgets: vec![WidgetView {
+            kind: WidgetViewKind::LevelHistory,
+            x: 0,
+            y: 0,
+            label: String::new(),
+            hover: Default::default(),
+            hidden: false,
+        }],
+    };
+    let mut scene = scope_scene();
+    let mut module = scene.modules()[0].clone();
+    module.panel = panel;
+    scene = Scene::new(vec![module], Vec::new());
+    scene
+}
+
+/// A level history's RMS is flat columns in their own buffer, with its peak
+/// a line drawn only close up (panel-widgets.md, Level history).
+#[test]
+fn a_level_history_fills_its_columns() {
+    let scene = history_scene();
+    let mut traces = ScopeTraces::new();
+    traces.set(
+        7,
+        0,
+        Trace {
+            points: vec![[0.0, -1.0], [0.5, 0.0], [0.99, 1.0]],
+            second: vec![[0.0, 0.5], [0.5, 0.5], [0.99, 1.0]],
+            level: 0.0,
+        },
+    );
+    let palette = Palette::default();
+    let close = TraceGeometry::build(&scene, &traces, true, &palette);
+    assert_eq!(close.fills.len(), 2, "a column at the floor draws nothing");
+    assert_eq!(close.segments.len(), 2, "the peak line");
+    let middle = TraceGeometry::build(&scene, &traces, false, &palette);
+    assert_eq!(middle.fills.len(), 2, "the RMS shape stays");
+    assert!(middle.segments.is_empty(), "no peak at the middle zoom");
 }

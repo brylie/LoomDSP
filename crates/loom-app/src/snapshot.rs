@@ -353,6 +353,7 @@ fn kind_name(kind: &WidgetViewKind) -> &'static str {
         WidgetViewKind::Readout { .. } => "readout",
         WidgetViewKind::Meter { .. } => "meter",
         WidgetViewKind::Scope => "scope",
+        WidgetViewKind::LevelHistory => "level_history",
         WidgetViewKind::Shape { .. } => "shape",
         WidgetViewKind::Button => "button",
     }
@@ -389,12 +390,22 @@ impl App {
             .collect();
         // The queues are read after every block, so they never fill.
         let block = self.controller.config().max_block;
+        let mut histories: std::collections::HashMap<loom_core::ProbeId, crate::history::LevelHistory> = watch
+            .histories
+            .iter()
+            .map(|(&probe, &seconds)| (probe, crate::history::LevelHistory::new(seconds, rate)))
+            .collect();
         let mut readings = Vec::new();
         let mut remaining = window;
         while remaining > 0 {
             let n = remaining.min(block);
             self.process(n);
             let (meters, chunks) = self.monitor.take_telemetry();
+            for reading in &meters {
+                if let Some(history) = histories.get_mut(&reading.probe) {
+                    history.push(reading);
+                }
+            }
             if remaining <= METER_WINDOW {
                 readings.extend(meters);
             }
@@ -432,6 +443,10 @@ impl App {
         let _ = self.update(crate::Message::Telemetry(crate::monitor::Update {
             levels: Vec::new(),
             traces,
+            histories: histories
+                .into_iter()
+                .map(|(probe, history)| (probe, history.trace()))
+                .collect(),
             activity,
         }));
         let _ = self.update(crate::Message::LiveFrame);

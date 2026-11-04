@@ -361,6 +361,8 @@ One signal against another: the first moves the trace left and right, the second
 
 ### Level history
 
+**Status:** Implemented. Code: `crates/loom-app/src/history.rs`, `WidgetKind::LevelHistory`.
+
 How loud a signal has been over the last seconds ([#97](https://github.com/brylie/LoomDSP/issues/97)).
 
 - **Binds to:** an output, through the same meter probe as the [meter](panels.md#meter-widget).

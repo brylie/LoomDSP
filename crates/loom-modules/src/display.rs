@@ -34,9 +34,43 @@ pub static METER: ModuleDescriptor = ModuleDescriptor {
         range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
-    params: &[],
+    params: &[
+        ParamSpec {
+            name: "view",
+            label: "View",
+            description: "Shows the meter alone, or with its level over the last seconds beside it.",
+            min: 0.0,
+            max: 1.0,
+            default: 0.0,
+            unit: "",
+            options: ParamOptions::DEFAULT,
+        }
+        .integer()
+        .choices(&["Meter", "Meter and history"]),
+        ParamSpec {
+            name: "window",
+            label: "Window",
+            description: "How much time the level history shows.",
+            min: 0.0,
+            max: 2.0,
+            default: 1.0,
+            unit: "",
+            options: ParamOptions::DEFAULT,
+        }
+        .integer()
+        .choices(&["1 s", "5 s", "30 s"]),
+    ],
     role: ModuleRole::Dsp(|_| Box::new(Meter)),
-    panel: Panel::new(3, 6, &[Widget::meter(0, 0, "out").captioned("")]),
+    panel: Panel::new(
+        12,
+        6,
+        &[
+            Widget::meter(0, 0, "out").captioned(""),
+            Widget::level_history(3, 0, "out")
+                .captioned("")
+                .shown_when("view", &[1]),
+        ],
+    ),
     displays: &[],
 };
 

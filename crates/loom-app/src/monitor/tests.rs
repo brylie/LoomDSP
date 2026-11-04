@@ -227,3 +227,89 @@ fn only_drawn_meters_are_sent() {
     let again = watcher.take(&watch, &[reading(1), reading(2)], [], 48_000.0, Instant::now());
     assert!(again.is_empty(), "{again:?}");
 }
+
+/// One block's reading of a level, for a history.
+fn reading(probe: ProbeId, frame: u64, rms: f32) -> MeterReading {
+    MeterReading {
+        probe,
+        frame,
+        frames: 128,
+        peak: rms,
+        rms,
+        right: None,
+    }
+}
+
+/// Runs a watcher over `seconds` of readings, in steps like the thread's, and
+/// counts the updates that carry a history.
+fn history_updates(watcher: &mut Watcher, watch: &WatchList, seconds: f32, level: impl Fn(u64) -> f32) -> usize {
+    let probe = *watch.histories.keys().next().unwrap();
+    let mut sends = 0;
+    let now = Instant::now();
+    let steps = (seconds * 48_000.0 / 1280.0) as u64;
+    for step in 0..steps {
+        let readings: Vec<MeterReading> = (0..10)
+            .map(|i| {
+                let frame = (step * 10 + i) * 128;
+                reading(probe, frame, level(frame))
+            })
+            .collect();
+        let update = watcher.take(watch, &readings, Vec::new(), 48_000.0, now);
+        if !update.histories.is_empty() {
+            sends += 1;
+        }
+        watcher.sent(&update);
+    }
+    sends
+}
+
+/// A list watching one level history of one second.
+fn history_watch() -> WatchList {
+    WatchList {
+        histories: HashMap::from([(ProbeId(1), 1.0)]),
+        ..WatchList::default()
+    }
+}
+
+/// A silent input sends the UI nothing (panel-widgets.md, rule 7).
+#[test]
+fn a_silent_history_sends_nothing() {
+    let mut watcher = Watcher::default();
+    assert_eq!(history_updates(&mut watcher, &history_watch(), 2.0, |_| 0.0), 0);
+}
+
+/// A steady tone stops sending once its columns have filled the window, even
+/// with rounding noise on each reading.
+#[test]
+fn a_steady_history_stops_sending_once_settled() {
+    let mut watcher = Watcher::default();
+    let watch = history_watch();
+    let noisy = |frame: u64| 0.5 + 1e-4 * (frame as f32).sin();
+    assert!(history_updates(&mut watcher, &watch, 2.0, noisy) > 0, "filling");
+    assert_eq!(history_updates(&mut watcher, &watch, 2.0, noisy), 0, "settled");
+}
+
+/// Changing the window starts the history again, on that window.
+#[test]
+fn a_new_window_starts_the_history_again() {
+    let mut watcher = Watcher::default();
+    let mut watch = history_watch();
+    history_updates(&mut watcher, &watch, 1.0, |_| 0.5);
+    watch.histories.insert(ProbeId(1), 5.0);
+    watcher.take(&watch, &[], Vec::new(), 48_000.0, Instant::now());
+    assert_eq!(watcher.histories[&ProbeId(1)].window(), 5.0);
+}
+
+/// [`moved`] ignores what is inside the tolerance, and counts a change of
+/// length, or a trace where nothing was shown.
+#[test]
+fn moved_reads_a_tolerance() {
+    let trace = |y: f32| loom_canvas::Trace {
+        points: vec![[0.0, y]],
+        ..loom_canvas::Trace::default()
+    };
+    assert!(!moved(None, &loom_canvas::Trace::default(), 0.1));
+    assert!(moved(None, &trace(0.0), 0.1));
+    assert!(!moved(Some(&trace(0.0)), &trace(0.05), 0.1));
+    assert!(moved(Some(&trace(0.0)), &trace(0.2), 0.1));
+}

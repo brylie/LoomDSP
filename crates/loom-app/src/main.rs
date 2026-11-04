@@ -26,6 +26,7 @@ mod file_commands;
 mod files;
 mod gestures;
 mod help;
+mod history;
 mod input_session;
 mod input_watch;
 mod inspector;
@@ -955,11 +956,17 @@ impl App {
         }
     }
 
-    /// The outputs of the meters on screen: each needs a probe.
+    /// The outputs of the meters and level histories on screen: each needs a
+    /// meter probe.
     fn metered_outputs(&self) -> BTreeSet<OutputRef> {
         scene::meter_outputs(&self.controller, &self.visible_displays)
             .into_iter()
             .map(|(_, output)| output)
+            .chain(
+                scene::history_outputs(&self.controller, &self.visible_displays)
+                    .into_iter()
+                    .map(|history| history.output),
+            )
             .collect()
     }
 
@@ -999,22 +1006,33 @@ impl App {
                 Some((probe, want))
             })
             .collect();
+        let histories = scene::history_outputs(&self.controller, &self.visible_displays)
+            .into_iter()
+            .filter_map(|history| Some((self.live.probe(history.output)?, history.window)))
+            .collect();
         let activity = self.live.activity_probes().collect();
         self.carrying.retain(|output| self.live.probe(*output).is_some());
         let list = monitor::WatchList {
             meters,
             activity,
             scopes,
+            histories,
             full_traces: self.full_traces,
         };
         if self.monitor.watched() != list {
             self.monitor.watch(list);
         }
-        // A scope that left the screen, or lost its probe, keeps no trace.
+        // A display that left the screen, or lost its probe, keeps no trace.
         let shown: BTreeSet<(u32, usize)> = scene::scope_outputs(&self.controller, &self.visible_displays)
             .into_iter()
             .filter(|scope| self.live.scope_probe(scope.output).is_some())
             .map(|scope| scope.widget)
+            .chain(
+                scene::history_outputs(&self.controller, &self.visible_displays)
+                    .into_iter()
+                    .filter(|history| self.live.probe(history.output).is_some())
+                    .map(|history| history.widget),
+            )
             .collect();
         self.traces.retain(|module, widget| shown.contains(&(module, widget)));
     }
@@ -1030,6 +1048,22 @@ impl App {
             for scope in &scopes {
                 if self.live.scope_probe(scope.output) == Some(probe) {
                     self.traces.set(scope.widget.0, scope.widget.1, trace.clone());
+                }
+            }
+        }
+    }
+
+    /// Takes new level histories from the telemetry thread and gives each to
+    /// the widgets that show its probe.
+    fn take_histories(&mut self, histories: Vec<(ProbeId, loom_canvas::Trace)>) {
+        if histories.is_empty() {
+            return;
+        }
+        let shown = scene::history_outputs(&self.controller, &self.visible_displays);
+        for (probe, trace) in histories {
+            for history in &shown {
+                if self.live.probe(history.output) == Some(probe) {
+                    self.traces.set(history.widget.0, history.widget.1, trace.clone());
                 }
             }
         }
@@ -1691,6 +1725,7 @@ impl App {
             }
             Message::Telemetry(update) => {
                 self.take_traces(update.traces);
+                self.take_histories(update.histories);
                 for (probe, carrying) in update.activity {
                     if let Some(output) = self.live.output_of(probe) {
                         if carrying {

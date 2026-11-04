@@ -10,7 +10,9 @@
 //! `output:NAME` name a port whose name a parameter or an output also has:
 //! the SVF's `4:cutoff` is its knob, and `4:input:cutoff` its input.
 //! `badge:OUTPUT` names an output's assignment count badge, such as
-//! `5:badge:out`.
+//! `5:badge:out`. Displays that show the same thing are counted: the Level
+//! Meter's `11:display:out` is its meter, and `11:display:out:2` its level
+//! history.
 
 use loom_canvas::{ControlPart, PORT_HIT_RADIUS, PanelValues, PortRef, Scene};
 use loom_core::{Graph, ModuleId};
@@ -56,7 +58,16 @@ pub fn find(graph: &Graph, module: u32, name: &str) -> Result<Part, String> {
             .map(|index| Part::Display(module, index))
     };
     if let Some(name) = name.strip_prefix(DISPLAY_PREFIX) {
-        return display(name)
+        // The second display on one name is `NAME:2`.
+        let counted = name.rsplit_once(':').and_then(|(plain, count)| {
+            let nth = count.parse::<usize>().ok()?.checked_sub(1)?;
+            let index = (0..widgets.len())
+                .filter(|&i| !widgets[i].is_control() && widgets[i].binds(plain))
+                .nth(nth)?;
+            Some(Part::Display(module, index))
+        });
+        return counted
+            .or_else(|| display(name))
             .ok_or_else(|| format!("module {module} ({}) has no light or meter `{name}`", descriptor.name));
     }
     if let Some(name) = name.strip_prefix(BADGE_PREFIX) {
@@ -146,6 +157,16 @@ pub fn name(graph: &Graph, part: Part) -> Option<String> {
             )
         }
     };
+    if let Part::Display(_, widget) = part {
+        let widgets = graph.node(ModuleId(module))?.descriptor.panel.widgets;
+        let earlier = widgets[..widget]
+            .iter()
+            .filter(|w| !w.is_control() && w.binds(plain))
+            .count();
+        if earlier > 0 {
+            return Some(format!("{module}:{DISPLAY_PREFIX}{plain}:{}", earlier + 1));
+        }
+    }
     let prefix = match part {
         Part::Badge(_) => return Some(format!("{module}:{BADGE_PREFIX}{plain}")),
         _ if find(graph, module, plain) == Ok(part) => "",

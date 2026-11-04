@@ -27,6 +27,8 @@ fn panels_follow_the_spec() {
         ("loom.midi.note", "bend-range"),
         ("loom.ui.button", "mode"),
         ("loom.display.scope", "slope"),
+        ("loom.display.meter", "view"),
+        ("loom.display.meter", "window"),
     ];
     for descriptor in super::ALL {
         let panel = &descriptor.panel;

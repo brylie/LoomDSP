@@ -785,3 +785,40 @@ fn a_readout_needs_a_level_display_and_a_known_width() {
         assert!(error.contains(why) && error.contains("Readout"), "{error}");
     }
 }
+
+/// A level history needs an output, and a display's own condition must name a
+/// choice its module has. A control follows its parameter's condition instead
+/// (panel-widgets.md, Level history).
+#[test]
+fn a_level_history_needs_an_output_and_a_real_condition() {
+    const VIEW: ParamSpec = param("view", 0.0, 1.0, 0.0, "").integer().choices(&["Off", "On"]);
+    static PARAMS: [ParamSpec; 2] = [VIEW, CUTOFF];
+    static OUTPUTS: [PortSpec; 1] = [PortSpec {
+        name: "out",
+        label: "Out",
+        signal: crate::SignalType::Audio,
+        description: "The signal.",
+        default: PortDefault::Value(0.0),
+        range: crate::PortRange::Signal,
+        channels: Channels::PerChannel,
+    }];
+    static GOOD: [Widget; 1] = [Widget::level_history(0, 0, "out").shown_when("view", &[1])];
+    static NO_OUTPUT: [Widget; 1] = [Widget::level_history(0, 0, "nothing")];
+    static NO_MODE: [Widget; 1] = [Widget::level_history(0, 0, "out").shown_when("nothing", &[1])];
+    static NOT_A_CHOICE: [Widget; 1] = [Widget::level_history(0, 0, "out").shown_when("cutoff", &[1])];
+    static NO_SUCH_CHOICE: [Widget; 1] = [Widget::level_history(0, 0, "out").shown_when("view", &[2])];
+    static ON_A_CONTROL: [Widget; 1] = [Widget::knob(0, 0, "cutoff").shown_when("view", &[1])];
+    let descriptor = |widgets| ModuleDescriptor {
+        params: &PARAMS,
+        outputs: &OUTPUTS,
+        panel: Panel::new(9, 6, widgets),
+        ..NAMED
+    };
+    assert!(descriptor(&GOOD).check_panel().is_ok());
+    for bad in [&NO_OUTPUT, &NO_MODE, &NOT_A_CHOICE, &NO_SUCH_CHOICE, &ON_A_CONTROL] {
+        assert!(descriptor(bad).check_panel().is_err());
+    }
+    let shown = descriptor(&GOOD);
+    assert!(!shown.is_widget_shown(&GOOD[0], &[0.0, 0.0]));
+    assert!(shown.is_widget_shown(&GOOD[0], &[1.0, 0.0]));
+}

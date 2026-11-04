@@ -25,13 +25,17 @@ Shows the peak and RMS level of its input. Passes the input through unchanged.
 
 ## Parameters
 
-None.
+| Parameter | Range | Default | Description |
+|---|---|---|---|
+| **View** (`view`) | Meter or Meter and history | Meter | Shows the meter alone, or with its level over the last seconds beside it. |
+| **Window** (`window`) | 1 s, 5 s, or 30 s | 5 s | How much time the level history shows. |
 
 ## Panel
 
-3 by 6 grid units.
+12 by 6 grid units.
 
 - Level meter: **Out** (`out`)
+- Level history: **Out** (`out`)
 
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->
 

@@ -404,9 +404,10 @@ fn caption_y(kind: &WidgetViewKind, rect: Rectangle) -> f32 {
         WidgetViewKind::Fader { vertical: false, .. } | WidgetViewKind::Range { vertical: false, .. } => {
             rect.y + GRID * 0.5
         }
-        WidgetViewKind::Meter { .. } | WidgetViewKind::Scope | WidgetViewKind::XyPad { .. } => {
-            rect.y + rect.height - GRID * 0.5
-        }
+        WidgetViewKind::Meter { .. }
+        | WidgetViewKind::Scope
+        | WidgetViewKind::LevelHistory
+        | WidgetViewKind::XyPad { .. } => rect.y + rect.height - GRID * 0.5,
         WidgetViewKind::Shape { .. } => rect.y + rect.height - GRID * 0.5,
         WidgetViewKind::Toggle | WidgetViewKind::Light => light_centre(rect).y + GRID,
         // On the face of the button.
