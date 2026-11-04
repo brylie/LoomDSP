@@ -26,6 +26,7 @@ LoomDSP is also a way to learn modular sound design, for musicians and for the p
 | [Filters near half the sample rate](filters-near-half-the-sample-rate.md) | Why a digital bell gets narrower near the top of the range, why a filter's curve depends on the sample rate, and what can fix it. |
 | [Licences for shared patches](patch-licences.md) | What a licence on a patch says, why two questions pick a Creative Commons licence, how SPDX expressions combine, and why the licence filters treat unknown terms as no. |
 | [Euclidean rhythms](euclidean-rhythms.md) | How to spread hits evenly with one line of arithmetic, why so many traditional rhythms come out of it, and why a clocked pattern waits for its first clock. |
+| [Reading a spectrum](reading-a-spectrum.md) | What an FFT gives, why a window is needed, why low columns hold no bin, and why the line falls slowly. |
 | [Repeatable randomness](repeatable-randomness.md) | Why a random part plays the same after a reload, why a small seed needs mixing, why each lane has its own stream, and why a walk bounces. |
 
 ## Writing one

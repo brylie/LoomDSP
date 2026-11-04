@@ -55,6 +55,7 @@ mod screenshot;
 mod script_vars;
 mod settings;
 mod snapshot;
+mod spectrum;
 mod stream;
 mod style;
 mod subscriptions;
@@ -979,6 +980,11 @@ impl App {
         let scopes: BTreeSet<OutputRef> = scene::scope_outputs(&self.controller, &self.visible_displays)
             .into_iter()
             .map(|scope| scope.output)
+            .chain(
+                scene::spectrum_outputs(&self.controller, &self.visible_displays)
+                    .into_iter()
+                    .map(|spectrum| spectrum.output),
+            )
             .collect();
         self.live.sync_scopes(&mut self.controller, &scopes);
         self.publish_watch();
@@ -1010,6 +1016,16 @@ impl App {
             .into_iter()
             .filter_map(|history| Some((self.live.probe(history.output)?, history.window)))
             .collect();
+        let spectra = scene::spectrum_outputs(&self.controller, &self.visible_displays)
+            .into_iter()
+            .filter_map(|spectrum| {
+                let want = monitor::SpectrumWant {
+                    tilt: spectrum.tilt,
+                    hold: spectrum.hold,
+                };
+                Some((self.live.scope_probe(spectrum.output)?, want))
+            })
+            .collect();
         let activity = self.live.activity_probes().collect();
         self.carrying.retain(|output| self.live.probe(*output).is_some());
         let list = monitor::WatchList {
@@ -1017,6 +1033,7 @@ impl App {
             activity,
             scopes,
             histories,
+            spectra,
             full_traces: self.full_traces,
         };
         if self.monitor.watched() != list {
@@ -1032,6 +1049,12 @@ impl App {
                     .into_iter()
                     .filter(|history| self.live.probe(history.output).is_some())
                     .map(|history| history.widget),
+            )
+            .chain(
+                scene::spectrum_outputs(&self.controller, &self.visible_displays)
+                    .into_iter()
+                    .filter(|spectrum| self.live.scope_probe(spectrum.output).is_some())
+                    .map(|spectrum| spectrum.widget),
             )
             .collect();
         self.traces.retain(|module, widget| shown.contains(&(module, widget)));
@@ -1064,6 +1087,22 @@ impl App {
             for history in &shown {
                 if self.live.probe(history.output) == Some(probe) {
                     self.traces.set(history.widget.0, history.widget.1, trace.clone());
+                }
+            }
+        }
+    }
+
+    /// Takes new spectra from the telemetry thread and gives each to the
+    /// widgets that show its probe. A scope on the same probe keeps its trace.
+    fn take_spectra(&mut self, spectra: Vec<(ProbeId, loom_canvas::Trace)>) {
+        if spectra.is_empty() {
+            return;
+        }
+        let shown = scene::spectrum_outputs(&self.controller, &self.visible_displays);
+        for (probe, trace) in spectra {
+            for spectrum in &shown {
+                if self.live.scope_probe(spectrum.output) == Some(probe) {
+                    self.traces.set(spectrum.widget.0, spectrum.widget.1, trace.clone());
                 }
             }
         }
@@ -1726,6 +1765,7 @@ impl App {
             Message::Telemetry(update) => {
                 self.take_traces(update.traces);
                 self.take_histories(update.histories);
+                self.take_spectra(update.spectra);
                 for (probe, carrying) in update.activity {
                     if let Some(output) = self.live.output_of(probe) {
                         if carrying {

@@ -135,3 +135,27 @@ fn a_level_history_fills_its_columns() {
     assert_eq!(middle.fills.len(), 2, "the RMS shape stays");
     assert!(middle.segments.is_empty(), "no peak at the middle zoom");
 }
+
+/// A spectrum draws its line at both zooms, and its grid and hold only close up
+/// (panel-widgets.md, Spectrum).
+#[test]
+fn a_spectrum_has_a_grid_only_close_up() {
+    let mut scene_module = history_scene().modules()[0].clone();
+    scene_module.panel.widgets[0].kind = WidgetViewKind::Spectrum;
+    let scene = Scene::new(vec![scene_module], Vec::new());
+    let mut traces = ScopeTraces::new();
+    traces.set(
+        7,
+        0,
+        Trace {
+            points: vec![[0.0, 0.0], [0.5, 0.5], [1.0, 0.0]],
+            second: vec![[0.0, 0.5], [1.0, 0.5]],
+            level: 0.0,
+        },
+    );
+    let palette = Palette::default();
+    let close = TraceGeometry::build(&scene, &traces, true, &palette);
+    assert_eq!(close.segments.len(), 3 + 1 + 2, "grid, hold, and line");
+    let middle = TraceGeometry::build(&scene, &traces, false, &palette);
+    assert_eq!(middle.segments.len(), 2, "the line only");
+}

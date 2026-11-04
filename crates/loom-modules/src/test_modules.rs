@@ -147,6 +147,7 @@ pub static PANEL: ModuleDescriptor = ModuleDescriptor {
             Widget::button(9, 5, "gate", "held", "mode"),
             Widget::scope(0, 8, "bi"),
             Widget::level_history(18, 0, "uni"),
+            Widget::spectrum(18, 7, "bi"),
             Widget::select(9, 8, "long"),
             Widget::select(9, 10, "voices"),
             Widget::fader(15, 7, "tall"),

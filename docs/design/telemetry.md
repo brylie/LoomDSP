@@ -63,6 +63,8 @@ The app hands the `Telemetry` handle from `create_engine` to a telemetry thread 
 
 - **`LevelHistory`** (`crates/loom-app/src/history.rs`) files a meter probe's readings into columns by their frame stamps, for a level history on screen ([panel widgets](panel-widgets.md#level-history)).
 
+- **`SpectrumAnalyser`** (`crates/loom-app/src/spectrum.rs`) runs the FFT on the chunks of one scope probe, for a spectrum on screen ([panel widgets](panel-widgets.md#spectrum)). A scope and a spectrum on one output share a probe, so their results travel apart in the `Update`.
+
 The planned direction for displays: signal displays are modules in the grid, not views laid over the canvas (ADR-0011, everything is a module). A scope module saves with the patch, sits next to the signal it shows, travels inside sub-patches, and can go on a front panel. It animates only while its tile is visible and large enough to read.
 
 Module display values, such as the brightness of a light, do not use these queues. Only the latest value matters for them, so they use a latest-value table instead ([panels](panels.md#display-values-69)).

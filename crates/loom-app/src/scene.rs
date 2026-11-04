@@ -128,6 +128,7 @@ fn panel_view(d: &ModuleDescriptor) -> PanelView {
                 WidgetKind::Readout { width } => WidgetViewKind::Readout { width },
                 WidgetKind::Scope => WidgetViewKind::Scope,
                 WidgetKind::LevelHistory => WidgetViewKind::LevelHistory,
+                WidgetKind::Spectrum => WidgetViewKind::Spectrum,
                 WidgetKind::Shape { width, .. } => WidgetViewKind::Shape { width },
                 // The names come from the parameter (panels.md, Choice names).
                 WidgetKind::Radio => WidgetViewKind::Radio {
@@ -558,7 +559,10 @@ fn display_text(d: &ModuleDescriptor, w: &loom_core::Widget, position: f32, righ
             .find(|display| display.name == w.bind())
             .map_or_else(String::new, |display| display.range.text(position));
     }
-    if matches!(w.kind, WidgetKind::Scope | WidgetKind::LevelHistory) {
+    if matches!(
+        w.kind,
+        WidgetKind::Scope | WidgetKind::LevelHistory | WidgetKind::Spectrum
+    ) {
         // The trace is the value.
         return String::new();
     }
@@ -665,6 +669,50 @@ pub fn history_outputs(controller: &Controller, modules: &[u32]) -> Vec<HistoryO
         }
     }
     histories
+}
+
+/// A spectrum on screen and what it shows.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SpectrumOutput {
+    /// Module ID and widget index.
+    pub widget: (u32, usize),
+    /// The output it shows.
+    pub output: OutputRef,
+    /// True to tilt the drawing by +4.5 dB per octave.
+    pub tilt: bool,
+    /// True to draw the peak hold line.
+    pub hold: bool,
+}
+
+/// The spectra on these modules (panel-widgets.md, Spectrum). The drawing's
+/// settings come from the module's `tilt` and `hold` parameters.
+pub fn spectrum_outputs(controller: &Controller, modules: &[u32]) -> Vec<SpectrumOutput> {
+    let mut spectra = Vec::new();
+    for &id in modules {
+        let Some(node) = controller.graph().node(ModuleId(id)) else {
+            continue;
+        };
+        let d = node.descriptor;
+        let on = |name: &str| d.param_index(name).is_some_and(|i| node.params[i] >= 0.5);
+        for (index, w) in d.panel.widgets.iter().enumerate() {
+            if w.kind != WidgetKind::Spectrum {
+                continue;
+            }
+            let Some(port) = d.outputs.iter().position(|p| p.name == w.bind()) else {
+                continue;
+            };
+            spectra.push(SpectrumOutput {
+                widget: (id, index),
+                output: OutputRef {
+                    module: ModuleId(id),
+                    port,
+                },
+                tilt: on("tilt"),
+                hold: on("hold"),
+            });
+        }
+    }
+    spectra
 }
 
 /// A scope widget on screen and what it shows.

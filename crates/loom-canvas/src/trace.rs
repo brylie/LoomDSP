@@ -27,8 +27,11 @@ const TRACE_WIDTH: f32 = 1.2;
 const TRACE_MIN_PX: f32 = 1.0;
 /// How far the trace area sits inside the scope widget's rectangle.
 const INSET: f32 = 2.0;
-/// Width of a level history's lighter peak line, in world units.
+/// Width of a lighter second line, in world units.
 const PEAK_WIDTH: f32 = 0.8;
+/// Where a spectrum's faint grid lines sit: 100 Hz, 1 kHz, and 10 kHz, on its
+/// logarithmic axis from 20 Hz to 20 kHz (panel-widgets.md, Spectrum).
+const SPECTRUM_GRID: [f32; 3] = [0.232_99, 0.566_33, 0.899_66];
 
 /// The points of one scope trace.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -39,8 +42,8 @@ pub struct Trace {
     /// first point, and the frame clips it. `y` runs from -1 at the bottom
     /// to 1 at the top, and is clamped to that.
     pub points: Vec<[f32; 2]>,
-    /// A second, lighter line over the same frame: a level history's peak.
-    /// Drawn only close up.
+    /// A second, lighter line over the same frame: a level history's peak or
+    /// a spectrum's hold. Drawn only close up.
     pub second: Vec<[f32; 2]>,
     /// The signal's level from 0 to 1 (-60 dB to 0 dB). At the middle zoom
     /// the scope is a flat line with this brightness.
@@ -213,6 +216,28 @@ impl TraceGeometry {
                                 .map(|pair| Segment::with_width(at(pair[0]), at(pair[1]), colour, area, PEAK_WIDTH)),
                         );
                     }
+                } else if widget.kind == WidgetViewKind::Spectrum {
+                    if full {
+                        for x in SPECTRUM_GRID {
+                            let (top, bottom) = (at([x, 1.0]), at([x, -1.0]));
+                            segments.push(Segment::new(top, bottom, palette.tile_border, area));
+                        }
+                    }
+                    if full {
+                        let colour = crate::controls::mix(palette.light_on, palette.text, 0.5);
+                        segments.extend(
+                            trace
+                                .second
+                                .windows(2)
+                                .map(|pair| Segment::with_width(at(pair[0]), at(pair[1]), colour, area, PEAK_WIDTH)),
+                        );
+                    }
+                    segments.extend(
+                        trace
+                            .points
+                            .windows(2)
+                            .map(|pair| Segment::new(at(pair[0]), at(pair[1]), palette.light_on, area)),
+                    );
                 } else if full {
                     segments.extend(
                         trace

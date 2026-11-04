@@ -82,6 +82,7 @@ pub static ALL: &[&ModuleDescriptor] = &[
     &midi::CONTROLLER_IN,
     &display::METER,
     &display::SCOPE,
+    &display::SPECTRUM,
     &clock::CLOCK,
     &transport::TRANSPORT,
     &gate::EUCLID,

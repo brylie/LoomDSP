@@ -313,3 +313,100 @@ fn moved_reads_a_tolerance() {
     assert!(!moved(Some(&trace(0.0)), &trace(0.05), 0.1));
     assert!(moved(Some(&trace(0.0)), &trace(0.2), 0.1));
 }
+
+/// One chunk of a sine at engine frame `frame`.
+fn sine_chunk(probe: ProbeId, frame: u64, amplitude: f32) -> ScopeChunk {
+    let mut chunk = ScopeChunk {
+        probe,
+        frame,
+        len: loom_core::SCOPE_CHUNK as u32,
+        samples: [0.0; loom_core::SCOPE_CHUNK],
+    };
+    for (i, sample) in chunk.samples.iter_mut().enumerate() {
+        let at = (frame + i as u64) as f64 / 48_000.0;
+        *sample = amplitude * (std::f64::consts::TAU * 1000.0 * at).sin() as f32;
+    }
+    chunk
+}
+
+/// Runs a watcher over `steps` steps of chunks, and counts the updates that
+/// carry a spectrum.
+fn spectrum_updates(watcher: &mut Watcher, watch: &WatchList, start: &mut u64, steps: u64, amplitude: f32) -> usize {
+    let probe = *watch.spectra.keys().next().unwrap();
+    let mut sends = 0;
+    for _ in 0..steps {
+        let chunks: Vec<ScopeChunk> = (0..12)
+            .map(|i| sine_chunk(probe, *start + i * loom_core::SCOPE_CHUNK as u64, amplitude))
+            .collect();
+        *start += 12 * loom_core::SCOPE_CHUNK as u64;
+        let update = watcher.take(watch, &[], chunks, 48_000.0, Instant::now());
+        if !update.spectra.is_empty() {
+            sends += 1;
+        }
+        watcher.sent(&update);
+    }
+    sends
+}
+
+/// A list watching one spectrum.
+fn spectrum_watch(hold: bool) -> WatchList {
+    WatchList {
+        spectra: HashMap::from([(ProbeId(1), SpectrumWant { tilt: false, hold })]),
+        ..WatchList::default()
+    }
+}
+
+/// A silent input sends the UI nothing (panel-widgets.md, rule 7).
+#[test]
+fn a_silent_spectrum_sends_nothing() {
+    let mut watcher = Watcher::default();
+    let mut frame = 0;
+    assert_eq!(
+        spectrum_updates(&mut watcher, &spectrum_watch(false), &mut frame, 100, 0.0),
+        0
+    );
+}
+
+/// A steady tone stops sending once the line has settled, with or without the
+/// hold line (panel-widgets.md, Spectrum, Data and redraw).
+#[test]
+fn a_steady_spectrum_stops_sending_once_settled() {
+    for hold in [false, true] {
+        let mut watcher = Watcher::default();
+        let watch = spectrum_watch(hold);
+        let mut frame = 0;
+        assert!(
+            spectrum_updates(&mut watcher, &watch, &mut frame, 100, 0.5) > 0,
+            "starting"
+        );
+        assert_eq!(
+            spectrum_updates(&mut watcher, &watch, &mut frame, 100, 0.5),
+            0,
+            "settled"
+        );
+    }
+}
+
+/// A scope and a spectrum on one output share a probe, and each gets its own
+/// result.
+#[test]
+fn a_scope_and_a_spectrum_on_one_probe_stay_apart() {
+    let probe = ProbeId(1);
+    let mut watcher = Watcher::default();
+    let mut watch = spectrum_watch(false);
+    watch.scopes.insert(
+        probe,
+        ScopeWant {
+            window: 480,
+            trigger: Trigger::Auto,
+            slope: Slope::Rising,
+        },
+    );
+    watch.full_traces = true;
+    let chunks: Vec<ScopeChunk> = (0..100).map(|i| sine_chunk(probe, i * 64, 0.5)).collect();
+    let update = watcher.take(&watch, &[], chunks, 48_000.0, Instant::now());
+    assert_eq!(update.traces.len(), 1);
+    assert_eq!(update.spectra.len(), 1);
+    assert_ne!(update.traces[0].1, update.spectra[0].1);
+    assert_eq!(update.spectra[0].1.points.len(), crate::spectrum::COLUMNS);
+}

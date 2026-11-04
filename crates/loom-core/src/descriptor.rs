@@ -1096,6 +1096,19 @@ impl Widget {
         self
     }
 
+    /// A spectrum on output `output`: its frequency content, from a scope
+    /// probe (panel-widgets.md, Spectrum).
+    pub const fn spectrum(x: u8, y: u8, output: &'static str) -> Self {
+        Self {
+            kind: WidgetKind::Spectrum,
+            x,
+            y,
+            bind: output,
+            caption: None,
+            shown_when: None,
+        }
+    }
+
     /// A level history on output `output`: its RMS and peak over the last
     /// seconds, from the same probe as a meter (panel-widgets.md, Level
     /// history).
@@ -1369,17 +1382,18 @@ impl Widget {
                 | WidgetKind::Meter
                 | WidgetKind::Scope
                 | WidgetKind::LevelHistory
+                | WidgetKind::Spectrum
                 | WidgetKind::Shape { .. }
         )
     }
 
     /// True for widgets that can be bound to one of the module's outputs, fed
-    /// by a port probe: meters, scopes, and level histories. A meter can show
+    /// by a port probe: meters, scopes, level histories, and spectra. A meter can show
     /// a display value instead: see [`ModuleDescriptor::meter_display`].
     pub const fn shows_output(&self) -> bool {
         matches!(
             self.kind,
-            WidgetKind::Meter | WidgetKind::Scope | WidgetKind::LevelHistory
+            WidgetKind::Meter | WidgetKind::Scope | WidgetKind::LevelHistory | WidgetKind::Spectrum
         )
     }
 }
@@ -1427,6 +1441,9 @@ pub enum WidgetKind {
     /// RMS as a filled shape and the peak as a line (panel-widgets.md, Level
     /// history).
     LevelHistory,
+    /// The frequency content of one of the module's outputs, from a port probe
+    /// (panel-widgets.md, Spectrum).
+    Spectrum,
     /// Read-only shape sampled from the module's parameters on the UI thread.
     Shape {
         /// Width in panel grid units.
@@ -1518,7 +1535,8 @@ impl PartialEq for WidgetKind {
             | (Self::Light, Self::Light)
             | (Self::Meter, Self::Meter)
             | (Self::Scope, Self::Scope)
-            | (Self::LevelHistory, Self::LevelHistory) => true,
+            | (Self::LevelHistory, Self::LevelHistory)
+            | (Self::Spectrum, Self::Spectrum) => true,
             (Self::Segmented { width: a }, Self::Segmented { width: b }) => a == b,
             // Kinds compare their visible form. Function addresses are not
             // stable identities for a shape sampler across codegen units.
@@ -1658,6 +1676,7 @@ impl ModuleDescriptor {
             WidgetKind::Meter => (3, 6),
             WidgetKind::Scope => (9, 5),
             WidgetKind::LevelHistory => (9, 6),
+            WidgetKind::Spectrum => (9, 5),
             WidgetKind::Shape { width, .. } => (width, 5),
             WidgetKind::Toggle | WidgetKind::Light => (3, 2),
             WidgetKind::Select => (6, 2),

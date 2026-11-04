@@ -85,6 +85,67 @@ impl Module for Meter {
     }
 }
 
+/// `loom.display.spectrum`: the frequency content of a signal (MT-VIEW-03).
+/// Passes its input through, as the level meter does, so the app reads the
+/// signal from a scope probe on `out`. The FFT runs in the app, never here,
+/// and the parameters only change the drawing. Spec:
+/// `docs/design/p2-modules.md`, Spectrum.
+pub static SPECTRUM: ModuleDescriptor = ModuleDescriptor {
+    id: "loom.display.spectrum",
+    version: 1,
+    name: "Spectrum",
+    category: "Display",
+    family: loom_core::Family::Interface,
+    description: "Shows the frequency content of its input. Passes the input through unchanged.",
+    inputs: &[PortSpec {
+        name: "in",
+        label: "In",
+        signal: SignalType::Audio,
+        description: "The signal to show.",
+        default: PortDefault::Value(0.0),
+        range: loom_core::PortRange::Signal,
+        channels: Channels::PerChannel,
+    }],
+    outputs: &[PortSpec {
+        name: "out",
+        label: "Out",
+        signal: SignalType::Audio,
+        description: "The input, unchanged.",
+        default: PortDefault::Value(0.0),
+        range: loom_core::PortRange::Signal,
+        channels: Channels::PerChannel,
+    }],
+    params: &[
+        ParamSpec {
+            name: "tilt",
+            label: "Tilt",
+            description: "Lifts the high frequencies on the display, so a full mix reads closer to level.",
+            min: 0.0,
+            max: 1.0,
+            default: 0.0,
+            unit: "",
+            options: ParamOptions::DEFAULT,
+        }
+        .integer()
+        .choices(&["Flat", "+4.5 dB per octave"]),
+        ParamSpec {
+            name: "hold",
+            label: "Hold",
+            description: "Keeps a line at each recent peak for two seconds.",
+            min: 0.0,
+            max: 1.0,
+            default: 0.0,
+            unit: "",
+            options: ParamOptions::DEFAULT,
+        }
+        .integer()
+        .choices(&["Off", "On"]),
+    ],
+    role: ModuleRole::Dsp(|_| Box::new(Meter)),
+    panel: Panel::new(9, 5, &[Widget::spectrum(0, 0, "out").captioned("")]),
+    displays: &[],
+};
+
 /// `loom.display.scope`: a mono oscilloscope (MT-VIEW-01, scope mode).
 /// Passes its input through, as the level meter does, so the app reads the
 /// signal from a scope probe on `out`. The parameters only tell the app how

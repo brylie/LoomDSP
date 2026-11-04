@@ -376,6 +376,8 @@ How loud a signal has been over the last seconds ([#97](https://github.com/bryli
 
 ### Spectrum
 
+**Status:** Implemented. Code: `crates/loom-app/src/spectrum.rs`, `WidgetKind::Spectrum`.
+
 The frequency content of a signal ([#109](https://github.com/brylie/LoomDSP/issues/109)). The module is in [M2 modules](p2-modules.md#spectrum-mt-view-03).
 
 - **Binds to:** an output, through a scope probe ([telemetry](telemetry.md)). The FFT runs on the app's telemetry thread, never the audio thread.

@@ -3,7 +3,7 @@
 The ports, parameters, ranges, defaults, and behaviour of the M2 modules that bring no new engine rules, so each can be built from its catalogue entry without guessing.
 
 - **Kind:** living specification.
-- **Status:** Implemented for Random, Chance, Phase reset, Phase shift and reverse, Macro, Euclidean rhythm, and Selector. Agreed for Pitch quantiser, Multi-lane sequencer, and Spectrum (2026-11-01). Each of those sections is ready to build. Other M2 modules are added here as they are agreed.
+- **Status:** Implemented for Random, Chance, Phase reset, Phase shift and reverse, Macro, Euclidean rhythm, Selector, and Spectrum. Agreed for Pitch quantiser and Multi-lane sequencer (2026-11-01). Each of those sections is ready to build. Other M2 modules are added here as they are agreed.
 - **Decision behind it:** [ADR-0036](../adr/0036-a-seeded-route-keeps-both-sides-together.md) for Selector on a stereo cable. Otherwise none. It follows [ADR-0007](../adr/0007-polymorphic-signal-model.md) (signals), [ADR-0014](../adr/0014-modulation-without-cables.md) (modulation without cables), [ADR-0016](../adr/0016-ports-and-parameters-carry-their-own-text.md) (port and parameter text), and [ADR-0018](../adr/0018-clean-room-module-development.md) (clean room).
 - **Use case and requirements:** FR-LIB-01, FR-LIB-08, FR-LIB-12, FR-LIB-14, FR-LIB-19, FR-LIB-22, FR-LIB-29, FR-LIB-30, NFR-SND-04.
 - **Background:** [Phase and cycles](../learn/phase-and-cycles.md), [Repeatable randomness](../learn/repeatable-randomness.md), [Euclidean rhythms](../learn/euclidean-rhythms.md).
@@ -256,7 +256,7 @@ Phase reset:
 
 Spectrum:
 
-- [ ] The output equals the input, sample for sample (test). The widget checks are in [panel widgets](panel-widgets.md#acceptance-criteria).
+- [x] The output equals the input, sample for sample (test). The widget checks are in [panel widgets](panel-widgets.md#acceptance-criteria).
 
 Euclidean rhythm:
 

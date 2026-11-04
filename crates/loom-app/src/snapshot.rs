@@ -354,6 +354,7 @@ fn kind_name(kind: &WidgetViewKind) -> &'static str {
         WidgetViewKind::Meter { .. } => "meter",
         WidgetViewKind::Scope => "scope",
         WidgetViewKind::LevelHistory => "level_history",
+        WidgetViewKind::Spectrum => "spectrum",
         WidgetViewKind::Shape { .. } => "shape",
         WidgetViewKind::Button => "button",
     }
@@ -395,6 +396,11 @@ impl App {
             .iter()
             .map(|(&probe, &seconds)| (probe, crate::history::LevelHistory::new(seconds, rate)))
             .collect();
+        let mut spectra: std::collections::HashMap<loom_core::ProbeId, crate::spectrum::SpectrumAnalyser> = watch
+            .spectra
+            .keys()
+            .map(|&probe| (probe, crate::spectrum::SpectrumAnalyser::new(rate)))
+            .collect();
         let mut readings = Vec::new();
         let mut remaining = window;
         while remaining > 0 {
@@ -412,6 +418,9 @@ impl App {
             for chunk in &chunks {
                 if let Some(scope) = scopes.get_mut(&chunk.probe) {
                     scope.push(chunk);
+                }
+                if let Some(spectrum) = spectra.get_mut(&chunk.probe) {
+                    spectrum.push(chunk);
                 }
             }
             remaining -= n;
@@ -446,6 +455,13 @@ impl App {
             histories: histories
                 .into_iter()
                 .map(|(probe, history)| (probe, history.trace()))
+                .collect(),
+            spectra: spectra
+                .into_iter()
+                .map(|(probe, spectrum)| {
+                    let want = watch.spectra[&probe];
+                    (probe, spectrum.trace(want.tilt, want.hold))
+                })
                 .collect(),
             activity,
         }));

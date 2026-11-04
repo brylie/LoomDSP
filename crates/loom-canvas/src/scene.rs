@@ -219,6 +219,9 @@ pub enum WidgetViewKind {
     /// A level history: a frame, and the columns the app sets in
     /// [`crate::ScopeTraces`] (panel-widgets.md, Level history).
     LevelHistory,
+    /// A spectrum: a frame, and the line the app sets in
+    /// [`crate::ScopeTraces`] (panel-widgets.md, Spectrum).
+    Spectrum,
     /// Read-only result shape sampled from parameters.
     Shape {
         /// Width in panel grid units.
@@ -252,13 +255,16 @@ impl WidgetViewKind {
     /// that grows belongs here, so its tile gets a handle and the widget
     /// fills the room (`docs/design/panels.md`, Resizable tiles).
     pub fn is_growable(&self) -> bool {
-        matches!(self, Self::Scope | Self::LevelHistory | Self::Meter { .. })
+        matches!(
+            self,
+            Self::Scope | Self::LevelHistory | Self::Spectrum | Self::Meter { .. }
+        )
     }
 
     /// True for a display drawn from [`crate::ScopeTraces`], in its own
     /// buffer.
     pub fn draws_a_trace(&self) -> bool {
-        matches!(self, Self::Scope | Self::LevelHistory)
+        matches!(self, Self::Scope | Self::LevelHistory | Self::Spectrum)
     }
 }
 
@@ -295,6 +301,7 @@ impl WidgetView {
             WidgetViewKind::Meter { .. } => (3, 6),
             WidgetViewKind::Scope => (9, 5),
             WidgetViewKind::LevelHistory => (9, 6),
+            WidgetViewKind::Spectrum => (9, 5),
             WidgetViewKind::Shape { width } => (*width, 5),
             WidgetViewKind::Toggle | WidgetViewKind::Light => (3, 2),
             WidgetViewKind::Button => (6, 3),
@@ -314,6 +321,7 @@ impl WidgetView {
                 | WidgetViewKind::Meter { .. }
                 | WidgetViewKind::Scope
                 | WidgetViewKind::LevelHistory
+                | WidgetViewKind::Spectrum
                 | WidgetViewKind::Shape { .. }
         )
     }
@@ -470,7 +478,9 @@ impl ModuleView {
         let origin = self.panel_origin();
         let (w, h) = widget.size();
         let extra = match widget.kind {
-            WidgetViewKind::Scope | WidgetViewKind::LevelHistory => self.size() - self.minimum_size(),
+            WidgetViewKind::Scope | WidgetViewKind::LevelHistory | WidgetViewKind::Spectrum => {
+                self.size() - self.minimum_size()
+            }
             WidgetViewKind::Meter { .. } => self.meter_growth(widget),
             _ => iced::Size::ZERO,
         };

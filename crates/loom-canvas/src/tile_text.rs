@@ -407,6 +407,7 @@ fn caption_y(kind: &WidgetViewKind, rect: Rectangle) -> f32 {
         WidgetViewKind::Meter { .. }
         | WidgetViewKind::Scope
         | WidgetViewKind::LevelHistory
+        | WidgetViewKind::Spectrum
         | WidgetViewKind::XyPad { .. } => rect.y + rect.height - GRID * 0.5,
         WidgetViewKind::Shape { .. } => rect.y + rect.height - GRID * 0.5,
         WidgetViewKind::Toggle | WidgetViewKind::Light => light_centre(rect).y + GRID,

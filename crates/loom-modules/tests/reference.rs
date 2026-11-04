@@ -302,6 +302,21 @@ fn meter() {
 }
 
 #[test]
+fn spectrum() {
+    // A pass-through, whatever its parameters: they only change the drawing,
+    // and the FFT runs in the app. The reference is its input.
+    let sine = |frame: usize| 0.5 * (frame as f32 * 220.0 / 48_000.0 * std::f32::consts::TAU).sin();
+    let render = Harness::new(&display::SPECTRUM)
+        .seconds(0.02)
+        .param("tilt", 1.0)
+        .param("hold", 1.0)
+        .input("in", Signal::from_fn(sine))
+        .check(reference!("spectrum"));
+    let expected: Vec<f32> = (0..render.frames()).map(sine).collect();
+    assert_eq!(render.output("out"), expected.as_slice());
+}
+
+#[test]
 fn scope() {
     // A pass-through, whatever its parameters: they only tell the app how to
     // draw. The reference is its input, a 220 Hz sine at half level.
@@ -620,6 +635,7 @@ fn every_dsp_module_has_a_reference_test() {
         &time::ALLPASS,
         &clock::CLOCK,
         &transport::TRANSPORT,
+        &display::SPECTRUM,
     ]
     .map(|descriptor| descriptor.id);
     for descriptor in ALL {

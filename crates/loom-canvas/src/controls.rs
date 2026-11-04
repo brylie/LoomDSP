@@ -542,8 +542,8 @@ impl ControlGeometry {
                             Rectangle::new(Point::new(area.x, area.center_y() - 0.5), Size::new(area.width, 1.0));
                         shapes.push(Shape::new(centre, 0.0, palette.tile_border, Color::TRANSPARENT, 0.0));
                     }
-                    WidgetViewKind::LevelHistory => {
-                        // The frame. The columns have their own buffer.
+                    WidgetViewKind::LevelHistory | WidgetViewKind::Spectrum => {
+                        // The frame. What it shows has its own buffer.
                         let area = crate::trace::trace_area(rect);
                         shapes.push(Shape::new(area, 3.0, palette.background, palette.tile_border, 1.0));
                     }
@@ -683,6 +683,7 @@ fn modulation_dot(kind: &WidgetViewKind, rect: Rectangle, mark: ModulationMark, 
             | WidgetViewKind::Meter { .. }
             | WidgetViewKind::Scope
             | WidgetViewKind::LevelHistory
+            | WidgetViewKind::Spectrum
             | WidgetViewKind::Shape { .. },
             _,
         ) => None,
@@ -824,6 +825,7 @@ pub(crate) fn focus_ring(kind: &WidgetViewKind, rect: Rectangle) -> (Rectangle, 
         | WidgetViewKind::Meter { .. }
         | WidgetViewKind::Scope
         | WidgetViewKind::LevelHistory
+        | WidgetViewKind::Spectrum
         | WidgetViewKind::Shape { .. } => (rect.expand(1.0), 4.0),
     }
 }
