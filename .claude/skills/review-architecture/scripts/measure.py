@@ -9,11 +9,10 @@ Run from the repository root:
 
     python3 .claude/skills/review-architecture/scripts/measure.py [PATH ...] [--json] [--since DAYS]
 
-Needs only Python 3. Uses `git` for churn and `cargo metadata` for the
-crate graph when they are available, and says so when they are not. With
-`rust-code-analysis-cli` available (`mise run metrics` installs it), the
-function tables come from its parser, with cognitive and cyclomatic
-complexity; without it they fall back to a brace-counting heuristic.
+Needs Python 3 and, for the function tables, `rust-code-analysis-cli`
+(`mise run metrics` installs it; the script also reaches it through
+`mise x`). Uses `git` for churn and `cargo metadata` for the crate graph
+when they are available, and says so when they are not.
 """
 
 from __future__ import annotations
@@ -75,7 +74,6 @@ VARIANT_RE = re.compile(r"^\s{4}[A-Z]\w*")
 IMPL_RE = re.compile(r"^impl(?:<[^>]*>)?\s+(?:[\w:]+\s+for\s+)?(\w+)")
 DESCRIPTOR_RE = re.compile(r"^(?:pub\s+)?static\s+([A-Z][A-Z0-9_]*)\s*:\s*ModuleDescriptor\s*=")
 MODULE_IMPL_RE = re.compile(r"^impl\s+Module\s+for\s+(\w+)")
-FN_RE = re.compile(r"^(\s*)(?:pub(?:\([^)]*\))?\s+)?(?:const\s+|async\s+|unsafe\s+)*fn\s+(\w+)")
 
 
 def block_end(lines: list[str], start: int) -> int:
@@ -93,11 +91,10 @@ def block_end(lines: list[str], start: int) -> int:
 
 
 def shapes(files: list[Path]) -> dict:
-    """Field, variant, impl-spread, and function-length counts."""
+    """Field, variant, and impl-spread counts. Functions come from `complexity`."""
     structs: list[tuple[int, str, str]] = []
     enums: list[tuple[int, str, str]] = []
     impl_files: dict[str, set[str]] = defaultdict(set)
-    functions: list[tuple[int, str, str]] = []
     for path in files:
         text = path.read_text(encoding="utf-8", errors="replace")
         lines = text.splitlines()
@@ -118,25 +115,11 @@ def shapes(files: list[Path]) -> dict:
             m = IMPL_RE.match(line)
             if m:
                 impl_files[m.group(1)].add(rel)
-            m = FN_RE.match(line)
-            if m and not is_test_file(path):
-                # rustfmt wraps a long signature one parameter per line, so the
-                # body's `{` can come several lines later. A `;` first means a
-                # declaration with no body, as in a trait.
-                for j in range(i, min(i + 40, len(lines))):
-                    sig = lines[j].split("//", 1)[0]
-                    if "{" in sig:
-                        end = block_end(lines, j)
-                        functions.append((end - i + 1, m.group(2), f"{rel}:{i + 1}"))
-                        break
-                    if sig.rstrip().endswith(";"):
-                        break
     spread = sorted(((len(v), k, sorted(v)) for k, v in impl_files.items() if len(v) >= 3), reverse=True)
     return {
         "structs": sorted(structs, reverse=True)[:TOP],
         "enums": sorted(enums, reverse=True)[:TOP],
         "impl_spread": [(n, name, files_) for n, name, files_ in spread[:TOP]],
-        "functions": [f for f in sorted(functions, reverse=True) if f[0] >= 80][:TOP],
     }
 
 
@@ -392,12 +375,9 @@ def markdown(report: dict) -> str:
         for f in by_lines:
             w(f"| {f['lines']} | {f['cognitive']} | `{f['name']}` | `{f['where']}` |")
     else:
-        w("\nLongest functions (80 lines or more, brace-counted, so attributes and comments count). Run `mise run metrics` once to install `rust-code-analysis-cli`, for parsed lengths and cognitive complexity:\n")
+        w("\n**No function tables:** `rust-code-analysis-cli` was not found. Run `mise run metrics` once to install it, then run this script again.")
         if cx.get("error"):
-            w(f"\nrust-code-analysis-cli failed: `{cx['error']}`\n")
-        w("| Lines | Function | Where |\n|---:|---|---|")
-        for n, name, where in sh["functions"]:
-            w(f"| {n} | `{name}` | `{where}` |")
+            w(f"\nIt was found but failed: `{cx['error']}`")
 
     c = report["churn"]
     w(f"\n## Churn (last {report['since_days']} days)\n")
