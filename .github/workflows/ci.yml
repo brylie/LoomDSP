@@ -386,12 +386,12 @@ jobs:
       - uses: jdx/mise-action@v5
       - run: mise run test-placement
 
-  # One check to mark as "required" in the main branch ruleset, instead of
-  # listing every job. Fails if any job above failed or was cancelled.
   # Code metrics for the architecture review skill: sizes, cognitive
   # complexity per function (rust-code-analysis), churn, and the rule checks.
   # Informational: the report goes to the job summary and an artifact, and
-  # ci-success does not depend on it, so a metric never blocks a merge.
+  # ci-success does not depend on it, so a metric never blocks a merge. The
+  # metrics task installs rust-code-analysis-cli itself (mise.toml scopes it
+  # to that task), so no other job compiles it.
   metrics:
     name: Code metrics (architecture review)
     runs-on: ubuntu-latest
@@ -410,6 +410,9 @@ jobs:
           name: metrics
           path: target/metrics.md
 
+  # One check to mark as "required" in the main branch ruleset, instead of
+  # listing every job. Fails if any job it needs (every job above except the
+  # informational metrics job) failed or was cancelled.
   ci-success:
     name: CI success
     if: always()

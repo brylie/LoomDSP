@@ -24,11 +24,6 @@ prek = "latest"
 "aqua:crate-ci/typos" = "latest"
 "aqua:EmbarkStudios/cargo-deny" = "latest"
 gh = "latest"
-# Code metrics (cognitive and cyclomatic complexity, lines, arguments, exits)
-# per function, from a real parser. The architecture review skill's
-# measurement script uses it when present, and `mise run metrics` writes the
-# report. A command-line tool only, never linked into the crates (MPL-2.0).
-"cargo:rust-code-analysis-cli" = "latest"
 
 [env]
 # Minimum line coverage, in percent. It must match the "Restrict code
@@ -130,6 +125,12 @@ run = "sh scripts/test-worktree-targets.sh"
 description = "Measure the workspace for an architecture review: sizes, complexity, churn, rule checks, seams; writes target/metrics.md"
 # The architecture review skill (.claude/skills/review-architecture) reads the
 # same report. Informational: CI uploads it and does not fail on it.
+# rust-code-analysis-cli gives cognitive and cyclomatic complexity per
+# function from a real parser. It is a tool of this task only, not of the
+# [tools] list above, so no other task or CI job compiles it (it builds
+# tree-sitter grammars from C, minutes on a cache miss). A command-line tool
+# only, never linked into the crates (MPL-2.0).
+tools = { "cargo:rust-code-analysis-cli" = "latest" }
 run = ["mkdir -p target", "python3 .claude/skills/review-architecture/scripts/measure.py > target/metrics.md", "sed -n '1,40p' target/metrics.md"]
 
 [tasks.help-pages]

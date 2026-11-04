@@ -11,7 +11,7 @@ Run from the repository root:
 
 Needs only Python 3. Uses `git` for churn and `cargo metadata` for the
 crate graph when they are available, and says so when they are not. With
-`rust-code-analysis-cli` installed (`mise install` provides it), the
+`rust-code-analysis-cli` available (`mise run metrics` installs it), the
 function tables come from its parser, with cognitive and cyclomatic
 complexity; without it they fall back to a brace-counting heuristic.
 """
@@ -143,13 +143,19 @@ def shapes(files: list[Path]) -> dict:
 # --- complexity -----------------------------------------------------------
 
 def metrics_command() -> list[str] | None:
-    """How to run rust-code-analysis-cli here: on the path, or through mise."""
+    """How to run rust-code-analysis-cli here: on the path, or through mise.
+
+    mise.toml scopes the tool to the `metrics` task, so outside that task
+    `mise x` names it in full; mise installs it on first use, which compiles
+    it and takes a few minutes once.
+    """
     if shutil.which("rust-code-analysis-cli"):
         return ["rust-code-analysis-cli"]
     if shutil.which("mise"):
-        probe = subprocess.run(["mise", "x", "--", "rust-code-analysis-cli", "--version"], capture_output=True, text=True)
+        command = ["mise", "x", "cargo:rust-code-analysis-cli@latest", "--", "rust-code-analysis-cli"]
+        probe = subprocess.run([*command, "--version"], capture_output=True, text=True, env={**os.environ, "MISE_YES": "1"})
         if probe.returncode == 0:
-            return ["mise", "x", "--", "rust-code-analysis-cli"]
+            return command
     return None
 
 
@@ -386,7 +392,7 @@ def markdown(report: dict) -> str:
         for f in by_lines:
             w(f"| {f['lines']} | {f['cognitive']} | `{f['name']}` | `{f['where']}` |")
     else:
-        w("\nLongest functions (80 lines or more, brace-counted, so attributes and comments count). Install `rust-code-analysis-cli` (`mise install`) for parsed lengths and cognitive complexity:\n")
+        w("\nLongest functions (80 lines or more, brace-counted, so attributes and comments count). Run `mise run metrics` once to install `rust-code-analysis-cli`, for parsed lengths and cognitive complexity:\n")
         if cx.get("error"):
             w(f"\nrust-code-analysis-cli failed: `{cx['error']}`\n")
         w("| Lines | Function | Where |\n|---:|---|---|")

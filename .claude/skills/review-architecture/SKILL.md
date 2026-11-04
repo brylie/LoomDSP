@@ -41,7 +41,7 @@ Run the bundled script from the repository root:
 python3 .claude/skills/review-architecture/scripts/measure.py [PATH ...]
 ```
 
-With no path it covers `crates/`. `mise run metrics` runs the same script over the workspace and writes `target/metrics.md`; CI runs that task on every pull request and attaches the report to the run, so for a review of `main` the report may already exist. The script needs Python 3, and uses `rust-code-analysis-cli` (installed by `mise install`) for the function tables; without it, those fall back to a line-counting heuristic and the output says so. It takes about ten seconds. It prints Markdown with:
+With no path it covers `crates/`. `mise run metrics` runs the same script over the workspace and writes `target/metrics.md`; CI runs that task on every pull request and attaches the report to the run, so for a review of `main` the report may already exist. The script needs Python 3, and uses `rust-code-analysis-cli` for the function tables. That tool belongs to the `metrics` task alone, so `mise run metrics` installs it on first use (a compile of a few minutes, once) and the script finds it afterwards; without it, the function tables fall back to a line-counting heuristic and the output says so. The script takes about ten seconds. It prints Markdown with:
 
 | Section | Shows |
 |---|---|
