@@ -374,10 +374,10 @@ def markdown(report: dict) -> str:
         w("| Lines | Cognitive | Function | Where |\n|---:|---:|---|---|")
         for f in by_lines:
             w(f"| {f['lines']} | {f['cognitive']} | `{f['name']}` | `{f['where']}` |")
+    elif cx.get("error"):
+        w(f"\n**No function tables:** `rust-code-analysis-cli` ran and failed: `{cx['error']}`")
     else:
         w("\n**No function tables:** `rust-code-analysis-cli` was not found. Run `mise run metrics` once to install it, then run this script again.")
-        if cx.get("error"):
-            w(f"\nIt was found but failed: `{cx['error']}`")
 
     c = report["churn"]
     w(f"\n## Churn (last {report['since_days']} days)\n")
