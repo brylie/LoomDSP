@@ -150,17 +150,24 @@ impl Controller {
             .nodes
             .get(&module)
             .and_then(|node| node.descriptor.range_partner(index));
-        let before = self.graph.nodes.get(&module).map(|node| node.range(index));
-        self.set_one_range(module, index, range)?;
+        // Check first, then change. Both parameters offer the same ranges (the
+        // registry checks), so once this holds, the second cannot fail after
+        // the first has already clamped a value and told the engine.
         if let Some(partner) = partner
-            && let Err(error) = self.set_one_range(module, partner, range)
+            && let Some(node) = self.graph.nodes.get(&module)
+            && node.slot.is_some_and(|slot| self.slots.fresh_mut(slot).is_none())
         {
-            // The pair must not keep two ranges. The value this one clamped
-            // goes back with the undo step that holds it.
-            if let (Some(node), Some(previous)) = (self.graph.nodes.get_mut(&module), before) {
-                node.ranges[index] = previous;
+            let clamping = [index, partner]
+                .iter()
+                .filter(|&&i| node.params.get(i).is_some_and(|&v| v.clamp(range.min, range.max) != v))
+                .count();
+            if self.commands.slots() < clamping {
+                return Err(LoomError::QueueFull);
             }
-            return Err(error);
+        }
+        self.set_one_range(module, index, range)?;
+        if let Some(partner) = partner {
+            self.set_one_range(module, partner, range)?;
         }
         Ok(())
     }

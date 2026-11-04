@@ -1,6 +1,6 @@
 use super::*;
 use crate::module::{Module, PortIo, ProcessContext};
-use crate::{Panel, ParamOptions, ParamSpec, Widget};
+use crate::{Panel, ParamOptions, ParamRange, ParamSpec, Widget};
 use std::sync::atomic::Ordering;
 
 struct Silent;
@@ -132,4 +132,70 @@ fn apply_pending_drains_the_queue_without_rendering() {
     assert_eq!(stats.buffers.load(Ordering::Relaxed), 0, "nothing rendered");
     assert_eq!(stats.schedule_swaps.load(Ordering::Relaxed), setup_swaps + 1000);
     assert_eq!(stats.leaked.load(Ordering::Relaxed), 0, "nothing leaked");
+}
+
+/// A full queue leaves a range widget's pair as it was: neither range nor value
+/// changes, and no command goes to the engine for one value alone
+/// (control-ranges.md, Ranges on a range widget).
+#[test]
+fn a_full_queue_changes_neither_value_of_a_range_pair() {
+    const NARROW: ParamRange = ParamRange::new(-1.0, 1.0);
+    const WIDE: ParamRange = ParamRange::new(-10.0, 10.0);
+    const OFFERED: &[ParamRange] = &[NARROW, WIDE];
+    const fn end(name: &'static str) -> ParamSpec {
+        ParamSpec {
+            name,
+            label: name,
+            description: "A test parameter.",
+            min: -10.0,
+            max: 10.0,
+            default: 0.0,
+            unit: "",
+            options: ParamOptions::DEFAULT,
+        }
+        .ranges(OFFERED, NARROW)
+    }
+    static SPAN: ModuleDescriptor = ModuleDescriptor {
+        id: "test.span",
+        version: 1,
+        name: "Span",
+        category: "Test",
+        family: crate::Family::Interface,
+        description: "A range for the queue test.",
+        inputs: &[],
+        outputs: &[],
+        params: &[end("low"), end("high")],
+        role: ModuleRole::Dsp(|_| Box::new(Silent)),
+        panel: Panel::new(6, 2, &[Widget::range(0, 0, "low", "high", "Span")]),
+        displays: &[],
+    };
+    let run = |capacity| {
+        let mut registry = Registry::new();
+        registry.register(&SPAN).expect("test module is valid");
+        let config = EngineConfig {
+            command_capacity: capacity,
+            ..EngineConfig::default()
+        };
+        let mut c = create_engine(Arc::new(registry), config).controller;
+        let id = c.add_module(SPAN.id).unwrap();
+        c.set_range(id, 0, WIDE).unwrap();
+        c.set_param(id, 0, 5.0).unwrap();
+        c.set_param(id, 1, 6.0).unwrap();
+        c.commit().unwrap();
+        let result = c.set_range(id, 0, NARROW);
+        let node = c.graph().node(id).unwrap();
+        (result, node.range(0), node.range(1), node.params.clone())
+    };
+
+    // Inserting the module and swapping in its schedule take two places, so
+    // one is free, and the pair needs two.
+    let (result, low, high, values) = run(3);
+    assert!(matches!(result, Err(LoomError::QueueFull)), "{result:?}");
+    assert_eq!((low, high), (Some(WIDE), Some(WIDE)));
+    assert_eq!(values, vec![5.0, 6.0]);
+
+    let (result, low, high, values) = run(16);
+    assert!(result.is_ok(), "{result:?}");
+    assert_eq!((low, high), (Some(NARROW), Some(NARROW)));
+    assert_eq!(values, vec![1.0, 1.0]);
 }

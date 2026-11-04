@@ -266,7 +266,7 @@ A square area with a point. The point's horizontal position is one parameter, it
 - **Shift-drag:** 10 times finer. **Double-click:** resets both parameters to their defaults.
 - **Modulation:** a bar along the bottom edge for `x` and along the left edge for `y`, each like a fader's bar. Dragging a bar changes the depth of one assignment, as on a fader. The live value is a hollow point inside the pad.
 - **Dropping a cable:** the drop goes to the nearest edge, bottom for `x` and left for `y`. That edge is highlighted during the drag, so the player can see which parameter will get it.
-- **Keyboard:** one point, so no inside (rule 4) is needed. Left and Right change `x`, Up and Down change `y`, in 1% steps, 0.1% with Shift. Enter does nothing. There is no typed value: each parameter's inspector row has its own field.
+- **Keyboard:** one point, so no inside (rule 4) is needed. Left and Right change `x`, Up and Down change `y`, in 1% steps, 0.1% with Shift. Enter does nothing, and Space does what it does on a knob. There is no typed value: each parameter's inspector row has its own field.
 - **MIDI learn and hover text:** per axis. Each edge of the pad has the hover text of its parameter, which names a mapped controller. Learn for each axis is set in the inspector. In learn mode a click, Space, or Enter on the pad arms nothing, and the status line says to use the inspector. *Why:* one press cannot say which axis the player means, and arming only `x` would be a silent surprise.
 - **Middle zoom:** the square and the point.
 - **Size (starting size):** 6 × 6, resizable once tiles are ([#61](https://github.com/brylie/LoomDSP/issues/61)).

@@ -679,7 +679,7 @@ The table below applies when no text field has focus.
 |---|---|---|---|
 | Tab, Shift-Tab | Next or previous control of the module; after the last, the next module | Next or previous module in reading order | Selects the first or last module |
 | Enter | Acts on the control (toggle, press). On a one-number control, opens the field for [typing a value](panel-widgets.md#typing-a-value). In MIDI learn mode, arms it | Focuses the module's first control | Nothing |
-| Space | Acts on a toggle, radio, or button. A one-number control does not take it | Toggles Run | Toggles Run |
+| Space | Acts on a toggle, radio, or button, and on a part inside a range. A one-number control, an XY pad, or a range from outside does not take it | Toggles Run | Toggles Run |
 | Arrow keys | Change the value ([Interaction](#interaction-68)) | Move the selected modules one grid unit; Shift moves 10 | Nothing |
 | Escape | Clears control focus | Clears the selection | Nothing (after the other uses of Escape: a drag, then pinned lines) |
 

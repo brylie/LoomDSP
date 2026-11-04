@@ -3582,3 +3582,25 @@ fn hiding_a_range_ends_the_inside() {
         "{events:?}"
     );
 }
+
+/// Space on a focused XY pad passes on to Run, as on a knob, and a key with no
+/// use is not swallowed (panels.md, Keyboard without a mouse).
+#[test]
+fn a_focused_xy_pad_does_not_use_space() {
+    let mut pad = module(1, 0.0);
+    pad.panel = PanelView {
+        width: 6,
+        height: 6,
+        widgets: vec![widget(WidgetViewKind::XyPad { parts: Box::default() }, 0)],
+    };
+    let scene = Scene::new(vec![pad], Vec::new());
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |event| event);
+    let mut state = State {
+        focus: Some((1, 0)),
+        ..State::default()
+    };
+    let at = scene.module(1).unwrap().bounds().center();
+    let events = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Space, true), at);
+    assert_eq!(events, vec![CanvasEvent::ToggleRun]);
+}
