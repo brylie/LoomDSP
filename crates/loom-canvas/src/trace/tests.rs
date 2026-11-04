@@ -193,3 +193,40 @@ fn an_xy_scope_fades_and_has_a_dot_at_the_middle_zoom() {
     let (from, to) = middle.segments[0].ends();
     assert_eq!(from, to, "a dot");
 }
+
+/// A grown XY scope stays square and centred, so a circle stays a circle, and
+/// its trace is drawn inside that square (panel-widgets.md, XY scope).
+#[test]
+fn an_xy_scope_stays_square_when_it_grows() {
+    let wide = xy_scope_area(Rectangle::new(Point::new(10.0, 20.0), iced::Size::new(400.0, 100.0)));
+    assert_eq!(wide.width, wide.height);
+    assert_eq!(wide.center(), Point::new(210.0, 70.0));
+    assert_eq!(
+        wide.height,
+        trace_area(Rectangle::new(Point::new(10.0, 20.0), iced::Size::new(400.0, 100.0))).height
+    );
+    let tall = xy_scope_area(Rectangle::new(Point::ORIGIN, iced::Size::new(100.0, 400.0)));
+    assert_eq!(tall.width, tall.height);
+    assert_eq!(tall.center(), Point::new(50.0, 200.0));
+
+    let mut module = history_scene().modules()[0].clone();
+    module.panel.widgets[0].kind = WidgetViewKind::XyScope;
+    module.size = Some((60, 20));
+    let rect = module.widget_bounds(0).unwrap();
+    assert!(rect.width > rect.height, "the widget itself is wide");
+    let area = xy_scope_area(rect);
+    let scene = Scene::new(vec![module], Vec::new());
+    let mut traces = ScopeTraces::new();
+    traces.set(
+        7,
+        0,
+        Trace {
+            points: vec![[0.0, -1.0], [1.0, 1.0]],
+            ..Trace::default()
+        },
+    );
+    let drawn = TraceGeometry::build(&scene, &traces, true, &Palette::default());
+    let (from, to) = drawn.segments[0].ends();
+    assert_eq!(from, Point::new(area.x, area.y + area.height));
+    assert_eq!(to, Point::new(area.x + area.width, area.y));
+}

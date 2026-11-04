@@ -158,6 +158,18 @@ pub(crate) fn trace_area(rect: Rectangle) -> Rectangle {
     rect.shrink(INSET)
 }
 
+/// The area inside an XY scope's rectangle that holds its trace: the largest
+/// centred square. Both axes then have the same scale at any tile size, so a
+/// circle stays a circle (panel-widgets.md, XY scope).
+pub(crate) fn xy_scope_area(rect: Rectangle) -> Rectangle {
+    let area = trace_area(rect);
+    let side = area.width.min(area.height);
+    Rectangle::new(
+        Point::new(area.center_x() - side * 0.5, area.center_y() - side * 0.5),
+        iced::Size::new(side, side),
+    )
+}
+
 /// GPU instances for every scope trace in a scene.
 #[derive(Debug, Default)]
 pub(crate) struct TraceGeometry {
@@ -187,7 +199,11 @@ impl TraceGeometry {
                 let (Some(rect), Some(trace)) = (module.widget_bounds(index), traces.get(module.id, index)) else {
                     continue;
                 };
-                let area = trace_area(rect);
+                let area = if widget.kind == WidgetViewKind::XyScope {
+                    xy_scope_area(rect)
+                } else {
+                    trace_area(rect)
+                };
                 let at = |[x, y]: [f32; 2]| {
                     Point::new(
                         area.x + x * area.width,

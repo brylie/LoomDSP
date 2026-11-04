@@ -549,7 +549,7 @@ impl ControlGeometry {
                     WidgetViewKind::XyScope => {
                         // The frame and a faint cross at 0. The trace has its
                         // own buffer.
-                        let area = crate::trace::trace_area(rect);
+                        let area = crate::trace::xy_scope_area(rect);
                         shapes.push(Shape::new(area, 3.0, palette.background, palette.tile_border, 1.0));
                         let across =
                             Rectangle::new(Point::new(area.x, area.center_y() - 0.5), Size::new(area.width, 1.0));

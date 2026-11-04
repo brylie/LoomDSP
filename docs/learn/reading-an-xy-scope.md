@@ -29,6 +29,8 @@ A point on a circle is `(sin t, cos t)`, and a cosine is a sine a quarter cycle 
 | A quarter cycle | Circle |
 | Half a cycle | Diagonal, falling to the right |
 
+This is why the frame stays square when you grow the tile. In a stretched frame a circle would look like an ellipse, and you would read a phase difference that is not there.
+
 Different frequencies make other figures. When one frequency is a simple ratio of the other, such as 2 to 3, the figure closes and holds still. Slightly off that ratio, it slowly turns.
 
 ## What stereo width looks like
