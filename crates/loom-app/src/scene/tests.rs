@@ -133,7 +133,13 @@ fn dragging_an_off_assignment_keeps_the_live_dot() {
     parts.engine.process(&mut left, &mut right);
 
     let mut values = PanelValues::new();
-    update_panel_values_dragging(&mut values, &parts.controller, &BTreeMap::new(), Some(off));
+    update_panel_values_dragging(
+        &mut values,
+        &parts.controller,
+        &BTreeMap::new(),
+        &ClipHolds::default(),
+        Some(off),
+    );
     let value = values.get(filter.0, knob).unwrap();
     assert!(value.live.is_some());
     assert_eq!(
@@ -577,7 +583,13 @@ fn a_meter_shows_a_display_value_from_its_zero() {
         .unwrap();
     let view = panel_view(&DYNAMICS);
     let meter = &view.widgets[index];
-    assert_eq!(meter.kind, WidgetViewKind::Meter { zero: 1.0 });
+    assert_eq!(
+        meter.kind,
+        WidgetViewKind::Meter {
+            zero: 1.0,
+            clips: false
+        }
+    );
     assert_eq!(meter.label, "Reduction");
     assert_eq!(
         meter.hover,
@@ -590,4 +602,120 @@ fn a_meter_shows_a_display_value_from_its_zero() {
         display_text(&DYNAMICS, &DYNAMICS.panel.widgets[index], -18.0, None),
         "Reduction: -18.0 dB"
     );
+}
+
+/// A Level Meter's panel closes up without its history, and holds it at
+/// `view` 1 (panel-widgets.md, Level history).
+#[test]
+fn the_level_meter_closes_up_its_history() {
+    let d = &loom_modules::display::METER;
+    let meter = panel_for(d, &[0.0, 1.0]);
+    assert_eq!((meter.width, meter.height), (3, 6));
+    assert!(!meter.widgets[0].hidden);
+    assert_eq!(meter.widgets[0].x, 0);
+    assert!(meter.widgets[1].hidden);
+    let both = panel_for(d, &[1.0, 1.0]);
+    assert_eq!((both.width, both.height), (12, 6));
+    assert!(!both.widgets[1].hidden);
+    assert_eq!(both.widgets[1].x, 3);
+}
+
+/// A new meter gets the size of its default view, not of the whole panel.
+#[test]
+fn a_new_tile_uses_the_default_panel() {
+    assert_eq!(default_panel_size(&loom_modules::display::METER), (3, 6));
+    assert_eq!(default_panel_size(&loom_modules::display::SCOPE), (9, 8));
+}
+
+/// Changing `view` changes the scene's layout key, and the tile's width and
+/// its ports follow; going back restores them.
+#[test]
+fn changing_the_view_widens_the_tile_and_moves_its_output() {
+    let mut parts = loom_core::create_engine(loom_modules::registry(), loom_core::EngineConfig::default());
+    let c = &mut parts.controller;
+    let meter = c.add_module("loom.display.meter").unwrap();
+    c.commit().unwrap();
+    let plain = build(c, &BTreeMap::new(), &BTreeMap::new());
+    let key = mode_key(c);
+    let narrow = plain.module(meter.0).unwrap().width();
+    let port = plain.module(meter.0).unwrap().output_position(0);
+    let view = c.graph().node(meter).unwrap().descriptor.param_index("view").unwrap();
+    c.set_param(meter, view, 1.0).unwrap();
+    assert_ne!(mode_key(c), key, "the scene must be rebuilt");
+    let wide = build(c, &BTreeMap::new(), &BTreeMap::new());
+    assert!(wide.module(meter.0).unwrap().width() > narrow);
+    assert!(wide.module(meter.0).unwrap().output_position(0).x > port.x);
+    c.set_param(meter, view, 0.0).unwrap();
+    let back = build(c, &BTreeMap::new(), &BTreeMap::new());
+    assert_eq!(back.module(meter.0).unwrap().width(), narrow);
+}
+
+/// A plain Level Meter still grows wider, because its hidden history closed
+/// up and lies past the panel's edge (panels.md, Resizable tiles).
+#[test]
+fn a_plain_meter_still_grows_wider() {
+    let mut parts = loom_core::create_engine(loom_modules::registry(), loom_core::EngineConfig::default());
+    let c = &mut parts.controller;
+    let meter = c.add_module("loom.display.meter").unwrap();
+    c.commit().unwrap();
+    let sizes = BTreeMap::from([(meter.0, (30, 20))]);
+    let scene = build(c, &BTreeMap::new(), &sizes);
+    let module = scene.module(meter.0).unwrap();
+    let rect = module.widget_bounds(0).unwrap();
+    assert!(rect.width > 3.0 * loom_canvas::GRID, "wider");
+    assert!(rect.height > 6.0 * loom_canvas::GRID, "taller");
+}
+
+/// With its history showing, the meter stays narrow and the history takes the
+/// extra room, so a resize reaches the new widget.
+#[test]
+fn a_resized_history_takes_the_room() {
+    let mut parts = loom_core::create_engine(loom_modules::registry(), loom_core::EngineConfig::default());
+    let c = &mut parts.controller;
+    let meter = c.add_module("loom.display.meter").unwrap();
+    let view = c.graph().node(meter).unwrap().descriptor.param_index("view").unwrap();
+    c.set_param(meter, view, 1.0).unwrap();
+    c.commit().unwrap();
+    let sizes = BTreeMap::from([(meter.0, (40, 20))]);
+    let scene = build(c, &BTreeMap::new(), &sizes);
+    let module = scene.module(meter.0).unwrap();
+    assert_eq!(module.widget_bounds(0).unwrap().width, 3.0 * loom_canvas::GRID);
+    let history = module.widget_bounds(1).unwrap();
+    assert!(history.width > 9.0 * loom_canvas::GRID);
+    assert!(history.height > 6.0 * loom_canvas::GRID);
+}
+
+/// A level history wants a probe only while it shows.
+#[test]
+fn a_hidden_history_wants_no_probe() {
+    let mut parts = loom_core::create_engine(loom_modules::registry(), loom_core::EngineConfig::default());
+    let c = &mut parts.controller;
+    let meter = c.add_module("loom.display.meter").unwrap();
+    c.commit().unwrap();
+    assert!(history_outputs(c, &[meter.0]).is_empty());
+    let d = c.graph().node(meter).unwrap().descriptor;
+    let (view, window) = (d.param_index("view").unwrap(), d.param_index("window").unwrap());
+    c.set_param(meter, view, 1.0).unwrap();
+    let shown = history_outputs(c, &[meter.0]);
+    assert_eq!(shown.len(), 1);
+    assert_eq!(shown[0].window, 5.0, "the default window");
+    c.set_param(meter, window, 2.0).unwrap();
+    assert_eq!(history_outputs(c, &[meter.0])[0].window, 30.0);
+}
+
+/// A display drawn in a frame has no caption, even with no `captioned("")`,
+/// because the frame fills the widget. Its hover text keeps the label.
+#[test]
+fn framed_displays_have_no_caption() {
+    let d = &loom_modules::test_modules::PANEL;
+    let panel = panel_view(d);
+    for (widget, view) in d.panel.widgets.iter().zip(&panel.widgets) {
+        if matches!(
+            widget.kind,
+            WidgetKind::Scope | WidgetKind::LevelHistory | WidgetKind::Spectrum
+        ) {
+            assert_eq!(view.label, "", "{:?}", widget.kind);
+            assert!(!view.hover.description.is_empty(), "{:?}", widget.kind);
+        }
+    }
 }

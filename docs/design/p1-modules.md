@@ -25,6 +25,7 @@ Modules in the clock family (Transport, Clock, Phase Scale) are in [clock.md](cl
 4. **A module added with non-default values starts at those values.** See [live patching, rule 7](live-patching.md#rules).
 5. **Choices are whole-number parameters with choice names** ([panels](panels.md#choice-names)). The tables list the names in order, from 0.
 6. **Each module follows the [module checklist](../../CONTRIBUTING.md#adding-a-module)** and has a reference test at block sizes 1, 77, and 512.
+7. **A result of finite inputs that overflows holds at the largest finite value of its sign** ([ADR-0037](../adr/0037-finite-inputs-hold-at-the-largest-finite-value.md)). This covers Mixer and Crossfade here. A non-finite input still passes through.
 
 ## Constant family (MT-LEVEL-01)
 

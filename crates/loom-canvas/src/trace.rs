@@ -1,12 +1,13 @@
-//! Scope traces inside their tiles (`docs/design/panels.md`, Drawing the
-//! scope trace).
+//! Scope traces and other live displays inside their tiles
+//! (`docs/design/panels.md`, Drawing the scope trace).
 //!
-//! The app gives the canvas each scope's points in [`ScopeTraces`], apart
+//! The app gives the canvas each display's points in [`ScopeTraces`], apart
 //! from the [`Scene`] and the panel values. A new trace rebuilds only the
 //! trace's own small buffer, never the tiles, ports, cables, or controls
 //! (ADR-0010). The frame around the trace is drawn with the controls, so a
 //! still scope costs nothing per frame.
 
+use crate::gpu::Shape;
 use crate::scene::{Scene, WidgetViewKind};
 use crate::theme::Palette;
 use bytemuck::{Pod, Zeroable};
@@ -26,6 +27,13 @@ const TRACE_WIDTH: f32 = 1.2;
 const TRACE_MIN_PX: f32 = 1.0;
 /// How far the trace area sits inside the scope widget's rectangle.
 const INSET: f32 = 2.0;
+/// Width of a lighter second line, in world units.
+const PEAK_WIDTH: f32 = 0.8;
+/// How far a level history's column reaches over the next one, in world units.
+const SEAM: f32 = 0.6;
+/// Where a spectrum's faint grid lines sit: 100 Hz, 1 kHz, and 10 kHz, on its
+/// logarithmic axis from 20 Hz to 20 kHz (panel-widgets.md, Spectrum).
+const SPECTRUM_GRID: [f32; 3] = [0.232_99, 0.566_33, 0.899_66];
 
 /// The points of one scope trace.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -36,6 +44,9 @@ pub struct Trace {
     /// first point, and the frame clips it. `y` runs from -1 at the bottom
     /// to 1 at the top, and is clamped to that.
     pub points: Vec<[f32; 2]>,
+    /// A second, lighter line over the same frame: a level history's peak or
+    /// a spectrum's hold. Drawn only close up.
+    pub second: Vec<[f32; 2]>,
     /// The signal's level from 0 to 1 (-60 dB to 0 dB). At the middle zoom
     /// the scope is a flat line with this brightness.
     pub level: f32,
@@ -153,6 +164,9 @@ pub(crate) struct TraceGeometry {
     pub key: (u64, u64, bool),
     /// Every trace's pieces.
     pub segments: Vec<Segment>,
+    /// Every filled shape under a trace, such as a level history's columns.
+    /// In its own buffer, so a moving history uploads nothing else.
+    pub fills: Vec<Shape>,
 }
 
 impl TraceGeometry {
@@ -162,9 +176,10 @@ impl TraceGeometry {
     pub fn build(scene: &Scene, traces: &ScopeTraces, full: bool, palette: &Palette) -> Self {
         crate::stats::count(crate::stats::Counter::TraceBuilds);
         let mut segments = Vec::new();
+        let mut fills = Vec::new();
         for module in scene.modules() {
             for (index, widget) in module.panel.widgets.iter().enumerate() {
-                if widget.kind != WidgetViewKind::Scope {
+                if !widget.kind.draws_a_trace() {
                     continue;
                 }
                 let (Some(rect), Some(trace)) = (module.widget_bounds(index), traces.get(module.id, index)) else {
@@ -177,7 +192,52 @@ impl TraceGeometry {
                         area.center_y() - y.clamp(-1.0, 1.0) * area.height * 0.5,
                     )
                 };
-                if full {
+                // The lighter line: a level history's peak, or a spectrum's hold.
+                let second_line = || {
+                    let colour = crate::controls::mix(palette.light_on, palette.text, 0.5);
+                    trace
+                        .second
+                        .windows(2)
+                        .map(move |pair| Segment::with_width(at(pair[0]), at(pair[1]), colour, area, PEAK_WIDTH))
+                };
+                if widget.kind == WidgetViewKind::LevelHistory {
+                    // One flat column per point, because a capsule has a
+                    // round top. The columns meet, so they read as one shape.
+                    let step = match trace.points.as_slice() {
+                        [first, next, ..] => next[0] - first[0],
+                        _ => 0.0,
+                    };
+                    let column = area.width * step;
+                    let colour = crate::controls::mix(palette.light_off, palette.light_on, 0.7);
+                    for &point in &trace.points {
+                        let top = at(point);
+                        let height = area.y + area.height - top.y;
+                        if height > 0.0 {
+                            // A little wider, so the soft edges of two columns
+                            // do not leave a seam between them.
+                            let width = (column + SEAM).min(area.x + area.width - top.x);
+                            let rect = Rectangle::new(top, iced::Size::new(width, height));
+                            fills.push(Shape::new(rect, 0.0, colour, Color::TRANSPARENT, 0.0));
+                        }
+                    }
+                    if full {
+                        segments.extend(second_line());
+                    }
+                } else if widget.kind == WidgetViewKind::Spectrum {
+                    if full {
+                        for x in SPECTRUM_GRID {
+                            let (top, bottom) = (at([x, 1.0]), at([x, -1.0]));
+                            segments.push(Segment::new(top, bottom, palette.tile_border, area));
+                        }
+                        segments.extend(second_line());
+                    }
+                    segments.extend(
+                        trace
+                            .points
+                            .windows(2)
+                            .map(|pair| Segment::new(at(pair[0]), at(pair[1]), palette.light_on, area)),
+                    );
+                } else if full {
                     segments.extend(
                         trace
                             .points
@@ -193,6 +253,7 @@ impl TraceGeometry {
         Self {
             key: (scene.generation(), traces.generation(), full),
             segments,
+            fills,
         }
     }
 }

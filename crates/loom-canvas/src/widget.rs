@@ -617,6 +617,8 @@ struct Inside {
 enum ChoiceClick {
     Set(u32, usize, f32),
     Open(u32, usize),
+    /// A press on a meter's clip light, which clears it on release.
+    ClearClip(u32, usize),
 }
 
 /// The choice list that is open above the canvas.
@@ -680,6 +682,9 @@ struct State {
     /// The last press on empty canvas, in screen coordinates, for
     /// double-click.
     last_empty_click: Option<(Instant, Point)>,
+    /// The last press on a meter with a clip light, for double-click: when,
+    /// the module, the widget, and where on screen.
+    last_meter_click: Option<(Instant, u32, usize, Point)>,
     /// The browser key last seen.
     browser_key: Option<u64>,
     /// Buttons held from the keyboard, one slot for Space and one for Enter.

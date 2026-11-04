@@ -38,7 +38,7 @@ Every message carries the probe ID and an engine frame number (frames since the 
 
 ## Why queues and not triple buffers for scopes
 
-ADR-0001 suggests triple buffering for large telemetry. A triple buffer shows only the latest snapshot. A scope needs every sample in order, so it can find a trigger point and draw a stable wave, and so the UI can see when samples were lost. A queue of fixed-size chunks does both. Triple buffering stays the better fit for data where only the latest value matters, such as a spectrum (FR-VIS-03).
+ADR-0001 suggests triple buffering for large telemetry. A triple buffer shows only the latest snapshot. A scope needs every sample in order, so it can find a trigger point and draw a stable wave, and so the UI can see when samples were lost. A queue of fixed-size chunks does both. Triple buffering stays the better fit for data where only the latest value matters. A spectrum (FR-VIS-03) does not use one: its FFT needs every sample too, so it reads the same scope chunks, on the telemetry thread.
 
 ## Sizes
 
@@ -51,15 +51,19 @@ Drain the queues once per UI frame. At 60 frames per second, one scope fills abo
 
 ## In the desktop app
 
-The app hands the `Telemetry` handle from `create_engine` to a telemetry thread (`crates/loom-app/src/monitor.rs`). The thread drains both queues every 33 ms, so they never fill, and sends the UI a message only when a meter level visibly changes. *Why a thread:* in Iced every message redraws the window, so draining on a UI timer would draw frames even when every meter is silent. `crates/loom-app/src/live.rs` holds the parts:
+The app hands the `Telemetry` handle from `create_engine` to a telemetry thread (`crates/loom-app/src/monitor.rs`). The thread drains both queues every 33 ms, or every 16 ms while a scope or a spectrum is on screen, so they never fill, and sends the UI a message only when a meter level visibly changes. *Why a thread:* in Iced every message redraws the window, so draining on a UI timer would draw frames even when every meter is silent. `crates/loom-app/src/live.rs` holds the parts:
 
 - **`Live::sync`** runs before every `Controller::commit` and whenever the meters on screen change. It keeps a `Meter` probe on the output of every meter widget on screen ([panels](panels.md#level-meters-and-audio-load-m1)), and forgets probes of removed modules. With signal activity on, every output with a cable gets one too; activity is off.
 - **`Levels`**, on the telemetry thread, turns readings into levels from 0 to 1: -60 dB and below is 0, 0 dB (1.0, or 10 V) and above is 1. The peak is the highest since the last drain. The RMS is taken over every frame since the last drain, weighted by block length, because a block can be shorter than one cycle of the signal. Both rise at once and fall by 1.0 per second, using the time since the last drain, so the drain rate does not change them. The peak is never below the RMS.
 - **`ScopeTrace`** turns the chunks of one scope probe into a stable trace:
   1. It keeps one second of samples. If the frame stamps show a gap, it clears the history first. *Why:* drawing across lost samples would show a step that is not in the signal.
-  2. It finds the latest rising edge that still has a full window after it. The trigger level is halfway between the lowest and highest sample in the history, so signals with an offset, such as envelopes and pitch, trigger too. An edge counts only if the signal was below the level by a tenth of its swing before it, so noise on a slow edge cannot trigger twice. A flat signal falls back to the latest samples ("free run"). A scope module with Auto off sets a fixed level instead, and the trace runs free when nothing crosses it ([panels](panels.md#trigger)).
+  2. It finds the latest edge of the chosen slope, rising by default, that still has a full window after it. The trigger level is halfway between the lowest and highest sample in the history, so signals with an offset, such as envelopes and pitch, trigger too. An edge counts only if the signal was on the far side of the level by a tenth of its swing before it, so noise on a slow edge cannot trigger twice. A flat signal falls back to the latest samples ("free run"). A scope module with Auto off sets a fixed level instead, and the trace runs free when nothing crosses it ([panels](panels.md#trigger)).
   3. It finds the crossing to a fraction of a sample (`offset`). *Why:* a period is rarely a whole number of samples. Drawing shifted by the fraction keeps the wave still instead of jittering by up to one sample per frame.
   4. It picks a vertical range from 0.01, 0.02, 0.05, ... 10. The range grows at once and shrinks only when the trace uses less than 40% of it, so it does not flicker.
+
+- **`LevelHistory`** (`crates/loom-app/src/history.rs`) files a meter probe's readings into columns by their frame stamps, for a level history on screen ([panel widgets](panel-widgets.md#level-history)).
+
+- **`SpectrumAnalyser`** (`crates/loom-app/src/spectrum.rs`) runs the FFT on the chunks of one scope probe, for a spectrum on screen ([panel widgets](panel-widgets.md#spectrum)). A scope and a spectrum on one output share a probe, so their results travel apart in the `Update`.
 
 The planned direction for displays: signal displays are modules in the grid, not views laid over the canvas (ADR-0011, everything is a module). A scope module saves with the patch, sits next to the signal it shows, travels inside sub-patches, and can go on a front panel. It animates only while its tile is visible and large enough to read.
 

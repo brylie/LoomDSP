@@ -235,6 +235,8 @@ impl App {
                 self.close_slider_gesture();
                 self.browser = Some(browser::Browser::open(self.modules.clone(), world, at, area));
             }
+            CanvasEvent::ClearClip { module, widget } => self.reset_clip((module, widget), false),
+            CanvasEvent::ResetMeter { module, widget } => self.reset_clip((module, widget), true),
             CanvasEvent::VisibleDisplays(ids) => {
                 self.visible_displays = ids;
                 self.sync_probes();

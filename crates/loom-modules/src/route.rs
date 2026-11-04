@@ -1,7 +1,7 @@
 //! Picking between signals (FR-LIB-30). Spec: `docs/design/p2-modules.md`.
 
 use crate::rand::{seed_from, seed_param, stream};
-use loom_core::signal::EdgeDetector;
+use loom_core::signal::{EdgeDetector, hold_finite};
 use loom_core::{
     Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, PortDefault, PortIo,
     PortSpec, ProcessContext, SignalType, Widget,
@@ -311,7 +311,7 @@ impl Module for Selector {
                     finite &= input[i].is_finite();
                 }
             }
-            out[i] = if finite { sum.clamp(-f32::MAX, f32::MAX) } else { sum };
+            out[i] = if finite { hold_finite(sum) } else { sum };
         }
     }
 

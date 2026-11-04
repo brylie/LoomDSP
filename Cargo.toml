@@ -75,6 +75,7 @@ png = "0.18"
 etcetera = "0.11"
 # Recovery copy timestamps, shown in local time.
 jiff = "0.2"
+rustfft = "6.4"
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 
 [workspace.lints.rust]

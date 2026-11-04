@@ -55,7 +55,14 @@ fn a_meter_does_not_grow_over_a_widget() {
         width: 3,
         height: 8,
         widgets: vec![
-            widget(WidgetViewKind::Meter { zero: 0.0 }, 0, 0),
+            widget(
+                WidgetViewKind::Meter {
+                    zero: 0.0,
+                    clips: false,
+                },
+                0,
+                0,
+            ),
             widget(WidgetViewKind::Toggle, 0, 6),
         ],
     };
@@ -456,4 +463,109 @@ fn a_neighbour_input_wins_over_a_badge_under_it() {
             index: 0
         })
     );
+}
+
+/// A tile that holds one widget in a panel of this size.
+fn tile_with(kind: WidgetViewKind, width: u8, height: u8) -> ModuleView {
+    let mut tile = module(1, 0.0, 0.0);
+    tile.panel = PanelView {
+        width,
+        height,
+        widgets: vec![WidgetView {
+            kind,
+            x: 0,
+            y: 0,
+            label: String::new(),
+            hover: HoverText::default(),
+            hidden: false,
+        }],
+    };
+    tile
+}
+
+/// A tile with one meter, with or without a clip light.
+fn meter_module(clips: bool) -> ModuleView {
+    tile_with(WidgetViewKind::Meter { zero: 0.0, clips }, 3, 6)
+}
+
+/// A press in a meter's top row finds its clip light, and a press lower down
+/// finds only the meter. A meter with no light finds neither.
+#[test]
+fn a_clip_light_takes_the_top_row_of_its_meter() {
+    let module = meter_module(true);
+    let rect = module.widget_bounds(0).unwrap();
+    let top = Point::new(rect.center_x(), rect.y + 2.0);
+    let middle = rect.center();
+    assert_eq!(module.clip_light_at(top), Some(0));
+    assert_eq!(module.clip_meter_at(top), Some(0));
+    assert_eq!(module.clip_light_at(middle), None);
+    assert_eq!(module.clip_meter_at(middle), Some(0));
+    let plain = meter_module(false);
+    assert_eq!(plain.clip_meter_at(top), None);
+    assert_eq!(plain.clip_light_at(top), None);
+}
+
+/// Each kind that grows takes a resized tile's extra size, and its tile has a
+/// handle. A new kind that compiles but is left out would not grow.
+#[test]
+fn every_growing_display_takes_the_room() {
+    for kind in [
+        WidgetViewKind::Scope,
+        WidgetViewKind::LevelHistory,
+        WidgetViewKind::Spectrum,
+    ] {
+        let mut tile = tile_with(kind.clone(), 9, 6);
+        assert!(tile.is_growable(), "{kind:?}");
+        let before = tile.widget_bounds(0).unwrap();
+        tile.size = Some((40, 40));
+        let after = tile.widget_bounds(0).unwrap();
+        assert!(after.width > before.width && after.height > before.height, "{kind:?}");
+    }
+}
+
+/// A widget below a level history or a spectrum moves down on a resize, so
+/// the display does not cover it.
+#[test]
+fn a_widget_below_any_trace_display_moves_down() {
+    for kind in [
+        WidgetViewKind::Scope,
+        WidgetViewKind::LevelHistory,
+        WidgetViewKind::Spectrum,
+    ] {
+        let mut tile = tile_with(kind.clone(), 9, 9);
+        tile.panel.widgets.push(WidgetView {
+            kind: WidgetViewKind::Toggle,
+            x: 0,
+            y: 6,
+            label: String::new(),
+            hover: HoverText::default(),
+            hidden: false,
+        });
+        tile.size = Some((40, 40));
+        let display = tile.widget_bounds(0).unwrap();
+        let below = tile.widget_bounds(1).unwrap();
+        assert!(below.y >= display.y + display.height, "{kind:?}");
+    }
+}
+
+/// With two trace displays in one column, the lower takes the extra height,
+/// and the upper keeps its own, so neither covers the other.
+#[test]
+fn stacked_displays_never_cover_each_other() {
+    let mut tile = tile_with(WidgetViewKind::LevelHistory, 9, 12);
+    tile.panel.widgets.push(WidgetView {
+        kind: WidgetViewKind::Spectrum,
+        x: 0,
+        y: 7,
+        label: String::new(),
+        hover: HoverText::default(),
+        hidden: false,
+    });
+    tile.size = Some((40, 60));
+    let upper = tile.widget_bounds(0).unwrap();
+    let lower = tile.widget_bounds(1).unwrap();
+    assert_eq!(upper.height, 6.0 * GRID, "the upper keeps its height");
+    assert!(lower.height > 5.0 * GRID, "the lower grows");
+    assert!(upper.y + upper.height <= lower.y);
+    assert!(lower.y + lower.height <= tile.bounds().y + tile.bounds().height);
 }

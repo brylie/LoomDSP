@@ -237,6 +237,12 @@ pub struct Widget {
     pub peak: f32,
     /// RMS and peak for a stereo meter's right channel.
     pub right: Option<(f32, f32)>,
+    /// True while a meter's clip light is on.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub clip: bool,
+    /// A meter's peak hold readout. Empty for other widgets.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub hold: String,
     /// The value as text, for controls.
     pub text: String,
     pub modulation: Mark,
@@ -357,6 +363,8 @@ fn kind_name(kind: &WidgetViewKind) -> &'static str {
         WidgetViewKind::Readout { .. } => "readout",
         WidgetViewKind::Meter { .. } => "meter",
         WidgetViewKind::Scope => "scope",
+        WidgetViewKind::LevelHistory => "level_history",
+        WidgetViewKind::Spectrum => "spectrum",
         WidgetViewKind::Shape { .. } => "shape",
         WidgetViewKind::Button => "button",
     }
@@ -393,18 +401,38 @@ impl App {
             .collect();
         // The queues are read after every block, so they never fill.
         let block = self.controller.config().max_block;
+        let mut histories: std::collections::HashMap<loom_core::ProbeId, crate::history::LevelHistory> = watch
+            .histories
+            .iter()
+            .map(|(&probe, &seconds)| (probe, crate::history::LevelHistory::new(seconds, rate)))
+            .collect();
+        let mut spectra: std::collections::HashMap<loom_core::ProbeId, crate::spectrum::SpectrumAnalyser> = watch
+            .spectra
+            .keys()
+            .map(|&probe| (probe, crate::spectrum::SpectrumAnalyser::new(rate)))
+            .collect();
+        let mut peaks = crate::clip::Peaks::default();
         let mut readings = Vec::new();
         let mut remaining = window;
         while remaining > 0 {
             let n = remaining.min(block);
             self.process(n);
             let (meters, chunks) = self.monitor.take_telemetry();
+            peaks.note(&watch.peak_resets, &watch.meters, &meters);
+            for reading in &meters {
+                if let Some(history) = histories.get_mut(&reading.probe) {
+                    history.push(reading);
+                }
+            }
             if remaining <= METER_WINDOW {
                 readings.extend(meters);
             }
             for chunk in &chunks {
                 if let Some(scope) = scopes.get_mut(&chunk.probe) {
                     scope.push(chunk);
+                }
+                if let Some(spectrum) = spectra.get_mut(&chunk.probe) {
+                    spectrum.push(chunk);
                 }
             }
             remaining -= n;
@@ -413,7 +441,7 @@ impl App {
             .into_iter()
             .map(|(probe, mut scope)| {
                 let want = watch.scopes[&probe];
-                scope.update(want.window, want.trigger);
+                scope.update(want.window, want.trigger, want.slope);
                 (probe, scope.canvas_trace(watch.full_traces))
             })
             .collect();
@@ -436,6 +464,18 @@ impl App {
         let _ = self.update(crate::Message::Telemetry(crate::monitor::Update {
             levels: Vec::new(),
             traces,
+            histories: histories
+                .into_iter()
+                .map(|(probe, history)| (probe, history.trace()))
+                .collect(),
+            spectra: spectra
+                .into_iter()
+                .map(|(probe, spectrum)| {
+                    let want = watch.spectra[&probe];
+                    (probe, spectrum.trace(want.tilt, want.hold))
+                })
+                .collect(),
+            peaks: peaks.news(),
             activity,
         }));
         let _ = self.update(crate::Message::LiveFrame);
@@ -538,6 +578,8 @@ impl App {
                                 position: value.position,
                                 peak: value.peak,
                                 right: value.right,
+                                clip: value.clip,
+                                hold: value.hold,
                                 text: value.text,
                                 modulation: value.modulation.into(),
                                 live: value.live,

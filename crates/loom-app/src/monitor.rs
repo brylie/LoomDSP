@@ -6,7 +6,10 @@
 //! Every message to the app redraws the window, so draining telemetry on a
 //! UI timer would draw frames even when every meter is silent.
 
-use crate::live::{Level, Levels, ScopeTrace, Trigger};
+use crate::clip::{PeakNews, Peaks};
+use crate::history::LevelHistory;
+use crate::live::{Level, Levels, ScopeTrace, Slope, Trigger};
+use crate::spectrum::SpectrumAnalyser;
 use iced::futures::Stream;
 use iced::futures::channel::mpsc;
 use loom_core::{MeterReading, ProbeId, ScopeChunk, Telemetry};
@@ -26,6 +29,15 @@ pub const SCOPE_INTERVAL: Duration = Duration::from_millis(16);
 /// (`docs/design/panels.md`, Signal activity on ports).
 pub const ACTIVITY_THRESHOLD: f32 = 0.0001;
 
+/// How far a level history's column must move before the UI hears of it:
+/// half a dB of the 60 dB the frame shows, which spans 2 in a trace. Every
+/// message redraws the window, so an exact comparison would wake it for
+/// rounding noise on a steady tone (panel-widgets.md, Level history).
+const HISTORY_TOLERANCE: f32 = 2.0 * 0.5 / 60.0;
+
+/// The same for a spectrum: half a dB of the 90 dB its frame shows.
+const SPECTRUM_TOLERANCE: f32 = 2.0 * 0.5 / 90.0;
+
 /// How often activity is read: 5 times a second.
 pub const ACTIVITY_INTERVAL: Duration = Duration::from_millis(200);
 
@@ -41,6 +53,13 @@ pub struct WatchList {
     pub activity: HashSet<ProbeId>,
     /// Scope probes on screen, with the trace each asks for.
     pub scopes: HashMap<ProbeId, ScopeWant>,
+    /// Meter probes whose level history is drawn, with the seconds it shows.
+    pub histories: HashMap<ProbeId, f32>,
+    /// Scope probes whose spectrum is drawn, with how each draws.
+    pub spectra: HashMap<ProbeId, SpectrumWant>,
+    /// Counts the UI's resets of clip lights and peak holds, by meter probe, so
+    /// the thread reports that probe's peaks again from there.
+    pub peak_resets: HashMap<ProbeId, u64>,
     /// True when scopes draw full traces (close zoom), false for a flat
     /// line at their level (middle zoom).
     pub full_traces: bool,
@@ -51,8 +70,19 @@ pub struct WatchList {
 pub struct ScopeWant {
     /// Samples across the frame: the module's `window` at the sample rate.
     pub window: usize,
-    /// Where the trace starts.
+    /// The level where the trace starts.
     pub trigger: Trigger,
+    /// The edge that starts it.
+    pub slope: Slope,
+}
+
+/// What one spectrum on screen draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SpectrumWant {
+    /// True to tilt the drawing by +4.5 dB per octave.
+    pub tilt: bool,
+    /// True to draw the peak hold line.
+    pub hold: bool,
 }
 
 /// What the thread found that the UI draws.
@@ -63,6 +93,13 @@ pub struct Update {
     /// Scope traces that changed: only what is drawn, so a still or silent
     /// signal sends none.
     pub traces: Vec<(ProbeId, loom_canvas::Trace)>,
+    /// Level histories that moved: a still or silent one sends none.
+    pub histories: Vec<(ProbeId, loom_canvas::Trace)>,
+    /// Spectra that moved, apart from `traces`, because a scope and a spectrum
+    /// on one output share a probe.
+    pub spectra: Vec<(ProbeId, loom_canvas::Trace)>,
+    /// Raw peaks that could change a clip light or a peak hold.
+    pub peaks: Vec<(ProbeId, PeakNews)>,
     /// Activity probes whose state changed: true for carrying.
     pub activity: Vec<(ProbeId, bool)>,
 }
@@ -70,7 +107,12 @@ pub struct Update {
 impl Update {
     /// True when nothing changed.
     pub fn is_empty(&self) -> bool {
-        self.levels.is_empty() && self.traces.is_empty() && self.activity.is_empty()
+        self.levels.is_empty()
+            && self.traces.is_empty()
+            && self.histories.is_empty()
+            && self.spectra.is_empty()
+            && self.peaks.is_empty()
+            && self.activity.is_empty()
     }
 }
 
@@ -94,6 +136,11 @@ pub struct Watcher {
     shown_levels: HashMap<ProbeId, MeterSteps>,
     scopes: HashMap<ProbeId, ScopeTrace>,
     shown_traces: HashMap<ProbeId, loom_canvas::Trace>,
+    histories: HashMap<ProbeId, LevelHistory>,
+    shown_histories: HashMap<ProbeId, loom_canvas::Trace>,
+    spectra: HashMap<ProbeId, SpectrumAnalyser>,
+    shown_spectra: HashMap<ProbeId, loom_canvas::Trace>,
+    peaks: Peaks,
     activity: HashMap<ProbeId, Activity>,
     shown_activity: HashMap<ProbeId, bool>,
     last_activity_read: Option<Instant>,
@@ -113,6 +160,7 @@ impl Watcher {
         now: Instant,
     ) -> Update {
         self.levels.update(readings, now);
+        self.peaks.note(&watch.peak_resets, &watch.meters, readings);
         let current: Vec<(ProbeId, Level)> = self
             .levels
             .all()
@@ -124,6 +172,8 @@ impl Watcher {
 
         self.scopes.retain(|probe, _| watch.scopes.contains_key(probe));
         self.shown_traces.retain(|probe, _| watch.scopes.contains_key(probe));
+        self.spectra.retain(|probe, _| watch.spectra.contains_key(probe));
+        self.shown_spectra.retain(|probe, _| watch.spectra.contains_key(probe));
         for chunk in chunks {
             if watch.scopes.contains_key(&chunk.probe) {
                 self.scopes
@@ -131,24 +181,74 @@ impl Watcher {
                     .or_insert_with(|| ScopeTrace::new(sample_rate))
                     .push(&chunk);
             }
+            if watch.spectra.contains_key(&chunk.probe) {
+                self.spectra
+                    .entry(chunk.probe)
+                    .or_insert_with(|| SpectrumAnalyser::new(sample_rate))
+                    .push(&chunk);
+            }
         }
+        let spectra = watch
+            .spectra
+            .iter()
+            .filter_map(|(probe, want)| {
+                let trace = self.spectra.get(probe)?.trace(want.tilt, want.hold);
+                moved(self.shown_spectra.get(probe), &trace, SPECTRUM_TOLERANCE).then_some((*probe, trace))
+            })
+            .collect();
         let mut traces = Vec::new();
         for (probe, want) in &watch.scopes {
             let Some(scope) = self.scopes.get_mut(probe) else {
                 continue;
             };
-            scope.update(want.window, want.trigger);
+            scope.update(want.window, want.trigger, want.slope);
             let trace = scope.canvas_trace(watch.full_traces);
             if self.shown_traces.get(probe) != Some(&trace) {
                 traces.push((*probe, trace));
             }
         }
+        let histories = self.take_histories(watch, readings, sample_rate);
         let activity = self.take_activity(watch, readings, now);
         Update {
             levels,
             traces,
+            histories,
+            spectra,
+            peaks: self.peaks.news(),
             activity,
         }
+    }
+
+    /// Files the readings into the level histories on screen, and returns
+    /// those that moved. A history that shows another window starts again.
+    fn take_histories(
+        &mut self,
+        watch: &WatchList,
+        readings: &[MeterReading],
+        sample_rate: f32,
+    ) -> Vec<(ProbeId, loom_canvas::Trace)> {
+        self.histories.retain(|probe, _| watch.histories.contains_key(probe));
+        self.shown_histories
+            .retain(|probe, _| watch.histories.contains_key(probe));
+        for (probe, &window) in &watch.histories {
+            let fresh = self.histories.get(probe).is_none_or(|h| h.window() != window);
+            if fresh {
+                self.histories.insert(*probe, LevelHistory::new(window, sample_rate));
+            }
+        }
+        for reading in readings {
+            if let Some(history) = self.histories.get_mut(&reading.probe) {
+                history.push(reading);
+            }
+        }
+        self.histories
+            .iter()
+            .filter_map(|(probe, history)| {
+                let trace = history.trace();
+                let shown = self.shown_histories.get(probe);
+                moved(shown, &trace, HISTORY_TOLERANCE).then_some((*probe, trace))
+            })
+            .collect()
     }
 
     /// Activity (`docs/design/panels.md`, Signal activity on ports): a port
@@ -201,6 +301,13 @@ impl Watcher {
         for (probe, trace) in &update.traces {
             self.shown_traces.insert(*probe, trace.clone());
         }
+        for (probe, trace) in &update.histories {
+            self.shown_histories.insert(*probe, trace.clone());
+        }
+        for (probe, trace) in &update.spectra {
+            self.shown_spectra.insert(*probe, trace.clone());
+        }
+        self.peaks.sent(&update.peaks);
         for (probe, carrying) in &update.activity {
             self.shown_activity.insert(*probe, *carrying);
         }
@@ -284,6 +391,18 @@ impl Hash for Monitor {
     }
 }
 
+/// True when `trace` differs from what the UI has by more than `tolerance`
+/// in some point, in a trace's vertical units. Nothing shown yet counts as an
+/// empty trace, so a display that stays empty sends nothing.
+pub fn moved(shown: Option<&loom_canvas::Trace>, trace: &loom_canvas::Trace, tolerance: f32) -> bool {
+    let empty = loom_canvas::Trace::default();
+    let shown = shown.unwrap_or(&empty);
+    let apart = |a: &[[f32; 2]], b: &[[f32; 2]]| {
+        a.len() != b.len() || a.iter().zip(b).any(|(a, b)| (a[1] - b[1]).abs() > tolerance)
+    };
+    apart(&shown.points, &trace.points) || apart(&shown.second, &trace.second)
+}
+
 /// The quantised left and optional right meter levels.
 pub type MeterSteps = (u8, u8, Option<(u8, u8)>);
 
@@ -307,7 +426,7 @@ pub fn changed(shown: &HashMap<ProbeId, MeterSteps>, levels: &[(ProbeId, Level)]
 }
 
 /// Drains the queues every [`INTERVAL`], or [`SCOPE_INTERVAL`] while a
-/// scope is on screen, and yields what changed on screen. The thread stops
+/// scope or a spectrum is on screen, and yields what changed on screen. The thread stops
 /// when the app closes.
 pub fn stream(monitor: &Monitor) -> impl Stream<Item = Update> + use<> {
     let (mut tx, rx) = mpsc::channel(1);
@@ -335,7 +454,7 @@ pub fn stream(monitor: &Monitor) -> impl Stream<Item = Update> + use<> {
                         Err(_) => break,
                     }
                 }
-                std::thread::sleep(if watch.scopes.is_empty() {
+                std::thread::sleep(if watch.scopes.is_empty() && watch.spectra.is_empty() {
                     INTERVAL
                 } else {
                     SCOPE_INTERVAL

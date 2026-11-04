@@ -38,6 +38,21 @@ impl Signal {
         Self(Source::Gate { on, off })
     }
 
+    /// A 50 Hz wave from -0.75 to 0.75, for `Harness::check_non_finite_recovery`.
+    /// On a gate input it crosses the 0.5 threshold, at 48 kHz on frames 112,
+    /// 1072, and 2032.
+    ///
+    /// The second rise falls inside the check's bad frames, so a module that
+    /// stores an input on a trigger on another input sees the bad value. The
+    /// third comes after the recovery time, so it cannot hide a kept bad value.
+    ///
+    /// Its edges are fixed in frames, but the recovery time scales with the sample
+    /// rate. So this holds below 95,600 Hz. At 96 kHz the third edge comes first,
+    /// and the check passes a module that kept the bad value until then.
+    pub fn non_finite_busy() -> Self {
+        Self::from_fn(|frame| 0.75 * (frame as f64 * std::f64::consts::TAU * 50.0 / 48_000.0).sin() as f32)
+    }
+
     /// A 2 Hz wave from -0.75 to 0.75, for `Harness::check_extreme_recovery`. On
     /// a gate input it crosses the 0.5 threshold, at 48 kHz on frames 2788 and
     /// 26788.

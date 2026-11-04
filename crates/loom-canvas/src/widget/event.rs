@@ -124,6 +124,21 @@ pub enum CanvasEvent {
         /// Index in the module's panel widgets.
         widget: usize,
     },
+    /// A click on a meter's clip light: clear the light, and keep the peak
+    /// hold (`docs/design/panels.md`, Meter widget).
+    ClearClip {
+        /// Module ID.
+        module: u32,
+        /// Index in the module's panel widgets.
+        widget: usize,
+    },
+    /// A double-click on a meter: clear its clip light and its peak hold.
+    ResetMeter {
+        /// Module ID.
+        module: u32,
+        /// Index in the module's panel widgets.
+        widget: usize,
+    },
     /// A button hold ended.
     ///
     /// Pointer up sends this, including after the pointer has left the

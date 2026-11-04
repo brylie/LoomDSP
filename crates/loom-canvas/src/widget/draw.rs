@@ -563,6 +563,7 @@ impl<Message> PatchCanvas<'_, Message> {
                 let chosen = values.position(module.id, widget).round().max(0.0) as usize;
                 options.get(chosen).map_or("", String::as_str)
             }
+            Some(WidgetViewKind::Meter { .. }) => values.get(module.id, widget).map_or("", |v| v.hold.as_str()),
             _ => values.get(module.id, widget).map_or("", |v| v.text.as_str()),
         }
     }

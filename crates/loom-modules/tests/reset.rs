@@ -6,7 +6,7 @@
 
 mod common;
 
-use common::{busy, changed, pulses, selector};
+use common::{busy_each, changed, pulses, selector};
 use loom_core::{MidiEvent, ModuleDescriptor, ModuleRole, TransportSettings};
 use loom_modules::ALL;
 use loom_test::Harness;
@@ -29,12 +29,9 @@ fn harness(descriptor: &'static ModuleDescriptor, running: bool) -> Harness {
         })
 }
 
-/// A busy signal on every input.
+/// A busy signal on every input, each at its own frequency.
 fn on_busy_inputs(harness: Harness, descriptor: &'static ModuleDescriptor) -> Harness {
-    descriptor
-        .inputs
-        .iter()
-        .fold(harness, |h, port| h.input(port.name, busy(50.0)))
+    busy_each(harness, descriptor)
 }
 
 /// The DSP modules in [`ALL`] that fail `check_reset` on the harness `build`

@@ -25,13 +25,17 @@ Shows the peak and RMS level of its input. Passes the input through unchanged.
 
 ## Parameters
 
-None.
+| Parameter | Range | Default | Description |
+|---|---|---|---|
+| **View** (`view`) | Meter or Meter and history | Meter | Shows the meter alone, or with its level over the last seconds beside it. |
+| **Window** (`window`) | 1 s, 5 s, or 30 s | 5 s | How much time the level history shows. |
 
 ## Panel
 
-3 by 6 grid units.
+12 by 6 grid units.
 
 - Level meter: **Out** (`out`)
+- Level history: **Out** (`out`)
 
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->
 
@@ -40,6 +44,10 @@ None.
 Use Level Meter to watch how loud a signal is at any point in a patch. It shows the peak and the RMS level, so you can see when a signal gets near the top of its range before the output stage has to limit it.
 
 The input passes through unchanged, so you can put the meter in the middle of a chain.
+
+The light above the bar turns on when a peak reaches 0 dB, because that would clip if it reached the output. It stays on until you click it. The number below the bar is the highest peak so far. Double-click the meter, or press **Reset clip** in the inspector, to reset both.
+
+Set View to Meter and history to see the level over the last seconds beside the meter. Window sets how many seconds.
 
 ## Example patch
 

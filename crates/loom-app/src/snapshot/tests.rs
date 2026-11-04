@@ -192,11 +192,13 @@ fn headless_snapshot_shows_right_only_stereo_activity() {
 fn trace_snapshot_bounds() {
     let empty = TraceShown::from(&loom_canvas::Trace {
         points: Vec::new(),
+        second: Vec::new(),
         level: 0.0,
     });
     assert_eq!((empty.points, empty.low, empty.high), (0, 0.0, 0.0));
     let shown = TraceShown::from(&loom_canvas::Trace {
         points: vec![[0.0, -0.5], [1.0, 0.75]],
+        second: Vec::new(),
         level: 0.8,
     });
     assert_eq!((shown.points, shown.low, shown.high, shown.level), (2, -0.5, 0.75, 0.8));

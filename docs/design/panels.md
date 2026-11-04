@@ -288,7 +288,7 @@ The first display module that shows a signal over time.
 | `window` | Window | 0.001 to 1 s | 0.02 s | Logarithmic. The time shown across the display. One second is the history `ScopeTrace` keeps. |
 | `auto` | Auto | 0 or 1 | 1 | Whole number. On: the trigger level is halfway between the lowest and highest sample, as in [telemetry](telemetry.md). |
 | `level` | Level | -10 to 10 | 0 | The trigger level while `auto` is off. [Control ranges](control-ranges.md) -1 to 1 (default) and -10 to 10, like the scope's vertical ranges ([#329](https://github.com/brylie/LoomDSP/issues/329)). |
-| `slope` | Slope | 0 Rising, 1 Falling | 0 | Which edge starts the trace ([#329](https://github.com/brylie/LoomDSP/issues/329)). |
+| `slope` | Slope | 0 Rising, 1 Falling | 0 | Which edge starts the trace ([#329](https://github.com/brylie/LoomDSP/issues/329)). In the inspector only, and always shown, because it applies with `auto` on or off. *Why not on the tile:* most patches never change it, and the tile keeps its size. |
 
 - Its panel: the scope widget at the top (9 by 5 grid units, bound to `out`, no caption), added in #62, and below it a knob for `window`, a toggle for `auto`, and a knob for `level`. Code: `SCOPE` in `loom-modules/src/display.rs`, `Trigger` in `loom-app/src/live.rs`, and `loom-app/src/probe_menu.rs`.
 - The parameters never change the audio. They tell the app how to draw the trace.
@@ -296,7 +296,7 @@ The first display module that shows a signal over time.
 
 ### Trigger
 
-- `ScopeTrace` takes the level and the slope from the module: automatic, or the fixed `level`; a rising or falling edge. The rest of the trigger is unchanged: the chosen edge, with hysteresis of a tenth of the history's swing, found to a fraction of a sample. The hysteresis never reaches below the lowest sample, so a fixed level near the bottom of the signal still triggers.
+- `ScopeTrace` takes the level and the slope from the module: automatic, or the fixed `level`; a rising or falling edge. The rest of the trigger is unchanged: the chosen edge, with hysteresis of a tenth of the history's swing, found to a fraction of a sample. The hysteresis never reaches below the lowest sample on a rising edge, or above the highest sample on a falling edge, so a fixed level near either end of the signal still triggers.
 - If no edge crosses a fixed level, the trace runs free, as for a flat signal.
 
 ### Add scope and Add meter
@@ -341,10 +341,10 @@ A right-click opens a menu for what is under the pointer. Right-clicking a tile 
 ### Acceptance criteria: scope module
 
 - [x] The scope module passes its input through, bit for bit. It has a reference test and a block-size check.
-- [ ] A falling slope starts the trace on a falling edge, and a fixed level of 3 triggers on a signal between 2 and 5 (tests in `crates/loom-app/src/live.rs`).
-- [ ] Level meter: a peak of 1.0 lights the clip light until it is clicked; the peak hold shows the highest peak in dB; a double-click resets both (`Ui` harness).
+- [x] A falling slope starts the trace on a falling edge, and a fixed level of 3 triggers on a signal between 2 and 5 (tests in `crates/loom-app/src/live/tests.rs`).
+- [x] Level meter: a peak of 1.0 lights the clip light until it is clicked; the peak hold shows the highest peak in dB; a double-click resets both (`Ui` harness, `crates/loom-app/src/clip/app_tests.rs`).
 - [x] A patch that makes infinity at the output counts silenced samples and shows the error message for 10 seconds after the last one; clipping with safety Off shows the warning (test).
-- [x] Its parameters are `window`, `auto`, and `level`, with the ranges above, and its panel has a knob, a toggle, and a knob for them.
+- [x] Its parameters are `window`, `auto`, `level`, and `slope`, with the ranges above. Its panel has a knob, a toggle, and a knob for the first three, and `slope` is in the inspector.
 - [x] `ScopeTrace` with a fixed level triggers on that level, and runs free when nothing crosses it. With `auto` on it behaves as before.
 - [x] Right-clicking an output or a cable opens the menu. A right-drag pans and opens no menu. Right-clicking a tile, an input, or empty canvas opens none.
 - [x] Add scope and Add meter, on an output and on a cable, place a module whose `in` is connected to that output, next to it and overlapping no tile. The cable that was clicked stays. The new module is selected.
@@ -478,20 +478,26 @@ The whole app redraws only when something visible changes ([#90](https://github.
 - A fifth M1 widget, 3 × 6 grid units. It binds to one of its module's **outputs** by name. The registry refuses a meter bound to an output the module does not have.
 - It shows the output's level from -60 dB (empty) to 0 dB (full), bottom to top: a bar for the RMS level and a thin line for the peak. Both rise at once and fall by the whole range in about a second. The bar is green below -12 dB, amber up to -3 dB, and red above. Its label is below it.
 - A meter is a display: pressing or dragging it selects or moves the tile, as with a light.
-- **Clip light and peak hold** (Agreed, M2, [#98](https://github.com/brylie/LoomDSP/issues/98), 2026-11-01). Above the meter, a clip light turns on when the peak reaches 1.0 and stays on until it is clicked. Below it, a readout shows the highest peak since the last reset, in dB to one decimal. Double-clicking the meter resets both. *Why the light says "would clip":* cables are never clipped (ADR-0007). A peak of 1.0 or more on a cable only clips if it reaches the output, so the hover text says "Would clip at the output". The clip light also has a shape, not only a colour (NFR-UX-03).
+- **Clip light and peak hold** (Implemented, M2, [#98](https://github.com/brylie/LoomDSP/issues/98)). Code: `crates/loom-app/src/clip.rs`. Above the meter, a clip light turns on when the peak reaches 1.0 and stays on until it is clicked. Below it, a readout shows the highest peak since the last reset, in dB to one decimal, and `--` before any signal. Double-clicking the meter resets both. *Why the light says "would clip":* cables are never clipped (ADR-0007). A peak of 1.0 or more on a cable only clips if it reaches the output, so the hover text says "Would clip at the output". The clip light also has a shape, not only a colour (NFR-UX-03): a hollow ring when off, a filled square when on.
+  - **Which meters.** Only a meter bound to an output. A meter on a display value, such as gain reduction, has neither, because it does not show a signal's level. A stereo meter has one light and one readout, using the higher side.
+  - **Layout.** Both fit inside the meter's 3 × 6, so the bar is shorter. The readout takes the caption's row, so such a meter has no caption, and hover text keeps its label. At middle zoom the light keeps its shape and the readout becomes a bar. Far out, neither is drawn.
+  - **Click.** The light clears on release, if the pointer did not move. The press also selects the module, as on any display. A drag from the light moves the tile and leaves it lit. A click elsewhere on the meter changes nothing. At far zoom neither is drawn, so a click or double-click there only selects the module and resets nothing.
+  - **Keyboard.** A display takes no focus, so the Level Meter's inspector has a **Reset clip** button, which resets both.
+  - **What counts.** A peak of 1.0 or more, or a peak or RMS that is not a finite number. A value that is not finite lights the light and never changes the readout.
+  - **How long it lasts.** The UI thread owns the state, by module and widget. It survives panning away, zooming out, and a device change. It clears when a patch opens and on New. It is not saved. While a meter is off screen it has no probe, so a clip then is not caught. *Why:* a probe costs engine work, and a meter nobody sees needs none.
 - *Why levels fall over a second:* a short peak stays visible long enough to see, and the bar does not flicker.
 
 ### Level meter module
 
-- **`loom.display.meter`**, category Display. One audio input `in` and one output `out` that passes `in` through, sample for sample. No parameters. Its panel is one meter bound to `out`.
-- Mono. For stereo, use two.
-- M2 adds a level history view, with `view` and `window` settings ([panel widgets, Level history](panel-widgets.md#level-history)).
+- **`loom.display.meter`**, category Display. One audio input `in` and one output `out` that passes `in` through, sample for sample. Its parameters are `view` and `window`. Its panel holds a meter and a level history, both bound to `out`, and the history shows only with `view` on Meter and history.
+- A stereo output shows both sides ([stereo](stereo.md), rule 22).
+- M2 adds a level history view, with `view` and `window` settings in the inspector ([panel widgets, Level history](panel-widgets.md#level-history)), and a **Reset clip** button in the inspector.
 - *Why a pass-through output:* probes read outputs, and the module can sit inline in a signal path or hang off an output, without changing the sound.
 
 ### How levels reach a meter
 
 - While a meter is on screen at a zoom where it is drawn, the app keeps a `Meter` probe on its output ([telemetry](telemetry.md)). When the meter leaves the screen, the probe is removed at the next commit. *Why:* a probe costs engine work, and a meter nobody sees needs none.
-- Telemetry is drained on a background thread every 33 ms, not on the UI thread. The thread keeps each probe's peak and RMS levels and sends the UI a message only when a level changes by at least 1 of 256 steps. *Why:* as for lights, every message redraws the window, so a silent patch with meters on screen must send none.
+- Telemetry is drained on a background thread every 33 ms, or every 16 ms while a scope or a spectrum is on screen, not on the UI thread. The thread keeps each probe's peak and RMS levels and sends the UI a message only when a level changes by at least 1 of 256 steps, or when the highest raw peak since the last reset rises by at least 0.1 dB or reaches 1.0. *Why:* as for lights, every message redraws the window, so a silent patch with meters on screen must send none.
 - Probes stay view state: not saved, and they never change the sound.
 
 ### Audio load and dropouts in the stats bar
@@ -502,7 +508,7 @@ The whole app redraws only when something visible changes ([#90](https://github.
 - The dropout count is red for 10 seconds after it grows.
 - **Redraw.** A thread reads the audio stats four times a second and wakes the UI only when the bar would change: the load or its maximum to the shown 1%, the dropout count, the end of the red time, the telemetry drops, or an output warning starting or ending. The load number changes at most twice a second. *Why:* in Iced every message redraws the window, so a timer that refreshed the bar drew two frames a second in an idle patch ([#90](https://github.com/brylie/LoomDSP/issues/90)).
 - *Why:* a performer needs a warning before a problem is audible (FR-PERF-04), and must notice when one just happened. A count that stayed red forever would soon be ignored.
-- **Silenced and clipped output** (Agreed, M2, [#130](https://github.com/brylie/LoomDSP/issues/130), 2026-11-01). The engine counts output samples it turned from NaN or infinity into silence, and samples it clipped to -1 to 1, in two atomics in `EngineStats` (an atomic add on the audio thread, nothing else). The stats bar shows **Output: bad samples silenced** in the error style, and **Output clipped** in the warning style, each for 10 seconds after the last such sample, like the dropout count. Hover text gives the counts since the engine started. The watcher thread owns the timing and tells the UI when a warning starts or ends, and the warnings clear when the stream or engine changes. Each stream gets a new engine, so a count already there at the watcher's first read is new, and it shows. *Why the watcher:* it wakes the UI only when the bar would change, so a second timer in the UI would end the warning while bad samples continue. *Why:* since #123 a patch that makes NaN just goes quiet, and the player cannot tell why. With the output limiter on, clipping is rare, so the clip message mostly appears with output safety Off.
+- **Silenced and clipped output** (Agreed, M2, [#130](https://github.com/brylie/LoomDSP/issues/130), 2026-11-01). The engine counts output samples it turned from NaN or infinity into silence, and samples it clipped, to -1 to 1 or at the safety stage's input limit, in two atomics in `EngineStats` (an atomic add on the audio thread, nothing else). The stats bar shows **Output: bad samples silenced** in the error style, and **Output clipped** in the warning style, each for 10 seconds after the last such sample, like the dropout count. Hover text gives the counts since the engine started. The watcher thread owns the timing and tells the UI when a warning starts or ends, and the warnings clear when the stream or engine changes. Each stream gets a new engine, so a count already there at the watcher's first read is new, and it shows. *Why the watcher:* it wakes the UI only when the bar would change, so a second timer in the UI would end the warning while bad samples continue. *Why:* since #123 a patch that makes NaN just goes quiet, and the player cannot tell why. With the output limiter on, clipping is rare, so the clip message mostly appears with output safety Off, or when a finite sample comes in above the safety stage's input limit, as a runaway feedback loop's does ([ADR-0037](../adr/0037-finite-inputs-hold-at-the-largest-finite-value.md)). *Why that counts:* the clamp at that limit is clipping, and the limiter would otherwise hide it, so the loop would go quiet with no warning.
 
 ### Acceptance criteria: level meters and audio load
 
@@ -517,9 +523,9 @@ The whole app redraws only when something visible changes ([#90](https://github.
 
 ### Out of scope
 
-- Stereo meters. ("Add meter" came with "Add scope": see [Add scope and Add meter](#add-scope-and-add-meter).)
-- Peak hold numbers and clip indicators.
-- Spectrum and scope displays.
+- Stereo meters, for M1. ("Add meter" came with "Add scope": see [Add scope and Add meter](#add-scope-and-add-meter).)
+- Peak hold numbers and clip indicators, for M1. They are [in M2](#meter-widget).
+- Spectrum and scope displays, for M1. See [Scope module](#scope-module) and [Spectrum](panel-widgets.md#spectrum).
 
 ## Labels and hover text
 
@@ -720,9 +726,9 @@ The table below applies when no text field has focus.
 
 **Status:** Implemented.
 
-- **The handle.** A small grip at the bottom-right corner of a tile that has a **growable** widget (a scope, a meter, an XY scope, later a spectrum or curve). Other tiles have no handle. Dragging it changes the tile's size and snaps to the grid. The cursor shows a resize cursor over it.
-- **Minimum and maximum.** The minimum is the size the panel declares (the tile cannot be smaller than its layout). The maximum is 64 by 64 grid units.
-- **What grows.** Only growable widgets. They take all extra width and height. Other widgets keep their size and position, top left, except that a widget below a scope moves down with the scope's bottom edge. *Why:* the scope sits at the top of its panel, so the controls under it would otherwise be covered, and a tall scope is the reason to resize one. A meter does not grow over a widget. A widget below it, in the meter's columns, stops it growing taller. A widget to its right, in the meter's rows, stops it growing wider. With nothing below it to stop it growing taller, a widget past its lower right corner also stops it growing wider, so it grows taller only. A hidden widget counts, so a meter does not jump when a setting shows or hides one. *Why:* a panel can place a meter above a control, as Dynamics does, and a covered control cannot be read or reached.
+- **The handle.** A small grip at the bottom-right corner of a tile that has a **growable** widget (a scope, a meter, a level history, a spectrum, an XY scope, later a curve). Other tiles have no handle. Dragging it changes the tile's size and snaps to the grid. The cursor shows a resize cursor over it.
+- **Minimum and maximum.** The minimum is the size of the panel as its parameter values show it (the tile cannot be smaller than its layout). The maximum is 64 by 64 grid units.
+- **What grows.** Only growable widgets. They take all extra width and height. Other widgets keep their size and position, top left, except that a widget below a trace display (a scope, a level history, a spectrum) moves down with that display's bottom edge. *Why:* the display sits at the top of its panel, so the controls under it would otherwise be covered, and a tall display is the reason to resize one. With several trace displays on one panel, only the one whose bottom edge is lowest takes the extra height, so displays stacked in a column never grow over each other. Each still takes all the extra width, so displays side by side are not handled yet, and a wide tile can draw one over another. No built-in module has them. A meter does not grow over a widget. A widget below it, in the meter's columns, stops it growing taller. A widget to its right, in the meter's rows, stops it growing wider. With nothing below it to stop it growing taller, a widget past its lower right corner also stops it growing wider, so it grows taller only. A hidden widget counts, so a meter does not jump when a setting shows or hides one. The exception is a hidden widget past the panel's closed-up width, which no longer takes any room. *Why:* a panel can place a meter above a control, as Dynamics does, and a covered control cannot be read or reached.
 - **Ports.** Inputs stay on the left edge and outputs on the right, spread evenly over the new height, in port order. Cable ends, hit-testing, and hover follow the new size.
 - **Saved.** The patch file gets an optional `size: (w, h)` next to the position, in grid units. A tile without one has its declared size. Files without the field load unchanged (ADR-0008).
 - **Undo.** One resize drag is one undo step. The size is part of the clipboard: paste keeps it.

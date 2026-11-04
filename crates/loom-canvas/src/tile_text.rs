@@ -321,6 +321,9 @@ fn value_text_place(kind: &WidgetViewKind, rect: Rectangle) -> Option<(Point, Al
             let box_rect = number_box(rect);
             Some((box_rect.center(), Align::Center, box_rect.width - 4.0))
         }
+        WidgetViewKind::Meter { clips: true, .. } => {
+            Some((crate::controls::meter_hold_centre(rect), Align::Center, rect.width))
+        }
         _ => None,
     }
 }
@@ -404,9 +407,11 @@ fn caption_y(kind: &WidgetViewKind, rect: Rectangle) -> f32 {
         WidgetViewKind::Fader { vertical: false, .. } | WidgetViewKind::Range { vertical: false, .. } => {
             rect.y + GRID * 0.5
         }
-        WidgetViewKind::Meter { .. } | WidgetViewKind::Scope | WidgetViewKind::XyPad { .. } => {
-            rect.y + rect.height - GRID * 0.5
-        }
+        WidgetViewKind::Meter { .. }
+        | WidgetViewKind::Scope
+        | WidgetViewKind::LevelHistory
+        | WidgetViewKind::Spectrum
+        | WidgetViewKind::XyPad { .. } => rect.y + rect.height - GRID * 0.5,
         WidgetViewKind::Shape { .. } => rect.y + rect.height - GRID * 0.5,
         WidgetViewKind::Toggle | WidgetViewKind::Light => light_centre(rect).y + GRID,
         // On the face of the button.

@@ -285,7 +285,25 @@ impl History {
     }
 }
 
-/// Where a scope's trace starts: the level a rising edge must cross
+/// Which edge starts a scope's trace (`docs/design/panels.md`, Scope module,
+/// Trigger).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Slope {
+    /// The signal crosses the level going up.
+    #[default]
+    Rising,
+    /// The signal crosses the level going down.
+    Falling,
+}
+
+impl Slope {
+    /// The slope a scope module's `slope` parameter asks for.
+    pub fn from_param(slope: f32) -> Self {
+        if slope >= 0.5 { Self::Falling } else { Self::Rising }
+    }
+}
+
+/// Where a scope's trace starts: the level an edge must cross
 /// (`docs/design/panels.md`, Scope module, Trigger).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Trigger {
@@ -344,7 +362,7 @@ impl ScopeTrace {
     }
 
     /// Fills the trace with `window` samples from the latest trigger.
-    pub fn update(&mut self, window: usize, trigger: Trigger) {
+    pub fn update(&mut self, window: usize, trigger: Trigger, slope: Slope) {
         let window = window.max(1);
         let samples = self.history.samples.make_contiguous();
         self.span = window as f32;
@@ -353,7 +371,7 @@ impl ScopeTrace {
             self.triggered = false;
             return;
         }
-        match find_trigger(samples, window, trigger) {
+        match find_trigger(samples, window, trigger, slope) {
             Some(position) => {
                 let start = position.floor() as usize;
                 self.offset = position - start as f32;
@@ -388,8 +406,8 @@ impl ScopeTrace {
         let level = (normalise(peak) * 255.0).round() / 255.0;
         if !full {
             return loom_canvas::Trace {
-                points: Vec::new(),
                 level,
+                ..loom_canvas::Trace::default()
             };
         }
         let point = |i: usize| {
@@ -419,7 +437,11 @@ impl ScopeTrace {
             }
             points
         };
-        loom_canvas::Trace { points, level }
+        loom_canvas::Trace {
+            points,
+            second: Vec::new(),
+            level,
+        }
     }
 }
 
@@ -443,33 +465,41 @@ fn decay(level: f32, target: f32, dt: f32) -> f32 {
     if next < 0.001 { 0.0 } else { next }
 }
 
-/// The latest rising edge through the trigger level that still has a full
-/// window after it, as a sample position with a fraction.
+/// The latest edge of `slope` through the trigger level that still has a
+/// full window after it, as a sample position with a fraction.
 ///
 /// With [`Trigger::Auto`] the level is halfway between the lowest and
 /// highest sample in the history, so signals with an offset (envelopes,
-/// pitch) trigger too. An edge counts only if the signal was clearly below
-/// the level before it (hysteresis of a tenth of the swing in the history),
-/// so noise on a slow edge cannot trigger twice. Returns `None` for a flat
-/// signal or when no edge is found.
-fn find_trigger(samples: &[f32], window: usize, trigger: Trigger) -> Option<f32> {
+/// pitch) trigger too. An edge counts only if the signal was clearly on the
+/// far side of the level before it (hysteresis of a tenth of the swing in the
+/// history), so noise on a slow edge cannot trigger twice. Returns `None` for
+/// a flat signal or when no edge is found.
+///
+/// A falling edge is a rising edge of the signal turned upside down, so both
+/// slopes share one search.
+fn find_trigger(samples: &[f32], window: usize, trigger: Trigger, slope: Slope) -> Option<f32> {
     let n = samples.len();
     let last_start = n.checked_sub(window + 1)?;
+    let sign = match slope {
+        Slope::Rising => 1.0,
+        Slope::Falling => -1.0,
+    };
+    let at = |i: usize| sign * samples[i];
     // Level from the whole history (about a second), so that a slow signal
     // still has a full cycle in it.
-    let (low, high) = samples
-        .iter()
-        .fold((f32::MAX, f32::MIN), |(lo, hi), &x| (lo.min(x), hi.max(x)));
+    let (low, high) = samples.iter().fold((f32::MAX, f32::MIN), |(lo, hi), &x| {
+        (lo.min(sign * x), hi.max(sign * x))
+    });
     let swing = high - low;
     if swing.is_nan() || swing <= 1e-6 {
         return None;
     }
     let level = match trigger {
         Trigger::Auto => low + swing * 0.5,
-        Trigger::Level(level) => level,
+        Trigger::Level(level) => sign * level,
     };
-    // Hysteresis of a tenth of the swing, but never as deep as the lowest
-    // sample: a fixed level near the bottom must still arm.
+    // Hysteresis of a tenth of the swing, but never as deep as the far end of
+    // the signal: a fixed level near that end must still arm.
     let arm = level - (swing * 0.1).min((level - low) * 0.5);
 
     // Walk back from the newest possible start. A crossing between i - 1 and
@@ -478,17 +508,17 @@ fn find_trigger(samples: &[f32], window: usize, trigger: Trigger) -> Option<f32>
     // a wiggle on the edge, and the search goes on.
     let mut candidate: Option<usize> = None;
     for i in (1..=last_start + 1).rev() {
-        let (before, at) = (samples[i - 1], samples[i]);
+        let (before, now) = (at(i - 1), at(i));
         if let Some(found) = candidate {
-            if at < arm {
-                let fraction = (level - samples[found - 1]) / (samples[found] - samples[found - 1]);
+            if now < arm {
+                let fraction = (level - at(found - 1)) / (at(found) - at(found - 1));
                 return Some((found - 1) as f32 + fraction);
             }
-            if at >= level {
+            if now >= level {
                 candidate = None;
             }
         }
-        if candidate.is_none() && before < level && at >= level {
+        if candidate.is_none() && before < level && now >= level {
             candidate = Some(i);
         }
     }

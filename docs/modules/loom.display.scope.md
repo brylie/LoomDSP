@@ -29,7 +29,8 @@ Shows its input over time. Passes the input through unchanged.
 |---|---|---|---|
 | **Window** (`window`) | 0.001 to 1 s, logarithmic | 0.02 s | The time shown across the display. |
 | **Auto** (`auto`) | 0 to 1, whole numbers | 1 | Triggers halfway between the signal's lowest and highest values. |
-| **Level** (`level`) | -1 to 1 | 0 | The trigger level while Auto is off. |
+| **Level** (`level`) | -10 to 10. Control ranges -1 to 1, -10 to 10 (default -1 to 1) | 0 | The trigger level while Auto is off. |
+| **Slope** (`slope`) | Rising or Falling | Rising | Which edge starts the trace. |
 
 ## Panel
 
@@ -46,7 +47,7 @@ Shows its input over time. Passes the input through unchanged.
 
 Use Scope to see a signal's shape over time: an oscillator's wave, an envelope's rise and fall, or how far a modulation moves.
 
-Window sets how much time the display shows. With Auto on, the trace starts where the signal crosses halfway between its lowest and highest values, so a steady wave stands still. Turn Auto off to set that level yourself. The input passes through unchanged.
+Window sets how much time the display shows. With Auto on, the trace starts where the signal crosses halfway between its lowest and highest values, so a steady wave stands still. Turn Auto off to set that level yourself. Slope, in the inspector, chooses a rising or a falling edge. The input passes through unchanged.
 
 ## Example patch
 

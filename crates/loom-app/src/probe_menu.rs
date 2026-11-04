@@ -102,12 +102,8 @@ impl ProbeMenu {
 /// grid allows, moved down in steps of 2 grid units until it overlaps none
 /// of `tiles`.
 pub fn place(descriptor: &ModuleDescriptor, anchor: Point, tiles: &[Rectangle]) -> Point {
-    let size: Size = tile_size(
-        descriptor.inputs.len(),
-        descriptor.outputs.len(),
-        descriptor.panel.width,
-        descriptor.panel.height,
-    );
+    let (width, height) = crate::scene::default_panel_size(descriptor);
+    let size: Size = tile_size(descriptor.inputs.len(), descriptor.outputs.len(), width, height);
     // The first input's centre, measured from the tile's top, as
     // `ModuleView::input_position` places it.
     let input = loom_canvas::HEADER + loom_canvas::ROW * 0.5;

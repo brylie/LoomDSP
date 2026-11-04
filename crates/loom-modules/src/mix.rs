@@ -2,6 +2,7 @@
 //!
 //! Spec: `docs/design/p1-modules.md`, Mixing and shaping.
 
+use loom_core::signal::hold_finite;
 use loom_core::{
     Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, Param, ParamOptions, ParamSpec, PortDefault,
     PortIo, PortSpec, ProcessContext, SignalType, Widget,
@@ -202,7 +203,10 @@ impl Module for Mixer {
         let mute_mod: [Param<'_>; MIXER_INPUTS] = std::array::from_fn(|n| io.param(Self::MUTE1 + n));
         let (inputs, [out]) = io.split::<MIXER_INPUTS, 1>();
         for (i, out) in out.iter_mut().enumerate() {
-            let mut sum = 0.0;
+            // Finite inputs hold at the largest finite value when they overflow,
+            // at each step, so a mute of 0 cannot turn infinity into NaN. A
+            // non-finite input still passes through.
+            let (mut sum, mut finite) = (0.0f32, true);
             for n in 0..MIXER_INPUTS {
                 // The smoother glides to the wanted state, so a modulated
                 // mute fades like a knob mute does.
@@ -211,7 +215,13 @@ impl Module for Mixer {
                     self.open[n].set_target(want);
                 }
                 let level = modulated[n].at_or(i, self.levels[n].tick());
-                sum += inputs[n][i] * level * self.open[n].tick();
+                let (input, open) = (inputs[n][i], self.open[n].tick());
+                finite &= input.is_finite();
+                if finite {
+                    sum = hold_finite(sum + hold_finite(hold_finite(input * level) * open));
+                } else {
+                    sum += input * level * open;
+                }
             }
             *out = sum;
         }
@@ -354,7 +364,12 @@ impl Module for Crossfade {
                 let (sin, cos) = (mix * FRAC_PI_2).sin_cos();
                 (cos, sin)
             };
-            *out = a[i] * gain_a + b[i] * gain_b;
+            let sum = a[i] * gain_a + b[i] * gain_b;
+            *out = if a[i].is_finite() && b[i].is_finite() {
+                hold_finite(sum)
+            } else {
+                sum
+            };
         }
     }
 

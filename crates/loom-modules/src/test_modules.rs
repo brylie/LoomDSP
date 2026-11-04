@@ -133,7 +133,7 @@ pub static PANEL: ModuleDescriptor = ModuleDescriptor {
         })
     }),
     panel: Panel::new(
-        18,
+        27,
         20,
         &[
             Widget::knob(0, 0, "level"),
@@ -146,6 +146,8 @@ pub static PANEL: ModuleDescriptor = ModuleDescriptor {
             Widget::light(9, 3, "lit"),
             Widget::button(9, 5, "gate", "held", "mode"),
             Widget::scope(0, 8, "bi"),
+            Widget::level_history(18, 0, "uni"),
+            Widget::spectrum(18, 7, "bi"),
             Widget::select(9, 8, "long"),
             Widget::select(9, 10, "voices"),
             Widget::fader(15, 7, "tall"),

@@ -308,7 +308,10 @@ fn the_peak_line_is_never_below_the_bar() {
                 width: 3,
                 height: 6,
                 widgets: vec![WidgetView {
-                    kind: WidgetViewKind::Meter { zero: 0.0 },
+                    kind: WidgetViewKind::Meter {
+                        zero: 0.0,
+                        clips: false,
+                    },
                     x: 0,
                     y: 0,
                     label: String::new(),
@@ -359,7 +362,10 @@ fn stereo_meter_draws_two_tracks() {
                 width: 3,
                 height: 6,
                 widgets: vec![WidgetView {
-                    kind: WidgetViewKind::Meter { zero: 0.0 },
+                    kind: WidgetViewKind::Meter {
+                        zero: 0.0,
+                        clips: false,
+                    },
                     x: 0,
                     y: 0,
                     label: String::new(),
@@ -696,4 +702,16 @@ fn a_ghost_adds_a_hollow_mark() {
     assert_eq!(with.shapes.len(), without.shapes.len() + 1);
     assert_eq!(with.key.0, without.key.0, "the scene is not rebuilt");
     assert_ne!(with.key, without.key, "the control values changed");
+}
+
+/// A clip light leaves the bar shorter than a meter without one, and a meter's
+/// bar stays clear of the readout's row.
+#[test]
+fn a_clip_light_shortens_the_bar() {
+    let rect = Rectangle::new(Point::ORIGIN, Size::new(36.0, 72.0));
+    let plain = meter_track(rect, false);
+    let with_light = meter_track(rect, true);
+    assert!(with_light.height < plain.height);
+    assert!(with_light.y > plain.y);
+    assert!(with_light.y + with_light.height < meter_hold_centre(rect).y);
 }

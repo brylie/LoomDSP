@@ -1,5 +1,7 @@
 use super::*;
-use loom_core::{Channels, Module, ParamOptions, ParamSpec, PortIo, PortSpec, ProcessContext, SignalType};
+use loom_core::{
+    Channels, Module, ParamOptions, ParamSpec, PortIo, PortSpec, ProcessContext, SignalType, TransportSettings,
+};
 use std::path::PathBuf;
 
 /// A port for test descriptors.
@@ -479,7 +481,7 @@ impl Module for Sum {
 /// A module that keeps a NaN in its state fails, naming the input, the
 /// value, and the output.
 #[test]
-#[should_panic(expected = "test.sum: after NaN on input `in` (frames 1000 to 1007), output `out` is still NaN")]
+#[should_panic(expected = "test.sum: after NaN on input `in` (frames 1068 to 1075), output `out` is still NaN")]
 fn a_module_that_keeps_a_non_finite_input_fails() {
     Harness::new(&SUM).frames(2_000).check_non_finite_recovery();
 }
@@ -494,7 +496,7 @@ fn a_module_without_state_recovers() {
 
 /// The render must be long enough to show recovery.
 #[test]
-#[should_panic(expected = "but the non-finite check needs more than 1488")]
+#[should_panic(expected = "but the non-finite check needs more than 1556")]
 fn a_short_render_cannot_show_recovery() {
     Harness::new(&ECHO).frames(1_000).check_non_finite_recovery();
 }
@@ -502,7 +504,7 @@ fn a_short_render_cannot_show_recovery() {
 /// The recovery window is 10 ms at any sample rate, so a render at 96 kHz
 /// needs 960 recovery frames, not 480.
 #[test]
-#[should_panic(expected = "but the non-finite check needs more than 1968")]
+#[should_panic(expected = "but the non-finite check needs more than 2036")]
 fn the_recovery_window_scales_with_the_sample_rate() {
     Harness::new(&ECHO)
         .sample_rate(96_000.0)
@@ -792,6 +794,395 @@ fn the_check_for_one_input_needs_a_real_input() {
 #[should_panic(expected = "the extreme check needs 48000")]
 fn the_extreme_check_needs_its_whole_render() {
     Harness::new(&PHASE_OFFSET).frames(1_000).check_extreme_recovery();
+}
+
+/// A module with an output and no inputs.
+static NO_INPUTS: ModuleDescriptor = ModuleDescriptor {
+    id: "test.no-inputs",
+    version: 1,
+    name: "No Inputs",
+    category: "Test",
+    family: loom_core::Family::Interface,
+    description: "Has no inputs.",
+    inputs: &[],
+    outputs: &[port("out", SignalType::Modulation)],
+    params: &[],
+    role: ModuleRole::Dsp(|_| Box::new(Silent)),
+    panel: loom_core::Panel::EMPTY,
+    displays: &[],
+};
+
+/// Writes silence, which is what a new output buffer holds.
+#[derive(Clone)]
+struct Silent;
+
+impl Module for Silent {
+    fn process(&mut self, _: &ProcessContext<'_>, _: &mut PortIo<'_>) {}
+}
+
+/// Stores `in` on each rising edge of `trigger`, with or without a guard against
+/// a non-finite value, as Sample and Hold does.
+#[derive(Clone)]
+struct Capture {
+    guarded: bool,
+    held: f32,
+    high: bool,
+}
+
+impl Module for Capture {
+    fn process(&mut self, _: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        let ([input, trigger], [out]) = io.split::<2, 1>();
+        for ((out, &input), &trigger) in out.iter_mut().zip(input).zip(trigger) {
+            if trigger > 0.5 && !self.high && (!self.guarded || input.is_finite()) {
+                self.held = input;
+            }
+            self.high = trigger > 0.5;
+            *out = self.held;
+        }
+    }
+}
+
+/// A [`Capture`] descriptor, guarded or not.
+macro_rules! capture {
+    ($name:ident, $id:literal, $guarded:literal) => {
+        static $name: ModuleDescriptor = ModuleDescriptor {
+            id: $id,
+            version: 1,
+            name: "Capture",
+            category: "Test",
+            family: loom_core::Family::Interface,
+            description: "Stores its input on a trigger.",
+            inputs: &[
+                port("in", SignalType::Modulation),
+                port("trigger", SignalType::Gate),
+            ],
+            outputs: &[port("out", SignalType::Modulation)],
+            params: &[],
+            role: ModuleRole::Dsp(|_| {
+                Box::new(Capture {
+                    guarded: $guarded,
+                    held: 0.0,
+                    high: false,
+                })
+            }),
+            panel: loom_core::Panel::EMPTY,
+            displays: &[],
+        };
+    };
+}
+
+capture!(GUARDED_CAPTURE, "test.guarded-capture", true);
+capture!(UNGUARDED_CAPTURE, "test.unguarded-capture", false);
+
+/// A harness for a capture module on the non-finite check's signal.
+fn on_non_finite_busy(descriptor: &'static ModuleDescriptor) -> Harness {
+    Harness::new(descriptor)
+        .frames(4_000)
+        .input("in", Signal::non_finite_busy())
+        .input("trigger", Signal::non_finite_busy())
+}
+
+/// A module that stores a bad input on another input's edge fails, which is the
+/// gap #564 closes. The bad frames must cover the edge for this to show.
+#[test]
+#[should_panic(expected = "test.unguarded-capture: after NaN on input `in`")]
+fn a_module_that_stores_a_bad_input_on_a_trigger_fails() {
+    on_non_finite_busy(&UNGUARDED_CAPTURE).check_non_finite_recovery();
+}
+
+/// The check's timing holds at the rates up to its limit, and not above it: at 96
+/// kHz the next edge overwrites the bad value before the recovery time ends, so
+/// this module passes. The spec lists this as a known limit.
+#[test]
+fn the_non_finite_signal_covers_rates_below_its_limit() {
+    let check = |rate: f32| {
+        let harness = on_non_finite_busy(&UNGUARDED_CAPTURE).sample_rate(rate);
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| harness.check_non_finite_recovery())).is_err()
+    };
+    assert!(check(44_100.0));
+    assert!(check(88_200.0));
+    assert!(
+        !check(96_000.0),
+        "the limit moved, so update the spec and the signal's comment"
+    );
+}
+
+/// With the guard, the same module passes.
+#[test]
+fn a_module_that_guards_what_it_stores_passes() {
+    on_non_finite_busy(&GUARDED_CAPTURE).check_non_finite_recovery();
+}
+
+/// Multiplies its two inputs, with no limit on the result.
+#[derive(Clone)]
+struct Product;
+
+impl Module for Product {
+    fn process(&mut self, _: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        let ([a, b], [out]) = io.split::<2, 1>();
+        for ((out, &a), &b) in out.iter_mut().zip(a).zip(b) {
+            *out = a * b;
+        }
+    }
+}
+
+/// The module for [`Product`].
+static PRODUCT: ModuleDescriptor = ModuleDescriptor {
+    id: "test.product",
+    version: 1,
+    name: "Product",
+    category: "Test",
+    family: loom_core::Family::Interface,
+    description: "Multiplies two inputs.",
+    inputs: &[port("a", SignalType::Modulation), port("b", SignalType::Modulation)],
+    outputs: &[port("out", SignalType::Modulation)],
+    params: &[],
+    role: ModuleRole::Dsp(|_| Box::new(Product)),
+    panel: loom_core::Panel::EMPTY,
+    displays: &[],
+};
+
+/// A harness for [`Product`] on the extreme check's slow signal.
+fn product() -> Harness {
+    Harness::new(&PRODUCT)
+        .frames(EXTREME_RENDER)
+        .input("a", Signal::extreme_busy())
+        .input("b", Signal::extreme_busy())
+}
+
+/// One huge input at a time stays finite here, which is the gap #575 closes.
+#[test]
+fn a_product_passes_with_one_huge_input_at_a_time() {
+    product().check_extreme_recovery();
+}
+
+/// Both inputs huge overflow, and the failure says every input took the value.
+#[test]
+#[should_panic(expected = "test.product: after 3.4028235e38 then 3.4028235e38 on every input at once, output `out`")]
+fn a_product_that_overflows_fails_with_every_input_huge() {
+    product().check_extreme_recovery_all();
+}
+
+/// Each level of the all-input check looks for the overflow.
+#[test]
+#[should_panic(expected = "not finite")]
+fn the_finite_level_sees_an_overflow_with_every_input_huge() {
+    product().check_extreme_finite_all();
+}
+
+/// Each of the other all-input levels sees it too.
+#[test]
+#[should_panic(expected = "not finite")]
+fn the_bounded_level_sees_an_overflow_with_every_input_huge() {
+    product().check_extreme_stays_bounded_all();
+}
+
+/// A module with no inputs has nothing to send a huge value to, so it passes.
+#[test]
+fn the_all_input_check_passes_a_module_with_no_inputs() {
+    Harness::new(&NO_INPUTS)
+        .frames(EXTREME_RENDER)
+        .check_extreme_recovery_all();
+}
+
+/// A harness that stores a huge input on one edge, and never again.
+fn capture_once() -> Harness {
+    Harness::new(&UNGUARDED_CAPTURE)
+        .frames(EXTREME_RENDER)
+        .input("trigger", Signal::gate(0.06, 0.07))
+}
+
+/// A value held for good stays finite, so the finite level passes it. That level
+/// is for a module with its parameters turned up, which may ring for a long time.
+#[test]
+fn the_finite_level_allows_a_value_that_stays_huge() {
+    capture_once().check_extreme_finite();
+}
+
+/// The bounded level refuses the same value.
+#[test]
+#[should_panic(expected = "it stayed huge")]
+fn the_bounded_level_refuses_a_value_that_stays_huge() {
+    capture_once().check_extreme_stays_bounded_on("in");
+}
+
+/// Passes one of its two inputs. Its copy takes the wrong one, which is the bug
+/// the shared copy check missed with one signal on every input (#564).
+#[derive(Clone)]
+struct WrongRouteOnCopy {
+    second: bool,
+}
+
+impl Module for WrongRouteOnCopy {
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        let copied = loom_core::copy_state(self, other);
+        self.second = !self.second;
+        copied
+    }
+
+    fn process(&mut self, _: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        let ([a, b], [out]) = io.split::<2, 1>();
+        out.copy_from_slice(if self.second { b } else { a });
+    }
+}
+
+/// The module for [`WrongRouteOnCopy`].
+static WRONG_ROUTE: ModuleDescriptor = ModuleDescriptor {
+    id: "test.wrong-route",
+    version: 1,
+    name: "Wrong Route",
+    category: "Test",
+    family: loom_core::Family::Interface,
+    description: "Passes the wrong input after a copy.",
+    inputs: &[port("a", SignalType::Modulation), port("b", SignalType::Modulation)],
+    outputs: &[port("out", SignalType::Modulation)],
+    params: &[],
+    role: ModuleRole::Dsp(|_| Box::new(WrongRouteOnCopy { second: false })),
+    panel: loom_core::Panel::EMPTY,
+    displays: &[],
+};
+
+/// With one signal on every input, a wrong route gives the same output, so the
+/// check passes the bug. This is why the shared checks give each input its own.
+#[test]
+fn one_signal_on_every_input_hides_a_wrong_route() {
+    let harness = Harness::new(&WRONG_ROUTE)
+        .frames(200)
+        .input("a", Signal::phase(100.0))
+        .input("b", Signal::phase(100.0));
+    assert!(harness.check_copy_state(100));
+}
+
+/// With each input at its own frequency, the same bug fails.
+#[test]
+#[should_panic(expected = "test.wrong-route: output `out`")]
+fn each_input_at_its_own_frequency_shows_a_wrong_route() {
+    Harness::new(&WRONG_ROUTE)
+        .frames(200)
+        .input("a", Signal::phase(100.0))
+        .input("b", Signal::phase(130.0))
+        .check_copy_state(100);
+}
+
+/// Seconds for frame `frame` at the default sample rate. Frame 5003 is one no block
+/// size lands on.
+fn at(frame: usize) -> f64 {
+    frame as f64 / f64::from(DEFAULT_SAMPLE_RATE)
+}
+
+/// A parameter change lands on its frame at every block size.
+#[test]
+fn a_parameter_change_lands_on_its_frame() {
+    let render = Harness::new(&ECHO)
+        .frames(6_000)
+        .param_at(at(5_003), "gain", 2.0)
+        .check_block_sizes();
+    let gain = render.output("gain");
+    assert_ne!(gain[5_002], gain[5_003]);
+    assert_eq!(gain[5_003], 2.0);
+}
+
+/// Changes on one frame apply in the order they were added.
+#[test]
+fn the_last_change_on_a_frame_wins() {
+    let render = Harness::new(&ECHO)
+        .frames(6_000)
+        .param_at(at(5_003), "gain", 2.0)
+        .param_at(at(5_003), "gain", 1.5)
+        .check_block_sizes();
+    assert_eq!(render.output("gain")[5_003], 1.5);
+}
+
+/// A change past the end of the render fails, so a test cannot lose one.
+#[test]
+#[should_panic(expected = "test.echo: a scheduled change at frame 6000 is past the end of the render (6000 frames)")]
+fn a_change_past_the_end_fails() {
+    Harness::new(&ECHO)
+        .frames(6_000)
+        .param_at(at(6_000), "gain", 2.0)
+        .render();
+}
+
+/// An unknown name fails as `.param` does.
+#[test]
+#[should_panic(expected = "test.echo: no parameter `nope`")]
+fn a_change_needs_a_real_parameter() {
+    let _ = Harness::new(&ECHO).param_at(0.0, "nope", 1.0);
+}
+
+/// A reset cannot replay a schedule, so the check says so.
+#[test]
+#[should_panic(expected = "`check_reset` does not support")]
+fn the_reset_check_refuses_scheduled_changes() {
+    Harness::new(&ECHO)
+        .frames(200)
+        .param_at(at(100), "gain", 2.0)
+        .check_reset();
+}
+
+/// A copy cannot replay a schedule, so the check says so.
+#[test]
+#[should_panic(expected = "`check_copy_state` does not support")]
+fn the_copy_check_refuses_scheduled_changes() {
+    Harness::new(&ECHO)
+        .frames(200)
+        .transport_at(at(50), TransportSettings::default())
+        .check_copy_state(100);
+}
+
+/// A playing transport at `tempo`, in 4/4.
+fn at_tempo(tempo: f64) -> TransportSettings {
+    TransportSettings {
+        tempo,
+        ..TransportSettings::default()
+    }
+}
+
+/// A tempo change keeps the position: the beat phase moves on from where it was,
+/// at the new speed. The unconnected input follows the same timeline.
+#[test]
+fn a_tempo_change_keeps_the_position() {
+    let render = Harness::new(&ECHO)
+        .frames(6_000)
+        .transport(at_tempo(120.0))
+        .transport_at(at(5_003), at_tempo(60.0))
+        .check_block_sizes();
+    let beat = render.output("beat");
+    let (before, after) = (beat[5_002] - beat[5_001], beat[5_004] - beat[5_003]);
+    assert!((before / after - 2.0).abs() < 1e-2, "{before} then {after}");
+    assert!((beat[5_003] - beat[5_002]).abs() < 1e-3);
+}
+
+/// Stopping holds the position, and the playing input follows.
+#[test]
+fn a_stop_holds_the_position() {
+    let stopped = TransportSettings {
+        running: false,
+        ..TransportSettings::default()
+    };
+    let render = Harness::new(&ECHO)
+        .frames(6_000)
+        .transport(TransportSettings::default())
+        .transport_at(at(5_003), stopped)
+        .check_block_sizes();
+    let (beat, play) = (render.output("beat"), render.output("play"));
+    assert_eq!((play[5_002], play[5_003]), (1.0, 0.0));
+    assert_eq!(beat[5_003], beat[5_999]);
+}
+
+// The recovery time ends before the next edge, or the edge could hide a bad
+// value. 480 frames is RECOVERY_SECONDS at 48 kHz.
+const _: () = assert!(BAD_START <= BAD_EDGE && BAD_EDGE < BAD_START + BAD_FRAMES);
+const _: () = assert!(BAD_START + BAD_FRAMES + 480 < BAD_NEXT_EDGE);
+
+/// The wave must rise inside the bad frames, and rise again after the recovery.
+#[test]
+fn the_non_finite_timing_covers_the_edges() {
+    let wave = Signal::non_finite_busy().render(BAD_NEXT_EDGE + 1, DEFAULT_SAMPLE_RATE);
+    let edges: Vec<usize> = (1..wave.len())
+        .filter(|&i| wave[i] > 0.5 && wave[i - 1] <= 0.5)
+        .collect();
+    assert_eq!(edges, [112, BAD_EDGE, BAD_NEXT_EDGE]);
 }
 
 // The settling time ends before the next edge, or nothing is compared.

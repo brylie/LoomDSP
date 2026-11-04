@@ -18,7 +18,8 @@ fn moves_down_past_tiles() {
     let corner = place(&loom_modules::display::METER, anchor, &[blocker]);
     assert_eq!(corner, Point::new(168.0, 72.0));
     let descriptor = &loom_modules::display::METER;
-    let size = tile_size(1, 1, descriptor.panel.width, descriptor.panel.height);
+    let (width, height) = crate::scene::default_panel_size(descriptor);
+    let size = tile_size(1, 1, width, height);
     assert!(!blocker.intersects(&Rectangle::new(corner, size)));
 }
 
@@ -39,4 +40,16 @@ fn placing_far_away_ends() {
     let blocker = Rectangle::new(Point::new(150.0, 1.0e9 - 100.0), Size::new(132.0, 400.0));
     let corner = place(&loom_modules::display::SCOPE, anchor, &[blocker]);
     assert!(corner.y.is_finite());
+}
+
+/// Add meter places a tile by its default 3-wide size, so a tile that only a
+/// meter with its history showing would reach does not push it down.
+#[test]
+fn add_meter_uses_the_plain_meter_size() {
+    let anchor = Point::new(132.0, 30.0);
+    let free = place(&loom_modules::display::METER, anchor, &[]);
+    let (width, height) = crate::scene::default_panel_size(&loom_modules::display::METER);
+    let size = tile_size(1, 1, width, height);
+    let beyond = Rectangle::new(Point::new(free.x + size.width + 4.0, 0.0), Size::new(100.0, 400.0));
+    assert_eq!(place(&loom_modules::display::METER, anchor, &[beyond]), free);
 }

@@ -2822,7 +2822,7 @@ mod tests {
             view.panel
                 .widgets
                 .iter()
-                .any(|w| matches!(w.kind, loom_canvas::WidgetViewKind::Meter { zero } if zero == 0.5)),
+                .any(|w| matches!(w.kind, loom_canvas::WidgetViewKind::Meter { zero, .. } if zero == 0.5)),
             "the meter's bar starts from zero, in the middle"
         );
 

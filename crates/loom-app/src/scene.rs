@@ -1,5 +1,6 @@
 //! Builds the canvas scene from the engine graph.
 
+use crate::clip::ClipHolds;
 use iced::{Color, Point};
 use loom_canvas::{
     CableView, ControlPart, HoverText, ModulationView, ModuleView, PanelValues, PanelView, PartText, PartValue,
@@ -124,9 +125,12 @@ fn panel_view(d: &ModuleDescriptor) -> PanelView {
                 WidgetKind::Toggle => WidgetViewKind::Toggle,
                 WidgetKind::Meter => WidgetViewKind::Meter {
                     zero: d.meter_display(w).map_or(0.0, |display| display.range.zero()),
+                    clips: d.meter_display(w).is_none(),
                 },
                 WidgetKind::Readout { width } => WidgetViewKind::Readout { width },
                 WidgetKind::Scope => WidgetViewKind::Scope,
+                WidgetKind::LevelHistory => WidgetViewKind::LevelHistory,
+                WidgetKind::Spectrum => WidgetViewKind::Spectrum,
                 WidgetKind::Shape { width, .. } => WidgetViewKind::Shape { width },
                 // The names come from the parameter (panels.md, Choice names).
                 WidgetKind::Radio => WidgetViewKind::Radio {
@@ -166,11 +170,15 @@ fn panel_view(d: &ModuleDescriptor) -> PanelView {
                     (label, HoverText::new(label, p.description, p.name))
                 })
             } else if w.shows_output() && d.meter_display(w).is_none() {
-                // A meter's or scope's text is its output's: two texts for
-                // one signal could disagree. A scope has no caption: its
-                // frame fills the widget.
+                // A display's text is its output's: two texts for one signal
+                // could disagree. A display drawn in a frame has no caption:
+                // the frame fills the widget.
                 let output = d.outputs.iter().find(|p| p.name == w.bind());
-                let caption = |label| if w.kind == WidgetKind::Scope { "" } else { label };
+                let framed = matches!(
+                    w.kind,
+                    WidgetKind::Scope | WidgetKind::LevelHistory | WidgetKind::Spectrum
+                );
+                let caption = |label| if framed { "" } else { label };
                 output.map_or((caption(w.bind()), HoverText::default()), |p| {
                     (caption(p.label), HoverText::new(p.label, p.description, p.name))
                 })
@@ -185,8 +193,13 @@ fn panel_view(d: &ModuleDescriptor) -> PanelView {
                 x: w.x,
                 y: w.y,
                 // A widget can caption itself, such as "1" under a mixer
-                // strip; the hover text keeps the full label.
-                label: w.caption.unwrap_or(label).to_string(),
+                // strip; the hover text keeps the full label. A meter's peak
+                // hold readout takes its caption's row.
+                label: if w.kind == WidgetKind::Meter && d.meter_display(w).is_none() {
+                    String::new()
+                } else {
+                    w.caption.unwrap_or(label).to_string()
+                },
                 hover,
                 hidden: false,
             }
@@ -204,6 +217,15 @@ fn panel_view(d: &ModuleDescriptor) -> PanelView {
 /// (ADR-0030, panels.md, Panel layout, principle 5).
 pub fn panel_for(d: &ModuleDescriptor, values: &[f32]) -> PanelView {
     let mut panel = panel_view(d);
+    let displays: Vec<bool> = d
+        .panel
+        .widgets
+        .iter()
+        .map(|w| !w.is_control() && !d.is_widget_shown(w, values))
+        .collect();
+    if displays.iter().any(|&h| h) {
+        close_up_columns(&mut panel, &displays);
+    }
     let hidden: Vec<bool> = d
         .panel
         .widgets
@@ -216,17 +238,57 @@ pub fn panel_for(d: &ModuleDescriptor, values: &[f32]) -> PanelView {
     panel
 }
 
+/// Hides the marked displays and removes the grid columns only they used, so
+/// the panel gets narrower (panel-widgets.md, Level history). A hidden
+/// display stays in the list, past the panel's new edge.
+fn close_up_columns(panel: &mut PanelView, hidden: &[bool]) {
+    for (widget, &h) in panel.widgets.iter_mut().zip(hidden) {
+        widget.hidden = h;
+    }
+    let covers = |w: &WidgetView, c: u8| w.x <= c && c < w.x + w.size().0;
+    let mut removed = 0;
+    for c in (0..panel.width).rev() {
+        let by_hidden = panel.widgets.iter().any(|w| w.hidden && covers(w, c));
+        let by_shown = panel.widgets.iter().any(|w| !w.hidden && covers(w, c));
+        if by_hidden && !by_shown {
+            for w in panel.widgets.iter_mut().filter(|w| !w.hidden && w.x > c) {
+                w.x -= 1;
+            }
+            removed += 1;
+        }
+    }
+    panel.width -= removed;
+    // Past the new edge, so nothing takes it for a widget beside another.
+    for widget in panel.widgets.iter_mut().filter(|w| w.hidden) {
+        widget.x = widget.x.max(panel.width);
+    }
+}
+
+/// The width and height of a module's panel at its default values, in grid
+/// units, which is the size a new tile gets.
+pub fn default_panel_size(d: &ModuleDescriptor) -> (u8, u8) {
+    let values: Vec<f32> = d.params.iter().map(|p| p.default).collect();
+    let panel = panel_for(d, &values);
+    (panel.width, panel.height)
+}
+
 /// Hides the marked widgets and closes the panel up around them, keeping
 /// its width (ADR-0030). A row that loses a widget closes its gap and is
 /// centred again in the space the row had. Grid rows that only hidden
 /// widgets used are removed, so the panel gets shorter.
 pub fn close_up(panel: &mut PanelView, hidden: &[bool]) {
     for (widget, &h) in panel.widgets.iter_mut().zip(hidden) {
-        widget.hidden = h;
+        widget.hidden |= h;
     }
     // Close up each row that lost a widget: rows are the widgets that start
     // on the same grid row.
-    let rows: std::collections::BTreeSet<u8> = panel.widgets.iter().filter(|w| w.hidden).map(|w| w.y).collect();
+    let rows: std::collections::BTreeSet<u8> = panel
+        .widgets
+        .iter()
+        .zip(hidden)
+        .filter(|(_, h)| **h)
+        .map(|(w, _)| w.y)
+        .collect();
     for row in rows {
         let all: Vec<usize> = (0..panel.widgets.len())
             .filter(|&i| panel.widgets[i].y == row)
@@ -277,6 +339,14 @@ pub fn mode_key(controller: &Controller) -> Vec<(u32, usize, i64)> {
                 key.push((id.0, mode, value.round() as i64));
             }
         }
+        for w in d.panel.widgets {
+            if let Some(when) = w.shown_when
+                && let Some(mode) = d.param_index(when.param)
+            {
+                let value = node.params.get(mode).copied().unwrap_or(d.params[mode].default);
+                key.push((id.0, mode, value.round() as i64));
+            }
+        }
     }
     key.dedup();
     key
@@ -316,7 +386,7 @@ pub fn control_value(kind: WidgetKind, spec: &ParamSpec, position: f32) -> f32 {
 /// and widget) for lights and meters. Values that did not change keep the generation, so the
 /// canvas uploads nothing new.
 pub fn update_panel_values(values: &mut PanelValues, controller: &Controller, shown: &ShownValues) {
-    update_panel_values_dragging(values, controller, shown, None);
+    update_panel_values_dragging(values, controller, shown, &ClipHolds::default(), None);
 }
 
 /// Updates only the live dots, for the refresh on every frame: the knobs
@@ -386,6 +456,7 @@ pub fn update_panel_values_dragging(
     values: &mut PanelValues,
     controller: &Controller,
     shown: &ShownValues,
+    holds: &ClipHolds,
     dragging: Option<loom_core::AssignmentId>,
 ) {
     let reaches = crate::modulation::reaches(controller.graph());
@@ -461,6 +532,7 @@ pub fn update_panel_values_dragging(
                             ghost: None,
                             shape: Vec::new(),
                             second,
+                            ..WidgetValue::default()
                         }
                     }
                     _ => {
@@ -471,11 +543,19 @@ pub fn update_panel_values_dragging(
                         let position = d
                             .meter_display(w)
                             .map_or(stored, |display| display.range.position(stored));
+                        let mut text = display_text(d, w, stored, right);
+                        let clips = w.kind == WidgetKind::Meter && d.meter_display(w).is_none();
+                        let hold = holds.get((id.0, index));
+                        if clips && hold.lit {
+                            text.push_str(". Would clip at the output");
+                        }
                         WidgetValue {
                             position,
                             peak,
                             right,
-                            text: display_text(d, w, stored, right),
+                            text,
+                            clip: clips && hold.lit,
+                            hold: if clips { hold.text() } else { String::new() },
                             ..WidgetValue::default()
                         }
                     }
@@ -527,7 +607,10 @@ fn display_text(d: &ModuleDescriptor, w: &loom_core::Widget, position: f32, righ
             .find(|display| display.name == w.bind())
             .map_or_else(String::new, |display| display.range.text(position));
     }
-    if w.kind == WidgetKind::Scope {
+    if matches!(
+        w.kind,
+        WidgetKind::Scope | WidgetKind::LevelHistory | WidgetKind::Spectrum
+    ) {
         // The trace is the value.
         return String::new();
     }
@@ -590,6 +673,96 @@ pub fn meter_outputs(controller: &Controller, modules: &[u32]) -> Vec<((u32, usi
         .collect()
 }
 
+/// The time a level history shows, by its `window` choice
+/// (panel-widgets.md, Level history).
+const HISTORY_WINDOWS: [f32; 3] = [1.0, 5.0, 30.0];
+
+/// A level history on screen and what it shows.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HistoryOutput {
+    /// Module ID and widget index.
+    pub widget: (u32, usize),
+    /// The output it shows.
+    pub output: OutputRef,
+    /// Seconds across the frame.
+    pub window: f32,
+}
+
+/// The level histories these modules show now: a hidden one needs no probe.
+pub fn history_outputs(controller: &Controller, modules: &[u32]) -> Vec<HistoryOutput> {
+    let mut histories = Vec::new();
+    for &id in modules {
+        let Some(node) = controller.graph().node(ModuleId(id)) else {
+            continue;
+        };
+        let d = node.descriptor;
+        let window = d.param_index("window").map_or(HISTORY_WINDOWS[1], |i| {
+            HISTORY_WINDOWS[(node.params[i].round().max(0.0) as usize).min(HISTORY_WINDOWS.len() - 1)]
+        });
+        for (index, w) in d.panel.widgets.iter().enumerate() {
+            if w.kind != WidgetKind::LevelHistory || !d.is_widget_shown(w, &node.params) {
+                continue;
+            }
+            let Some(port) = d.outputs.iter().position(|p| p.name == w.bind()) else {
+                continue;
+            };
+            histories.push(HistoryOutput {
+                widget: (id, index),
+                output: OutputRef {
+                    module: ModuleId(id),
+                    port,
+                },
+                window,
+            });
+        }
+    }
+    histories
+}
+
+/// A spectrum on screen and what it shows.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SpectrumOutput {
+    /// Module ID and widget index.
+    pub widget: (u32, usize),
+    /// The output it shows.
+    pub output: OutputRef,
+    /// True to tilt the drawing by +4.5 dB per octave.
+    pub tilt: bool,
+    /// True to draw the peak hold line.
+    pub hold: bool,
+}
+
+/// The spectra on these modules (panel-widgets.md, Spectrum). The drawing's
+/// settings come from the module's `tilt` and `hold` parameters.
+pub fn spectrum_outputs(controller: &Controller, modules: &[u32]) -> Vec<SpectrumOutput> {
+    let mut spectra = Vec::new();
+    for &id in modules {
+        let Some(node) = controller.graph().node(ModuleId(id)) else {
+            continue;
+        };
+        let d = node.descriptor;
+        let on = |name: &str| d.param_index(name).is_some_and(|i| node.params[i] >= 0.5);
+        for (index, w) in d.panel.widgets.iter().enumerate() {
+            if w.kind != WidgetKind::Spectrum {
+                continue;
+            }
+            let Some(port) = d.outputs.iter().position(|p| p.name == w.bind()) else {
+                continue;
+            };
+            spectra.push(SpectrumOutput {
+                widget: (id, index),
+                output: OutputRef {
+                    module: ModuleId(id),
+                    port,
+                },
+                tilt: on("tilt"),
+                hold: on("hold"),
+            });
+        }
+    }
+    spectra
+}
+
 /// A scope widget on screen and what it shows.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ScopeOutput {
@@ -602,11 +775,13 @@ pub struct ScopeOutput {
     /// Where the trace starts: from the module's `auto` and `level`, or
     /// automatic.
     pub trigger: crate::live::Trigger,
+    /// The edge that starts the trace: from the module's `slope`, or rising.
+    pub slope: crate::live::Slope,
 }
 
 /// The scopes on these modules (`docs/design/panels.md`, Scope module).
-/// The window and trigger come from the module's `window`, `auto`, and
-/// `level` parameters, when it has them.
+/// The window and trigger come from the module's `window`, `auto`, `level`,
+/// and `slope` parameters, when it has them.
 pub fn scope_outputs(controller: &Controller, modules: &[u32]) -> Vec<ScopeOutput> {
     let mut scopes = Vec::new();
     for &id in modules {
@@ -630,6 +805,7 @@ pub fn scope_outputs(controller: &Controller, modules: &[u32]) -> Vec<ScopeOutpu
                 },
                 window: param("window", 0.02),
                 trigger: crate::live::Trigger::from_params(param("auto", 1.0), param("level", 0.0)),
+                slope: crate::live::Slope::from_param(param("slope", 0.0)),
             });
         }
     }

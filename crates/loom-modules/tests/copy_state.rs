@@ -5,7 +5,7 @@
 
 mod common;
 
-use common::{SEEDED_ROUTES, busy, changed, pulses, selector};
+use common::{SEEDED_ROUTES, WRAP_FRAME, busy_each, changed, playing_short_bar, pulses, selector};
 use loom_core::{MidiEvent, ModuleDescriptor, ModuleRole, TransportSettings};
 use loom_modules::ALL;
 use loom_test::Harness;
@@ -18,8 +18,23 @@ const FRAMES: usize = 9_600;
 /// notes, the gates, and the delay times, so each kind of state is busy.
 const AT: usize = 2_500;
 
+/// Frames in a playing render, long enough to pass the bar wrap.
+const PLAYING_FRAMES: usize = WRAP_FRAME + 7_846;
+
+/// Notes held across every copy frame.
+fn notes() -> [MidiEvent; 5] {
+    [
+        MidiEvent::note_on(100, 0, 60, 100),
+        MidiEvent::note_on(1_000, 0, 67, 64),
+        MidiEvent::from_bytes(2_000, &[0xE0, 0x00, 0x60]),
+        MidiEvent::note_off(3_000, 0, 67),
+        MidiEvent::note_off(6_000, 0, 60),
+    ]
+}
+
 /// A harness for `descriptor` with every parameter away from its default,
-/// a busy signal on every input, and notes held across the copy.
+/// a busy signal on every input, each at its own frequency, and notes held across
+/// the copy.
 fn harness(descriptor: &'static ModuleDescriptor) -> Harness {
     let harness = descriptor
         .params
@@ -27,17 +42,7 @@ fn harness(descriptor: &'static ModuleDescriptor) -> Harness {
         .fold(Harness::new(descriptor).frames(FRAMES), |h, spec| {
             h.param(spec.name, changed(spec))
         });
-    let harness = descriptor
-        .inputs
-        .iter()
-        .fold(harness, |h, port| h.input(port.name, busy(37.0)));
-    harness.midi([
-        MidiEvent::note_on(100, 0, 60, 100),
-        MidiEvent::note_on(1_000, 0, 67, 64),
-        MidiEvent::from_bytes(2_000, &[0xE0, 0x00, 0x60]),
-        MidiEvent::note_off(3_000, 0, 67),
-        MidiEvent::note_off(6_000, 0, 60),
-    ])
+    busy_each(harness, descriptor).midi(notes())
 }
 
 /// True for a module with a random generator, which re-derives it when it
@@ -63,6 +68,43 @@ fn every_module_hands_over_its_state() {
     assert!(
         failed.is_empty(),
         "these modules do not hand over their state: {failed:?}"
+    );
+}
+
+/// Every DSP module on its port defaults, on a playing transport. A connected
+/// input hides the transport, so only here do modules that follow the bar through
+/// a port default see it move. It copies mid-cycle, on the wrap, and on the frame
+/// after: a wrap detector looks back one frame, so only the last two can show a
+/// lost one. It runs at the default parameters and away from them.
+#[test]
+fn every_playing_module_hands_over_its_state() {
+    let mut failed = Vec::new();
+    for descriptor in ALL
+        .iter()
+        .filter(|descriptor| matches!(descriptor.role, ModuleRole::Dsp(_)) && !seeded(descriptor))
+    {
+        let plain = Harness::new(descriptor)
+            .frames(PLAYING_FRAMES)
+            .transport(playing_short_bar())
+            .midi(notes());
+        let turned = descriptor.params.iter().fold(
+            Harness::new(descriptor)
+                .frames(PLAYING_FRAMES)
+                .transport(playing_short_bar())
+                .midi(notes()),
+            |h, spec| h.param(spec.name, changed(spec)),
+        );
+        for harness in [plain, turned] {
+            for at in [AT, WRAP_FRAME, WRAP_FRAME + 1] {
+                if catch_unwind(AssertUnwindSafe(|| harness.check_copy_state(at))).is_err() {
+                    failed.push((descriptor.id, at));
+                }
+            }
+        }
+    }
+    assert!(
+        failed.is_empty(),
+        "these modules do not hand over their state on a playing transport: {failed:?}"
     );
 }
 
