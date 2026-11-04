@@ -181,6 +181,7 @@ fn a_swap_does_not_take_a_relative_step_twice() {
     let (stale, _) = crate::compile::compile(
         &controller.graph,
         controller.probes.as_map(),
+        controller.probes.pairs(),
         &synced,
         controller.config.sample_rate,
         controller.config.max_block,
