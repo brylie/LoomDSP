@@ -370,8 +370,8 @@ impl App {
                     MappingRow {
                         mode: mode_name(m.options.mode),
                         encoding: encoding_of(m.options.mode).map(encoding_name),
-                        low: draft.map_or_else(|| format!("{:.2}", m.options.low), |d| d.low.clone()),
-                        high: draft.map_or_else(|| format!("{:.2}", m.options.high), |d| d.high.clone()),
+                        low: draft.map_or_else(|| m.options.low.to_string(), |d| d.low.clone()),
+                        high: draft.map_or_else(|| m.options.high.to_string(), |d| d.high.clone()),
                         range_error: draft.and_then(|d| d.error.clone()),
                         invert: m.options.invert,
                         open: self.learn.options_open((id, index)),

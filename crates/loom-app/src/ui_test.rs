@@ -986,6 +986,29 @@ mod tests {
         assert_eq!((options(&ui).low, options(&ui).high), (0.2, 0.8));
         assert_eq!(ui.app.ui_snapshot().undo.as_deref(), Some("change MIDI mapping"));
 
+        // A more exact end, from a script or a patch file, shows in full, so
+        // editing the other field leaves it exactly as it was.
+        ui.send(Message::MidiOptions {
+            module: 4,
+            index: 0,
+            options: loom_core::MidiMappingOptions {
+                low: 0.333_33,
+                ..options(&ui)
+            },
+        });
+        let crate::inspector::Inspector::Module(rows) = ui.app.ui_snapshot().inspector else {
+            panic!("the filter's inspector");
+        };
+        let shown_low = rows.params[0].mapping_options.as_ref().unwrap().low.clone();
+        ui.send(Message::MidiRangeText {
+            module: 4,
+            index: 0,
+            low: shown_low,
+            high: "0.7".to_string(),
+        });
+        ui.send(Message::MidiRangeSubmit { module: 4, index: 0 });
+        assert_eq!((options(&ui).low, options(&ui).high), (0.333_33, 0.7));
+
         // Relative shows its encoding, and has no range or invert.
         let relative = options(&ui).with_mode(loom_core::MidiMode::Relative(loom_core::MidiEncoding::SignBit));
         ui.send(Message::MidiOptions {

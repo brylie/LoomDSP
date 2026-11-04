@@ -382,8 +382,8 @@ fn a_script_changes_a_mappings_options() {
     assert_eq!(run(&mut app, change), ok);
     let row = cutoff_row(&mut app);
     assert_eq!(row["mapping_options"]["mode"], json!("Pickup"), "{row}");
-    assert_eq!(row["mapping_options"]["low"], json!("0.10"), "{row}");
-    assert_eq!(row["mapping_options"]["high"], json!("0.90"), "{row}");
+    assert_eq!(row["mapping_options"]["low"], json!("0.1"), "{row}");
+    assert_eq!(row["mapping_options"]["high"], json!("0.9"), "{row}");
     assert_eq!(row["mapping_options"]["invert"], json!(true), "{row}");
     assert_eq!(
         run(&mut app, r#"{"cmd": "snapshot"}"#).unwrap()["snapshot"]["undo"],
