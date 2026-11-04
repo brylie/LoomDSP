@@ -154,8 +154,10 @@ def complexity(paths: list[str]) -> dict:
         return {"available": False, "functions": []}
     out_dir = tempfile.mkdtemp(prefix="loom-metrics-")
     try:
+        # The tool takes one path per `-p`.
+        path_args = [arg for path in paths for arg in ("-p", path)]
         run = subprocess.run(
-            [*command, "-m", "-O", "json", "-I", "*.rs", "-X", "**/target/**", "-o", out_dir, "-p", *paths],
+            [*command, "-m", "-O", "json", "-I", "*.rs", "-X", "**/target/**", "-o", out_dir, *path_args],
             capture_output=True, text=True,
         )
         if run.returncode != 0:
