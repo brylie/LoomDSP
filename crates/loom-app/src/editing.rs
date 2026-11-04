@@ -16,6 +16,13 @@ pub(crate) fn text_field_focused() -> Task<bool> {
     text_focus().map(|focus| focus.any)
 }
 
+/// Focuses a text field, then tells the app. A focus task sends no message, and
+/// the canvas must know a text field has the keys (panel-widgets.md, Keys in a
+/// text field). So use this wherever a task focuses a field.
+pub(crate) fn focus_text_field(id: &'static str) -> Task<crate::Message> {
+    iced::widget::operation::focus(id).chain(text_focus().map(crate::Message::TextFocus))
+}
+
 /// Which text field has focus, as the widget tree knows it.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct TextFocus {

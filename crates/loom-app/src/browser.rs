@@ -136,11 +136,6 @@ impl Browser {
         (outcome, task)
     }
 
-    /// Gives the search field the keyboard focus.
-    pub fn focus<T>() -> Task<T> {
-        iced::widget::operation::focus(INPUT)
-    }
-
     /// The modules the list shows, best first.
     #[cfg(test)]
     pub fn results(&self) -> &[&'static ModuleDescriptor] {

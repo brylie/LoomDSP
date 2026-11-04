@@ -1227,7 +1227,7 @@ impl App {
             self.document.finish();
             Task::batch([task, iced::exit()])
         } else if self.browser.is_some() && (!was_open || (was_help_open && self.help.is_none())) {
-            Task::batch([task, browser::Browser::focus()])
+            Task::batch([task, editing::focus_text_field(browser::INPUT)])
         } else {
             task
         }
@@ -1249,7 +1249,7 @@ impl App {
         self.patches_open += 1;
         let (browser, task) = patches::PatchBrowser::open(self.patches_open, folder);
         self.patches = Some(browser);
-        task.map(Message::Patches)
+        Task::batch([task.map(Message::Patches), editing::focus_text_field(patches::SEARCH)])
     }
 
     /// Handles a patches browser message: keep it open, close it, or open

@@ -341,6 +341,35 @@ fn captured_filter_keys_do_not_reach_matrix() {
     assert!(key_message(pressed(Named::Delete), iced::event::Status::Ignored).is_some());
 }
 
+/// #597: the same for a depth field opened with the pointer. The click goes
+/// through the depth cell, so the field still takes focus by a task.
+#[test]
+fn cmd_v_in_a_depth_field_opened_by_pointer_stays_out_of_the_canvas() {
+    let mut ui = Ui::open("modulation.ron");
+    ui.app.matrix_event(Event::Tab(Tab::Matrix));
+    ui.redraw();
+    let id = ui.app.controller.graph().assignments().next().expect("an assignment").0;
+    ui.app.matrix_event(Event::Select(id, Column::Depth));
+    ui.redraw();
+    let depth = {
+        let assignment = ui.app.controller.graph().assignment(id).unwrap();
+        crate::modulation::depth_text(assignment.depth)
+    };
+    let cell = ui.text(&depth).expect("the depth cell shows its value");
+    ui.move_to(cell.center());
+    ui.press();
+    ui.release();
+    assert_eq!(ui.app.matrix.edit.as_ref().map(|e| e.column), Some(Column::Depth));
+
+    let messages = ui.tap(keyboard::Key::Character("v".into()), keyboard::Modifiers::COMMAND);
+    assert!(
+        !messages
+            .iter()
+            .any(|m| matches!(m, Message::Canvas(loom_canvas::CanvasEvent::Paste { .. }))),
+        "the canvas took the paste: {messages:?}"
+    );
+}
+
 /// A canvas click returns keyboard control to the canvas before Delete.
 #[test]
 fn canvas_click_then_delete_removes_the_module_not_a_matrix_row() {

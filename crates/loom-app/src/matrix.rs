@@ -552,20 +552,13 @@ pub fn parse_depth(input: &str) -> Option<f32> {
     (percent.is_finite() && (-100.0..=100.0).contains(&percent)).then_some(percent / 100.0)
 }
 
-/// Focuses the depth field, then tells the app. A focus task sends no message,
-/// and the canvas must know a text field has the keys (panel-widgets.md, Keys
-/// in a text field).
-fn focus_depth_field() -> iced::Task<Message> {
-    iced::widget::operation::focus("matrix-depth").chain(crate::editing::text_focus().map(Message::TextFocus))
-}
-
 impl App {
     /// Handles a matrix event, and returns what the view must do after it:
     /// focus the depth field when an edit opens it, or scroll the selected
     /// card into view when the order or filter changes.
     pub(crate) fn matrix_message(&mut self, event: Event) -> iced::Task<Message> {
         let task = match event {
-            Event::Edit(_, Column::Depth) => focus_depth_field(),
+            Event::Edit(_, Column::Depth) => crate::editing::focus_text_field("matrix-depth"),
             Event::SortBy(_) | Event::ReverseSort | Event::Filter(_) | Event::SelectedOnly(_) => reveal_selected(),
             _ => iced::Task::none(),
         };
@@ -591,7 +584,7 @@ impl App {
             iced::Task::none()
         };
         if open_depth && self.matrix.edit.as_ref().is_some_and(|e| e.column == Column::Depth) {
-            iced::Task::batch([scroll, focus_depth_field()])
+            iced::Task::batch([scroll, crate::editing::focus_text_field("matrix-depth")])
         } else {
             scroll
         }

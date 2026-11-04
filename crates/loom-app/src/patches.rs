@@ -332,11 +332,11 @@ impl PatchBrowser {
     }
 
     /// Opens a browser over `folder` and the task that reads it on a
-    /// thread, one message per file.
+    /// thread, one message per file. The caller focuses [`SEARCH`].
     pub fn open(open: u64, folder: PathBuf) -> (Self, Task<Message>) {
         let browser = Self::new(open, folder.clone());
         let reader = read(open, folder, browser.stop.clone());
-        (browser, Task::batch([reader, iced::widget::operation::focus(SEARCH)]))
+        (browser, reader)
     }
 
     /// The rows the list shows, in order.

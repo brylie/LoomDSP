@@ -695,21 +695,29 @@ fn pointer_ui() -> crate::ui_test::Ui {
 /// redraws the view, where pointer and key events go in, then counts a
 /// control frame.
 fn run_ui(ui: &mut crate::ui_test::Ui, line: &str) -> Answer {
+    drive(ui, line).0
+}
+
+/// Runs a command as the app does: its tasks run, and so do the tasks of each
+/// frame, where a step can start. Returns the answer and every message applied.
+fn drive(ui: &mut crate::ui_test::Ui, line: &str) -> (Answer, Vec<Message>) {
     let command: Command = serde_json::from_str(line).unwrap();
     let (sender, receiver) = std::sync::mpsc::channel();
     let call = Call {
         command,
         reply: Reply(Arc::new(Mutex::new(Some(sender)))),
     };
-    let _ = ui.app.control(call);
+    let task = ui.app.control(call);
+    let mut messages = ui.run_task(task);
     for _ in 0..200 {
         if let Ok(answer) = receiver.try_recv() {
-            return answer;
+            return (answer, messages);
         }
-        ui.redraw();
-        let _ = ui.app.update(Message::ControlFrame(Instant::now()));
+        messages.extend(ui.redraw());
+        let task = ui.app.update(Message::ControlFrame(Instant::now()));
+        messages.extend(ui.run_task(task));
     }
-    receiver.try_recv().expect("answered after drawing")
+    (receiver.try_recv().expect("answered after drawing"), messages)
 }
 
 /// The snapshot's `pointer` field.
@@ -1064,25 +1072,8 @@ fn keys_reach_the_open_browser_and_the_bar_draws_the_clock() {
 /// Runs a `type` command as the app does: the window reports whether a text
 /// field has focus, and then the keys go in, one frame at a time.
 fn run_type(ui: &mut crate::ui_test::Ui, text: &str) -> Answer {
-    let (sender, receiver) = std::sync::mpsc::channel();
-    let call = Call {
-        command: Command::Type { text: text.to_string() },
-        reply: Reply(Arc::new(Mutex::new(Some(sender)))),
-    };
-    let focused = ui.text_field_focused();
-    let _ = ui.app.update(Message::TypeFocus {
-        call,
-        text: text.to_string(),
-        focused,
-    });
-    for _ in 0..200 {
-        if let Ok(answer) = receiver.try_recv() {
-            return answer;
-        }
-        ui.redraw();
-        let _ = ui.app.update(Message::ControlFrame(Instant::now()));
-    }
-    receiver.try_recv().expect("answered after drawing")
+    let line = serde_json::json!({"cmd": "type", "text": text}).to_string();
+    run_ui(ui, &line)
 }
 
 /// An app with the script's pointer on, for typing tests.
@@ -1107,28 +1098,23 @@ fn routed_names(messages: Vec<Message>) -> Vec<String> {
                 .unwrap_or_default()
                 .to_string()
         })
-        .filter(|name| !["Control", "ControlFrame", "Located", "TextFocus", "Telemetry"].contains(&name.as_str()))
+        .filter(|name| {
+            ![
+                "Control",
+                "ControlFrame",
+                "Located",
+                "TextFocus",
+                "TypeFocus",
+                "Telemetry",
+            ]
+            .contains(&name.as_str())
+        })
         .collect()
 }
 
-/// Runs a command through the channel, and returns what the frames applied.
+/// Runs a command through the channel, and returns what it applied.
 fn channel_messages(ui: &mut crate::ui_test::Ui, line: &str) -> Vec<Message> {
-    let command: Command = serde_json::from_str(line).unwrap();
-    let (sender, receiver) = std::sync::mpsc::channel();
-    let call = Call {
-        command,
-        reply: Reply(Arc::new(Mutex::new(Some(sender)))),
-    };
-    let _ = ui.app.control(call);
-    let mut messages = Vec::new();
-    for _ in 0..200 {
-        if receiver.try_recv().is_ok() {
-            return messages;
-        }
-        messages.extend(ui.redraw());
-        let _ = ui.app.update(Message::ControlFrame(Instant::now()));
-    }
-    panic!("no answer to {line}");
+    drive(ui, line).1
 }
 
 /// A fresh app with an overlay open, ready for the same event by either path.
