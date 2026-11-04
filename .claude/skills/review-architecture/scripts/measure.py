@@ -10,7 +10,10 @@ Run from the repository root:
     python3 .claude/skills/review-architecture/scripts/measure.py [PATH ...] [--json] [--since DAYS]
 
 Needs only Python 3. Uses `git` for churn and `cargo metadata` for the
-crate graph when they are available, and says so when they are not.
+crate graph when they are available, and says so when they are not. With
+`rust-code-analysis-cli` installed (`mise install` provides it), the
+function tables come from its parser, with cognitive and cyclomatic
+complexity; without it they fall back to a brace-counting heuristic.
 """
 
 from __future__ import annotations
@@ -19,8 +22,10 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -133,6 +138,64 @@ def shapes(files: list[Path]) -> dict:
         "impl_spread": [(n, name, files_) for n, name, files_ in spread[:TOP]],
         "functions": [f for f in sorted(functions, reverse=True) if f[0] >= 80][:TOP],
     }
+
+
+# --- complexity -----------------------------------------------------------
+
+def metrics_command() -> list[str] | None:
+    """How to run rust-code-analysis-cli here: on the path, or through mise."""
+    if shutil.which("rust-code-analysis-cli"):
+        return ["rust-code-analysis-cli"]
+    if shutil.which("mise"):
+        probe = subprocess.run(["mise", "x", "--", "rust-code-analysis-cli", "--version"], capture_output=True, text=True)
+        if probe.returncode == 0:
+            return ["mise", "x", "--", "rust-code-analysis-cli"]
+    return None
+
+
+def complexity(paths: list[str]) -> dict:
+    """Per-function complexity from rust-code-analysis-cli, or `available: False`.
+
+    Closures are left out (the tool names them `<anonymous>`), and so are
+    test files. `cognitive` is the sum for the function, nested closures
+    included, which is what a reader meets.
+    """
+    command = metrics_command()
+    if command is None:
+        return {"available": False, "functions": []}
+    out_dir = tempfile.mkdtemp(prefix="loom-metrics-")
+    try:
+        run = subprocess.run(
+            [*command, "-m", "-O", "json", "-I", "*.rs", "-X", "**/target/**", "-o", out_dir, "-p", *paths],
+            capture_output=True, text=True,
+        )
+        if run.returncode != 0:
+            return {"available": False, "functions": [], "error": run.stderr.strip()[-200:]}
+        functions: list[dict] = []
+        for json_path in sorted(Path(out_dir).rglob("*.json")):
+            data = json.loads(json_path.read_text(encoding="utf-8"))
+            source = Path(data["name"])
+            if is_test_file(source):
+                continue
+            stack = list(data.get("spaces", []))
+            while stack:
+                space = stack.pop()
+                stack.extend(space.get("spaces", []))
+                if space["kind"] != "function" or space["name"] == "<anonymous>":
+                    continue
+                m = space["metrics"]
+                functions.append({
+                    "cognitive": int(m["cognitive"]["sum"]),
+                    "cyclomatic": int(m["cyclomatic"]["sum"]),
+                    "lines": int(m["loc"]["sloc"]),
+                    "args": int(m["nargs"]["total_functions"]),
+                    "exits": int(m["nexits"]["sum"]),
+                    "name": space["name"],
+                    "where": f"{source}:{space['start_line']}",
+                })
+        return {"available": True, "functions": functions}
+    finally:
+        shutil.rmtree(out_dir, ignore_errors=True)
 
 
 # --- sizes ----------------------------------------------------------------
@@ -310,10 +373,25 @@ def markdown(report: dict) -> str:
     w("| Files | Type | Files |\n|---:|---|---|")
     for n, name, files_ in sh["impl_spread"]:
         w(f"| {n} | `{name}` | {', '.join(f'`{f}`' for f in files_)} |")
-    w("\nLongest functions (80 lines or more, brace-counted, so attributes and comments count):\n")
-    w("| Lines | Function | Where |\n|---:|---|---|")
-    for n, name, where in sh["functions"]:
-        w(f"| {n} | `{name}` | `{where}` |")
+    cx = report["complexity"]
+    if cx["available"]:
+        by_cognitive = sorted(cx["functions"], key=lambda f: (-f["cognitive"], -f["lines"]))[:TOP]
+        w("\nMost complex functions, by cognitive complexity (how much nesting and branching a reader must hold; 15 is the usual warning level, 25 and up is hard to change safely), from rust-code-analysis:\n")
+        w("| Cognitive | Cyclomatic | Lines | Args | Exits | Function | Where |\n|---:|---:|---:|---:|---:|---|---|")
+        for f in by_cognitive:
+            w(f"| {f['cognitive']} | {f['cyclomatic']} | {f['lines']} | {f['args']} | {f['exits']} | `{f['name']}` | `{f['where']}` |")
+        by_lines = sorted(cx["functions"], key=lambda f: (-f["lines"], -f["cognitive"]))[:TOP]
+        w("\nLongest functions (source lines, from rust-code-analysis):\n")
+        w("| Lines | Cognitive | Function | Where |\n|---:|---:|---|---|")
+        for f in by_lines:
+            w(f"| {f['lines']} | {f['cognitive']} | `{f['name']}` | `{f['where']}` |")
+    else:
+        w("\nLongest functions (80 lines or more, brace-counted, so attributes and comments count). Install `rust-code-analysis-cli` (`mise install`) for parsed lengths and cognitive complexity:\n")
+        if cx.get("error"):
+            w(f"\nrust-code-analysis-cli failed: `{cx['error']}`\n")
+        w("| Lines | Function | Where |\n|---:|---|---|")
+        for n, name, where in sh["functions"]:
+            w(f"| {n} | `{name}` | `{where}` |")
 
     c = report["churn"]
     w(f"\n## Churn (last {report['since_days']} days)\n")
@@ -376,6 +454,7 @@ def main() -> int:
         "since_days": args.since,
         "sizes": sizes(files),
         "shapes": shapes(files),
+        "complexity": complexity(args.paths),
         "churn": churn(args.since, args.paths),
         "rules": rules(files),
         "seams": seams(files),

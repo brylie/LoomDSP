@@ -68,7 +68,7 @@ Size is a map. The finding is what the size makes hard.
 - **A large `Message` enum with a split dispatch.** Group variants by the view that owns them, so `update` arms sit beside their views.
 - **A file holding several concerns.** `descriptor.rs` held port specs, parameter curves, text parsing, note formatting, panel layout, and a button state machine. Each is fine; together they make every change touch the same 2,000-line file. Propose a directory with one file per concern, and no behaviour change.
 
-For functions, the script lists the longest. Read them for several levels of loop and branch, repeated blocks, and a name that says "and".
+For functions, the script lists the most complex and the longest, from rust-code-analysis when it is installed. Cognitive complexity counts the nesting and branching a reader has to hold: 15 is the usual warning level, and 25 and up means a change there is hard to make safely. Length alone misleads both ways. A long flat dispatcher (`assemble` in the app's boot code: 178 lines, cognitive 13) is easy to change, while a shorter function with four nested levels (`check_panel` in the descriptor: 203 lines, cognitive 142) is not. Read the high-complexity ones for several levels of loop and branch, repeated blocks, many exits, and a name that says "and". A high count on a function that is one big `match` over an event enum is often the honest shape of a dispatcher; the finding then is the arms that have grown bodies of their own, not the match.
 
 ## 6. Stringly-typed seams
 

@@ -24,6 +24,11 @@ prek = "latest"
 "aqua:crate-ci/typos" = "latest"
 "aqua:EmbarkStudios/cargo-deny" = "latest"
 gh = "latest"
+# Code metrics (cognitive and cyclomatic complexity, lines, arguments, exits)
+# per function, from a real parser. The architecture review skill's
+# measurement script uses it when present, and `mise run metrics` writes the
+# report. A command-line tool only, never linked into the crates (MPL-2.0).
+"cargo:rust-code-analysis-cli" = "latest"
 
 [env]
 # Minimum line coverage, in percent. It must match the "Restrict code
@@ -120,6 +125,12 @@ run = ["sh scripts/test-check-test-placement.sh", "sh scripts/check-test-placeme
 [tasks.worktree-targets]
 description = "Test worktree target ownership and orphan pruning"
 run = "sh scripts/test-worktree-targets.sh"
+
+[tasks.metrics]
+description = "Measure the workspace for an architecture review: sizes, complexity, churn, rule checks, seams; writes target/metrics.md"
+# The architecture review skill (.claude/skills/review-architecture) reads the
+# same report. Informational: CI uploads it and does not fail on it.
+run = ["mkdir -p target", "python3 .claude/skills/review-architecture/scripts/measure.py > target/metrics.md", "sed -n '1,40p' target/metrics.md"]
 
 [tasks.help-pages]
 description = "Regenerate the module help pages in docs/modules from the descriptors"

@@ -388,6 +388,28 @@ jobs:
 
   # One check to mark as "required" in the main branch ruleset, instead of
   # listing every job. Fails if any job above failed or was cancelled.
+  # Code metrics for the architecture review skill: sizes, cognitive
+  # complexity per function (rust-code-analysis), churn, and the rule checks.
+  # Informational: the report goes to the job summary and an artifact, and
+  # ci-success does not depend on it, so a metric never blocks a merge.
+  metrics:
+    name: Code metrics (architecture review)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          # The churn table reads 90 days of history.
+          fetch-depth: 0
+      - uses: jdx/mise-action@v5
+      - run: mise run metrics
+      - run: cat target/metrics.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() && hashFiles('target/metrics.md') != '' }}
+        with:
+          name: metrics
+          path: target/metrics.md
+
   ci-success:
     name: CI success
     if: always()

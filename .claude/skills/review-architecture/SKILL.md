@@ -41,18 +41,18 @@ Run the bundled script from the repository root:
 python3 .claude/skills/review-architecture/scripts/measure.py [PATH ...]
 ```
 
-With no path it covers `crates/`. It needs only Python 3 and takes a few seconds. It prints Markdown with:
+With no path it covers `crates/`. `mise run metrics` runs the same script over the workspace and writes `target/metrics.md`; CI runs that task on every pull request and attaches the report to the run, so for a review of `main` the report may already exist. The script needs Python 3, and uses `rust-code-analysis-cli` (installed by `mise install`) for the function tables; without it, those fall back to a line-counting heuristic and the output says so. It takes about ten seconds. It prints Markdown with:
 
 | Section | Shows |
 |---|---|
 | Size | Lines per crate, and the largest source files |
-| Shapes | Structs with the most fields, enums with the most variants, types whose `impl` blocks are spread over the most files, and the longest functions |
+| Shapes | Structs with the most fields, enums with the most variants, types whose `impl` blocks are spread over the most files, the most complex functions by cognitive complexity (with cyclomatic complexity, lines, arguments, and exits), and the longest functions |
 | Churn | The files with the most commits in the last 90 days, so you know where cost is paid |
 | Rules | `unsafe` blocks and whether each has a `// SAFETY:` comment; filesystem, process, thread, and clock calls in the portable crates; modules whose descriptors declare smoothed parameters but that have no `param_glide` |
 | Seams | WAV readers and writers, thread spawns, temp-directory helpers in tests, message text matched by substring, and id strings compared by hand |
 | Crates | Each crate's dependencies on the other workspace crates |
 
-**The numbers are a map, not findings.** A long file with one concern is fine. A struct with forty fields that only one module reads is fine. Use the map to choose where to read, then read.
+**The numbers are a map, not findings.** A long file with one concern is fine. A struct with forty fields that only one module reads is fine. A 400-line match with flat arms can score lower on cognitive complexity than a 120-line function with four nested levels, and the second is the one to read. Use the map to choose where to read, then read.
 
 Pass `--json` for machine-readable output, and `--since DAYS` to change the churn window.
 
