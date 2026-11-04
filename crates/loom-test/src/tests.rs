@@ -890,6 +890,23 @@ fn a_module_that_stores_a_bad_input_on_a_trigger_fails() {
     on_non_finite_busy(&UNGUARDED_CAPTURE).check_non_finite_recovery();
 }
 
+/// The check's timing holds at the rates up to its limit, and not above it: at 96
+/// kHz the next edge overwrites the bad value before the recovery time ends, so
+/// this module passes. The spec lists this as a known limit.
+#[test]
+fn the_non_finite_signal_covers_rates_below_its_limit() {
+    let check = |rate: f32| {
+        let harness = on_non_finite_busy(&UNGUARDED_CAPTURE).sample_rate(rate);
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| harness.check_non_finite_recovery())).is_err()
+    };
+    assert!(check(44_100.0));
+    assert!(check(88_200.0));
+    assert!(
+        !check(96_000.0),
+        "the limit moved, so update the spec and the signal's comment"
+    );
+}
+
 /// With the guard, the same module passes.
 #[test]
 fn a_module_that_guards_what_it_stores_passes() {

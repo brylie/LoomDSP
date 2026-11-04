@@ -4,9 +4,9 @@
 
 mod common;
 
-use common::{busy_each, changed};
-use loom_core::{ModuleDescriptor, ModuleRole, TimeSignature, TransportSettings};
-use loom_modules::{ALL, clock, lfo, math, transport};
+use common::{busy_each, changed, dsp_modules};
+use loom_core::{ModuleDescriptor, TimeSignature, TransportSettings};
+use loom_modules::{clock, lfo, math, transport};
 use loom_test::{DEFAULT_SAMPLE_RATE, Harness, Signal};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
@@ -28,13 +28,6 @@ fn playing(tempo: f64) -> TransportSettings {
         tempo,
         ..TransportSettings::default()
     }
-}
-
-/// The DSP modules in [`ALL`].
-fn dsp_modules() -> impl Iterator<Item = &'static ModuleDescriptor> {
-    ALL.iter()
-        .copied()
-        .filter(|descriptor| matches!(descriptor.role, ModuleRole::Dsp(_)))
 }
 
 /// Moves each parameter of every DSP module in turn, on `inputs`, and panics with
@@ -66,6 +59,47 @@ fn every_parameter_change_lands_on_its_frame_with_default_inputs() {
 #[test]
 fn every_parameter_change_lands_on_its_frame_with_busy_inputs() {
     check_every_parameter(busy_each);
+}
+
+/// Runs every DSP module through a tempo change, a stop, and a time signature
+/// change, on `inputs`, and panics with all that depend on the block size.
+fn check_every_transport_change(inputs: impl Fn(Harness, &'static ModuleDescriptor) -> Harness) {
+    let start = playing(130.0);
+    let changes = [
+        playing(90.0),
+        TransportSettings {
+            running: false,
+            ..start
+        },
+        TransportSettings {
+            time_signature: TimeSignature::new(3, 4),
+            ..start
+        },
+    ];
+    let mut failed = Vec::new();
+    for descriptor in dsp_modules() {
+        for change in changes {
+            let harness = inputs(Harness::new(descriptor).frames(FRAMES).transport(start), descriptor)
+                .transport_at(change_at(), change);
+            if catch_unwind(AssertUnwindSafe(|| harness.check_block_sizes())).is_err() {
+                failed.push((descriptor.id, change.tempo, change.running, change.time_signature));
+            }
+        }
+    }
+    assert!(failed.is_empty(), "these depend on the block size: {failed:?}");
+}
+
+/// Every transport change on every module, with inputs on their port defaults, so
+/// a module that follows the bar through a port default sees it.
+#[test]
+fn every_transport_change_lands_on_its_frame_with_default_inputs() {
+    check_every_transport_change(|harness, _| harness);
+}
+
+/// Every transport change on every module, with a busy signal on every input.
+#[test]
+fn every_transport_change_lands_on_its_frame_with_busy_inputs() {
+    check_every_transport_change(busy_each);
 }
 
 /// A smoothed parameter glides from the frame of the change, not before, and the

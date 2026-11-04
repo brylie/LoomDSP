@@ -4,7 +4,10 @@
 //! can send very large values into a module. See
 //! `Harness::check_extreme_recovery`.
 
-use loom_core::{ModuleDescriptor, ModuleRole, TransportSettings};
+mod common;
+
+use common::dsp_modules;
+use loom_core::{ModuleDescriptor, TransportSettings};
 use loom_modules::{ALL, level, math, mix};
 use loom_test::{EXTREME_RENDER, Harness, Signal};
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -67,44 +70,62 @@ fn sets_delay_time(descriptor: &ModuleDescriptor, port: &str) -> bool {
     port == "time" && matches!(descriptor.id, "loom.time.delay" | "loom.time.allpass")
 }
 
-/// Modules where every input being huge at once rightly leaves them different
-/// from a clean render, and why: `(module, reason)`. The module must still stay
-/// finite and return to a normal size. A run with every input huge has no single
-/// input to name, so this table is keyed by module.
-const ALL_INPUT_EXCEPTIONS: &[(&str, &str)] = &[
+/// Where every input being huge at once rightly leaves a module different from a
+/// clean render, and why: `(module, option, reason)`. The module must still stay
+/// finite and return to a normal size. An entry with an option, as `(parameter,
+/// value)`, excuses only that option, so every other option gets the full check. A
+/// bug can live in one mode, so an entry with `None`, which excuses them all, is
+/// for a module that needs it at its defaults.
+const ALL_INPUT_EXCEPTIONS: &[(&str, Option<(&str, f32)>, &str)] = &[
     (
         "loom.dyn.dynamics",
+        None,
         "A huge input is a real 300 dB peak. Its release takes longer than the settling time.",
     ),
     (
         "loom.env.envelope",
+        None,
         "A huge gate is a real rising edge, so the envelope really plays.",
     ),
     (
         "loom.eq.eq",
-        "The peak fills a band's state while its frequency input is at the limit. It leaves slowly once the frequency falls.",
+        Some(("low_slope", 2.0)),
+        "A 300 dB peak rings down through the 24 dB low cut. At the 40 Hz default its slowest pole falls 96 per second, too slow for the settling time.",
     ),
     (
         "loom.gate.euclid",
-        "A huge clock or reset is a real rising edge, so the pattern really moves.",
+        Some(("source", 1.0)),
+        "A huge clock is a real rising edge, so the pattern really moves.",
     ),
     (
         "loom.logic.memory",
-        "A huge input is a real gate, and the module's job is to remember it.",
+        Some(("mode", 2.0)),
+        "In Data mode, a huge clock remembers a huge input, and the module's job is to keep it.",
     ),
     (
         "loom.rand.random",
+        None,
         "A huge trigger is a real rising edge, so it takes a value from the stream early.",
     ),
     (
         "loom.rand.sample-hold",
+        None,
         "A huge trigger captures the huge input, and holds it until the next trigger.",
     ),
     (
         "loom.time.allpass",
+        None,
         "A 300 dB peak recirculates in the line, and takes longer than the settling time to ring down.",
     ),
 ];
+
+/// True if [`ALL_INPUT_EXCEPTIONS`] excuses `id` in `option`, or at its defaults
+/// if `option` is `None`.
+fn all_input_excused(id: &str, option: Option<(&str, f32)>) -> bool {
+    ALL_INPUT_EXCEPTIONS
+        .iter()
+        .any(|(entry, excused, _)| *entry == id && (excused.is_none() || *excused == option))
+}
 
 /// Modules from [`ALL_INPUT_EXCEPTIONS`] that keep the huge value with no later
 /// input to replace it. On port defaults, a trigger rises once, as the hold
@@ -217,17 +238,16 @@ fn every_module_survives_with_busy_inputs_when_playing() {
 }
 
 /// Every input of every DSP module takes the huge value together, on `running`
-/// and `busy`, at the defaults and in each option of each choice parameter. A
-/// listed module stays bounded, and any other recovers. Panics with all that fail.
+/// and `busy`, at the defaults and in each option of each choice parameter. An
+/// excused run stays bounded, and any other recovers. Panics with all that fail.
 fn check_all_at_once(running: bool, busy: bool) {
     let mut failed = Vec::new();
     for descriptor in dsp_modules() {
-        let excused = ALL_INPUT_EXCEPTIONS.iter().any(|(id, _)| *id == descriptor.id);
-        let check = |harness: &Harness, what: &str| {
+        let check = |harness: &Harness, option: Option<(&str, f32)>, what: &str| {
             failure(descriptor.id, || {
                 if !busy && HOLDS_UNTIL_NEXT_TRIGGER.contains(&descriptor.id) {
                     harness.check_extreme_finite_all();
-                } else if excused {
+                } else if all_input_excused(descriptor.id, option) {
                     harness.check_extreme_stays_bounded_all();
                 } else {
                     harness.check_extreme_recovery_all();
@@ -235,10 +255,10 @@ fn check_all_at_once(running: bool, busy: bool) {
             })
             .map(|message| format!("{what}: {message}"))
         };
-        failed.extend(check(&harness(descriptor, running, busy), "defaults"));
+        failed.extend(check(&harness(descriptor, running, busy), None, "defaults"));
         for (name, value) in choice_options(descriptor) {
             let harness = harness(descriptor, running, busy).param(name, value);
-            failed.extend(check(&harness, &format!("{name} = {value}")));
+            failed.extend(check(&harness, Some((name, value)), &format!("{name} = {value}")));
         }
     }
     assert!(failed.is_empty(), "{}", failed.join("\n"));
@@ -293,37 +313,51 @@ fn every_module_stays_finite_turned_up_with_busy_inputs() {
     check_turned_up(true);
 }
 
-/// Each module-wide exception is still needed, so the table cannot go stale.
+/// The stopped and playing, default and busy runs of the check.
+const RUNS: [(bool, bool); 4] = [(false, false), (false, true), (true, false), (true, true)];
+
+/// Each all-input exception is still needed for what it names: an option in that
+/// option, and an entry for the whole module at its defaults. So the table cannot
+/// go stale and hide a later bug.
 #[test]
 fn every_all_input_exception_is_needed() {
-    for (id, _) in ALL_INPUT_EXCEPTIONS {
+    for (id, option, _) in ALL_INPUT_EXCEPTIONS {
         let descriptor = ALL
             .iter()
             .find(|descriptor| descriptor.id == *id)
             .unwrap_or_else(|| panic!("{id} is not a module"));
-        let needed = [(false, false), (false, true), (true, false), (true, true)]
-            .into_iter()
-            .any(|(running, busy)| {
-                let defaults = failure(id, || harness(descriptor, running, busy).check_extreme_recovery_all());
-                defaults.is_some()
-                    || choice_options(descriptor).into_iter().any(|(name, value)| {
-                        let harness = harness(descriptor, running, busy).param(name, value);
-                        failure(id, || harness.check_extreme_recovery_all()).is_some()
-                    })
-            });
+        let needed = RUNS.into_iter().any(|(running, busy)| {
+            let harness = harness(descriptor, running, busy);
+            let harness = match option {
+                Some((name, value)) => harness.param(name, *value),
+                None => harness,
+            };
+            failure(id, || harness.check_extreme_recovery_all()).is_some()
+        });
         assert!(
             needed,
-            "{id} passes the full check with every input huge, so it needs no exception"
+            "{id} {option:?} passes the full check with every input huge, so it needs no exception"
         );
     }
 }
 
-/// The DSP modules in [`ALL`]. Unit delays and audio outputs are run by the
-/// engine, not by `process`.
-fn dsp_modules() -> impl Iterator<Item = &'static ModuleDescriptor> {
-    ALL.iter()
-        .copied()
-        .filter(|descriptor| matches!(descriptor.role, ModuleRole::Dsp(_)))
+/// Each module that keeps the huge value on port defaults still does, so
+/// [`HOLDS_UNTIL_NEXT_TRIGGER`] cannot go stale.
+#[test]
+fn every_held_value_exception_is_needed() {
+    for id in HOLDS_UNTIL_NEXT_TRIGGER {
+        let descriptor = ALL
+            .iter()
+            .find(|descriptor| descriptor.id == *id)
+            .unwrap_or_else(|| panic!("{id} is not a module"));
+        for running in [false, true] {
+            let harness = harness(descriptor, running, false);
+            assert!(
+                failure(id, || harness.check_extreme_stays_bounded_all()).is_some(),
+                "{id} returns to a normal size with every input huge, so it needs no exception"
+            );
+        }
+    }
 }
 
 /// Each exception is still needed for its own input, so the table cannot go

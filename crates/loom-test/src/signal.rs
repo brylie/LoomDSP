@@ -45,6 +45,10 @@ impl Signal {
     /// The second rise falls inside the check's bad frames, so a module that
     /// stores an input on a trigger on another input sees the bad value. The
     /// third comes after the recovery time, so it cannot hide a kept bad value.
+    ///
+    /// Its edges are fixed in frames, but the recovery time scales with the sample
+    /// rate. So this holds below 95,600 Hz. At 96 kHz the third edge comes first,
+    /// and the check passes a module that kept the bad value until then.
     pub fn non_finite_busy() -> Self {
         Self::from_fn(|frame| 0.75 * (frame as f64 * std::f64::consts::TAU * 50.0 / 48_000.0).sin() as f32)
     }

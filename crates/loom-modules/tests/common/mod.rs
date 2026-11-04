@@ -3,9 +3,10 @@
 #![allow(dead_code)]
 
 use loom_core::{
-    EngineConfig, EngineParts, MeterReading, MidiEvent, ModuleDescriptor, ModuleId, OutputSafety, ParamSpec, ProbeId,
-    TimeSignature, TransportSettings, create_engine,
+    EngineConfig, EngineParts, MeterReading, MidiEvent, ModuleDescriptor, ModuleId, ModuleRole, OutputSafety,
+    ParamSpec, ProbeId, TimeSignature, TransportSettings, create_engine,
 };
+use loom_modules::ALL;
 use loom_patch::Patch;
 use loom_test::{Harness, Signal};
 use std::f32::consts::TAU;
@@ -29,6 +30,14 @@ pub fn changed(spec: &ParamSpec) -> f32 {
 /// state.
 pub fn busy(hz: f32) -> Signal {
     Signal::from_fn(move |frame| 0.75 * (frame as f32 * TAU * hz / SAMPLE_RATE).sin())
+}
+
+/// The DSP modules in [`ALL`]. Unit delays and audio outputs are run by the
+/// engine, not by `process`.
+pub fn dsp_modules() -> impl Iterator<Item = &'static ModuleDescriptor> {
+    ALL.iter()
+        .copied()
+        .filter(|descriptor| matches!(descriptor.role, ModuleRole::Dsp(_)))
 }
 
 /// Frequencies for [`busy_each`], in Hz. No one is a multiple of another, so two
