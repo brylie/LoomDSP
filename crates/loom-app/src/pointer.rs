@@ -22,7 +22,7 @@ use iced::advanced::renderer;
 use iced::advanced::widget::{Id, Operation, Tree, tree};
 use iced::advanced::{Clipboard, Shell, Widget, overlay};
 use iced::{Element, Event, Length, Point, Rectangle, Size, Vector, keyboard, mouse, window};
-use loom_canvas::{CanvasPointer, CanvasView, Hit, PointerDrag, PortRef};
+use loom_canvas::{CanvasPointer, CanvasTyped, CanvasView, Hit, PointerDrag, PortRef};
 use serde::Serialize;
 use std::any::Any;
 use std::cell::RefCell;
@@ -76,6 +76,8 @@ struct Seen {
     /// The pointer in window coordinates, if it is in the window.
     cursor: Option<Point>,
     canvas: Option<CanvasPointer>,
+    /// The typed field the canvas had open, if any.
+    typed: Option<CanvasTyped>,
 }
 
 #[derive(Debug, Default)]
@@ -272,6 +274,7 @@ struct FindNow<'a> {
     text: Option<&'a str>,
     found: Found,
     pointer: Option<CanvasPointer>,
+    typed: Option<CanvasTyped>,
 }
 
 impl Operation for FindNow<'_> {
@@ -285,6 +288,9 @@ impl Operation for FindNow<'_> {
         }
         if let Some(pointer) = state.downcast_ref::<CanvasPointer>() {
             self.pointer = Some(pointer.clone());
+        }
+        if let Some(typed) = state.downcast_ref::<CanvasTyped>() {
+            self.typed = Some(typed.clone());
         }
     }
 
@@ -326,14 +332,15 @@ impl<'a, Message> Injector<'a, Message> {
         layout: Layout<'_>,
         renderer: &iced::Renderer,
         text: Option<&str>,
-    ) -> (Found, Option<CanvasPointer>) {
+    ) -> (Found, Option<CanvasPointer>, Option<CanvasTyped>) {
         let mut op = FindNow {
             text,
             found: Found::default(),
             pointer: None,
+            typed: None,
         };
         self.content.as_widget_mut().operate(tree, layout, renderer, &mut op);
-        (op.found, op.pointer)
+        (op.found, op.pointer, op.typed)
     }
 
     /// A real pointer event takes over from the script, which first lets go
@@ -376,7 +383,7 @@ impl<'a, Message> Injector<'a, Message> {
         renderer: &iced::Renderer,
         target: &str,
     ) -> Result<Point, String> {
-        let (found, _) = self.find(tree, layout, renderer, Some(target));
+        let (found, _, _) = self.find(tree, layout, renderer, Some(target));
         let rect = crate::control::locate(self.app, target, &found)?;
         let window = layout.bounds();
         if !window.contains(rect.center()) {
@@ -551,10 +558,11 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Injector<'_, Mess
             viewport,
         );
         if redraw.is_some() && self.pointer.0.borrow().record {
-            let (_, canvas) = self.find(&mut tree.children[0], layout, renderer, None);
+            let (_, canvas, typed) = self.find(&mut tree.children[0], layout, renderer, None);
             self.pointer.0.borrow_mut().seen = Some(Seen {
                 cursor: cursor.position(),
                 canvas,
+                typed,
             });
         }
     }
@@ -609,6 +617,17 @@ pub struct PointerState {
     pub pinned: Option<String>,
     /// The drag in progress on the canvas.
     pub drag: Option<DragState>,
+}
+
+/// The canvas's typed field in the snapshot, so a script can check it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TypedFieldState {
+    /// The control the field is over, as a name `locate` takes.
+    pub target: String,
+    /// The text in the field.
+    pub text: String,
+    /// Why the text is not a value yet, as the field shows it.
+    pub reason: Option<String>,
 }
 
 /// What is under the pointer, by name.
@@ -696,6 +715,25 @@ fn button_name(button: mouse::Button) -> Option<&'static str> {
 impl App {
     /// The pointer for the snapshot, or `None` when nothing has been drawn
     /// with the control channel on.
+    /// The canvas typed field for the snapshot, as it was last drawn. The reason
+    /// comes from the same check the canvas uses, so the two cannot disagree.
+    pub(crate) fn typed_field_state(&self) -> Option<TypedFieldState> {
+        let inner = self.pointer.0.borrow();
+        if !inner.record {
+            return None;
+        }
+        let typed = inner.seen.as_ref()?.typed.as_ref()?;
+        let target = crate::targets::name(
+            self.controller.graph(),
+            crate::targets::Part::Control(typed.module, typed.widget),
+        )?;
+        Some(TypedFieldState {
+            target,
+            text: typed.text.clone(),
+            reason: self.typed_check(typed.module, typed.widget, &typed.text).err(),
+        })
+    }
+
     pub(crate) fn pointer_state(&self) -> Option<PointerState> {
         let inner = self.pointer.0.borrow();
         if !inner.record {

@@ -720,6 +720,26 @@ fn drive(ui: &mut crate::ui_test::Ui, line: &str) -> (Answer, Vec<Message>) {
     (receiver.try_recv().expect("answered after drawing"), messages)
 }
 
+/// #579: a script reads the typed field from the `snapshot` reply.
+#[test]
+fn a_script_reads_the_typed_field_from_the_snapshot() {
+    let mut ui = typing_ui();
+    let id = ui.app.controller.add_module("loom.filter.svf").unwrap();
+    ui.app.commit();
+    let _ = ui.app.update(Message::SelectModule(id.0));
+    ui.redraw();
+    let at = ui.control(id.0, "cutoff");
+    ui.move_to(at);
+    ui.press();
+    ui.release();
+    run_ui(&mut ui, r#"{"cmd": "key", "key": "4"}"#).unwrap();
+    let snapshot = run_ui(&mut ui, r#"{"cmd": "snapshot"}"#).unwrap();
+    let field = &snapshot["snapshot"]["typed_field"];
+    assert_eq!(field["target"], format!("{}:cutoff", id.0));
+    assert_eq!(field["text"], "4");
+    assert!(field["reason"].is_null());
+}
+
 /// The snapshot's `pointer` field.
 fn pointer_of(ui: &mut crate::ui_test::Ui) -> Value {
     run_ui(ui, r#"{"cmd": "snapshot"}"#).unwrap()["snapshot"]["pointer"].clone()

@@ -1673,6 +1673,49 @@ mod tests {
         ui.release();
     }
 
+    /// #579: the snapshot shows the canvas's typed field: which control it is
+    /// on, its text, and the reason bad text gives. It opens with real keys, and
+    /// goes when Escape closes it.
+    #[test]
+    fn the_snapshot_shows_the_typed_field() {
+        use keyboard::key::Named;
+        let mut ui = Ui::open("subtractive.ron");
+        ui.app.pointer = crate::pointer::Pointer::new(true);
+        let id = select_new(&mut ui, "loom.filter.svf");
+        focus_control(&mut ui, id, "cutoff");
+        ui.redraw();
+        assert_eq!(ui.app.ui_snapshot().typed_field, None, "a click opens no field");
+
+        ui.typewrite("4");
+        ui.redraw();
+        let typed = ui.app.ui_snapshot().typed_field.expect("the digit opened the field");
+        assert_eq!(typed.target, format!("{}:cutoff", id.0));
+        assert_eq!(typed.text, "4");
+        assert_eq!(typed.reason, None);
+
+        ui.typewrite("x");
+        ui.redraw();
+        let typed = ui.app.ui_snapshot().typed_field.expect("the field is still open");
+        assert_eq!(typed.text, "4x");
+        assert!(typed.reason.is_some(), "bad text gives its reason");
+
+        ui.tap(keyboard::Key::Named(Named::Escape), keyboard::Modifiers::empty());
+        ui.redraw();
+        assert_eq!(ui.app.ui_snapshot().typed_field, None, "Escape closed it");
+    }
+
+    /// Without the control channel's pointer state, the field is not reported,
+    /// as with `pointer` (control-channel.md).
+    #[test]
+    fn the_typed_field_is_null_without_the_control_channel() {
+        let mut ui = Ui::open("subtractive.ron");
+        let id = select_new(&mut ui, "loom.filter.svf");
+        focus_control(&mut ui, id, "cutoff");
+        ui.typewrite("4");
+        ui.redraw();
+        assert_eq!(ui.app.ui_snapshot().typed_field, None);
+    }
+
     /// Typing 128 on a focused Tempo knob sets exactly 128 BPM, as one undo
     /// step. A drag or an arrow key rarely lands on it (panel-widgets.md,
     /// Typing a value).
