@@ -1,6 +1,7 @@
 //! MIDI learn: control changes that set parameters.
 //!
-//! Spec: `docs/design/midi-learn.md`.
+//! Spec: `docs/design/midi-learn.md`. Why pickup and encoders work this way:
+//! `docs/learn/hardware-controls.md`.
 //!
 //! The engine applies mappings (rule 1) and reports back through tables of
 //! atomics, allocated once with the engine (rules 2 and 3). There is one

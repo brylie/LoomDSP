@@ -17,6 +17,7 @@ LoomDSP is also a way to learn modular sound design, for musicians and for the p
 | [Triggers and gates](triggers-and-gates.md) | Why a trigger is one sample, why inputs count rising edges, and why a 1 ms pulse was rejected. |
 | [Pitch at 0.1 per octave](pitch.md) | How pitch relates to 1 V per octave, why 20 octaves fit in -1 to 1, and how to convert to Hz and MIDI notes. |
 | [Block-size invariance](block-size-invariance.md) | Why a module must sound the same at any block size, what breaks it, and how the harness checks it. |
+| [Hardware controls and decibel faders](hardware-controls.md) | Why a mapped knob jumps and how pickup stops it, why an endless encoder sends steps and has three encodings, and why a level control has a floor. |
 | [Real-time safety](real-time-safety.md) | Why the audio thread must not allocate, lock, or wait, and how LoomDSP keeps to that. |
 | [Modulation without cables](modulation-without-cables.md) | Why depth is a share of the knob, how polarity remaps a source, the stored-value trap, and why assignments are delayed before cables. |
 | [Stopping a stream without a click](stopping-a-stream.md) | Why the engine fades out, why the host waits for silent buffers, and why a new sample rate paused a stream on macOS. |
