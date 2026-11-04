@@ -71,7 +71,7 @@ Copy [template.md](template.md). Keep it to one feature. Link the ADR, requireme
 | [Delay line and all-pass](delay.md) | [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md), [ADR-0002](../adr/0002-graph-execution-and-feedback.md), [ADR-0017](../adr/0017-primitives-traits-and-abstractions.md), [ADR-0020](../adr/0020-inferred-channel-count.md) | Implemented, M1 |
 | [Port and parameter text](port-and-parameter-text.md) | [ADR-0016](../adr/0016-ports-and-parameters-carry-their-own-text.md) | Implemented, M1 |
 | [Open, Save, and Save As](files.md) | None (builds on [ADR-0008](../adr/0008-patch-format-ron.md)) | Implemented, M1; recent files and dropping a file Agreed, M2 |
-| [MIDI learn](midi-learn.md) | None (builds on [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md) and [ADR-0013](../adr/0013-modules-carry-their-own-panel.md)) | Agreed, M1; device mappings and mapping modes Agreed, M2 |
+| [MIDI learn](midi-learn.md) | None (builds on [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md) and [ADR-0013](../adr/0013-modules-carry-their-own-panel.md)) | Implemented, with mapping modes; device mappings Agreed, M2 |
 | [Module browser](module-browser.md) | None (builds on [ADR-0010](../adr/0010-own-patch-canvas.md)) | Implemented, M1 |
 | [Automatic placement](auto-placement.md) | None (builds on [ADR-0010](../adr/0010-own-patch-canvas.md)) | Implemented, M1 |
 | [Copy, paste, and duplicate](clipboard.md) | None (builds on [ADR-0008](../adr/0008-patch-format-ron.md)) | Implemented, M1 |

@@ -224,7 +224,7 @@ Every parameter maps between its value and its control's position, from 0 to 1. 
 |---|---|---|
 | Linear (the default) | `min + t × (max - min)` | Most parameters. Whole-number parameters are always linear. |
 | Logarithmic | `min × (max / min)^t` | Frequencies and times. Equal steps of the control give equal ratios, so a tenth of a 20 Hz to 20 kHz knob is about one octave anywhere on it. |
-| Decibels | 0 at `t = 0`; otherwise the gain of `floor + t × (dB(max) − floor)` dB | Gains and levels. The value stays a linear gain; the control turns and reads in dB, with −∞ at the bottom. `floor` is −60 dB unless the parameter sets another. 0 dB on a 0 to 2 level then sits at about 91% of the travel, and one 7-bit MIDI step is about 0.52 dB. *Why this simple formula:* it is a deliberate choice, though many hardware faders put 0 dB lower, because one straight line is easy to read and to explain. |
+| Decibels ([why](../learn/hardware-controls.md)) | 0 at `t = 0`; otherwise the gain of `floor + t × (dB(max) − floor)` dB | Gains and levels. The value stays a linear gain; the control turns and reads in dB, with −∞ at the bottom. `floor` is −60 dB unless the parameter sets another. 0 dB on a 0 to 2 level then sits at about 91% of the travel, and one 7-bit MIDI step is about 0.52 dB. *Why this simple formula:* it is a deliberate choice, though many hardware faders put 0 dB lower, because one straight line is easy to read and to explain. |
 
 - **The mapping is part of `ParamSpec`.** A `ParamSpec` with `ParamOptions::DEFAULT` is linear; `.logarithmic()` makes it logarithmic. Nothing is guessed from the unit. *Why:* the module author knows how the parameter should feel. A guess can be wrong, and then the arc lies.
 - **`loom-core` has the two functions:** `ParamSpec::normalize(value)` gives the position, and `ParamSpec::denormalize(position)` gives the value. The inspector, panel controls, and the engine's modulation use only these. *Why:* rule 3.
@@ -246,9 +246,9 @@ Every parameter maps between its value and its control's position, from 0 to 1. 
 - [x] The registry refuses a logarithmic whole-number parameter and a logarithmic parameter with a minimum of 0 or less.
 - [x] Every built-in parameter in Hz or seconds is logarithmic.
 - [x] The inspector uses `normalize` and `denormalize`. The app no longer guesses a mapping.
-- [ ] Decibels: `denormalize(0)` is 0; `normalize(1.0)` on a 0 to 2 level is the position of 0 dB; `denormalize(normalize(v))` returns `v` within 1e-4 dB for gains above the floor (unit tests).
-- [ ] The registry refuses a decibel mapping with a minimum above 0, on a whole number, or with control ranges (test).
-- [ ] The Mixer's levels read "0.0 dB" at their default and "−∞ dB" at 0 (test).
+- [x] Decibels: `denormalize(0)` is 0; `normalize(1.0)` on a 0 to 2 level is the position of 0 dB; `denormalize(normalize(v))` returns `v` within 1e-4 dB for gains above the floor (unit tests).
+- [x] The registry refuses a decibel mapping with a minimum above 0, on a whole number, or with control ranges (test).
+- [x] The Mixer's levels read "0.0 dB" at their default and "−∞ dB" at 0 (test).
 
 ### Out of scope
 

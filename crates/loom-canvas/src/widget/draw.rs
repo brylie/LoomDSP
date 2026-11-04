@@ -2,6 +2,17 @@
 
 use super::*;
 
+/// The mapping label that replaces a caption in MIDI learn mode, if this text
+/// is the caption of a mapped control (midi-learn.md, Making a mapping).
+pub(super) fn learned_label(learn: Option<&LearnView>, module: u32, kind: TextKind) -> Option<&str> {
+    match kind {
+        TextKind::Caption(widget) => learn
+            .and_then(|learn| learn.labels.get(&(module, widget)))
+            .map(String::as_str),
+        _ => None,
+    }
+}
+
 impl<Message> PatchCanvas<'_, Message> {
     /// The overlay for a view whose visible world area is `visible`. Learn
     /// mode outlines only the controls there, so its cost follows what is on
@@ -480,13 +491,7 @@ impl<Message> PatchCanvas<'_, Message> {
                 // A focused or turning knob shows its value instead of its
                 // caption.
                 // In MIDI learn mode, a mapped control shows its mapping.
-                let learned = match item.kind {
-                    TextKind::Caption(widget) => self
-                        .learn
-                        .and_then(|learn| learn.labels.get(&(module.id, widget)))
-                        .map(String::as_str),
-                    _ => None,
-                };
+                let learned = learned_label(self.learn, module.id, item.kind);
                 let value = match item.kind {
                     _ if learned.is_some() => learned,
                     TextKind::Caption(widget) if active == Some((module.id, widget)) => values

@@ -2390,6 +2390,42 @@ fn a_learn_click_arms_and_focuses_without_changing_a_value() {
     );
 }
 
+/// Outside learn mode, a click on a control only changes its value: it never
+/// asks to arm anything, so moving a hardware control next maps nothing
+/// (midi-learn.md, Acceptance criteria).
+#[test]
+fn outside_learn_mode_a_click_arms_nothing() {
+    let mut m = module(1, 0.0);
+    m.panel = panel();
+    let scene = Scene::new(vec![m], Vec::new());
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+    let mut state = State::default();
+    let knob = scene.module(1).unwrap().widget_bounds(0).unwrap().center();
+    let events = drive(&canvas, &mut state, &click(mouse::Button::Left), knob);
+    assert!(
+        events.iter().all(|e| !matches!(e, CanvasEvent::Learn { .. })),
+        "{events:?}"
+    );
+}
+
+/// In learn mode a mapped control's caption shows its mapping, and an
+/// unmapped control, other text, or no learn mode shows none (midi-learn.md,
+/// Acceptance criteria).
+#[test]
+fn a_mapped_control_shows_its_label_in_learn_mode() {
+    let mut learn = LearnView::default();
+    learn.labels.insert((1, 0), "CC 74".to_string());
+    assert_eq!(
+        draw::learned_label(Some(&learn), 1, crate::tile_text::TextKind::Caption(0)),
+        Some("CC 74")
+    );
+    assert_eq!(draw::learned_label(Some(&learn), 1, crate::tile_text::TextKind::Caption(1)), None);
+    assert_eq!(draw::learned_label(Some(&learn), 2, crate::tile_text::TextKind::Caption(0)), None);
+    assert_eq!(draw::learned_label(None, 1, crate::tile_text::TextKind::Caption(0)), None);
+    assert_eq!(draw::learned_label(Some(&learn), 1, crate::tile_text::TextKind::Title), None);
+}
+
 /// In MIDI learn mode Space and Enter arm the focused control, arrows do
 /// nothing, and Escape is left for the app, which ends the mode.
 #[test]

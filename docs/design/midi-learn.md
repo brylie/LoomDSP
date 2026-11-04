@@ -3,10 +3,10 @@
 How a performer links a hardware knob or fader to any parameter in a few seconds, and how those links are saved, shown, and removed.
 
 - **Kind:** living specification.
-- **Status:** Agreed. [Device mappings](#device-mappings-fr-midi-06) Agreed, M2 (2026-11-01, [#166](https://github.com/brylie/LoomDSP/issues/166)); not built. [Mapping modes](#mapping-modes-fr-midi-09) Agreed, M2 (2026-11-01, [#165](https://github.com/brylie/LoomDSP/issues/165)); not built.
+- **Status:** Implemented for the base behaviour and [mapping modes](#mapping-modes-fr-midi-09) ([#164](https://github.com/brylie/LoomDSP/issues/164), [#165](https://github.com/brylie/LoomDSP/issues/165)), except the unticked checks, which wait for the QA round. [Device mappings](#device-mappings-fr-midi-06) Agreed, M2 (2026-11-01, [#166](https://github.com/brylie/LoomDSP/issues/166)); not built.
 - **Decision behind it:** none of its own. Builds on [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md) (control and audio threads), [ADR-0004](../adr/0004-export-as-runtime-plus-patch-data.md) (export as runtime plus patch data), [ADR-0008](../adr/0008-patch-format-ron.md) (patch format), and [ADR-0013](../adr/0013-modules-carry-their-own-panel.md) (the inspector shows and removes mappings; learn mode extends the gesture to tile controls).
 - **Use case and requirements:** [UC3, perform live](../product/personas-and-use-cases.md#uc3-perform-live-tomas-highest-priority-use-case), FR-MIDI-02. FR-MIDI-06 (per-device mappings, [own section](#device-mappings-fr-midi-06)). FR-MIDI-09 (pickup, relative encoders, scaling, [own section](#mapping-modes-fr-midi-09)).
-- **Background:** [parameter mapping](modulation.md#parameter-mapping) (value to position and back).
+- **Background:** [parameter mapping](modulation.md#parameter-mapping) (value to position and back), [hardware controls and decibel faders](../learn/hardware-controls.md) (why pickup and encoders work as they do).
 - **Prior art:** most DAWs and software modular tools have a "learn" gesture: arm a control, move a hardware control, and the two are linked. We use the idea, in our own words.
 - **Issues:** [#24](https://github.com/brylie/LoomDSP/issues/24), [#166](https://github.com/brylie/LoomDSP/issues/166) (device mappings).
 - **Code:** `crates/loom-core/src/midi_map.rs` (mappings and feedback), `Engine::apply_midi_maps`, the `Controller` MIDI methods, the `midi` list in `loom-patch`, `crates/loom-app/src/learn.rs` (learn mode), and `LearnView` in `loom-canvas`. Tests: `crates/loom-modules/tests/midi_learn.rs`, and the learn mode tests in `loom-canvas`'s `widget/tests.rs`.
@@ -97,14 +97,14 @@ midi: [
 
 - [x] Pressing **MIDI learn** starts learn mode. Clicking a tile control or an inspector row in learn mode arms its parameter and does not change its value.
 - [x] Given an armed parameter, when a control change arrives, then one mapping is made, the parameter takes the control's value, nothing is armed, and learn mode stays on.
-- [ ] Outside learn mode, clicking a control and then moving a hardware control makes no mapping.
+- [x] Outside learn mode, clicking a control and then moving a hardware control makes no mapping.
 - [x] Given a mapping, when its control change arrives, then the parameter's base value is `denormalize(value / 127)`: the minimum at 0, the maximum at 127, and the middle of a logarithmic range at 64 (within one step).
 - [x] A control change on another channel or controller number does not move the parameter.
 - [x] Learning a mapped parameter replaces its mapping. Learning a hardware control that is already mapped moves the mapping to the new parameter, and the status bar names the old one.
 - [x] Clicking an armed control disarms it. Escape or a second press of **MIDI learn** ends learn mode with no change.
 - [x] The status bar shows `Learning` for as long as learn mode is on, whatever the status message says (`App::ui_snapshot()` test).
-- [ ] In learn mode, every mapped control in view shows its `CC` label.
-- [ ] The tile knob and the inspector show the value set by the hardware at the first redraw after the watcher's next poll: at most one audio buffer, plus 15 ms, plus one frame. *Why not one frame:* a faster poll buys nothing a player would notice on a knob.
+- [x] In learn mode, every mapped control in view shows its `CC` label.
+- [x] The tile knob and the inspector show the value set by the hardware at the first redraw after the watcher's next poll: at most one audio buffer, plus 15 ms, plus one frame. *Why not one frame:* a faster poll buys nothing a player would notice on a knob.
 - [x] A mapped control change still reaches a MIDI input module.
 - [x] A patch with mappings saves and loads with the same mappings. A patch without a `midi` list loads with none. A patch with two mappings on one parameter, or on one channel and controller number, fails to load with a clear error.
 - [x] Removing a mapping in the inspector stops the control from moving the parameter. Deleting a module removes its mappings.
@@ -225,11 +225,11 @@ Controller(
 
 ### Acceptance criteria: mapping modes
 
-- [ ] Absolute with range 0.2 to 0.8 maps 0 to position 0.2 and 127 to 0.8; with Invert, 0 maps to 0.8 (engine test at block sizes 1, 77, and 512).
-- [ ] Pickup ignores a control above the current position until it comes down past it, then follows; a screen edit makes it wait again (engine test).
-- [ ] Relative in each encoding moves by the right number of steps in each direction, and stops at the range ends (engine test).
-- [ ] A waiting pickup shows its ghost mark while the hardware moves, and not after it catches (UI snapshot).
-- [ ] Modes, ranges, invert, and encodings save and load in patches; a mapping with none writes no new fields (test). Device files are in the [device mapping criteria](#acceptance-criteria-device-mappings).
+- [x] Absolute with range 0.2 to 0.8 maps 0 to position 0.2 and 127 to 0.8; with Invert, 0 maps to 0.8 (engine test at block sizes 1, 77, and 512).
+- [x] Pickup ignores a control above the current position until it comes down past it, then follows; a screen edit makes it wait again (engine test).
+- [x] Relative in each encoding moves by the right number of steps in each direction, and stops at the range ends (engine test).
+- [x] A waiting pickup shows its ghost mark while the hardware moves, and not after it catches (UI snapshot).
+- [x] Modes, ranges, invert, and encodings save and load in patches; a mapping with none writes no new fields (test). Device files are in the [device mapping criteria](#acceptance-criteria-device-mappings).
 - [ ] Manual check with a hardware knob and an endless encoder.
 
 ## Out of scope: device mappings
