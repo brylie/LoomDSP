@@ -224,5 +224,37 @@ fn modulation(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, feedback_regions, patches, modulation);
+/// A sine into Dynamics at its default settings, to the audio output.
+fn dynamics_on_a_sine() -> EngineParts {
+    let mut parts = create_engine(loom_modules::registry(), EngineConfig::default());
+    let c = &mut parts.controller;
+    let phase = c.add_module("loom.phase.generator").unwrap();
+    let sine = c.add_module("loom.osc.sine").unwrap();
+    c.connect_named(phase, "phase", sine, "phase").unwrap();
+    let dynamics = c.add_module("loom.dyn.dynamics").unwrap();
+    c.connect_named(sine, "out", dynamics, "in").unwrap();
+    let out = c.add_module("loom.io.audio-out").unwrap();
+    c.connect_named(dynamics, "out", out, "in").unwrap();
+    c.commit().unwrap();
+    parts
+}
+
+/// Benchmarks Dynamics with its settings still, so a change to how it takes its
+/// outputs shows (#616). #559 adds the modulated cases and the other modules.
+fn dynamics(c: &mut Criterion) {
+    let mut left = vec![0.0f32; BLOCK];
+    let mut right = vec![0.0f32; BLOCK];
+    let mut group = c.benchmark_group("dynamics");
+    group.throughput(Throughput::Elements(BLOCK as u64));
+    let mut parts = dynamics_on_a_sine();
+    group.bench_function("still", |b| {
+        b.iter(|| {
+            parts.engine.process(&mut left, &mut right);
+            black_box(&left);
+        })
+    });
+    group.finish();
+}
+
+criterion_group!(benches, feedback_regions, patches, modulation, dynamics);
 criterion_main!(benches);

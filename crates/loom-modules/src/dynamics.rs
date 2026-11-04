@@ -372,6 +372,7 @@ impl Module for Dynamics {
         let [left_in, right_in] = io.stereo_input(Self::IN);
         let [sidechain, _] = io.stereo_input(Self::SIDECHAIN_IN);
         let frames = left_in.len();
+        let ([gain_out], [[left_out, right_out]]) = io.split_outputs([Self::GAIN_OUT], [Self::OUT]);
         let mut reduction = 0.0f32;
         for i in 0..frames {
             let settings = Settings {
@@ -422,11 +423,9 @@ impl Module for Dynamics {
             let blend = mix.at_or(i, self.mix.tick());
             let out_gain = factor(output.at_or(i, self.output.tick()));
             let blended = |dry: f32, wet: f32| (dry + blend * (wet * matched - dry)) * out_gain;
-            let (out_left, out_right) = (blended(left, wet_left), blended(right, wet_right));
-            io.output(Self::GAIN_OUT)[i] = gain;
-            let [left_out, right_out] = io.stereo_output(Self::OUT);
-            left_out[i] = out_left;
-            right_out[i] = out_right;
+            gain_out[i] = gain;
+            left_out[i] = blended(left, wet_left);
+            right_out[i] = blended(right, wet_right);
         }
         self.reduction = reduction;
     }

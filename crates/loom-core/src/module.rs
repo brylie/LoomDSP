@@ -405,19 +405,60 @@ impl<'a> PortIo<'a> {
     /// programming error that tests catch, not a runtime condition.
     #[inline]
     pub fn stereo_output(&mut self, index: usize) -> [&mut [f32]; 2] {
-        let right = self
-            .right_of(index, true)
-            .expect("stereo_output needs an output declared Channels::Stereo");
-        let (offset, frames) = (self.offset, self.frames);
-        // SAFETY: guaranteed by the contract of `PortIo::new`. The right
-        // buffer is distinct from every other buffer, so the two slices do
-        // not overlap, and both borrows are tied to `&mut self`.
-        unsafe {
-            [
-                std::slice::from_raw_parts_mut(self.outputs[index].add(offset), frames),
-                std::slice::from_raw_parts_mut(right.add(offset), frames),
-            ]
+        let ([], [pair]) = self.split_outputs([], [index]);
+        pair
+    }
+
+    /// Several outputs at once: the left buffer of each port in `mono`, and
+    /// both channels of each port in `stereo`. Call it once above a frame loop.
+    /// [`PortIo::output`] and [`PortIo::stereo_output`] each borrow `self`, so
+    /// two of their results cannot be held together, and each call looks its
+    /// buffers up again.
+    ///
+    /// ```ignore
+    /// let ([gain], [[left, right]]) = io.split_outputs([Self::GAIN_OUT], [Self::OUT]);
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// Panics if a port is named twice, or a port in `stereo` is not declared
+    /// `Stereo`. This is a programming error that tests catch, not a runtime
+    /// condition.
+    #[inline]
+    pub fn split_outputs<const M: usize, const S: usize>(
+        &mut self,
+        mono: [usize; M],
+        stereo: [usize; S],
+    ) -> ([&mut [f32]; M], [[&mut [f32]; 2]; S]) {
+        // A real check, not a debug one: two slices of one port would overlap,
+        // and that would be undefined behaviour.
+        let ports = || mono.iter().chain(&stereo);
+        for (n, port) in ports().enumerate() {
+            assert!(
+                !ports().skip(n + 1).any(|other| other == port),
+                "split_outputs was given port {port} twice"
+            );
         }
+        let (offset, frames) = (self.offset, self.frames);
+        let slice = |ptr: *mut f32| {
+            // SAFETY: guaranteed by the contract of `PortIo::new`. The ports
+            // are distinct (checked above), outputs are distinct buffers, and a
+            // right buffer is distinct from every other buffer, so no slices
+            // overlap. The returned borrows are tied to `&mut self`.
+            unsafe { std::slice::from_raw_parts_mut(ptr.add(offset), frames) }
+        };
+        let mono = mono.map(|port| slice(self.outputs[port]));
+        let stereo = stereo.map(|port| {
+            let left = self.outputs[port];
+            let right = self
+                .right_of(port, true)
+                .expect("a stereo output needs a port declared Channels::Stereo");
+            // The compiler's `right_ptrs` promise this. A compiler bug should
+            // fail a test here, not alias silently.
+            debug_assert_ne!(left, right, "the two sides of output {port} are one buffer");
+            [slice(left), slice(right)]
+        });
+        (mono, stereo)
     }
 }
 
