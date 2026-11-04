@@ -724,6 +724,51 @@ fn depth_zero_continues_the_glide_in_eq_crossover_and_dynamics() {
     assert_close(&run(true), &run(false), 1e-4);
 }
 
+/// LFO rate and EQ mid Q glide on the engine's curve, so an assignment added
+/// during a glide does not bend it (#615).
+#[test]
+fn depth_zero_continues_a_logarithmic_glide() {
+    let turn = Turn::new("rate", 1.0, 40.0);
+    let run = |assign| glide_with_depth_zero("loom.mod.lfo", &turn, "out", |_| {}, assign);
+    assert_close(&run(true), &run(false), 1e-4);
+
+    let turn = Turn::new("mid_q", 0.5, 8.0);
+    let run = |assign| glide_with_depth_zero("loom.eq.eq", &turn, "out", noise_through_raised_mid, assign);
+    assert_close(&run(true), &run(false), 1e-4);
+}
+
+/// Renders a settled sink for one second, with or without a depth 0 assignment.
+fn settled_with_depth_zero(kind: &str, base: &[(&str, f32)], param: &str, setup: impl Fn(&mut Rig)) -> [Vec<f32>; 2] {
+    [false, true].map(|assign| {
+        let mut rig = Rig::new(kind, base);
+        setup(&mut rig);
+        rig.listen("out", "out");
+        if assign {
+            rig.assign(param, 0.0);
+        }
+        rig.parts.controller.commit().unwrap();
+        rig.render(48_000).0
+    })
+}
+
+/// A settled knob plays its exact value, as the engine's fill does. A trip
+/// through log space and back moves some values in the last bits: 2.0 Hz and a
+/// Q of 0.15 are two of them. Depth 0 must then still add nothing (rule 9).
+///
+/// The Q is chosen with care. A moved Q changes the sound only if the bell's
+/// damping then rounds differently. At +12 dB, 5.0 moves but its damping does
+/// not, so a test at 5.0 passes with or without the exact value.
+#[test]
+fn depth_zero_on_a_settled_logarithmic_knob_is_bit_identical() {
+    let [without, with] = settled_with_depth_zero("loom.mod.lfo", &[("rate", 2.0)], "rate", |_| {});
+    assert_eq!(with, without);
+    assert!(without.iter().any(|&sample| sample != 0.0));
+
+    let [without, with] = settled_with_depth_zero("loom.eq.eq", &[("mid_q", 0.15)], "mid_q", noise_through_raised_mid);
+    assert_eq!(with, without);
+    assert!(without.iter().any(|&sample| sample != 0.0));
+}
+
 /// A mute keeps fading when its first assignment arrives early in the fade.
 /// It reports no glide on purpose. A fill started part-way would round to the
 /// old state and reverse the fade for the first frames (rule 9), so this adds

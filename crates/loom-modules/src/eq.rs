@@ -292,7 +292,12 @@ struct Eq {
     low_gain: Smoothed,
     mid_gain: Smoothed,
     high_gain: Smoothed,
+    /// Mid Q as `log2`, so a glide spends equal time per octave of Q, as the
+    /// engine's does when Q is modulated (modulation spec, rule 7).
     mid_q: Smoothed,
+    /// The knob's exact Q. A settled band uses this, not a value that went
+    /// through `log2` and back, so depth 0 adds nothing (rule 9).
+    q: f32,
     low_coefficients: Cached<Shape, Coefficients>,
     mid_coefficients: Cached<Shape, Coefficients>,
     high_coefficients: Cached<Shape, Coefficients>,
@@ -348,7 +353,12 @@ impl Eq {
             low_gain: plain(Self::LOW_GAIN),
             mid_gain: plain(Self::MID_GAIN),
             high_gain: plain(Self::HIGH_GAIN),
-            mid_q: plain(Self::MID_Q),
+            mid_q: Smoothed::new(
+                default(Self::MID_Q).log2(),
+                rate,
+                params[Self::MID_Q].options.smooth_seconds,
+            ),
+            q: default(Self::MID_Q),
             low_coefficients: Cached::new(low_shelf(default(Self::LOW_FREQ), default(Self::LOW_GAIN)), compute),
             mid_coefficients: Cached::new(
                 Shape::Bell {
@@ -404,7 +414,13 @@ impl Module for Eq {
             let low_gain = params[3].at_or(i, self.low_gain.tick());
             let mid_freq = glide(&params[4], &mut self.mid_freq, Self::MID_FREQ);
             let mid_gain = params[5].at_or(i, self.mid_gain.tick());
-            let mid_q = params[6].at_or(i, self.mid_q.tick());
+            let gliding_q = self.mid_q.tick();
+            let base_q = if self.mid_q.current() == self.mid_q.target() {
+                self.q
+            } else {
+                gliding_q.exp2()
+            };
+            let mid_q = params[6].at_or(i, base_q);
             let high_freq = glide(&params[7], &mut self.high_freq, Self::HIGH_FREQ);
             let high_gain = params[8].at_or(i, self.high_gain.tick());
             let high_cut = glide(&params[9], &mut self.high_cut.corner, Self::HIGH_CUT);
@@ -436,7 +452,10 @@ impl Module for Eq {
             Self::LOW_GAIN => self.low_gain.set_target(value),
             Self::MID_FREQ => self.mid_freq.set_target(pitch::from_hz(value)),
             Self::MID_GAIN => self.mid_gain.set_target(value),
-            Self::MID_Q => self.mid_q.set_target(value),
+            Self::MID_Q => {
+                self.mid_q.set_target(value.log2());
+                self.q = value;
+            }
             Self::HIGH_FREQ => self.high_freq.set_target(pitch::from_hz(value)),
             Self::HIGH_GAIN => self.high_gain.set_target(value),
             Self::HIGH_CUT => self.high_cut.corner.set_target(pitch::from_hz(value)),
@@ -454,7 +473,7 @@ impl Module for Eq {
             Self::LOW_GAIN => self.low_gain.gliding(),
             Self::MID_FREQ => self.mid_freq.gliding().map(pitch::to_hz),
             Self::MID_GAIN => self.mid_gain.gliding(),
-            Self::MID_Q => self.mid_q.gliding(),
+            Self::MID_Q => self.mid_q.gliding().map(f32::exp2),
             Self::HIGH_FREQ => self.high_freq.gliding().map(pitch::to_hz),
             Self::HIGH_GAIN => self.high_gain.gliding(),
             Self::HIGH_CUT => self.high_cut.corner.gliding().map(pitch::to_hz),

@@ -2,6 +2,7 @@
 //!
 //! Spec: `docs/design/p1-modules.md`, LFO.
 
+use loom_core::signal::pitch;
 use loom_core::{
     Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, PortDefault, PortIo,
     PortSpec, ProcessContext, SignalType, Widget,
@@ -139,7 +140,12 @@ struct Lfo {
     synced: bool,
     cycles: f64,
     shape: u8,
+    /// The rate in pitch units, so a glide spends equal time per octave, as the
+    /// engine's does when the rate is modulated (modulation spec, rule 7).
     rate: Smoothed,
+    /// The knob's exact rate. A settled LFO runs at this, not at a value that
+    /// went through pitch and back, so depth 0 adds nothing (rule 9).
+    rate_hz: f32,
     /// The free-running phase.
     phasor: Phasor,
 }
@@ -151,12 +157,18 @@ impl Lfo {
     const SHAPE: usize = LFO.param_index("shape").unwrap();
 
     fn new(config: &ModuleConfig) -> Self {
+        let rate = &LFO.params[Self::RATE];
         Self {
             sample_rate: f64::from(config.sample_rate),
             synced: false,
             cycles: 1.0,
             shape: 0,
-            rate: Smoothed::new(1.0, config.sample_rate, LFO.params[Self::RATE].options.smooth_seconds),
+            rate: Smoothed::new(
+                pitch::from_hz(rate.default),
+                config.sample_rate,
+                rate.options.smooth_seconds,
+            ),
+            rate_hz: rate.default,
             phasor: Phasor::new(),
         }
     }
@@ -195,7 +207,13 @@ impl Module for Lfo {
             let synced = sync_mod.map_or(i, self.synced, |v| v >= 0.5);
             let cycles = cycles_mod.map_or(i, self.cycles, |v| f64::from(v.round().max(1.0)));
             let shape = shape_mod.map_or(i, self.shape, |v| v.round().max(0.0) as u8);
-            let rate = f64::from(rate_mod.at_or(i, self.rate.tick()));
+            let gliding = self.rate.tick();
+            let base = if self.rate.current() == self.rate.target() {
+                self.rate_hz
+            } else {
+                pitch::to_hz(gliding)
+            };
+            let rate = f64::from(rate_mod.at_or(i, base));
             let p = if synced {
                 // `cycles` waves per input cycle. A whole number keeps the
                 // wave continuous where the input wraps.
@@ -217,7 +235,10 @@ impl Module for Lfo {
     fn set_param(&mut self, index: usize, value: f32) {
         match index {
             Self::SYNC => self.synced = value >= 0.5,
-            Self::RATE => self.rate.set_target(value),
+            Self::RATE => {
+                self.rate.set_target(pitch::from_hz(value));
+                self.rate_hz = value;
+            }
             Self::CYCLES => self.cycles = f64::from(value.round().max(1.0)),
             Self::SHAPE => self.shape = value as u8,
             _ => {}
@@ -225,7 +246,13 @@ impl Module for Lfo {
     }
 
     fn param_glide(&self, index: usize) -> Option<f32> {
-        if index == Self::RATE { self.rate.gliding() } else { None }
+        // The rate glides in pitch. The engine glides in the knob's position,
+        // which is also logarithmic, so the paths match.
+        if index == Self::RATE {
+            self.rate.gliding().map(pitch::to_hz)
+        } else {
+            None
+        }
     }
 
     fn reset(&mut self) {

@@ -8,8 +8,9 @@ mod common;
 
 use common::{SAMPLE_RATE, changed};
 use loom_core::testing::run;
-use loom_core::{Module, ModuleConfig, ModuleDescriptor, ModuleRole, ParamSpec};
+use loom_core::{Module, ModuleConfig, ModuleDescriptor, ModuleRole, ParamMapping, ParamSpec};
 use loom_modules::{ALL, test_modules};
+use loom_rt::Smoothed;
 
 /// Frames per call to a module, the largest block the harness uses.
 const BLOCK: usize = 512;
@@ -107,6 +108,50 @@ fn whole_number_parameters_report_no_glide() {
         advance(module.as_mut(), descriptor, STILL_GLIDING);
         if let Some(value) = module.param_glide(index) {
             failed.push(format!("{}:{} reports {value}", descriptor.id, spec.name));
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// A knob follows one curve, whether or not it has an assignment. The engine
+/// glides in the control's position (`fill_param`), so a logarithmic parameter
+/// spends equal time per octave, and a module must glide the same way (#615).
+/// This also finds a logarithmic parameter that a module smooths in linear
+/// units. Positions are compared with an absolute tolerance, as a relative one
+/// fails on a parameter that glides through zero.
+///
+/// Two kinds are left out. A decibel parameter glides in linear gain in the
+/// module and in dB in the engine, which rule 9 accepts. A whole-number one
+/// rounds in the engine, and its module fades on a smoother of its own.
+#[test]
+fn modules_glide_on_the_curve_the_engine_uses() {
+    /// The most the two positions may differ, on a 0 to 1 control.
+    const TOLERANCE: f32 = 1e-4;
+    let mut failed = Vec::new();
+    let same_curve =
+        |spec: &ParamSpec| !spec.options.integer && !matches!(spec.options.mapping, ParamMapping::Decibels { .. });
+    for (descriptor, index, spec) in smoothed_params().filter(|(_, _, spec)| same_curve(spec)) {
+        let (from, to) = (spec.default, changed(spec));
+        let mut module = start(descriptor);
+        module.set_param(index, to);
+        // The engine's smoother, as `fill_param` runs it.
+        let mut engine = Smoothed::new(spec.normalize(from), SAMPLE_RATE, spec.options.smooth_seconds);
+        engine.set_target(spec.normalize(to));
+        let mut frame = 0;
+        for at in [16, 64, 160] {
+            advance(module.as_mut(), descriptor, at - frame);
+            for _ in frame..at {
+                engine.tick();
+            }
+            frame = at;
+            let got = module.param_glide(index).map(|value| spec.normalize(value));
+            let want = engine.current();
+            if got.is_none_or(|got| (got - want).abs() > TOLERANCE) {
+                failed.push(format!(
+                    "{}:{} at frame {at}: position {got:?}, the engine has {want}",
+                    descriptor.id, spec.name
+                ));
+            }
         }
     }
     assert!(failed.is_empty(), "{failed:#?}");
