@@ -778,6 +778,16 @@ impl Module for Crossover {
         }
     }
 
+    fn param_glide(&self, index: usize) -> Option<f32> {
+        match index {
+            // The splits glide in pitch. The engine glides in the knob's
+            // position, which is also logarithmic, so the paths match.
+            Self::LOW_SPLIT => self.low_split.gliding().map(pitch::to_hz),
+            Self::HIGH_SPLIT => self.high_split.gliding().map(pitch::to_hz),
+            _ => None,
+        }
+    }
+
     fn reset(&mut self) {
         self.filter.reset();
         self.low_split.reset(self.low_split.target());

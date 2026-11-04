@@ -19,6 +19,7 @@ use loom_core::{
     ModuleRole, Panel, ParamOptions, ParamSpec, Polarity, PortDefault, PortIo, PortSpec, ProcessContext, Registry,
     SignalType, Widget,
 };
+use loom_rt::Smoothed;
 
 /// Every test module.
 pub static ALL: &[&ModuleDescriptor] = &[&PANEL, &READOUT, &LINEAR, &LOG, &STEPS, &SMOOTH];
@@ -67,6 +68,8 @@ const fn output(name: &'static str, polarity: Polarity) -> PortSpec {
 const LEVEL: usize = 0;
 /// Index of `on` in [`PANEL`]: the parameter its light shows.
 const ON: usize = 4;
+/// Index of `glide` in [`PANEL`]: its smoothed parameter.
+const GLIDE: usize = PANEL.param_index("glide").unwrap();
 
 /// `test.panel`: one of every panel widget and parameter mapping.
 ///
@@ -126,10 +129,12 @@ pub static PANEL: ModuleDescriptor = ModuleDescriptor {
         param("count", 0.0, 1000.0, 7.0, "").integer(),
         param("tempo", 20.0, 300.0, 120.0, "BPM"),
     ],
-    role: ModuleRole::Dsp(|_| {
+    role: ModuleRole::Dsp(|config| {
+        let glide = &PANEL.params[GLIDE];
         Box::new(TestPanel {
             params: [0.0; 21],
             lit: 0.0,
+            glide: Smoothed::new(glide.default, config.sample_rate, glide.options.smooth_seconds),
         })
     }),
     panel: Panel::new(
@@ -173,6 +178,8 @@ struct TestPanel {
     params: [f32; 21],
     /// `on` at the last frame of the last block, for the light.
     lit: f32,
+    /// The smoothed parameter, which no output shows.
+    glide: Smoothed,
 }
 
 impl Module for TestPanel {
@@ -184,6 +191,7 @@ impl Module for TestPanel {
             .unwrap_or(self.params[ON]);
         let ([], [uni, bi]) = io.split::<0, 2>();
         for (i, (u, b)) in uni.iter_mut().zip(bi.iter_mut()).enumerate() {
+            self.glide.tick();
             let value = level.map_or(self.params[LEVEL], |samples| samples[i]);
             *u = value;
             *b = value;
@@ -194,6 +202,17 @@ impl Module for TestPanel {
         if let Some(slot) = self.params.get_mut(index) {
             *slot = value;
         }
+        if index == GLIDE {
+            self.glide.set_target(value);
+        }
+    }
+
+    fn param_glide(&self, index: usize) -> Option<f32> {
+        if index == GLIDE { self.glide.gliding() } else { None }
+    }
+
+    fn reset(&mut self) {
+        self.glide.reset(self.glide.target());
     }
 
     fn displays(&self, values: &mut [f32]) {
@@ -302,8 +321,10 @@ impl Module for TestReadout {
 }
 
 /// Writes its only parameter, or that parameter's modulated buffer, to `out`.
+/// A parameter with a smooth time glides to a new value, as a built-in does.
 struct Mirror {
     value: f32,
+    glide: Option<Smoothed>,
 }
 
 impl Module for Mirror {
@@ -311,17 +332,37 @@ impl Module for Mirror {
         let samples = io.modulated(0);
         let ([], [out]) = io.split::<0, 1>();
         for (i, sample) in out.iter_mut().enumerate() {
-            *sample = samples.map_or(self.value, |values| values[i]);
+            let base = self.glide.as_mut().map_or(self.value, Smoothed::tick);
+            *sample = samples.map_or(base, |values| values[i]);
         }
     }
 
     fn set_param(&mut self, _index: usize, value: f32) {
         self.value = value;
+        if let Some(glide) = self.glide.as_mut() {
+            glide.set_target(value);
+        }
+    }
+
+    fn param_glide(&self, _index: usize) -> Option<f32> {
+        self.glide.as_ref().and_then(Smoothed::gliding)
+    }
+
+    fn reset(&mut self) {
+        if let Some(glide) = self.glide.as_mut() {
+            glide.reset(glide.target());
+        }
     }
 }
 
-fn mirror(_config: &ModuleConfig) -> Box<dyn Module> {
-    Box::new(Mirror { value: 0.0 })
+/// A mirror of the only parameter of `descriptor`.
+fn mirror(descriptor: &ModuleDescriptor, config: &ModuleConfig) -> Box<dyn Module> {
+    let spec = &descriptor.params[0];
+    let seconds = spec.options.smooth_seconds;
+    Box::new(Mirror {
+        value: spec.default,
+        glide: (seconds > 0.0).then(|| Smoothed::new(spec.default, config.sample_rate, seconds)),
+    })
 }
 
 macro_rules! mirror_module {
@@ -345,7 +386,7 @@ macro_rules! mirror_module {
                 channels: Channels::PerChannel,
             }],
             params: &[$param],
-            role: ModuleRole::Dsp(mirror),
+            role: ModuleRole::Dsp(|config| mirror(&$name, config)),
             panel: Panel::EMPTY,
             displays: &[],
         };

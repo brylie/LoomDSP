@@ -445,6 +445,23 @@ impl Module for Eq {
         }
     }
 
+    fn param_glide(&self, index: usize) -> Option<f32> {
+        match index {
+            // The frequencies glide in pitch. The engine glides in the knob's
+            // position, which is also logarithmic, so the paths match.
+            Self::LOW_CUT => self.low_cut.corner.gliding().map(pitch::to_hz),
+            Self::LOW_FREQ => self.low_freq.gliding().map(pitch::to_hz),
+            Self::LOW_GAIN => self.low_gain.gliding(),
+            Self::MID_FREQ => self.mid_freq.gliding().map(pitch::to_hz),
+            Self::MID_GAIN => self.mid_gain.gliding(),
+            Self::MID_Q => self.mid_q.gliding(),
+            Self::HIGH_FREQ => self.high_freq.gliding().map(pitch::to_hz),
+            Self::HIGH_GAIN => self.high_gain.gliding(),
+            Self::HIGH_CUT => self.high_cut.corner.gliding().map(pitch::to_hz),
+            _ => None,
+        }
+    }
+
     fn reset(&mut self) {
         // The cuts aim from their slopes first, so the blends snap to them.
         let (low, high) = (self.low_cut.slope, self.high_cut.slope);

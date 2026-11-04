@@ -98,7 +98,7 @@ Every render fails if a port or parameter has an empty label or description, and
 `loom_modules::test_modules` holds small modules for tests only. It builds only with the `test-modules` feature of `loom-modules`, which is off by default. *Why not in `loom-test`:* the app ships them for `--test-modules`, and the harness should not ship. The built-in modules do not cover every panel widget or parameter mapping yet, so engine, app, and canvas tests share these instead of each declaring its own descriptor.
 
 - `test.panel` has one of every widget kind (a knob for a continuous and a whole-number parameter, a toggle, radio buttons with three options, a button, a light, and a meter), every parameter mapping (linear, logarithmic, whole-number, and one smoothed parameter), and one unipolar and one bipolar output.
-- `test.linear`, `test.log`, `test.steps`, and `test.smooth` each have one parameter and one bipolar output `out`, which writes what the engine gave that parameter. A test reads it to see the modulated value.
+- `test.linear`, `test.log`, `test.steps`, and `test.smooth` each have one parameter and one bipolar output `out`, which writes what the engine gave that parameter. A test reads it to see the modulated value. With no assignment, `test.smooth` writes its own glide to a new value, and reports it through `Module::param_glide`, as a built-in does.
 - `loom_modules::test_modules::register` adds them all to a registry, which checks their panels.
 - Their IDs start with `test.`, so they never clash with a real module.
 - The app registers them in its own tests, and in a normal run only with `--test-modules`. Only with that flag does its module browser list them. `examples/dev/test-widgets.ron` uses them: one of each widget, with an assignment on each control. Open it with `--test-modules`, `--dump-ui`, `--screenshot-window`, or the control channel to check a widget by hand. *Why:* some widgets are on no built-in module yet, so a manual check of them needs a patch, and a normal user should never see these modules.
@@ -148,6 +148,7 @@ Golden-audio tests for whole patches, the other half of NFR-OSS-05 ([#93](https:
 - [x] Every built-in DSP module stays finite with its continuous parameters at their maximum, each input in turn and all inputs at once.
 - [x] A parameter change and a transport change land on the same frame at block sizes 1, 77, and 512, for every built-in DSP module.
 - [x] A scheduled time signature change is a jump for one call, and a tempo or running change is not (test).
+- [x] Every continuous smoothed parameter of every built-in DSP module and test module reports its glide through `Module::param_glide` and stops once it has settled, and every whole-number one reports none (`crates/loom-modules/tests/param_glide.rs`).
 
 ## Huge finite inputs
 

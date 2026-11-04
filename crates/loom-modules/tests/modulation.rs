@@ -608,30 +608,65 @@ fn cable_cycle_is_broken_before_an_assignment_that_needs_no_delay() {
     assert_eq!(report.inserted_assignment_delays().count(), 0);
 }
 
-/// Turns a knob, then adds its first assignment halfway through the glide.
-/// The depth is 0, so the output must follow the same glide as with no
-/// assignment, instead of stepping to the new value (review on #133).
-fn glide_with_depth_zero(
-    kind: &str,
-    param: &str,
+/// A knob turn and when its first assignment arrives.
+struct Turn {
+    param: &'static str,
     from: f32,
     to: f32,
-    output: &str,
-    setup: impl Fn(&mut Rig),
-    assign: bool,
-) -> Vec<f32> {
-    let mut rig = Rig::new(kind, &[(param, from)]);
+    /// Frames after the turn at which the assignment is added.
+    at: usize,
+}
+
+impl Turn {
+    /// A turn with the assignment added at frame 64, inside every glide.
+    fn new(param: &'static str, from: f32, to: f32) -> Self {
+        Self {
+            param,
+            from,
+            to,
+            at: 64,
+        }
+    }
+}
+
+/// Turns a knob, then adds its first assignment during the glide. The depth
+/// is 0, so the output must follow the same glide as with no assignment,
+/// instead of stepping to the new value (review on #133).
+fn glide_with_depth_zero(kind: &str, turn: &Turn, output: &str, setup: impl Fn(&mut Rig), assign: bool) -> Vec<f32> {
+    let mut rig = Rig::new(kind, &[(turn.param, turn.from)]);
     setup(&mut rig);
     rig.listen(output, output);
     rig.render(256);
-    rig.parts.controller.set_param_named(rig.sink, param, to).unwrap();
-    let mut out = rig.render(64).0;
+    rig.parts
+        .controller
+        .set_param_named(rig.sink, turn.param, turn.to)
+        .unwrap();
+    let mut out = rig.render(turn.at).0;
     if assign {
-        rig.assign(param, 0.0);
+        rig.assign(turn.param, 0.0);
     }
     rig.parts.controller.commit().unwrap();
     out.extend(rig.render(1_024).0);
     out
+}
+
+/// Noise on the sink's `in`.
+fn noise_in(rig: &mut Rig) {
+    let noise = rig.parts.controller.add_module("loom.osc.noise").unwrap();
+    rig.parts
+        .controller
+        .connect_named(noise, "out", rig.sink, "in")
+        .unwrap();
+}
+
+/// Noise on the sink's `in`, with the EQ's mid band raised, so its frequency
+/// and Q change the sound. At 0 dB the bell is flat and they change nothing.
+fn noise_through_raised_mid(rig: &mut Rig) {
+    noise_in(rig);
+    rig.parts
+        .controller
+        .set_param_named(rig.sink, "mid_gain", 12.0)
+        .unwrap();
 }
 
 fn assert_close(got: &[f32], expected: &[f32], tolerance: f32) {
@@ -643,21 +678,16 @@ fn assert_close(got: &[f32], expected: &[f32], tolerance: f32) {
 
 #[test]
 fn depth_zero_added_during_a_glide_continues_the_glide() {
-    let run = |assign| glide_with_depth_zero("loom.math.constant", "value", 0.0, 1.0, "out", |_| {}, assign);
+    let turn = Turn::new("value", 0.0, 1.0);
+    let run = |assign| glide_with_depth_zero("loom.math.constant", &turn, "out", |_| {}, assign);
     let without = run(false);
     let with = run(true);
     // Still gliding when the assignment arrives, so a step would show.
     assert!(without[64] < 0.9, "{}", without[64]);
     assert_close(&with, &without, 1e-5);
 
-    let noise = |rig: &mut Rig| {
-        let noise = rig.parts.controller.add_module("loom.osc.noise").unwrap();
-        rig.parts
-            .controller
-            .connect_named(noise, "out", rig.sink, "in")
-            .unwrap();
-    };
-    let run = |assign| glide_with_depth_zero("loom.filter.svf", "cutoff", 200.0, 8_000.0, "lowpass", noise, assign);
+    let turn = Turn::new("cutoff", 200.0, 8_000.0);
+    let run = |assign| glide_with_depth_zero("loom.filter.svf", &turn, "lowpass", noise_in, assign);
     assert_close(&run(true), &run(false), 1e-4);
 
     let phase = |rig: &mut Rig| {
@@ -667,8 +697,54 @@ fn depth_zero_added_during_a_glide_continues_the_glide() {
             .connect_named(phase, "phase", rig.sink, "phase")
             .unwrap();
     };
-    let run = |assign| glide_with_depth_zero("loom.osc.pulse", "width", 0.2, 0.8, "out", phase, assign);
+    let turn = Turn::new("width", 0.2, 0.8);
+    let run = |assign| glide_with_depth_zero("loom.osc.pulse", &turn, "out", phase, assign);
     assert_close(&run(true), &run(false), 1e-4);
+}
+
+/// The EQ, Crossover, and Dynamics report their glides, so the same holds
+/// through them (#614). Dynamics `output` goes straight to the gain, so a step
+/// shows at once. `threshold` reaches the output through the detector.
+#[test]
+fn depth_zero_continues_the_glide_in_eq_crossover_and_dynamics() {
+    let turn = Turn::new("mid_freq", 200.0, 8_000.0);
+    let run = |assign| glide_with_depth_zero("loom.eq.eq", &turn, "out", noise_through_raised_mid, assign);
+    assert_close(&run(true), &run(false), 1e-4);
+
+    let turn = Turn::new("low_split", 200.0, 8_000.0);
+    let run = |assign| glide_with_depth_zero("loom.filter.crossover", &turn, "low", noise_in, assign);
+    assert_close(&run(true), &run(false), 1e-4);
+
+    let turn = Turn::new("output", 0.0, -12.0);
+    let run = |assign| glide_with_depth_zero("loom.dyn.dynamics", &turn, "out", noise_in, assign);
+    assert_close(&run(true), &run(false), 1e-4);
+
+    let turn = Turn::new("threshold", -18.0, -40.0);
+    let run = |assign| glide_with_depth_zero("loom.dyn.dynamics", &turn, "out", noise_in, assign);
+    assert_close(&run(true), &run(false), 1e-4);
+}
+
+/// A mute keeps fading when its first assignment arrives early in the fade.
+/// It reports no glide on purpose. A fill started part-way would round to the
+/// old state and reverse the fade for the first frames (rule 9), so this adds
+/// the assignment at frame 16, while the fill would still round the old way.
+#[test]
+fn depth_zero_does_not_reverse_a_mute_fade() {
+    let turn = Turn {
+        param: "mute1",
+        from: 0.0,
+        to: 1.0,
+        at: 16,
+    };
+    let held_input = |rig: &mut Rig| {
+        let input = module(&mut rig.parts.controller, "test.linear", "level", 0.5);
+        rig.parts
+            .controller
+            .connect_named(input, "out", rig.sink, "in1")
+            .unwrap();
+    };
+    let run = |assign| glide_with_depth_zero("loom.mix.mixer", &turn, "out", held_input, assign);
+    assert_close(&run(true), &run(false), 1e-6);
 }
 
 /// Guards the controller path: an assignment to a module that is not a DSP

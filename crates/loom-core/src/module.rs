@@ -50,6 +50,10 @@ pub trait Module: Send + AsAny {
     /// engine starts its own glide from this value, so the sound does not
     /// step to the target (modulation spec, rule 9). Called on the audio
     /// thread, so the rules for `process` apply.
+    ///
+    /// A whole-number parameter reports no glide. The module fades on its own
+    /// smoother and reads the fill only for the state it wants. A fill started
+    /// part-way would round to the old state and reverse the fade.
     fn param_glide(&self, index: usize) -> Option<f32> {
         let _ = index;
         None

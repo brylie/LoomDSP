@@ -236,6 +236,11 @@ impl Module for Mixer {
         }
     }
 
+    /// The levels report their glide. The mutes do not, on purpose: they are
+    /// whole numbers, so a fill started part-way would round to the old state,
+    /// and `process` would reverse the fade until the fill crossed the middle.
+    /// `open` keeps ticking under modulation, so the fade goes on from where it
+    /// is with nothing reported (modulation spec, rule 9).
     fn param_glide(&self, index: usize) -> Option<f32> {
         Self::input_of(Self::LEVEL1, index).and_then(|n| self.levels[n].gliding())
     }

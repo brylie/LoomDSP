@@ -449,6 +449,15 @@ impl Module for Dynamics {
         }
     }
 
+    fn param_glide(&self, index: usize) -> Option<f32> {
+        match index {
+            Self::THRESHOLD => self.threshold.gliding(),
+            Self::OUTPUT => self.output.gliding(),
+            Self::MIX => self.mix.gliding(),
+            _ => None,
+        }
+    }
+
     fn reset(&mut self) {
         self.algorithm.reset();
         self.level_match.reset();
