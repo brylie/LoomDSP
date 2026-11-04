@@ -713,8 +713,6 @@ fn button_name(button: mouse::Button) -> Option<&'static str> {
 }
 
 impl App {
-    /// The pointer for the snapshot, or `None` when nothing has been drawn
-    /// with the control channel on.
     /// The canvas typed field for the snapshot, as it was last drawn. The reason
     /// comes from the same check the canvas uses, so the two cannot disagree.
     pub(crate) fn typed_field_state(&self) -> Option<TypedFieldState> {
@@ -734,6 +732,8 @@ impl App {
         })
     }
 
+    /// The pointer for the snapshot, or `None` when nothing has been drawn
+    /// with the control channel on.
     pub(crate) fn pointer_state(&self) -> Option<PointerState> {
         let inner = self.pointer.0.borrow();
         if !inner.record {
