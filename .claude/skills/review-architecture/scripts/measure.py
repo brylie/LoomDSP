@@ -149,11 +149,11 @@ def sizes(files: list[Path]) -> dict:
 
 # --- churn ----------------------------------------------------------------
 
-def churn(since_days: int) -> dict:
-    """Files with the most commits in the window, from git."""
+def churn(since_days: int, paths: list[str]) -> dict:
+    """Files with the most commits in the window, from git, under the given paths."""
     try:
         out = subprocess.run(
-            ["git", "log", f"--since={since_days} days ago", "--name-only", "--pretty=format:", "--", "crates"],
+            ["git", "log", f"--since={since_days} days ago", "--name-only", "--pretty=format:", "--", *paths],
             capture_output=True, text=True, check=True,
         ).stdout
     except (OSError, subprocess.CalledProcessError):
@@ -209,6 +209,8 @@ def rules(files: list[Path]) -> dict:
 
 # --- seams ----------------------------------------------------------------
 
+# A `use` line, or a line inside a multi-line `use` block (names, commas, braces only).
+IMPORT_LINE_RE = re.compile(r"^\s*(use\s|[\w:,{}\s]+,?\s*$)")
 SEAMS = {
     "WAV writers (`WavWriter`)": re.compile(r"\bWavWriter\b"),
     "WAV readers (`WavReader`)": re.compile(r"\bWavReader\b"),
@@ -233,7 +235,7 @@ def seams(files: list[Path]) -> dict:
                 wants_tests = "Temp-directory" in name
                 if wants_tests != is_test_file(path):
                     continue
-                if "Transport" in name and "const TRANSPORT_MODULE" in code:
+                if "Transport" in name and ("const TRANSPORT_MODULE" in code or IMPORT_LINE_RE.match(code)):
                     continue
                 found[name].append(f"{path}:{i + 1}")
     return found
@@ -366,7 +368,7 @@ def main() -> int:
         "since_days": args.since,
         "sizes": sizes(files),
         "shapes": shapes(files),
-        "churn": churn(args.since),
+        "churn": churn(args.since, args.paths),
         "rules": rules(files),
         "seams": seams(files),
         "crates": crate_graph(),

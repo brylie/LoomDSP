@@ -20,7 +20,7 @@ $ARGUMENTS
 Use the narrowest scope that fits:
 
 - **A crate, path, or theme named above:** review that, and the seams it shares with its neighbours, because a boundary problem shows on both sides.
-- **A pasted review:** treat its claims as candidates and go to section 4. Reviews are usually written against an older tree, so check each claim at `HEAD` and record which are stale, so the next reader does not verify them again.
+- **A pasted review:** treat its claims as candidates. Still run the script (section 1), because its Rules and Crates sections answer most portability and dependency claims directly, and still read the lenses (section 3), because the traps there are how stale claims get caught. Then skip the broad reading and go to section 4. Reviews are usually written against an older tree, so check each claim at `HEAD` and record which are stale, so the next reader does not verify them again. First, though, search the issues for the review's own date, commit, or wording: a review that was filed before has a record in the backlog, and the right report then starts with that.
 - **Nothing named:** the whole workspace. Weigh the crates by where change is happening, which the measurement script shows from the git log, because debt in a crate nobody touches costs nothing yet.
 
 ## Ground rules
@@ -63,11 +63,13 @@ Before judging, read what the project has already decided, so you do not re-argu
 - `AGENTS.md`, for the hard rules and the architecture in one page, and `docs/dev/architecture.md` for the longer one.
 - The ADR index: `ls docs/adr/`, and the ADRs for the area in scope. The ones most often relevant to structure are ADR-0001 (two threads), ADR-0006 (licences), ADR-0010 (canvas), ADR-0013 (panels), ADR-0018 (clean room), ADR-0021 (plain-data view models), ADR-0034 (flat API over typed parts), and ADR-0035 (pure algorithms in `loom-dsp`).
 - Earlier snapshots: `ls docs/research/ | grep -i architecture`. Read the most recent one's "Deliberate" and "Stale" sections, because they save you repeating work.
-- The backlog for the area: `gh issue list --state open --label chore --limit 300`, the same for each `area:*` label in scope, and `gh issue list --search "KEYWORD" --state all` for each finding before you call it new. Closed issues matter as much as open ones: a closed issue often records why something is the way it is.
+- The backlog for the area: `gh issue list --state open --label chore --limit 300`, the same for each `area:*` label in scope, and `gh issue list --search "KEYWORD" --state all` for each finding before you call it new. Closed issues matter as much as open ones: a closed issue often records why something is the way it is. For a pasted review, one keyword search per claim is enough.
+- The area labels by crate: `area:engine` is `loom-core` and `loom-rt`; `area:modules` is `loom-modules`; `area:ui` is `loom-canvas` and `loom-app`; `area:crates` is `loom-dsp`, `loom-patch`, `loom-analysis`, `loom-test`, and `loom-host-desktop`; `area:midi` and `area:infra` cut across.
+- The first architecture review (November 2026) has no snapshot. Its record is issues #614 to #630 and [references/lenses.md](references/lenses.md), so for anything it covered, the backlog is the place to look before the code.
 
 ## 3. Look through the lenses
 
-Read [references/lenses.md](references/lenses.md) now. It says what to look for under each lens, where in this workspace each has bitten before, and which choices are deliberate.
+Read [references/lenses.md](references/lenses.md) now. It says what to look for under each lens, where in this workspace each has bitten before, and which choices are deliberate. Its examples are the conclusions of one review at one commit. They show the pattern; they do not settle the case in front of you, so read the code before you read the example that matches it, or the example will tell you what to find.
 
 Work in this order, because the earlier lenses produce bugs and the later ones produce cleanups:
 
@@ -109,7 +111,8 @@ Each finding that survives is one of:
 | **Cost** | Duplication, a mixed file, a seam that is slow to change | Findings, Medium or Low |
 | **Decision** | A choice the project needs to make before the fix is clear | Findings, with the options and your recommendation |
 | **Deliberate** | Explained by an ADR, a comment, or a closed issue | Its own section, with the reference |
-| **Already filed** | An open issue covers it | Its own section, with the link |
+| **Already filed** | An open issue covers it | Its own section, with the link. If your evidence changes its priority or its order against other work, it also gets a row in the table, marked filed, and the summary says why |
+| **Looks done, still open** | The code meets an open issue's "Done when" | Under "What to do next": say which commit did it, and that the issue should be checked and closed. Do not close it yourself |
 | **Stale or wrong** | A pasted claim that does not hold at `HEAD` | Its own section, with the commit that changed it where you know it |
 | **Taste** | A smell with no consequence you can name | Leave it out, or one line at the end |
 
@@ -130,7 +133,10 @@ Write in this order:
 5. **Deliberate:** what looked like debt and is a decision, with the reference. Say if the decision's cost has grown.
 6. **Already filed:** with links.
 7. **Stale or wrong:** for a pasted review, each claim that did not hold, and why.
-8. **Limits:** what you measured, what you read, what you did not build, run, or benchmark, and which crates you did not read.
+8. **Limits:** what you measured, what you read, what you did not build, run, or benchmark, and which crates you did not read. Some claims cannot be run here at all, such as what Rust's `std` does on `wasm32-unknown-unknown`; say that you stated them from the source and did not run them.
+9. **What to do next:** the filing shape you would propose (which findings go together, which are P1), and any open issue the code already satisfies. A run with no user to ask still leaves something to act on.
+
+For a pasted review, use a lighter shape: the commit, a verdict table (claim, verdict at `HEAD`, backlog link), one block per claim, then Deliberate, Stale or wrong, Limits, and What to do next. "What to preserve" has nothing to say about a list of claims, so leave it out.
 
 For each finding give:
 
@@ -142,7 +148,18 @@ For each finding give:
 
 Keep taste apart from defects. Report real findings only, because a long list hides what matters. Short sentences, plain words, no em dashes, as AGENTS.md asks. Counts in prose should come from the script's output, dated by the commit.
 
-**Where it goes.** Write the report in your reply. When the scope is a crate or wider, also draft a snapshot at `docs/research/YYYY-MM-<scope>-architecture-review.md`, with the header the UX snapshots use: Kind (research snapshot, non-normative), Date with the commit, Follows (the previous architecture snapshot, if any), Used by (filled in after filing), then Method, Limits, and the report. Research snapshots do not change later, so a later review writes a new one and reads this one's "Deliberate" and "Stale" sections first. Leave the draft uncommitted for the user.
+**Where it goes.** Write the report in your reply. When the scope is a crate or wider, also draft a snapshot at `docs/research/YYYY-MM-<scope>-architecture-review.md`. A pasted review gets no snapshot unless the user asks, because its record is the issues it maps to. The snapshot starts with the header the UX snapshots use:
+
+```markdown
+# Architecture Review: <scope>
+
+- **Kind:** Research snapshot. Non-normative.
+- **Date:** YYYY-MM-DD, on `main` at <commit> (after #<last PR>).
+- **Follows:** <the previous architecture snapshot>, or none.
+- **Used by:** to be filled in after filing.
+```
+
+Then one paragraph on what was reviewed and why, then Method (what you ran and read, with the script's numbers), then the report from Summary on, with Limits inside it. Research snapshots do not change later, so a later review writes a new one and reads this one's "Deliberate" and "Stale" sections first. Leave the draft uncommitted for the user.
 
 ## 7. After the report
 

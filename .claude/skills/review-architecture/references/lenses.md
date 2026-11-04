@@ -1,6 +1,8 @@
 # Lenses for an architecture review of LoomDSP
 
-Each lens says what to look for, where it has bitten this workspace before, and what to check before calling something a finding. The examples are from the review of November 2026 on `main` at a671e30. Line numbers there have moved since; use them to find the pattern, not the line.
+Each lens says what to look for, where it has bitten this workspace before, and what to check before calling something a finding. The examples are from the review of November 2026 on `main` at a671e30, filed as issues #614 to #630. Line numbers there have moved since; use them to find the pattern, not the line.
+
+The examples are that review's conclusions. They are a map of where to look, and they anchor: a reader who knows what the last review found tends to find it again and little else. So read the code for the case in front of you before you read the example that matches it, and check whether an example's issue is still open before you repeat it.
 
 ## Contents
 
@@ -42,7 +44,7 @@ Nothing reachable from `Engine::process` or `Module::process` may allocate, free
 
 AGENTS.md states rules that CI only partly enforces. For each, ask what would break it without a test failing.
 
-- **Portability (rule 6).** The wasm task only builds the five portable crates. Rust's `std` compiles `std::fs` and `std::process` as stubs on `wasm32-unknown-unknown`, so a filesystem call in `loom-patch` builds and then panics or errors at runtime. The script lists such calls; check each is gated or belongs elsewhere.
+- **Portability (rule 6).** The wasm task only builds the five portable crates. Rust's `std` compiles `std::fs` and `std::process` as stubs on `wasm32-unknown-unknown`: the filesystem calls return an "unsupported" error, and `std::process::id` panics, because that target has no process ids. So a filesystem call in `loom-patch` builds, and fails only at runtime. The script lists such calls; check each is gated or belongs elsewhere. To confirm what a stub does, read the `unsupported` platform module in `std`'s source, which comes with `rustup component add rust-src` under the toolchain's `lib/rustlib/src`; say in Limits if you stated it without reading it.
 - **Determinism.** Random sources are seeded. Look for `HashMap` iteration that reaches output order, `Instant`, or thread timing on the audio path.
 - **Licences.** `cargo deny` covers crates. It does not cover code pasted from elsewhere; the clean-room rule is a review question, not a tool.
 - **Block-size invariance.** Reference tests run block sizes 1, 77, and 512. A module that keeps a per-block value across `process` calls can pass them and still differ at another size. Read for state updated once per call rather than once per sample.
@@ -117,7 +119,7 @@ Each of these was flagged by a review and is a decision. A review may still say 
 | Looks like | Is |
 |---|---|
 | `WidgetKind` in `loom-core` mirrored as `WidgetViewKind` in `loom-canvas` | `loom-canvas` has no dependency on `loom-core` by design (ADR-0010), so the canvas stays a plain widget crate. The mirror is the price of that boundary. |
-| Nine overlay `Option`s on `App` read in several places | Since #569 one function, `input_owner()`, reads them. The `Option`s as source are still a hazard (#624), but the divergent guards are gone. |
+| Nine overlay `Option`s on `App` read in several places | Since commit d13ece9 one function, `input_owner()`, reads them. The `Option`s as source are still a hazard (#624), but the divergent guards are gone. The issue that asked for this, #569, may still be open; cite the commit, and say the issue looks done. |
 | `test.*` modules compiled into the app | Decided in #469: the feature is on so that `--test-modules` works; registration is gated by the flag, so users never see them. |
 | Range pairing found by scanning the panel for a `Range` widget | The widget must declare the pair anyway; declaring it twice would be the duplication. |
 | Display and live tables fenced on the module id | The key carries the id, so a recycled slot can only return the same logical module's stale value for one frame (#620). Real, and Later. |
@@ -135,3 +137,5 @@ Add to this table when a review finds another, because the next reviewer will tr
 - **A smaller twin the review missed.** The LFO's linear glide was named; the EQ's mid Q had the same mismatch two files away. Grep the pattern after confirming one case.
 - **A crate boundary read as coupling.** The absence of a dependency can be the design (section 10).
 - **Backlog overlap.** About a third of a review's recommendations already had open issues. Search before "not filed", and search closed issues before "nobody decided".
+- **A review that was filed before.** Issues that cite a review's date or commit mean someone already did this. Search for that first, and report it rather than filing twice.
+- **An open issue the code already meets.** A commit can do an issue's work without closing it. Say "looks done, still open" and name the commit; do not close it, because the user checks the "Done when" list.
