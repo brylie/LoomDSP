@@ -45,6 +45,10 @@ Use Level Meter to watch how loud a signal is at any point in a patch. It shows 
 
 The input passes through unchanged, so you can put the meter in the middle of a chain.
 
+The light above the bar turns on when a peak reaches 0 dB, because that would clip if it reached the output. It stays on until you click it. The number below the bar is the highest peak so far. Double-click the meter, or press **Reset clip** in the inspector, to reset both.
+
+Set View to Meter and history to see the level over the last seconds beside the meter. Window sets how many seconds.
+
 ## Example patch
 
 Measures the output of an oscillator before sending it to the main audio output.

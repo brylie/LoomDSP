@@ -47,7 +47,7 @@ Shows its input over time. Passes the input through unchanged.
 
 Use Scope to see a signal's shape over time: an oscillator's wave, an envelope's rise and fall, or how far a modulation moves.
 
-Window sets how much time the display shows. With Auto on, the trace starts where the signal crosses halfway between its lowest and highest values, so a steady wave stands still. Turn Auto off to set that level yourself. The input passes through unchanged.
+Window sets how much time the display shows. With Auto on, the trace starts where the signal crosses halfway between its lowest and highest values, so a steady wave stands still. Turn Auto off to set that level yourself. Slope, in the inspector, chooses a rising or a falling edge. The input passes through unchanged.
 
 ## Example patch
 

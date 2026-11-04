@@ -29,6 +29,8 @@ const TRACE_MIN_PX: f32 = 1.0;
 const INSET: f32 = 2.0;
 /// Width of a lighter second line, in world units.
 const PEAK_WIDTH: f32 = 0.8;
+/// How far a level history's column reaches over the next one, in world units.
+const SEAM: f32 = 0.6;
 /// Where a spectrum's faint grid lines sit: 100 Hz, 1 kHz, and 10 kHz, on its
 /// logarithmic axis from 20 Hz to 20 kHz (panel-widgets.md, Spectrum).
 const SPECTRUM_GRID: [f32; 3] = [0.232_99, 0.566_33, 0.899_66];
@@ -203,7 +205,10 @@ impl TraceGeometry {
                         let top = at(point);
                         let height = area.y + area.height - top.y;
                         if height > 0.0 {
-                            let rect = Rectangle::new(top, iced::Size::new(column, height));
+                            // A little wider, so the soft edges of two columns
+                            // do not leave a seam between them.
+                            let width = (column + SEAM).min(area.x + area.width - top.x);
+                            let rect = Rectangle::new(top, iced::Size::new(width, height));
                             fills.push(Shape::new(rect, 0.0, colour, Color::TRANSPARENT, 0.0));
                         }
                     }
