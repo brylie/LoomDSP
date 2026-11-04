@@ -25,16 +25,11 @@ impl App {
             .browser_key(self.browser_key)
             .interactive(self.input_owner() == crate::input_owner::InputOwner::Canvas)
             .matrix_line(self.matrix_line())
-            .matrix_keyboard(self.matrix.tab == RightTab::Matrix && self.matrix.focused)
+            .matrix_keyboard(self.matrix_has_keys())
             .text_field_keys(self.text_focus.any)
             .text_field_keeps_tab(self.tab_moves_between_fields())
             .typed_check(|module, widget, text| self.typed_check(module, widget, text))
-            .matrix_escape(
-                self.matrix.tab == RightTab::Matrix
-                    && self.matrix.focused
-                    && self.matrix.edit.is_none()
-                    && self.matrix.add.is_none(),
-            )
+            .matrix_escape(self.matrix_has_keys() && self.matrix.edit.is_none() && self.matrix.add.is_none())
             .animate(self.animating)
             .learn(self.learn.shown());
         if let Some(still) = self.still {

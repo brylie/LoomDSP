@@ -7,7 +7,6 @@
 //! and the headless `Ui` all go through this route, so a test sees what the
 //! app does.
 
-use crate::matrix::Tab as RightTab;
 use crate::{App, Message, panic, patches, question, recent, settings};
 use crate::{controls, matrix, subscriptions};
 use iced::Task;
@@ -187,7 +186,7 @@ impl App {
     pub(crate) fn listening(&self) -> Listening {
         Listening {
             open: self.question.is_none(),
-            matrix: self.matrix.tab == RightTab::Matrix && self.matrix.focused,
+            matrix: self.matrix_has_keys(),
             browser: self.browser.is_some() && self.help.is_none(),
             patches: self.patches.is_some() && self.chooser.is_none(),
             value_draft: self.value_draft.is_some(),

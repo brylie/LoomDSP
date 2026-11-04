@@ -13,6 +13,10 @@ use loom_core::{AssignmentId, Graph, ModuleId, OutputRef};
 use serde::Serialize;
 use std::fmt;
 
+/// The filter's widget ID. Its focus changes which keys the table takes
+/// (modulation.md, Filter focus).
+pub(crate) const FILTER: &str = "matrix-filter";
+
 /// Finds the selected cell and reveals it with the smallest scroll.
 struct RevealRow {
     viewport: Option<(iced::Rectangle, iced::Vector)>,
@@ -375,6 +379,7 @@ pub fn view<'a>(model: MatrixModel, state: &State, graph: &Graph) -> Element<'a,
     let mut content = column![].spacing(7).width(Length::Fill);
     content = content.push(
         text_input("Filter modules or parameters", &model.filter)
+            .id(FILTER)
             .on_input(|s| Message::Matrix(Event::Filter(s)))
             .size(style::CONTROL),
     );
@@ -566,6 +571,14 @@ impl App {
         task
     }
 
+    /// True when the keyboard belongs to the matrix: its tab is open, it has
+    /// focus, and no overlay has the input.
+    pub(crate) fn matrix_has_keys(&self) -> bool {
+        self.matrix.tab == Tab::Matrix
+            && self.matrix.focused
+            && self.input_owner() == crate::input_owner::InputOwner::Canvas
+    }
+
     /// Handles a key while the matrix has focus. Keeps the selected card in
     /// view, and focuses the depth field when Enter opens it.
     pub(crate) fn matrix_key_message(&mut self, key: keyboard::Event) -> iced::Task<Message> {
@@ -578,7 +591,7 @@ impl App {
         ) && self.matrix.edit.is_none()
             && self.matrix.cell == Column::Depth;
         self.matrix_key(key);
-        let scroll = if self.matrix.tab == Tab::Matrix && self.matrix.focused {
+        let scroll = if self.matrix_has_keys() {
             reveal_selected()
         } else {
             iced::Task::none()
@@ -817,11 +830,14 @@ impl App {
         let keyboard::Event::KeyPressed { key, modifiers, .. } = event else {
             return;
         };
-        if self.matrix.tab != Tab::Matrix || !self.matrix.focused || self.browser.is_some() || self.rig.window.is_some()
-        {
+        if !self.matrix_has_keys() || modifiers.command() {
             return;
         }
-        if modifiers.command() {
+        // Only these two leave the filter. Anything else the field does not use
+        // must not change a row while the player is typing (modulation.md,
+        // Filter focus).
+        let leaves = matches!(key, keyboard::Key::Named(Named::Escape | Named::Tab));
+        if !leaves && self.text_focus.field == Some(iced::advanced::widget::Id::new(FILTER)) {
             return;
         }
         if key == keyboard::Key::Named(Named::Escape) {

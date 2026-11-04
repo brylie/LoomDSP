@@ -308,6 +308,16 @@ impl Ui {
 
     /// Where the inspector's value field for this parameter is in the window.
     pub fn value_field(&mut self, module: u32, index: usize) -> Point {
+        self.field_by_id(crate::controls::value_field_id(module, index))
+    }
+
+    /// Where the text field with this ID is in the window, to click on it.
+    pub fn field(&mut self, id: &'static str) -> Point {
+        self.field_by_id(iced::advanced::widget::Id::new(id))
+    }
+
+    /// The centre of the focusable widget with this ID.
+    fn field_by_id(&mut self, id: iced::advanced::widget::Id) -> Point {
         use iced::advanced::widget::operation::{Focusable, Outcome};
         use iced::advanced::widget::{Id, Operation};
 
@@ -325,9 +335,9 @@ impl Ui {
                 Outcome::None
             }
         }
-        let mut find = Find(crate::controls::value_field_id(module, index), None);
+        let mut find = Find(id, None);
         self.with_ui(|ui, renderer, _| ui.operate(renderer, &mut find));
-        find.1.expect("a value field for that parameter").center()
+        find.1.expect("a field with that ID is on screen").center()
     }
 
     /// Moves the pointer to a window point.

@@ -1443,9 +1443,8 @@ impl App {
             Message::FileDropped(path) => self.file_dropped(path),
             Message::DropsDone => self.drops_done(),
             Message::Key(iced::keyboard::Event::KeyPressed { modifiers, .. })
-                if self.matrix.tab == RightTab::Matrix && self.matrix.focused && !modifiers.command() => {}
-            Message::Key(iced::keyboard::Event::KeyReleased { .. })
-                if self.matrix.tab == RightTab::Matrix && self.matrix.focused => {}
+                if self.matrix_has_keys() && !modifiers.command() => {}
+            Message::Key(iced::keyboard::Event::KeyReleased { .. }) if self.matrix_has_keys() => {}
             Message::ProbeMenu(message) => {
                 if let (Some(menu), probe_menu::Message::Pick(probe)) = (self.probe_menu.take(), message) {
                     self.add_probe(probe, menu.output, menu.world);
