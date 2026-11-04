@@ -38,7 +38,7 @@ fn a_commit_that_cannot_retry_is_kept() {
     app.commit_failed(&LoomError::TooManyModules(4));
     assert!(!app.retry_commit);
     assert_eq!(app.alerts.severity(), alerts::Severity::Alarm);
-    assert_eq!(app.alerts.newest_kept().unwrap().cause, alerts::Cause::Other);
+    assert_eq!(app.alerts.top_kept().unwrap().cause, alerts::Cause::Other);
     app.alerts.say("saved");
     assert!(app.alerts.kept_field().is_some(), "a later message does not hide it");
 }

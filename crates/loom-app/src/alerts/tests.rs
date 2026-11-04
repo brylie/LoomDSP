@@ -70,7 +70,7 @@ fn an_error_stays_after_later_messages_and_never_shows_twice() {
     assert_eq!(alerts.status(), "the recording stopped", "a command's reply reads this");
     assert_eq!(alerts.severity(), Severity::Alarm);
     assert_eq!(alerts.kept_field(), None, "the status line says it");
-    assert!(alerts.newest_kept().is_some());
+    assert!(alerts.top_kept().is_some());
 
     alerts.say("saved");
     assert_eq!(alerts.kept_field().unwrap().text, "the recording stopped");
@@ -88,11 +88,67 @@ fn one_error_is_kept_per_cause() {
     alerts.error(Cause::File, "save failed again");
     let kept: Vec<_> = alerts.kept().iter().map(|kept| kept.text.as_str()).collect();
     assert_eq!(kept, ["lost", "save failed again"]);
-    assert_eq!(alerts.newest_kept().unwrap().cause, Cause::File);
+    assert_eq!(alerts.top_kept().unwrap().cause, Cause::File);
 
     assert!(alerts.clear(Cause::File));
     assert!(!alerts.clear(Cause::File));
-    assert_eq!(alerts.newest_kept().unwrap().cause, Cause::AudioOutput);
+    assert_eq!(alerts.top_kept().unwrap().cause, Cause::AudioOutput);
+}
+
+/// A kept warning stays beside later messages, and reads as a warning in the
+/// bar's field and in hover text, not as an error.
+#[test]
+fn a_kept_warning_stays_and_reads_as_a_warning() {
+    let mut alerts = Alerts::default();
+    alerts.warn_kept(Cause::Autosave, "autosave failed");
+    assert_eq!(alerts.severity(), Severity::Warning);
+    assert!(alerts.kept_field().is_none(), "the status line says it");
+    assert!(alerts.status_is_kept());
+
+    alerts.say("saved");
+    let kept = alerts.kept_field().unwrap();
+    assert_eq!((kept.severity, kept.dismissible), (Severity::Warning, true));
+    assert_eq!(alerts.kept_hover(), "Warning: autosave failed");
+    assert!(!alerts.status_is_kept());
+
+    assert!(alerts.clear(Cause::Autosave));
+    assert_eq!(alerts.status(), "saved", "a newer message stays");
+}
+
+/// Clearing a kept warning that is also the latest message empties the line,
+/// so it does not go on saying `Warning:`.
+#[test]
+fn clearing_a_kept_warning_empties_the_line_that_says_it() {
+    let mut alerts = Alerts::default();
+    alerts.warn_kept(Cause::Autosave, "autosave failed");
+    alerts.clear(Cause::Autosave);
+    assert_eq!((alerts.status(), alerts.severity()), ("", Severity::Normal));
+}
+
+/// A warning kept later does not hide an error from the bar's field, and a
+/// plain warning with the same text is not mistaken for it.
+#[test]
+fn an_error_leads_a_newer_kept_warning() {
+    let mut alerts = Alerts::default();
+    alerts.error(Cause::AudioOutput, "device lost");
+    alerts.warn_kept(Cause::Autosave, "autosave failed");
+    assert_eq!(alerts.top_kept().unwrap().cause, Cause::AudioOutput);
+    assert_eq!(alerts.kept_field().unwrap().cause, Cause::AudioOutput);
+    assert_eq!(alerts.status(), "autosave failed");
+
+    alerts.clear(Cause::AudioOutput);
+    assert_eq!(alerts.top_kept().unwrap().cause, Cause::Autosave);
+    assert!(alerts.kept_field().is_none(), "the status line still says it");
+}
+
+/// `keep_warning` leaves the status line for the message already there.
+#[test]
+fn keeping_a_warning_quietly_leaves_the_status_line() {
+    let mut alerts = Alerts::default();
+    alerts.say("Restored unsaved changes.");
+    alerts.keep_warning(Cause::Autosave, "Autosave is off: no folder.");
+    assert_eq!(alerts.status(), "Restored unsaved changes.");
+    assert_eq!(alerts.kept_field().unwrap().text, "Autosave is off: no folder.");
 }
 
 /// Clearing an error that is also the latest message empties the line, so it

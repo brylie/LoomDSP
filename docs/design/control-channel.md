@@ -180,7 +180,7 @@ A rectangle is `{x, y, width, height}`, from its top-left corner. `locate` answe
 | `stats.output_silenced`, `stats.output_clipped` | True while the bar shows that output warning ([panels.md](panels.md#audio-load-and-dropouts-in-the-stats-bar)) |
 | `status` | The latest status message |
 | `status_severity` | `info`, `warning`, or `error` ([visual system, Status messages](visual-system.md#status-messages)) |
-| `errors` | The kept errors, oldest first: `cause` (`audio_output`, `audio_input`, `file`, or `other`), `text`, and `dismissible` |
+| `errors` | The kept problems, oldest first: `cause` (`audio_output`, `audio_input`, `file`, `autosave`, or `other`), `severity` (`error`, or `warning` for `autosave`), `text`, and `dismissible` |
 | `learning` | True while MIDI learn mode is on and the bar shows `Learning` |
 | `tiles[].inputs[].shown`, `tiles[].outputs[].shown`, `tiles[].widgets[].shown` | The label as the tile draws it, when it is cut with "…" (`{"label": "Resonance", "shown": "Reson…"}`). Left out when the whole label shows |
 

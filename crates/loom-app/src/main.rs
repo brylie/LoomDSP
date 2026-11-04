@@ -841,12 +841,22 @@ impl App {
             return;
         }
         let current = self.current_patch();
-        if let Some(line) = self.document.autosave(now, current) {
-            if line == recovery::AUTOSAVE_WORKS {
-                self.alerts.say(line);
-            } else {
-                self.alerts.warn(line);
+        for report in self.document.autosave(now, current) {
+            self.autosave_report(report);
+        }
+    }
+
+    /// Tells the player what autosave reported. A failure stays on screen as
+    /// a warning until autosave works again: the safety net is gone, but
+    /// nothing else is wrong, so it never interrupts playing.
+    pub(crate) fn autosave_report(&mut self, report: recovery::Report) {
+        match report {
+            recovery::Report::Failed(line) => self.alerts.warn_kept(alerts::Cause::Autosave, line),
+            recovery::Report::Works => {
+                self.alerts.clear(alerts::Cause::Autosave);
+                self.alerts.say(recovery::AUTOSAVE_WORKS);
             }
+            recovery::Report::Note(line) => self.alerts.warn(line),
         }
     }
 
