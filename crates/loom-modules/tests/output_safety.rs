@@ -6,6 +6,7 @@ mod common;
 use common::*;
 use loom_core::safety::{CEILING, FADE_SECONDS, LOOKAHEAD_SECONDS, samples};
 use loom_core::{EngineConfig, EngineParts, ModuleId, OutputSafety, ProbeKind, create_engine};
+use std::sync::atomic::Ordering;
 
 const MODES: [OutputSafety; 3] = [OutputSafety::LowLatency, OutputSafety::Clean, OutputSafety::Off];
 const BLOCKS: [usize; 3] = [1, 77, 512];
@@ -363,5 +364,39 @@ fn a_restart_keeps_the_running_module_state() {
     for (frame, (&actual, &source)) in faded.iter().zip(&plain).enumerate() {
         let gain = frame.min(length) as f32 / length as f32;
         assert_eq!(actual, source * gain, "frame {frame}");
+    }
+}
+
+/// A runaway feedback loop holds at the largest finite value (ADR-0037), so it
+/// makes no bad samples. In every mode it must still raise a warning, or it goes
+/// quiet with nothing to say why (panels spec, Silenced and clipped output).
+#[test]
+fn a_runaway_loop_raises_the_clipped_warning() {
+    const FRAMES: usize = 48_000;
+    for mode in MODES {
+        let mut parts = engine(mode, SAMPLE_RATE);
+        let c = &mut parts.controller;
+        let add = c.add_module("loom.math.add").unwrap();
+        let mul = c.add_module("loom.math.mul").unwrap();
+        let out = c.add_module("loom.io.audio-out").unwrap();
+        c.set_param_named(add, "offset", 1.0).unwrap();
+        c.set_range(mul, 0, loom_core::ParamRange::new(-10.0, 10.0)).unwrap();
+        c.set_param_named(mul, "gain", 10.0).unwrap();
+        c.connect_named(add, "out", mul, "a").unwrap();
+        c.connect_named(mul, "out", add, "a").unwrap();
+        c.connect_named(mul, "out", out, "in").unwrap();
+        c.commit().unwrap();
+        render(&mut parts, FRAMES, 128, &[]);
+        let stats = parts.controller.stats();
+        let (silenced, clipped) = (
+            stats.output_silenced.load(Ordering::Relaxed),
+            stats.output_clipped.load(Ordering::Relaxed),
+        );
+        assert_eq!(silenced, 0, "{mode:?}");
+        assert!(clipped > 0, "{mode:?}");
+        assert!(
+            clipped <= 2 * FRAMES as u64,
+            "{mode:?}: each sample counts once, {clipped}"
+        );
     }
 }

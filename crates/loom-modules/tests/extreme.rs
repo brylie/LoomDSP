@@ -70,13 +70,16 @@ fn sets_delay_time(descriptor: &ModuleDescriptor, port: &str) -> bool {
     port == "time" && matches!(descriptor.id, "loom.time.delay" | "loom.time.allpass")
 }
 
+/// An entry of [`ALL_INPUT_EXCEPTIONS`]: `(module, option, reason)`.
+type AllInputException = (&'static str, Option<(&'static str, f32)>, &'static str);
+
 /// Where every input being huge at once rightly leaves a module different from a
 /// clean render, and why: `(module, option, reason)`. The module must still stay
 /// finite and return to a normal size. An entry with an option, as `(parameter,
 /// value)`, excuses only that option, so every other option gets the full check. A
 /// bug can live in one mode, so an entry with `None`, which excuses them all, is
 /// for a module that needs it at its defaults.
-const ALL_INPUT_EXCEPTIONS: &[(&str, Option<(&str, f32)>, &str)] = &[
+const ALL_INPUT_EXCEPTIONS: &[AllInputException] = &[
     (
         "loom.dyn.dynamics",
         None,
