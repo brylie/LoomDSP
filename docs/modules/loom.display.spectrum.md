@@ -44,6 +44,8 @@ Use Spectrum to see which frequencies a signal holds: where a filter cuts, how b
 
 Across is frequency, from 20 Hz to 20 kHz, on a scale where each octave has the same width. Up is level, from -90 dB to 0 dB. A full-scale sine peaks at 0 dB. Turn Tilt on to make a full mix read closer to level across the range, and Hold to keep a line at each recent peak for two seconds. The input passes through unchanged. Both settings are in the inspector, and neither changes the sound.
 
+On a stereo cable it shows the mean of the two sides. A full-scale sine on one side only reads -6 dB, and sides in opposite phase cancel, so they read nothing.
+
 ## Example patch
 
 Shows a saw wave's harmonics, with the filter cutting the highest ones.

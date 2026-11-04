@@ -1098,6 +1098,9 @@ impl App {
 
     /// Takes new scope traces from the telemetry thread.
     fn take_traces(&mut self, traces: Vec<(ProbeId, loom_canvas::Trace)>) {
+        if traces.is_empty() {
+            return;
+        }
         let shown: Vec<_> = scene::scope_outputs(&self.controller, &self.visible_displays)
             .iter()
             .map(|scope| (scope.widget, self.live.scope_probe(scope.output)))
@@ -1157,6 +1160,9 @@ impl App {
 
     /// Takes new level histories from the telemetry thread.
     fn take_histories(&mut self, histories: Vec<(ProbeId, loom_canvas::Trace)>) {
+        if histories.is_empty() {
+            return;
+        }
         let shown: Vec<_> = scene::history_outputs(&self.controller, &self.visible_displays)
             .iter()
             .map(|history| (history.widget, self.live.probe(history.output)))
@@ -1167,6 +1173,9 @@ impl App {
     /// Takes new spectra from the telemetry thread. A scope on the same probe
     /// keeps its trace.
     fn take_spectra(&mut self, spectra: Vec<(ProbeId, loom_canvas::Trace)>) {
+        if spectra.is_empty() {
+            return;
+        }
         let shown: Vec<_> = scene::spectrum_outputs(&self.controller, &self.visible_displays)
             .iter()
             .map(|spectrum| (spectrum.widget, self.live.scope_probe(spectrum.output)))

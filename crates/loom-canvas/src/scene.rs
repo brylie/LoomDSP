@@ -518,8 +518,9 @@ impl ModuleView {
     }
 
     /// The trace display whose bottom edge is lowest, by widget index. Only it
-    /// takes a resized tile's extra height, so two displays never grow over
-    /// each other (`docs/design/panels.md`, Resizable tiles).
+    /// takes a resized tile's extra height, so displays stacked in a column
+    /// never grow over each other. Displays side by side are not handled yet:
+    /// each takes all the extra width (`docs/design/panels.md`, Resizable tiles).
     fn lowest_display(&self) -> Option<usize> {
         let widgets = &self.panel.widgets;
         (0..widgets.len())
