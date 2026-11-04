@@ -418,7 +418,7 @@ impl App {
             let n = remaining.min(block);
             self.process(n);
             let (meters, chunks) = self.monitor.take_telemetry();
-            peaks.note(watch.peak_epoch, &watch.meters, &meters);
+            peaks.note(&watch.peak_resets, &watch.meters, &meters);
             for reading in &meters {
                 if let Some(history) = histories.get_mut(&reading.probe) {
                     history.push(reading);
@@ -476,7 +476,6 @@ impl App {
                 })
                 .collect(),
             peaks: peaks.news(),
-            peak_epoch: watch.peak_epoch,
             activity,
         }));
         let _ = self.update(crate::Message::LiveFrame);

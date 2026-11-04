@@ -497,7 +497,13 @@ impl ModuleView {
         let (w, h) = widget.size();
         let extra = match widget.kind {
             WidgetViewKind::Scope | WidgetViewKind::LevelHistory | WidgetViewKind::Spectrum => {
-                self.size() - self.minimum_size()
+                let extra = self.size() - self.minimum_size();
+                let height = if self.lowest_display() == Some(index) {
+                    extra.height
+                } else {
+                    0.0
+                };
+                iced::Size::new(extra.width, height)
             }
             WidgetViewKind::Meter { .. } => self.meter_growth(widget),
             _ => iced::Size::ZERO,
@@ -505,21 +511,30 @@ impl ModuleView {
         Some(Rectangle::new(
             Point::new(
                 origin.x + f32::from(widget.x) * GRID,
-                origin.y + f32::from(widget.y) * GRID + self.scope_push(widget),
+                origin.y + f32::from(widget.y) * GRID + self.display_push(widget),
             ),
             iced::Size::new(f32::from(w) * GRID + extra.width, f32::from(h) * GRID + extra.height),
         ))
     }
 
-    /// How far a growing scope above `widget` moves it down, so the scope does
-    /// not cover it (`docs/design/panels.md`, Resizable tiles).
-    fn scope_push(&self, widget: &WidgetView) -> f32 {
-        let below_a_scope = self
-            .panel
-            .widgets
-            .iter()
-            .any(|w| matches!(w.kind, WidgetViewKind::Scope) && widget.y >= w.y + w.size().1);
-        if below_a_scope {
+    /// The trace display whose bottom edge is lowest, by widget index. Only it
+    /// takes a resized tile's extra height, so two displays never grow over
+    /// each other (`docs/design/panels.md`, Resizable tiles).
+    fn lowest_display(&self) -> Option<usize> {
+        let widgets = &self.panel.widgets;
+        (0..widgets.len())
+            .filter(|&i| !widgets[i].hidden && widgets[i].kind.draws_a_trace())
+            .max_by_key(|&i| widgets[i].y + widgets[i].size().1)
+    }
+
+    /// How far a growing display above `widget` moves it down, so the display
+    /// does not cover it (`docs/design/panels.md`, Resizable tiles).
+    fn display_push(&self, widget: &WidgetView) -> f32 {
+        let below = self.lowest_display().is_some_and(|display| {
+            let display = &self.panel.widgets[display];
+            widget.y >= display.y + display.size().1
+        });
+        if below {
             (self.size() - self.minimum_size()).height
         } else {
             0.0

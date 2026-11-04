@@ -25,6 +25,9 @@ pub struct PeakNews {
     pub peak: f32,
     /// True if a peak or RMS was not a finite number.
     pub bad: bool,
+    /// The probe's reset count this came after. The UI drops news from before
+    /// its meter's latest reset, which was on its way when it happened.
+    pub after: u64,
 }
 
 impl PeakNews {
@@ -45,20 +48,25 @@ impl PeakNews {
 pub struct Peaks {
     seen: HashMap<ProbeId, PeakNews>,
     shown: HashMap<ProbeId, PeakNews>,
-    epoch: u64,
+    /// The reset count each probe was last told.
+    resets: HashMap<ProbeId, u64>,
 }
 
 impl Peaks {
-    /// Takes readings from the probes in `meters`. A new `epoch` means the UI
-    /// reset something, so everything since is news again.
-    pub fn note(&mut self, epoch: u64, meters: &HashSet<ProbeId>, readings: &[MeterReading]) {
-        if epoch != self.epoch {
-            self.epoch = epoch;
-            self.seen.clear();
-            self.shown.clear();
-        }
+    /// Takes readings from the probes in `meters`. A new count in `resets` means
+    /// the UI reset that probe's meter, so everything since is news again. Other
+    /// probes keep what they have, so a reset never costs another meter a clip.
+    pub fn note(&mut self, resets: &HashMap<ProbeId, u64>, meters: &HashSet<ProbeId>, readings: &[MeterReading]) {
         self.seen.retain(|probe, _| meters.contains(probe));
         self.shown.retain(|probe, _| meters.contains(probe));
+        self.resets.retain(|probe, _| meters.contains(probe));
+        for probe in meters {
+            let count = resets.get(probe).copied().unwrap_or(0);
+            if self.resets.insert(*probe, count).is_some_and(|last| last != count) {
+                self.seen.remove(probe);
+                self.shown.remove(probe);
+            }
+        }
         for reading in readings.iter().filter(|r| meters.contains(&r.probe)) {
             let news = self.seen.entry(reading.probe).or_default();
             let (right_peak, right_rms) = reading.right.unwrap_or((0.0, 0.0));
@@ -78,18 +86,16 @@ impl Peaks {
         self.seen
             .iter()
             .filter(|(probe, news)| news.beyond(self.shown.get(probe).copied().unwrap_or_default()))
-            .map(|(&probe, &news)| (probe, news))
+            .map(|(&probe, &news)| {
+                let after = self.resets.get(&probe).copied().unwrap_or(0);
+                (probe, PeakNews { after, ..news })
+            })
             .collect()
     }
 
     /// Notes that the UI has these.
     pub fn sent(&mut self, news: &[(ProbeId, PeakNews)]) {
         self.shown.extend(news.iter().copied());
-    }
-
-    /// The reset count these peaks were last told.
-    pub fn epoch(&self) -> u64 {
-        self.epoch
     }
 }
 
@@ -118,7 +124,9 @@ impl Hold {
 #[derive(Debug, Default)]
 pub struct ClipHolds {
     holds: HashMap<(u32, usize), Hold>,
-    epoch: u64,
+    /// How many times each meter was reset. Kept apart from `holds`, because a
+    /// reset removes the hold.
+    resets: HashMap<(u32, usize), u64>,
 }
 
 impl ClipHolds {
@@ -127,9 +135,9 @@ impl ClipHolds {
         self.holds.get(&meter).copied().unwrap_or_default()
     }
 
-    /// Counts resets, for [`Peaks::note`].
-    pub fn epoch(&self) -> u64 {
-        self.epoch
+    /// How many times a meter was reset, for [`Peaks::note`].
+    pub fn resets(&self, meter: (u32, usize)) -> u64 {
+        self.resets.get(&meter).copied().unwrap_or(0)
     }
 
     /// Takes news for a meter. Returns true if what it shows changed.
@@ -144,18 +152,19 @@ impl ClipHolds {
     /// Clears the light and keeps the readout.
     pub fn clear_light(&mut self, meter: (u32, usize)) {
         self.holds.entry(meter).or_default().lit = false;
-        self.epoch += 1;
+        *self.resets.entry(meter).or_default() += 1;
     }
 
     /// Clears the light and the readout.
     pub fn reset(&mut self, meter: (u32, usize)) {
         self.holds.remove(&meter);
-        self.epoch += 1;
+        *self.resets.entry(meter).or_default() += 1;
     }
 
     /// Forgets meters `keep` returns false for, whose modules are gone.
     pub fn retain(&mut self, mut keep: impl FnMut(u32, usize) -> bool) {
         self.holds.retain(|&(module, widget), _| keep(module, widget));
+        self.resets.retain(|&(module, widget), _| keep(module, widget));
     }
 }
 

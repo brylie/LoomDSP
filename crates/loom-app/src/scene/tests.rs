@@ -702,3 +702,20 @@ fn a_hidden_history_wants_no_probe() {
     c.set_param(meter, window, 2.0).unwrap();
     assert_eq!(history_outputs(c, &[meter.0])[0].window, 30.0);
 }
+
+/// A display drawn in a frame has no caption, even with no `captioned("")`,
+/// because the frame fills the widget. Its hover text keeps the label.
+#[test]
+fn framed_displays_have_no_caption() {
+    let d = &loom_modules::test_modules::PANEL;
+    let panel = panel_view(d);
+    for (widget, view) in d.panel.widgets.iter().zip(&panel.widgets) {
+        if matches!(
+            widget.kind,
+            WidgetKind::Scope | WidgetKind::LevelHistory | WidgetKind::Spectrum
+        ) {
+            assert_eq!(view.label, "", "{:?}", widget.kind);
+            assert!(!view.hover.description.is_empty(), "{:?}", widget.kind);
+        }
+    }
+}

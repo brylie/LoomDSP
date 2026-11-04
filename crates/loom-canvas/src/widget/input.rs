@@ -903,8 +903,12 @@ impl<Message> PatchCanvas<'_, Message> {
                 }
                 // A meter's clip light clears on release, so a drag from it
                 // moves the tile and leaves it lit. A second press on the
-                // meter resets it (panels.md, Meter widget).
-                let module = self.scene.module(id);
+                // meter resets it. Far out neither is drawn, so a press only
+                // selects (panels.md, Meter widget).
+                let module = self
+                    .scene
+                    .module(id)
+                    .filter(|_| detail(state.camera.zoom) != Detail::Far);
                 let meter = module.and_then(|m| m.clip_meter_at(world));
                 let last = state.last_meter_click.take();
                 let again = meter.filter(|&widget| {

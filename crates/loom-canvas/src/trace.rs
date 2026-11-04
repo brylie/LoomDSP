@@ -192,6 +192,14 @@ impl TraceGeometry {
                         area.center_y() - y.clamp(-1.0, 1.0) * area.height * 0.5,
                     )
                 };
+                // The lighter line: a level history's peak, or a spectrum's hold.
+                let second_line = || {
+                    let colour = crate::controls::mix(palette.light_on, palette.text, 0.5);
+                    trace
+                        .second
+                        .windows(2)
+                        .map(move |pair| Segment::with_width(at(pair[0]), at(pair[1]), colour, area, PEAK_WIDTH))
+                };
                 if widget.kind == WidgetViewKind::LevelHistory {
                     // One flat column per point, because a capsule has a
                     // round top. The columns meet, so they read as one shape.
@@ -213,13 +221,7 @@ impl TraceGeometry {
                         }
                     }
                     if full {
-                        let colour = crate::controls::mix(palette.light_on, palette.text, 0.5);
-                        segments.extend(
-                            trace
-                                .second
-                                .windows(2)
-                                .map(|pair| Segment::with_width(at(pair[0]), at(pair[1]), colour, area, PEAK_WIDTH)),
-                        );
+                        segments.extend(second_line());
                     }
                 } else if widget.kind == WidgetViewKind::Spectrum {
                     if full {
@@ -227,15 +229,7 @@ impl TraceGeometry {
                             let (top, bottom) = (at([x, 1.0]), at([x, -1.0]));
                             segments.push(Segment::new(top, bottom, palette.tile_border, area));
                         }
-                    }
-                    if full {
-                        let colour = crate::controls::mix(palette.light_on, palette.text, 0.5);
-                        segments.extend(
-                            trace
-                                .second
-                                .windows(2)
-                                .map(|pair| Segment::with_width(at(pair[0]), at(pair[1]), colour, area, PEAK_WIDTH)),
-                        );
+                        segments.extend(second_line());
                     }
                     segments.extend(
                         trace

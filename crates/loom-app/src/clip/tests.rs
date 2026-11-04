@@ -15,8 +15,8 @@ fn reading(peak: f32, rms: f32) -> MeterReading {
 }
 
 /// One step of the telemetry thread: readings in, and the news marked sent.
-fn step(peaks: &mut Peaks, epoch: u64, readings: &[MeterReading]) -> Vec<(ProbeId, PeakNews)> {
-    peaks.note(epoch, &HashSet::from([PROBE]), readings);
+fn step(peaks: &mut Peaks, resets: u64, readings: &[MeterReading]) -> Vec<(ProbeId, PeakNews)> {
+    peaks.note(&HashMap::from([(PROBE, resets)]), &HashSet::from([PROBE]), readings);
     let news = peaks.news();
     peaks.sent(&news);
     news
@@ -63,10 +63,10 @@ fn reaching_the_clip_level_is_always_news() {
 fn a_clip_survives_a_busy_ui() {
     let mut peaks = Peaks::default();
     let meters = HashSet::from([PROBE]);
-    peaks.note(0, &meters, &[reading(2.0, 0.5)]);
+    peaks.note(&HashMap::new(), &meters, &[reading(2.0, 0.5)]);
     // `try_send` failed: nothing marked sent.
     let _ = peaks.news();
-    peaks.note(0, &meters, &[reading(0.0, 0.0)]);
+    peaks.note(&HashMap::new(), &meters, &[reading(0.0, 0.0)]);
     let news = peaks.news();
     assert_eq!(news[0].1.peak, 2.0);
     assert!(news[0].1.clips());
@@ -111,13 +111,13 @@ fn a_stereo_meter_uses_the_higher_side() {
 /// After a reset, what still plays is news again, or a light cleared under a
 /// hot signal would never come back.
 #[test]
-fn a_new_epoch_makes_everything_news_again() {
+fn a_new_reset_count_makes_it_news_again() {
     let mut peaks = Peaks::default();
     step(&mut peaks, 0, &[reading(1.5, 0.5)]);
     assert!(step(&mut peaks, 0, &[reading(1.5, 0.5)]).is_empty());
     let news = step(&mut peaks, 1, &[reading(1.5, 0.5)]);
     assert!(news[0].1.clips());
-    assert_eq!(peaks.epoch(), 1);
+    assert_eq!(news[0].1.after, 1, "news says which reset it came after");
 }
 
 /// A click clears the light and keeps the readout. A double-click resets both.
@@ -126,13 +126,39 @@ fn clearing_and_resetting() {
     let mut holds = ClipHolds::default();
     let meter = (3, 0);
     assert_eq!(holds.get(meter).text(), "--");
-    assert!(holds.take(meter, PeakNews { peak: 2.0, bad: false }));
-    assert!(!holds.take(meter, PeakNews { peak: 1.0, bad: false }), "nothing new");
+    let news = |peak| PeakNews {
+        peak,
+        ..PeakNews::default()
+    };
+    assert!(holds.take(meter, news(2.0)));
+    assert!(!holds.take(meter, news(1.0)), "nothing new");
     assert_eq!(holds.get(meter).text(), "+6.0 dB");
     holds.clear_light(meter);
     assert!(!holds.get(meter).lit);
     assert_eq!(holds.get(meter).text(), "+6.0 dB");
     holds.reset(meter);
     assert_eq!(holds.get(meter), Hold::default());
-    assert_eq!(holds.epoch(), 2);
+    assert_eq!(holds.resets(meter), 2);
+    assert_eq!(holds.resets((4, 0)), 0, "each meter counts its own");
+}
+
+/// A reset of one meter leaves another probe's unsent clip alone, though the
+/// signal has moved on and nothing would report it again.
+#[test]
+fn a_reset_of_one_meter_keeps_a_clip_on_another() {
+    let other = ProbeId(2);
+    let meters = HashSet::from([PROBE, other]);
+    let mut peaks = Peaks::default();
+    let on_other = MeterReading {
+        probe: other,
+        ..reading(2.0, 0.5)
+    };
+    peaks.note(&HashMap::new(), &meters, &[reading(1.5, 0.5), on_other]);
+    // The UI resets the first meter before the news reaches it.
+    peaks.note(&HashMap::from([(PROBE, 1)]), &meters, &[]);
+    let news = peaks.news();
+    assert_eq!(news.len(), 1, "the first probe starts again");
+    assert_eq!(news[0].0, other);
+    assert_eq!(news[0].1.peak, 2.0);
+    assert_eq!(news[0].1.after, 0, "the second meter was never reset");
 }

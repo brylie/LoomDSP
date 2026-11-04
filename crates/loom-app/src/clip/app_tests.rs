@@ -27,10 +27,14 @@ fn show(ui: &mut Ui, module: u32) {
 /// Sends a peak on the meter's current probe, as the telemetry thread does.
 fn send_peak(ui: &mut Ui, meter: u32, peak: f32) {
     let probe = ui.app.live.probe(output(ui, meter)).expect("a probe while on screen");
-    let peak_epoch = ui.app.clip_holds.epoch();
+    let after = ui.app.peak_resets().get(&probe).copied().unwrap_or(0);
+    let news = PeakNews {
+        peak,
+        bad: false,
+        after,
+    };
     let _ = ui.app.update(Message::Telemetry(Update {
-        peaks: vec![(probe, PeakNews { peak, bad: false })],
-        peak_epoch,
+        peaks: vec![(probe, news)],
         ..Update::default()
     }));
     ui.redraw();
@@ -162,19 +166,18 @@ fn the_state_survives_panning_away() {
 fn a_peak_from_before_a_reset_is_dropped() {
     let (mut ui, meter) = with_meter();
     let probe = ui.app.live.probe(output(&ui, meter)).unwrap();
-    let old = ui.app.clip_holds.epoch();
+    let old = PeakNews {
+        peak: 2.0,
+        bad: false,
+        after: ui.app.peak_resets()[&probe],
+    };
     ui.app.reset_clip((meter, 0), true);
     let _ = ui.app.update(Message::Telemetry(Update {
-        peaks: vec![(probe, PeakNews { peak: 2.0, bad: false })],
-        peak_epoch: old,
+        peaks: vec![(probe, old)],
         ..Update::default()
     }));
     assert_eq!(drawn(&ui, meter), (false, "--".to_string()));
-    assert_eq!(
-        ui.app.monitor.watched().peak_epoch,
-        ui.app.clip_holds.epoch(),
-        "the thread is told"
-    );
+    assert_eq!(ui.app.monitor.watched().peak_resets[&probe], 1, "the thread is told");
 }
 
 /// A meter on a display value has no light and no readout.
@@ -229,4 +232,55 @@ fn a_removed_module_forgets_its_state() {
     ui.app.commit();
     show(&mut ui, 3);
     assert_eq!(ui.app.clip_holds.get((meter, 0)), Hold::default());
+}
+
+/// News for one meter, sent before another meter's reset, still counts, because
+/// each meter has its own reset count.
+#[test]
+fn a_reset_of_one_meter_keeps_a_clip_on_another() {
+    let (mut ui, first) = with_meter();
+    let second = ui.app.controller.add_module("loom.display.meter").unwrap().0;
+    ui.app.positions.insert(second, Point::new(900.0, 0.0));
+    ui.app.commit();
+    ui.redraw();
+    let _ = ui
+        .app
+        .update(Message::Canvas(CanvasEvent::VisibleDisplays(vec![first, second])));
+    let probe = ui.app.live.probe(output(&ui, second)).unwrap();
+    let news = PeakNews {
+        peak: 2.0,
+        bad: false,
+        after: ui.app.peak_resets()[&probe],
+    };
+    ui.app.reset_clip((first, 0), false);
+    let _ = ui.app.update(Message::Telemetry(Update {
+        peaks: vec![(probe, news)],
+        ..Update::default()
+    }));
+    ui.redraw();
+    assert_eq!(drawn(&ui, second), (true, "+6.0 dB".to_string()));
+}
+
+/// At far zoom neither the light nor the readout is drawn, so a click or a
+/// double-click there only selects the module. The light may be the only record
+/// of a clip, because no probe runs out there.
+#[test]
+fn far_zoom_clicks_clear_nothing() {
+    let (mut ui, meter) = with_meter();
+    send_peak(&mut ui, meter, 2.0);
+    let (light, _) = targets(&mut ui, meter);
+    ui.move_to(light);
+    for _ in 0..40 {
+        ui.step(&[iced::Event::Mouse(iced::mouse::Event::WheelScrolled {
+            delta: iced::mouse::ScrollDelta::Lines { x: 0.0, y: -1.0 },
+        })]);
+    }
+    assert!(ui.canvas().camera.zoom < 0.35, "far out: {}", ui.canvas().camera.zoom);
+    let (light, bar) = targets(&mut ui, meter);
+    click(&mut ui, light);
+    assert_eq!(ui.app.selection, [meter].into());
+    assert_eq!(drawn(&ui, meter), (true, "+6.0 dB".to_string()), "a click");
+    click(&mut ui, bar);
+    click(&mut ui, bar);
+    assert_eq!(drawn(&ui, meter), (true, "+6.0 dB".to_string()), "a double-click");
 }
