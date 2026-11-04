@@ -92,8 +92,9 @@ impl Heard {
 /// stays idle.
 ///
 /// Its subscription restarts when [`Listening`] changes, and an event still
-/// queued for the old one is lost. That is rare, and a person just presses the
-/// key again. What must never be lost goes through [`always_event`].
+/// queued for the old one is lost. That is rare: the window is usually very
+/// short, though longer while the main thread is busy, and a person just presses
+/// the key again. What must never be lost goes through [`always_event`].
 pub(crate) fn input_event(event: iced::Event, status: Status, _window: window::Id) -> Option<Heard> {
     let used = matches!(
         event,
