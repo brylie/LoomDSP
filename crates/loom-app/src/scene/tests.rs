@@ -702,3 +702,25 @@ fn a_hidden_history_wants_no_probe() {
     c.set_param(meter, window, 2.0).unwrap();
     assert_eq!(history_outputs(c, &[meter.0])[0].window, 30.0);
 }
+
+/// An XY scope's settings come from its parameters, and it reads as "XY scope
+/// of" its two inputs (panel-widgets.md, XY scope).
+#[test]
+fn an_xy_scope_reads_its_parameters_and_says_its_inputs() {
+    let mut parts = loom_core::create_engine(loom_modules::registry(), loom_core::EngineConfig::default());
+    let c = &mut parts.controller;
+    let xy = c.add_module("loom.display.xy").unwrap();
+    c.commit().unwrap();
+    let shown = xy_outputs(c, &[xy.0]);
+    assert_eq!(shown.len(), 1);
+    assert_eq!((shown[0].range, shown[0].rotate), (1.0, false));
+    assert!((shown[0].time - 0.02).abs() < 1e-6);
+    assert_eq!(shown[0].y_input, Some(c.input_ref(xy, "y").unwrap()));
+    c.set_param_named(xy, "range", 2.0).unwrap();
+    c.set_param_named(xy, "rotate", 1.0).unwrap();
+    let shown = xy_outputs(c, &[xy.0]);
+    assert_eq!((shown[0].range, shown[0].rotate), (10.0, true));
+    let mut values = PanelValues::new();
+    update_panel_values(&mut values, c, &BTreeMap::new());
+    assert_eq!(values.get(xy.0, 0).unwrap().text, "XY scope of X and Y");
+}

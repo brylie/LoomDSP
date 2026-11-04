@@ -373,6 +373,15 @@ fn widget(d: &ModuleDescriptor, w: &Widget) -> String {
                 .map_or_else(|| format!("`{}`", w.bind()), port_name);
             format!("Level history: {output}")
         }
+        WidgetKind::XyScope { y } => {
+            let output = |bound: &str| {
+                d.outputs
+                    .iter()
+                    .find(|p| p.name == bound)
+                    .map_or_else(|| format!("`{bound}`"), port_name)
+            };
+            format!("XY scope: {} across, {} up", output(w.bind()), output(y))
+        }
         WidgetKind::Spectrum => {
             let output = d
                 .outputs

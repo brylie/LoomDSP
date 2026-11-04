@@ -120,7 +120,15 @@ fn input_ptr(schedule: &Schedule, op: usize, port: usize) -> *const f32 {
 
 #[test]
 fn inputs_that_follow_the_same_default_share_one_buffer() {
-    let schedule = compile(&followers(100), &probes_on(1..=100), &BTreeMap::new(), 48_000.0, 64).0;
+    let schedule = compile(
+        &followers(100),
+        &probes_on(1..=100),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        48_000.0,
+        64,
+    )
+    .0;
     // 100 outputs, one bar phase buffer, one buffer holding 0.5.
     assert_eq!(schedule._buffers.len(), 102);
     let bar = schedule.transport.bar_phase.expect("bar phase is used") as *const f32;
@@ -157,7 +165,14 @@ fn a_patch_without_stereo_compiles_as_before() {
     cable(&mut graph, 1, 2);
     cable(&mut graph, 2, 3);
     cable(&mut graph, 3, 3);
-    let (schedule, report) = compile(&graph, &probes_on(1..=3), &BTreeMap::new(), 48_000.0, 64);
+    let (schedule, report) = compile(
+        &graph,
+        &probes_on(1..=3),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        48_000.0,
+        64,
+    );
     assert!(report.per_channel.is_empty());
     assert!(report.stereo_outputs.is_empty());
     // One operation per module, one tap for the one delay, and buffers
@@ -200,7 +215,14 @@ fn mono_cable_into_stereo_input_reuses_its_buffer() {
             port: 0,
         },
     );
-    let (schedule, report) = compile(&graph, &probes_on([2]), &BTreeMap::new(), 48_000.0, 64);
+    let (schedule, report) = compile(
+        &graph,
+        &probes_on([2]),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        48_000.0,
+        64,
+    );
     assert!(report.per_channel.is_empty() && report.stereo_outputs.is_empty());
     assert_eq!(schedule._buffers.len(), 4, "two outputs and two defaults");
     assert!(schedule.downmixes.is_empty());
@@ -246,7 +268,15 @@ fn a_cable_replaces_the_default() {
         port: 0,
     };
     graph.cables.insert(to, from);
-    let schedule = compile(&graph, &probes_on([1]), &BTreeMap::new(), 48_000.0, 64).0;
+    let schedule = compile(
+        &graph,
+        &probes_on([1]),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        48_000.0,
+        64,
+    )
+    .0;
     // Module 2 runs first; module 1 reads module 2's output.
     let source = schedule.output_ptrs[schedule.ops[0].outputs.0 as usize] as *const f32;
     assert_eq!(input_ptr(&schedule, 1, 0), source);
@@ -338,12 +368,26 @@ fn modules_that_reach_nothing_are_skipped() {
     // 2 -> 1 is probed. 4 -> 3 leads nowhere.
     cable(&mut graph, 2, 1, 0);
     cable(&mut graph, 4, 3, 0);
-    let (schedule, report) = compile(&graph, &probes_on([1]), &BTreeMap::new(), 48_000.0, 64);
+    let (schedule, report) = compile(
+        &graph,
+        &probes_on([1]),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        48_000.0,
+        64,
+    );
     assert_eq!(scheduled_slots(&schedule), vec![1, 0]);
     assert_eq!(report.skipped, BTreeSet::from([ModuleId(3), ModuleId(4)]));
     assert_eq!(report.modules, 4);
 
-    let (schedule, report) = compile(&graph, &BTreeMap::new(), &BTreeMap::new(), 48_000.0, 64);
+    let (schedule, report) = compile(
+        &graph,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        48_000.0,
+        64,
+    );
     assert!(schedule.steps.is_empty());
     assert_eq!(report.skipped.len(), 4);
     // Skipped modules read no transport, so the engine fills nothing.
@@ -357,7 +401,14 @@ fn a_module_with_lights_runs_unconnected() {
     let mut graph = followers(1);
     add(&mut graph, 2, &LIT);
     cable(&mut graph, 1, 2, 0);
-    let (schedule, report) = compile(&graph, &BTreeMap::new(), &BTreeMap::new(), 48_000.0, 64);
+    let (schedule, report) = compile(
+        &graph,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        48_000.0,
+        64,
+    );
     assert_eq!(scheduled_slots(&schedule), vec![0, 2]);
     assert!(report.skipped.is_empty());
 }
@@ -380,7 +431,14 @@ fn a_modulated_module_runs_unconnected() {
         enabled: true,
     };
     graph.assignments.insert(AssignmentId(1), assignment);
-    let (schedule, report) = compile(&graph, &BTreeMap::new(), &BTreeMap::new(), 48_000.0, 64);
+    let (schedule, report) = compile(
+        &graph,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        48_000.0,
+        64,
+    );
     assert_eq!(scheduled_slots(&schedule), vec![0, 3]);
     assert_eq!(schedule.fills.len(), 1);
     assert_eq!(report.skipped, BTreeSet::from([ModuleId(2)]));
@@ -395,7 +453,14 @@ fn a_skipped_loop_is_reported_but_not_run() {
     // 1 <-> 2 is a loop with no unit delay. 3 is probed and alone.
     cable(&mut graph, 1, 2, 0);
     cable(&mut graph, 2, 1, 0);
-    let (schedule, report) = compile(&graph, &probes_on([3]), &BTreeMap::new(), 48_000.0, 64);
+    let (schedule, report) = compile(
+        &graph,
+        &probes_on([3]),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        48_000.0,
+        64,
+    );
     assert_eq!(scheduled_slots(&schedule), vec![2]);
     assert_eq!(schedule.taps.len(), 1);
     assert_eq!(report.loops.len(), 1);
@@ -403,7 +468,14 @@ fn a_skipped_loop_is_reported_but_not_run() {
     assert_eq!(report.skipped, BTreeSet::from([ModuleId(1), ModuleId(2)]));
 
     // Probed, the same loop runs one sample at a time with its delay.
-    let (schedule, report) = compile(&graph, &probes_on([1]), &BTreeMap::new(), 48_000.0, 64);
+    let (schedule, report) = compile(
+        &graph,
+        &probes_on([1]),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        48_000.0,
+        64,
+    );
     assert_eq!(scheduled_slots(&schedule), vec![0, 1]);
     assert_eq!(schedule.taps.len(), 1);
     assert_eq!(report.skipped, BTreeSet::from([ModuleId(3)]));
@@ -412,10 +484,24 @@ fn a_skipped_loop_is_reported_but_not_run() {
     // still there when the loop becomes live again.
     let mut live = schedule;
     live.taps[0].state = 0.75;
-    let (mut skipped, _) = compile(&graph, &probes_on([3]), &BTreeMap::new(), 48_000.0, 64);
+    let (mut skipped, _) = compile(
+        &graph,
+        &probes_on([3]),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        48_000.0,
+        64,
+    );
     skipped.take_tap_state_from(&live, 64);
     assert_eq!(skipped.taps[0].state, 0.75);
-    let (mut reconnected, _) = compile(&graph, &probes_on([1]), &BTreeMap::new(), 48_000.0, 64);
+    let (mut reconnected, _) = compile(
+        &graph,
+        &probes_on([1]),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        48_000.0,
+        64,
+    );
     reconnected.take_tap_state_from(&skipped, 64);
     assert_eq!(reconnected.taps[0].state, 0.75);
 }

@@ -410,3 +410,92 @@ fn a_scope_and_a_spectrum_on_one_probe_stay_apart() {
     assert_ne!(update.traces[0].1, update.spectra[0].1);
     assert_eq!(update.spectra[0].1.points.len(), crate::spectrum::COLUMNS);
 }
+
+/// One chunk of pairs for an XY scope.
+fn pair_chunk(probe: ProbeId, frame: u64, pair: impl Fn(u64) -> [f32; 2]) -> loom_core::PairChunk {
+    let mut chunk = loom_core::PairChunk {
+        probe,
+        frame,
+        len: loom_core::PAIR_CHUNK as u32,
+        values: [0.0; loom_core::PAIR_CHUNK * 2],
+    };
+    for (i, out) in chunk.values.as_chunks_mut::<2>().0.iter_mut().enumerate() {
+        out.copy_from_slice(&pair(frame + i as u64));
+    }
+    chunk
+}
+
+/// A list watching one XY scope.
+fn xy_watch() -> WatchList {
+    WatchList {
+        xy: HashMap::from([(
+            ProbeId(1),
+            XyWant {
+                frames: 480,
+                range: 1.0,
+                rotate: false,
+            },
+        )]),
+        full_traces: true,
+        ..WatchList::default()
+    }
+}
+
+/// Runs a watcher over `steps` steps of pair chunks, and counts the sends.
+fn xy_sends(
+    watcher: &mut Watcher,
+    watch: &WatchList,
+    start: &mut u64,
+    steps: u64,
+    pair: impl Fn(u64) -> [f32; 2],
+) -> usize {
+    let mut sends = 0;
+    for _ in 0..steps {
+        let chunk = pair_chunk(ProbeId(1), *start, &pair);
+        *start += loom_core::PAIR_CHUNK as u64;
+        let xy = watcher.take_pairs(watch, [chunk], 48_000.0);
+        if !xy.is_empty() {
+            sends += 1;
+        }
+        watcher.sent(&Update {
+            xy,
+            ..Update::default()
+        });
+    }
+    sends
+}
+
+/// A silent XY scope sends nothing, and a still one sends once, so neither
+/// draws frames (panel-widgets.md, rule 7). A moving one keeps sending.
+#[test]
+fn only_a_moving_xy_scope_sends() {
+    let watch = xy_watch();
+    let mut frame = 0;
+    assert_eq!(
+        xy_sends(&mut Watcher::default(), &watch, &mut frame, 50, |_| [0.0, 0.0]),
+        0,
+        "silent"
+    );
+    let mut still = Watcher::default();
+    let mut frame = 0;
+    xy_sends(&mut still, &watch, &mut frame, 20, |_| [0.25, 0.5]);
+    assert_eq!(
+        xy_sends(&mut still, &watch, &mut frame, 20, |_| [0.25, 0.5]),
+        0,
+        "still"
+    );
+    let mut moving = Watcher::default();
+    let mut frame = 0;
+    let wave = |f: u64| [(f as f32 * 0.03).sin() * 0.5, (f as f32 * 0.02).cos() * 0.5];
+    assert_eq!(xy_sends(&mut moving, &watch, &mut frame, 20, wave), 20, "moving");
+}
+
+/// A trace leaves with its scope.
+#[test]
+fn an_xy_scope_off_screen_keeps_nothing() {
+    let mut watcher = Watcher::default();
+    let mut frame = 0;
+    xy_sends(&mut watcher, &xy_watch(), &mut frame, 5, |_| [0.25, 0.5]);
+    assert!(watcher.take_pairs(&WatchList::default(), [], 48_000.0).is_empty());
+    assert!(watcher.xy.is_empty() && watcher.shown_xy.is_empty());
+}

@@ -302,6 +302,25 @@ fn meter() {
 }
 
 #[test]
+fn xy() {
+    // Two pass-throughs, whatever the parameters: they only tell the app how
+    // to draw. The references are its inputs.
+    let x = |frame: usize| 0.5 * (frame as f32 * 220.0 / 48_000.0 * std::f32::consts::TAU).sin();
+    let y = |frame: usize| 0.25 * (frame as f32 * 330.0 / 48_000.0 * std::f32::consts::TAU).cos();
+    let render = Harness::new(&display::XY)
+        .seconds(0.02)
+        .param("range", 2.0)
+        .param("rotate", 1.0)
+        .input("x", Signal::from_fn(x))
+        .input("y", Signal::from_fn(y))
+        .check(reference!("xy"));
+    let expected: Vec<f32> = (0..render.frames()).map(x).collect();
+    assert_eq!(render.output("x_out"), expected.as_slice());
+    let expected: Vec<f32> = (0..render.frames()).map(y).collect();
+    assert_eq!(render.output("y_out"), expected.as_slice());
+}
+
+#[test]
 fn spectrum() {
     // A pass-through, whatever its parameters: they only change the drawing,
     // and the FFT runs in the app. The reference is its input.
@@ -636,6 +655,7 @@ fn every_dsp_module_has_a_reference_test() {
         &clock::CLOCK,
         &transport::TRANSPORT,
         &display::SPECTRUM,
+        &display::XY,
     ]
     .map(|descriptor| descriptor.id);
     for descriptor in ALL {

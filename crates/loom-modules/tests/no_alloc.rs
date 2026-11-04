@@ -178,6 +178,11 @@ fn audio_thread_never_allocates() {
                 let id = parts.controller.add_module("loom.filter.svf").unwrap();
                 let lowpass = parts.controller.output_ref(id, "lowpass").unwrap();
                 parts.controller.add_probe(lowpass, ProbeKind::Scope).unwrap();
+                // A pair comes and goes too, with the queue drained and full.
+                let pair = parts.controller.add_probe_pair(lowpass, lowpass, None).unwrap();
+                if i % 3 == 0 {
+                    parts.controller.remove_probe(pair).unwrap();
+                }
                 extra.push(id);
             }
             // Close the loop a buffer later, once the filter has run. The
@@ -306,6 +311,7 @@ fn audio_thread_never_allocates() {
             if i < 200 {
                 parts.telemetry.meters().for_each(drop);
                 parts.telemetry.scope().for_each(drop);
+                parts.telemetry.pairs().for_each(drop);
             }
             let frames = [1, 32, 128, 129, 1024][i % 5];
 

@@ -16,7 +16,7 @@ use crate::midi_map::{MidiControl, MidiFeedback, later};
 use crate::module::{Module, PortIo, ProcessContext};
 use crate::panic::{PanicState, PanicTrigger, TriggerWatch};
 use crate::safety::{OutputSafety, SafetyStage};
-use crate::telemetry::{MeterReading, SCOPE_CHUNK, ScopeChunk, TelemetrySender, measure};
+use crate::telemetry::{MeterReading, PAIR_CHUNK, PairChunk, SCOPE_CHUNK, ScopeChunk, TelemetrySender, measure};
 use crate::transport::{TRANSPORT_GRID, TimeSignature, Transport};
 use rtrb::{Consumer, Producer, RingBuffer};
 use std::sync::Arc;
@@ -60,6 +60,9 @@ pub struct EngineConfig {
     /// Capacity of the scope queue, in chunks of
     /// [`SCOPE_CHUNK`](crate::SCOPE_CHUNK) samples.
     pub scope_capacity: usize,
+    /// Capacity of the pair queue, in chunks of
+    /// [`PAIR_CHUNK`](crate::PAIR_CHUNK) frames.
+    pub pair_capacity: usize,
     /// The safety stage's mode when the engine starts (ADR-0019). Change it
     /// later with [`Controller::set_output_safety`](crate::Controller::set_output_safety).
     pub output_safety: OutputSafety,
@@ -76,6 +79,7 @@ impl Default for EngineConfig {
             midi_capacity: 1024,
             meter_capacity: 1024,
             scope_capacity: 1024,
+            pair_capacity: 1024,
             output_safety: OutputSafety::LowLatency,
         }
     }
@@ -107,6 +111,8 @@ pub struct EngineStats {
     pub dropped_meters: AtomicU64,
     /// Scope chunks dropped because the scope queue was full.
     pub dropped_scope: AtomicU64,
+    /// Pair chunks dropped because the queue was full.
+    pub dropped_pairs: AtomicU64,
     /// Input underrun corrections.
     pub input_underruns: AtomicU64,
     /// Input overrun corrections.
@@ -788,6 +794,38 @@ impl Engine {
                     if self.telemetry.scope.push(chunk).is_err() {
                         self.stats.dropped_scope.fetch_add(1, Ordering::Relaxed);
                     }
+                }
+            }
+        }
+        for pair in &self.schedule.pairs {
+            // SAFETY: as for the probes above: these are output buffers of
+            // the schedule, `max_block` floats long, `frames <= max_block`, and
+            // no module is running, so nothing writes to them now.
+            let read = |ptr: *const f32| unsafe { std::slice::from_raw_parts(ptr, frames) };
+            let (x, y) = (read(pair.x), read(pair.y));
+            let (x_right, y_right) = (pair.x_right.map(read), pair.y_right.map(read));
+            for start in (0..frames).step_by(PAIR_CHUNK) {
+                if self.telemetry.pairs.is_full() {
+                    self.stats.dropped_pairs.fetch_add(1, Ordering::Relaxed);
+                    continue;
+                }
+                let len = PAIR_CHUNK.min(frames - start);
+                let mut chunk = PairChunk {
+                    probe: pair.id,
+                    frame: self.frame + start as u64,
+                    len: len as u32,
+                    values: [0.0; PAIR_CHUNK * 2],
+                };
+                let side = |left: &[f32], right: Option<&[f32]>, i: usize| match right {
+                    Some(right) => (left[i] + right[i]) * 0.5,
+                    None => left[i],
+                };
+                for (i, out) in chunk.values[..len * 2].as_chunks_mut::<2>().0.iter_mut().enumerate() {
+                    out[0] = side(x, x_right, start + i);
+                    out[1] = side(y, y_right, start + i);
+                }
+                if self.telemetry.pairs.push(chunk).is_err() {
+                    self.stats.dropped_pairs.fetch_add(1, Ordering::Relaxed);
                 }
             }
         }

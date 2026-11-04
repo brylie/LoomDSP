@@ -546,6 +546,18 @@ impl ControlGeometry {
                             Rectangle::new(Point::new(area.x, area.center_y() - 0.5), Size::new(area.width, 1.0));
                         shapes.push(Shape::new(centre, 0.0, palette.tile_border, Color::TRANSPARENT, 0.0));
                     }
+                    WidgetViewKind::XyScope => {
+                        // The frame and a faint cross at 0. The trace has its
+                        // own buffer.
+                        let area = crate::trace::trace_area(rect);
+                        shapes.push(Shape::new(area, 3.0, palette.background, palette.tile_border, 1.0));
+                        let across =
+                            Rectangle::new(Point::new(area.x, area.center_y() - 0.5), Size::new(area.width, 1.0));
+                        let up = Rectangle::new(Point::new(area.center_x() - 0.5, area.y), Size::new(1.0, area.height));
+                        for line in [across, up] {
+                            shapes.push(Shape::new(line, 0.0, palette.tile_border, Color::TRANSPARENT, 0.0));
+                        }
+                    }
                     WidgetViewKind::LevelHistory | WidgetViewKind::Spectrum => {
                         // The frame. What it shows has its own buffer.
                         let area = crate::trace::trace_area(rect);
@@ -700,6 +712,7 @@ fn modulation_dot(kind: &WidgetViewKind, rect: Rectangle, mark: ModulationMark, 
             | WidgetViewKind::Scope
             | WidgetViewKind::LevelHistory
             | WidgetViewKind::Spectrum
+            | WidgetViewKind::XyScope
             | WidgetViewKind::Shape { .. },
             _,
         ) => None,
@@ -851,6 +864,7 @@ pub(crate) fn focus_ring(kind: &WidgetViewKind, rect: Rectangle) -> (Rectangle, 
         | WidgetViewKind::Scope
         | WidgetViewKind::LevelHistory
         | WidgetViewKind::Spectrum
+        | WidgetViewKind::XyScope
         | WidgetViewKind::Shape { .. } => (rect.expand(1.0), 4.0),
     }
 }

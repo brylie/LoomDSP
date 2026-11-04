@@ -83,6 +83,7 @@ pub static ALL: &[&ModuleDescriptor] = &[
     &display::METER,
     &display::SCOPE,
     &display::SPECTRUM,
+    &display::XY,
     &clock::CLOCK,
     &transport::TRANSPORT,
     &gate::EUCLID,

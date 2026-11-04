@@ -10,7 +10,7 @@
 
 #[cfg(test)]
 use loom_core::Telemetry;
-use loom_core::{Controller, MeterReading, OutputRef, ProbeId, ProbeKind, ScopeChunk};
+use loom_core::{Controller, InputRef, MeterReading, OutputRef, ProbeId, ProbeKind, ScopeChunk};
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::time::Instant;
 
@@ -33,6 +33,8 @@ pub struct Live {
     meters: BTreeMap<OutputRef, ProbeId>,
     /// Scope probes, for the scopes on screen.
     scopes: BTreeMap<OutputRef, ProbeId>,
+    /// Paired probes, for the XY scopes on screen, by their two outputs.
+    pairs: BTreeMap<(OutputRef, OutputRef), ProbeId>,
 }
 
 impl Live {
@@ -77,6 +79,39 @@ impl Live {
     /// The scope probe on an output, if it has one.
     pub fn scope_probe(&self, output: OutputRef) -> Option<ProbeId> {
         self.scopes.get(&output).copied()
+    }
+
+    /// The paired probe on two outputs, if it has one.
+    pub fn pair_probe(&self, x: OutputRef, y: OutputRef) -> Option<ProbeId> {
+        self.pairs.get(&(x, y)).copied()
+    }
+
+    /// Brings the paired probes in line with the graph and with `wanted`: the
+    /// two outputs of each XY scope on screen, and the input that feeds the
+    /// second. Call it before [`Controller::commit`], as [`Live::sync`].
+    pub fn sync_pairs(&mut self, controller: &mut Controller, wanted: &[(OutputRef, OutputRef, Option<InputRef>)]) {
+        let stale: Vec<(OutputRef, OutputRef)> = self
+            .pairs
+            .iter()
+            .filter(|(key, probe)| {
+                !wanted.iter().any(|(x, y, _)| (*x, *y) == **key) || !controller.has_probe_pair(**probe)
+            })
+            .map(|(&key, _)| key)
+            .collect();
+        for key in stale {
+            if let Some(probe) = self.pairs.remove(&key) {
+                // Already gone if its module was removed.
+                let _ = controller.remove_probe(probe);
+            }
+        }
+        for &(x, y, input) in wanted {
+            if self.pairs.contains_key(&(x, y)) {
+                continue;
+            }
+            if let Ok(probe) = controller.add_probe_pair(x, y, input) {
+                self.pairs.insert((x, y), probe);
+            }
+        }
     }
 
     /// The probes this `Live` still owns: meters, then scopes.

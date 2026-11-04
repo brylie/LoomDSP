@@ -281,7 +281,15 @@ fn the_compile_report_lists_the_widths() {
     let lfo = add(&mut graph, 3, &LFO);
     cable(&mut graph, source, filter, 0);
     cable(&mut graph, lfo, filter, 1);
-    let report = crate::compile::compile(&graph, &BTreeMap::new(), &BTreeMap::new(), 48_000.0, 64).1;
+    let report = crate::compile::compile(
+        &graph,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        48_000.0,
+        64,
+    )
+    .1;
     assert_eq!(report.width(out(filter)), Width::Stereo);
     assert_eq!(report.width(out(lfo)), Width::Mono);
     assert!(report.runs_per_channel(filter));

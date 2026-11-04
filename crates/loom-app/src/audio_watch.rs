@@ -90,7 +90,8 @@ impl EngineRead {
     fn of(engine: &EngineStats) -> Self {
         Self {
             telemetry_dropped: engine.dropped_meters.load(Ordering::Relaxed)
-                + engine.dropped_scope.load(Ordering::Relaxed),
+                + engine.dropped_scope.load(Ordering::Relaxed)
+                + engine.dropped_pairs.load(Ordering::Relaxed),
             silenced: engine.output_silenced.load(Ordering::Relaxed),
             clipped: engine.output_clipped.load(Ordering::Relaxed),
         }

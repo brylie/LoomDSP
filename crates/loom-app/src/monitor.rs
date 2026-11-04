@@ -10,9 +10,10 @@ use crate::clip::{PeakNews, Peaks};
 use crate::history::LevelHistory;
 use crate::live::{Level, Levels, ScopeTrace, Slope, Trigger};
 use crate::spectrum::SpectrumAnalyser;
+use crate::xy::XyTrace;
 use iced::futures::Stream;
 use iced::futures::channel::mpsc;
-use loom_core::{MeterReading, ProbeId, ScopeChunk, Telemetry};
+use loom_core::{MeterReading, PairChunk, ProbeId, ScopeChunk, Telemetry};
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -57,6 +58,8 @@ pub struct WatchList {
     pub histories: HashMap<ProbeId, f32>,
     /// Scope probes whose spectrum is drawn, with how each draws.
     pub spectra: HashMap<ProbeId, SpectrumWant>,
+    /// Paired probes whose XY scope is drawn, with how each draws.
+    pub xy: HashMap<ProbeId, XyWant>,
     /// Counts the UI's resets of clip lights and peak holds, so the thread
     /// reports peaks again from there.
     pub peak_epoch: u64,
@@ -85,6 +88,17 @@ pub struct SpectrumWant {
     pub hold: bool,
 }
 
+/// What one XY scope on screen draws.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct XyWant {
+    /// Frames of history: the module's `time` at the sample rate.
+    pub frames: usize,
+    /// The value at each edge of the frame.
+    pub range: f32,
+    /// True to turn the trace by 45 degrees.
+    pub rotate: bool,
+}
+
 /// What the thread found that the UI draws.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Update {
@@ -98,6 +112,8 @@ pub struct Update {
     /// Spectra that moved, apart from `traces`, because a scope and a spectrum
     /// on one output share a probe.
     pub spectra: Vec<(ProbeId, loom_canvas::Trace)>,
+    /// XY traces that changed: a still or silent one sends none.
+    pub xy: Vec<(ProbeId, loom_canvas::Trace)>,
     /// Raw peaks that could change a clip light or a peak hold.
     pub peaks: Vec<(ProbeId, PeakNews)>,
     /// The reset count `peaks` came after. The UI drops peaks from before its
@@ -114,6 +130,7 @@ impl Update {
             && self.traces.is_empty()
             && self.histories.is_empty()
             && self.spectra.is_empty()
+            && self.xy.is_empty()
             && self.peaks.is_empty()
             && self.activity.is_empty()
     }
@@ -144,6 +161,8 @@ pub struct Watcher {
     spectra: HashMap<ProbeId, SpectrumAnalyser>,
     shown_spectra: HashMap<ProbeId, loom_canvas::Trace>,
     peaks: Peaks,
+    xy: HashMap<ProbeId, XyTrace>,
+    shown_xy: HashMap<ProbeId, loom_canvas::Trace>,
     activity: HashMap<ProbeId, Activity>,
     shown_activity: HashMap<ProbeId, bool>,
     last_activity_read: Option<Instant>,
@@ -217,10 +236,44 @@ impl Watcher {
             traces,
             histories,
             spectra,
+            xy: Vec::new(),
             peaks: self.peaks.news(),
             peak_epoch: self.peaks.epoch(),
             activity,
         }
+    }
+
+    /// Takes the pair chunks that arrived, and returns the XY traces that
+    /// changed. Apart from [`Watcher::take`], because chunks of the third queue
+    /// are read only here.
+    pub fn take_pairs(
+        &mut self,
+        watch: &WatchList,
+        chunks: impl IntoIterator<Item = PairChunk>,
+        sample_rate: f32,
+    ) -> Vec<(ProbeId, loom_canvas::Trace)> {
+        self.xy.retain(|probe, _| watch.xy.contains_key(probe));
+        self.shown_xy.retain(|probe, _| watch.xy.contains_key(probe));
+        for chunk in chunks {
+            if watch.xy.contains_key(&chunk.probe) {
+                self.xy
+                    .entry(chunk.probe)
+                    .or_insert_with(|| XyTrace::new(sample_rate))
+                    .push(&chunk);
+            }
+        }
+        let empty = loom_canvas::Trace::default();
+        watch
+            .xy
+            .iter()
+            .filter_map(|(probe, want)| {
+                let trace = self
+                    .xy
+                    .get(probe)?
+                    .trace(want.frames, want.range, want.rotate, watch.full_traces);
+                (self.shown_xy.get(probe).unwrap_or(&empty) != &trace).then_some((*probe, trace))
+            })
+            .collect()
     }
 
     /// Files the readings into the level histories on screen, and returns
@@ -312,6 +365,9 @@ impl Watcher {
             self.shown_spectra.insert(*probe, trace.clone());
         }
         self.peaks.sent(&update.peaks);
+        for (probe, trace) in &update.xy {
+            self.shown_xy.insert(*probe, trace.clone());
+        }
         for (probe, carrying) in &update.activity {
             self.shown_activity.insert(*probe, *carrying);
         }
@@ -366,6 +422,13 @@ impl Monitor {
         };
         let chunks = telemetry.scope().collect();
         (telemetry.meters().collect(), chunks)
+    }
+
+    /// Takes the pair chunks waiting now, on the caller's thread, for
+    /// `--frames` as [`Monitor::take_telemetry`] does.
+    pub fn take_pairs(&self) -> Vec<PairChunk> {
+        let mut telemetry = self.telemetry.lock().unwrap_or_else(PoisonError::into_inner);
+        telemetry.as_mut().map_or_else(Vec::new, |t| t.pairs().collect())
     }
 
     /// Takes the meter readings waiting now, and drops the scope chunks.
@@ -442,13 +505,14 @@ pub fn stream(monitor: &Monitor) -> impl Stream<Item = Update> + use<> {
             while !tx.is_closed() {
                 let watch = monitor.watched();
                 let readings: Vec<MeterReading> = telemetry.meters().collect();
-                let update = watcher.take(
+                let mut update = watcher.take(
                     &watch,
                     &readings,
                     telemetry.scope(),
                     monitor.sample_rate,
                     Instant::now(),
                 );
+                update.xy = watcher.take_pairs(&watch, telemetry.pairs(), monitor.sample_rate);
                 if !update.is_empty() {
                     match tx.try_send(update.clone()) {
                         Ok(()) => watcher.sent(&update),
@@ -458,11 +522,13 @@ pub fn stream(monitor: &Monitor) -> impl Stream<Item = Update> + use<> {
                         Err(_) => break,
                     }
                 }
-                std::thread::sleep(if watch.scopes.is_empty() && watch.spectra.is_empty() {
-                    INTERVAL
-                } else {
-                    SCOPE_INTERVAL
-                });
+                std::thread::sleep(
+                    if watch.scopes.is_empty() && watch.spectra.is_empty() && watch.xy.is_empty() {
+                        INTERVAL
+                    } else {
+                        SCOPE_INTERVAL
+                    },
+                );
             }
         });
     }

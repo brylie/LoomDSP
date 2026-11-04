@@ -822,3 +822,36 @@ fn a_level_history_needs_an_output_and_a_real_condition() {
     assert!(!shown.is_widget_shown(&GOOD[0], &[0.0, 0.0]));
     assert!(shown.is_widget_shown(&GOOD[0], &[1.0, 0.0]));
 }
+
+/// An XY scope binds two different outputs of its own module, and the registry
+/// names the widget when it does not (panel-widgets.md, XY scope).
+#[test]
+fn an_xy_scope_needs_two_outputs_of_its_module() {
+    const fn output(name: &'static str) -> PortSpec {
+        PortSpec {
+            name,
+            label: name,
+            signal: crate::SignalType::Audio,
+            description: "The signal.",
+            default: PortDefault::Value(0.0),
+            range: crate::PortRange::Signal,
+            channels: Channels::PerChannel,
+        }
+    }
+    static OUTPUTS: [PortSpec; 2] = [output("a"), output("b")];
+    static GOOD: [Widget; 1] = [Widget::xy_scope(0, 0, "a", "b")];
+    static NO_X: [Widget; 1] = [Widget::xy_scope(0, 0, "nothing", "b")];
+    static NO_Y: [Widget; 1] = [Widget::xy_scope(0, 0, "a", "nothing")];
+    static SAME: [Widget; 1] = [Widget::xy_scope(0, 0, "a", "a")];
+    let descriptor = |widgets| ModuleDescriptor {
+        outputs: &OUTPUTS,
+        panel: Panel::new(6, 6, widgets),
+        ..NAMED
+    };
+    assert!(descriptor(&GOOD).check_panel().is_ok());
+    assert!(descriptor(&NO_X).check_panel().unwrap_err().contains("XyScope"));
+    for bad in [&NO_Y, &SAME] {
+        let problem = descriptor(bad).check_panel().unwrap_err();
+        assert!(problem.contains("two different outputs"), "{problem}");
+    }
+}

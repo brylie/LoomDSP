@@ -59,6 +59,7 @@ impl<'l, 'a> Builder<'l, 'a> {
         mut self,
         compiled: &[CompiledAssignment],
         probes: &BTreeMap<ProbeId, (OutputRef, ProbeKind)>,
+        pairs: &BTreeMap<ProbeId, (PairProbe, bool)>,
         midi_synced: &BTreeMap<MidiMappingId, u32>,
     ) -> Schedule {
         let layout = self.layout;
@@ -73,6 +74,7 @@ impl<'l, 'a> Builder<'l, 'a> {
         self.schedule.output_downmixes = (start, self.schedule.downmixes.len() as u32);
         self.schedule.outputs = self.outputs();
         self.schedule.probes = self.probes(probes);
+        self.schedule.pairs = self.pairs(pairs);
         self.schedule.sources = self.sources();
 
         let fills = &self.schedule.fills;
@@ -403,6 +405,44 @@ impl<'l, 'a> Builder<'l, 'a> {
                     buffer: self.ptr(buffer) as *const f32,
                     right: layout.right_buf[v][from.port].map(|buffer| self.ptr(buffer) as *const f32),
                     kind,
+                })
+            })
+            .collect()
+    }
+
+    /// The paired probes on outputs that exist. The flag says `y` has no cable
+    /// in it, so a stereo `x` is read as its two sides.
+    fn pairs(&self, pairs: &BTreeMap<ProbeId, (PairProbe, bool)>) -> Vec<PairOp> {
+        let layout = self.layout;
+        let side = |from: OutputRef| {
+            let v = *layout.index_of.get(&from.module)?;
+            let buffer = *layout.out_buf.get(v)?.get(from.port)?;
+            let right = layout.right_buf[v][from.port];
+            Some((
+                self.ptr(buffer) as *const f32,
+                right.map(|buffer| self.ptr(buffer) as *const f32),
+            ))
+        };
+        pairs
+            .iter()
+            .filter_map(|(&id, &(pair, y_empty))| {
+                let (x, x_right) = side(pair.x)?;
+                let (y, y_right) = side(pair.y)?;
+                Some(match x_right {
+                    Some(right) if y_empty => PairOp {
+                        id,
+                        x,
+                        x_right: None,
+                        y: right,
+                        y_right: None,
+                    },
+                    _ => PairOp {
+                        id,
+                        x,
+                        x_right,
+                        y,
+                        y_right,
+                    },
                 })
             })
             .collect()

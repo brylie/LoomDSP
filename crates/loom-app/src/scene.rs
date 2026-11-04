@@ -131,6 +131,7 @@ fn panel_view(d: &ModuleDescriptor) -> PanelView {
                 WidgetKind::Scope => WidgetViewKind::Scope,
                 WidgetKind::LevelHistory => WidgetViewKind::LevelHistory,
                 WidgetKind::Spectrum => WidgetViewKind::Spectrum,
+                WidgetKind::XyScope { .. } => WidgetViewKind::XyScope,
                 WidgetKind::Shape { width, .. } => WidgetViewKind::Shape { width },
                 // The names come from the parameter (panels.md, Choice names).
                 WidgetKind::Radio => WidgetViewKind::Radio {
@@ -576,6 +577,16 @@ fn display_text(d: &ModuleDescriptor, w: &loom_core::Widget, position: f32, righ
             .find(|display| display.name == w.bind())
             .map_or_else(String::new, |display| display.range.text(position));
     }
+    if let WidgetKind::XyScope { y } = w.kind {
+        // What a screen reader says: the two inputs that feed it.
+        let label = |output: &str| {
+            let port = d.outputs.iter().position(|p| p.name == output);
+            port.and_then(|port| d.inputs.get(port))
+                .map_or(output, |input| input.label)
+                .to_string()
+        };
+        return format!("XY scope of {} and {}", label(w.bind()), label(y));
+    }
     if matches!(
         w.kind,
         WidgetKind::Scope | WidgetKind::LevelHistory | WidgetKind::Spectrum
@@ -686,6 +697,62 @@ pub fn history_outputs(controller: &Controller, modules: &[u32]) -> Vec<HistoryO
         }
     }
     histories
+}
+
+/// The value at each edge of an XY scope, by its `range` choice
+/// (panel-widgets.md, XY scope).
+const XY_RANGES: [f32; 3] = [0.1, 1.0, 10.0];
+
+/// An XY scope on screen and what it shows.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct XyOutput {
+    /// Module ID and widget index.
+    pub widget: (u32, usize),
+    /// The output drawn across.
+    pub x: OutputRef,
+    /// The output drawn up.
+    pub y: OutputRef,
+    /// The input that feeds `y`, if the module has one at its port.
+    pub y_input: Option<loom_core::InputRef>,
+    /// Seconds of history.
+    pub time: f32,
+    /// The value at each edge of the frame.
+    pub range: f32,
+    /// True to turn the trace by 45 degrees.
+    pub rotate: bool,
+}
+
+/// The XY scopes on these modules (panel-widgets.md, XY scope).
+pub fn xy_outputs(controller: &Controller, modules: &[u32]) -> Vec<XyOutput> {
+    let mut scopes = Vec::new();
+    for &id in modules {
+        let Some(node) = controller.graph().node(ModuleId(id)) else {
+            continue;
+        };
+        let d = node.descriptor;
+        let param = |name: &str, default: f32| d.param_index(name).map_or(default, |i| node.params[i]);
+        let module = ModuleId(id);
+        for (index, w) in d.panel.widgets.iter().enumerate() {
+            let WidgetKind::XyScope { y } = w.kind else {
+                continue;
+            };
+            let port = |name: &str| d.outputs.iter().position(|p| p.name == name);
+            let (Some(x_port), Some(y_port)) = (port(w.bind()), port(y)) else {
+                continue;
+            };
+            let choice = param("range", 1.0).round().max(0.0) as usize;
+            scopes.push(XyOutput {
+                widget: (id, index),
+                x: OutputRef { module, port: x_port },
+                y: OutputRef { module, port: y_port },
+                y_input: (y_port < d.inputs.len()).then_some(loom_core::InputRef { module, port: y_port }),
+                time: param("time", 0.02),
+                range: XY_RANGES[choice.min(XY_RANGES.len() - 1)],
+                rotate: param("rotate", 0.0) >= 0.5,
+            });
+        }
+    }
+    scopes
 }
 
 /// A spectrum on screen and what it shows.

@@ -52,8 +52,37 @@ impl Controller {
         Ok(id)
     }
 
-    /// Stops watching a port, from the next [`Controller::commit`] on.
-    /// Telemetry already in the queues may still arrive.
+    /// Starts watching two outputs as one, so a sample of `x_output` is never
+    /// paired with a sample of `y_output` from another block
+    /// (`docs/design/telemetry.md`, Paired probes). `y_input` is the input that
+    /// feeds `y_output`, if there is one: with no cable in it and a stereo
+    /// `x_output`, the pair reads the two sides of `x_output`.
+    ///
+    /// Remove it with [`Controller::remove_probe`].
+    pub fn add_probe_pair(
+        &mut self,
+        x_output: OutputRef,
+        y_output: OutputRef,
+        y_input: Option<InputRef>,
+    ) -> Result<ProbeId, LoomError> {
+        self.check_output(x_output)?;
+        self.check_output(y_output)?;
+        let id = self.probes.add_pair(PairProbe {
+            x: x_output,
+            y: y_output,
+            y_input,
+        });
+        self.dirty = true;
+        Ok(id)
+    }
+
+    /// True if this probe is a paired probe that still exists.
+    pub fn has_probe_pair(&self, id: ProbeId) -> bool {
+        self.probes.pairs().contains_key(&id)
+    }
+
+    /// Stops watching a port or a pair, from the next [`Controller::commit`]
+    /// on. Telemetry already in the queues may still arrive.
     pub fn remove_probe(&mut self, id: ProbeId) -> Result<(), LoomError> {
         self.probes.remove(id).ok_or(LoomError::UnknownProbe(id))?;
         self.dirty = true;
@@ -75,6 +104,8 @@ impl Controller {
 /// of the graph, and not saved.
 pub(super) struct Probes {
     watched: BTreeMap<ProbeId, (OutputRef, ProbeKind)>,
+    /// The pairs the UI watches, sharing the IDs.
+    pairs: BTreeMap<ProbeId, PairProbe>,
     /// The id the next probe gets.
     next: u32,
 }
@@ -84,6 +115,7 @@ impl Probes {
     pub(super) fn new() -> Self {
         Self {
             watched: BTreeMap::new(),
+            pairs: BTreeMap::new(),
             next: 1,
         }
     }
@@ -96,14 +128,31 @@ impl Probes {
         id
     }
 
-    /// Stops a probe. Returns what it watched, or `None` for an unknown id.
-    pub(super) fn remove(&mut self, id: ProbeId) -> Option<(OutputRef, ProbeKind)> {
-        self.watched.remove(&id)
+    /// Watches a pair, and returns the new probe's id.
+    pub(super) fn add_pair(&mut self, pair: PairProbe) -> ProbeId {
+        let id = ProbeId(self.next);
+        self.next += 1;
+        self.pairs.insert(id, pair);
+        id
+    }
+
+    /// Stops a probe or a pair. Returns `None` for an unknown id.
+    pub(super) fn remove(&mut self, id: ProbeId) -> Option<()> {
+        let port = self.watched.remove(&id).map(|_| ());
+        let pair = self.pairs.remove(&id).map(|_| ());
+        port.or(pair)
+    }
+
+    /// Every pair, as the compiler takes them.
+    pub(super) fn pairs(&self) -> &BTreeMap<ProbeId, PairProbe> {
+        &self.pairs
     }
 
     /// Stops every probe on a module's outputs, for a removed module.
     pub(super) fn remove_on(&mut self, module: ModuleId) {
         self.watched.retain(|_, (from, _)| from.module != module);
+        self.pairs
+            .retain(|_, pair| pair.x.module != module && pair.y.module != module);
     }
 
     /// The port and kind of a probe.

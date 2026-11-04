@@ -135,6 +135,16 @@ pub(crate) struct ProbeOp {
     pub kind: ProbeKind,
 }
 
+/// A paired probe's buffers. Read after each block for telemetry. A side with
+/// a right buffer is stereo, and reads as the mean of its two.
+pub(crate) struct PairOp {
+    pub id: ProbeId,
+    pub x: *const f32,
+    pub x_right: Option<*const f32>,
+    pub y: *const f32,
+    pub y_right: Option<*const f32>,
+}
+
 /// Buffers for transport signals that at least one unconnected input reads.
 /// `None` when nothing reads that signal, so it costs nothing.
 #[derive(Default)]
@@ -182,6 +192,7 @@ pub(crate) struct Schedule {
     pub steps: Vec<Step>,
     pub outputs: Vec<OutputOp>,
     pub probes: Vec<ProbeOp>,
+    pub pairs: Vec<PairOp>,
     pub transport: TransportBuffers,
     pub fills: Vec<ParamFill>,
     /// Indices into `fills`, sorted by fill key. Built on the control thread
@@ -225,6 +236,7 @@ impl Schedule {
             steps: Vec::new(),
             outputs: Vec::new(),
             probes: Vec::new(),
+            pairs: Vec::new(),
             transport: TransportBuffers::default(),
             fills: Vec::new(),
             fill_order: Vec::new(),

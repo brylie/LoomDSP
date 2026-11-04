@@ -40,7 +40,7 @@ use crate::graph::{AssignmentId, Graph, InputRef, ModuleId, Node, OutputRef};
 use crate::midi_map::{MidiMapOp, MidiMappingId};
 use crate::module::RightPtr;
 use crate::signal::SignalType;
-use crate::telemetry::{ProbeId, ProbeKind};
+use crate::telemetry::{PairProbe, ProbeId, ProbeKind};
 use crate::width::{self, Width, Widths};
 use loom_rt::Smoothed;
 use std::collections::{BTreeMap, BTreeSet};
@@ -58,8 +58,8 @@ use midi_maps::compile_midi_maps;
 pub(crate) use order::partner;
 use order::{reaches_a_root, tarjan};
 pub(crate) use schedule::{
-    AssignmentRuntime, DownmixKind, DownmixOp, ModSource, ModuleOp, OutputOp, ParamFill, ProbeOp, Schedule, Step, Tap,
-    TransportBuffers,
+    AssignmentRuntime, DownmixKind, DownmixOp, ModSource, ModuleOp, OutputOp, PairOp, ParamFill, ProbeOp, Schedule,
+    Step, Tap, TransportBuffers,
 };
 use steps::{Plan, StepSpec, successors};
 
@@ -278,6 +278,7 @@ impl<'a> Layout<'a> {
 pub(crate) fn compile(
     graph: &Graph,
     probes: &BTreeMap<ProbeId, (OutputRef, ProbeKind)>,
+    pairs: &BTreeMap<ProbeId, PairProbe>,
     midi_synced: &BTreeMap<MidiMappingId, u32>,
     sample_rate: f32,
     max_block: usize,
@@ -291,7 +292,19 @@ pub(crate) fn compile(
     let mut sccs = tarjan(&succ);
     // Tarjan emits SCCs in reverse topological order.
     sccs.reverse();
-    let probed: BTreeSet<ModuleId> = probes.values().map(|(from, _)| from.module).collect();
+    // A pair keeps its modules scheduled, as any probe does.
+    let probed: BTreeSet<ModuleId> = probes
+        .values()
+        .map(|(from, _)| from.module)
+        .chain(pairs.values().flat_map(|pair| [pair.x.module, pair.y.module]))
+        .collect();
+    let pairs: BTreeMap<ProbeId, (PairProbe, bool)> = pairs
+        .iter()
+        .map(|(&id, &pair)| {
+            let y_empty = pair.y_input.is_some_and(|input| graph.source_of(input).is_none());
+            (id, (pair, y_empty))
+        })
+        .collect();
     let modulated: BTreeSet<usize> = compiled.iter().map(|a| a.target_node).collect();
     let live = reaches_a_root(&layout.nodes, &succ, |v| {
         probed.contains(&layout.ids[v]) || modulated.contains(&v)
@@ -313,8 +326,12 @@ pub(crate) fn compile(
         per_channel: layout.widths.per_channel.clone(),
         stereo_outputs: layout.widths.stereo_outputs.clone(),
     };
-    let schedule =
-        Builder::new(&layout, &plan, &inputs, buffers, max_block, sample_rate).finish(&compiled, probes, midi_synced);
+    let schedule = Builder::new(&layout, &plan, &inputs, buffers, max_block, sample_rate).finish(
+        &compiled,
+        probes,
+        &pairs,
+        midi_synced,
+    );
     (schedule, report)
 }
 

@@ -85,6 +85,118 @@ impl Module for Meter {
     }
 }
 
+/// `loom.display.xy`: one signal against another (MT-VIEW-01, XY mode). Passes
+/// each input through, so the app reads both from one paired probe on `x_out`
+/// and `y_out`. The parameters only tell the app how to draw. Spec:
+/// `docs/design/panel-widgets.md`, XY scope.
+pub static XY: ModuleDescriptor = ModuleDescriptor {
+    id: "loom.display.xy",
+    version: 1,
+    name: "XY Scope",
+    category: "Display",
+    family: loom_core::Family::Interface,
+    description: "Shows one signal against another. Passes both inputs through unchanged.",
+    inputs: &[
+        PortSpec {
+            name: "x",
+            label: "X",
+            signal: SignalType::Audio,
+            description: "The signal that moves the trace left and right.",
+            default: PortDefault::Value(0.0),
+            range: loom_core::PortRange::Signal,
+            channels: Channels::PerChannel,
+        },
+        PortSpec {
+            name: "y",
+            label: "Y",
+            signal: SignalType::Audio,
+            description: "The signal that moves the trace up and down.",
+            default: PortDefault::Value(0.0),
+            range: loom_core::PortRange::Signal,
+            channels: Channels::PerChannel,
+        },
+    ],
+    outputs: &[
+        PortSpec {
+            name: "x_out",
+            label: "X",
+            signal: SignalType::Audio,
+            description: "The X input, unchanged.",
+            default: PortDefault::Value(0.0),
+            range: loom_core::PortRange::Signal,
+            channels: Channels::PerChannel,
+        },
+        PortSpec {
+            name: "y_out",
+            label: "Y",
+            signal: SignalType::Audio,
+            description: "The Y input, unchanged.",
+            default: PortDefault::Value(0.0),
+            range: loom_core::PortRange::Signal,
+            channels: Channels::PerChannel,
+        },
+    ],
+    params: &[
+        ParamSpec {
+            name: "range",
+            label: "Range",
+            description: "The value at each edge of the frame. A point beyond it stays at the edge.",
+            min: 0.0,
+            max: 2.0,
+            default: 1.0,
+            unit: "",
+            options: ParamOptions::DEFAULT,
+        }
+        .integer()
+        .choices(&["±0.1", "±1", "±10"]),
+        ParamSpec {
+            name: "time",
+            label: "Time",
+            description: "How much history the trace shows.",
+            min: 0.001,
+            max: 0.1,
+            default: 0.02,
+            unit: "s",
+            options: ParamOptions::DEFAULT,
+        }
+        .logarithmic(),
+        ParamSpec {
+            name: "rotate",
+            label: "Rotate",
+            description: "Turns the trace by 45 degrees, so a mono signal is a vertical line.",
+            min: 0.0,
+            max: 1.0,
+            default: 0.0,
+            unit: "",
+            options: ParamOptions::DEFAULT,
+        }
+        .integer(),
+    ],
+    role: ModuleRole::Dsp(|_| Box::new(PassTwo)),
+    panel: Panel::new(
+        6,
+        11,
+        &[
+            Widget::xy_scope(0, 0, "x_out", "y_out").captioned(""),
+            Widget::segmented(0, 6, 6, "range"),
+            Widget::knob(0, 8, "time"),
+            Widget::toggle(3, 8, "rotate"),
+        ],
+    ),
+    displays: &[],
+};
+
+/// Copies each input to its output, for a probe to read.
+struct PassTwo;
+
+impl Module for PassTwo {
+    fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        let ([x, y], [x_out, y_out]) = io.split::<2, 2>();
+        x_out.copy_from_slice(x);
+        y_out.copy_from_slice(y);
+    }
+}
+
 /// `loom.display.spectrum`: the frequency content of a signal (MT-VIEW-03).
 /// Passes its input through, as the level meter does, so the app reads the
 /// signal from a scope probe on `out`. The FFT runs in the app, never here,

@@ -264,7 +264,7 @@ These depend on how notes travel on cables (OQ-16).
 
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
-| MT-VIEW-01 | Probe | Shows signals on the tile: over time (scope), one against another (XY), or as a number in chosen units. | | M1 | FR-LIB-17 | Scope mode built (`loom.display.scope`, [panels](../design/panels.md#scope-module)); trace drawing specified in [panels](../design/panels.md#drawing-the-scope-trace). XY mode specified as `loom.display.xy` ([panel widgets](../design/panel-widgets.md#xy-scope)), moved to M2 ([#280](https://github.com/brylie/LoomDSP/issues/280)) |
+| MT-VIEW-01 | Probe | Shows signals on the tile: over time (scope), one against another (XY), or as a number in chosen units. | | M1 | FR-LIB-17 | Scope mode built (`loom.display.scope`, [panels](../design/panels.md#scope-module)); trace drawing specified in [panels](../design/panels.md#drawing-the-scope-trace). XY mode built (`loom.display.xy`, [panel widgets](../design/panel-widgets.md#xy-scope)). |
 | MT-VIEW-02 | Level meter | Shows peak and average level, and the level over the last seconds. | | M1 | FR-LIB-17 | Built (`loom.display.meter`) |
 | MT-VIEW-03 | Spectrum | Shows the frequency content of a signal. | | M2 | FR-LIB-17 | Built (`loom.display.spectrum`, [M2 modules](../design/p2-modules.md#spectrum-mt-view-03)) |
 | MT-VIEW-04 | Note monitor | Shows incoming notes and controller values, for checking a setup. | | M2 | New | Planned |

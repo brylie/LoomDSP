@@ -28,8 +28,8 @@ Every message carries the probe ID and an engine frame number (frames since the 
 
 ## Rules
 
-1. **The audio thread never waits for the UI.** Both queues are bounded `rtrb` queues of fixed-size `Copy` messages, allocated when the engine is created. *Why:* NFR-RT-01. A push into a full queue fails at once instead of blocking.
-2. **Full queue: drop the newest telemetry.** The engine counts drops in `EngineStats::dropped_meters` and `EngineStats::dropped_scope`. *Why:* NFR-RT-07. Visual data can be lost safely. Edits travel on a different queue and are never dropped.
+1. **The audio thread never waits for the UI.** All queues are bounded `rtrb` queues of fixed-size `Copy` messages, allocated when the engine is created. *Why:* NFR-RT-01. A push into a full queue fails at once instead of blocking.
+2. **Full queue: drop the newest telemetry.** The engine counts drops in `EngineStats::dropped_meters`, `EngineStats::dropped_scope`, and `EngineStats::dropped_pairs`. *Why:* NFR-RT-07. Visual data can be lost safely. Edits travel on a different queue and are never dropped.
 3. **Meters and scopes have separate queues.** *Why:* scopes send about 750 chunks per second per probe at 48 kHz. If they shared a queue with meters, a busy scope could starve every meter.
 4. **Probes take effect at commit, like structural edits.** *Why:* a probe needs a pointer into the schedule's buffers, and only the compiler knows them. Recompiling is cheap, and module state survives the swap.
 5. **Probes are view state.** They live in the `Controller`, not in the `Graph`, and are not saved in patches. Removing a module removes its probes. *Why:* what the UI is looking at is not part of the sound.
@@ -52,7 +52,7 @@ Drain the queues once per UI frame. At 60 frames per second, one scope fills abo
 
 ## In the desktop app
 
-The app hands the `Telemetry` handle from `create_engine` to a telemetry thread (`crates/loom-app/src/monitor.rs`). The thread drains both queues every 33 ms, so they never fill, and sends the UI a message only when a meter level visibly changes. *Why a thread:* in Iced every message redraws the window, so draining on a UI timer would draw frames even when every meter is silent. `crates/loom-app/src/live.rs` holds the parts:
+The app hands the `Telemetry` handle from `create_engine` to a telemetry thread (`crates/loom-app/src/monitor.rs`). The thread drains the queues every 33 ms, so they never fill, and sends the UI a message only when a meter level visibly changes. *Why a thread:* in Iced every message redraws the window, so draining on a UI timer would draw frames even when every meter is silent. `crates/loom-app/src/live.rs` holds the parts:
 
 - **`Live::sync`** runs before every `Controller::commit` and whenever the meters on screen change. It keeps a `Meter` probe on the output of every meter widget on screen ([panels](panels.md#level-meters-and-audio-load-m1)), and forgets probes of removed modules. With signal activity on, every output with a cable gets one too; activity is off.
 - **`Levels`**, on the telemetry thread, turns readings into levels from 0 to 1: -60 dB and below is 0, 0 dB (1.0, or 10 V) and above is 1. The peak is the highest since the last drain. The RMS is taken over every frame since the last drain, weighted by block length, because a block can be shorter than one cycle of the signal. Both rise at once and fall by 1.0 per second, using the time since the last drain, so the drain rate does not change them. The peak is never below the RMS.
@@ -65,6 +65,8 @@ The app hands the `Telemetry` handle from `create_engine` to a telemetry thread 
 - **`LevelHistory`** (`crates/loom-app/src/history.rs`) files a meter probe's readings into columns by their frame stamps, for a level history on screen ([panel widgets](panel-widgets.md#level-history)).
 
 - **`SpectrumAnalyser`** (`crates/loom-app/src/spectrum.rs`) runs the FFT on the chunks of one scope probe, for a spectrum on screen ([panel widgets](panel-widgets.md#spectrum)). A scope and a spectrum on one output share a probe, so their results travel apart in the `Update`.
+
+- **`XyTrace`** (`crates/loom-app/src/xy.rs`) keeps the last pairs of one paired probe and turns them into the points an XY scope draws ([panel widgets](panel-widgets.md#xy-scope)).
 
 The planned direction for displays: signal displays are modules in the grid, not views laid over the canvas (ADR-0011, everything is a module). A scope module saves with the patch, sits next to the signal it shows, travels inside sub-patches, and can go on a front panel. It animates only while its tile is visible and large enough to read.
 

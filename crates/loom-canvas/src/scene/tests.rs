@@ -513,6 +513,7 @@ fn every_growing_display_takes_the_room() {
         WidgetViewKind::Scope,
         WidgetViewKind::LevelHistory,
         WidgetViewKind::Spectrum,
+        WidgetViewKind::XyScope,
     ] {
         let mut tile = tile_with(kind.clone(), 9, 6);
         assert!(tile.is_growable(), "{kind:?}");
@@ -521,4 +522,25 @@ fn every_growing_display_takes_the_room() {
         let after = tile.widget_bounds(0).unwrap();
         assert!(after.width > before.width && after.height > before.height, "{kind:?}");
     }
+}
+
+/// A growing XY scope moves the controls below it down, so it does not cover
+/// them (`docs/design/panels.md`, Resizable tiles).
+#[test]
+fn a_growing_xy_scope_moves_what_is_below_it() {
+    let mut tile = tile_with(WidgetViewKind::XyScope, 6, 11);
+    tile.panel.widgets.push(WidgetView {
+        kind: WidgetViewKind::Toggle,
+        x: 0,
+        y: 8,
+        label: String::new(),
+        hover: HoverText::default(),
+        hidden: false,
+    });
+    let before = tile.widget_bounds(1).unwrap().y;
+    tile.size = Some((40, 40));
+    let scope = tile.widget_bounds(0).unwrap();
+    let below = tile.widget_bounds(1).unwrap();
+    assert!(below.y > before);
+    assert!(below.y >= scope.y + scope.height);
 }

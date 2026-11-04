@@ -365,6 +365,7 @@ fn kind_name(kind: &WidgetViewKind) -> &'static str {
         WidgetViewKind::Scope => "scope",
         WidgetViewKind::LevelHistory => "level_history",
         WidgetViewKind::Spectrum => "spectrum",
+        WidgetViewKind::XyScope => "xy_scope",
         WidgetViewKind::Shape { .. } => "shape",
         WidgetViewKind::Button => "button",
     }
@@ -392,6 +393,7 @@ impl App {
         // The meters show the end of the run, and the scopes its last
         // second: earlier telemetry is dropped.
         let _ = self.monitor.take_telemetry();
+        let _ = self.monitor.take_pairs();
         let watch = self.monitor.watched();
         let rate = self.monitor.sample_rate();
         let mut scopes: std::collections::HashMap<loom_core::ProbeId, crate::live::ScopeTrace> = watch
@@ -411,6 +413,11 @@ impl App {
             .keys()
             .map(|&probe| (probe, crate::spectrum::SpectrumAnalyser::new(rate)))
             .collect();
+        let mut xy: std::collections::HashMap<loom_core::ProbeId, crate::xy::XyTrace> = watch
+            .xy
+            .keys()
+            .map(|&probe| (probe, crate::xy::XyTrace::new(rate)))
+            .collect();
         let mut peaks = crate::clip::Peaks::default();
         let mut readings = Vec::new();
         let mut remaining = window;
@@ -418,6 +425,11 @@ impl App {
             let n = remaining.min(block);
             self.process(n);
             let (meters, chunks) = self.monitor.take_telemetry();
+            for chunk in self.monitor.take_pairs() {
+                if let Some(trace) = xy.get_mut(&chunk.probe) {
+                    trace.push(&chunk);
+                }
+            }
             peaks.note(watch.peak_epoch, &watch.meters, &meters);
             for reading in &meters {
                 if let Some(history) = histories.get_mut(&reading.probe) {
@@ -475,6 +487,16 @@ impl App {
                     (probe, spectrum.trace(want.tilt, want.hold))
                 })
                 .collect(),
+            xy: xy
+                .into_iter()
+                .map(|(probe, trace)| {
+                    let want = watch.xy[&probe];
+                    (
+                        probe,
+                        trace.trace(want.frames, want.range, want.rotate, watch.full_traces),
+                    )
+                })
+                .collect(),
             peaks: peaks.news(),
             peak_epoch: watch.peak_epoch,
             activity,
@@ -490,7 +512,8 @@ impl App {
     pub(crate) fn stats_model(&self) -> Stats {
         let engine = self.controller.stats();
         let telemetry_dropped = engine.dropped_meters.load(std::sync::atomic::Ordering::Relaxed)
-            + engine.dropped_scope.load(std::sync::atomic::Ordering::Relaxed);
+            + engine.dropped_scope.load(std::sync::atomic::Ordering::Relaxed)
+            + engine.dropped_pairs.load(std::sync::atomic::Ordering::Relaxed);
         let (playing, load, max_load) = match self.stream.stats() {
             Some(stats) => {
                 let s = stats.snapshot();

@@ -1,10 +1,12 @@
-//! Data from the audio thread for live views: meters and scopes (FR-VIS-04).
+//! Data from the audio thread for live views: meters, scopes, and pairs of
+//! signals (FR-VIS-04).
 //!
 //! The UI asks to watch an output port with [`Controller::add_probe`]. The
 //! next [`Controller::commit`] compiles the probe into the schedule. After
 //! each internal block, the engine reads the probed buffers and pushes
-//! fixed-size messages into two bounded queues: one for meter readings, one
-//! for scope samples. The control thread reads them through [`Telemetry`].
+//! fixed-size messages into three bounded queues: one for meter readings, one
+//! for scope samples, and one for paired samples. The control thread reads them
+//! through [`Telemetry`].
 //!
 //! Telemetry may be lost, edits may not (NFR-RT-07). When a queue is full the
 //! engine drops the new message and counts it in
@@ -13,11 +15,15 @@
 //! [`Controller::add_probe`]: crate::Controller::add_probe
 //! [`Controller::commit`]: crate::Controller::commit
 
+use crate::graph::{InputRef, OutputRef};
 use rtrb::{Consumer, Producer};
 use std::fmt;
 
 /// Number of samples in one [`ScopeChunk`].
 pub const SCOPE_CHUNK: usize = 64;
+
+/// Number of frames in one [`PairChunk`]. The same byte size as a scope chunk.
+pub const PAIR_CHUNK: usize = 32;
 
 /// Identifies a probe. Returned by [`Controller::add_probe`].
 ///
@@ -94,6 +100,41 @@ impl ScopeChunk {
     }
 }
 
+/// Consecutive frames of a paired probe: `x` and `y` interleaved, so both
+/// values of a frame always come from the same block, the same chunk, and the
+/// same push (`docs/design/telemetry.md`, Paired probes).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PairChunk {
+    /// The probe.
+    pub probe: ProbeId,
+    /// Engine frame of the first pair, counted from engine start. A gap
+    /// between chunks of the same probe means chunks were dropped.
+    pub frame: u64,
+    /// Number of valid frames.
+    pub len: u32,
+    /// `x` then `y` for each frame. Only the first `len` frames are valid.
+    pub values: [f32; PAIR_CHUNK * 2],
+}
+
+impl PairChunk {
+    /// The valid frames, each as `[x, y]`.
+    pub fn pairs(&self) -> impl Iterator<Item = [f32; 2]> + '_ {
+        self.values[..self.len as usize * 2].as_chunks::<2>().0.iter().copied()
+    }
+}
+
+/// What a paired probe reads (`docs/design/telemetry.md`, Paired probes).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PairProbe {
+    /// The output drawn across.
+    pub x: OutputRef,
+    /// The output drawn up.
+    pub y: OutputRef,
+    /// The input that feeds `y`. With no cable in it and a stereo `x`, the
+    /// pair reads the two sides of `x`.
+    pub y_input: Option<InputRef>,
+}
+
 /// Reads telemetry on the control thread. Returned by
 /// [`create_engine`](crate::create_engine).
 ///
@@ -102,11 +143,12 @@ impl ScopeChunk {
 pub struct Telemetry {
     meters: Consumer<MeterReading>,
     scope: Consumer<ScopeChunk>,
+    pairs: Consumer<PairChunk>,
 }
 
 impl Telemetry {
-    pub(crate) fn new(meters: Consumer<MeterReading>, scope: Consumer<ScopeChunk>) -> Self {
-        Self { meters, scope }
+    pub(crate) fn new(meters: Consumer<MeterReading>, scope: Consumer<ScopeChunk>, pairs: Consumer<PairChunk>) -> Self {
+        Self { meters, scope, pairs }
     }
 
     /// The oldest waiting meter reading.
@@ -117,6 +159,11 @@ impl Telemetry {
     /// The oldest waiting scope chunk.
     pub fn pop_scope(&mut self) -> Option<ScopeChunk> {
         self.scope.pop().ok()
+    }
+
+    /// Takes every waiting pair chunk, oldest first.
+    pub fn pairs(&mut self) -> impl Iterator<Item = PairChunk> + '_ {
+        std::iter::from_fn(|| self.pairs.pop().ok())
     }
 
     /// Takes every waiting meter reading, oldest first.
@@ -134,6 +181,7 @@ impl Telemetry {
 pub(crate) struct TelemetrySender {
     pub meters: Producer<MeterReading>,
     pub scope: Producer<ScopeChunk>,
+    pub pairs: Producer<PairChunk>,
 }
 
 /// Peak and RMS of a block. Runs on the audio thread.

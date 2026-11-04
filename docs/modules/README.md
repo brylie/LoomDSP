@@ -102,3 +102,4 @@ One page for each built-in module, made from its descriptor. After you change a 
 | [Macro](loom.ui.macro.md) | `loom.ui.macro` | One knob whose value is a signal. Assign it to many parameters, so one knob shapes a whole sound. |
 | [Scope](loom.display.scope.md) | `loom.display.scope` | Shows its input over time. Passes the input through unchanged. |
 | [Spectrum](loom.display.spectrum.md) | `loom.display.spectrum` | Shows the frequency content of its input. Passes the input through unchanged. |
+| [XY Scope](loom.display.xy.md) | `loom.display.xy` | Shows one signal against another. Passes both inputs through unchanged. |

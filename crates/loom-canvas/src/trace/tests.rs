@@ -159,3 +159,37 @@ fn a_spectrum_has_a_grid_only_close_up() {
     let middle = TraceGeometry::build(&scene, &traces, false, &palette);
     assert_eq!(middle.segments.len(), 2, "the line only");
 }
+
+/// An XY scope fades its older points, and at the middle zoom the one point the
+/// app sends is drawn as a dot (panel-widgets.md, XY scope).
+#[test]
+fn an_xy_scope_fades_and_has_a_dot_at_the_middle_zoom() {
+    let mut scene_module = history_scene().modules()[0].clone();
+    scene_module.panel.widgets[0].kind = WidgetViewKind::XyScope;
+    let scene = Scene::new(vec![scene_module], Vec::new());
+    let palette = Palette::default();
+    let mut traces = ScopeTraces::new();
+    traces.set(
+        7,
+        0,
+        Trace {
+            points: vec![[0.0, 0.0], [0.5, 0.5], [1.0, 0.0], [0.5, -0.5]],
+            ..Trace::default()
+        },
+    );
+    let close = TraceGeometry::build(&scene, &traces, true, &palette);
+    assert_eq!(close.segments.len(), 3);
+    assert_ne!(close.segments[0], close.segments[2]);
+    traces.set(
+        7,
+        0,
+        Trace {
+            points: vec![[0.5, 0.5]],
+            ..Trace::default()
+        },
+    );
+    let middle = TraceGeometry::build(&scene, &traces, false, &palette);
+    assert_eq!(middle.segments.len(), 1);
+    let (from, to) = middle.segments[0].ends();
+    assert_eq!(from, to, "a dot");
+}

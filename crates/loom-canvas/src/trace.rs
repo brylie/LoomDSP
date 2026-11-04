@@ -29,6 +29,8 @@ const TRACE_MIN_PX: f32 = 1.0;
 const INSET: f32 = 2.0;
 /// Width of a lighter second line, in world units.
 const PEAK_WIDTH: f32 = 0.8;
+/// How bright an XY scope's oldest point is, from 0 to 1.
+const XY_FADEST: f32 = 0.15;
 /// How far a level history's column reaches over the next one, in world units.
 const SEAM: f32 = 0.6;
 /// Where a spectrum's faint grid lines sit: 100 Hz, 1 kHz, and 10 kHz, on its
@@ -221,6 +223,18 @@ impl TraceGeometry {
                                 .map(|pair| Segment::with_width(at(pair[0]), at(pair[1]), colour, area, PEAK_WIDTH)),
                         );
                     }
+                } else if widget.kind == WidgetViewKind::XyScope {
+                    // Older points fade, so the newest part is brightest. The
+                    // app sends one point at the middle zoom, drawn as a dot.
+                    if let [only] = trace.points.as_slice() {
+                        segments.push(Segment::new(at(*only), at(*only), palette.light_on, area));
+                    }
+                    let last = trace.points.len().saturating_sub(2).max(1) as f32;
+                    segments.extend(trace.points.windows(2).enumerate().map(|(i, pair)| {
+                        let age = XY_FADEST + (1.0 - XY_FADEST) * i as f32 / last;
+                        let colour = crate::controls::mix(palette.background, palette.light_on, age);
+                        Segment::new(at(pair[0]), at(pair[1]), colour, area)
+                    }));
                 } else if widget.kind == WidgetViewKind::Spectrum {
                     if full {
                         for x in SPECTRUM_GRID {

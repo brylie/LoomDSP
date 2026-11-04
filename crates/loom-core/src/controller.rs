@@ -38,7 +38,7 @@ use crate::midi_map::{
 };
 use crate::registry::Registry;
 use crate::safety::OutputSafety;
-use crate::telemetry::{ProbeId, ProbeKind, Telemetry, TelemetrySender};
+use crate::telemetry::{PairProbe, ProbeId, ProbeKind, Telemetry, TelemetrySender};
 use crate::transport::{TimeSignature, TransportSettings, clamp_tempo};
 use crate::width;
 use rtrb::{Consumer, Producer, RingBuffer};
@@ -67,6 +67,7 @@ pub fn create_engine(registry: Arc<Registry>, config: EngineConfig) -> EnginePar
     let (midi_tx, midi_rx) = RingBuffer::new(config.midi_capacity);
     let (meter_tx, meter_rx) = RingBuffer::new(config.meter_capacity);
     let (scope_tx, scope_rx) = RingBuffer::new(config.scope_capacity);
+    let (pair_tx, pair_rx) = RingBuffer::new(config.pair_capacity);
     let stats = Arc::new(EngineStats::default());
     let displays = Arc::new(DisplayTable::new(config.max_modules));
     let live = Arc::new(LiveTable::new(config.max_live_values));
@@ -79,6 +80,7 @@ pub fn create_engine(registry: Arc<Registry>, config: EngineConfig) -> EnginePar
         TelemetrySender {
             meters: meter_tx,
             scope: scope_tx,
+            pairs: pair_tx,
         },
         (displays.clone(), live.clone()),
         stats.clone(),
@@ -104,7 +106,7 @@ pub fn create_engine(registry: Arc<Registry>, config: EngineConfig) -> EnginePar
         controller,
         engine,
         midi: MidiSender { tx: midi_tx },
-        telemetry: Telemetry::new(meter_rx, scope_rx),
+        telemetry: Telemetry::new(meter_rx, scope_rx, pair_rx),
     }
 }
 
@@ -290,6 +292,7 @@ impl Controller {
         let (mut schedule, mut report) = compile(
             &self.graph,
             self.probes.as_map(),
+            self.probes.pairs(),
             &synced,
             self.config.sample_rate,
             self.config.max_block,

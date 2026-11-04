@@ -1096,6 +1096,19 @@ impl Widget {
         self
     }
 
+    /// An XY scope: output `x_output` across and output `y_output` up, from
+    /// one paired probe (panel-widgets.md, XY scope).
+    pub const fn xy_scope(x: u8, y: u8, x_output: &'static str, y_output: &'static str) -> Self {
+        Self {
+            kind: WidgetKind::XyScope { y: y_output },
+            x,
+            y,
+            bind: x_output,
+            caption: None,
+            shown_when: None,
+        }
+    }
+
     /// A spectrum on output `output`: its frequency content, from a scope
     /// probe (panel-widgets.md, Spectrum).
     pub const fn spectrum(x: u8, y: u8, output: &'static str) -> Self {
@@ -1383,6 +1396,7 @@ impl Widget {
                 | WidgetKind::Scope
                 | WidgetKind::LevelHistory
                 | WidgetKind::Spectrum
+                | WidgetKind::XyScope { .. }
                 | WidgetKind::Shape { .. }
         )
     }
@@ -1393,7 +1407,11 @@ impl Widget {
     pub const fn shows_output(&self) -> bool {
         matches!(
             self.kind,
-            WidgetKind::Meter | WidgetKind::Scope | WidgetKind::LevelHistory | WidgetKind::Spectrum
+            WidgetKind::Meter
+                | WidgetKind::Scope
+                | WidgetKind::LevelHistory
+                | WidgetKind::Spectrum
+                | WidgetKind::XyScope { .. }
         )
     }
 }
@@ -1444,6 +1462,13 @@ pub enum WidgetKind {
     /// The frequency content of one of the module's outputs, from a port probe
     /// (panel-widgets.md, Spectrum).
     Spectrum,
+    /// Two of the module's outputs against each other, from one paired probe
+    /// (panel-widgets.md, XY scope). The widget's `bind` is the output drawn
+    /// across.
+    XyScope {
+        /// The output drawn up.
+        y: &'static str,
+    },
     /// Read-only shape sampled from the module's parameters on the UI thread.
     Shape {
         /// Width in panel grid units.
@@ -1537,6 +1562,7 @@ impl PartialEq for WidgetKind {
             | (Self::Scope, Self::Scope)
             | (Self::LevelHistory, Self::LevelHistory)
             | (Self::Spectrum, Self::Spectrum) => true,
+            (Self::XyScope { y: a }, Self::XyScope { y: b }) => a == b,
             (Self::Segmented { width: a }, Self::Segmented { width: b }) => a == b,
             // Kinds compare their visible form. Function addresses are not
             // stable identities for a shape sampler across codegen units.
@@ -1677,6 +1703,7 @@ impl ModuleDescriptor {
             WidgetKind::Scope => (9, 5),
             WidgetKind::LevelHistory => (9, 6),
             WidgetKind::Spectrum => (9, 5),
+            WidgetKind::XyScope { .. } => (6, 6),
             WidgetKind::Shape { width, .. } => (width, 5),
             WidgetKind::Toggle | WidgetKind::Light => (3, 2),
             WidgetKind::Select => (6, 2),
@@ -2003,6 +2030,11 @@ impl ModuleDescriptor {
             } else if widget.shows_output() || matches!(widget.kind, WidgetKind::Shape { .. }) {
                 if !self.outputs.iter().any(|port| port.name == widget.bind) {
                     return Err(name("no such output"));
+                }
+                if let WidgetKind::XyScope { y } = widget.kind
+                    && (y == widget.bind || !self.outputs.iter().any(|port| port.name == y))
+                {
+                    return Err(name("an XY scope binds two different outputs of its own module"));
                 }
                 if let WidgetKind::Shape { width, label, .. } = widget.kind
                     && (width == 0 || label.trim().is_empty())

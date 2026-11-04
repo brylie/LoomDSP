@@ -55,7 +55,7 @@ pub use panic::PanicTrigger;
 pub use registry::{ModuleKind, Registry, RegistryNote};
 pub use safety::OutputSafety;
 pub use signal::SignalType;
-pub use telemetry::{MeterReading, ProbeId, ProbeKind, SCOPE_CHUNK, ScopeChunk, Telemetry};
+pub use telemetry::{MeterReading, PAIR_CHUNK, PairChunk, ProbeId, ProbeKind, SCOPE_CHUNK, ScopeChunk, Telemetry};
 pub use transport::{
     TRANSPORT_GRID, TRANSPORT_MODULE, TimeSignature, TransportInfo, TransportRequest, TransportSettings,
 };

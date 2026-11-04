@@ -111,6 +111,8 @@ fn panels_follow_the_spec() {
                 ("loom.dyn.dynamics", "match"),
                 ("loom.eq.eq", "low_slope"),
                 ("loom.eq.eq", "high_slope"),
+                ("loom.display.xy", "range"),
+                ("loom.display.xy", "rotate"),
             ];
             if non_knob.contains(&(descriptor.id, param.name)) {
                 assert!(
