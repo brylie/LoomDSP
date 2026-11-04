@@ -750,7 +750,7 @@ impl App {
             .node(ModuleId(module))
             .ok_or_else(|| format!("no module {module}"))?;
         let widgets = node.descriptor.panel.widgets;
-        let widget = widgets.iter().position(|w| w.bind == name).ok_or_else(|| {
+        let widget = widgets.iter().position(|w| w.binds(name)).ok_or_else(|| {
             format!(
                 "module {module} ({}) has no control, light, or meter `{name}`",
                 node.descriptor.name
@@ -760,6 +760,11 @@ impl App {
             module,
             widget,
             name: name.to_string(),
+            part: if widgets[widget].second() == Some(name) {
+                ControlPart::Second
+            } else {
+                ControlPart::Main
+            },
             meter: widgets[widget].kind == WidgetKind::Meter,
             ms,
             start: None,

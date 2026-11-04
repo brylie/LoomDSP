@@ -196,7 +196,7 @@ impl App {
             .filter_map(|&id| Some((id, graph.node(ModuleId(id))?.descriptor)))
             .flat_map(|(id, d)| {
                 d.panel.widgets.iter().enumerate().filter_map(move |(index, w)| {
-                    let display = (!w.is_control()).then(|| d.display_index(w.bind))??;
+                    let display = (!w.is_control()).then(|| d.display_index(w.bind()))??;
                     Some(((id, index), display, lights::range(d, w), lights::readout(d, w)))
                 })
             })

@@ -221,7 +221,7 @@ impl<Message> PatchCanvas<'_, Message> {
                             module: popup.module,
                             widget: popup.widget,
                         })
-                    && last_click.is_some_and(|(at, module, widget)| {
+                    && last_click.is_some_and(|(at, module, widget, _)| {
                         module == popup.module && widget == popup.widget && Instant::now() - at < DOUBLE_CLICK
                     })
                 {
@@ -230,6 +230,7 @@ impl<Message> PatchCanvas<'_, Message> {
                         CanvasEvent::ResetControl {
                             module: popup.module,
                             widget: popup.widget,
+                            part: ControlPart::Main,
                         },
                     );
                 }

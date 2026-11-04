@@ -46,7 +46,15 @@ impl<Message> PatchCanvas<'_, Message> {
             // too.
             Some(Hit::Port(port)) => Some(HoverTarget::Port(port)),
             Some(Hit::Widget { module, widget }) if self.is_control(module, widget) => {
-                Some(HoverTarget::Control(module, widget))
+                // Each edge of an XY pad has its parameter's hover text.
+                let second = state
+                    .cursor
+                    .is_some_and(|world| self.drop_part(module, widget, world) == ControlPart::Second);
+                Some(if second {
+                    HoverTarget::Second(module, widget)
+                } else {
+                    HoverTarget::Control(module, widget)
+                })
             }
             // A light or meter belongs to the tile for presses, so the hit
             // is the module. Its hover text still shows. A port's label, or
@@ -108,12 +116,25 @@ impl<Message> PatchCanvas<'_, Message> {
             .hover
             .zip(state.cursor)
             .and_then(|(hit, world)| self.depth_drag_at(&hit, world));
-        if let Some((module, widget)) = on_range {
+        if let Some((module, widget, part)) = on_range {
+            if matches!(self.widget_kind(module, widget), Some(WidgetViewKind::XyPad { .. })) {
+                return ValueDrag::xy_axis(
+                    self.scene
+                        .module(module)
+                        .and_then(|m| m.widget_bounds(widget))
+                        .map_or(Rectangle::default(), xy_area),
+                    part,
+                    state.camera.zoom,
+                )
+                .cursor();
+            }
             return self.value_drag(module, widget, state.camera.zoom).cursor();
         }
         match state.hover {
             Some(Hit::Port(_) | Hit::Badge(_)) => mouse::Interaction::Pointer,
             Some(Hit::Widget { module, widget }) => match self.widget_kind(module, widget) {
+                Some(WidgetViewKind::XyPad { .. }) => mouse::Interaction::Crosshair,
+                Some(WidgetViewKind::Range { .. }) => self.value_drag(module, widget, state.camera.zoom).cursor(),
                 Some(kind) if kind.is_one_number() => self.value_drag(module, widget, state.camera.zoom).cursor(),
                 _ => mouse::Interaction::Pointer,
             },
@@ -146,6 +167,11 @@ impl<Message> PatchCanvas<'_, Message> {
         }
     }
 
+    /// The mapping of one value of a widget that binds two, in learn mode.
+    fn part_label(&self, module: u32, widget: usize, part: ControlPart) -> Option<&str> {
+        self.learn?.part_labels.get(&(module, widget, part)).map(String::as_str)
+    }
+
     /// The label, hover text, and world bounds of what hover text is about.
     /// The label, hover text, value line, and anchor of a hover target. Only
     /// lights and meters have a value line: their current value, which the
@@ -172,9 +198,20 @@ impl<Message> PatchCanvas<'_, Message> {
                 };
                 Some((&view.label, &view.hover, None, anchor))
             }
+            HoverTarget::Second(id, widget) => {
+                let module = self.scene.module(id)?;
+                let view = module.panel.widgets.get(widget)?;
+                let part = &view.kind.parts()?[1];
+                let value = self.part_label(id, widget, ControlPart::Second);
+                Some((&part.label, &part.hover, value, module.widget_bounds(widget)?))
+            }
             HoverTarget::Control(id, widget) => {
                 let module = self.scene.module(id)?;
                 let view = module.panel.widgets.get(widget)?;
+                if let Some(parts) = view.kind.parts() {
+                    let value = self.part_label(id, widget, ControlPart::Main);
+                    return Some((&parts[0].label, &parts[0].hover, value, module.widget_bounds(widget)?));
+                }
                 let value = (!view.is_control())
                     .then(|| self.values.and_then(|v| v.get(id, widget)))
                     .flatten()
@@ -212,7 +249,7 @@ impl<Message> PatchCanvas<'_, Message> {
         // (panels.md, Clock mark on transport inputs).
         let follows = match target {
             HoverTarget::Port(port) => self.scene.port(port).and_then(|p| p.follows_transport),
-            HoverTarget::Control(..) | HoverTarget::Title(_) => None,
+            HoverTarget::Control(..) | HoverTarget::Second(..) | HoverTarget::Title(_) => None,
         };
         let font = renderer.default_font();
         let inner = crate::hover::text_width(bounds.width);

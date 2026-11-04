@@ -41,6 +41,7 @@ impl App {
         let mut rig = settings::Rig::new(host, store, args.devices.clone(), args.output_safety.is_some());
         rig.recent = recent;
         let mut session_folder = None;
+        let mut autosave_off = None;
         let mut restore = None;
         if let Some(root) = args.recovery_root() {
             match root.and_then(|root| recovery::start(&root)) {
@@ -62,7 +63,7 @@ impl App {
                         }
                     }
                 }
-                Err(e) => notes.push(format!("Autosave is off: {e}.")),
+                Err(e) => autosave_off = Some(format!("Autosave is off: {e}.")),
             }
         }
         // The file is checked after the answer: it can change while the
@@ -143,6 +144,10 @@ impl App {
             } else {
                 app.alerts.warn(notes);
             }
+        }
+        // It stays for the whole run, beside whatever the line says.
+        if let Some(off) = autosave_off {
+            app.alerts.keep_warning(alerts::Cause::Autosave, off);
         }
         app
     }

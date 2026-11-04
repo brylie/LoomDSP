@@ -87,28 +87,30 @@ Every module belongs to one of eight families ([ADR-0029](../adr/0029-module-fam
 |---|---|
 | Module and cable count, audio device and rate, load, dropouts, input alerts, output warnings, MIDI, the last status message | Always |
 | `Learning` | While MIDI learn mode is on ([MIDI learn](midi-learn.md)) |
-| The kept error | While there is one, and it is not the last status message |
+| The kept error or warning | While there is one, and it is not the last status message |
 | Measure and Move camera switches, the frame summary | Only with `--dev`, `--measure`, `--measure-idle`, or `--bench` |
 
-MIDI shows a count, such as "MIDI: 2 inputs" or "MIDI: no inputs". Its hover text lists the input names. The fixed items come first. The kept error and the status message share the remaining width. Each is cut, not wrapped, and its hover text shows all of it.
+MIDI shows a count, such as "MIDI: 2 inputs" or "MIDI: no inputs". Its hover text lists the input names. The fixed items come first. The kept problem and the status message share the remaining width. Each is cut, not wrapped, and its hover text shows all of it.
 
 ### Status messages
 
 **Status:** Agreed, M2 ([#493](https://github.com/brylie/LoomDSP/issues/493), 2026-11-03). Severity follows NFR-UX-03: a word as well as a colour.
 
 - **Three severities.** Info has no label. A warning shows `Warning:` and an error shows `Error:`, each in its own colour. The snapshot reports them as `info`, `warning`, and `error`.
-- **What each one means.** A kept error is a problem that stays true after the moment passes and that the player must act on, or that lost their work. A refused gesture or a problem that fixed itself is a warning. Warnings and info are the latest message only, and are never kept. *Why:* if every failed gesture stayed until dismissed, a performer would be clicking × on stage.
+- **What each one means.** A kept error is a problem that stays true after the moment passes and that the player must act on, or that lost their work. A refused gesture or a problem that fixed itself is a warning. Warnings and info are the latest message only, and are not kept. *Why:* if every failed gesture stayed until dismissed, a performer would be clicking × on stage.
+- **One kept warning: a lost autosave.** It stays true and leaves the player's work at risk, so it stays on screen. But nothing is wrong until a crash, so it reads as a warning, never as a red error, and nothing interrupts playing. *Why:* autosave is a safety net, and on stage other things can matter more than a full disk.
 - **An error is also the latest message.** So `status` always holds what happened last, and a failed control command replies with its own text. The kept error field appears only when the newest kept error is not the latest message, so the same text never shows twice.
-- **One kept error per cause.** The bar shows the newest. Its hover text lists the others. *Why:* with one slot, a failed save could hide a lost device.
+- **One kept problem per cause.** The bar shows the most severe, then the newest. Its hover text lists the others. *Why:* with one slot, a failed save could hide a lost device, and a later warning must not hide an error.
 
 | Cause | Cleared by |
 |---|---|
 | Audio output | Sound is playing again, or the player chooses a device. No × button ([device changes](device-changes.md)). |
 | Audio input | The stream opens, the player chooses an input, or an input is no longer wanted. × allowed. |
 | File | A later successful save, open, or new patch. × allowed. |
+| Autosave (a warning) | Autosave works again. × allowed, and it does not come back until autosave recovers and fails again. Autosave that is off for the run has only the ×. |
 | Other | × or a newer error of this kind. |
 
-Kept errors survive opening another patch, except as the table says.
+Kept problems survive opening another patch, except as the table says.
 
 - **Disabled toolbar buttons say why.** Hold note and Recent have hover text with the reason while disabled, as Undo and Redo do.
 

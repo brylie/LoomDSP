@@ -38,12 +38,12 @@ Spreads a number of hits as evenly as possible over a number of steps, driven by
 
 ## Panel
 
-9 by 5 grid units.
+15 by 4 grid units.
 
 - Segmented control: **Source** (`source`)
-- Knob: **Steps** (`steps`)
-- Knob: **Hits** (`hits`)
-- Knob: **Rotation** (`rotation`)
+- Number: **Steps** (`steps`)
+- Number: **Hits** (`hits`)
+- Number: **Rotation** (`rotation`)
 
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->
 

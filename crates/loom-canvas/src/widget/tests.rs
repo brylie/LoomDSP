@@ -553,7 +553,8 @@ fn select_popup_preserves_choice_and_tile_gestures() {
     assert!(picked.contains(&CanvasEvent::SetControl {
         module: 1,
         widget: 0,
-        position: 1.0
+        position: 1.0,
+        part: ControlPart::Main
     }));
     assert!(state.select_popup.is_none());
 
@@ -652,7 +653,8 @@ fn select_popup_keyboard_choices_are_explicit() {
         vec![CanvasEvent::SetControl {
             module: 1,
             widget: 0,
-            position: 1.0
+            position: 1.0,
+            part: ControlPart::Main
         }]
     );
     assert!(state.select_popup.is_none());
@@ -805,7 +807,8 @@ fn select_popup_commits_to_its_own_widget_and_closes_with_no_edit() {
         vec![CanvasEvent::SetControl {
             module: 1,
             widget: 0,
-            position: 1.0
+            position: 1.0,
+            part: ControlPart::Main
         }]
     );
 
@@ -904,7 +907,8 @@ fn a_long_select_list_scrolls() {
     assert!(picked.contains(&CanvasEvent::SetControl {
         module: 1,
         widget: 0,
-        position: 5.0
+        position: 5.0,
+        part: ControlPart::Main
     }));
 
     // The keyboard scrolls the highlight into view.
@@ -980,7 +984,8 @@ fn a_list_on_a_grown_canvas_has_no_blank_rows() {
         events.contains(&CanvasEvent::SetControl {
             module: 1,
             widget: 0,
-            position: 29.0
+            position: 29.0,
+            part: ControlPart::Main
         }),
         "{events:?}"
     );
@@ -1110,6 +1115,7 @@ fn a_fader_drags_along_its_track_and_its_bar_drags_depth() {
                 module: 1,
                 widget: 0,
                 position: 0.75,
+                part: ControlPart::Main
             }),
             "100 of 200 pixels adds half the range: {events:?}"
         );
@@ -1167,6 +1173,7 @@ fn a_fader_takes_the_keys_of_a_knob() {
         module: 1,
         widget: 0,
         position: 0.26,
+        part: ControlPart::Main
     }));
     assert_eq!(focusable(&scene.module(1).unwrap().panel), [0]);
     assert_eq!(
@@ -2523,7 +2530,8 @@ fn dropping_an_output_on_a_control_assigns_it() {
             CanvasEvent::Assign {
                 from: OUT,
                 module: 2,
-                widget: 0
+                widget: 0,
+                part: ControlPart::Main
             },
             CanvasEvent::AssignCancel,
             CanvasEvent::GestureEnd
@@ -2533,7 +2541,8 @@ fn dropping_an_output_on_a_control_assigns_it() {
     assert!(events.contains(&CanvasEvent::Assign {
         from: OUT,
         module: 2,
-        widget: 2
+        widget: 2,
+        part: ControlPart::Main
     }));
     let (events, on_light) = drop_on(&canvas, &scene, 1);
     assert_eq!(events, vec![CanvasEvent::AssignCancel, CanvasEvent::GestureEnd]);
@@ -2826,6 +2835,7 @@ fn dragging_the_range_ring_changes_depth() {
             widget: 0,
             pinned: Some(pinned),
             delta,
+            part: ControlPart::Main,
         },
     ] = moved_events.as_slice()
     else {
@@ -3439,4 +3449,158 @@ fn right_click_elsewhere_opens_no_menu() {
         output,
     ));
     assert!(events.is_empty(), "{events:?}");
+}
+
+/// Each edge of an XY pad and each handle of a range has its own parameter's
+/// hover text (panel-widgets.md, XY pad, and Range).
+#[test]
+fn hover_text_follows_the_part_under_the_pointer() {
+    let parts = || {
+        Box::new([
+            crate::scene::PartText {
+                label: "First".to_string(),
+                hover: HoverText::new("First", "The first value.", "first"),
+            },
+            crate::scene::PartText {
+                label: "Second".to_string(),
+                hover: HoverText::new("Second", "The second value.", "second"),
+            },
+        ])
+    };
+    let mut pad = module(1, 0.0);
+    pad.panel = PanelView {
+        width: 6,
+        height: 6,
+        widgets: vec![widget(WidgetViewKind::XyPad { parts: parts() }, 0)],
+    };
+    let mut range = module(2, 600.0);
+    range.panel = PanelView {
+        width: 6,
+        height: 2,
+        widgets: vec![widget(
+            WidgetViewKind::Range {
+                vertical: false,
+                parts: parts(),
+            },
+            0,
+        )],
+    };
+    let scene = Scene::new(vec![pad, range], Vec::new());
+    let mut values = PanelValues::new();
+    values.set(
+        2,
+        0,
+        WidgetValue {
+            position: 0.1,
+            second: Some(crate::controls::PartValue {
+                position: 0.9,
+                ..Default::default()
+            }),
+            ..WidgetValue::default()
+        },
+    );
+    let none = BTreeSet::new();
+    let canvas = PatchCanvas::new(&scene, &none, |e| e).values(&values);
+    let at = |point: Point| State {
+        hover: Some(scene.hit(point, 8.0)),
+        cursor: Some(point),
+        ..State::default()
+    };
+
+    let area = xy_area(scene.module(1).unwrap().widget_bounds(0).unwrap());
+    let bottom = at(Point::new(area.center_x(), area.y + area.height - 2.0));
+    assert_eq!(canvas.hover_target(&bottom), Some(HoverTarget::Control(1, 0)));
+    let left = at(Point::new(area.x + 2.0, area.center_y()));
+    assert_eq!(canvas.hover_target(&left), Some(HoverTarget::Second(1, 0)));
+    let (label, hover, _, _) = canvas.hover_content(HoverTarget::Second(1, 0)).unwrap();
+    assert_eq!((label, hover.description.as_str()), ("Second", "The second value."));
+    let (label, _, _, _) = canvas.hover_content(HoverTarget::Control(1, 0)).unwrap();
+    assert_eq!(label, "First");
+
+    let rect = scene.module(2).unwrap().widget_bounds(0).unwrap();
+    let low = at(crate::controls::range_point(rect, false, 0.1));
+    assert_eq!(canvas.hover_target(&low), Some(HoverTarget::Control(2, 0)));
+    let high = at(crate::controls::range_point(rect, false, 0.9));
+    assert_eq!(canvas.hover_target(&high), Some(HoverTarget::Second(2, 0)));
+}
+
+/// Hiding a range ends the keyboard's inside and any grab at once, even if it
+/// is shown again before the next key press (panel-widgets.md, rule 4).
+#[test]
+fn hiding_a_range_ends_the_inside() {
+    let tile = |hidden: bool| {
+        let mut range = widget(
+            WidgetViewKind::Range {
+                vertical: false,
+                parts: Box::default(),
+            },
+            0,
+        );
+        range.hidden = hidden;
+        let mut view = module(1, 0.0);
+        view.panel = PanelView {
+            width: 6,
+            height: 2,
+            widgets: vec![range],
+        };
+        Scene::new(vec![view], Vec::new())
+    };
+    let (shown, hidden) = (tile(false), tile(true));
+    let selected = BTreeSet::from([1]);
+    let at = shown.module(1).unwrap().bounds().center();
+    let moved = Event::Mouse(mouse::Event::CursorMoved { position: at });
+    let mut state = State {
+        focus: Some((1, 0)),
+        inside: Some(Inside {
+            module: 1,
+            widget: 0,
+            part: 0,
+            grab: Some(RangeGrab::Band),
+        }),
+        ..State::default()
+    };
+
+    let canvas = PatchCanvas::new(&shown, &selected, |event| event);
+    drive(&canvas, &mut state, &moved, at);
+    assert!(state.inside.is_some(), "a shown range keeps its grab");
+
+    let canvas = PatchCanvas::new(&hidden, &selected, |event| event);
+    drive(&canvas, &mut state, &moved, at);
+    assert!(state.inside.is_none(), "hiding ends it");
+
+    let canvas = PatchCanvas::new(&shown, &selected, |event| event);
+    let events = drive(
+        &canvas,
+        &mut state,
+        &key_event(keyboard::key::Named::ArrowRight, true),
+        at,
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, CanvasEvent::SetControl { .. })),
+        "{events:?}"
+    );
+}
+
+/// Space on a focused XY pad passes on to Run, as on a knob, and a key with no
+/// use is not swallowed (panels.md, Keyboard without a mouse).
+#[test]
+fn a_focused_xy_pad_does_not_use_space() {
+    let mut pad = module(1, 0.0);
+    pad.panel = PanelView {
+        width: 6,
+        height: 6,
+        widgets: vec![widget(WidgetViewKind::XyPad { parts: Box::default() }, 0)],
+    };
+    let scene = Scene::new(vec![pad], Vec::new());
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |event| event);
+    let mut state = State {
+        focus: Some((1, 0)),
+        ..State::default()
+    };
+    let at = scene.module(1).unwrap().bounds().center();
+    let events = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Space, true), at);
+    assert_eq!(events, vec![CanvasEvent::ToggleRun]);
 }

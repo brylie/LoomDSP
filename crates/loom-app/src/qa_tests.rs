@@ -947,7 +947,7 @@ fn a_later_save_clears_a_failed_save() {
     let dir = std::env::temp_dir().join(format!("loom-app-failed-save-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     assert!(!app.write_to(dir.join("no-such-folder").join("patch.ron")));
-    assert_eq!(app.alerts.newest_kept().unwrap().cause, alerts::Cause::File);
+    assert_eq!(app.alerts.top_kept().unwrap().cause, alerts::Cause::File);
     assert_eq!(app.alerts.severity(), alerts::Severity::Alarm);
     assert!(app.write_to(dir.join("patch.ron")));
     let _ = std::fs::remove_dir_all(&dir);
@@ -972,7 +972,7 @@ fn a_new_patch_stays_idle_while_a_named_output_is_lost() {
     assert!(run.app.replace(Source::Empty));
     assert!(!run.app.stream.is_playing(), "Fake A does not stand in");
     assert!(run.app.rig.lost_audio.is_some(), "still waiting");
-    assert_eq!(run.app.alerts.newest_kept().unwrap().cause, alerts::Cause::AudioOutput);
+    assert_eq!(run.app.alerts.top_kept().unwrap().cause, alerts::Cause::AudioOutput);
     assert_eq!(run.tape.stream_starts().len(), starts);
 
     run.host.add_device(fake::device("Fake B"));

@@ -115,13 +115,13 @@ pub static EUCLID: ModuleDescriptor = ModuleDescriptor {
     ],
     role: ModuleRole::Dsp(|_| Box::new(Euclid::new())),
     panel: Panel::new(
-        9,
-        5,
+        15,
+        4,
         &[
             Widget::segmented(0, 0, 9, "source"),
-            Widget::knob(0, 2, "steps"),
-            Widget::knob(3, 2, "hits"),
-            Widget::knob(6, 2, "rotation"),
+            Widget::number(0, 2, "steps"),
+            Widget::number(5, 2, "hits"),
+            Widget::number(10, 2, "rotation"),
         ],
     ),
     displays: &[],

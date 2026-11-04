@@ -491,3 +491,74 @@ fn building_a_copy_is_cheap() {
     assert!(each < Duration::from_millis(20), "{each:?}");
     app.autosave(Instant::now());
 }
+
+/// A failed autosave stays on screen as a warning beside later messages, also
+/// across a new patch, until autosave works again. It opens no question.
+#[test]
+fn a_failed_autosave_stays_as_a_warning_until_it_works() {
+    let setup = Setup::new("failed");
+    let mut prompt = Answer::new(Choice::NotNow);
+    let mut app = setup.boot(Some(setup.file()), &mut prompt);
+    app.autosave_report(recovery::Report::Failed("Autosave failed: disk full.".to_string()));
+    assert_eq!(app.alerts.severity(), alerts::Severity::Warning);
+    assert!(app.question.is_none(), "it must not interrupt playing");
+
+    app.alerts.say("Something newer");
+    let snapshot = app.ui_snapshot();
+    assert_eq!(snapshot.status, "Something newer");
+    assert_eq!(snapshot.errors.len(), 1);
+    assert_eq!(snapshot.errors[0].cause, alerts::Cause::Autosave);
+    assert_eq!(snapshot.errors[0].severity, alerts::Severity::Warning);
+
+    let _ = app.update(Message::File(FileAction::New));
+    assert_eq!(app.alerts.kept().len(), 1, "a new patch does not fix the disk");
+
+    app.autosave_report(recovery::Report::Works);
+    assert!(app.alerts.kept().is_empty());
+    assert_eq!(app.alerts.status(), recovery::AUTOSAVE_WORKS);
+    assert_eq!(app.alerts.severity(), alerts::Severity::Normal);
+}
+
+/// The × removes the warning, and it comes back only with a new failure.
+#[test]
+fn a_failed_autosave_can_be_dismissed() {
+    let setup = Setup::new("dismiss");
+    let mut app = setup.boot(Some(setup.file()), &mut Answer::new(Choice::NotNow));
+    app.autosave_report(recovery::Report::Failed("Autosave failed: disk full.".to_string()));
+    let _ = app.update(Message::DismissError(alerts::Cause::Autosave));
+    assert!(app.alerts.kept().is_empty());
+    assert_eq!(app.alerts.status(), "");
+}
+
+/// A note about an old copy is a plain warning, and does not end a failure.
+#[test]
+fn an_autosave_note_is_not_kept() {
+    let setup = Setup::new("note");
+    let mut app = setup.boot(Some(setup.file()), &mut Answer::new(Choice::NotNow));
+    app.autosave_report(recovery::Report::Note("Could not delete the old copy".to_string()));
+    assert!(app.alerts.kept().is_empty());
+    assert_eq!(app.alerts.severity(), alerts::Severity::Warning);
+
+    app.autosave_report(recovery::Report::Failed("Autosave failed: disk full.".to_string()));
+    app.autosave_report(recovery::Report::Note("Could not delete the old copy".to_string()));
+    assert_eq!(app.alerts.kept().len(), 1);
+}
+
+/// With no recovery folder, the app starts and keeps the warning on screen.
+#[test]
+fn autosave_that_is_off_stays_as_a_warning() {
+    let setup = Setup::new("off");
+    // A file where the folder should be, so the folder cannot be created.
+    fs::write(setup.root(), "").unwrap();
+    let mut app = setup.boot(Some(setup.file()), &mut Answer::new(Choice::NotNow));
+    assert!(!app.document.autosave_on());
+    let kept = app.alerts.kept_field().expect("the warning shows");
+    assert_eq!(
+        (kept.cause, kept.severity),
+        (alerts::Cause::Autosave, alerts::Severity::Warning)
+    );
+    assert!(kept.text.starts_with("Autosave is off: "), "{}", kept.text);
+
+    app.alerts.say("Something newer");
+    assert_eq!(app.alerts.kept().len(), 1);
+}

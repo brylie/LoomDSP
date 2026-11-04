@@ -1615,6 +1615,695 @@ mod tests {
         assert!(kind.is_one_number());
     }
 
+    /// A parameter whose only widget is a select list takes a modulation
+    /// assignment everywhere: its inspector row accepts a drop, the matrix
+    /// offers it, a cable dragged onto the box on the canvas assigns it, and
+    /// the box shows a dot, or a hollow ring when the assignment is off
+    /// (panel-widgets.md, rule 3; #567).
+    #[test]
+    fn a_select_only_parameter_is_a_modulation_target() {
+        use crate::snapshot::Mark;
+        let mut ui = Ui::open("sine.ron");
+        let id = select_new(&mut ui, "test.panel");
+        let node = ui.app.controller.graph().node(id).unwrap();
+        let long = node.descriptor.param_index("long").unwrap();
+        assert!(
+            node.descriptor
+                .panel
+                .widgets
+                .iter()
+                .filter(|w| w.binds("long"))
+                .all(|w| matches!(w.kind, loom_core::WidgetKind::Select)),
+            "the test needs a parameter shown only as a select list"
+        );
+
+        let crate::inspector::Inspector::Module(rows) = ui.app.inspector_model() else {
+            panic!("the inspector shows the selected module");
+        };
+        assert!(rows.params[long].accepts_drop, "its row accepts a drop");
+        assert!(
+            crate::matrix::targets(ui.app.controller.graph())
+                .iter()
+                .any(|t| t.module == id && t.param == long),
+            "the matrix offers it as a target"
+        );
+
+        let widget = widget_of(&ui, id, "long");
+        let mark = |ui: &Ui| {
+            let snapshot = ui.app.ui_snapshot();
+            let tile = snapshot.tiles.iter().find(|t| t.id == id.0).expect("the tile");
+            assert_eq!(tile.widgets[widget].kind, "select");
+            tile.widgets[widget].modulation
+        };
+        assert_eq!(mark(&ui), Mark::None);
+
+        let from = ui.output(id.0, "uni");
+        let to = ui.control(id.0, "long");
+        ui.drag(from, to, 12);
+        let assignments: Vec<_> = ui
+            .app
+            .controller
+            .graph()
+            .assignments()
+            .filter(|(_, a)| a.target == id && a.param == long)
+            .map(|(assignment, _)| assignment)
+            .collect();
+        assert_eq!(assignments.len(), 1, "the drop on the box made an assignment");
+        ui.redraw();
+        assert_eq!(mark(&ui), Mark::Dot);
+
+        let _ = ui.app.update(Message::Enabled {
+            id: assignments[0],
+            enabled: false,
+        });
+        ui.redraw();
+        assert_eq!(mark(&ui), Mark::Ring, "a hollow ring while the assignment is off");
+    }
+
+    /// The square of the XY pad on a new `test.panel`, in world units.
+    fn pad_area(ui: &mut Ui, id: ModuleId) -> Rectangle {
+        loom_canvas::xy_area(ui.control_bounds(id.0, "pad_x"))
+    }
+
+    /// A parameter's position on its control.
+    fn position_of(ui: &Ui, module: ModuleId, name: &str) -> f32 {
+        let node = ui.app.controller.graph().node(module).unwrap();
+        let spec = node.spec(node.descriptor.param_index(name).unwrap()).unwrap();
+        spec.normalize(param_value(ui, module, name))
+    }
+
+    /// A press on an XY pad moves nothing, and a drag moves the point by the
+    /// pointer's movement, on both axes at once, as one undo step. Shift is
+    /// 10 times finer (panel-widgets.md, XY pad, and rule 2).
+    #[test]
+    fn an_xy_pad_drags_relatively_on_both_axes() {
+        let mut ui = Ui::open("sine.ron");
+        let id = select_new(&mut ui, "test.panel");
+        let before = (position_of(&ui, id, "pad_x"), position_of(&ui, id, "pad_y"));
+        let at = ui.control(id.0, "pad_x");
+        ui.move_to(at);
+        ui.press();
+        assert_eq!(position_of(&ui, id, "pad_x"), before.0, "a plain press moves nothing");
+        assert_eq!(position_of(&ui, id, "pad_y"), before.1, "a plain press moves nothing");
+        let steps = ui.app.edits.history.len();
+        ui.move_to(Point::new(at.x + 20.0, at.y - 20.0));
+        ui.release();
+        assert_eq!(ui.app.edits.history.len(), steps + 1, "one undo step");
+        let moved = position_of(&ui, id, "pad_x") - before.0;
+        assert!((moved - 0.1).abs() < 1e-3, "{moved}");
+        let moved = position_of(&ui, id, "pad_y") - before.1;
+        assert!((moved - 0.1).abs() < 1e-3, "up raises y: {moved}");
+
+        // Long enough after the last click not to be a double-click.
+        std::thread::sleep(std::time::Duration::from_millis(450));
+        let coarse = position_of(&ui, id, "pad_x");
+        ui.hold(keyboard::Modifiers::SHIFT);
+        ui.drag(at, Point::new(at.x + 20.0, at.y), 4);
+        ui.hold(keyboard::Modifiers::default());
+        let moved = position_of(&ui, id, "pad_x") - coarse;
+        assert!((moved - 0.01).abs() < 1e-3, "Shift is finer: {moved}");
+    }
+
+    /// With Alt held, a press jumps the point to the pointer. A double-click
+    /// resets both parameters as one undo step (panel-widgets.md, XY pad).
+    #[test]
+    fn an_xy_pad_jumps_with_alt_and_resets_both() {
+        let mut ui = Ui::open("sine.ron");
+        let id = select_new(&mut ui, "test.panel");
+        let area = pad_area(&mut ui, id);
+        let world = Point::new(area.x + area.width * 0.25, area.y + area.height * 0.25);
+        let at = ui.canvas().to_window(world);
+        ui.hold(keyboard::Modifiers::ALT);
+        ui.move_to(at);
+        ui.press();
+        ui.release();
+        ui.hold(keyboard::Modifiers::default());
+        let (x, y) = (position_of(&ui, id, "pad_x"), position_of(&ui, id, "pad_y"));
+        assert!((x - 0.25).abs() < 1e-3, "x follows the pointer: {x}");
+        assert!((y - 0.75).abs() < 1e-3, "y follows the pointer: {y}");
+
+        std::thread::sleep(std::time::Duration::from_millis(450));
+        let steps = ui.app.edits.history.len();
+        ui.move_to(at);
+        ui.press();
+        ui.release();
+        ui.press();
+        ui.release();
+        assert_eq!(param_value(&ui, id, "pad_x"), 0.5, "reset to the default");
+        assert_eq!(param_value(&ui, id, "pad_y"), 1_000.0, "reset to the default");
+        assert_eq!(ui.app.edits.history.len(), steps + 1, "one undo step for both");
+    }
+
+    /// Left and Right change `x`, and Up and Down change `y`, by 1%, or 0.1%
+    /// with Shift. Enter does nothing, and digits open no field: a pad takes
+    /// no typed value (panel-widgets.md, XY pad).
+    #[test]
+    fn an_xy_pad_takes_its_keys_by_axis() {
+        use keyboard::key::Named;
+        let mut ui = Ui::open("sine.ron");
+        let id = select_new(&mut ui, "test.panel");
+        focus_control(&mut ui, id, "pad_x");
+        let none = keyboard::Modifiers::default();
+        let start = (position_of(&ui, id, "pad_x"), position_of(&ui, id, "pad_y"));
+
+        ui.tap(keyboard::Key::Named(Named::ArrowRight), none);
+        assert!((position_of(&ui, id, "pad_x") - start.0 - 0.01).abs() < 1e-4);
+        assert!((position_of(&ui, id, "pad_y") - start.1).abs() < 1e-4, "y stays");
+        ui.tap(keyboard::Key::Named(Named::ArrowLeft), keyboard::Modifiers::SHIFT);
+        assert!(
+            (position_of(&ui, id, "pad_x") - start.0 - 0.009).abs() < 1e-4,
+            "Shift is finer"
+        );
+        ui.tap(keyboard::Key::Named(Named::ArrowUp), none);
+        assert!((position_of(&ui, id, "pad_y") - start.1 - 0.01).abs() < 1e-4);
+        ui.tap(keyboard::Key::Named(Named::ArrowDown), none);
+        assert!((position_of(&ui, id, "pad_y") - start.1).abs() < 1e-4);
+
+        let before = (param_value(&ui, id, "pad_x"), param_value(&ui, id, "pad_y"));
+        ui.tap(keyboard::Key::Named(Named::Enter), none);
+        ui.typewrite("7");
+        ui.tap(keyboard::Key::Named(Named::Enter), none);
+        assert_eq!((param_value(&ui, id, "pad_x"), param_value(&ui, id, "pad_y")), before);
+    }
+
+    /// In learn mode a click, Space, or Enter on a pad arms nothing, and the
+    /// status line says to use the inspector. The tile shows no mapping label
+    /// (midi-learn.md, Making a mapping).
+    #[test]
+    fn learn_mode_arms_nothing_on_an_xy_pad() {
+        use keyboard::key::Named;
+        let mut ui = Ui::open("sine.ron");
+        let id = select_new(&mut ui, "test.panel");
+        let _ = ui.app.update(Message::Learn(crate::learn::Message::Toggle));
+        ui.redraw();
+        focus_control(&mut ui, id, "pad_x");
+        assert!(ui.app.learn.armed().is_none(), "a click arms nothing");
+        assert!(ui.app.ui_snapshot().status.contains("inspector"));
+        for key in [Named::Space, Named::Enter] {
+            ui.app.alerts.say(String::new());
+            ui.tap(keyboard::Key::Named(key), keyboard::Modifiers::default());
+            assert!(ui.app.learn.armed().is_none(), "{key:?} arms nothing");
+            assert!(ui.app.ui_snapshot().status.contains("inspector"), "{key:?} says why");
+        }
+        let widget = widget_of(&ui, id, "pad_x");
+        let view = crate::learn::view(&ui.app.controller, ui.app.learn.armed());
+        assert!(!view.labels.contains_key(&(id.0, widget)));
+    }
+
+    /// A cable dropped on a pad goes to the nearest edge, and each parameter
+    /// shows its own mark: a bar for one, and a ring for one whose assignment
+    /// is off. A press on the bar drags depth, not the value
+    /// (panel-widgets.md, XY pad, and rule 3).
+    #[test]
+    fn an_xy_pad_takes_a_drop_at_its_nearest_edge_and_marks_each_axis() {
+        use crate::snapshot::Mark;
+        let mut ui = Ui::open("sine.ron");
+        let id = select_new(&mut ui, "test.panel");
+        let area = pad_area(&mut ui, id);
+        let node = ui.app.controller.graph().node(id).unwrap();
+        let (x, y) = (
+            node.descriptor.param_index("pad_x").unwrap(),
+            node.descriptor.param_index("pad_y").unwrap(),
+        );
+        let target = |ui: &Ui, param: usize| {
+            let graph = ui.app.controller.graph();
+            let found = graph.assignments().find(|(_, a)| a.target == id && a.param == param);
+            found.map(|(assignment, _)| assignment)
+        };
+        let from = ui.output(id.0, "uni");
+        let bottom = ui
+            .canvas()
+            .to_window(Point::new(area.center_x(), area.y + area.height - 2.0));
+        ui.drag(from, bottom, 12);
+        assert!(target(&ui, x).is_some(), "the bottom edge is x");
+        assert!(target(&ui, y).is_none());
+        let from = ui.output(id.0, "bi");
+        let left = ui.canvas().to_window(Point::new(area.x + 2.0, area.center_y()));
+        ui.drag(from, left, 12);
+        let off = target(&ui, y).expect("the left edge is y");
+
+        let _ = ui.app.update(Message::Enabled {
+            id: off,
+            enabled: false,
+        });
+        ui.redraw();
+        let widget = widget_of(&ui, id, "pad_x");
+        let snapshot = ui.app.ui_snapshot();
+        let tile = snapshot.tiles.iter().find(|t| t.id == id.0).unwrap();
+        let shown = &tile.widgets[widget];
+        assert_eq!(shown.kind, "xy_pad");
+        assert!(matches!(shown.modulation, Mark::Range { .. }), "x shows a bar");
+        let second = shown.second.as_ref().expect("the pad reports y");
+        assert_eq!(second.modulation, Mark::Ring, "y shows a ring");
+        assert!(shown.text.contains(", "), "the text says both values: {}", shown.text);
+
+        let depth = |ui: &Ui| {
+            ui.app
+                .controller
+                .graph()
+                .assignment(target(ui, x).unwrap())
+                .unwrap()
+                .depth
+        };
+        let before = (depth(&ui), param_value(&ui, id, "pad_x"));
+        let at = ui
+            .canvas()
+            .to_window(loom_canvas::xy_edge_point(area, loom_canvas::ControlPart::Main, 0.5));
+        ui.drag(at, Point::new(at.x + 20.0, at.y), 4);
+        assert!(depth(&ui) > before.0, "the bar changes the depth");
+        assert_eq!(param_value(&ui, id, "pad_x"), before.1, "and not the value");
+    }
+
+    /// Each edge of a pad has its parameter's own label and description
+    /// (panel-widgets.md, XY pad).
+    #[test]
+    fn each_axis_of_an_xy_pad_has_its_own_text() {
+        let mut ui = Ui::open("sine.ron");
+        let id = select_new(&mut ui, "test.panel");
+        let widget = widget_of(&ui, id, "pad_x");
+        let tile = ui.app.scene.module(id.0).unwrap();
+        let view = &tile.panel.widgets[widget];
+        let parts = view.kind.parts().expect("a pad has two parts");
+        assert_eq!(view.label, "Position", "the caption names the pair");
+        assert_eq!(parts[0].label, "pad_x");
+        assert_eq!(parts[1].label, "pad_y");
+    }
+
+    /// A handle of the range on a new `test.panel`, in window coordinates.
+    fn handle(ui: &mut Ui, id: ModuleId, name: &str) -> Point {
+        let part = crate::targets::find(ui.app.controller.graph(), id.0, name).unwrap();
+        let world = crate::targets::world_bounds(&ui.app.scene, &ui.app.values, part).unwrap();
+        ui.canvas().to_window(world.center())
+    }
+
+    /// The point at a position on the range's track, in window coordinates.
+    fn on_span(ui: &mut Ui, id: ModuleId, t: f32) -> Point {
+        let rect = ui.control_bounds(id.0, "span_low");
+        let track = (rect.x + 4.0, rect.width - 8.0);
+        let y = handle(ui, id, "span_low").y;
+        let window = ui.canvas().to_window(Point::new(track.0 + track.1 * t, 0.0));
+        Point::new(window.x, y)
+    }
+
+    /// Dragging a handle moves that parameter only, and it stops at the other
+    /// handle. A press on the track outside the band moves the tile, not a
+    /// handle (panel-widgets.md, Range).
+    #[test]
+    fn a_range_handle_drags_and_cannot_cross() {
+        let mut ui = Ui::open("sine.ron");
+        let id = select_new(&mut ui, "test.panel");
+        // Below high, by a drag on the low handle.
+        let (low, high) = (param_value(&ui, id, "span_low"), param_value(&ui, id, "span_high"));
+        assert_eq!((low, high), (0.0, 1.0));
+        let at = handle(&mut ui, id, "span_low");
+        ui.drag(at, Point::new(at.x + 20.0, at.y), 4);
+        let moved = param_value(&ui, id, "span_low");
+        assert!(moved > 0.0, "low moved up: {moved}");
+        assert_eq!(param_value(&ui, id, "span_high"), 1.0, "high stayed");
+
+        std::thread::sleep(std::time::Duration::from_millis(450));
+        let at = handle(&mut ui, id, "span_low");
+        ui.drag(at, Point::new(at.x + 1_000.0, at.y), 8);
+        assert_eq!(param_value(&ui, id, "span_low"), 1.0, "low stops at high");
+        assert_eq!(param_value(&ui, id, "span_high"), 1.0);
+
+        // Apart again, and a press on the track outside the band.
+        std::thread::sleep(std::time::Duration::from_millis(450));
+        let _ = ui.app.update(Message::Canvas(CanvasEvent::SetControl {
+            module: id.0,
+            widget: widget_of(&ui, id, "span_low"),
+            part: loom_canvas::ControlPart::Main,
+            position: 0.75,
+        }));
+        ui.redraw();
+        let before = ui.app.scene.module(id.0).unwrap().bounds();
+        let values = (param_value(&ui, id, "span_low"), param_value(&ui, id, "span_high"));
+        let outside = on_span(&mut ui, id, 0.2);
+        ui.drag(outside, Point::new(outside.x + 48.0, outside.y), 4);
+        assert_ne!(ui.app.scene.module(id.0).unwrap().bounds(), before, "the tile moved");
+        assert_eq!(
+            (param_value(&ui, id, "span_low"), param_value(&ui, id, "span_high")),
+            values
+        );
+    }
+
+    /// One large pointer move goes all the way: a handle does not lag behind a
+    /// fast pointer (panel-widgets.md, Range).
+    #[test]
+    fn a_fast_move_takes_a_range_handle_all_the_way() {
+        let mut ui = Ui::open("sine.ron");
+        let id = select_new(&mut ui, "test.panel");
+        let widget = widget_of(&ui, id, "tall_low");
+        for (part, position) in [
+            (loom_canvas::ControlPart::Main, 0.0),
+            (loom_canvas::ControlPart::Second, 1.0),
+        ] {
+            let _ = ui.app.update(Message::Canvas(CanvasEvent::SetControl {
+                module: id.0,
+                widget,
+                part,
+                position,
+            }));
+        }
+        ui.redraw();
+        let at = handle(&mut ui, id, "tall_high");
+        ui.drag(at, Point::new(at.x, at.y + 180.0), 1);
+        let high = param_value(&ui, id, "tall_high");
+        assert!((high - 0.1).abs() < 0.01, "{high}");
+    }
+
+    /// Dragging the band moves both as one undo step, and keeps the width. A
+    /// double-click on a handle resets it, and on the band resets both as one
+    /// undo step. Two quick clicks on different handles reset nothing
+    /// (panel-widgets.md, Range).
+    #[test]
+    fn a_range_band_moves_both_and_a_double_click_resets() {
+        let mut ui = Ui::open("sine.ron");
+        let id = select_new(&mut ui, "test.panel");
+        let middle = on_span(&mut ui, id, 0.75);
+        let steps = ui.app.edits.history.len();
+        ui.drag(middle, Point::new(middle.x - 10.0, middle.y), 4);
+        assert_eq!(ui.app.edits.history.len(), steps + 1, "one undo step");
+        let (low, high) = (param_value(&ui, id, "span_low"), param_value(&ui, id, "span_high"));
+        assert!(low < 0.0 && high < 1.0, "both moved: {low}, {high}");
+        assert!((high - low - 1.0).abs() < 1e-3, "the width stays: {}", high - low);
+
+        std::thread::sleep(std::time::Duration::from_millis(450));
+        let (a, b) = (handle(&mut ui, id, "span_low"), handle(&mut ui, id, "span_high"));
+        ui.move_to(a);
+        ui.press();
+        ui.release();
+        ui.move_to(b);
+        ui.press();
+        ui.release();
+        assert_eq!(
+            param_value(&ui, id, "span_low"),
+            low,
+            "low then high is no double-click"
+        );
+        assert_eq!(param_value(&ui, id, "span_high"), high);
+
+        std::thread::sleep(std::time::Duration::from_millis(450));
+        ui.move_to(b);
+        ui.press();
+        ui.release();
+        ui.press();
+        ui.release();
+        assert_eq!(param_value(&ui, id, "span_high"), 1.0, "high resets");
+        assert_eq!(param_value(&ui, id, "span_low"), low, "low stays");
+
+        std::thread::sleep(std::time::Duration::from_millis(450));
+        let middle = on_span(&mut ui, id, 0.7);
+        let steps = ui.app.edits.history.len();
+        ui.move_to(middle);
+        ui.press();
+        ui.release();
+        ui.press();
+        ui.release();
+        assert_eq!(param_value(&ui, id, "span_low"), 0.0, "low resets");
+        assert_eq!(ui.app.edits.history.len(), steps + 1, "one undo step");
+    }
+
+    /// Selecting a control range on either parameter selects it for both, as
+    /// one undo step. A typed value picks the smallest range that holds both
+    /// (control-ranges.md, Ranges on a range widget).
+    #[test]
+    fn a_range_widgets_parameters_share_a_control_range() {
+        let mut ui = Ui::open("sine.ron");
+        let id = select_new(&mut ui, "test.panel");
+        let node = ui.app.controller.graph().node(id).unwrap();
+        let low = node.descriptor.param_index("span_low").unwrap();
+        let high = node.descriptor.param_index("span_high").unwrap();
+        let wide = node.descriptor.params[low].options.ranges.len() - 1;
+        let selected = |ui: &Ui| {
+            let node = ui.app.controller.graph().node(id).unwrap();
+            (node.range(low), node.range(high))
+        };
+        let (a, b) = selected(&ui);
+        assert_eq!(a, b);
+
+        let steps = ui.app.edits.history.len();
+        ui.app.set_range(id.0, high, wide);
+        let (a, b) = selected(&ui);
+        assert_eq!(a, b, "selecting one selects both");
+        assert_eq!(ui.app.edits.history.len(), steps + 1, "one undo step");
+        let _ = ui.app.update(Message::Undo);
+        assert_eq!(selected(&ui).0, selected(&ui).1, "undo keeps them together");
+
+        ui.app.apply_typed_value(id.0, high, "5").unwrap();
+        let (a, b) = selected(&ui);
+        assert_eq!(a, b);
+        assert!(a.unwrap().contains(5.0) && a.unwrap().contains(param_value(&ui, id, "span_low")));
+    }
+
+    /// The keyboard goes inside a range and never traps: Enter goes in, arrows
+    /// pick a part and stop at the ends, Space or Enter grabs, the arrows then
+    /// move it, a handle stops at the other, Enter or Escape lets go and keeps
+    /// the change, Escape leaves, and Tab leaves from any state
+    /// (panel-widgets.md, rule 4, and Range).
+    #[test]
+    fn the_keyboard_goes_inside_a_range() {
+        use keyboard::key::Named;
+        let mut ui = Ui::open("sine.ron");
+        let id = select_new(&mut ui, "test.panel");
+        focus_control(&mut ui, id, "span_high");
+        let none = keyboard::Modifiers::default();
+        let key = |k| keyboard::Key::Named(k);
+        let (low, high) = (position_of(&ui, id, "span_low"), position_of(&ui, id, "span_high"));
+
+        ui.tap(key(Named::ArrowRight), none);
+        assert_eq!(
+            position_of(&ui, id, "span_high"),
+            high,
+            "outside, arrows change nothing"
+        );
+
+        ui.tap(key(Named::Enter), none);
+        ui.tap(key(Named::ArrowLeft), none);
+        ui.tap(key(Named::Space), none);
+        ui.tap(key(Named::ArrowRight), none);
+        assert!(
+            (position_of(&ui, id, "span_low") - low - 0.01).abs() < 1e-4,
+            "inside starts on low"
+        );
+        assert_eq!(position_of(&ui, id, "span_high"), high, "high stays");
+        ui.tap(key(Named::ArrowRight), keyboard::Modifiers::SHIFT);
+        assert!(
+            (position_of(&ui, id, "span_low") - low - 0.011).abs() < 1e-4,
+            "Shift is finer"
+        );
+        let kept = position_of(&ui, id, "span_low");
+        ui.tap(key(Named::Escape), none);
+        assert_eq!(position_of(&ui, id, "span_low"), kept, "Escape lets go and keeps it");
+
+        // Not grabbed, the arrows pick: the band, then high, and stop there.
+        ui.tap(key(Named::ArrowRight), none);
+        ui.tap(key(Named::ArrowRight), none);
+        ui.tap(key(Named::ArrowRight), none);
+        assert_eq!(position_of(&ui, id, "span_low"), kept, "picking changes nothing");
+        ui.tap(key(Named::Enter), none);
+        ui.tap(key(Named::ArrowLeft), none);
+        assert!(
+            (position_of(&ui, id, "span_high") - high + 0.01).abs() < 1e-4,
+            "high is grabbed"
+        );
+        // A long way down: it stops at low.
+        for _ in 0..80 {
+            ui.tap(key(Named::ArrowLeft), none);
+        }
+        assert_eq!(position_of(&ui, id, "span_high"), position_of(&ui, id, "span_low"));
+        ui.tap(key(Named::Enter), none);
+
+        // The band moves both.
+        ui.tap(key(Named::ArrowLeft), none);
+        ui.tap(key(Named::Space), none);
+        let before = position_of(&ui, id, "span_low");
+        ui.tap(key(Named::ArrowLeft), none);
+        assert!((position_of(&ui, id, "span_low") - before + 0.01).abs() < 1e-4);
+        assert!((position_of(&ui, id, "span_high") - before + 0.01).abs() < 1e-4);
+
+        // Tab leaves from a grab, and arrows then belong to the next control.
+        ui.tap(key(Named::Tab), none);
+        let after = position_of(&ui, id, "span_low");
+        ui.tap(key(Named::ArrowLeft), none);
+        assert_eq!(position_of(&ui, id, "span_low"), after, "the grab ended");
+    }
+
+    /// Nothing redraws while nothing a pad or a range shows changes: refreshing
+    /// the same values keeps the panel generation (panel-widgets.md, rule 7).
+    #[test]
+    fn two_value_widgets_do_not_redraw_when_nothing_changes() {
+        let mut ui = Ui::open("sine.ron");
+        select_new(&mut ui, "test.panel");
+        let generation = ui.app.values.generation();
+        ui.app.refresh_values();
+        crate::scene::update_live_values(&mut ui.app.values, &ui.app.controller);
+        assert_eq!(ui.app.values.generation(), generation);
+    }
+
+    /// Transport's Tempo is a number that an arrow moves by 1 BPM, or 0.1 BPM
+    /// with Shift. A number with no declared step keeps 1% of its range
+    /// (panel-widgets.md, Number).
+    #[test]
+    fn the_tempo_number_steps_by_whole_beats_per_minute() {
+        use keyboard::key::Named;
+        let mut ui = Ui::open("sine.ron");
+        let transport = ui.app.controller.transport_module().expect("a transport");
+        let _ = ui.app.update(Message::SelectModule(transport.0));
+        ui.redraw();
+        focus_control(&mut ui, transport, "tempo");
+        let tempo = |ui: &Ui| param_value(ui, transport, "tempo");
+        let start = tempo(&ui);
+        let up = keyboard::Key::Named(Named::ArrowUp);
+        ui.tap(up.clone(), keyboard::Modifiers::default());
+        assert!((tempo(&ui) - start - 1.0).abs() < 1e-2, "{}", tempo(&ui));
+        ui.tap(up.clone(), keyboard::Modifiers::SHIFT);
+        assert!((tempo(&ui) - start - 1.1).abs() < 1e-2, "{}", tempo(&ui));
+
+        // Steps land exactly, however many there are, and walk back to the start.
+        let down = keyboard::Key::Named(Named::ArrowDown);
+        ui.tap(down.clone(), keyboard::Modifiers::SHIFT);
+        assert_eq!(tempo(&ui), 121.0);
+        for _ in 0..100 {
+            ui.tap(up.clone(), keyboard::Modifiers::default());
+        }
+        assert_eq!(tempo(&ui), 221.0);
+        for _ in 0..101 {
+            ui.tap(down.clone(), keyboard::Modifiers::default());
+        }
+        assert_eq!(tempo(&ui), 120.0);
+
+        let id = select_new(&mut ui, "test.panel");
+        focus_control(&mut ui, id, "tempo");
+        let before = position_of(&ui, id, "tempo");
+        ui.tap(up, keyboard::Modifiers::default());
+        assert!((position_of(&ui, id, "tempo") - before - 0.01).abs() < 1e-4);
+    }
+
+    /// A press ends a grab: back on the same range, the arrows change nothing
+    /// until the keyboard goes inside again (panel-widgets.md, rule 4).
+    #[test]
+    fn a_press_ends_the_inside_of_a_range() {
+        use keyboard::key::Named;
+        let mut ui = Ui::open("sine.ron");
+        let id = select_new(&mut ui, "test.panel");
+        focus_control(&mut ui, id, "span_low");
+        let none = keyboard::Modifiers::default();
+        ui.tap(keyboard::Key::Named(Named::Enter), none);
+        ui.tap(keyboard::Key::Named(Named::Space), none);
+        std::thread::sleep(std::time::Duration::from_millis(450));
+        focus_control(&mut ui, id, "span_low");
+        let before = position_of(&ui, id, "span_low");
+        ui.tap(keyboard::Key::Named(Named::ArrowRight), none);
+        assert_eq!(position_of(&ui, id, "span_low"), before);
+    }
+
+    /// Escape lets a grab go before it hides pinned lines, and hides them
+    /// before it leaves the range (modulation.md, Lines). Losing focus ends
+    /// the inside.
+    #[test]
+    fn escape_lets_a_grab_go_before_it_hides_pinned_lines() {
+        use keyboard::key::Named;
+        let mut ui = Ui::open("sine.ron");
+        let id = select_new(&mut ui, "test.panel");
+        let _ = ui.app.update(Message::Assign {
+            source: OutputRef { module: id, port: 0 },
+            module: id.0,
+            index: ui
+                .app
+                .controller
+                .graph()
+                .node(id)
+                .unwrap()
+                .descriptor
+                .param_index("level")
+                .unwrap(),
+        });
+        ui.redraw();
+        let badge = ui.canvas().to_window(
+            ui.app
+                .scene
+                .badge_bounds(id.0, 0)
+                .expect("the output shows a badge")
+                .center(),
+        );
+        ui.move_to(badge);
+        ui.press();
+        ui.release();
+
+        focus_control(&mut ui, id, "span_low");
+        let none = keyboard::Modifiers::default();
+        let key = |k| keyboard::Key::Named(k);
+        ui.tap(key(Named::Enter), none);
+        ui.tap(key(Named::Space), none);
+        // The first Escape lets go, and the second hides the pinned lines, so
+        // the keyboard is still inside: Space grabs again and the arrows move.
+        ui.tap(key(Named::Escape), none);
+        ui.tap(key(Named::Escape), none);
+        ui.tap(key(Named::Space), none);
+        let before = position_of(&ui, id, "span_low");
+        ui.tap(key(Named::ArrowRight), none);
+        assert!(position_of(&ui, id, "span_low") > before, "still inside");
+
+        // With no pinned lines left, the same two Escapes leave the range.
+        ui.tap(key(Named::Escape), none);
+        ui.tap(key(Named::Escape), none);
+        let before = position_of(&ui, id, "span_low");
+        ui.tap(key(Named::ArrowRight), none);
+        assert_eq!(position_of(&ui, id, "span_low"), before, "left the range");
+    }
+
+    /// Learn mode arms nothing on a range. Space outside its inside does what
+    /// it does on a knob: it reaches Run. Its snapshot says both values, and
+    /// `MODULE:high` names the high handle (panel-widgets.md, Range;
+    /// control-channel.md, rule 10).
+    #[test]
+    fn a_range_reports_both_values_and_names_each_handle() {
+        use keyboard::key::Named;
+        let mut ui = Ui::open("sine.ron");
+        let id = select_new(&mut ui, "test.panel");
+        let widget = widget_of(&ui, id, "span_low");
+        let snapshot = ui.app.ui_snapshot();
+        let tile = snapshot.tiles.iter().find(|t| t.id == id.0).unwrap();
+        assert_eq!(tile.widgets[widget].kind, "range");
+        assert_eq!(tile.widgets[widget].label, "Span");
+        assert!(
+            tile.widgets[widget].text.contains(" to "),
+            "{}",
+            tile.widgets[widget].text
+        );
+
+        let graph = ui.app.controller.graph();
+        let low = crate::targets::find(graph, id.0, "span_low").unwrap();
+        let high = crate::targets::find(graph, id.0, "span_high").unwrap();
+        assert_ne!(low, high);
+        assert_eq!(
+            crate::targets::name(graph, high),
+            Some(format!("{}:span_high", id.0)),
+            "the name finds it again"
+        );
+        let (a, b) = (handle(&mut ui, id, "span_low"), handle(&mut ui, id, "span_high"));
+        assert!(b.x > a.x, "each name aims at its own handle");
+
+        focus_control(&mut ui, id, "span_low");
+        let running = |ui: &Ui| ui.app.ui_snapshot().tiles.len();
+        let before = running(&ui);
+        let messages = ui.tap(keyboard::Key::Named(Named::Space), keyboard::Modifiers::default());
+        assert!(
+            messages
+                .iter()
+                .any(|m| matches!(m, Message::Canvas(CanvasEvent::ToggleRun))),
+            "Space reaches Run, as on a knob"
+        );
+        assert_eq!(running(&ui), before);
+
+        let _ = ui.app.update(Message::Learn(crate::learn::Message::Toggle));
+        ui.redraw();
+        ui.tap(keyboard::Key::Named(Named::Enter), keyboard::Modifiers::default());
+        assert!(ui.app.learn.armed().is_none(), "learn mode arms nothing");
+        assert!(ui.app.ui_snapshot().status.contains("inspector"));
+    }
+
     /// The widget index of the control bound to a parameter.
     fn widget_of(ui: &Ui, module: ModuleId, param: &str) -> usize {
         let node = ui.app.controller.graph().node(module).unwrap();
@@ -1622,7 +2311,7 @@ mod tests {
             .panel
             .widgets
             .iter()
-            .position(|w| w.bind == param)
+            .position(|w| w.binds(param))
             .unwrap()
     }
 

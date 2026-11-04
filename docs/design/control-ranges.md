@@ -56,6 +56,15 @@ PatchModule(id: 5, kind: "loom.math.mul@1", params: {"gain": 0.08}, ranges: {"ga
 9. **A range change keeps a modulated glide going.** The engine's base smoother runs in the control's 0 to 1 position. When the range changes, the glide continues from the value it had reached, placed in the new range, toward the new base. *Why:* resetting would jump the sound, and carrying the old position over would pass through values that were never set. (Decided while building, as asked in [#122](https://github.com/brylie/LoomDSP/issues/122).)
 10. **Range names come from their bounds.** The inspector shows "-0.1 to 0.1", never a word like "fine". *Why:* plain numbers need no translation and say exactly what the knob does.
 
+## Ranges on a range widget
+
+Two parameters on one [range widget](panel-widgets.md#range) share one selected control range.
+
+- Selecting a range on either parameter selects it for both, as one undo step. Rule 6 applies to both values.
+- On load, the pair keeps a saved range they share, if it is listed and holds both values. With no saved range, it uses the default range if that holds both values. Otherwise both use the smallest listed range that holds both values. A typed value outside the selected range also selects the smallest listed range that holds both values. Rule 7 still holds: no saved value changes. A saved pair of different ranges is reported as a note, as a saved range that does not hold its value is.
+- A mapped controller or a modulation assignment on either parameter uses the shared range.
+- *Why:* both handles sit on one track, so one position must mean one value. With separate ranges, a handle would stop partway along the track with nothing on screen to explain it, and the two modulation bars would use different scales.
+
 ## Acceptance criteria
 
 - [x] The registry refuses a range outside the parameter's `min` and `max`, a range with `min >= max`, a default range not in the list, a default value outside the default range, and ranges on a logarithmic or whole-number parameter.
@@ -81,7 +90,8 @@ PatchModule(id: 5, kind: "loom.math.mul@1", params: {"gain": 0.08}, ranges: {"ga
 
 - **Default range: -1 to 1** for all three parameters (decided in [#122](https://github.com/brylie/LoomDSP/issues/122)). It is safe and fits pitch and audio. Multiply's default gain of 1 sits at the top of the knob, which is the natural place for "unity". *Why not -10 to 10:* it keeps today's feel but is not safe by default, which is the reason for this spec.
 - **Rule 6 is confirmed:** a smaller range clamps the value, a wider range keeps it.
-- **Clamp and Scale** ([M1 modules](p1-modules.md)) offer the same list for their limits and offset.
+- **Clamp** `low` and `high` offer the same list, with the default range -1 to 1. A patch whose limits lie outside it loads with the smallest range that holds them.
+- **Scale** ([M1 modules](p1-modules.md)) offers the same list for its offset. Not built yet.
 - **Ranges from what is connected.** Could a range follow the signals around the module? [Port ranges](port-ranges.md) (Draft) proposes that ports declare nominal ranges and that the inspector offers a one-click **Match** for the Range selector. It never changes a range or value on its own, because that would break rules 6 and 7 here. Nothing in this spec waits for it.
 - **Other parameters.** Phase `tune` and `octave` are already in musical units and probably need no ranges. Check each new module as it comes.
 - **Explainer.** Written: [Why feedback FM turns to noise](../learn/feedback-fm.md).

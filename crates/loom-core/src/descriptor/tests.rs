@@ -469,6 +469,192 @@ fn a_fader_needs_a_parameter_and_room() {
     assert!(descriptor(&MISSING, 2, 6).check_panel().is_err());
 }
 
+/// An XY pad needs two different parameters that exist and hide together, and
+/// its own caption. Its parameters may have different mappings
+/// (panel-widgets.md, XY pad).
+#[test]
+fn an_xy_pad_needs_two_parameters_that_hide_together() {
+    const MODE: ParamSpec = param("mode", 0.0, 1.0, 0.0, "").integer();
+    static PARAMS: [ParamSpec; 4] = [
+        CUTOFF,
+        GAIN,
+        MODE,
+        param("hidden", 0.0, 1.0, 0.0, "").shown_when("mode", &[1]),
+    ];
+    static GOOD: [Widget; 1] = [Widget::xy_pad(0, 0, "cutoff", "gain", "Place")];
+    static SAME: [Widget; 1] = [Widget::xy_pad(0, 0, "gain", "gain", "Place")];
+    static MISSING: [Widget; 1] = [Widget::xy_pad(0, 0, "gain", "nothing", "Place")];
+    static BLANK: [Widget; 1] = [Widget::xy_pad(0, 0, "cutoff", "gain", " ")];
+    static HALF: [Widget; 1] = [Widget::xy_pad(0, 0, "gain", "hidden", "Place")];
+    let check = |widgets, size| {
+        ModuleDescriptor {
+            params: &PARAMS,
+            panel: Panel::new(size, size, widgets),
+            ..NAMED
+        }
+        .check_panel()
+    };
+    assert!(check(&GOOD, 6).is_ok());
+    assert!(check(&GOOD, 5).unwrap_err().contains("outside"));
+    assert!(check(&SAME, 6).unwrap_err().contains("different"));
+    assert!(check(&MISSING, 6).unwrap_err().contains("second parameter"));
+    assert!(check(&BLANK, 6).unwrap_err().contains("caption"));
+    assert!(check(&HALF, 6).unwrap_err().contains("same choices"));
+    assert!(GOOD[0].binds("cutoff") && GOOD[0].binds("gain") && !GOOD[0].binds("mode"));
+    assert_eq!(GOOD[0].params().collect::<Vec<_>>(), ["cutoff", "gain"]);
+}
+
+/// A pad or a range cannot bind a whole number, because its arrows move by a
+/// share of the track (panel-widgets.md, XY pad, and Range).
+#[test]
+fn a_widget_with_two_values_refuses_whole_numbers() {
+    static PARAMS: [ParamSpec; 3] = [
+        param("low", 0.0, 127.0, 0.0, "").integer(),
+        param("high", 0.0, 127.0, 127.0, "").integer(),
+        param("free", 0.0, 127.0, 0.0, ""),
+    ];
+    static RANGE: [Widget; 1] = [Widget::range(0, 0, "low", "high", "Notes")];
+    static PAD: [Widget; 1] = [Widget::xy_pad(0, 0, "free", "high", "Notes")];
+    for (widgets, width, height) in [(&RANGE, 6, 2), (&PAD, 6, 6)] {
+        let problem = ModuleDescriptor {
+            params: &PARAMS,
+            panel: Panel::new(width, height, widgets),
+            ..NAMED
+        }
+        .check_panel()
+        .unwrap_err();
+        assert!(problem.contains("whole-number"), "{problem}");
+    }
+}
+
+/// A key step is a size in the parameter's units, and a control's position is
+/// a share of the selected control range, so the two cannot be combined
+/// (panel-widgets.md, Number).
+#[test]
+fn a_key_step_refuses_control_ranges() {
+    const OFFERED: &[ParamRange] = &[ParamRange::new(-1.0, 1.0), ParamRange::new(-10.0, 10.0)];
+    static PARAMS: [ParamSpec; 1] = [param("level", -10.0, 10.0, 0.0, "")
+        .ranges(OFFERED, ParamRange::new(-1.0, 1.0))
+        .key_step(1.0)];
+    static WIDGETS: [Widget; 1] = [Widget::number(0, 0, "level")];
+    let problem = ModuleDescriptor {
+        params: &PARAMS,
+        panel: Panel::new(6, 2, &WIDGETS),
+        ..NAMED
+    }
+    .check_panel()
+    .unwrap_err();
+    assert!(problem.contains("key step"), "{problem}");
+}
+
+/// A range needs two parameters with the same range, mapping, and control
+/// ranges, because both handles sit on one track (panel-widgets.md, Range).
+#[test]
+fn a_range_needs_parameters_that_share_a_track() {
+    const OFFERED: &[ParamRange] = &[ParamRange::new(-1.0, 1.0), ParamRange::new(-10.0, 10.0)];
+    const LESS: &[ParamRange] = &[ParamRange::new(-10.0, 10.0)];
+    static PARAMS: [ParamSpec; 7] = [
+        param("low", 0.0, 1.0, 0.0, ""),
+        param("high", 0.0, 1.0, 1.0, ""),
+        param("wider", 0.0, 2.0, 1.0, ""),
+        param("curved", 0.1, 1.0, 1.0, "").logarithmic(),
+        param("a", -10.0, 10.0, 0.0, "").ranges(OFFERED, ParamRange::new(-1.0, 1.0)),
+        param("b", -10.0, 10.0, 1.0, "").ranges(OFFERED, ParamRange::new(-1.0, 1.0)),
+        param("c", -10.0, 10.0, 1.0, "").ranges(LESS, ParamRange::new(-10.0, 10.0)),
+    ];
+    static GOOD: [Widget; 1] = [Widget::range(0, 0, "low", "high", "Span")];
+    static TALL: [Widget; 1] = [Widget::range_vertical(0, 0, "low", "high", "Span")];
+    static RANGES: [Widget; 1] = [Widget::range(0, 0, "a", "b", "Span")];
+    static WIDER: [Widget; 1] = [Widget::range(0, 0, "low", "wider", "Span")];
+    static CURVED: [Widget; 1] = [Widget::range(0, 0, "low", "curved", "Span")];
+    static LISTS: [Widget; 1] = [Widget::range(0, 0, "a", "c", "Span")];
+    let check = |widgets, width, height| {
+        ModuleDescriptor {
+            params: &PARAMS,
+            panel: Panel::new(width, height, widgets),
+            ..NAMED
+        }
+        .check_panel()
+    };
+    assert!(check(&GOOD, 6, 2).is_ok());
+    assert!(check(&TALL, 2, 6).is_ok());
+    assert!(check(&RANGES, 6, 2).is_ok());
+    assert!(check(&GOOD, 5, 2).unwrap_err().contains("outside"));
+    for bad in [&WIDER, &CURVED, &LISTS] {
+        assert!(check(bad, 6, 2).unwrap_err().contains("same range"));
+    }
+}
+
+/// A range widget's two parameters load with one range: a saved one they agree
+/// on that holds both, or else the smallest that does, and no saved value
+/// changes (control-ranges.md, Ranges on a range widget).
+#[test]
+fn a_range_widgets_parameters_load_with_one_range() {
+    const R1: ParamRange = ParamRange::new(-1.0, 1.0);
+    const R5: ParamRange = ParamRange::new(-5.0, 5.0);
+    const R10: ParamRange = ParamRange::new(-10.0, 10.0);
+    const OFFERED: &[ParamRange] = &[R1, R5, R10];
+    static PARAMS: [ParamSpec; 3] = [
+        param("a", -10.0, 10.0, 0.0, "").ranges(OFFERED, R1),
+        param("b", -10.0, 10.0, 1.0, "").ranges(OFFERED, R1),
+        param("alone", -10.0, 10.0, 1.0, "").ranges(OFFERED, R1),
+    ];
+    static WIDGETS: [Widget; 1] = [Widget::range(0, 0, "a", "b", "Span")];
+    let d = ModuleDescriptor {
+        params: &PARAMS,
+        panel: Panel::new(6, 2, &WIDGETS),
+        ..NAMED
+    };
+    assert_eq!(d.range_partner(0), Some(1));
+    assert_eq!(d.range_partner(1), Some(0));
+    assert_eq!(d.range_partner(2), None);
+
+    let load = |index, saved: [Option<ParamRange>; 2], values: [f32; 2]| {
+        let at = |spec: &ParamSpec| usize::from(spec.name == "b");
+        d.load_range(index, |spec| saved[at(spec)], |spec| values[at(spec)])
+    };
+    assert_eq!(load(0, [None, None], [0.0, 1.0]), Some((R1, false)), "the default");
+    assert_eq!(
+        load(0, [None, None], [0.0, 3.0]),
+        Some((R5, false)),
+        "holds both, no report"
+    );
+    assert_eq!(
+        load(1, [None, None], [0.0, 3.0]),
+        Some((R5, false)),
+        "the same for both"
+    );
+    assert_eq!(
+        load(0, [Some(R10), Some(R10)], [0.0, 1.0]),
+        Some((R10, false)),
+        "agreed"
+    );
+    assert_eq!(
+        load(0, [Some(R1), Some(R10)], [0.0, 1.0]),
+        Some((R1, true)),
+        "they differ"
+    );
+    assert_eq!(
+        load(1, [Some(R1), Some(R10)], [0.0, 1.0]),
+        Some((R1, true)),
+        "the same for both"
+    );
+    assert_eq!(
+        load(0, [Some(R1), Some(R1)], [0.0, 3.0]),
+        Some((R5, true)),
+        "does not hold both"
+    );
+}
+
+/// A button shows one parameter. Its mode and hold do not count as bound, so a
+/// lookup by name finds what it found before widgets could bind two.
+#[test]
+fn a_button_binds_only_its_own_parameter() {
+    let button = Widget::button(0, 0, "gate", "held", "mode");
+    assert!(button.binds("gate") && !button.binds("held") && !button.binds("mode"));
+    assert_eq!(button.params().collect::<Vec<_>>(), ["gate"]);
+}
+
 /// A typed value takes its unit and `k` in the forms players type, reads a
 /// comma as a decimal point, rounds whole numbers, and clamps. Anything else is
 /// refused by name (panel-widgets.md, Typing a value).

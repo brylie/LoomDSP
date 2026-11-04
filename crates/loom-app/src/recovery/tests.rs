@@ -548,7 +548,10 @@ fn failures_are_reported_once() {
     }
     assert_eq!(
         lines,
-        ["Autosave failed: disk full. Your changes are not protected against a crash. Save to keep them."]
+        [Report::Failed(
+            "Autosave failed: disk full. Your changes are not protected against a crash. Save to keep them."
+                .to_string()
+        )]
     );
     // The disk has room again: the next retry writes, with no new change.
     failing.store(false, Ordering::SeqCst);
@@ -560,7 +563,7 @@ fn failures_are_reported_once() {
         later.extend(session.tick(t, Some(patch("a")), info));
         std::thread::sleep(Duration::from_millis(5));
     }
-    assert_eq!(later, ["Autosave works again."]);
+    assert_eq!(later, [Report::Works]);
     assert!(t - now <= RETRY + TICK * 2, "written within 10 s: {:?}", t - now);
     assert!(session.dir.join(PATCH).is_file());
     assert!(session.finish());

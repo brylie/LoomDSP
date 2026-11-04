@@ -253,16 +253,19 @@ impl Group {
             let params = descriptor.saved_values(&params);
             // As a patch loads: the range never changes the value
             // (control-ranges.md, rule 7).
-            let ranges = descriptor
-                .params
-                .iter()
-                .zip(&params)
-                .map(|(spec, &value)| {
-                    let saved = module
-                        .ranges
-                        .get(spec.name)
-                        .map(|&(min, max)| ParamRange::new(min, max));
-                    spec.load_range(saved, spec.clamp(value)).map(|(range, _)| range)
+            let ranges = (0..descriptor.params.len())
+                .map(|index| {
+                    let saved = |spec: &loom_core::ParamSpec| {
+                        module
+                            .ranges
+                            .get(spec.name)
+                            .map(|&(min, max)| ParamRange::new(min, max))
+                    };
+                    let value = |spec: &loom_core::ParamSpec| {
+                        let at = descriptor.params.iter().position(|p| p.name == spec.name);
+                        at.map_or(spec.default, |at| spec.clamp(params[at]))
+                    };
+                    descriptor.load_range(index, saved, value).map(|(range, _)| range)
                 })
                 .collect();
             modules.push(Member {

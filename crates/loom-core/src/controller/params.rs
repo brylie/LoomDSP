@@ -141,7 +141,39 @@ impl Controller {
     /// full range. Modulation and MIDI follow it after the next
     /// [`Controller::commit`], which puts the bounds into the schedule
     /// (rule 8). An error leaves the range and the value as they were.
+    ///
+    /// The two parameters of a range widget share one selected range, so
+    /// this selects it for both (control-ranges.md, Ranges on a range widget).
     pub fn set_range(&mut self, module: ModuleId, index: usize, range: ParamRange) -> Result<(), LoomError> {
+        let partner = self
+            .graph
+            .nodes
+            .get(&module)
+            .and_then(|node| node.descriptor.range_partner(index));
+        // Check first, then change. Both parameters offer the same ranges (the
+        // registry checks), so once this holds, the second cannot fail after
+        // the first has already clamped a value and told the engine.
+        if let Some(partner) = partner
+            && let Some(node) = self.graph.nodes.get(&module)
+            && node.slot.is_some_and(|slot| self.slots.fresh_mut(slot).is_none())
+        {
+            let clamping = [index, partner]
+                .iter()
+                .filter(|&&i| node.params.get(i).is_some_and(|&v| v.clamp(range.min, range.max) != v))
+                .count();
+            if self.commands.slots() < clamping {
+                return Err(LoomError::QueueFull);
+            }
+        }
+        self.set_one_range(module, index, range)?;
+        if let Some(partner) = partner {
+            self.set_one_range(module, partner, range)?;
+        }
+        Ok(())
+    }
+
+    /// Selects a range for one parameter. See [`Controller::set_range`].
+    fn set_one_range(&mut self, module: ModuleId, index: usize, range: ParamRange) -> Result<(), LoomError> {
         let node = self
             .graph
             .nodes

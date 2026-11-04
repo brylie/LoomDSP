@@ -118,6 +118,18 @@ impl Info {
 /// other line from the autosave thread reports a problem.
 pub const AUTOSAVE_WORKS: &str = "Autosave works again.";
 
+/// What a tick has to tell the player.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Report {
+    /// A write failed, so the changes are not protected against a crash.
+    /// Sent once, not for each retry.
+    Failed(String),
+    /// A write worked after a failure.
+    Works,
+    /// Something that does not change whether autosave works.
+    Note(String),
+}
+
 /// A time as RFC 3339 text in UTC, the form `info.ron` keeps.
 fn timestamp(time: SystemTime) -> Option<String> {
     jiff::Timestamp::try_from(time).ok().map(|t| t.to_string())
@@ -703,29 +715,29 @@ impl Session {
 
     /// Reads the writer's reports, then sends a job if one is due. `target`
     /// is the patch to keep, or `None` when nothing needs keeping. Returns
-    /// lines for the status bar.
-    pub fn tick(&mut self, now: Instant, target: Option<Patch>, info: impl FnOnce() -> Info) -> Vec<String> {
-        let mut status = Vec::new();
+    /// what the player should be told, oldest first.
+    pub fn tick(&mut self, now: Instant, target: Option<Patch>, info: impl FnOnce() -> Info) -> Vec<Report> {
+        let mut reports = Vec::new();
         for (id, result) in self.writer.take_done() {
             self.schedule.done(id, result.is_ok(), now);
             match result {
                 Ok(()) => {
                     if self.failing {
                         self.failing = false;
-                        status.push(AUTOSAVE_WORKS.to_string());
+                        reports.push(Report::Works);
                     }
                     if let Some(orphan) = self.restored_from.take()
                         && let Err(e) = orphan.discard()
                     {
-                        status.push(format!("Could not delete the old recovery copy: {e}"));
+                        reports.push(Report::Note(format!("Could not delete the old recovery copy: {e}")));
                     }
                 }
                 Err(e) => {
                     if !self.failing {
                         self.failing = true;
-                        status.push(format!(
+                        reports.push(Report::Failed(format!(
                             "Autosave failed: {e}. Your changes are not protected against a crash. Save to keep them."
-                        ));
+                        )));
                     }
                 }
             }
@@ -738,7 +750,7 @@ impl Session {
             let id = self.writer.send(job);
             self.schedule.sent(id, target);
         }
-        status
+        reports
     }
 
     /// True when the copy matches the last target and nothing is under way,

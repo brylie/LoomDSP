@@ -34,6 +34,8 @@ pub enum HoverTarget {
     Port(PortRef),
     /// A control on a panel: module ID and widget index.
     Control(u32, usize),
+    /// The second value of an XY pad or a range: module ID and widget index.
+    Second(u32, usize),
     /// A tile's header, by module ID: its family and description.
     Title(u32),
 }

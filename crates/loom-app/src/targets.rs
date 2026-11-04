@@ -12,7 +12,7 @@
 //! `badge:OUTPUT` names an output's assignment count badge, such as
 //! `5:badge:out`.
 
-use loom_canvas::{PORT_HIT_RADIUS, PortRef, Scene};
+use loom_canvas::{ControlPart, PORT_HIT_RADIUS, PanelValues, PortRef, Scene};
 use loom_core::{Graph, ModuleId};
 
 /// The prefix that names a light or a meter only.
@@ -29,6 +29,8 @@ pub const OUTPUT_PREFIX: &str = "output:";
 pub enum Part {
     /// A control on the panel, by widget index, bound to a parameter.
     Control(u32, usize),
+    /// The second parameter of an XY pad or a range, by widget index.
+    Second(u32, usize),
     /// A port.
     Port(PortRef),
     /// A light or a meter on the panel, by widget index.
@@ -50,7 +52,7 @@ pub fn find(graph: &Graph, module: u32, name: &str) -> Result<Part, String> {
     let display = |name: &str| {
         widgets
             .iter()
-            .position(|w| !w.is_control() && w.bind == name)
+            .position(|w| !w.is_control() && w.binds(name))
             .map(|index| Part::Display(module, index))
     };
     if let Some(name) = name.strip_prefix(DISPLAY_PREFIX) {
@@ -88,8 +90,12 @@ pub fn find(graph: &Graph, module: u32, name: &str) -> Result<Part, String> {
     }
     widgets
         .iter()
-        .position(|w| w.is_control() && w.bind == name)
+        .position(|w| w.is_control() && w.bind() == name)
         .map(|index| Part::Control(module, index))
+        .or_else(|| {
+            let second = widgets.iter().position(|w| w.second() == Some(name))?;
+            Some(Part::Second(module, second))
+        })
         .or_else(|| port(name, true))
         .or_else(|| port(name, false))
         .or_else(|| display(name))
@@ -110,7 +116,23 @@ pub fn name(graph: &Graph, part: Part) -> Option<String> {
     let (module, plain) = match part {
         Part::Control(module, widget) | Part::Display(module, widget) => (
             module,
-            graph.node(ModuleId(module))?.descriptor.panel.widgets.get(widget)?.bind,
+            graph
+                .node(ModuleId(module))?
+                .descriptor
+                .panel
+                .widgets
+                .get(widget)?
+                .bind(),
+        ),
+        Part::Second(module, widget) => (
+            module,
+            graph
+                .node(ModuleId(module))?
+                .descriptor
+                .panel
+                .widgets
+                .get(widget)?
+                .second()?,
         ),
         Part::Port(port) | Part::Badge(port) => {
             let node = graph.node(ModuleId(port.module))?;
@@ -132,17 +154,39 @@ pub fn name(graph: &Graph, part: Part) -> Option<String> {
         Part::Port(_) => INPUT_PREFIX,
         // A control comes first in rule 10. Only a second control bound to
         // the same parameter is not found by its name.
-        Part::Control(..) => return None,
+        Part::Control(..) | Part::Second(..) => return None,
     };
     Some(format!("{module}:{prefix}{plain}"))
 }
 
 /// Where a part is drawn, in world units: a widget's rectangle, the
 /// square a port is hit in, or a badge. An error when it is not drawn.
-pub fn world_bounds(scene: &Scene, part: Part) -> Result<iced::Rectangle, String> {
+///
+/// A name on an XY pad or a range aims at that value: inside the pad, at the
+/// middle of that value's edge, or at the handle (`docs/design/control-channel.md`,
+/// rule 10).
+pub fn world_bounds(scene: &Scene, values: &PanelValues, part: Part) -> Result<iced::Rectangle, String> {
     let not_drawn = || "it is not on the canvas".to_string();
+    if let Part::Control(module, widget) | Part::Second(module, widget) = part
+        && let Some(aim) = scene.module(module).and_then(|m| {
+            let rect = m.widget_bounds(widget)?;
+            let control = if matches!(part, Part::Second(..)) {
+                ControlPart::Second
+            } else {
+                ControlPart::Main
+            };
+            loom_canvas::part_bounds(
+                &m.panel.widgets.get(widget)?.kind,
+                rect,
+                values.part_position(module, widget, control),
+                control,
+            )
+        })
+    {
+        return Ok(aim);
+    }
     match part {
-        Part::Control(module, widget) | Part::Display(module, widget) => scene
+        Part::Control(module, widget) | Part::Second(module, widget) | Part::Display(module, widget) => scene
             .module(module)
             .and_then(|m| m.widget_bounds(widget))
             .ok_or_else(not_drawn),

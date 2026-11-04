@@ -43,8 +43,7 @@ A new random value on each trigger, within a range, or a random walk. The seed m
 
 - Segmented control: **Mode** (`mode`)
 - Segmented control: **Shape** (`shape`)
-- Knob: **Low** (`low`)
-- Knob: **High** (`high`)
+- Range: **Low** (`low`) to **High** (`high`)
 - Knob: **Step** (`step`)
 - Knob: **Glide** (`glide`)
 

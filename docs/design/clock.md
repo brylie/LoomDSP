@@ -32,10 +32,10 @@ The engine keeps one transport per patch.
 
 Every patch has exactly one **Transport** module, as it has one audio output. Its panel is the transport's control surface, as a clock module is in VCV Rack:
 
-- a **Run** toggle, a **Reset** button, a **tempo** knob with a typed value, and the time signature;
+- a **Run** toggle, a **Reset** button, a **tempo** [number](panel-widgets.md#number) with a typed value, and the time signature;
 - a **run** input (gate) and a **reset** input (trigger), so anything in the patch can start and stop time.
 
-There are no transport controls in the app toolbar. The Space key toggles Run when no panel control or text field is focused, as a shortcut to the same control. When a panel control has focus, Space and Enter act on that control instead ([panels](panels.md#interaction-68)).
+There are no transport controls in the app toolbar. The Space key toggles Run when no text field is focused and no focused panel control uses Space, as a shortcut to the same control. A toggle, radio buttons, a segmented control, a select list, a button, or a part inside a range uses Space itself ([panels](panels.md#keyboard-without-a-mouse)).
 
 *Why on a module:* it follows ADR-0011 and ADR-0013. Time is controlled where you see it, it can go on a front panel, and it can be patched. Starting the clock from a pad, a sequencer, or a logic module is ordinary patching.
 
@@ -43,7 +43,7 @@ There are no transport controls in the app toolbar. The Space key toggles Run wh
 
 | How | What happens |
 |---|---|
-| Click Run on the Transport panel, or press Space when no panel control or text field is focused | Toggles running. |
+| Click Run on the Transport panel, or press Space when no text field is focused and no focused panel control uses Space | Toggles running. |
 | A gate into the run input | High runs, low stops. While the input is connected, it decides, and the Run toggle shows its state. |
 | A trigger into reset, or the Reset button | Returns to bar 1 and fires the jump trigger. While stopped, the next start begins at bar 1. |
 
@@ -112,7 +112,7 @@ Trigger outputs are high for one sample, and trigger inputs count rising edges (
 **Status:** Implemented ([#73](https://github.com/brylie/LoomDSP/issues/73)). Code: `loom.clock.transport` in `loom-modules/src/transport.rs`; `TRANSPORT_MODULE`, `TRANSPORT_GRID`, and `TransportRequest` in `loom-core/src/transport.rs`; `Module::transport_request`; the singleton rules in `Controller` and `Patch::load_into`. These details were settled while building the module.
 
 - **Names.** Inputs `run` (gate) and `reset` (gate, rising edges). Outputs `bar-phase` (label "Bar"), `beat-phase` ("Beat"), `playing`, `bar` ("On bar"), `beat` ("On beat"), and `jump`. *Why the short labels:* "Bar phase" is cut on the tile, and the signal colour already says phase. Parameters `tempo` (20 to 300 BPM, default 120, not smoothed), `numerator` (label "Beats", 1 to 32, default 4), `denominator` (label "Note", a choice: 0 "1", 1 "2", 2 "4", 3 "8", 4 "16"; default 2, so 4/4), `run` (0 or 1, default 1), and `reset` (0 or 1, transient). *Why a choice for the denominator:* only powers of two up to 16 are valid, and a choice cannot hold another value.
-- **Panel.** 15 by 5 grid units: the Run toggle, a Beat light, the Reset button below them, and knobs for tempo, beats, and note. Reset is a button with no mode parameter, `Widget::momentary`: it is always momentary, and holds its own parameter. *Why a new widget form:* the Button module's widget needs a mode parameter, and a reset that could latch would never fire again. Display values: `running` (1 while the transport runs) and `beat` (a trigger light).
+- **Panel.** 12 by 5 grid units: the Run toggle, a Beat light, the Reset button below them, a number for tempo, and knobs for beats and note below it. Reset is a button with no mode parameter, `Widget::momentary`: it is always momentary, and holds its own parameter. *Why a new widget form:* the Button module's widget needs a mode parameter, and a reset that could latch would never fire again. Display values: `running` (1 while the transport runs) and `beat` (a trigger light).
 - **How it drives the engine.** Before each block, the engine asks the module for a `TransportRequest` and applies it: time signature, tempo, running, then reset. The module asks only for changes, so a new module asks for all of its settings once (a loaded patch sets the transport), and later only what moved. *Why changes only:* a cable removed from `run` must leave the transport as it was, and `Controller::set_tempo` and its siblings still work for a patch without a Transport.
 - **Parameters apply at the next buffer,** as any parameter does. Edges on the inputs wait for the grid: a block on the grid ([`TRANSPORT_GRID`], 32 frames) applies them (rule 11). Only base values count: an assignment on a Transport parameter does nothing yet.
 - **Reset** fires on the press (0 to 1), not on release. A rising edge on the `reset` input does the same, on the grid.
@@ -174,7 +174,7 @@ These details were settled while building the module.
 - **The button does not drag the tile.** In both modes, pointer down on the button leaves the tile where it is. Drag the tile from its header.
 - **Key repeat is ignored.** A held key does not flip the gate again.
 - **Switching mode needs no clearing.** The two modes use different parameters, so a latched `on` does not show as a hold, and a hold does not change the latch. The gate follows the mode at once. *Why:* the old rule (clear `on` when the mode becomes Momentary) existed only because both modes shared one saved parameter ([#161](https://github.com/brylie/LoomDSP/issues/161)).
-- **Space.** When a panel control has keyboard focus, Space and Enter act on that control and do not toggle Run. A text field with focus keeps Space too ([panels](panels.md#keyboard-without-a-mouse)). Space toggles Run only when neither has focus: the canvas reports `ToggleRun` and the app calls `Controller::set_running`. A repeated Space does not toggle again. Enter with nothing focused does nothing. *Why:* if both ran, a focused Button patched into run would be asked to change twice. The focused control is the one being played. The canvas consumes the key, so Run's handler, when the Transport module is built ([#73](https://github.com/brylie/LoomDSP/issues/73)), must not also see it.
+- **Space.** A focused control that uses Space acts on it and does not toggle Run: a toggle, radio buttons, a segmented control, a select list, a button, or a part inside a range. A knob, a fader, a number, an XY pad, and a range from outside have no use for Space, so it passes on to Run. A text field with focus keeps Space too ([panels](panels.md#keyboard-without-a-mouse)). Otherwise Space toggles Run: the canvas reports `ToggleRun` and the app calls `Controller::set_running`. A repeated Space does not toggle again. Enter with nothing focused does nothing. *Why:* if both ran, a focused Button patched into run would be asked to change twice. The focused control is the one being played. The canvas consumes the key, so Run's handler, when the Transport module is built ([#73](https://github.com/brylie/LoomDSP/issues/73)), must not also see it.
 - **A hold is never saved.** `hold` is transient, so a patch saved while a button is held loads with the gate low, and a hold does not mark the patch changed. A press and a release that land in the same buffer are applied in order, so a very short tap can be missed by the module; this is the commands queue's order and is out of scope.
 
 ## Rules
@@ -222,7 +222,7 @@ These details were settled while building the module.
 ### Following an external clock
 
 - **The source is a preference** (settled). Preferences > MIDI has **Clock source**: Internal (default), or one open MIDI input. *Why:* which device sends the clock is part of the rig and its cables, like the devices themselves ([preferences](preferences.md#audio-and-midi-devices)). A patch opened on another rig never follows a device that is not there.
-- **It replaces the internal transport completely** (rule 7). The Transport tile shows `Following <input> clock` and disables its tempo knob and Run toggle; the `run` and `reset` inputs are ignored while following.
+- **It replaces the internal transport completely** (rule 7). The Transport tile shows `Following <input> clock` and disables its tempo number and Run toggle; the `run` and `reset` inputs are ignored while following.
 - **Messages:** Start sets the position to bar 1 and runs. Continue runs from the current position. Stop stops and holds. Song Position Pointer sets the position in sixteenth notes, as a jump (rule 8).
 - **Tempo** is the mean pulse interval over the last 24 pulses (one beat), shown on the tile. *Why:* single pulse intervals jitter by up to a buffer, because the desktop host stamps live MIDI at the start of a buffer ([MIDI learn](midi-learn.md#rules), rule 4).
 - **Position** follows the pulse count: each pulse is 1/24 of a beat. Between pulses the position moves at the smoothed tempo, and it never passes the next pulse's position before that pulse arrives. Position is still computed from an anchor (rule 5); each pulse moves the anchor.
@@ -336,7 +336,7 @@ The Transport module's parameters (tempo, time signature, run) are saved like an
 - [ ] An LFO in sync mode with nothing connected follows bar phase. A cable overrides it; removing the cable returns to the transport.
 - [x] Ports that follow the transport show the clock mark.
 - [x] Every patch has one Transport module. It cannot be deleted, and a second one cannot be added.
-- [x] Run on the Transport panel toggles running. Space does the same when no panel control is focused. A focused control takes Space for itself. Stopping holds synced phases; running continues from there.
+- [x] Run on the Transport panel toggles running. Space does the same when no focused control uses it. A focused control that uses Space takes it for itself. Stopping holds synced phases; running continues from there.
 - [x] Every Button gate sample is 0 or 1, and a toggle press flips `on`.
 - [ ] The gate is `on` in Toggle mode and `hold` in Momentary mode. A momentary press sets `hold` to 1, and release sets it to 0, including when the pointer has left the button, when another mouse button is pressed, or when the window loses focus. Switching `mode` changes neither `on` nor `hold`. A patch saved while a momentary button is held loads with the gate low (needs [transient parameters](transient-params.md)).
 - [x] Reset returns to bar 1 and fires the jump trigger.

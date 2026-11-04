@@ -4,7 +4,7 @@
 
 use iced::futures::Stream;
 use iced::futures::channel::mpsc;
-use loom_canvas::LearnView;
+use loom_canvas::{ControlPart, LearnView};
 use loom_core::{Controller, MidiMapping, MidiReader, ModuleId};
 use std::hash::{Hash, Hasher};
 use std::time::Duration;
@@ -161,7 +161,19 @@ pub fn view(controller: &Controller, armed: Option<Armed>) -> LearnView {
             if !w.is_control() {
                 continue;
             }
-            let Some(param) = d.param_index(w.bind) else {
+            // A widget with two values shows no armed state or label on the
+            // tile. Its hover text names each mapping (midi-learn.md).
+            if w.kind.is_two_numbers() {
+                for (part, name) in [ControlPart::Main, ControlPart::Second].into_iter().zip(w.params()) {
+                    let mapping = d.param_index(name).and_then(|param| graph.midi_mapping_of(id, param));
+                    if let Some((_, mapping)) = mapping {
+                        view.part_labels
+                            .insert((id.0, widget, part), format!("CC {}", mapping.control.controller));
+                    }
+                }
+                continue;
+            }
+            let Some(param) = d.param_index(w.bind()) else {
                 continue;
             };
             if armed.is_some_and(|a| a.param == (id.0, param)) {

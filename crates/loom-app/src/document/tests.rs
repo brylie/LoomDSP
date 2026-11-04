@@ -97,7 +97,7 @@ fn autosave_off_is_never_due() {
     assert!(!document.autosave_due());
     document.may_have_changed();
     assert!(!document.autosave_due());
-    assert_eq!(document.autosave(Instant::now(), Patch::new("Patch")), None);
+    assert!(document.autosave(Instant::now(), Patch::new("Patch")).is_empty());
 }
 
 /// The next patch takes over the examples folder, and applies the example

@@ -102,17 +102,18 @@ pub static MIXER: ModuleDescriptor = ModuleDescriptor {
     // Four columns, each a knob over a toggle.
     panel: Panel::new(
         12,
-        5,
+        8,
         &[
             // Each strip is labelled once, by its number (principle 10).
-            Widget::knob(0, 0, "level1").captioned("1"),
-            Widget::knob(3, 0, "level2").captioned("2"),
-            Widget::knob(6, 0, "level3").captioned("3"),
-            Widget::knob(9, 0, "level4").captioned("4"),
-            Widget::toggle(0, 3, "mute1").captioned(""),
-            Widget::toggle(3, 3, "mute2").captioned(""),
-            Widget::toggle(6, 3, "mute3").captioned(""),
-            Widget::toggle(9, 3, "mute4").captioned(""),
+            // Faders, so the four levels compare at a glance.
+            Widget::fader(0, 0, "level1").captioned("1"),
+            Widget::fader(3, 0, "level2").captioned("2"),
+            Widget::fader(6, 0, "level3").captioned("3"),
+            Widget::fader(9, 0, "level4").captioned("4"),
+            Widget::toggle(0, 6, "mute1").captioned(""),
+            Widget::toggle(3, 6, "mute2").captioned(""),
+            Widget::toggle(6, 6, "mute3").captioned(""),
+            Widget::toggle(9, 6, "mute4").captioned(""),
         ],
     ),
     displays: &[],
@@ -306,7 +307,14 @@ pub static CROSSFADE: ModuleDescriptor = ModuleDescriptor {
             linear: false,
         })
     }),
-    panel: Panel::new(11, 5, &[Widget::segmented(0, 0, 11, "law"), Widget::knob(4, 2, "mix")]),
+    panel: Panel::new(
+        11,
+        4,
+        &[
+            Widget::segmented(0, 0, 11, "law"),
+            Widget::fader_horizontal(2, 2, "mix"),
+        ],
+    ),
     displays: &[],
 };
 

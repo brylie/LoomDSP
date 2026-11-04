@@ -27,6 +27,7 @@ impl<Message> PatchCanvas<'_, Message> {
                 Interaction::Depth {
                     module,
                     widget,
+                    part: ControlPart::Main,
                     drag,
                     last: still.pointer.map_or(0.0, |p| drag.along(state.camera.to_screen(p))),
                 }
@@ -106,6 +107,7 @@ impl<Message> PatchCanvas<'_, Message> {
             }
         }
 
+        self.close_stale_inside(state);
         // An open list comes before every other use of the pointer. A stale
         // one is closed first, so the event still does its normal work.
         self.close_stale_select(state);
@@ -375,14 +377,51 @@ impl<Message> PatchCanvas<'_, Message> {
                             let event = CanvasEvent::SetControl {
                                 module: *module,
                                 widget: *widget,
+                                part: ControlPart::Main,
                                 position: next,
                             };
                             self.emit(shell, event);
                         }
                     }
+                    Interaction::Pad {
+                        module,
+                        widget,
+                        throw,
+                        last,
+                        position,
+                    } => {
+                        let scale = if state.modifiers.shift() { 0.1 } else { 1.0 } / *throw;
+                        let moved = screen - *last;
+                        *last = screen;
+                        let next = (
+                            (position.0 + moved.x * scale).clamp(0.0, 1.0),
+                            (position.1 - moved.y * scale).clamp(0.0, 1.0),
+                        );
+                        let (module, widget, before) = (*module, *widget, *position);
+                        *position = next;
+                        self.set_pad(shell, module, widget, before, next);
+                    }
+                    Interaction::Range {
+                        module,
+                        widget,
+                        grab,
+                        drag,
+                        last,
+                        position,
+                    } => {
+                        let along = drag.along(screen);
+                        let delta = drag.delta(along - *last, state.modifiers.shift());
+                        *last = along;
+                        let (next_grab, low, high) = grab.moved(position.0, position.1, delta);
+                        *grab = next_grab;
+                        let (module, widget, before) = (*module, *widget, *position);
+                        *position = (low, high);
+                        self.set_pad(shell, module, widget, before, (low, high));
+                    }
                     Interaction::Depth {
                         module,
                         widget,
+                        part,
                         drag,
                         last,
                     } => {
@@ -391,11 +430,12 @@ impl<Message> PatchCanvas<'_, Message> {
                         *last = along;
                         // The control's own drag scale: the way that raises
                         // the value raises the depth.
-                        let delta = drag.moved(0.5, moved, state.modifiers.shift()) - 0.5;
+                        let delta = drag.delta(moved, state.modifiers.shift());
                         if delta != 0.0 {
                             let event = CanvasEvent::DragDepth {
                                 module: *module,
                                 widget: *widget,
+                                part: *part,
                                 pinned: self.pin(state),
                                 delta,
                             };
@@ -450,6 +490,8 @@ impl<Message> PatchCanvas<'_, Message> {
                     Interaction::Moving { .. }
                         | Interaction::Resizing { .. }
                         | Interaction::Turning { .. }
+                        | Interaction::Pad { .. }
+                        | Interaction::Range { .. }
                         | Interaction::Wiring { .. }
                         | Interaction::Depth { .. }
                 );
@@ -490,7 +532,15 @@ impl<Message> PatchCanvas<'_, Message> {
                             Some(Hit::Widget { module, widget })
                                 if !pulled && self.takes_assignment(from, module, widget) =>
                             {
-                                self.emit(shell, CanvasEvent::Assign { from, module, widget });
+                                self.emit(
+                                    shell,
+                                    CanvasEvent::Assign {
+                                        from,
+                                        module,
+                                        widget,
+                                        part: world.map_or(ControlPart::Main, |w| self.drop_part(module, widget, w)),
+                                    },
+                                );
                                 handled = true;
                             }
                             _ => {}
@@ -542,6 +592,8 @@ impl<Message> PatchCanvas<'_, Message> {
                     | Interaction::Panning { .. }
                     | Interaction::Moving { .. }
                     | Interaction::Turning { .. }
+                    | Interaction::Pad { .. }
+                    | Interaction::Range { .. }
                     | Interaction::Depth { .. } => {}
                 }
                 if gesture {
@@ -607,19 +659,23 @@ impl<Message> PatchCanvas<'_, Message> {
         }
         let shift = state.modifiers.shift();
         let hit = self.scene.hit(world, state.hit_radius());
+        // A press ends the keyboard's inside of a composite widget and any
+        // grab (panel-widgets.md, rule 4).
+        state.inside = None;
         state.tab_focus = false;
         state.focus_first = false;
         // The ring of a modulated knob reaches a little past the knob's
         // cell, so it is found before the hit test's answer is used.
-        if let Some((module, widget)) = self.depth_drag_at(&hit, world) {
+        if let Some((module, widget, part)) = self.depth_drag_at(&hit, world) {
             // The selection stays as it is: a selected source module is one
             // way the drag picks its assignment (modulation.md, Arc drag).
-            let drag = self.value_drag(module, widget, state.camera.zoom);
+            let drag = self.depth_scale(module, widget, part, state.camera.zoom);
             self.begin(
                 state,
                 Interaction::Depth {
                     module,
                     widget,
+                    part,
                     drag,
                     last: drag.along(screen),
                 },
@@ -647,24 +703,90 @@ impl<Message> PatchCanvas<'_, Message> {
                 self.select_for_edit(module, shell);
                 state.focus = Some((module, widget));
                 let now = Instant::now();
-                let double = state
-                    .last_click
-                    .is_some_and(|(at, m, w)| m == module && w == widget && now - at < DOUBLE_CLICK);
+                // Where a double-click resets, and so what it must land on
+                // twice: `low` then `high` is not a double-click.
+                let reset = self.reset_part(module, widget, world);
+                let double = reset.is_some_and(|part| {
+                    state
+                        .last_click
+                        .is_some_and(|(at, m, w, p)| m == module && w == widget && p == part && now - at < DOUBLE_CLICK)
+                });
                 // A button's second press is another press. Other controls
                 // reset to the default (panels.md, Interaction).
                 let button = matches!(self.widget_kind(module, widget), Some(WidgetViewKind::Button));
                 if double && !button {
                     state.last_click = None;
-                    self.emit(shell, CanvasEvent::ResetControl { module, widget });
+                    self.emit(
+                        shell,
+                        CanvasEvent::ResetControl {
+                            module,
+                            widget,
+                            part: reset.unwrap_or_default(),
+                        },
+                    );
                     return;
                 }
-                state.last_click = Some((now, module, widget));
+                state.last_click = reset.map(|part| (now, module, widget, part));
                 if button {
                     self.press_button(state, module, widget, shell);
                     return;
                 }
                 let position = self.position(module, widget);
                 let click = match self.widget_kind(module, widget) {
+                    Some(WidgetViewKind::Range { vertical, .. }) => {
+                        let vertical = *vertical;
+                        let bounds = self.scene.module(module).and_then(|m| m.widget_bounds(widget));
+                        let high = self.part_position(module, widget, ControlPart::Second);
+                        let grab = bounds.and_then(|rect| RangeGrab::at(rect, vertical, position, high, world));
+                        if let (Some(grab), Some(rect)) = (grab, bounds) {
+                            let drag = ValueDrag::range(rect, vertical, state.camera.zoom);
+                            self.begin(
+                                state,
+                                Interaction::Range {
+                                    module,
+                                    widget,
+                                    grab,
+                                    drag,
+                                    last: drag.along(screen),
+                                    position: (position, high),
+                                },
+                                shell,
+                            );
+                            return;
+                        }
+                        // A press on the track outside the band moves the tile,
+                        // and never jumps a handle (panel-widgets.md, rule 2).
+                        None
+                    }
+                    Some(WidgetViewKind::XyPad { .. }) => {
+                        let Some(area) = self
+                            .scene
+                            .module(module)
+                            .and_then(|m| m.widget_bounds(widget))
+                            .map(xy_area)
+                        else {
+                            return;
+                        };
+                        let before = (position, self.part_position(module, widget, ControlPart::Second));
+                        // Only with Alt held does a press move the point
+                        // (panel-widgets.md, rule 2).
+                        let jump = state.modifiers.alt().then(|| xy_position(area, world));
+                        self.begin(
+                            state,
+                            Interaction::Pad {
+                                module,
+                                widget,
+                                throw: xy_throw(area, state.camera.zoom),
+                                last: screen,
+                                position: jump.unwrap_or(before),
+                            },
+                            shell,
+                        );
+                        if let Some(jump) = jump {
+                            self.set_pad(shell, module, widget, before, jump);
+                        }
+                        return;
+                    }
                     Some(kind) if kind.is_one_number() => {
                         let drag = self.value_drag(module, widget, state.camera.zoom);
                         self.begin(

@@ -262,14 +262,14 @@ pub static CONTROLLER_IN: ModuleDescriptor = ModuleDescriptor {
     ],
     role: ModuleRole::Dsp(|config| Box::new(ControllerIn::new(config.sample_rate))),
     panel: Panel::new(
-        9,
+        11,
         5,
         &[
             Widget::select(0, 0, "source"),
             // Shown only for the Controller source (ADR-0030).
-            Widget::knob(0, 2, "controller"),
-            Widget::knob(3, 2, "channel"),
-            Widget::knob(6, 2, "smoothing"),
+            Widget::number(6, 0, "controller"),
+            Widget::knob(0, 2, "channel"),
+            Widget::knob(3, 2, "smoothing"),
         ],
     ),
     displays: &[],

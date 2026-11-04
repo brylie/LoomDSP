@@ -41,12 +41,12 @@ Adds four signals, each with its own level and mute. Two mixers in a row make a 
 
 ## Panel
 
-12 by 5 grid units.
+12 by 8 grid units.
 
-- Knob: **Level 1** (`level1`)
-- Knob: **Level 2** (`level2`)
-- Knob: **Level 3** (`level3`)
-- Knob: **Level 4** (`level4`)
+- Fader: **Level 1** (`level1`)
+- Fader: **Level 2** (`level2`)
+- Fader: **Level 3** (`level3`)
+- Fader: **Level 4** (`level4`)
 - Toggle: **Mute 1** (`mute1`)
 - Toggle: **Mute 2** (`mute2`)
 - Toggle: **Mute 3** (`mute3`)

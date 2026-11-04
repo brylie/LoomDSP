@@ -531,3 +531,145 @@ fn a_number_drag_steps_by_one() {
     assert!((large.moved(0.0, 40.0, true) - 0.001).abs() < 1e-6, "40 with Shift");
     assert_eq!(ValueDrag::number(0), ValueDrag::KNOB, "a smooth value is like a knob");
 }
+
+/// A handle stops at the other and cannot pass it, whichever way it comes
+/// from, and after resting on it (panel-widgets.md, Range).
+#[test]
+fn a_range_handle_stops_at_the_other() {
+    let low = RangeGrab::handle(ControlPart::Main, 0.2, 0.7);
+    let (grab, a, b) = low.moved(0.2, 0.7, 0.9);
+    assert_eq!((a, b), (0.7, 0.7), "low stops at high");
+    let (_, a, b) = grab.moved(a, b, 0.1);
+    assert_eq!((a, b), (0.7, 0.7), "resting on it, low still cannot pass");
+    let (_, a, _) = grab.moved(0.7, 0.7, -0.2);
+    assert!((a - 0.5).abs() < 1e-6, "and it can move away");
+
+    let high = RangeGrab::handle(ControlPart::Second, 0.2, 0.7);
+    let (_, a, b) = high.moved(0.2, 0.7, -0.9);
+    assert_eq!((a, b), (0.2, 0.2), "high stops at low");
+    let (_, _, b) = high.moved(0.2, 0.7, 0.9);
+    assert_eq!(b, 1.0, "and at the end of the track");
+}
+
+/// A crossed handle moves freely away from the other, stops on reaching it,
+/// and never jumps (panel-widgets.md, Range).
+#[test]
+fn a_crossed_range_handle_keeps_its_side() {
+    let low = RangeGrab::handle(ControlPart::Main, 0.7, 0.2);
+    let (_, a, _) = low.moved(0.7, 0.2, 0.1);
+    assert!((a - 0.8).abs() < 1e-6, "away from the other");
+    let (_, a, b) = low.moved(0.7, 0.2, -0.9);
+    assert_eq!((a, b), (0.2, 0.2), "stops on reaching it");
+}
+
+/// The band keeps its width, and stops when either handle reaches an end,
+/// crossed or not (panel-widgets.md, Range).
+#[test]
+fn a_range_band_keeps_its_width() {
+    let (_, a, b) = RangeGrab::Band.moved(0.2, 0.7, 0.1);
+    assert!((a - 0.3).abs() < 1e-6 && (b - 0.8).abs() < 1e-6);
+    let (_, a, b) = RangeGrab::Band.moved(0.2, 0.7, 0.9);
+    assert!((a - 0.5).abs() < 1e-6 && b == 1.0, "stops at the top");
+    let (_, a, b) = RangeGrab::Band.moved(0.2, 0.7, -0.9);
+    assert!(a == 0.0 && (b - 0.5).abs() < 1e-6, "stops at the bottom");
+    let (_, a, b) = RangeGrab::Band.moved(0.7, 0.2, -0.9);
+    assert!((a - 0.5).abs() < 1e-6 && b == 0.0, "crossed too");
+}
+
+/// Where handles overlap, the first movement takes the handle on that side,
+/// at both ends of the track and when crossed. Before it moves, nothing is
+/// taken (panel-widgets.md, Range).
+#[test]
+fn overlapping_range_handles_follow_the_first_movement() {
+    let either = RangeGrab::Either;
+    assert_eq!(either.moved(1.0, 1.0, 0.0), (either, 1.0, 1.0));
+
+    let (_, a, b) = either.moved(1.0, 1.0, -0.1);
+    assert!((a - 0.9).abs() < 1e-6 && b == 1.0, "at the top, down takes low");
+    let (_, a, b) = either.moved(0.0, 0.0, 0.1);
+    assert!(a == 0.0 && (b - 0.1).abs() < 1e-6, "at the bottom, up takes high");
+
+    let (grab, a, b) = either.moved(0.5, 0.5, 0.1);
+    assert!(a == 0.5 && (b - 0.6).abs() < 1e-6, "in the middle, up takes high");
+    assert_eq!(
+        grab,
+        RangeGrab::Handle {
+            part: ControlPart::Second,
+            above: true
+        },
+        "and keeps it"
+    );
+
+    let (_, a, b) = either.moved(0.52, 0.5, 0.1);
+    assert!(
+        (a - 0.62).abs() < 1e-6 && b == 0.5,
+        "crossed, up takes the one drawn higher"
+    );
+    let (_, a, b) = either.moved(0.52, 0.5, -0.1);
+    assert!(
+        a == 0.52 && (b - 0.4).abs() < 1e-6,
+        "crossed, down takes the one drawn lower"
+    );
+}
+
+/// What a press on a range takes: a handle, the band, both where they overlap,
+/// and nothing on the track outside the band. A double-click resets the same
+/// thing (panel-widgets.md, Range).
+#[test]
+fn a_press_on_a_range_takes_what_is_under_it() {
+    let rect = Rectangle::new(Point::new(0.0, 0.0), Size::new(72.0, 24.0));
+    let at = |t: f32| range_point(rect, false, t);
+    let take = |low, high, t| RangeGrab::at(rect, false, low, high, at(t));
+    assert!(matches!(
+        take(0.2, 0.8, 0.2),
+        Some(RangeGrab::Handle {
+            part: ControlPart::Main,
+            ..
+        })
+    ));
+    assert!(matches!(
+        take(0.2, 0.8, 0.8),
+        Some(RangeGrab::Handle {
+            part: ControlPart::Second,
+            ..
+        })
+    ));
+    assert_eq!(take(0.2, 0.8, 0.5), Some(RangeGrab::Band));
+    assert_eq!(take(0.2, 0.8, 0.05), None, "outside the band");
+    assert_eq!(take(0.5, 0.52, 0.5), Some(RangeGrab::Either));
+    assert_eq!(RangeGrab::Band.reset(), ControlPart::Both);
+    assert_eq!(RangeGrab::Either.reset(), ControlPart::Both);
+    assert_eq!(
+        RangeGrab::handle(ControlPart::Second, 0.2, 0.8).reset(),
+        ControlPart::Second
+    );
+}
+
+/// A range's bars sit on opposite sides of the track, clear of the handles, on
+/// both directions (panel-widgets.md, Range).
+#[test]
+fn a_range_has_a_bar_on_each_side() {
+    for (vertical, rect) in [
+        (false, Rectangle::new(Point::new(0.0, 0.0), Size::new(72.0, 24.0))),
+        (true, Rectangle::new(Point::new(0.0, 0.0), Size::new(24.0, 72.0))),
+    ] {
+        let low = range_bar_point(rect, vertical, ControlPart::Main, 0.5);
+        let high = range_bar_point(rect, vertical, ControlPart::Second, 0.5);
+        assert_ne!(low, high);
+        assert_eq!(range_bar_at(rect, vertical, low), Some(ControlPart::Main));
+        assert_eq!(range_bar_at(rect, vertical, high), Some(ControlPart::Second));
+        let handle = range_handle(rect, vertical, 0.5);
+        assert!(!handle.contains(low) && !handle.contains(high), "clear of the handle");
+        assert!(rect.contains(low) && rect.contains(high), "inside the cell");
+        assert_eq!(range_bar_at(rect, vertical, range_point(rect, vertical, 0.5)), None);
+    }
+}
+
+/// A drag's change is the whole move, not capped by a position's 0 to 1, so a
+/// range's band and a depth keep up with a fast pointer.
+#[test]
+fn a_drag_delta_is_not_capped() {
+    assert!((ValueDrag::KNOB.delta(180.0, false) - 0.9).abs() < 1e-6);
+    assert!((ValueDrag::KNOB.delta(-180.0, false) + 0.9).abs() < 1e-6);
+    assert!((ValueDrag::KNOB.delta(180.0, true) - 0.09).abs() < 1e-6);
+}

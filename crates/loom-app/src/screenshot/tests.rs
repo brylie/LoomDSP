@@ -141,7 +141,7 @@ fn pointer_and_center_find_lights_and_meters() {
         .panel
         .widgets
         .iter()
-        .position(|w| w.bind == "level")
+        .position(|w| w.binds("level"))
         .unwrap();
     let point = find_point(&app.controller, &app.scene, &named(format!("{env}:level"))).unwrap();
     assert_eq!(point, bounds(env, light).center());

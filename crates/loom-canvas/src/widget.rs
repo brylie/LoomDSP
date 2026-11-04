@@ -1,7 +1,11 @@
 //! The patch canvas widget: input handling and drawing.
 
 use crate::camera::Camera;
-use crate::controls::{ControlGeometry, PanelValues, ValueDrag, focus_ring, knob_step, radio_option, select_box};
+use crate::controls::{
+    ControlGeometry, PanelValues, RangeGrab, ValueDrag, focus_ring, knob_step, radio_option, range_bar_at,
+    range_handle, range_nearest, range_track, select_box, xy_area, xy_bar_at, xy_edge_ring, xy_nearest_edge,
+    xy_position, xy_throw,
+};
 use crate::gpu::{Cable, CanvasPrimitive, Geometry, Overlay, Shape};
 use crate::hover::{HOVER_PADDING, HOVER_TEXT_PX, HoverTarget, HoverTimer};
 use crate::scene::{
@@ -31,7 +35,7 @@ mod panel_input;
 mod select_popup;
 mod typed_field;
 
-pub use event::CanvasEvent;
+pub use event::{CanvasEvent, ControlPart};
 
 /// Two presses on the same control within this time reset it.
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
@@ -70,6 +74,10 @@ pub struct LearnView {
     /// Mapping labels, such as `CC 74`, by module ID and widget index. They
     /// show in place of the control's caption.
     pub labels: BTreeMap<(u32, usize), String>,
+    /// Mapping labels of the values of a widget that binds two, by module ID,
+    /// widget index, and part. They show in that part's hover text
+    /// (midi-learn.md, Making a mapping).
+    pub part_labels: BTreeMap<(u32, usize, ControlPart), String>,
 }
 
 /// Says why typed text is not a value of a control: module, widget, text.
@@ -227,7 +235,9 @@ impl PointerDrag {
             Interaction::Panning { .. } => Self::Pan,
             Interaction::Moving { ids, .. } => Self::Move(ids.clone()),
             Interaction::Resizing { module, .. } => Self::Resize(*module),
-            Interaction::Turning { module, widget, .. } => Self::Knob(*module, *widget),
+            Interaction::Turning { module, widget, .. }
+            | Interaction::Pad { module, widget, .. }
+            | Interaction::Range { module, widget, .. } => Self::Knob(*module, *widget),
             Interaction::Holding { module, widget } => Self::Button(*module, *widget),
             Interaction::Wiring { from, pulled } => Self::Wire {
                 from: *from,
@@ -459,6 +469,8 @@ impl<'a, Message> PatchCanvas<'a, Message> {
             Interaction::Moving { .. }
                 | Interaction::Resizing { .. }
                 | Interaction::Turning { .. }
+                | Interaction::Pad { .. }
+                | Interaction::Range { .. }
                 | Interaction::Wiring { .. }
                 | Interaction::Depth { .. }
         ) {
@@ -531,10 +543,36 @@ enum Interaction {
         /// cable (modulation.md, Making an assignment).
         pulled: bool,
     },
+    /// Dragging the point of an XY pad.
+    Pad {
+        module: u32,
+        widget: usize,
+        /// Screen pixels for the full range.
+        throw: f32,
+        /// Where the pointer was at the last move.
+        last: Point,
+        /// The positions last sent.
+        position: (f32, f32),
+    },
+    /// Dragging a range's handle or band.
+    Range {
+        module: u32,
+        widget: usize,
+        /// What the press took.
+        grab: RangeGrab,
+        /// How pointer movement changes the position.
+        drag: ValueDrag,
+        /// Where the pointer was along the drag at the last move.
+        last: f32,
+        /// The positions last sent.
+        position: (f32, f32),
+    },
     /// Dragging a knob's range arc or a fader's bar: its depth, not its value.
     Depth {
         module: u32,
         widget: usize,
+        /// Which of the control's values the depth belongs to.
+        part: ControlPart,
         /// How pointer movement changes the depth.
         drag: ValueDrag,
         /// Where the pointer was along the drag at the last move.
@@ -555,12 +593,23 @@ impl Interaction {
         Some(match self {
             Self::Panning { .. } | Self::Moving { .. } => mouse::Interaction::Grabbing,
             Self::Resizing { .. } => mouse::Interaction::ResizingDiagonallyDown,
-            Self::Turning { drag, .. } | Self::Depth { drag, .. } => drag.cursor(),
+            Self::Turning { drag, .. } | Self::Depth { drag, .. } | Self::Range { drag, .. } => drag.cursor(),
             Self::Holding { .. } => mouse::Interaction::Pointer,
-            Self::Wiring { .. } | Self::Selecting { .. } => mouse::Interaction::Crosshair,
+            Self::Pad { .. } | Self::Wiring { .. } | Self::Selecting { .. } => mouse::Interaction::Crosshair,
             Self::Idle => return None,
         })
     }
+}
+
+/// The keyboard inside a composite widget (panel-widgets.md, rule 4).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Inside {
+    module: u32,
+    widget: usize,
+    /// The picked part: 0 is the low handle, 1 the band, and 2 the high handle.
+    part: u8,
+    /// How the arrows change the part while it is grabbed.
+    grab: Option<RangeGrab>,
 }
 
 /// What a stationary click on a choice control does.
@@ -624,7 +673,10 @@ struct State {
     /// When hover text shows (panels.md, Labels and hover text).
     hover_text: HoverTimer,
     /// The last press on a control, for double-click.
-    last_click: Option<(Instant, u32, usize)>,
+    last_click: Option<(Instant, u32, usize, ControlPart)>,
+    /// The focused range while the keyboard is inside it (panel-widgets.md,
+    /// rule 4).
+    inside: Option<Inside>,
     /// The last press on empty canvas, in screen coordinates, for
     /// double-click.
     last_empty_click: Option<(Instant, Point)>,

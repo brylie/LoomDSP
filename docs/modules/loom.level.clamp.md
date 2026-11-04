@@ -27,15 +27,14 @@ Limits a signal to the range between two limits. NaN becomes 0 first, so Clamp m
 
 | Parameter | Range | Default | Description |
 |---|---|---|---|
-| **Low** (`low`) | -10 to 10 | -1 | One limit. If it is above High, the two swap. |
-| **High** (`high`) | -10 to 10 | 1 | The other limit. If it is below Low, the two swap. |
+| **Low** (`low`) | -10 to 10. Control ranges -0.1 to 0.1, -1 to 1, 0 to 1, -5 to 5, 0 to 5, -10 to 10, 0 to 10 (default -1 to 1) | -1 | One limit. If it is above High, the two swap. |
+| **High** (`high`) | -10 to 10. Control ranges -0.1 to 0.1, -1 to 1, 0 to 1, -5 to 5, 0 to 5, -10 to 10, 0 to 10 (default -1 to 1) | 1 | The other limit. If it is below Low, the two swap. |
 
 ## Panel
 
-6 by 3 grid units.
+6 by 2 grid units.
 
-- Knob: **Low** (`low`)
-- Knob: **High** (`high`)
+- Range: **Low** (`low`) to **High** (`high`)
 
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->
 

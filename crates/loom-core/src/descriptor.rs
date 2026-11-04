@@ -285,6 +285,11 @@ pub struct ParamOptions {
     /// choice parameter holds one of the listed choices, or always when
     /// `None`. Set with [`ParamSpec::shown_when`]. ADR-0030.
     pub shown_when: Option<ShownWhen>,
+    /// What one arrow key press adds on a number widget, in the parameter's
+    /// unit, for a value whose useful step is a whole unit, not 1% of its
+    /// range. Shift is 10 times finer. Set with [`ParamSpec::key_step`]
+    /// (panel-widgets.md, Number).
+    pub key_step: Option<f32>,
 }
 
 /// A condition on one choice parameter of the same module (ADR-0030).
@@ -338,6 +343,7 @@ impl ParamOptions {
         ranges: &[],
         default_range: None,
         shown_when: None,
+        key_step: None,
         transient: false,
     };
 }
@@ -530,6 +536,14 @@ impl ParamSpec {
     /// has no choice names, and a choice it does not have.
     pub const fn shown_when(mut self, param: &'static str, choices: &'static [u32]) -> Self {
         self.options.shown_when = Some(ShownWhen { param, choices });
+        self
+    }
+
+    /// Makes one arrow key press on a number widget add `step`, in the
+    /// parameter's unit. The registry refuses it on a whole-number or
+    /// logarithmic parameter.
+    pub const fn key_step(mut self, step: f32) -> Self {
+        self.options.key_step = Some(step);
         self
     }
 
@@ -1020,8 +1034,10 @@ pub struct Widget {
     /// Row of its top-left corner, in grid units from the panel's top.
     pub y: u8,
     /// What it shows: a parameter name for controls, a display value name
-    /// for lights, an output name for meters and scopes.
-    pub bind: &'static str,
+    /// for lights, an output name for meters and scopes. Private, because a
+    /// widget can bind a second parameter: a lookup by name asks
+    /// [`Widget::binds`], so it cannot miss the second one.
+    bind: &'static str,
     /// The tile's caption, when it differs from the bound item's label,
     /// such as "1" under each mixer strip's level (panels.md, Panel layout,
     /// principle 10). Hover text and the inspector keep the full label.
@@ -1030,10 +1046,77 @@ pub struct Widget {
 }
 
 impl Widget {
+    /// The name this widget shows first: its parameter, or `x` on an XY pad
+    /// and `low` on a range; a display value; or an output.
+    pub const fn bind(&self) -> &'static str {
+        self.bind
+    }
+
+    /// The second parameter of a widget that binds two: `y` on an XY pad and
+    /// `high` on a range (panel-widgets.md, Two numbers).
+    pub const fn second(&self) -> Option<&'static str> {
+        match self.kind {
+            WidgetKind::XyPad { y } => Some(y),
+            WidgetKind::Range { high, .. } => Some(high),
+            _ => None,
+        }
+    }
+
+    /// True if this widget shows the item named `name`, as either of its
+    /// parameters. A button's `mode` and `hold` do not count, because the
+    /// button does not show them.
+    pub fn binds(&self, name: &str) -> bool {
+        self.bind == name || self.second() == Some(name)
+    }
+
+    /// The parameter names of a control: one, or two on an XY pad and a range.
+    /// A button's `mode` and `hold` are left out, as in [`Widget::binds`].
+    pub fn params(&self) -> impl Iterator<Item = &'static str> + use<> {
+        let first = self.is_control().then_some(self.bind);
+        first.into_iter().chain(self.second())
+    }
+
     /// The same widget with its own tile caption (principle 10).
     pub const fn captioned(mut self, caption: &'static str) -> Self {
         self.caption = Some(caption);
         self
+    }
+
+    /// An XY pad: `horizontal` follows the point left and right, and `vertical`
+    /// up and down. Neither parameter's label names the pair, so it takes its
+    /// own caption (panel-widgets.md, XY pad).
+    pub const fn xy_pad(x: u8, y: u8, horizontal: &'static str, vertical: &'static str, caption: &'static str) -> Self {
+        Self {
+            kind: WidgetKind::XyPad { y: vertical },
+            x,
+            y,
+            bind: horizontal,
+            caption: Some(caption),
+        }
+    }
+
+    /// A range: a horizontal track with two handles, for `low` and `high` on
+    /// one scale. Neither parameter's label names the pair, so it takes its own
+    /// caption (panel-widgets.md, Range).
+    pub const fn range(x: u8, y: u8, low: &'static str, high: &'static str, caption: &'static str) -> Self {
+        Self {
+            kind: WidgetKind::Range { high, vertical: false },
+            x,
+            y,
+            bind: low,
+            caption: Some(caption),
+        }
+    }
+
+    /// A range on a vertical track.
+    pub const fn range_vertical(x: u8, y: u8, low: &'static str, high: &'static str, caption: &'static str) -> Self {
+        Self {
+            kind: WidgetKind::Range { high, vertical: true },
+            x,
+            y,
+            bind: low,
+            caption: Some(caption),
+        }
     }
 
     /// A knob for parameter `param`.
@@ -1300,6 +1383,20 @@ pub enum WidgetKind {
         /// to a vertical position.
         sample: fn(&[f32], f32, f32) -> f32,
     },
+    /// A square with a point, for two parameters at once (panel-widgets.md,
+    /// XY pad). The widget's `bind` is the horizontal parameter.
+    XyPad {
+        /// The vertical parameter.
+        y: &'static str,
+    },
+    /// A track with two handles, for a low and a high value on one scale
+    /// (panel-widgets.md, Range). The widget's `bind` is the low parameter.
+    Range {
+        /// The high parameter.
+        high: &'static str,
+        /// True for a vertical track, false for a horizontal one.
+        vertical: bool,
+    },
     /// A large button for whole-number parameters from 0 to 1.
     ///
     /// The widget's `bind` is the toggle latch. `mode` names the parameter
@@ -1330,13 +1427,25 @@ impl WidgetKind {
     /// range, and a live value on it: an arc or a bar (rule 3). Other controls
     /// show a dot.
     pub const fn has_range(&self) -> bool {
-        matches!(self, Self::Knob | Self::Fader { .. })
+        matches!(self, Self::Knob | Self::Fader { .. }) || self.is_two_numbers()
+    }
+
+    /// True for a widget that sets two numbers through their parameters'
+    /// mappings (panel-widgets.md, Two numbers). It takes no typed value.
+    pub const fn is_two_numbers(&self) -> bool {
+        matches!(self, Self::XyPad { .. } | Self::Range { .. })
+    }
+
+    /// True for a widget whose position is a parameter's place along its
+    /// mapping, from 0 to 1, not an index of choices.
+    pub const fn is_mapped(&self) -> bool {
+        self.is_one_number() || self.is_two_numbers()
     }
 
     /// True for a control that takes a dropped output as a modulation
     /// assignment (modulation.md, Making an assignment).
     pub const fn takes_modulation(&self) -> bool {
-        self.is_one_number() || matches!(self, Self::Toggle | Self::Radio | Self::Select | Self::Segmented { .. })
+        self.is_mapped() || matches!(self, Self::Toggle | Self::Radio | Self::Select | Self::Segmented { .. })
     }
 }
 
@@ -1344,6 +1453,8 @@ impl PartialEq for WidgetKind {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Fader { vertical: a }, Self::Fader { vertical: b }) => a == b,
+            (Self::XyPad { y: a }, Self::XyPad { y: b }) => a == b,
+            (Self::Range { high: a, vertical: av }, Self::Range { high: b, vertical: bv }) => a == b && av == bv,
             (Self::Readout { width: a }, Self::Readout { width: b }) => a == b,
             (Self::Knob, Self::Knob)
             | (Self::Number, Self::Number)
@@ -1484,8 +1595,9 @@ impl ModuleDescriptor {
     pub fn widget_size(&self, widget: &Widget) -> (u8, u8) {
         match widget.kind {
             WidgetKind::Knob => (3, 3),
-            WidgetKind::Fader { vertical: true } => (2, 6),
-            WidgetKind::Fader { vertical: false } => (6, 2),
+            WidgetKind::Fader { vertical: true } | WidgetKind::Range { vertical: true, .. } => (2, 6),
+            WidgetKind::Fader { vertical: false } | WidgetKind::Range { vertical: false, .. } => (6, 2),
+            WidgetKind::XyPad { .. } => (6, 6),
             WidgetKind::Number => (5, 2),
             WidgetKind::Readout { width } => (width, 2),
             WidgetKind::Meter => (3, 6),
@@ -1564,6 +1676,52 @@ impl ModuleDescriptor {
         self.param_index(widget.bind)
     }
 
+    /// The parameter that shares its selected control range with parameter
+    /// `index`: the other one on a range widget (control-ranges.md, Ranges on
+    /// a range widget).
+    pub fn range_partner(&self, index: usize) -> Option<usize> {
+        let name = self.params.get(index)?.name;
+        self.panel.widgets.iter().find_map(|w| match w.kind {
+            WidgetKind::Range { high, .. } if w.bind == name => self.param_index(high),
+            WidgetKind::Range { high, .. } if high == name => self.param_index(w.bind),
+            _ => None,
+        })
+    }
+
+    /// The range a loaded module gets for parameter `index`, and whether the
+    /// loader reports it, as [`ParamSpec::load_range`] says. A parameter on a
+    /// range widget shares its range: the pair keeps a saved range they agree
+    /// on that holds both values, and otherwise takes the smallest that does
+    /// (control-ranges.md, Ranges on a range widget). `saved` and `value` give
+    /// a parameter's saved range and its value, clamped to `min` and `max`.
+    pub fn load_range(
+        &self,
+        index: usize,
+        saved: impl Fn(&ParamSpec) -> Option<ParamRange>,
+        value: impl Fn(&ParamSpec) -> f32,
+    ) -> Option<(ParamRange, bool)> {
+        let spec = self.params.get(index)?;
+        let Some(other) = self.range_partner(index).and_then(|i| self.params.get(i)) else {
+            return spec.load_range(saved(spec), value(spec));
+        };
+        let default = spec.default_range()?;
+        let (a, b) = (value(spec), value(other));
+        let holds = |range: &ParamRange| range.contains(a) && range.contains(b);
+        let smallest = spec
+            .options
+            .ranges
+            .iter()
+            .copied()
+            .find(|range| holds(range))
+            .unwrap_or(ParamRange::new(spec.min, spec.max));
+        Some(match (saved(spec), saved(other)) {
+            (None, None) if holds(&default) => (default, false),
+            (None, None) => (smallest, false),
+            (Some(x), Some(y)) if x == y && spec.options.ranges.contains(&x) && holds(&x) => (x, false),
+            _ => (smallest, true),
+        })
+    }
+
     /// How a button widget answers a gesture, from its mode parameter. A
     /// button with no mode parameter ([`Widget::momentary`]) is always
     /// momentary. `None` for another widget or a missing name.
@@ -1616,6 +1774,19 @@ impl ModuleDescriptor {
                 }
             }
         }
+        for param in self.params {
+            if let Some(step) = param.options.key_step
+                && (step <= 0.0
+                    || param.options.integer
+                    || param.options.mapping != ParamMapping::Linear
+                    || !param.options.ranges.is_empty())
+            {
+                return Err(format!(
+                    "parameter `{}`: a key step needs a linear parameter that is not a whole number and offers no control ranges, and a size above 0",
+                    param.name
+                ));
+            }
+        }
         let panel = &self.panel;
         for (i, widget) in panel.widgets.iter().enumerate() {
             let name = |problem: &str| format!("panel widget `{}` ({:?}): {problem}", widget.bind, widget.kind);
@@ -1655,6 +1826,38 @@ impl ModuleDescriptor {
                 }
                 let param = &self.params[index];
                 let integer = param.options.integer;
+                if let Some(second) = widget.second() {
+                    let Some(other) = self.params.iter().find(|p| p.name == second) else {
+                        return Err(name("no such second parameter"));
+                    };
+                    if second == widget.bind {
+                        return Err(name("a widget with two values needs two different parameters"));
+                    }
+                    if widget.caption.is_none_or(|caption| caption.trim().is_empty()) {
+                        return Err(name("a widget with two values needs its own caption"));
+                    }
+                    if param.options.shown_when != other.options.shown_when {
+                        return Err(name("its two parameters must be shown for the same choices"));
+                    }
+                    // Its arrows move by a share of the track, which would skip
+                    // whole numbers or never reach the next one.
+                    if param.options.integer || other.options.integer {
+                        return Err(name("a widget with two values cannot bind a whole-number parameter"));
+                    }
+                    // Both handles sit on one track, so one position must mean
+                    // one value for both (panel-widgets.md, Range).
+                    if matches!(widget.kind, WidgetKind::Range { .. })
+                        && (param.min != other.min
+                            || param.max != other.max
+                            || param.options.mapping != other.options.mapping
+                            || param.options.ranges != other.options.ranges
+                            || param.options.default_range != other.options.default_range)
+                    {
+                        return Err(name(
+                            "its two parameters must have the same range, mapping, and control ranges",
+                        ));
+                    }
+                }
                 match widget.kind {
                     WidgetKind::Toggle if !(integer && param.min == 0.0 && param.max == 1.0) => {
                         return Err(name("a toggle needs a whole-number parameter from 0 to 1"));

@@ -539,7 +539,7 @@ fn a_lost_named_input_is_waited_for_in_either_order() {
         bench.sync();
         assert_eq!(bench.device(), None, "the default does not stand in");
         assert!(bench.session.named_lost());
-        let kept = bench.alerts.newest_kept().expect("the loss stays on screen");
+        let kept = bench.alerts.top_kept().expect("the loss stays on screen");
         assert_eq!(kept.text, "Audio input: \"Mic\" was lost. Trying to reopen it.");
         bench.alerts.say("newer");
         bench.sync();

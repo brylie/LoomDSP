@@ -33,10 +33,10 @@ Fires on every Nth trigger, so a fast clock makes slower rhythms. Offset fires e
 
 ## Panel
 
-9 by 3 grid units.
+13 by 2 grid units.
 
-- Knob: **Division** (`n`)
-- Knob: **Offset** (`offset`)
+- Number: **Division** (`n`)
+- Number: **Offset** (`offset`)
 - Light: **Fired** (`fired`): Flashes each time the output fires.
 
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->

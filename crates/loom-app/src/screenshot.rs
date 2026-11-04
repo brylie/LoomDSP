@@ -478,7 +478,7 @@ fn control_index(descriptor: &loom_core::ModuleDescriptor, param: &str) -> Optio
         .panel
         .widgets
         .iter()
-        .position(|w| w.is_control() && w.bind == param)
+        .position(|w| w.is_control() && w.binds(param))
 }
 
 /// The port with this name. An output wins over an input of the same name.
@@ -531,7 +531,9 @@ fn pick_up(controller: &mut Controller, target: &Named) -> Result<(PortRef, bool
 fn find_point(controller: &Controller, scene: &Scene, target: &Named) -> Result<Point, String> {
     descriptor(controller, target.module)?;
     let part = crate::targets::find(controller.graph(), target.module, &target.name)?;
-    crate::targets::world_bounds(scene, part)
+    let mut values = PanelValues::new();
+    crate::scene::update_panel_values(&mut values, controller, &BTreeMap::new());
+    crate::targets::world_bounds(scene, &values, part)
         .map(|bounds| bounds.center())
         .map_err(|e| format!("{}:{}: {e}", target.module, target.name))
 }
@@ -560,11 +562,11 @@ fn depth_assignment(
     let (module, widget) = knob;
     let (param, kind, spec) =
         crate::scene::control_param(controller, module, widget).ok_or("not a parameter control")?;
-    // Only a knob or a fader has a range to drag. Other controls set their
-    // depth in the inspector.
+    // Only a control that shows a range has one to drag. Other controls set
+    // their depth in the inspector.
     if !kind.has_range() {
         return Err(format!(
-            "the control for {module}:{} is not a knob or a fader, so it has no range to drag",
+            "the control for {module}:{} is not a knob, a fader, an XY pad, or a range, so it has no range to drag",
             spec.name
         ));
     }

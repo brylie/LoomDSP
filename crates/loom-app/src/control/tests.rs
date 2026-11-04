@@ -403,6 +403,50 @@ fn sample_follows_a_live_value_frame_by_frame() {
     assert!(!app.control_waiting());
 }
 
+/// `sample` reads the value it names on a widget with two: `pad_y` gives its
+/// own position and no live value, while `pad_x` is modulated and has one.
+#[test]
+fn sample_reads_the_named_value_of_a_two_value_widget() {
+    let (mut app, env) = held_envelope();
+    let pad = app.controller.add_module("test.panel").unwrap();
+    app.controller.set_param_named(pad, "pad_x", 0.2).unwrap();
+    app.commit();
+    let node = app.controller.graph().node(pad).unwrap();
+    let pad_x = node.descriptor.param_index("pad_x").unwrap();
+    let y_position = node
+        .spec(node.descriptor.param_index("pad_y").unwrap())
+        .unwrap()
+        .normalize(1_000.0);
+    let _ = app.update(Message::Assign {
+        source: loom_core::OutputRef {
+            module: ModuleId(env),
+            port: 0,
+        },
+        module: pad.0,
+        index: pad_x,
+    });
+
+    let mut frames = |name: &str| {
+        let line = format!(r#"{{"cmd": "sample", "target": "{}:{name}", "ms": 100}}"#, pad.0);
+        let sample = run_playing(&mut app, &line).unwrap();
+        sample["frames"].as_array().unwrap().clone()
+    };
+    let x = frames("pad_x");
+    assert!(
+        x.iter().all(|f| (f["position"].as_f64().unwrap() - 0.2).abs() < 1e-4),
+        "{x:?}"
+    );
+    assert!(x.iter().all(|f| f.get("live").is_some()), "{x:?}");
+    let y = frames("pad_y");
+    assert!(!y.is_empty());
+    assert!(
+        y.iter()
+            .all(|f| (f["position"].as_f64().unwrap() - f64::from(y_position)).abs() < 1e-4),
+        "{y:?}"
+    );
+    assert!(y.iter().all(|f| f.get("live").is_none()), "{y:?}");
+}
+
 /// Removing the sampled module ends the sample with an error, not with
 /// the last values it drew, which the value table still holds.
 #[test]
@@ -809,7 +853,7 @@ fn a_script_drags_a_range_arc() {
         .panel
         .widgets
         .iter()
-        .position(|w| w.bind == "resonance")
+        .position(|w| w.binds("resonance"))
         .unwrap();
     assert_eq!(index, 1);
     let rect = ui.app.scene.module(4).unwrap().widget_bounds(widget).unwrap();
@@ -1337,7 +1381,7 @@ fn locate_finds_lights_and_meters() {
         .panel
         .widgets
         .iter()
-        .position(|w| w.bind == "level")
+        .position(|w| w.binds("level"))
         .unwrap();
     let rect = locate(&ui.app, &format!("{env}:level"), &found).unwrap();
     assert!(near(rect.center(), centre(env, light)));

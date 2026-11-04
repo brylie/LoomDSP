@@ -383,22 +383,22 @@ impl App {
         // bar stays one line high. Hover shows all of it.
         .extend(self.alerts.kept_field().map(|kept| {
             status_field(
-                alerts::labelled(alerts::Severity::Alarm, &kept.text),
+                alerts::labelled(kept.severity, &kept.text),
                 self.alerts.kept_hover(),
-                alerts::Severity::Alarm,
+                kept.severity,
                 kept.dismissible.then_some(kept.cause),
             )
         }))
         .push(status_field(
             alerts::labelled(self.alerts.severity(), self.alerts.status()),
-            if self.alerts.severity() == alerts::Severity::Alarm {
+            if self.alerts.status_is_kept() {
                 self.alerts.kept_hover()
             } else {
                 alerts::labelled(self.alerts.severity(), self.alerts.status())
             },
             self.alerts.severity(),
             self.alerts
-                .newest_kept()
+                .top_kept()
                 .filter(|kept| kept.dismissible && self.alerts.kept_field().is_none())
                 .map(|kept| kept.cause),
         ))
@@ -445,7 +445,14 @@ fn status_field<'a>(
             .style(container::rounded_box),
         tooltip::Position::Top,
     )]
-    .extend(dismiss.map(|cause| remove_button("Dismiss this error", Message::DismissError(cause))))
+    .extend(dismiss.map(|cause| {
+        let hover = if severity == alerts::Severity::Warning {
+            "Dismiss this warning"
+        } else {
+            "Dismiss this error"
+        };
+        remove_button(hover, Message::DismissError(cause))
+    }))
     .width(Length::Fill)
     .spacing(4)
     .align_y(iced::Alignment::Center)

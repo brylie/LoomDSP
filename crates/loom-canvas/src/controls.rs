@@ -8,6 +8,7 @@ use crate::gpu::{Arc as ArcShape, Shape};
 use crate::scene::{GRID, Scene, WidgetViewKind};
 use crate::theme::Palette;
 use crate::trace::Segment;
+use crate::widget::ControlPart;
 use iced::{Color, Point, Rectangle, Size};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -50,6 +51,19 @@ const RING_WIDTH: f32 = 1.0;
 const MIN_THROW: f32 = 200.0;
 /// The fewest screen pixels per whole value on a number.
 const MIN_PIXELS_PER_STEP: f32 = 4.0;
+/// How far an XY pad's modulation bars sit outside its square.
+const XY_BAR_AWAY: f32 = 3.5;
+/// The width of those bars.
+const XY_BAR_WIDTH: f32 = 2.0;
+/// Radius of an XY pad's point.
+const XY_POINT_RADIUS: f32 = 4.0;
+/// A horizontal range's track centre, below the top of its second row: room
+/// for a bar above and below the handles.
+const RANGE_ACROSS: f32 = 5.0;
+/// How far a horizontal range's bars sit from its track.
+const RANGE_BAR_AWAY: f32 = 5.0;
+/// How far from a handle's centre, along the track, a press takes it.
+const RANGE_REACH: f32 = 4.5;
 /// A horizontal fader's track centre, below the top of its second row.
 const FADER_ACROSS: f32 = 3.0;
 /// How far a fader's modulation bar sits from the centre of its track: clear
@@ -77,6 +91,22 @@ pub struct WidgetValue {
     pub live: Option<f32>,
     /// Read-only result shape, sampled left to right in the UI thread.
     pub shape: Vec<f32>,
+    /// The second value of an XY pad or a range. The fields above then hold
+    /// the first value, and `text` holds both, as the widget says them.
+    pub second: Option<PartValue>,
+}
+
+/// The second value of a widget that binds two: `y` or `high`.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct PartValue {
+    /// Position from 0 to 1.
+    pub position: f32,
+    /// The value as text, with its unit.
+    pub text: String,
+    /// What this value shows of its own modulation assignments.
+    pub modulation: ModulationMark,
+    /// The live modulated value as a position from 0 to 1.
+    pub live: Option<f32>,
 }
 
 /// What a control shows of the modulation assignments on its parameter.
@@ -142,6 +172,28 @@ impl PanelValues {
     /// The position of a widget's value, or 0.
     pub fn position(&self, module: u32, widget: usize) -> f32 {
         self.get(module, widget).map_or(0.0, |v| v.position)
+    }
+
+    /// The position of one value of a widget, or 0.
+    pub fn part_position(&self, module: u32, widget: usize, part: ControlPart) -> f32 {
+        match part {
+            ControlPart::Second => self
+                .get(module, widget)
+                .and_then(|v| v.second.as_ref())
+                .map_or(0.0, |second| second.position),
+            ControlPart::Main | ControlPart::Both => self.position(module, widget),
+        }
+    }
+
+    /// The modulation mark of one value of a widget.
+    pub fn part_mark(&self, module: u32, widget: usize, part: ControlPart) -> ModulationMark {
+        let value = self.get(module, widget);
+        match part {
+            ControlPart::Second => value
+                .and_then(|v| v.second.as_ref())
+                .map_or(ModulationMark::None, |second| second.modulation),
+            ControlPart::Main | ControlPart::Both => value.map_or(ModulationMark::None, |v| v.modulation),
+        }
     }
 
     /// The peak of a meter's value, or 0.
@@ -253,6 +305,127 @@ impl ControlGeometry {
                             palette.text,
                             1.0,
                         ));
+                    }
+                    WidgetViewKind::XyPad { .. } => {
+                        let area = xy_area(rect);
+                        let value = values.get(module.id, index);
+                        let second = value.and_then(|v| v.second.as_ref());
+                        let (x, y) = (
+                            position.clamp(0.0, 1.0),
+                            second.map_or(0.0, |s| s.position.clamp(0.0, 1.0)),
+                        );
+                        shapes.push(Shape::new(area, 3.0, palette.control_body, palette.control_track, 1.0));
+                        let marks = [
+                            (ControlPart::Main, modulation),
+                            (
+                                ControlPart::Second,
+                                second.map_or(ModulationMark::None, |s| s.modulation),
+                            ),
+                        ];
+                        for (part, mark) in marks {
+                            match mark {
+                                ModulationMark::Range { low, high } => shapes.push(Shape::new(
+                                    xy_bar(area, part, low, high),
+                                    1.0,
+                                    palette.modulation,
+                                    Color::TRANSPARENT,
+                                    0.0,
+                                )),
+                                ModulationMark::Dot => shapes.push(circle(
+                                    xy_edge_point(area, part, 0.5),
+                                    DOT_RADIUS,
+                                    palette.modulation,
+                                    Color::TRANSPARENT,
+                                    0.0,
+                                )),
+                                ModulationMark::Ring => shapes.push(circle(
+                                    xy_edge_point(area, part, 0.5),
+                                    DOT_RADIUS,
+                                    Color::TRANSPARENT,
+                                    palette.modulation,
+                                    RING_WIDTH,
+                                )),
+                                ModulationMark::None => {}
+                            }
+                        }
+                        let live = (value.and_then(|v| v.live), second.and_then(|s| s.live));
+                        if live.0.is_some() || live.1.is_some() {
+                            let at = xy_point(area, live.0.unwrap_or(x), live.1.unwrap_or(y));
+                            shapes.push(circle(at, XY_POINT_RADIUS, Color::TRANSPARENT, palette.modulation, 1.2));
+                        }
+                        shapes.push(circle(
+                            xy_point(area, x, y),
+                            XY_POINT_RADIUS,
+                            palette.control_value,
+                            palette.text,
+                            1.0,
+                        ));
+                    }
+                    WidgetViewKind::Range { vertical, .. } => {
+                        let vertical = *vertical;
+                        let value = values.get(module.id, index);
+                        let second = value.and_then(|v| v.second.as_ref());
+                        let low = position.clamp(0.0, 1.0);
+                        let high = second.map_or(0.0, |s| s.position.clamp(0.0, 1.0));
+                        let track = range_track(rect, vertical);
+                        shapes.push(Shape::new(track, 1.5, palette.control_track, Color::TRANSPARENT, 0.0));
+                        shapes.push(Shape::new(
+                            fader_span(track, vertical, low.min(high), low.max(high)),
+                            1.5,
+                            palette.control_value,
+                            Color::TRANSPARENT,
+                            0.0,
+                        ));
+                        let parts = [
+                            (ControlPart::Main, modulation, low, value.and_then(|v| v.live)),
+                            (
+                                ControlPart::Second,
+                                second.map_or(ModulationMark::None, |s| s.modulation),
+                                high,
+                                second.and_then(|s| s.live),
+                            ),
+                        ];
+                        for (part, mark, at, live) in parts {
+                            let centre = range_bar_point(rect, vertical, part, at);
+                            match mark {
+                                ModulationMark::Range { low, high } => shapes.push(Shape::new(
+                                    range_bar(rect, vertical, part, low, high),
+                                    1.0,
+                                    palette.modulation,
+                                    Color::TRANSPARENT,
+                                    0.0,
+                                )),
+                                ModulationMark::Dot => {
+                                    shapes.push(circle(centre, DOT_RADIUS, palette.modulation, Color::TRANSPARENT, 0.0))
+                                }
+                                ModulationMark::Ring => shapes.push(circle(
+                                    centre,
+                                    DOT_RADIUS,
+                                    Color::TRANSPARENT,
+                                    palette.modulation,
+                                    RING_WIDTH,
+                                )),
+                                ModulationMark::None => {}
+                            }
+                            if let Some(live) = live {
+                                shapes.push(Shape::new(
+                                    range_live_line(rect, vertical, live),
+                                    0.0,
+                                    palette.modulation,
+                                    Color::TRANSPARENT,
+                                    0.0,
+                                ));
+                            }
+                        }
+                        for at in [low, high] {
+                            shapes.push(Shape::new(
+                                range_handle(rect, vertical, at),
+                                2.0,
+                                palette.control_body,
+                                palette.text,
+                                1.0,
+                            ));
+                        }
                     }
                     WidgetViewKind::Toggle => {
                         let on = position > 0.5;
@@ -496,6 +669,8 @@ fn modulation_dot(kind: &WidgetViewKind, rect: Rectangle, mark: ModulationMark, 
     match (kind, mark) {
         (_, ModulationMark::None)
         | (WidgetViewKind::Knob { .. } | WidgetViewKind::Fader { .. }, ModulationMark::Range { .. }) => None,
+        // An XY pad draws a mark at each edge.
+        (WidgetViewKind::XyPad { .. } | WidgetViewKind::Range { .. }, _) => None,
         // Displays have no parameter, so no assignments.
         (
             WidgetViewKind::Light
@@ -616,6 +791,8 @@ pub(crate) fn focus_ring(kind: &WidgetViewKind, rect: Rectangle) -> (Rectangle, 
             )
         }
         WidgetViewKind::Fader { vertical, .. } => (fader_drawn(rect, *vertical), 4.0),
+        WidgetViewKind::XyPad { .. } => (fader_drawn(rect, true), 4.0),
+        WidgetViewKind::Range { vertical, .. } => (fader_drawn(rect, *vertical), 4.0),
         WidgetViewKind::Toggle => (toggle_track(rect).expand(2.5), 8.0),
         WidgetViewKind::Number { .. } => (number_box(rect).expand(2.0), 5.0),
         WidgetViewKind::Select { .. } => (select_box(rect).expand(2.0), 5.0),
@@ -754,6 +931,339 @@ pub(crate) fn fader_drawn(rect: Rectangle, vertical: bool) -> Rectangle {
     }
 }
 
+/// A range's track: as a fader's, with more room around it on a horizontal
+/// one for a bar on each side of the handles.
+pub(crate) fn range_track(rect: Rectangle, vertical: bool) -> Rectangle {
+    let track = fader_track(rect, vertical);
+    if vertical {
+        track
+    } else {
+        Rectangle::new(Point::new(track.x, rect.y + GRID + RANGE_ACROSS - 1.5), track.size())
+    }
+}
+
+/// The point at position `t` on a range's track.
+pub(crate) fn range_point(rect: Rectangle, vertical: bool, t: f32) -> Point {
+    let track = range_track(rect, vertical);
+    if vertical {
+        Point::new(track.center_x(), track.y + track.height * (1.0 - t))
+    } else {
+        Point::new(track.x + track.width * t, track.center_y())
+    }
+}
+
+/// A range's handle at position `t`.
+pub(crate) fn range_handle(rect: Rectangle, vertical: bool, t: f32) -> Rectangle {
+    let at = range_point(rect, vertical, t);
+    if vertical {
+        Rectangle::new(Point::new(at.x - 6.0, at.y - 2.5), Size::new(12.0, 5.0))
+    } else {
+        Rectangle::new(Point::new(at.x - 2.5, at.y - 3.5), Size::new(5.0, 7.0))
+    }
+}
+
+/// How far a handle's modulation bar sits from the track: `low` before it and
+/// `high` after it, so the two bars never overlap (panel-widgets.md, Range).
+fn range_bar_offset(vertical: bool, part: ControlPart) -> f32 {
+    let away = if vertical { FADER_BAR_AWAY } else { RANGE_BAR_AWAY };
+    if part == ControlPart::Second { away } else { -away }
+}
+
+/// The point at position `t` on a handle's bar. With `t` at 0.5, tests and
+/// scripts press here to drag depth.
+pub fn range_bar_point(rect: Rectangle, vertical: bool, part: ControlPart, t: f32) -> Point {
+    let at = range_point(rect, vertical, t.clamp(0.0, 1.0));
+    let offset = range_bar_offset(vertical, part);
+    if vertical {
+        Point::new(at.x + offset, at.y)
+    } else {
+        Point::new(at.x, at.y + offset)
+    }
+}
+
+/// A handle's modulation bar, from position `low` to `high`.
+fn range_bar(rect: Rectangle, vertical: bool, part: ControlPart, low: f32, high: f32) -> Rectangle {
+    let track = range_track(rect, vertical);
+    let offset = range_bar_offset(vertical, part);
+    let beside = if vertical {
+        Rectangle::new(
+            Point::new(track.center_x() + offset - 1.0, track.y),
+            Size::new(2.0, track.height),
+        )
+    } else {
+        Rectangle::new(
+            Point::new(track.x, track.center_y() + offset - 1.0),
+            Size::new(track.width, 2.0),
+        )
+    };
+    fader_span(beside, vertical, low, high)
+}
+
+/// The thin line at a handle's live value, across the track.
+fn range_live_line(rect: Rectangle, vertical: bool, t: f32) -> Rectangle {
+    let at = range_point(rect, vertical, t.clamp(0.0, 1.0));
+    if vertical {
+        Rectangle::new(Point::new(at.x - 5.0, at.y - 0.5), Size::new(10.0, 1.0))
+    } else {
+        Rectangle::new(Point::new(at.x - 0.5, at.y - 4.0), Size::new(1.0, 8.0))
+    }
+}
+
+/// The handle whose modulation bar, or its place, is under `world`. There a
+/// drag changes depth, not the value.
+pub(crate) fn range_bar_at(rect: Rectangle, vertical: bool, world: Point) -> Option<ControlPart> {
+    let track = range_track(rect, vertical);
+    let (away, along) = if vertical {
+        (
+            world.x - track.center_x(),
+            track.y - 2.0 <= world.y && world.y <= track.y + track.height + 2.0,
+        )
+    } else {
+        (
+            world.y - track.center_y(),
+            track.x - 2.0 <= world.x && world.x <= track.x + track.width + 2.0,
+        )
+    };
+    let near = |part| (away - range_bar_offset(vertical, part)).abs() <= 1.5;
+    if !along {
+        None
+    } else if near(ControlPart::Main) {
+        Some(ControlPart::Main)
+    } else if near(ControlPart::Second) {
+        Some(ControlPart::Second)
+    } else {
+        None
+    }
+}
+
+/// How far `world` lies from position `t`, along the track, in world units.
+fn range_distance(rect: Rectangle, vertical: bool, t: f32, world: Point) -> f32 {
+    let at = range_point(rect, vertical, t);
+    if vertical {
+        (world.y - at.y).abs()
+    } else {
+        (world.x - at.x).abs()
+    }
+}
+
+/// The handle nearer `world` along the track. A dropped cable goes to it, and
+/// that handle's hover text shows (panel-widgets.md, Range).
+pub(crate) fn range_nearest(rect: Rectangle, vertical: bool, low: f32, high: f32, world: Point) -> ControlPart {
+    if range_distance(rect, vertical, low, world) <= range_distance(rect, vertical, high, world) {
+        ControlPart::Main
+    } else {
+        ControlPart::Second
+    }
+}
+
+/// What a press on a range takes (panel-widgets.md, Range).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum RangeGrab {
+    /// One handle, on its side of the other. It stops at the other handle.
+    Handle {
+        /// `Main` for `low`, `Second` for `high`.
+        part: ControlPart,
+        /// True if it stays above the other handle. Set when it is taken, so a
+        /// handle resting on the other cannot pass it on the next move.
+        above: bool,
+    },
+    /// The band: both handles together, keeping the width.
+    Band,
+    /// Handles that overlap: the first movement decides.
+    Either,
+}
+
+impl RangeGrab {
+    /// A handle, on the side of the other that it is on now.
+    pub(crate) fn handle(part: ControlPart, low: f32, high: f32) -> Self {
+        let above = if part == ControlPart::Second {
+            high >= low
+        } else {
+            low > high
+        };
+        Self::Handle { part, above }
+    }
+
+    /// What a press at `world` takes, or `None` on the track outside the band.
+    pub(crate) fn at(rect: Rectangle, vertical: bool, low: f32, high: f32, world: Point) -> Option<Self> {
+        let on_low = range_distance(rect, vertical, low, world) <= RANGE_REACH;
+        let on_high = range_distance(rect, vertical, high, world) <= RANGE_REACH;
+        let track = range_point(rect, vertical, 0.0);
+        let end = range_point(rect, vertical, 1.0);
+        let along = if vertical {
+            (track.y - world.y) / (track.y - end.y)
+        } else {
+            (world.x - track.x) / (end.x - track.x)
+        };
+        match (on_low, on_high) {
+            (true, true) => Some(Self::Either),
+            (true, false) => Some(Self::handle(ControlPart::Main, low, high)),
+            (false, true) => Some(Self::handle(ControlPart::Second, low, high)),
+            (false, false) => (low.min(high) < along && along < low.max(high)).then_some(Self::Band),
+        }
+    }
+
+    /// What a double-click here resets: the handle, or both.
+    pub(crate) fn reset(self) -> ControlPart {
+        match self {
+            Self::Handle { part, .. } => part,
+            Self::Band | Self::Either => ControlPart::Both,
+        }
+    }
+
+    /// New positions after a move of `delta` along the track, and what the
+    /// grab is from now on.
+    pub(crate) fn moved(self, low: f32, high: f32, delta: f32) -> (Self, f32, f32) {
+        match self {
+            Self::Either if delta == 0.0 => (self, low, high),
+            // The handle on that side of the other (panel-widgets.md, Range).
+            Self::Either => {
+                let part = match (delta > 0.0, high >= low) {
+                    (true, true) | (false, false) => ControlPart::Second,
+                    (true, false) | (false, true) => ControlPart::Main,
+                };
+                Self::Handle {
+                    part,
+                    above: delta > 0.0,
+                }
+                .moved(low, high, delta)
+            }
+            Self::Band => {
+                let delta = delta.clamp(-low.min(high), 1.0 - low.max(high));
+                (self, low + delta, high + delta)
+            }
+            Self::Handle { part, above } => {
+                let (own, other) = if part == ControlPart::Second {
+                    (high, low)
+                } else {
+                    (low, high)
+                };
+                let next = own + delta;
+                let next = if above { next.max(other) } else { next.min(other) }.clamp(0.0, 1.0);
+                if part == ControlPart::Second {
+                    (self, low, next)
+                } else {
+                    (self, next, high)
+                }
+            }
+        }
+    }
+}
+
+/// Where a script aims to reach one value of a widget that binds two: the
+/// handle of a range, or inside an XY pad at the middle of that value's edge.
+/// `None` for any other widget.
+pub fn part_bounds(kind: &WidgetViewKind, rect: Rectangle, position: f32, part: ControlPart) -> Option<Rectangle> {
+    match kind {
+        WidgetViewKind::Range { vertical, .. } => Some(range_handle(rect, *vertical, position)),
+        WidgetViewKind::XyPad { .. } => {
+            let area = xy_area(rect);
+            let at = if part == ControlPart::Second {
+                Point::new(area.x + 4.0, area.center_y())
+            } else {
+                Point::new(area.center_x(), area.y + area.height - 4.0)
+            };
+            Some(Rectangle::new(Point::new(at.x - 2.0, at.y - 2.0), Size::new(4.0, 4.0)))
+        }
+        _ => None,
+    }
+}
+
+/// An XY pad's square: above the caption row, with room at the left and at
+/// the bottom for the modulation bars.
+pub fn xy_area(rect: Rectangle) -> Rectangle {
+    let away = XY_BAR_AWAY + XY_BAR_WIDTH;
+    let side = (rect.height - GRID - away - 1.0).min(rect.width - 2.0 * away);
+    Rectangle::new(
+        Point::new(rect.center_x() - side * 0.5, rect.y + 1.0),
+        Size::new(side, side),
+    )
+}
+
+/// The world point of the pad's point at these positions: `x` grows to the
+/// right, and `y` grows upward.
+pub(crate) fn xy_point(area: Rectangle, x: f32, y: f32) -> Point {
+    Point::new(area.x + area.width * x, area.y + area.height * (1.0 - y))
+}
+
+/// The positions of a world point on the pad, inside its square.
+pub(crate) fn xy_position(area: Rectangle, world: Point) -> (f32, f32) {
+    (
+        ((world.x - area.x) / area.width).clamp(0.0, 1.0),
+        (1.0 - (world.y - area.y) / area.height).clamp(0.0, 1.0),
+    )
+}
+
+/// The modulation bar of one axis, from position `low` to `high`: along the
+/// bottom edge for `x`, and along the left edge for `y`.
+fn xy_bar(area: Rectangle, part: ControlPart, low: f32, high: f32) -> Rectangle {
+    if part == ControlPart::Second {
+        Rectangle::new(
+            Point::new(
+                area.x - XY_BAR_AWAY - XY_BAR_WIDTH * 0.5,
+                area.y + area.height * (1.0 - high),
+            ),
+            Size::new(XY_BAR_WIDTH, area.height * (high - low)),
+        )
+    } else {
+        Rectangle::new(
+            Point::new(
+                area.x + area.width * low,
+                area.y + area.height + XY_BAR_AWAY - XY_BAR_WIDTH * 0.5,
+            ),
+            Size::new(area.width * (high - low), XY_BAR_WIDTH),
+        )
+    }
+}
+
+/// The point at position `t` on one axis's bar. With `t` at 0.5, tests and
+/// scripts press here to drag depth.
+pub fn xy_edge_point(area: Rectangle, part: ControlPart, t: f32) -> Point {
+    if part == ControlPart::Second {
+        Point::new(area.x - XY_BAR_AWAY, area.y + area.height * (1.0 - t))
+    } else {
+        Point::new(area.x + area.width * t, area.y + area.height + XY_BAR_AWAY)
+    }
+}
+
+/// The axis whose modulation bar, or its place, is under `world`. There a
+/// drag changes depth, not the value.
+pub(crate) fn xy_bar_at(area: Rectangle, world: Point) -> Option<ControlPart> {
+    let beside = |distance: f32| (XY_BAR_AWAY - 2.5..=XY_BAR_AWAY + 2.5).contains(&distance);
+    let along_x = area.x - 2.0 <= world.x && world.x <= area.x + area.width + 2.0;
+    let along_y = area.y - 2.0 <= world.y && world.y <= area.y + area.height + 2.0;
+    if along_x && beside(world.y - (area.y + area.height)) {
+        Some(ControlPart::Main)
+    } else if along_y && beside(area.x - world.x) {
+        Some(ControlPart::Second)
+    } else {
+        None
+    }
+}
+
+/// The axis whose edge is nearest `world`: the bottom edge for `x`, and the
+/// left edge for `y`. A dropped cable goes to it (panel-widgets.md, XY pad).
+pub(crate) fn xy_nearest_edge(area: Rectangle, world: Point) -> ControlPart {
+    let bottom = (area.y + area.height - world.y).abs();
+    let left = (world.x - area.x).abs();
+    if bottom <= left {
+        ControlPart::Main
+    } else {
+        ControlPart::Second
+    }
+}
+
+/// The outline that shows which edge takes a dropped cable.
+pub(crate) fn xy_edge_ring(area: Rectangle, part: ControlPart) -> Rectangle {
+    xy_bar(area, part, 0.0, 1.0).expand(1.5)
+}
+
+/// How many screen pixels make an XY pad's full range: its square on screen,
+/// and at least 200 pixels, as for a fader.
+pub(crate) fn xy_throw(area: Rectangle, zoom: f32) -> f32 {
+    (area.width * zoom).max(MIN_THROW)
+}
+
 /// A number's box, leaving a caption row above it.
 pub(crate) fn number_box(rect: Rectangle) -> Rectangle {
     select_box(rect)
@@ -859,6 +1369,19 @@ impl ValueDrag {
         }
     }
 
+    /// A range: along its track, like a fader.
+    pub fn range(rect: Rectangle, vertical: bool, zoom: f32) -> Self {
+        Self::fader(rect, vertical, zoom)
+    }
+
+    /// A bar on one axis of an XY pad: along that axis, over the pad's throw.
+    pub fn xy_axis(area: Rectangle, part: ControlPart, zoom: f32) -> Self {
+        Self {
+            horizontal: part != ControlPart::Second,
+            throw: xy_throw(area, zoom),
+        }
+    }
+
     /// A number: up raises. A whole number takes `200 / steps` pixels per
     /// value, and at least 4, so a small range feels like a knob and a large
     /// range never skips a value (panel-widgets.md, Number).
@@ -878,8 +1401,14 @@ impl ValueDrag {
     /// A new position after the pointer moved `moved` pixels along the drag.
     /// Shift is 10 times finer.
     pub fn moved(&self, position: f32, moved: f32, fine: bool) -> f32 {
+        (position + self.delta(moved, fine)).clamp(0.0, 1.0)
+    }
+
+    /// How far `moved` pixels go, as a share of the full range. Not clamped:
+    /// a change that is not one value's position can be as large as the move.
+    pub fn delta(&self, moved: f32, fine: bool) -> f32 {
         let scale = if fine { 0.1 } else { 1.0 };
-        (position + moved / self.throw * scale).clamp(0.0, 1.0)
+        moved / self.throw * scale
     }
 
     /// The cursor that says which way this drag goes.

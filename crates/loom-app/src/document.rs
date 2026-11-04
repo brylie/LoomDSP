@@ -223,16 +223,18 @@ impl Document {
     }
 
     /// Writes or deletes the recovery copy when one is due, given the patch
-    /// as it would be saved now. Returns a line for the status bar, if any.
-    pub fn autosave(&mut self, now: Instant, current: Patch) -> Option<String> {
+    /// as it would be saved now. Returns what the player should be told.
+    pub fn autosave(&mut self, now: Instant, current: Patch) -> Vec<recovery::Report> {
         let target = (self.saved_content.as_ref() != Some(&current)).then_some(current);
         let (file, stamp) = (self.file.clone(), self.stamp);
-        let session = self.recovery.as_mut()?;
-        let lines = session.tick(now, target, || {
+        let Some(session) = self.recovery.as_mut() else {
+            return Vec::new();
+        };
+        let reports = session.tick(now, target, || {
             recovery::Info::new(file.as_deref(), stamp, std::time::SystemTime::now())
         });
         self.settled = session.settled();
-        lines.into_iter().last()
+        reports
     }
 
     /// True while a recovery copy may be due, so the autosave timer runs.

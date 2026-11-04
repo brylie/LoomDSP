@@ -163,6 +163,40 @@ fn a_range_never_changes_a_loaded_value() {
 }
 
 /// Every example patch loads with the values in its file.
+/// A range widget's two parameters load with one control range, and no saved
+/// value changes. Saved ranges that differ are said once for the pair
+/// (control-ranges.md, Ranges on a range widget).
+#[test]
+fn a_range_widgets_parameters_load_with_one_control_range() {
+    let ranges = |c: &Controller| {
+        let node = c.graph().nodes().next().unwrap().1;
+        let index = |name| node.descriptor.param_index(name).unwrap();
+        (
+            node.range(index("low")),
+            node.range(index("high")),
+            node.params[index("low")],
+            node.params[index("high")],
+        )
+    };
+    let one = Some(ParamRange::new(-1.0, 1.0));
+    let (c, notes) = load_text(r#"Patch(version: 1, modules: [(id: 1, kind: "loom.level.clamp@1")])"#);
+    assert_eq!(ranges(&c), (one, one, -1.0, 1.0), "the default");
+    assert!(notes.is_empty(), "{notes:?}");
+
+    let (c, notes) =
+        load_text(r#"Patch(version: 1, modules: [(id: 1, kind: "loom.level.clamp@1", params: {"high": 3.0})])"#);
+    let five = Some(ParamRange::new(-5.0, 5.0));
+    assert_eq!(ranges(&c), (five, five, -1.0, 3.0), "the smallest that holds both");
+    assert!(notes.is_empty(), "{notes:?}");
+
+    let (c, notes) = load_text(
+        r#"Patch(version: 1, modules: [(id: 1, kind: "loom.level.clamp@1", ranges: {"low": (-1.0, 1.0), "high": (-5.0, 5.0)})])"#,
+    );
+    assert_eq!(ranges(&c), (one, one, -1.0, 1.0), "saved ranges that differ");
+    assert_eq!(notes.len(), 1, "one note for the pair: {notes:?}");
+    assert!(notes[0].contains("share a range"), "{notes:?}");
+}
+
 #[test]
 fn example_patches_keep_their_values() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches");

@@ -14,19 +14,30 @@ use common::*;
 use loom_core::{EngineParts, ModuleId, ProbeId, ProbeKind};
 
 /// Built-in tiles use knobs for single continuous values. A read-only shape
-/// or a named choice does not change that input grammar.
+/// or a named choice does not change that input grammar. Only the controls
+/// with a task for another widget differ: tempo, mixer levels, a crossfade, and
+/// two ends of a range (panel-widgets.md, Which modules use which widget).
 #[test]
 fn continuous_panel_controls_are_knobs() {
+    let task = |id: &str, name: &str| {
+        matches!(
+            (id, name),
+            ("loom.clock.transport", "tempo")
+                | ("loom.mix.mixer", "level1" | "level2" | "level3" | "level4")
+                | ("loom.mix.crossfade", "mix")
+                | ("loom.rand.random" | "loom.level.clamp", "low")
+        )
+    };
     for descriptor in loom_modules::ALL {
         for widget in descriptor.panel.widgets.iter().filter(|widget| widget.is_control()) {
-            let param = &descriptor.params[descriptor.param_index(widget.bind).unwrap()];
-            if !param.options.integer {
+            let param = &descriptor.params[descriptor.param_index(widget.bind()).unwrap()];
+            if !param.options.integer && !task(descriptor.id, widget.bind()) {
                 assert_eq!(
                     widget.kind,
                     loom_core::WidgetKind::Knob,
                     "{}.{}",
                     descriptor.id,
-                    widget.bind
+                    widget.bind()
                 );
             }
         }

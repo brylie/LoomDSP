@@ -32,10 +32,10 @@ The [rules for M1 modules](p1-modules.md#rules-for-all-modules-here) apply: IDs 
 | Inputs | `trigger` (trigger, default 0), `reset` (trigger, default 0) |
 | Outputs | `out`, `out2` |
 | Parameters | `mode`: 0 Step (default), 1 Walk. `low`: −10 to 10, default 0. `high`: −10 to 10, default 1. `shape`: 0 Uniform (default), 1 Centred. `step`: 0 to 1, default 0.1. `glide`: 0 to 5 s, default 0. `seed` (rule 1) |
-| Panel | `low` and `high` on one [range](panel-widgets.md#range) widget; until it exists, two knobs. Segmented controls for `mode` and `shape`. Knobs for `step` and `glide`. `seed` in the inspector only. |
+| Panel | `low` and `high` on one [range](panel-widgets.md#range) widget. Segmented controls for `mode` and `shape`. Knobs for `step` and `glide`. `seed` in the inspector only. |
 
 - **Position inside the range.** The module keeps each output's position `u` from 0 to 1, and outputs `low + u × (high − low)`. If `low` is above `high`, the two are swapped. *Why:* a moved or modulated range rescales the output at once, and a walk can never leave it.
-- `low` and `high` have the [control ranges](control-ranges.md) −1 to 1 (default) and −10 to 10.
+- `low` and `high` have the [control ranges](control-ranges.md) −1 to 1 (default) and −10 to 10, and [share one selected range](control-ranges.md#ranges-on-a-range-widget).
 - **Two independent outputs.** `out` and `out2` each have their own stream and position, and both move on every trigger. *Why two outputs:* one clock often needs two unrelated random values, such as a pitch and a velocity. To send one value to several places, drag several cables from one output.
 - **Step mode:** on each trigger, `u` gets a new draw.
 - **Walk mode:** on each trigger, `u` moves by a draw from −`step` to +`step`. `step` is a fraction of the range. *Why no shared two-dimensional step:* it would change how `out` moves depending on whether `out2` is used, and a module cannot see its output cables. A cable must not change another output's sound ([#529](https://github.com/brylie/LoomDSP/issues/529)). Two independent walks still draw a path on an XY scope.
@@ -89,7 +89,7 @@ The [rules for M1 modules](p1-modules.md#rules-for-all-modules-here) apply: IDs 
 | Inputs | `phase` (phase, default **bar phase**), `clock` (trigger, default 0), `reset` (trigger, default 0) |
 | Outputs | `trigger`, `gate`, `accent` |
 | Parameters | `source`: 0 Phase (default), 1 Clock. `steps`: whole number 1 to 32, default 16. `hits`: whole number 0 to 32, default 4. `rotation`: whole number 0 to 31, default 0 |
-| Panel | A segmented control for `source` ([panels](panels.md), rule 6), knobs for `steps`, `hits`, and `rotation`. A read-only [step grid](panel-widgets.md#step-grid) in the ring layout shows the pattern and the current step, once that widget exists. |
+| Panel | A segmented control for `source` ([panels](panels.md), rule 6), numbers for `steps`, `hits`, and `rotation`. A read-only [step grid](panel-widgets.md#step-grid) in the ring layout shows the pattern and the current step, once that widget exists. |
 
 - **The pattern.** Step `i` (from 0) of the unrotated pattern is a hit when `(i × hits) mod steps < hits`. `hits` above `steps` counts as `steps`. Rotation moves the pattern later: step `i` plays pattern step `(i − rotation) mod steps`. *Why this rule:* it is a closed form of the Euclidean spread. It gives the published patterns up to rotation (3 in 8 is `x..x..x.`), and it fixes which rotation is 0, so tests are exact.
 - **Source** is a setting, not chosen by a cable. *Why:* the `phase` input has a default, so a cable cannot be the switch, as on the LFO ([M1 modules](p1-modules.md#lfo-mt-mod-01)).

@@ -395,7 +395,7 @@ impl App {
                     range,
                     mode,
                     accepts_drop: {
-                        let bound = d.panel.widgets.iter().filter(|w| w.bind == spec.name);
+                        let bound = d.panel.widgets.iter().filter(|w| w.binds(spec.name));
                         bound.clone().next().is_none() || bound.into_iter().any(|w| w.kind.takes_modulation())
                     },
                 }

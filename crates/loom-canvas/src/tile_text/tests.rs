@@ -304,7 +304,14 @@ fn a_clock_mark_moves_the_input_label_clear_of_it() {
 #[test]
 fn a_number_box_holds_a_tempo_whole() {
     let rect = Rectangle::new(Point::ORIGIN, Size::new(5.0 * GRID, 2.0 * GRID));
-    let (anchor, _, width) = value_text_place(&WidgetViewKind::Number { steps: 0 }, rect).unwrap();
+    let (anchor, _, width) = value_text_place(
+        &WidgetViewKind::Number {
+            key_step: 0.0,
+            steps: 0,
+        },
+        rect,
+    )
+    .unwrap();
     assert!(number_box(rect).contains(anchor));
     assert_eq!(fit_label("120.0 BPM", width, LABEL_SIZE), "120.0 BPM");
     assert_eq!(value_text_place(&WidgetViewKind::Toggle, rect), None);

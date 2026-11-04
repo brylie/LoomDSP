@@ -18,7 +18,7 @@ fn labels_follow_mappings_and_the_armed_control() {
         d.panel
             .widgets
             .iter()
-            .position(|w| d.param_index(w.bind) == Some(param))
+            .position(|w| d.param_index(w.bind()) == Some(param))
             .unwrap()
     };
     controller.map_midi(CC74, filter, cutoff).unwrap();

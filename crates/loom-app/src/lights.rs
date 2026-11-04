@@ -158,7 +158,7 @@ pub fn range(descriptor: &ModuleDescriptor, widget: &Widget) -> Option<DisplayRa
 /// The range that says how `widget` writes its value, if it is a readout.
 pub fn readout(descriptor: &ModuleDescriptor, widget: &Widget) -> Option<DisplayRange> {
     matches!(widget.kind, WidgetKind::Readout { .. })
-        .then(|| descriptor.displays.iter().find(|display| display.name == widget.bind))
+        .then(|| descriptor.displays.iter().find(|display| display.name == widget.bind()))
         .flatten()
         .map(|display| display.range)
 }

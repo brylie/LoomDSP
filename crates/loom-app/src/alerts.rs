@@ -37,6 +37,11 @@ pub enum Cause {
     /// A file could not be read or written. Clears after a later successful
     /// save, open, or new patch.
     File,
+    /// Autosave cannot write, or is off for this run. A kept warning, not an
+    /// error: the player's work is fine until a crash, and a performance may
+    /// have better things to do than free disk space. Clears when autosave
+    /// works again.
+    Autosave,
     /// Anything else that lost the player's work.
     Other,
 }
@@ -46,7 +51,9 @@ pub enum Cause {
 pub struct KeptError {
     /// What it is about.
     pub cause: Cause,
-    /// The message, without its `Error:` label.
+    /// How it reads: an error, or for a lost autosave a warning.
+    pub severity: Severity,
+    /// The message, without its label.
     pub text: String,
     /// Whether the bar offers a × for it.
     pub dismissible: bool,
@@ -169,23 +176,54 @@ impl Alerts {
     pub fn error(&mut self, cause: Cause, status: impl Into<String>) {
         self.status = status.into();
         self.severity = Severity::Alarm;
+        self.keep(cause, Severity::Alarm, self.status.clone());
+    }
+
+    /// Replaces the status line with a warning that stays on screen until
+    /// its cause is gone, as an error does but without its alarm.
+    pub fn warn_kept(&mut self, cause: Cause, status: impl Into<String>) {
+        self.status = status.into();
+        self.severity = Severity::Warning;
+        self.keep(cause, Severity::Warning, self.status.clone());
+    }
+
+    /// Keeps a warning on screen and leaves the status line alone, so a
+    /// message already there can still be read.
+    pub fn keep_warning(&mut self, cause: Cause, text: impl Into<String>) {
+        self.keep(cause, Severity::Warning, text.into());
+    }
+
+    /// Keeps a problem, in place of any other of the same cause.
+    fn keep(&mut self, cause: Cause, severity: Severity, text: String) {
         self.kept.retain(|kept| kept.cause != cause);
         self.kept.push(KeptError {
             cause,
-            text: self.status.clone(),
+            severity,
+            text,
             dismissible: cause != Cause::AudioOutput,
         });
     }
 
-    /// The cause of a kept error is gone. Returns whether one was kept. If
+    /// Whether the status line is saying this kept problem.
+    fn says(&self, kept: &KeptError) -> bool {
+        self.severity == kept.severity && self.status == kept.text
+    }
+
+    /// Whether the status line is saying a kept problem, so its hover text
+    /// lists them all.
+    pub fn status_is_kept(&self) -> bool {
+        self.kept.iter().any(|kept| self.says(kept))
+    }
+
+    /// The cause of a kept problem is gone. Returns whether one was kept. If
     /// it was also the latest message, the status line empties, so it does
-    /// not go on saying `Error:`.
+    /// not go on saying `Error:` or `Warning:`.
     pub fn clear(&mut self, cause: Cause) -> bool {
         let Some(at) = self.kept.iter().position(|kept| kept.cause == cause) else {
             return false;
         };
         let kept = self.kept.remove(at);
-        if self.severity == Severity::Alarm && kept.text == self.status {
+        if self.says(&kept) {
             self.say(String::new());
         }
         true
@@ -203,24 +241,26 @@ impl Alerts {
         &self.kept
     }
 
-    /// The newest kept error, if any.
-    pub fn newest_kept(&self) -> Option<&KeptError> {
-        self.kept.last()
+    /// The kept problem the bar leads with: the most severe, then the newest.
+    /// *Why:* a warning that arrives later must not hide a lost device.
+    pub fn top_kept(&self) -> Option<&KeptError> {
+        // Of equal elements, `max_by_key` returns the last, here the newest.
+        self.kept.iter().max_by_key(|kept| kept.severity)
     }
 
-    /// The error for the bar's own field: the newest kept one, unless the
-    /// status line already says it, so the same text never shows twice.
+    /// The problem for the bar's own field: [`top_kept`](Self::top_kept),
+    /// unless the status line already says it, so the same text never shows
+    /// twice.
     pub fn kept_field(&self) -> Option<&KeptError> {
-        self.newest_kept()
-            .filter(|kept| self.severity != Severity::Alarm || kept.text != self.status)
+        self.top_kept().filter(|kept| !self.says(kept))
     }
 
-    /// All the kept errors, newest first, for hover text.
+    /// All the kept problems, newest first, for hover text.
     pub fn kept_hover(&self) -> String {
         self.kept
             .iter()
             .rev()
-            .map(|kept| labelled(Severity::Alarm, &kept.text))
+            .map(|kept| labelled(kept.severity, &kept.text))
             .collect::<Vec<_>>()
             .join("\n")
     }
@@ -236,10 +276,13 @@ impl Alerts {
     }
 
     /// Adds `more` to the end of the status line. If the line is a kept
-    /// error, the kept text grows with it, so the two still match.
+    /// problem, the kept text grows with it, so the two still match.
     pub fn append(&mut self, more: &str) {
-        if self.severity == Severity::Alarm
-            && let Some(kept) = self.kept.iter_mut().find(|kept| kept.text == self.status)
+        let (severity, status) = (self.severity, &self.status);
+        if let Some(kept) = self
+            .kept
+            .iter_mut()
+            .find(|kept| kept.severity == severity && &kept.text == status)
         {
             kept.text.push_str(more);
         }
