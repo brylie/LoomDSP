@@ -21,6 +21,7 @@ fn blocked_by_question(command: &Command) -> bool {
         | Command::Undo
         | Command::Redo
         | Command::Arm { .. }
+        | Command::MidiOptions { .. }
         | Command::Type { .. }
         | Command::OutputSafety { .. }
         | Command::Audio { .. }
@@ -472,6 +473,19 @@ impl App {
                 send(self, message);
                 Map::new()
             }),
+            Command::MidiOptions {
+                target,
+                mode,
+                encoding,
+                low,
+                high,
+                invert,
+            } => self
+                .midi_options_command(&target, mode.as_deref(), encoding.as_deref(), (low, high), invert)
+                .map(|message| {
+                    send(self, message);
+                    Map::new()
+                }),
             Command::Locate { target } => return (Then::AfterDraw(Step::Locate(target)), Task::batch(tasks)),
             Command::Screenshot {
                 path,
@@ -731,6 +745,72 @@ impl App {
             .param_index(param)
             .ok_or_else(|| format!("module {module} ({}) has no parameter `{param}`", descriptor.name))?;
         Ok(Message::Learn(crate::learn::Message::Arm((module, index))))
+    }
+
+    /// Checks a `midi_options` command and builds what it asks for. Fields
+    /// left out keep their value, and options that do not pass are refused
+    /// with the reason.
+    pub(super) fn midi_options_command(
+        &self,
+        target: &str,
+        mode: Option<&str>,
+        encoding: Option<&str>,
+        (low, high): (Option<f32>, Option<f32>),
+        invert: Option<bool>,
+    ) -> Result<Message, String> {
+        use loom_core::{MidiEncoding, MidiMode};
+        let Some((module, Some(param))) = split_target(target) else {
+            return Err(format!(
+                "`{target}` is not a parameter; use `module:param`, like `4:cutoff`"
+            ));
+        };
+        let node = self
+            .controller
+            .graph()
+            .node(ModuleId(module))
+            .ok_or_else(|| format!("no module {module}"))?;
+        let index = node
+            .descriptor
+            .param_index(param)
+            .ok_or_else(|| format!("module {module} ({}) has no parameter `{param}`", node.descriptor.name))?;
+        let (_, mapping) = self
+            .controller
+            .graph()
+            .midi_mapping_of(ModuleId(module), index)
+            .ok_or_else(|| format!("`{target}` has no MIDI mapping"))?;
+        let mut options = mapping.options;
+        let encoding = match encoding {
+            None => None,
+            Some("offset64") => Some(MidiEncoding::Offset64),
+            Some("twos_complement") => Some(MidiEncoding::TwosComplement),
+            Some("sign_bit") => Some(MidiEncoding::SignBit),
+            Some(other) => return Err(format!("no encoding `{other}`; use offset64, twos_complement, or sign_bit")),
+        };
+        let relative = |current: MidiMode| match current {
+            MidiMode::Relative(kept) => kept,
+            _ => MidiEncoding::default(),
+        };
+        options = match (mode, encoding) {
+            (None, None) => options,
+            (None, Some(encoding)) => {
+                if !matches!(options.mode, MidiMode::Relative(_)) {
+                    return Err("an encoding is only for a Relative mapping".to_string());
+                }
+                options.with_mode(MidiMode::Relative(encoding))
+            }
+            (Some("relative"), encoding) => {
+                options.with_mode(MidiMode::Relative(encoding.unwrap_or(relative(options.mode))))
+            }
+            (Some(_), Some(_)) => return Err("an encoding is only for a Relative mapping".to_string()),
+            (Some("absolute"), None) => options.with_mode(MidiMode::Absolute),
+            (Some("pickup"), None) => options.with_mode(MidiMode::Pickup),
+            (Some(other), None) => return Err(format!("no mode `{other}`; use absolute, pickup, or relative")),
+        };
+        options.low = low.unwrap_or(options.low);
+        options.high = high.unwrap_or(options.high);
+        options.invert = invert.unwrap_or(options.invert);
+        options.check()?;
+        Ok(Message::MidiOptions { module, index, options })
     }
 
     /// Checks a `sample` target: a panel widget by the name it is bound

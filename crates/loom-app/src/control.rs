@@ -171,6 +171,15 @@ pub enum Command {
     Arm {
         target: String,
     },
+    /// Changes a MIDI mapping's options. Fields left out keep their value.
+    MidiOptions {
+        target: String,
+        mode: Option<String>,
+        encoding: Option<String>,
+        low: Option<f32>,
+        high: Option<f32>,
+        invert: Option<bool>,
+    },
     Locate {
         target: String,
     },

@@ -345,6 +345,145 @@ fn a_script_maps_a_control_in_learn_mode() {
     assert!(mapping.contains("21"), "{row}");
 }
 
+/// The app on the subtractive patch, with `cc` 21 learned on the filter's
+/// cutoff (module 4).
+fn app_with_mapped_cutoff() -> App {
+    let mut app = App::new(crate::Args {
+        patch: Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches/subtractive.ron")),
+        fake_audio: true,
+        no_audio: false,
+        ..crate::tests::app_args()
+    });
+    let ok = Ok(Map::new());
+    assert_eq!(run(&mut app, r#"{"cmd": "toolbar", "button": "learn"}"#), ok);
+    assert_eq!(run(&mut app, r#"{"cmd": "select", "modules": [4]}"#), ok);
+    assert_eq!(run(&mut app, r#"{"cmd": "arm", "target": "4:cutoff"}"#), ok);
+    assert_eq!(run(&mut app, r#"{"cmd": "cc", "controller": 21, "value": 64}"#), ok);
+    assert_eq!(run(&mut app, r#"{"cmd": "toolbar", "button": "learn"}"#), ok);
+    app
+}
+
+/// The inspector row of the filter's cutoff, from the snapshot.
+fn cutoff_row(app: &mut App) -> Value {
+    run(app, r#"{"cmd": "snapshot"}"#).unwrap()["snapshot"]["inspector"]["module"]["params"][0].clone()
+}
+
+/// A script changes a mapping's options as the inspector rows do, as one undo
+/// step, and options that do not pass are refused with the reason
+/// (control-channel.md, `midi_options`).
+#[test]
+fn a_script_changes_a_mappings_options() {
+    let mut app = app_with_mapped_cutoff();
+    let ok = Ok(Map::new());
+    assert_eq!(cutoff_row(&mut app)["mapping_options"]["mode"], json!("Absolute"));
+
+    let change = r#"{"cmd": "midi_options", "target": "4:cutoff", "mode": "pickup", "low": 0.1, "high": 0.9, "invert": true}"#;
+    assert_eq!(run(&mut app, change), ok);
+    let row = cutoff_row(&mut app);
+    assert_eq!(row["mapping_options"]["mode"], json!("Pickup"), "{row}");
+    assert_eq!(row["mapping_options"]["low"], json!("0.10"), "{row}");
+    assert_eq!(row["mapping_options"]["high"], json!("0.90"), "{row}");
+    assert_eq!(row["mapping_options"]["invert"], json!(true), "{row}");
+    assert_eq!(
+        run(&mut app, r#"{"cmd": "snapshot"}"#).unwrap()["snapshot"]["undo"],
+        json!("change MIDI mapping")
+    );
+
+    run(&mut app, r#"{"cmd": "undo"}"#).unwrap();
+    assert_eq!(cutoff_row(&mut app)["mapping_options"]["mode"], json!("Absolute"));
+    run(&mut app, r#"{"cmd": "redo"}"#).unwrap();
+    assert_eq!(cutoff_row(&mut app)["mapping_options"]["mode"], json!("Pickup"));
+
+    // Moving to Relative resets what it does not have.
+    let relative = r#"{"cmd": "midi_options", "target": "4:cutoff", "mode": "relative", "encoding": "sign_bit"}"#;
+    assert_eq!(run(&mut app, relative), ok);
+    let row = cutoff_row(&mut app);
+    assert_eq!(row["mapping_options"]["encoding"], json!("Sign bit"), "{row}");
+    assert_eq!(row["mapping_options"]["invert"], json!(false), "{row}");
+
+    for (line, reason) in [
+        (
+            r#"{"cmd": "midi_options", "target": "4:cutoff", "low": 0.5}"#,
+            "no range or invert",
+        ),
+        (
+            r#"{"cmd": "midi_options", "target": "4:cutoff", "mode": "sideways"}"#,
+            "no mode",
+        ),
+        (
+            r#"{"cmd": "midi_options", "target": "4:cutoff", "encoding": "morse"}"#,
+            "no encoding",
+        ),
+        (
+            r#"{"cmd": "midi_options", "target": "4:cutoff", "mode": "pickup", "encoding": "sign_bit"}"#,
+            "only for a Relative",
+        ),
+        (
+            r#"{"cmd": "midi_options", "target": "4:resonance", "mode": "pickup"}"#,
+            "has no MIDI mapping",
+        ),
+        (r#"{"cmd": "midi_options", "target": "4", "mode": "pickup"}"#, "not a parameter"),
+        (
+            r#"{"cmd": "midi_options", "target": "4:nothing", "mode": "pickup"}"#,
+            "has no parameter",
+        ),
+    ] {
+        let error = run(&mut app, line).unwrap_err();
+        assert!(error.contains(reason), "{line}: {error}");
+    }
+    assert_eq!(run(&mut app, r#"{"cmd": "midi_options", "target": "4:cutoff", "mode": "absolute"}"#), ok);
+    let bad = r#"{"cmd": "midi_options", "target": "4:cutoff", "low": 0.9, "high": 0.1}"#;
+    assert!(run(&mut app, bad).unwrap_err().contains("below the high end"));
+}
+
+/// While a pickup waits, the hardware's position shows as a ghost mark on the
+/// inspector row and the tile, and the value stays. When the pickup catches,
+/// the ghost goes and the value moves, on the tile and in the inspector, by
+/// the time the app answers: the first redraw after the control change
+/// (midi-learn.md, Acceptance criteria).
+#[test]
+fn a_waiting_pickup_shows_a_ghost_until_it_catches() {
+    let mut app = app_with_mapped_cutoff();
+    let ok = Ok(Map::new());
+    assert_eq!(
+        run(&mut app, r#"{"cmd": "midi_options", "target": "4:cutoff", "mode": "pickup"}"#),
+        ok
+    );
+    let knob = app
+        .controller
+        .graph()
+        .node(ModuleId(4))
+        .unwrap()
+        .descriptor
+        .panel
+        .widgets
+        .iter()
+        .position(|widget| widget.binds("cutoff"))
+        .unwrap();
+    let start = cutoff_row(&mut app)["mode"]["edit"]["position"].as_f64().unwrap();
+    assert!(cutoff_row(&mut app)["mapping_options"]["ghost"].is_null(), "no move yet");
+
+    // Far away on one side: it waits.
+    let (far, other) = if start < 0.5 { (127_u8, 0_u8) } else { (0_u8, 127_u8) };
+    assert_eq!(run(&mut app, &format!(r#"{{"cmd": "cc", "controller": 21, "value": {far}}}"#)), ok);
+    let row = cutoff_row(&mut app);
+    assert_eq!(row["mode"]["edit"]["position"].as_f64().unwrap(), start, "the value stays");
+    let ghost = f32::from(far) / 127.0;
+    assert_eq!(row["mapping_options"]["ghost"].as_f64().unwrap() as f32, ghost, "{row}");
+    assert_eq!(app.values.get(4, knob).unwrap().ghost, Some(ghost));
+    assert!(app.values.get(4, knob).unwrap().position as f64 == start);
+
+    // Across to the other side: it catches, with no ghost and a new value.
+    assert_eq!(run(&mut app, &format!(r#"{{"cmd": "cc", "controller": 21, "value": {other}}}"#)), ok);
+    let row = cutoff_row(&mut app);
+    let position = f32::from(other) / 127.0;
+    assert_eq!(row["mode"]["edit"]["position"].as_f64().unwrap() as f32, position, "{row}");
+    assert!(row["mapping_options"]["ghost"].is_null(), "{row}");
+    assert_eq!(app.values.get(4, knob).unwrap().ghost, None);
+    assert_eq!(app.values.get(4, knob).unwrap().position, position);
+    assert!(crate::learn::INTERVAL <= Duration::from_millis(15), "the criterion's poll");
+}
+
 /// `sample` records a knob's live value once per frame (#255): with a
 /// held envelope modulating a filter's Resonance, the live dot moves.
 /// Then the app asks for no more frames (rule 7).

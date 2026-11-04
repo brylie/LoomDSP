@@ -922,6 +922,86 @@ mod tests {
         assert!(!canvas.bounds.intersects(&row), "the row {row:?} is beside the canvas");
     }
 
+    /// A mapping's options rows are closed until asked, show what its mode
+    /// has, and the range fields keep bad text with its reason (midi-learn.md,
+    /// Mapping modes).
+    #[test]
+    fn mapping_options_rows_open_and_edit() {
+        let mut ui = Ui::open("subtractive.ron");
+        let id = loom_core::ModuleId(4);
+        ui.app
+            .controller
+            .map_midi(
+                loom_core::MidiControl {
+                    channel: 0,
+                    controller: 21,
+                },
+                id,
+                0,
+            )
+            .unwrap();
+        ui.app.commit();
+        ui.send(Message::SelectModule(4));
+        ui.redraw();
+        assert!(ui.text("Options").is_some(), "the small button beside the mapping's x");
+        assert!(ui.text("Invert").is_none(), "closed until asked");
+
+        ui.send(Message::MidiOptionsRows { module: 4, index: 0 });
+        ui.redraw();
+        assert!(ui.text("Range").is_some());
+        assert!(ui.text("Invert").is_some());
+        assert!(ui.text("Encoding").is_none());
+
+        // Bad text stays, with the reason, and changes nothing.
+        ui.send(Message::MidiRangeText {
+            module: 4,
+            index: 0,
+            low: "0.8".to_string(),
+            high: "0.2".to_string(),
+        });
+        ui.send(Message::MidiRangeSubmit { module: 4, index: 0 });
+        ui.redraw();
+        assert!(ui.text("the low end of its range must be below the high end").is_some());
+        let options = |ui: &Ui| ui.app.controller.graph().midi_mapping_of(id, 0).unwrap().1.options;
+        assert_eq!(options(&ui), loom_core::MidiMappingOptions::DEFAULT);
+        ui.send(Message::MidiRangeText {
+            module: 4,
+            index: 0,
+            low: "x".to_string(),
+            high: "0.2".to_string(),
+        });
+        ui.send(Message::MidiRangeSubmit { module: 4, index: 0 });
+        ui.redraw();
+        assert!(ui.text("Not a number").is_some());
+
+        // Good text applies on Enter, as one undo step.
+        ui.send(Message::MidiRangeText {
+            module: 4,
+            index: 0,
+            low: "0,2".to_string(),
+            high: "0.8".to_string(),
+        });
+        ui.send(Message::MidiRangeSubmit { module: 4, index: 0 });
+        assert_eq!((options(&ui).low, options(&ui).high), (0.2, 0.8));
+        assert_eq!(ui.app.ui_snapshot().undo.as_deref(), Some("change MIDI mapping"));
+
+        // Relative shows its encoding, and has no range or invert.
+        let relative = options(&ui).with_mode(loom_core::MidiMode::Relative(loom_core::MidiEncoding::SignBit));
+        ui.send(Message::MidiOptions {
+            module: 4,
+            index: 0,
+            options: relative,
+        });
+        ui.redraw();
+        assert!(ui.text("Encoding").is_some());
+        assert!(ui.text("Invert").is_none());
+        assert_eq!((options(&ui).low, options(&ui).high), (0.0, 1.0));
+
+        ui.send(Message::MidiOptionsRows { module: 4, index: 0 });
+        ui.redraw();
+        assert!(ui.text("Encoding").is_none());
+    }
+
     /// Adds a module of `kind`, selects it, and draws the inspector.
     fn select_new(ui: &mut Ui, kind: &str) -> ModuleId {
         let id = ui.app.controller.add_module(kind).expect("a built-in module");

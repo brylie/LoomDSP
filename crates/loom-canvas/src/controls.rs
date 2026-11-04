@@ -89,6 +89,10 @@ pub struct WidgetValue {
     /// a dot on the range arc (`docs/design/modulation.md`, Live value).
     /// `None` draws no dot.
     pub live: Option<f32>,
+    /// Knob and fader: where the hardware of a waiting pickup stands, as a
+    /// position from 0 to 1, drawn as a hollow mark (`docs/design/midi-learn.md`,
+    /// Mapping modes). `None` draws none.
+    pub ghost: Option<f32>,
     /// Read-only result shape, sampled left to right in the UI thread.
     pub shape: Vec<f32>,
     /// The second value of an XY pad or a range. The fields above then hold
@@ -274,6 +278,9 @@ impl ControlGeometry {
                         if let Some(live) = values.get(module.id, index).and_then(|v| v.live) {
                             shapes.push(live_dot(centre, live, palette));
                         }
+                        if let Some(ghost) = values.get(module.id, index).and_then(|v| v.ghost) {
+                            shapes.push(ghost_mark(live_dot_centre(centre, ghost), palette));
+                        }
                         shapes.push(circle(centre, 6.5, palette.control_body, palette.tile_border, 1.0));
                         let angle = KNOB_START + KNOB_SWEEP * t;
                         let tip = Point::new(centre.x + 4.0 * angle.sin(), centre.y - 4.0 * angle.cos());
@@ -297,6 +304,9 @@ impl ControlGeometry {
                         if let Some(live) = values.get(module.id, index).and_then(|v| v.live) {
                             let at = fader_bar_point(rect, *vertical, live);
                             shapes.push(circle(at, LIVE_RADIUS, palette.modulation, palette.text, 0.8));
+                        }
+                        if let Some(ghost) = values.get(module.id, index).and_then(|v| v.ghost) {
+                            shapes.push(ghost_mark(fader_bar_point(rect, *vertical, ghost), palette));
                         }
                         shapes.push(Shape::new(
                             fader_handle(rect, *vertical, t),
@@ -651,6 +661,13 @@ fn live_dot(centre: Point, position: f32, palette: &Palette) -> Shape {
         palette.text,
         0.8,
     )
+}
+
+/// A hollow ring at `centre`: where a waiting pickup's hardware stands. It
+/// differs from the filled live value dot by shape, so colour need not tell
+/// them apart.
+fn ghost_mark(centre: Point, palette: &Palette) -> Shape {
+    circle(centre, LIVE_RADIUS, Color::TRANSPARENT, palette.text, RING_WIDTH)
 }
 
 /// Where the live value dot of a knob centred at `centre` goes.

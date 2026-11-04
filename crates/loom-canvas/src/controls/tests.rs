@@ -673,3 +673,27 @@ fn a_drag_delta_is_not_capped() {
     assert!((ValueDrag::KNOB.delta(-180.0, false) + 0.9).abs() < 1e-6);
     assert!((ValueDrag::KNOB.delta(180.0, true) - 0.09).abs() < 1e-6);
 }
+
+/// A waiting pickup's hardware shows as one more shape on a knob, and only
+/// the control values change, so the scene is not rebuilt (midi-learn.md,
+/// Mapping modes).
+#[test]
+fn a_ghost_adds_a_hollow_mark() {
+    let scene = scene();
+    let palette = Palette::default();
+    let mut values = PanelValues::new();
+    values.set(1, 0, modulated(0.5, ModulationMark::None));
+    let without = ControlGeometry::build(&scene, &values, &palette);
+    values.set(
+        1,
+        0,
+        WidgetValue {
+            ghost: Some(0.75),
+            ..modulated(0.5, ModulationMark::None)
+        },
+    );
+    let with = ControlGeometry::build(&scene, &values, &palette);
+    assert_eq!(with.shapes.len(), without.shapes.len() + 1);
+    assert_eq!(with.key.0, without.key.0, "the scene is not rebuilt");
+    assert_ne!(with.key, without.key, "the control values changed");
+}

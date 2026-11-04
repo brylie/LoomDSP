@@ -162,6 +162,9 @@ impl App {
             };
             Subscription::run_with(watch, learn::stream).map(|_| Message::Midi)
         });
+        // Runs only while a ghost mark shows, so an idle app stays idle.
+        let ghosts = (!self.learn.ghosts().shown().is_empty())
+            .then(|| iced::time::every(learn::GHOST_CHECK).map(|_| Message::MidiGhosts));
         // An open question has the keys, except Panic's. One key must not
         // answer it and also reach what is behind it, once the answer has
         // closed it (files.md, Asking before losing work).
@@ -195,6 +198,7 @@ impl App {
         Subscription::batch(
             watch
                 .into_iter()
+                .chain(ghosts)
                 .chain(keys)
                 .chain(matrix_keys)
                 .chain(browser)

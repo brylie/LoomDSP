@@ -5,13 +5,24 @@
 use iced::futures::Stream;
 use iced::futures::channel::mpsc;
 use loom_canvas::{ControlPart, LearnView};
-use loom_core::{Controller, MidiMapping, MidiReader, ModuleId};
+use loom_core::{Controller, MidiMapping, MidiReader, MidiWaiting, ModuleId};
+use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-/// How often the watcher looks for new control changes. A hardware knob
-/// then moves the knob on screen within about one frame.
+/// How often the watcher looks for new control changes. A hardware knob then
+/// moves the knob on screen at the first redraw after the next check
+/// (midi-learn.md, Acceptance criteria). A faster check would buy nothing a
+/// player notices.
 pub const INTERVAL: Duration = Duration::from_millis(15);
+
+/// How long a ghost mark stays after its hardware last moved (midi-learn.md,
+/// Mapping modes).
+pub const GHOST_TIME: Duration = Duration::from_secs(1);
+
+/// How often the app checks whether a ghost mark has run out, only while one
+/// shows.
+pub const GHOST_CHECK: Duration = Duration::from_millis(100);
 
 /// A parameter: module ID and parameter index.
 pub type Param = (u32, usize);
@@ -22,6 +33,75 @@ pub type Param = (u32, usize);
 pub struct Armed {
     pub param: Param,
     pub serial: Option<u32>,
+}
+
+/// One waiting pickup whose hardware has moved.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Ghost {
+    position: f32,
+    /// Changes when the hardware moves.
+    sequence: u32,
+    moved: Instant,
+}
+
+/// The ghost marks: where the hardware of each waiting pickup stands, for
+/// [`GHOST_TIME`] after it last moved. It reads the time only in
+/// [`update`](Self::update), so the view reads state and a test needs no real
+/// wait.
+#[derive(Debug, Default)]
+pub struct Ghosts {
+    marks: BTreeMap<Param, Ghost>,
+    shown: BTreeMap<Param, f32>,
+}
+
+impl Ghosts {
+    /// Brings the marks in line with the engine at time `now`. Returns true
+    /// when what shows changed.
+    pub fn update(&mut self, waiting: &[MidiWaiting], now: Instant) -> bool {
+        let mut marks = BTreeMap::new();
+        for w in waiting {
+            let param = (w.target.0, w.param);
+            let moved = match self.marks.get(&param) {
+                Some(mark) if mark.sequence == w.sequence => mark.moved,
+                _ => now,
+            };
+            marks.insert(
+                param,
+                Ghost {
+                    position: w.position,
+                    sequence: w.sequence,
+                    moved,
+                },
+            );
+        }
+        let shown: BTreeMap<Param, f32> = marks
+            .iter()
+            .filter(|(_, mark)| now.saturating_duration_since(mark.moved) < GHOST_TIME)
+            .map(|(&param, mark)| (param, mark.position))
+            .collect();
+        let changed = shown != self.shown;
+        self.marks = marks;
+        self.shown = shown;
+        changed
+    }
+
+    /// The marks that show, by parameter, as positions from 0 to 1.
+    pub fn shown(&self) -> &BTreeMap<Param, f32> {
+        &self.shown
+    }
+}
+
+/// What is typed in a mapping's range fields, until Enter.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RangeDraft {
+    /// The mapped parameter.
+    pub param: Param,
+    /// The low field's text.
+    pub low: String,
+    /// The high field's text.
+    pub high: String,
+    /// Why the text is not a range, once Enter has found out.
+    pub error: Option<String>,
 }
 
 /// Watches for control changes. One for the whole app.
@@ -92,6 +172,13 @@ pub struct Learn {
     /// Rebuilt by [`refresh`](Self::refresh) when mappings or the armed
     /// parameter change.
     view: LearnView,
+    /// The mapping whose options rows are open in the inspector. App state,
+    /// not saved in the patch.
+    options_open: Option<Param>,
+    /// The text in the open rows' range fields.
+    range_draft: Option<RangeDraft>,
+    /// The ghost marks of waiting pickups.
+    ghosts: Ghosts,
 }
 
 impl Learn {
@@ -125,6 +212,39 @@ impl Learn {
     /// one seen now, maps it.
     pub fn arm(&mut self, param: Param, serial: Option<u32>) {
         self.armed = Some(Armed { param, serial });
+    }
+
+    /// True if `param`'s mapping options rows are open.
+    pub fn options_open(&self, param: Param) -> bool {
+        self.options_open == Some(param)
+    }
+
+    /// Opens `param`'s options rows, or closes them if open. Only one is open
+    /// at a time, and a draft does not outlive its rows.
+    pub fn toggle_options(&mut self, param: Param) {
+        self.options_open = (self.options_open != Some(param)).then_some(param);
+        self.range_draft = None;
+    }
+
+    /// The draft in `param`'s range fields, if any.
+    pub fn range_draft(&self, param: Param) -> Option<&RangeDraft> {
+        self.range_draft.as_ref().filter(|draft| draft.param == param)
+    }
+
+    /// Sets or clears the draft in the range fields.
+    pub fn set_range_draft(&mut self, draft: Option<RangeDraft>) {
+        self.range_draft = draft;
+    }
+
+    /// The ghost marks.
+    pub fn ghosts(&self) -> &Ghosts {
+        &self.ghosts
+    }
+
+    /// Brings the ghost marks in line with the engine. Returns true when what
+    /// shows changed.
+    pub fn update_ghosts(&mut self, waiting: &[MidiWaiting], now: Instant) -> bool {
+        self.ghosts.update(waiting, now)
     }
 
     /// Disarms, keeping learn mode on.

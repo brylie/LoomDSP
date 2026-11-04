@@ -4,7 +4,8 @@
 //! `docs/design/modulation.md`).
 
 use crate::{App, Message, learn, modulation, scene};
-use loom_core::{ModuleId, OutputRef};
+use loom_core::{MidiMappingOptions, ModuleId, OutputRef};
+use std::time::Instant;
 
 impl App {
     /// Rebuilds what learn mode shows, after mappings or the armed
@@ -64,7 +65,8 @@ impl App {
     /// Follows control changes: mapped parameters on screen, and the armed
     /// parameter in learn mode.
     pub(crate) fn midi_arrived(&mut self) {
-        if !self.controller.sync_midi().is_empty() {
+        let moved = !self.controller.sync_midi().is_empty();
+        if self.refresh_ghosts() || moved {
             self.refresh_values();
         }
         if self.panic_midi_arrived() {
@@ -105,6 +107,63 @@ impl App {
         if !self.edits.gesture_open() {
             self.record();
         }
+    }
+
+    /// Brings the ghost marks in line with the engine. Returns true when what
+    /// shows changed.
+    pub(crate) fn refresh_ghosts(&mut self) -> bool {
+        let waiting = self.controller.midi_waiting();
+        self.learn.update_ghosts(&waiting, Instant::now())
+    }
+
+    /// Changes the options of a parameter's mapping. One undo step.
+    pub(crate) fn set_midi_options(&mut self, module: u32, index: usize, options: MidiMappingOptions) {
+        self.close_slider_gesture();
+        self.edit(
+            |app| match app.controller.set_midi_options(ModuleId(module), index, options) {
+                Ok(Some(_)) => {
+                    app.commit();
+                }
+                Ok(None) => {}
+                Err(e) => app.alerts.warn(e.to_string()),
+            },
+        );
+    }
+
+    /// Enter in a mapping's range fields: a range that passes becomes the
+    /// mapping's. Otherwise the text stays with the reason, as for a typed
+    /// value (panel-widgets.md, Typing a value).
+    pub(crate) fn submit_midi_range(&mut self, module: u32, index: usize) {
+        let param = (module, index);
+        let Some(draft) = self.learn.range_draft(param).cloned() else {
+            return;
+        };
+        let current = self
+            .controller
+            .graph()
+            .midi_mapping_of(ModuleId(module), index)
+            .map(|(_, mapping)| mapping.options);
+        let Some(current) = current else {
+            self.learn.set_range_draft(None);
+            return;
+        };
+        let number = |text: &str| text.trim().replace(',', ".").parse::<f32>().ok();
+        let options = number(&draft.low)
+            .zip(number(&draft.high))
+            .map(|(low, high)| MidiMappingOptions { low, high, ..current });
+        let error = match options.map(|options| (options, options.check())) {
+            Some((options, Ok(()))) => {
+                self.learn.set_range_draft(None);
+                self.set_midi_options(module, index, options);
+                return;
+            }
+            Some((_, Err(reason))) => reason.to_string(),
+            None => "Not a number".to_string(),
+        };
+        self.learn.set_range_draft(Some(learn::RangeDraft {
+            error: Some(error),
+            ..draft
+        }));
     }
 
     pub(crate) fn stop_learning(&mut self) {

@@ -10,11 +10,11 @@ use crate::style::{self, button};
 use crate::view::remove_button;
 use crate::{App, DIM, Message, param};
 use iced::widget::{
-    checkbox, column, container, mouse_area, pick_list, radio, row, scrollable, slider, space, text, text_input,
+    checkbox, column, container, mouse_area, pick_list, radio, row, scrollable, slider, space, stack, text, text_input,
     tooltip,
 };
 use iced::{Element, Length, Theme};
-use loom_core::{AssignmentId, ModuleId, OutputRef};
+use loom_core::{AssignmentId, MidiEncoding, MidiMappingOptions, MidiMode, ModuleId, OutputRef};
 use serde::Serialize;
 
 /// Width of a parameter's value field, in pixels.
@@ -110,6 +110,8 @@ pub struct ParamRow {
     pub field: Option<ValueField>,
     /// The MIDI control mapped to it.
     pub mapping: Option<String>,
+    /// The mapping's mode, range, and ghost mark.
+    pub mapping_options: Option<MappingRow>,
     /// The **Range** selector, for a parameter that offers ranges.
     pub range: Option<RangeRow>,
     /// "Not used in AD" while the module's mode hides this parameter's
@@ -119,6 +121,33 @@ pub struct ParamRow {
     /// Whether a dragged output can target this row.
     #[serde(skip)]
     pub accepts_drop: bool,
+}
+
+/// A MIDI mapping's options on a parameter's row (midi-learn.md, Mapping
+/// modes).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct MappingRow {
+    /// The mode's name.
+    pub mode: &'static str,
+    /// The encoding's name, for a Relative mapping.
+    pub encoding: Option<&'static str>,
+    /// The low field's text.
+    pub low: String,
+    /// The high field's text.
+    pub high: String,
+    /// Why the range text is not a range, if it is not.
+    pub range_error: Option<String>,
+    /// Whether Invert is on.
+    pub invert: bool,
+    /// Whether the rows are open.
+    pub open: bool,
+    /// Where a waiting pickup's hardware stands, from 0 to 1, while its
+    /// ghost mark shows.
+    pub ghost: Option<f32>,
+    /// The options as the controller holds them, for the messages that
+    /// change one field.
+    #[serde(skip)]
+    pub options: MidiMappingOptions,
 }
 
 /// What a parameter's value field shows.
@@ -336,6 +365,20 @@ impl App {
                 let mapping = graph
                     .midi_mapping_of(ModuleId(id), index)
                     .map(|(_, m)| m.control.to_string());
+                let mapping_options = graph.midi_mapping_of(ModuleId(id), index).map(|(_, m)| {
+                    let draft = self.learn.range_draft((id, index));
+                    MappingRow {
+                        mode: mode_name(m.options.mode),
+                        encoding: encoding_of(m.options.mode).map(encoding_name),
+                        low: draft.map_or_else(|| format!("{:.2}", m.options.low), |d| d.low.clone()),
+                        high: draft.map_or_else(|| format!("{:.2}", m.options.high), |d| d.high.clone()),
+                        range_error: draft.and_then(|d| d.error.clone()),
+                        invert: m.options.invert,
+                        open: self.learn.options_open((id, index)),
+                        ghost: self.learn.ghosts().shown().get(&(id, index)).copied(),
+                        options: m.options,
+                    }
+                });
                 let mode = if self.learn.is_on() {
                     // In learn mode a row arms its parameter, and its value
                     // does not change (midi-learn.md).
@@ -392,6 +435,7 @@ impl App {
                     field,
                     value: shown,
                     mapping,
+                    mapping_options,
                     range,
                     mode,
                     accepts_drop: {
@@ -576,6 +620,7 @@ fn module_view<'a>(m: ModuleRows, drop_row: Option<(u32, usize)>, dragging: bool
         let index = p.index;
         let accepts_drop = p.accepts_drop;
         let unmap = Message::Unmap { module: id, index };
+        let ghost = p.mapping_options.as_ref().and_then(|row| row.ghost);
         let line: Element<'a, Message> = match p.mode {
             ParamMode::Learn { armed, detail } => {
                 let arm = button(row![
@@ -586,12 +631,16 @@ fn module_view<'a>(m: ModuleRows, drop_row: Option<(u32, usize)>, dragging: bool
                 .width(Length::Fill)
                 .style(if armed { style::primary } else { style::secondary })
                 .on_press(Message::Learn(crate::learn::Message::Arm((id, index))));
-                // A mapping can be removed in learn mode too.
+                // A mapping can be removed or changed in learn mode too.
                 let mut line = row![arm].spacing(4).align_y(iced::Alignment::Center);
                 if p.mapping.is_some() {
+                    line = line.push(options_button(id, index));
                     line = line.push(remove_button("Remove MIDI mapping", unmap));
                 }
-                line.into()
+                match p.mapping_options.filter(|row| row.open) {
+                    Some(mapping) => column![line, mapping_rows(id, index, mapping)].spacing(2).into(),
+                    None => line.into(),
+                }
             }
             ParamMode::Edit {
                 position,
@@ -618,13 +667,13 @@ fn module_view<'a>(m: ModuleRows, drop_row: Option<(u32, usize)>, dragging: bool
                     .spacing(6),
                     match p.range {
                         Some(range) => row![
-                            value_control(id, index, control, position, step),
+                            with_ghost(value_control(id, index, control, position, step), ghost),
                             range_view(id, index, range),
                         ]
                         .spacing(6)
                         .align_y(iced::Alignment::Center)
                         .into(),
-                        None => value_control(id, index, control, position, step),
+                        None => with_ghost(value_control(id, index, control, position, step), ghost),
                     },
                 ]
                 .spacing(2);
@@ -633,10 +682,15 @@ fn module_view<'a>(m: ModuleRows, drop_row: Option<(u32, usize)>, dragging: bool
                         row![
                             text(control).size(style::SMALL).color(DIM),
                             space::horizontal(),
+                            options_button(id, index),
                             remove_button("Remove MIDI mapping", unmap),
                         ]
+                        .spacing(4)
                         .align_y(iced::Alignment::Center),
                     );
+                }
+                if let Some(mapping) = p.mapping_options.filter(|row| row.open) {
+                    rows = rows.push(mapping_rows(id, index, mapping));
                 }
                 let editor: Element<'a, Message> = container(rows)
                     .width(Length::Fill)
@@ -690,6 +744,202 @@ fn module_view<'a>(m: ModuleRows, drop_row: Option<(u32, usize)>, dragging: bool
         ));
     }
     items.into()
+}
+
+/// The small button beside a mapping's ×, which opens its options rows.
+fn options_button<'a>(module: u32, index: usize) -> Element<'a, Message> {
+    button(text("Options").size(style::SMALL))
+        .style(style::plain)
+        .padding(1)
+        .on_press(Message::MidiOptionsRows { module, index })
+        .into()
+}
+
+/// A mapping's options, under its line: mode, then range and invert, or the
+/// encoding for Relative (midi-learn.md, Mapping modes).
+fn mapping_rows<'a>(module: u32, index: usize, row_data: MappingRow) -> Element<'a, Message> {
+    let options = row_data.options;
+    let modes: Vec<Labelled<MidiMode>> = [
+        MidiMode::Absolute,
+        MidiMode::Pickup,
+        MidiMode::Relative(encoding_of(options.mode).unwrap_or_default()),
+    ]
+    .into_iter()
+    .map(|mode| Labelled {
+        value: mode,
+        label: mode_name(mode),
+    })
+    .collect();
+    let current = modes.iter().copied().find(|choice| choice.value == options.mode);
+    let label = |name| text(name).size(style::SMALL).color(DIM);
+    let mut rows = column![
+        row![
+            label("Mode"),
+            space::horizontal(),
+            pick_list(modes, current, move |choice: Labelled<MidiMode>| Message::MidiOptions {
+                module,
+                index,
+                options: options.with_mode(choice.value),
+            })
+            .text_size(style::SMALL)
+            .width(120),
+        ]
+        .align_y(iced::Alignment::Center)
+    ]
+    .spacing(2);
+    if let Some(encoding) = encoding_of(options.mode) {
+        let encodings: Vec<Labelled<MidiEncoding>> = [
+            MidiEncoding::Offset64,
+            MidiEncoding::TwosComplement,
+            MidiEncoding::SignBit,
+        ]
+        .into_iter()
+        .map(|value| Labelled {
+            value,
+            label: encoding_name(value),
+        })
+        .collect();
+        let current = encodings.iter().copied().find(|choice| choice.value == encoding);
+        rows = rows.push(
+            row![
+                label("Encoding"),
+                space::horizontal(),
+                pick_list(encodings, current, move |choice: Labelled<MidiEncoding>| {
+                    Message::MidiOptions {
+                        module,
+                        index,
+                        options: options.with_mode(MidiMode::Relative(choice.value)),
+                    }
+                })
+                .text_size(style::SMALL)
+                .width(120),
+            ]
+            .align_y(iced::Alignment::Center),
+        );
+    } else {
+        let (low, high) = (row_data.low, row_data.high);
+        let bad = row_data.range_error.is_some();
+        let field = |shown: &str| {
+            text_input("", shown)
+                .on_submit(Message::MidiRangeSubmit { module, index })
+                .size(style::SMALL)
+                .width(48)
+                .padding(1)
+                .style(move |theme: &Theme, status| {
+                    let mut style = text_input::default(theme, status);
+                    if bad {
+                        style.border.color = theme.extended_palette().danger.strong.color;
+                        style.border.width = 2.0;
+                    }
+                    style
+                })
+        };
+        let high_text = high.clone();
+        let low_field = field(&low).on_input(move |text| Message::MidiRangeText {
+            module,
+            index,
+            low: text,
+            high: high_text.clone(),
+        });
+        let low_text = low.clone();
+        let high_field = field(&high).on_input(move |text| Message::MidiRangeText {
+            module,
+            index,
+            low: low_text.clone(),
+            high: text,
+        });
+        rows = rows.push(
+            row![label("Range"), space::horizontal(), low_field, label("to"), high_field]
+                .spacing(4)
+                .align_y(iced::Alignment::Center),
+        );
+        if let Some(reason) = row_data.range_error {
+            rows = rows.push(label_owned(reason));
+        }
+        rows = rows.push(
+            checkbox(options.invert)
+                .label("Invert")
+                .size(style::SWITCH)
+                .text_size(style::SMALL)
+                .on_toggle(move |invert| Message::MidiOptions {
+                    module,
+                    index,
+                    options: MidiMappingOptions { invert, ..options },
+                }),
+        );
+    }
+    rows.into()
+}
+
+/// Dim small text that the view owns.
+fn label_owned<'a>(words: String) -> Element<'a, Message> {
+    text(words).size(style::SMALL).color(DIM).into()
+}
+
+/// A value and the name a pick list shows for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Labelled<T> {
+    value: T,
+    label: &'static str,
+}
+
+impl<T> std::fmt::Display for Labelled<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.label)
+    }
+}
+
+/// A mode's name in the inspector and the snapshot.
+fn mode_name(mode: MidiMode) -> &'static str {
+    match mode {
+        MidiMode::Absolute => "Absolute",
+        MidiMode::Pickup => "Pickup",
+        MidiMode::Relative(_) => "Relative",
+    }
+}
+
+/// The encoding of a Relative mode.
+fn encoding_of(mode: MidiMode) -> Option<MidiEncoding> {
+    match mode {
+        MidiMode::Relative(encoding) => Some(encoding),
+        _ => None,
+    }
+}
+
+/// An encoding's name in the inspector and the snapshot.
+fn encoding_name(encoding: MidiEncoding) -> &'static str {
+    match encoding {
+        MidiEncoding::Offset64 => "Offset 64",
+        MidiEncoding::TwosComplement => "Two's complement",
+        MidiEncoding::SignBit => "Sign bit",
+    }
+}
+
+/// A slider with a waiting pickup's hollow ghost mark over its track, in
+/// proportion across it. It takes no presses, so the slider still gets them.
+fn with_ghost<'a>(control: Element<'a, Message>, ghost: Option<f32>) -> Element<'a, Message> {
+    let Some(ghost) = ghost else {
+        return control;
+    };
+    let before = (ghost.clamp(0.0, 1.0) * 1000.0).round() as u16;
+    let mark = container(space())
+        .width(10)
+        .height(10)
+        .style(|theme: &Theme| container::Style {
+            border: iced::Border {
+                color: theme.palette().text,
+                width: 1.5,
+                radius: 5.0.into(),
+            },
+            ..container::Style::default()
+        });
+    let track = row![
+        space().width(Length::FillPortion(before.max(1))),
+        mark,
+        space().width(Length::FillPortion((1000 - before).max(1))),
+    ]
+    .align_y(iced::Alignment::Center);
+    stack![control, container(track).center_y(Length::Fill)].into()
 }
 
 /// A parameter's value: a field to type in, or plain text for a parameter

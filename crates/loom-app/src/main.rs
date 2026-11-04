@@ -346,6 +346,31 @@ enum Message {
         module: u32,
         index: usize,
     },
+    /// Open or close the options rows of a parameter's MIDI mapping.
+    MidiOptionsRows {
+        module: u32,
+        index: usize,
+    },
+    /// Change the options of a parameter's MIDI mapping.
+    MidiOptions {
+        module: u32,
+        index: usize,
+        options: loom_core::MidiMappingOptions,
+    },
+    /// Text typed in a MIDI mapping's range fields.
+    MidiRangeText {
+        module: u32,
+        index: usize,
+        low: String,
+        high: String,
+    },
+    /// Enter in a MIDI mapping's range fields.
+    MidiRangeSubmit {
+        module: u32,
+        index: usize,
+    },
+    /// Time to check whether a ghost mark has run out.
+    MidiGhosts,
     /// A MIDI control change arrived.
     Midi,
     /// A key: the undo and redo shortcuts, and Escape in learn mode. Ignored
@@ -575,6 +600,9 @@ impl Message {
             Self::Patches(message) => matches!(message, patches::Message::Found { .. }),
             Self::Key(_)
             | Self::DropRow(_)
+            | Self::MidiOptionsRows { .. }
+            | Self::MidiRangeText { .. }
+            | Self::MidiGhosts
             | Self::Param { .. }
             | Self::OpenBrowser
             | Self::ShowHelp
@@ -593,6 +621,8 @@ impl Message {
             | Self::Animate(_)
             | Self::Learn(_)
             | Self::Unmap { .. }
+            | Self::MidiOptions { .. }
+            | Self::MidiRangeSubmit { .. }
             | Self::Undo
             | Self::HistoryKey { .. }
             | Self::Redo
@@ -934,6 +964,7 @@ impl App {
         }
         let dragging = self.gestures.depth_target();
         scene::update_panel_values_dragging(&mut self.values, &self.controller, &shown, dragging);
+        scene::set_ghosts(&mut self.values, &self.controller, self.learn.ghosts().shown());
         // A scope's window or trigger may have changed.
         self.publish_watch();
     }
@@ -1723,6 +1754,25 @@ impl App {
                     Ok(None) => {}
                     Err(e) => app.alerts.warn(e.to_string()),
                 });
+            }
+            Message::MidiOptionsRows { module, index } => self.learn.toggle_options((module, index)),
+            Message::MidiOptions { module, index, options } => self.set_midi_options(module, index, options),
+            Message::MidiRangeText {
+                module,
+                index,
+                low,
+                high,
+            } => self.learn.set_range_draft(Some(learn::RangeDraft {
+                param: (module, index),
+                low,
+                high,
+                error: None,
+            })),
+            Message::MidiRangeSubmit { module, index } => self.submit_midi_range(module, index),
+            Message::MidiGhosts => {
+                if self.refresh_ghosts() {
+                    self.refresh_values();
+                }
             }
             Message::Midi => {
                 self.midi_arrived();

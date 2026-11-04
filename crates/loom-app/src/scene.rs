@@ -353,6 +353,32 @@ pub fn update_live_values(values: &mut PanelValues, controller: &Controller) {
     }
 }
 
+/// Puts each waiting pickup's ghost mark on its knob or fader. Other controls
+/// have no single travel to mark (midi-learn.md, Mapping modes). Call it after
+/// the values are updated, which clears the marks.
+pub fn set_ghosts(values: &mut PanelValues, controller: &Controller, ghosts: &BTreeMap<(u32, usize), f32>) {
+    for (&(module, param), &position) in ghosts {
+        let Some(node) = controller.graph().node(ModuleId(module)) else {
+            continue;
+        };
+        let Some(spec) = node.descriptor.params.get(param) else {
+            continue;
+        };
+        for (index, widget) in node.descriptor.panel.widgets.iter().enumerate() {
+            if widget.binds(spec.name)
+                && matches!(widget.kind, WidgetKind::Knob | WidgetKind::Fader { .. })
+                && let Some(value) = values.get(module, index)
+            {
+                let next = WidgetValue {
+                    ghost: Some(position),
+                    ..value.clone()
+                };
+                values.set(module, index, next);
+            }
+        }
+    }
+}
+
 /// As [`update_panel_values`], while the arc of a knob is dragged: that
 /// knob's arc shows only `dragging`, the assignment being changed, so the
 /// user sees what moves (`docs/design/modulation.md`, Arc drag).
@@ -432,6 +458,7 @@ pub fn update_panel_values_dragging(
                             text: both_values_text(w.kind, crate::param::format(spec, value), second.as_ref()),
                             modulation: crate::modulation::mark(w.kind, spec, value, assigned),
                             live,
+                            ghost: None,
                             shape: Vec::new(),
                             second,
                         }

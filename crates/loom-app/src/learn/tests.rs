@@ -100,3 +100,62 @@ fn a_removed_module_disarms_its_parameter() {
     assert!(learn.armed().is_none());
     assert!(learn.shown().unwrap().armed.is_none());
 }
+
+/// A waiting pickup's hardware at `position`, moved `sequence` times.
+fn waiting(position: f32, sequence: u32) -> MidiWaiting {
+    MidiWaiting {
+        target: ModuleId(4),
+        param: 0,
+        position,
+        sequence,
+    }
+}
+
+/// A ghost shows for one second after its hardware last moved, and goes as
+/// soon as the pickup catches (midi-learn.md, Mapping modes).
+#[test]
+fn a_ghost_lasts_one_second_after_the_last_move() {
+    let start = Instant::now();
+    let mut ghosts = Ghosts::default();
+    assert!(ghosts.update(&[waiting(0.25, 1)], start), "it appears");
+    assert_eq!(ghosts.shown().get(&(4, 0)), Some(&0.25));
+    assert!(!ghosts.update(&[waiting(0.25, 1)], start + GHOST_TIME / 2), "no change");
+
+    // Another move starts the second again.
+    assert!(ghosts.update(&[waiting(0.5, 2)], start + GHOST_TIME / 2));
+    assert_eq!(ghosts.shown().get(&(4, 0)), Some(&0.5));
+    assert!(!ghosts.update(&[waiting(0.5, 2)], start + GHOST_TIME));
+    assert!(ghosts.update(&[waiting(0.5, 2)], start + GHOST_TIME + GHOST_TIME / 2), "it runs out");
+    assert!(ghosts.shown().is_empty());
+    assert!(
+        !ghosts.update(&[waiting(0.5, 2)], start + GHOST_TIME * 3),
+        "it stays gone while the hardware rests"
+    );
+
+    // A new move brings it back, and catching removes it at once.
+    assert!(ghosts.update(&[waiting(0.75, 3)], start + GHOST_TIME * 3));
+    assert!(ghosts.update(&[], start + GHOST_TIME * 3));
+    assert!(ghosts.shown().is_empty());
+}
+
+/// Only one mapping's rows are open, and a draft does not outlive them.
+#[test]
+fn options_rows_open_one_at_a_time() {
+    let mut learn = Learn::default();
+    learn.toggle_options((4, 0));
+    assert!(learn.options_open((4, 0)));
+    learn.set_range_draft(Some(RangeDraft {
+        param: (4, 0),
+        low: "x".to_string(),
+        high: "1".to_string(),
+        error: None,
+    }));
+    assert!(learn.range_draft((4, 0)).is_some());
+    assert!(learn.range_draft((4, 1)).is_none());
+    learn.toggle_options((4, 1));
+    assert!(!learn.options_open((4, 0)));
+    assert!(learn.options_open((4, 1)));
+    assert!(learn.range_draft((4, 0)).is_none());
+    learn.toggle_options((4, 1));
+    assert!(!learn.options_open((4, 1)));
+}
