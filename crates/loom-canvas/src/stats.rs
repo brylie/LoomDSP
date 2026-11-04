@@ -67,9 +67,25 @@ impl FrameCauses {
 static PENDING_CAUSES: AtomicU64 = AtomicU64::new(0);
 static CAUSES: [AtomicU64; 8] = [const { AtomicU64::new(0) }; 8];
 
+thread_local! {
+    /// How many times this thread asked for a frame, by cause. `CAUSES` is for
+    /// the whole process and counts frames, so tests running side by side
+    /// cannot read a request of their own from it.
+    static REQUESTS: [Cell<u64>; 8] = const { [const { Cell::new(0) }; 8] };
+}
+
 /// Marks a message as a cause of the next rendered frame.
 pub fn request_frame(cause: FrameCause) {
     PENDING_CAUSES.fetch_or(1 << cause as u8, Ordering::Relaxed);
+    REQUESTS.with(|requests| {
+        let cell = &requests[cause as usize];
+        cell.set(cell.get() + 1);
+    });
+}
+
+/// How many times this thread asked for a frame with this cause.
+pub fn requests_this_thread(cause: FrameCause) -> u64 {
+    REQUESTS.with(|requests| requests[cause as usize].get())
 }
 
 impl RenderCounts {

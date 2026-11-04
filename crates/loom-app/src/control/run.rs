@@ -354,7 +354,7 @@ impl App {
             } => {
                 // Through the view, as a real key: a widget such as the
                 // canvas can take it (Escape unpins a badge), and what none
-                // takes goes to the app as the keyboard listener sends it.
+                // takes goes to the app as the input listener sends it.
                 let then = match key(&name)
                     .and_then(|k| Ok((k, modifiers(&names)?)))
                     .and_then(|(k, m)| refuse_dialog_keys(&k, m).map(|()| (k, m)))

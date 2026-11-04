@@ -22,7 +22,7 @@ use iced::advanced::renderer;
 use iced::advanced::widget::{Id, Operation, Tree, tree};
 use iced::advanced::{Clipboard, Shell, Widget, overlay};
 use iced::{Element, Event, Length, Point, Rectangle, Size, Vector, keyboard, mouse, window};
-use loom_canvas::{CanvasPointer, CanvasView, Hit, PointerDrag, PortRef};
+use loom_canvas::{CanvasPointer, CanvasTyped, CanvasView, Hit, PointerDrag, PortRef};
 use serde::Serialize;
 use std::any::Any;
 use std::cell::RefCell;
@@ -59,7 +59,7 @@ pub enum Step {
     /// on a frame of its own.
     Modifiers(keyboard::Modifiers),
     /// A key press or release, at the pointer. What no widget takes goes to
-    /// the app as the keyboard listener would send it.
+    /// the app as the input listener would send it.
     Key(keyboard::Event),
 }
 
@@ -76,6 +76,8 @@ struct Seen {
     /// The pointer in window coordinates, if it is in the window.
     cursor: Option<Point>,
     canvas: Option<CanvasPointer>,
+    /// The typed field the canvas had open, if any.
+    typed: Option<CanvasTyped>,
 }
 
 #[derive(Debug, Default)]
@@ -272,6 +274,7 @@ struct FindNow<'a> {
     text: Option<&'a str>,
     found: Found,
     pointer: Option<CanvasPointer>,
+    typed: Option<CanvasTyped>,
 }
 
 impl Operation for FindNow<'_> {
@@ -285,6 +288,9 @@ impl Operation for FindNow<'_> {
         }
         if let Some(pointer) = state.downcast_ref::<CanvasPointer>() {
             self.pointer = Some(pointer.clone());
+        }
+        if let Some(typed) = state.downcast_ref::<CanvasTyped>() {
+            self.typed = Some(typed.clone());
         }
     }
 
@@ -300,31 +306,22 @@ pub struct Injector<'a, Message> {
     content: Element<'a, Message>,
     pointer: Pointer,
     app: &'a App,
-    /// The messages a key event no widget took becomes, as the app's key
-    /// subscriptions would send them.
-    on_key: KeyHandler<'a, Message>,
-    /// The message a press becomes, as the app's event subscription would
-    /// send it. It may have moved text focus.
-    on_press: Box<dyn Fn() -> Message + 'a>,
+    /// What an injected event becomes, as the app's input listeners hear it.
+    on_input: Box<dyn Fn(Event, iced::event::Status) -> Vec<Message> + 'a>,
 }
-
-/// Turns a key event, and whether a widget took it, into app messages.
-type KeyHandler<'a, Message> = Box<dyn Fn(keyboard::Event, iced::event::Status) -> Vec<Message> + 'a>;
 
 impl<'a, Message> Injector<'a, Message> {
     /// Wraps `content`, the whole window view of `app`.
     pub(crate) fn new(
         content: impl Into<Element<'a, Message>>,
         app: &'a App,
-        on_key: impl Fn(keyboard::Event, iced::event::Status) -> Vec<Message> + 'a,
-        on_press: impl Fn() -> Message + 'a,
+        on_input: impl Fn(Event, iced::event::Status) -> Vec<Message> + 'a,
     ) -> Self {
         Self {
             content: content.into(),
             pointer: app.pointer.clone(),
             app,
-            on_key: Box::new(on_key),
-            on_press: Box::new(on_press),
+            on_input: Box::new(on_input),
         }
     }
 
@@ -335,14 +332,15 @@ impl<'a, Message> Injector<'a, Message> {
         layout: Layout<'_>,
         renderer: &iced::Renderer,
         text: Option<&str>,
-    ) -> (Found, Option<CanvasPointer>) {
+    ) -> (Found, Option<CanvasPointer>, Option<CanvasTyped>) {
         let mut op = FindNow {
             text,
             found: Found::default(),
             pointer: None,
+            typed: None,
         };
         self.content.as_widget_mut().operate(tree, layout, renderer, &mut op);
-        (op.found, op.pointer)
+        (op.found, op.pointer, op.typed)
     }
 
     /// A real pointer event takes over from the script, which first lets go
@@ -385,7 +383,7 @@ impl<'a, Message> Injector<'a, Message> {
         renderer: &iced::Renderer,
         target: &str,
     ) -> Result<Point, String> {
-        let (found, _) = self.find(tree, layout, renderer, Some(target));
+        let (found, _, _) = self.find(tree, layout, renderer, Some(target));
         let rect = crate::control::locate(self.app, target, &found)?;
         let window = layout.bounds();
         if !window.contains(rect.center()) {
@@ -512,14 +510,10 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Injector<'_, Mess
                 );
                 let status = own.event_status();
                 shell.merge(own, |m| m);
-                if matches!(injected, Event::Mouse(mouse::Event::ButtonPressed(_))) {
-                    shell.publish((self.on_press)());
-                }
-                if let Event::Keyboard(
-                    key @ (keyboard::Event::KeyPressed { .. } | keyboard::Event::KeyReleased { .. }),
-                ) = injected
-                {
-                    for message in (self.on_key)(key, status) {
+                // Modifier changes reach the view only (control-channel.md,
+                // Pointer commands).
+                if !matches!(injected, Event::Keyboard(keyboard::Event::ModifiersChanged(_))) {
+                    for message in (self.on_input)(injected, status) {
                         shell.publish(message);
                     }
                 }
@@ -564,10 +558,11 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Injector<'_, Mess
             viewport,
         );
         if redraw.is_some() && self.pointer.0.borrow().record {
-            let (_, canvas) = self.find(&mut tree.children[0], layout, renderer, None);
+            let (_, canvas, typed) = self.find(&mut tree.children[0], layout, renderer, None);
             self.pointer.0.borrow_mut().seen = Some(Seen {
                 cursor: cursor.position(),
                 canvas,
+                typed,
             });
         }
     }
@@ -622,6 +617,17 @@ pub struct PointerState {
     pub pinned: Option<String>,
     /// The drag in progress on the canvas.
     pub drag: Option<DragState>,
+}
+
+/// The canvas's typed field in the snapshot, so a script can check it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TypedFieldState {
+    /// The control the field is over, as a name `locate` takes.
+    pub target: String,
+    /// The text in the field.
+    pub text: String,
+    /// Why the text is not a value yet, as the field shows it.
+    pub reason: Option<String>,
 }
 
 /// What is under the pointer, by name.
@@ -707,6 +713,25 @@ fn button_name(button: mouse::Button) -> Option<&'static str> {
 }
 
 impl App {
+    /// The canvas typed field for the snapshot, as it was last drawn. The reason
+    /// comes from the same check the canvas uses, so the two cannot disagree.
+    pub(crate) fn typed_field_state(&self) -> Option<TypedFieldState> {
+        let inner = self.pointer.0.borrow();
+        if !inner.record {
+            return None;
+        }
+        let typed = inner.seen.as_ref()?.typed.as_ref()?;
+        let target = crate::targets::name(
+            self.controller.graph(),
+            crate::targets::Part::Control(typed.module, typed.widget),
+        )?;
+        Some(TypedFieldState {
+            target,
+            text: typed.text.clone(),
+            reason: self.typed_check(typed.module, typed.widget, &typed.text).err(),
+        })
+    }
+
     /// The pointer for the snapshot, or `None` when nothing has been drawn
     /// with the control channel on.
     pub(crate) fn pointer_state(&self) -> Option<PointerState> {

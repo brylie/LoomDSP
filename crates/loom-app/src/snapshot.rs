@@ -65,6 +65,10 @@ pub struct UiSnapshot {
     /// The pointer and what it is on, as the canvas last drew it. `None`
     /// with no window (`--dump-ui`) or without the control channel.
     pub pointer: Option<crate::pointer::PointerState>,
+    /// The text field the canvas draws for a typed value, as it last drew it.
+    /// `None` while none is open, with no window (`--dump-ui`), or without the
+    /// control channel.
+    pub typed_field: Option<crate::pointer::TypedFieldState>,
 }
 
 /// The stats bar's audio numbers, as the bar shows them (#234). Values
@@ -589,6 +593,7 @@ impl App {
             matrix: self.matrix.model(self.controller.graph(), &self.selection),
             stats: self.stats_model(),
             pointer: self.pointer_state(),
+            typed_field: self.typed_field_state(),
         }
     }
 }

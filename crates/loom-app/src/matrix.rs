@@ -13,6 +13,10 @@ use loom_core::{AssignmentId, Graph, ModuleId, OutputRef};
 use serde::Serialize;
 use std::fmt;
 
+/// The filter's widget ID. Its focus changes which keys the table takes
+/// (modulation.md, Filter focus).
+pub(crate) const FILTER: &str = "matrix-filter";
+
 /// Finds the selected cell and reveals it with the smallest scroll.
 struct RevealRow {
     viewport: Option<(iced::Rectangle, iced::Vector)>,
@@ -375,6 +379,7 @@ pub fn view<'a>(model: MatrixModel, state: &State, graph: &Graph) -> Element<'a,
     let mut content = column![].spacing(7).width(Length::Fill);
     content = content.push(
         text_input("Filter modules or parameters", &model.filter)
+            .id(FILTER)
             .on_input(|s| Message::Matrix(Event::Filter(s)))
             .size(style::CONTROL),
     );
@@ -552,25 +557,26 @@ pub fn parse_depth(input: &str) -> Option<f32> {
     (percent.is_finite() && (-100.0..=100.0).contains(&percent)).then_some(percent / 100.0)
 }
 
-/// Focuses the depth field, then tells the app. A focus task sends no message,
-/// and the canvas must know a text field has the keys (panel-widgets.md, Keys
-/// in a text field).
-fn focus_depth_field() -> iced::Task<Message> {
-    iced::widget::operation::focus("matrix-depth").chain(crate::editing::text_focus().map(Message::TextFocus))
-}
-
 impl App {
     /// Handles a matrix event, and returns what the view must do after it:
     /// focus the depth field when an edit opens it, or scroll the selected
     /// card into view when the order or filter changes.
     pub(crate) fn matrix_message(&mut self, event: Event) -> iced::Task<Message> {
         let task = match event {
-            Event::Edit(_, Column::Depth) => focus_depth_field(),
+            Event::Edit(_, Column::Depth) => crate::editing::focus_text_field("matrix-depth"),
             Event::SortBy(_) | Event::ReverseSort | Event::Filter(_) | Event::SelectedOnly(_) => reveal_selected(),
             _ => iced::Task::none(),
         };
         self.matrix_event(event);
         task
+    }
+
+    /// True when the keyboard belongs to the matrix: its tab is open, it has
+    /// focus, and no overlay has the input.
+    pub(crate) fn matrix_has_keys(&self) -> bool {
+        self.matrix.tab == Tab::Matrix
+            && self.matrix.focused
+            && self.input_owner() == crate::input_owner::InputOwner::Canvas
     }
 
     /// Handles a key while the matrix has focus. Keeps the selected card in
@@ -585,13 +591,13 @@ impl App {
         ) && self.matrix.edit.is_none()
             && self.matrix.cell == Column::Depth;
         self.matrix_key(key);
-        let scroll = if self.matrix.tab == Tab::Matrix && self.matrix.focused {
+        let scroll = if self.matrix_has_keys() {
             reveal_selected()
         } else {
             iced::Task::none()
         };
         if open_depth && self.matrix.edit.as_ref().is_some_and(|e| e.column == Column::Depth) {
-            iced::Task::batch([scroll, focus_depth_field()])
+            iced::Task::batch([scroll, crate::editing::focus_text_field("matrix-depth")])
         } else {
             scroll
         }
@@ -824,11 +830,14 @@ impl App {
         let keyboard::Event::KeyPressed { key, modifiers, .. } = event else {
             return;
         };
-        if self.matrix.tab != Tab::Matrix || !self.matrix.focused || self.browser.is_some() || self.rig.window.is_some()
-        {
+        if !self.matrix_has_keys() || modifiers.command() {
             return;
         }
-        if modifiers.command() {
+        // Only these two leave the filter. Anything else the field does not use
+        // must not change a row while the player is typing (modulation.md,
+        // Filter focus).
+        let leaves = matches!(key, keyboard::Key::Named(Named::Escape | Named::Tab));
+        if !leaves && self.text_focus.field == Some(iced::advanced::widget::Id::new(FILTER)) {
             return;
         }
         if key == keyboard::Key::Named(Named::Escape) {

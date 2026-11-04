@@ -310,8 +310,7 @@ impl App {
     /// canvas. The canvas has taken the same key and moved its focus. The matrix
     /// and the windows over the canvas have their own use of the keys.
     pub(crate) fn text_field_tab(&mut self) -> iced::Task<Message> {
-        let matrix = self.matrix.tab == crate::matrix::Tab::Matrix && self.matrix.focused;
-        if !self.text_focus.any || matrix || !self.no_overlay() || self.tab_moves_between_fields() {
+        if !self.text_focus.any || self.matrix_has_keys() || !self.no_overlay() || self.tab_moves_between_fields() {
             return iced::Task::none();
         }
         self.text_focus = crate::editing::TextFocus::default();

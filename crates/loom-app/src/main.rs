@@ -26,6 +26,7 @@ mod file_commands;
 mod files;
 mod gestures;
 mod help;
+mod input_owner;
 mod input_session;
 mod input_watch;
 mod inspector;
@@ -253,6 +254,15 @@ enum Message {
     /// The player pressed × on a kept error.
     DismissError(alerts::Cause),
     Canvas(CanvasEvent),
+    /// A window event for the app's one input listener, and whether a widget
+    /// used it. `update` turns it into the messages it routes to
+    /// (`Listening::route`).
+    Input {
+        event: iced::Event,
+        status: iced::event::Status,
+        /// Who was listening when the event was heard.
+        listening: input_owner::Listening,
+    },
     /// The eligible inspector parameter currently under an output drag.
     DropRow(Option<(u32, usize)>),
     Param {
@@ -563,6 +573,9 @@ impl Message {
     fn allowed_during_question(&self) -> bool {
         match self {
             Self::Question(_)
+            // Never asked: `update` routes it before this check, and each
+            // message it becomes is checked on its own.
+            | Self::Input { .. }
             | Self::Panic
             | Self::MidiPoll
             | Self::AudioPoll
@@ -1116,9 +1129,22 @@ impl App {
     /// 5. Runs the idle engine, and retries a commit that waited for room.
     /// 6. Quits cleanly when asked, or focuses the browser when it opens.
     ///
+    /// A window event from the input listener goes first to `Listening::route`,
+    /// and each message it becomes comes back here.
+    ///
     /// A workflow returns the `Task` it needs; this joins them.
     fn update(&mut self, message: Message) -> Task<Message> {
         use loom_canvas::stats::FrameCause;
+        // Above the steps below: each message it routes to takes them, so
+        // one event counts once.
+        let message = match message {
+            Message::Input {
+                event,
+                status,
+                listening,
+            } => return self.input_message(event, status, listening),
+            message => message,
+        };
         let cause = match &message {
             Message::Tick => FrameCause::Tick,
             Message::LiveFrame => FrameCause::Live,
@@ -1242,21 +1268,10 @@ impl App {
             self.document.finish();
             Task::batch([task, iced::exit()])
         } else if self.browser.is_some() && (!was_open || (was_help_open && self.help.is_none())) {
-            Task::batch([task, browser::Browser::focus()])
+            Task::batch([task, editing::focus_text_field(browser::INPUT)])
         } else {
             task
         }
-    }
-
-    /// True when no overlay or dialog panel is open over the canvas.
-    fn no_overlay(&self) -> bool {
-        self.browser.is_none()
-            && self.help.is_none()
-            && self.rig.window.is_none()
-            && self.chooser.is_none()
-            && self.patches.is_none()
-            && self.question.is_none()
-            && self.recent_rows.is_none()
     }
 
     /// Opens your patches browser over the library folder, which is read
@@ -1275,7 +1290,7 @@ impl App {
         self.patches_open += 1;
         let (browser, task) = patches::PatchBrowser::open(self.patches_open, folder);
         self.patches = Some(browser);
-        task.map(Message::Patches)
+        Task::batch([task.map(Message::Patches), editing::focus_text_field(patches::SEARCH)])
     }
 
     /// Handles a patches browser message: keep it open, close it, or open
@@ -1384,6 +1399,7 @@ impl App {
         match message {
             // `update` runs these: they return tasks.
             Message::Browser(_)
+            | Message::Input { .. }
             | Message::Control(_)
             | Message::ControlFrame(_)
             | Message::TextFieldTab
@@ -1394,7 +1410,7 @@ impl App {
             | Message::Matrix(_)
             | Message::MatrixKey(_) => {}
             Message::ShowHelp => {
-                if self.help.is_none() && self.rig.window.is_none() {
+                if self.help.is_none() {
                     let descriptor = self
                         .browser
                         .as_ref()
@@ -1449,7 +1465,7 @@ impl App {
                 }
             }
             Message::CloseTileMenu => self.tile_menu = None,
-            Message::Key(_) if self.help.is_some() => {}
+            Message::Key(event) if self.input_owner() != input_owner::InputOwner::Canvas => self.overlay_key(&event),
             Message::Preferences(message) => self.preferences(message),
             Message::PatchInfo(message) => self.patch_info_message(message),
             Message::HistoryKey { redo, typing } => {
@@ -1467,49 +1483,9 @@ impl App {
             Message::Recent(message) => self.recent_message(message),
             Message::FileDropped(path) => self.file_dropped(path),
             Message::DropsDone => self.drops_done(),
-            Message::Key(iced::keyboard::Event::KeyPressed { key, .. }) if self.chooser.is_some() => {
-                // The chooser takes Escape and keeps other keys from the
-                // canvas and the windows behind it.
-                if key == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) {
-                    self.chooser = None;
-                }
-            }
-            Message::Key(_) if self.chooser.is_some() || self.patches.is_some() => {}
-            Message::Key(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) if self.rig.window.is_some() => {
-                // The window takes Escape and its own shortcut, and keeps
-                // other keys from the canvas behind it.
-                match key.as_ref() {
-                    iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) => {
-                        self.preferences(settings::Message::Close)
-                    }
-                    iced::keyboard::Key::Character(",") if modifiers.command() => self.toggle_preferences(),
-                    _ => {}
-                }
-            }
-            Message::Key(_) if self.browser.is_some() || self.rig.window.is_some() => {}
             Message::Key(iced::keyboard::Event::KeyPressed { modifiers, .. })
-                if self.matrix.tab == RightTab::Matrix && self.matrix.focused && !modifiers.command() => {}
-            Message::Key(iced::keyboard::Event::KeyReleased { .. })
-                if self.matrix.tab == RightTab::Matrix && self.matrix.focused => {}
-            Message::Key(iced::keyboard::Event::KeyPressed { key, .. }) if self.probe_menu.is_some() => {
-                // The menu takes Escape and keeps other keys from the canvas.
-                if key == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) {
-                    self.probe_menu = None;
-                }
-            }
-            Message::Key(_) if self.probe_menu.is_some() => {}
-            Message::Key(iced::keyboard::Event::KeyPressed { key, .. }) if self.tile_menu.is_some() => {
-                if key == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) {
-                    self.tile_menu = None;
-                }
-            }
-            Message::Key(_) if self.tile_menu.is_some() => {}
-            Message::Key(iced::keyboard::Event::KeyPressed { key, .. }) if self.recent_rows.is_some() => {
-                if key == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) {
-                    self.recent_rows = None;
-                }
-            }
-            Message::Key(_) if self.recent_rows.is_some() => {}
+                if self.matrix_has_keys() && !modifiers.command() => {}
+            Message::Key(iced::keyboard::Event::KeyReleased { .. }) if self.matrix_has_keys() => {}
             Message::ProbeMenu(message) => {
                 if let (Some(menu), probe_menu::Message::Pick(probe)) = (self.probe_menu.take(), message) {
                     self.add_probe(probe, menu.output, menu.world);
