@@ -12,7 +12,7 @@ use crate::display::DisplayTable;
 use crate::graph::AssignmentId;
 use crate::live::{LiveTable, NO_CELL};
 use crate::midi::{HeldSet, MAX_MIDI_INPUTS, MidiEvent, MidiMessage};
-use crate::midi_map::{MidiControl, MidiFeedback, later};
+use crate::midi_map::{ControlOutcome, ControlState, MIDI_CONTROLS, MidiControl, MidiFeedback, MidiMode, later};
 use crate::module::{Module, PortIo, ProcessContext};
 use crate::panic::{PanicState, PanicTrigger, TriggerWatch};
 use crate::safety::{OutputSafety, SafetyStage};
@@ -278,6 +278,9 @@ pub struct Engine {
     midi: Vec<MidiEvent>,
     /// What MIDI mappings did, for the controller (MIDI learn).
     midi_feedback: Arc<MidiFeedback>,
+    /// What each mapped control's mapping knows between control changes.
+    /// Indexed by [`MidiControl::index`].
+    midi_states: Box<[ControlState]>,
     /// Control changes and note ons received, for [`MidiFeedback::record`]
     /// and [`MidiFeedback::record_note`]. Never 0
     /// after the first one.
@@ -332,6 +335,7 @@ impl Engine {
             midi_in,
             midi: Vec::with_capacity(config.midi_capacity),
             midi_feedback,
+            midi_states: vec![ControlState::NONE; MIDI_CONTROLS].into_boxed_slice(),
             cc_serial: 0,
             feedback_sequence: 0,
             telemetry,
@@ -648,7 +652,7 @@ impl Engine {
                     }
                     let old = std::mem::replace(&mut self.schedule, schedule);
                     self.discard(Garbage::Schedule(old));
-                    self.reapply_midi_maps();
+                    self.seed_midi_maps();
                     self.stats.schedule_swaps.fetch_add(1, Ordering::Relaxed);
                 }
                 Command::SetParam {
@@ -666,6 +670,19 @@ impl Engine {
                         value,
                     );
                     if let Some((control, token)) = edit {
+                        // The mapping on it starts again from this value. Its
+                        // id tells an edit on a mapping learned just now, and
+                        // not in this schedule yet, from one that plays.
+                        let maps = &self.schedule.midi_maps;
+                        let start = maps.partition_point(|map| map.control < control);
+                        if let Some(map) = maps[start..].first().filter(|map| {
+                            map.control == control && map.slot as usize == slot && usize::from(map.param) == index
+                        }) {
+                            let state = &mut self.midi_states[control.index()];
+                            if state.id == map.id {
+                                state.changed_elsewhere(&map.options, &map.spec, value);
+                            }
+                        }
                         self.feedback_sequence = self.feedback_sequence.wrapping_add(1);
                         self.midi_feedback.write_edit(control, token, self.feedback_sequence);
                     }
@@ -845,41 +862,65 @@ impl Engine {
             let maps = &self.schedule.midi_maps;
             let start = maps.partition_point(|map| map.control < control);
             for map in maps[start..].iter().take_while(|map| map.control == control) {
-                let base = crate::midi_map::control_value(&map.spec, value);
-                set_base(
-                    &mut self.slots,
-                    &mut self.schedule.fills,
-                    &self.schedule.copies,
-                    map.slot as usize,
-                    usize::from(map.param),
-                    base,
-                );
-                self.feedback_sequence = self.feedback_sequence.wrapping_add(1);
-                self.midi_feedback.write(control, map.id, self.feedback_sequence, value);
+                match self.midi_states[control.index()].control_change(&map.options, &map.spec, value) {
+                    ControlOutcome::Set(base) => {
+                        set_base(
+                            &mut self.slots,
+                            &mut self.schedule.fills,
+                            &self.schedule.copies,
+                            map.slot as usize,
+                            usize::from(map.param),
+                            base,
+                        );
+                        self.feedback_sequence = self.feedback_sequence.wrapping_add(1);
+                        self.midi_feedback
+                            .write(control, map.id, self.feedback_sequence, value, base);
+                    }
+                    ControlOutcome::Waiting => {
+                        self.feedback_sequence = self.feedback_sequence.wrapping_add(1);
+                        self.midi_feedback
+                            .write_waiting(control, map.id, self.feedback_sequence, value);
+                    }
+                    ControlOutcome::Nothing => {}
+                }
             }
         }
     }
 
-    /// After a swap: a control change applied to the old schedule after the
-    /// new one was compiled is missing from the new one's base values.
-    /// Applies it again (MIDI learn, rule 2), unless a screen edit came
-    /// after it. Screen edits made after the compile are queued behind the
-    /// swap, so they still win.
-    fn reapply_midi_maps(&mut self) {
+    /// After a swap, brings each control's state and the new schedule into
+    /// step (MIDI learn, rule 2, and Mapping modes):
+    ///
+    /// - A new mapping id starts its state from the compiled value.
+    /// - A control change applied to the old schedule after the new one was
+    ///   compiled is missing from the new one's base values. Sets its result
+    ///   again, unless a screen edit came after it. The state already has it,
+    ///   so a step is not taken twice. Screen edits made after the compile are
+    ///   queued behind the swap, so they still win.
+    /// - Otherwise a compiled value that differs was changed from somewhere
+    ///   else. An unchanged one keeps the state's unrounded position, so an
+    ///   unrelated commit does not undo an encoder's small steps.
+    fn seed_midi_maps(&mut self) {
         for map in &self.schedule.midi_maps {
+            let state = &mut self.midi_states[map.control.index()];
+            if state.id != map.id {
+                let waiting = map.options.mode == MidiMode::Pickup && !map.caught;
+                *state = ControlState::seeded(map.id, &map.spec, map.base, waiting);
+                continue;
+            }
             let entry = self.midi_feedback.read(map.control);
             let (token, edited) = self.midi_feedback.read_edit(map.control);
             let newest = token == 0 || later(entry.sequence, edited);
-            if entry.id == map.id && Some(entry.sequence) != map.synced && newest {
-                let base = crate::midi_map::control_value(&map.spec, entry.value);
+            if entry.id == map.id && !entry.waiting && Some(entry.sequence) != map.synced && newest {
                 set_base(
                     &mut self.slots,
                     &mut self.schedule.fills,
                     &self.schedule.copies,
                     map.slot as usize,
                     usize::from(map.param),
-                    base,
+                    self.midi_feedback.result(map.control),
                 );
+            } else if state.value != map.base {
+                state.changed_elsewhere(&map.options, &map.spec, map.base);
             }
         }
     }

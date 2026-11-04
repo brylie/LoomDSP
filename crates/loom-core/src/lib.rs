@@ -51,7 +51,7 @@ pub use graph::{Assignment, AssignmentId, Graph, InputRef, ModuleId, Node, Outpu
 pub use midi::{MAX_MIDI_INPUTS, MidiEvent, MidiInputId, MidiMessage};
 pub use midi_map::{
     ControlChangeSeen, MidiControl, MidiEncoding, MidiMapping, MidiMappingId, MidiMappingOptions, MidiMode, MidiReader,
-    NoteOnSeen, control_value,
+    MidiWaiting, NoteOnSeen,
 };
 pub use module::{AsAny, Module, Param, PortIo, ProcessContext, copy_state, testing};
 pub use panic::PanicTrigger;

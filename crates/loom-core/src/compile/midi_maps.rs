@@ -17,6 +17,9 @@ pub(super) fn compile_midi_maps(graph: &Graph, synced: &BTreeMap<MidiMappingId, 
                 slot: node.slot? as u32,
                 param: u16::try_from(mapping.param).ok()?,
                 spec: node.spec(mapping.param)?,
+                options: mapping.options,
+                base: *node.params.get(mapping.param)?,
+                caught: mapping.learned,
             })
         })
         .collect();

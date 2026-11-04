@@ -34,8 +34,8 @@ use crate::graph::{Assignment, AssignmentId, Graph, InputRef, ModuleId, Node, Ou
 use crate::live::{LiveCells, LiveTable, NO_CELL};
 use crate::midi::MidiEvent;
 use crate::midi_map::{
-    ControlChangeSeen, MidiControl, MidiFeedback, MidiMapping, MidiMappingId, MidiMappingOptions, MidiReader,
-    control_value, later,
+    ControlChangeSeen, ControlOutcome, ControlState, MidiControl, MidiFeedback, MidiMapping, MidiMappingId,
+    MidiMappingOptions, MidiReader, MidiWaiting, later,
 };
 use crate::registry::Registry;
 use crate::safety::OutputSafety;

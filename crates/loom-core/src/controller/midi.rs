@@ -127,22 +127,55 @@ impl Controller {
     }
 
     /// Finishes MIDI learn: maps the control that moved to a parameter, and
-    /// sets the parameter from that control change, so the user hears at
-    /// once that the link works. Commit afterwards.
+    /// sets the parameter from that control change as the mapping's mode
+    /// would, so the user hears at once that the link works. A control that
+    /// was mapped elsewhere keeps its options, because they describe the
+    /// hardware. A new control starts at the defaults. Commit afterwards.
     pub fn learn_midi(
         &mut self,
         seen: ControlChangeSeen,
         target: ModuleId,
         param: usize,
     ) -> Result<(MidiMappingId, Vec<MidiMapping>), LoomError> {
-        let result = self.map_midi(seen.control, target, param)?;
+        let options = self
+            .graph
+            .midi_mapping_on(seen.control)
+            .map_or(MidiMappingOptions::DEFAULT, |(_, mapping)| mapping.options);
+        let result = self.map_midi_with(seen.control, target, param, options)?;
+        if let Some(mapping) = self.graph.midi_mappings.get_mut(&result.0) {
+            mapping.learned = true;
+        }
         // The control spans the selected range (control-ranges.md, rule 4).
-        let spec = self.node(target)?.spec(param).ok_or_else(|| LoomError::NoSuchParam {
+        let node = self.node(target)?;
+        let spec = node.spec(param).ok_or_else(|| LoomError::NoSuchParam {
             module: target,
             param: param.to_string(),
         })?;
-        self.set_param(target, param, control_value(&spec, seen.value))?;
+        // The engine has no state for this mapping yet, so use the same steps
+        // on a state that starts from the parameter's value, not waiting.
+        let current = node.params[param];
+        let mut state = ControlState::seeded(result.0, &spec, current, false);
+        if let ControlOutcome::Set(value) = state.control_change(&options, &spec, seen.value) {
+            self.set_param(target, param, value)?;
+        }
         Ok(result)
+    }
+
+    /// The pickups that are waiting and whose hardware has moved, for the
+    /// ghost marks. The UI decides how long a mark stays.
+    pub fn midi_waiting(&self) -> Vec<MidiWaiting> {
+        self.graph
+            .midi_mappings()
+            .filter_map(|(id, mapping)| {
+                let entry = self.midi.feedback().read(mapping.control);
+                (entry.id == id && entry.waiting).then(|| MidiWaiting {
+                    target: mapping.target,
+                    param: mapping.param,
+                    position: mapping.options.position(entry.value),
+                    sequence: entry.sequence,
+                })
+            })
+            .collect()
     }
 
     /// Removes the MIDI mapping on a parameter, if there is one. Takes effect
@@ -332,11 +365,17 @@ impl MidiSync {
             if entry.id == id {
                 self.seen.insert(id, entry.sequence);
             }
+            // A waiting pickup set nothing in the engine, so a newer screen
+            // edit in the graph must stay. Otherwise the graph takes exactly
+            // what the engine set, and maps nothing itself.
             if apply
-                && let Some(node) = graph.nodes.get_mut(&mapping.target)
-                && let Some(spec) = node.spec(mapping.param)
+                && !entry.waiting
+                && let Some(value) = graph
+                    .nodes
+                    .get_mut(&mapping.target)
+                    .and_then(|node| node.params.get_mut(mapping.param))
             {
-                node.params[mapping.param] = control_value(&spec, entry.value);
+                *value = self.feedback.result(mapping.control);
                 changed.push((mapping.target, mapping.param));
             }
         }

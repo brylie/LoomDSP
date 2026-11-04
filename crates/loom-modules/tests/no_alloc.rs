@@ -214,6 +214,24 @@ fn audio_thread_never_allocates() {
                     controller: (i / 9 % 128) as u8,
                 };
                 parts.controller.map_midi_named(control, id, "cutoff").unwrap();
+                // Each mode has its own path through the engine's tables.
+                let mode = match i / 9 % 3 {
+                    0 => loom_core::MidiMode::Absolute,
+                    1 => loom_core::MidiMode::Pickup,
+                    _ => loom_core::MidiMode::Relative(loom_core::MidiEncoding::Offset64),
+                };
+                let index = parts.controller.graph().node(id).unwrap().descriptor.param_index("cutoff").unwrap();
+                parts
+                    .controller
+                    .set_midi_options(
+                        id,
+                        index,
+                        loom_core::MidiMappingOptions {
+                            mode,
+                            ..loom_core::MidiMappingOptions::DEFAULT
+                        },
+                    )
+                    .unwrap();
             }
             if i % 3 == 0 {
                 parts
