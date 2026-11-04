@@ -794,6 +794,30 @@ fn the_extreme_check_needs_its_whole_render() {
     Harness::new(&PHASE_OFFSET).frames(1_000).check_extreme_recovery();
 }
 
+/// A module with an output and no inputs.
+static NO_INPUTS: ModuleDescriptor = ModuleDescriptor {
+    id: "test.no-inputs",
+    version: 1,
+    name: "No Inputs",
+    category: "Test",
+    family: loom_core::Family::Interface,
+    description: "Has no inputs.",
+    inputs: &[],
+    outputs: &[port("out", SignalType::Modulation)],
+    params: &[],
+    role: ModuleRole::Dsp(|_| Box::new(Silent)),
+    panel: loom_core::Panel::EMPTY,
+    displays: &[],
+};
+
+/// Writes silence, which is what a new output buffer holds.
+#[derive(Clone)]
+struct Silent;
+
+impl Module for Silent {
+    fn process(&mut self, _: &ProcessContext<'_>, _: &mut PortIo<'_>) {}
+}
+
 /// Stores `in` on each rising edge of `trigger`, with or without a guard against
 /// a non-finite value, as Sample and Hold does.
 #[derive(Clone)]
@@ -865,6 +889,155 @@ fn a_module_that_stores_a_bad_input_on_a_trigger_fails() {
 #[test]
 fn a_module_that_guards_what_it_stores_passes() {
     on_non_finite_busy(&GUARDED_CAPTURE).check_non_finite_recovery();
+}
+
+/// Multiplies its two inputs, with no limit on the result.
+#[derive(Clone)]
+struct Product;
+
+impl Module for Product {
+    fn process(&mut self, _: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        let ([a, b], [out]) = io.split::<2, 1>();
+        for ((out, &a), &b) in out.iter_mut().zip(a).zip(b) {
+            *out = a * b;
+        }
+    }
+}
+
+/// The module for [`Product`].
+static PRODUCT: ModuleDescriptor = ModuleDescriptor {
+    id: "test.product",
+    version: 1,
+    name: "Product",
+    category: "Test",
+    family: loom_core::Family::Interface,
+    description: "Multiplies two inputs.",
+    inputs: &[port("a", SignalType::Modulation), port("b", SignalType::Modulation)],
+    outputs: &[port("out", SignalType::Modulation)],
+    params: &[],
+    role: ModuleRole::Dsp(|_| Box::new(Product)),
+    panel: loom_core::Panel::EMPTY,
+    displays: &[],
+};
+
+/// A harness for [`Product`] on the extreme check's slow signal.
+fn product() -> Harness {
+    Harness::new(&PRODUCT)
+        .frames(EXTREME_RENDER)
+        .input("a", Signal::extreme_busy())
+        .input("b", Signal::extreme_busy())
+}
+
+/// One huge input at a time stays finite here, which is the gap #575 closes.
+#[test]
+fn a_product_passes_with_one_huge_input_at_a_time() {
+    product().check_extreme_recovery();
+}
+
+/// Both inputs huge overflow, and the failure says every input took the value.
+#[test]
+#[should_panic(expected = "test.product: after 3.4028235e38 then 3.4028235e38 on every input at once, output `out`")]
+fn a_product_that_overflows_fails_with_every_input_huge() {
+    product().check_extreme_recovery_all();
+}
+
+/// Each level of the all-input check looks for the overflow.
+#[test]
+#[should_panic(expected = "not finite")]
+fn the_finite_level_sees_an_overflow_with_every_input_huge() {
+    product().check_extreme_finite_all();
+}
+
+/// Each of the other all-input levels sees it too.
+#[test]
+#[should_panic(expected = "not finite")]
+fn the_bounded_level_sees_an_overflow_with_every_input_huge() {
+    product().check_extreme_stays_bounded_all();
+}
+
+/// A module with no inputs has nothing to send a huge value to, so it passes.
+#[test]
+fn the_all_input_check_passes_a_module_with_no_inputs() {
+    Harness::new(&NO_INPUTS).frames(EXTREME_RENDER).check_extreme_recovery_all();
+}
+
+/// A harness that stores a huge input on one edge, and never again.
+fn capture_once() -> Harness {
+    Harness::new(&UNGUARDED_CAPTURE)
+        .frames(EXTREME_RENDER)
+        .input("trigger", Signal::gate(0.06, 0.07))
+}
+
+/// A value held for good stays finite, so the finite level passes it. That level
+/// is for a module with its parameters turned up, which may ring for a long time.
+#[test]
+fn the_finite_level_allows_a_value_that_stays_huge() {
+    capture_once().check_extreme_finite();
+}
+
+/// The bounded level refuses the same value.
+#[test]
+#[should_panic(expected = "it stayed huge")]
+fn the_bounded_level_refuses_a_value_that_stays_huge() {
+    capture_once().check_extreme_stays_bounded_on("in");
+}
+
+/// Passes one of its two inputs. Its copy takes the wrong one, which is the bug
+/// the shared copy check missed with one signal on every input (#564).
+#[derive(Clone)]
+struct WrongRouteOnCopy {
+    second: bool,
+}
+
+impl Module for WrongRouteOnCopy {
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        let copied = loom_core::copy_state(self, other);
+        self.second = !self.second;
+        copied
+    }
+
+    fn process(&mut self, _: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        let ([a, b], [out]) = io.split::<2, 1>();
+        out.copy_from_slice(if self.second { b } else { a });
+    }
+}
+
+/// The module for [`WrongRouteOnCopy`].
+static WRONG_ROUTE: ModuleDescriptor = ModuleDescriptor {
+    id: "test.wrong-route",
+    version: 1,
+    name: "Wrong Route",
+    category: "Test",
+    family: loom_core::Family::Interface,
+    description: "Passes the wrong input after a copy.",
+    inputs: &[port("a", SignalType::Modulation), port("b", SignalType::Modulation)],
+    outputs: &[port("out", SignalType::Modulation)],
+    params: &[],
+    role: ModuleRole::Dsp(|_| Box::new(WrongRouteOnCopy { second: false })),
+    panel: loom_core::Panel::EMPTY,
+    displays: &[],
+};
+
+/// With one signal on every input, a wrong route gives the same output, so the
+/// check passes the bug. This is why the shared checks give each input its own.
+#[test]
+fn one_signal_on_every_input_hides_a_wrong_route() {
+    let harness = Harness::new(&WRONG_ROUTE)
+        .frames(200)
+        .input("a", Signal::phase(100.0))
+        .input("b", Signal::phase(100.0));
+    assert!(harness.check_copy_state(100));
+}
+
+/// With each input at its own frequency, the same bug fails.
+#[test]
+#[should_panic(expected = "test.wrong-route: output `out`")]
+fn each_input_at_its_own_frequency_shows_a_wrong_route() {
+    Harness::new(&WRONG_ROUTE)
+        .frames(200)
+        .input("a", Signal::phase(100.0))
+        .input("b", Signal::phase(130.0))
+        .check_copy_state(100);
 }
 
 // The recovery time ends before the next edge, or the edge could hide a bad

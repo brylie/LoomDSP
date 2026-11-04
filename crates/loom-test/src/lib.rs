@@ -116,6 +116,29 @@ macro_rules! reference {
     };
 }
 
+/// Which inputs take the huge value in the extreme check.
+#[derive(Clone, Copy)]
+enum ExtremeTarget {
+    /// Each input in turn, the others staying normal.
+    Each,
+    /// One input, by index.
+    One(usize),
+    /// Every input together.
+    AllAtOnce,
+}
+
+/// What the extreme check requires of the outputs. Each level includes the ones
+/// below it.
+#[derive(Clone, Copy, PartialEq)]
+enum ExtremeLevel {
+    /// Matches a clean render after the settling time.
+    Recovers,
+    /// Returns to a normal size after the next edge.
+    Bounded,
+    /// Stays finite for the whole render.
+    Finite,
+}
+
 enum Length {
     Frames(usize),
     Seconds(f64),
@@ -630,13 +653,13 @@ impl Harness {
     /// [`Signal::extreme_busy`] or their defaults.
     #[track_caller]
     pub fn check_extreme_recovery(&self) {
-        self.check_extreme(None, true);
+        self.check_extreme(ExtremeTarget::Each, ExtremeLevel::Recovers);
     }
 
     /// [`Harness::check_extreme_recovery`] for one input.
     #[track_caller]
     pub fn check_extreme_recovery_on(&self, input: &str) {
-        self.check_extreme(Some(self.extreme_port(input)), true);
+        self.check_extreme(ExtremeTarget::One(self.extreme_port(input)), ExtremeLevel::Recovers);
     }
 
     /// The part of [`Harness::check_extreme_recovery`] that does not compare
@@ -646,7 +669,37 @@ impl Harness {
     /// normal size.
     #[track_caller]
     pub fn check_extreme_stays_bounded_on(&self, input: &str) {
-        self.check_extreme(Some(self.extreme_port(input)), false);
+        self.check_extreme(ExtremeTarget::One(self.extreme_port(input)), ExtremeLevel::Bounded);
+    }
+
+    /// [`Harness::check_extreme_recovery`] with the huge value on every input at
+    /// once. A bug that needs two huge inputs together, such as a product that
+    /// overflows, never shows with one input at a time.
+    #[track_caller]
+    pub fn check_extreme_recovery_all(&self) {
+        self.check_extreme(ExtremeTarget::AllAtOnce, ExtremeLevel::Recovers);
+    }
+
+    /// [`Harness::check_extreme_stays_bounded_on`] with the huge value on every
+    /// input at once, for a module with a stated exception.
+    #[track_caller]
+    pub fn check_extreme_stays_bounded_all(&self) {
+        self.check_extreme(ExtremeTarget::AllAtOnce, ExtremeLevel::Bounded);
+    }
+
+    /// Only the finite part of [`Harness::check_extreme_recovery`], each input in
+    /// turn. It is for a module with its parameters turned up, which may rightly
+    /// ring for a long time.
+    #[track_caller]
+    pub fn check_extreme_finite(&self) {
+        self.check_extreme(ExtremeTarget::Each, ExtremeLevel::Finite);
+    }
+
+    /// [`Harness::check_extreme_finite`] with the huge value on every input at
+    /// once.
+    #[track_caller]
+    pub fn check_extreme_finite_all(&self) {
+        self.check_extreme(ExtremeTarget::AllAtOnce, ExtremeLevel::Finite);
     }
 
     /// The index of input `name`, for the extreme check.
@@ -657,10 +710,9 @@ impl Harness {
             .unwrap_or_else(|| panic!("{}: there is no input `{name}`", self.descriptor.id))
     }
 
-    /// Runs the extreme check on input `only`, or on every input, comparing with
-    /// a clean render if `compare`.
+    /// Runs the extreme check on `target`, requiring `level` of the outputs.
     #[track_caller]
-    fn check_extreme(&self, only: Option<usize>, compare: bool) {
+    fn check_extreme(&self, target: ExtremeTarget, level: ExtremeLevel) {
         let id = self.descriptor.id;
         let frames = self.frame_count();
         assert!(
@@ -671,33 +723,37 @@ impl Harness {
         let compare_from = hold_end + EXTREME_SETTLE;
         let (clean_inputs, connected) = self.input_buffers();
         let base = self.run(MAX_BLOCK, &clean_inputs, &connected);
-        for (port, spec) in self.descriptor.inputs.iter().enumerate() {
-            if only.is_some_and(|only| only != port) {
-                continue;
-            }
-            // A clean render differs only if the check adds a cable to this input.
-            let added = !connected[port];
+        for (ports, name) in self.extreme_runs(target) {
+            // A clean render differs only if the check adds a cable.
+            let added = ports.iter().any(|&port| !connected[port]);
             let mut connected = connected.clone();
-            connected[port] = true;
+            for &port in &ports {
+                connected[port] = true;
+            }
             let own = added.then(|| self.run(MAX_BLOCK, &clean_inputs, &connected));
             let clean = own.as_ref().unwrap_or(&base);
             for (extreme, flipped) in [(f32::MAX, f32::MAX), (-f32::MAX, -f32::MAX), (f32::MAX, -f32::MAX)] {
                 let mut inputs = clean_inputs.clone();
-                inputs[port][EXTREME_START..EXTREME_FLIP].fill(extreme);
-                inputs[port][EXTREME_FLIP..hold_end].fill(flipped);
+                for &port in &ports {
+                    inputs[port][EXTREME_START..EXTREME_FLIP].fill(extreme);
+                    inputs[port][EXTREME_FLIP..hold_end].fill(flipped);
+                }
                 let render = self.run(MAX_BLOCK, &inputs, &connected);
                 let what = |output: usize| {
                     format!(
-                        "{id}: after {extreme:e} then {flipped:e} on input `{}`, output `{}`",
-                        spec.name, self.descriptor.outputs[output].name
+                        "{id}: after {extreme:e} then {flipped:e} on {name}, output `{}`",
+                        self.descriptor.outputs[output].name
                     )
                 };
                 for (output, (samples, clean)) in render.outputs.iter().zip(&clean.outputs).enumerate() {
                     if let Some(frame) = samples.iter().position(|value| !value.is_finite()) {
                         panic!("{} is {} at frame {frame}: not finite", what(output), samples[frame]);
                     }
+                    if level == ExtremeLevel::Finite {
+                        continue;
+                    }
                     let peak = clean.iter().fold(1.0f32, |peak, value| peak.max(value.abs()));
-                    if compare {
+                    if level == ExtremeLevel::Recovers {
                         let phase = self.descriptor.outputs[output].signal == SignalType::Phase;
                         let frame = (compare_from..EXTREME_NEXT_EDGE).find(|&frame| {
                             if phase {
@@ -730,6 +786,19 @@ impl Harness {
                     }
                 }
             }
+        }
+    }
+
+    /// The runs `target` asks for: the inputs that take the huge value together,
+    /// and how a failure names them. A module with no inputs has no run.
+    fn extreme_runs(&self, target: ExtremeTarget) -> Vec<(Vec<usize>, String)> {
+        let inputs = self.descriptor.inputs;
+        let one = |port: usize| (vec![port], format!("input `{}`", inputs[port].name));
+        match target {
+            ExtremeTarget::Each => (0..inputs.len()).map(one).collect(),
+            ExtremeTarget::One(port) => vec![one(port)],
+            ExtremeTarget::AllAtOnce if inputs.is_empty() => Vec::new(),
+            ExtremeTarget::AllAtOnce => vec![((0..inputs.len()).collect(), "every input at once".to_string())],
         }
     }
 

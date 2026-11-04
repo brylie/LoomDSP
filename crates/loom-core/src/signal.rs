@@ -46,6 +46,16 @@ impl SignalType {
 /// Gate threshold. Any value above this counts as "high".
 pub const GATE_THRESHOLD: f32 = 0.5;
 
+/// Holds `value` at the largest finite value of its sign. A module uses it on
+/// the result of its own arithmetic on finite inputs, because a product or sum
+/// that overflows is the module's own doing, and infinity times a gain of 0 is
+/// NaN (module test harness, All inputs at once). This is not clipping: normal
+/// values never reach it. NaN passes through.
+#[inline]
+pub fn hold_finite(value: f32) -> f32 {
+    value.clamp(-f32::MAX, f32::MAX)
+}
+
 /// Returns true when a gate value is high.
 #[inline]
 pub fn gate_is_high(value: f32) -> bool {

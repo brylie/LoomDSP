@@ -3,6 +3,7 @@
 //! Unconnected inputs fall back to a sensible default (0 for add, 1 for
 //! multiply and divide), so a module is useful with only one cable.
 
+use loom_core::signal::hold_finite;
 use loom_core::{
     Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamRange, ParamSpec,
     PortDefault, PortIo, PortSpec, ProcessContext, SignalType, Widget,
@@ -106,7 +107,11 @@ impl Module for Add {
         let ([a, b], [out]) = io.split::<2, 1>();
         for (i, ((out, &a), &b)) in out.iter_mut().zip(a).zip(b).enumerate() {
             let offset = param.at_or(i, self.offset.tick());
-            *out = a + b + offset;
+            *out = if a.is_finite() && b.is_finite() {
+                hold_finite(hold_finite(a + b) + offset)
+            } else {
+                a + b + offset
+            };
         }
     }
 
@@ -212,7 +217,13 @@ impl Module for Mul {
         for (i, ((out, &a), &b)) in out.iter_mut().zip(a).zip(b).enumerate() {
             let b = if b_connected { b } else { 1.0 };
             let gain = param.at_or(i, self.gain.tick());
-            *out = a * b * gain;
+            // Held before the gain too, or a product that overflows and a gain
+            // of 0 would give NaN.
+            *out = if a.is_finite() && b.is_finite() {
+                hold_finite(hold_finite(a * b) * gain)
+            } else {
+                a * b * gain
+            };
         }
     }
 
@@ -283,7 +294,11 @@ impl Module for Sub {
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
         let ([a, b], [out]) = io.split::<2, 1>();
         for ((out, &a), &b) in out.iter_mut().zip(a).zip(b) {
-            *out = a - b;
+            *out = if a.is_finite() && b.is_finite() {
+                hold_finite(a - b)
+            } else {
+                a - b
+            };
         }
     }
 }
@@ -354,7 +369,7 @@ impl Module for Div {
             } else if a.is_finite() {
                 // A huge value over a small one overflows. Give the largest
                 // finite value, not infinity. Nothing smaller changes.
-                (a / b).clamp(-f32::MAX, f32::MAX)
+                hold_finite(a / b)
             } else {
                 a / b
             };
