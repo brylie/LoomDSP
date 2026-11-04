@@ -183,3 +183,28 @@ fn only_a_time_signature_change_is_a_jump() {
     };
     assert_eq!(jumps(&start().transport_at(change_at(), stopped)), Vec::<usize>::new());
 }
+
+/// Two changes on one frame are one change: a time signature change keeps its
+/// jump when a tempo change follows it there. A change on frame 0 replaces the
+/// starting transport, and is a jump there.
+#[test]
+fn changes_on_one_frame_keep_the_jump() {
+    let start = || {
+        Harness::new(&transport::TRANSPORT)
+            .frames(FRAMES)
+            .transport(playing(130.0))
+    };
+    let three_four = TransportSettings {
+        time_signature: TimeSignature::new(3, 4),
+        ..playing(130.0)
+    };
+    let both = start().transport_at(change_at(), three_four).transport_at(
+        change_at(),
+        TransportSettings {
+            tempo: 90.0,
+            ..three_four
+        },
+    );
+    assert_eq!(jumps(&both), [CHANGE]);
+    assert_eq!(jumps(&start().transport_at(0.0, three_four)), [0]);
+}
