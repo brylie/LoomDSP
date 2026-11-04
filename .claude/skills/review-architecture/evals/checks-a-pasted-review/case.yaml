@@ -1,0 +1,10 @@
+schema_version: "1.1"
+name: checks-a-pasted-review
+expected_outcome: |
+  Each of the four claims is checked at HEAD with a file and line read in
+  this run. Claim 1 is reported as stale: one input owner function replaced
+  the separate guards (crates/loom-app/src/input_owner.rs). Claims 2, 3, and
+  4 are confirmed with evidence and a stated consequence, and claim 2's
+  consequence is narrowed to the moment the first assignment arrives during
+  a glide. Already-filed findings are linked to their issues rather than
+  proposed again. Nothing is edited or filed.

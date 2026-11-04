@@ -1,0 +1,9 @@
+schema_version: "1.1"
+name: reviews-one-crate
+expected_outcome: |
+  A review of crates/loom-patch at a named HEAD commit that runs the
+  measurement script, reads AGENTS.md hard rule 6 and the relevant ADRs,
+  reports the std::fs and std::process calls as a rule break with a
+  direction (gate or move), separates deliberate choices and already-filed
+  issues from new findings, says what was not run, and drafts a research
+  snapshot under docs/research without committing it or editing source.
