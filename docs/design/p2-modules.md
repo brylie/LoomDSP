@@ -226,7 +226,7 @@ Two built forms of the Phase warp type (ADR-0017): small, cheap, and needed now 
 | Parameters | `tilt`: 0 Flat (default), 1 +4.5 dB per octave. `hold`: 0 Off (default), 1 On |
 | Panel | A [spectrum](panel-widgets.md#spectrum) widget bound to `out`. `tilt` and `hold` in the inspector. Growable tile. |
 
-- Mono, like the Level Meter. *Why a pass-through:* probes read outputs, and the module can sit inline or hang off an output without changing the sound, as the Level Meter and Scope do.
+- On a stereo cable it shows the mean of the two sides ([panel widgets](panel-widgets.md#spectrum)). *Why a pass-through:* probes read outputs, and the module can sit inline or hang off an output without changing the sound, as the Level Meter and Scope do.
 - The parameters change only the drawing, never the sound (panel widgets rule 6).
 
 ## Acceptance criteria

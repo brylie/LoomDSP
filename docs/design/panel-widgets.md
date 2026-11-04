@@ -385,6 +385,7 @@ The frequency content of a signal ([#109](https://github.com/brylie/LoomDSP/issu
 - **Binds to:** an output, through a scope probe ([telemetry](telemetry.md)). The FFT runs on the app's telemetry thread, never the audio thread.
 - **Analysis:** 4096 points, Hann window, half overlap (about 12 Hz per bin at 48 kHz). The FFT comes from the `rustfft` crate (MIT or Apache-2.0), used in `loom-app` only, so the engine crates stay portable (AGENTS.md rule 6). A sample that is not finite counts as 0, so it cannot spoil a whole analysis. Nothing draws before the first 4096 samples. See [Reading a spectrum](../learn/reading-a-spectrum.md).
 - **Level:** a full-scale sine reads 0 dB, with the window's loss made up.
+- **Stereo:** a stereo output shows the mean of its two sides, as a scope does ([stereo](stereo.md), rule 22). A full-scale sine on one side only reads -6 dB, and sides in opposite phase cancel, so they read nothing. *Why:* it needs no change on the audio thread, and one line is easier to read. A stereo mode that shows both sides may come later ([Open points](#open-points)).
 - **Columns:** 256, fixed on the telemetry thread, whatever the tile's width, so a resize needs no new analysis. A column takes the highest bin inside it. A low column can be narrower than a bin, and holds none. It is interpolated in dB between its two neighbouring bins, so the line stays continuous. The line stops at half the sample rate.
 - **Drawing:** one line, log frequency from 20 Hz to 20 kHz across, −90 to 0 dB up. Bins are reduced to one value per drawn column (the highest), so low and high frequencies read alike. After a peak, the line falls at 20 dB per second. *Why:* a raw spectrum flickers too fast to read.
 - **Tilt:** Flat, or +4.5 dB per octave around 1 kHz, so a full mix reads closer to level across the range. It changes only the drawing.
@@ -587,4 +588,5 @@ Deferred on purpose, each with the moment it will be decided:
 - **Handles bound to parameters on a curve.** An ADSR shape could have handles that set its times and levels directly. Decide after the read-only shape preview has been used for a while.
 - **Matrix as data or as parameters.** Decide in the matrix module's own spec (MT-ROUTE-04).
 - **Tunings with more than 64 notes per octave.** Wait until someone asks.
+- **A stereo mode on the spectrum** that shows both sides. For now it shows their mean. Decide when someone needs to compare the sides.
 - **Polar views** on the XY scope and the XY pad. Decide when the spatialiser (MT-FX-10) is designed.

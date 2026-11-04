@@ -120,7 +120,7 @@ How the canvas shows a stereo cable is FR-CANVAS-12 (M2). See Open points.
 
 21. **Join and Split are the first stereo modules,** built in M1 from MT-MIX-03. Join takes two mono inputs (`Stereo` output). Split takes one `Stereo` input and has a mono output per side. *Why:* with one stereo input on Audio Out, a player with separate left and right signals needs Join. Join is also the smallest module that makes stereo, so the feature can be heard and tested. Split gives back the case that a downmix cannot: reading one side on purpose.
 
-22. **A meter on a stereo output shows both channels. A scope shows the mean of the two sides,** the same downmix rule 11 gives audio, whatever the output's type. *Why:* level is where the sides most often differ, and a player checks it per side. A scope trace is for shape, and one trace is easier to read. A scope of a signal whose sides are opposite shows a flat line, like any downmix (see the explainer). To see one side, probe a Split output.
+22. **A meter on a stereo output shows both channels. A scope and a spectrum show the mean of the two sides,** the same downmix rule 11 gives audio, whatever the output's type. *Why:* level is where the sides most often differ, and a player checks it per side. A scope trace is for shape, and one trace is easier to read. A scope of a signal whose sides are opposite shows a flat line, like any downmix (see the explainer). To see one side, probe a Split output.
 
 23. **A port's hover text says "Stereo" when its cable is stereo,** until FR-CANVAS-12 (M2) draws stereo cables. *Why:* the player needs some way to see a width the engine chose for them.
 

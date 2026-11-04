@@ -489,7 +489,7 @@ The whole app redraws only when something visible changes ([#90](https://github.
 
 ### Level meter module
 
-- **`loom.display.meter`**, category Display. One audio input `in` and one output `out` that passes `in` through, sample for sample. Its parameters are in the next lines. Its panel is one meter bound to `out`.
+- **`loom.display.meter`**, category Display. One audio input `in` and one output `out` that passes `in` through, sample for sample. Its parameters are `view` and `window`. Its panel holds a meter and a level history, both bound to `out`, and the history shows only with `view` on Meter and history.
 - A stereo output shows both sides ([stereo](stereo.md), rule 22).
 - M2 adds a level history view, with `view` and `window` settings in the inspector ([panel widgets, Level history](panel-widgets.md#level-history)), and a **Reset clip** button in the inspector.
 - *Why a pass-through output:* probes read outputs, and the module can sit inline in a signal path or hang off an output, without changing the sound.
@@ -523,7 +523,7 @@ The whole app redraws only when something visible changes ([#90](https://github.
 
 ### Out of scope
 
-- Stereo meters. ("Add meter" came with "Add scope": see [Add scope and Add meter](#add-scope-and-add-meter).)
+- Stereo meters, for M1. ("Add meter" came with "Add scope": see [Add scope and Add meter](#add-scope-and-add-meter).)
 - Peak hold numbers and clip indicators, for M1. They are [in M2](#meter-widget).
 - Spectrum and scope displays, for M1. See [Scope module](#scope-module) and [Spectrum](panel-widgets.md#spectrum).
 
@@ -728,7 +728,7 @@ The table below applies when no text field has focus.
 
 - **The handle.** A small grip at the bottom-right corner of a tile that has a **growable** widget (a scope, a meter, a level history, a spectrum, an XY scope, later a curve). Other tiles have no handle. Dragging it changes the tile's size and snaps to the grid. The cursor shows a resize cursor over it.
 - **Minimum and maximum.** The minimum is the size of the panel as its parameter values show it (the tile cannot be smaller than its layout). The maximum is 64 by 64 grid units.
-- **What grows.** Only growable widgets. They take all extra width and height. Other widgets keep their size and position, top left, except that a widget below a trace display (a scope, a level history, a spectrum, an XY scope) moves down with that display's bottom edge. *Why:* the display sits at the top of its panel, so the controls under it would otherwise be covered, and a tall display is the reason to resize one. With several trace displays on one panel, only the one whose bottom edge is lowest takes the extra height, so they never grow over each other. A meter does not grow over a widget. A widget below it, in the meter's columns, stops it growing taller. A widget to its right, in the meter's rows, stops it growing wider. With nothing below it to stop it growing taller, a widget past its lower right corner also stops it growing wider, so it grows taller only. A hidden widget counts, so a meter does not jump when a setting shows or hides one. The exception is a hidden widget past the panel's closed-up width, which no longer takes any room. *Why:* a panel can place a meter above a control, as Dynamics does, and a covered control cannot be read or reached.
+- **What grows.** Only growable widgets. They take all extra width and height. Other widgets keep their size and position, top left, except that a widget below a trace display (a scope, a level history, a spectrum, an XY scope) moves down with that display's bottom edge. *Why:* the display sits at the top of its panel, so the controls under it would otherwise be covered, and a tall display is the reason to resize one. With several trace displays on one panel, only the one whose bottom edge is lowest takes the extra height, so displays stacked in a column never grow over each other. Each still takes all the extra width, so displays side by side are not handled yet, and a wide tile can draw one over another. No built-in module has them. A meter does not grow over a widget. A widget below it, in the meter's columns, stops it growing taller. A widget to its right, in the meter's rows, stops it growing wider. With nothing below it to stop it growing taller, a widget past its lower right corner also stops it growing wider, so it grows taller only. A hidden widget counts, so a meter does not jump when a setting shows or hides one. The exception is a hidden widget past the panel's closed-up width, which no longer takes any room. *Why:* a panel can place a meter above a control, as Dynamics does, and a covered control cannot be read or reached.
 - **Ports.** Inputs stay on the left edge and outputs on the right, spread evenly over the new height, in port order. Cable ends, hit-testing, and hover follow the new size.
 - **Saved.** The patch file gets an optional `size: (w, h)` next to the position, in grid units. A tile without one has its declared size. Files without the field load unchanged (ADR-0008).
 - **Undo.** One resize drag is one undo step. The size is part of the clipboard: paste keeps it.
