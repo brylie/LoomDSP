@@ -63,7 +63,7 @@ Any client that can write lines to a Unix socket works, such as `nc -U /tmp/loom
 | `save` | `path` | Saves the patch, as Save As does after the dialog | |
 | `note` | `note`, optional `velocity` (default 100), `on` | A MIDI note on or off on channel 1, as a MIDI port sends it | |
 | `cc` | `controller`, `value`, optional `channel` (1 to 16, default 1) | A MIDI control change. Replies once the engine has taken it and the app has applied it: mapped controls moved, or the armed parameter learned it | |
-| `key` | `key` (a character, or `escape`, `enter`, `tab`, `space`, `delete`, `backspace`, `up`, `down`, `left`, `right`, `home`, `end`, `pageup`, `pagedown`), optional `modifiers` (`cmd`, `ctrl`, `shift`, `alt`) | A key press and release, each on its own frame, sent to the window view at the pointer as a real key is. A character carries its text, unless Command or Ctrl is held. A widget can take it (the canvas takes Escape while a badge is pinned); what none takes goes to the app as the keyboard listener sends it | |
+| `key` | `key` (a character, or `escape`, `enter`, `tab`, `space`, `delete`, `backspace`, `up`, `down`, `left`, `right`, `home`, `end`, `pageup`, `pagedown`), optional `modifiers` (`cmd`, `ctrl`, `shift`, `alt`) | A key press and release, each on its own frame, sent to the window view at the pointer as a real key is. A character carries its text, unless Command or Ctrl is held. A widget can take it (the canvas takes Escape while a badge is pinned); what none takes goes to the app as the app's input listener routes it | |
 | `type` | `text` | Types into the text field that has focus, one character at a time, as a keyboard does ([Typing text](#typing-text)). Refused when no text field has focus | |
 | `toolbar` | `button`: `new`, `learn` (MIDI learn), `hold` (Hold note), `panic` (Panic), `undo`, `redo`. While a question is open: its buttons, `save`, `dont-save`, `cancel`, `replace`, or `ok`, and `panic` | Clicks a toolbar button by name, through the message it sends. Refused when the button is disabled, opens a dialog (rule 9), or is Add module (use `add`). Was `press` before [#392](https://github.com/brylie/LoomDSP/issues/392); `press` is now only the mouse button ([Pointer commands](#pointer-commands)) | |
 | `arm` | `target`: a parameter (`"4:cutoff"`) | In MIDI learn mode, arms the parameter, or disarms it if armed, as its inspector row does. Refused when learn mode is off | |
@@ -93,7 +93,7 @@ Any client that can write lines to a Unix socket works, such as `nc -U /tmp/loom
 - **Refused while a question is open.** A question stops keys reaching the patch and its fields, so the reply would say the text went in when it did not (rule 9).
 - **Text only.** A control character, such as a newline or a tab, is refused, and the error points to `key`. Empty text is refused too. *Why:* Enter and Tab act on the field or the window. A script should say that on purpose.
 - **At most 500 characters.** *Why:* each character takes two frames, so 500 takes about 17 seconds at 60 frames per second, well inside the time a listener waits for an answer.
-- **The reply says the keys went in.** It does not read the field back. A script checks the result as it would for a person: `screenshot`, or the snapshot where the field's view is in it.
+- **The reply says the keys went in.** It does not read the field back. A script checks the result as it would for a person: `screenshot`, or the snapshot where the field's view is in it, such as `typed_field` for the field the canvas draws.
 
 ### Pointer commands
 
@@ -116,7 +116,7 @@ Commands for the checks that need a hand today: hover lines, pinning a badge and
 - **Still no dialogs** (rule 9), and no events outside the window.
 - **Idle.** A pointer command wakes the app and asks for frames until it is drawn. `--measure-idle` counts no frames when no command arrives (rule 7).
 
-How it is built: `pointer::Injector` wraps the whole window view. A command's events wait in a queue. On each redraw the injector sends the next one to the view, with the script's pointer as the cursor, and asks for another frame. The runtime can send one redraw to the view up to three times; only the first takes an event. Answers come two frames after the last event, as for other commands (rule 5).
+How it is built: `pointer::Injector` wraps the whole window view. A command's events wait in a queue. On each redraw the injector sends the next one to the view, with the script's pointer as the cursor, and asks for another frame. The runtime can send one redraw to the view up to three times; only the first takes an event. Answers come two frames after the last event, as for other commands (rule 5). An injected event then goes through the same filter and the same route as a real one (`input_event` and `App::route_input`), so a script's key reaches the same messages, in the same order, as a person's. Modifier changes reach the view only.
 
 Points settled while building, agreed in [#392](https://github.com/brylie/LoomDSP/issues/392) (2026-10-28):
 
@@ -137,6 +137,14 @@ The snapshot's `pointer` field is `null` without the control channel and in `--d
 | `hover` | What is under the pointer on the canvas, or `null`: `{"kind": K, "target": T}` with `kind` one of `output`, `input`, `badge`, `control`, `display`, `tile`, and `target` a name `locate` takes that finds it again (`"5:out"`, `"5:badge:out"`, `"4:cutoff"`, `"4:input:cutoff"`, `"4"`). A light or a meter is hit as part of its tile. A cable is `{"kind": "cable", "from": "3:out", "to": "4:in"}` |
 | `pinned` | The output whose badge is pinned (`"5:out"`), or `null` |
 | `drag` | The drag in progress, or `null`: `{"kind": K}` with `kind` one of `pan`, `move` (with `modules`), `resize` (with `module`), `knob`, `button`, `depth` (each with `target`), `wire` (with `from` and `pulled`), `select` |
+
+The snapshot's `typed_field` field is the text field the canvas draws for a typed value ([Typing a value](panel-widgets.md#typing-a-value)). It is `null` while no field is open, without the control channel, and in `--dump-ui`. With the channel on, it is read from the canvas once per drawn frame, as `pointer` is:
+
+| Field | What it is |
+|---|---|
+| `target` | The control the field is over, as a name `locate` takes (`"4:cutoff"`) |
+| `text` | The text in the field |
+| `reason` | Why the text is not a value yet, as the field shows it, or `null` when it is fine |
 
 Example, from `examples/dev/check-pin-badge.jsonl`:
 
