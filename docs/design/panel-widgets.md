@@ -329,7 +329,7 @@ Specified in [panels.md](panels.md#scope-module), built in [#60](https://github.
 
 ### XY scope
 
-**Status:** Agreed for M2 ([#280](https://github.com/brylie/LoomDSP/issues/280)).
+**Status:** Implemented ([#280](https://github.com/brylie/LoomDSP/issues/280)). Code: `crates/loom-app/src/xy.rs`, `WidgetKind::XyScope`.
 
 One signal against another: the first moves the trace left and right, the second up and down. A circle means two sines a quarter cycle apart. A line means the two signals are the same. A stereo signal shows how wide it is.
 
@@ -337,14 +337,15 @@ One signal against another: the first moves the trace left and right, the second
 
 | | |
 |---|---|
-| Inputs | `x`, `y` (default 0) |
+| Inputs | `x`, `y` (default 0). Each runs per channel |
 | Outputs | `x_out`, `y_out`, each passing its input through bit for bit |
 | Parameters | `range`: a choice, 0 to 2 for ±0.1, ±1, ±10 (default 1). `time`: 0.001 to 0.1 s, logarithmic, default 0.02. `rotate`: toggle, default 0 |
-| Panel | The XY scope widget, a knob for `time`, a radio for `range`, a toggle for `rotate` |
+| Panel | 6 × 11: the XY scope widget on top, then a segmented control for `range`, then a knob for `time` and a toggle for `rotate` |
 
 - The app probes the pair `(x_out, y_out)` with a [paired probe](telemetry.md#paired-probes). An unconnected input reads 0 and draws a dot or a line along an axis.
 - **`time`** is how much history the trace shows. The trace draws at most 2048 points. When `time` holds more frames than that, the app keeps every Nth pair, with `N` the frame count divided by 2048, rounded up (at 48 kHz, 0.1 s is 4800 frames, so `N` is 3). *Why:* the knob then changes the length of the trace over its whole range, and the point count stays fixed. Older points fade, so the newest part is brightest.
-- **`rotate`** (mid and side view) turns the trace by 45 degrees: with the new axes `(x + y) / √2` across and `(y − x) / √2` up. A mono signal (`x` equal to `y`) is then a vertical line. The audio is untouched.
+- **`rotate`** (mid and side view) turns the trace by 45 degrees, with `(y − x) / √2` across and `(x + y) / √2` up. A mono signal (`x` equal to `y`) is then a vertical line, and a signal only on `x` leans up and to the left. Rotation happens before clamping, so a full-scale mono sine reaches 1.41 and clamps at the top and bottom edges in this view. The audio is untouched.
+- **Stereo cables.** With cables in both `x` and `y`, each port reads the mean of its sides, as a scope does ([stereo](stereo.md), rule 22). A stereo cable in `x` with no cable in `y` draws its left side across and its right side up. *Why:* otherwise that case is a flat line, and a stereo signal should show how wide it is with one cable.
 - **Binds to:** two outputs of its module, `x_out` and `y_out`. The module is the Probe (MT-VIEW-01) in XY mode: two inputs, each passed through to an output, as the level meter does.
 - **Data: a paired probe.** One telemetry probe carries both outputs' samples from the same block, interleaved, in one chunk. *Why not two scope probes:* each queue drops chunks on its own when full, so two probes can pair a sample of `x` with a sample of `y` from another block. The trace would then show shapes that are not in the signal.
 - **Drawing:** a line through the last points, as many as fill the module's time window. Older points fade, so the newest part of the trace is brightest. A faint cross marks 0 on both axes.
@@ -352,6 +353,7 @@ One signal against another: the first moves the trace left and right, the second
 - **Mid and side view:** a module parameter turns the trace by 45 degrees, so a mono signal is a vertical line and a wide stereo signal spreads sideways. *Why a parameter and not a widget setting:* it is part of what the module shows, saved with the patch, and it can sit on a front panel.
 - **Pointer:** a display. Pressing or dragging selects or moves the tile. Double-click opens the larger view when there is one (panels.md, Interaction on the canvas).
 - **Keyboard:** not focusable. Its module's controls are.
+- **Values that are not finite:** a pair with a NaN is dropped, because it has no place on either axis. Infinity clamps to the edge.
 - **Screen reader:** the label, and "XY scope of" the two input labels.
 - **Redraw:** every frame while on screen and the signal moves. A still or silent signal draws no frames.
 - **Middle zoom:** the frame and a single point at the latest position.
