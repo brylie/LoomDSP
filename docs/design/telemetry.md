@@ -38,7 +38,7 @@ Every message carries the probe ID and an engine frame number (frames since the 
 
 ## Why queues and not triple buffers for scopes
 
-ADR-0001 suggests triple buffering for large telemetry. A triple buffer shows only the latest snapshot. A scope needs every sample in order, so it can find a trigger point and draw a stable wave, and so the UI can see when samples were lost. A queue of fixed-size chunks does both. Triple buffering stays the better fit for data where only the latest value matters, such as a spectrum (FR-VIS-03).
+ADR-0001 suggests triple buffering for large telemetry. A triple buffer shows only the latest snapshot. A scope needs every sample in order, so it can find a trigger point and draw a stable wave, and so the UI can see when samples were lost. A queue of fixed-size chunks does both. Triple buffering stays the better fit for data where only the latest value matters. A spectrum (FR-VIS-03) does not use one: its FFT needs every sample too, so it reads the same scope chunks, on the telemetry thread.
 
 ## Sizes
 
@@ -57,7 +57,7 @@ The app hands the `Telemetry` handle from `create_engine` to a telemetry thread 
 - **`Levels`**, on the telemetry thread, turns readings into levels from 0 to 1: -60 dB and below is 0, 0 dB (1.0, or 10 V) and above is 1. The peak is the highest since the last drain. The RMS is taken over every frame since the last drain, weighted by block length, because a block can be shorter than one cycle of the signal. Both rise at once and fall by 1.0 per second, using the time since the last drain, so the drain rate does not change them. The peak is never below the RMS.
 - **`ScopeTrace`** turns the chunks of one scope probe into a stable trace:
   1. It keeps one second of samples. If the frame stamps show a gap, it clears the history first. *Why:* drawing across lost samples would show a step that is not in the signal.
-  2. It finds the latest rising edge that still has a full window after it. The trigger level is halfway between the lowest and highest sample in the history, so signals with an offset, such as envelopes and pitch, trigger too. An edge counts only if the signal was below the level by a tenth of its swing before it, so noise on a slow edge cannot trigger twice. A flat signal falls back to the latest samples ("free run"). A scope module with Auto off sets a fixed level instead, and the trace runs free when nothing crosses it ([panels](panels.md#trigger)).
+  2. It finds the latest edge of the chosen slope, rising by default, that still has a full window after it. The trigger level is halfway between the lowest and highest sample in the history, so signals with an offset, such as envelopes and pitch, trigger too. An edge counts only if the signal was on the far side of the level by a tenth of its swing before it, so noise on a slow edge cannot trigger twice. A flat signal falls back to the latest samples ("free run"). A scope module with Auto off sets a fixed level instead, and the trace runs free when nothing crosses it ([panels](panels.md#trigger)).
   3. It finds the crossing to a fraction of a sample (`offset`). *Why:* a period is rarely a whole number of samples. Drawing shifted by the fraction keeps the wave still instead of jittering by up to one sample per frame.
   4. It picks a vertical range from 0.01, 0.02, 0.05, ... 10. The range grows at once and shrinks only when the trace uses less than 40% of it, so it does not flicker.
 

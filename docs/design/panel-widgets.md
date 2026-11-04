@@ -55,6 +55,7 @@ Widgets are grouped by the **kind of value** they show or edit, not by the modul
 | | Meter | An output, or a display value | Yes | M1, display value in M2 |
 | Signals | Scope | An output | No ([#62](https://github.com/brylie/LoomDSP/issues/62)) | M1 |
 | | XY scope | Two outputs | No | M2 ([#280](https://github.com/brylie/LoomDSP/issues/280)) |
+| | Level history | An output | No ([#97](https://github.com/brylie/LoomDSP/issues/97)) | M2 |
 | | Spectrum | An output | No ([#109](https://github.com/brylie/LoomDSP/issues/109)) | M2 |
 | Shapes and data | Curve | Curve data, or a shape the module computes from its parameters | Read-only shape preview only | M2 |
 | | Step grid | Pattern data. Drawn as rows, a ring, or keys | No | M2 |
@@ -107,7 +108,7 @@ These rules hold for every widget. Each widget section below says only what diff
    | Drag | Changes the value | Moves the tile | Moves the tile |
    | Shift-drag | 10 times finer | | |
    | Click | Selects the module | Acts: flips, picks, or opens the list | Selects the module |
-   | Double-click | Resets to the default | Resets to the default | Opens the larger view, if the module has one |
+   | Double-click | Resets to the default | Resets to the default | Opens the larger view, if the module has one. On a meter bound to an output, resets its clip light and peak hold ([panels](panels.md#meter-widget)) |
    | Mouse wheel | Zooms the canvas | Zooms the canvas, except over an open select list | Zooms the canvas |
 
    The button is its own case (panels.md, Interaction). Data editors (curve, step grid, waveform) follow the first column for drags, Shift, and double-click, but a click acts on the part under the pointer: it selects a curve point or segment, adds a point on empty curve space, or flips a gate cell. Each widget's section gives the details. *Why:* a part of a data editor is a small control of its own, and clicking it should do the obvious thing, as clicking a toggle does. *Why:* a gesture learned once must work on every widget, or users hesitate on stage. *Why a choice control does not change on a drag:* toggles and radio buttons already move the tile on a drag, and a value that changes during a drag meant to move the tile is heard at once.
@@ -364,23 +365,26 @@ How loud a signal has been over the last seconds ([#97](https://github.com/bryli
 
 - **Binds to:** an output, through the same meter probe as the [meter](panels.md#meter-widget).
 - **Drawing:** the RMS level from −60 to 0 dB over a time window, newest at the right, as a filled shape; the peak as a lighter line above it. Colour is not the only signal: peak and RMS differ in fill (rule 8).
-- **Data:** the telemetry thread keeps the history, one column per 1/100 of the window, and wakes the UI only when a column it would draw changes. A silent history draws no frames (rule 7).
-- **Pointer:** a display (rule 1). **Middle zoom:** the RMS shape only. **Starting size:** 9 × 3, growable.
+- **Levels:** each column holds the true RMS and peak of its frames, with none of the meter's one-second fall. A tone that stops scrolls away, so the history reaches the floor after one full window. A stereo output uses the higher side in each column.
+- **Data:** the telemetry thread keeps the history, one column per 1/100 of the window, and places each reading by its frame stamp. A column with no reading shows the floor. A reading that is not finite is skipped. The thread wakes the UI only when a column it would draw moves by at least half a dB. *Why not every change:* every message redraws the window, so comparing exact values would wake it for rounding noise on a steady tone. A silent history draws no frames (rule 7).
+- **Pointer:** a display (rule 1). **Middle zoom:** the RMS shape only. **Starting size:** 9 × 6, growable, so it matches the meter's height beside it.
 - **Used by** the Level Meter (below).
 
-**Level Meter options** (settled; the module is in [panels](panels.md#level-meter-module)): `view`: 0 Meter (default), 1 Meter and history. `window`: 0 1 s, 1 5 s (default), 2 30 s. Both are choices, kept in the inspector. With history, the tile grows to hold a level history beside the meter. *Why an option and not a new module:* it is the same probe and the same job; the merge rule of ADR-0017 makes it one type with a setting.
+**Level Meter options** (settled; the module is in [panels](panels.md#level-meter-module)): `view`: 0 Meter (default), 1 Meter and history. `window`: 0 1 s, 1 5 s (default), 2 30 s. Both are choices, kept in the inspector. With history, the panel is 12 × 6, with the level history beside the meter. With Meter, the history's columns close up and the panel is 3 × 6 again. The tile widens in place, as one undo step with the parameter edit. It never moves a neighbour, so it can overlap one until the user moves it. A size the user saved is kept, so going back to Meter restores it. *Why an option and not a new module:* it is the same probe and the same job; the merge rule of ADR-0017 makes it one type with a setting.
 
 ### Spectrum
 
 The frequency content of a signal ([#109](https://github.com/brylie/LoomDSP/issues/109)). The module is in [M2 modules](p2-modules.md#spectrum-mt-view-03).
 
 - **Binds to:** an output, through a scope probe ([telemetry](telemetry.md)). The FFT runs on the app's telemetry thread, never the audio thread.
-- **Analysis:** 4096 points, Hann window, half overlap (about 12 Hz per bin at 48 kHz). The FFT comes from the `rustfft` crate (MIT or Apache-2.0), used in `loom-app` only, so the engine crates stay portable (AGENTS.md rule 6).
+- **Analysis:** 4096 points, Hann window, half overlap (about 12 Hz per bin at 48 kHz). The FFT comes from the `rustfft` crate (MIT or Apache-2.0), used in `loom-app` only, so the engine crates stay portable (AGENTS.md rule 6). A sample that is not finite counts as 0, so it cannot spoil a whole analysis. Nothing draws before the first 4096 samples. See [Reading a spectrum](../learn/reading-a-spectrum.md).
+- **Level:** a full-scale sine reads 0 dB, with the window's loss made up.
+- **Columns:** 256, fixed on the telemetry thread, whatever the tile's width, so a resize needs no new analysis. A column takes the highest bin inside it. A low column can be narrower than a bin, and holds none. It is interpolated in dB between its two neighbouring bins, so the line stays continuous. The line stops at half the sample rate.
 - **Drawing:** one line, log frequency from 20 Hz to 20 kHz across, −90 to 0 dB up. Bins are reduced to one value per drawn column (the highest), so low and high frequencies read alike. After a peak, the line falls at 20 dB per second. *Why:* a raw spectrum flickers too fast to read.
-- **Tilt:** Flat, or +4.5 dB per octave around 1 kHz, so a full mix reads closer to level across the range.
+- **Tilt:** Flat, or +4.5 dB per octave around 1 kHz, so a full mix reads closer to level across the range. It changes only the drawing.
 - **Hold:** an optional peak line that stays for 2 s, then falls at 20 dB per second.
-- **Data and redraw:** the thread sends the UI new columns only when the drawn line changes. A silent spectrum draws no frames (rule 7).
-- **Pointer:** a display. **Middle zoom:** the line only, no grid. **Starting size:** 9 × 5, growable.
+- **Data and redraw:** the thread sends the UI new columns only when a column moves by at least half a dB, so a steady tone stops waking the UI once its line settles. A silent spectrum draws no frames (rule 7).
+- **Pointer:** a display. **Close zoom:** a faint grid at 100 Hz, 1 kHz, and 10 kHz. **Middle zoom:** the line only, no grid. **Starting size:** 9 × 5, growable.
 
 ## Shapes and data
 
@@ -543,8 +547,8 @@ Widget-specific checks:
 | XY pad | Alt-press jumps the point; a plain press does not. Each axis shows its own modulation bar. Each axis has its own arrow keys, and Enter does nothing. |
 | Range | The two handles cannot cross. Each has its own modulation bar and live line. Overlapping handles follow the first movement. The two parameters share one control range. |
 | Readout, meter on a display value | Text uses the display value's unit; the meter follows the display value at rule 7's rate. |
-| Level history | A tone that stops shows RMS falling to the floor over the window; a silent input sends the UI nothing. |
-| Spectrum | A 1 kHz sine peaks in the column holding 1 kHz, within one bin; hold keeps the peak for 2 s; a silent input sends the UI nothing. |
+| Level history | A tone that stops shows RMS falling to the floor over the window; a silent input sends the UI nothing; a steady tone stops sending once settled. |
+| Spectrum | A 1 kHz sine peaks in the column holding 1 kHz, within one bin; hold keeps the peak for 2 s; a silent input sends the UI nothing; a steady tone stops sending once settled; one sample that is not finite does not spoil the line. |
 | Curve | Click adds, double-click removes, segment drag bends, Ctrl-drag snaps; wrap and odd symmetry hold their constraint; the live modulated shape appears only while modulated. |
 | Step grid | Rows, ring, and keys layouts give the same cell for the same key presses; ring and keys are refused on value lanes; Alt-drag draws values. |
 | Waveform | The outline is built once per buffer change; markers set their parameters; frames draw the strip and the current frame. |
