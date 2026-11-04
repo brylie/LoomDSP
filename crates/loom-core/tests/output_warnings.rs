@@ -141,3 +141,19 @@ fn the_limiter_leaves_little_to_clip() {
     assert!(silenced > 0);
     assert_eq!(clipped, 0, "the limiter holds the level under the ceiling");
 }
+
+/// With the safety stage off, infinity reaches the output as silence, and the
+/// other values only clip (ADR-0007, #121). It looks past the first half second,
+/// where a new patch fades in.
+#[test]
+fn infinity_becomes_silence_at_the_output() {
+    let mut parts = patch(OutputSafety::Off);
+    let (mut left, mut right) = (vec![0.0; 48_000], vec![0.0; 48_000]);
+    parts.engine.process(&mut left, &mut right);
+    let settled = &left[24_000..];
+    assert!(settled.contains(&0.0), "infinity is silent");
+    assert!(settled.contains(&1.0), "2 clips to 1");
+    assert!(settled.contains(&0.5), "0.5 passes");
+    let other = settled.iter().find(|&&sample| ![0.0, 1.0, 0.5].contains(&sample));
+    assert_eq!(other, None);
+}

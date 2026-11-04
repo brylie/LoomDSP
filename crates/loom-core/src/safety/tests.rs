@@ -141,6 +141,27 @@ fn a_fade_out_while_clean_waits_for_its_first_sample_is_silent_at_once() {
     assert!(stage.is_silent());
 }
 
+/// A finite sample above the input limit counts as clipped, once, in every mode,
+/// though the limiter hides it from the final clip. A non-finite one counts as
+/// silenced only.
+#[test]
+fn a_sample_over_the_input_limit_counts_as_clipped_once() {
+    for mode in [OutputSafety::LowLatency, OutputSafety::Clean, OutputSafety::Off] {
+        let mut stage = SafetyStage::new(mode, RATE);
+        let mut left = [20.0, -20.0, f32::INFINITY, 0.0];
+        let mut right = [0.0; 4];
+        let counts = stage.process(&mut left, &mut right);
+        assert_eq!(
+            counts,
+            OutputCounts {
+                silenced: 1,
+                clipped: 2
+            },
+            "{mode:?}"
+        );
+    }
+}
+
 /// The stage counts what it turned to silence and what it clipped.
 #[test]
 fn process_counts_silenced_and_clipped_samples() {

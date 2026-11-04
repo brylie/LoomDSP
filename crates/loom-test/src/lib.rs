@@ -53,12 +53,22 @@ pub const DEFAULT_TOLERANCE: f32 = 1e-5;
 
 /// First frame of the non-finite input in
 /// [`Harness::check_non_finite_recovery`]. The module runs normally before
-/// it, so it has state to lose.
-pub const BAD_START: usize = 1_000;
+/// it, so it has state to lose. The bad frames cover [`BAD_EDGE`].
+pub const BAD_START: usize = 1_068;
 
 /// How many frames the non-finite input lasts in
 /// [`Harness::check_non_finite_recovery`].
 pub const BAD_FRAMES: usize = 8;
+
+/// The rising edge of [`Signal::non_finite_busy`] inside the bad frames. A
+/// module that stores an input on a trigger on another input takes the bad
+/// value here.
+pub const BAD_EDGE: usize = 1_072;
+
+/// The next rising edge of [`Signal::non_finite_busy`]. It overwrites bad state
+/// that [`BAD_EDGE`] captured, so the recovery time must end before it, or the
+/// check would pass a module that kept the bad value until then.
+pub const BAD_NEXT_EDGE: usize = 2_032;
 
 /// Time a module may take to give finite output again after the
 /// non-finite input ends, in [`Harness::check_non_finite_recovery`], in
@@ -106,6 +116,29 @@ macro_rules! reference {
     };
 }
 
+/// Which inputs take the huge value in the extreme check.
+#[derive(Clone, Copy)]
+enum ExtremeTarget {
+    /// Each input in turn, the others staying normal.
+    Each,
+    /// One input, by index.
+    One(usize),
+    /// Every input together.
+    AllAtOnce,
+}
+
+/// What the extreme check requires of the outputs. Each level includes the ones
+/// below it.
+#[derive(Clone, Copy, PartialEq)]
+enum ExtremeLevel {
+    /// Matches a clean render after the settling time.
+    Recovers,
+    /// Returns to a normal size after the next edge.
+    Bounded,
+    /// Stays finite for the whole render.
+    Finite,
+}
+
 enum Length {
     Frames(usize),
     Seconds(f64),
@@ -121,8 +154,29 @@ pub struct Harness {
     params: Vec<(usize, f32)>,
     midi: Vec<MidiEvent>,
     transport: TransportSettings,
+    /// Parameter changes during the render: `(seconds, index, value)`.
+    param_changes: Vec<(f64, usize, f32)>,
+    /// Transport changes during the render: `(seconds, settings)`.
+    transport_changes: Vec<(f64, TransportSettings)>,
     tolerance: f32,
     allow_undocumented: bool,
+}
+
+/// The transport from one frame of a render until the next change.
+#[derive(Clone, Copy)]
+struct TransportSpan {
+    /// The frame where this transport takes effect.
+    start: usize,
+    /// The settings in force, so the next change can tell what it changed.
+    settings: TransportSettings,
+    /// The transport at `start`.
+    info: TransportInfo,
+}
+
+/// The transport in force at `frame`, for a call that starts there.
+fn transport_at_frame(spans: &[TransportSpan], frame: usize) -> TransportInfo {
+    let span = spans[spans.partition_point(|span| span.start <= frame) - 1];
+    span.info.later(frame - span.start)
 }
 
 impl Harness {
@@ -146,6 +200,8 @@ impl Harness {
                 running: false,
                 ..TransportSettings::default()
             },
+            param_changes: Vec::new(),
+            transport_changes: Vec::new(),
             tolerance: DEFAULT_TOLERANCE,
             allow_undocumented: false,
         }
@@ -188,7 +244,26 @@ impl Harness {
     /// `Controller::set_param` clamps it.
     #[track_caller]
     pub fn param(mut self, name: &str, value: f32) -> Self {
-        let Some(index) = self.descriptor.param_index(name) else {
+        let index = self.param_named(name);
+        self.params.push((index, self.descriptor.params[index].clamp(value)));
+        self
+    }
+
+    /// Changes parameter `name` at `seconds` into the render, clamped as
+    /// [`Harness::param`] clamps it. The harness ends a block there, so the
+    /// change lands on the same frame at every block size.
+    #[track_caller]
+    pub fn param_at(mut self, seconds: f64, name: &str, value: f32) -> Self {
+        let index = self.param_named(name);
+        self.param_changes
+            .push((seconds, index, self.descriptor.params[index].clamp(value)));
+        self
+    }
+
+    /// The index of parameter `name`. Panics with the names it has.
+    #[track_caller]
+    fn param_named(&self, name: &str) -> usize {
+        self.descriptor.param_index(name).unwrap_or_else(|| {
             panic!(
                 "{}: no parameter `{name}`; it has {:?}",
                 self.descriptor.id,
@@ -197,10 +272,8 @@ impl Harness {
                     .iter()
                     .map(|param| param.name)
                     .collect::<Vec<_>>()
-            );
-        };
-        self.params.push((index, self.descriptor.params[index].clamp(value)));
-        self
+            )
+        })
     }
 
     /// MIDI events. Each event's `frame` counts from the start of the render.
@@ -213,6 +286,15 @@ impl Harness {
     /// stopped, at 120 BPM, in 4/4.
     pub fn transport(mut self, settings: TransportSettings) -> Self {
         self.transport = settings;
+        self
+    }
+
+    /// Changes the transport at `seconds` into the render. The position stays
+    /// where it is. A tempo or running change is not a jump, and a time signature
+    /// change is a jump for one call (clock spec, rule 10). The harness ends a
+    /// block there, so the change lands on the same frame at every block size.
+    pub fn transport_at(mut self, seconds: f64, settings: TransportSettings) -> Self {
+        self.transport_changes.push((seconds, settings));
         self
     }
 
@@ -273,7 +355,7 @@ impl Harness {
     /// cable. An unconnected input reads its port default.
     fn input_buffers(&self) -> (Vec<Vec<f32>>, Vec<bool>) {
         let frames = self.frame_count();
-        let transport = TransportInfo::new(self.sample_rate, self.transport, 0.0);
+        let transport = self.transport_spans();
         let inputs = self
             .descriptor
             .inputs
@@ -286,6 +368,64 @@ impl Harness {
             .collect();
         let connected = self.inputs.iter().map(Option::is_some).collect();
         (inputs, connected)
+    }
+
+    /// The frame of a change at `seconds`, rounded as [`Harness::seconds`] is.
+    fn frame_at(&self, seconds: f64) -> usize {
+        (seconds * f64::from(self.sample_rate)).round() as usize
+    }
+
+    /// The parameter changes as `(frame, index, value)`, by frame, and in the
+    /// order they were added on one frame.
+    fn scheduled_params(&self) -> Vec<(usize, usize, f32)> {
+        let mut changes: Vec<_> = self
+            .param_changes
+            .iter()
+            .map(|&(seconds, index, value)| (self.frame_at(seconds), index, value))
+            .collect();
+        changes.sort_by_key(|&(frame, ..)| frame);
+        changes
+    }
+
+    /// The transport over the render, in frame order: the first span from frame
+    /// 0, and one for each frame with a change.
+    fn transport_spans(&self) -> Vec<TransportSpan> {
+        let mut spans = vec![TransportSpan {
+            start: 0,
+            settings: self.transport,
+            info: TransportInfo::new(self.sample_rate, self.transport, 0.0),
+        }];
+        let mut changes: Vec<_> = self
+            .transport_changes
+            .iter()
+            .map(|&(seconds, settings)| (self.frame_at(seconds), settings))
+            .collect();
+        changes.sort_by_key(|&(frame, _)| frame);
+        for (start, settings) in changes {
+            let last = spans[spans.len() - 1];
+            let before = last.info.later(start - last.start);
+            let moved = settings.time_signature != last.settings.time_signature;
+            // Two changes on one frame are one change, so the jump stays.
+            let jump = moved || (start == last.start && last.info.jumped());
+            let info = TransportInfo::new(self.sample_rate, settings, before.position()).with_jump(jump);
+            if start == last.start {
+                spans.pop();
+            }
+            spans.push(TransportSpan { start, settings, info });
+        }
+        spans
+    }
+
+    /// Panics if the harness has scheduled changes. A reset or a new copy cannot
+    /// replay a schedule that has already run.
+    #[track_caller]
+    fn refuse_scheduled_changes(&self, check: &str) {
+        assert!(
+            self.param_changes.is_empty() && self.transport_changes.is_empty(),
+            "{}: `{check}` does not support `.param_at` or `.transport_at`: a reset or a new copy cannot replay a \
+             schedule that has already run",
+            self.descriptor.id
+        );
     }
 
     /// A new instance with the harness's parameter values, set up as the
@@ -318,6 +458,7 @@ impl Harness {
     /// keeps state that `process` changed.
     #[track_caller]
     pub fn check_reset(&self) {
+        self.refuse_scheduled_changes("check_reset");
         let (inputs, connected) = self.input_buffers();
         let mut module = self.build();
         let first = self.run_module_ref(module.as_mut(), MAX_BLOCK, &inputs, &connected);
@@ -362,6 +503,20 @@ impl Harness {
                 event.frame
             );
         }
+        let last_change = self
+            .param_changes
+            .iter()
+            .map(|&(seconds, ..)| seconds)
+            .chain(self.transport_changes.iter().map(|&(seconds, _)| seconds))
+            .map(|seconds| self.frame_at(seconds))
+            .max();
+        if let Some(frame) = last_change {
+            assert!(
+                frame < frames,
+                "{}: a scheduled change at frame {frame} is past the end of the render ({frames} frames)",
+                descriptor.id
+            );
+        }
         let mut outputs = vec![vec![0.0; frames]; descriptor.outputs.len()];
         self.run_span(module, block, inputs, connected, 0..frames, &mut outputs);
         Render {
@@ -383,12 +538,25 @@ impl Harness {
         span: std::ops::Range<usize>,
         outputs: &mut [Vec<f32>],
     ) {
-        let transport = TransportInfo::new(self.sample_rate, self.transport, 0.0);
+        let transport = self.transport_spans();
+        let params = self.scheduled_params();
         let frames = span.end;
         let mut block_midi = Vec::with_capacity(self.midi.len());
         let mut start = span.start;
         while start < frames {
-            let len = block.min(frames - start);
+            for &(_, index, value) in params.iter().filter(|&&(frame, ..)| frame == start) {
+                module.set_param(index, value);
+            }
+            // A block ends at the next change, so the change lands on its frame
+            // at every block size.
+            let next_change = params
+                .iter()
+                .map(|&(frame, ..)| frame)
+                .chain(transport.iter().map(|span| span.start))
+                .filter(|&frame| frame > start)
+                .min()
+                .unwrap_or(frames);
+            let len = block.min(next_change.min(frames) - start);
             let end = start + len;
             block_midi.clear();
             block_midi.extend(
@@ -405,7 +573,7 @@ impl Harness {
             testing::run_with_transport(
                 module,
                 self.sample_rate,
-                transport.later(start),
+                transport_at_frame(&transport, start),
                 &block_inputs,
                 connected,
                 &mut block_outputs,
@@ -420,7 +588,9 @@ impl Harness {
     /// run on to the end, in blocks of `block` frames. Returns whether the copy
     /// took the state, and the two outputs from frame `at`: the running
     /// instance's first.
+    #[track_caller]
     fn copied_at(&self, at: usize, block: usize) -> (bool, Vec<Vec<f32>>, Vec<Vec<f32>>) {
+        self.refuse_scheduled_changes("check_copy_state");
         let frames = self.frame_count();
         assert!(
             at < frames,
@@ -620,13 +790,13 @@ impl Harness {
     /// [`Signal::extreme_busy`] or their defaults.
     #[track_caller]
     pub fn check_extreme_recovery(&self) {
-        self.check_extreme(None, true);
+        self.check_extreme(ExtremeTarget::Each, ExtremeLevel::Recovers);
     }
 
     /// [`Harness::check_extreme_recovery`] for one input.
     #[track_caller]
     pub fn check_extreme_recovery_on(&self, input: &str) {
-        self.check_extreme(Some(self.extreme_port(input)), true);
+        self.check_extreme(ExtremeTarget::One(self.extreme_port(input)), ExtremeLevel::Recovers);
     }
 
     /// The part of [`Harness::check_extreme_recovery`] that does not compare
@@ -636,7 +806,37 @@ impl Harness {
     /// normal size.
     #[track_caller]
     pub fn check_extreme_stays_bounded_on(&self, input: &str) {
-        self.check_extreme(Some(self.extreme_port(input)), false);
+        self.check_extreme(ExtremeTarget::One(self.extreme_port(input)), ExtremeLevel::Bounded);
+    }
+
+    /// [`Harness::check_extreme_recovery`] with the huge value on every input at
+    /// once. A bug that needs two huge inputs together, such as a product that
+    /// overflows, never shows with one input at a time.
+    #[track_caller]
+    pub fn check_extreme_recovery_all(&self) {
+        self.check_extreme(ExtremeTarget::AllAtOnce, ExtremeLevel::Recovers);
+    }
+
+    /// [`Harness::check_extreme_stays_bounded_on`] with the huge value on every
+    /// input at once, for a module with a stated exception.
+    #[track_caller]
+    pub fn check_extreme_stays_bounded_all(&self) {
+        self.check_extreme(ExtremeTarget::AllAtOnce, ExtremeLevel::Bounded);
+    }
+
+    /// Only the finite part of [`Harness::check_extreme_recovery`], each input in
+    /// turn. It is for a module with its parameters turned up, which may rightly
+    /// ring for a long time.
+    #[track_caller]
+    pub fn check_extreme_finite(&self) {
+        self.check_extreme(ExtremeTarget::Each, ExtremeLevel::Finite);
+    }
+
+    /// [`Harness::check_extreme_finite`] with the huge value on every input at
+    /// once.
+    #[track_caller]
+    pub fn check_extreme_finite_all(&self) {
+        self.check_extreme(ExtremeTarget::AllAtOnce, ExtremeLevel::Finite);
     }
 
     /// The index of input `name`, for the extreme check.
@@ -647,10 +847,9 @@ impl Harness {
             .unwrap_or_else(|| panic!("{}: there is no input `{name}`", self.descriptor.id))
     }
 
-    /// Runs the extreme check on input `only`, or on every input, comparing with
-    /// a clean render if `compare`.
+    /// Runs the extreme check on `target`, requiring `level` of the outputs.
     #[track_caller]
-    fn check_extreme(&self, only: Option<usize>, compare: bool) {
+    fn check_extreme(&self, target: ExtremeTarget, level: ExtremeLevel) {
         let id = self.descriptor.id;
         let frames = self.frame_count();
         assert!(
@@ -661,33 +860,37 @@ impl Harness {
         let compare_from = hold_end + EXTREME_SETTLE;
         let (clean_inputs, connected) = self.input_buffers();
         let base = self.run(MAX_BLOCK, &clean_inputs, &connected);
-        for (port, spec) in self.descriptor.inputs.iter().enumerate() {
-            if only.is_some_and(|only| only != port) {
-                continue;
-            }
-            // A clean render differs only if the check adds a cable to this input.
-            let added = !connected[port];
+        for (ports, name) in self.extreme_runs(target) {
+            // A clean render differs only if the check adds a cable.
+            let added = ports.iter().any(|&port| !connected[port]);
             let mut connected = connected.clone();
-            connected[port] = true;
+            for &port in &ports {
+                connected[port] = true;
+            }
             let own = added.then(|| self.run(MAX_BLOCK, &clean_inputs, &connected));
             let clean = own.as_ref().unwrap_or(&base);
             for (extreme, flipped) in [(f32::MAX, f32::MAX), (-f32::MAX, -f32::MAX), (f32::MAX, -f32::MAX)] {
                 let mut inputs = clean_inputs.clone();
-                inputs[port][EXTREME_START..EXTREME_FLIP].fill(extreme);
-                inputs[port][EXTREME_FLIP..hold_end].fill(flipped);
+                for &port in &ports {
+                    inputs[port][EXTREME_START..EXTREME_FLIP].fill(extreme);
+                    inputs[port][EXTREME_FLIP..hold_end].fill(flipped);
+                }
                 let render = self.run(MAX_BLOCK, &inputs, &connected);
                 let what = |output: usize| {
                     format!(
-                        "{id}: after {extreme:e} then {flipped:e} on input `{}`, output `{}`",
-                        spec.name, self.descriptor.outputs[output].name
+                        "{id}: after {extreme:e} then {flipped:e} on {name}, output `{}`",
+                        self.descriptor.outputs[output].name
                     )
                 };
                 for (output, (samples, clean)) in render.outputs.iter().zip(&clean.outputs).enumerate() {
                     if let Some(frame) = samples.iter().position(|value| !value.is_finite()) {
                         panic!("{} is {} at frame {frame}: not finite", what(output), samples[frame]);
                     }
+                    if level == ExtremeLevel::Finite {
+                        continue;
+                    }
                     let peak = clean.iter().fold(1.0f32, |peak, value| peak.max(value.abs()));
-                    if compare {
+                    if level == ExtremeLevel::Recovers {
                         let phase = self.descriptor.outputs[output].signal == SignalType::Phase;
                         let frame = (compare_from..EXTREME_NEXT_EDGE).find(|&frame| {
                             if phase {
@@ -723,6 +926,19 @@ impl Harness {
         }
     }
 
+    /// The runs `target` asks for: the inputs that take the huge value together,
+    /// and how a failure names them. A module with no inputs has no run.
+    fn extreme_runs(&self, target: ExtremeTarget) -> Vec<(Vec<usize>, String)> {
+        let inputs = self.descriptor.inputs;
+        let one = |port: usize| (vec![port], format!("input `{}`", inputs[port].name));
+        match target {
+            ExtremeTarget::Each => (0..inputs.len()).map(one).collect(),
+            ExtremeTarget::One(port) => vec![one(port)],
+            ExtremeTarget::AllAtOnce if inputs.is_empty() => Vec::new(),
+            ExtremeTarget::AllAtOnce => vec![((0..inputs.len()).collect(), "every input at once".to_string())],
+        }
+    }
+
     #[track_caller]
     fn compare_or_update(&self, render: &Render, path: &Path, update: bool) {
         if update {
@@ -736,12 +952,15 @@ impl Harness {
 /// What an unconnected input reads, for the whole render. Computed from the
 /// same anchor as the engine's shared buffers, so it is the same value, bit
 /// for bit.
-fn default_signal(default: PortDefault, transport: &TransportInfo, frames: usize) -> Vec<f32> {
+fn default_signal(default: PortDefault, transport: &[TransportSpan], frames: usize) -> Vec<f32> {
+    let at = |frame: usize| transport_at_frame(transport, frame);
     match default {
         PortDefault::Value(value) => vec![value; frames],
-        PortDefault::BarPhase => (0..frames).map(|frame| transport.bar_phase_at(frame)).collect(),
-        PortDefault::BeatPhase => (0..frames).map(|frame| transport.beat_phase_at(frame)).collect(),
-        PortDefault::Playing => vec![if transport.playing() { 1.0 } else { 0.0 }; frames],
+        PortDefault::BarPhase => (0..frames).map(|frame| at(frame).bar_phase_at(0)).collect(),
+        PortDefault::BeatPhase => (0..frames).map(|frame| at(frame).beat_phase_at(0)).collect(),
+        PortDefault::Playing => (0..frames)
+            .map(|frame| if at(frame).playing() { 1.0 } else { 0.0 })
+            .collect(),
     }
 }
 

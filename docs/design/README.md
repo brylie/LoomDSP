@@ -65,7 +65,7 @@ Copy [template.md](template.md). Keep it to one feature. Link the ADR, requireme
 | [Undo and redo](undo.md) | None (builds on [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md)) | Implemented, M1 |
 | [Control ranges](control-ranges.md) | None (extends parameter mapping) | Agreed, M1 |
 | [Port ranges](port-ranges.md) | None (builds on [ADR-0007](../adr/0007-polymorphic-signal-model.md)) | Tier 1 Agreed (M1), Tiers 2 and 3 Agreed (M2) |
-| [Module test harness](module-test-harness.md) | [ADR-0002](../adr/0002-graph-execution-and-feedback.md) | Implemented, M1; reset check Agreed, M2 |
+| [Module test harness](module-test-harness.md) | [ADR-0002](../adr/0002-graph-execution-and-feedback.md) | Implemented, M1; reset check, shared check blind spots, all inputs at once, and changes during a render Implemented, M2 |
 | [Clock and transport](clock.md) | [ADR-0015](../adr/0015-one-transport-per-patch.md) | Engine sections, Clock Divide, and Phase Trigger Implemented (M1); Transport, Clock, Phase Scale, and rules 10 and 11 Agreed (M1); MIDI clock and Clock to phase Agreed (M2); rest Draft |
 | [DSP algorithms](dsp-algorithms.md) | [ADR-0035](../adr/0035-pure-dsp-algorithms-in-loom-dsp.md) | Implemented |
 | [Delay line and all-pass](delay.md) | [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md), [ADR-0002](../adr/0002-graph-execution-and-feedback.md), [ADR-0017](../adr/0017-primitives-traits-and-abstractions.md), [ADR-0020](../adr/0020-inferred-channel-count.md) | Implemented, M1 |

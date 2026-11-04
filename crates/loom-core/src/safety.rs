@@ -193,6 +193,7 @@ impl SafetyStage {
         let mut counts = OutputCounts::default();
         for (l, r) in left.iter_mut().zip(right.iter_mut()) {
             counts.silenced += u64::from(!l.is_finite()) + u64::from(!r.is_finite());
+            let (over_l, over_r) = (is_over_limit(*l), is_over_limit(*r));
             let (mut a, mut b) = (sanitize(*l), sanitize(*r));
             if self.mode != OutputSafety::Off {
                 a = self.dc[0].tick(a);
@@ -201,7 +202,7 @@ impl SafetyStage {
             }
             let gain = self.fade.tick();
             let (a, b) = (a * gain, b * gain);
-            counts.clipped += u64::from(a.abs() > 1.0) + u64::from(b.abs() > 1.0);
+            counts.clipped += u64::from(over_l || a.abs() > 1.0) + u64::from(over_r || b.abs() > 1.0);
             *l = a.clamp(-1.0, 1.0);
             *r = b.clamp(-1.0, 1.0);
             self.silent = self.stopping && gain == 0.0;
@@ -223,8 +224,16 @@ impl SafetyStage {
 pub(crate) struct OutputCounts {
     /// Samples that were NaN or infinity, now 0.
     pub silenced: u64,
-    /// Samples beyond -1 to 1, now at the limit.
+    /// Samples beyond -1 to 1, now at the limit, or finite samples beyond
+    /// [`INPUT_LIMIT`] when they came in. Each sample counts once.
     pub clipped: u64,
+}
+
+/// True for a finite sample that [`sanitize`] will clamp. That clamp is clipping,
+/// and the limiter hides it from the later check, so a runaway feedback loop that
+/// holds at the largest finite value (ADR-0037) would go quiet with no warning.
+fn is_over_limit(sample: f32) -> bool {
+    sample.is_finite() && sample.abs() > INPUT_LIMIT
 }
 
 /// NaN and infinity become 0 (ADR-0007). Other values are clamped to

@@ -3,8 +3,10 @@
 #![allow(dead_code)]
 
 use loom_core::{
-    EngineConfig, EngineParts, MeterReading, MidiEvent, ModuleId, OutputSafety, ParamSpec, ProbeId, create_engine,
+    EngineConfig, EngineParts, MeterReading, MidiEvent, ModuleDescriptor, ModuleId, ModuleRole, OutputSafety,
+    ParamSpec, ProbeId, TimeSignature, TransportSettings, create_engine,
 };
+use loom_modules::ALL;
 use loom_patch::Patch;
 use loom_test::{Harness, Signal};
 use std::f32::consts::TAU;
@@ -28,6 +30,50 @@ pub fn changed(spec: &ParamSpec) -> f32 {
 /// state.
 pub fn busy(hz: f32) -> Signal {
     Signal::from_fn(move |frame| 0.75 * (frame as f32 * TAU * hz / SAMPLE_RATE).sin())
+}
+
+/// The DSP modules in [`ALL`]. Unit delays and audio outputs are run by the
+/// engine, not by `process`.
+pub fn dsp_modules() -> impl Iterator<Item = &'static ModuleDescriptor> {
+    ALL.iter()
+        .copied()
+        .filter(|descriptor| matches!(descriptor.role, ModuleRole::Dsp(_)))
+}
+
+/// Frequencies for [`busy_each`], in Hz. No one is a multiple of another, so two
+/// inputs never move together for long, and the lowest gives every input an edge
+/// before the copy checks' copy frame.
+const BUSY_HZ: [f32; 12] = [37.0, 41.0, 43.0, 47.0, 53.0, 59.0, 61.0, 67.0, 71.0, 73.0, 79.0, 83.0];
+
+/// A busy signal on every input of `descriptor`, each at its own frequency. With
+/// one signal on every input, a routing module gives the same output whichever
+/// input it picks, so a wrong pick does not show.
+pub fn busy_each(harness: Harness, descriptor: &ModuleDescriptor) -> Harness {
+    assert!(
+        descriptor.inputs.len() <= BUSY_HZ.len(),
+        "{} has more inputs than BUSY_HZ has frequencies",
+        descriptor.id
+    );
+    descriptor
+        .inputs
+        .iter()
+        .zip(BUSY_HZ)
+        .fold(harness, |h, (port, hz)| h.input(port.name, busy(hz)))
+}
+
+/// The frame where the bar wraps on [`playing_short_bar`].
+pub const WRAP_FRAME: usize = 22_154;
+
+/// A playing transport for the shared checks: 130 BPM in 1/4, so the bar is one
+/// beat, and it wraps within a short render. A beat is 22153.8 frames, so the
+/// frame after a wrap has a phase above 0, and only a wrap detector that
+/// remembers the frame before fires there.
+pub fn playing_short_bar() -> TransportSettings {
+    TransportSettings {
+        tempo: 130.0,
+        time_signature: TimeSignature::new(1, 4),
+        running: true,
+    }
 }
 
 /// Seeded modules whose numbers choose a route, not a signal, so a copy takes the

@@ -2,6 +2,7 @@
 //!
 //! An amplifier makes a signal quieter or louder and never flips its sign.
 
+use loom_core::signal::hold_finite;
 use loom_core::{
     Channels, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, PortDefault, PortIo, PortSpec,
     ProcessContext, SignalType, Widget,
@@ -125,9 +126,14 @@ impl Module for Amp {
         let modulated = io.param(Self::GAIN);
         let ([input, level], [out]) = io.split::<2, 1>();
         for (i, ((out, &input), &level)) in out.iter_mut().zip(input).zip(level).enumerate() {
+            let finite = input.is_finite() && level.is_finite();
             let level = if level_connected { self.curve(level) } else { 1.0 };
             let gain = modulated.at_or(i, self.gain.tick());
-            *out = input * level * gain;
+            *out = if finite {
+                hold_finite(hold_finite(input * hold_finite(level)) * gain)
+            } else {
+                input * level * gain
+            };
         }
     }
 

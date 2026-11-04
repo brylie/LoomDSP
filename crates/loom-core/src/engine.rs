@@ -119,7 +119,8 @@ pub struct EngineStats {
     pub input_overruns: AtomicU64,
     /// Output samples that were NaN or infinity, and became silence.
     pub output_silenced: AtomicU64,
-    /// Output samples clipped to -1 to 1.
+    /// Output samples clipped to -1 to 1, or finite samples above the safety
+    /// stage's input limit when they came in. Each sample counts once.
     pub output_clipped: AtomicU64,
 }
 
