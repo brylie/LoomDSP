@@ -50,3 +50,18 @@ fn formats_with_units() {
     assert_eq!(format(&CUTOFF, 1000.0), "1000 Hz");
     assert_eq!(format(&GAIN, 0.25), "0.250");
 }
+
+/// The UI's text for the Mixer's levels is what the spec shows, because this
+/// is the function the inspector and the tile call (modulation.md, Parameter
+/// mapping).
+#[test]
+fn the_mixer_levels_read_in_decibels() {
+    let mixer = loom_modules::ALL
+        .iter()
+        .find(|descriptor| descriptor.id == "loom.mix.mixer")
+        .expect("the Mixer is built in");
+    let level = mixer.params.iter().find(|spec| spec.name == "level1").expect("level1");
+    assert_eq!(format(level, 1.0), "0.0 dB");
+    assert_eq!(format(level, 0.0), "−∞ dB");
+    assert_eq!(format(level, 2.0), "+6.0 dB");
+}

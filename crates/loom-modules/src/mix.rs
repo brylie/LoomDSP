@@ -31,9 +31,12 @@ const fn mixer_level(name: &'static str, label: &'static str) -> ParamSpec {
         min: 0.0,
         max: 2.0,
         default: 1.0,
+        // The decibel mapping writes the dB in its text. The value and this
+        // range stay a linear gain, so the unit stays empty.
         unit: "",
         options: ParamOptions::DEFAULT,
     }
+    .decibels()
     .smooth(0.005)
 }
 

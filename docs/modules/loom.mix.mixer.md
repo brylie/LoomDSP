@@ -30,10 +30,10 @@ Adds four signals, each with its own level and mute. Two mixers in a row make a 
 
 | Parameter | Range | Default | Description |
 |---|---|---|---|
-| **Level 1** (`level1`) | 0 to 2 | 1 | How loud this input is in the mix. |
-| **Level 2** (`level2`) | 0 to 2 | 1 | How loud this input is in the mix. |
-| **Level 3** (`level3`) | 0 to 2 | 1 | How loud this input is in the mix. |
-| **Level 4** (`level4`) | 0 to 2 | 1 | How loud this input is in the mix. |
+| **Level 1** (`level1`) | −∞ to +6.0 dB | 0.0 dB | How loud this input is in the mix. |
+| **Level 2** (`level2`) | −∞ to +6.0 dB | 0.0 dB | How loud this input is in the mix. |
+| **Level 3** (`level3`) | −∞ to +6.0 dB | 0.0 dB | How loud this input is in the mix. |
+| **Level 4** (`level4`) | −∞ to +6.0 dB | 0.0 dB | How loud this input is in the mix. |
 | **Mute 1** (`mute1`) | 0 to 1, whole numbers | 0 | Silences this input. The input fades out over 5 ms. |
 | **Mute 2** (`mute2`) | 0 to 1, whole numbers | 0 | Silences this input. The input fades out over 5 ms. |
 | **Mute 3** (`mute3`) | 0 to 1, whole numbers | 0 | Silences this input. The input fades out over 5 ms. |

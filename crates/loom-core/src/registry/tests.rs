@@ -412,6 +412,39 @@ fn refuses_impossible_logarithmic_parameters() {
     assert!(Registry::new().register(fine).is_ok());
 }
 
+/// The registry refuses what a decibel mapping cannot do (modulation.md,
+/// Parameter mapping).
+#[test]
+fn refuses_impossible_decibel_parameters() {
+    let whole = with_params!(param("level", 0.0, 2.0, 1.0, "").integer().decibels());
+    let error = Registry::new().register(whole).unwrap_err();
+    assert!(error.to_string().contains("whole-number"), "{error}");
+    let above = with_params!(param("level", 0.5, 2.0, 1.0, "").decibels());
+    let error = Registry::new().register(above).unwrap_err();
+    assert!(error.to_string().contains("minimum of 0"), "{error}");
+    let below = with_params!(param("level", -1.0, 2.0, 1.0, "").decibels());
+    let error = Registry::new().register(below).unwrap_err();
+    assert!(error.to_string().contains("minimum of 0"), "{error}");
+    let no_top = with_params!(param("level", 0.0, 0.0, 0.0, "").decibels());
+    let error = Registry::new().register(no_top).unwrap_err();
+    assert!(error.to_string().contains("maximum above 0"), "{error}");
+    let ranged = with_params!(
+        param("level", 0.0, 2.0, 1.0, "")
+            .ranges(
+                &[crate::ParamRange::new(0.0, 1.0), crate::ParamRange::new(0.0, 2.0)],
+                crate::ParamRange::new(0.0, 2.0)
+            )
+            .decibels()
+    );
+    let error = Registry::new().register(ranged).unwrap_err();
+    assert!(error.to_string().contains("control ranges"), "{error}");
+    let high_floor = with_params!(param("level", 0.0, 1.0, 1.0, "").decibels_from(3.0));
+    let error = Registry::new().register(high_floor).unwrap_err();
+    assert!(error.to_string().contains("floor"), "{error}");
+    let fine = with_params!(param("level", 0.0, 2.0, 1.0, "").decibels());
+    assert!(Registry::new().register(fine).is_ok());
+}
+
 /// A transient parameter must be a whole number with a default of 0
 /// (transient-params.md, rules 1 and 2).
 #[test]

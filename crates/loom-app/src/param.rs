@@ -2,7 +2,7 @@
 //! slider positions is `ParamSpec::normalize` and `denormalize` in
 //! `loom-core`, shared with the engine's modulation.
 
-use loom_core::ParamSpec;
+use loom_core::{ParamMapping, ParamSpec};
 
 /// Slider step in slider positions (0 to 1). Whole-number parameters move
 /// one value per step, so the slider snaps to them.
@@ -19,6 +19,9 @@ pub fn slider_step(spec: &ParamSpec) -> f32 {
 pub fn format(spec: &ParamSpec, value: f32) -> String {
     if let Some(name) = spec.choice_name(value) {
         return name.to_string();
+    }
+    if matches!(spec.options.mapping, ParamMapping::Decibels { .. }) {
+        return spec.value_text(value);
     }
     let digits = match value.abs() {
         _ if spec.options.integer => 0,

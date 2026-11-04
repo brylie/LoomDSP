@@ -360,7 +360,7 @@ impl Default for ParamOptions {
 /// through [`ParamSpec::normalize`] and [`ParamSpec::denormalize`], so a
 /// modulation arc on a knob shows exactly what the engine does.
 /// Spec: `docs/design/modulation.md`, Parameter mapping.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 #[non_exhaustive]
 pub enum ParamMapping {
     /// Equal steps of the control give equal steps of the value.
@@ -370,6 +370,57 @@ pub enum ParamMapping {
     /// frequencies and times. Needs a minimum above 0, and not a whole
     /// number; the registry refuses others.
     Logarithmic,
+    /// The control turns and reads in decibels, but the value stays a linear
+    /// gain: 0 at the bottom, then a straight line in dB from `floor` to the
+    /// maximum. Needs a minimum of 0, a maximum above 0, not a whole number,
+    /// and no control ranges; the registry refuses others.
+    Decibels {
+        /// The dB value just above the bottom of the control's travel.
+        floor: f32,
+    },
+}
+
+/// The floor of a decibel mapping unless a parameter sets another.
+pub const DEFAULT_DECIBEL_FLOOR: f32 = -60.0;
+
+/// A gain in decibels. A gain of 0 gives negative infinity.
+fn gain_to_db(gain: f32) -> f32 {
+    20.0 * gain.log10()
+}
+
+/// The gain of a value in decibels.
+fn db_to_gain(db: f32) -> f32 {
+    10.0_f32.powf(db / 20.0)
+}
+
+/// A gain as a player reads it: "−6.0 dB", "0.0 dB", "+6.0 dB", or "−∞ dB".
+/// It uses the true minus sign, and [`ParamSpec::parse_value_text`] reads
+/// everything it writes.
+fn decibel_text(gain: f32) -> String {
+    if gain <= 0.0 {
+        return "−∞ dB".to_string();
+    }
+    let db = (gain_to_db(gain) * 10.0).round() / 10.0;
+    if db > 0.0 {
+        format!("+{db:.1} dB")
+    } else if db < 0.0 {
+        format!("−{:.1} dB", -db)
+    } else {
+        // Rounding can leave -0.0, and "−0.0 dB" means nothing to a player.
+        "0.0 dB".to_string()
+    }
+}
+
+/// A typed gain in decibels: what [`decibel_text`] writes, an ASCII minus,
+/// or "-inf". A plain number is in dB too.
+fn parse_decibels(text: &str) -> Option<f32> {
+    let text = text.trim().replace(',', ".").replace('−', "-").to_lowercase();
+    let number = text.strip_suffix("db").unwrap_or(&text).trim_end();
+    if matches!(number, "-inf" | "-∞") {
+        return Some(0.0);
+    }
+    // Rust reads "NaN" and "inf" as numbers. A player never means them.
+    number.parse::<f32>().ok().filter(|db| db.is_finite()).map(db_to_gain)
 }
 
 /// Why typed text is not a value of a parameter. Its text is what the field
@@ -420,6 +471,12 @@ impl ParamSpec {
     /// spec's range, so parse with the descriptor's spec to reach the whole
     /// range. Spec: `docs/design/panel-widgets.md`, Typing a value.
     pub fn parse_value_text(&self, text: &str) -> Result<f32, NotANumber> {
+        if matches!(self.options.mapping, ParamMapping::Decibels { .. }) {
+            return match parse_decibels(text) {
+                Some(gain) => Ok(self.clamp(gain) + 0.0),
+                None => Err(NotANumber { unit: "dB" }),
+            };
+        }
         let bad = NotANumber { unit: self.unit };
         let text = text.trim().replace(',', ".").to_lowercase();
         let unit = self.unit.to_lowercase();
@@ -445,7 +502,9 @@ impl ParamSpec {
     /// A value of this parameter with its unit, such as "1000 Hz", for help
     /// text. The in-app help and the generated pages share it.
     pub fn value_text(&self, value: f32) -> String {
-        if self.unit.is_empty() {
+        if matches!(self.options.mapping, ParamMapping::Decibels { .. }) {
+            decibel_text(value)
+        } else if self.unit.is_empty() {
             number_text(value)
         } else {
             format!("{} {}", number_text(value), self.unit)
@@ -458,7 +517,12 @@ impl ParamSpec {
     /// Module names and summaries).
     pub fn range_text(&self) -> String {
         let mut text = if self.options.choices.is_empty() {
-            let mut text = format!("{} to {}", number_text(self.min), self.value_text(self.max));
+            let lowest = if matches!(self.options.mapping, ParamMapping::Decibels { .. }) {
+                "−∞".to_string()
+            } else {
+                number_text(self.min)
+            };
+            let mut text = format!("{lowest} to {}", self.value_text(self.max));
             if self.options.integer {
                 text.push_str(", whole numbers");
             }
@@ -498,6 +562,22 @@ impl ParamSpec {
     /// Maps the parameter logarithmically, for frequencies and times.
     pub const fn logarithmic(mut self) -> Self {
         self.options.mapping = ParamMapping::Logarithmic;
+        self
+    }
+
+    /// Maps the parameter in decibels, for gains and levels, with the floor
+    /// at −60 dB. The value stays a linear gain.
+    pub const fn decibels(mut self) -> Self {
+        self.options.mapping = ParamMapping::Decibels {
+            floor: DEFAULT_DECIBEL_FLOOR,
+        };
+        self
+    }
+
+    /// Maps the parameter in decibels, as [`decibels`](Self::decibels) does,
+    /// with the floor at `floor` dB.
+    pub const fn decibels_from(mut self, floor: f32) -> Self {
+        self.options.mapping = ParamMapping::Decibels { floor };
         self
     }
 
@@ -697,6 +777,8 @@ impl ParamSpec {
         let position = match self.options.mapping {
             ParamMapping::Linear => (value - self.min) / (self.max - self.min),
             ParamMapping::Logarithmic => (value / self.min).ln() / (self.max / self.min).ln(),
+            // A gain of 0 reads as negative infinity, so it clamps to 0 below.
+            ParamMapping::Decibels { floor } => (gain_to_db(value) - floor) / (gain_to_db(self.max) - floor),
         };
         position.clamp(0.0, 1.0)
     }
@@ -712,6 +794,11 @@ impl ParamSpec {
         let value = match self.options.mapping {
             ParamMapping::Linear => self.min + t * (self.max - self.min),
             ParamMapping::Logarithmic => self.min * (self.max / self.min).powf(t),
+            ParamMapping::Decibels { .. } if t == 0.0 => 0.0,
+            // The top of the travel is exactly the maximum, with no rounding
+            // from going through dB and back.
+            ParamMapping::Decibels { .. } if t == 1.0 => self.max,
+            ParamMapping::Decibels { floor } => db_to_gain(floor + t * (gain_to_db(self.max) - floor)),
         };
         self.clamp(value)
     }

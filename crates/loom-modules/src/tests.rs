@@ -211,6 +211,12 @@ fn parameters_in_hz_and_seconds_are_logarithmic() {
                 assert_eq!(param.options.mapping, ParamMapping::Linear);
                 continue;
             }
+            // The Mixer's levels read in decibels (modulation.md, Parameter
+            // mapping).
+            if descriptor.id == "loom.mix.mixer" && param.name.starts_with("level") {
+                assert_eq!(param.options.mapping, ParamMapping::Decibels { floor: -60.0 });
+                continue;
+            }
             // A ratio and a Q are heard as multiples, as a frequency is.
             let multiple = [("loom.dyn.dynamics", "ratio"), ("loom.eq.eq", "mid_q")];
             let expected = if matches!(param.unit, "Hz" | "s") || multiple.contains(&(descriptor.id, param.name)) {

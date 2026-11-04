@@ -107,6 +107,23 @@ impl Registry {
                     return Err(invalid("a logarithmic parameter needs a minimum above 0"));
                 }
             }
+            if let ParamMapping::Decibels { floor } = param.options.mapping {
+                if param.options.integer {
+                    return Err(invalid("a whole-number parameter cannot be in decibels"));
+                }
+                if param.min != 0.0 {
+                    return Err(invalid("a parameter in decibels needs a minimum of 0"));
+                }
+                if param.max.is_nan() || param.max <= 0.0 {
+                    return Err(invalid("a parameter in decibels needs a maximum above 0"));
+                }
+                if !param.options.ranges.is_empty() {
+                    return Err(invalid("a parameter in decibels cannot have control ranges"));
+                }
+                if !floor.is_finite() || floor >= 20.0 * param.max.log10() {
+                    return Err(invalid("a parameter in decibels needs a floor below its maximum"));
+                }
+            }
         }
         // Stereo rules (ADR-0020, stereo spec rule 5). An output cannot
         // downmix, and a module that handles stereo itself is never copied,

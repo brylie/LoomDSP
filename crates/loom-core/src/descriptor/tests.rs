@@ -785,3 +785,94 @@ fn a_readout_needs_a_level_display_and_a_known_width() {
         assert!(error.contains(why) && error.contains("Readout"), "{error}");
     }
 }
+
+/// A 0 to 2 level in decibels, as on the Mixer.
+const LEVEL: ParamSpec = param("level", 0.0, 2.0, 1.0, "").decibels();
+
+/// The decibel mapping keeps its bottom, its 0 dB, and every gain above the
+/// floor (modulation.md, Acceptance criteria: parameter mapping).
+#[test]
+fn decibels_map_position_and_gain() {
+    assert_eq!(LEVEL.denormalize(0.0), 0.0);
+    assert_eq!(LEVEL.normalize(0.0), 0.0);
+    assert_eq!(LEVEL.denormalize(1.0), 2.0);
+    let top = 20.0 * 2.0_f32.log10();
+    assert!((LEVEL.normalize(1.0) - 60.0 / (60.0 + top)).abs() < 1e-5);
+    for db in [-59.0_f32, -40.0, -12.0, -6.0, -0.5, 0.0, 3.0, 6.0] {
+        let gain = 10.0_f32.powf(db / 20.0);
+        let back = 20.0 * LEVEL.denormalize(LEVEL.normalize(gain)).log10();
+        assert!((back - db).abs() < 1e-4, "{db} dB came back as {back} dB");
+    }
+}
+
+/// Just above the bottom of the travel is the floor, and a gain below it
+/// puts the control at the bottom.
+#[test]
+fn decibels_start_at_the_floor() {
+    let just_above = LEVEL.denormalize(1e-6);
+    assert!((20.0 * just_above.log10() + 60.0).abs() < 0.01, "{just_above}");
+    assert_eq!(LEVEL.normalize(1e-4), 0.0);
+    let deep: ParamSpec = param("level", 0.0, 1.0, 1.0, "").decibels_from(-80.0);
+    assert!((20.0 * deep.denormalize(1e-6).log10() + 80.0).abs() < 0.01);
+}
+
+/// Bad inputs give a valid value, as for the other mappings.
+#[test]
+fn decibels_handle_bad_inputs() {
+    assert_eq!(LEVEL.denormalize(f32::NAN), 1.0);
+    assert_eq!(LEVEL.denormalize(-1.0), 0.0);
+    assert_eq!(LEVEL.denormalize(2.0), 2.0);
+    assert_eq!(LEVEL.normalize(9.0), 1.0);
+    assert_eq!(LEVEL.normalize(-1.0), 0.0);
+}
+
+/// Decibel text uses the true minus sign, a plus for a boost, and one plain
+/// zero, and it names the range for help.
+#[test]
+fn decibel_text_reads_as_the_spec_shows() {
+    assert_eq!(LEVEL.value_text(1.0), "0.0 dB");
+    assert_eq!(LEVEL.value_text(0.0), "−∞ dB");
+    assert_eq!(LEVEL.value_text(2.0), "+6.0 dB");
+    assert_eq!(LEVEL.value_text(0.5), "−6.0 dB");
+    assert_eq!(LEVEL.value_text(1e-4), "−80.0 dB");
+    assert_eq!(LEVEL.value_text(0.999_999), "0.0 dB");
+    assert_eq!(LEVEL.range_text(), "−∞ to +6.0 dB");
+    assert_eq!(LEVEL.default_text(), "0.0 dB");
+}
+
+/// A player can type a value in dB in every form the spec names, a plain
+/// number is in dB, and text that is not a number is refused.
+#[test]
+fn typed_decibels_set_the_gain() {
+    let close = |text: &str, gain: f32| {
+        let got = LEVEL.parse_value_text(text).unwrap();
+        assert!((got - gain).abs() < 1e-3, "{text} gave {got}");
+    };
+    close("-6 dB", 0.501);
+    close("-6dB", 0.501);
+    close("−6.0 dB", 0.501);
+    close("+3 db", 1.413);
+    close("-6,0", 0.501);
+    close("0", 1.0);
+    close("-inf", 0.0);
+    close("−∞", 0.0);
+    close("−∞ dB", 0.0);
+    close("12 dB", 2.0);
+    let below = LEVEL.parse_value_text("-70 dB").unwrap();
+    assert!((below - 10.0_f32.powf(-3.5)).abs() < 1e-6, "{below}");
+    for bad in ["", "dB", "loud", "inf", "NaN", "3 Hz"] {
+        let error = LEVEL.parse_value_text(bad).unwrap_err();
+        assert_eq!(error.to_string(), "Not a number in dB", "{bad}");
+    }
+}
+
+/// Whatever the UI shows parses back to the same text, so committing what a
+/// field shows never moves the value by more than the text's rounding.
+#[test]
+fn decibel_text_parses_back() {
+    for gain in [0.0_f32, 1e-4, 0.001, 0.25, 0.5, 0.7, 1.0, 1.5, 2.0] {
+        let text = LEVEL.value_text(gain);
+        let back = LEVEL.parse_value_text(&text).unwrap();
+        assert_eq!(LEVEL.value_text(back), text, "{gain}");
+    }
+}
