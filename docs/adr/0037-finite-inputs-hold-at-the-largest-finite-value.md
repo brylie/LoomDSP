@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-11-04
-- **Related requirements:** FR-SIG-07, FR-SDK-02
+- **Related requirements:** FR-SIG-01, FR-SDK-02
 - **Specification:** [Module test harness, All inputs at once](../design/module-test-harness.md#all-inputs-at-once)
 - **Refines:** [ADR-0007](0007-polymorphic-signal-model.md), which says cables are never clipped and leaves overflow open.
 
