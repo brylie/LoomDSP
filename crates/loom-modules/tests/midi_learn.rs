@@ -3,8 +3,7 @@
 use loom_core::{
     Channels, ControlChangeSeen, EngineConfig, EngineParts, MidiControl, MidiEncoding, MidiEvent, MidiMappingOptions,
     MidiMessage, MidiMode, Module, ModuleConfig, ModuleDescriptor, ModuleId, ModuleRole, Panel, ParamOptions,
-    ParamRange, ParamSpec, PortDefault, PortIo, PortSpec, ProbeKind,
-    ProcessContext, SignalType, create_engine,
+    ParamRange, ParamSpec, PortDefault, PortIo, PortSpec, ProbeKind, ProcessContext, SignalType, create_engine,
 };
 use loom_modules::register_all;
 use std::sync::Arc;
@@ -453,7 +452,10 @@ fn a_range_and_invert_set_where_the_control_lands() {
         let playing = play(&mut parts, frames);
         assert_eq!(parts.controller.graph().node(id).unwrap().params[0], playing);
 
-        let inverted = MidiMappingOptions { invert: true, ..options };
+        let inverted = MidiMappingOptions {
+            invert: true,
+            ..options
+        };
         let (mut parts, _) = mapped_probe(inverted, 0.5);
         send_cc(&mut parts, CC74, 0);
         assert!((play(&mut parts, frames) - 0.8).abs() < 1e-6);
@@ -547,7 +549,10 @@ fn a_waiting_pickup_never_overwrites_a_newer_edit() {
         .add_assignment_named(id, "ccs", id, "level", 0.0)
         .unwrap();
     parts.controller.set_param(id, 0, 0.5).unwrap();
-    parts.controller.map_midi_with(CC74, id, 0, in_mode(MidiMode::Pickup)).unwrap();
+    parts
+        .controller
+        .map_midi_with(CC74, id, 0, in_mode(MidiMode::Pickup))
+        .unwrap();
     parts.controller.commit().unwrap();
     step(&mut parts);
     // Catch it, so the table holds a position of about 0.5.
@@ -596,7 +601,10 @@ fn changing_options_makes_a_pickup_wait() {
     send_cc(&mut parts, CC74, 127);
     assert_eq!(step(&mut parts).0, 0.5, "it waits");
     assert_eq!(
-        parts.controller.set_midi_options(id, 1, in_mode(MidiMode::Pickup)).unwrap(),
+        parts
+            .controller
+            .set_midi_options(id, 1, in_mode(MidiMode::Pickup))
+            .unwrap(),
         None,
         "no mapping on that parameter"
     );
@@ -619,7 +627,10 @@ fn a_range_change_makes_a_pickup_wait() {
     let ranges: &[ParamRange] = spec.options.ranges;
     assert!(ranges.len() > 1, "constant offers ranges");
     parts.controller.set_range(id, index, ranges[0]).unwrap();
-    parts.controller.map_midi_with(CC74, id, index, in_mode(MidiMode::Pickup)).unwrap();
+    parts
+        .controller
+        .map_midi_with(CC74, id, index, in_mode(MidiMode::Pickup))
+        .unwrap();
     parts.controller.commit().unwrap();
     let (old, _) = parts.controller.graph().midi_mapping_of(id, index).unwrap();
     parts.controller.set_range(id, index, ranges[1]).unwrap();
@@ -662,7 +673,10 @@ fn learning_sets_the_value_as_the_mode_would() {
     };
     moved(&mut parts, id, options, 0);
     assert!((step(&mut parts).0 - 0.8).abs() < 1e-6);
-    assert_eq!(parts.controller.graph().midi_mapping_of(id, 0).unwrap().1.options, options);
+    assert_eq!(
+        parts.controller.graph().midi_mapping_of(id, 0).unwrap().1.options,
+        options
+    );
 
     // Relative applies its step from the current value. Read as a position,
     // 65 would jump to about the middle.
@@ -694,7 +708,10 @@ fn learning_sets_the_value_as_the_mode_would() {
     // A new control starts at the defaults.
     let mut parts = engine();
     let id = add_probe(&mut parts);
-    parts.controller.map_midi_with(CC71, id, 0, in_mode(MidiMode::Pickup)).unwrap();
+    parts
+        .controller
+        .map_midi_with(CC71, id, 0, in_mode(MidiMode::Pickup))
+        .unwrap();
     parts.controller.commit().unwrap();
     step(&mut parts);
     parts.controller.learn_midi(seen(127), id, 0).unwrap();
@@ -712,7 +729,14 @@ fn learning_sets_the_value_as_the_mode_would() {
 fn a_decibel_level_takes_mappings() {
     let mut parts = engine();
     let id = parts.controller.add_module("loom.mix.mixer").unwrap();
-    let level = parts.controller.graph().node(id).unwrap().descriptor.param_index("level1").unwrap();
+    let level = parts
+        .controller
+        .graph()
+        .node(id)
+        .unwrap()
+        .descriptor
+        .param_index("level1")
+        .unwrap();
     parts.controller.map_midi(CC74, id, level).unwrap();
     parts.controller.commit().unwrap();
     step_silently(&mut parts);
@@ -726,7 +750,10 @@ fn a_decibel_level_takes_mappings() {
     parts.controller.sync_midi();
     assert_eq!(value(&parts), 2.0);
 
-    parts.controller.set_midi_options(id, level, in_mode(MidiMode::Pickup)).unwrap();
+    parts
+        .controller
+        .set_midi_options(id, level, in_mode(MidiMode::Pickup))
+        .unwrap();
     parts.controller.set_param(id, level, 1.0).unwrap();
     parts.controller.commit().unwrap();
     step_silently(&mut parts);

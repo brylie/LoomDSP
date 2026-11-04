@@ -2420,10 +2420,22 @@ fn a_mapped_control_shows_its_label_in_learn_mode() {
         draw::learned_label(Some(&learn), 1, crate::tile_text::TextKind::Caption(0)),
         Some("CC 74")
     );
-    assert_eq!(draw::learned_label(Some(&learn), 1, crate::tile_text::TextKind::Caption(1)), None);
-    assert_eq!(draw::learned_label(Some(&learn), 2, crate::tile_text::TextKind::Caption(0)), None);
-    assert_eq!(draw::learned_label(None, 1, crate::tile_text::TextKind::Caption(0)), None);
-    assert_eq!(draw::learned_label(Some(&learn), 1, crate::tile_text::TextKind::Title), None);
+    assert_eq!(
+        draw::learned_label(Some(&learn), 1, crate::tile_text::TextKind::Caption(1)),
+        None
+    );
+    assert_eq!(
+        draw::learned_label(Some(&learn), 2, crate::tile_text::TextKind::Caption(0)),
+        None
+    );
+    assert_eq!(
+        draw::learned_label(None, 1, crate::tile_text::TextKind::Caption(0)),
+        None
+    );
+    assert_eq!(
+        draw::learned_label(Some(&learn), 1, crate::tile_text::TextKind::Title),
+        None
+    );
 }
 
 /// In MIDI learn mode Space and Enter arm the focused control, arrows do

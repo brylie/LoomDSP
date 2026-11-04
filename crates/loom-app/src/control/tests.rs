@@ -377,7 +377,8 @@ fn a_script_changes_a_mappings_options() {
     let ok = Ok(Map::new());
     assert_eq!(cutoff_row(&mut app)["mapping_options"]["mode"], json!("Absolute"));
 
-    let change = r#"{"cmd": "midi_options", "target": "4:cutoff", "mode": "pickup", "low": 0.1, "high": 0.9, "invert": true}"#;
+    let change =
+        r#"{"cmd": "midi_options", "target": "4:cutoff", "mode": "pickup", "low": 0.1, "high": 0.9, "invert": true}"#;
     assert_eq!(run(&mut app, change), ok);
     let row = cutoff_row(&mut app);
     assert_eq!(row["mapping_options"]["mode"], json!("Pickup"), "{row}");
@@ -422,7 +423,10 @@ fn a_script_changes_a_mappings_options() {
             r#"{"cmd": "midi_options", "target": "4:resonance", "mode": "pickup"}"#,
             "has no MIDI mapping",
         ),
-        (r#"{"cmd": "midi_options", "target": "4", "mode": "pickup"}"#, "not a parameter"),
+        (
+            r#"{"cmd": "midi_options", "target": "4", "mode": "pickup"}"#,
+            "not a parameter",
+        ),
         (
             r#"{"cmd": "midi_options", "target": "4:nothing", "mode": "pickup"}"#,
             "has no parameter",
@@ -431,7 +435,13 @@ fn a_script_changes_a_mappings_options() {
         let error = run(&mut app, line).unwrap_err();
         assert!(error.contains(reason), "{line}: {error}");
     }
-    assert_eq!(run(&mut app, r#"{"cmd": "midi_options", "target": "4:cutoff", "mode": "absolute"}"#), ok);
+    assert_eq!(
+        run(
+            &mut app,
+            r#"{"cmd": "midi_options", "target": "4:cutoff", "mode": "absolute"}"#
+        ),
+        ok
+    );
     let bad = r#"{"cmd": "midi_options", "target": "4:cutoff", "low": 0.9, "high": 0.1}"#;
     assert!(run(&mut app, bad).unwrap_err().contains("below the high end"));
 }
@@ -446,7 +456,10 @@ fn a_waiting_pickup_shows_a_ghost_until_it_catches() {
     let mut app = app_with_mapped_cutoff();
     let ok = Ok(Map::new());
     assert_eq!(
-        run(&mut app, r#"{"cmd": "midi_options", "target": "4:cutoff", "mode": "pickup"}"#),
+        run(
+            &mut app,
+            r#"{"cmd": "midi_options", "target": "4:cutoff", "mode": "pickup"}"#
+        ),
         ok
     );
     let knob = app
@@ -461,27 +474,53 @@ fn a_waiting_pickup_shows_a_ghost_until_it_catches() {
         .position(|widget| widget.binds("cutoff"))
         .unwrap();
     let start = cutoff_row(&mut app)["mode"]["edit"]["position"].as_f64().unwrap();
-    assert!(cutoff_row(&mut app)["mapping_options"]["ghost"].is_null(), "no move yet");
+    assert!(
+        cutoff_row(&mut app)["mapping_options"]["ghost"].is_null(),
+        "no move yet"
+    );
 
     // Far away on one side: it waits.
     let (far, other) = if start < 0.5 { (127_u8, 0_u8) } else { (0_u8, 127_u8) };
-    assert_eq!(run(&mut app, &format!(r#"{{"cmd": "cc", "controller": 21, "value": {far}}}"#)), ok);
+    assert_eq!(
+        run(
+            &mut app,
+            &format!(r#"{{"cmd": "cc", "controller": 21, "value": {far}}}"#)
+        ),
+        ok
+    );
     let row = cutoff_row(&mut app);
-    assert_eq!(row["mode"]["edit"]["position"].as_f64().unwrap(), start, "the value stays");
+    assert_eq!(
+        row["mode"]["edit"]["position"].as_f64().unwrap(),
+        start,
+        "the value stays"
+    );
     let ghost = f32::from(far) / 127.0;
     assert_eq!(row["mapping_options"]["ghost"].as_f64().unwrap() as f32, ghost, "{row}");
     assert_eq!(app.values.get(4, knob).unwrap().ghost, Some(ghost));
     assert!(app.values.get(4, knob).unwrap().position as f64 == start);
 
     // Across to the other side: it catches, with no ghost and a new value.
-    assert_eq!(run(&mut app, &format!(r#"{{"cmd": "cc", "controller": 21, "value": {other}}}"#)), ok);
+    assert_eq!(
+        run(
+            &mut app,
+            &format!(r#"{{"cmd": "cc", "controller": 21, "value": {other}}}"#)
+        ),
+        ok
+    );
     let row = cutoff_row(&mut app);
     let position = f32::from(other) / 127.0;
-    assert_eq!(row["mode"]["edit"]["position"].as_f64().unwrap() as f32, position, "{row}");
+    assert_eq!(
+        row["mode"]["edit"]["position"].as_f64().unwrap() as f32,
+        position,
+        "{row}"
+    );
     assert!(row["mapping_options"]["ghost"].is_null(), "{row}");
     assert_eq!(app.values.get(4, knob).unwrap().ghost, None);
     assert_eq!(app.values.get(4, knob).unwrap().position, position);
-    assert!(crate::learn::INTERVAL <= Duration::from_millis(15), "the criterion's poll");
+    assert!(
+        crate::learn::INTERVAL <= Duration::from_millis(15),
+        "the criterion's poll"
+    );
 }
 
 /// `sample` records a knob's live value once per frame (#255): with a

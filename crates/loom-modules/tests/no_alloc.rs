@@ -220,7 +220,14 @@ fn audio_thread_never_allocates() {
                     1 => loom_core::MidiMode::Pickup,
                     _ => loom_core::MidiMode::Relative(loom_core::MidiEncoding::Offset64),
                 };
-                let index = parts.controller.graph().node(id).unwrap().descriptor.param_index("cutoff").unwrap();
+                let index = parts
+                    .controller
+                    .graph()
+                    .node(id)
+                    .unwrap()
+                    .descriptor
+                    .param_index("cutoff")
+                    .unwrap();
                 parts
                     .controller
                     .set_midi_options(

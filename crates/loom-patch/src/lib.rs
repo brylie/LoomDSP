@@ -30,8 +30,8 @@
 #![warn(missing_docs)]
 
 use loom_core::{
-    Controller, Graph, InputRef, LoomError, MidiControl, MidiEncoding, MidiMappingOptions, MidiMode, ModuleId, OutputRef, ParamRange, Polarity, Registry,
-    TRANSPORT_MODULE,
+    Controller, Graph, InputRef, LoomError, MidiControl, MidiEncoding, MidiMappingOptions, MidiMode, ModuleId,
+    OutputRef, ParamRange, Polarity, Registry, TRANSPORT_MODULE,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

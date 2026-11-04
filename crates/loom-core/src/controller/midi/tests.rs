@@ -187,7 +187,11 @@ fn a_swap_does_not_take_a_relative_step_twice() {
     );
 
     let one_step = 0.5 + 1.0 / 128.0;
-    assert!(parts.midi.send(crate::MidiEvent::control_change(0, 0, KNOB.controller, 65)));
+    assert!(
+        parts
+            .midi
+            .send(crate::MidiEvent::control_change(0, 0, KNOB.controller, 65))
+    );
     parts.engine.process(&mut left, &mut right);
     assert_eq!(gauge(), one_step);
 
@@ -203,7 +207,11 @@ fn a_swap_does_not_take_a_relative_step_twice() {
     assert_eq!(gauge(), one_step, "the swap sets the result again, once");
 
     // The next step starts from there.
-    assert!(parts.midi.send(crate::MidiEvent::control_change(0, 0, KNOB.controller, 65)));
+    assert!(
+        parts
+            .midi
+            .send(crate::MidiEvent::control_change(0, 0, KNOB.controller, 65))
+    );
     parts.engine.process(&mut left, &mut right);
     assert_eq!(gauge(), 0.5 + 2.0 / 128.0);
 }

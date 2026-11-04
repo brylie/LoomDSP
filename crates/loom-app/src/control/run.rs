@@ -784,7 +784,11 @@ impl App {
             Some("offset64") => Some(MidiEncoding::Offset64),
             Some("twos_complement") => Some(MidiEncoding::TwosComplement),
             Some("sign_bit") => Some(MidiEncoding::SignBit),
-            Some(other) => return Err(format!("no encoding `{other}`; use offset64, twos_complement, or sign_bit")),
+            Some(other) => {
+                return Err(format!(
+                    "no encoding `{other}`; use offset64, twos_complement, or sign_bit"
+                ));
+            }
         };
         let relative = |current: MidiMode| match current {
             MidiMode::Relative(kept) => kept,

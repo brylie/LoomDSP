@@ -125,7 +125,10 @@ fn a_ghost_lasts_one_second_after_the_last_move() {
     assert!(ghosts.update(&[waiting(0.5, 2)], start + GHOST_TIME / 2));
     assert_eq!(ghosts.shown().get(&(4, 0)), Some(&0.5));
     assert!(!ghosts.update(&[waiting(0.5, 2)], start + GHOST_TIME));
-    assert!(ghosts.update(&[waiting(0.5, 2)], start + GHOST_TIME + GHOST_TIME / 2), "it runs out");
+    assert!(
+        ghosts.update(&[waiting(0.5, 2)], start + GHOST_TIME + GHOST_TIME / 2),
+        "it runs out"
+    );
     assert!(ghosts.shown().is_empty());
     assert!(
         !ghosts.update(&[waiting(0.5, 2)], start + GHOST_TIME * 3),

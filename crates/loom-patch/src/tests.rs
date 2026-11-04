@@ -563,10 +563,25 @@ fn mapping_modes_round_trip() {
     let mut parts = engine();
     patch.load_into(&mut parts.controller).unwrap();
     let graph = parts.controller.graph();
-    let cutoff = graph.midi_mapping_on(MidiControl { channel: 0, controller: 74 }).unwrap().1;
+    let cutoff = graph
+        .midi_mapping_on(MidiControl {
+            channel: 0,
+            controller: 74,
+        })
+        .unwrap()
+        .1;
     assert_eq!(cutoff.options.mode, MidiMode::Pickup);
-    assert_eq!((cutoff.options.low, cutoff.options.high, cutoff.options.invert), (0.2, 0.8, true));
-    let resonance = graph.midi_mapping_on(MidiControl { channel: 0, controller: 20 }).unwrap().1;
+    assert_eq!(
+        (cutoff.options.low, cutoff.options.high, cutoff.options.invert),
+        (0.2, 0.8, true)
+    );
+    let resonance = graph
+        .midi_mapping_on(MidiControl {
+            channel: 0,
+            controller: 20,
+        })
+        .unwrap()
+        .1;
     assert_eq!(resonance.options.mode, MidiMode::Relative(MidiEncoding::Offset64));
     let text = Patch::from_graph("t", graph).to_ron().unwrap();
     assert!(text.contains("mode: Pickup"), "{text}");
@@ -605,7 +620,10 @@ fn bad_mapping_options_do_not_load() {
         let patch = Patch::from_ron(&text).unwrap();
         let mut parts = engine();
         let error = patch.load_into(&mut parts.controller).unwrap_err();
-        assert!(matches!(error, PatchError::InvalidMidiMapping { .. }), "{fields}: {error}");
+        assert!(
+            matches!(error, PatchError::InvalidMidiMapping { .. }),
+            "{fields}: {error}"
+        );
         assert!(error.to_string().contains("cutoff"), "{error}");
     }
 }

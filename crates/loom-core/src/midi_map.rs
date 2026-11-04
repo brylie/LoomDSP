@@ -155,11 +155,11 @@ impl MidiMappingOptions {
     /// edits and for loading a patch, so an edit can never make a patch that
     /// does not load.
     pub fn check(&self) -> Result<(), &'static str> {
-        // Written so that NaN fails too.
+        // Written so that NaN fails here, and the next check can compare.
         if !(self.low >= 0.0 && self.high <= 1.0) {
             return Err("its range must be from 0 to 1");
         }
-        if !(self.low < self.high) {
+        if self.low >= self.high {
             return Err("the low end of its range must be below the high end");
         }
         if matches!(self.mode, MidiMode::Relative(_)) && (self.low != 0.0 || self.high != 1.0 || self.invert) {

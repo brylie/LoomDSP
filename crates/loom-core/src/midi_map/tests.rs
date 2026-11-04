@@ -207,7 +207,10 @@ fn a_first_control_change_catches_only_within_one_step() {
     let mut far = ControlState::seeded(MidiMappingId(1), &UNIT, 0.5, true);
     assert_eq!(far.control_change(&options, &UNIT, 0), ControlOutcome::Waiting);
     let mut near = ControlState::seeded(MidiMappingId(1), &UNIT, 0.5, true);
-    assert!(matches!(near.control_change(&options, &UNIT, 64), ControlOutcome::Set(_)));
+    assert!(matches!(
+        near.control_change(&options, &UNIT, 64),
+        ControlOutcome::Set(_)
+    ));
 }
 
 /// One step stays 1/127 of position on a narrow range, so a step on the
@@ -221,7 +224,10 @@ fn one_step_is_the_same_on_a_narrow_range() {
         invert: false,
     };
     let mut state = ControlState::seeded(MidiMappingId(1), &UNIT, 0.505, true);
-    assert!(matches!(state.control_change(&options, &UNIT, 0), ControlOutcome::Set(_)));
+    assert!(matches!(
+        state.control_change(&options, &UNIT, 0),
+        ControlOutcome::Set(_)
+    ));
 }
 
 /// A parameter outside the span is caught at the span's nearest end, because
@@ -248,7 +254,10 @@ fn a_change_from_elsewhere_makes_a_pickup_wait() {
     set(state.control_change(&options, &UNIT, 64));
     state.changed_elsewhere(&options, &UNIT, 0.9);
     assert_eq!(state.control_change(&options, &UNIT, 70), ControlOutcome::Waiting);
-    assert!(matches!(state.control_change(&options, &UNIT, 127), ControlOutcome::Set(_)));
+    assert!(matches!(
+        state.control_change(&options, &UNIT, 127),
+        ControlOutcome::Set(_)
+    ));
 }
 
 /// Relative steps by 1/128 from the current position, stops at the ends, and
@@ -275,11 +284,7 @@ fn relative_steps_and_stops_at_the_ends() {
 /// same value, so an encoder never stays stuck.
 #[test]
 fn relative_small_steps_add_up_on_a_whole_number() {
-    let whole = ParamSpec {
-        max: 3.0,
-        ..UNIT
-    }
-    .integer();
+    let whole = ParamSpec { max: 3.0, ..UNIT }.integer();
     let options = in_mode(MidiMode::Relative(MidiEncoding::Offset64));
     let mut state = ControlState::seeded(MidiMappingId(1), &whole, 0.0, false);
     let mut last = 0.0;
