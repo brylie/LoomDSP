@@ -1379,7 +1379,7 @@ impl App {
             | Message::Matrix(_)
             | Message::MatrixKey(_) => {}
             Message::ShowHelp => {
-                if self.help.is_none() && self.rig.window.is_none() {
+                if self.help.is_none() {
                     let descriptor = self
                         .browser
                         .as_ref()

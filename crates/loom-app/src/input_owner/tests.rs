@@ -233,14 +233,15 @@ fn only_the_input_listener_restarts_when_who_is_listening_changes() {
     assert_eq!(identity(crate::subscriptions::always_subscription()), always);
 }
 
-/// Help opens on top of Your patches and the chooser (help-pages.md, Help in the
-/// app), and has the input there: a click on its backdrop closes it, and one
-/// Escape closes it and nothing else.
+/// Help opens on top of Your patches, the chooser, and Preferences
+/// (help-pages.md, Help in the app), and has the input there: a click on its
+/// backdrop closes it, and one Escape closes it and nothing else.
 #[test]
 fn help_is_on_top_of_a_dialog_and_closes_alone() {
-    for (owner, close) in [(InputOwner::Patches, "escape"), (InputOwner::Chooser, "escape")]
+    let owners = [InputOwner::Patches, InputOwner::Chooser, InputOwner::Preferences];
+    for (owner, close) in owners
         .into_iter()
-        .chain([(InputOwner::Patches, "click"), (InputOwner::Chooser, "click")])
+        .flat_map(|owner| [(owner, "escape"), (owner, "click")])
     {
         let mut ui = Ui::open("subtractive.ron");
         open_overlay(&mut ui, owner);
@@ -256,6 +257,23 @@ fn help_is_on_top_of_a_dialog_and_closes_alone() {
         assert!(ui.app.help.is_none(), "{owner:?}, {close}: help closed");
         assert_eq!(ui.app.input_owner(), owner, "{owner:?}, {close}: the dialog stayed");
     }
+}
+
+/// The chooser has two ways in, and F1 works over it from Preferences as well:
+/// one Escape closes help, the next the chooser, and the window stays.
+#[test]
+fn help_opens_over_a_chooser_opened_from_preferences() {
+    let mut ui = Ui::open("subtractive.ron");
+    ui.send(Message::Preferences(settings::Message::Open));
+    ui.send(Message::Preferences(settings::Message::ChooseLicence));
+    ui.redraw();
+    assert_eq!(ui.app.input_owner(), InputOwner::Chooser);
+    ui.tap(Key::Named(Named::F1), Modifiers::empty());
+    assert_eq!(ui.app.input_owner(), InputOwner::Help);
+    ui.tap(Key::Named(Named::Escape), Modifiers::empty());
+    assert_eq!(ui.app.input_owner(), InputOwner::Chooser, "help closed");
+    ui.tap(Key::Named(Named::Escape), Modifiers::empty());
+    assert_eq!(ui.app.input_owner(), InputOwner::Preferences, "the chooser closed");
 }
 
 /// While help is on top, the patch list behind it hears no keys.
