@@ -184,8 +184,8 @@ impl App {
         ];
         let (undo_hint, redo_hint) = (self.undo_hint(), self.redo_hint());
         let edit = row![
-            history_button("Undo", undo_hint, "Nothing to undo", Message::Undo),
-            history_button("Redo", redo_hint, "Nothing to redo", Message::Redo),
+            history_button("Undo", undo_hint, Message::Undo),
+            history_button("Redo", redo_hint, Message::Redo),
         ];
         let setup = row![
             // Primary only while learning: a mode that is on.
@@ -236,8 +236,6 @@ impl App {
         }
     }
 
-    /// An Undo or Redo button. It is disabled with nothing to do, and its
-    /// hover text names the step.
     pub(crate) fn inspector(&self) -> Element<'_, Message> {
         inspector::view(
             self.inspector_model(),
@@ -484,10 +482,14 @@ pub(crate) fn severity_colour(severity: alerts::Severity) -> Color {
 }
 
 /// A toolbar Undo or Redo button. `hint` names what it would do, and the
-/// button works only when there is one. `nothing` is the hint otherwise.
-fn history_button<'a>(label: &'a str, hint: Option<String>, nothing: &str, message: Message) -> Element<'a, Message> {
-    let enabled = hint.is_some();
-    let hint = hint.unwrap_or_else(|| nothing.to_string());
+/// button works only then; otherwise the hover text says why not.
+fn history_button<'a>(
+    label: &'a str,
+    hint: Result<String, crate::editing::HistoryBlock>,
+    message: Message,
+) -> Element<'a, Message> {
+    let enabled = hint.is_ok();
+    let hint = hint.unwrap_or_else(|block| block.hover(label == "Redo").to_string());
     tooltip(
         button(text(label).size(style::CONTROL)).on_press_maybe(enabled.then_some(message)),
         container(text(hint).size(style::BODY))

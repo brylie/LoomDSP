@@ -904,6 +904,19 @@ fn toolbar_undo_works_while_an_arrow_group_is_released() {
     assert_eq!(app.session.edits.arrow_group(), crate::edits::ArrowGroup::Closed);
 }
 
+/// `toolbar` refuses Undo and Redo while an arrow key is held, as the
+/// disabled buttons do, and says an edit is in progress.
+#[test]
+fn toolbar_refuses_undo_while_an_arrow_is_held() {
+    let mut app = App::new(crate::tests::app_args());
+    app.arrow_event(crate::edits::ArrowEvent::Step(std::time::Instant::now()));
+    assert_eq!(app.session.edits.arrow_group(), crate::edits::ArrowGroup::Held);
+    for name in ["undo", "redo"] {
+        let error = run(&mut app, &format!(r#"{{"cmd": "toolbar", "button": "{name}"}}"#)).unwrap_err();
+        assert!(error.contains("an edit is in progress"), "{name}: {error}");
+    }
+}
+
 /// `toolbar` refuses what a click could not do: dialogs (rule 9),
 /// disabled buttons, and unknown names.
 #[test]

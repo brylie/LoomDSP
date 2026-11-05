@@ -145,6 +145,11 @@ fn an_arrow_right_after_undo_is_a_new_step() {
     ui.tap(right(), keyboard::Modifiers::default());
     let moved = ui.app.session.positions[&FILTER];
     assert_ne!(moved, place, "the arrow moved the tile");
+    assert_eq!(
+        ui.app.redo_hint(),
+        Err(crate::editing::HistoryBlock::Nothing),
+        "the released move is a new edit, so the undone knob step cannot come back"
+    );
     ui.redraw_at(Instant::now() + PAST_GROUP);
     assert!(!ui.app.session.edits.gesture_open());
     ui.click_text("Undo");
@@ -169,6 +174,27 @@ fn a_held_arrow_is_one_step() {
     ui.redraw_at(Instant::now() + PAST_GROUP);
     assert!(cutoff(&ui) > original, "every repeat moved the knob");
     assert_eq!(steps(&ui), before + 1, "one step for the whole hold");
+    ui.click_text("Undo");
+    assert_eq!(cutoff(&ui), original);
+}
+
+/// While an arrow key is held, the group stays open and Undo would do
+/// nothing, so the button is disabled and says why. Once the key is let
+/// go, Undo works at once.
+#[test]
+fn undo_is_disabled_while_an_arrow_is_held() {
+    use crate::editing::HistoryBlock;
+    let mut ui = open_on_cutoff();
+    let original = cutoff(&ui);
+    ui.key_down(right(), false);
+    let held = cutoff(&ui);
+    assert_ne!(held, original, "the arrow moved the knob");
+    assert_eq!(ui.app.undo_hint(), Err(HistoryBlock::EditOpen));
+    assert_eq!(ui.app.redo_hint(), Err(HistoryBlock::EditOpen));
+    assert!(ui.app.session.edits.gesture_open());
+
+    ui.key_up(right());
+    assert!(ui.app.undo_hint().is_ok(), "a released group can be undone");
     ui.click_text("Undo");
     assert_eq!(cutoff(&ui), original);
 }
@@ -259,13 +285,7 @@ fn a_press_and_release_in_one_frame_still_close_the_group() {
     let before = steps(&ui);
     ui.step(&[
         key_pressed(right(), false),
-        Event::Keyboard(keyboard::Event::KeyReleased {
-            key: right(),
-            modified_key: right(),
-            physical_key: keyboard::key::Physical::Unidentified(keyboard::key::NativeCode::Unidentified),
-            location: keyboard::Location::Standard,
-            modifiers: keyboard::Modifiers::default(),
-        }),
+        key_released(right(), keyboard::Modifiers::default()),
     ]);
     assert_ne!(cutoff(&ui), original);
     ui.redraw_at(Instant::now() + PAST_GROUP);

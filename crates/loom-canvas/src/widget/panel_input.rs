@@ -39,6 +39,16 @@ pub(super) fn is_arrow(key: &keyboard::Key) -> bool {
     )
 }
 
+/// True for a modifier key pressed on its own, which the window reports as
+/// a key press too.
+fn is_modifier(key: &keyboard::Key) -> bool {
+    use keyboard::key::Named;
+    matches!(
+        key.as_ref(),
+        keyboard::Key::Named(Named::Shift | Named::Control | Named::Alt | Named::AltGraph | Named::Meta | Named::Super)
+    )
+}
+
 impl<Message> PatchCanvas<'_, Message> {
     pub(super) fn is_control(&self, module: u32, widget: usize) -> bool {
         self.scene
@@ -493,11 +503,12 @@ impl<Message> PatchCanvas<'_, Message> {
     ) -> bool {
         use keyboard::key::Named;
         // Within the release window, an arrow keeps the group open and any
-        // other key ends it.
+        // other key ends it. A modifier alone does not: Shift pressed before
+        // the next arrow is part of that arrow.
         if let ArrowGroupView::Released { .. } = self.arrow_group {
             if is_arrow(key) {
                 self.emit(shell, CanvasEvent::ArrowPressed { at: Instant::now() });
-            } else {
+            } else if !is_modifier(key) {
                 self.end_arrow_group(shell, false);
             }
         }

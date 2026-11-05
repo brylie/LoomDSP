@@ -2290,6 +2290,26 @@ fn released_group() -> ArrowGroupView {
     }
 }
 
+/// Shift pressed alone after an arrow release keeps the group open, so
+/// Shift and the next arrow join the same step. Another key ends it.
+#[test]
+fn a_modifier_alone_keeps_a_released_group() {
+    let scene = Scene::new(vec![module(1, 0.0)], Vec::new());
+    let selected = BTreeSet::from([1]);
+    let released = PatchCanvas::new(&scene, &selected, |e| e).arrow_group(released_group());
+    let mut state = State::default();
+    let at = Point::new(700.0, 500.0);
+    for modifier in [keyboard::key::Named::Shift, keyboard::key::Named::Control] {
+        let events = drive(&released, &mut state, &key_event(modifier, true), at);
+        assert!(
+            !events.contains(&CanvasEvent::ArrowGroupEnd),
+            "{modifier:?} alone ended the group: {events:?}"
+        );
+    }
+    let other = drive(&released, &mut state, &key_event(keyboard::key::Named::Tab, true), at);
+    assert!(other.contains(&CanvasEvent::ArrowGroupEnd), "{other:?}");
+}
+
 /// An unfocused selected tile moves by one grid cell, or ten with Shift.
 /// The canvas reports each arrow step and release; with the group released,
 /// an arrow press says so first, and the next other key ends the group.

@@ -227,11 +227,11 @@ pub(super) fn press_message(app: &App, name: &str) -> Result<Message, String> {
         "panic" => (Message::Panic, None),
         "undo" => (
             Message::Undo,
-            app.undo_hint().is_none().then_some("Undo is disabled: nothing to undo"),
+            app.undo_hint().err().map(|block| block.press_error(false)),
         ),
         "redo" => (
             Message::Redo,
-            app.redo_hint().is_none().then_some("Redo is disabled: nothing to redo"),
+            app.redo_hint().err().map(|block| block.press_error(true)),
         ),
         "open" | "save" | "save-as" => {
             return Err(format!(

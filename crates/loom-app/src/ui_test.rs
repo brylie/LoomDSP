@@ -308,13 +308,7 @@ impl Ui {
 
     /// Lets go of a key.
     pub(crate) fn key_up(&mut self, key: keyboard::Key) -> Vec<Message> {
-        self.step(&[Event::Keyboard(keyboard::Event::KeyReleased {
-            key: key.clone(),
-            modified_key: key,
-            physical_key: keyboard::key::Physical::Unidentified(keyboard::key::NativeCode::Unidentified),
-            location: keyboard::Location::Standard,
-            modifiers: keyboard::Modifiers::default(),
-        })])
+        self.step(&[key_released(key, keyboard::Modifiers::default())])
     }
 
     /// Clicks the first text widget that reads exactly `content`, such as a
@@ -432,23 +426,8 @@ impl Ui {
 
     /// Presses and releases a key with modifiers held.
     pub(crate) fn tap(&mut self, key: keyboard::Key, modifiers: keyboard::Modifiers) -> Vec<Message> {
-        let physical = keyboard::key::Physical::Unidentified(keyboard::key::NativeCode::Unidentified);
-        let mut messages = self.step(&[Event::Keyboard(keyboard::Event::KeyPressed {
-            key: key.clone(),
-            modified_key: key.clone(),
-            physical_key: physical,
-            location: keyboard::Location::Standard,
-            modifiers,
-            text: None,
-            repeat: false,
-        })]);
-        messages.extend(self.step(&[Event::Keyboard(keyboard::Event::KeyReleased {
-            key: key.clone(),
-            modified_key: key,
-            physical_key: physical,
-            location: keyboard::Location::Standard,
-            modifiers,
-        })]));
+        let mut messages = self.step(&[key_press(key.clone(), modifiers, None, false)]);
+        messages.extend(self.step(&[key_released(key, modifiers)]));
         messages
     }
 
@@ -456,25 +435,12 @@ impl Ui {
     /// does. Only the widget with focus takes it.
     pub(crate) fn typewrite(&mut self, text: &str) -> Vec<Message> {
         let mut messages = Vec::new();
+        let none = keyboard::Modifiers::default();
         for c in text.chars() {
-            let key = keyboard::Key::Character(c.to_string().into());
-            let physical = keyboard::key::Physical::Unidentified(keyboard::key::NativeCode::Unidentified);
-            messages.extend(self.step(&[Event::Keyboard(keyboard::Event::KeyPressed {
-                key: key.clone(),
-                modified_key: key.clone(),
-                physical_key: physical,
-                location: keyboard::Location::Standard,
-                modifiers: keyboard::Modifiers::default(),
-                text: Some(c.to_string().into()),
-                repeat: false,
-            })]));
-            messages.extend(self.step(&[Event::Keyboard(keyboard::Event::KeyReleased {
-                key: key.clone(),
-                modified_key: key,
-                physical_key: physical,
-                location: keyboard::Location::Standard,
-                modifiers: keyboard::Modifiers::default(),
-            })]));
+            let typed = c.to_string();
+            let key = keyboard::Key::Character(typed.as_str().into());
+            messages.extend(self.step(&[key_press(key.clone(), none, Some(&typed), false)]));
+            messages.extend(self.step(&[key_released(key, none)]));
         }
         messages
     }
@@ -622,14 +588,31 @@ impl Ui {
 
 /// A key press with no modifiers and no text, as the keyboard sends it.
 pub(crate) fn key_pressed(key: keyboard::Key, repeat: bool) -> Event {
+    key_press(key, keyboard::Modifiers::default(), None, repeat)
+}
+
+/// A key press with `modifiers` held, carrying `text` when the key types
+/// a character.
+fn key_press(key: keyboard::Key, modifiers: keyboard::Modifiers, text: Option<&str>, repeat: bool) -> Event {
     Event::Keyboard(keyboard::Event::KeyPressed {
         key: key.clone(),
         modified_key: key,
         physical_key: keyboard::key::Physical::Unidentified(keyboard::key::NativeCode::Unidentified),
         location: keyboard::Location::Standard,
-        modifiers: keyboard::Modifiers::default(),
-        text: None,
+        modifiers,
+        text: text.map(Into::into),
         repeat,
+    })
+}
+
+/// A key release with `modifiers` held.
+pub(crate) fn key_released(key: keyboard::Key, modifiers: keyboard::Modifiers) -> Event {
+    Event::Keyboard(keyboard::Event::KeyReleased {
+        key: key.clone(),
+        modified_key: key,
+        physical_key: keyboard::key::Physical::Unidentified(keyboard::key::NativeCode::Unidentified),
+        location: keyboard::Location::Standard,
+        modifiers,
     })
 }
 
