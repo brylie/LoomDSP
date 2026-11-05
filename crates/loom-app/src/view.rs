@@ -182,23 +182,7 @@ impl App {
                 },
             ),
         ];
-        // A released arrow edit is not a step until its group closes, and
-        // Undo closes it first, so Undo works then too (undo.md).
-        let undo_hint = if matches!(self.session.edits.arrow_group(), ArrowGroup::Released { .. }) {
-            Some("Undo: the arrow key edit".to_string())
-        } else {
-            self.session
-                .edits
-                .history
-                .undo_step()
-                .map(|step| format!("Undo: {}", step.name()))
-        };
-        let redo_hint = self
-            .session
-            .edits
-            .history
-            .redo_step()
-            .map(|step| format!("Redo: {}", step.name()));
+        let (undo_hint, redo_hint) = (self.undo_hint(), self.redo_hint());
         let edit = row![
             history_button("Undo", undo_hint, "Nothing to undo", Message::Undo),
             history_button("Redo", redo_hint, "Nothing to redo", Message::Redo),

@@ -891,6 +891,19 @@ fn the_panic_command_and_button_run_panic() {
     assert!(app.alerts.status().starts_with("Panic"), "{}", app.alerts.status());
 }
 
+/// `toolbar` presses Undo while an arrow edit is released, as a click can:
+/// the edit is not a step yet, but Undo closes the group first.
+#[test]
+fn toolbar_undo_works_while_an_arrow_group_is_released() {
+    let mut app = App::new(crate::tests::app_args());
+    assert!(run(&mut app, r#"{"cmd": "toolbar", "button": "undo"}"#).is_err());
+    app.session.edits.set_arrow_group(crate::edits::ArrowGroup::Released {
+        due: std::time::Instant::now() + std::time::Duration::from_secs(60),
+    });
+    assert!(run(&mut app, r#"{"cmd": "toolbar", "button": "undo"}"#).is_ok());
+    assert_eq!(app.session.edits.arrow_group(), crate::edits::ArrowGroup::Closed);
+}
+
 /// `toolbar` refuses what a click could not do: dialogs (rule 9),
 /// disabled buttons, and unknown names.
 #[test]

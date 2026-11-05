@@ -216,6 +216,28 @@ impl App {
         self.session.edits.set_arrow_group(next);
     }
 
+    /// What toolbar Undo would do, or `None` when it is disabled. The
+    /// button and the control channel both ask this, so a script presses
+    /// what a click could. A released arrow edit is not a step until its
+    /// group closes, and Undo closes it first, so Undo works then too
+    /// (undo.md).
+    pub(crate) fn undo_hint(&self) -> Option<String> {
+        if matches!(
+            self.session.edits.arrow_group(),
+            crate::edits::ArrowGroup::Released { .. }
+        ) {
+            return Some("Undo: the arrow key edit".to_string());
+        }
+        let step = self.session.edits.history.undo_step()?;
+        Some(format!("Undo: {}", step.name()))
+    }
+
+    /// What toolbar Redo would do, or `None` when it is disabled.
+    pub(crate) fn redo_hint(&self) -> Option<String> {
+        let step = self.session.edits.history.redo_step()?;
+        Some(format!("Redo: {}", step.name()))
+    }
+
     pub(crate) fn undo(&mut self) {
         self.close_slider_gesture();
         if !self.session.edits.gesture_open() {
