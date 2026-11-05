@@ -947,3 +947,73 @@ fn an_xy_scope_needs_two_outputs_of_its_module() {
         assert!(problem.contains("two different outputs"), "{problem}");
     }
 }
+
+/// Each widget builder sets its kind, place, and names. The registry only
+/// calls them in `const` panels, which run at compile time, so this test is
+/// where they run as code.
+#[test]
+fn widget_builders_set_kind_place_and_names() {
+    use WidgetKind as K;
+    let one = |w: Widget, bind: &str| {
+        assert_eq!((w.x, w.y, w.bind()), (1, 2, bind), "{w:?}");
+        assert_eq!((w.caption, w.shown_when), (None, None), "{w:?}");
+        w
+    };
+    assert!(matches!(one(Widget::knob(1, 2, "p"), "p").kind, K::Knob));
+    assert!(matches!(
+        one(Widget::fader(1, 2, "p"), "p").kind,
+        K::Fader { vertical: true }
+    ));
+    assert!(matches!(
+        one(Widget::fader_horizontal(1, 2, "p"), "p").kind,
+        K::Fader { vertical: false }
+    ));
+    assert!(matches!(one(Widget::number(1, 2, "p"), "p").kind, K::Number));
+    assert!(matches!(one(Widget::toggle(1, 2, "p"), "p").kind, K::Toggle));
+    assert!(matches!(one(Widget::radio(1, 2, "p"), "p").kind, K::Radio));
+    assert!(matches!(
+        one(Widget::segmented(1, 2, 3, "p"), "p").kind,
+        K::Segmented { width: 3 }
+    ));
+    assert!(matches!(one(Widget::scope(1, 2, "out"), "out").kind, K::Scope));
+    assert!(matches!(one(Widget::spectrum(1, 2, "out"), "out").kind, K::Spectrum));
+    assert!(matches!(
+        one(Widget::level_history(1, 2, "out"), "out").kind,
+        K::LevelHistory
+    ));
+    assert!(matches!(
+        one(Widget::xy_scope(1, 2, "l", "r"), "l").kind,
+        K::XyScope { y: "r" }
+    ));
+    assert!(matches!(
+        one(Widget::momentary(1, 2, "go"), "go").kind,
+        K::Button { mode: "", hold: "go" }
+    ));
+
+    // The two-parameter widgets carry their caption and second name.
+    let pad = Widget::xy_pad(1, 2, "h", "v", "Pad");
+    assert_eq!((pad.bind(), pad.second(), pad.caption), ("h", Some("v"), Some("Pad")));
+    let range = Widget::range(1, 2, "lo", "hi", "Band");
+    assert!(matches!(
+        range.kind,
+        K::Range {
+            high: "hi",
+            vertical: false
+        }
+    ));
+    assert_eq!((range.second(), range.caption), (Some("hi"), Some("Band")));
+    let tall = Widget::range_vertical(1, 2, "lo", "hi", "Band");
+    assert!(matches!(tall.kind, K::Range { vertical: true, .. }));
+
+    // The modifiers change only what they name.
+    let captioned = Widget::knob(1, 2, "p").captioned("1");
+    assert_eq!(captioned.caption, Some("1"));
+    let shown = Widget::scope(1, 2, "out").shown_when("view", &[1]);
+    assert_eq!(
+        shown.shown_when,
+        Some(ShownWhen {
+            param: "view",
+            choices: &[1]
+        })
+    );
+}
