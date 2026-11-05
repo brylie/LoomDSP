@@ -1,4 +1,5 @@
 use super::*;
+use crate::signal::SignalType;
 
 /// A parameter for test descriptors.
 const fn param(name: &'static str, min: f32, max: f32, default: f32, unit: &'static str) -> ParamSpec {

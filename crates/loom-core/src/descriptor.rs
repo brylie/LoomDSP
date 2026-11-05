@@ -15,8 +15,6 @@ pub use param::{NotANumber, ParamMapping, ParamOptions, ParamRange, ParamSpec, S
 pub use port::{Channels, Polarity, PortDefault, PortRange, PortSpec};
 
 use crate::module::Module;
-#[cfg(test)]
-use crate::signal::SignalType;
 
 /// Settings passed to a module factory.
 #[derive(Debug, Clone, Copy)]
@@ -214,18 +212,6 @@ impl ModuleDescriptor {
                 _ => value,
             })
             .collect()
-    }
-
-    /// The parameter that shares its selected control range with parameter
-    /// `index`: the other one on a range widget (control-ranges.md, Ranges on
-    /// a range widget).
-    pub fn range_partner(&self, index: usize) -> Option<usize> {
-        let name = self.params.get(index)?.name;
-        self.panel.widgets.iter().find_map(|w| match w.kind {
-            WidgetKind::Range { high, .. } if w.bind == name => self.param_index(high),
-            WidgetKind::Range { high, .. } if high == name => self.param_index(w.bind),
-            _ => None,
-        })
     }
 
     /// The range a loaded module gets for parameter `index`, and whether the

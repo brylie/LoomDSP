@@ -42,7 +42,7 @@ pub struct Widget {
     /// for lights, an output name for meters and scopes. Private, because a
     /// widget can bind a second parameter: a lookup by name asks
     /// [`Widget::binds`], so it cannot miss the second one.
-    pub(super) bind: &'static str,
+    bind: &'static str,
     /// The tile's caption, when it differs from the bound item's label,
     /// such as "1" under each mixer strip's level (panels.md, Panel layout,
     /// principle 10). Hover text and the inspector keep the full label.
@@ -947,5 +947,17 @@ impl ModuleDescriptor {
             }
         }
         Ok(())
+    }
+
+    /// The parameter that shares its selected control range with parameter
+    /// `index`: the other one on a range widget (control-ranges.md, Ranges on
+    /// a range widget).
+    pub fn range_partner(&self, index: usize) -> Option<usize> {
+        let name = self.params.get(index)?.name;
+        self.panel.widgets.iter().find_map(|w| match w.kind {
+            WidgetKind::Range { high, .. } if w.bind == name => self.param_index(high),
+            WidgetKind::Range { high, .. } if high == name => self.param_index(w.bind),
+            _ => None,
+        })
     }
 }
