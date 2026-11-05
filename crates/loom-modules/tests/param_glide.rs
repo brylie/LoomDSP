@@ -113,6 +113,31 @@ fn whole_number_parameters_report_no_glide() {
     assert!(failed.is_empty(), "{failed:#?}");
 }
 
+/// A parameter with no smoothing reports no glide, even while the module's
+/// smoothed parameters are moving. The engine would otherwise start a glide
+/// that the parameter does not have, or from another parameter's value, if a
+/// module's `param_glide` answered for the wrong index.
+#[test]
+fn parameters_without_smoothing_report_no_glide() {
+    let mut failed = Vec::new();
+    for descriptor in modules() {
+        let mut module = start(descriptor);
+        for (index, spec) in descriptor.params.iter().enumerate() {
+            module.set_param(index, changed(spec));
+        }
+        advance(module.as_mut(), descriptor, STILL_GLIDING);
+        for (index, spec) in descriptor.params.iter().enumerate() {
+            if spec.options.smooth_seconds > 0.0 {
+                continue;
+            }
+            if let Some(value) = module.param_glide(index) {
+                failed.push(format!("{}:{} reports {value}", descriptor.id, spec.name));
+            }
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
 /// A knob follows one curve, whether or not it has an assignment. The engine
 /// glides in the control's position (`fill_param`), so a logarithmic parameter
 /// spends equal time per octave, and a module must glide the same way (#615).
