@@ -262,16 +262,17 @@ impl App {
         let tab = |label: &'static str, which: RightTab| {
             button(text(label).size(style::CONTROL))
                 .padding([4, 12])
-                .style(style::tab(self.matrix.tab == which))
+                .style(style::tab(self.right_tab == which))
                 .on_press(Message::Matrix(MatrixEvent::Tab(which)))
         };
         let tabs = row![tab("Inspector", RightTab::Inspector), tab("Matrix", RightTab::Matrix)]
             .spacing(4)
             .padding([6, 8]);
-        let panel = match self.matrix.tab {
+        let panel = match self.right_tab {
             RightTab::Inspector => self.inspector(),
             RightTab::Matrix => matrix::view(
-                self.matrix.model(self.controller.graph(), &self.selection),
+                self.matrix
+                    .model(self.controller.graph(), &self.selection, self.right_tab),
                 &self.matrix,
                 self.controller.graph(),
             ),

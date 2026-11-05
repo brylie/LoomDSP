@@ -16,7 +16,7 @@ fn bundled_help_examples_load() {
         assert!(!help.model.notes.is_empty(), "{} has no notes", descriptor.id);
         let example = help.model.example.as_ref().expect(descriptor.id);
         let patch = loom_patch::Patch::from_ron(example).expect(descriptor.id);
-        let session = crate::App::session(
+        let session = crate::Loaded::read(
             loom_core::EngineConfig::default(),
             false,
             crate::Source::Recovered(Box::new(patch)),

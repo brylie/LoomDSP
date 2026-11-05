@@ -104,7 +104,7 @@ fn matrix_cell<'a>(content: impl Into<Element<'a, Message>>, selected: bool) -> 
     .into()
 }
 
-/// The right-hand panel visible this session.
+/// The right-hand panel on show.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Tab {
@@ -212,7 +212,6 @@ pub struct Add {
 /// Everything the matrix remembers for this app session.
 #[derive(Debug, Default)]
 pub struct State {
-    pub tab: Tab,
     pub sort: Option<(Column, bool)>,
     pub filter: String,
     pub selected_only: bool,
@@ -225,7 +224,7 @@ pub struct State {
 
 impl State {
     /// Rows in the current graph level, with filters and sorting applied.
-    pub fn model(&self, graph: &Graph, selected_modules: &std::collections::BTreeSet<u32>) -> MatrixModel {
+    pub fn model(&self, graph: &Graph, selected_modules: &std::collections::BTreeSet<u32>, tab: Tab) -> MatrixModel {
         let filter = self.filter.to_lowercase();
         let mut rows: Vec<_> = graph
             .assignments()
@@ -264,7 +263,7 @@ impl State {
             });
         }
         MatrixModel {
-            tab: self.tab,
+            tab,
             sort: self.sort,
             filter: self.filter.clone(),
             selected_only: self.selected_only,
@@ -574,7 +573,7 @@ impl App {
     /// True when the keyboard belongs to the matrix: its tab is open, it has
     /// focus, and no overlay has the input.
     pub(crate) fn matrix_has_keys(&self) -> bool {
-        self.matrix.tab == Tab::Matrix
+        self.right_tab == Tab::Matrix
             && self.matrix.focused
             && self.input_owner() == crate::input_owner::InputOwner::Canvas
     }
@@ -605,7 +604,7 @@ impl App {
 
     /// Which one matrix assignment the canvas should show without pinning.
     pub(crate) fn matrix_line(&self) -> Option<loom_canvas::ModulationView> {
-        if self.matrix.tab != Tab::Matrix {
+        if self.right_tab != Tab::Matrix {
             return None;
         }
         let id = self.matrix.selected?;
@@ -629,7 +628,7 @@ impl App {
     pub(crate) fn matrix_event(&mut self, event: Event) {
         match event {
             Event::Tab(tab) => {
-                self.matrix.tab = tab;
+                self.right_tab = tab;
                 self.matrix.focused = tab == Tab::Matrix;
                 self.matrix.edit = None;
                 self.matrix.add = None;
@@ -916,7 +915,9 @@ impl App {
             }
             return;
         }
-        let model = self.matrix.model(self.controller.graph(), &self.selection);
+        let model = self
+            .matrix
+            .model(self.controller.graph(), &self.selection, self.right_tab);
         let Some(i) = self
             .matrix
             .selected

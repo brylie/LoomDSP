@@ -91,7 +91,7 @@ impl App {
             );
         // The autosave timer runs only while a copy may be due: once the
         // copy matches the patch, an idle app ticks no more (#90).
-        let autosave = if self.document.autosave_due() {
+        let autosave = if self.run_files.autosave_due(&self.document) {
             iced::time::every(recovery::TICK).map(|_| Message::Autosave)
         } else {
             Subscription::none()

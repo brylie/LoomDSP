@@ -1334,9 +1334,9 @@ fn session_keeps_saved_tile_dimensions() {
         size: Some((24, 16)),
         ranges: Default::default(),
     });
-    let session = App::session(EngineConfig::default(), false, Source::Recovered(Box::new(patch))).unwrap();
-    assert_eq!(session.sizes.get(&7), Some(&(24, 16)));
-    let scene = scene::build(&session.controller, &session.positions, &session.sizes);
+    let loaded = Loaded::read(EngineConfig::default(), false, Source::Recovered(Box::new(patch))).unwrap();
+    assert_eq!(loaded.sizes.get(&7), Some(&(24, 16)));
+    let scene = scene::build(&loaded.controller, &loaded.positions, &loaded.sizes);
     let tile = scene.module(7).unwrap();
     assert_eq!(
         (tile.width(), tile.height()),

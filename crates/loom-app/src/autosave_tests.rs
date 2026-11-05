@@ -72,7 +72,7 @@ impl Setup {
 }
 
 fn folder(app: &App) -> PathBuf {
-    app.document.recovery().expect("autosave is on").dir().to_path_buf()
+    app.run_files.recovery().expect("autosave is on").dir().to_path_buf()
 }
 
 /// Calls the autosave tick at `now` until `done` holds, so the writer's
@@ -179,7 +179,7 @@ fn a_clean_exit_deletes_the_folder() {
     let mut app = setup.boot(Some(setup.file()), &mut Answer::new(Choice::NotNow));
     let dir = folder(&app);
     let _ = app.update(Message::File(crate::FileAction::Close));
-    assert!(!app.document.autosave_on());
+    assert!(!app.run_files.autosave_on());
     assert!(!dir.exists());
     assert!(sessions(&setup.root()).is_empty());
 }
@@ -462,7 +462,7 @@ fn unattended_runs_leave_recovery_alone() {
         let mut answer = Answer::new(Choice::Discard);
         let app = App::boot(args, &mut answer);
         assert!(answer.asked.is_empty());
-        assert!(!app.document.autosave_on());
+        assert!(!app.run_files.autosave_on());
     }
     assert_eq!(fs::read_to_string(crashed.join("patch.ron")).unwrap(), before);
     assert_eq!(sessions(&setup.root()), [crashed]);
@@ -551,7 +551,7 @@ fn autosave_that_is_off_stays_as_a_warning() {
     // A file where the folder should be, so the folder cannot be created.
     fs::write(setup.root(), "").unwrap();
     let mut app = setup.boot(Some(setup.file()), &mut Answer::new(Choice::NotNow));
-    assert!(!app.document.autosave_on());
+    assert!(!app.run_files.autosave_on());
     let kept = app.alerts.kept_field().expect("the warning shows");
     assert_eq!(
         (kept.cause, kept.severity),

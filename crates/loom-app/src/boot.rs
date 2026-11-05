@@ -1,10 +1,10 @@
 //! Building the app: from the command line at start, and a new engine
-//! and session for each patch it opens (`docs/design/files.md`,
+//! and loaded patch for each patch it opens (`docs/design/files.md`,
 //! `docs/design/autosave.md`).
 
 use crate::live::Live;
 use crate::{
-    App, Args, Session, Source, alerts, bench, devices, document, edits, files, gestures, layout, learn, matrix,
+    App, Args, Loaded, Source, alerts, bench, devices, document, edits, files, gestures, layout, learn, matrix,
     monitor, pointer, recovery, registry, run_is_driven, scene, settings, stream,
 };
 use iced::{Color, Theme};
@@ -110,29 +110,29 @@ impl App {
             output_safety: args.output_safety.unwrap_or(rig.store.saved().output_safety),
             ..EngineConfig::with_sample_rate(sample_rate)
         };
-        let session = Self::session(config, args.test_modules, source).unwrap_or_else(|e| {
+        let loaded = Loaded::read(config, args.test_modules, source).unwrap_or_else(|e| {
             // A copy that reads but does not load is a failed restore too:
             // the orphan is kept, not adopted.
             match recovered.take() {
                 Some((_, orphan, _)) => restore_error(&e, orphan, &mut notes),
                 None => status = e,
             }
-            Self::session(config, args.test_modules, Source::Empty).expect("an empty patch always loads")
+            Loaded::read(config, args.test_modules, Source::Empty).expect("an empty patch always loads")
         });
-        let mut app = Self::assemble(output, sample_rate, session, 1, &args, rig, true);
+        let mut app = Self::assemble(output, sample_rate, loaded, 1, &args, rig, true);
         // Tests have no bundled folder unless they set one: the checkout's
         // examples must open as plain files there.
         #[cfg(test)]
-        app.document.set_examples(files::fake::examples());
+        app.run_files.set_examples(files::fake::examples());
         #[cfg(not(test))]
-        app.document.set_examples(files::bundled_examples());
-        app.document.copy_if_example();
+        app.run_files.set_examples(files::bundled_examples());
+        app.run_files.copy_if_example(&mut app.document);
         // The compile report gives way to anything that needs reading.
         let mut keep = !status.is_empty();
         if keep {
             app.alerts.error(alerts::Cause::File, status);
         }
-        app.document.start_autosave(session_folder);
+        app.run_files.start_autosave(session_folder);
         if let Some((state, orphan, _)) = recovered {
             app.restored(state, orphan, &args);
             keep = true;
@@ -171,108 +171,25 @@ impl App {
                 self.alerts.append_warning(&format!(" {note}"));
             }
         }
-        self.document.adopt(orphan);
+        self.run_files.adopt(orphan);
         // This session's own copy, at once: the orphan goes when it is on disk.
         self.autosave(Instant::now());
     }
 
-    /// Builds an engine and loads a patch into it. On failure nothing else
-    /// is touched, so a failed open leaves the running patch alone.
-    pub(crate) fn session(config: EngineConfig, test_modules: bool, source: Source) -> Result<Session, String> {
-        let EngineParts {
-            mut controller,
-            engine,
-            midi,
-            telemetry,
-        } = create_engine(registry(test_modules), config);
-        let mut positions = BTreeMap::new();
-        let mut sizes = BTreeMap::new();
-        let mut original_unknown_positions = BTreeMap::new();
-        let mut notes = Vec::new();
-        let mut load = |patch: &Patch, controller: &mut Controller| -> Result<Metadata, String> {
-            notes = patch.load_into(controller).map_err(|e| e.to_string())?;
-            for m in &patch.modules {
-                if controller
-                    .graph()
-                    .node(ModuleId(m.id))
-                    .is_some_and(|node| node.unknown.is_some())
-                {
-                    original_unknown_positions.insert(m.id, m.position);
-                }
-                if let Some((x, y)) = m.position {
-                    positions.insert(m.id, (x, y));
-                }
-                if let Some(size) = m.size {
-                    sizes.insert(m.id, size);
-                }
-            }
-            Ok(patch.metadata())
-        };
-        let named = |name: String| Metadata {
-            name,
-            ..Metadata::default()
-        };
-        let fresh = matches!(source, Source::Empty);
-        let (info, file, stamp) = match source {
-            Source::Generated(n) => {
-                layout::generate(&mut controller, n).map_err(|e| format!("generate failed: {e}"))?;
-                layout::generated_layout(&controller, &mut positions);
-                (named(format!("Generated ({n} modules)")), None, None)
-            }
-            Source::File(path) => {
-                // Stamped before reading: a change after this shows as a change.
-                let stamp = recovery::Stamp::of(path);
-                let patch = Patch::load(path).map_err(|e| e.to_string())?;
-                let info = load(&patch, &mut controller)?;
-                (info, Some(path.to_path_buf()), stamp)
-            }
-            Source::Recovered(patch) => (load(&patch, &mut controller)?, None, None),
-            Source::Empty => (named("Untitled".to_string()), None, None),
-        };
-        // Every patch has one Transport (clock.md). A loaded file gets one
-        // in `load_into`; a new or generated patch gets it here.
-        if controller.transport_module().is_none() && controller.registry().resolve(TRANSPORT_MODULE).is_ok() {
-            controller.add_module(TRANSPORT_MODULE).map_err(|e| e.to_string())?;
-            controller.commit().map_err(|e| e.to_string())?;
-        }
-        layout::auto_layout(&controller, &mut positions);
-        let unknown_positions = original_unknown_positions
-            .into_iter()
-            .filter_map(|(id, original)| positions.get(&id).copied().map(|initial| (id, (original, initial))))
-            .collect();
-        for note in &notes {
-            eprintln!("loom-app: {note}");
-        }
-        Ok(Session {
-            controller,
-            engine,
-            midi,
-            telemetry,
-            positions,
-            unknown_positions,
-            sizes,
-            info,
-            fresh,
-            file,
-            stamp,
-            notes,
-        })
-    }
-
-    /// Attaches audio and MIDI to a session and builds the app around it.
+    /// Attaches audio and MIDI to a loaded patch and builds the app around it.
     /// A rig that has MIDI inputs open already keeps them, pointed at the
     /// new engine. Otherwise its inputs are opened, unless `connect_midi`
     /// is false.
     pub(crate) fn assemble(
         output: Result<AudioOutput, String>,
         sample_rate: f32,
-        session: Session,
+        loaded: Loaded,
         generation: u64,
         args: &Args,
         mut rig: settings::Rig,
         connect_midi: bool,
     ) -> Self {
-        let Session {
+        let Loaded {
             controller,
             engine,
             midi: sender,
@@ -285,7 +202,7 @@ impl App {
             file,
             stamp,
             notes,
-        } = session;
+        } = loaded;
         let status = notes.join("; ");
         let mut recording_stopped = None;
         let load_notes = notes;
@@ -346,6 +263,8 @@ impl App {
             visible_displays: Vec::new(),
             selection: BTreeSet::new(),
             document: document::Document::new(info, file, stamp, load_notes),
+            run_files: document::RunFiles::default(),
+            right_tab: matrix::Tab::default(),
             generation,
             stream: stream::Stream::new(
                 audio,
@@ -433,5 +352,90 @@ impl App {
             app.report();
         }
         app
+    }
+}
+
+impl Loaded {
+    /// Builds an engine and loads a patch into it. On failure nothing else
+    /// is touched, so a failed open leaves the running patch alone.
+    pub(crate) fn read(config: EngineConfig, test_modules: bool, source: Source) -> Result<Self, String> {
+        let EngineParts {
+            mut controller,
+            engine,
+            midi,
+            telemetry,
+        } = create_engine(registry(test_modules), config);
+        let mut positions = BTreeMap::new();
+        let mut sizes = BTreeMap::new();
+        let mut original_unknown_positions = BTreeMap::new();
+        let mut notes = Vec::new();
+        let mut load = |patch: &Patch, controller: &mut Controller| -> Result<Metadata, String> {
+            notes = patch.load_into(controller).map_err(|e| e.to_string())?;
+            for m in &patch.modules {
+                if controller
+                    .graph()
+                    .node(ModuleId(m.id))
+                    .is_some_and(|node| node.unknown.is_some())
+                {
+                    original_unknown_positions.insert(m.id, m.position);
+                }
+                if let Some((x, y)) = m.position {
+                    positions.insert(m.id, (x, y));
+                }
+                if let Some(size) = m.size {
+                    sizes.insert(m.id, size);
+                }
+            }
+            Ok(patch.metadata())
+        };
+        let named = |name: String| Metadata {
+            name,
+            ..Metadata::default()
+        };
+        let fresh = matches!(source, Source::Empty);
+        let (info, file, stamp) = match source {
+            Source::Generated(n) => {
+                layout::generate(&mut controller, n).map_err(|e| format!("generate failed: {e}"))?;
+                layout::generated_layout(&controller, &mut positions);
+                (named(format!("Generated ({n} modules)")), None, None)
+            }
+            Source::File(path) => {
+                // Stamped before reading: a change after this shows as a change.
+                let stamp = recovery::Stamp::of(path);
+                let patch = Patch::load(path).map_err(|e| e.to_string())?;
+                let info = load(&patch, &mut controller)?;
+                (info, Some(path.to_path_buf()), stamp)
+            }
+            Source::Recovered(patch) => (load(&patch, &mut controller)?, None, None),
+            Source::Empty => (named("Untitled".to_string()), None, None),
+        };
+        // Every patch has one Transport (clock.md). A loaded file gets one
+        // in `load_into`; a new or generated patch gets it here.
+        if controller.transport_module().is_none() && controller.registry().resolve(TRANSPORT_MODULE).is_ok() {
+            controller.add_module(TRANSPORT_MODULE).map_err(|e| e.to_string())?;
+            controller.commit().map_err(|e| e.to_string())?;
+        }
+        layout::auto_layout(&controller, &mut positions);
+        let unknown_positions = original_unknown_positions
+            .into_iter()
+            .filter_map(|(id, original)| positions.get(&id).copied().map(|initial| (id, (original, initial))))
+            .collect();
+        for note in &notes {
+            eprintln!("loom-app: {note}");
+        }
+        Ok(Self {
+            controller,
+            engine,
+            midi,
+            telemetry,
+            positions,
+            unknown_positions,
+            sizes,
+            info,
+            fresh,
+            file,
+            stamp,
+            notes,
+        })
     }
 }

@@ -756,6 +756,10 @@ struct App {
     selection: BTreeSet<u32>,
     /// The patch's file, title, saved state, and recovery copy.
     document: document::Document,
+    /// The recovery folder and the examples folder, for the whole run.
+    run_files: document::RunFiles,
+    /// Which tab the right panel shows. It stays when the patch changes.
+    right_tab: RightTab,
     /// Counts the engines built. Background watchers restart when it changes.
     generation: u64,
     /// The `test.` modules are loaded (`--test-modules`).
@@ -821,7 +825,7 @@ struct App {
     arrow_group_pending: bool,
     /// A toolbar or inspector action closed that group before its canvas timer.
     arrow_group_closed: bool,
-    /// Session-only matrix tab, filters, selection, and pending edit.
+    /// The matrix's filters, selection, and pending edit, for this patch.
     matrix: matrix::State,
     /// How the canvas starts, for a still image of the window
     /// (`--screenshot-window`). `None` in the app.
@@ -844,7 +848,7 @@ enum Source<'a> {
 }
 
 /// An engine and the patch loaded into it, before audio is attached.
-struct Session {
+struct Loaded {
     controller: Controller,
     engine: loom_core::Engine,
     midi: loom_core::MidiSender,
@@ -886,11 +890,11 @@ impl App {
     /// (`docs/design/autosave.md`). Runs on a timer and after save, open,
     /// and new.
     fn autosave(&mut self, now: Instant) {
-        if !self.document.autosave_on() {
+        if !self.run_files.autosave_on() {
             return;
         }
         let current = self.current_patch();
-        for report in self.document.autosave(now, current) {
+        for report in self.run_files.autosave(&mut self.document, now, current) {
             self.autosave_report(report);
         }
     }
@@ -1433,7 +1437,7 @@ impl App {
             self.stop_audio();
             control::close(&self.control);
             // A clean exit: the recovery folder goes (autosave.md, Clean exit).
-            self.document.finish();
+            self.run_files.finish();
             Task::batch([task, iced::exit()])
         } else if self.overlays.browser().is_some() && (!was_open || (was_help_open && self.overlays.help.is_none())) {
             Task::batch([task, editing::focus_text_field(browser::INPUT)])

@@ -108,7 +108,7 @@ fn keyboard_reveals_rows_in_an_overflowing_table() {
         assert!(
             ui.app
                 .matrix
-                .model(ui.app.controller.graph(), &ui.app.selection)
+                .model(ui.app.controller.graph(), &ui.app.selection, ui.app.right_tab)
                 .rows
                 .iter()
                 .any(|row| row.id == selected.0)
@@ -140,7 +140,11 @@ fn rows_sort_and_filter_without_editing_assignments() {
         .map(|(id, a)| (id, *a))
         .collect();
     ui.app.matrix_event(Event::Tab(Tab::Matrix));
-    let model = |ui: &Ui| ui.app.matrix.model(ui.app.controller.graph(), &ui.app.selection);
+    let model = |ui: &Ui| {
+        ui.app
+            .matrix
+            .model(ui.app.controller.graph(), &ui.app.selection, ui.app.right_tab)
+    };
     assert_eq!(model(&ui).rows.iter().map(|r| r.id).collect::<Vec<_>>(), vec![1, 2]);
     ui.app.matrix_event(Event::SortBy(Some(Column::Depth)));
     assert_eq!(model(&ui).rows.iter().map(|r| r.id).collect::<Vec<_>>(), vec![1, 2]);
@@ -270,7 +274,7 @@ fn keyboard_path_selects_edits_and_deletes() {
     ui.move_to(Point::new(tab.x, tab.y));
     ui.press();
     ui.release();
-    assert_eq!(ui.app.matrix.tab, Tab::Matrix);
+    assert_eq!(ui.app.right_tab, Tab::Matrix);
     let key = |ui: &mut Ui, named| {
         ui.tap(keyboard::Key::Named(named), keyboard::Modifiers::default());
     };
@@ -580,11 +584,11 @@ fn tab_survives_patch_change_and_bad_endpoint_changes_nothing() {
         (old.source.module.0, old.source.port)
     );
     assert!(ui.app.replace(crate::Source::Empty));
-    assert_eq!(ui.app.matrix.tab, Tab::Matrix);
+    assert_eq!(ui.app.right_tab, Tab::Matrix);
     assert!(
         ui.app
             .matrix
-            .model(ui.app.controller.graph(), &ui.app.selection)
+            .model(ui.app.controller.graph(), &ui.app.selection, ui.app.right_tab)
             .rows
             .is_empty()
     );
@@ -609,7 +613,10 @@ fn cards_fit_the_column() {
 
     let source = format!("Sample and Hold #{}: Out", hold.0);
     assert_eq!(source.len(), 24);
-    let column = ui.app.matrix.model(ui.app.controller.graph(), &ui.app.selection);
+    let column = ui
+        .app
+        .matrix
+        .model(ui.app.controller.graph(), &ui.app.selection, ui.app.right_tab);
     let right = crate::WINDOW.width;
     let left = right - 280.0;
     let mut labels = vec![source.clone()];

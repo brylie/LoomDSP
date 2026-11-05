@@ -655,7 +655,9 @@ impl App {
             help: self.overlays.help.as_ref().map(|help| help.model.clone()),
             recent: self.overlays.recent_rows().cloned(),
             question: self.overlays.question.as_ref().map(crate::question::Question::model),
-            matrix: self.matrix.model(self.controller.graph(), &self.selection),
+            matrix: self
+                .matrix
+                .model(self.controller.graph(), &self.selection, self.right_tab),
             stats: self.stats_model(),
             pointer: self.pointer_state(),
             typed_field: self.typed_field_state(),
@@ -671,11 +673,11 @@ pub fn headless(args: &Args) -> Result<App, String> {
         output_safety: args.output_safety.unwrap_or_default(),
         ..loom_core::EngineConfig::with_sample_rate(48_000.0)
     };
-    let session = App::session(config, args.test_modules, args.source())?;
+    let loaded = crate::Loaded::read(config, args.test_modules, args.source())?;
     let mut app = App::assemble(
         Err("headless".to_string()),
         48_000.0,
-        session,
+        loaded,
         1,
         args,
         crate::settings::Rig::empty(),

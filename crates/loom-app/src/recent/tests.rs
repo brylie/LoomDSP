@@ -488,7 +488,7 @@ fn the_list_takes_the_keys_from_a_focused_matrix() {
     let files = patches(&dir.0, 1);
     let mut ui = Ui::with_app(app());
     ui.app.rig.recent.remember(&files[0]).unwrap();
-    ui.app.matrix.tab = crate::matrix::Tab::Matrix;
+    ui.app.right_tab = crate::matrix::Tab::Matrix;
     ui.app.matrix.focused = true;
     ui.redraw();
     ui.send(AppMessage::OpenRecent);

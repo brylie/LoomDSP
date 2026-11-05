@@ -2,8 +2,8 @@
 //! save dialog show, whether the work is saved, and its recovery copy.
 //! Specs: `docs/design/files.md`, `docs/design/autosave.md`.
 //!
-//! The app owns one [`Document`] per patch and reaches it through its
-//! methods. Building the patch from the graph, the undo history, dialogs,
+//! The app owns one [`Document`] per patch, and one [`RunFiles`] for the run,
+//! and reaches them through their methods. Building the patch from the graph, the undo history, dialogs,
 //! and the status bar stay with the app.
 
 use crate::{files, recovery};
@@ -11,7 +11,82 @@ use loom_patch::{Metadata, Patch};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-/// The open patch's file and recovery state.
+/// What belongs to the run and not to one patch: the folders that apply to
+/// every patch it opens.
+#[derive(Default)]
+pub struct RunFiles {
+    /// This run's recovery folder. `None` when autosave is off.
+    recovery: Option<recovery::Session>,
+    /// The bundled examples folder, found once at start. A patch opened
+    /// from it is an untitled copy (files.md, Defaults for the dialogs).
+    examples: Option<PathBuf>,
+}
+
+impl RunFiles {
+    /// Sets the bundled examples folder.
+    pub fn set_examples(&mut self, examples: Option<PathBuf>) {
+        self.examples = examples;
+    }
+
+    /// Applies the examples rule to a patch.
+    pub fn copy_if_example(&self, document: &mut Document) {
+        document.copy_if_example(self.examples.as_deref());
+    }
+
+    /// Turns autosave on with this run's recovery folder, or leaves it off.
+    pub fn start_autosave(&mut self, session: Option<recovery::Session>) {
+        self.recovery = session;
+    }
+
+    /// True while autosave is on.
+    pub fn autosave_on(&self) -> bool {
+        self.recovery.is_some()
+    }
+
+    /// Keeps the orphan a restore came from until this session has a copy.
+    pub fn adopt(&mut self, orphan: recovery::Orphan) {
+        if let Some(session) = &mut self.recovery {
+            session.adopt(orphan);
+        }
+    }
+
+    /// Writes or deletes the recovery copy of `document` when one is due,
+    /// given the patch as it would be saved now. Returns what the player
+    /// should be told.
+    pub fn autosave(&mut self, document: &mut Document, now: Instant, current: Patch) -> Vec<recovery::Report> {
+        let target = (document.saved_content.as_ref() != Some(&current)).then_some(current);
+        let (file, stamp) = (document.file.clone(), document.stamp);
+        let Some(session) = self.recovery.as_mut() else {
+            return Vec::new();
+        };
+        let reports = session.tick(now, target, || {
+            recovery::Info::new(file.as_deref(), stamp, std::time::SystemTime::now())
+        });
+        document.settled = session.settled();
+        reports
+    }
+
+    /// True while a recovery copy of `document` may be due, so the autosave
+    /// timer runs.
+    pub fn autosave_due(&self, document: &Document) -> bool {
+        self.recovery.is_some() && !document.settled
+    }
+
+    /// A clean exit: the recovery folder goes (autosave.md, Clean exit).
+    pub fn finish(&mut self) {
+        if let Some(session) = self.recovery.take() {
+            session.finish();
+        }
+    }
+
+    /// This run's recovery folder, for tests.
+    #[cfg(test)]
+    pub fn recovery(&self) -> Option<&recovery::Session> {
+        self.recovery.as_ref()
+    }
+}
+
+/// The open patch's file and saved state.
 pub struct Document {
     /// The name, description, authors, tags, and licence saved inside the
     /// patch (`docs/design/patch-metadata.md`).
@@ -33,14 +108,9 @@ pub struct Document {
     /// restored copy's changed or missing file, or the file name of the
     /// example a copy came from.
     save_hint: Option<PathBuf>,
-    /// The bundled examples folder, found once at start. A patch opened
-    /// from it is an untitled copy (files.md, Defaults for the dialogs).
-    examples: Option<PathBuf>,
     /// The patch as it was last opened or saved, to tell unsaved work
     /// apart. `None` when nothing on disk holds this patch (a restored copy).
     saved_content: Option<Patch>,
-    /// This run's recovery folder. `None` when autosave is off.
-    recovery: Option<recovery::Session>,
     /// True when the recovery copy matches the patch and no job is under
     /// way, so the autosave timer can stop.
     settled: bool,
@@ -49,8 +119,7 @@ pub struct Document {
 }
 
 impl Document {
-    /// A patch just loaded from `file`, or with no file. Autosave is off
-    /// until [`start_autosave`](Self::start_autosave).
+    /// A patch just loaded from `file`, or with no file.
     pub fn new(info: Metadata, file: Option<PathBuf>, stamp: Option<recovery::Stamp>, load_notes: Vec<String>) -> Self {
         Self {
             saved_info: info.clone(),
@@ -60,9 +129,7 @@ impl Document {
             stamp,
             shown_name: None,
             save_hint: None,
-            examples: None,
             saved_content: None,
-            recovery: None,
             settled: false,
             load_notes,
         }
@@ -139,20 +206,15 @@ impl Document {
         }
     }
 
-    /// Sets the bundled examples folder.
-    pub fn set_examples(&mut self, examples: Option<PathBuf>) {
-        self.examples = examples;
-    }
-
     /// Makes a patch opened from the bundled examples folder an untitled
     /// copy (files.md, Defaults for the dialogs): no current file,
     /// `<name> (example)` in the title, and a Save that asks for a place,
     /// suggesting the example's file name.
-    pub fn copy_if_example(&mut self) {
+    fn copy_if_example(&mut self, examples: Option<&Path>) {
         let Some(path) = self.file.as_deref() else {
             return;
         };
-        if !files::is_example(path, self.examples.as_deref()) {
+        if !files::is_example(path, examples) {
             return;
         }
         let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned());
@@ -205,68 +267,9 @@ impl Document {
         self.saved_content = None;
     }
 
-    /// Turns autosave on with this run's recovery folder, or leaves it off.
-    pub fn start_autosave(&mut self, session: Option<recovery::Session>) {
-        self.recovery = session;
-    }
-
-    /// True while autosave is on.
-    pub fn autosave_on(&self) -> bool {
-        self.recovery.is_some()
-    }
-
-    /// Keeps the orphan a restore came from until this session has a copy.
-    pub fn adopt(&mut self, orphan: recovery::Orphan) {
-        if let Some(session) = &mut self.recovery {
-            session.adopt(orphan);
-        }
-    }
-
-    /// Writes or deletes the recovery copy when one is due, given the patch
-    /// as it would be saved now. Returns what the player should be told.
-    pub fn autosave(&mut self, now: Instant, current: Patch) -> Vec<recovery::Report> {
-        let target = (self.saved_content.as_ref() != Some(&current)).then_some(current);
-        let (file, stamp) = (self.file.clone(), self.stamp);
-        let Some(session) = self.recovery.as_mut() else {
-            return Vec::new();
-        };
-        let reports = session.tick(now, target, || {
-            recovery::Info::new(file.as_deref(), stamp, std::time::SystemTime::now())
-        });
-        self.settled = session.settled();
-        reports
-    }
-
-    /// True while a recovery copy may be due, so the autosave timer runs.
-    pub fn autosave_due(&self) -> bool {
-        self.recovery.is_some() && !self.settled
-    }
-
     /// Tells autosave to look again: something may have changed the patch.
     pub fn may_have_changed(&mut self) {
         self.settled = false;
-    }
-
-    /// A clean exit: the recovery folder goes (autosave.md, Clean exit).
-    pub fn finish(&mut self) {
-        if let Some(session) = self.recovery.take() {
-            session.finish();
-        }
-    }
-
-    /// Takes over what belongs to the run, not the patch, from the document
-    /// of the patch this one replaces: the recovery folder and the examples
-    /// folder. Then applies the examples rule to this patch.
-    pub fn carry_on_from(&mut self, old: &mut Document) {
-        self.recovery = old.recovery.take();
-        self.examples = old.examples.take();
-        self.copy_if_example();
-    }
-
-    /// This run's recovery folder, for tests.
-    #[cfg(test)]
-    pub fn recovery(&self) -> Option<&recovery::Session> {
-        self.recovery.as_ref()
     }
 
     /// Where Save As starts with no current file, for tests.

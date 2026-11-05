@@ -128,7 +128,7 @@ impl App {
     pub(crate) fn tab_fields(&self) -> &'static [&'static str] {
         if self.overlays.patches().is_some() {
             &crate::patches::TEXT_FIELDS
-        } else if self.no_overlay() && self.matrix.tab == RightTab::Inspector && self.selection.is_empty() {
+        } else if self.no_overlay() && self.right_tab == RightTab::Inspector && self.selection.is_empty() {
             &crate::patch_info::TEXT_FIELDS
         } else {
             &[]

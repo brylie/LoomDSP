@@ -63,7 +63,7 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
 
     // What outlives it.
     app.animating = true;
-    app.matrix.tab = Tab::Matrix;
+    app.right_tab = Tab::Matrix;
     app.browser_key = 7;
     app.patches_open = 5;
     app.frame_key = 9;
@@ -98,6 +98,9 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
         visible_displays,
         selection,
         document,
+        // `document/tests.rs` and `autosave_tests.rs` cover what it does.
+        run_files: _,
+        right_tab,
         generation,
         test_modules,
         // Set only by `AfterDiscard::Close`, which never replaces the patch.
@@ -187,7 +190,7 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
     // What outlives the patch.
     assert!(!test_modules);
     assert!(!modules.is_empty());
-    assert_eq!(matrix.tab, Tab::Matrix);
+    assert_eq!(*right_tab, Tab::Matrix);
     assert_eq!(*patches_open, 5);
     assert_eq!(*browser_key, 7);
     assert_eq!(*frame_key, 10, "a new patch is framed");

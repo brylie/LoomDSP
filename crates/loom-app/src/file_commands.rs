@@ -3,7 +3,7 @@
 
 use crate::overlays::Overlay;
 use crate::question::{AfterDiscard, Answer, Kind, Message as QuestionMessage, Question};
-use crate::{App, Args, FileAction, Source, alerts, bench, control, devices, files, screenshot, settings};
+use crate::{App, Args, FileAction, Loaded, Source, alerts, bench, control, devices, files, screenshot, settings};
 use loom_core::EngineConfig;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -318,8 +318,8 @@ impl App {
             output_safety: self.stream.output_safety(),
             ..EngineConfig::with_sample_rate(sample_rate)
         };
-        let session = match Self::session(config, self.test_modules, source) {
-            Ok(session) => session,
+        let loaded = match Loaded::read(config, self.test_modules, source) {
+            Ok(loaded) => loaded,
             Err(e) => {
                 let message = format!("Could not open the patch: {e}. The current patch is unchanged.");
                 self.show_error(&message);
@@ -357,15 +357,16 @@ impl App {
             dev: self.dev_tools,
         };
         let rig = std::mem::replace(&mut self.rig, settings::Rig::empty());
-        let mut fresh = Self::assemble(output, sample_rate, session, self.generation + 1, &args, rig, true);
+        let mut fresh = Self::assemble(output, sample_rate, loaded, self.generation + 1, &args, rig, true);
         fresh.animating = self.animating;
-        fresh.matrix.tab = self.matrix.tab;
+        fresh.right_tab = self.right_tab;
         fresh.reporter = self.reporter.take();
         fresh.control = std::mem::take(&mut self.control);
         // The script's pointer stays where it was, over the new patch.
         fresh.pointer = self.pointer.clone();
-        // The session goes on; only its patch changed.
-        fresh.document.carry_on_from(&mut self.document);
+        // The run goes on; only its patch changed.
+        fresh.run_files = std::mem::take(&mut self.run_files);
+        fresh.run_files.copy_if_example(&mut fresh.document);
         // Commands waiting to be drawn still get their answer, except a
         // `sample`, which would measure a module of the new patch.
         fresh.control_pending = control::end_samples(std::mem::take(&mut self.control_pending));

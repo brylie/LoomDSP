@@ -46,8 +46,7 @@ fn an_example_opens_as_an_untitled_copy() {
     let folder = Folder::new("example");
     let path = folder.file("drone.ron");
     let mut document = Document::new(named("Drone"), Some(path), None, Vec::new());
-    document.set_examples(Some(folder.0.clone()));
-    document.copy_if_example();
+    document.copy_if_example(Some(&folder.0.clone()));
     assert_eq!(document.file(), None);
     assert_eq!(document.title_name(), "drone (example)");
     assert_eq!(document.save_start(), Some(Path::new("drone.ron")));
@@ -60,8 +59,7 @@ fn a_plain_file_is_not_an_example() {
     let mine = Folder::new("mine");
     let path = mine.file("song.ron");
     let mut document = Document::new(named("Song"), Some(path.clone()), None, Vec::new());
-    document.set_examples(Some(examples.0.clone()));
-    document.copy_if_example();
+    document.copy_if_example(Some(&examples.0.clone()));
     assert_eq!(document.file(), Some(path.as_path()));
 }
 
@@ -93,23 +91,27 @@ fn saving_drops_the_copy_hints() {
 #[test]
 fn autosave_off_is_never_due() {
     let mut document = untitled();
-    assert!(!document.autosave_on());
-    assert!(!document.autosave_due());
+    let mut run = RunFiles::default();
+    assert!(!run.autosave_on());
+    assert!(!run.autosave_due(&document));
     document.may_have_changed();
-    assert!(!document.autosave_due());
-    assert!(document.autosave(Instant::now(), Patch::new("Patch")).is_empty());
+    assert!(!run.autosave_due(&document));
+    assert!(
+        run.autosave(&mut document, Instant::now(), Patch::new("Patch"))
+            .is_empty()
+    );
 }
 
-/// The next patch takes over the examples folder, and applies the example
-/// rule to itself.
+/// The examples folder belongs to the run, so the example rule applies to the
+/// next patch too.
 #[test]
 fn the_next_patch_carries_on_the_run() {
     let folder = Folder::new("carry");
-    let mut old = untitled();
-    old.set_examples(Some(folder.0.clone()));
+    let mut run = RunFiles::default();
+    run.set_examples(Some(folder.0.clone()));
     let path = folder.file("pad.ron");
     let mut next = Document::new(named("Pad"), Some(path), None, Vec::new());
-    next.carry_on_from(&mut old);
+    run.copy_if_example(&mut next);
     assert_eq!(next.file(), None, "the example rule applied");
     assert_eq!(next.title_name(), "pad (example)");
 }
