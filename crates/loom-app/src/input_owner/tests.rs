@@ -409,3 +409,35 @@ fn the_subscription_sends_what_it_hears_with_who_was_listening() {
         "{routed:?}"
     );
 }
+
+/// For each overlay, a key sent the way the `Injector` and the headless `Ui`
+/// send it makes the same message as the real window's subscription.
+#[test]
+fn the_injector_and_the_subscription_agree_for_each_overlay() {
+    use iced_runtime::futures::futures::{StreamExt, executor::block_on, stream};
+    use iced_runtime::futures::subscription::{Event as Runtime, into_recipes};
+    let escape = iced::Event::Keyboard(keyboard::Event::KeyPressed {
+        key: Key::Named(Named::Escape),
+        modified_key: Key::Named(Named::Escape),
+        physical_key: keyboard::key::Physical::Unidentified(keyboard::key::NativeCode::Unidentified),
+        location: keyboard::Location::Standard,
+        modifiers: Modifiers::empty(),
+        text: None,
+        repeat: false,
+    });
+    for owner in OWNERS {
+        let mut ui = Ui::open("subtractive.ron");
+        open_overlay(&mut ui, owner);
+
+        let injected = heard_messages(&escape, Status::Ignored, ui.app.listening());
+
+        let runtime = Runtime::Interaction {
+            window: window::Id::unique(),
+            event: escape.clone(),
+            status: Status::Ignored,
+        };
+        let recipe = into_recipes(ui.app.input_subscription()).remove(0);
+        let heard: Vec<Message> = block_on(recipe.stream(stream::iter(vec![runtime]).boxed()).collect());
+        assert_eq!(format!("{injected:?}"), format!("{heard:?}"), "{owner:?}");
+    }
+}
