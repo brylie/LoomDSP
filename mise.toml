@@ -71,7 +71,12 @@ run = "cargo llvm-cov --workspace --html --open"
 [tasks.docs]
 description = "Build the API docs, with warnings as errors"
 env = { RUSTDOCFLAGS = "-D warnings" }
-run = "cargo doc --workspace --no-deps"
+# loom-app's items are private to the crate. The second command checks their
+# doc links, which a library's public docs would not reach.
+run = [
+  "cargo doc --workspace --no-deps",
+  "cargo doc -p loom-app --no-deps --document-private-items",
+]
 
 [tasks.wasm]
 description = "Build the engine crates for WebAssembly (hard rule 6)"

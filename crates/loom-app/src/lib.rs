@@ -3,6 +3,9 @@
 //! Phase 1 prototype: the patch canvas (ADR-0010), an inspector for the
 //! selected module, live audio and MIDI, and a stats bar for measuring the
 //! canvas against the performance gates in NFR-PERF-04.
+//!
+//! A library, so that tests under `tests/` can import `ui_test::Ui` with the
+//! `test-ui` feature. The program in `src/bin/loom-app.rs` calls [`run`].
 
 mod alerts;
 mod audio_watch;
@@ -62,8 +65,9 @@ mod stream;
 mod style;
 mod subscriptions;
 mod targets;
-#[cfg(test)]
-mod ui_test;
+#[cfg(any(test, feature = "test-ui"))]
+#[allow(dead_code, reason = "the crate's unit tests use the rest of this harness")]
+pub mod ui_test;
 mod undo;
 mod view;
 mod xy;
@@ -204,7 +208,8 @@ impl Args {
     }
 }
 
-fn main() -> iced::Result {
+/// Runs the program with the command line it was started with.
+pub fn run() -> iced::Result {
     let args = Args::parse();
     if let Some(path) = &args.view.screenshot {
         if let Err(e) = screenshot::run(&args, path) {

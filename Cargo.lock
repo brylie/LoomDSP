@@ -2061,6 +2061,7 @@ dependencies = [
  "known-folders",
  "libc",
  "loom-analysis",
+ "loom-app",
  "loom-canvas",
  "loom-core",
  "loom-host-desktop",

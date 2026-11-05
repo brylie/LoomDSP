@@ -11,9 +11,21 @@ readme.workspace = true
 keywords = ["audio", "synthesizer", "modular", "live", "dsp"]
 categories = ["multimedia::audio", "gui"]
 
+[lib]
+name = "loom_app"
+path = "src/lib.rs"
+
+# `doc` is off because the library has the same name, and `test` because the
+# program is one call into the library, whose tests cover it.
 [[bin]]
 name = "loom-app"
-path = "src/main.rs"
+path = "src/bin/loom-app.rs"
+doc = false
+test = false
+
+[features]
+# The headless `Ui` harness, for the tests in `tests/`. It changes no behaviour.
+test-ui = []
 
 [dependencies]
 loom-core.workspace = true
@@ -48,6 +60,8 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_
 [dev-dependencies]
 hound.workspace = true
 loom-analysis.workspace = true
+# `test-ui`: lets the tests in `tests/` import `Ui`.
+loom-app = { path = ".", features = ["test-ui"] }
 
 [lints]
 workspace = true
