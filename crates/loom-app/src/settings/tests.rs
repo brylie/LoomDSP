@@ -974,7 +974,7 @@ fn an_input_plugged_in_is_opened_unless_it_is_off() {
     fake.plug("Drums");
     app.poll_midi();
     assert_eq!(app.open_midi_inputs(), ["Keys"]);
-    let listed = &app.rig.window.as_ref().unwrap().midi;
+    let listed = &app.rig.window.as_ref().unwrap().lists.midi;
     assert_eq!(
         listed.as_deref(),
         Ok(&["Keys".to_string(), "Drums".to_string()][..]),

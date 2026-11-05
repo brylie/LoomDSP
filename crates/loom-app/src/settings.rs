@@ -90,6 +90,9 @@ pub struct Rig {
     /// The window, while it is open, with the device lists read when it
     /// opened.
     pub window: Option<Window>,
+    /// Lists a control channel command reads while the window is closed, so
+    /// it checks a change as the window does without opening anything.
+    borrowed_lists: Option<DeviceLists>,
     /// A mode change the engine's full queue refused, sent again on the
     /// next update.
     pub safety_pending: Option<OutputSafety>,
@@ -133,11 +136,27 @@ pub struct LostAudio {
     pub last_error: Option<String>,
 }
 
-/// The device lists the window shows.
-pub struct Window {
+/// The devices the machine offers, as read when the window opened.
+pub struct DeviceLists {
     outputs: Result<Outputs, String>,
     inputs: Result<devices::Inputs, String>,
     midi: Result<Vec<String>, String>,
+}
+
+impl DeviceLists {
+    fn read(host: &dyn Host) -> Self {
+        Self {
+            outputs: host.outputs(),
+            inputs: host.audio_inputs(),
+            midi: host.midi_inputs(),
+        }
+    }
+}
+
+/// What the Preferences window holds while it is open.
+pub struct Window {
+    /// The device lists it shows.
+    lists: DeviceLists,
     /// The **Your name** field as typed, saved on Enter or on close.
     author: String,
 }
@@ -145,9 +164,7 @@ pub struct Window {
 impl Window {
     fn read(host: &dyn Host, author: String) -> Self {
         Self {
-            outputs: host.outputs(),
-            inputs: host.audio_inputs(),
-            midi: host.midi_inputs(),
+            lists: DeviceLists::read(host),
             author,
         }
     }
@@ -166,6 +183,7 @@ impl Rig {
             input: InputSession::new(),
             playing: None,
             window: None,
+            borrowed_lists: None,
             safety_pending: None,
             last_stop: None,
             recorder: None,
@@ -383,14 +401,14 @@ impl App {
             return Err(format!("there are no audio devices to choose with {flag}"));
         }
         let read;
-        let window = match &self.rig.window {
-            Some(window) => window,
+        let lists = match &self.rig.window {
+            Some(window) => &window.lists,
             None => {
-                read = Window::read(&*self.rig.host, String::new());
+                read = DeviceLists::read(&*self.rig.host);
                 &read
             }
         };
-        let outputs = window
+        let outputs = lists
             .outputs
             .as_ref()
             .map_err(|e| format!("could not list the audio outputs: {e}"))?;
@@ -446,21 +464,19 @@ impl App {
         if self.rig.window.is_some() {
             return false;
         }
-        let author = self.rig.store.saved().author.clone();
-        self.rig.window = Some(Window::read(&*self.rig.host, author));
+        self.rig.borrowed_lists = Some(DeviceLists::read(&*self.rig.host));
         true
     }
 
-    /// Drops the lists [`App::read_device_lists`] read, so the window stays
-    /// closed.
+    /// Drops the lists [`App::read_device_lists`] read.
     pub(crate) fn forget_device_lists(&mut self) {
-        self.rig.window = None;
+        self.rig.borrowed_lists = None;
     }
 
     /// The MIDI input a control channel `midi` command names (rule S2).
     pub(crate) fn control_midi_input(&self, wanted: &str) -> Result<String, String> {
         let names = match &self.rig.window {
-            Some(window) => window.midi.clone(),
+            Some(window) => window.lists.midi.clone(),
             None => self.rig.host.midi_inputs(),
         }
         .map_err(|e| format!("could not list the MIDI inputs: {e}"))?;
@@ -699,7 +715,9 @@ impl App {
     }
 
     fn outputs(&self) -> Option<&Outputs> {
-        self.rig.window.as_ref().and_then(|w| w.outputs.as_ref().ok())
+        let open = self.rig.window.as_ref().map(|window| &window.lists);
+        open.or(self.rig.borrowed_lists.as_ref())
+            .and_then(|lists| lists.outputs.as_ref().ok())
     }
 
     fn default_device_name(&self) -> Option<String> {
@@ -1233,7 +1251,7 @@ impl App {
     pub(crate) fn poll_midi(&mut self) {
         let Ok(list) = self.rig.host.midi_list() else { return };
         if let Some(window) = &mut self.rig.window {
-            window.midi = Ok(list.iter().map(|input| input.name.clone()).collect());
+            window.lists.midi = Ok(list.iter().map(|input| input.name.clone()).collect());
         }
         if self.rig.midi_in.is_none() || list == self.rig.seen_midi {
             self.rig.seen_midi = list;
@@ -1449,7 +1467,7 @@ impl App {
     ) -> Element<'a, crate::Message> {
         let mut section = column![].spacing(8);
         let shown = self.rig.shown_audio();
-        match &window.outputs {
+        match &window.lists.outputs {
             Err(e) => section = section.push(note(format!("Could not list the audio outputs: {e}"))),
             Ok(outputs) => {
                 let default_name = outputs.default.clone().unwrap_or_else(|| "none".into());
@@ -1531,7 +1549,7 @@ impl App {
                 }
             }
         }
-        match &window.inputs {
+        match &window.lists.inputs {
             Err(error) => section = section.push(note(format!("Could not list the audio inputs: {error}"))),
             Ok(inputs) => {
                 let choices: Vec<Item<InputChoice>> = std::iter::once(Item {
@@ -1621,7 +1639,7 @@ impl App {
         note: impl Fn(String) -> iced::widget::Text<'a>,
     ) -> Element<'a, crate::Message> {
         let mut section = column![].spacing(6);
-        match &window.midi {
+        match &window.lists.midi {
             Err(e) => section = section.push(note(format!("Could not list the MIDI inputs: {e}"))),
             Ok(names) if names.is_empty() => section = section.push(note("No MIDI inputs found.".into())),
             Ok(names) => {
