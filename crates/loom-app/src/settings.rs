@@ -88,8 +88,6 @@ pub struct Rig {
     pub(crate) input: InputSession,
     /// The device playing now, when one is.
     pub playing: Option<Playing>,
-    /// The window, while it is open, with the device lists read when it
-    /// opened.
     /// Lists a control channel command reads while the window is closed, so
     /// it checks a change as the window does without opening anything.
     borrowed_lists: Option<DeviceLists>,
