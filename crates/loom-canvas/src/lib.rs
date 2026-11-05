@@ -11,6 +11,7 @@
 
 mod camera;
 mod controls;
+mod draft;
 mod drag_line;
 mod gpu;
 mod hover;
@@ -27,6 +28,7 @@ pub use controls::{
     xy_edge_point,
 };
 pub use controls::{part_bounds, range_bar_point};
+pub use draft::{DraftSubmit, TypedDraft};
 pub use drag_line::DragLine;
 pub use scene::{
     CLOCK_MARK_RADIUS, CableView, GRID, HEADER, Hit, HoverText, LABEL_COLUMNS, ModulationView, ModuleView,

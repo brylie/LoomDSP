@@ -6,6 +6,7 @@ use crate::controls::{
     range_handle, range_nearest, range_track, select_box, xy_area, xy_bar_at, xy_edge_ring, xy_nearest_edge,
     xy_position, xy_throw,
 };
+use crate::draft::{DraftSubmit, TypedDraft};
 use crate::gpu::{Cable, CanvasPrimitive, Geometry, Overlay, Shape};
 use crate::hover::{HOVER_PADDING, HOVER_TEXT_PX, HoverTarget, HoverTimer};
 use crate::scene::{
@@ -775,7 +776,7 @@ where
             let mut typed = CanvasTyped {
                 module,
                 widget,
-                text: field.text.clone(),
+                text: field.draft.text.clone(),
             };
             operation.custom(None, layout.bounds(), &mut typed);
         }

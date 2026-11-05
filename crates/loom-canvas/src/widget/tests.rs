@@ -1387,16 +1387,16 @@ fn a_digit_opens_the_typed_field_and_enter_commits() {
         ..State::default()
     };
     assert!(type_text(&canvas, &mut state, "129", at).is_empty());
-    assert_eq!(state.focus.typed().unwrap().text, "129");
+    assert_eq!(state.focus.typed().unwrap().draft.text, "129");
 
     let named = |key| key_event(key, true);
     use keyboard::key::Named;
     drive(&canvas, &mut state, &named(Named::ArrowLeft), at);
     drive(&canvas, &mut state, &named(Named::Backspace), at);
-    assert_eq!(state.focus.typed().unwrap().text, "19", "Backspace takes the 2");
+    assert_eq!(state.focus.typed().unwrap().draft.text, "19", "Backspace takes the 2");
     drive(&canvas, &mut state, &named(Named::Home), at);
     drive(&canvas, &mut state, &named(Named::Delete), at);
-    assert_eq!(state.focus.typed().unwrap().text, "9", "Delete takes the 1");
+    assert_eq!(state.focus.typed().unwrap().draft.text, "9", "Delete takes the 1");
     drive(
         &canvas,
         &mut state,
@@ -1410,7 +1410,7 @@ fn a_digit_opens_the_typed_field_and_enter_commits() {
         &typed(keyboard::Key::Character("0".into()), "0"),
         at,
     );
-    assert_eq!(state.focus.typed().unwrap().text, "190");
+    assert_eq!(state.focus.typed().unwrap().draft.text, "190");
 
     let committed = drive(&canvas, &mut state, &named(Named::Enter), at);
     assert_eq!(
@@ -1451,7 +1451,7 @@ fn the_field_opens_on_what_was_typed_not_on_the_key() {
         drive(&canvas, &mut state, &event, at);
         assert_eq!(state.focus.typed().is_some(), opens, "{key} {text}");
         if opens {
-            assert_eq!(state.focus.typed().unwrap().text, text);
+            assert_eq!(state.focus.typed().unwrap().draft.text, text);
         }
     }
     // With Command, a digit or a dot stays a shortcut, so Cmd+. can panic.
@@ -1512,7 +1512,7 @@ fn the_open_field_takes_every_key() {
     }
     assert_eq!(state.camera, camera);
     assert_eq!(
-        state.focus.typed().unwrap().text,
+        state.focus.typed().unwrap().draft.text,
         "fa",
         "letters are text; Cmd+V is not"
     );
@@ -1546,13 +1546,17 @@ fn enter_on_unchanged_text_commits_nothing() {
     };
     use keyboard::key::Named;
     assert!(drive(&canvas, &mut state, &key_event(Named::Enter, true), at).is_empty());
-    assert_eq!(state.focus.typed().unwrap().text, "128.0 BPM");
+    assert_eq!(state.focus.typed().unwrap().draft.text, "128.0 BPM");
     assert!(drive(&canvas, &mut state, &key_event(Named::Enter, true), at).is_empty());
     assert!(state.focus.typed().is_none(), "closed, with no edit");
 
     drive(&canvas, &mut state, &key_event(Named::Enter, true), at);
     type_text(&canvas, &mut state, "9", at);
-    assert_eq!(state.focus.typed().unwrap().text, "9", "the selection is replaced");
+    assert_eq!(
+        state.focus.typed().unwrap().draft.text,
+        "9",
+        "the selection is replaced"
+    );
     assert!(drive(&canvas, &mut state, &key_event(Named::Escape, true), at).is_empty());
     assert!(state.focus.typed().is_none());
     assert_eq!(state.focus.control(), Some((1, 0)), "Escape closes only the field");
@@ -1561,7 +1565,7 @@ fn enter_on_unchanged_text_commits_nothing() {
     // goes in it.
     drive(&canvas, &mut state, &key_event(Named::Enter, true), at);
     drive(&canvas, &mut state, &key_event(Named::Backspace, true), at);
-    assert_eq!(state.focus.typed().unwrap().text, "");
+    assert_eq!(state.focus.typed().unwrap().draft.text, "");
 }
 
 /// Bad text stays open and Enter does nothing. It can be corrected, and then
@@ -1584,14 +1588,11 @@ fn bad_typed_text_blocks_enter_until_it_is_corrected() {
     };
     use keyboard::key::Named;
     type_text(&canvas, &mut state, "1a", at);
-    assert_eq!(
-        canvas.typed_error(1, 0, state.focus.typed().unwrap()),
-        Some("Not a number in Hz".to_string())
-    );
+    assert_eq!(state.focus.typed().unwrap().draft.error(), Some("Not a number in Hz"));
     assert!(drive(&canvas, &mut state, &key_event(Named::Enter, true), at).is_empty());
     assert!(state.focus.typed().is_some(), "bad text keeps the field open");
     drive(&canvas, &mut state, &key_event(Named::Backspace, true), at);
-    assert!(canvas.typed_error(1, 0, state.focus.typed().unwrap()).is_none());
+    assert!(state.focus.typed().unwrap().draft.error().is_none());
     assert_eq!(drive(&canvas, &mut state, &key_event(Named::Enter, true), at).len(), 1);
 }
 

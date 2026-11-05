@@ -368,20 +368,17 @@ impl App {
     /// Typing in an inspector value field keeps the text as a draft, with the
     /// reason if it is not a value yet.
     pub(crate) fn type_value_draft(&mut self, module: u32, index: usize, text: String) {
-        let error = self
+        let spec = self
             .session
             .controller
             .graph()
             .node(ModuleId(module))
-            .and_then(|node| node.descriptor.params.get(index))
-            .and_then(|spec| spec.parse_value_text(&text).err())
-            .map(|why| why.to_string());
-        self.session.value_draft = Some(ValueDraft {
-            module,
-            index,
-            text,
-            error,
+            .and_then(|node| node.descriptor.params.get(index));
+        let draft = loom_canvas::TypedDraft::new(text, |text| match spec {
+            Some(spec) => spec.parse_value_text(text).map(|_| ()).map_err(|why| why.to_string()),
+            None => Ok(()),
         });
+        self.session.value_draft = Some(ValueDraft { module, index, draft });
     }
 
     /// Enter in an inspector value field: commits a draft that is a value, as
@@ -402,18 +399,21 @@ impl App {
                 node.params[index],
             ))
         });
-        if shown.as_deref() == Some(draft.text.as_str()) {
-            self.session.value_draft = None;
-            return;
+        // The inspector's baseline is the value as it shows now, which MIDI
+        // may have moved since the typing began.
+        match draft.draft.submit(shown.as_deref()) {
+            loom_canvas::DraftSubmit::Unchanged => {
+                self.session.value_draft = None;
+            }
+            loom_canvas::DraftSubmit::Blocked => {}
+            loom_canvas::DraftSubmit::Commit => {
+                self.close_slider_gesture();
+                self.edit(|app| {
+                    let _ = app.apply_typed_value(module, index, &draft.draft.text);
+                });
+                self.session.value_draft = None;
+            }
         }
-        if draft.error.is_some() {
-            return;
-        }
-        self.close_slider_gesture();
-        self.edit(|app| {
-            let _ = app.apply_typed_value(module, index, &draft.text);
-        });
-        self.session.value_draft = None;
     }
 
     /// Sets a parameter from a control on a tile or in the inspector.
@@ -549,9 +549,8 @@ impl App {
 pub(crate) struct ValueDraft {
     pub module: u32,
     pub index: usize,
-    pub text: String,
-    /// Why the text is not a value, if it is not.
-    pub error: Option<String>,
+    /// The text and why it is not a value yet, as the canvas field keeps it.
+    pub draft: loom_canvas::TypedDraft,
 }
 
 /// The widget ID of an inspector value field. Each parameter has its own, so a

@@ -34,8 +34,7 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
     app.session.value_draft = Some(controls::ValueDraft {
         module: added.0,
         index: 0,
-        text: "1".to_string(),
-        error: None,
+        draft: loom_canvas::TypedDraft::new("1".to_string(), |_| Ok(())),
     });
     app.text_focus = editing::TextFocus { any: true, field: None };
     app.session.lights.insert((added.0, 0), 1.0);

@@ -11,7 +11,7 @@ fn popup() -> SelectPopup {
 
 /// A field holding `text`.
 fn field(text: &str) -> TypedField {
-    TypedField::typing(text)
+    TypedField::typing(text, |_| Ok(()))
 }
 
 /// The inside of a range, on the band.

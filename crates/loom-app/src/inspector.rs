@@ -542,9 +542,9 @@ impl App {
                         .as_ref()
                         .filter(|d| d.module == id && d.index == index)
                     {
-                        Some(draft) => ValueField {
-                            text: draft.text.clone(),
-                            error: draft.error.clone(),
+                        Some(value) => ValueField {
+                            text: value.draft.text.clone(),
+                            error: value.draft.error().map(str::to_string),
                         },
                         None => ValueField {
                             text: shown.clone(),

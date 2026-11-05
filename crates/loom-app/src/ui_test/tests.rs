@@ -2385,7 +2385,7 @@ fn a_draft_ends_when_focus_moves_or_the_patch_changes() {
     let (id, _) = focus_cutoff_field(&mut ui);
     ui.typewrite("abc");
     assert_eq!(
-        ui.app.session.value_draft.as_ref().unwrap().text,
+        ui.app.session.value_draft.as_ref().unwrap().draft.text,
         "abc",
         "bad text keeps its focus"
     );
