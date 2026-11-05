@@ -132,26 +132,35 @@ Shader names must not be reserved words in Metal or HLSL, because wgpu's transla
 
 ## How the app handles a message
 
-Every Iced message goes through one entry point, `App::update` in `crates/loom-app/src/main.rs`. It owns the work that crosses workflows, in a fixed order: frame accounting, a safety change the engine's queue refused, telling autosave to look again, handing the message to its workflow, running the idle engine and retrying a waiting commit, and quitting cleanly. Each step is listed in its doc comment.
+Every Iced message goes through one entry point, `App::update` in `crates/loom-app/src/lib.rs`. It owns the work that crosses workflows, in a fixed order: frame accounting, a safety change the engine's queue refused, telling autosave to look again, handing the message to its workflow, running the idle engine and retrying a waiting commit, and quitting cleanly. Each step is listed in its doc comment.
 
-A workflow's messages go to a named handler that returns the `Task` it needs: `matrix_message` and `matrix_key_message` (`matrix.rs`), `browser_message`, `control` for the control channel, and `file_action` for `Message::File(FileAction)`, which the toolbar, the shortcuts, and the window's close request all send. The rest go to `App::handle`. There is no event bus and no second application state.
+A workflow's messages go to a named handler, next to its view, that returns the `Task` it needs if it needs one: `inspector_message` (`inspector.rs`), `modulation_message` (`modulation.rs`), `learn_message` (`controls.rs`), `matrix_message` and `matrix_key_message` (`matrix.rs`), `browser_message`, `control` for the control channel, and `file_action` for `Message::File(FileAction)`, which the toolbar, the shortcuts, and the window's close request all send. The rest go to `App::handle`. There is no event bus and no second application state.
 
-The app's state is split into owned parts (#466), in the pattern of [ADR-0034](../adr/0034-controller-flat-api-typed-parts.md): each part keeps its fields private, has its own small API and nested `Message`, and `App` coordinates the parts with the controller, undo, and the status bar.
+The app's state has three levels, by how long it lives:
+
+- **`App`** holds what lasts for the whole run: the rig, the control channel, the overlays, and the alerts.
+- **`session::PatchSession`** holds what belongs to the open patch: the controller, layout, selection, edits, canvas caches, and in `session.engine` the stream and the telemetry reader. New and Open build a new session and swap it in (`App::replace`), so nothing is copied by hand. `PatchSession::start` is the only way to build one.
+- **Owned parts** (#466) hold state with rules of its own, in the pattern of [ADR-0034](../adr/0034-controller-flat-api-typed-parts.md): each part keeps its fields private, has its own small API and sometimes a nested `Message`, and `App` coordinates the parts with the controller, undo, and the status bar.
+
+`PatchSession` is a holder, not a part. Its fields are `pub(crate)` plain paths, because `App`'s methods borrow two of them at once, as in `self.session.engine.live.sync(&mut self.session.controller, ...)`. To add a field, decide how long it lives. A test in `file_commands/tests.rs` names every field of `App` and of the session, so a new one does not compile until it says whether a new patch keeps it.
 
 | Part | Owns | Messages |
 |---|---|---|
 | `learn::Learn` (`learn.rs`) | Whether MIDI learn is on, the armed parameter, and what the canvas shows | `Message::Learn(learn::Message)` |
-| `document::Document` (`document.rs`) | The patch's name and file, what the title and the save dialog show, the bundled-examples rule, the saved content that tells unsaved work apart, and the recovery copy and autosave timer | File commands stay `Message::File(FileAction)`, handled by `App::file_action`, because saving also needs the graph, undo, and dialogs |
-| `gestures::Gestures` (`gestures.rs`) | Modulation gestures in progress: the open **Add modulation** list, an output dragged onto an inspector row and the row under it, an arc drag's picked assignment, and a placeholder label being typed | Inspector and canvas messages, such as `AddModulation`, `DropRow`, and `UnknownLabelDraft`; the finished edit goes through undo in `App` |
+| `overlays::Overlays` (`overlays.rs`, on `App`) | What is open over the canvas: one `Overlay` panel, with the licence chooser, help, and a question as ordered slots above it | Each overlay has its own `Message`; see [Who has the input](#who-has-the-input) |
+| `document::Document` (`document.rs`) | The patch's name and file, what the title and the save dialog show, the saved content that tells unsaved work apart, and whether a recovery copy is up to date | File commands stay `Message::File(FileAction)`, handled by `App::file_action`, because saving also needs the graph, undo, and dialogs |
+| `document::RunFiles` (`document.rs`, on `App`) | The run's recovery folder, the bundled-examples rule, and writing the recovery copy of a `Document` | `Message::Autosave` |
+| `gestures::Gestures` (`gestures.rs`) | Modulation gestures in progress: the open **Add modulation** list, an output dragged onto an inspector row and the row under it, an arc drag's picked assignment, and a placeholder label being typed | `Message::Inspector`, `Message::Modulation`, and canvas messages; the finished edit goes through undo in `App` |
 | `stream::Stream` (`stream.rs`) | The stream that plays the engine, or the idle engine when none does, its callback counters, load, and stall check, the device label, the sample rate, how this run plays (`Playback`: a device, `--fake-audio`, or `--no-audio`), and the output safety mode | Audio watcher and preferences messages; building engines and choosing devices stay in `App` and `settings::Rig` |
 | `input_session::InputSession` (`input_session.rs`, in `settings::Rig`) | The audio input stream and its drift tracker, whether it is off, waiting, or open, the retry time, a lost named device, and which input messages have been shown | `App::sync_audio_input` gives it a `Demand`, and the input watcher's events call that sync; it writes the status line through `Alerts` |
 | `alerts::Alerts` (`alerts.rs`) | The status line, the stats bar's dropout and input drift warnings, and problems reported once: a full live-value table, and a recording that stopped early | None of its own: every workflow writes the status line through `say` and `append` |
 
-`App` itself keeps only what coordinates the parts. `main.rs` holds the `App` struct, `Message`, `update`, `handle`, and the live-value and probe sync that run after each change. The rest of `impl App` is split by workflow, one block per file, and each block works through the parts' methods:
+`App` itself keeps only what coordinates the parts. `lib.rs` holds the `App` struct, `Message`, `update`, `handle`, and the live-value and probe sync that run after each change. The rest of `impl App` is split by workflow, one block per file, and each block works through the parts' methods:
 
 | File | What it coordinates |
 |---|---|
-| `boot.rs` | Building the app at start, and a new engine and session for each patch |
+| `boot.rs` | Building the app at start, loading a patch into a new engine (`Loaded::read`), and what a new session needs from the app (`settle_session`) |
+| `session.rs` | The fields of a session, and attaching audio and MIDI to a loaded patch (`PatchSession::start`) |
 | `file_commands.rs` | Save, Save As, New, Open, and replacing the patch |
 | `editing.rs` | Undo steps, commits to the engine, and the clipboard commands |
 | `controls.rs` | Turning controls, ranges, buttons, modulation assignments, depth drags, and arming MIDI learn |
@@ -159,7 +168,18 @@ The app's state is split into owned parts (#466), in the pattern of [ADR-0034](.
 | `subscriptions.rs` | Timers, keys, MIDI, the control channel, and the watcher threads |
 | `view.rs` | The window: toolbar, canvas, right panel, and stats bar. It reads state and changes nothing |
 
-The selection is not a part: the canvas, inspector, matrix, clipboard, undo, and snapshot all read it, so it stays on `App` as shared state, as the graph stays shared in `Controller`.
+The selection is not a part: the canvas, inspector, matrix, clipboard, undo, and snapshot all read it, so it stays a plain field of the session, as the graph stays shared in `Controller`.
+
+### Who has the input
+
+[`input_owner.rs`](../../crates/loom-app/src/input_owner.rs) decides which keys and clicks go where.
+
+- **`App::input_owner()` says who has the input.** It reads `Overlays::owner`: the top layer the view draws. To add a panel, add a variant to `Overlay`. The compiler then points to `Overlays::owner` and `App::overlay_key`. The canvas, the clipboard keys, and key handling follow.
+- **One listener hears what depends on who has the input.** `input_event` sends one message, and `Listening::route` turns it into messages in one fixed order. Iced keeps subscriptions in a hash map, so separate listeners would have no set order.
+- **Each message carries `Listening` from before the event,** because widgets act on an event first. Otherwise an Enter that makes a widget open a question would also answer it.
+- **`always_event` hears the panic key and dropped files.** Its subscription never restarts, so it cannot lose them. #604 covers the rare lost key on the other listener.
+
+The real window, the control channel's `pointer::Injector`, and the headless `Ui` all go through the same two listeners (`heard_messages`), so a test sees what the app does.
 
 ## View models for app panels
 
@@ -233,7 +253,7 @@ An unconnected input reads its `default`: a fixed value, or a transport signal s
 | Add a `Controller` method | The group it belongs to, in `crates/loom-core/src/controller/` (modules, cables, assignments, params, midi, transport, displays, audio). The API stays one flat list; each group is its own `impl Controller` block, shown as a section in the API docs. State with rules of its own is a typed part with private fields (`Slots`, `MidiSync`, `Probes`, `LiveValues`); a helper that two groups need goes in `controller.rs` ([ADR-0034](../adr/0034-controller-flat-api-typed-parts.md)). |
 | Change the patch format | `crates/loom-patch/src/lib.rs`. During the early alpha the format stays at version 1, and a change may stop old files from loading: update the example patches in the same change ([AGENTS.md](../../AGENTS.md#project-stage-early-alpha)). From the first release, add a migration and never break old files (ADR-0008). |
 | Change how the canvas looks or responds | `crates/loom-canvas/src/`. Keep per-frame work small. |
-| Add a panel, button, or setting to the app | The window is drawn in `crates/loom-app/src/view.rs`, panels have their own files (`inspector.rs`, `matrix.rs`), and preferences are in `settings.rs`. A new message goes in `Message` in `main.rs` and its handler in the file of the workflow it belongs to. |
+| Add a panel, button, or setting to the app | The window is drawn in `crates/loom-app/src/view.rs`, panels have their own files (`inspector.rs`, `matrix.rs`), and preferences are in `settings.rs`. A new message goes in the `Message` of its group, or in `Message` in `lib.rs` if it has none, and its handler in the file of the workflow it belongs to. |
 | Support another audio or MIDI case | `crates/loom-host-desktop/src/lib.rs`. |
 
 ## Tests
@@ -250,7 +270,7 @@ An unconnected input reads its `default`: a fixed value, or a transport signal s
 | Patch loading and round trips | `crates/loom-patch`. |
 | Canvas logic and shaders | `crates/loom-canvas` (hit-testing, camera, geometry, shader validation). |
 | Layout and parameter mapping in the app | `crates/loom-app`. |
-| Pointer and key events reaching the right widget in the app view | `crates/loom-app/src/ui_test.rs`: the headless `Ui` harness sends real events to `App::view`, runs the tasks they return, and finds ports, controls, and text by name. |
+| Pointer and key events reaching the right widget in the app view | `crates/loom-app/src/ui_test.rs`: the headless `Ui` harness sends real events to `App::view`, runs the tasks they return, and finds ports, controls, and text by name. A test in `crates/loom-app/tests/` can import it (`loom_app::ui_test::Ui`) through the `test-ui` feature, with what the crate makes public: `Ui::headless`, `tap_key`, and `snapshot_json`. |
 | Engine speed | `cargo bench -p loom-modules`. |
 
 CI runs all of them on Linux, macOS, and Windows. The full list of CI jobs is in CONTRIBUTING.md.
