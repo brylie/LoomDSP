@@ -126,7 +126,7 @@ impl App {
     /// The text fields Tab moves between in the view on top now. None when
     /// that view has fewer than two.
     pub(crate) fn tab_fields(&self) -> &'static [&'static str] {
-        if self.patches.is_some() && self.chooser.is_none() {
+        if self.overlays.patches().is_some() {
             &crate::patches::TEXT_FIELDS
         } else if self.no_overlay() && self.matrix.tab == RightTab::Inspector && self.selection.is_empty() {
             &crate::patch_info::TEXT_FIELDS

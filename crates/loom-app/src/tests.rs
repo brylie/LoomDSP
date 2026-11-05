@@ -330,13 +330,13 @@ fn adding_from_the_browser_is_one_undo_step_at_the_snapped_point() {
     open_at(&mut app, Point::new(250.0, 130.0));
     type_query(&mut app, "svf");
     let _ = app.update(Message::Browser(browser::Message::Key(browser::Nav::Escape)));
-    assert!(app.browser.is_none());
+    assert!(app.overlays.browser().is_none());
     assert_eq!(app.edits.history.undo_step().map(|s| s.name().to_string()), undo);
 
     open_at(&mut app, Point::new(250.0, 130.0));
     type_query(&mut app, "svf");
     let _ = app.update(Message::Browser(browser::Message::Submit));
-    assert!(app.browser.is_none());
+    assert!(app.overlays.browser().is_none());
     assert_eq!(app.controller.graph().nodes().count(), before + 1);
     let id = *app.selection.iter().next().expect("the new module is selected");
     assert_eq!(app.selection.len(), 1);
@@ -2303,7 +2303,7 @@ fn new_says_it_started_an_empty_patch() {
 fn an_unbundled_help_link_says_so() {
     let mut app = app();
     let _ = app.update(Message::HelpLink("nowhere.md".to_string()));
-    assert!(app.help.is_none());
+    assert!(app.overlays.help.is_none());
     assert_eq!(app.alerts.status(), "Linked document is not bundled: nowhere.md");
 }
 
@@ -2385,7 +2385,7 @@ fn a_broken_help_example_says_why() {
     let descriptor = *app.modules.first().unwrap();
     let mut help = help::Help::new(descriptor);
     help.model.example = Some("not a patch".to_string());
-    app.help = Some(help);
+    app.overlays.help = Some(help);
     let _ = app.update(Message::HelpExample);
     assert!(
         app.alerts.status().starts_with("Could not open example: "),
@@ -2664,7 +2664,12 @@ fn tab_moves_between_the_fields_of_one_view() {
     assert_eq!(ui.focused_field(), Some(Id::new(tags)), "Shift-Tab wraps back to Tags");
 
     let _ = press_key(&mut ui, Key::Named(Named::Escape), None, Modifiers::default());
-    ui.app.patches = Some(crate::patches::PatchBrowser::new(1, PathBuf::from("unread")));
+    ui.app
+        .overlays
+        .open(crate::overlays::Overlay::Patches(crate::patches::PatchBrowser::new(
+            1,
+            PathBuf::from("unread"),
+        )));
     ui.redraw();
     let [search, author] = crate::patches::TEXT_FIELDS;
     ui.focus(search);

@@ -8,6 +8,7 @@
 
 use crate::devices::{self, Host, MidiPort, Playing, Wanted};
 use crate::input_session::{Demand, InputSession};
+use crate::overlays::Overlay;
 use crate::preferences::{AudioPrefs, BufferChoice, DeviceChoice, InputChoice, Preferences, RateChoice, Store};
 use crate::style::{self, button};
 use crate::{App, alerts, undo};
@@ -89,7 +90,6 @@ pub struct Rig {
     pub playing: Option<Playing>,
     /// The window, while it is open, with the device lists read when it
     /// opened.
-    pub window: Option<Window>,
     /// Lists a control channel command reads while the window is closed, so
     /// it checks a change as the window does without opening anything.
     borrowed_lists: Option<DeviceLists>,
@@ -182,7 +182,6 @@ impl Rig {
             ports: Vec::new(),
             input: InputSession::new(),
             playing: None,
-            window: None,
             borrowed_lists: None,
             safety_pending: None,
             last_stop: None,
@@ -344,30 +343,31 @@ impl App {
         match message {
             Message::Open => {
                 let author = self.rig.store.saved().author.clone();
-                self.rig.window = Some(Window::read(&*self.rig.host, author));
-                self.browser = None;
+                let window = Window::read(&*self.rig.host, author);
+                self.overlays.open(Overlay::Preferences(Box::new(window)));
             }
             Message::Close => {
                 self.save_author();
-                self.rig.window = None;
+                self.overlays.close_preferences();
                 // Learning a panic trigger needs the window open to show
                 // "Waiting for MIDI...", so closing it cancels the learn.
                 self.rig.panic_learn = None;
             }
             Message::Refresh => {
-                if let Some(old) = self.rig.window.take() {
-                    self.rig.window = Some(Window::read(&*self.rig.host, old.author));
+                let lists = DeviceLists::read(&*self.rig.host);
+                if let Some(window) = self.overlays.preferences_mut() {
+                    window.lists = lists;
                 }
             }
             Message::Author(text) => {
-                if let Some(window) = &mut self.rig.window {
+                if let Some(window) = self.overlays.preferences_mut() {
                     window.author = text;
                 }
             }
             Message::SaveAuthor => self.save_author(),
             Message::ChooseLicence => {
                 let current = self.rig.store.saved().licence.clone();
-                self.chooser = Some(crate::licence_chooser::Chooser::open(
+                self.overlays.chooser = Some(crate::licence_chooser::Chooser::open(
                     crate::licence_chooser::Target::Default,
                     current.as_deref(),
                 ));
@@ -401,7 +401,7 @@ impl App {
             return Err(format!("there are no audio devices to choose with {flag}"));
         }
         let read;
-        let lists = match &self.rig.window {
+        let lists = match self.overlays.preferences() {
             Some(window) => &window.lists,
             None => {
                 read = DeviceLists::read(&*self.rig.host);
@@ -461,7 +461,7 @@ impl App {
     /// channel change is checked as the window checks it. Returns true when
     /// it read them, and the caller then calls [`App::forget_device_lists`].
     pub(crate) fn read_device_lists(&mut self) -> bool {
-        if self.rig.window.is_some() {
+        if self.overlays.preferences().is_some() {
             return false;
         }
         self.rig.borrowed_lists = Some(DeviceLists::read(&*self.rig.host));
@@ -475,7 +475,7 @@ impl App {
 
     /// The MIDI input a control channel `midi` command names (rule S2).
     pub(crate) fn control_midi_input(&self, wanted: &str) -> Result<String, String> {
-        let names = match &self.rig.window {
+        let names = match self.overlays.preferences() {
             Some(window) => window.lists.midi.clone(),
             None => self.rig.host.midi_inputs(),
         }
@@ -490,7 +490,7 @@ impl App {
 
     /// Opens or closes the window, for Cmd+, or Ctrl+,.
     pub(crate) fn toggle_preferences(&mut self) {
-        let message = if self.rig.window.is_some() {
+        let message = if self.overlays.preferences().is_some() {
             Message::Close
         } else {
             Message::Open
@@ -522,7 +522,9 @@ impl App {
     /// (patch-metadata.md, Defaults). Only the name is stored, never other
     /// contact details (rule 4).
     fn save_author(&mut self) {
-        let Some(window) = &self.rig.window else { return };
+        let Some(window) = self.overlays.preferences() else {
+            return;
+        };
         let author = window.author.trim().to_string();
         if self.rig.store.saved().author == author {
             return;
@@ -715,7 +717,7 @@ impl App {
     }
 
     fn outputs(&self) -> Option<&Outputs> {
-        let open = self.rig.window.as_ref().map(|window| &window.lists);
+        let open = self.overlays.preferences().map(|window| &window.lists);
         open.or(self.rig.borrowed_lists.as_ref())
             .and_then(|lists| lists.outputs.as_ref().ok())
     }
@@ -1250,7 +1252,7 @@ impl App {
     /// follows too.
     pub(crate) fn poll_midi(&mut self) {
         let Ok(list) = self.rig.host.midi_list() else { return };
-        if let Some(window) = &mut self.rig.window {
+        if let Some(window) = self.overlays.preferences_mut() {
             window.lists.midi = Ok(list.iter().map(|input| input.name.clone()).collect());
         }
         if self.rig.midi_in.is_none() || list == self.rig.seen_midi {
@@ -1318,7 +1320,7 @@ impl App {
 
     /// The window, over the canvas, while it is open.
     pub(crate) fn preferences_view(&self) -> Option<Element<'_, crate::Message>> {
-        let window = self.rig.window.as_ref()?;
+        let window = self.overlays.preferences()?;
         let heading = |label: &'static str| text(label).size(style::HEADING);
         let note = |line: String| text(line).size(style::BODY).color(crate::DIM);
 

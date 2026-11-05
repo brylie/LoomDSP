@@ -43,6 +43,7 @@ mod live;
 mod matrix;
 mod modulation;
 mod monitor;
+mod overlays;
 mod panic;
 mod param;
 mod patch_info;
@@ -83,6 +84,7 @@ use loom_host_desktop::{CallbackStats, SharedMidi};
 use loom_patch::Patch;
 use matrix::{Event as MatrixEvent, Tab as RightTab};
 use modulation::PolarityChoice;
+use overlays::Overlay;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -773,33 +775,18 @@ struct App {
     holding: bool,
     /// Every registered module, for the browser.
     modules: Vec<&'static ModuleDescriptor>,
-    /// The module browser, while it is open.
-    browser: Option<browser::Browser>,
+    /// What is open over the canvas.
+    overlays: overlays::Overlays,
     /// Patch info's fields being typed in (`docs/design/patch-metadata.md`).
     patch_info: patch_info::State,
-    /// The licence chooser, while it is open.
-    chooser: Option<licence_chooser::Chooser>,
-    /// Your patches browser, while it is open.
-    patches: Option<patches::PatchBrowser>,
-    /// The rows of the recent list, while it is open. Read when it opens.
-    recent_rows: Option<Vec<recent::Row>>,
     /// Files of a drop being collected, for a moment after the first.
     drops: Vec<PathBuf>,
-    /// The question over everything else, while one is open. While it is,
-    /// most messages are dropped (`Message::allowed_during_question`).
-    question: Option<question::Question>,
     /// Counts openings of the patches browser, so files read for an
     /// earlier one are dropped.
     patches_open: u64,
-    /// Open module help.
-    help: Option<help::Help>,
-    /// Right-clicked tile and its menu position.
-    tile_menu: Option<(u32, Point)>,
     /// Changed by the toolbar button; the canvas then opens the browser at
     /// its centre.
     browser_key: u64,
-    /// The probe menu, while it is open.
-    probe_menu: Option<probe_menu::ProbeMenu>,
     frame_key: u64,
     meter: bench::FrameMeter,
     /// The stdout report, when started with --bench, --measure, or
@@ -1334,7 +1321,7 @@ impl App {
             _ => FrameCause::Other,
         };
         loom_canvas::stats::request_frame(cause);
-        if self.question.is_some() && !message.allowed_during_question() {
+        if self.overlays.question.is_some() && !message.allowed_during_question() {
             return Task::none();
         }
         // A field can go with the view, so any input while one has focus asks
@@ -1352,8 +1339,8 @@ impl App {
             // It may have changed the patch: autosave looks again.
             self.document.may_have_changed();
         }
-        let was_open = self.browser.is_some();
-        let was_help_open = self.help.is_some();
+        let was_open = self.overlays.browser().is_some();
+        let was_help_open = self.overlays.help.is_some();
         let task = match message {
             Message::Browser(message) => self.browser_message(message),
             Message::Patches(message) => self.patches_message(message),
@@ -1444,7 +1431,7 @@ impl App {
             // A clean exit: the recovery folder goes (autosave.md, Clean exit).
             self.document.finish();
             Task::batch([task, iced::exit()])
-        } else if self.browser.is_some() && (!was_open || (was_help_open && self.help.is_none())) {
+        } else if self.overlays.browser().is_some() && (!was_open || (was_help_open && self.overlays.help.is_none())) {
             Task::batch([task, editing::focus_text_field(browser::INPUT)])
         } else {
             task
@@ -1463,25 +1450,24 @@ impl App {
             }
             return Task::none();
         };
-        self.browser = None;
         self.patches_open += 1;
         let (browser, task) = patches::PatchBrowser::open(self.patches_open, folder);
-        self.patches = Some(browser);
+        self.overlays.open(Overlay::Patches(browser));
         Task::batch([task.map(Message::Patches), editing::focus_text_field(patches::SEARCH)])
     }
 
     /// Handles a patches browser message: keep it open, close it, or open
     /// a patch, asking about unsaved changes first.
     fn patches_message(&mut self, message: patches::Message) -> Task<Message> {
-        let Some(open) = self.patches.as_mut() else {
+        let Some(open) = self.overlays.patches_mut() else {
             return Task::none();
         };
         let (outcome, task) = open.update(message);
         match outcome {
             patches::Outcome::Stay => {}
-            patches::Outcome::Close => self.patches = None,
+            patches::Outcome::Close => self.overlays.close_patches(),
             patches::Outcome::Open(path) => {
-                self.patches = None;
+                self.overlays.close_patches();
                 self.after_discard(question::AfterDiscard::OpenPath(path));
             }
         }
@@ -1490,15 +1476,15 @@ impl App {
 
     /// Handles a browser message: keep it open, close it, or add a module.
     fn browser_message(&mut self, message: browser::Message) -> Task<Message> {
-        let Some(open) = self.browser.as_mut() else {
+        let Some(open) = self.overlays.browser_mut() else {
             return Task::none();
         };
         let (outcome, task) = open.update(message);
         match outcome {
             browser::Outcome::Stay => {}
-            browser::Outcome::Close => self.browser = None,
+            browser::Outcome::Close => self.overlays.close_browser(),
             browser::Outcome::Add(descriptor, world) => {
-                self.browser = None;
+                self.overlays.close_browser();
                 self.add_module(descriptor, world);
             }
         }
@@ -1587,13 +1573,13 @@ impl App {
             | Message::Matrix(_)
             | Message::MatrixKey(_) => {}
             Message::ShowHelp => {
-                if self.help.is_none() {
+                if self.overlays.help.is_none() {
                     let descriptor = self
-                        .browser
-                        .as_ref()
+                        .overlays
+                        .browser()
                         .and_then(browser::Browser::highlighted)
                         .or_else(|| {
-                            (self.browser.is_none() && self.selection.len() == 1)
+                            (self.overlays.browser().is_none() && self.selection.len() == 1)
                                 .then(|| {
                                     self.selection
                                         .iter()
@@ -1604,12 +1590,12 @@ impl App {
                                 .flatten()
                         });
                     // With nothing to describe, F1 shows the shortcuts.
-                    self.help = Some(descriptor.map_or_else(help::Help::shortcuts, help::Help::new));
+                    self.overlays.help = Some(descriptor.map_or_else(help::Help::shortcuts, help::Help::new));
                 }
             }
             Message::ShowShortcuts => {
-                if self.rig.window.is_none() {
-                    self.help = Some(help::Help::shortcuts());
+                if self.overlays.preferences().is_none() {
+                    self.overlays.help = Some(help::Help::shortcuts());
                 }
             }
             Message::ResetClip(id) => {
@@ -1619,16 +1605,16 @@ impl App {
                 }
             }
             Message::ShowModuleHelp(id) => {
-                self.tile_menu = None;
-                self.help = self
+                self.overlays.close_tile_menu();
+                self.overlays.help = self
                     .controller
                     .graph()
                     .node(ModuleId(id))
                     .map(|node| help::Help::new(node.descriptor));
             }
-            Message::CloseHelp => self.help = None,
+            Message::CloseHelp => self.overlays.help = None,
             Message::HelpExample => {
-                let example = self.help.as_ref().and_then(|help| help.model.example.clone());
+                let example = self.overlays.help.as_ref().and_then(|help| help.model.example.clone());
                 if let Some(example) = example {
                     match Patch::from_ron(&example) {
                         Ok(patch) => self.after_discard(question::AfterDiscard::Example(Box::new(patch))),
@@ -1642,12 +1628,12 @@ impl App {
                     .and_then(|id| self.modules.iter().find(|d| d.id == id))
                     .copied();
                 if let Some(descriptor) = descriptor {
-                    self.help = Some(help::Help::new(descriptor));
+                    self.overlays.help = Some(help::Help::new(descriptor));
                 } else {
                     self.alerts.warn(format!("Linked document is not bundled: {link}"));
                 }
             }
-            Message::CloseTileMenu => self.tile_menu = None,
+            Message::CloseTileMenu => self.overlays.close_tile_menu(),
             Message::Key(event) if self.input_owner() != input_owner::InputOwner::Canvas => self.overlay_key(&event),
             Message::Preferences(message) => self.preferences(message),
             Message::PatchInfo(message) => self.patch_info_message(message),
@@ -1670,7 +1656,7 @@ impl App {
                 if self.matrix_has_keys() && !modifiers.command() => {}
             Message::Key(iced::keyboard::Event::KeyReleased { .. }) if self.matrix_has_keys() => {}
             Message::ProbeMenu(message) => {
-                if let (Some(menu), probe_menu::Message::Pick(probe)) = (self.probe_menu.take(), message) {
+                if let (Some(menu), probe_menu::Message::Pick(probe)) = (self.overlays.take_probe_menu(), message) {
                     self.add_probe(probe, menu.output, menu.world);
                 }
             }

@@ -62,14 +62,14 @@ fn help_from_focused_browser_preserves_search() {
     assert!(help.notes.contains("Example patch"));
     assert!(ui.text("Open example").is_some());
     ui.tap(Key::Named(Named::Escape), Modifiers::default());
-    assert!(ui.app.help.is_none());
+    assert!(ui.app.overlays.help.is_none());
     assert_eq!(
-        ui.app.browser.as_ref().unwrap().highlighted().unwrap().id,
+        ui.app.overlays.browser().unwrap().highlighted().unwrap().id,
         "loom.filter.svf"
     );
     ui.typewrite("x");
     assert!(
-        ui.app.browser.as_ref().unwrap().highlighted().is_none(),
+        ui.app.overlays.browser().unwrap().highlighted().is_none(),
         "search retains focus"
     );
 }
@@ -96,8 +96,8 @@ fn help_from_selected_tile_inspector_and_menu() {
     ui.move_to(at);
     ui.step(&[iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right))]);
     ui.step(&[iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Right))]);
-    assert!(ui.app.tile_menu.is_some());
-    let (_, menu_at) = ui.app.tile_menu.unwrap();
+    assert!(ui.app.overlays.tile_menu().is_some());
+    let (_, menu_at) = ui.app.overlays.tile_menu().unwrap();
     ui.move_to(Point::new(menu_at.x + 30.0, menu_at.y + 15.0));
     ui.press();
     ui.release();
@@ -123,7 +123,7 @@ fn help_close_stays_visible_while_scrolling() {
     ui.move_to(after.center());
     ui.press();
     ui.release();
-    assert!(ui.app.help.is_none());
+    assert!(ui.app.overlays.help.is_none());
 }
 
 /// The example button asks about unsaved changes and honors the answer.
@@ -144,20 +144,20 @@ fn example_button_honors_unsaved_changes() {
     ui.move_to(at);
     ui.press();
     ui.release();
-    assert!(ui.app.question.is_some(), "it asks first");
+    assert!(ui.app.overlays.question.is_some(), "it asks first");
     let _ = ui
         .app
         .update(Message::Question(QuestionMessage::Answer(Answer::Cancel)));
-    assert!(ui.app.help.is_some(), "cancellation keeps the help open");
+    assert!(ui.app.overlays.help.is_some(), "cancellation keeps the help open");
     assert!(ui.app.unsaved());
 
     ui.press();
     ui.release();
-    assert!(ui.app.question.is_some(), "it asks again");
+    assert!(ui.app.overlays.question.is_some(), "it asks again");
     let _ = ui
         .app
         .update(Message::Question(QuestionMessage::Answer(Answer::DontSave)));
-    assert!(ui.app.help.is_none());
+    assert!(ui.app.overlays.help.is_none());
     assert!(!ui.app.unsaved());
     assert!(ui.app.document.file().is_none());
     assert_eq!(
@@ -219,13 +219,13 @@ fn example_uses_existing_unsaved_changes_flow() {
     assert!(ui.app.unsaved());
     let _ = files::fake::asked();
     let _ = ui.app.update(Message::HelpExample);
-    assert!(ui.app.help.is_some());
-    assert!(ui.app.question.is_some());
+    assert!(ui.app.overlays.help.is_some());
+    assert!(ui.app.overlays.question.is_some());
     let mut clean = Ui::open("subtractive.ron");
     let _ = clean.app.update(Message::Canvas(CanvasEvent::Select(vec![4])));
     let _ = clean.app.update(Message::ShowHelp);
     let _ = clean.app.update(Message::HelpExample);
-    assert!(clean.app.help.is_none());
+    assert!(clean.app.overlays.help.is_none());
     assert!(clean.app.document.file().is_none());
 }
 
@@ -248,11 +248,17 @@ fn empty_inspector_and_f1_open_the_shortcuts() {
     );
     let button = ui.text("Keyboard shortcuts").expect("the shortcuts button").center();
     click(&mut ui, button);
-    assert_eq!(ui.app.help.as_ref().map(|h| h.model.name), Some("Keyboard shortcuts"));
+    assert_eq!(
+        ui.app.overlays.help.as_ref().map(|h| h.model.name),
+        Some("Keyboard shortcuts")
+    );
     ui.tap(Key::Named(Named::Escape), Modifiers::default());
-    assert!(ui.app.help.is_none());
+    assert!(ui.app.overlays.help.is_none());
     ui.tap(Key::Named(Named::F1), Modifiers::default());
-    assert_eq!(ui.app.help.as_ref().map(|h| h.model.name), Some("Keyboard shortcuts"));
+    assert_eq!(
+        ui.app.overlays.help.as_ref().map(|h| h.model.name),
+        Some("Keyboard shortcuts")
+    );
 }
 
 /// Help details read as words with units: no "unconnected:", no stray
@@ -281,7 +287,7 @@ fn help_wraps_inside_and_closes_from_the_backdrop() {
     let close = ui.text("Close").expect("the Close button");
     // The panel ends 20 px right of its Close button.
     let right = close.x + close.width + 20.0;
-    let help = ui.app.help.as_ref().unwrap().model.clone();
+    let help = ui.app.overlays.help.as_ref().unwrap().model.clone();
     for entry in help.params.iter().chain(&help.inputs).chain(&help.outputs) {
         let text = ui.text(entry.description).expect("an entry's description");
         assert!(
@@ -294,9 +300,9 @@ fn help_wraps_inside_and_closes_from_the_backdrop() {
     // inspector, outside the overlay.
     let heading = ui.text("Parameters").expect("a help heading");
     click(&mut ui, heading.center());
-    assert!(ui.app.help.is_some(), "a click inside keeps help open");
+    assert!(ui.app.overlays.help.is_some(), "a click inside keeps help open");
     click(&mut ui, Point::new(10.0, crate::WINDOW.height / 2.0));
-    assert!(ui.app.help.is_none(), "a click on the backdrop closes help");
+    assert!(ui.app.overlays.help.is_none(), "a click on the backdrop closes help");
 }
 
 /// The inspector lists each port on one line with its signal and range,
@@ -324,10 +330,10 @@ fn the_browser_shows_the_id_under_the_description() {
     let canvas = ui.canvas();
     ui.move_to(Point::new(canvas.bounds.x + 8.0, canvas.bounds.y + 8.0));
     ui.tap(Key::Character("a".into()), Modifiers::default());
-    let first = ui.app.browser.as_ref().unwrap().highlighted().unwrap();
+    let first = ui.app.overlays.browser().unwrap().highlighted().unwrap();
     assert!(ui.text(first.id).is_some(), "the highlighted ID");
     assert!(ui.text(first.description).is_some());
-    let second = ui.app.browser.as_ref().unwrap().results()[1];
+    let second = ui.app.overlays.browser().unwrap().results()[1];
     assert!(ui.text(second.id).is_none(), "no ID on other rows");
     // Each row shows its family (ADR-0029).
     assert!(ui.text(first.family.label()).is_some(), "the row's family");

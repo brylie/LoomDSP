@@ -198,7 +198,7 @@ fn choosing_a_row_asks_first() {
     changed(&mut ui.app);
     ui.send(AppMessage::OpenRecent);
     ui.send(AppMessage::Recent(Message::Pick(0)));
-    assert!(ui.app.question.is_some());
+    assert!(ui.app.overlays.question.is_some());
     assert_eq!(ui.app.document.file(), None);
     ui.send(AppMessage::Question(QuestionMessage::Answer(Answer::DontSave)));
     assert_eq!(ui.app.document.file(), Some(files[0].as_path()));
@@ -220,7 +220,7 @@ fn a_missing_file_is_dimmed_and_removed_when_chosen() {
     assert!(rows[0].missing);
     assert!(!rows[1].missing);
     ui.send(AppMessage::Recent(Message::Pick(0)));
-    assert!(ui.app.question.is_none(), "nothing to ask about");
+    assert!(ui.app.overlays.question.is_none(), "nothing to ask about");
     assert_eq!(ui.app.rig.recent.files(), &files[1..]);
     assert!(ui.app.alerts.status().contains("0.ron"), "{}", ui.app.alerts.status());
 }
@@ -367,7 +367,7 @@ fn dropping_one_patch_opens_it_after_the_question() {
     let mut app = app();
     changed(&mut app);
     drop_files(&mut app, &files);
-    assert!(app.question.is_some());
+    assert!(app.overlays.question.is_some());
     assert_eq!(app.document.file(), None);
     let _ = app.update(AppMessage::Question(QuestionMessage::Answer(Answer::DontSave)));
     assert_eq!(app.document.file(), Some(files[0].as_path()));
@@ -416,7 +416,7 @@ fn dropping_something_else_shows_the_message() {
     changed(&mut app);
     drop_files(&mut app, &[PathBuf::from("/a/b.wav")]);
     assert_eq!(app.alerts.status(), "Only LoomDSP patches (.ron) can be opened here.");
-    assert!(app.question.is_none());
+    assert!(app.overlays.question.is_none());
     assert!(app.unsaved());
 }
 
@@ -449,14 +449,14 @@ fn overlays_stay_open_until_the_patch_opens() {
     let files = patches(&dir.0, 1);
     let mut app = app();
     let _ = app.update(AppMessage::Preferences(crate::settings::Message::Open));
-    assert!(app.rig.window.is_some());
+    assert!(app.overlays.preferences().is_some());
     changed(&mut app);
     drop_files(&mut app, &files);
     let _ = app.update(AppMessage::Question(QuestionMessage::Answer(Answer::Cancel)));
-    assert!(app.rig.window.is_some(), "Cancel changes nothing");
+    assert!(app.overlays.preferences().is_some(), "Cancel changes nothing");
     drop_files(&mut app, &files);
     let _ = app.update(AppMessage::Question(QuestionMessage::Answer(Answer::DontSave)));
-    assert!(app.rig.window.is_none());
+    assert!(app.overlays.preferences().is_none());
 }
 
 /// With the list open, the clipboard shortcuts reach nothing behind it. Cut
@@ -477,7 +477,7 @@ fn clipboard_keys_do_nothing_behind_the_list() {
         ui.tap(Key::Character(key.into()), Modifiers::COMMAND);
         assert_eq!(ui.app.controller.graph().nodes().count(), count, "{key}");
     }
-    assert!(ui.app.recent_rows.is_some(), "the list stays open");
+    assert!(ui.app.overlays.recent_rows().is_some(), "the list stays open");
 }
 
 /// Opening the list takes the keys from a focused matrix, so Delete removes
@@ -500,7 +500,7 @@ fn the_list_takes_the_keys_from_a_focused_matrix() {
         "{messages:?}"
     );
     ui.tap(Key::Named(Named::Escape), Modifiers::empty());
-    assert!(ui.app.recent_rows.is_none(), "one Escape closes it");
+    assert!(ui.app.overlays.recent_rows().is_none(), "one Escape closes it");
 }
 
 /// Open with a current file starts in its folder, and does not make the

@@ -1,6 +1,7 @@
 //! File commands: the patch name and unsaved mark, Save, Save As, New,
 //! Open, and replacing the patch with another (`docs/design/files.md`).
 
+use crate::overlays::Overlay;
 use crate::question::{AfterDiscard, Answer, Kind, Message as QuestionMessage, Question};
 use crate::{App, Args, FileAction, Source, alerts, bench, control, devices, files, screenshot, settings};
 use loom_core::EngineConfig;
@@ -189,7 +190,7 @@ impl App {
             }
             files::Saving::Confirm(path) => {
                 self.used_folder_of(&path);
-                self.question = Some(Question::replace(path, next));
+                self.overlays.question = Some(Question::replace(path, next));
                 false
             }
         }
@@ -219,7 +220,7 @@ impl App {
     pub(crate) fn after_discard(&mut self, next: AfterDiscard) {
         self.finish_edits();
         if self.unsaved() {
-            self.question = Some(Question::discard(self.patch_name(), next));
+            self.overlays.question = Some(Question::discard(self.patch_name(), next));
         } else {
             self.proceed(next);
         }
@@ -261,12 +262,12 @@ impl App {
     /// channel's reply says so too (control-channel.md, rule 9).
     pub(crate) fn question_message(&mut self, message: QuestionMessage) -> bool {
         if let QuestionMessage::Move(by) = message {
-            if let Some(question) = self.question.as_mut() {
+            if let Some(question) = self.overlays.question.as_mut() {
                 question.step(by);
             }
             return true;
         }
-        let Some(question) = self.question.take() else {
+        let Some(question) = self.overlays.question.take() else {
             return true;
         };
         let answer = match message {
@@ -375,6 +376,8 @@ impl App {
         fresh.patches_open = self.patches_open;
         fresh.frame_key = self.frame_key + 1;
         fresh.alerts.carry_kept_from(&mut self.alerts);
+        self.overlays.close_for_new_patch();
+        fresh.overlays.keep_panel_from(&mut self.overlays);
         // The file that could not be read or written no longer matters.
         fresh.alerts.clear(alerts::Cause::File);
         // The new app's first look at the devices came before the carry, so
@@ -396,8 +399,8 @@ impl App {
     /// would block every later command (`docs/design/control-channel.md`,
     /// rule 9). A question already open stays: the status bar has this too.
     pub(crate) fn show_error(&mut self, message: &str) {
-        if self.control.is_empty() && self.question.is_none() {
-            self.question = Some(Question::error(message.to_string()));
+        if self.control.is_empty() && self.overlays.question.is_none() {
+            self.overlays.question = Some(Question::error(message.to_string()));
         }
     }
 
@@ -445,7 +448,7 @@ impl App {
         if !self.open_path(path) {
             return;
         }
-        self.rig.window = None;
+        self.overlays.close_preferences();
         if several {
             let notes = self.document.load_notes().join("; ");
             let name = files::display_name(Some(path));
@@ -463,15 +466,18 @@ impl App {
     /// missing is looked up here, not on every frame. The matrix gives up the
     /// keys, or Delete would remove an assignment behind the list.
     pub(crate) fn open_recent_list(&mut self) {
-        self.recent_rows = (!self.rig.recent.files().is_empty()).then(|| crate::recent::rows(self.rig.recent.files()));
-        if self.recent_rows.is_some() {
+        if self.rig.recent.files().is_empty() {
+            self.overlays.close_recent_list();
+        } else {
+            let rows = crate::recent::rows(self.rig.recent.files());
+            self.overlays.open(Overlay::RecentList(rows));
             self.matrix.focused = false;
         }
     }
 
     /// Handles a message for the open list.
     pub(crate) fn recent_message(&mut self, message: crate::recent::Message) {
-        let rows = self.recent_rows.take();
+        let rows = self.overlays.take_recent_rows();
         let crate::recent::Message::Pick(index) = message else {
             return;
         };
@@ -497,7 +503,7 @@ impl App {
     /// Adds a file to the drop being collected. A drop while a question is
     /// open is ignored, because the question must be answered first.
     pub(crate) fn file_dropped(&mut self, path: PathBuf) {
-        if self.question.is_some() {
+        if self.overlays.question.is_some() {
             self.alerts
                 .warn("The dropped file was not opened: answer the question first.".to_string());
         } else {
@@ -511,7 +517,7 @@ impl App {
         if drops.is_empty() {
             return;
         }
-        if self.question.is_some() {
+        if self.overlays.question.is_some() {
             self.alerts
                 .warn("The dropped file was not opened: answer the question first.".to_string());
             return;

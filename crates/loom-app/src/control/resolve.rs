@@ -215,7 +215,7 @@ pub(super) const BUTTONS: [&str; 6] = ["new", "learn", "hold", "panic", "undo", 
 /// Add module is left out: it opens the browser at the pointer, which a
 /// script does not have, and the `add` command adds a module directly.
 pub(super) fn press_message(app: &App, name: &str) -> Result<Message, String> {
-    if let Some(question) = &app.question {
+    if let Some(question) = &app.overlays.question {
         return question_press(question, name);
     }
     let (message, disabled) = match name {

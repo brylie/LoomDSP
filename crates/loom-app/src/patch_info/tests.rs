@@ -121,7 +121,7 @@ fn the_licence_is_described() {
     assert_eq!(shown.licence, "Unrecognised licence");
     assert!(shown.licence_summary.unwrap().contains("my own terms"));
     send(&mut app, Message::ChooseLicence);
-    assert!(app.chooser.is_some(), "Choose opens the licence chooser");
+    assert!(app.overlays.chooser.is_some(), "Choose opens the licence chooser");
 }
 
 /// Acceptance: with "Your name" and a default licence set, a new patch
@@ -285,14 +285,14 @@ fn the_window_shows_patch_info_the_chooser_and_the_browser() {
 
     ui.tap(Key::Character("o".into()), Modifiers::COMMAND | Modifiers::SHIFT);
     ui.redraw();
-    assert!(ui.app.patches.is_some(), "Ctrl+Shift+O opens the browser");
+    assert!(ui.app.overlays.patches().is_some(), "Ctrl+Shift+O opens the browser");
     assert!(ui.text("Your patches").is_some());
     assert!(ui.text("Low Drone").is_some());
     ui.tap(Key::Named(Named::ArrowDown), Modifiers::empty());
     ui.typewrite("drone");
     ui.tap(Key::Named(Named::Enter), Modifiers::empty());
     ui.redraw();
-    assert!(ui.app.patches.is_none());
+    assert!(ui.app.overlays.patches().is_none());
     // Unsaved changes are asked about first.
     ui.send(AppMessage::Question(crate::question::Message::Answer(
         crate::question::Answer::DontSave,

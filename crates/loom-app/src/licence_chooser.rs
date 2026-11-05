@@ -285,15 +285,15 @@ impl Chooser {
 impl App {
     /// Handles a chooser message, storing the licence it gives.
     pub(crate) fn licence_message(&mut self, message: Message) {
-        let Some(chooser) = self.chooser.as_mut() else {
+        let Some(chooser) = self.overlays.chooser.as_mut() else {
             return;
         };
         let target = chooser.target();
         match chooser.update(message) {
             Outcome::Stay => {}
-            Outcome::Close => self.chooser = None,
+            Outcome::Close => self.overlays.chooser = None,
             Outcome::Set(licence) => {
-                self.chooser = None;
+                self.overlays.chooser = None;
                 match target {
                     Target::Patch => {
                         if self.document.info().license != licence {

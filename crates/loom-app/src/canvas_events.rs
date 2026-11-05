@@ -1,6 +1,7 @@
 //! What a canvas event does to the patch: the canvas reports
 //! `CanvasEvent`s and never edits the graph itself (ADR-0010).
 
+use crate::overlays::{ContextMenu, Overlay};
 use crate::{App, browser, gestures, probe_menu, scene, undo};
 use iced::Point;
 use loom_canvas::{CanvasEvent, ControlPart};
@@ -220,20 +221,28 @@ impl App {
                 area,
             } => {
                 self.close_slider_gesture();
-                self.probe_menu = Some(probe_menu::ProbeMenu::open(output, world, at, area));
+                self.overlays
+                    .open(Overlay::Menu(ContextMenu::Probe(probe_menu::ProbeMenu::open(
+                        output, world, at, area,
+                    ))));
             }
             CanvasEvent::TileMenu { module, at, area } => {
-                self.tile_menu = Some((
+                self.overlays.open(Overlay::Menu(ContextMenu::Tile {
                     module,
-                    Point::new(
+                    at: Point::new(
                         at.x.min(area.x + area.width - 140.0).max(area.x),
                         at.y.min(area.y + area.height - 36.0).max(area.y),
                     ),
-                ));
+                }));
             }
             CanvasEvent::OpenBrowser { world, at, area } => {
                 self.close_slider_gesture();
-                self.browser = Some(browser::Browser::open(self.modules.clone(), world, at, area));
+                self.overlays.open(Overlay::Browser(browser::Browser::open(
+                    self.modules.clone(),
+                    world,
+                    at,
+                    area,
+                )));
             }
             CanvasEvent::ClearClip { module, widget } => self.reset_clip((module, widget), false),
             CanvasEvent::ResetMeter { module, widget } => self.reset_clip((module, widget), true),

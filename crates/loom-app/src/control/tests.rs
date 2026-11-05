@@ -1377,9 +1377,9 @@ fn keys_reach_the_open_browser_and_the_bar_draws_the_clock() {
     );
     let _ = ui.app.update(Message::OpenBrowser);
     ui.redraw();
-    assert!(ui.app.browser.is_some());
+    assert!(ui.app.overlays.browser().is_some());
     run_ui(&mut ui, r#"{"cmd": "key", "key": "escape"}"#).unwrap();
-    assert!(ui.app.browser.is_none(), "Escape closed the browser");
+    assert!(ui.app.overlays.browser().is_none(), "Escape closed the browser");
 }
 
 /// Runs a `type` command as the app does: the window reports whether a text
@@ -1493,11 +1493,11 @@ fn type_filters_the_open_browser() {
     let _ = ui.app.update(Message::OpenBrowser);
     ui.redraw();
     ui.focus(crate::browser::INPUT);
-    let before = ui.app.browser.as_ref().unwrap().results().len();
+    let before = ui.app.overlays.browser().unwrap().results().len();
 
     assert_eq!(run_type(&mut ui, "osc saw"), Ok(Map::new()));
 
-    let browser = ui.app.browser.as_ref().unwrap();
+    let browser = ui.app.overlays.browser().unwrap();
     let names: Vec<&str> = browser.results().iter().map(|d| d.id).collect();
     assert!(names.len() < before, "the list was filtered");
     assert!(names.contains(&"loom.osc.saw"), "found {names:?}");
@@ -1513,7 +1513,7 @@ fn type_is_refused_with_no_text_field_in_focus() {
     for _ in 0..4 {
         ui.redraw();
     }
-    assert!(ui.app.browser.is_none(), "no key reached the shortcuts");
+    assert!(ui.app.overlays.browser().is_none(), "no key reached the shortcuts");
 }
 
 /// An open question stops keys reaching the patch and its fields, so `type`
@@ -1522,7 +1522,7 @@ fn type_is_refused_with_no_text_field_in_focus() {
 fn type_is_refused_while_a_question_is_open() {
     let mut app = scripted_with_changes();
     run(&mut app, r#"{"cmd": "toolbar", "button": "new"}"#).unwrap();
-    assert!(app.question.is_some(), "the New button raised the question");
+    assert!(app.overlays.question.is_some(), "the New button raised the question");
     assert!(run(&mut app, r#"{"cmd": "type", "text": "a"}"#).is_err());
 }
 
@@ -1761,7 +1761,10 @@ fn preferences_commands_change_what_the_window_shows() {
     run(&mut app, r#"{"cmd": "audio", "device": "default"}"#).unwrap();
     assert_eq!(app.rig.shown_audio().device, DeviceChoice::SystemDefault);
     assert_eq!(fake.opened().last().map(String::as_str), Some("Fake A"));
-    assert!(app.rig.window.is_none(), "the commands leave the window closed");
+    assert!(
+        app.overlays.preferences().is_none(),
+        "the commands leave the window closed"
+    );
 
     let reply = run(&mut app, r#"{"cmd": "output_safety", "mode": "clean"}"#).unwrap();
     assert_eq!(app.stream.output_safety(), OutputSafety::Clean);
@@ -2001,7 +2004,7 @@ fn scripted_with_changes() -> App {
 fn commands_never_raise_the_question() {
     let mut app = scripted_with_changes();
     run(&mut app, r#"{"cmd": "new"}"#).unwrap();
-    assert!(app.question.is_none());
+    assert!(app.overlays.question.is_none());
     assert!(!app.unsaved());
 
     let mut app = scripted_with_changes();
@@ -2011,11 +2014,11 @@ fn commands_never_raise_the_question() {
         &serde_json::json!({ "cmd": "open", "path": path }).to_string(),
     )
     .unwrap();
-    assert!(app.question.is_none());
+    assert!(app.overlays.question.is_none());
 
     let mut app = scripted_with_changes();
     run(&mut app, r#"{"cmd": "quit"}"#).unwrap();
-    assert!(app.question.is_none());
+    assert!(app.overlays.question.is_none());
     assert!(app.quit);
 }
 
@@ -2027,7 +2030,7 @@ fn a_failed_open_leaves_no_question() {
     let line = serde_json::json!({ "cmd": "open", "path": "/nowhere/missing.ron" }).to_string();
     let error = run(&mut app, &line).unwrap_err();
     assert!(error.starts_with("Could not open the patch"), "{error}");
-    assert!(app.question.is_none());
+    assert!(app.overlays.question.is_none());
 }
 
 /// Rule 9: the New button raises the question, the snapshot shows it, and a
@@ -2043,12 +2046,12 @@ fn a_script_can_raise_and_answer_the_question() {
     assert!(app.unsaved(), "it waits for the answer");
 
     run(&mut app, r#"{"cmd": "toolbar", "button": "cancel"}"#).unwrap();
-    assert!(app.question.is_none());
+    assert!(app.overlays.question.is_none());
     assert!(app.unsaved(), "Cancel changes nothing");
 
     run(&mut app, r#"{"cmd": "toolbar", "button": "new"}"#).unwrap();
     run(&mut app, r#"{"cmd": "toolbar", "button": "dont-save"}"#).unwrap();
-    assert!(app.question.is_none());
+    assert!(app.overlays.question.is_none());
     assert!(!app.unsaved());
 }
 
@@ -2070,7 +2073,7 @@ fn what_a_question_blocks_is_refused() {
     }
     run(&mut app, r#"{"cmd": "panic"}"#).unwrap();
     run(&mut app, r#"{"cmd": "toolbar", "button": "panic"}"#).unwrap();
-    assert!(app.question.is_some());
+    assert!(app.overlays.question.is_some());
 }
 
 /// Rule 9: answering Save on a patch with no file cannot open a native
@@ -2086,7 +2089,7 @@ fn a_scripted_save_answer_opens_no_picker() {
     assert_eq!(error, app.alerts.status());
     assert_eq!(crate::files::fake::asked(), Vec::new(), "no dialog");
     assert!(app.unsaved(), "nothing is lost");
-    assert!(app.question.is_none());
+    assert!(app.overlays.question.is_none());
 }
 
 /// An app with the control channel on and a file in a folder of its own, and
@@ -2128,7 +2131,7 @@ fn a_failed_scripted_replace_answer_is_an_error() {
     let (mut app, _dir, folder) = scripted_with_a_file("control-answer-replace");
     let path = folder.join("mine.ron");
     std::fs::remove_dir_all(&folder).unwrap();
-    app.question = Some(Question::replace(path, Some(AfterDiscard::Close)));
+    app.overlays.question = Some(Question::replace(path, Some(AfterDiscard::Close)));
     let error = run(&mut app, r#"{"cmd": "toolbar", "button": "replace"}"#).unwrap_err();
     assert!(error.starts_with("Could not save"), "{error}");
     assert!(!app.quit, "the next step did not run");
@@ -2225,4 +2228,24 @@ fn the_audio_field_reports_the_input_stream() {
     assert!(app.commit());
     app.sync_audio_input();
     assert_eq!(input(&mut app), json!({"device": null, "state": "off"}));
+}
+
+/// An `audio` command reads the device lists for itself, so it leaves the panel
+/// that is open as it was.
+#[test]
+fn an_audio_command_leaves_an_open_panel_alone() {
+    use crate::devices::fake::{self, Fake};
+    use crate::input_owner::InputOwner;
+    use crate::overlays::Overlay;
+    let fake = std::rc::Rc::new(Fake::new(&[fake::device("Fake A"), fake::device("Fake B")], &[]));
+    let mut app = on_fake_devices("audio-over-panel", &fake);
+    app.overlays.open(Overlay::RecentList(Vec::new()));
+
+    run(&mut app, r#"{"cmd": "audio", "device": "fake b"}"#).unwrap();
+
+    assert_eq!(app.input_owner(), InputOwner::RecentList);
+    assert_eq!(
+        app.rig.shown_audio().device,
+        crate::preferences::DeviceChoice::Named("Fake B".into())
+    );
 }

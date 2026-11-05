@@ -62,7 +62,7 @@ fn a_clean_patch_is_not_asked_about() {
     let mut app = app();
     assert!(!app.unsaved());
     let _ = app.update(AppMessage::File(FileAction::Close));
-    assert!(app.question.is_none());
+    assert!(app.overlays.question.is_none());
     assert!(app.quit);
 }
 
@@ -78,7 +78,7 @@ fn each_way_of_dropping_the_patch_asks() {
     let mut ui = changed();
     let before = modules(&ui.app);
     ui.send(AppMessage::File(FileAction::New));
-    assert!(ui.app.question.is_some());
+    assert!(ui.app.overlays.question.is_some());
     assert_eq!(modules(&ui.app), before, "it waits for the answer");
     answer(&mut ui, Answer::DontSave);
     assert!(modules(&ui.app) < before);
@@ -111,7 +111,7 @@ fn cancel_changes_nothing() {
         let before = modules(&ui.app);
         ui.send(AppMessage::File(FileAction::Close));
         ui.send(AppMessage::Question(cancel));
-        assert!(ui.app.question.is_none());
+        assert!(ui.app.overlays.question.is_none());
         assert!(!ui.app.quit);
         assert!(ui.app.unsaved());
         assert_eq!(modules(&ui.app), before);
@@ -141,7 +141,7 @@ fn a_cancelled_save_stays() {
     answer(&mut ui, Answer::Save);
     assert!(!ui.app.quit);
     assert!(ui.app.unsaved());
-    assert!(ui.app.question.is_none());
+    assert!(ui.app.overlays.question.is_none());
 }
 
 /// A failed save stays and says why, with nothing lost.
@@ -165,7 +165,7 @@ fn a_failed_save_stays_and_says_why() {
 
     // OK closes it. Escape would too, and neither quits.
     ui.tap(Key::Named(Named::Enter), Modifiers::empty());
-    assert!(ui.app.question.is_none());
+    assert!(ui.app.overlays.question.is_none());
     assert!(!ui.app.quit);
 }
 
@@ -205,7 +205,7 @@ fn cancelling_replace_keeps_everything() {
     let dir = TempDir::new("question-keep");
     let mut ui = asked_to_replace(&dir);
     ui.tap(Key::Named(Named::Enter), Modifiers::empty());
-    assert!(ui.app.question.is_none());
+    assert!(ui.app.overlays.question.is_none());
     assert_eq!(std::fs::read_to_string(dir.0.join("foo.ron")).unwrap(), "theirs");
     assert!(ui.app.unsaved());
     assert!(!ui.app.quit);
@@ -284,9 +284,9 @@ fn a_focused_field_gets_nothing() {
     ui.redraw();
     ui.typewrite("drone");
     assert_eq!(ui.app.patch_info.tag_draft, draft);
-    assert!(ui.app.question.is_some());
+    assert!(ui.app.overlays.question.is_some());
     ui.tap(Key::Named(Named::Enter), Modifiers::empty());
-    assert!(ui.app.question.is_none(), "Enter answered the question");
+    assert!(ui.app.overlays.question.is_none(), "Enter answered the question");
     assert!(ui.app.document.info().tags.is_empty(), "and added no tag");
 }
 
@@ -310,7 +310,7 @@ fn shortcuts_do_nothing_behind_the_question() {
     assert_eq!(modules(&ui.app), count, "Delete did nothing");
     ui.tap(Key::Named(Named::Space), Modifiers::empty());
     ui.tap(Key::Named(Named::F1), Modifiers::empty());
-    assert!(ui.app.help.is_none(), "help stays closed");
+    assert!(ui.app.overlays.help.is_none(), "help stays closed");
     assert_eq!(model(&ui), before, "the question stays as it was");
 }
 
@@ -321,12 +321,12 @@ fn escape_leaves_help_open_under_the_question() {
     let mut ui = changed();
     select_a_module(&mut ui);
     ui.tap(Key::Named(Named::F1), Modifiers::empty());
-    assert!(ui.app.help.is_some());
+    assert!(ui.app.overlays.help.is_some());
     ui.send(AppMessage::File(FileAction::Close));
     ui.redraw();
     ui.tap(Key::Named(Named::Escape), Modifiers::empty());
-    assert!(ui.app.question.is_none());
-    assert!(ui.app.help.is_some(), "help is still open");
+    assert!(ui.app.overlays.question.is_none());
+    assert!(ui.app.overlays.help.is_some(), "help is still open");
 }
 
 /// A second close request is ignored, and the question stays as it was.
@@ -352,7 +352,7 @@ fn the_panic_key_works_over_the_question() {
         "{}",
         ui.app.alerts.status()
     );
-    assert!(ui.app.question.is_some());
+    assert!(ui.app.overlays.question.is_some());
 }
 
 /// The gate lets through what keeps the music going, and what the canvas sends
@@ -396,12 +396,12 @@ fn rows_still_reach_a_browser_under_the_question() {
         app.commit();
     });
     let _ = app.update(AppMessage::File(FileAction::Close));
-    assert!(app.question.is_some());
+    assert!(app.overlays.question.is_some());
     let rows = vec![crate::patches::Row::read(&dir.0.join("a.ron"))];
     let open = app.patches_open;
     let _ = app.update(AppMessage::Patches(crate::patches::Message::Found { open, rows }));
     let _ = app.update(AppMessage::Question(Message::Escape));
-    let browser = app.patches.as_ref().expect("the browser is still open");
+    let browser = app.overlays.patches().expect("the browser is still open");
     assert_eq!(browser.shown().count(), 1);
 }
 

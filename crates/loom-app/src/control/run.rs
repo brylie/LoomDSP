@@ -248,7 +248,7 @@ impl App {
     /// What to answer, now or after drawing, and the tasks the UI messages
     /// returned.
     pub(super) fn run_command(&mut self, call: &Call) -> (Then, Task<Message>) {
-        if let Some(question) = &self.question
+        if let Some(question) = &self.overlays.question
             && blocked_by_question(&call.command)
         {
             return (Then::Now(Err(question_open_error(question))), Task::none());
@@ -358,7 +358,7 @@ impl App {
                 let then = match key(&name)
                     .and_then(|k| Ok((k, modifiers(&names)?)))
                     .and_then(|(k, m)| refuse_dialog_keys(&k, m).map(|()| (k, m)))
-                    .and_then(|(k, m)| refuse_while_asking(self.question.as_ref(), &k, m).map(|()| (k, m)))
+                    .and_then(|(k, m)| refuse_while_asking(self.overlays.question.as_ref(), &k, m).map(|()| (k, m)))
                 {
                     Ok((k, m)) => {
                         let steps = key_events(k, m).into_iter().map(PointerStep::Key).collect();

@@ -70,7 +70,7 @@ fn the_chooser_sets_its_target() {
     let _ = app.update(AppMessage::PatchInfo(crate::patch_info::Message::ChooseLicence));
     let _ = app.update(AppMessage::Licence(Message::Answer(Answer::GiveUp)));
     let _ = app.update(AppMessage::Licence(Message::Use));
-    assert!(app.chooser.is_none());
+    assert!(app.overlays.chooser.is_none());
     assert_eq!(app.document.info().license.as_deref(), Some("CC0-1.0"));
     assert!(app.unsaved());
 
@@ -85,11 +85,14 @@ fn the_chooser_sets_its_target() {
         repeat: false,
     };
     let _ = app.update(AppMessage::Key(escape));
-    assert!(app.chooser.is_none());
+    assert!(app.overlays.chooser.is_none());
     assert_eq!(app.document.info().license.as_deref(), Some("CC0-1.0"));
 
     let _ = app.update(AppMessage::Preferences(crate::settings::Message::ChooseLicence));
-    assert_eq!(app.chooser.as_ref().map(Chooser::target), Some(Target::Default));
+    assert_eq!(
+        app.overlays.chooser.as_ref().map(Chooser::target),
+        Some(Target::Default)
+    );
     let _ = app.update(AppMessage::Licence(Message::OtherText("MIT".into())));
     let _ = app.update(AppMessage::Licence(Message::Use));
     assert_eq!(app.rig.store.saved().licence.as_deref(), Some("MIT"));

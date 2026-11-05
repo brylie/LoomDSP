@@ -501,7 +501,7 @@ fn a_failed_autosave_stays_as_a_warning_until_it_works() {
     let mut app = setup.boot(Some(setup.file()), &mut prompt);
     app.autosave_report(recovery::Report::Failed("Autosave failed: disk full.".to_string()));
     assert_eq!(app.alerts.severity(), alerts::Severity::Warning);
-    assert!(app.question.is_none(), "it must not interrupt playing");
+    assert!(app.overlays.question.is_none(), "it must not interrupt playing");
 
     app.alerts.say("Something newer");
     let snapshot = app.ui_snapshot();

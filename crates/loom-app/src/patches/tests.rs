@@ -123,7 +123,7 @@ fn browse_opens_patches_in_the_app() {
     preferences.library = Some(dir.clone());
     let _ = app.rig.store.save(preferences);
     let _ = app.update(AppMessage::File(FileAction::Browse));
-    assert!(app.patches.is_some());
+    assert!(app.overlays.patches().is_some());
     for path in patch_files(&dir, &AtomicBool::new(false)) {
         let rows = vec![Row::read(&path)];
         let _ = app.update(AppMessage::Patches(Message::Found {
@@ -133,7 +133,7 @@ fn browse_opens_patches_in_the_app() {
     }
     let _ = app.update(AppMessage::Patches(Message::Search("bass".into())));
     let _ = app.update(AppMessage::Patches(Message::Submit));
-    assert!(app.patches.is_none());
+    assert!(app.overlays.patches().is_none());
     assert_eq!(app.document.name(), "Bass");
     assert_eq!(app.document.file(), Some(dir.join("live/bass.ron").as_path()));
     let _ = std::fs::remove_dir_all(dir);
@@ -165,7 +165,7 @@ fn the_library_folder_is_made_when_first_needed() {
     std::fs::remove_dir_all(&root).unwrap();
     let _ = app.update(AppMessage::File(FileAction::Browse));
     assert!(dir.is_dir(), "Browse made the library folder");
-    assert!(app.patches.is_some());
+    assert!(app.overlays.patches().is_some());
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -230,7 +230,7 @@ fn app_browsing(dir: &Path) -> (App, Arc<AtomicBool>) {
     preferences.library = Some(dir.to_path_buf());
     let _ = app.rig.store.save(preferences);
     let _ = app.update(AppMessage::File(FileAction::Browse));
-    let stop = app.patches.as_ref().expect("the browser is open").stop.clone();
+    let stop = app.overlays.patches().expect("the browser is open").stop.clone();
     assert!(!stop.load(Ordering::Relaxed));
     (app, stop)
 }
@@ -241,7 +241,7 @@ fn closing_the_browser_stops_its_reader() {
     let dir = library("close");
     let (mut app, stop) = app_browsing(&dir);
     let _ = app.update(AppMessage::Patches(Message::Close));
-    assert!(app.patches.is_none());
+    assert!(app.overlays.patches().is_none());
     assert!(stop.load(Ordering::Relaxed));
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -257,7 +257,7 @@ fn opening_a_patch_stops_the_reader() {
         rows: vec![Row::read(&dir.join("pad.ron"))],
     }));
     let _ = app.update(AppMessage::Patches(Message::Submit));
-    assert!(app.patches.is_none());
+    assert!(app.overlays.patches().is_none());
     assert!(stop.load(Ordering::Relaxed));
 
     let (mut app, stop) = app_browsing(&dir);
@@ -272,7 +272,7 @@ fn opening_the_browser_again_stops_the_earlier_reader() {
     let dir = library("again");
     let (mut app, first) = app_browsing(&dir);
     let _ = app.update(AppMessage::File(FileAction::Browse));
-    let second = app.patches.as_ref().expect("the browser is open").stop.clone();
+    let second = app.overlays.patches().expect("the browser is open").stop.clone();
     assert!(first.load(Ordering::Relaxed), "the earlier reader stops");
     assert!(!second.load(Ordering::Relaxed), "the new one keeps reading");
     let _ = std::fs::remove_dir_all(dir);

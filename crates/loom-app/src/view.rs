@@ -59,18 +59,18 @@ impl App {
         {
             layers = layers.push(DragLine::new(drag.start, at, port.colour, drag.zoom));
         }
-        if let Some(open) = &self.browser {
+        if let Some(open) = self.overlays.browser() {
             let outside = mouse_area(space().width(Length::Fill).height(Length::Fill))
                 .on_press(Message::Browser(browser::Message::Close));
             layers = layers.push(outside).push(open.view().map(Message::Browser));
         }
-        if let Some(menu) = &self.probe_menu {
+        if let Some(menu) = self.overlays.probe_menu() {
             let outside = mouse_area(space().width(Length::Fill).height(Length::Fill))
                 .on_press(Message::ProbeMenu(probe_menu::Message::Close))
                 .on_right_press(Message::ProbeMenu(probe_menu::Message::Close));
             layers = layers.push(outside).push(menu.view().map(Message::ProbeMenu));
         }
-        if let Some((module, at)) = self.tile_menu {
+        if let Some((module, at)) = self.overlays.tile_menu() {
             let outside = mouse_area(space().width(Length::Fill).height(Length::Fill))
                 .on_press(Message::CloseTileMenu)
                 .on_right_press(Message::CloseTileMenu);
@@ -81,7 +81,7 @@ impl App {
                 .push(outside)
                 .push(iced::widget::pin(iced::widget::opaque(menu)).position(at));
         }
-        if let Some(rows) = &self.recent_rows {
+        if let Some(rows) = self.overlays.recent_rows() {
             let outside = mouse_area(space::horizontal().width(Length::Fill).height(Length::Fill))
                 .on_press(Message::Recent(recent::Message::Close))
                 .on_right_press(Message::Recent(recent::Message::Close));
@@ -93,19 +93,19 @@ impl App {
         if let Some(window) = self.preferences_view() {
             layers = layers.push(window);
         }
-        if let Some(open) = &self.patches {
+        if let Some(open) = self.overlays.patches() {
             layers = layers.push(open.view().map(Message::Patches));
         }
         // Over the Preferences window, which also opens it.
-        if let Some(chooser) = &self.chooser {
+        if let Some(chooser) = &self.overlays.chooser {
             layers = layers.push(chooser.view());
         }
         // Over the dialogs, because F1 opens it from them (help-pages.md).
-        if let Some(help) = &self.help {
+        if let Some(help) = &self.overlays.help {
             layers = layers.push(iced::widget::opaque(help.view(self.theme())));
         }
         // Over everything: a question must be answered first.
-        if let Some(question) = &self.question {
+        if let Some(question) = &self.overlays.question {
             layers = layers.push(question.view().map(Message::Question));
         }
         // The control channel's pointer events go in here, as a real

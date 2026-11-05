@@ -60,9 +60,7 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
     app.matrix.focused = true;
     app.step_name = Some("step".to_string());
     // Overlays close, all but the Preferences window.
-    app.help = Some(help::Help::shortcuts());
-    app.recent_rows = Some(Vec::new());
-    app.tile_menu = Some((added.0, Point::ORIGIN));
+    app.overlays.help = Some(help::Help::shortcuts());
 
     // What outlives it.
     app.animating = true;
@@ -111,23 +109,17 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
         // Rebuilt around the new engine's telemetry.
         monitor: _,
         live,
-        rig,
+        // What belongs to the machine. `Rig`'s own tests cover it.
+        rig: _,
         alerts,
         midi,
         holding,
         modules,
-        browser,
+        overlays,
         patch_info,
-        chooser,
-        patches,
-        recent_rows,
         drops,
-        question,
         patches_open,
-        help,
-        tile_menu,
         browser_key,
-        probe_menu,
         frame_key,
         meter,
         reporter,
@@ -190,15 +182,8 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
     assert!(control_pending.is_empty());
 
     // Every overlay closes, but the Preferences window stays.
-    assert!(browser.is_none());
-    assert!(chooser.is_none());
-    assert!(patches.is_none());
-    assert!(recent_rows.is_none());
-    assert!(question.is_none());
-    assert!(help.is_none());
-    assert!(tile_menu.is_none());
-    assert!(probe_menu.is_none());
-    assert!(rig.window.is_some());
+    assert_eq!(overlays.owner(), InputOwner::Preferences);
+    assert!(overlays.help.is_none());
 
     // What outlives the patch.
     assert!(!test_modules);
@@ -241,10 +226,10 @@ fn a_new_patch_closes_help() {
     assert_eq!(ui.app.input_owner(), InputOwner::Canvas);
 }
 
-/// Cmd+Shift+O opens Your patches over a menu on the canvas, because a menu
-/// does not count as an overlay. The menu is still there once the browser goes.
+/// Cmd+Shift+O opens Your patches from a menu on the canvas, because a menu
+/// does not count as an overlay. One panel is open at a time, so the menu goes.
 #[test]
-fn your_patches_opens_over_a_menu_and_leaves_it_behind() {
+fn your_patches_opens_from_a_menu_and_closes_it() {
     let tmp = TempDir::new("patches-over-menu");
     for owner in [InputOwner::TileMenu, InputOwner::ProbeMenu] {
         let mut ui = Ui::open("subtractive.ron");
@@ -256,8 +241,8 @@ fn your_patches_opens_over_a_menu_and_leaves_it_behind() {
         ui.tap(Key::Character("o".into()), Modifiers::COMMAND | Modifiers::SHIFT);
         assert_eq!(ui.app.input_owner(), InputOwner::Patches, "{owner:?}");
 
-        ui.app.patches = None;
-        assert_eq!(ui.app.input_owner(), owner, "the menu is still open");
+        ui.app.overlays.close_patches();
+        assert_eq!(ui.app.input_owner(), InputOwner::Canvas, "the menu is gone");
     }
 }
 

@@ -39,7 +39,7 @@ fn open(app: &mut App, output: PortRef, world: Point) {
         at: Point::new(100.0, 100.0),
         area: area(),
     }));
-    assert!(app.probe_menu.is_some());
+    assert!(app.overlays.probe_menu().is_some());
 }
 
 /// The new module's cable: from the probed output into its `in`.
@@ -80,7 +80,7 @@ fn add_scope_and_meter_on_an_output_and_a_cable() {
 
             open(&mut app, output, world);
             let _ = app.update(Message::ProbeMenu(super::Message::Pick(probe)));
-            assert!(app.probe_menu.is_none());
+            assert!(app.overlays.probe_menu().is_none());
 
             let graph = app.controller.graph();
             assert_eq!(graph.nodes().count(), modules + 1);
@@ -133,15 +133,15 @@ fn escape_and_a_click_outside_close_the_menu() {
     };
     let _ = app.update(press(iced::keyboard::Key::Character("a".into())));
     assert!(
-        app.probe_menu.is_some() && app.browser.is_none(),
+        app.overlays.probe_menu().is_some() && app.overlays.browser().is_none(),
         "A does not open the browser"
     );
     let _ = app.update(press(iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape)));
-    assert!(app.probe_menu.is_none());
+    assert!(app.overlays.probe_menu().is_none());
 
     open(&mut app, output, port);
     let _ = app.update(Message::ProbeMenu(super::Message::Close));
-    assert!(app.probe_menu.is_none());
+    assert!(app.overlays.probe_menu().is_none());
     assert_eq!(app.controller.graph().nodes().count(), modules);
     assert_eq!(app.edits.history.undo_step().map(|s| s.name().to_string()), undo);
 }
@@ -158,7 +158,7 @@ fn clipboard_keys_do_nothing_while_the_menu_is_open() {
     let _ = app.update(tests::command_key("d"));
     let _ = app.update(tests::command_key("x"));
     assert_eq!(app.controller.graph().nodes().count(), modules);
-    assert!(app.probe_menu.is_some());
+    assert!(app.overlays.probe_menu().is_some());
 }
 
 /// If the output's module was removed while the menu was open, picking

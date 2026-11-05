@@ -974,7 +974,7 @@ fn an_input_plugged_in_is_opened_unless_it_is_off() {
     fake.plug("Drums");
     app.poll_midi();
     assert_eq!(app.open_midi_inputs(), ["Keys"]);
-    let listed = &app.rig.window.as_ref().unwrap().lists.midi;
+    let listed = &app.overlays.preferences().unwrap().lists.midi;
     assert_eq!(
         listed.as_deref(),
         Ok(&["Keys".to_string(), "Drums".to_string()][..]),
@@ -1432,9 +1432,9 @@ fn the_window_opens_and_closes_with_its_shortcut_and_escape() {
         })
     };
     let _ = app.update(press(Key::Character(",".into()), Modifiers::COMMAND));
-    assert!(app.rig.window.is_some());
+    assert!(app.overlays.preferences().is_some());
     let _ = app.update(press(Key::Named(Named::Escape), Modifiers::empty()));
-    assert!(app.rig.window.is_none());
+    assert!(app.overlays.preferences().is_none());
 }
 
 /// unwrap_reopen_error strips the restart wrapper while preserving raw reasons.

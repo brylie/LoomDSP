@@ -42,11 +42,12 @@ pub(crate) fn open_overlay(ui: &mut Ui, owner: InputOwner) {
         InputOwner::Help => ui.send(Message::ShowHelp),
         InputOwner::Chooser => ui.send(Message::PatchInfo(crate::patch_info::Message::ChooseLicence)),
         InputOwner::Patches => {
-            ui.app.patches = Some(patches::PatchBrowser::open(1, std::env::temp_dir().join("no-such-folder")).0);
+            let browser = patches::PatchBrowser::open(1, std::env::temp_dir().join("no-such-folder")).0;
+            ui.app.overlays.open(crate::overlays::Overlay::Patches(browser));
         }
         InputOwner::Preferences => ui.send(Message::Preferences(settings::Message::Open)),
         InputOwner::Browser => ui.send(Message::OpenBrowser),
-        InputOwner::RecentList => ui.app.recent_rows = Some(Vec::new()),
+        InputOwner::RecentList => ui.app.overlays.open(crate::overlays::Overlay::RecentList(Vec::new())),
         InputOwner::ProbeMenu => {
             let (from, _) = ui.app.controller.graph().cables().next().expect("a cable");
             let output = PortRef {
@@ -167,7 +168,7 @@ fn a_route_reads_who_was_listening_before_the_event() {
         app.commit();
     });
     let _ = app.update(Message::File(crate::FileAction::New));
-    assert!(app.question.is_some());
+    assert!(app.overlays.question.is_some());
     let enter = iced::Event::Keyboard(keyboard::Event::KeyPressed {
         key: Key::Named(Named::Enter),
         modified_key: Key::Named(Named::Enter),
@@ -182,7 +183,10 @@ fn a_route_reads_who_was_listening_before_the_event() {
         status: Status::Captured,
         listening: before,
     });
-    assert!(app.question.is_some(), "the question is still waiting for its answer");
+    assert!(
+        app.overlays.question.is_some(),
+        "the question is still waiting for its answer"
+    );
 }
 
 /// The panic key and dropped files go through the listener that never restarts.
@@ -254,7 +258,7 @@ fn help_is_on_top_of_a_dialog_and_closes_alone() {
             ui.press();
             ui.release();
         }
-        assert!(ui.app.help.is_none(), "{owner:?}, {close}: help closed");
+        assert!(ui.app.overlays.help.is_none(), "{owner:?}, {close}: help closed");
         assert_eq!(ui.app.input_owner(), owner, "{owner:?}, {close}: the dialog stayed");
     }
 }

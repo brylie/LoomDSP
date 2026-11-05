@@ -20,16 +20,17 @@ use iced::{mouse, window};
 /// order the view draws them, top layer first. The rest are small and open
 /// over the canvas, and do not normally share the screen.
 ///
-/// To add an overlay, add it here and to [`App::input_owner`]. The canvas, the
-/// clipboard keys, and key handling then follow, and the compiler points to
-/// [`App::overlay_key`].
+/// To add an overlay, add it here and to [`Overlays`](crate::overlays::Overlays):
+/// a panel is one more [`Overlay`](crate::overlays::Overlay) variant, and the
+/// compiler points to `Overlays::owner` and [`App::overlay_key`]. The canvas, the
+/// clipboard keys, and key handling then follow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum InputOwner {
     /// A question must be answered first.
     Question,
     /// The help overlay.
     Help,
-    /// The licence chooser, over Your patches or the inspector.
+    /// The licence chooser, over Preferences or the inspector.
     Chooser,
     /// The Your patches browser.
     Patches,
@@ -169,27 +170,7 @@ fn app_key(event: iced::Event, status: Status, _window: window::Id) -> Option<Me
 impl App {
     /// Who has the input now.
     pub(crate) fn input_owner(&self) -> InputOwner {
-        if self.question.is_some() {
-            InputOwner::Question
-        } else if self.help.is_some() {
-            InputOwner::Help
-        } else if self.chooser.is_some() {
-            InputOwner::Chooser
-        } else if self.patches.is_some() {
-            InputOwner::Patches
-        } else if self.rig.window.is_some() {
-            InputOwner::Preferences
-        } else if self.browser.is_some() {
-            InputOwner::Browser
-        } else if self.recent_rows.is_some() {
-            InputOwner::RecentList
-        } else if self.probe_menu.is_some() {
-            InputOwner::ProbeMenu
-        } else if self.tile_menu.is_some() {
-            InputOwner::TileMenu
-        } else {
-            InputOwner::Canvas
-        }
+        self.overlays.owner()
     }
 
     /// True when no overlay or dialog panel is open over the canvas. A small
@@ -205,7 +186,7 @@ impl App {
     /// Which listeners hear events now.
     pub(crate) fn listening(&self) -> Listening {
         Listening {
-            open: self.question.is_none(),
+            open: self.overlays.question.is_none(),
             matrix: self.matrix_has_keys(),
             browser: self.input_owner() == InputOwner::Browser,
             patches: self.input_owner() == InputOwner::Patches,
@@ -238,16 +219,16 @@ impl App {
             | InputOwner::Patches
             | InputOwner::Browser
             | InputOwner::Canvas => {}
-            InputOwner::Chooser if escape => self.chooser = None,
+            InputOwner::Chooser if escape => self.overlays.chooser = None,
             InputOwner::Chooser => {}
             InputOwner::Preferences => match key.as_ref() {
                 Key::Named(Named::Escape) => self.preferences(settings::Message::Close),
                 Key::Character(",") if modifiers.command() => self.toggle_preferences(),
                 _ => {}
             },
-            InputOwner::RecentList if escape => self.recent_rows = None,
-            InputOwner::ProbeMenu if escape => self.probe_menu = None,
-            InputOwner::TileMenu if escape => self.tile_menu = None,
+            InputOwner::RecentList if escape => self.overlays.close_recent_list(),
+            InputOwner::ProbeMenu if escape => self.overlays.close_probe_menu(),
+            InputOwner::TileMenu if escape => self.overlays.close_tile_menu(),
             InputOwner::RecentList | InputOwner::ProbeMenu | InputOwner::TileMenu => {}
         }
     }

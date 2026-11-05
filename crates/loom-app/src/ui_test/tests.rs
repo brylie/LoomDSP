@@ -302,7 +302,7 @@ fn the_browser_search_field_takes_typing() {
     let canvas = ui.canvas();
     ui.move_to(Point::new(canvas.bounds.x + 8.0, canvas.bounds.y + 8.0));
     ui.tap(keyboard::Key::Character("a".into()), keyboard::Modifiers::default());
-    assert!(ui.app.browser.is_some(), "A opens the browser");
+    assert!(ui.app.overlays.browser().is_some(), "A opens the browser");
 
     ui.typewrite("svf");
     ui.tap(
@@ -310,7 +310,10 @@ fn the_browser_search_field_takes_typing() {
         keyboard::Modifiers::default(),
     );
 
-    assert!(ui.app.browser.is_none(), "Enter adds the match and closes the browser");
+    assert!(
+        ui.app.overlays.browser().is_none(),
+        "Enter adds the match and closes the browser"
+    );
     assert_eq!(ui.app.controller.graph().nodes().count(), modules + 1);
 }
 
@@ -1015,13 +1018,13 @@ fn the_camera_survives_opening_the_browser() {
     assert_ne!(moved, canvas.camera, "the scroll moved the camera");
 
     ui.tap(keyboard::Key::Character("a".into()), keyboard::Modifiers::default());
-    assert!(ui.app.browser.is_some(), "A opens the browser");
+    assert!(ui.app.overlays.browser().is_some(), "A opens the browser");
     assert_eq!(ui.canvas().camera, moved, "with the browser open");
     ui.tap(
         keyboard::Key::Named(keyboard::key::Named::Escape),
         keyboard::Modifiers::default(),
     );
-    assert!(ui.app.browser.is_none(), "Escape closes the browser");
+    assert!(ui.app.overlays.browser().is_none(), "Escape closes the browser");
 
     assert_eq!(ui.canvas().camera, moved, "after the browser closed");
 }
@@ -2165,7 +2168,7 @@ fn keys_in_an_inspector_field_do_not_reach_the_canvas() {
     ui.tap(keyboard::Key::Named(Named::Backspace), none);
     assert!(ui.app.controller.graph().node(id).is_some(), "Backspace edits the text");
     ui.typewrite("a");
-    assert!(ui.app.browser.is_none());
+    assert!(ui.app.overlays.browser().is_none());
     assert_eq!(ui.app.edits.history.len(), steps);
 
     // Escape ends the field's focus and keeps the selection. The next one

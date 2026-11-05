@@ -147,7 +147,7 @@ impl App {
             }
             Message::ChooseLicence => {
                 let current = self.document.info().license.clone();
-                self.chooser = Some(licence_chooser::Chooser::open(
+                self.overlays.chooser = Some(licence_chooser::Chooser::open(
                     licence_chooser::Target::Patch,
                     current.as_deref(),
                 ));
