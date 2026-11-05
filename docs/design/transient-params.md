@@ -8,7 +8,7 @@ Parameters that carry a live performance gesture to a module without being saved
 - **Use case and requirements:** UC3, FR-LIB-27, FR-LIB-12.
 - **Prior art:** none needed.
 - **Issues:** [#161](https://github.com/brylie/LoomDSP/issues/161).
-- **Code:** `ParamOptions::transient` and `ModuleDescriptor::saved_values` in `crates/loom-core/src/descriptor.rs`, the registry check, `Patch::from_graph`, `load_into`, and `transient_values` in `loom-patch`, the button in `loom-modules/src/ui.rs`, and undo, clipboard, inspector, and MIDI learn in `loom-app`.
+- **Code:** `ParamOptions::transient` in `crates/loom-core/src/descriptor/param.rs` and `ModuleDescriptor::saved_values` in `crates/loom-core/src/descriptor.rs`, the registry check, `Patch::from_graph`, `load_into`, and `transient_values` in `loom-patch`, the button in `loom-modules/src/ui.rs`, and undo, clipboard, inspector, and MIDI learn in `loom-app`.
 
 ## Goal
 

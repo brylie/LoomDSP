@@ -7,7 +7,7 @@ Every port and parameter carries a short label and a one-sentence description, s
 - **Decision behind it:** [ADR-0016](../adr/0016-ports-and-parameters-carry-their-own-text.md)
 - **Use case and requirements:** FR-LIB-11, FR-SDK-01, NFR-UX-04
 - **Issues:** #115 (fields and checks), #43 (help pages), [#118](https://github.com/brylie/LoomDSP/issues/118) (display values)
-- **Code:** `PortSpec`, `ParamSpec`, `ParamOptions`, `DisplaySpec`, `assert_documented`, and `ModuleDescriptor::undocumented` in `loom-core/src/descriptor.rs`; `Registry::notes` in `loom-core/src/registry.rs`; `Harness::allow_undocumented` in `loom-test`.
+- **Code:** `PortSpec`, `ParamSpec`, `ParamOptions`, and `DisplaySpec` in `loom-core/src/descriptor/` (`port.rs`, `param.rs`, `display.rs`), and `assert_documented` and `ModuleDescriptor::undocumented` in `loom-core/src/descriptor/lint.rs`; `Registry::notes` in `loom-core/src/registry.rs`; `Harness::allow_undocumented` in `loom-test`.
 
 ## Goal
 
@@ -62,7 +62,7 @@ params: &[
 
 ## Display values
 
-**Status:** Implemented ([#118](https://github.com/brylie/LoomDSP/issues/118)). Code: `DisplaySpec` in `loom-core/src/descriptor.rs`, `panel_view` and `display_text` in `loom-app/src/scene.rs`, `hover_content` in `loom-canvas/src/widget/hover_text.rs`.
+**Status:** Implemented ([#118](https://github.com/brylie/LoomDSP/issues/118)). Code: `DisplaySpec` in `loom-core/src/descriptor/display.rs`, `panel_view` and `display_text` in `loom-app/src/scene.rs`, `hover_content` in `loom-canvas/src/widget/hover_text.rs`.
 
 A module's display values (the lights and step positions of [panels](panels.md#display-values-69)) get the same treatment.
 

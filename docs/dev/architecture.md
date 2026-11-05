@@ -197,7 +197,7 @@ Widget identity: Iced keeps widget state (a scroll offset, an open list, the can
 
 ## Describing a module
 
-A module is a `static` `ModuleDescriptor` plus a struct that implements `Module`. The descriptor is plain data, written with named fields. This is Clock Divide's, shortened; the full one is in `crates/loom-modules/src/logic.rs`:
+A module is a `static` `ModuleDescriptor` plus a struct that implements `Module`. The descriptor is plain data, written with named fields. The descriptor types live in `crates/loom-core/src/descriptor.rs` and its submodules: `port.rs`, `param.rs`, `display.rs`, `panel.rs`, `format.rs` for value text, and `lint.rs` for the label and description checks. This is Clock Divide's descriptor, shortened; the full one is in `crates/loom-modules/src/logic.rs`:
 
 ```rust
 pub static DIVIDE: ModuleDescriptor = ModuleDescriptor {

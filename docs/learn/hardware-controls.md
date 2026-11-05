@@ -49,4 +49,4 @@ Modulation does work in position, so it does change: a modulated level now swing
 ## Where this lives
 
 - Specification: [MIDI learn: Mapping modes](../design/midi-learn.md#mapping-modes-fr-midi-09), [Modulation: Parameter mapping](../design/modulation.md#parameter-mapping).
-- Code: `ControlState` in `crates/loom-core/src/midi_map.rs`, and `ParamMapping::Decibels` in `crates/loom-core/src/descriptor.rs`.
+- Code: `ControlState` in `crates/loom-core/src/midi_map.rs`, and `ParamMapping::Decibels` in `crates/loom-core/src/descriptor/param.rs`.

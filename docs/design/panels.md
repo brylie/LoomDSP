@@ -357,7 +357,7 @@ A right-click opens a menu for what is under the pointer. Right-clicking a tile 
 
 ### Panel declaration ([#67](https://github.com/brylie/LoomDSP/issues/67))
 
-**Status:** Implemented. Code: `Panel`, `Widget`, and `ModuleDescriptor::check_panel` in `loom-core/src/descriptor.rs`.
+**Status:** Implemented. Code: `Panel`, `Widget`, and `ModuleDescriptor::check_panel` in `loom-core/src/descriptor/panel.rs`.
 
 - A `ModuleDescriptor` has a `panel`: its size in grid units (width and height), and a list of widgets. A module with nothing on its tile has an empty panel.
 - Each widget has a kind, a grid position inside the panel, and a binding by name: a parameter for controls, a display value for lights. *Why names:* parameter names are stable IDs (AGENTS.md rule 5), and the M2 panel editor will save bindings the same way.
@@ -624,7 +624,7 @@ What M1 builds. The rest of this spec is M2.
 
 ### Choice names
 
-([#160](https://github.com/brylie/LoomDSP/issues/160).) **Implemented.** Code: `ParamSpec::choices` and `ParamSpec::check_choices` in `loom-core/src/descriptor.rs`, `ParamControl` in `loom-app/src/inspector.rs`. A whole-number parameter can name its values.
+([#160](https://github.com/brylie/LoomDSP/issues/160).) **Implemented.** Code: `ParamSpec::choices` and `ParamSpec::check_choices` in `loom-core/src/descriptor/param.rs`, `ParamControl` in `loom-app/src/inspector.rs`. A whole-number parameter can name its values.
 
 - `ParamOptions` gets `.choices(&[...])`: one name per value, from `min` to `max` in steps of 1, so `max - min + 1` names. Names are short Title Case words or numbers with a unit ("Toggle", "Momentary", "24 dB"), at most 16 characters. The registry refuses names on a parameter that is not whole-number, a count that does not match, and an empty name, with an error that names the parameter.
 - **The inspector** shows a parameter with names as radio buttons when there are 4 or fewer, otherwise as a pick list (the [radio or select rule](panel-widgets.md#radio-buttons-or-a-select-list) with the inspector's width). It never shows the slider with a bare number. A parameter without names keeps the slider.
