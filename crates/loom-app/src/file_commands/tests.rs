@@ -1,9 +1,265 @@
-use crate::Source;
 use crate::files::fake::{self, Asked};
+use crate::input_owner::{InputOwner, tests::open_overlay};
+use crate::matrix::Tab;
 use crate::recovery::tests::TempDir;
-use crate::tests::app;
+use crate::tests::{app, app_args};
 use crate::ui_test::Ui;
+use crate::{App, Source, alerts, control, controls, editing, help, live, settings};
+use iced::Point;
 use iced::keyboard::{Key, Modifiers};
+use loom_core::{OutputRef, OutputSafety, ProbeId};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+/// New and Open keep what outlives a patch and start the rest again. The
+/// pattern names every field with no `..`, so a new field does not compile
+/// until someone decides which it is.
+#[test]
+fn replacing_the_patch_keeps_or_resets_every_field() {
+    let mut args = app_args();
+    args.bench.measure = true;
+    args.bench.bench_seconds = Some(30.0);
+    let mut app = App::new(args);
+    let report = format!("{:?}", app.reporter);
+    let added = app.controller.add_module("loom.osc.sine").unwrap();
+    app.commit();
+
+    // What goes with the patch.
+    app.retry_commit = true;
+    app.positions.insert(added.0, Point::new(1.0, 2.0));
+    app.unknown_positions.insert(99, (None, Point::ORIGIN));
+    app.sizes.insert(added.0, (4, 4));
+    app.mode_key.push((99, 0, 1));
+    app.gestures.toggle_adding((added.0, 0));
+    app.value_draft = Some(controls::ValueDraft {
+        module: added.0,
+        index: 0,
+        text: "1".to_string(),
+        error: None,
+    });
+    app.text_focus = editing::TextFocus { any: true, field: None };
+    app.lights.insert((added.0, 0), 1.0);
+    app.run_driven = true;
+    app.meter_levels.insert(ProbeId(99), live::Level::default());
+    app.clip_holds.reset((added.0, 0));
+    app.traces.set(added.0, 0, loom_canvas::Trace::default());
+    app.carrying.insert(OutputRef { module: added, port: 0 });
+    app.full_traces = false;
+    app.visible_displays.push(added.0);
+    app.selection.insert(added.0);
+    app.holding = true;
+    app.patch_info.tag_draft = "draft".to_string();
+    app.drops.push("dropped.ron".into());
+    let now = Instant::now();
+    app.meter.record(now);
+    app.meter.record(now + Duration::from_millis(10));
+    app.control_seen = Some((Arc::default(), 1));
+    app.learn.start();
+    app.arrow_group_pending = true;
+    app.arrow_group_closed = true;
+    app.matrix.focused = true;
+    app.step_name = Some("step".to_string());
+    // Overlays close, all but the Preferences window.
+    app.help = Some(help::Help::shortcuts());
+    app.recent_rows = Some(Vec::new());
+    app.tile_menu = Some((added.0, Point::ORIGIN));
+
+    // What outlives it.
+    app.animating = true;
+    app.matrix.tab = Tab::Matrix;
+    app.browser_key = 7;
+    app.patches_open = 5;
+    app.frame_key = 9;
+    app.control = vec![control::Listener::Script("script.jsonl".into())];
+    let serial = app.pointer.push(Vec::new());
+    app.preferences(settings::Message::Open);
+    app.alerts.warn_kept(alerts::Cause::Autosave, "kept".to_string());
+    app.alerts.warn("said".to_string());
+
+    assert!(app.replace(Source::Empty));
+
+    let App {
+        controller,
+        retry_commit,
+        positions,
+        unknown_positions,
+        sizes,
+        scene,
+        mode_key,
+        gestures,
+        // Rebuilt from the new patch, as the scene is.
+        values: _,
+        value_draft,
+        text_focus,
+        lights,
+        run_driven,
+        meter_levels,
+        clip_holds,
+        traces,
+        carrying,
+        full_traces,
+        visible_displays,
+        selection,
+        document,
+        generation,
+        test_modules,
+        // Set only by `AfterDiscard::Close`, which never replaces the patch.
+        quit: _,
+        // Built the same way every time.
+        theme: _,
+        stream,
+        // Rebuilt around the new engine's telemetry.
+        monitor: _,
+        live,
+        rig,
+        alerts,
+        midi,
+        holding,
+        modules,
+        browser,
+        patch_info,
+        chooser,
+        patches,
+        recent_rows,
+        drops,
+        question,
+        patches_open,
+        help,
+        tile_menu,
+        browser_key,
+        probe_menu,
+        frame_key,
+        meter,
+        reporter,
+        control,
+        // `control::end_samples` decides what stays. Empty here.
+        control_pending,
+        pointer,
+        control_seen,
+        measuring,
+        animating,
+        dev_tools,
+        learn,
+        edits,
+        arrow_group_pending,
+        arrow_group_closed,
+        matrix,
+        // Set only on the screenshot path, which never replaces the patch.
+        still: _,
+        step_name,
+        // Set and taken within one `update`.
+        history_key: _,
+    } = &app;
+
+    // A new patch: only its Transport.
+    assert_eq!(controller.graph().nodes().count(), 1);
+    assert_eq!(scene.modules().len(), 1);
+    assert!(!retry_commit);
+    assert!(!positions.contains_key(&added.0));
+    assert!(unknown_positions.is_empty());
+    assert!(sizes.is_empty());
+    assert!(!mode_key.contains(&(99, 0, 1)));
+    assert_eq!(gestures.adding(), None);
+    assert!(value_draft.is_none());
+    assert!(!text_focus.any);
+    assert!(lights.is_empty());
+    assert!(!run_driven);
+    assert!(meter_levels.is_empty());
+    assert_eq!(clip_holds.resets((added.0, 0)), 0);
+    assert!(traces.get(added.0, 0).is_none());
+    assert!(carrying.is_empty());
+    assert!(*full_traces);
+    assert!(visible_displays.is_empty());
+    assert!(selection.is_empty());
+    assert_eq!(document.file(), None);
+    assert_eq!(*generation, 2, "one engine more");
+    assert!(stream.playback().is_off(), "this run still plays nothing");
+    assert_eq!(live.probes().count(), 0);
+    assert!(midi.is_none());
+    assert!(!holding);
+    assert!(patch_info.tag_draft.is_empty());
+    assert!(drops.is_empty());
+    assert_eq!(meter.stats().worst_ms, 0.0);
+    assert!(control_seen.is_none());
+    assert!(!learn.is_on());
+    assert!(edits.history.undo_step().is_none());
+    assert!(!arrow_group_pending);
+    assert!(!arrow_group_closed);
+    assert!(!matrix.focused);
+    assert!(step_name.is_none());
+    assert!(control_pending.is_empty());
+
+    // Every overlay closes, but the Preferences window stays.
+    assert!(browser.is_none());
+    assert!(chooser.is_none());
+    assert!(patches.is_none());
+    assert!(recent_rows.is_none());
+    assert!(question.is_none());
+    assert!(help.is_none());
+    assert!(tile_menu.is_none());
+    assert!(probe_menu.is_none());
+    assert!(rig.window.is_some());
+
+    // What outlives the patch.
+    assert!(!test_modules);
+    assert!(!modules.is_empty());
+    assert_eq!(matrix.tab, Tab::Matrix);
+    assert_eq!(*patches_open, 5);
+    assert_eq!(*browser_key, 7);
+    assert_eq!(*frame_key, 10, "a new patch is framed");
+    assert_eq!(format!("{reporter:?}"), report, "--bench-seconds still counts");
+    assert_eq!(control.len(), 1);
+    assert_eq!(pointer.push(Vec::new()), serial + 1);
+    assert!(*measuring);
+    assert!(*animating);
+    assert!(*dev_tools);
+    assert_eq!(alerts.kept_field().map(|kept| kept.text.as_str()), Some("kept"));
+    assert_ne!(alerts.status(), "said");
+}
+
+/// `--output-safety` is not saved, and it holds for the whole run: a patch
+/// opened later plays with it too.
+#[test]
+fn the_output_safety_flag_holds_for_a_new_patch() {
+    let mut args = app_args();
+    args.output_safety = Some(OutputSafety::Clean);
+    let mut app = App::new(args);
+
+    assert!(app.replace(Source::Empty));
+
+    assert_eq!(app.stream.output_safety(), OutputSafety::Clean);
+}
+
+/// Opening a patch closes help, even the help that offered it as an example.
+#[test]
+fn a_new_patch_closes_help() {
+    let mut ui = Ui::open("subtractive.ron");
+    open_overlay(&mut ui, InputOwner::Help);
+
+    assert!(ui.app.replace(Source::Empty));
+
+    assert_eq!(ui.app.input_owner(), InputOwner::Canvas);
+}
+
+/// Cmd+Shift+O opens Your patches over a menu on the canvas, because a menu
+/// does not count as an overlay. The menu is still there once the browser goes.
+#[test]
+fn your_patches_opens_over_a_menu_and_leaves_it_behind() {
+    let tmp = TempDir::new("patches-over-menu");
+    for owner in [InputOwner::TileMenu, InputOwner::ProbeMenu] {
+        let mut ui = Ui::open("subtractive.ron");
+        let mut preferences = ui.app.rig.store.saved().clone();
+        preferences.library = Some(tmp.0.clone());
+        let _ = ui.app.rig.store.save(preferences);
+        open_overlay(&mut ui, owner);
+
+        ui.tap(Key::Character("o".into()), Modifiers::COMMAND | Modifiers::SHIFT);
+        assert_eq!(ui.app.input_owner(), InputOwner::Patches, "{owner:?}");
+
+        ui.app.patches = None;
+        assert_eq!(ui.app.input_owner(), owner, "the menu is still open");
+    }
+}
 
 /// A patch that does not load shows the reason in the window, and the status
 /// line says the same. The running patch stays.

@@ -428,6 +428,24 @@ fn record_covers_the_whole_run() {
     assert_eq!(audio.channels[0], tape, "the file is what was played");
 }
 
+/// Opening a patch on a device at another sample rate than the recording ends
+/// the recording, and the new patch's status line says so.
+#[test]
+fn opening_a_patch_reports_a_refused_recording() {
+    let mut run = Setup::new("record-refused", PatchFrom::Example("sine.ron")).start();
+    let path = run.dir.join("other-rate.wav");
+    run.app.rig.recorder = Some(loom_host_desktop::Recorder::start(&path, 44_100).unwrap());
+
+    run.open("fm-feedback.ron");
+
+    assert!(
+        run.app.alerts.status().contains("The recording stopped"),
+        "{}",
+        run.app.alerts.status()
+    );
+    assert!(run.app.rig.recorder.is_none());
+}
+
 /// A device change to another sample rate ends the recording, with a
 /// message; what was recorded stays readable.
 #[test]
